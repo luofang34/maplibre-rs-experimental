@@ -95,61 +95,63 @@ fn seen_points(
         .collect()
 }
 
-#[tokio::test]
-async fn markers_stay_visible_as_the_view_and_the_display_change() {
-    let grid: Vec<[f64; 2]> = GRID_Y
-        .iter()
-        .flat_map(|y| GRID_X.map(|x| [x, *y]))
-        .collect();
-    let points = points_under(WIDE, CLOSE_ZOOM, &grid).await;
-    let places = features(
-        &points
+#[test]
+fn markers_stay_visible_as_the_view_and_the_display_change() {
+    crate::headless::map::test_async::run_async(async {
+        let grid: Vec<[f64; 2]> = GRID_Y
             .iter()
-            .map(|point| (*point, "column"))
-            .collect::<Vec<_>>(),
-    );
-    let mut map = map_at(globe_style(CLOSE_ZOOM - 1.0, places), WIDE, 2.0).await;
-    let mut failures = Vec::new();
-    for (step, change, ratio) in steps() {
-        change(&mut map);
-        let pixels = map.settle().await;
-        let texture = map.map.head_texture().expect("color").size();
-        let size = [texture.width, texture.height];
-        let view = map.map.view_state();
-        assert!(
-            (view.width() * ratio - f64::from(size[0])).abs() < 1.0
-                && (view.height() * ratio - f64::from(size[1])).abs() < 1.0,
-            "after {step}, the {size:?} target is {} x {} layout pixels at {ratio}x",
-            view.width(),
-            view.height()
-        );
-        let seen = seen_points(&map, &points, size, ratio);
-        let anchors: Vec<[f64; 2]> = seen.iter().map(|(at, _)| *at).collect();
-        let counts = counts_near(&pixels, size[0], &anchors, &SEEN.colours);
-        let inside: Vec<_> = seen
-            .iter()
-            .zip(&counts)
-            .filter(|((_, inside), _)| *inside)
+            .flat_map(|y| GRID_X.map(|x| [x, *y]))
             .collect();
-        let reaches = |axis: usize| {
-            inside
+        let points = points_under(WIDE, CLOSE_ZOOM, &grid).await;
+        let places = features(
+            &points
                 .iter()
-                .any(|((at, _), _)| at[axis] > 0.6 * f64::from(size[axis]))
-        };
-        assert!(
-            inside.len() >= 4 && reaches(0) && reaches(1),
-            "after {step}, points stand across the target up to its right and bottom: {seen:?}"
+                .map(|point| (*point, "column"))
+                .collect::<Vec<_>>(),
         );
-        for ((at, _), count) in inside {
-            for (kind, name) in KIND_NAMES.iter().enumerate() {
-                if (count[kind] as f64) < MINIMUM[kind] as f64 * ratio * ratio {
-                    failures.push(format!(
-                        "after {step} at {ratio}x: the {name} at {at:?} shows {} pixels",
-                        count[kind]
-                    ));
+        let mut map = map_at(globe_style(CLOSE_ZOOM - 1.0, places), WIDE, 2.0).await;
+        let mut failures = Vec::new();
+        for (step, change, ratio) in steps() {
+            change(&mut map);
+            let pixels = map.settle().await;
+            let texture = map.map.head_texture().expect("color").size();
+            let size = [texture.width, texture.height];
+            let view = map.map.view_state();
+            assert!(
+                (view.width() * ratio - f64::from(size[0])).abs() < 1.0
+                    && (view.height() * ratio - f64::from(size[1])).abs() < 1.0,
+                "after {step}, the {size:?} target is {} x {} layout pixels at {ratio}x",
+                view.width(),
+                view.height()
+            );
+            let seen = seen_points(&map, &points, size, ratio);
+            let anchors: Vec<[f64; 2]> = seen.iter().map(|(at, _)| *at).collect();
+            let counts = counts_near(&pixels, size[0], &anchors, &SEEN.colours);
+            let inside: Vec<_> = seen
+                .iter()
+                .zip(&counts)
+                .filter(|((_, inside), _)| *inside)
+                .collect();
+            let reaches = |axis: usize| {
+                inside
+                    .iter()
+                    .any(|((at, _), _)| at[axis] > 0.6 * f64::from(size[axis]))
+            };
+            assert!(
+                inside.len() >= 4 && reaches(0) && reaches(1),
+                "after {step}, points stand across the target up to its right and bottom: {seen:?}"
+            );
+            for ((at, _), count) in inside {
+                for (kind, name) in KIND_NAMES.iter().enumerate() {
+                    if (count[kind] as f64) < MINIMUM[kind] as f64 * ratio * ratio {
+                        failures.push(format!(
+                            "after {step} at {ratio}x: the {name} at {at:?} shows {} pixels",
+                            count[kind]
+                        ));
+                    }
                 }
             }
         }
-    }
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    })
 }

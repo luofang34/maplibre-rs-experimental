@@ -140,92 +140,97 @@ fn line_width(pixels: &[u8], row: usize) -> f64 {
         .sum()
 }
 
-#[tokio::test]
-async fn overlay_line_keeps_its_style_width_across_a_low_steep_view() {
-    let flat = image::RgbaImage::from_pixel(2, 2, SEA_LEVEL);
-    for (placement, expect_steady) in [("draped", false), ("overlay", true)] {
-        let routes = lines(&[meridian(0.0, 0.01, 0.087)]);
-        let map = overlay_map(placement, flat.clone(), routes).await;
-        let pixels = read_blocking(&map);
-        // Both measured rows must show the ground on either side of the line.
-        for row in [32, 63] {
-            let ground = pixel(&pixels, 4, row);
-            assert!(
-                ground[0] > 100 && ground[1] < 60,
-                "{placement}: row {row} is {ground:?}, not ground"
-            );
-        }
-        let bottom = line_width(&pixels, 63);
-        let middle = line_width(&pixels, 32);
-        let steady = [bottom, middle]
-            .iter()
-            .all(|width| (1.5..=6.0).contains(width));
-        assert_eq!(
+#[test]
+fn overlay_line_keeps_its_style_width_across_a_low_steep_view() {
+    futures::executor::block_on(async {
+        let flat = image::RgbaImage::from_pixel(2, 2, SEA_LEVEL);
+        for (placement, expect_steady) in [("draped", false), ("overlay", true)] {
+            let routes = lines(&[meridian(0.0, 0.01, 0.087)]);
+            let map = overlay_map(placement, flat.clone(), routes).await;
+            let pixels = read_blocking(&map);
+            // Both measured rows must show the ground on either side of the line.
+            for row in [32, 63] {
+                let ground = pixel(&pixels, 4, row);
+                assert!(
+                    ground[0] > 100 && ground[1] < 60,
+                    "{placement}: row {row} is {ground:?}, not ground"
+                );
+            }
+            let bottom = line_width(&pixels, 63);
+            let middle = line_width(&pixels, 32);
+            let steady = [bottom, middle]
+                .iter()
+                .all(|width| (1.5..=6.0).contains(width));
+            assert_eq!(
             steady, expect_steady,
             "{placement}: 3 px line is {bottom:.2} px wide at the bottom, {middle:.2} px mid-frame"
         );
-    }
+        }
+    })
 }
 
-#[tokio::test]
-async fn overlay_line_climbs_a_facing_slope_and_hides_behind_its_crest() {
-    // Rows 22 and 23 of 32, from the north, raise a 150 m ridge: its face climbs from 0.6 km
-    // north of the eye to a crest at 0.95 km, and its top stays level for another 300 m.
-    let ridge = image::RgbaImage::from_fn(32, 32, |_, y| {
-        if (22..24).contains(&y) {
-            RIDGE
-        } else {
-            SEA_LEVEL
-        }
-    });
-    // A line west of the center climbs the face onto the top. One east of the center crosses
-    // the plain beyond the ridge, which the ridge hides from the eye.
-    let routes = lines(&[
-        meridian(-0.002, 0.016, 0.025),
-        [
-            [CENTER.longitude + 0.001, 0.032],
-            [CENTER.longitude + 0.004, 0.032],
-        ],
-    ]);
-    let map = overlay_map("overlay", ridge, routes.clone()).await;
-    let pixels = read_blocking(&map);
-    let width = |row: usize, columns: std::ops::Range<usize>| -> f64 {
-        columns
-            .map(|x| pixel(&pixels, x, row))
-            .filter(|pixel| pixel[1] > pixel[0])
-            .map(|pixel| f64::from(pixel[1]) / 255.0)
-            .sum()
-    };
-    let near_rows: Vec<usize> = (0..64)
-        .filter(|y| (0..32).any(|x| is_green(pixel(&pixels, x, *y))))
-        .collect();
-    let (Some(top), Some(bottom)) = (near_rows.first().copied(), near_rows.last().copied()) else {
-        panic!("near line missing");
-    };
-    // Up the face as on the plain, every row between the ends holds the line's full width.
-    let thin: Vec<(usize, f64)> = (top + 1..bottom)
-        .map(|row| (row, width(row, 0..32)))
-        .filter(|(_, width)| *width < 1.5)
-        .collect();
-    assert!(
-        thin.is_empty(),
-        "near line narrows or breaks on rows {thin:?}"
-    );
-    let far: Vec<usize> = (0..64)
-        .filter(|y| (32..64).any(|x| is_green(pixel(&pixels, x, *y))))
-        .collect();
-    assert!(
-        far.is_empty(),
-        "far line shows through the ridge on rows {far:?}"
-    );
+#[test]
+fn overlay_line_climbs_a_facing_slope_and_hides_behind_its_crest() {
+    futures::executor::block_on(async {
+        // Rows 22 and 23 of 32, from the north, raise a 150 m ridge: its face climbs from 0.6 km
+        // north of the eye to a crest at 0.95 km, and its top stays level for another 300 m.
+        let ridge = image::RgbaImage::from_fn(32, 32, |_, y| {
+            if (22..24).contains(&y) {
+                RIDGE
+            } else {
+                SEA_LEVEL
+            }
+        });
+        // A line west of the center climbs the face onto the top. One east of the center crosses
+        // the plain beyond the ridge, which the ridge hides from the eye.
+        let routes = lines(&[
+            meridian(-0.002, 0.016, 0.025),
+            [
+                [CENTER.longitude + 0.001, 0.032],
+                [CENTER.longitude + 0.004, 0.032],
+            ],
+        ]);
+        let map = overlay_map("overlay", ridge, routes.clone()).await;
+        let pixels = read_blocking(&map);
+        let width = |row: usize, columns: std::ops::Range<usize>| -> f64 {
+            columns
+                .map(|x| pixel(&pixels, x, row))
+                .filter(|pixel| pixel[1] > pixel[0])
+                .map(|pixel| f64::from(pixel[1]) / 255.0)
+                .sum()
+        };
+        let near_rows: Vec<usize> = (0..64)
+            .filter(|y| (0..32).any(|x| is_green(pixel(&pixels, x, *y))))
+            .collect();
+        let (Some(top), Some(bottom)) = (near_rows.first().copied(), near_rows.last().copied())
+        else {
+            panic!("near line missing");
+        };
+        // Up the face as on the plain, every row between the ends holds the line's full width.
+        let thin: Vec<(usize, f64)> = (top + 1..bottom)
+            .map(|row| (row, width(row, 0..32)))
+            .filter(|(_, width)| *width < 1.5)
+            .collect();
+        assert!(
+            thin.is_empty(),
+            "near line narrows or breaks on rows {thin:?}"
+        );
+        let far: Vec<usize> = (0..64)
+            .filter(|y| (32..64).any(|x| is_green(pixel(&pixels, x, *y))))
+            .collect();
+        assert!(
+            far.is_empty(),
+            "far line shows through the ridge on rows {far:?}"
+        );
 
-    // On a plain the far line is in view, so the check above can fail.
-    let flat = image::RgbaImage::from_pixel(32, 32, SEA_LEVEL);
-    let map = overlay_map("overlay", flat, routes).await;
-    let pixels = read_blocking(&map);
-    let far = (0..64)
-        .flat_map(|y| (32..64).map(move |x| (x, y)))
-        .filter(|(x, y)| is_green(pixel(&pixels, *x, *y)))
-        .count();
-    assert!(far > 0, "far line is not drawn over flat terrain");
+        // On a plain the far line is in view, so the check above can fail.
+        let flat = image::RgbaImage::from_pixel(32, 32, SEA_LEVEL);
+        let map = overlay_map("overlay", flat, routes).await;
+        let pixels = read_blocking(&map);
+        let far = (0..64)
+            .flat_map(|y| (32..64).map(move |x| (x, y)))
+            .filter(|(x, y)| is_green(pixel(&pixels, *x, *y)))
+            .count();
+        assert!(far > 0, "far line is not drawn over flat terrain");
+    })
 }

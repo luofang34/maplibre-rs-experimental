@@ -100,44 +100,46 @@ fn drag(map: &mut HeadlessMap, direction: f64, name: &str) -> Vec<Frame> {
         .collect()
 }
 
-#[tokio::test]
-async fn a_drag_is_covered_every_frame_and_dragging_back_reuses_its_tiles_and_drapes() {
-    let mut map = cached_map().await;
-    let start = drag_frame(&mut map, "drag-start");
-    assert!(start.loads > 0, "the first view loads its tiles");
-    let out = drag(&mut map, 1.0, "drag-out");
-    assert!(
-        out.iter().any(|frame| frame.loads > 0),
-        "dragging out reaches tiles the start did not load: {out:?}"
-    );
-    let back = drag(&mut map, -1.0, "drag-back");
-    let one_tile = 256 * 256 * 4;
-    for (step, frame) in back.iter().enumerate() {
-        assert_eq!(
-            frame.loads, 0,
-            "dragging back loads nothing at {step}: {frame:?}"
-        );
-        assert!(frame.hits > 0, "dragging back hits the cache at {step}");
+#[test]
+fn a_drag_is_covered_every_frame_and_dragging_back_reuses_its_tiles_and_drapes() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = cached_map().await;
+        let start = drag_frame(&mut map, "drag-start");
+        assert!(start.loads > 0, "the first view loads its tiles");
+        let out = drag(&mut map, 1.0, "drag-out");
         assert!(
-            frame.upload_bytes < one_tile,
-            "dragging back uploads no tile at {step}: {frame:?}"
+            out.iter().any(|frame| frame.loads > 0),
+            "dragging out reaches tiles the start did not load: {out:?}"
         );
-    }
-    // A drape follows the source tiles in view, as GL JS fingerprints it, so one that more of
-    // its tile scrolls into is drawn again from resident tiles; the start view's drapes were
-    // last drawn for the start view itself and come back untouched.
-    let end = back.last().expect("return leg");
-    assert_eq!(
-        end.drape_redraws, 0,
-        "the start view reuses its drapes: {end:?}"
-    );
-    // Leaving for tiles never seen and coming straight back finds the start view's drapes
-    // parked with their content.
-    let away = jump(&mut map, 4.0 * STEP * STEPS as f64, "jump-away");
-    assert!(away.loads > 0 && away.drape_redraws > 0, "{away:?}");
-    let home = jump(&mut map, -4.0 * STEP * STEPS as f64, "jump-home");
-    assert_eq!(home.loads, 0, "the start view is still cached: {home:?}");
-    assert_eq!(home.drape_redraws, 0, "its drapes come back: {home:?}");
+        let back = drag(&mut map, -1.0, "drag-back");
+        let one_tile = 256 * 256 * 4;
+        for (step, frame) in back.iter().enumerate() {
+            assert_eq!(
+                frame.loads, 0,
+                "dragging back loads nothing at {step}: {frame:?}"
+            );
+            assert!(frame.hits > 0, "dragging back hits the cache at {step}");
+            assert!(
+                frame.upload_bytes < one_tile,
+                "dragging back uploads no tile at {step}: {frame:?}"
+            );
+        }
+        // A drape follows the source tiles in view, as GL JS fingerprints it, so one that more of
+        // its tile scrolls into is drawn again from resident tiles; the start view's drapes were
+        // last drawn for the start view itself and come back untouched.
+        let end = back.last().expect("return leg");
+        assert_eq!(
+            end.drape_redraws, 0,
+            "the start view reuses its drapes: {end:?}"
+        );
+        // Leaving for tiles never seen and coming straight back finds the start view's drapes
+        // parked with their content.
+        let away = jump(&mut map, 4.0 * STEP * STEPS as f64, "jump-away");
+        assert!(away.loads > 0 && away.drape_redraws > 0, "{away:?}");
+        let home = jump(&mut map, -4.0 * STEP * STEPS as f64, "jump-home");
+        assert_eq!(home.loads, 0, "the start view is still cached: {home:?}");
+        assert_eq!(home.drape_redraws, 0, "its drapes come back: {home:?}");
+    })
 }
 
 fn jump(map: &mut HeadlessMap, distance: f64, name: &str) -> Frame {

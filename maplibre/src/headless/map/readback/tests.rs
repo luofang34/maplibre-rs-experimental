@@ -96,36 +96,38 @@ fn look_down(map: &mut HeadlessMap, color: &wgpu::Texture) {
     .expect("the eye renders");
 }
 
-#[tokio::test]
-async fn an_eye_target_reads_back_as_the_drawn_background_in_both_layouts() {
-    for format in [
-        wgpu::TextureFormat::Rgba8Unorm,
-        wgpu::TextureFormat::Bgra8Unorm,
-    ] {
-        let mut map = map(format).await;
-        let color = target(&map, wgpu::TextureUsages::COPY_SRC);
-        look_down(&mut map, &color);
-        let mut readback = FrameReadback::new(&map, WIDTH, HEIGHT);
+#[test]
+fn an_eye_target_reads_back_as_the_drawn_background_in_both_layouts() {
+    crate::headless::map::test_async::run_async(async {
+        for format in [
+            wgpu::TextureFormat::Rgba8Unorm,
+            wgpu::TextureFormat::Bgra8Unorm,
+        ] {
+            let mut map = map(format).await;
+            let color = target(&map, wgpu::TextureUsages::COPY_SRC);
+            look_down(&mut map, &color);
+            let mut readback = FrameReadback::new(&map, WIDTH, HEIGHT);
 
-        let mut rgba = vec![0; readback.frame_len(PixelLayout::Rgba8)];
-        readback
-            .read_into_blocking(&map, &color, PixelLayout::Rgba8, &mut rgba)
-            .expect("RGBA readback");
-        for (index, pixel) in rgba.as_chunks::<4>().0.iter().enumerate() {
-            assert_eq!(*pixel, BACKGROUND, "{format:?} pixel {index}");
-        }
+            let mut rgba = vec![0; readback.frame_len(PixelLayout::Rgba8)];
+            readback
+                .read_into_blocking(&map, &color, PixelLayout::Rgba8, &mut rgba)
+                .expect("RGBA readback");
+            for (index, pixel) in rgba.as_chunks::<4>().0.iter().enumerate() {
+                assert_eq!(*pixel, BACKGROUND, "{format:?} pixel {index}");
+            }
 
-        // A second read through the same staging buffer, longer output untouched past the frame.
-        let mut rgb = vec![7; readback.frame_len(PixelLayout::Rgb8) + 5];
-        readback
-            .read_into_blocking(&map, &color, PixelLayout::Rgb8, &mut rgb)
-            .expect("RGB readback");
-        let (frame, tail) = rgb.split_at(readback.frame_len(PixelLayout::Rgb8));
-        for (index, pixel) in frame.as_chunks::<3>().0.iter().enumerate() {
-            assert_eq!(pixel, &BACKGROUND[..3], "{format:?} pixel {index}");
+            // A second read through the same staging buffer, longer output untouched past the frame.
+            let mut rgb = vec![7; readback.frame_len(PixelLayout::Rgb8) + 5];
+            readback
+                .read_into_blocking(&map, &color, PixelLayout::Rgb8, &mut rgb)
+                .expect("RGB readback");
+            let (frame, tail) = rgb.split_at(readback.frame_len(PixelLayout::Rgb8));
+            for (index, pixel) in frame.as_chunks::<3>().0.iter().enumerate() {
+                assert_eq!(pixel, &BACKGROUND[..3], "{format:?} pixel {index}");
+            }
+            assert_eq!(tail, [7; 5]);
         }
-        assert_eq!(tail, [7; 5]);
-    }
+    })
 }
 
 /// Writes a texel whose bytes name its column and row, in the texture's own channel order.
@@ -167,91 +169,95 @@ fn resolve<F: std::future::Future>(map: &HeadlessMap, future: F) -> F::Output {
     }
 }
 
-#[tokio::test]
-async fn padded_rows_unpack_in_place_and_blue_first_textures_come_out_red_first() {
-    for format in [
-        wgpu::TextureFormat::Rgba8Unorm,
-        wgpu::TextureFormat::Bgra8Unorm,
-    ] {
-        let map = map(format).await;
-        let texture = target(
-            &map,
-            wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
-        );
-        write_pattern(&map, &texture);
-        let mut readback = FrameReadback::new(&map, WIDTH, HEIGHT);
-        let mut rgba = vec![0; readback.frame_len(PixelLayout::Rgba8)];
-        resolve(
-            &map,
-            readback.read_into(&map, &texture, PixelLayout::Rgba8, &mut rgba),
-        )
-        .expect("async RGBA readback");
-        let mut rgb = vec![0; readback.frame_len(PixelLayout::Rgb8)];
-        readback
-            .read_into_blocking(&map, &texture, PixelLayout::Rgb8, &mut rgb)
-            .expect("RGB readback");
-        for y in 0..HEIGHT {
-            for x in 0..WIDTH {
-                let index = (y * WIDTH + x) as usize;
-                let expected = [x as u8, y as u8, (x + y) as u8, 200 - y as u8];
-                assert_eq!(
-                    rgba[index * 4..][..4],
-                    expected,
-                    "{format:?} RGBA ({x},{y})"
-                );
-                assert_eq!(
-                    rgb[index * 3..][..3],
-                    expected[..3],
-                    "{format:?} RGB ({x},{y})"
-                );
+#[test]
+fn padded_rows_unpack_in_place_and_blue_first_textures_come_out_red_first() {
+    crate::headless::map::test_async::run_async(async {
+        for format in [
+            wgpu::TextureFormat::Rgba8Unorm,
+            wgpu::TextureFormat::Bgra8Unorm,
+        ] {
+            let map = map(format).await;
+            let texture = target(
+                &map,
+                wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
+            );
+            write_pattern(&map, &texture);
+            let mut readback = FrameReadback::new(&map, WIDTH, HEIGHT);
+            let mut rgba = vec![0; readback.frame_len(PixelLayout::Rgba8)];
+            resolve(
+                &map,
+                readback.read_into(&map, &texture, PixelLayout::Rgba8, &mut rgba),
+            )
+            .expect("async RGBA readback");
+            let mut rgb = vec![0; readback.frame_len(PixelLayout::Rgb8)];
+            readback
+                .read_into_blocking(&map, &texture, PixelLayout::Rgb8, &mut rgb)
+                .expect("RGB readback");
+            for y in 0..HEIGHT {
+                for x in 0..WIDTH {
+                    let index = (y * WIDTH + x) as usize;
+                    let expected = [x as u8, y as u8, (x + y) as u8, 200 - y as u8];
+                    assert_eq!(
+                        rgba[index * 4..][..4],
+                        expected,
+                        "{format:?} RGBA ({x},{y})"
+                    );
+                    assert_eq!(
+                        rgb[index * 3..][..3],
+                        expected[..3],
+                        "{format:?} RGB ({x},{y})"
+                    );
+                }
             }
         }
-    }
+    })
 }
 
-#[tokio::test]
-async fn a_texture_the_copy_cannot_serve_is_refused_before_any_gpu_work() {
-    let map = map(wgpu::TextureFormat::Rgba8Unorm).await;
-    let mut readback = FrameReadback::new(&map, WIDTH, HEIGHT);
-    let mut out = vec![0; readback.frame_len(PixelLayout::Rgba8)];
+#[test]
+fn a_texture_the_copy_cannot_serve_is_refused_before_any_gpu_work() {
+    crate::headless::map::test_async::run_async(async {
+        let map = map(wgpu::TextureFormat::Rgba8Unorm).await;
+        let mut readback = FrameReadback::new(&map, WIDTH, HEIGHT);
+        let mut out = vec![0; readback.frame_len(PixelLayout::Rgba8)];
 
-    let unreadable = target(&map, wgpu::TextureUsages::empty());
-    assert!(matches!(
-        readback.read_into_blocking(&map, &unreadable, PixelLayout::Rgba8, &mut out),
-        Err(ReadbackError::Usage(_))
-    ));
+        let unreadable = target(&map, wgpu::TextureUsages::empty());
+        assert!(matches!(
+            readback.read_into_blocking(&map, &unreadable, PixelLayout::Rgba8, &mut out),
+            Err(ReadbackError::Usage(_))
+        ));
 
-    let mut short = vec![0; readback.frame_len(PixelLayout::Rgb8) - 1];
-    let readable = target(&map, wgpu::TextureUsages::COPY_SRC);
-    assert!(matches!(
-        readback.read_into_blocking(&map, &readable, PixelLayout::Rgb8, &mut short),
-        Err(ReadbackError::BufferTooSmall { needed, provided })
-            if needed == (WIDTH * HEIGHT * 3) as usize && provided == needed - 1
-    ));
+        let mut short = vec![0; readback.frame_len(PixelLayout::Rgb8) - 1];
+        let readable = target(&map, wgpu::TextureUsages::COPY_SRC);
+        assert!(matches!(
+            readback.read_into_blocking(&map, &readable, PixelLayout::Rgb8, &mut short),
+            Err(ReadbackError::BufferTooSmall { needed, provided })
+                if needed == (WIDTH * HEIGHT * 3) as usize && provided == needed - 1
+        ));
 
-    let mut other = FrameReadback::new(&map, WIDTH + 1, HEIGHT);
-    assert!(matches!(
-        other.read_into_blocking(&map, &readable, PixelLayout::Rgba8, &mut out),
-        Err(ReadbackError::Size { texture: (WIDTH, HEIGHT), readback: (w, HEIGHT) }) if w == WIDTH + 1
-    ));
+        let mut other = FrameReadback::new(&map, WIDTH + 1, HEIGHT);
+        assert!(matches!(
+            other.read_into_blocking(&map, &readable, PixelLayout::Rgba8, &mut out),
+            Err(ReadbackError::Size { texture: (WIDTH, HEIGHT), readback: (w, HEIGHT) }) if w == WIDTH + 1
+        ));
 
-    let depth = map.device().create_texture(&wgpu::TextureDescriptor {
-        label: Some("depth"),
-        size: readable.size(),
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Depth32Float,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
-    assert!(matches!(
-        readback.read_into_blocking(&map, &depth, PixelLayout::Rgba8, &mut out),
-        Err(ReadbackError::Format(wgpu::TextureFormat::Depth32Float))
-    ));
+        let depth = map.device().create_texture(&wgpu::TextureDescriptor {
+            label: Some("depth"),
+            size: readable.size(),
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        assert!(matches!(
+            readback.read_into_blocking(&map, &depth, PixelLayout::Rgba8, &mut out),
+            Err(ReadbackError::Format(wgpu::TextureFormat::Depth32Float))
+        ));
 
-    // The refusals left the staging buffer unmapped, so a good read still succeeds.
-    readback
-        .read_into_blocking(&map, &readable, PixelLayout::Rgba8, &mut out)
-        .expect("a readable texture reads after refusals");
+        // The refusals left the staging buffer unmapped, so a good read still succeeds.
+        readback
+            .read_into_blocking(&map, &readable, PixelLayout::Rgba8, &mut out)
+            .expect("a readable texture reads after refusals");
+    })
 }

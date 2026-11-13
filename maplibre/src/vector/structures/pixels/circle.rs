@@ -206,40 +206,44 @@ impl Frame {
     }
 }
 
-#[tokio::test]
-async fn circle_stands_on_raised_terrain() {
-    for projection in ["mercator", "globe"] {
-        Frame::read(&village_map(false, projection, (root(), SEA_LEVEL)).await)
-            .assert_circle_on_square(&format!("{projection} without terrain"));
-        Frame::read(&village_map(true, projection, (root(), PLATEAU)).await)
-            .assert_circle_on_square(&format!("{projection} on a 500 m plateau"));
-    }
+#[test]
+fn circle_stands_on_raised_terrain() {
+    futures::executor::block_on(async {
+        for projection in ["mercator", "globe"] {
+            Frame::read(&village_map(false, projection, (root(), SEA_LEVEL)).await)
+                .assert_circle_on_square(&format!("{projection} without terrain"));
+            Frame::read(&village_map(true, projection, (root(), PLATEAU)).await)
+                .assert_circle_on_square(&format!("{projection} on a 500 m plateau"));
+        }
+    })
 }
 
-#[tokio::test]
-async fn circle_stands_on_the_terrain_drawn_when_finer_dem_arrives() {
-    let mut map = village_map(true, "mercator", (parent(), SEA_LEVEL)).await;
-    Frame::read(&map).assert_circle_on_square("coarse sea-level terrain");
-    // The view's terrain tiles draw the root's DEM once it arrives, so the circle must take its
-    // 500 m rather than the sea level of the still finer tiles that arrive with it.
-    let mut dem = vec![(root(), image::RgbaImage::from_pixel(2, 2, PLATEAU))];
-    dem.extend(
-        children()
-            .into_iter()
-            .map(|coords| (coords, image::RgbaImage::from_pixel(2, 2, SEA_LEVEL))),
-    );
-    map.render_frames_with_terrain(ProcessedLayers::default(), Vec::new(), dem, 16)
-        .expect("frames over the plateau");
-    let index = map
-        .world()
-        .resources
-        .get::<crate::terrain::TerrainCoverageIndex>()
-        .expect("terrain coverage");
-    assert!(
-        index
-            .rendered_tiles()
-            .all(|coords| index.loaded_dem_for(coords) == Some(root())),
-        "the drawn terrain samples the root DEM"
-    );
-    Frame::read(&map).assert_circle_on_square("500 m root under finer sea-level tiles");
+#[test]
+fn circle_stands_on_the_terrain_drawn_when_finer_dem_arrives() {
+    futures::executor::block_on(async {
+        let mut map = village_map(true, "mercator", (parent(), SEA_LEVEL)).await;
+        Frame::read(&map).assert_circle_on_square("coarse sea-level terrain");
+        // The view's terrain tiles draw the root's DEM once it arrives, so the circle must take its
+        // 500 m rather than the sea level of the still finer tiles that arrive with it.
+        let mut dem = vec![(root(), image::RgbaImage::from_pixel(2, 2, PLATEAU))];
+        dem.extend(
+            children()
+                .into_iter()
+                .map(|coords| (coords, image::RgbaImage::from_pixel(2, 2, SEA_LEVEL))),
+        );
+        map.render_frames_with_terrain(ProcessedLayers::default(), Vec::new(), dem, 16)
+            .expect("frames over the plateau");
+        let index = map
+            .world()
+            .resources
+            .get::<crate::terrain::TerrainCoverageIndex>()
+            .expect("terrain coverage");
+        assert!(
+            index
+                .rendered_tiles()
+                .all(|coords| index.loaded_dem_for(coords) == Some(root())),
+            "the drawn terrain samples the root DEM"
+        );
+        Frame::read(&map).assert_circle_on_square("500 m root under finer sea-level tiles");
+    })
 }

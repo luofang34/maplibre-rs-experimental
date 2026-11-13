@@ -88,103 +88,105 @@ fn luminance([r, g, b]: [f64; 3]) -> f64 {
     0.2126 * r + 0.7152 * g + 0.0722 * b
 }
 
-#[tokio::test]
-async fn a_moon_in_the_umbra_turns_dim_and_copper() {
-    let mut map = globe().await;
-    let camera = globe_camera_for_view(map.view_state()).expect("camera");
-    // In space up and to the right of the globe, clear of its disc.
-    let centre = (200.0, 56.0);
-    let moon = direction_through(&camera, centre.0, centre.1);
-    let radius = 0.8
-        * crate::starfield::sun::radius_pixels(
-            camera.projection().y.y,
-            f64::from(SIZE),
-            MOON_RADIUS_DEGREES,
+#[test]
+fn a_moon_in_the_umbra_turns_dim_and_copper() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = globe().await;
+        let camera = globe_camera_for_view(map.view_state()).expect("camera");
+        // In space up and to the right of the globe, clear of its disc.
+        let centre = (200.0, 56.0);
+        let moon = direction_through(&camera, centre.0, centre.1);
+        let radius = 0.8
+            * crate::starfield::sun::radius_pixels(
+                camera.projection().y.y,
+                f64::from(SIZE),
+                MOON_RADIUS_DEGREES,
+            );
+        // A full moon: the sun stands opposite it.
+        map.set_sun_direction(Some(ecef(-moon)));
+        map.set_moon_disc(Some(
+            Disc::new(ecef(moon), MOON_RADIUS_DEGREES).expect("disc"),
+        ));
+        let whole = |_| true;
+        let full = mean(&frame(&mut map), centre, radius, whole);
+
+        let shadow = |axis: Vector3<f64>, danjon| {
+            Some(
+                EarthShadow::new(ecef(axis), UMBRA_DEGREES, PENUMBRA_DEGREES, Some(danjon))
+                    .expect("shadow"),
+            )
+        };
+        map.set_earth_shadow(shadow(moon, 2.0));
+        let total = mean(&frame(&mut map), centre, radius, whole);
+        map.set_earth_shadow(shadow(moon, 0.0));
+        let dark = mean(&frame(&mut map), centre, radius, whole);
+        map.set_earth_shadow(shadow(moon, 4.0));
+        let bright = mean(&frame(&mut map), centre, radius, whole);
+        let report = format!("full {full:?}, L2 {total:?}, L0 {dark:?}, L4 {bright:?}");
+        assert!(
+            luminance(total) < 0.35 * luminance(full),
+            "totality dims the moon: {report}"
         );
-    // A full moon: the sun stands opposite it.
-    map.set_sun_direction(Some(ecef(-moon)));
-    map.set_moon_disc(Some(
-        Disc::new(ecef(moon), MOON_RADIUS_DEGREES).expect("disc"),
-    ));
-    let whole = |_| true;
-    let full = mean(&frame(&mut map), centre, radius, whole);
+        assert!(
+            total[0] > 1.5 * total[2] && total[0] > total[1],
+            "a copper moon: {report}"
+        );
+        assert!(
+            total[0] > 70.0 && luminance(total) > 0.12 * luminance(full),
+            "an L2 moon stays a plain red disc against the night sky: {report}"
+        );
+        assert!(
+            luminance(dark) < luminance(total) && luminance(total) < luminance(bright),
+            "Danjon's scale orders the darkness: {report}"
+        );
 
-    let shadow = |axis: Vector3<f64>, danjon| {
-        Some(
-            EarthShadow::new(ecef(axis), UMBRA_DEGREES, PENUMBRA_DEGREES, Some(danjon))
-                .expect("shadow"),
-        )
-    };
-    map.set_earth_shadow(shadow(moon, 2.0));
-    let total = mean(&frame(&mut map), centre, radius, whole);
-    map.set_earth_shadow(shadow(moon, 0.0));
-    let dark = mean(&frame(&mut map), centre, radius, whole);
-    map.set_earth_shadow(shadow(moon, 4.0));
-    let bright = mean(&frame(&mut map), centre, radius, whole);
-    let report = format!("full {full:?}, L2 {total:?}, L0 {dark:?}, L4 {bright:?}");
-    assert!(
-        luminance(total) < 0.35 * luminance(full),
-        "totality dims the moon: {report}"
-    );
-    assert!(
-        total[0] > 1.5 * total[2] && total[0] > total[1],
-        "a copper moon: {report}"
-    );
-    assert!(
-        total[0] > 70.0 && luminance(total) > 0.12 * luminance(full),
-        "an L2 moon stays a plain red disc against the night sky: {report}"
-    );
-    assert!(
-        luminance(dark) < luminance(total) && luminance(total) < luminance(bright),
-        "Danjon's scale orders the darkness: {report}"
-    );
-
-    // The umbra's edge through the moon's centre, the shadow off to its right: the right half
-    // in the umbra, the left half's limb in sunlight.
-    let pixels_per_degree = radius / MOON_RADIUS_DEGREES;
-    let axis = direction_through(
-        &camera,
-        centre.0 + UMBRA_DEGREES * pixels_per_degree / 0.8,
-        centre.1,
-    );
-    map.set_earth_shadow(shadow(axis, 2.0));
-    let partial = frame(&mut map);
-    let left = mean(&partial, centre, radius, |dx| dx < -radius * 0.5);
-    let right = mean(&partial, centre, radius, |dx| dx > radius * 0.3);
-    assert!(
-        luminance(right) < 0.4 * luminance(left),
-        "the shadowed side is darker: left {left:?}, right {right:?}"
-    );
-    assert!(
-        luminance(left) > 0.8 * luminance(full),
-        "the sunlit limb keeps its light: left {left:?}, full {full:?}"
-    );
-    // Just inside the umbra's edge the ozone band turns the copper toward turquoise. The
-    // edge lies near the moon's centre; the most turquoise column within a band's width of it
-    // shows the fringe, the umbra further in shows copper.
-    let band = UMBRA_DEGREES * OZONE_WIDTH * pixels_per_degree / 0.8;
-    let blue_green = |[r, g, b]: [f64; 3]| (g + b) / (2.0 * r.max(1.0));
-    let column_colour = |dx: i32| {
-        let x = (centre.0 + f64::from(dx)) as u32;
-        // Rows near the centre, where the umbra's curved edge runs nearly straight down.
-        let rows = (centre.1 - radius * 0.25) as u32..(centre.1 + radius * 0.25) as u32;
-        let count = f64::from(rows.end - rows.start);
-        let mut sum = [0.0; 3];
-        for y in rows {
-            let at = ((y * SIZE + x) * 4) as usize;
-            for (channel, total) in sum.iter_mut().enumerate() {
-                *total += f64::from(partial[at + channel]) / count;
+        // The umbra's edge through the moon's centre, the shadow off to its right: the right half
+        // in the umbra, the left half's limb in sunlight.
+        let pixels_per_degree = radius / MOON_RADIUS_DEGREES;
+        let axis = direction_through(
+            &camera,
+            centre.0 + UMBRA_DEGREES * pixels_per_degree / 0.8,
+            centre.1,
+        );
+        map.set_earth_shadow(shadow(axis, 2.0));
+        let partial = frame(&mut map);
+        let left = mean(&partial, centre, radius, |dx| dx < -radius * 0.5);
+        let right = mean(&partial, centre, radius, |dx| dx > radius * 0.3);
+        assert!(
+            luminance(right) < 0.4 * luminance(left),
+            "the shadowed side is darker: left {left:?}, right {right:?}"
+        );
+        assert!(
+            luminance(left) > 0.8 * luminance(full),
+            "the sunlit limb keeps its light: left {left:?}, full {full:?}"
+        );
+        // Just inside the umbra's edge the ozone band turns the copper toward turquoise. The
+        // edge lies near the moon's centre; the most turquoise column within a band's width of it
+        // shows the fringe, the umbra further in shows copper.
+        let band = UMBRA_DEGREES * OZONE_WIDTH * pixels_per_degree / 0.8;
+        let blue_green = |[r, g, b]: [f64; 3]| (g + b) / (2.0 * r.max(1.0));
+        let column_colour = |dx: i32| {
+            let x = (centre.0 + f64::from(dx)) as u32;
+            // Rows near the centre, where the umbra's curved edge runs nearly straight down.
+            let rows = (centre.1 - radius * 0.25) as u32..(centre.1 + radius * 0.25) as u32;
+            let count = f64::from(rows.end - rows.start);
+            let mut sum = [0.0; 3];
+            for y in rows {
+                let at = ((y * SIZE + x) * 4) as usize;
+                for (channel, total) in sum.iter_mut().enumerate() {
+                    *total += f64::from(partial[at + channel]) / count;
+                }
             }
-        }
-        sum
-    };
-    let reach = band.ceil() as i32;
-    let fringe = (-reach..=reach)
-        .map(|dx| blue_green(column_colour(dx)))
-        .fold(0.0, f64::max);
-    let deep = blue_green(mean(&partial, centre, radius, |dx| dx > radius * 0.5));
-    assert!(
-        fringe > 1.2 && deep < 0.6,
-        "a turquoise fringe lines the copper umbra: fringe {fringe:.2}, deeper {deep:.2}"
-    );
+            sum
+        };
+        let reach = band.ceil() as i32;
+        let fringe = (-reach..=reach)
+            .map(|dx| blue_green(column_colour(dx)))
+            .fold(0.0, f64::max);
+        let deep = blue_green(mean(&partial, centre, radius, |dx| dx > radius * 0.5));
+        assert!(
+            fringe > 1.2 && deep < 0.6,
+            "a turquoise fringe lines the copper umbra: fringe {fringe:.2}, deeper {deep:.2}"
+        );
+    })
 }

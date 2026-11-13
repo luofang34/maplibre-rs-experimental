@@ -2,8 +2,6 @@
 
 use std::{cell::RefCell, ops::Deref, rc::Rc, time::Duration};
 
-use image::RgbaImage;
-
 use crate::{
     context::MapContext,
     coords::{WorldCoords, WorldTileCoords, Zoom},
@@ -16,10 +14,9 @@ use crate::{
     kernel::Kernel,
     map::MapError,
     plugin::Plugin,
-    raster::{AvailableRasterLayerData, RasterSourceId},
     render::{
         frame_input::FrameInput,
-        projection::{raster_source_regions, view_region_for_projection, ProjectionStateError},
+        projection::{view_region_for_projection, ProjectionStateError},
         tile_view_pattern::DEFAULT_TILE_SIZE,
         view_state::{ViewState, ViewStatePadding},
         Renderer,
@@ -41,6 +38,7 @@ pub use error::HeadlessMapOperationError;
 mod experimental;
 mod processed;
 mod provided_images;
+#[cfg(feature = "raster")]
 mod raster;
 pub mod readback;
 pub mod reference;
@@ -53,6 +51,8 @@ mod targets;
 #[cfg(test)]
 mod terrain_coverage;
 mod terrain_patch;
+#[cfg(test)]
+mod test_async;
 #[cfg(all(test, feature = "experimental"))]
 mod vertical_perspective;
 mod xr;
@@ -128,52 +128,15 @@ impl HeadlessMap {
         &mut self,
         layers: ProcessedLayers,
     ) -> Result<(), HeadlessMapOperationError> {
-        self.render_sources(layers, Vec::new())
-    }
-
-    /// Renders already-decoded vector and raster source tiles in one frame.
-    pub fn render_sources(
-        &mut self,
-        layers: ProcessedLayers,
-        raster_layers: Vec<AvailableRasterLayerData>,
-    ) -> Result<(), HeadlessMapOperationError> {
-        self.render_source_frames(layers, raster_layers, 1)
-    }
-
-    /// Renders the same decoded source tiles for a fixed number of consecutive frames.
-    pub fn render_source_frames(
-        &mut self,
-        layers: ProcessedLayers,
-        raster_layers: Vec<AvailableRasterLayerData>,
-        frame_count: u8,
-    ) -> Result<(), HeadlessMapOperationError> {
-        self.render_frames_with_terrain(layers, raster_layers, Vec::new(), frame_count)
-    }
-
-    /// Loads processed vector, raster and DEM data, then runs `frame_count` offscreen frames.
-    /// A zero count is rejected before loading data. DEM decode failures use ancestor fallback;
-    /// invalid tile coordinates and schedule failures are returned with their cause.
-    pub fn render_frames_with_terrain(
-        &mut self,
-        layers: ProcessedLayers,
-        raster_layers: Vec<AvailableRasterLayerData>,
-        dem_tiles: Vec<(WorldTileCoords, RgbaImage)>,
-        frame_count: u8,
-    ) -> Result<(), HeadlessMapOperationError> {
-        if frame_count == 0 {
-            return Err(HeadlessMapOperationError::InvalidFrameCount);
-        }
-        if !dem_tiles.is_empty() {
-            self.load_dem_tiles(dem_tiles)?;
-        }
         let context = &mut self.map_context;
         layers.insert_into_tiles(&context.style, &mut context.world.tiles)?;
-
-        self.load_raster_layers(raster_layers)?;
-        self.advance_frames(frame_count)
+        self.advance_frames(1)
     }
 
-    fn advance_frames(&mut self, frame_count: u8) -> Result<(), HeadlessMapOperationError> {
+    pub(super) fn advance_frames(
+        &mut self,
+        frame_count: u8,
+    ) -> Result<(), HeadlessMapOperationError> {
         for _ in 0..frame_count {
             self.map_context
                 .world
@@ -300,13 +263,6 @@ impl HeadlessMap {
             .unwrap_or_default()
     }
 
-    /// Fades out raster tiles a camera change left behind, drawing them over the tiles that
-    /// replace them as GL JS does during `raster-fade-duration`.
-    pub fn set_raster_cross_fade(&mut self, fade: crate::raster::cross_fade::RasterCrossFade) {
-        self.map_context.world.resources.insert(fade);
-        crate::render::frame_signals::mark_dirty(&mut self.map_context.world);
-    }
-
     /// Whether terrain tiles hang skirts below their edges, as GL JS `terrainSkirtLength`.
     pub fn set_terrain_skirts(&mut self, skirts: crate::terrain::TerrainSkirts) {
         self.map_context.world.resources.insert(skirts);
@@ -341,47 +297,6 @@ impl HeadlessMap {
                 .filter(|coords| coords.build_quad_key().is_some())
                 .collect()
         }))
-    }
-
-    /// Returns the tiles a raster source must make available for this view: its own covering
-    /// at its tile size and rounding, as the request system asks for them.
-    pub fn required_raster_tile_coords(
-        &self,
-        source_name: &str,
-    ) -> Result<Vec<WorldTileCoords>, ProjectionStateError> {
-        let source = crate::io::tile_sources::source_layer_groups(
-            &self.map_context.style,
-            crate::io::tile_sources::TileKind::Raster,
-        )
-        .into_iter()
-        .find(|group| {
-            group
-                .layers
-                .iter()
-                .any(|layer| layer.source.as_deref() == Some(source_name))
-        })
-        .map(|group| RasterSourceId::new(group.source_name));
-        source.map_or_else(
-            || Ok(Vec::new()),
-            |source| self.required_raster_source_tile_coords(&source),
-        )
-    }
-
-    /// Returns this source's visible tile coordinates, including the explicit unnamed fallback.
-    pub fn required_raster_source_tile_coords(
-        &self,
-        source: &RasterSourceId,
-    ) -> Result<Vec<WorldTileCoords>, ProjectionStateError> {
-        let context = &self.map_context;
-        Ok(raster_source_regions(
-            &context.style,
-            &context.view_state,
-            &context.world,
-            ViewStatePadding::Loose,
-        )?
-        .into_iter()
-        .find(|(id, _)| id == source)
-        .map_or_else(Vec::new, |(_, tiles)| tiles))
     }
 
     /// Fetches a vector tile from [`TessellateSource::default`], independent of style sources.

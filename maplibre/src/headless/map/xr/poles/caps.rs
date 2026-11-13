@@ -165,7 +165,7 @@ impl PolarMap {
         for _ in 0..count {
             self.frame(view);
             for _ in 0..8 {
-                tokio::task::yield_now().await;
+                crate::headless::map::test_async::yield_once().await;
             }
         }
     }
@@ -306,69 +306,71 @@ impl PolarMap {
     }
 }
 
-#[tokio::test]
-async fn polar_caps_take_the_fill_with_depth_from_every_view_and_level_of_detail() {
-    for pole in [-1.0, 1.0] {
-        let above = |tilt, bearing| View {
-            latitude: 89.999999 * pole,
-            distance: 3_000_000.0,
-            tilt,
-            bearing,
-        };
-        // Low over the last row of tiles, looking at the pole, the tiles there refine.
-        let near = View {
-            latitude: 85.0 * pole,
-            distance: 150_000.0,
-            tilt: 30.0,
-            bearing: if pole < 0.0 { 180.0 } else { 0.0 },
-        };
-        // Not straight down: with the eye on the pole's axis every meridian plane holds the
-        // eye, so the skirts along the 0° and 180° meridians have no area on screen, and
-        // lavapipe still covers a pixel or two of them with a depth that beats the cap.
-        let views = [
-            above(1.0, 0.0),
-            above(55.0, 0.0),
-            above(55.0, 90.0),
-            above(55.0, 180.0),
-            near,
-        ];
-        let mut map = PolarMap::new().await;
-        let mut zooms: Vec<u8> = Vec::new();
-        for (index, view) in views.into_iter().enumerate() {
-            let case = format!("{view:?}");
-            map.frame(view);
-            if index == 0 || index == views.len() - 1 {
-                // While the tiles of the new view load, before their drapes are drawn.
-                map.check(view, false, &format!("{case} loading"));
+#[test]
+fn polar_caps_take_the_fill_with_depth_from_every_view_and_level_of_detail() {
+    crate::headless::map::test_async::run_async(async {
+        for pole in [-1.0, 1.0] {
+            let above = |tilt, bearing| View {
+                latitude: 89.999999 * pole,
+                distance: 3_000_000.0,
+                tilt,
+                bearing,
+            };
+            // Low over the last row of tiles, looking at the pole, the tiles there refine.
+            let near = View {
+                latitude: 85.0 * pole,
+                distance: 150_000.0,
+                tilt: 30.0,
+                bearing: if pole < 0.0 { 180.0 } else { 0.0 },
+            };
+            // Not straight down: with the eye on the pole's axis every meridian plane holds the
+            // eye, so the skirts along the 0° and 180° meridians have no area on screen, and
+            // lavapipe still covers a pixel or two of them with a depth that beats the cap.
+            let views = [
+                above(1.0, 0.0),
+                above(55.0, 0.0),
+                above(55.0, 90.0),
+                above(55.0, 180.0),
+                near,
+            ];
+            let mut map = PolarMap::new().await;
+            let mut zooms: Vec<u8> = Vec::new();
+            for (index, view) in views.into_iter().enumerate() {
+                let case = format!("{view:?}");
+                map.frame(view);
+                if index == 0 || index == views.len() - 1 {
+                    // While the tiles of the new view load, before their drapes are drawn.
+                    map.check(view, false, &format!("{case} loading"));
+                }
+                map.frames(view, 12).await;
+                map.whiten_drapes();
+                map.frame(view);
+                let white = map.check(view, true, &case);
+                assert!(
+                    white > 100,
+                    "{case}: the tiles keep their drape: {white} white pixels"
+                );
+                zooms.push(map.finest_zoom());
             }
-            map.frames(view, 12).await;
-            map.whiten_drapes();
-            map.frame(view);
-            let white = map.check(view, true, &case);
             assert!(
-                white > 100,
-                "{case}: the tiles keep their drape: {white} white pixels"
+                zooms.last().is_some_and(|zoom| *zoom >= 2) && zooms.first() == Some(&0),
+                "{pole}: the near view switches to finer tiles: {zooms:?}"
             );
-            zooms.push(map.finest_zoom());
+            // A map allowed no drape draws every tile without one.
+            let mut bare = PolarMap::new().await;
+            bare.map
+                .map_context
+                .world
+                .resources
+                .insert(crate::terrain::DrapeBudget {
+                    per_frame: 0,
+                    per_eye_frame: 0,
+                    ..Default::default()
+                });
+            for view in [above(1.0, 0.0), above(55.0, 90.0), near] {
+                bare.frames(view, 4).await;
+                bare.check(view, false, &format!("{view:?} without drapes"));
+            }
         }
-        assert!(
-            zooms.last().is_some_and(|zoom| *zoom >= 2) && zooms.first() == Some(&0),
-            "{pole}: the near view switches to finer tiles: {zooms:?}"
-        );
-        // A map allowed no drape draws every tile without one.
-        let mut bare = PolarMap::new().await;
-        bare.map
-            .map_context
-            .world
-            .resources
-            .insert(crate::terrain::DrapeBudget {
-                per_frame: 0,
-                per_eye_frame: 0,
-                ..Default::default()
-            });
-        for view in [above(1.0, 0.0), above(55.0, 90.0), near] {
-            bare.frames(view, 4).await;
-            bare.check(view, false, &format!("{view:?} without drapes"));
-        }
-    }
+    })
 }

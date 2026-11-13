@@ -50,7 +50,7 @@ pub(super) const SHIELD: [u8; 3] = [255, 255, 0];
 type Served = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
 
 /// A glyph range held back, and the gate that lets its requests through.
-type Hold = Arc<Mutex<Option<(&'static str, Arc<tokio::sync::Semaphore>)>>>;
+type Hold = Arc<Mutex<Option<(&'static str, Arc<super::test_async::PermitGate>)>>>;
 
 /// Serves the fixture font's ranges, a sprite sheet and vector tiles, recording every URL.
 #[derive(Clone, Default)]
@@ -180,8 +180,8 @@ impl AssetServer {
     }
 
     /// Holds `range`'s glyph requests until the returned gate is closed.
-    pub(super) fn hold_glyphs(&self, range: &'static str) -> Arc<tokio::sync::Semaphore> {
-        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+    pub(super) fn hold_glyphs(&self, range: &'static str) -> Arc<super::test_async::PermitGate> {
+        let gate = Arc::new(super::test_async::PermitGate::new(0));
         *self.held.lock().expect("held") = Some((range, gate.clone()));
         gate
     }
@@ -287,7 +287,7 @@ impl SymbolMap {
         self.map.frame_input_mut().timestamp += std::time::Duration::from_millis(16);
         self.map.run_frame().expect("frame");
         for _ in 0..8 {
-            tokio::task::yield_now().await;
+            crate::headless::map::test_async::yield_once().await;
         }
         let ready = self.map.take_ready_resources();
         self.labels_ready |= ready

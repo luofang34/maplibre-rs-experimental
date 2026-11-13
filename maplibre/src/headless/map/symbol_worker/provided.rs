@@ -58,7 +58,7 @@ pub(super) struct Shields {
     pub(super) generation: Mutex<String>,
     pub(super) calls: AtomicUsize,
     pub(super) requests: Mutex<Vec<ImageRequest>>,
-    pub(super) gate: Option<Arc<tokio::sync::Semaphore>>,
+    pub(super) gate: Option<Arc<crate::headless::map::test_async::PermitGate>>,
     /// Set while the test draws a frame; a call made then would block drawing.
     pub(super) drawing: Arc<std::sync::atomic::AtomicBool>,
     /// Calls made while a frame was drawn.
@@ -70,12 +70,17 @@ impl Shields {
         Self::gated(answer, None)
     }
 
-    pub(super) fn held(answer: Answer) -> (Arc<Self>, Arc<tokio::sync::Semaphore>) {
-        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+    pub(super) fn held(
+        answer: Answer,
+    ) -> (Arc<Self>, Arc<crate::headless::map::test_async::PermitGate>) {
+        let gate = Arc::new(crate::headless::map::test_async::PermitGate::new(0));
         (Self::gated(answer, Some(gate.clone())), gate)
     }
 
-    pub(super) fn gated(answer: Answer, gate: Option<Arc<tokio::sync::Semaphore>>) -> Arc<Self> {
+    pub(super) fn gated(
+        answer: Answer,
+        gate: Option<Arc<crate::headless::map::test_async::PermitGate>>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             answer: Mutex::new(answer),
             generation: Mutex::new("pack-1".into()),
@@ -130,7 +135,7 @@ impl StyleImageProvider for Shields {
                 .expect("requests")
                 .push(request.clone());
             if let Some(gate) = &self.gate {
-                gate.acquire().await.expect("gate").forget();
+                gate.acquire().await.expect("gate");
             }
             let ratio = request.pixel_ratio;
             let side = (SIDE * ratio).round() as u32;
@@ -264,7 +269,7 @@ pub(super) async fn watched_frame(map: &mut SymbolMap, shields: &Shields) {
     map.map.run_frame().expect("frame");
     shields.drawing.store(false, Ordering::SeqCst);
     for _ in 0..8 {
-        tokio::task::yield_now().await;
+        crate::headless::map::test_async::yield_once().await;
     }
 }
 

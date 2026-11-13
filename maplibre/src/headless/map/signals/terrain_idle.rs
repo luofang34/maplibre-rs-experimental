@@ -31,7 +31,7 @@ struct SyntheticTiles {
     failing: Option<&'static str>,
     failures: Arc<AtomicUsize>,
     frames: Arc<AtomicU64>,
-    advanced: Arc<tokio::sync::Notify>,
+    advanced: Arc<crate::headless::map::test_async::Notify>,
 }
 
 impl SyntheticTiles {
@@ -186,7 +186,7 @@ async fn frames_until_idle(
         map.run_frame().expect("frame");
         tiles.advance();
         for _ in 0..16 {
-            tokio::task::yield_now().await;
+            crate::headless::map::test_async::yield_once().await;
         }
     }
     if map.needs_redraw() {
@@ -196,54 +196,58 @@ async fn frames_until_idle(
     }
 }
 
-#[tokio::test]
-async fn a_resting_terrain_map_stops_asking_for_frames() {
-    for (zoom, pitch) in [(1.2, 0.0), (11.0, 70.0)] {
-        let tiles = SyntheticTiles::default();
-        let mut map = terrain_map(zoom, pitch, tiles.clone()).await;
-        let idle = frames_until_idle(&mut map, &tiles, 600).await;
-        assert!(
-            idle.is_ok(),
-            "zoom {zoom}, pitch {pitch}: still asking after 600 frames: {idle:?}"
-        );
-        assert_eq!(map.redraw_reasons(), RedrawReasons::default());
-    }
+#[test]
+fn a_resting_terrain_map_stops_asking_for_frames() {
+    crate::headless::map::test_async::run_async(async {
+        for (zoom, pitch) in [(1.2, 0.0), (11.0, 70.0)] {
+            let tiles = SyntheticTiles::default();
+            let mut map = terrain_map(zoom, pitch, tiles.clone()).await;
+            let idle = frames_until_idle(&mut map, &tiles, 600).await;
+            assert!(
+                idle.is_ok(),
+                "zoom {zoom}, pitch {pitch}: still asking after 600 frames: {idle:?}"
+            );
+            assert_eq!(map.redraw_reasons(), RedrawReasons::default());
+        }
+    })
 }
 
-#[tokio::test]
-async fn a_failed_tile_the_view_left_waits_for_the_view_to_return() {
-    let tiles = SyntheticTiles {
-        failing: Some("img.example/2/"),
-        ..Default::default()
-    };
-    let mut map = terrain_map(1.2, 0.0, tiles.clone()).await;
-    frames_until_idle(&mut map, &tiles, 300)
-        .await
-        .expect("the globe settles while its failed tiles back off");
-    assert!(map.map_context.has_scheduled_retries());
-    jump(&mut map, 9.0);
-    frames_until_idle(&mut map, &tiles, 600)
-        .await
-        .expect("the closer view settles");
+#[test]
+fn a_failed_tile_the_view_left_waits_for_the_view_to_return() {
+    crate::headless::map::test_async::run_async(async {
+        let tiles = SyntheticTiles {
+            failing: Some("img.example/2/"),
+            ..Default::default()
+        };
+        let mut map = terrain_map(1.2, 0.0, tiles.clone()).await;
+        frames_until_idle(&mut map, &tiles, 300)
+            .await
+            .expect("the globe settles while its failed tiles back off");
+        assert!(map.map_context.has_scheduled_retries());
+        jump(&mut map, 9.0);
+        frames_until_idle(&mut map, &tiles, 600)
+            .await
+            .expect("the closer view settles");
 
-    // The backoff of the tiles left behind runs out with no view wanting them.
-    map.frame_input_mut()
-        .advance(std::time::Duration::from_secs(120));
-    let idle = frames_until_idle(&mut map, &tiles, 60).await;
-    assert!(
-        idle.is_ok(),
-        "a retry no view wants keeps the map drawing: {idle:?}"
-    );
+        // The backoff of the tiles left behind runs out with no view wanting them.
+        map.frame_input_mut()
+            .advance(std::time::Duration::from_secs(120));
+        let idle = frames_until_idle(&mut map, &tiles, 60).await;
+        assert!(
+            idle.is_ok(),
+            "a retry no view wants keeps the map drawing: {idle:?}"
+        );
 
-    let failures = tiles.failures.load(Ordering::SeqCst);
-    jump(&mut map, 1.2);
-    frames_until_idle(&mut map, &tiles, 300)
-        .await
-        .expect("the globe settles again");
-    assert!(
-        tiles.failures.load(Ordering::SeqCst) > failures,
-        "the failed tiles are requested again once they are back in view"
-    );
+        let failures = tiles.failures.load(Ordering::SeqCst);
+        jump(&mut map, 1.2);
+        frames_until_idle(&mut map, &tiles, 300)
+            .await
+            .expect("the globe settles again");
+        assert!(
+            tiles.failures.load(Ordering::SeqCst) > failures,
+            "the failed tiles are requested again once they are back in view"
+        );
+    })
 }
 
 /// Without a runtime to run them on, every request is refused.

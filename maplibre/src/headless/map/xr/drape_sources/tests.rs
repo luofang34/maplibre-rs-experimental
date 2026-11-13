@@ -34,7 +34,7 @@ struct Unavailable;
 /// Serves imagery and flat terrain, and answers the detail server with 503.
 #[derive(Clone, Default)]
 struct Servers {
-    fetched: Arc<tokio::sync::Notify>,
+    fetched: Arc<crate::headless::map::test_async::Notify>,
     detail_requests: Arc<Mutex<u32>>,
 }
 
@@ -148,29 +148,36 @@ async fn drapes_beside(extra: &str) -> (usize, u32) {
             break;
         }
         // Workers answer asynchronously; the next frame folds in what arrived.
-        tokio::time::timeout(Duration::from_millis(200), servers.fetched.notified())
-            .await
-            .ok();
+        crate::headless::map::test_async::timeout(
+            Duration::from_millis(200),
+            servers.fetched.notified(),
+        )
+        .await
+        .ok();
     }
     let detail_requests = *servers.detail_requests.lock().expect("count");
     (built, detail_requests)
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_source_whose_server_fails_every_tile_does_not_hold_the_drape_back() {
-    let (built, detail_requests) = drapes_beside("detail").await;
-    assert!(detail_requests > 0, "the failing server was asked");
-    assert!(
-        built > 0,
-        "terrain tiles drape the base imagery beside a failing source"
-    );
+#[test]
+fn a_source_whose_server_fails_every_tile_does_not_hold_the_drape_back() {
+    crate::headless::map::test_async::run_async(async {
+        let (built, detail_requests) = drapes_beside("detail").await;
+        assert!(detail_requests > 0, "the failing server was asked");
+        assert!(
+            built > 0,
+            "terrain tiles drape the base imagery beside a failing source"
+        );
+    })
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_source_with_no_tile_at_the_view_zoom_does_not_hold_the_drape_back() {
-    let (built, _) = drapes_beside("close").await;
-    assert!(
-        built > 0,
-        "terrain tiles drape the base imagery beside a source zoomed out of view"
-    );
+#[test]
+fn a_source_with_no_tile_at_the_view_zoom_does_not_hold_the_drape_back() {
+    crate::headless::map::test_async::run_async(async {
+        let (built, _) = drapes_beside("close").await;
+        assert!(
+            built > 0,
+            "terrain tiles drape the base imagery beside a source zoomed out of view"
+        );
+    })
 }

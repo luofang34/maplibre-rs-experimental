@@ -99,51 +99,53 @@ fn totals(pixels: &[u8], width: u32, colours: &[[u8; 3]; 3]) -> [usize; 3] {
     counts_near(pixels, width, &[[0.0, 0.0]], colours)[0]
 }
 
-#[tokio::test]
-async fn markers_behind_a_ridge_stay_hidden_and_those_before_it_show_at_every_pixel_ratio() {
-    let mut failures = Vec::new();
-    for size in [WIDE, SQUARE] {
-        // On flat ground the markers behind the ridge's place are on the target.
-        let mut flat =
-            SymbolMap::serving_sized(ridge_style(1.0), server_with_ridges(0.0), size).await;
-        flat.map
-            .image_providers()
-            .expect("registry")
-            .register("shield", Shields::new(Answer::PerRoute));
-        let open = totals(&flat.settle().await, size[0], &HIDDEN.colours);
-        assert!(
-            open.iter()
-                .zip(MINIMUM)
-                .all(|(have, least)| *have >= 3 * least),
-            "{size:?}: without the ridge the markers behind it show: {open:?}"
-        );
-        let mut reference = [0; 3];
-        for ratio in RATIOS {
-            let pixels = map_at(ridge_style(ratio), size, ratio).await.settle().await;
-            let seen = totals(&pixels, size[0], &SEEN.colours);
-            let hidden = totals(&pixels, size[0], &HIDDEN.colours);
-            if ratio == 1.0 {
-                reference = seen;
-            }
-            for (kind, name) in KIND_NAMES.iter().enumerate() {
-                let area = ratio * ratio;
-                let scaled = seen[kind] as f64 / (reference[kind] as f64 * area);
-                if (seen[kind] as f64) < (3 * MINIMUM[kind]) as f64 * area
-                    || !(0.7..1.4).contains(&scaled)
-                {
-                    failures.push(format!(
+#[test]
+fn markers_behind_a_ridge_stay_hidden_and_those_before_it_show_at_every_pixel_ratio() {
+    crate::headless::map::test_async::run_async(async {
+        let mut failures = Vec::new();
+        for size in [WIDE, SQUARE] {
+            // On flat ground the markers behind the ridge's place are on the target.
+            let mut flat =
+                SymbolMap::serving_sized(ridge_style(1.0), server_with_ridges(0.0), size).await;
+            flat.map
+                .image_providers()
+                .expect("registry")
+                .register("shield", Shields::new(Answer::PerRoute));
+            let open = totals(&flat.settle().await, size[0], &HIDDEN.colours);
+            assert!(
+                open.iter()
+                    .zip(MINIMUM)
+                    .all(|(have, least)| *have >= 3 * least),
+                "{size:?}: without the ridge the markers behind it show: {open:?}"
+            );
+            let mut reference = [0; 3];
+            for ratio in RATIOS {
+                let pixels = map_at(ridge_style(ratio), size, ratio).await.settle().await;
+                let seen = totals(&pixels, size[0], &SEEN.colours);
+                let hidden = totals(&pixels, size[0], &HIDDEN.colours);
+                if ratio == 1.0 {
+                    reference = seen;
+                }
+                for (kind, name) in KIND_NAMES.iter().enumerate() {
+                    let area = ratio * ratio;
+                    let scaled = seen[kind] as f64 / (reference[kind] as f64 * area);
+                    if (seen[kind] as f64) < (3 * MINIMUM[kind]) as f64 * area
+                        || !(0.7..1.4).contains(&scaled)
+                    {
+                        failures.push(format!(
                         "{size:?} at {ratio}x: the {name}s before the ridge show {} pixels, {} at 1x",
                         seen[kind], reference[kind]
                     ));
-                }
-                if hidden[kind] > 4 {
-                    failures.push(format!(
-                        "{size:?} at {ratio}x: the {name}s behind the ridge show {} pixels",
-                        hidden[kind]
-                    ));
+                    }
+                    if hidden[kind] > 4 {
+                        failures.push(format!(
+                            "{size:?} at {ratio}x: the {name}s behind the ridge show {} pixels",
+                            hidden[kind]
+                        ));
+                    }
                 }
             }
         }
-    }
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    })
 }

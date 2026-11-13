@@ -89,49 +89,51 @@ fn groups_style(globe: bool, terrain: bool) -> Style {
     serde_json::from_value(style).expect("style")
 }
 
-#[tokio::test]
-async fn a_road_of_three_routes_shows_their_shields_in_a_row_that_collides_as_one_label() {
-    for (globe, terrain) in [(false, false), (true, false), (false, true)] {
-        let case = match (globe, terrain) {
-            (true, _) => "globe",
-            (_, true) => "terrain",
-            _ => "mercator",
-        };
-        let shields = Shields::new(Answer::PerRoute);
-        let server = AssetServer::default();
-        server.serve("https://tiles.test/", three_route_tile());
-        server.serve(
-            "https://dem.test/",
-            crate::headless::map::symbol_worker::mvt::dem_tile(),
-        );
-        let mut map = SymbolMap::serving(groups_style(globe, terrain), server).await;
-        map.map
-            .image_providers()
-            .expect("registry")
-            .register("shield", shields.clone());
-        let pixels = map.settle().await;
-        assert_eq!(
-            shown(&pixels, [255, 0, 0]),
-            0,
-            "{case}: no request name drawn as text"
-        );
-        let boxes = middle_row(&map);
-        assert_eq!(boxes.len(), 3, "{case}: one box per shield");
-        assert_shields_in_route_order(&pixels, &boxes, case);
-        assert_one_label_under_each_shield(&map, &boxes, case);
-        assert_eq!(
-            shields.calls(),
-            3,
-            "{case}: each route's shield is made once"
-        );
-        assert_rows_apart(&map, case);
-        assert_rows_keep_apart_across_zooms(&mut map, case).await;
-        assert_eq!(
-            shields.calls(),
-            3,
-            "{case}: no shield is made again for the zoom"
-        );
-    }
+#[test]
+fn a_road_of_three_routes_shows_their_shields_in_a_row_that_collides_as_one_label() {
+    crate::headless::map::test_async::run_async(async {
+        for (globe, terrain) in [(false, false), (true, false), (false, true)] {
+            let case = match (globe, terrain) {
+                (true, _) => "globe",
+                (_, true) => "terrain",
+                _ => "mercator",
+            };
+            let shields = Shields::new(Answer::PerRoute);
+            let server = AssetServer::default();
+            server.serve("https://tiles.test/", three_route_tile());
+            server.serve(
+                "https://dem.test/",
+                crate::headless::map::symbol_worker::mvt::dem_tile(),
+            );
+            let mut map = SymbolMap::serving(groups_style(globe, terrain), server).await;
+            map.map
+                .image_providers()
+                .expect("registry")
+                .register("shield", shields.clone());
+            let pixels = map.settle().await;
+            assert_eq!(
+                shown(&pixels, [255, 0, 0]),
+                0,
+                "{case}: no request name drawn as text"
+            );
+            let boxes = middle_row(&map);
+            assert_eq!(boxes.len(), 3, "{case}: one box per shield");
+            assert_shields_in_route_order(&pixels, &boxes, case);
+            assert_one_label_under_each_shield(&map, &boxes, case);
+            assert_eq!(
+                shields.calls(),
+                3,
+                "{case}: each route's shield is made once"
+            );
+            assert_rows_apart(&map, case);
+            assert_rows_keep_apart_across_zooms(&mut map, case).await;
+            assert_eq!(
+                shields.calls(),
+                3,
+                "{case}: no shield is made again for the zoom"
+            );
+        }
+    })
 }
 
 /// The glyph boxes of the row of shields nearest the middle of the view.
@@ -339,58 +341,60 @@ fn two_class_tile(gap: u32) -> Vec<u8> {
     .encode_to_vec()
 }
 
-#[tokio::test]
-async fn the_more_important_road_keeps_its_shields_where_two_rows_would_collide() {
-    let [motorway, _, secondary] = ROUTE_COLOURS;
-    for sorted in [true, false] {
-        let mut style = groups_style(false, false);
-        if sorted {
-            style
-                .set_layout_property(
-                    "shields",
-                    "symbol-sort-key",
-                    serde_json::json!([
-                        "match",
-                        ["get", "class"],
-                        "motorway",
-                        0,
-                        "trunk",
-                        1,
-                        "primary",
-                        2,
-                        "secondary",
-                        3,
-                        "tertiary",
-                        4,
-                        5
-                    ]),
-                )
-                .expect("sort key");
+#[test]
+fn the_more_important_road_keeps_its_shields_where_two_rows_would_collide() {
+    crate::headless::map::test_async::run_async(async {
+        let [motorway, _, secondary] = ROUTE_COLOURS;
+        for sorted in [true, false] {
+            let mut style = groups_style(false, false);
+            if sorted {
+                style
+                    .set_layout_property(
+                        "shields",
+                        "symbol-sort-key",
+                        serde_json::json!([
+                            "match",
+                            ["get", "class"],
+                            "motorway",
+                            0,
+                            "trunk",
+                            1,
+                            "primary",
+                            2,
+                            "secondary",
+                            3,
+                            "tertiary",
+                            4,
+                            5
+                        ]),
+                    )
+                    .expect("sort key");
+            }
+            let shields = Shields::new(Answer::PerRoute);
+            let server = AssetServer::default();
+            // A few pixels apart, so the two roads' rows collide.
+            server.serve("https://tiles.test/", two_class_tile(40));
+            let mut map = SymbolMap::serving(style, server).await;
+            map.map
+                .image_providers()
+                .expect("registry")
+                .register("shield", shields);
+            let pixels = map.settle().await;
+            let (kept, hidden) = if sorted {
+                (motorway, secondary)
+            } else {
+                // Without a sort key the road first in the tile is placed first.
+                (secondary, motorway)
+            };
+            assert!(
+                shown(&pixels, kept) > 300,
+                "sorted {sorted}: the first road's shields show"
+            );
+            assert_eq!(
+                shown(&pixels, hidden),
+                0,
+                "sorted {sorted}: the other road's rows yield"
+            );
         }
-        let shields = Shields::new(Answer::PerRoute);
-        let server = AssetServer::default();
-        // A few pixels apart, so the two roads' rows collide.
-        server.serve("https://tiles.test/", two_class_tile(40));
-        let mut map = SymbolMap::serving(style, server).await;
-        map.map
-            .image_providers()
-            .expect("registry")
-            .register("shield", shields);
-        let pixels = map.settle().await;
-        let (kept, hidden) = if sorted {
-            (motorway, secondary)
-        } else {
-            // Without a sort key the road first in the tile is placed first.
-            (secondary, motorway)
-        };
-        assert!(
-            shown(&pixels, kept) > 300,
-            "sorted {sorted}: the first road's shields show"
-        );
-        assert_eq!(
-            shown(&pixels, hidden),
-            0,
-            "sorted {sorted}: the other road's rows yield"
-        );
-    }
+    })
 }

@@ -76,34 +76,36 @@ fn label_at(map: &HeadlessMap, dx: f64) -> bool {
     .any(|symbol| symbol.text == "Moved")
 }
 
-#[tokio::test]
-async fn a_label_keeps_its_anchor_while_it_still_fits() {
-    let mut map = fixture_map(style(0.0), layers(&style(0.0)), 1).await;
-    // The obstacle takes the space east of the point, so the label goes west of it.
-    assert!(label_at(&map, -30.0), "the label takes its second anchor");
-    assert!(!label_at(&map, 20.0), "nothing is east of the point");
+#[test]
+fn a_label_keeps_its_anchor_while_it_still_fits() {
+    futures::executor::block_on(async {
+        let mut map = fixture_map(style(0.0), layers(&style(0.0)), 1).await;
+        // The obstacle takes the space east of the point, so the label goes west of it.
+        assert!(label_at(&map, -30.0), "the label takes its second anchor");
+        assert!(!label_at(&map, 20.0), "nothing is east of the point");
 
-    // Turning the map carries the obstacle north of the label, and the first anchor, east of
-    // the point, would now fit.
-    map.view_state_mut()
-        .camera_mut()
-        .set_bearing(cgmath::Deg(90.0));
-    for _ in 0..8 {
-        map.frame_input_mut()
-            .advance(std::time::Duration::from_millis(16));
-        map.run_frame().expect("turned frame");
-        assert!(label_at(&map, -30.0), "the label stays on its anchor");
-        assert!(!label_at(&map, 20.0), "the label does not jump back");
-    }
+        // Turning the map carries the obstacle north of the label, and the first anchor, east of
+        // the point, would now fit.
+        map.view_state_mut()
+            .camera_mut()
+            .set_bearing(cgmath::Deg(90.0));
+        for _ in 0..8 {
+            map.frame_input_mut()
+                .advance(std::time::Duration::from_millis(16));
+            map.run_frame().expect("turned frame");
+            assert!(label_at(&map, -30.0), "the label stays on its anchor");
+            assert!(!label_at(&map, 20.0), "the label does not jump back");
+        }
 
-    // A map that starts turned has no anchor to keep and takes the first.
-    let fresh = fixture_map(style(90.0), layers(&style(90.0)), 1).await;
-    assert!(
-        label_at(&fresh, 20.0),
-        "with no history the first anchor fits"
-    );
-    assert!(
-        !label_at(&fresh, -30.0),
-        "with no history the second is not needed"
-    );
+        // A map that starts turned has no anchor to keep and takes the first.
+        let fresh = fixture_map(style(90.0), layers(&style(90.0)), 1).await;
+        assert!(
+            label_at(&fresh, 20.0),
+            "with no history the first anchor fits"
+        );
+        assert!(
+            !label_at(&fresh, -30.0),
+            "with no history the second is not needed"
+        );
+    })
 }

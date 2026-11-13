@@ -60,56 +60,60 @@ async fn zoom_in(moving_time: Duration) -> ZoomRun {
     ZoomRun { moving, settling }
 }
 
-#[tokio::test]
-async fn a_zoom_redraws_drapes_within_its_frame_time_and_finishes_them_after() {
-    let bounded = zoom_in(Duration::ZERO).await;
-    for (step, (redraws, allowed)) in bounded.moving.iter().enumerate() {
+#[test]
+fn a_zoom_redraws_drapes_within_its_frame_time_and_finishes_them_after() {
+    crate::headless::map::test_async::run_async(async {
+        let bounded = zoom_in(Duration::ZERO).await;
+        for (step, (redraws, allowed)) in bounded.moving.iter().enumerate() {
+            assert!(
+                *redraws as usize <= *allowed,
+                "zoom step {step} drew {redraws} drapes, past the {allowed} its time holds"
+            );
+        }
         assert!(
-            *redraws as usize <= *allowed,
-            "zoom step {step} drew {redraws} drapes, past the {allowed} its time holds"
+            bounded.moving.iter().any(|(redraws, _)| *redraws > 0),
+            "the zoom draws drapes as it goes: {:?}",
+            bounded.moving
         );
-    }
-    assert!(
-        bounded.moving.iter().any(|(redraws, _)| *redraws > 0),
-        "the zoom draws drapes as it goes: {:?}",
-        bounded.moving
-    );
-    assert_eq!(
-        bounded.settling.last().copied().unwrap_or(0),
-        0,
-        "every drape is current once the map settles: {:?}",
-        bounded.settling
-    );
-    // Without the time budget the same zoom redraws more in some frame, so the budget is what
-    // held it back.
-    let unbounded = zoom_in(Duration::from_secs(1)).await;
-    let most = |run: &ZoomRun| {
-        run.moving
-            .iter()
-            .map(|(redraws, _)| *redraws)
-            .max()
-            .unwrap_or(0)
-    };
-    assert!(
-        most(&unbounded) > most(&bounded),
-        "the budget limits the zoom's redraws: {} unbounded, {} bounded",
-        most(&unbounded),
-        most(&bounded)
-    );
+        assert_eq!(
+            bounded.settling.last().copied().unwrap_or(0),
+            0,
+            "every drape is current once the map settles: {:?}",
+            bounded.settling
+        );
+        // Without the time budget the same zoom redraws more in some frame, so the budget is what
+        // held it back.
+        let unbounded = zoom_in(Duration::from_secs(1)).await;
+        let most = |run: &ZoomRun| {
+            run.moving
+                .iter()
+                .map(|(redraws, _)| *redraws)
+                .max()
+                .unwrap_or(0)
+        };
+        assert!(
+            most(&unbounded) > most(&bounded),
+            "the budget limits the zoom's redraws: {} unbounded, {} bounded",
+            most(&unbounded),
+            most(&bounded)
+        );
+    })
 }
 
-#[tokio::test]
-async fn a_moving_view_reaching_undrawn_ground_still_covers_it() {
-    let mut map = cached_map().await;
-    map.map_context
-        .world
-        .resources
-        .insert(crate::terrain::DrapeBudget {
-            moving_time: Duration::ZERO,
-            ..Default::default()
-        });
-    drag_frame(&mut map, "jump-start");
-    // Drapes here have no drawn ancestor, so they are drawn whatever the time budget says.
-    let away = jump(&mut map, 4800.0, "jump-undrawn");
-    assert!(away.drape_redraws > 1, "{away:?}");
+#[test]
+fn a_moving_view_reaching_undrawn_ground_still_covers_it() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = cached_map().await;
+        map.map_context
+            .world
+            .resources
+            .insert(crate::terrain::DrapeBudget {
+                moving_time: Duration::ZERO,
+                ..Default::default()
+            });
+        drag_frame(&mut map, "jump-start");
+        // Drapes here have no drawn ancestor, so they are drawn whatever the time budget says.
+        let away = jump(&mut map, 4800.0, "jump-undrawn");
+        assert!(away.drape_redraws > 1, "{away:?}");
+    })
 }

@@ -95,7 +95,7 @@ fn drawn_eye(map: &HeadlessMap) -> Vector3<f64> {
 async fn step(map: &mut HeadlessMap) -> bool {
     let drawn = map.run_frame().is_ok();
     for _ in 0..8 {
-        tokio::task::yield_now().await;
+        crate::headless::map::test_async::yield_once().await;
     }
     drawn
 }
@@ -169,77 +169,79 @@ fn pixel(pixels: &[u8], x: u32, y: u32) -> [u8; 3] {
 
 /// Sokoly's moonlight case: the camera stands 2 m up at the observer, posed through
 /// [`GlobePose`] to look at the moon 37° above the horizon, a pitch of 127°.
-#[tokio::test]
-async fn looking_up_from_the_ground_centres_the_moon_above_the_drawn_horizon() {
-    let mut map = standing_view().await;
-    let camera = globe_camera_for_view(map.view_state()).expect("camera");
-    let eye_height = (camera.camera_position().magnitude() - 1.0) * EARTH_RADIUS_METERS;
-    let (up, east, _) = local_axes();
-    let centre_view = {
-        let far = camera.inverse_view_projection() * cgmath::Vector4::new(0.0, 0.0, 0.5, 1.0);
-        (far.truncate() / far.w - camera.camera_position()).normalize()
-    };
-    let centre_elevation = centre_view.dot(up).asin().to_degrees();
+#[test]
+fn looking_up_from_the_ground_centres_the_moon_above_the_drawn_horizon() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = standing_view().await;
+        let camera = globe_camera_for_view(map.view_state()).expect("camera");
+        let eye_height = (camera.camera_position().magnitude() - 1.0) * EARTH_RADIUS_METERS;
+        let (up, east, _) = local_axes();
+        let centre_view = {
+            let far = camera.inverse_view_projection() * cgmath::Vector4::new(0.0, 0.0, 0.5, 1.0);
+            (far.truncate() / far.w - camera.camera_position()).normalize()
+        };
+        let centre_elevation = centre_view.dot(up).asin().to_degrees();
 
-    // A near-full moon at night: the sun stands opposite it.
-    map.set_sun_direction(Some(ecef(-moon_direction())));
-    let without = frame(&mut map);
-    map.set_moon_disc(Some(
-        Disc::new(ecef(moon_direction()), MOON_RADIUS_DEGREES).expect("disc"),
-    ));
-    let with = frame(&mut map);
-    let (mut sum, mut count) = ((0.0, 0.0), 0);
-    for y in 0..SIZE {
-        for x in 0..SIZE {
-            let (a, b) = (pixel(&with, x, y), pixel(&without, x, y));
-            if (0..3).any(|c| a[c].saturating_sub(b[c]) > 40) {
-                sum.0 += f64::from(x) + 0.5;
-                sum.1 += f64::from(y) + 0.5;
-                count += 1;
+        // A near-full moon at night: the sun stands opposite it.
+        map.set_sun_direction(Some(ecef(-moon_direction())));
+        let without = frame(&mut map);
+        map.set_moon_disc(Some(
+            Disc::new(ecef(moon_direction()), MOON_RADIUS_DEGREES).expect("disc"),
+        ));
+        let with = frame(&mut map);
+        let (mut sum, mut count) = ((0.0, 0.0), 0);
+        for y in 0..SIZE {
+            for x in 0..SIZE {
+                let (a, b) = (pixel(&with, x, y), pixel(&without, x, y));
+                if (0..3).any(|c| a[c].saturating_sub(b[c]) > 40) {
+                    sum.0 += f64::from(x) + 0.5;
+                    sum.1 += f64::from(y) + 0.5;
+                    count += 1;
+                }
             }
         }
-    }
-    let moon = (
-        sum.0 / f64::from(count.max(1)),
-        sum.1 / f64::from(count.max(1)),
-    );
-    let half = f64::from(SIZE) / 2.0;
-    // The horizon lies 37° below the centre: tan(37°) of the focal length, half the frame.
-    let horizon = half + half * ELEVATION.to_radians().tan();
-    let night_ground = pixel(&without, SIZE / 2, (horizon + 20.0) as u32);
+        let moon = (
+            sum.0 / f64::from(count.max(1)),
+            sum.1 / f64::from(count.max(1)),
+        );
+        let half = f64::from(SIZE) / 2.0;
+        // The horizon lies 37° below the centre: tan(37°) of the focal length, half the frame.
+        let horizon = half + half * ELEVATION.to_radians().tan();
+        let night_ground = pixel(&without, SIZE / 2, (horizon + 20.0) as u32);
 
-    // By day the sky and the ground are told apart from the clear colour and each other.
-    map.set_moon_disc(None);
-    map.set_sun_direction(Some(ecef(up * 0.9 + east * 0.1)));
-    let day = frame(&mut map);
-    let sky = pixel(&day, SIZE / 2, (horizon - 30.0) as u32);
-    let ground = pixel(&day, SIZE / 2, (horizon + 20.0) as u32);
-    let report = format!(
+        // By day the sky and the ground are told apart from the clear colour and each other.
+        map.set_moon_disc(None);
+        map.set_sun_direction(Some(ecef(up * 0.9 + east * 0.1)));
+        let day = frame(&mut map);
+        let sky = pixel(&day, SIZE / 2, (horizon - 30.0) as u32);
+        let ground = pixel(&day, SIZE / 2, (horizon + 20.0) as u32);
+        let report = format!(
         "eye {eye_height:.2} m, frame centre at {centre_elevation:.3}° elevation, moon {count} px \
          at ({:.1}, {:.1}), horizon row {horizon:.1}, sky {sky:?}, ground {ground:?} by day, {night_ground:?} by night",
         moon.0, moon.1,
     );
-    assert!((eye_height - EYE_HEIGHT_METERS).abs() < 0.01, "{report}");
-    assert!((centre_elevation - ELEVATION).abs() < 0.01, "{report}");
-    let pitch = map.view_state().free_globe_pitch().expect("free pose").0;
-    assert!(
-        (pitch - (90.0 + ELEVATION)).abs() < 0.01,
-        "pitch {pitch}°: {report}"
-    );
-    assert!(count > 10, "the moon is drawn: {report}");
-    assert!(
-        (moon.0 - half).abs() < 1.0 && (moon.1 - half).abs() < 1.0,
-        "the moon lands at the frame centre: {report}"
-    );
-    assert!(
-        sky.iter().any(|&c| c > 40),
-        "the atmosphere is drawn above the horizon: {report}"
-    );
-    assert!(
-        ground.iter().any(|&c| c > 20),
-        "the ground is drawn below it: {report}"
-    );
-    assert!(sky != ground, "the sky and the ground differ: {report}");
+        assert!((eye_height - EYE_HEIGHT_METERS).abs() < 0.01, "{report}");
+        assert!((centre_elevation - ELEVATION).abs() < 0.01, "{report}");
+        let pitch = map.view_state().free_globe_pitch().expect("free pose").0;
+        assert!(
+            (pitch - (90.0 + ELEVATION)).abs() < 0.01,
+            "pitch {pitch}°: {report}"
+        );
+        assert!(count > 10, "the moon is drawn: {report}");
+        assert!(
+            (moon.0 - half).abs() < 1.0 && (moon.1 - half).abs() < 1.0,
+            "the moon lands at the frame centre: {report}"
+        );
+        assert!(
+            sky.iter().any(|&c| c > 40),
+            "the atmosphere is drawn above the horizon: {report}"
+        );
+        assert!(
+            ground.iter().any(|&c| c > 20),
+            "the ground is drawn below it: {report}"
+        );
+        assert!(sky != ground, "the sky and the ground differ: {report}");
+    })
 }
 
 /// The direction `degrees` below the horizon towards the moon's azimuth.
@@ -251,51 +253,56 @@ fn towards_moon_below_horizon(degrees: f64) -> Vector3<f64> {
 
 /// A pose looking down from 300 m with its target held 100 m ahead in the air still takes the
 /// ground under its target, its eye carried down with it and kept above the ground.
-#[tokio::test]
-async fn a_pose_looking_down_still_stands_its_target_on_the_ground() {
-    let mut map = standing_view_without_pose().await;
-    let eye = local_axes().0 * (EARTH_RADIUS_METERS + 300.0);
-    let placed = pose_at(eye, towards_moon_below_horizon(30.0), 100.0);
-    map.restore_globe_pose(placed).expect("pose");
-    for _ in 0..40 {
+#[test]
+fn a_pose_looking_down_still_stands_its_target_on_the_ground() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = standing_view_without_pose().await;
+        let eye = local_axes().0 * (EARTH_RADIUS_METERS + 300.0);
+        let placed = pose_at(eye, towards_moon_below_horizon(30.0), 100.0);
+        map.restore_globe_pose(placed).expect("pose");
+        for _ in 0..40 {
+            assert!(
+                step(&mut map).await,
+                "every frame draws as the terrain loads"
+            );
+        }
+        let pose = map.view_state().globe_pose().expect("free pose");
         assert!(
-            step(&mut map).await,
-            "every frame draws as the terrain loads"
+            pose.target_elevation_meters.abs() < 0.01,
+            "the target stands on the ground: {pose:?}"
         );
-    }
-    let pose = map.view_state().globe_pose().expect("free pose");
-    assert!(
-        pose.target_elevation_meters.abs() < 0.01,
-        "the target stands on the ground: {pose:?}"
-    );
-    assert_eq!(pose.target, placed.target, "in the same direction");
-    // The target came down 250 m, from 250 m to the ground, and the eye with it.
-    let altitude = drawn_eye(&map).magnitude() - EARTH_RADIUS_METERS;
-    assert!((altitude - 50.0).abs() < 0.5, "the eye at {altitude} m");
+        assert_eq!(pose.target, placed.target, "in the same direction");
+        // The target came down 250 m, from 250 m to the ground, and the eye with it.
+        let altitude = drawn_eye(&map).magnitude() - EARTH_RADIUS_METERS;
+        assert!((altitude - 50.0).abs() < 0.5, "the eye at {altitude} m");
+    })
 }
 
 /// A fly-in from an overview looking down to the eye looking up at the moon, pose by pose,
 /// as a host interpolating poses places them: every pose draws with its eye above the ground,
 /// and the eye looking up stays where it was placed.
-#[tokio::test]
-async fn a_fly_in_to_an_eye_looking_up_draws_every_pose() {
-    let mut map = standing_view_without_pose().await;
-    let (up, ..) = local_axes();
-    let start_eye = up * (EARTH_RADIUS_METERS + 5000.0) - towards_moon_below_horizon(0.0) * 3000.0;
-    let start_forward = towards_moon_below_horizon(60.0);
-    let steps = 12;
-    for index in 0..=steps {
-        let t = f64::from(index) / f64::from(steps);
-        let eye = start_eye * (1.0 - t) + standing_eye() * t;
-        let forward = (start_forward * (1.0 - t) + moon_direction() * t).normalize();
-        map.restore_globe_pose(pose_at(eye, forward, 1000.0))
-            .unwrap_or_else(|error| panic!("pose {index}: {error}"));
-        for _ in 0..3 {
-            assert!(step(&mut map).await, "pose {index} draws");
+#[test]
+fn a_fly_in_to_an_eye_looking_up_draws_every_pose() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = standing_view_without_pose().await;
+        let (up, ..) = local_axes();
+        let start_eye =
+            up * (EARTH_RADIUS_METERS + 5000.0) - towards_moon_below_horizon(0.0) * 3000.0;
+        let start_forward = towards_moon_below_horizon(60.0);
+        let steps = 12;
+        for index in 0..=steps {
+            let t = f64::from(index) / f64::from(steps);
+            let eye = start_eye * (1.0 - t) + standing_eye() * t;
+            let forward = (start_forward * (1.0 - t) + moon_direction() * t).normalize();
+            map.restore_globe_pose(pose_at(eye, forward, 1000.0))
+                .unwrap_or_else(|error| panic!("pose {index}: {error}"));
+            for _ in 0..3 {
+                assert!(step(&mut map).await, "pose {index} draws");
+            }
+            let altitude = drawn_eye(&map).magnitude() - EARTH_RADIUS_METERS;
+            assert!(altitude > 0.0, "pose {index}: the eye at {altitude} m");
         }
-        let altitude = drawn_eye(&map).magnitude() - EARTH_RADIUS_METERS;
-        assert!(altitude > 0.0, "pose {index}: the eye at {altitude} m");
-    }
-    let moved = (drawn_eye(&map) - standing_eye()).magnitude();
-    assert!(moved < 0.01, "the eye looking up moved {moved} m");
+        let moved = (drawn_eye(&map) - standing_eye()).magnitude();
+        assert!(moved < 0.01, "the eye looking up moved {moved} m");
+    })
 }

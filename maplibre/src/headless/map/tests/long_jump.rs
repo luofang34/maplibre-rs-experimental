@@ -76,32 +76,34 @@ fn eye_altitude(map: &HeadlessMap) -> f64 {
     camera_ground_position(map.view_state()).1
 }
 
-#[tokio::test]
-async fn a_long_jump_stands_at_sea_level_until_the_new_ground_loads() {
-    let mut map = ocean_map().await;
-    assert!(
-        (map.view_state().center_elevation() + 5468.0).abs() < 1.0,
-        "the center stands on the ocean floor: {}",
-        map.view_state().center_elevation()
-    );
-    map.jump_to(CameraOptions {
-        center: Some(ORYOL),
-        zoom: Some(15.0),
-        pitch: Some(cgmath::Deg(55.0)),
-        ..Default::default()
+#[test]
+fn a_long_jump_stands_at_sea_level_until_the_new_ground_loads() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = ocean_map().await;
+        assert!(
+            (map.view_state().center_elevation() + 5468.0).abs() < 1.0,
+            "the center stands on the ocean floor: {}",
+            map.view_state().center_elevation()
+        );
+        map.jump_to(CameraOptions {
+            center: Some(ORYOL),
+            zoom: Some(15.0),
+            pitch: Some(cgmath::Deg(55.0)),
+            ..Default::default()
+        })
+        .expect("jump");
+        for _ in 0..3 {
+            assert_eq!(map.view_state().center_elevation(), 0.0);
+            assert!(eye_altitude(&map) > 0.0, "eye at {}", eye_altitude(&map));
+            map.run_frame().expect("frame");
+        }
+        map.load_dem_tiles(vec![(tile_at(ORYOL, 10), flat_dem(180.0))])
+            .expect("Oryol ground");
+        assert!(
+            (map.view_state().center_elevation() - 180.0).abs() < 1.0,
+            "the center stands on the loaded ground: {}",
+            map.view_state().center_elevation()
+        );
+        assert!(eye_altitude(&map) > 180.0, "eye at {}", eye_altitude(&map));
     })
-    .expect("jump");
-    for _ in 0..3 {
-        assert_eq!(map.view_state().center_elevation(), 0.0);
-        assert!(eye_altitude(&map) > 0.0, "eye at {}", eye_altitude(&map));
-        map.run_frame().expect("frame");
-    }
-    map.load_dem_tiles(vec![(tile_at(ORYOL, 10), flat_dem(180.0))])
-        .expect("Oryol ground");
-    assert!(
-        (map.view_state().center_elevation() - 180.0).abs() < 1.0,
-        "the center stands on the loaded ground: {}",
-        map.view_state().center_elevation()
-    );
-    assert!(eye_altitude(&map) > 180.0, "eye at {}", eye_altitude(&map));
 }

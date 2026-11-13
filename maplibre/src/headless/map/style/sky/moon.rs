@@ -83,42 +83,44 @@ fn halves(pixels: &[u8], (x, y): (f64, f64), radius: f64) -> (f64, f64) {
     (left.0 / f64::from(left.1), right.0 / f64::from(right.1))
 }
 
-#[tokio::test]
-async fn the_half_of_the_moon_facing_the_sun_is_lit() {
-    let mut map = globe().await;
-    let camera = camera(&map);
-    // In space up and to the right of the globe, clear of its disc.
-    let centre = (210.0, 50.0);
-    let moon = direction_through(&camera, centre.0, centre.1);
-    // A quarter turn from the moon, towards the right of the frame: a half moon lit on the right.
-    let towards = direction_through(&camera, 250.0, centre.1);
-    let sun = (towards - moon * moon.dot(towards)).normalize();
-    let radius = 0.8
-        * crate::starfield::sun::radius_pixels(
-            camera.projection().y.y,
-            f64::from(SIZE),
-            MOON_RADIUS_DEGREES,
-        );
-    map.set_moon_disc(Some(
-        Disc::new(ecef(moon), MOON_RADIUS_DEGREES).expect("disc"),
-    ));
+#[test]
+fn the_half_of_the_moon_facing_the_sun_is_lit() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = globe().await;
+        let camera = camera(&map);
+        // In space up and to the right of the globe, clear of its disc.
+        let centre = (210.0, 50.0);
+        let moon = direction_through(&camera, centre.0, centre.1);
+        // A quarter turn from the moon, towards the right of the frame: a half moon lit on the right.
+        let towards = direction_through(&camera, 250.0, centre.1);
+        let sun = (towards - moon * moon.dot(towards)).normalize();
+        let radius = 0.8
+            * crate::starfield::sun::radius_pixels(
+                camera.projection().y.y,
+                f64::from(SIZE),
+                MOON_RADIUS_DEGREES,
+            );
+        map.set_moon_disc(Some(
+            Disc::new(ecef(moon), MOON_RADIUS_DEGREES).expect("disc"),
+        ));
 
-    let mut lit = Vec::new();
-    for sun in [Some(sun), Some(-sun), None] {
-        map.set_sun_direction(sun.map(ecef));
-        lit.push(halves(&frame(&mut map), centre, radius));
-    }
-    let [(left, right), (left_turned, right_turned), (left_full, right_full)] = lit[..] else {
-        panic!("three frames");
-    };
-    assert!(right > 3.0 * left, "the sun's side is lit: {lit:?}");
-    assert!(left > 0.0, "the night side keeps its earthshine: {lit:?}");
-    assert!(
-        left_turned > 3.0 * right_turned,
-        "turning the sun turns the phase: {lit:?}"
-    );
-    assert!(
-        left_full > right * 0.9 && (left_full - right_full).abs() < 10.0,
-        "with no sun the whole disc is lit: {lit:?}"
-    );
+        let mut lit = Vec::new();
+        for sun in [Some(sun), Some(-sun), None] {
+            map.set_sun_direction(sun.map(ecef));
+            lit.push(halves(&frame(&mut map), centre, radius));
+        }
+        let [(left, right), (left_turned, right_turned), (left_full, right_full)] = lit[..] else {
+            panic!("three frames");
+        };
+        assert!(right > 3.0 * left, "the sun's side is lit: {lit:?}");
+        assert!(left > 0.0, "the night side keeps its earthshine: {lit:?}");
+        assert!(
+            left_turned > 3.0 * right_turned,
+            "turning the sun turns the phase: {lit:?}"
+        );
+        assert!(
+            left_full > right * 0.9 && (left_full - right_full).abs() < 10.0,
+            "with no sun the whole disc is lit: {lit:?}"
+        );
+    })
 }

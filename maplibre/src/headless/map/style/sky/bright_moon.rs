@@ -128,119 +128,125 @@ fn full_moon(map: &mut HeadlessMap, moon: Vector3<f64>) {
 }
 
 /// The full moon's centre and its light outshine the brightest star, Sirius at -1.46.
-#[tokio::test]
-async fn a_full_moon_outshines_the_brightest_star() {
-    let mut map = night_sky().await;
-    let moon = direction_through(&map, MOON_PIXEL);
-    let star_pixel = (40.0, 40.0);
-    let star = direction_through(&map, star_pixel);
-    map.set_sun_direction(Some(ecef(-moon)));
-    let plain = frame(&mut map);
-    map.set_stars(vec![Star::new(ecef(star), -1.46, None).expect("star")]);
-    let starlit = frame(&mut map);
-    map.set_stars(Vec::new());
-    full_moon(&mut map, moon);
-    let moonlit = frame(&mut map);
+#[test]
+fn a_full_moon_outshines_the_brightest_star() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = night_sky().await;
+        let moon = direction_through(&map, MOON_PIXEL);
+        let star_pixel = (40.0, 40.0);
+        let star = direction_through(&map, star_pixel);
+        map.set_sun_direction(Some(ecef(-moon)));
+        let plain = frame(&mut map);
+        map.set_stars(vec![Star::new(ecef(star), -1.46, None).expect("star")]);
+        let starlit = frame(&mut map);
+        map.set_stars(Vec::new());
+        full_moon(&mut map, moon);
+        let moonlit = frame(&mut map);
 
-    let reach = 3.0 * moon_radius_pixels(&map);
-    let (star_peak, star_light) = peak_and_light(&starlit, &plain, star_pixel, reach);
-    let (moon_peak, moon_light) = peak_and_light(&moonlit, &plain, MOON_PIXEL, reach);
-    let centre = value(&moonlit, MOON_PIXEL);
-    let report = format!(
-        "moon centre {centre}, peak {moon_peak}, light {moon_light}; \
+        let reach = 3.0 * moon_radius_pixels(&map);
+        let (star_peak, star_light) = peak_and_light(&starlit, &plain, star_pixel, reach);
+        let (moon_peak, moon_light) = peak_and_light(&moonlit, &plain, MOON_PIXEL, reach);
+        let centre = value(&moonlit, MOON_PIXEL);
+        let report = format!(
+            "moon centre {centre}, peak {moon_peak}, light {moon_light}; \
          star peak {star_peak}, light {star_light}; centre ratio {:.2}, light ratio {:.1}",
-        f64::from(centre) / f64::from(star_peak),
-        f64::from(moon_light) / f64::from(star_light.max(1)),
-    );
-    assert!(centre >= 230, "the moon is near-white: {report}");
-    assert!(
-        f64::from(centre) >= 1.2 * f64::from(star_peak),
-        "the moon's centre outshines the star's: {report}"
-    );
-    assert!(
-        moon_light >= 10 * star_light,
-        "the moon gives far more light: {report}"
-    );
+            f64::from(centre) / f64::from(star_peak),
+            f64::from(moon_light) / f64::from(star_light.max(1)),
+        );
+        assert!(centre >= 230, "the moon is near-white: {report}");
+        assert!(
+            f64::from(centre) >= 1.2 * f64::from(star_peak),
+            "the moon's centre outshines the star's: {report}"
+        );
+        assert!(
+            moon_light >= 10 * star_light,
+            "the moon gives far more light: {report}"
+        );
+    })
 }
 
 /// The halo around a full moon falls off with the angle from it, and a crescent's is far
 /// weaker than a full moon's.
-#[tokio::test]
-async fn the_halo_falls_off_with_angle_and_follows_the_phase() {
-    let mut map = night_sky().await;
-    let moon = direction_through(&map, MOON_PIXEL);
-    let radius = moon_radius_pixels(&map);
-    map.set_sun_direction(Some(ecef(-moon)));
-    let plain = frame(&mut map);
-    full_moon(&mut map, moon);
-    let full = frame(&mut map);
-    // Out from the centre towards the top of the frame, in the sky.
-    let rise = |pixels: &[u8], radii: f64| {
-        let at = (MOON_PIXEL.0, MOON_PIXEL.1 - radii * radius);
-        value(pixels, at).saturating_sub(value(&plain, at))
-    };
-    let falloff: Vec<u8> = [2.0, 4.0, 8.0]
-        .iter()
-        .map(|&radii| rise(&full, radii))
-        .collect();
-    assert!(falloff[0] > 20, "a full moon glows beside it: {falloff:?}");
-    assert!(
-        falloff.windows(2).all(|pair| pair[1] < pair[0]),
-        "the halo falls off with angle: {falloff:?}"
-    );
+#[test]
+fn the_halo_falls_off_with_angle_and_follows_the_phase() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = night_sky().await;
+        let moon = direction_through(&map, MOON_PIXEL);
+        let radius = moon_radius_pixels(&map);
+        map.set_sun_direction(Some(ecef(-moon)));
+        let plain = frame(&mut map);
+        full_moon(&mut map, moon);
+        let full = frame(&mut map);
+        // Out from the centre towards the top of the frame, in the sky.
+        let rise = |pixels: &[u8], radii: f64| {
+            let at = (MOON_PIXEL.0, MOON_PIXEL.1 - radii * radius);
+            value(pixels, at).saturating_sub(value(&plain, at))
+        };
+        let falloff: Vec<u8> = [2.0, 4.0, 8.0]
+            .iter()
+            .map(|&radii| rise(&full, radii))
+            .collect();
+        assert!(falloff[0] > 20, "a full moon glows beside it: {falloff:?}");
+        assert!(
+            falloff.windows(2).all(|pair| pair[1] < pair[0]),
+            "the halo falls off with angle: {falloff:?}"
+        );
 
-    // A crescent, 30° from the sun, phase angle 150°.
-    let up = camera(&map).camera_position().normalize();
-    let sun = turned(moon, moon.cross(up), 30.0);
-    map.set_sun_direction(Some(ecef(sun)));
-    let crescent = frame(&mut map);
-    let thin = rise(&crescent, 2.0);
-    assert!(
-        u32::from(thin) * 10 < u32::from(falloff[0]),
-        "a crescent's halo {thin} is far weaker than a full moon's {}",
-        falloff[0]
-    );
-    let (_, crescent_light) = peak_and_light(&crescent, &plain, MOON_PIXEL, radius);
-    let (_, full_light) = peak_and_light(&full, &plain, MOON_PIXEL, radius);
-    assert!(
-        crescent_light * 3 < full_light,
-        "a crescent's disc {crescent_light} is dimmer than a full moon's {full_light}"
-    );
+        // A crescent, 30° from the sun, phase angle 150°.
+        let up = camera(&map).camera_position().normalize();
+        let sun = turned(moon, moon.cross(up), 30.0);
+        map.set_sun_direction(Some(ecef(sun)));
+        let crescent = frame(&mut map);
+        let thin = rise(&crescent, 2.0);
+        assert!(
+            u32::from(thin) * 10 < u32::from(falloff[0]),
+            "a crescent's halo {thin} is far weaker than a full moon's {}",
+            falloff[0]
+        );
+        let (_, crescent_light) = peak_and_light(&crescent, &plain, MOON_PIXEL, radius);
+        let (_, full_light) = peak_and_light(&full, &plain, MOON_PIXEL, radius);
+        assert!(
+            crescent_light * 3 < full_light,
+            "a crescent's disc {crescent_light} is dimmer than a full moon's {full_light}"
+        );
+    })
 }
 
 /// A star 3° from a full moon is washed out by the sky the moon lights; the same star with the
 /// moon 40° away shows.
-#[tokio::test]
-async fn stars_beside_a_full_moon_fade() {
-    let mut map = night_sky().await;
-    let moon = direction_through(&map, MOON_PIXEL);
-    let up = camera(&map).camera_position().normalize();
-    let star = turned(moon, up, 3.0);
-    let star_pixel = {
-        let clip = camera(&map).view_projection() * star.extend(0.0);
-        (
-            (clip.x / clip.w + 1.0) / 2.0 * f64::from(SIZE),
-            (1.0 - clip.y / clip.w) / 2.0 * f64::from(SIZE),
-        )
-    };
-    let mut rises = Vec::new();
-    for moon in [moon, turned(moon, up, 40.0)] {
-        full_moon(&mut map, moon);
-        map.set_stars(Vec::new());
-        let plain = frame(&mut map);
-        map.set_stars(vec![Star::new(ecef(star), 1.0, None).expect("star")]);
-        let lit = frame(&mut map);
-        rises.push(value(&lit, star_pixel).saturating_sub(value(&plain, star_pixel)));
-    }
-    let [near, far] = rises[..] else {
-        panic!("two frames");
-    };
-    assert!(
-        far > 150,
-        "the star shows away from the moon: {far} at {star_pixel:?}"
-    );
-    assert!(
-        near * 3 < far,
-        "beside the moon it fades: {near} against {far}"
-    );
+#[test]
+fn stars_beside_a_full_moon_fade() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = night_sky().await;
+        let moon = direction_through(&map, MOON_PIXEL);
+        let up = camera(&map).camera_position().normalize();
+        let star = turned(moon, up, 3.0);
+        let star_pixel = {
+            let clip = camera(&map).view_projection() * star.extend(0.0);
+            (
+                (clip.x / clip.w + 1.0) / 2.0 * f64::from(SIZE),
+                (1.0 - clip.y / clip.w) / 2.0 * f64::from(SIZE),
+            )
+        };
+        let mut rises = Vec::new();
+        for moon in [moon, turned(moon, up, 40.0)] {
+            full_moon(&mut map, moon);
+            map.set_stars(Vec::new());
+            let plain = frame(&mut map);
+            map.set_stars(vec![Star::new(ecef(star), 1.0, None).expect("star")]);
+            let lit = frame(&mut map);
+            rises.push(value(&lit, star_pixel).saturating_sub(value(&plain, star_pixel)));
+        }
+        let [near, far] = rises[..] else {
+            panic!("two frames");
+        };
+        assert!(
+            far > 150,
+            "the star shows away from the moon: {far} at {star_pixel:?}"
+        );
+        assert!(
+            near * 3 < far,
+            "beside the moon it fades: {near} against {far}"
+        );
+    })
 }

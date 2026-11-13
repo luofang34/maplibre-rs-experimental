@@ -87,29 +87,31 @@ fn assert_steady(offsets: &[[f64; 2]], case: &str) {
     );
 }
 
-#[tokio::test]
-async fn a_label_holds_to_its_ground_while_the_map_pans_turns_and_tilts() {
-    for case in ["pan", "turn", "tilt"] {
-        let mut map = SymbolMap::serving(style(), AssetServer::default()).await;
-        map.settle().await;
-        let offsets = offsets(&mut map, 30, async |map, _| {
-            let camera = map.map.view_state_mut().camera_mut();
-            match case {
-                "pan" => camera.move_relative(cgmath::Vector2::new(0.6, 0.4)),
-                "turn" => {
-                    let bearing = camera.get_bearing();
-                    camera.set_bearing(bearing + cgmath::Rad(0.5_f64.to_radians()));
+#[test]
+fn a_label_holds_to_its_ground_while_the_map_pans_turns_and_tilts() {
+    crate::headless::map::test_async::run_async(async {
+        for case in ["pan", "turn", "tilt"] {
+            let mut map = SymbolMap::serving(style(), AssetServer::default()).await;
+            map.settle().await;
+            let offsets = offsets(&mut map, 30, async |map, _| {
+                let camera = map.map.view_state_mut().camera_mut();
+                match case {
+                    "pan" => camera.move_relative(cgmath::Vector2::new(0.6, 0.4)),
+                    "turn" => {
+                        let bearing = camera.get_bearing();
+                        camera.set_bearing(bearing + cgmath::Rad(0.5_f64.to_radians()));
+                    }
+                    _ => {
+                        let pitch = camera.get_pitch();
+                        camera.set_pitch(pitch + cgmath::Rad(0.3_f64.to_radians()));
+                    }
                 }
-                _ => {
-                    let pitch = camera.get_pitch();
-                    camera.set_pitch(pitch + cgmath::Rad(0.3_f64.to_radians()));
-                }
-            }
-            map.frame().await;
-        })
-        .await;
-        assert_steady(&offsets, case);
-    }
+                map.frame().await;
+            })
+            .await;
+            assert_steady(&offsets, case);
+        }
+    })
 }
 
 /// One eye 600 m south of the label and 350 m up, looking north and 30 degrees down, turned
@@ -147,28 +149,30 @@ fn head(yaw: f64, drift: f64, clock: u32) -> crate::render::xr::XrFrame {
     }
 }
 
-#[tokio::test]
-async fn a_label_holds_to_its_ground_while_a_tracked_head_turns() {
-    let mut map = SymbolMap::serving(style(), AssetServer::default()).await;
-    // Labels place on a slower cadence in a tracked view; the still head lets them load
-    // and fade in first.
-    for clock in 0..120 {
-        map.map
-            .run_xr_frame(head(0.0, 0.0, clock))
-            .expect("still head");
-        for _ in 0..8 {
-            tokio::task::yield_now().await;
+#[test]
+fn a_label_holds_to_its_ground_while_a_tracked_head_turns() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = SymbolMap::serving(style(), AssetServer::default()).await;
+        // Labels place on a slower cadence in a tracked view; the still head lets them load
+        // and fade in first.
+        for clock in 0..120 {
+            map.map
+                .run_xr_frame(head(0.0, 0.0, clock))
+                .expect("still head");
+            for _ in 0..8 {
+                crate::headless::map::test_async::yield_once().await;
+            }
         }
-    }
-    let offsets = offsets(&mut map, 40, async |map, frame| {
-        let step = f64::from(frame);
-        map.map
-            .run_xr_frame(head(step * 0.2, step * 0.5, 120 + frame))
-            .expect("turning head");
-        for _ in 0..8 {
-            tokio::task::yield_now().await;
-        }
+        let offsets = offsets(&mut map, 40, async |map, frame| {
+            let step = f64::from(frame);
+            map.map
+                .run_xr_frame(head(step * 0.2, step * 0.5, 120 + frame))
+                .expect("turning head");
+            for _ in 0..8 {
+                crate::headless::map::test_async::yield_once().await;
+            }
+        })
+        .await;
+        assert_steady(&offsets, "tracked head");
     })
-    .await;
-    assert_steady(&offsets, "tracked head");
 }

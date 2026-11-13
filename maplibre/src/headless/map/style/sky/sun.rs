@@ -92,7 +92,7 @@ async fn look_from(map: &mut HeadlessMap, altitude: f64) {
     for _ in 0..40 {
         map.run_frame().expect("frame");
         for _ in 0..8 {
-            tokio::task::yield_now().await;
+            crate::headless::map::test_async::yield_once().await;
         }
     }
 }
@@ -208,38 +208,44 @@ async fn glare_from(altitude: f64, sun: EcefDirection) -> u8 {
 
 /// The glare follows the share of the disc the ground leaves showing: full over a whole disc,
 /// less over half of one, and none once the ground hides it.
-#[tokio::test]
-async fn the_glare_follows_the_share_of_the_sun_that_shows() {
-    let whole = glare_from(100.0, sun()).await;
-    let half = glare_from(1.7, sun()).await;
-    let hidden = glare_from(100.0, lowered_sun(1.0)).await;
-    assert!(whole > 10, "a whole sun glares: {whole}");
-    assert!(
-        half < whole && half > whole / 4,
-        "half a sun glares less: {half} of {whole}"
-    );
-    assert!(hidden <= 1, "a hidden sun does not glare: {hidden}");
+#[test]
+fn the_glare_follows_the_share_of_the_sun_that_shows() {
+    crate::headless::map::test_async::run_async(async {
+        let whole = glare_from(100.0, sun()).await;
+        let half = glare_from(1.7, sun()).await;
+        let hidden = glare_from(100.0, lowered_sun(1.0)).await;
+        assert!(whole > 10, "a whole sun glares: {whole}");
+        assert!(
+            half < whole && half > whole / 4,
+            "half a sun glares less: {half} of {whole}"
+        );
+        assert!(hidden <= 1, "a hidden sun does not glare: {hidden}");
+    })
 }
 
 /// From a standing eye, 1.7 m up, the sea horizon dips 0.04°, so a little over half of the
 /// disc whose centre is on the geometric horizon shows.
-#[tokio::test]
-async fn a_standing_eye_sees_about_half_the_rising_sun() {
-    let (share, dip) = share_from(1.7).await;
-    assert!(dip < 0.05, "dip {dip}°");
-    assert!((0.4..=0.75).contains(&share), "{share} of the disc shows");
+#[test]
+fn a_standing_eye_sees_about_half_the_rising_sun() {
+    crate::headless::map::test_async::run_async(async {
+        let (share, dip) = share_from(1.7).await;
+        assert!(dip < 0.05, "dip {dip}°");
+        assert!((0.4..=0.75).contains(&share), "{share} of the disc shows");
+    })
 }
 
 /// From 100 m up, the sea horizon dips 0.32°, more than the sun's radius, so the whole disc
 /// stands above it, its lower limb just clear.
-#[tokio::test]
-async fn from_a_hundred_metres_the_whole_rising_sun_shows() {
-    let (share, dip) = share_from(100.0).await;
-    assert!(
-        dip > SUN_RADIUS_DEGREES && dip < SUN_RADIUS_DEGREES + 0.1,
-        "dip {dip}°"
-    );
-    assert!(share > 0.95, "{share} of the disc shows");
+#[test]
+fn from_a_hundred_metres_the_whole_rising_sun_shows() {
+    crate::headless::map::test_async::run_async(async {
+        let (share, dip) = share_from(100.0).await;
+        assert!(
+            dip > SUN_RADIUS_DEGREES && dip < SUN_RADIUS_DEGREES + 0.1,
+            "dip {dip}°"
+        );
+        assert!(share > 0.95, "{share} of the disc shows");
+    })
 }
 
 /// The sunrise direction turned `degrees` clockwise about the observer's up, along the horizon.
@@ -260,33 +266,35 @@ fn turned_sun(degrees: f64) -> EcefDirection {
 
 /// The disc stands where the sun direction points: turning the sun alone moves the disc, so
 /// the disc cannot part from the light it stands for.
-#[tokio::test]
-async fn turning_the_sun_direction_moves_its_disc() {
-    let mut map = horizon_view().await;
-    look_from(&mut map, 100.0).await;
-    let (before, after) = (sun(), turned_sun(1.0));
-    let mut shares = Vec::new();
-    for direction in [before, after] {
-        map.set_sun_direction(Some(direction));
-        map.set_sun_angular_radius(None);
-        let without = frame(&mut map);
-        map.set_sun_angular_radius(Some(radius()));
-        let with = frame(&mut map);
-        shares.push((
-            disc_share(&without, &with, disc_in_frame(&map, before)),
-            disc_share(&without, &with, disc_in_frame(&map, after)),
-        ));
-    }
-    assert!(
-        shares[0].0 > 0.95,
-        "the disc shows where the sun first points: {shares:?}"
-    );
-    assert!(
-        shares[1].1 > 0.95,
-        "the disc follows the turned sun: {shares:?}"
-    );
-    assert!(
-        shares[1].0 < 0.05,
-        "and leaves where the sun was: {shares:?}"
-    );
+#[test]
+fn turning_the_sun_direction_moves_its_disc() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = horizon_view().await;
+        look_from(&mut map, 100.0).await;
+        let (before, after) = (sun(), turned_sun(1.0));
+        let mut shares = Vec::new();
+        for direction in [before, after] {
+            map.set_sun_direction(Some(direction));
+            map.set_sun_angular_radius(None);
+            let without = frame(&mut map);
+            map.set_sun_angular_radius(Some(radius()));
+            let with = frame(&mut map);
+            shares.push((
+                disc_share(&without, &with, disc_in_frame(&map, before)),
+                disc_share(&without, &with, disc_in_frame(&map, after)),
+            ));
+        }
+        assert!(
+            shares[0].0 > 0.95,
+            "the disc shows where the sun first points: {shares:?}"
+        );
+        assert!(
+            shares[1].1 > 0.95,
+            "the disc follows the turned sun: {shares:?}"
+        );
+        assert!(
+            shares[1].0 < 0.05,
+            "and leaves where the sun was: {shares:?}"
+        );
+    })
 }

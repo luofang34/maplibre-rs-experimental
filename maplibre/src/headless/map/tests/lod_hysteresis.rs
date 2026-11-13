@@ -185,17 +185,23 @@ async fn wavering_keeps_levels(covering: Covering) {
     }
 }
 
-#[tokio::test]
-async fn a_camera_wavering_across_a_terrain_level_threshold_keeps_the_drawn_levels() {
-    wavering_keeps_levels(Covering::Terrain).await;
+#[test]
+fn a_camera_wavering_across_a_terrain_level_threshold_keeps_the_drawn_levels() {
+    crate::headless::map::test_async::run_async(async {
+        wavering_keeps_levels(Covering::Terrain).await;
+    })
 }
 
-#[tokio::test]
-async fn a_camera_wavering_across_a_view_level_threshold_keeps_the_drawn_levels() {
-    wavering_keeps_levels(Covering::View).await;
+#[test]
+fn a_camera_wavering_across_a_view_level_threshold_keeps_the_drawn_levels() {
+    crate::headless::map::test_async::run_async(async {
+        wavering_keeps_levels(Covering::View).await;
+    })
 }
 
-#[tokio::test]
-async fn a_camera_wavering_across_a_raster_level_threshold_keeps_the_drawn_levels() {
-    wavering_keeps_levels(Covering::Imagery).await;
+#[test]
+fn a_camera_wavering_across_a_raster_level_threshold_keeps_the_drawn_levels() {
+    crate::headless::map::test_async::run_async(async {
+        wavering_keeps_levels(Covering::Imagery).await;
+    })
 }

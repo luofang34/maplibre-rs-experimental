@@ -139,7 +139,7 @@ impl LevelMap {
             for _ in 0..4 {
                 self.map.run_frame().expect("frame");
                 for _ in 0..8 {
-                    tokio::task::yield_now().await;
+                    crate::headless::map::test_async::yield_once().await;
                 }
             }
             let depth = self.read_depth();
@@ -317,20 +317,22 @@ async fn check(scene: Scene) {
     assert_eq!(floating, 0, "{scene:?}: {floating} sky pixels hold terrain");
 }
 
-#[tokio::test]
-async fn level_terrain_meets_the_camera_at_its_center_and_everywhere_in_view() {
-    for (meters, exaggeration) in [(4000.0, 1.0), (4000.0, 2.0), (0.0, 1.0), (-400.0, 1.0)] {
-        for pitch in [70.0, 85.0] {
-            check(Scene {
-                meters,
-                relief: 0.0,
-                exaggeration,
-                pitch,
-                zoom: 11.67,
-            })
-            .await;
+#[test]
+fn level_terrain_meets_the_camera_at_its_center_and_everywhere_in_view() {
+    crate::headless::map::test_async::run_async(async {
+        for (meters, exaggeration) in [(4000.0, 1.0), (4000.0, 2.0), (0.0, 1.0), (-400.0, 1.0)] {
+            for pitch in [70.0, 85.0] {
+                check(Scene {
+                    meters,
+                    relief: 0.0,
+                    exaggeration,
+                    pitch,
+                    zoom: 11.67,
+                })
+                .await;
+            }
         }
-    }
+    })
 }
 
 /// Distance along the view axis to the ground picked through `pixel`: `None` for the sky or a
@@ -362,72 +364,76 @@ fn picked_distance(
 
 /// Every sampled pixel's terrain pick lies where the frame drew the ground: at the depth the
 /// GPU stored there, on hills whose every sample differs.
-#[tokio::test]
-async fn picks_land_where_the_frame_draws_the_ground() {
-    use crate::terrain::{sightline::DrawnTerrain, TerrainCoverageIndex};
-    for pitch in [70.0, 85.0] {
-        let scene = Scene {
-            meters: 1500.0,
-            relief: 600.0,
-            exaggeration: 1.0,
-            pitch,
-            zoom: 11.67,
-        };
-        let mut hills = LevelMap::new(scene).await;
-        let depth = hills.settle(None).await;
-        let camera = globe_camera_for_view(hills.map.view_state()).expect("camera");
-        let (near, far) = camera.depth_range();
-        let world = hills.map.world();
-        let terrain = DrawnTerrain {
-            index: world
-                .resources
-                .get::<TerrainCoverageIndex>()
-                .expect("coverage index"),
-            tiles: &world.tiles,
-            body: camera.body(),
-        };
-        // The frame keeps the nearest of a pixel's samples, the standard four-sample pattern;
-        // at a grazing view one pixel spans a long stretch of ground.
-        let samples = [
-            (0.375, 0.125),
-            (0.875, 0.375),
-            (0.125, 0.625),
-            (0.625, 0.875),
-        ];
-        let distance_of = |pixel| picked_distance(&camera, terrain, pixel);
-        let (mut picked, mut unknown) = (0, 0);
-        for y in (0..HEIGHT).step_by(90) {
-            for x in (0..WIDTH).step_by(90) {
-                let picks: Result<Vec<Option<f64>>, ()> = samples
-                    .iter()
-                    .map(|(dx, dy)| distance_of(Point2::new(f64::from(x) + dx, f64::from(y) + dy)))
-                    .collect();
-                let Ok(picks) = picks else {
-                    unknown += 1;
-                    continue;
-                };
-                let Some(nearest) = picks.iter().flatten().copied().reduce(f64::min) else {
-                    continue;
-                };
-                let stored = depth[(y * WIDTH + x) as usize];
-                assert!(
-                    stored > 0.0,
-                    "{scene:?}: ({x},{y}) picks ground the frame left empty"
-                );
-                let drawn = near * far / (f64::from(stored) * (far - near) + near);
-                assert!(
+#[test]
+fn picks_land_where_the_frame_draws_the_ground() {
+    crate::headless::map::test_async::run_async(async {
+        use crate::terrain::{sightline::DrawnTerrain, TerrainCoverageIndex};
+        for pitch in [70.0, 85.0] {
+            let scene = Scene {
+                meters: 1500.0,
+                relief: 600.0,
+                exaggeration: 1.0,
+                pitch,
+                zoom: 11.67,
+            };
+            let mut hills = LevelMap::new(scene).await;
+            let depth = hills.settle(None).await;
+            let camera = globe_camera_for_view(hills.map.view_state()).expect("camera");
+            let (near, far) = camera.depth_range();
+            let world = hills.map.world();
+            let terrain = DrawnTerrain {
+                index: world
+                    .resources
+                    .get::<TerrainCoverageIndex>()
+                    .expect("coverage index"),
+                tiles: &world.tiles,
+                body: camera.body(),
+            };
+            // The frame keeps the nearest of a pixel's samples, the standard four-sample pattern;
+            // at a grazing view one pixel spans a long stretch of ground.
+            let samples = [
+                (0.375, 0.125),
+                (0.875, 0.375),
+                (0.125, 0.625),
+                (0.625, 0.875),
+            ];
+            let distance_of = |pixel| picked_distance(&camera, terrain, pixel);
+            let (mut picked, mut unknown) = (0, 0);
+            for y in (0..HEIGHT).step_by(90) {
+                for x in (0..WIDTH).step_by(90) {
+                    let picks: Result<Vec<Option<f64>>, ()> = samples
+                        .iter()
+                        .map(|(dx, dy)| {
+                            distance_of(Point2::new(f64::from(x) + dx, f64::from(y) + dy))
+                        })
+                        .collect();
+                    let Ok(picks) = picks else {
+                        unknown += 1;
+                        continue;
+                    };
+                    let Some(nearest) = picks.iter().flatten().copied().reduce(f64::min) else {
+                        continue;
+                    };
+                    let stored = depth[(y * WIDTH + x) as usize];
+                    assert!(
+                        stored > 0.0,
+                        "{scene:?}: ({x},{y}) picks ground the frame left empty"
+                    );
+                    let drawn = near * far / (f64::from(stored) * (far - near) + near);
+                    assert!(
                     (drawn / nearest - 1.0).abs() < 2e-3,
                     "{scene:?}: ({x},{y}) picks ground {nearest} px away, the frame drew it {drawn} px away"
                 );
-                picked += 1;
+                    picked += 1;
+                }
             }
+            assert!(picked > 150, "{scene:?}: {picked} pixels picked ground");
+            assert_eq!(
+                unknown, 0,
+                "{scene:?}: the settled frame has ground without DEM"
+            );
         }
-        assert!(picked > 150, "{scene:?}: {picked} pixels picked ground");
-        assert_eq!(
-            unknown, 0,
-            "{scene:?}: the settled frame has ground without DEM"
-        );
-    }
+    })
 }
 
 mod ground;

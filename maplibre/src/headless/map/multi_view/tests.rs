@@ -199,86 +199,141 @@ pub(super) fn loaded_dem_coords(map: &HeadlessMap) -> HashSet<WorldTileCoords> {
         .collect()
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn heterogeneous_multi_view_renders_otw_and_sensor_without_skipped_slot_eviction() {
-    let client = CountingTileClient::default();
-    let loader = SharedLoader::new(client);
-    let settings = RendererSettings {
-        msaa: Msaa { samples: 1 },
-        symbol_pools: BufferPoolSizes::EMPTY,
-        buffer_pools: BufferPoolSizes::EMPTY,
-        terrain_drape_size: 256,
-        ..RendererSettings::default()
-    };
-    let (kernel, renderer) = create_headless_renderer_with_loader(64, 64, settings, loader)
-        .await
-        .expect("headless renderer");
+#[test]
+fn heterogeneous_multi_view_renders_otw_and_sensor_without_skipped_slot_eviction() {
+    crate::headless::map::test_async::run_async(async {
+        let client = CountingTileClient::default();
+        let loader = SharedLoader::new(client);
+        let settings = RendererSettings {
+            msaa: Msaa { samples: 1 },
+            symbol_pools: BufferPoolSizes::EMPTY,
+            buffer_pools: BufferPoolSizes::EMPTY,
+            terrain_drape_size: 256,
+            ..RendererSettings::default()
+        };
+        let (kernel, renderer) = create_headless_renderer_with_loader(64, 64, settings, loader)
+            .await
+            .expect("headless renderer");
 
-    let mut map = HeadlessMap::new(
-        terrain_raster_style("#102030"),
-        renderer,
-        kernel,
-        vec![
-            Box::new(RenderPlugin),
-            Box::new(BackgroundPlugin),
-            Box::new(RasterPlugin::<DefaultRasterTransferables>::default()),
-            Box::new(TerrainPlugin::<DefaultDemTransferables>::default()),
-            Box::new(OverlayPlugin),
-        ],
-    )
-    .expect("headless map");
+        let mut map = HeadlessMap::new(
+            terrain_raster_style("#102030"),
+            renderer,
+            kernel,
+            vec![
+                Box::new(RenderPlugin),
+                Box::new(BackgroundPlugin),
+                Box::new(RasterPlugin::<DefaultRasterTransferables>::default()),
+                Box::new(TerrainPlugin::<DefaultDemTransferables>::default()),
+                Box::new(OverlayPlugin),
+            ],
+        )
+        .expect("headless map");
 
-    let otw_slot = map.register_view_slot(ViewSlotConfig {
-        size: PhysicalSize::new(160, 90).expect("otw size"),
-        depth_readout: true,
-    });
-    let otw_right = map.register_view_slot(ViewSlotConfig {
-        size: PhysicalSize::new(160, 90).expect("right eye size"),
-        depth_readout: false,
-    });
-    let sensor_slot = map.register_view_slot(ViewSlotConfig {
-        size: PhysicalSize::new(80, 60).expect("sensor size"),
-        depth_readout: true,
-    });
+        let otw_slot = map.register_view_slot(ViewSlotConfig {
+            size: PhysicalSize::new(160, 90).expect("otw size"),
+            depth_readout: true,
+        });
+        let otw_right = map.register_view_slot(ViewSlotConfig {
+            size: PhysicalSize::new(160, 90).expect("right eye size"),
+            depth_readout: false,
+        });
+        let sensor_slot = map.register_view_slot(ViewSlotConfig {
+            size: PhysicalSize::new(80, 60).expect("sensor size"),
+            depth_readout: true,
+        });
 
-    let bogus = ViewSlotId::from_raw(999);
-    let cam_zero = SlotView::Camera {
-        center: LatLon::new(0.0, 0.0),
-        zoom: Zoom::new(3.0),
-        bearing_deg: 0.0,
-        pitch_deg: 0.0,
-    };
-    assert!(matches!(
+        let bogus = ViewSlotId::from_raw(999);
+        let cam_zero = SlotView::Camera {
+            center: LatLon::new(0.0, 0.0),
+            zoom: Zoom::new(3.0),
+            bearing_deg: 0.0,
+            pitch_deg: 0.0,
+        };
+        assert!(matches!(
+            map.run_multi_view_frame(MultiViewFrame {
+                slots: vec![ViewSlotEntry { slot: bogus, view: cam_zero, policy: CoveringPolicy::Independent }],
+                ..Default::default()
+            }),
+            Err(MultiViewError::UnknownSlot { slot }) if slot == bogus
+        ));
+        assert!(matches!(
+            map.run_multi_view_frame(MultiViewFrame {
+                slots: vec![ViewSlotEntry {
+                    slot: otw_right,
+                    view: SlotView::External(external_view_at(
+                        47.0,
+                        8.0,
+                        1_500.0,
+                        -8.0,
+                        160.0 / 90.0
+                    )),
+                    policy: CoveringPolicy::StereoReuse(otw_slot),
+                }],
+                ..Default::default()
+            }),
+            Err(MultiViewError::InvalidStereoPrimary { .. })
+        ));
+
+        let otw_view =
+            SlotView::External(external_view_at(47.0, 8.0, 2_500.0, -12.0, 160.0 / 90.0));
+        let sensor_view = SlotView::Camera {
+            center: LatLon::new(-33.86, 151.20),
+            zoom: Zoom::new(6.0),
+            bearing_deg: 0.0,
+            pitch_deg: 0.0,
+        };
+        for step in 0..16 {
+            map.run_multi_view_frame(MultiViewFrame {
+                timestamp: Duration::from_millis(step * 16),
+                opaque_environment: true,
+                request_overscan: 1.0,
+                slots: vec![
+                    ViewSlotEntry {
+                        slot: otw_slot,
+                        view: otw_view,
+                        policy: CoveringPolicy::Independent,
+                    },
+                    ViewSlotEntry {
+                        slot: otw_right,
+                        view: otw_view,
+                        policy: CoveringPolicy::StereoReuse(otw_slot),
+                    },
+                    ViewSlotEntry {
+                        slot: sensor_slot,
+                        view: sensor_view,
+                        policy: CoveringPolicy::Independent,
+                    },
+                ],
+            })
+            .expect("multi-view frame");
+            crate::headless::map::test_async::sleep(Duration::from_millis(5)).await;
+        }
+
+        let otw_color = map.view_slot_color_texture(otw_slot).expect("otw color");
+        let otw_depth = map.view_slot_depth_texture(otw_slot).expect("otw depth");
+        let sensor_color = map
+            .view_slot_color_texture(sensor_slot)
+            .expect("sensor color");
+        let sensor_depth = map
+            .view_slot_depth_texture(sensor_slot)
+            .expect("sensor depth");
+        assert_eq!((otw_color.width(), otw_color.height()), (160, 90));
+        assert_eq!((otw_depth.width(), otw_depth.height()), (160, 90));
+        assert_eq!((sensor_color.width(), sensor_color.height()), (80, 60));
+        assert_eq!((sensor_depth.width(), sensor_depth.height()), (80, 60));
+        assert!(map.view_slot_depth_texture(otw_right).is_none());
+        assert_eq!(map.view_slot_has_readback_buffer(otw_slot), Some(false));
+        assert_eq!(map.view_slot_has_readback_buffer(sensor_slot), Some(false));
+
+        // Per-slot OverlayMesh isolation: green on OTW, red on Sensor.
+        map.set_view_slot_overlay(otw_slot, fullscreen_overlay(160, 90, [0.0, 1.0, 0.0, 1.0]))
+            .expect("set otw overlay");
+        map.set_view_slot_overlay(
+            sensor_slot,
+            fullscreen_overlay(80, 60, [1.0, 0.0, 0.0, 1.0]),
+        )
+        .expect("set sensor overlay");
         map.run_multi_view_frame(MultiViewFrame {
-            slots: vec![ViewSlotEntry { slot: bogus, view: cam_zero, policy: CoveringPolicy::Independent }],
-            ..Default::default()
-        }),
-        Err(MultiViewError::UnknownSlot { slot }) if slot == bogus
-    ));
-    assert!(matches!(
-        map.run_multi_view_frame(MultiViewFrame {
-            slots: vec![ViewSlotEntry {
-                slot: otw_right,
-                view: SlotView::External(external_view_at(47.0, 8.0, 1_500.0, -8.0, 160.0 / 90.0)),
-                policy: CoveringPolicy::StereoReuse(otw_slot),
-            }],
-            ..Default::default()
-        }),
-        Err(MultiViewError::InvalidStereoPrimary { .. })
-    ));
-
-    let otw_view = SlotView::External(external_view_at(47.0, 8.0, 2_500.0, -12.0, 160.0 / 90.0));
-    let sensor_view = SlotView::Camera {
-        center: LatLon::new(-33.86, 151.20),
-        zoom: Zoom::new(6.0),
-        bearing_deg: 0.0,
-        pitch_deg: 0.0,
-    };
-    for step in 0..16 {
-        map.run_multi_view_frame(MultiViewFrame {
-            timestamp: Duration::from_millis(step * 16),
-            opaque_environment: true,
-            request_overscan: 1.0,
             slots: vec![
                 ViewSlotEntry {
                     slot: otw_slot,
@@ -286,100 +341,74 @@ async fn heterogeneous_multi_view_renders_otw_and_sensor_without_skipped_slot_ev
                     policy: CoveringPolicy::Independent,
                 },
                 ViewSlotEntry {
-                    slot: otw_right,
-                    view: otw_view,
-                    policy: CoveringPolicy::StereoReuse(otw_slot),
-                },
-                ViewSlotEntry {
                     slot: sensor_slot,
                     view: sensor_view,
                     policy: CoveringPolicy::Independent,
                 },
             ],
+            ..Default::default()
         })
-        .expect("multi-view frame");
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
+        .expect("overlay frame");
 
-    let otw_color = map.view_slot_color_texture(otw_slot).expect("otw color");
-    let otw_depth = map.view_slot_depth_texture(otw_slot).expect("otw depth");
-    let sensor_color = map
-        .view_slot_color_texture(sensor_slot)
-        .expect("sensor color");
-    let sensor_depth = map
-        .view_slot_depth_texture(sensor_slot)
-        .expect("sensor depth");
-    assert_eq!((otw_color.width(), otw_color.height()), (160, 90));
-    assert_eq!((otw_depth.width(), otw_depth.height()), (160, 90));
-    assert_eq!((sensor_color.width(), sensor_color.height()), (80, 60));
-    assert_eq!((sensor_depth.width(), sensor_depth.height()), (80, 60));
-    assert!(map.view_slot_depth_texture(otw_right).is_none());
-    assert_eq!(map.view_slot_has_readback_buffer(otw_slot), Some(false));
-    assert_eq!(map.view_slot_has_readback_buffer(sensor_slot), Some(false));
+        let otw_rgba = crate::headless::map::readback::read_blocking(
+            &map,
+            map.view_slot_color_texture(otw_slot).expect("otw"),
+            wgpu::TextureAspect::All,
+        )
+        .expect("read otw");
+        let sensor_rgba = crate::headless::map::readback::read_blocking(
+            &map,
+            map.view_slot_color_texture(sensor_slot).expect("sensor"),
+            wgpu::TextureAspect::All,
+        )
+        .expect("read sensor");
+        assert!(
+            otw_rgba[1] > 240 && otw_rgba[0] < 10,
+            "OTW slot must show green overlay"
+        );
+        assert!(
+            sensor_rgba[0] > 240 && sensor_rgba[1] < 10,
+            "Sensor slot must show red overlay"
+        );
 
-    // Per-slot OverlayMesh isolation: green on OTW, red on Sensor.
-    map.set_view_slot_overlay(otw_slot, fullscreen_overlay(160, 90, [0.0, 1.0, 0.0, 1.0]))
-        .expect("set otw overlay");
-    map.set_view_slot_overlay(
-        sensor_slot,
-        fullscreen_overlay(80, 60, [1.0, 0.0, 0.0, 1.0]),
-    )
-    .expect("set sensor overlay");
-    map.run_multi_view_frame(MultiViewFrame {
-        slots: vec![
-            ViewSlotEntry {
-                slot: otw_slot,
-                view: otw_view,
-                policy: CoveringPolicy::Independent,
-            },
-            ViewSlotEntry {
-                slot: sensor_slot,
-                view: sensor_view,
-                policy: CoveringPolicy::Independent,
-            },
-        ],
-        ..Default::default()
-    })
-    .expect("overlay frame");
+        // Capture southern-hemisphere DEM tiles belonging exclusively to sensor_slot (y >= 2^(z-1)).
+        let sensor_dem_before: HashSet<WorldTileCoords> = loaded_dem_coords(&map)
+            .into_iter()
+            .filter(|c| u8::from(c.z) >= 2 && c.y >= (1_i32 << (u8::from(c.z) - 1)))
+            .collect();
+        assert!(
+            !sensor_dem_before.is_empty(),
+            "sensor_slot must have loaded southern-hemisphere DEM tiles"
+        );
 
-    let otw_rgba = crate::headless::map::readback::read_blocking(
-        &map,
-        map.view_slot_color_texture(otw_slot).expect("otw"),
-        wgpu::TextureAspect::All,
-    )
-    .expect("read otw");
-    let sensor_rgba = crate::headless::map::readback::read_blocking(
-        &map,
-        map.view_slot_color_texture(sensor_slot).expect("sensor"),
-        wgpu::TextureAspect::All,
-    )
-    .expect("read sensor");
-    assert!(
-        otw_rgba[1] > 240 && otw_rgba[0] < 10,
-        "OTW slot must show green overlay"
-    );
-    assert!(
-        sensor_rgba[0] > 240 && sensor_rgba[1] < 10,
-        "Sensor slot must show red overlay"
-    );
+        // Force critical memory pressure (0-tile out-of-view cache) and skip sensor_slot for 10 OTW frames.
+        map.world_mut().resources.insert(MemoryBudget {
+            available_bytes: Some(128 << 20),
+        });
+        for step in 0..10 {
+            map.run_multi_view_frame(MultiViewFrame {
+                timestamp: Duration::from_millis(500 + step * 8),
+                slots: vec![ViewSlotEntry {
+                    slot: otw_slot,
+                    view: otw_view,
+                    policy: CoveringPolicy::Independent,
+                }],
+                ..Default::default()
+            })
+            .expect("otw-only frame");
+        }
 
-    // Capture southern-hemisphere DEM tiles belonging exclusively to sensor_slot (y >= 2^(z-1)).
-    let sensor_dem_before: HashSet<WorldTileCoords> = loaded_dem_coords(&map)
-        .into_iter()
-        .filter(|c| u8::from(c.z) >= 2 && c.y >= (1_i32 << (u8::from(c.z) - 1)))
-        .collect();
-    assert!(
-        !sensor_dem_before.is_empty(),
-        "sensor_slot must have loaded southern-hemisphere DEM tiles"
-    );
+        let after_skip = loaded_dem_coords(&map);
+        for coords in &sensor_dem_before {
+            assert!(
+                after_skip.contains(coords),
+                "skipped sensor_slot DEM tile {coords} must stay resident across OTW-only frames"
+            );
+        }
 
-    // Force critical memory pressure (0-tile out-of-view cache) and skip sensor_slot for 10 OTW frames.
-    map.world_mut().resources.insert(MemoryBudget {
-        available_bytes: Some(128 << 20),
-    });
-    for step in 0..10 {
+        // Once sensor_slot is unregistered, critical pressure immediately evicts its unused tiles.
+        assert!(map.remove_view_slot(sensor_slot));
         map.run_multi_view_frame(MultiViewFrame {
-            timestamp: Duration::from_millis(500 + step * 8),
             slots: vec![ViewSlotEntry {
                 slot: otw_slot,
                 view: otw_view,
@@ -387,31 +416,11 @@ async fn heterogeneous_multi_view_renders_otw_and_sensor_without_skipped_slot_ev
             }],
             ..Default::default()
         })
-        .expect("otw-only frame");
-    }
-
-    let after_skip = loaded_dem_coords(&map);
-    for coords in &sensor_dem_before {
+        .expect("post-remove frame");
+        let after_remove = loaded_dem_coords(&map);
         assert!(
-            after_skip.contains(coords),
-            "skipped sensor_slot DEM tile {coords} must stay resident across OTW-only frames"
+            sensor_dem_before.iter().any(|c| !after_remove.contains(c)),
+            "unregistered slot's out-of-view tiles should become eligible for eviction"
         );
-    }
-
-    // Once sensor_slot is unregistered, critical pressure immediately evicts its unused tiles.
-    assert!(map.remove_view_slot(sensor_slot));
-    map.run_multi_view_frame(MultiViewFrame {
-        slots: vec![ViewSlotEntry {
-            slot: otw_slot,
-            view: otw_view,
-            policy: CoveringPolicy::Independent,
-        }],
-        ..Default::default()
     })
-    .expect("post-remove frame");
-    let after_remove = loaded_dem_coords(&map);
-    assert!(
-        sensor_dem_before.iter().any(|c| !after_remove.contains(c)),
-        "unregistered slot's out-of-view tiles should become eligible for eviction"
-    );
 }

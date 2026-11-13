@@ -121,56 +121,58 @@ async fn tile_map(tile: Vec<u8>, pitch: f64, bearing: f64) -> SymbolMap {
     map
 }
 
-#[tokio::test]
-async fn a_street_name_upright_to_the_viewer_follows_its_curving_street() {
-    // Turned half way around, the street runs leftward and its name flips to read upright.
-    for (pitch, bearing) in [(0.0, 0.0), (45.0, 20.0), (30.0, 180.0)] {
-        let case = format!("pitch {pitch}, bearing {bearing}");
-        let mut map = arch_map("Revere Road", pitch, bearing).await;
-        map.settle().await;
-        let glyphs = glyph_centres(&map);
-        let (first, last) = (glyphs[0], glyphs[glyphs.len() - 1]);
-        assert!(
-            first[0] < last[0],
-            "{case}: reads left to right: {glyphs:?}"
-        );
-        let bend = glyphs
-            .iter()
-            .map(|glyph| off_chord(*glyph, first, last))
-            .fold(0.0, f64::max);
-        assert!(
-            bend > 4.0,
-            "{case}: the name bends with its street by {bend} px: {glyphs:?}"
-        );
-        for pair in glyphs.windows(2) {
-            let step = (pair[1][0] - pair[0][0]).hypot(pair[1][1] - pair[0][1]);
-            // The word space has no glyph of its own, so the step across it is the widest.
+#[test]
+fn a_street_name_upright_to_the_viewer_follows_its_curving_street() {
+    crate::headless::map::test_async::run_async(async {
+        // Turned half way around, the street runs leftward and its name flips to read upright.
+        for (pitch, bearing) in [(0.0, 0.0), (45.0, 20.0), (30.0, 180.0)] {
+            let case = format!("pitch {pitch}, bearing {bearing}");
+            let mut map = arch_map("Revere Road", pitch, bearing).await;
+            map.settle().await;
+            let glyphs = glyph_centres(&map);
+            let (first, last) = (glyphs[0], glyphs[glyphs.len() - 1]);
             assert!(
-                (4.0..30.0).contains(&step),
-                "{case}: glyphs {step} px apart: {glyphs:?}"
+                first[0] < last[0],
+                "{case}: reads left to right: {glyphs:?}"
             );
-        }
-        // Every glyph's centre lies on the street as the frame draws it without its name.
-        map.map
-            .mutate_style(|style| {
-                style.set_layout_property("road-name", "visibility", "none".into())
-            })
-            .expect("hide the name");
-        let pixels = map.settle().await;
-        let road = count(&pixels, ROAD, [0, 0, SIZE, SIZE]);
-        for glyph in &glyphs {
-            let nearest = road
+            let bend = glyphs
                 .iter()
-                .map(|[x, y]| {
-                    (f64::from(*x) + 0.5 - glyph[0]).hypot(f64::from(*y) + 0.5 - glyph[1])
-                })
-                .fold(f64::INFINITY, f64::min);
+                .map(|glyph| off_chord(*glyph, first, last))
+                .fold(0.0, f64::max);
             assert!(
-                nearest < 2.5,
-                "{case}: glyph at {glyph:?} is {nearest} px off the street"
+                bend > 4.0,
+                "{case}: the name bends with its street by {bend} px: {glyphs:?}"
             );
+            for pair in glyphs.windows(2) {
+                let step = (pair[1][0] - pair[0][0]).hypot(pair[1][1] - pair[0][1]);
+                // The word space has no glyph of its own, so the step across it is the widest.
+                assert!(
+                    (4.0..30.0).contains(&step),
+                    "{case}: glyphs {step} px apart: {glyphs:?}"
+                );
+            }
+            // Every glyph's centre lies on the street as the frame draws it without its name.
+            map.map
+                .mutate_style(|style| {
+                    style.set_layout_property("road-name", "visibility", "none".into())
+                })
+                .expect("hide the name");
+            let pixels = map.settle().await;
+            let road = count(&pixels, ROAD, [0, 0, SIZE, SIZE]);
+            for glyph in &glyphs {
+                let nearest = road
+                    .iter()
+                    .map(|[x, y]| {
+                        (f64::from(*x) + 0.5 - glyph[0]).hypot(f64::from(*y) + 0.5 - glyph[1])
+                    })
+                    .fold(f64::INFINITY, f64::min);
+                assert!(
+                    nearest < 2.5,
+                    "{case}: glyph at {glyph:?} is {nearest} px off the street"
+                );
+            }
         }
-    }
+    })
 }
 
 /// For each inner glyph of an all-`I` name: how far, in degrees, its stroke leans from square
@@ -220,123 +222,131 @@ fn spacing_over_height(glyphs: &[[f64; 2]], strokes: &[(f64, f64)]) -> f64 {
     step / height
 }
 
-#[tokio::test]
-async fn each_glyph_stands_square_to_its_street_at_the_size_it_is_spaced_for() {
-    let mut level = None;
-    for (pitch, bearing) in [(0.0, 0.0), (45.0, 20.0), (60.0, 0.0)] {
-        let mut map = arch_map("IIIIIIIIIIIIII", pitch, bearing).await;
+#[test]
+fn each_glyph_stands_square_to_its_street_at_the_size_it_is_spaced_for() {
+    crate::headless::map::test_async::run_async(async {
+        let mut level = None;
+        for (pitch, bearing) in [(0.0, 0.0), (45.0, 20.0), (60.0, 0.0)] {
+            let mut map = arch_map("IIIIIIIIIIIIII", pitch, bearing).await;
+            let pixels = map.settle().await;
+            let glyphs = glyph_centres(&map);
+            let strokes = strokes(&pixels, &glyphs);
+            let leans: Vec<f64> = strokes.iter().map(|stroke| stroke.0).collect();
+            let mean = leans.iter().sum::<f64>() / leans.len() as f64;
+            assert!(
+                mean < 3.5 && leans.iter().all(|lean| *lean < 10.0),
+                "pitch {pitch}: strokes lean from square by {leans:.1?} degrees"
+            );
+            // Glyphs drawn smaller or larger with distance are spaced closer or wider with them.
+            let ratio = spacing_over_height(&glyphs, &strokes);
+            let flat = *level.get_or_insert(ratio);
+            assert!(
+                (ratio / flat - 1.0).abs() < 0.03,
+                "pitch {pitch}: spacing over stroke height {ratio}, {flat} seen flat"
+            );
+        }
+    })
+}
+
+#[test]
+fn a_name_along_a_receding_street_keeps_one_size() {
+    crate::headless::map::test_async::run_async(async {
+        // A street straight up the view, away from the eye.
+        let tile = road_tile(&[[1864, 4096], [1864, 0]], "IIIIIIIIIIIIII");
+        let mut map = tile_map(tile, 60.0, 0.0).await;
         let pixels = map.settle().await;
         let glyphs = glyph_centres(&map);
-        let strokes = strokes(&pixels, &glyphs);
-        let leans: Vec<f64> = strokes.iter().map(|stroke| stroke.0).collect();
-        let mean = leans.iter().sum::<f64>() / leans.len() as f64;
-        assert!(
-            mean < 3.5 && leans.iter().all(|lean| *lean < 10.0),
-            "pitch {pitch}: strokes lean from square by {leans:.1?} degrees"
-        );
-        // Glyphs drawn smaller or larger with distance are spaced closer or wider with them.
-        let ratio = spacing_over_height(&glyphs, &strokes);
-        let flat = *level.get_or_insert(ratio);
-        assert!(
-            (ratio / flat - 1.0).abs() < 0.03,
-            "pitch {pitch}: spacing over stroke height {ratio}, {flat} seen flat"
-        );
-    }
-}
-
-#[tokio::test]
-async fn a_name_along_a_receding_street_keeps_one_size() {
-    // A street straight up the view, away from the eye.
-    let tile = road_tile(&[[1864, 4096], [1864, 0]], "IIIIIIIIIIIIII");
-    let mut map = tile_map(tile, 60.0, 0.0).await;
-    let pixels = map.settle().await;
-    let glyphs = glyph_centres(&map);
-    let heights: Vec<f64> = strokes(&pixels, &glyphs)
-        .iter()
-        .map(|stroke| stroke.1)
-        .collect();
-    let (near, far) = (
-        heights[0].max(heights[heights.len() - 1]),
-        heights[0].min(heights[heights.len() - 1]),
-    );
-    assert!(
-        near / far - 1.0 < 0.03,
-        "every glyph takes its label's size, not its own depth's: {heights:.1?}"
-    );
-}
-
-#[tokio::test]
-async fn a_single_letter_on_a_leftward_street_turns_upright() {
-    // A street running from right to left across the view.
-    let tile = road_tile(&[[3400, 2048], [300, 2048]], "T");
-    let mut map = tile_map(tile, 30.0, 0.0).await;
-    let pixels = map.settle().await;
-    let placed = map
-        .map
-        .map_context
-        .world
-        .resources
-        .get::<crate::sdf::query::PlacedSymbols>()
-        .expect("placed symbols");
-    let middle = f64::from(SIZE) / 2.0;
-    let [left, top, right, bottom] = placed
-        .0
-        .iter()
-        .filter(|symbol| symbol.layer == "road-name" && symbol.glyph_boxes.len() == 1)
-        .map(|symbol| symbol.glyph_boxes[0])
-        .min_by(|a, b| {
-            let off = |area: &[f64; 4]| {
-                ((area[0] + area[2]) / 2.0 - middle).hypot((area[1] + area[3]) / 2.0 - middle)
-            };
-            off(a).total_cmp(&off(b))
-        })
-        .expect("the letter is placed on its own");
-    let centre = (top + bottom) / 2.0;
-    let rows: Vec<f64> = count(
-        &pixels,
-        [255, 0, 0],
-        [left as u32, top as u32, right as u32 + 1, bottom as u32 + 1],
-    )
-    .iter()
-    .map(|[_, y]| f64::from(*y) + 0.5 - centre)
-    .collect();
-    let mean = rows.iter().sum::<f64>() / rows.len() as f64;
-    assert!(
-        mean < -0.5,
-        "the T's bar lies above its middle: {mean} px over {} pixels",
-        rows.len()
-    );
-}
-
-#[tokio::test]
-async fn a_street_name_its_street_can_no_longer_hold_fades_out_without_leaving_it() {
-    let mut map = arch_map("Revere Road", 45.0, 20.0).await;
-    map.settle().await;
-    // Zoomed out at once, the arch is too short on the screen for the name, which fades out
-    // over the frames that follow.
-    map.map
-        .view_state_mut()
-        .zoom_to(crate::coords::Zoom::new(12.0));
-    for frame in 0..30 {
-        map.frame().await;
-        let pixels = map.read();
-        let road = count(&pixels, ROAD, [0, 0, SIZE, SIZE]);
-        let text = count(&pixels, [255, 0, 0], [0, 0, SIZE, SIZE]);
-        let stray = text
+        let heights: Vec<f64> = strokes(&pixels, &glyphs)
             .iter()
-            .filter(|[x, y]| {
-                !road
-                    .iter()
-                    .any(|[rx, ry]| x.abs_diff(*rx) <= 14 && y.abs_diff(*ry) <= 14)
-            })
-            .count();
-        assert_eq!(
-            stray,
-            0,
-            "frame {frame}: {stray} of {} text pixels drawn away from the street",
-            text.len()
+            .map(|stroke| stroke.1)
+            .collect();
+        let (near, far) = (
+            heights[0].max(heights[heights.len() - 1]),
+            heights[0].min(heights[heights.len() - 1]),
         );
-    }
+        assert!(
+            near / far - 1.0 < 0.03,
+            "every glyph takes its label's size, not its own depth's: {heights:.1?}"
+        );
+    })
+}
+
+#[test]
+fn a_single_letter_on_a_leftward_street_turns_upright() {
+    crate::headless::map::test_async::run_async(async {
+        // A street running from right to left across the view.
+        let tile = road_tile(&[[3400, 2048], [300, 2048]], "T");
+        let mut map = tile_map(tile, 30.0, 0.0).await;
+        let pixels = map.settle().await;
+        let placed = map
+            .map
+            .map_context
+            .world
+            .resources
+            .get::<crate::sdf::query::PlacedSymbols>()
+            .expect("placed symbols");
+        let middle = f64::from(SIZE) / 2.0;
+        let [left, top, right, bottom] = placed
+            .0
+            .iter()
+            .filter(|symbol| symbol.layer == "road-name" && symbol.glyph_boxes.len() == 1)
+            .map(|symbol| symbol.glyph_boxes[0])
+            .min_by(|a, b| {
+                let off = |area: &[f64; 4]| {
+                    ((area[0] + area[2]) / 2.0 - middle).hypot((area[1] + area[3]) / 2.0 - middle)
+                };
+                off(a).total_cmp(&off(b))
+            })
+            .expect("the letter is placed on its own");
+        let centre = (top + bottom) / 2.0;
+        let rows: Vec<f64> = count(
+            &pixels,
+            [255, 0, 0],
+            [left as u32, top as u32, right as u32 + 1, bottom as u32 + 1],
+        )
+        .iter()
+        .map(|[_, y]| f64::from(*y) + 0.5 - centre)
+        .collect();
+        let mean = rows.iter().sum::<f64>() / rows.len() as f64;
+        assert!(
+            mean < -0.5,
+            "the T's bar lies above its middle: {mean} px over {} pixels",
+            rows.len()
+        );
+    })
+}
+
+#[test]
+fn a_street_name_its_street_can_no_longer_hold_fades_out_without_leaving_it() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = arch_map("Revere Road", 45.0, 20.0).await;
+        map.settle().await;
+        // Zoomed out at once, the arch is too short on the screen for the name, which fades out
+        // over the frames that follow.
+        map.map
+            .view_state_mut()
+            .zoom_to(crate::coords::Zoom::new(12.0));
+        for frame in 0..30 {
+            map.frame().await;
+            let pixels = map.read();
+            let road = count(&pixels, ROAD, [0, 0, SIZE, SIZE]);
+            let text = count(&pixels, [255, 0, 0], [0, 0, SIZE, SIZE]);
+            let stray = text
+                .iter()
+                .filter(|[x, y]| {
+                    !road
+                        .iter()
+                        .any(|[rx, ry]| x.abs_diff(*rx) <= 14 && y.abs_diff(*ry) <= 14)
+                })
+                .count();
+            assert_eq!(
+                stray,
+                0,
+                "frame {frame}: {stray} of {} text pixels drawn away from the street",
+                text.len()
+            );
+        }
+    })
 }
 
 /// For each glyph of an all-`I` name, how far, in degrees, its stroke leans from upright on
@@ -362,63 +372,65 @@ fn screen_leans(pixels: &[u8], glyphs: &[[f64; 2]]) -> Vec<f64> {
         .collect()
 }
 
-#[tokio::test]
-async fn viewport_glyph_text_follows_its_curving_street_with_every_glyph_upright() {
-    // Turned with the map, the glyphs of the same name lean with the arch.
-    let mut map = arch_map("IIIIIIIIIII", 0.0, 0.0).await;
-    let pixels = map.settle().await;
-    let turned = screen_leans(&pixels, &glyph_centres(&map));
-    assert!(
-        turned.iter().copied().fold(0.0, f64::max) > 15.0,
-        "map-aligned glyphs turn along the arch: {turned:.1?}"
-    );
-    for (pitch, bearing) in [(0.0, 0.0), (45.0, 30.0), (30.0, 180.0)] {
-        let case = format!("pitch {pitch}, bearing {bearing}");
-        let mut map = arch_map("IIIIIIIIIII", pitch, bearing).await;
-        map.map
-            .mutate_style(|style| {
-                style.set_layout_property(
-                    "road-name",
-                    "text-rotation-alignment",
-                    "viewport-glyph".into(),
-                )
-            })
-            .expect("viewport-glyph");
+#[test]
+fn viewport_glyph_text_follows_its_curving_street_with_every_glyph_upright() {
+    crate::headless::map::test_async::run_async(async {
+        // Turned with the map, the glyphs of the same name lean with the arch.
+        let mut map = arch_map("IIIIIIIIIII", 0.0, 0.0).await;
         let pixels = map.settle().await;
-        let glyphs = glyph_centres(&map);
-        let (first, last) = (glyphs[0], glyphs[glyphs.len() - 1]);
-        let bend = glyphs
-            .iter()
-            .map(|glyph| off_chord(*glyph, first, last))
-            .fold(0.0, f64::max);
+        let turned = screen_leans(&pixels, &glyph_centres(&map));
         assert!(
-            bend > 4.0,
-            "{case}: the row bends with its street by {bend} px"
+            turned.iter().copied().fold(0.0, f64::max) > 15.0,
+            "map-aligned glyphs turn along the arch: {turned:.1?}"
         );
-        assert!(
-            first[0] < last[0],
-            "{case}: the row reads left to right: {glyphs:?}"
-        );
-        // Where the street runs steeply up the screen, upright glyphs stand above one another
-        // and their bars overlap, as in GL JS; only glyphs with room beside them are measured.
-        let measurable: Vec<[f64; 2]> = glyphs
-            .iter()
-            .enumerate()
-            .filter(|(index, glyph)| {
-                [index.wrapping_sub(1), index + 1]
-                    .iter()
-                    .filter_map(|neighbour| glyphs.get(*neighbour))
-                    .all(|other| (other[0] - glyph[0]).abs() >= 5.0)
-            })
-            .map(|(_, glyph)| *glyph)
-            .collect();
-        assert!(measurable.len() >= 5, "{case}: {glyphs:.1?}");
-        let leans = screen_leans(&pixels, &measurable);
-        let worst = leans.iter().copied().fold(0.0, f64::max);
-        assert!(
-            worst < 5.0,
-            "{case}: every glyph stands upright on the screen, the worst leaning {worst:.1} \
+        for (pitch, bearing) in [(0.0, 0.0), (45.0, 30.0), (30.0, 180.0)] {
+            let case = format!("pitch {pitch}, bearing {bearing}");
+            let mut map = arch_map("IIIIIIIIIII", pitch, bearing).await;
+            map.map
+                .mutate_style(|style| {
+                    style.set_layout_property(
+                        "road-name",
+                        "text-rotation-alignment",
+                        "viewport-glyph".into(),
+                    )
+                })
+                .expect("viewport-glyph");
+            let pixels = map.settle().await;
+            let glyphs = glyph_centres(&map);
+            let (first, last) = (glyphs[0], glyphs[glyphs.len() - 1]);
+            let bend = glyphs
+                .iter()
+                .map(|glyph| off_chord(*glyph, first, last))
+                .fold(0.0, f64::max);
+            assert!(
+                bend > 4.0,
+                "{case}: the row bends with its street by {bend} px"
+            );
+            assert!(
+                first[0] < last[0],
+                "{case}: the row reads left to right: {glyphs:?}"
+            );
+            // Where the street runs steeply up the screen, upright glyphs stand above one another
+            // and their bars overlap, as in GL JS; only glyphs with room beside them are measured.
+            let measurable: Vec<[f64; 2]> = glyphs
+                .iter()
+                .enumerate()
+                .filter(|(index, glyph)| {
+                    [index.wrapping_sub(1), index + 1]
+                        .iter()
+                        .filter_map(|neighbour| glyphs.get(*neighbour))
+                        .all(|other| (other[0] - glyph[0]).abs() >= 5.0)
+                })
+                .map(|(_, glyph)| *glyph)
+                .collect();
+            assert!(measurable.len() >= 5, "{case}: {glyphs:.1?}");
+            let leans = screen_leans(&pixels, &measurable);
+            let worst = leans.iter().copied().fold(0.0, f64::max);
+            assert!(
+                worst < 5.0,
+                "{case}: every glyph stands upright on the screen, the worst leaning {worst:.1} \
              degrees: {leans:.1?}"
-        );
-    }
+            );
+        }
+    })
 }

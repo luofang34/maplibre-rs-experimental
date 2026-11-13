@@ -57,67 +57,75 @@ async fn compare_with_flat(view: View, grade: f64) -> Vec<String> {
     failures
 }
 
-#[tokio::test]
-async fn every_glyph_of_a_road_name_shows_on_a_slope_from_any_view() {
-    let mut failures = Vec::new();
-    for grade in [0.15, -0.15] {
-        for (pitch, bearing) in [(50.0, 0.0), (60.0, 25.0), (30.0, -40.0), (0.0, 0.0)] {
+#[test]
+fn every_glyph_of_a_road_name_shows_on_a_slope_from_any_view() {
+    crate::headless::map::test_async::run_async(async {
+        let mut failures = Vec::new();
+        for grade in [0.15, -0.15] {
+            for (pitch, bearing) in [(50.0, 0.0), (60.0, 25.0), (30.0, -40.0), (0.0, 0.0)] {
+                let view = View {
+                    pitch,
+                    bearing,
+                    ..VIEW
+                };
+                failures.extend(compare_with_flat(view, grade).await);
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    })
+}
+
+#[test]
+fn a_road_name_across_a_dem_tiles_edge_keeps_every_glyph() {
+    crate::headless::map::test_async::run_async(async {
+        // Zoom-15 DEM tiles meet under the middle of the zoom-14 tile the label is centred in.
+        let mut failures = Vec::new();
+        for grade in [0.15, -0.15] {
             let view = View {
-                pitch,
-                bearing,
+                dem_zoom: 15,
                 ..VIEW
             };
             failures.extend(compare_with_flat(view, grade).await);
         }
-    }
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    })
 }
 
-#[tokio::test]
-async fn a_road_name_across_a_dem_tiles_edge_keeps_every_glyph() {
-    // Zoom-15 DEM tiles meet under the middle of the zoom-14 tile the label is centred in.
-    let mut failures = Vec::new();
-    for grade in [0.15, -0.15] {
+#[test]
+fn a_road_name_on_a_slope_keeps_every_glyph_at_every_pixel_ratio_and_after_a_resize() {
+    crate::headless::map::test_async::run_async(async {
+        let mut failures = Vec::new();
+        for ratio in [2.0, 3.0] {
+            failures.extend(compare_with_flat(View { ratio, ..VIEW }, 0.15).await);
+        }
+        let view = View { ratio: 2.0, ..VIEW };
+        let size = crate::window::PhysicalSize::new(768, 512).expect("size");
+        let mut flat = scene_map(view, &slope(0.0)).await;
+        flat.settle().await;
+        flat.map.resize(size);
+        let flat_pixels = flat.settle().await;
+        let mut sloped = scene_map(view, &slope(0.15)).await;
+        sloped.settle().await;
+        sloped.map.resize(size);
+        let pixels = sloped.settle().await;
+        failures.extend(incomplete_glyphs(
+            "resized at 2x",
+            &glyph_pixels(&sloped, &pixels, 2.0),
+            &glyph_pixels(&flat, &flat_pixels, 2.0),
+            0.6,
+        ));
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    })
+}
+
+#[test]
+fn a_road_name_on_a_slope_keeps_every_glyph_over_imagery() {
+    crate::headless::map::test_async::run_async(async {
         let view = View {
-            dem_zoom: 15,
+            imagery: true,
             ..VIEW
         };
-        failures.extend(compare_with_flat(view, grade).await);
-    }
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
-}
-
-#[tokio::test]
-async fn a_road_name_on_a_slope_keeps_every_glyph_at_every_pixel_ratio_and_after_a_resize() {
-    let mut failures = Vec::new();
-    for ratio in [2.0, 3.0] {
-        failures.extend(compare_with_flat(View { ratio, ..VIEW }, 0.15).await);
-    }
-    let view = View { ratio: 2.0, ..VIEW };
-    let size = crate::window::PhysicalSize::new(768, 512).expect("size");
-    let mut flat = scene_map(view, &slope(0.0)).await;
-    flat.settle().await;
-    flat.map.resize(size);
-    let flat_pixels = flat.settle().await;
-    let mut sloped = scene_map(view, &slope(0.15)).await;
-    sloped.settle().await;
-    sloped.map.resize(size);
-    let pixels = sloped.settle().await;
-    failures.extend(incomplete_glyphs(
-        "resized at 2x",
-        &glyph_pixels(&sloped, &pixels, 2.0),
-        &glyph_pixels(&flat, &flat_pixels, 2.0),
-        0.6,
-    ));
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
-}
-
-#[tokio::test]
-async fn a_road_name_on_a_slope_keeps_every_glyph_over_imagery() {
-    let view = View {
-        imagery: true,
-        ..VIEW
-    };
-    let failures = compare_with_flat(view, 0.15).await;
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
+        let failures = compare_with_flat(view, 0.15).await;
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    })
 }

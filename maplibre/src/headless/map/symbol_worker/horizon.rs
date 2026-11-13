@@ -51,33 +51,35 @@ fn placed_heights(map: &SymbolMap) -> Vec<f64> {
         .unwrap_or_default()
 }
 
-#[tokio::test]
-async fn labels_toward_the_horizon_stop_at_the_perspective_ratio_cutoff() {
-    let mut map = SymbolMap::new(style()).await;
-    map.map
-        .map_context
-        .set_geojson_data("places", GeoJsonData::Inline(Arc::new(column())))
-        .expect("set data");
-    // Flat, every label is drawn at its own size, which the pitched view divides by.
-    map.settle().await;
-    let flat = placed_heights(&map);
-    let full = flat.iter().copied().fold(0.0, f64::max);
-    assert!(full > 0.0, "labels are placed flat: {flat:?}");
-    map.map.set_max_pitch(cgmath::Deg(85.0));
-    map.map
-        .view_state_mut()
-        .camera_mut()
-        .set_pitch(cgmath::Deg(75.0));
-    map.settle().await;
-    let ratios: Vec<f64> = placed_heights(&map).iter().map(|h| h / full).collect();
-    let nearest = ratios.iter().copied().fold(0.0, f64::max);
-    assert!(
-        nearest > 0.9,
-        "the label at the centre keeps its size: {ratios:.2?}"
-    );
-    let farthest = ratios.iter().copied().fold(f64::INFINITY, f64::min);
-    assert!(
-        (0.59..0.7).contains(&farthest),
-        "labels reach the cutoff and none is placed beyond it: {ratios:.2?}"
-    );
+#[test]
+fn labels_toward_the_horizon_stop_at_the_perspective_ratio_cutoff() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = SymbolMap::new(style()).await;
+        map.map
+            .map_context
+            .set_geojson_data("places", GeoJsonData::Inline(Arc::new(column())))
+            .expect("set data");
+        // Flat, every label is drawn at its own size, which the pitched view divides by.
+        map.settle().await;
+        let flat = placed_heights(&map);
+        let full = flat.iter().copied().fold(0.0, f64::max);
+        assert!(full > 0.0, "labels are placed flat: {flat:?}");
+        map.map.set_max_pitch(cgmath::Deg(85.0));
+        map.map
+            .view_state_mut()
+            .camera_mut()
+            .set_pitch(cgmath::Deg(75.0));
+        map.settle().await;
+        let ratios: Vec<f64> = placed_heights(&map).iter().map(|h| h / full).collect();
+        let nearest = ratios.iter().copied().fold(0.0, f64::max);
+        assert!(
+            nearest > 0.9,
+            "the label at the centre keeps its size: {ratios:.2?}"
+        );
+        let farthest = ratios.iter().copied().fold(f64::INFINITY, f64::min);
+        assert!(
+            (0.59..0.7).contains(&farthest),
+            "labels reach the cutoff and none is placed beyond it: {ratios:.2?}"
+        );
+    })
 }

@@ -18,8 +18,8 @@ use crate::{
 
 #[derive(Default)]
 struct SourceGate {
-    entered: tokio::sync::Notify,
-    resume: tokio::sync::Notify,
+    entered: crate::headless::map::test_async::Notify,
+    resume: crate::headless::map::test_async::Notify,
 }
 
 #[derive(Clone)]

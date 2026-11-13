@@ -286,49 +286,52 @@ mod tests {
         assert!(position(draw_graph::node::TRANSLUCENT_PASS) < position(draw_graph::node::COPY));
     }
 
-    #[tokio::test]
+    #[test]
     #[allow(clippy::expect_used)]
-    async fn headless_maps_drop_only_the_request_stage() {
-        use std::rc::Rc;
+    fn headless_maps_drop_only_the_request_stage() {
+        futures::executor::block_on(async {
+            use std::rc::Rc;
 
-        use crate::{
-            plugin::Plugin,
-            render::{RenderPlugin, RenderStageLabel},
-            schedule::Schedule,
-            tcs::world::World,
-        };
+            use crate::{
+                plugin::Plugin,
+                render::{RenderPlugin, RenderStageLabel},
+                schedule::Schedule,
+                tcs::world::World,
+            };
 
-        let size = crate::window::PhysicalSize::new(8, 8).expect("size");
-        let kernel = Rc::new(
-            crate::headless::environment::create_kernel(size, None, None, None).expect("kernel"),
-        );
-        let mut world = World::default();
-        let mut schedule = Schedule::default();
-        let (_, mut renderer) = crate::headless::create_headless_renderer(8, 8, None)
-            .await
-            .expect("renderer");
-        RenderPlugin
-            .build(&mut schedule, Rc::clone(&kernel), &mut world, &mut renderer)
-            .expect("render plugin");
-        super::HeadlessPlugin::new(false)
-            .build(&mut schedule, kernel, &mut world, &mut renderer)
-            .expect("headless plugin");
+            let size = crate::window::PhysicalSize::new(8, 8).expect("size");
+            let kernel = Rc::new(
+                crate::headless::environment::create_kernel(size, None, None, None)
+                    .expect("kernel"),
+            );
+            let mut world = World::default();
+            let mut schedule = Schedule::default();
+            let (_, mut renderer) = crate::headless::create_headless_renderer(8, 8, None)
+                .await
+                .expect("renderer");
+            RenderPlugin
+                .build(&mut schedule, Rc::clone(&kernel), &mut world, &mut renderer)
+                .expect("render plugin");
+            super::HeadlessPlugin::new(false)
+                .build(&mut schedule, kernel, &mut world, &mut renderer)
+                .expect("headless plugin");
 
-        let stages: Vec<String> = schedule
-            .iter_stages()
-            .map(|(label, _)| format!("{label:?}"))
+            let stages: Vec<String> = schedule
+                .iter_stages()
+                .map(|(label, _)| format!("{label:?}"))
+                .collect();
+            let expected: Vec<String> = [
+                RenderStageLabel::Input,
+                RenderStageLabel::Prepare,
+                RenderStageLabel::Queue,
+                RenderStageLabel::PhaseSort,
+                RenderStageLabel::Render,
+                RenderStageLabel::Cleanup,
+            ]
+            .iter()
+            .map(|label| format!("{label:?}"))
             .collect();
-        let expected: Vec<String> = [
-            RenderStageLabel::Input,
-            RenderStageLabel::Prepare,
-            RenderStageLabel::Queue,
-            RenderStageLabel::PhaseSort,
-            RenderStageLabel::Render,
-            RenderStageLabel::Cleanup,
-        ]
-        .iter()
-        .map(|label| format!("{label:?}"))
-        .collect();
-        assert_eq!(stages, expected);
+            assert_eq!(stages, expected);
+        })
     }
 }

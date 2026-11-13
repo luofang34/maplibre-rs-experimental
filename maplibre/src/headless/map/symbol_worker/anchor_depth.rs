@@ -228,71 +228,75 @@ fn device_pixels(size: [u32; 2], fractions: &[[f64; 2]]) -> Vec<[f64; 2]> {
         .collect()
 }
 
-#[tokio::test]
-async fn markers_across_a_globe_stay_visible_at_every_pixel_ratio() {
-    let mut failures = Vec::new();
-    for size in [WIDE, SQUARE] {
-        let points = points_under(size, ZOOM, &PLACES).await;
-        let places = features(&points.into_iter().zip(SET_OF_PLACE).collect::<Vec<_>>());
-        let anchors = device_pixels(size, &PLACES);
-        let mut reference = Vec::new();
-        for ratio in RATIOS {
-            let style = globe_style(ZOOM - ratio.log2(), places.clone());
-            let pixels = map_at(style, size, ratio).await.settle().await;
-            let counts = counts_near(&pixels, size[0], &anchors, &SEEN.colours);
-            if ratio == 1.0 {
-                reference = counts.clone();
-            }
-            for (place, (count, base)) in counts.iter().zip(&reference).enumerate() {
-                for (kind, name) in KIND_NAMES.iter().enumerate() {
-                    let area = ratio * ratio;
-                    let enough = count[kind] as f64 >= MINIMUM[kind] as f64 * area;
-                    let scaled = count[kind] as f64 / (base[kind] as f64 * area);
-                    if !enough || !(0.7..1.4).contains(&scaled) {
-                        failures.push(format!(
+#[test]
+fn markers_across_a_globe_stay_visible_at_every_pixel_ratio() {
+    crate::headless::map::test_async::run_async(async {
+        let mut failures = Vec::new();
+        for size in [WIDE, SQUARE] {
+            let points = points_under(size, ZOOM, &PLACES).await;
+            let places = features(&points.into_iter().zip(SET_OF_PLACE).collect::<Vec<_>>());
+            let anchors = device_pixels(size, &PLACES);
+            let mut reference = Vec::new();
+            for ratio in RATIOS {
+                let style = globe_style(ZOOM - ratio.log2(), places.clone());
+                let pixels = map_at(style, size, ratio).await.settle().await;
+                let counts = counts_near(&pixels, size[0], &anchors, &SEEN.colours);
+                if ratio == 1.0 {
+                    reference = counts.clone();
+                }
+                for (place, (count, base)) in counts.iter().zip(&reference).enumerate() {
+                    for (kind, name) in KIND_NAMES.iter().enumerate() {
+                        let area = ratio * ratio;
+                        let enough = count[kind] as f64 >= MINIMUM[kind] as f64 * area;
+                        let scaled = count[kind] as f64 / (base[kind] as f64 * area);
+                        if !enough || !(0.7..1.4).contains(&scaled) {
+                            failures.push(format!(
                             "{size:?} at {ratio}x: the {name} at the {} shows {} pixels, {} at 1x",
                             PLACE_NAMES[place], count[kind], base[kind]
                         ));
+                        }
                     }
                 }
             }
         }
-    }
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    })
 }
 
-#[tokio::test]
-async fn a_label_whose_anchor_lies_past_the_edge_is_not_judged_by_the_edges_ground() {
-    let past = [[1.03, 0.3], [1.03, 0.7]];
-    let mut failures = Vec::new();
-    for size in [WIDE, SQUARE] {
-        let points = points_under(size, CLOSE_ZOOM, &past).await;
-        let places = features(
-            &points
+#[test]
+fn a_label_whose_anchor_lies_past_the_edge_is_not_judged_by_the_edges_ground() {
+    crate::headless::map::test_async::run_async(async {
+        let past = [[1.03, 0.3], [1.03, 0.7]];
+        let mut failures = Vec::new();
+        for size in [WIDE, SQUARE] {
+            let points = points_under(size, CLOSE_ZOOM, &past).await;
+            let places = features(
+                &points
+                    .into_iter()
+                    .map(|point| (point, "past"))
+                    .collect::<Vec<_>>(),
+            );
+            // The markers stand left of their anchors.
+            let anchors: Vec<[f64; 2]> = device_pixels(size, &past)
                 .into_iter()
-                .map(|point| (point, "past"))
-                .collect::<Vec<_>>(),
-        );
-        // The markers stand left of their anchors.
-        let anchors: Vec<[f64; 2]> = device_pixels(size, &past)
-            .into_iter()
-            .map(|[x, y]| [x - 60.0, y])
-            .collect();
-        for ratio in RATIOS {
-            let style = globe_style(CLOSE_ZOOM - ratio.log2(), places.clone());
-            let pixels = map_at(style, size, ratio).await.settle().await;
-            let counts = counts_near(&pixels, size[0], &anchors, &SEEN.colours);
-            for (place, count) in counts.iter().enumerate() {
-                for (kind, name) in KIND_NAMES.iter().enumerate() {
-                    if count[kind] < MINIMUM[kind] {
-                        failures.push(format!(
-                            "{size:?} at {ratio}x: the {name} of anchor {:?} shows {} pixels",
-                            past[place], count[kind]
-                        ));
+                .map(|[x, y]| [x - 60.0, y])
+                .collect();
+            for ratio in RATIOS {
+                let style = globe_style(CLOSE_ZOOM - ratio.log2(), places.clone());
+                let pixels = map_at(style, size, ratio).await.settle().await;
+                let counts = counts_near(&pixels, size[0], &anchors, &SEEN.colours);
+                for (place, count) in counts.iter().enumerate() {
+                    for (kind, name) in KIND_NAMES.iter().enumerate() {
+                        if count[kind] < MINIMUM[kind] {
+                            failures.push(format!(
+                                "{size:?} at {ratio}x: the {name} of anchor {:?} shows {} pixels",
+                                past[place], count[kind]
+                            ));
+                        }
                     }
                 }
             }
         }
-    }
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    })
 }

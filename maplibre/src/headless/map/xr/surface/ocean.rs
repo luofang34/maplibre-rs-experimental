@@ -12,18 +12,20 @@ use crate::{
     style::Style,
 };
 
-#[tokio::test]
-async fn globe_background_does_not_occlude_below_sea_level_terrain() {
-    for height in [-300.0, 300.0] {
-        let map = water_map(height, 0).await;
-        let pixels = read_back_blocking(&map);
-        let offset = ((SIZE / 2 * SIZE + SIZE / 2) * 4) as usize;
-        let center = &pixels[offset..offset + 4];
-        assert!(
-            center[2] > 150 && center[0] < 80,
-            "water at {height}m must cover the red background: {center:?}"
-        );
-    }
+#[test]
+fn globe_background_does_not_occlude_below_sea_level_terrain() {
+    crate::headless::map::test_async::run_async(async {
+        for height in [-300.0, 300.0] {
+            let map = water_map(height, 0).await;
+            let pixels = read_back_blocking(&map);
+            let offset = ((SIZE / 2 * SIZE + SIZE / 2) * 4) as usize;
+            let center = &pixels[offset..offset + 4];
+            assert!(
+                center[2] > 150 && center[0] < 80,
+                "water at {height}m must cover the red background: {center:?}"
+            );
+        }
+    })
 }
 
 async fn water_map(height: f64, source_zoom: u8) -> HeadlessMap {
@@ -100,31 +102,35 @@ async fn water_map(height: f64, source_zoom: u8) -> HeadlessMap {
     map
 }
 
-#[tokio::test]
-async fn overzoomed_terrain_uploads_the_available_vector_ancestor() {
-    let map = water_map(300.0, 6).await;
-    let pixels = read_back_blocking(&map);
-    let offset = ((SIZE / 2 * SIZE + SIZE / 2) * 4) as usize;
-    let center = &pixels[offset..offset + 4];
-    assert!(
-        center[2] > 150 && center[0] < 80,
-        "zoom 12 must paint the available z6 source over the red fallback: {center:?}"
-    );
+#[test]
+fn overzoomed_terrain_uploads_the_available_vector_ancestor() {
+    crate::headless::map::test_async::run_async(async {
+        let map = water_map(300.0, 6).await;
+        let pixels = read_back_blocking(&map);
+        let offset = ((SIZE / 2 * SIZE + SIZE / 2) * 4) as usize;
+        let center = &pixels[offset..offset + 4];
+        assert!(
+            center[2] > 150 && center[0] < 80,
+            "zoom 12 must paint the available z6 source over the red fallback: {center:?}"
+        );
+    })
 }
 
-#[tokio::test]
-async fn memory_pressure_preserves_the_overzoomed_ground_paint() {
-    let mut map = water_map(300.0, 6).await;
-    for available in [768_u64 << 20, 300_u64 << 20] {
-        map.set_available_memory(Some(available));
-        for _ in 0..16 {
-            map.run_frame().expect("constrained frame");
-            let pixels = read_back_blocking(&map);
-            let offset = ((SIZE / 2 * SIZE + SIZE / 2) * 4) as usize;
-            assert!(
-                pixels[offset + 2] > 150 && pixels[offset] < 80,
-                "memory pressure must retain painted ground while drape limits change"
-            );
+#[test]
+fn memory_pressure_preserves_the_overzoomed_ground_paint() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = water_map(300.0, 6).await;
+        for available in [768_u64 << 20, 300_u64 << 20] {
+            map.set_available_memory(Some(available));
+            for _ in 0..16 {
+                map.run_frame().expect("constrained frame");
+                let pixels = read_back_blocking(&map);
+                let offset = ((SIZE / 2 * SIZE + SIZE / 2) * 4) as usize;
+                assert!(
+                    pixels[offset + 2] > 150 && pixels[offset] < 80,
+                    "memory pressure must retain painted ground while drape limits change"
+                );
+            }
         }
-    }
+    })
 }

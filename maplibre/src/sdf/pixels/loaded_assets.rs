@@ -37,98 +37,104 @@ impl HttpClient for Server {
     }
 }
 
-#[tokio::test]
-async fn text_and_sprite_loaded_through_the_asset_cache_are_drawn() {
-    let server = Server::default();
-    let client = SourceClient::new(HttpSourceClient::new(server.clone()));
-    let mut style = style(0., "ground");
-    style.glyphs = Some("https://fonts.invalid/{fontstack}/{range}.pbf".into());
-    style.sprite = Some(serde_json::json!("https://sprites.invalid/sprite"));
-    let tile = geozero::mvt::Tile {
-        layers: vec![geozero::mvt::tile::Layer {
-            name: "places".into(),
-            version: 2,
-            extent: Some(4096),
-            features: vec![geozero::mvt::tile::Feature {
-                r#type: Some(1),
-                geometry: vec![9, 4096, 4096],
+#[test]
+fn text_and_sprite_loaded_through_the_asset_cache_are_drawn() {
+    futures::executor::block_on(async {
+        let server = Server::default();
+        let client = SourceClient::new(HttpSourceClient::new(server.clone()));
+        let mut style = style(0., "ground");
+        style.glyphs = Some("https://fonts.invalid/{fontstack}/{range}.pbf".into());
+        style.sprite = Some(serde_json::json!("https://sprites.invalid/sprite"));
+        let tile = geozero::mvt::Tile {
+            layers: vec![geozero::mvt::tile::Layer {
+                name: "places".into(),
+                version: 2,
+                extent: Some(4096),
+                features: vec![geozero::mvt::tile::Feature {
+                    r#type: Some(1),
+                    geometry: vec![9, 4096, 4096],
+                    ..Default::default()
+                }],
                 ..Default::default()
             }],
-            ..Default::default()
-        }],
-    }
-    .encode_to_vec();
-    let atlas = load_symbol_assets(
-        &client,
-        SymbolAssetConfig::of(&style),
-        &style.layers,
-        &tile,
-        12.,
-    )
-    .await
-    .expect("assets load");
-    assert!(atlas.icons.contains_key("marker"));
-    let fetches = server.urls.lock().expect("urls").len();
-    let again = load_symbol_assets(
-        &client,
-        SymbolAssetConfig::of(&style),
-        &style.layers,
-        &tile,
-        12.,
-    )
-    .await
-    .expect("assets load again");
-    assert_eq!(
-        server.urls.lock().expect("urls").len(),
-        fetches,
-        "a second tile reuses the cached glyph range and sprite sheet"
-    );
-    assert_eq!(again.glyphs.len(), atlas.glyphs.len());
+        }
+        .encode_to_vec();
+        let atlas = load_symbol_assets(
+            &client,
+            SymbolAssetConfig::of(&style),
+            &style.layers,
+            &tile,
+            12.,
+        )
+        .await
+        .expect("assets load");
+        assert!(atlas.icons.contains_key("marker"));
+        let fetches = server.urls.lock().expect("urls").len();
+        let again = load_symbol_assets(
+            &client,
+            SymbolAssetConfig::of(&style),
+            &style.layers,
+            &tile,
+            12.,
+        )
+        .await
+        .expect("assets load again");
+        assert_eq!(
+            server.urls.lock().expect("urls").len(),
+            fetches,
+            "a second tile reuses the cached glyph range and sprite sheet"
+        );
+        assert_eq!(again.glyphs.len(), atlas.glyphs.len());
 
-    let pixels = render_with_atlas(0., "ground", 12., 4, atlas).await;
-    let (red, text) = colored_bounds(&pixels, 0);
-    let (green, icon) = colored_bounds(&pixels, 1);
-    assert!(red > 70, "loaded glyphs are not drawn: {red} {text:?}");
-    assert!(green > 100, "loaded sprite is not drawn: {green} {icon:?}");
+        let pixels = render_with_atlas(0., "ground", 12., 4, atlas).await;
+        let (red, text) = colored_bounds(&pixels, 0);
+        let (green, icon) = colored_bounds(&pixels, 1);
+        assert!(red > 70, "loaded glyphs are not drawn: {red} {text:?}");
+        assert!(green > 100, "loaded sprite is not drawn: {green} {icon:?}");
+    })
 }
 
-#[tokio::test]
-async fn a_tile_whose_atlas_reaches_the_gpu_is_reported_ready() {
-    let mut style = style(0., "ground");
-    style.zoom = Some(12.);
-    let layers = super::layers(&style);
-    let mut map = super::fixture_map(style, layers, 1).await;
-    let ready = map.take_ready_resources();
-    assert!(
-        ready.iter().any(|resource| matches!(
-            resource,
-            crate::render::frame_signals::ResourceReady::SymbolAtlas { .. }
-        )),
-        "the labels' atlas is reported: {ready:?}"
-    );
-    map.run_frame().expect("still frame");
-    assert!(
-        !map.take_ready_resources().iter().any(|resource| matches!(
-            resource,
-            crate::render::frame_signals::ResourceReady::SymbolAtlas { .. }
-        )),
-        "an atlas already bound is not reported again"
-    );
+#[test]
+fn a_tile_whose_atlas_reaches_the_gpu_is_reported_ready() {
+    futures::executor::block_on(async {
+        let mut style = style(0., "ground");
+        style.zoom = Some(12.);
+        let layers = super::layers(&style);
+        let mut map = super::fixture_map(style, layers, 1).await;
+        let ready = map.take_ready_resources();
+        assert!(
+            ready.iter().any(|resource| matches!(
+                resource,
+                crate::render::frame_signals::ResourceReady::SymbolAtlas { .. }
+            )),
+            "the labels' atlas is reported: {ready:?}"
+        );
+        map.run_frame().expect("still frame");
+        assert!(
+            !map.take_ready_resources().iter().any(|resource| matches!(
+                resource,
+                crate::render::frame_signals::ResourceReady::SymbolAtlas { .. }
+            )),
+            "an atlas already bound is not reported again"
+        );
+    })
 }
 
-#[tokio::test]
-async fn fading_labels_keep_the_map_animating_until_they_settle() {
-    let mut style = style(0., "ground");
-    style.zoom = Some(12.);
-    let layers = super::layers(&style);
-    // One frame in, the label has only begun to fade in.
-    let mut map = super::fixture_map_after(style, layers, 1, 1).await;
-    let mut frames = 0;
-    while map.needs_redraw() && frames < 200 {
-        map.render_source_frames(Default::default(), Vec::new(), 1)
-            .expect("frame");
-        frames += 1;
-    }
-    assert!(!map.needs_redraw(), "the fade settles");
-    assert!(frames > 2, "labels fading in keep frames coming: {frames}");
+#[test]
+fn fading_labels_keep_the_map_animating_until_they_settle() {
+    futures::executor::block_on(async {
+        let mut style = style(0., "ground");
+        style.zoom = Some(12.);
+        let layers = super::layers(&style);
+        // One frame in, the label has only begun to fade in.
+        let mut map = super::fixture_map_after(style, layers, 1, 1).await;
+        let mut frames = 0;
+        while map.needs_redraw() && frames < 200 {
+            map.render_source_frames(Default::default(), Vec::new(), 1)
+                .expect("frame");
+            frames += 1;
+        }
+        assert!(!map.needs_redraw(), "the fade settles");
+        assert!(frames > 2, "labels fading in keep frames coming: {frames}");
+    })
 }

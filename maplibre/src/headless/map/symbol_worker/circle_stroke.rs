@@ -42,27 +42,29 @@ fn is(pixels: &[u8], [x, y]: [f64; 2], color: [u8; 3]) -> bool {
         .all(|(have, want)| have.abs_diff(want) <= 2)
 }
 
-#[tokio::test]
-async fn each_circle_strokes_with_the_colour_its_feature_names() {
-    let style = style();
-    style
-        .validate()
-        .expect("a per-feature stroke colour validates");
-    let mut map = SymbolMap::new(style).await;
-    let pixels = map.settle().await;
+#[test]
+fn each_circle_strokes_with_the_colour_its_feature_names() {
+    crate::headless::map::test_async::run_async(async {
+        let style = style();
+        style
+            .validate()
+            .expect("a per-feature stroke colour validates");
+        let mut map = SymbolMap::new(style).await;
+        let pixels = map.settle().await;
 
-    let middle = f64::from(SIZE) / 2.0;
-    for (longitude, stroke) in [(-10.0, [255, 0, 0]), (10.0, [0, 0, 255])] {
-        let center = middle + longitude * PIXELS_PER_DEGREE;
-        assert!(
-            is(&pixels, [center, middle], [0, 255, 0]),
-            "the fill at {longitude}"
-        );
-        for ring in [center - 13.0, center + 13.0] {
+        let middle = f64::from(SIZE) / 2.0;
+        for (longitude, stroke) in [(-10.0, [255, 0, 0]), (10.0, [0, 0, 255])] {
+            let center = middle + longitude * PIXELS_PER_DEGREE;
             assert!(
-                is(&pixels, [ring, middle], stroke),
-                "the ring of the circle at {longitude}"
+                is(&pixels, [center, middle], [0, 255, 0]),
+                "the fill at {longitude}"
             );
+            for ring in [center - 13.0, center + 13.0] {
+                assert!(
+                    is(&pixels, [ring, middle], stroke),
+                    "the ring of the circle at {longitude}"
+                );
+            }
         }
-    }
+    })
 }

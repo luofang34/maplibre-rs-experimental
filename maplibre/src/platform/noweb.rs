@@ -46,6 +46,20 @@ pub fn run_multithreaded<F: Future>(future: F) -> F::Output {
         .block_on(future)
 }
 
+/// Runs CPU-bound `work` on the current Tokio runtime's blocking pool when inside a runtime,
+/// or inline when called outside one.
+pub(crate) async fn run_cpu_bound<R: Send + 'static>(
+    work: impl FnOnce() -> R + Send + 'static,
+) -> Result<R, Box<dyn std::error::Error + Send + Sync>> {
+    if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+        return runtime
+            .spawn_blocking(work)
+            .await
+            .map_err(|error| Box::new(error) as Box<dyn std::error::Error + Send + Sync>);
+    }
+    Ok(work())
+}
+
 /// Worker services that construct a Reqwest source client using the configured cache directory.
 pub struct ReqwestOffscreenKernelEnvironment(OffscreenKernelConfig);
 

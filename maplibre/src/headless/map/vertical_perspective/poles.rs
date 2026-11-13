@@ -107,72 +107,75 @@ fn check_frame(level: &LevelMap, depth: &[f32], case: &str) -> (usize, usize) {
     (tiles, caps)
 }
 
-#[tokio::test]
-async fn a_free_camera_dragged_over_the_north_pole_keeps_ground_and_cap_where_picks_find_them() {
-    let scene = Scene {
-        meters: 500.0,
-        relief: 0.0,
-        exaggeration: 1.0,
-        pitch: 50.0,
-        zoom: 4.0,
-    };
-    let mut level = LevelMap::new(scene).await;
-    let state = &mut level.map.map_context.view_state;
-    let start = WorldCoords::from_lat_lon(LatLon::new(84.0, 10.0), state.zoom());
-    state.camera_mut().move_to(Point2::new(start.x, start.y));
-    state.camera_mut().set_bearing(cgmath::Deg(0.0));
-    level
-        .map
-        .set_navigation_mode(NavigationMode::FreeGlobe)
-        .expect("free navigation");
-    let center = Point2::new(f64::from(WIDTH) / 2.0, f64::from(HEIGHT) / 2.0);
-    let (mut seen_tiles, mut seen_caps, mut checked) = (0, 0, 0);
-    let mut highest = 0.0_f64;
-    for step in 0..400 {
+#[test]
+fn a_free_camera_dragged_over_the_north_pole_keeps_ground_and_cap_where_picks_find_them() {
+    crate::headless::map::test_async::run_async(async {
+        let scene = Scene {
+            meters: 500.0,
+            relief: 0.0,
+            exaggeration: 1.0,
+            pitch: 50.0,
+            zoom: 4.0,
+        };
+        let mut level = LevelMap::new(scene).await;
         let state = &mut level.map.map_context.view_state;
-        assert!(state.drag_free_globe(center - cgmath::Vector2::new(0.0, 40.0), center));
-        level.map.run_frame().expect("frame");
-        let state = level.map.view_state();
-        let data = crate::render::projection::projection_data_for_view(
-            &level.map.map_context.style,
-            state,
-        )
-        .expect("projection data");
-        let matrix: [[f32; 4]; 4] = data.main_matrix;
-        assert!(
-            matrix.iter().flatten().all(|value| value.is_finite()),
-            "step {step}: a non-finite projection"
-        );
-        let latitude = state.pose_view().expect("free camera").center.latitude;
-        highest = highest.max(latitude);
-        if latitude > MERCATOR_LATITUDE_LIMIT {
-            assert_eq!(
-                state.center_elevation(),
-                0.0,
-                "the cap holds the center at sea level"
+        let start = WorldCoords::from_lat_lon(LatLon::new(84.0, 10.0), state.zoom());
+        state.camera_mut().move_to(Point2::new(start.x, start.y));
+        state.camera_mut().set_bearing(cgmath::Deg(0.0));
+        level
+            .map
+            .set_navigation_mode(NavigationMode::FreeGlobe)
+            .expect("free navigation");
+        let center = Point2::new(f64::from(WIDTH) / 2.0, f64::from(HEIGHT) / 2.0);
+        let (mut seen_tiles, mut seen_caps, mut checked) = (0, 0, 0);
+        let mut highest = 0.0_f64;
+        for step in 0..400 {
+            let state = &mut level.map.map_context.view_state;
+            assert!(state.drag_free_globe(center - cgmath::Vector2::new(0.0, 40.0), center));
+            level.map.run_frame().expect("frame");
+            let state = level.map.view_state();
+            let data = crate::render::projection::projection_data_for_view(
+                &level.map.map_context.style,
+                state,
+            )
+            .expect("projection data");
+            let matrix: [[f32; 4]; 4] = data.main_matrix;
+            assert!(
+                matrix.iter().flatten().all(|value| value.is_finite()),
+                "step {step}: a non-finite projection"
             );
+            let latitude = state.pose_view().expect("free camera").center.latitude;
+            highest = highest.max(latitude);
+            if latitude > MERCATOR_LATITUDE_LIMIT {
+                assert_eq!(
+                    state.center_elevation(),
+                    0.0,
+                    "the cap holds the center at sea level"
+                );
+            }
+            let checkpoint = step % 25 == 0 || (latitude > 89.5 && checked < 4);
+            if checkpoint {
+                // The cap holds the center at sea level; the tiles at their level ground.
+                let ground = if latitude > MERCATOR_LATITUDE_LIMIT {
+                    0.0
+                } else {
+                    scene.meters
+                };
+                let depth = level.settle(Some(ground)).await;
+                let (tiles, caps) =
+                    check_frame(&level, &depth, &format!("step {step} at {latitude}"));
+                seen_tiles += tiles;
+                seen_caps += caps;
+                checked += 1;
+            }
+            if highest > 89.0 && latitude < 83.0 {
+                break;
+            }
         }
-        let checkpoint = step % 25 == 0 || (latitude > 89.5 && checked < 4);
-        if checkpoint {
-            // The cap holds the center at sea level; the tiles at their level ground.
-            let ground = if latitude > MERCATOR_LATITUDE_LIMIT {
-                0.0
-            } else {
-                scene.meters
-            };
-            let depth = level.settle(Some(ground)).await;
-            let (tiles, caps) = check_frame(&level, &depth, &format!("step {step} at {latitude}"));
-            seen_tiles += tiles;
-            seen_caps += caps;
-            checked += 1;
-        }
-        if highest > 89.0 && latitude < 83.0 {
-            break;
-        }
-    }
-    assert!(highest > 89.0, "the drag never reached the pole: {highest}");
-    assert!(
-        seen_tiles > 50 && seen_caps > 50,
-        "{seen_tiles} tile and {seen_caps} cap pixels"
-    );
+        assert!(highest > 89.0, "the drag never reached the pole: {highest}");
+        assert!(
+            seen_tiles > 50 && seen_caps > 50,
+            "{seen_tiles} tile and {seen_caps} cap pixels"
+        );
+    })
 }

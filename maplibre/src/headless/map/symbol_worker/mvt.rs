@@ -178,61 +178,65 @@ async fn scene_map(scene: Scene) -> SymbolMap {
     map
 }
 
-#[tokio::test]
-async fn road_names_and_shields_draw_at_both_pixel_ratios_zoomed_and_rotated() {
-    let mut heights = Vec::new();
-    for pixel_ratio in [1.0, 2.0] {
-        let scene = Scene {
-            pixel_ratio,
-            globe: false,
-            terrain: false,
-        };
-        let mut map = scene_map(scene).await;
-        let pixels = map.settle().await;
-        check(&map, (&pixels, pixel_ratio), &format!("{scene:?}"));
-        heights.push(shield_height(&pixels));
-        // Zooming in past the source's last zoom lays the tile out again, magnified.
-        map.map.view_state_mut().zoom_to(Zoom::new(15.5));
-        let pixels = map.settle().await;
-        check(
-            &map,
-            (&pixels, pixel_ratio),
-            &format!("{scene:?} at zoom 15.5"),
-        );
-        map.map
-            .view_state_mut()
-            .camera_mut()
-            .set_bearing(cgmath::Deg(35.0));
-        let pixels = map.settle().await;
-        check(&map, (&pixels, pixel_ratio), &format!("{scene:?} rotated"));
-    }
-    let [one, two] = heights[..] else {
-        panic!("two ratios");
-    };
-    assert!(
-        f64::from(two) / f64::from(one) > 1.7 && f64::from(two) / f64::from(one) < 2.3,
-        "a shield twice as dense is twice as tall: {one} px at 1, {two} px at 2"
-    );
-}
-
-#[tokio::test]
-async fn road_names_and_shields_draw_on_the_globe_and_over_terrain() {
-    for (globe, terrain) in [(true, false), (false, true), (true, true)] {
+#[test]
+fn road_names_and_shields_draw_at_both_pixel_ratios_zoomed_and_rotated() {
+    crate::headless::map::test_async::run_async(async {
+        let mut heights = Vec::new();
         for pixel_ratio in [1.0, 2.0] {
             let scene = Scene {
                 pixel_ratio,
-                globe,
-                terrain,
+                globe: false,
+                terrain: false,
             };
             let mut map = scene_map(scene).await;
             let pixels = map.settle().await;
             check(&map, (&pixels, pixel_ratio), &format!("{scene:?}"));
+            heights.push(shield_height(&pixels));
+            // Zooming in past the source's last zoom lays the tile out again, magnified.
+            map.map.view_state_mut().zoom_to(Zoom::new(15.5));
+            let pixels = map.settle().await;
+            check(
+                &map,
+                (&pixels, pixel_ratio),
+                &format!("{scene:?} at zoom 15.5"),
+            );
             map.map
                 .view_state_mut()
                 .camera_mut()
-                .set_bearing(cgmath::Deg(-25.0));
+                .set_bearing(cgmath::Deg(35.0));
             let pixels = map.settle().await;
             check(&map, (&pixels, pixel_ratio), &format!("{scene:?} rotated"));
         }
-    }
+        let [one, two] = heights[..] else {
+            panic!("two ratios");
+        };
+        assert!(
+            f64::from(two) / f64::from(one) > 1.7 && f64::from(two) / f64::from(one) < 2.3,
+            "a shield twice as dense is twice as tall: {one} px at 1, {two} px at 2"
+        );
+    })
+}
+
+#[test]
+fn road_names_and_shields_draw_on_the_globe_and_over_terrain() {
+    crate::headless::map::test_async::run_async(async {
+        for (globe, terrain) in [(true, false), (false, true), (true, true)] {
+            for pixel_ratio in [1.0, 2.0] {
+                let scene = Scene {
+                    pixel_ratio,
+                    globe,
+                    terrain,
+                };
+                let mut map = scene_map(scene).await;
+                let pixels = map.settle().await;
+                check(&map, (&pixels, pixel_ratio), &format!("{scene:?}"));
+                map.map
+                    .view_state_mut()
+                    .camera_mut()
+                    .set_bearing(cgmath::Deg(-25.0));
+                let pixels = map.settle().await;
+                check(&map, (&pixels, pixel_ratio), &format!("{scene:?} rotated"));
+            }
+        }
+    })
 }

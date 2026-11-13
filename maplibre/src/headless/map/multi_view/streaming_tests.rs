@@ -43,7 +43,7 @@ use crate::{
 #[derive(Clone, Default)]
 pub(super) struct LateTiles {
     frames: Arc<AtomicU64>,
-    advanced: Arc<tokio::sync::Notify>,
+    advanced: Arc<crate::headless::map::test_async::Notify>,
     /// How many imagery tiles from level 14 down, the first the map asks for, never answer.
     /// Each holds a request in flight, so the count stays under the bound on those.
     unanswered_detail: usize,
@@ -203,47 +203,49 @@ const FLIGHT_FRAMES: u64 = 200;
 /// drawn a frame.
 const COVERED_BY_FRAME: u64 = 120;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_eye_in_flight_has_imagery_out_to_its_horizon_while_the_detail_streams_in() {
-    let tiles = LateTiles::default();
-    let (mut map, slot) = flying_map(&tiles, Some(700 << 20)).await;
-    let metres_per_frame = 100.0 / 32.0;
-    let degrees_per_metre = 1.0 / (111_320.0 * 41.66_f64.to_radians().cos());
-    let mut covered_at = None;
-    let mut bare_after_covered = 0;
-    for frame in 0..FLIGHT_FRAMES {
-        let longitude = -1.0 + frame as f64 * metres_per_frame * degrees_per_metre;
-        map.run_multi_view_frame(MultiViewFrame {
-            timestamp: Duration::from_micros(frame * 31_250),
-            opaque_environment: true,
-            request_overscan: 1.22,
-            slots: vec![ViewSlotEntry {
-                slot,
-                view: SlotView::External(eastbound_eye(LatLon::new(41.66, longitude), 2_049.0)),
-                policy: CoveringPolicy::Independent,
-            }],
-        })
-        .expect("frame");
-        tiles.advance();
-        for _ in 0..16 {
-            tokio::task::yield_now().await;
+#[test]
+fn an_eye_in_flight_has_imagery_out_to_its_horizon_while_the_detail_streams_in() {
+    crate::headless::map::test_async::run_async(async {
+        let tiles = LateTiles::default();
+        let (mut map, slot) = flying_map(&tiles, Some(700 << 20)).await;
+        let metres_per_frame = 100.0 / 32.0;
+        let degrees_per_metre = 1.0 / (111_320.0 * 41.66_f64.to_radians().cos());
+        let mut covered_at = None;
+        let mut bare_after_covered = 0;
+        for frame in 0..FLIGHT_FRAMES {
+            let longitude = -1.0 + frame as f64 * metres_per_frame * degrees_per_metre;
+            map.run_multi_view_frame(MultiViewFrame {
+                timestamp: Duration::from_micros(frame * 31_250),
+                opaque_environment: true,
+                request_overscan: 1.22,
+                slots: vec![ViewSlotEntry {
+                    slot,
+                    view: SlotView::External(eastbound_eye(LatLon::new(41.66, longitude), 2_049.0)),
+                    policy: CoveringPolicy::Independent,
+                }],
+            })
+            .expect("frame");
+            tiles.advance();
+            for _ in 0..16 {
+                crate::headless::map::test_async::yield_once().await;
+            }
+            let (drawn, bare) = drawn_terrain(&map);
+            assert!(drawn > 0, "the eye sees terrain in frame {frame}");
+            match covered_at {
+                None if bare == 0 => covered_at = Some(frame),
+                None => {}
+                Some(_) => bare_after_covered += bare,
+            }
         }
-        let (drawn, bare) = drawn_terrain(&map);
-        assert!(drawn > 0, "the eye sees terrain in frame {frame}");
-        match covered_at {
-            None if bare == 0 => covered_at = Some(frame),
-            None => {}
-            Some(_) => bare_after_covered += bare,
-        }
-    }
-    assert!(
+        assert!(
         covered_at.is_some_and(|frame| frame <= COVERED_BY_FRAME),
         "every terrain tile drawn holds imagery by frame {COVERED_BY_FRAME}, not {covered_at:?}"
     );
-    assert_eq!(
-        bare_after_covered, 0,
-        "terrain coming into view holds imagery from its first frame"
-    );
+        assert_eq!(
+            bare_after_covered, 0,
+            "terrain coming into view holds imagery from its first frame"
+        );
+    })
 }
 
 /// Whether `tile` lies under `ancestor`.
@@ -260,57 +262,59 @@ fn under(tile: WorldTileCoords, ancestor: WorldTileCoords) -> bool {
 
 /// The web page that reported the uniform band had loaded the tiles under it, yet its drapes
 /// stayed on their stand-ins: a drape whose set never completes must still show what arrived.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_eyes_drape_shows_the_detail_that_arrived_while_some_of_it_never_answers() {
-    let tiles = LateTiles {
-        unanswered_detail: 3,
-        ..LateTiles::default()
-    };
-    let (mut map, slot) = flying_map(&tiles, None).await;
-    let mut detail_over_stand_in = false;
-    for frame in 0..FLIGHT_FRAMES {
-        map.run_multi_view_frame(MultiViewFrame {
-            timestamp: Duration::from_micros(frame * 31_250),
-            opaque_environment: true,
-            request_overscan: 1.22,
-            slots: vec![ViewSlotEntry {
-                slot,
-                view: SlotView::External(eastbound_eye(LatLon::new(41.66, -1.0), 2_049.0)),
-                policy: CoveringPolicy::Independent,
-            }],
-        })
-        .expect("frame");
-        tiles.advance();
-        for _ in 0..16 {
-            tokio::task::yield_now().await;
-        }
-        let unanswered: Vec<WorldTileCoords> = tiles
-            .unanswered
-            .lock()
-            .expect("lock")
-            .iter()
-            .map(|&(x, y, z)| WorldTileCoords::from((x as i32, y as i32, (z as u8).into())))
-            .collect();
-        let Some(phase) = map.world().resources.get::<DrapePhase>() else {
-            continue;
+#[test]
+fn an_eyes_drape_shows_the_detail_that_arrived_while_some_of_it_never_answers() {
+    crate::headless::map::test_async::run_async(async {
+        let tiles = LateTiles {
+            unanswered_detail: 3,
+            ..LateTiles::default()
         };
-        detail_over_stand_in |= phase.targets.iter().any(|target| {
-            unanswered.iter().any(|tile| under(*tile, target.coords))
-                && target
-                    .layers
-                    .iter()
-                    .any(|layer| layer.tile.coords.z > target.coords.z)
-        });
-    }
-    assert_eq!(
-        tiles.unanswered.lock().expect("lock").len(),
-        3,
-        "the view wants detail the server never answers"
-    );
-    assert!(
-        detail_over_stand_in,
-        "a drape over an unanswered tile draws the tiles that did arrive"
-    );
+        let (mut map, slot) = flying_map(&tiles, None).await;
+        let mut detail_over_stand_in = false;
+        for frame in 0..FLIGHT_FRAMES {
+            map.run_multi_view_frame(MultiViewFrame {
+                timestamp: Duration::from_micros(frame * 31_250),
+                opaque_environment: true,
+                request_overscan: 1.22,
+                slots: vec![ViewSlotEntry {
+                    slot,
+                    view: SlotView::External(eastbound_eye(LatLon::new(41.66, -1.0), 2_049.0)),
+                    policy: CoveringPolicy::Independent,
+                }],
+            })
+            .expect("frame");
+            tiles.advance();
+            for _ in 0..16 {
+                crate::headless::map::test_async::yield_once().await;
+            }
+            let unanswered: Vec<WorldTileCoords> = tiles
+                .unanswered
+                .lock()
+                .expect("lock")
+                .iter()
+                .map(|&(x, y, z)| WorldTileCoords::from((x as i32, y as i32, (z as u8).into())))
+                .collect();
+            let Some(phase) = map.world().resources.get::<DrapePhase>() else {
+                continue;
+            };
+            detail_over_stand_in |= phase.targets.iter().any(|target| {
+                unanswered.iter().any(|tile| under(*tile, target.coords))
+                    && target
+                        .layers
+                        .iter()
+                        .any(|layer| layer.tile.coords.z > target.coords.z)
+            });
+        }
+        assert_eq!(
+            tiles.unanswered.lock().expect("lock").len(),
+            3,
+            "the view wants detail the server never answers"
+        );
+        assert!(
+            detail_over_stand_in,
+            "a drape over an unanswered tile draws the tiles that did arrive"
+        );
+    })
 }
 
 /// How many drapes the last of two views draws over the last 200 of 500 frames of flight: an
@@ -355,7 +359,7 @@ async fn late_redraws_of_the_last_view(sensor_first: bool) -> usize {
         .expect("frame");
         tiles.advance();
         for _ in 0..16 {
-            tokio::task::yield_now().await;
+            crate::headless::map::test_async::yield_once().await;
         }
         if frame >= 300 {
             redraws += map
@@ -371,17 +375,19 @@ async fn late_redraws_of_the_last_view(sensor_first: bool) -> usize {
 /// Each view selects a drape's source tiles from its own covering. Two views draping one
 /// terrain tile at different detail must not draw it again each frame in turn: that takes the
 /// frame's drape budget from every drape farther away, which then never refines.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn two_views_sharing_a_drape_do_not_redraw_it_every_frame() {
-    for sensor_first in [false, true] {
-        let redraws = late_redraws_of_the_last_view(sensor_first).await;
-        assert!(
-            {
-                println!("RD sensor_first={sensor_first} redraws={redraws}");
-                redraws <= 100
-            },
-            "the last view drew {redraws} drapes in 200 frames of steady flight \
+#[test]
+fn two_views_sharing_a_drape_do_not_redraw_it_every_frame() {
+    crate::headless::map::test_async::run_async(async {
+        for sensor_first in [false, true] {
+            let redraws = late_redraws_of_the_last_view(sensor_first).await;
+            assert!(
+                {
+                    println!("RD sensor_first={sensor_first} redraws={redraws}");
+                    redraws <= 100
+                },
+                "the last view drew {redraws} drapes in 200 frames of steady flight \
              (sensor first: {sensor_first})"
-        );
-    }
+            );
+        }
+    })
 }

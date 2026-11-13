@@ -112,34 +112,36 @@ fn arc(centre: [f64; 2], radius: f64, from: f64, to: f64) -> Vec<[f64; 2]> {
         .collect()
 }
 
-#[tokio::test]
-async fn a_label_on_an_arc_bends_with_it() {
-    // A 60 px circle whose top arc carries the label; the centre is at screen (381, 381).
-    let centre_units = [1000.0, 1000.0];
-    let radius_units = 480.0;
-    let screen_centre = [
-        256.0 + centre_units[0] * PIXELS_PER_UNIT,
-        256.0 + centre_units[1] * PIXELS_PER_UNIT,
-    ];
-    let line = arc(centre_units, radius_units, 200.0, 340.0);
-    let map = line_map(line_style(serde_json::json!({})), &line).await;
-    let distances = distances_from(&read_blocking(&map), screen_centre);
-    assert!(
-        distances.len() > 100,
-        "the label drew {} pixels",
-        distances.len()
-    );
-    let radius = radius_units * PIXELS_PER_UNIT;
-    let (nearest, farthest) = distances
-        .iter()
-        .fold((f64::MAX, 0.0_f64), |(a, b), d| (a.min(*d), b.max(*d)));
-    // Glyphs on the arc stay within their own height of it (about 26 px for this text, from
-    // descenders inward to ascenders outward); a straight baseline would push the outer
-    // glyphs to about 80 px.
-    assert!(
-        nearest > radius - 20.0 && farthest < radius + 14.0,
-        "text spans {nearest:.1}..{farthest:.1} px from the centre of a {radius} px arc"
-    );
+#[test]
+fn a_label_on_an_arc_bends_with_it() {
+    futures::executor::block_on(async {
+        // A 60 px circle whose top arc carries the label; the centre is at screen (381, 381).
+        let centre_units = [1000.0, 1000.0];
+        let radius_units = 480.0;
+        let screen_centre = [
+            256.0 + centre_units[0] * PIXELS_PER_UNIT,
+            256.0 + centre_units[1] * PIXELS_PER_UNIT,
+        ];
+        let line = arc(centre_units, radius_units, 200.0, 340.0);
+        let map = line_map(line_style(serde_json::json!({})), &line).await;
+        let distances = distances_from(&read_blocking(&map), screen_centre);
+        assert!(
+            distances.len() > 100,
+            "the label drew {} pixels",
+            distances.len()
+        );
+        let radius = radius_units * PIXELS_PER_UNIT;
+        let (nearest, farthest) = distances
+            .iter()
+            .fold((f64::MAX, 0.0_f64), |(a, b), d| (a.min(*d), b.max(*d)));
+        // Glyphs on the arc stay within their own height of it (about 26 px for this text, from
+        // descenders inward to ascenders outward); a straight baseline would push the outer
+        // glyphs to about 80 px.
+        assert!(
+            nearest > radius - 20.0 && farthest < radius + 14.0,
+            "text spans {nearest:.1}..{farthest:.1} px from the centre of a {radius} px arc"
+        );
+    })
 }
 
 fn red_mask(pixels: &[u8]) -> Vec<bool> {
@@ -159,96 +161,104 @@ fn top_arc() -> Vec<[f64; 2]> {
     arc([1000.0, 1000.0], 480.0, 200.0, 340.0)
 }
 
-#[tokio::test]
-async fn a_line_drawn_backwards_still_reads_upright() {
-    let forward = red_mask(&read_blocking(
-        &line_map(line_style(serde_json::json!({})), &top_arc()).await,
-    ));
-    let mut reversed_line = top_arc();
-    reversed_line.reverse();
-    let reversed = red_mask(&read_blocking(
-        &line_map(line_style(serde_json::json!({})), &reversed_line).await,
-    ));
-    let ink = forward.iter().filter(|red| **red).count();
-    assert!(ink > 100, "the label drew {ink} pixels");
-    assert!(
-        differing(&forward, &reversed) * 10 < ink,
-        "keep-upright makes both directions draw alike: {} of {ink} pixels differ",
-        differing(&forward, &reversed)
-    );
-    let unturned = line_style(serde_json::json!({"text-keep-upright": false}));
-    let backwards = red_mask(&read_blocking(&line_map(unturned, &reversed_line).await));
-    assert!(
-        differing(&forward, &backwards) * 2 > ink,
-        "without keep-upright the reversed line writes the text upside down"
-    );
+#[test]
+fn a_line_drawn_backwards_still_reads_upright() {
+    futures::executor::block_on(async {
+        let forward = red_mask(&read_blocking(
+            &line_map(line_style(serde_json::json!({})), &top_arc()).await,
+        ));
+        let mut reversed_line = top_arc();
+        reversed_line.reverse();
+        let reversed = red_mask(&read_blocking(
+            &line_map(line_style(serde_json::json!({})), &reversed_line).await,
+        ));
+        let ink = forward.iter().filter(|red| **red).count();
+        assert!(ink > 100, "the label drew {ink} pixels");
+        assert!(
+            differing(&forward, &reversed) * 10 < ink,
+            "keep-upright makes both directions draw alike: {} of {ink} pixels differ",
+            differing(&forward, &reversed)
+        );
+        let unturned = line_style(serde_json::json!({"text-keep-upright": false}));
+        let backwards = red_mask(&read_blocking(&line_map(unturned, &reversed_line).await));
+        assert!(
+            differing(&forward, &backwards) * 2 > ink,
+            "without keep-upright the reversed line writes the text upside down"
+        );
+    })
 }
 
-#[tokio::test]
-async fn a_sharp_bend_under_the_label_refuses_it_until_max_angle_allows_it() {
-    let corner = [[900.0, 1000.0], [1400.0, 1000.0], [1400.0, 1500.0]];
-    // The corner lies at the middle of this line, under the centre of the label.
-    let refuses = line_style(serde_json::json!({"text-max-angle": 45}));
-    let map = line_map(refuses, &corner).await;
-    assert!(
-        !red_mask(&read_blocking(&map)).iter().any(|red| *red),
-        "a 90 degree corner under the label leaves it out"
-    );
-    let allows = line_style(serde_json::json!({"text-max-angle": 100}));
-    let map = line_map(allows, &corner).await;
-    assert!(
-        red_mask(&read_blocking(&map))
+#[test]
+fn a_sharp_bend_under_the_label_refuses_it_until_max_angle_allows_it() {
+    futures::executor::block_on(async {
+        let corner = [[900.0, 1000.0], [1400.0, 1000.0], [1400.0, 1500.0]];
+        // The corner lies at the middle of this line, under the centre of the label.
+        let refuses = line_style(serde_json::json!({"text-max-angle": 45}));
+        let map = line_map(refuses, &corner).await;
+        assert!(
+            !red_mask(&read_blocking(&map)).iter().any(|red| *red),
+            "a 90 degree corner under the label leaves it out"
+        );
+        let allows = line_style(serde_json::json!({"text-max-angle": 100}));
+        let map = line_map(allows, &corner).await;
+        assert!(
+            red_mask(&read_blocking(&map))
+                .iter()
+                .filter(|red| **red)
+                .count()
+                > 100
+        );
+    })
+}
+
+#[test]
+fn a_curved_label_is_selectable_on_its_glyphs_but_not_under_the_curve() {
+    futures::executor::block_on(async {
+        let map = line_map(line_style(serde_json::json!({})), &top_arc()).await;
+        let pixels = read_blocking(&map);
+        let index = pixels
+            .as_chunks::<4>()
+            .0
             .iter()
-            .filter(|red| **red)
-            .count()
-            > 100
-    );
+            .position(|p| p[0] > 180 && p[1] < 80 && p[2] < 80)
+            .expect("the label draws");
+        let on_glyph = [
+            (index % SIZE as usize) as f64 + 0.5,
+            (index / SIZE as usize) as f64 + 0.5,
+        ];
+        assert!(
+            !map.query_rendered_symbols(on_glyph, None).is_empty(),
+            "a drawn glyph selects the label"
+        );
+        // Below the middle of the arc, inside the box around all glyphs but on none of them.
+        assert!(
+            map.query_rendered_symbols([381.0, 340.0], None).is_empty(),
+            "the space under a curve is not part of the label"
+        );
+    })
 }
 
-#[tokio::test]
-async fn a_curved_label_is_selectable_on_its_glyphs_but_not_under_the_curve() {
-    let map = line_map(line_style(serde_json::json!({})), &top_arc()).await;
-    let pixels = read_blocking(&map);
-    let index = pixels
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .position(|p| p[0] > 180 && p[1] < 80 && p[2] < 80)
-        .expect("the label draws");
-    let on_glyph = [
-        (index % SIZE as usize) as f64 + 0.5,
-        (index / SIZE as usize) as f64 + 0.5,
-    ];
-    assert!(
-        !map.query_rendered_symbols(on_glyph, None).is_empty(),
-        "a drawn glyph selects the label"
-    );
-    // Below the middle of the arc, inside the box around all glyphs but on none of them.
-    assert!(
-        map.query_rendered_symbols([381.0, 340.0], None).is_empty(),
-        "the space under a curve is not part of the label"
-    );
-}
-
-#[tokio::test]
-async fn a_viewport_aligned_line_label_keeps_its_straight_layout() {
-    // Such text is not placed glyph by glyph; it must still sit centred on its anchor.
-    let straight = [[500.0, 1000.0], [1900.0, 1000.0]];
-    let style = line_style(serde_json::json!({
-        "text-rotation-alignment": "viewport", "text-pitch-alignment": "viewport"
-    }));
-    let pixels = read_blocking(&line_map(style, &straight).await);
-    let (count, bounds) = colored_bounds(&pixels, 0);
-    assert!(count > 100, "the label drew {count} pixels");
-    assert!(
-        bounds[2] - bounds[0] < 70,
-        "glyphs stay together, not {} px wide",
-        bounds[2] - bounds[0]
-    );
-    let middle = (bounds[0] + bounds[2]) as f64 / 2.0;
-    let anchor = 256.0 + 1200.0 * PIXELS_PER_UNIT;
-    assert!(
-        (middle - anchor).abs() < 6.0,
-        "centred on the anchor {anchor}, not at {middle}"
-    );
+#[test]
+fn a_viewport_aligned_line_label_keeps_its_straight_layout() {
+    futures::executor::block_on(async {
+        // Such text is not placed glyph by glyph; it must still sit centred on its anchor.
+        let straight = [[500.0, 1000.0], [1900.0, 1000.0]];
+        let style = line_style(serde_json::json!({
+            "text-rotation-alignment": "viewport", "text-pitch-alignment": "viewport"
+        }));
+        let pixels = read_blocking(&line_map(style, &straight).await);
+        let (count, bounds) = colored_bounds(&pixels, 0);
+        assert!(count > 100, "the label drew {count} pixels");
+        assert!(
+            bounds[2] - bounds[0] < 70,
+            "glyphs stay together, not {} px wide",
+            bounds[2] - bounds[0]
+        );
+        let middle = (bounds[0] + bounds[2]) as f64 / 2.0;
+        let anchor = 256.0 + 1200.0 * PIXELS_PER_UNIT;
+        assert!(
+            (middle - anchor).abs() < 6.0,
+            "centred on the anchor {anchor}, not at {middle}"
+        );
+    })
 }

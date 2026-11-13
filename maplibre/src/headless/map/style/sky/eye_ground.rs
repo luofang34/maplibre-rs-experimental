@@ -92,7 +92,7 @@ async fn standing_view() -> HeadlessMap {
     for _ in 0..10 {
         map.run_frame().expect("frame");
         for _ in 0..8 {
-            tokio::task::yield_now().await;
+            crate::headless::map::test_async::yield_once().await;
         }
     }
     map
@@ -105,43 +105,45 @@ fn pixel(pixels: &[u8], x: u32, y: u32) -> [u8; 3] {
 
 /// Eclipse's case: the eye 2 m above Madrid on a globe without terrain, looking 40° up with a
 /// 100° field of view, has the horizon in the frame and the ground below it.
-#[tokio::test]
-async fn an_eye_on_a_globe_without_terrain_sees_the_ground_below_its_horizon() {
-    let mut map = standing_view().await;
-    let (up, ..) = local_axes();
-    let sun = up * 0.8 - local_axes().2 * 0.6;
-    map.set_sun_direction(Some(
-        EcefDirection::new(sun.z, sun.x, sun.y).expect("direction"),
-    ));
-    map.run_frame().expect("frame");
-    let pixels = read_blocking(
-        &map,
-        map.head_texture().expect("head texture"),
-        wgpu::TextureAspect::All,
-    )
-    .expect("readback");
-    let half = f64::from(SIZE) / 2.0;
-    let focal = half / (FIELD_OF_VIEW_DEGREES / 2.0).to_radians().tan();
-    // The horizon lies LOOK_UP_DEGREES below the frame's centre.
-    let horizon = half + focal * LOOK_UP_DEGREES.to_radians().tan();
-    let rows: Vec<u32> = [8.0, 30.0, 60.0]
-        .iter()
-        .map(|below| (horizon + below) as u32)
-        .filter(|row| *row < SIZE)
-        .collect();
-    let report = rows
-        .iter()
-        .map(|&row| format!("row {row}: {:?}", pixel(&pixels, SIZE / 2, row)))
-        .collect::<Vec<_>>()
-        .join(", ");
-    assert!(rows.len() >= 2, "rows below the horizon {horizon:.1}");
-    for &row in &rows {
-        let ground = pixel(&pixels, SIZE / 2, row);
-        let green = i32::from(ground[1]) - i32::from(ground[0]).max(i32::from(ground[2]));
-        assert!(
+#[test]
+fn an_eye_on_a_globe_without_terrain_sees_the_ground_below_its_horizon() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = standing_view().await;
+        let (up, ..) = local_axes();
+        let sun = up * 0.8 - local_axes().2 * 0.6;
+        map.set_sun_direction(Some(
+            EcefDirection::new(sun.z, sun.x, sun.y).expect("direction"),
+        ));
+        map.run_frame().expect("frame");
+        let pixels = read_blocking(
+            &map,
+            map.head_texture().expect("head texture"),
+            wgpu::TextureAspect::All,
+        )
+        .expect("readback");
+        let half = f64::from(SIZE) / 2.0;
+        let focal = half / (FIELD_OF_VIEW_DEGREES / 2.0).to_radians().tan();
+        // The horizon lies LOOK_UP_DEGREES below the frame's centre.
+        let horizon = half + focal * LOOK_UP_DEGREES.to_radians().tan();
+        let rows: Vec<u32> = [8.0, 30.0, 60.0]
+            .iter()
+            .map(|below| (horizon + below) as u32)
+            .filter(|row| *row < SIZE)
+            .collect();
+        let report = rows
+            .iter()
+            .map(|&row| format!("row {row}: {:?}", pixel(&pixels, SIZE / 2, row)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        assert!(rows.len() >= 2, "rows below the horizon {horizon:.1}");
+        for &row in &rows {
+            let ground = pixel(&pixels, SIZE / 2, row);
+            let green = i32::from(ground[1]) - i32::from(ground[0]).max(i32::from(ground[2]));
+            assert!(
             green > 10,
             "the background's green ground is drawn below the horizon at {horizon:.1}, not the \
              sky ({BACKGROUND:?} lit by the sun): {report}"
         );
-    }
+        }
+    })
 }

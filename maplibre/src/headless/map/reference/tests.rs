@@ -69,58 +69,64 @@ fn invalid_intrinsics_are_refused() {
     ));
 }
 
-#[tokio::test]
-async fn a_nadir_view_reads_the_camera_height_above_terrain() {
-    let mut map = prepared_map().await;
-    let target = ReferenceTarget::new(&map, intrinsics()).expect("target");
-    let render = target
-        .render_blocking(
+#[test]
+fn a_nadir_view_reads_the_camera_height_above_terrain() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = prepared_map().await;
+        let target = ReferenceTarget::new(&map, intrinsics()).expect("target");
+        let render = target
+            .render_blocking(
+                &mut map,
+                anchor(),
+                Matrix4::from_translation(Vector3::new(0.0, 0.0, CAMERA_M)),
+            )
+            .expect("render");
+        assert_eq!(render.rgba.len(), (SIZE * SIZE * 4) as usize);
+        assert_eq!(render.depth_m.len(), (SIZE * SIZE) as usize);
+        let centre = ((SIZE / 2) * SIZE + SIZE / 2) as usize;
+        assert_eq!(
+            render.rgba[centre * 4 + 3],
+            255,
+            "imagery covers the centre"
+        );
+        let depth = f64::from(render.depth_m[centre]);
+        assert!(
+            (depth - (CAMERA_M - TERRAIN_M)).abs() < 2.0,
+            "centre depth {depth} m"
+        );
+    })
+}
+
+#[test]
+fn a_camera_of_another_size_is_refused() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = prepared_map().await;
+        let mut other = intrinsics();
+        other.width = SIZE * 2;
+        let target = ReferenceTarget::new(&map, other).expect("target");
+        let result = target.draw(
             &mut map,
             anchor(),
             Matrix4::from_translation(Vector3::new(0.0, 0.0, CAMERA_M)),
-        )
-        .expect("render");
-    assert_eq!(render.rgba.len(), (SIZE * SIZE * 4) as usize);
-    assert_eq!(render.depth_m.len(), (SIZE * SIZE) as usize);
-    let centre = ((SIZE / 2) * SIZE + SIZE / 2) as usize;
-    assert_eq!(
-        render.rgba[centre * 4 + 3],
-        255,
-        "imagery covers the centre"
-    );
-    let depth = f64::from(render.depth_m[centre]);
-    assert!(
-        (depth - (CAMERA_M - TERRAIN_M)).abs() < 2.0,
-        "centre depth {depth} m"
-    );
+        );
+        assert!(matches!(result, Err(ReferenceError::SizeMismatch { .. })));
+    })
 }
 
-#[tokio::test]
-async fn a_camera_of_another_size_is_refused() {
-    let mut map = prepared_map().await;
-    let mut other = intrinsics();
-    other.width = SIZE * 2;
-    let target = ReferenceTarget::new(&map, other).expect("target");
-    let result = target.draw(
-        &mut map,
-        anchor(),
-        Matrix4::from_translation(Vector3::new(0.0, 0.0, CAMERA_M)),
-    );
-    assert!(matches!(result, Err(ReferenceError::SizeMismatch { .. })));
-}
-
-#[tokio::test]
-async fn settle_frames_continue_the_map_clock() {
-    let mut map = prepared_map().await;
-    let before = map.frame_input_mut().timestamp;
-    let target = ReferenceTarget::new(&map, intrinsics()).expect("target");
-    let eye = Matrix4::from_translation(Vector3::new(0.0, 0.0, CAMERA_M));
-    target.draw(&mut map, anchor(), eye).expect("draw");
-    let after = map.frame_input_mut().timestamp;
-    assert_eq!(
-        after,
-        before + SETTLE_FRAME_INTERVAL * REFERENCE_SETTLE_FRAMES
-    );
+#[test]
+fn settle_frames_continue_the_map_clock() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = prepared_map().await;
+        let before = map.frame_input_mut().timestamp;
+        let target = ReferenceTarget::new(&map, intrinsics()).expect("target");
+        let eye = Matrix4::from_translation(Vector3::new(0.0, 0.0, CAMERA_M));
+        target.draw(&mut map, anchor(), eye).expect("draw");
+        let after = map.frame_input_mut().timestamp;
+        assert_eq!(
+            after,
+            before + SETTLE_FRAME_INTERVAL * REFERENCE_SETTLE_FRAMES
+        );
+    })
 }
 
 fn anchor() -> ExternalAnchor {

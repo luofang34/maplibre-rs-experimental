@@ -255,68 +255,74 @@ fn assert_steady_name(pixels: &[u8], case: &str) {
     );
 }
 
-#[tokio::test]
-async fn a_close_globe_view_keeps_a_street_name_square_to_its_street_and_evenly_spaced() {
-    // Zoom 14 lays the street out from its own tile; higher zooms magnify it.
-    for zoom in [14.0, 15.0, 17.0, 18.0, 20.0] {
-        for pitch in [0.0, 45.0, 70.0, 85.0] {
-            let mut map = street_map(zoom, false).await;
-            map.map
-                .view_state_mut()
-                .camera_mut()
-                .set_pitch(cgmath::Deg(pitch));
-            let pixels = map.settle().await;
-            assert_steady_name(&pixels, &format!("zoom {zoom}, pitch {pitch}"));
-        }
-    }
-}
-
-#[tokio::test]
-async fn a_free_globe_camera_moving_in_small_steps_keeps_the_street_name_steady() {
-    use crate::{projection::ProjectionType, render::view_state::NavigationMode};
-    let mut map = street_map(18.0, false).await;
-    map.map
-        .view_state_mut()
-        .camera_mut()
-        .set_pitch(cgmath::Deg(45.0));
-    map.settle().await;
-    map.map
-        .view_state_mut()
-        .set_navigation_mode(
-            NavigationMode::FreeGlobe,
-            &ProjectionType::VerticalPerspective,
-        )
-        .expect("free globe camera");
-    let middle = cgmath::Point2::new(f64::from(SIZE) / 2.0, f64::from(SIZE) / 2.0);
-    for step in 0..6 {
-        let view = map.map.view_state_mut();
-        match step % 3 {
-            0 => assert!(view.drag_free_globe(middle, middle + cgmath::Vector2::new(3.0, 2.0))),
-            1 => assert!(view.zoom_free_globe(middle, 0.15)),
-            _ => {
-                let pose = view.globe_pose().expect("pose");
-                view.orbit_globe_pose(pose, cgmath::Rad(4_f64.to_radians()), cgmath::Rad(0.0))
-                    .expect("turn");
+#[test]
+fn a_close_globe_view_keeps_a_street_name_square_to_its_street_and_evenly_spaced() {
+    crate::headless::map::test_async::run_async(async {
+        // Zoom 14 lays the street out from its own tile; higher zooms magnify it.
+        for zoom in [14.0, 15.0, 17.0, 18.0, 20.0] {
+            for pitch in [0.0, 45.0, 70.0, 85.0] {
+                let mut map = street_map(zoom, false).await;
+                map.map
+                    .view_state_mut()
+                    .camera_mut()
+                    .set_pitch(cgmath::Deg(pitch));
+                let pixels = map.settle().await;
+                assert_steady_name(&pixels, &format!("zoom {zoom}, pitch {pitch}"));
             }
         }
-        let pixels = map.settle().await;
-        assert_steady_name(&pixels, &format!("free camera step {step}"));
-    }
+    })
 }
 
-#[tokio::test]
-async fn a_street_name_over_raised_terrain_stays_square_and_evenly_spaced() {
-    for zoom in [18.0, 20.0] {
-        let mut map = street_map(zoom, true).await;
+#[test]
+fn a_free_globe_camera_moving_in_small_steps_keeps_the_street_name_steady() {
+    crate::headless::map::test_async::run_async(async {
+        use crate::{projection::ProjectionType, render::view_state::NavigationMode};
+        let mut map = street_map(18.0, false).await;
         map.map
             .view_state_mut()
             .camera_mut()
             .set_pitch(cgmath::Deg(45.0));
-        let pixels = map.settle().await;
-        assert!(
-            (map.map.view_state().center_elevation() - 500.0).abs() < 1.0,
-            "the view stands on the 500 m ground"
-        );
-        assert_steady_name(&pixels, &format!("terrain, zoom {zoom}"));
-    }
+        map.settle().await;
+        map.map
+            .view_state_mut()
+            .set_navigation_mode(
+                NavigationMode::FreeGlobe,
+                &ProjectionType::VerticalPerspective,
+            )
+            .expect("free globe camera");
+        let middle = cgmath::Point2::new(f64::from(SIZE) / 2.0, f64::from(SIZE) / 2.0);
+        for step in 0..6 {
+            let view = map.map.view_state_mut();
+            match step % 3 {
+                0 => assert!(view.drag_free_globe(middle, middle + cgmath::Vector2::new(3.0, 2.0))),
+                1 => assert!(view.zoom_free_globe(middle, 0.15)),
+                _ => {
+                    let pose = view.globe_pose().expect("pose");
+                    view.orbit_globe_pose(pose, cgmath::Rad(4_f64.to_radians()), cgmath::Rad(0.0))
+                        .expect("turn");
+                }
+            }
+            let pixels = map.settle().await;
+            assert_steady_name(&pixels, &format!("free camera step {step}"));
+        }
+    })
+}
+
+#[test]
+fn a_street_name_over_raised_terrain_stays_square_and_evenly_spaced() {
+    crate::headless::map::test_async::run_async(async {
+        for zoom in [18.0, 20.0] {
+            let mut map = street_map(zoom, true).await;
+            map.map
+                .view_state_mut()
+                .camera_mut()
+                .set_pitch(cgmath::Deg(45.0));
+            let pixels = map.settle().await;
+            assert!(
+                (map.map.view_state().center_elevation() - 500.0).abs() < 1.0,
+                "the view stands on the 500 m ground"
+            );
+            assert_steady_name(&pixels, &format!("terrain, zoom {zoom}"));
+        }
+    })
 }

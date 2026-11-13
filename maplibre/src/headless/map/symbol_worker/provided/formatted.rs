@@ -47,60 +47,63 @@ fn routes_style() -> Style {
     .expect("style")
 }
 
-#[tokio::test]
-async fn shields_a_case_chooses_inside_format_are_drawn_as_images_never_as_their_names() {
-    let (shields, gate) = Shields::held(Answer::Shield(SHIELD));
-    let mut map = SymbolMap::serving(routes_style(), AssetServer::default()).await;
-    map.map
-        .image_providers()
-        .expect("registry")
-        .register("shield", shields.clone());
-    // While the shields are made the label has nothing to draw: no name shows as text.
-    for _ in 0..40 {
-        map.frame().await;
-        let pixels = map.read();
+#[test]
+fn shields_a_case_chooses_inside_format_are_drawn_as_images_never_as_their_names() {
+    crate::headless::map::test_async::run_async(async {
+        let (shields, gate) = Shields::held(Answer::Shield(SHIELD));
+        let mut map = SymbolMap::serving(routes_style(), AssetServer::default()).await;
+        map.map
+            .image_providers()
+            .expect("registry")
+            .register("shield", shields.clone());
+        // While the shields are made the label has nothing to draw: no name shows as text.
+        for _ in 0..40 {
+            map.frame().await;
+            let pixels = map.read();
+            assert_eq!(shown(&pixels, TEXT), 0, "a request name is drawn as text");
+            assert_eq!(shown(&pixels, SHIELD), 0);
+        }
+        let mut requested: Vec<String> = shields
+            .requests
+            .lock()
+            .expect("requests")
+            .iter()
+            .map(|request| request.id.clone())
+            .collect();
+        requested.sort();
+        assert_eq!(
+            requested,
+            ["BAB=A 115", "e-road=E 51"],
+            "every route's shield is asked for, the third case naming none"
+        );
+        gate.add_permits(64);
+        // Once they arrive the label is laid out again with both, without the map moving.
+        let pixels = map.settle().await;
         assert_eq!(shown(&pixels, TEXT), 0, "a request name is drawn as text");
-        assert_eq!(shown(&pixels, SHIELD), 0);
-    }
-    let mut requested: Vec<String> = shields
-        .requests
-        .lock()
-        .expect("requests")
-        .iter()
-        .map(|request| request.id.clone())
-        .collect();
-    requested.sort();
-    assert_eq!(
-        requested,
-        ["BAB=A 115", "e-road=E 51"],
-        "every route's shield is asked for, the third case naming none"
-    );
-    gate.add_permits(64);
-    // Once they arrive the label is laid out again with both, without the map moving.
-    let pixels = map.settle().await;
-    assert_eq!(shown(&pixels, TEXT), 0, "a request name is drawn as text");
-    let shield = count(&pixels, SHIELD, WHOLE);
-    let side = (SIDE as usize).pow(2);
-    assert!(
-        shield.len() > side * 3 / 2,
-        "both routes' shields are drawn: {} pixels",
-        shield.len()
-    );
-    // Side by side along the line of text, not on top of each other.
-    let xs = shield.iter().map(|[x, _]| *x);
-    let width = xs.clone().max().expect("pixels") - xs.min().expect("pixels") + 1;
-    assert!(
-        width as f32 > SIDE * 2.0,
-        "the shields stand {width} px across"
-    );
-    assert_eq!(shields.calls(), 2, "each shield is made once");
-    assert_eq!(shields.during_frames.load(Ordering::SeqCst), 0);
+        let shield = count(&pixels, SHIELD, WHOLE);
+        let side = (SIDE as usize).pow(2);
+        assert!(
+            shield.len() > side * 3 / 2,
+            "both routes' shields are drawn: {} pixels",
+            shield.len()
+        );
+        // Side by side along the line of text, not on top of each other.
+        let xs = shield.iter().map(|[x, _]| *x);
+        let width = xs.clone().max().expect("pixels") - xs.min().expect("pixels") + 1;
+        assert!(
+            width as f32 > SIDE * 2.0,
+            "the shields stand {width} px across"
+        );
+        assert_eq!(shields.calls(), 2, "each shield is made once");
+        assert_eq!(shields.during_frames.load(Ordering::SeqCst), 0);
+    })
 }
 
-#[tokio::test]
-async fn text_an_inline_image_and_an_icon_draw_together_once_the_images_arrive() {
-    let (shields, gate) = Shields::held(Answer::PerRoute);
-    let style: Style = serde_json::from_value(serde_json::json!({
+#[test]
+fn text_an_inline_image_and_an_icon_draw_together_once_the_images_arrive() {
+    crate::headless::map::test_async::run_async(async {
+        let (shields, gate) = Shields::held(Answer::PerRoute);
+        let style: Style = serde_json::from_value(serde_json::json!({
         "version":8,"center":[0.01,0.010986328],"zoom":14,"glyphs":GLYPHS,"sprite":SPRITE,
         "sources":{"spot":{"type":"geojson","data":{"type":"Feature","properties":{"exit":"Exit"},
             "geometry":{"type":"Point","coordinates":[0.01,0.010986328]}}}},
@@ -115,41 +118,42 @@ async fn text_an_inline_image_and_an_icon_draw_together_once_the_images_arrive()
         ]
     }))
     .expect("style");
-    let mut map = SymbolMap::serving(style, AssetServer::default()).await;
-    map.map
-        .image_providers()
-        .expect("registry")
-        .register("shield", shields.clone());
-    let [inline, icon, _] = ROUTE_COLOURS;
-    // The text shows at once; the images are still being made.
-    let pixels = frames_until(&mut map, "the text", |pixels| shown(pixels, TEXT) > 50).await;
-    assert_eq!((shown(&pixels, inline), shown(&pixels, icon)), (0, 0));
-    gate.add_permits(64);
-    let pixels = frames_until(&mut map, "the inline image and the icon", |pixels| {
-        shown(pixels, inline) > 300 && shown(pixels, icon) > 300
+        let mut map = SymbolMap::serving(style, AssetServer::default()).await;
+        map.map
+            .image_providers()
+            .expect("registry")
+            .register("shield", shields.clone());
+        let [inline, icon, _] = ROUTE_COLOURS;
+        // The text shows at once; the images are still being made.
+        let pixels = frames_until(&mut map, "the text", |pixels| shown(pixels, TEXT) > 50).await;
+        assert_eq!((shown(&pixels, inline), shown(&pixels, icon)), (0, 0));
+        gate.add_permits(64);
+        let pixels = frames_until(&mut map, "the inline image and the icon", |pixels| {
+            shown(pixels, inline) > 300 && shown(pixels, icon) > 300
+        })
+        .await;
+        assert!(
+            shown(&pixels, TEXT) > 50,
+            "the text stays drawn beside its image"
+        );
+        // The inline image stands in the line of text, below the icon the text is offset from.
+        let centre = |colour| {
+            let points = count(&pixels, colour, WHOLE);
+            let n = points.len() as f64;
+            [0, 1].map(|axis| points.iter().map(|p| f64::from(p[axis])).sum::<f64>() / n)
+        };
+        let (text, inline, icon) = (centre(TEXT), centre(inline), centre(icon));
+        assert!(
+            inline[0] > text[0],
+            "the image follows the text: {text:?} {inline:?}"
+        );
+        assert!(
+            (inline[1] - text[1]).abs() < 12.0,
+            "on its line: {text:?} {inline:?}"
+        );
+        assert!(
+            icon[1] < text[1] - 20.0,
+            "the icon above the offset text: {icon:?} {text:?}"
+        );
     })
-    .await;
-    assert!(
-        shown(&pixels, TEXT) > 50,
-        "the text stays drawn beside its image"
-    );
-    // The inline image stands in the line of text, below the icon the text is offset from.
-    let centre = |colour| {
-        let points = count(&pixels, colour, WHOLE);
-        let n = points.len() as f64;
-        [0, 1].map(|axis| points.iter().map(|p| f64::from(p[axis])).sum::<f64>() / n)
-    };
-    let (text, inline, icon) = (centre(TEXT), centre(inline), centre(icon));
-    assert!(
-        inline[0] > text[0],
-        "the image follows the text: {text:?} {inline:?}"
-    );
-    assert!(
-        (inline[1] - text[1]).abs() < 12.0,
-        "on its line: {text:?} {inline:?}"
-    );
-    assert!(
-        icon[1] < text[1] - 20.0,
-        "the icon above the offset text: {icon:?} {text:?}"
-    );
 }

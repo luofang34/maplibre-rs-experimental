@@ -67,46 +67,48 @@ fn limbs(pixels: &[u8]) -> (u32, u32) {
 /// The sun over 0°N 60°E lights the globe's centre, 0°N 0°E, from 30° up and leaves its west
 /// in night; the night keeps a share of the day's light, and the sky beside the globe is not
 /// drawn on.
-#[tokio::test]
-async fn the_globe_without_terrain_turns_from_day_to_night() {
-    let mut map = globe().await;
-    let unlit = frame(&mut map);
-    let longitude = 60_f64.to_radians();
-    map.set_sun_direction(Some(
-        EcefDirection::new(longitude.cos(), longitude.sin(), 0.0).expect("sun"),
-    ));
-    let lit = frame(&mut map);
-    let (left, right) = limbs(&unlit);
-    let row = SIZE / 2;
-    let (west, centre) = (left + (right - left) / 8, SIZE / 2);
-    let report = format!(
-        "limbs {left}..{right}: centre {:.0} → {:.0}, west {:.0} → {:.0}",
-        luminance(&unlit, centre, row),
-        luminance(&lit, centre, row),
-        luminance(&unlit, west, row),
-        luminance(&lit, west, row),
-    );
-    assert!(
-        (luminance(&lit, centre, row) - luminance(&unlit, centre, row)).abs() < 3.0,
-        "the day side keeps its colour: {report}"
-    );
-    let night = luminance(&lit, west, row) / luminance(&unlit, west, row);
-    assert!(
-        (0.25..0.5).contains(&night),
-        "the night side keeps about a third of its light: {report}"
-    );
-    assert_eq!(
-        pixel(&lit, 2, 2),
-        pixel(&unlit, 2, 2),
-        "the sky beside the globe is left alone"
-    );
+#[test]
+fn the_globe_without_terrain_turns_from_day_to_night() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = globe().await;
+        let unlit = frame(&mut map);
+        let longitude = 60_f64.to_radians();
+        map.set_sun_direction(Some(
+            EcefDirection::new(longitude.cos(), longitude.sin(), 0.0).expect("sun"),
+        ));
+        let lit = frame(&mut map);
+        let (left, right) = limbs(&unlit);
+        let row = SIZE / 2;
+        let (west, centre) = (left + (right - left) / 8, SIZE / 2);
+        let report = format!(
+            "limbs {left}..{right}: centre {:.0} → {:.0}, west {:.0} → {:.0}",
+            luminance(&unlit, centre, row),
+            luminance(&lit, centre, row),
+            luminance(&unlit, west, row),
+            luminance(&lit, west, row),
+        );
+        assert!(
+            (luminance(&lit, centre, row) - luminance(&unlit, centre, row)).abs() < 3.0,
+            "the day side keeps its colour: {report}"
+        );
+        let night = luminance(&lit, west, row) / luminance(&unlit, west, row);
+        assert!(
+            (0.25..0.5).contains(&night),
+            "the night side keeps about a third of its light: {report}"
+        );
+        assert_eq!(
+            pixel(&lit, 2, 2),
+            pixel(&unlit, 2, 2),
+            "the sky beside the globe is left alone"
+        );
 
-    // Totality where the eye stands takes the day side to the night's light.
-    map.set_sun_visible_fraction(VisibleFraction::new(0.0).expect("fraction"));
-    let total = frame(&mut map);
-    let darkened = luminance(&total, centre, row) / luminance(&unlit, centre, row);
-    assert!(
-        (0.25..0.5).contains(&darkened),
-        "the day side dims to its night in totality, {darkened:.2}: {report}"
-    );
+        // Totality where the eye stands takes the day side to the night's light.
+        map.set_sun_visible_fraction(VisibleFraction::new(0.0).expect("fraction"));
+        let total = frame(&mut map);
+        let darkened = luminance(&total, centre, row) / luminance(&unlit, centre, row);
+        assert!(
+            (0.25..0.5).contains(&darkened),
+            "the day side dims to its night in totality, {darkened:.2}: {report}"
+        );
+    })
 }

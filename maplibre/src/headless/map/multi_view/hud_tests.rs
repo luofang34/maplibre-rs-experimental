@@ -82,50 +82,54 @@ fn draw_main(map: &mut HeadlessMap) -> u64 {
     capsule(map, map.head_texture().expect("head texture"), MAIN)
 }
 
-#[tokio::test]
-async fn a_view_slot_draws_the_hud_only_when_asked_to() {
-    let mut map = map_with_published_hud().await;
-    let slot = map.register_view_slot(ViewSlotConfig {
-        size: PhysicalSize::new(SLOT.0, SLOT.1).expect("size"),
-        depth_readout: false,
-    });
+#[test]
+fn a_view_slot_draws_the_hud_only_when_asked_to() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = map_with_published_hud().await;
+        let slot = map.register_view_slot(ViewSlotConfig {
+            size: PhysicalSize::new(SLOT.0, SLOT.1).expect("size"),
+            depth_readout: false,
+        });
 
-    assert!(draw_main(&mut map) > 0, "the map's own view has the HUD");
-    assert_eq!(draw_slot(&mut map, slot), 0, "a slot has none by default");
-    assert!(
-        draw_main(&mut map) > 0,
-        "the map's own view keeps the HUD after a frame of slots"
-    );
+        assert!(draw_main(&mut map) > 0, "the map's own view has the HUD");
+        assert_eq!(draw_slot(&mut map, slot), 0, "a slot has none by default");
+        assert!(
+            draw_main(&mut map) > 0,
+            "the map's own view keeps the HUD after a frame of slots"
+        );
 
-    map.set_view_slot_navigation_hud(slot, true).expect("slot");
-    assert!(
-        draw_slot(&mut map, slot) > 0,
-        "a slot asked to draws the HUD where its own size puts it"
-    );
-    assert!(draw_main(&mut map) > 0);
+        map.set_view_slot_navigation_hud(slot, true).expect("slot");
+        assert!(
+            draw_slot(&mut map, slot) > 0,
+            "a slot asked to draws the HUD where its own size puts it"
+        );
+        assert!(draw_main(&mut map) > 0);
 
-    map.set_view_slot_navigation_hud(slot, false).expect("slot");
-    assert_eq!(draw_slot(&mut map, slot), 0);
+        map.set_view_slot_navigation_hud(slot, false).expect("slot");
+        assert_eq!(draw_slot(&mut map, slot), 0);
+    })
 }
 
-#[tokio::test]
-async fn the_hud_setting_of_an_unregistered_slot_is_refused() {
-    let mut map = map_with_published_hud().await;
-    let slot = map.register_view_slot(ViewSlotConfig {
-        size: PhysicalSize::new(SLOT.0, SLOT.1).expect("size"),
-        depth_readout: false,
-    });
-    map.set_view_slot_navigation_hud(slot, true).expect("slot");
-    assert!(map.remove_view_slot(slot));
-    assert!(matches!(
-        map.set_view_slot_navigation_hud(slot, true),
-        Err(MultiViewError::UnknownSlot { .. })
-    ));
+#[test]
+fn the_hud_setting_of_an_unregistered_slot_is_refused() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = map_with_published_hud().await;
+        let slot = map.register_view_slot(ViewSlotConfig {
+            size: PhysicalSize::new(SLOT.0, SLOT.1).expect("size"),
+            depth_readout: false,
+        });
+        map.set_view_slot_navigation_hud(slot, true).expect("slot");
+        assert!(map.remove_view_slot(slot));
+        assert!(matches!(
+            map.set_view_slot_navigation_hud(slot, true),
+            Err(MultiViewError::UnknownSlot { .. })
+        ));
 
-    // A slot registered afterwards starts without the HUD, whatever the removed one had.
-    let next = map.register_view_slot(ViewSlotConfig {
-        size: PhysicalSize::new(SLOT.0, SLOT.1).expect("size"),
-        depth_readout: false,
-    });
-    assert_eq!(draw_slot(&mut map, next), 0);
+        // A slot registered afterwards starts without the HUD, whatever the removed one had.
+        let next = map.register_view_slot(ViewSlotConfig {
+            size: PhysicalSize::new(SLOT.0, SLOT.1).expect("size"),
+            depth_readout: false,
+        });
+        assert_eq!(draw_slot(&mut map, next), 0);
+    })
 }

@@ -125,25 +125,27 @@ fn over_white(premultiplied: [u8; 4], opacity: f64) -> [u8; 3] {
     })
 }
 
-#[tokio::test]
-async fn one_point_paints_the_ramp_colour_of_its_density_and_nothing_past_the_radius() {
-    let paint = serde_json::json!({"heatmap-radius": 40, "heatmap-intensity": UNIT_INTENSITY});
-    let bytes = rendered(heatmap_style(paint), &[(CENTRE.0, CENTRE.1, 1.0)]).await;
-    let centre = pixel(&bytes, SIZE / 2, SIZE / 2);
-    let expected = over_white(ramp_at(1.0), 1.0);
-    assert!(
-        centre[..3]
-            .iter()
-            .zip(expected)
-            .all(|(a, b)| a.abs_diff(b) <= 20),
-        "centre density 1 is the last ramp colour: {centre:?} against {expected:?}"
-    );
-    let outside = pixel(&bytes, SIZE / 2 + 60, SIZE / 2);
-    assert_eq!(
-        outside,
-        [255, 255, 255, 255],
-        "beyond the radius is background"
-    );
+#[test]
+fn one_point_paints_the_ramp_colour_of_its_density_and_nothing_past_the_radius() {
+    crate::headless::map::test_async::run_async(async {
+        let paint = serde_json::json!({"heatmap-radius": 40, "heatmap-intensity": UNIT_INTENSITY});
+        let bytes = rendered(heatmap_style(paint), &[(CENTRE.0, CENTRE.1, 1.0)]).await;
+        let centre = pixel(&bytes, SIZE / 2, SIZE / 2);
+        let expected = over_white(ramp_at(1.0), 1.0);
+        assert!(
+            centre[..3]
+                .iter()
+                .zip(expected)
+                .all(|(a, b)| a.abs_diff(b) <= 20),
+            "centre density 1 is the last ramp colour: {centre:?} against {expected:?}"
+        );
+        let outside = pixel(&bytes, SIZE / 2 + 60, SIZE / 2);
+        assert_eq!(
+            outside,
+            [255, 255, 255, 255],
+            "beyond the radius is background"
+        );
+    })
 }
 
 fn assert_close(actual: [u8; 4], expected: [u8; 3], tolerance: u8, what: &str) {
@@ -162,107 +164,117 @@ fn kernel(distance_ratio: f64) -> f64 {
     (-0.5 * 9.0 * distance_ratio * distance_ratio).exp()
 }
 
-#[tokio::test]
-async fn density_falls_off_as_the_gaussian_kernel_between_centre_and_radius() {
-    let paint = serde_json::json!({"heatmap-radius": 40, "heatmap-intensity": UNIT_INTENSITY});
-    let bytes = rendered(heatmap_style(paint), &[(CENTRE.0, CENTRE.1, 1.0)]).await;
-    for pixels in [10_u32, 20, 30] {
-        // A pixel is sampled at its centre, half a pixel past its index.
-        let density = kernel((f64::from(pixels) + 0.5) / 40.0);
+#[test]
+fn density_falls_off_as_the_gaussian_kernel_between_centre_and_radius() {
+    crate::headless::map::test_async::run_async(async {
+        let paint = serde_json::json!({"heatmap-radius": 40, "heatmap-intensity": UNIT_INTENSITY});
+        let bytes = rendered(heatmap_style(paint), &[(CENTRE.0, CENTRE.1, 1.0)]).await;
+        for pixels in [10_u32, 20, 30] {
+            // A pixel is sampled at its centre, half a pixel past its index.
+            let density = kernel((f64::from(pixels) + 0.5) / 40.0);
+            assert_close(
+                pixel(&bytes, SIZE / 2 + pixels, SIZE / 2),
+                over_white(ramp_at(density), 1.0),
+                8,
+                &format!("{pixels}px from the centre"),
+            );
+        }
+    })
+}
+
+#[test]
+fn overlapping_points_add_their_densities() {
+    crate::headless::map::test_async::run_async(async {
+        let paint = serde_json::json!({"heatmap-radius": 40, "heatmap-intensity": UNIT_INTENSITY});
+        // Two points 40 px apart; between them each contributes exp(-4.5 * 0.25).
+        let points = [
+            (CENTRE.0 - 160, CENTRE.1, 1.0),
+            (CENTRE.0 + 160, CENTRE.1, 1.0),
+        ];
+        let two = rendered(heatmap_style(paint.clone()), &points).await;
+        let one = rendered(heatmap_style(paint), &points[..1]).await;
+        let midpoint = pixel(&two, SIZE / 2, SIZE / 2);
         assert_close(
-            pixel(&bytes, SIZE / 2 + pixels, SIZE / 2),
-            over_white(ramp_at(density), 1.0),
+            midpoint,
+            over_white(ramp_at(2.0 * kernel(0.5)), 1.0),
             8,
-            &format!("{pixels}px from the centre"),
+            "between two points",
         );
-    }
+        assert_ne!(
+            midpoint[..3],
+            pixel(&one, SIZE / 2, SIZE / 2)[..3],
+            "the second point makes the midpoint denser"
+        );
+    })
 }
 
-#[tokio::test]
-async fn overlapping_points_add_their_densities() {
-    let paint = serde_json::json!({"heatmap-radius": 40, "heatmap-intensity": UNIT_INTENSITY});
-    // Two points 40 px apart; between them each contributes exp(-4.5 * 0.25).
-    let points = [
-        (CENTRE.0 - 160, CENTRE.1, 1.0),
-        (CENTRE.0 + 160, CENTRE.1, 1.0),
-    ];
-    let two = rendered(heatmap_style(paint.clone()), &points).await;
-    let one = rendered(heatmap_style(paint), &points[..1]).await;
-    let midpoint = pixel(&two, SIZE / 2, SIZE / 2);
-    assert_close(
-        midpoint,
-        over_white(ramp_at(2.0 * kernel(0.5)), 1.0),
-        8,
-        "between two points",
-    );
-    assert_ne!(
-        midpoint[..3],
-        pixel(&one, SIZE / 2, SIZE / 2)[..3],
-        "the second point makes the midpoint denser"
-    );
+#[test]
+fn a_data_driven_weight_scales_each_points_density() {
+    crate::headless::map::test_async::run_async(async {
+        let paint = serde_json::json!({
+            "heatmap-radius": 20,
+            "heatmap-intensity": UNIT_INTENSITY,
+            "heatmap-weight": ["get", "mag"]
+        });
+        let points = [
+            (CENTRE.0 - 400, CENTRE.1, 0.25),
+            (CENTRE.0 + 400, CENTRE.1, 1.0),
+        ];
+        let bytes = rendered(heatmap_style(paint), &points).await;
+        assert_close(
+            pixel(&bytes, SIZE / 2 - 50, SIZE / 2),
+            over_white(ramp_at(0.25), 1.0),
+            6,
+            "weight 0.25",
+        );
+        assert_close(
+            pixel(&bytes, SIZE / 2 + 50, SIZE / 2),
+            over_white(ramp_at(1.0), 1.0),
+            6,
+            "weight 1",
+        );
+    })
 }
 
-#[tokio::test]
-async fn a_data_driven_weight_scales_each_points_density() {
-    let paint = serde_json::json!({
-        "heatmap-radius": 20,
-        "heatmap-intensity": UNIT_INTENSITY,
-        "heatmap-weight": ["get", "mag"]
-    });
-    let points = [
-        (CENTRE.0 - 400, CENTRE.1, 0.25),
-        (CENTRE.0 + 400, CENTRE.1, 1.0),
-    ];
-    let bytes = rendered(heatmap_style(paint), &points).await;
-    assert_close(
-        pixel(&bytes, SIZE / 2 - 50, SIZE / 2),
-        over_white(ramp_at(0.25), 1.0),
-        6,
-        "weight 0.25",
-    );
-    assert_close(
-        pixel(&bytes, SIZE / 2 + 50, SIZE / 2),
-        over_white(ramp_at(1.0), 1.0),
-        6,
-        "weight 1",
-    );
+#[test]
+fn heatmap_opacity_fades_the_layer_into_the_background() {
+    crate::headless::map::test_async::run_async(async {
+        let paint = serde_json::json!({
+            "heatmap-radius": 40, "heatmap-intensity": UNIT_INTENSITY, "heatmap-opacity": 0.5
+        });
+        let bytes = rendered(heatmap_style(paint), &[(CENTRE.0, CENTRE.1, 1.0)]).await;
+        assert_close(
+            pixel(&bytes, SIZE / 2, SIZE / 2),
+            over_white(ramp_at(1.0), 0.5),
+            4,
+            "half-opaque centre",
+        );
+    })
 }
 
-#[tokio::test]
-async fn heatmap_opacity_fades_the_layer_into_the_background() {
-    let paint = serde_json::json!({
-        "heatmap-radius": 40, "heatmap-intensity": UNIT_INTENSITY, "heatmap-opacity": 0.5
-    });
-    let bytes = rendered(heatmap_style(paint), &[(CENTRE.0, CENTRE.1, 1.0)]).await;
-    assert_close(
-        pixel(&bytes, SIZE / 2, SIZE / 2),
-        over_white(ramp_at(1.0), 0.5),
-        4,
-        "half-opaque centre",
-    );
-}
-
-#[tokio::test]
-async fn radius_and_intensity_are_evaluated_at_the_view_zoom() {
-    // At zoom 12 the stops give radius 40 and intensity of exactly one unit density.
-    let paint = serde_json::json!({
-        "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 0, 0, 24, 80],
-        "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 0, 0, 24, 2.0 * UNIT_INTENSITY]
-    });
-    let bytes = rendered(heatmap_style(paint), &[(CENTRE.0, CENTRE.1, 1.0)]).await;
-    assert_close(
-        pixel(&bytes, SIZE / 2, SIZE / 2),
-        over_white(ramp_at(1.0), 1.0),
-        3,
-        "intensity at zoom 12",
-    );
-    assert_close(
-        pixel(&bytes, SIZE / 2 + 20, SIZE / 2),
-        over_white(ramp_at(kernel(20.5 / 40.0)), 1.0),
-        8,
-        "radius 40 at zoom 12",
-    );
-    assert_eq!(pixel(&bytes, SIZE / 2 + 60, SIZE / 2), [255, 255, 255, 255]);
+#[test]
+fn radius_and_intensity_are_evaluated_at_the_view_zoom() {
+    crate::headless::map::test_async::run_async(async {
+        // At zoom 12 the stops give radius 40 and intensity of exactly one unit density.
+        let paint = serde_json::json!({
+            "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 0, 0, 24, 80],
+            "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 0, 0, 24, 2.0 * UNIT_INTENSITY]
+        });
+        let bytes = rendered(heatmap_style(paint), &[(CENTRE.0, CENTRE.1, 1.0)]).await;
+        assert_close(
+            pixel(&bytes, SIZE / 2, SIZE / 2),
+            over_white(ramp_at(1.0), 1.0),
+            3,
+            "intensity at zoom 12",
+        );
+        assert_close(
+            pixel(&bytes, SIZE / 2 + 20, SIZE / 2),
+            over_white(ramp_at(kernel(20.5 / 40.0)), 1.0),
+            8,
+            "radius 40 at zoom 12",
+        );
+        assert_eq!(pixel(&bytes, SIZE / 2 + 60, SIZE / 2), [255, 255, 255, 255]);
+    })
 }
 
 /// A tile with the points and a polygon covering the whole tile, for layer-order fixtures.
@@ -355,89 +367,95 @@ async fn layered(order: [&str; 2]) -> Vec<u8> {
     read_blocking(&map, "heatmap-order")
 }
 
-#[tokio::test]
-async fn a_heatmap_composites_at_its_place_in_the_style_order() {
-    let over_land = layered(["land", "heat"]).await;
-    assert_close(
-        pixel(&over_land, SIZE / 2, SIZE / 2),
-        {
-            // The ramp's last colour is opaque red, so it replaces the land beneath.
-            [255, 0, 0]
-        },
-        3,
-        "a heatmap above the land",
-    );
-    assert_close(
-        pixel(&over_land, SIZE / 2 + 80, SIZE / 2),
-        [0, 0, 255],
-        2,
-        "the land shows beyond the kernel",
-    );
-    // GL JS draws opaque fills in a depth-writing pass ahead of its translucent layers, and the
-    // heatmap composite ignores depth, so it shows even over opaque land above it.
-    let under_land = layered(["heat", "land"]).await;
-    assert_close(
-        pixel(&under_land, SIZE / 2, SIZE / 2),
-        [255, 0, 0],
-        3,
-        "a heatmap below opaque land still shows over it, as in GL JS",
-    );
-    assert_close(
-        pixel(&under_land, SIZE / 2 + 80, SIZE / 2),
-        [0, 0, 255],
-        2,
-        "the land shows beyond the kernel",
-    );
+#[test]
+fn a_heatmap_composites_at_its_place_in_the_style_order() {
+    crate::headless::map::test_async::run_async(async {
+        let over_land = layered(["land", "heat"]).await;
+        assert_close(
+            pixel(&over_land, SIZE / 2, SIZE / 2),
+            {
+                // The ramp's last colour is opaque red, so it replaces the land beneath.
+                [255, 0, 0]
+            },
+            3,
+            "a heatmap above the land",
+        );
+        assert_close(
+            pixel(&over_land, SIZE / 2 + 80, SIZE / 2),
+            [0, 0, 255],
+            2,
+            "the land shows beyond the kernel",
+        );
+        // GL JS draws opaque fills in a depth-writing pass ahead of its translucent layers, and the
+        // heatmap composite ignores depth, so it shows even over opaque land above it.
+        let under_land = layered(["heat", "land"]).await;
+        assert_close(
+            pixel(&under_land, SIZE / 2, SIZE / 2),
+            [255, 0, 0],
+            3,
+            "a heatmap below opaque land still shows over it, as in GL JS",
+        );
+        assert_close(
+            pixel(&under_land, SIZE / 2 + 80, SIZE / 2),
+            [0, 0, 255],
+            2,
+            "the land shows beyond the kernel",
+        );
+    })
 }
 
-#[tokio::test]
-async fn a_geojson_source_draws_a_heatmap_like_a_vector_tile() {
-    let style = heatmap_style(serde_json::json!({
-        "heatmap-radius": 40, "heatmap-intensity": UNIT_INTENSITY
-    }));
-    let centre = style.center.expect("centre");
-    let layer = style
-        .layers
-        .iter()
-        .find(|layer| layer.id == "heat")
-        .expect("heatmap layer")
-        .clone();
-    let processed = crate::headless::map::process_geojson_layers(
-        &serde_json::json!({"type":"Feature","properties":{},
+#[test]
+fn a_geojson_source_draws_a_heatmap_like_a_vector_tile() {
+    crate::headless::map::test_async::run_async(async {
+        let style = heatmap_style(serde_json::json!({
+            "heatmap-radius": 40, "heatmap-intensity": UNIT_INTENSITY
+        }));
+        let centre = style.center.expect("centre");
+        let layer = style
+            .layers
+            .iter()
+            .find(|layer| layer.id == "heat")
+            .expect("heatmap layer")
+            .clone();
+        let processed = crate::headless::map::process_geojson_layers(
+            &serde_json::json!({"type":"Feature","properties":{},
             "geometry":{"type":"Point","coordinates":[centre[0], centre[1]]}}),
-        "points",
-        vec![layer],
-        target(),
-        crate::projection::ProjectionType::default(),
-    )
-    .expect("geojson layers");
-    let bytes = render_processed(style, processed).await;
-    assert_close(
-        pixel(&bytes, SIZE / 2, SIZE / 2),
-        over_white(ramp_at(1.0), 1.0),
-        4,
-        "a GeoJSON point at the centre",
-    );
+            "points",
+            vec![layer],
+            target(),
+            crate::projection::ProjectionType::default(),
+        )
+        .expect("geojson layers");
+        let bytes = render_processed(style, processed).await;
+        assert_close(
+            pixel(&bytes, SIZE / 2, SIZE / 2),
+            over_white(ramp_at(1.0), 1.0),
+            4,
+            "a GeoJSON point at the centre",
+        );
+    })
 }
 
-#[tokio::test]
-async fn a_strong_point_keeps_its_kernel_tail_past_the_radius() {
-    // Eight units of strength leave a visible density 1.1 radii out; a quad cut at one radius
-    // would end there in a ring.
-    let paint = serde_json::json!({
-        "heatmap-radius": 40, "heatmap-intensity": 8.0 * UNIT_INTENSITY
-    });
-    let bytes = rendered(heatmap_style(paint), &[(CENTRE.0, CENTRE.1, 1.0)]).await;
-    let pixels = 44_u32;
-    let density = 8.0 * kernel((f64::from(pixels) + 0.5) / 40.0);
-    assert_close(
-        pixel(&bytes, SIZE / 2 + pixels, SIZE / 2),
-        over_white(ramp_at(density), 1.0),
-        10,
-        "1.1 radii from a strong point",
-    );
-    assert_ne!(
-        pixel(&bytes, SIZE / 2 + pixels, SIZE / 2),
-        [255, 255, 255, 255]
-    );
+#[test]
+fn a_strong_point_keeps_its_kernel_tail_past_the_radius() {
+    crate::headless::map::test_async::run_async(async {
+        // Eight units of strength leave a visible density 1.1 radii out; a quad cut at one radius
+        // would end there in a ring.
+        let paint = serde_json::json!({
+            "heatmap-radius": 40, "heatmap-intensity": 8.0 * UNIT_INTENSITY
+        });
+        let bytes = rendered(heatmap_style(paint), &[(CENTRE.0, CENTRE.1, 1.0)]).await;
+        let pixels = 44_u32;
+        let density = 8.0 * kernel((f64::from(pixels) + 0.5) / 40.0);
+        assert_close(
+            pixel(&bytes, SIZE / 2 + pixels, SIZE / 2),
+            over_white(ramp_at(density), 1.0),
+            10,
+            "1.1 radii from a strong point",
+        );
+        assert_ne!(
+            pixel(&bytes, SIZE / 2 + pixels, SIZE / 2),
+            [255, 255, 255, 255]
+        );
+    })
 }

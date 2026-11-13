@@ -52,93 +52,97 @@ fn settle(map: &mut HeadlessMap) -> bool {
     !map.needs_redraw()
 }
 
-#[tokio::test]
-async fn a_settled_map_needs_a_frame_only_after_its_camera_or_style_changes() {
-    let mut map = raster_map().await;
-    assert!(
-        map.needs_redraw(),
-        "a map that has never drawn needs a frame"
-    );
-    map.render_frames_with_terrain(Default::default(), vec![picture()], vec![], 2)
-        .expect("frames");
-    assert!(settle(&mut map), "a still map settles");
+#[test]
+fn a_settled_map_needs_a_frame_only_after_its_camera_or_style_changes() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = raster_map().await;
+        assert!(
+            map.needs_redraw(),
+            "a map that has never drawn needs a frame"
+        );
+        map.render_frames_with_terrain(Default::default(), vec![picture()], vec![], 2)
+            .expect("frames");
+        assert!(settle(&mut map), "a still map settles");
 
-    let camera = map.view_state().camera().position();
-    map.view_state_mut()
-        .camera_mut()
-        .move_to(cgmath::Point2::new(camera.x + 10.0, camera.y));
-    assert!(map.needs_redraw(), "a moved camera needs a frame");
-    assert!(settle(&mut map));
+        let camera = map.view_state().camera().position();
+        map.view_state_mut()
+            .camera_mut()
+            .move_to(cgmath::Point2::new(camera.x + 10.0, camera.y));
+        assert!(map.needs_redraw(), "a moved camera needs a frame");
+        assert!(settle(&mut map));
 
-    map.mutate_style(|style| {
+        map.mutate_style(|style| {
         style.add_layer(
             serde_json::json!({"id": "bg", "type": "background", "paint": {"background-color": "#00f"}}),
             Some("pic"),
         )
     })
     .expect("style change");
-    assert!(map.needs_redraw(), "a style change needs a frame");
-    assert!(settle(&mut map));
+        assert!(map.needs_redraw(), "a style change needs a frame");
+        assert!(settle(&mut map));
 
-    map.set_terrain_skirts(Default::default());
-    assert!(map.needs_redraw(), "a rendering setting needs a frame");
-    assert!(settle(&mut map));
+        map.set_terrain_skirts(Default::default());
+        assert!(map.needs_redraw(), "a rendering setting needs a frame");
+        assert!(settle(&mut map));
 
-    map.resize(crate::window::PhysicalSize::new(64, 64).expect("size"));
-    assert!(
-        map.needs_redraw(),
-        "a new surface needs a frame even at the same size"
-    );
-    assert!(settle(&mut map));
+        map.resize(crate::window::PhysicalSize::new(64, 64).expect("size"));
+        assert!(
+            map.needs_redraw(),
+            "a new surface needs a frame even at the same size"
+        );
+        assert!(settle(&mut map));
+    })
 }
 
-#[tokio::test]
-async fn frame_statistics_count_the_work_of_each_frame() {
-    let mut map = raster_map().await;
-    map.render_frames_with_terrain(Default::default(), vec![picture()], vec![], 1)
-        .expect("frame");
-    let loading = map.last_frame_stats();
-    assert!(
-        loading.upload_bytes >= 32 * 32 * 4,
-        "the new tile's texture is uploaded: {loading:?}"
-    );
-    assert!(loading.draws > 0, "{loading:?}");
-    for stage in ["Input", "Prepare", "Queue", "Render"] {
+#[test]
+fn frame_statistics_count_the_work_of_each_frame() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = raster_map().await;
+        map.render_frames_with_terrain(Default::default(), vec![picture()], vec![], 1)
+            .expect("frame");
+        let loading = map.last_frame_stats();
         assert!(
-            loading.stages.iter().any(|(name, _)| &**name == stage),
-            "{stage} is timed: {:?}",
-            loading.stages
+            loading.upload_bytes >= 32 * 32 * 4,
+            "the new tile's texture is uploaded: {loading:?}"
         );
-    }
-    map.run_frame().expect("still frame");
-    let still = map.last_frame_stats();
-    assert_eq!(still.frame, loading.frame + 1);
-    assert!(
-        still.upload_bytes < 32 * 32 * 4,
-        "a still frame uploads no tile again: {still:?}"
-    );
-    assert_eq!(still.drape_redraws, 0);
-    if map
-        .device()
-        .features()
-        .contains(wgpu::Features::TIMESTAMP_QUERY)
-    {
-        // The readback lands a frame or more later; waiting keeps that bound off a busy GPU.
-        let timed = (0..4).any(|_| {
-            map.device()
-                .poll(wgpu::PollType::wait_indefinitely())
-                .expect("device poll");
-            map.render_source_frames(Default::default(), vec![picture()], 1)
-                .expect("frame");
-            map.last_frame_stats()
-                .gpu
-                .is_some_and(|spent| spent > std::time::Duration::ZERO)
-        });
+        assert!(loading.draws > 0, "{loading:?}");
+        for stage in ["Input", "Prepare", "Queue", "Render"] {
+            assert!(
+                loading.stages.iter().any(|(name, _)| &**name == stage),
+                "{stage} is timed: {:?}",
+                loading.stages
+            );
+        }
+        map.run_frame().expect("still frame");
+        let still = map.last_frame_stats();
+        assert_eq!(still.frame, loading.frame + 1);
         assert!(
-            timed,
-            "a device with timestamps reports the main pass's GPU time"
+            still.upload_bytes < 32 * 32 * 4,
+            "a still frame uploads no tile again: {still:?}"
         );
-    }
+        assert_eq!(still.drape_redraws, 0);
+        if map
+            .device()
+            .features()
+            .contains(wgpu::Features::TIMESTAMP_QUERY)
+        {
+            // The readback lands a frame or more later; waiting keeps that bound off a busy GPU.
+            let timed = (0..4).any(|_| {
+                map.device()
+                    .poll(wgpu::PollType::wait_indefinitely())
+                    .expect("device poll");
+                map.render_source_frames(Default::default(), vec![picture()], 1)
+                    .expect("frame");
+                map.last_frame_stats()
+                    .gpu
+                    .is_some_and(|spent| spent > std::time::Duration::ZERO)
+            });
+            assert!(
+                timed,
+                "a device with timestamps reports the main pass's GPU time"
+            );
+        }
+    })
 }
 
 fn spend_twenty_milliseconds(
@@ -148,42 +152,44 @@ fn spend_twenty_milliseconds(
     Ok(())
 }
 
-#[tokio::test]
-async fn a_stage_is_charged_the_time_its_systems_take() {
-    use crate::render::RenderStageLabel;
-    let mut map = raster_map().await;
-    map.render_sources(Default::default(), vec![picture()])
-        .expect("loading frame");
-    assert!(settle(&mut map));
-    let twenty = std::time::Duration::from_millis(20);
-    let mut slowed = Vec::new();
-    for (label, name) in [
-        (RenderStageLabel::Input, "Input"),
-        (RenderStageLabel::Prepare, "Prepare"),
-        (RenderStageLabel::Queue, "Queue"),
-        (RenderStageLabel::Render, "Render"),
-    ] {
-        map.schedule
-            .add_system_to_stage(label, spend_twenty_milliseconds)
-            .expect("schedule");
-        slowed.push(name);
-        let started = std::time::Instant::now();
-        map.run_frame().expect("slow frame");
-        let frame = started.elapsed();
-        let stats = map.last_frame_stats();
-        for stage in &slowed {
-            let spent = stats
-                .stages
-                .iter()
-                .find(|(name, _)| &**name == *stage)
-                .map(|(_, spent)| *spent)
-                .expect("stage timed");
-            assert!(spent >= twenty, "{stage} is not charged: {stats:?}");
+#[test]
+fn a_stage_is_charged_the_time_its_systems_take() {
+    crate::headless::map::test_async::run_async(async {
+        use crate::render::RenderStageLabel;
+        let mut map = raster_map().await;
+        map.render_sources(Default::default(), vec![picture()])
+            .expect("loading frame");
+        assert!(settle(&mut map));
+        let twenty = std::time::Duration::from_millis(20);
+        let mut slowed = Vec::new();
+        for (label, name) in [
+            (RenderStageLabel::Input, "Input"),
+            (RenderStageLabel::Prepare, "Prepare"),
+            (RenderStageLabel::Queue, "Queue"),
+            (RenderStageLabel::Render, "Render"),
+        ] {
+            map.schedule
+                .add_system_to_stage(label, spend_twenty_milliseconds)
+                .expect("schedule");
+            slowed.push(name);
+            let started = std::time::Instant::now();
+            map.run_frame().expect("slow frame");
+            let frame = started.elapsed();
+            let stats = map.last_frame_stats();
+            for stage in &slowed {
+                let spent = stats
+                    .stages
+                    .iter()
+                    .find(|(name, _)| &**name == *stage)
+                    .map(|(_, spent)| *spent)
+                    .expect("stage timed");
+                assert!(spent >= twenty, "{stage} is not charged: {stats:?}");
+            }
+            // Stages run one after another inside the frame, so time charged to two stages would
+            // add up to more than the frame took, however loaded the machine is.
+            assert!(stats.cpu() <= frame, "{frame:?} < {stats:?}");
         }
-        // Stages run one after another inside the frame, so time charged to two stages would
-        // add up to more than the frame took, however loaded the machine is.
-        assert!(stats.cpu() <= frame, "{frame:?} < {stats:?}");
-    }
+    })
 }
 
 /// A 1024² map of `layers` translucent backgrounds, on a device that can time passes.
@@ -231,273 +237,256 @@ fn gpu_time_of_frame(map: &mut HeadlessMap) -> Option<std::time::Duration> {
     map.last_frame_stats().gpu
 }
 
-#[tokio::test]
-async fn gpu_time_grows_with_the_work_a_frame_draws() {
-    let (Some(mut light), Some(mut heavy)) = (heavy_map(1).await, heavy_map(96).await) else {
-        return;
-    };
-    // Work other processes give the GPU between a frame's timestamps only adds to its time,
-    // so the shortest of several frames is the frame's own work; taking the two maps' frames
-    // in turn puts both under the same load.
-    let (mut light_times, mut heavy_times) = (Vec::new(), Vec::new());
-    for _ in 0..12 {
-        light_times.extend(gpu_time_of_frame(&mut light));
-        heavy_times.extend(gpu_time_of_frame(&mut heavy));
-    }
-    let (Some(&light), Some(&heavy)) = (light_times.iter().min(), heavy_times.iter().min()) else {
-        return;
-    };
-    assert!(
-        heavy > std::time::Duration::from_micros(20),
-        "covering a large target 96 times takes measurable GPU time: {heavy:?}"
-    );
-    assert!(
-        heavy > light * 4,
-        "96 layers take far longer than one: {heavy:?} against {light:?}"
-    );
+#[test]
+fn gpu_time_grows_with_the_work_a_frame_draws() {
+    crate::headless::map::test_async::run_async(async {
+        let (Some(mut light), Some(mut heavy)) = (heavy_map(1).await, heavy_map(96).await) else {
+            return;
+        };
+        // Work other processes give the GPU between a frame's timestamps only adds to its time,
+        // so the shortest of several frames is the frame's own work; taking the two maps' frames
+        // in turn puts both under the same load.
+        let (mut light_times, mut heavy_times) = (Vec::new(), Vec::new());
+        for _ in 0..12 {
+            light_times.extend(gpu_time_of_frame(&mut light));
+            heavy_times.extend(gpu_time_of_frame(&mut heavy));
+        }
+        let (Some(&light), Some(&heavy)) = (light_times.iter().min(), heavy_times.iter().min())
+        else {
+            return;
+        };
+        assert!(
+            heavy > std::time::Duration::from_micros(20),
+            "covering a large target 96 times takes measurable GPU time: {heavy:?}"
+        );
+        assert!(
+            heavy > light * 4,
+            "96 layers take far longer than one: {heavy:?} against {light:?}"
+        );
+    })
 }
 
-#[tokio::test]
-async fn a_frame_trace_collects_each_frame_with_the_host_s_spans() {
-    use crate::render::frame_trace::Clock;
-    let mut map = raster_map().await;
-    map.enable_frame_trace(4);
-    for index in 0..6_u64 {
-        map.render_source_frames(Default::default(), vec![picture()], 1)
-            .expect("frame");
-        let frame = map.last_frame_stats().host_frame;
-        let trace = map.frame_trace_mut().expect("trace");
-        trace.record_span(
-            frame,
-            "overlay",
-            Clock::Gpu,
-            std::time::Duration::from_micros(index),
+#[test]
+fn a_frame_trace_collects_each_frame_with_the_host_s_spans() {
+    crate::headless::map::test_async::run_async(async {
+        use crate::render::frame_trace::Clock;
+        let mut map = raster_map().await;
+        map.enable_frame_trace(4);
+        for index in 0..6_u64 {
+            map.render_source_frames(Default::default(), vec![picture()], 1)
+                .expect("frame");
+            let frame = map.last_frame_stats().host_frame;
+            let trace = map.frame_trace_mut().expect("trace");
+            trace.record_span(
+                frame,
+                "overlay",
+                Clock::Gpu,
+                std::time::Duration::from_micros(index),
+            );
+        }
+        let export = map.frame_trace_mut().expect("trace").export();
+        assert_eq!(export.frames.len(), 4, "the window keeps the last frames");
+        // GPU times arriving for frames already pushed out are dropped records too.
+        assert!(
+            export.summary.dropped >= 2,
+            "the frames pushed out are counted: {}",
+            export.summary.dropped
         );
-    }
-    let export = map.frame_trace_mut().expect("trace").export();
-    assert_eq!(export.frames.len(), 4, "the window keeps the last frames");
-    // GPU times arriving for frames already pushed out are dropped records too.
-    assert!(
-        export.summary.dropped >= 2,
-        "the frames pushed out are counted: {}",
-        export.summary.dropped
-    );
-    let first = &export.frames[0];
-    assert!(
-        first
+        let first = &export.frames[0];
+        assert!(
+            first
+                .spans
+                .iter()
+                .any(|span| span.name == "Render" && span.clock == Clock::Cpu),
+            "the map's stages land in its frame: {first:?}"
+        );
+        assert!(first
             .spans
             .iter()
-            .any(|span| span.name == "Render" && span.clock == Clock::Cpu),
-        "the map's stages land in its frame: {first:?}"
-    );
-    assert!(first
-        .spans
-        .iter()
-        .any(|span| span.name == "overlay" && span.clock == Clock::Gpu));
-    assert!(export.summary.spans.contains_key("cpu/Prepare"));
+            .any(|span| span.name == "overlay" && span.clock == Clock::Gpu));
+        assert!(export.summary.spans.contains_key("cpu/Prepare"));
+    })
 }
 
 /// Frame CPU time with and without a frame trace, interleaved so drift hits both alike. Run
 /// with `cargo test --release -p maplibre -p render-tests -- --ignored frame_trace_overhead`.
-#[tokio::test]
+#[test]
 #[ignore = "a timing comparison for release builds"]
-async fn frame_trace_overhead() {
-    use crate::render::{
-        frame_signals::FrameStats,
-        frame_trace::{Clock, Percentiles},
-    };
-    let mut map = raster_map().await;
-    map.render_source_frames(Default::default(), vec![picture()], 8)
-        .expect("warm-up");
-    let (mut plain, mut traced) = (Vec::new(), Vec::new());
-    for round in 0..400 {
-        let tracing = round % 2 == 1;
-        if tracing {
-            map.enable_frame_trace(64);
-        } else {
-            map.disable_frame_trace();
-        }
-        let start = std::time::Instant::now();
-        map.run_frame().expect("frame");
-        let frame = map.last_frame_stats().host_frame;
-        if let Some(trace) = map.frame_trace_mut() {
-            trace.record_span(frame, "queue-wait", Clock::Cpu, start.elapsed());
-        }
-        let spent = start.elapsed();
-        if tracing {
-            traced.push(spent);
-        } else {
-            plain.push(spent);
-        }
-    }
-    let (plain, traced) = (
-        Percentiles::of(plain).expect("plain"),
-        Percentiles::of(traced).expect("traced"),
-    );
-    let overhead = traced.p95.as_secs_f64() / plain.p95.as_secs_f64() - 1.0;
-    println!(
-        "plain {plain:?} traced {traced:?} p95 overhead {:.2}%",
-        overhead * 100.0
-    );
-    // Frames this small swing by microseconds, so the recorder's own cost per frame, timed
-    // over many frames, is what bounds it against the frame time.
-    let stats = map.last_frame_stats();
-    let mut trace = crate::render::frame_trace::FrameTrace::new(64);
-    let rounds = 10_000_u32;
-    let start = std::time::Instant::now();
-    for frame in 0..u64::from(rounds) {
-        let stats = FrameStats {
-            frame,
-            ..stats.clone()
+fn frame_trace_overhead() {
+    crate::headless::map::test_async::run_async(async {
+        use crate::render::{
+            frame_signals::FrameStats,
+            frame_trace::{Clock, Percentiles},
         };
-        trace.record_map_frame(&stats);
-        trace.record_span(frame, "queue-wait", Clock::Cpu, plain.p50);
-    }
-    let per_frame = start.elapsed() / rounds;
-    let share = per_frame.as_secs_f64() / plain.p95.as_secs_f64();
-    println!(
-        "recorder {per_frame:?} per frame, {:.3}% of the plain p95",
-        share * 100.0
-    );
-    assert!(share < 0.02, "recording costs under 2% of a frame's p95");
+        let mut map = raster_map().await;
+        map.render_source_frames(Default::default(), vec![picture()], 8)
+            .expect("warm-up");
+        let (mut plain, mut traced) = (Vec::new(), Vec::new());
+        for round in 0..400 {
+            let tracing = round % 2 == 1;
+            if tracing {
+                map.enable_frame_trace(64);
+            } else {
+                map.disable_frame_trace();
+            }
+            let start = std::time::Instant::now();
+            map.run_frame().expect("frame");
+            let frame = map.last_frame_stats().host_frame;
+            if let Some(trace) = map.frame_trace_mut() {
+                trace.record_span(frame, "queue-wait", Clock::Cpu, start.elapsed());
+            }
+            let spent = start.elapsed();
+            if tracing {
+                traced.push(spent);
+            } else {
+                plain.push(spent);
+            }
+        }
+        let (plain, traced) = (
+            Percentiles::of(plain).expect("plain"),
+            Percentiles::of(traced).expect("traced"),
+        );
+        let overhead = traced.p95.as_secs_f64() / plain.p95.as_secs_f64() - 1.0;
+        println!(
+            "plain {plain:?} traced {traced:?} p95 overhead {:.2}%",
+            overhead * 100.0
+        );
+        // Frames this small swing by microseconds, so the recorder's own cost per frame, timed
+        // over many frames, is what bounds it against the frame time.
+        let stats = map.last_frame_stats();
+        let mut trace = crate::render::frame_trace::FrameTrace::new(64);
+        let rounds = 10_000_u32;
+        let start = std::time::Instant::now();
+        for frame in 0..u64::from(rounds) {
+            let stats = FrameStats {
+                frame,
+                ..stats.clone()
+            };
+            trace.record_map_frame(&stats);
+            trace.record_span(frame, "queue-wait", Clock::Cpu, plain.p50);
+        }
+        let per_frame = start.elapsed() / rounds;
+        let share = per_frame.as_secs_f64() / plain.p95.as_secs_f64();
+        println!(
+            "recorder {per_frame:?} per frame, {:.3}% of the plain p95",
+            share * 100.0
+        );
+        assert!(share < 0.02, "recording costs under 2% of a frame's p95");
+    })
 }
 
-#[tokio::test]
-async fn the_main_pass_gpu_time_lands_in_the_frame_it_timed() {
-    // A pass heavy enough that its start and end timestamps always differ.
-    let Some(mut map) = heavy_map(32).await else {
-        return;
-    };
-    map.enable_frame_trace(64);
-    let timed = |map: &mut HeadlessMap| -> Vec<u64> {
-        map.frame_trace_mut()
-            .expect("trace")
-            .peek()
-            .frames
-            .iter()
-            .filter(|record| record.spans.iter().any(|span| span.name == "map"))
-            .map(|record| record.frame)
-            .collect()
-    };
-    let mut arrivals = 0;
-    // Only frames the timer could claim come back, fewer on a loaded machine.
-    for _ in 0..120 {
-        let before = timed(&mut map);
-        map.render_source_frames(Default::default(), Vec::new(), 1)
-            .expect("frame");
-        let drawing = map.last_frame_stats().host_frame;
-        for frame in timed(&mut map)
-            .into_iter()
-            .filter(|frame| !before.contains(frame))
-        {
-            arrivals += 1;
-            assert!(
+#[test]
+fn the_main_pass_gpu_time_lands_in_the_frame_it_timed() {
+    crate::headless::map::test_async::run_async(async {
+        // A pass heavy enough that its start and end timestamps always differ.
+        let Some(mut map) = heavy_map(32).await else {
+            return;
+        };
+        map.enable_frame_trace(64);
+        let timed = |map: &mut HeadlessMap| -> Vec<u64> {
+            map.frame_trace_mut()
+                .expect("trace")
+                .peek()
+                .frames
+                .iter()
+                .filter(|record| record.spans.iter().any(|span| span.name == "map"))
+                .map(|record| record.frame)
+                .collect()
+        };
+        let mut arrivals = 0;
+        // Only frames the timer could claim come back, fewer on a loaded machine.
+        for _ in 0..120 {
+            let before = timed(&mut map);
+            map.render_source_frames(Default::default(), Vec::new(), 1)
+                .expect("frame");
+            let drawing = map.last_frame_stats().host_frame;
+            for frame in timed(&mut map)
+                .into_iter()
+                .filter(|frame| !before.contains(frame))
+            {
+                arrivals += 1;
+                assert!(
                 frame < drawing,
                 "a time read back while drawing frame {drawing} measured an earlier frame, not {frame}"
             );
+            }
+            // The readback is mapped before a later frame takes it.
+            map.device()
+                .poll(wgpu::PollType::wait_indefinitely())
+                .expect("device poll");
+            if arrivals >= 3 {
+                break;
+            }
         }
-        // The readback is mapped before a later frame takes it.
-        map.device()
-            .poll(wgpu::PollType::wait_indefinitely())
-            .expect("device poll");
-        if arrivals >= 3 {
-            break;
-        }
-    }
-    assert!(arrivals >= 1, "a GPU time came back: {arrivals}");
+        assert!(arrivals >= 1, "a GPU time came back: {arrivals}");
+    })
 }
 
-#[tokio::test]
-async fn later_eyes_preserve_earlier_eye_animation_signals() {
-    use crate::render::eye_covering::EyeInFrame;
-    let mut map = raster_map().await;
-    map.render_frames_with_terrain(Default::default(), vec![picture()], vec![], 1)
-        .expect("frame");
-    assert!(settle(&mut map), "still map settles");
+#[test]
+fn later_eyes_preserve_earlier_eye_animation_signals() {
+    crate::headless::map::test_async::run_async(async {
+        use crate::render::eye_covering::EyeInFrame;
+        let mut map = raster_map().await;
+        map.render_frames_with_terrain(Default::default(), vec![picture()], vec![], 1)
+            .expect("frame");
+        assert!(settle(&mut map), "still map settles");
 
-    map.map_context
-        .world
-        .resources
-        .insert(EyeInFrame { index: 0, frame: 1 });
-    crate::render::frame_signals::keep_animating(&mut map.map_context.world);
-    crate::render::frame_signals::finish_frame(&mut map.map_context);
+        map.map_context
+            .world
+            .resources
+            .insert(EyeInFrame { index: 0, frame: 1 });
+        crate::render::frame_signals::keep_animating(&mut map.map_context.world);
+        crate::render::frame_signals::finish_frame(&mut map.map_context);
 
-    map.map_context
-        .world
-        .resources
-        .insert(EyeInFrame { index: 1, frame: 1 });
-    crate::render::frame_signals::finish_frame(&mut map.map_context);
-    assert!(
-        map.needs_redraw(),
-        "second eye must not clear first eye's animation signal"
-    );
-}
-
-#[tokio::test]
-async fn a_flight_asks_for_every_frame_until_it_lands_and_then_none() {
-    use std::time::Duration;
-
-    use crate::{
-        context::FlightOutcome,
-        render::view_state::{CameraOptions, FlightCurve},
-    };
-    let mut map = raster_map().await;
-    map.render_frames_with_terrain(Default::default(), vec![picture()], vec![], 1)
-        .expect("frame");
-    assert!(settle(&mut map), "a still map settles");
-
-    let flight = map.fly_to(
-        CameraOptions {
-            zoom: Some(2.0),
-            ..Default::default()
-        },
-        FlightCurve::Ease {
-            duration: Duration::from_millis(100),
-        },
-    );
-    let mut millis = 0;
-    while map.context().flight_outcome(flight) == FlightOutcome::Flying {
+        map.map_context
+            .world
+            .resources
+            .insert(EyeInFrame { index: 1, frame: 1 });
+        crate::render::frame_signals::finish_frame(&mut map.map_context);
         assert!(
             map.needs_redraw(),
-            "a flight in progress needs frame {millis}"
+            "second eye must not clear first eye's animation signal"
         );
-        millis += 16;
-        assert!(millis < 1000, "the flight lands");
-        map.frame_input_mut().timestamp = Duration::from_millis(millis);
-        map.run_frame().expect("frame");
-    }
-    assert_eq!(map.context().flight_outcome(flight), FlightOutcome::Arrived);
-    assert!(settle(&mut map), "the landed map stops asking for frames");
+    })
 }
 
-#[tokio::test]
-async fn has_ready_work_stays_false_while_network_fetches_merely_wait() {
-    use crate::io::tile_retry::{self, RequestKind};
-    let mut map = raster_map().await;
-    assert!(map.has_ready_work(), "initial frame is ready immediately");
-    map.render_frames_with_terrain(Default::default(), vec![picture()], vec![], 1)
-        .expect("frame");
-    assert!(settle(&mut map), "still map settles");
-    assert!(!map.has_ready_work(), "settled map has no ready work");
+#[test]
+fn a_flight_asks_for_every_frame_until_it_lands_and_then_none() {
+    crate::headless::map::test_async::run_async(async {
+        use std::time::Duration;
 
-    let coords = WorldTileCoords {
-        x: 1,
-        y: 0,
-        z: ZoomLevel::from(1),
-    };
-    tile_retry::started(
-        &mut map.map_context.world,
-        coords,
-        RequestKind::Raster,
-        1,
-        None,
-    );
-    assert!(
-        map.needs_redraw(),
-        "settle loops know a request is in flight"
-    );
-    assert!(
-        !map.has_ready_work(),
-        "in-flight network I/O without APC arrivals must not wake VSync hosts"
-    );
+        use crate::{
+            context::FlightOutcome,
+            render::view_state::{CameraOptions, FlightCurve},
+        };
+        let mut map = raster_map().await;
+        map.render_frames_with_terrain(Default::default(), vec![picture()], vec![], 1)
+            .expect("frame");
+        assert!(settle(&mut map), "a still map settles");
+
+        let flight = map.fly_to(
+            CameraOptions {
+                zoom: Some(2.0),
+                ..Default::default()
+            },
+            FlightCurve::Ease {
+                duration: Duration::from_millis(100),
+            },
+        );
+        let mut millis = 0;
+        while map.context().flight_outcome(flight) == FlightOutcome::Flying {
+            assert!(
+                map.needs_redraw(),
+                "a flight in progress needs frame {millis}"
+            );
+            millis += 16;
+            assert!(millis < 1000, "the flight lands");
+            map.frame_input_mut().timestamp = Duration::from_millis(millis);
+            map.run_frame().expect("frame");
+        }
+        assert_eq!(map.context().flight_outcome(flight), FlightOutcome::Arrived);
+        assert!(settle(&mut map), "the landed map stops asking for frames");
+    })
 }
+
+mod ready_work;

@@ -189,7 +189,8 @@ pub(super) struct Fixture {
 impl Fixture {
     pub async fn new(kind: Kind, multiple: bool) -> Self {
         let source = Source::new().await;
-        let http_client = ReqwestHttpClient::with_in_process_routes::<String>(None, source.routes());
+        let http_client =
+            ReqwestHttpClient::with_in_process_routes::<String>(None, source.routes());
         let calls = Calls {
             config: OffscreenKernelConfig {
                 loader: Some(crate::io::resource_loader::SharedLoader::new(

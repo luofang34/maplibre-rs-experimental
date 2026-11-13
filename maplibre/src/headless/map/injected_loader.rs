@@ -22,7 +22,7 @@ use crate::{
 #[derive(Clone, Default)]
 struct Recorder {
     urls: Arc<Mutex<Vec<String>>>,
-    fetched: Arc<tokio::sync::Notify>,
+    fetched: Arc<super::test_async::Notify>,
 }
 
 #[cfg_attr(not(feature = "thread-safe-futures"), async_trait::async_trait(?Send))]
@@ -93,92 +93,96 @@ async fn map_with(recorder: &Recorder) -> HeadlessMap {
     .expect("map")
 }
 
-#[tokio::test]
-async fn the_map_thread_and_tile_workers_fetch_through_the_injected_loader() {
-    let recorder = Recorder::default();
-    let mut map = map_with(&recorder).await;
-    map.fetch_tile(WorldTileCoords::default())
-        .await
-        .expect("map-thread fetch");
-    assert_eq!(recorder.urls.lock().expect("urls").len(), 1);
-    for _ in 0..20 {
-        if recorder.saw("https://worker.invalid/") {
-            break;
+#[test]
+fn the_map_thread_and_tile_workers_fetch_through_the_injected_loader() {
+    crate::headless::map::test_async::run_async(async {
+        let recorder = Recorder::default();
+        let mut map = map_with(&recorder).await;
+        map.fetch_tile(WorldTileCoords::default())
+            .await
+            .expect("map-thread fetch");
+        assert_eq!(recorder.urls.lock().expect("urls").len(), 1);
+        for _ in 0..20 {
+            if recorder.saw("https://worker.invalid/") {
+                break;
+            }
+            map.run_frame().expect("frame");
+            super::test_async::timeout(
+                std::time::Duration::from_secs(5),
+                recorder.fetched.notified(),
+            )
+            .await
+            .ok();
         }
-        map.run_frame().expect("frame");
-        tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            recorder.fetched.notified(),
-        )
-        .await
-        .ok();
-    }
-    assert!(
-        recorder.saw("https://worker.invalid/"),
-        "tile workers fetch through the host's loader: {:?}",
-        recorder.urls.lock().expect("urls")
-    );
+        assert!(
+            recorder.saw("https://worker.invalid/"),
+            "tile workers fetch through the host's loader: {:?}",
+            recorder.urls.lock().expect("urls")
+        );
+    })
 }
 
-#[tokio::test]
-async fn an_elevation_tile_fetched_through_the_loader_is_reported_ready() {
-    use crate::{io::tile_retry::RequestKind, render::frame_signals::ResourceReady};
-    let recorder = Recorder::default();
-    let (kernel, renderer) = create_headless_renderer_with_loader(
-        64,
-        64,
-        Default::default(),
-        SharedLoader::new(recorder.clone()),
-    )
-    .await
-    .expect("renderer");
-    let style: Style = serde_json::from_value(serde_json::json!({
-        "version": 8, "zoom": 2,
-        "sources": {"dem": {"type": "raster-dem", "encoding": "terrarium",
-            "tiles": ["https://dem.invalid/{z}/{x}/{y}.png"]}},
-        "terrain": {"source": "dem"},
-        "layers": [{"id": "bg", "type": "background"}]
-    }))
-    .expect("style");
-    let mut map = HeadlessMap::new(
-        style,
-        renderer,
-        kernel,
-        vec![
-            Box::new(RenderPlugin),
-            Box::new(crate::terrain::TerrainPlugin::<
-                crate::terrain::DefaultDemTransferables,
-            >::default()),
-        ],
-    )
-    .expect("map");
-    let mut ready = Vec::new();
-    for _ in 0..40 {
-        map.run_frame().expect("frame");
-        ready.extend(map.take_ready_resources());
-        if ready.iter().any(|resource| {
-            matches!(
-                resource,
-                ResourceReady::Tile {
-                    kind: RequestKind::Dem,
-                    loaded: true,
-                    ..
-                }
-            )
-        }) {
-            return;
-        }
-        tokio::time::timeout(
-            std::time::Duration::from_millis(200),
-            recorder.fetched.notified(),
+#[test]
+fn an_elevation_tile_fetched_through_the_loader_is_reported_ready() {
+    crate::headless::map::test_async::run_async(async {
+        use crate::{io::tile_retry::RequestKind, render::frame_signals::ResourceReady};
+        let recorder = Recorder::default();
+        let (kernel, renderer) = create_headless_renderer_with_loader(
+            64,
+            64,
+            Default::default(),
+            SharedLoader::new(recorder.clone()),
         )
         .await
-        .ok();
-    }
-    panic!(
-        "no elevation tile was reported ready: {ready:?}, fetched {:?}",
-        recorder.urls.lock().expect("urls")
-    );
+        .expect("renderer");
+        let style: Style = serde_json::from_value(serde_json::json!({
+            "version": 8, "zoom": 2,
+            "sources": {"dem": {"type": "raster-dem", "encoding": "terrarium",
+                "tiles": ["https://dem.invalid/{z}/{x}/{y}.png"]}},
+            "terrain": {"source": "dem"},
+            "layers": [{"id": "bg", "type": "background"}]
+        }))
+        .expect("style");
+        let mut map = HeadlessMap::new(
+            style,
+            renderer,
+            kernel,
+            vec![
+                Box::new(RenderPlugin),
+                Box::new(crate::terrain::TerrainPlugin::<
+                    crate::terrain::DefaultDemTransferables,
+                >::default()),
+            ],
+        )
+        .expect("map");
+        let mut ready = Vec::new();
+        for _ in 0..40 {
+            map.run_frame().expect("frame");
+            ready.extend(map.take_ready_resources());
+            if ready.iter().any(|resource| {
+                matches!(
+                    resource,
+                    ResourceReady::Tile {
+                        kind: RequestKind::Dem,
+                        loaded: true,
+                        ..
+                    }
+                )
+            }) {
+                return;
+            }
+            super::test_async::timeout(
+                std::time::Duration::from_millis(200),
+                recorder.fetched.notified(),
+            )
+            .await
+            .ok();
+        }
+        panic!(
+            "no elevation tile was reported ready: {ready:?}, fetched {:?}",
+            recorder.urls.lock().expect("urls")
+        );
+    })
 }
 
 /// Holds every fetch until the test ends, counting fetches begun and fetches dropped unfinished.
@@ -186,8 +190,8 @@ async fn an_elevation_tile_fetched_through_the_loader_is_reported_ready() {
 struct Stalled {
     urls: Arc<Mutex<Vec<String>>>,
     dropped: Arc<Mutex<Vec<String>>>,
-    entered: Arc<tokio::sync::Notify>,
-    never: Arc<tokio::sync::Notify>,
+    entered: Arc<super::test_async::Notify>,
+    never: Arc<super::test_async::Notify>,
 }
 
 struct Unfinished(String, Arc<Mutex<Vec<String>>>);
@@ -214,7 +218,7 @@ impl Stalled {
     async fn until_fetched(&self, count: usize) {
         while self.urls.lock().expect("urls").len() < count {
             let entered = self.entered.notified();
-            if tokio::time::timeout(std::time::Duration::from_secs(2), entered)
+            if super::test_async::timeout(std::time::Duration::from_secs(2), entered)
                 .await
                 .is_err()
             {
@@ -224,82 +228,84 @@ impl Stalled {
     }
 }
 
-#[tokio::test]
-async fn requests_for_tiles_out_of_view_stop_and_free_their_slots() {
-    use std::collections::HashSet;
+#[test]
+fn requests_for_tiles_out_of_view_stop_and_free_their_slots() {
+    crate::headless::map::test_async::run_async(async {
+        use std::collections::HashSet;
 
-    use crate::io::tile_backpressure::{tiles_in_flight, MAX_TILES_IN_FLIGHT};
-    let stalled = Stalled::default();
-    let (kernel, renderer) = create_headless_renderer_with_loader(
-        256,
-        256,
-        Default::default(),
-        SharedLoader::new(stalled.clone()),
-    )
-    .await
-    .expect("renderer");
-    let style: Style = serde_json::from_value(serde_json::json!({
-        "version": 8, "zoom": 5, "center": [-100, 40],
-        "sources": {"v": {"type": "vector",
-            "tiles": ["https://worker.invalid/{z}/{x}/{y}.pbf"]}},
-        "layers": [{"id": "roads", "type": "line", "source": "v", "source-layer": "roads"}]
-    }))
-    .expect("style");
-    let mut map = HeadlessMap::new(
-        style,
-        renderer,
-        kernel,
-        vec![
-            Box::new(RenderPlugin),
-            Box::new(VectorPlugin::<DefaultVectorTransferables>::default()),
-        ],
-    )
-    .expect("map");
-    map.run_frame().expect("first view");
-    stalled.until_fetched(MAX_TILES_IN_FLIGHT).await;
-    let first: HashSet<WorldTileCoords> = map
-        .world()
-        .tiles
-        .tiles
-        .values()
-        .map(|tile| tile.coords)
-        .collect();
-    assert_eq!(
-        tiles_in_flight(map.world()),
-        MAX_TILES_IN_FLIGHT,
-        "the first view's requests take every slot"
-    );
+        use crate::io::tile_backpressure::{tiles_in_flight, MAX_TILES_IN_FLIGHT};
+        let stalled = Stalled::default();
+        let (kernel, renderer) = create_headless_renderer_with_loader(
+            256,
+            256,
+            Default::default(),
+            SharedLoader::new(stalled.clone()),
+        )
+        .await
+        .expect("renderer");
+        let style: Style = serde_json::from_value(serde_json::json!({
+            "version": 8, "zoom": 5, "center": [-100, 40],
+            "sources": {"v": {"type": "vector",
+                "tiles": ["https://worker.invalid/{z}/{x}/{y}.pbf"]}},
+            "layers": [{"id": "roads", "type": "line", "source": "v", "source-layer": "roads"}]
+        }))
+        .expect("style");
+        let mut map = HeadlessMap::new(
+            style,
+            renderer,
+            kernel,
+            vec![
+                Box::new(RenderPlugin),
+                Box::new(VectorPlugin::<DefaultVectorTransferables>::default()),
+            ],
+        )
+        .expect("map");
+        map.run_frame().expect("first view");
+        stalled.until_fetched(MAX_TILES_IN_FLIGHT).await;
+        let first: HashSet<WorldTileCoords> = map
+            .world()
+            .tiles
+            .tiles
+            .values()
+            .map(|tile| tile.coords)
+            .collect();
+        assert_eq!(
+            tiles_in_flight(map.world()),
+            MAX_TILES_IN_FLIGHT,
+            "the first view's requests take every slot"
+        );
 
-    // Half the world away, nothing of the first view is wanted.
-    map.view_state_mut()
-        .camera_mut()
-        .move_relative(cgmath::Vector2::new(512.0 * 32.0 / 2.0, 0.0));
-    map.run_frame().expect("moved view");
-    map.run_frame().expect("following frame");
-    stalled.until_fetched(2 * MAX_TILES_IN_FLIGHT).await;
+        // Half the world away, nothing of the first view is wanted.
+        map.view_state_mut()
+            .camera_mut()
+            .move_relative(cgmath::Vector2::new(512.0 * 32.0 / 2.0, 0.0));
+        map.run_frame().expect("moved view");
+        map.run_frame().expect("following frame");
+        stalled.until_fetched(2 * MAX_TILES_IN_FLIGHT).await;
 
-    let resident: HashSet<WorldTileCoords> = map
-        .world()
-        .tiles
-        .tiles
-        .values()
-        .map(|tile| tile.coords)
-        .collect();
-    let kept: Vec<_> = first
-        .iter()
-        .filter(|coords| resident.contains(coords) && u8::from(coords.z) > 0)
-        .collect();
-    assert!(
-        kept.is_empty(),
-        "requests out of view are dropped: {kept:?}"
-    );
-    let dropped = stalled.dropped.lock().expect("dropped").len();
-    assert!(
-        dropped >= MAX_TILES_IN_FLIGHT - 1,
-        "their fetches stopped: {dropped} dropped"
-    );
-    assert!(
-        stalled.urls.lock().expect("urls").len() > MAX_TILES_IN_FLIGHT,
-        "the freed slots fetch the new view"
-    );
+        let resident: HashSet<WorldTileCoords> = map
+            .world()
+            .tiles
+            .tiles
+            .values()
+            .map(|tile| tile.coords)
+            .collect();
+        let kept: Vec<_> = first
+            .iter()
+            .filter(|coords| resident.contains(coords) && u8::from(coords.z) > 0)
+            .collect();
+        assert!(
+            kept.is_empty(),
+            "requests out of view are dropped: {kept:?}"
+        );
+        let dropped = stalled.dropped.lock().expect("dropped").len();
+        assert!(
+            dropped >= MAX_TILES_IN_FLIGHT - 1,
+            "their fetches stopped: {dropped} dropped"
+        );
+        assert!(
+            stalled.urls.lock().expect("urls").len() > MAX_TILES_IN_FLIGHT,
+            "the freed slots fetch the new view"
+        );
+    })
 }

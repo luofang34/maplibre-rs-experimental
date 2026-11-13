@@ -140,43 +140,45 @@ fn roll_turns_the_globe_camera_as_it_turns_the_flat_one() {
     }
 }
 
-#[tokio::test]
-async fn a_center_altitude_holds_without_terrain_and_the_pure_globe_orbits_it() {
-    // With the render plugin's own stages, and with the headless plugin that replaces them.
-    for headless in [false, true] {
-        let style = style(
-            r#"{"version":8,"center":[88.05,27.77],"centerAltitude":4200.5,"zoom":11.67,"pitch":60,
+#[test]
+fn a_center_altitude_holds_without_terrain_and_the_pure_globe_orbits_it() {
+    crate::headless::map::test_async::run_async(async {
+        // With the render plugin's own stages, and with the headless plugin that replaces them.
+        for headless in [false, true] {
+            let style = style(
+                r#"{"version":8,"center":[88.05,27.77],"centerAltitude":4200.5,"zoom":11.67,"pitch":60,
                 "projection":{"type":"vertical-perspective"},"sources":{},"layers":[]}"#,
-        );
-        let (kernel, renderer) = crate::headless::create_headless_renderer(64, 64, None)
-            .await
-            .expect("renderer");
-        let mut plugins: Vec<Box<dyn crate::plugin::Plugin<_>>> =
-            vec![Box::new(crate::render::RenderPlugin)];
-        if headless {
-            plugins.push(Box::new(crate::headless::HeadlessPlugin::new(false)));
+            );
+            let (kernel, renderer) = crate::headless::create_headless_renderer(64, 64, None)
+                .await
+                .expect("renderer");
+            let mut plugins: Vec<Box<dyn crate::plugin::Plugin<_>>> =
+                vec![Box::new(crate::render::RenderPlugin)];
+            if headless {
+                plugins.push(Box::new(crate::headless::HeadlessPlugin::new(false)));
+            }
+            let mut map =
+                super::super::HeadlessMap::new(style, renderer, kernel, plugins).expect("map");
+            // Whatever moved the center, each frame rests it at its altitude again.
+            map.map_context.view_state.set_center_elevation(0.0);
+            for _ in 0..3 {
+                map.run_frame().expect("frame");
+            }
+            assert_eq!(
+                map.view_state().center_elevation(),
+                4200.5,
+                "headless {headless}"
+            );
+            let camera = globe_camera_for_view(map.view_state()).expect("camera");
+            let expected = camera.body().unit_radius_at(4200.5);
+            assert!(
+                (camera.target().magnitude() - expected).abs() < 1e-12,
+                "headless {headless}: the globe camera orbits sea level"
+            );
+            map.set_vertical_field_of_view(Deg(50.0));
+            assert!((map.view_state().field_of_view().0.to_degrees() - 50.0).abs() < 1e-12);
         }
-        let mut map =
-            super::super::HeadlessMap::new(style, renderer, kernel, plugins).expect("map");
-        // Whatever moved the center, each frame rests it at its altitude again.
-        map.map_context.view_state.set_center_elevation(0.0);
-        for _ in 0..3 {
-            map.run_frame().expect("frame");
-        }
-        assert_eq!(
-            map.view_state().center_elevation(),
-            4200.5,
-            "headless {headless}"
-        );
-        let camera = globe_camera_for_view(map.view_state()).expect("camera");
-        let expected = camera.body().unit_radius_at(4200.5);
-        assert!(
-            (camera.target().magnitude() - expected).abs() < 1e-12,
-            "headless {headless}: the globe camera orbits sea level"
-        );
-        map.set_vertical_field_of_view(Deg(50.0));
-        assert!((map.view_state().field_of_view().0.to_degrees() - 50.0).abs() < 1e-12);
-    }
+    })
 }
 
 /// The screen direction, as an angle, in which the ground's up points at `location`: from the
@@ -219,31 +221,33 @@ fn roll_and_center_altitude_together_raise_the_target_and_tilt_the_horizon() {
     assert!(turned(1).signum() != turned(2).signum(), "{tilts:?}");
 }
 
-#[tokio::test]
-async fn whether_terrain_holds_the_center_follows_the_style_frame_by_frame() {
-    let (kernel, renderer) = crate::headless::create_headless_renderer(64, 64, None)
-        .await
-        .expect("renderer");
-    let mut map = super::super::HeadlessMap::new(
-        style(r#"{"version":8,"centerAltitude":3000,"sources":{},"layers":[]}"#),
-        renderer,
-        kernel,
-        vec![Box::new(crate::render::RenderPlugin)],
-    )
-    .expect("map");
-    map.run_frame().expect("frame");
-    assert!(!map.view_state().center_held_by_terrain());
-    map.map_context.style.terrain =
-        Some(serde_json::from_str(r#"{"source":"dem"}"#).expect("terrain"));
-    map.run_frame().expect("frame");
-    assert!(
-        map.view_state().center_held_by_terrain(),
-        "terrain added at runtime holds it"
-    );
-    map.map_context.style.terrain = None;
-    map.run_frame().expect("frame");
-    assert!(!map.view_state().center_held_by_terrain());
-    assert_eq!(map.view_state().center_elevation(), 3000.0);
+#[test]
+fn whether_terrain_holds_the_center_follows_the_style_frame_by_frame() {
+    crate::headless::map::test_async::run_async(async {
+        let (kernel, renderer) = crate::headless::create_headless_renderer(64, 64, None)
+            .await
+            .expect("renderer");
+        let mut map = super::super::HeadlessMap::new(
+            style(r#"{"version":8,"centerAltitude":3000,"sources":{},"layers":[]}"#),
+            renderer,
+            kernel,
+            vec![Box::new(crate::render::RenderPlugin)],
+        )
+        .expect("map");
+        map.run_frame().expect("frame");
+        assert!(!map.view_state().center_held_by_terrain());
+        map.map_context.style.terrain =
+            Some(serde_json::from_str(r#"{"source":"dem"}"#).expect("terrain"));
+        map.run_frame().expect("frame");
+        assert!(
+            map.view_state().center_held_by_terrain(),
+            "terrain added at runtime holds it"
+        );
+        map.map_context.style.terrain = None;
+        map.run_frame().expect("frame");
+        assert!(!map.view_state().center_held_by_terrain());
+        assert_eq!(map.view_state().center_elevation(), 3000.0);
+    })
 }
 
 #[test]

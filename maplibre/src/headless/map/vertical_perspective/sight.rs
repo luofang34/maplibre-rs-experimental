@@ -5,113 +5,116 @@ use super::*;
 
 /// Through [`HeadlessMap::drawn_terrain`], ground the frame draws is in sight of the camera,
 /// and ground nearer drawn ground covers on the screen is not.
-#[tokio::test]
-async fn drawn_terrain_sees_the_picked_ground_and_not_what_ridges_cover() {
-    use crate::terrain::sightline::{
-        pick_globe_terrain, target_view, TargetAltitude, TerrainPick, Visibility,
-    };
-    let scene = Scene {
-        meters: 1500.0,
-        relief: 600.0,
-        exaggeration: 1.0,
-        pitch: 80.0,
-        zoom: 11.67,
-    };
-    let mut hills = LevelMap::new(scene).await;
-    hills.settle(None).await;
-    let camera = globe_camera_for_view(hills.map.view_state()).expect("camera");
-    let terrain = hills
-        .map
-        .context()
-        .drawn_terrain(camera.body())
-        .expect("terrain drawn");
-    let mut picks = Vec::new();
-    for y in (HEIGHT / 3..HEIGHT).step_by(3) {
-        let pixel = Point2::new(f64::from(WIDTH / 2) + 0.5, f64::from(y) + 0.5);
-        if let TerrainPick::Ground(hit) = pick_globe_terrain(&camera, terrain, pixel) {
-            picks.push(crate::coords::LatLon::new(
-                (std::f64::consts::PI * (1.0 - 2.0 * hit.mercator.y))
-                    .sinh()
-                    .atan()
-                    .to_degrees(),
-                hit.mercator.x * 360.0 - 180.0,
-            ));
-        }
-    }
-    assert!(picks.len() > 100, "{} ground picks", picks.len());
-    let seen = |at| target_view(&camera, Some(terrain), at, TargetAltitude::OnGround).visibility;
-    let visible = picks
-        .iter()
-        .filter(|&&at| seen(at) == Visibility::Visible)
-        .count();
-    assert!(
-        visible * 100 >= picks.len() * 98,
-        "{visible} of {} picked points in sight",
-        picks.len()
-    );
-    // Over the picked region, ground is hidden exactly when the pick through its pixel lands
-    // nearer the camera than it.
-    let (lat, lon) = picks.iter().fold(
-        ((f64::MAX, f64::MIN), (f64::MAX, f64::MIN)),
-        |((a, b), (c, d)), p| {
-            (
-                (a.min(p.latitude), b.max(p.latitude)),
-                (c.min(p.longitude), d.max(p.longitude)),
-            )
-        },
-    );
-    let eye = camera.camera_position();
-    let (mut agree, mut checked, mut hidden) = (0, 0, 0);
-    for i in 0..60 {
-        for j in 0..60 {
-            let at = crate::coords::LatLon::new(
-                lat.0 + (lat.1 - lat.0) * f64::from(i) / 59.0,
-                lon.0 + (lon.1 - lon.0) * f64::from(j) / 59.0,
-            );
-            let view = target_view(&camera, Some(terrain), at, TargetAltitude::OnGround);
-            let (Some(pixel), Some(elevation)) = (view.pixel, view.elevation) else {
-                continue;
-            };
-            // Off the screen no pick describes the point.
-            if view.visibility == Visibility::OutsideFrustum {
-                continue;
+#[test]
+fn drawn_terrain_sees_the_picked_ground_and_not_what_ridges_cover() {
+    crate::headless::map::test_async::run_async(async {
+        use crate::terrain::sightline::{
+            pick_globe_terrain, target_view, TargetAltitude, TerrainPick, Visibility,
+        };
+        let scene = Scene {
+            meters: 1500.0,
+            relief: 600.0,
+            exaggeration: 1.0,
+            pitch: 80.0,
+            zoom: 11.67,
+        };
+        let mut hills = LevelMap::new(scene).await;
+        hills.settle(None).await;
+        let camera = globe_camera_for_view(hills.map.view_state()).expect("camera");
+        let terrain = hills
+            .map
+            .context()
+            .drawn_terrain(camera.body())
+            .expect("terrain drawn");
+        let mut picks = Vec::new();
+        for y in (HEIGHT / 3..HEIGHT).step_by(3) {
+            let pixel = Point2::new(f64::from(WIDTH / 2) + 0.5, f64::from(y) + 0.5);
+            if let TerrainPick::Ground(hit) = pick_globe_terrain(&camera, terrain, pixel) {
+                picks.push(crate::coords::LatLon::new(
+                    (std::f64::consts::PI * (1.0 - 2.0 * hit.mercator.y))
+                        .sinh()
+                        .atan()
+                        .to_degrees(),
+                    hit.mercator.x * 360.0 - 180.0,
+                ));
             }
-            let TerrainPick::Ground(hit) = pick_globe_terrain(&camera, terrain, pixel) else {
-                continue;
-            };
-            let unit = |at, meters| {
-                crate::projection::globe::lat_lon_to_unit_sphere(at)
-                    * camera.body().unit_radius_at(meters)
-            };
-            let picked = crate::coords::LatLon::new(
-                (std::f64::consts::PI * (1.0 - 2.0 * hit.mercator.y))
-                    .sinh()
-                    .atan()
-                    .to_degrees(),
-                hit.mercator.x * 360.0 - 180.0,
-            );
-            let own = (unit(at, elevation) - eye).magnitude();
-            let first = (unit(picked, hit.elevation) - eye).magnitude();
-            // Too close to call: the pick and the point lie on the same patch of ground.
-            if (first / own - 1.0).abs() < 2e-3 {
-                continue;
-            }
-            let covered = first < own;
-            checked += 1;
-            hidden += usize::from(covered);
-            let said = match view.visibility {
-                Visibility::Visible => Some(false),
-                Visibility::BehindTerrain => Some(true),
-                _ => None,
-            };
-            agree += usize::from(said == Some(covered));
         }
-    }
-    assert!(hidden > 50, "{hidden} of {checked} points behind hills");
-    assert!(
-        agree == checked,
-        "line of sight agrees with the picks for {agree} of {checked} points"
-    );
+        assert!(picks.len() > 100, "{} ground picks", picks.len());
+        let seen =
+            |at| target_view(&camera, Some(terrain), at, TargetAltitude::OnGround).visibility;
+        let visible = picks
+            .iter()
+            .filter(|&&at| seen(at) == Visibility::Visible)
+            .count();
+        assert!(
+            visible * 100 >= picks.len() * 98,
+            "{visible} of {} picked points in sight",
+            picks.len()
+        );
+        // Over the picked region, ground is hidden exactly when the pick through its pixel lands
+        // nearer the camera than it.
+        let (lat, lon) = picks.iter().fold(
+            ((f64::MAX, f64::MIN), (f64::MAX, f64::MIN)),
+            |((a, b), (c, d)), p| {
+                (
+                    (a.min(p.latitude), b.max(p.latitude)),
+                    (c.min(p.longitude), d.max(p.longitude)),
+                )
+            },
+        );
+        let eye = camera.camera_position();
+        let (mut agree, mut checked, mut hidden) = (0, 0, 0);
+        for i in 0..60 {
+            for j in 0..60 {
+                let at = crate::coords::LatLon::new(
+                    lat.0 + (lat.1 - lat.0) * f64::from(i) / 59.0,
+                    lon.0 + (lon.1 - lon.0) * f64::from(j) / 59.0,
+                );
+                let view = target_view(&camera, Some(terrain), at, TargetAltitude::OnGround);
+                let (Some(pixel), Some(elevation)) = (view.pixel, view.elevation) else {
+                    continue;
+                };
+                // Off the screen no pick describes the point.
+                if view.visibility == Visibility::OutsideFrustum {
+                    continue;
+                }
+                let TerrainPick::Ground(hit) = pick_globe_terrain(&camera, terrain, pixel) else {
+                    continue;
+                };
+                let unit = |at, meters| {
+                    crate::projection::globe::lat_lon_to_unit_sphere(at)
+                        * camera.body().unit_radius_at(meters)
+                };
+                let picked = crate::coords::LatLon::new(
+                    (std::f64::consts::PI * (1.0 - 2.0 * hit.mercator.y))
+                        .sinh()
+                        .atan()
+                        .to_degrees(),
+                    hit.mercator.x * 360.0 - 180.0,
+                );
+                let own = (unit(at, elevation) - eye).magnitude();
+                let first = (unit(picked, hit.elevation) - eye).magnitude();
+                // Too close to call: the pick and the point lie on the same patch of ground.
+                if (first / own - 1.0).abs() < 2e-3 {
+                    continue;
+                }
+                let covered = first < own;
+                checked += 1;
+                hidden += usize::from(covered);
+                let said = match view.visibility {
+                    Visibility::Visible => Some(false),
+                    Visibility::BehindTerrain => Some(true),
+                    _ => None,
+                };
+                agree += usize::from(said == Some(covered));
+            }
+        }
+        assert!(hidden > 50, "{hidden} of {checked} points behind hills");
+        assert!(
+            agree == checked,
+            "line of sight agrees with the picks for {agree} of {checked} points"
+        );
+    })
 }
 
 /// A point of ground on a grid over hills, with how the frame should treat it.
@@ -260,69 +263,73 @@ pub(super) async fn ground_marks() -> (LevelMap, Vec<Mark>) {
 
 /// An overlay drawn at the depth of the ground it marks shows where that ground is in sight
 /// and not where nearer terrain covers it.
-#[tokio::test]
-async fn overlay_marks_on_hidden_ground_are_covered_by_the_terrain() {
-    use crate::overlay::{OverlayMesh, OverlayVertex};
-    let (mut hills, marks) = ground_marks().await;
-    let mut mesh = OverlayMesh::default();
-    for m in &marks {
-        let base = mesh.vertices.len() as u32;
-        for (dx, dy) in [(-1.5, -1.5), (1.5, -1.5), (1.5, 1.5), (-1.5, 1.5)] {
-            mesh.vertices.push(OverlayVertex {
-                position: [(m.x + dx) as f32, (m.y + dy) as f32],
-                depth: m.depth,
-                color: [0.0, 1.0, 0.0, 1.0],
-            });
+#[test]
+fn overlay_marks_on_hidden_ground_are_covered_by_the_terrain() {
+    crate::headless::map::test_async::run_async(async {
+        use crate::overlay::{OverlayMesh, OverlayVertex};
+        let (mut hills, marks) = ground_marks().await;
+        let mut mesh = OverlayMesh::default();
+        for m in &marks {
+            let base = mesh.vertices.len() as u32;
+            for (dx, dy) in [(-1.5, -1.5), (1.5, -1.5), (1.5, 1.5), (-1.5, 1.5)] {
+                mesh.vertices.push(OverlayVertex {
+                    position: [(m.x + dx) as f32, (m.y + dy) as f32],
+                    depth: m.depth,
+                    color: [0.0, 1.0, 0.0, 1.0],
+                });
+            }
+            mesh.indices.extend([0, 1, 2, 0, 2, 3].map(|k| base + k));
         }
-        mesh.indices.extend([0, 1, 2, 0, 2, 3].map(|k| base + k));
-    }
-    hills.map.set_overlay(mesh);
-    hills.map.run_frame().expect("frame");
-    let color = hills.read_color();
-    let green = |m: &Mark| {
-        let p = color[(m.y as u32 * WIDTH + m.x as u32) as usize];
-        p[1] > 200 && p[0] < 60 && p[2] < 60
-    };
-    check_shown(&marks, green);
+        hills.map.set_overlay(mesh);
+        hills.map.run_frame().expect("frame");
+        let color = hills.read_color();
+        let green = |m: &Mark| {
+            let p = color[(m.y as u32 * WIDTH + m.x as u32) as usize];
+            p[1] > 200 && p[0] < 60 && p[2] < 60
+        };
+        check_shown(&marks, green);
+    })
 }
 
 /// Depth probes at ground points answer as the overlay draws them: in sight, or covered.
-#[tokio::test]
-async fn depth_probes_tell_ground_in_sight_from_ground_behind_hills() {
-    use crate::overlay::DepthProbe;
-    let (mut hills, marks) = ground_marks().await;
-    let probes = marks
-        .iter()
-        .map(|m| DepthProbe {
-            position: [m.x as f32, m.y as f32],
-            depth: m.depth,
-        })
-        .collect();
-    let request = hills.map.set_depth_probes(probes);
-    let mut answer = None;
-    for _ in 0..20 {
-        hills.map.run_frame().expect("frame");
-        hills
-            .map
-            .device()
-            .poll(wgpu::PollType::wait_indefinitely())
-            .expect("frame completes");
-        tokio::task::yield_now().await;
-        if let Some(results) = hills.map.depth_probe_results() {
-            answer = Some(results);
-            break;
-        }
-    }
-    let answer = answer.expect("the probes are answered within a few frames");
-    assert_eq!(answer.request, request);
-    assert_eq!(answer.visible.len(), marks.len());
-    let by_mark: Vec<(&Mark, bool)> = marks.iter().zip(answer.visible).collect();
-    check_shown(&marks, |m| {
-        by_mark
+#[test]
+fn depth_probes_tell_ground_in_sight_from_ground_behind_hills() {
+    crate::headless::map::test_async::run_async(async {
+        use crate::overlay::DepthProbe;
+        let (mut hills, marks) = ground_marks().await;
+        let probes = marks
             .iter()
-            .find(|(n, _)| std::ptr::eq(*n, m))
-            .is_some_and(|(_, seen)| *seen)
-    });
+            .map(|m| DepthProbe {
+                position: [m.x as f32, m.y as f32],
+                depth: m.depth,
+            })
+            .collect();
+        let request = hills.map.set_depth_probes(probes);
+        let mut answer = None;
+        for _ in 0..20 {
+            hills.map.run_frame().expect("frame");
+            hills
+                .map
+                .device()
+                .poll(wgpu::PollType::wait_indefinitely())
+                .expect("frame completes");
+            crate::headless::map::test_async::yield_once().await;
+            if let Some(results) = hills.map.depth_probe_results() {
+                answer = Some(results);
+                break;
+            }
+        }
+        let answer = answer.expect("the probes are answered within a few frames");
+        assert_eq!(answer.request, request);
+        assert_eq!(answer.visible.len(), marks.len());
+        let by_mark: Vec<(&Mark, bool)> = marks.iter().zip(answer.visible).collect();
+        check_shown(&marks, |m| {
+            by_mark
+                .iter()
+                .find(|(n, _)| std::ptr::eq(*n, m))
+                .is_some_and(|(_, seen)| *seen)
+        });
+    })
 }
 
 /// At least 99 % of the marks in sight are shown, and at most 5 % of those well behind

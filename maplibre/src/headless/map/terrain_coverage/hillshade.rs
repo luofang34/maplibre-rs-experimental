@@ -118,74 +118,82 @@ async fn center_of(rise: Rise, paint: serde_json::Value, bearing: f64) -> [u8; 4
     pixel(&bytes, SIZE / 2, SIZE / 2)
 }
 
-#[tokio::test]
-async fn slopes_facing_the_light_are_lighter_than_slopes_facing_away() {
-    let paint = serde_json::json!({"hillshade-exaggeration": 1.0});
-    let flat = center_of(Rise::Flat, paint.clone(), 0.0).await;
-    let lit = center_of(Rise::East, paint.clone(), 0.0).await;
-    let shadowed = center_of(Rise::West, paint, 0.0).await;
-    assert_eq!(flat, [128, 128, 128, 255], "flat ground is not shaded");
-    assert!(lit[0] >= flat[0], "the lit side is not darker: {lit:?}");
-    assert!(
-        shadowed[0] + 20 < flat[0],
-        "the side facing away is darker than flat ground: {shadowed:?} vs {flat:?}"
-    );
+#[test]
+fn slopes_facing_the_light_are_lighter_than_slopes_facing_away() {
+    crate::headless::map::test_async::run_async(async {
+        let paint = serde_json::json!({"hillshade-exaggeration": 1.0});
+        let flat = center_of(Rise::Flat, paint.clone(), 0.0).await;
+        let lit = center_of(Rise::East, paint.clone(), 0.0).await;
+        let shadowed = center_of(Rise::West, paint, 0.0).await;
+        assert_eq!(flat, [128, 128, 128, 255], "flat ground is not shaded");
+        assert!(lit[0] >= flat[0], "the lit side is not darker: {lit:?}");
+        assert!(
+            shadowed[0] + 20 < flat[0],
+            "the side facing away is darker than flat ground: {shadowed:?} vs {flat:?}"
+        );
+    })
 }
 
-#[tokio::test]
-async fn zero_exaggeration_draws_nothing() {
-    let paint = serde_json::json!({"hillshade-exaggeration": 0.0});
-    assert_eq!(
-        center_of(Rise::West, paint, 0.0).await,
-        [128, 128, 128, 255]
-    );
+#[test]
+fn zero_exaggeration_draws_nothing() {
+    crate::headless::map::test_async::run_async(async {
+        let paint = serde_json::json!({"hillshade-exaggeration": 0.0});
+        assert_eq!(
+            center_of(Rise::West, paint, 0.0).await,
+            [128, 128, 128, 255]
+        );
+    })
 }
 
-#[tokio::test]
-async fn the_illumination_anchor_decides_whether_light_turns_with_the_map() {
-    let anchored = |anchor: &str| serde_json::json!({"hillshade-exaggeration": 1.0, "hillshade-illumination-anchor": anchor});
-    let map_north = center_of(Rise::West, anchored("map"), 0.0).await;
-    let map_south = center_of(Rise::West, anchored("map"), 180.0).await;
-    assert_eq!(
-        map_north, map_south,
-        "a light fixed to the map shades a slope the same at any bearing"
-    );
-    let screen_north = center_of(Rise::West, anchored("viewport"), 0.0).await;
-    let screen_south = center_of(Rise::West, anchored("viewport"), 180.0).await;
-    assert!(
-        screen_south[0] > screen_north[0] + 20,
-        "a light fixed to the screen lights the slope once the map is turned: \
+#[test]
+fn the_illumination_anchor_decides_whether_light_turns_with_the_map() {
+    crate::headless::map::test_async::run_async(async {
+        let anchored = |anchor: &str| serde_json::json!({"hillshade-exaggeration": 1.0, "hillshade-illumination-anchor": anchor});
+        let map_north = center_of(Rise::West, anchored("map"), 0.0).await;
+        let map_south = center_of(Rise::West, anchored("map"), 180.0).await;
+        assert_eq!(
+            map_north, map_south,
+            "a light fixed to the map shades a slope the same at any bearing"
+        );
+        let screen_north = center_of(Rise::West, anchored("viewport"), 0.0).await;
+        let screen_south = center_of(Rise::West, anchored("viewport"), 180.0).await;
+        assert!(
+            screen_south[0] > screen_north[0] + 20,
+            "a light fixed to the screen lights the slope once the map is turned: \
          {screen_north:?} then {screen_south:?}"
-    );
+        );
+    })
 }
 
-#[tokio::test]
-async fn a_continuous_slope_shades_without_a_seam_between_tiles() {
-    // A gentle slope, well below the derivative clamp, so a halved edge derivative would show.
-    const GENTLE: f64 = 4.0;
-    let west = target();
-    let east = WorldTileCoords::from((west.x + 1, west.y, west.z));
-    let bytes = shaded(
-        hillshade_style(serde_json::json!({"hillshade-exaggeration": 1.0}), 0.0, 0.5),
-        vec![
-            (west, dem_tile_with(Rise::West, 0, GENTLE)),
-            (east, dem_tile_with(Rise::West, 256, GENTLE)),
-        ],
-    )
-    .await;
-    let row = SIZE / 2;
-    let colours: Vec<u8> = (32..SIZE - 32).map(|x| pixel(&bytes, x, row)[0]).collect();
-    let (min, max) = colours.iter().fold((255u8, 0u8), |(min, max), value| {
-        (min.min(*value), max.max(*value))
-    });
-    assert!(
-        max + 8 < 128,
-        "the slope is shaded across both tiles: {colours:?}"
-    );
-    assert!(
-        max - min <= 1,
-        "one plane across two tiles shades one colour, not {min}..{max}: {colours:?}"
-    );
+#[test]
+fn a_continuous_slope_shades_without_a_seam_between_tiles() {
+    crate::headless::map::test_async::run_async(async {
+        // A gentle slope, well below the derivative clamp, so a halved edge derivative would show.
+        const GENTLE: f64 = 4.0;
+        let west = target();
+        let east = WorldTileCoords::from((west.x + 1, west.y, west.z));
+        let bytes = shaded(
+            hillshade_style(serde_json::json!({"hillshade-exaggeration": 1.0}), 0.0, 0.5),
+            vec![
+                (west, dem_tile_with(Rise::West, 0, GENTLE)),
+                (east, dem_tile_with(Rise::West, 256, GENTLE)),
+            ],
+        )
+        .await;
+        let row = SIZE / 2;
+        let colours: Vec<u8> = (32..SIZE - 32).map(|x| pixel(&bytes, x, row)[0]).collect();
+        let (min, max) = colours.iter().fold((255u8, 0u8), |(min, max), value| {
+            (min.min(*value), max.max(*value))
+        });
+        assert!(
+            max + 8 < 128,
+            "the slope is shaded across both tiles: {colours:?}"
+        );
+        assert!(
+            max - min <= 1,
+            "one plane across two tiles shades one colour, not {min}..{max}: {colours:?}"
+        );
+    })
 }
 
 /// The centre row of two tiles of one gentle slope, delivered in the given order.
@@ -211,70 +219,78 @@ async fn seam_row(batches: [Rise; 2]) -> Vec<u8> {
         .collect()
 }
 
-#[tokio::test]
-async fn a_tile_arriving_later_fills_the_border_of_the_one_already_drawn() {
-    // West first then east, and east first then west: either neighbour lands after a draw.
-    for order in [[Rise::West, Rise::East], [Rise::East, Rise::West]] {
-        let colours = seam_row(order).await;
-        let (min, max) = colours.iter().fold((255u8, 0u8), |(min, max), value| {
-            (min.min(*value), max.max(*value))
-        });
-        assert!(
-            max + 8 < 128,
-            "the slope is shaded across both tiles: {colours:?}"
-        );
-        assert!(
-            max - min <= 1,
-            "no seam after a late neighbour: {min}..{max}"
-        );
-    }
+#[test]
+fn a_tile_arriving_later_fills_the_border_of_the_one_already_drawn() {
+    crate::headless::map::test_async::run_async(async {
+        // West first then east, and east first then west: either neighbour lands after a draw.
+        for order in [[Rise::West, Rise::East], [Rise::East, Rise::West]] {
+            let colours = seam_row(order).await;
+            let (min, max) = colours.iter().fold((255u8, 0u8), |(min, max), value| {
+                (min.min(*value), max.max(*value))
+            });
+            assert!(
+                max + 8 < 128,
+                "the slope is shaded across both tiles: {colours:?}"
+            );
+            assert!(
+                max - min <= 1,
+                "no seam after a late neighbour: {min}..{max}"
+            );
+        }
+    })
 }
 
-#[tokio::test]
-async fn turning_the_light_half_way_around_swaps_the_lit_and_shadowed_sides() {
-    let light = |direction: f64, method: &str| {
-        serde_json::json!({
-            "hillshade-exaggeration": 1.0,
-            "hillshade-illumination-direction": direction,
-            "hillshade-method": method
-        })
-    };
-    for method in ["standard", "basic", "combined", "igor", "multidirectional"] {
-        let from_north_west = center_of(Rise::West, light(335.0, method), 0.0).await;
-        let from_south_east = center_of(Rise::West, light(155.0, method), 0.0).await;
-        assert!(
-            from_south_east[0] > from_north_west[0] + 20,
-            "{method}: a slope facing east is lit from the south-east: \
+#[test]
+fn turning_the_light_half_way_around_swaps_the_lit_and_shadowed_sides() {
+    crate::headless::map::test_async::run_async(async {
+        let light = |direction: f64, method: &str| {
+            serde_json::json!({
+                "hillshade-exaggeration": 1.0,
+                "hillshade-illumination-direction": direction,
+                "hillshade-method": method
+            })
+        };
+        for method in ["standard", "basic", "combined", "igor", "multidirectional"] {
+            let from_north_west = center_of(Rise::West, light(335.0, method), 0.0).await;
+            let from_south_east = center_of(Rise::West, light(155.0, method), 0.0).await;
+            assert!(
+                from_south_east[0] > from_north_west[0] + 20,
+                "{method}: a slope facing east is lit from the south-east: \
              {from_north_west:?} against {from_south_east:?}"
-        );
-    }
+            );
+        }
+    })
 }
 
-#[tokio::test]
-async fn a_translucent_shadow_colour_darkens_less_than_an_opaque_one() {
-    let shadow = |color: &str| serde_json::json!({"hillshade-exaggeration": 1.0, "hillshade-shadow-color": color});
-    let opaque = center_of(Rise::West, shadow("#000000"), 0.0).await;
-    let translucent = center_of(Rise::West, shadow("rgba(0, 0, 0, 0.5)"), 0.0).await;
-    // The gap is small: a translucent shadow lets more of the black accent colour through,
-    // which darkens the slope again, so only the ordering and a few levels can be asserted.
-    assert!(
-        translucent[0] > opaque[0] + 4 && translucent[0] < 128,
-        "half-transparent shadow lies between the opaque shadow and the ground: \
+#[test]
+fn a_translucent_shadow_colour_darkens_less_than_an_opaque_one() {
+    crate::headless::map::test_async::run_async(async {
+        let shadow = |color: &str| serde_json::json!({"hillshade-exaggeration": 1.0, "hillshade-shadow-color": color});
+        let opaque = center_of(Rise::West, shadow("#000000"), 0.0).await;
+        let translucent = center_of(Rise::West, shadow("rgba(0, 0, 0, 0.5)"), 0.0).await;
+        // The gap is small: a translucent shadow lets more of the black accent colour through,
+        // which darkens the slope again, so only the ordering and a few levels can be asserted.
+        assert!(
+            translucent[0] > opaque[0] + 4 && translucent[0] < 128,
+            "half-transparent shadow lies between the opaque shadow and the ground: \
          {opaque:?} {translucent:?}"
-    );
+        );
+    })
 }
 
-#[tokio::test]
-async fn opposite_lights_average_toward_flat_ground() {
-    let lights = |directions: serde_json::Value| {
-        serde_json::json!({"hillshade-exaggeration": 1.0, "hillshade-method": "multidirectional",
+#[test]
+fn opposite_lights_average_toward_flat_ground() {
+    crate::headless::map::test_async::run_async(async {
+        let lights = |directions: serde_json::Value| {
+            serde_json::json!({"hillshade-exaggeration": 1.0, "hillshade-method": "multidirectional",
             "hillshade-illumination-direction": directions,
             "hillshade-illumination-altitude": [45.0, 45.0]})
-    };
-    let one = center_of(Rise::West, lights(serde_json::json!([335.0, 335.0])), 0.0).await;
-    let two = center_of(Rise::West, lights(serde_json::json!([335.0, 155.0])), 0.0).await;
-    assert!(
-        two[0] > one[0] + 20,
-        "a second light from the other side softens the shadow: {one:?} then {two:?}"
-    );
+        };
+        let one = center_of(Rise::West, lights(serde_json::json!([335.0, 335.0])), 0.0).await;
+        let two = center_of(Rise::West, lights(serde_json::json!([335.0, 155.0])), 0.0).await;
+        assert!(
+            two[0] > one[0] + 20,
+            "a second light from the other side softens the shadow: {one:?} then {two:?}"
+        );
+    })
 }

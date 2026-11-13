@@ -2,11 +2,21 @@
 //! parts of this module are used.
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "native-io"))]
+pub(crate) use noweb::run_cpu_bound;
+#[cfg(all(not(target_arch = "wasm32"), feature = "native-io"))]
 pub use noweb::run_multithreaded;
 #[cfg(all(not(target_arch = "wasm32"), feature = "native-io", feature = "trace"))]
 pub use noweb::trace;
 #[cfg(all(not(target_arch = "wasm32"), feature = "native-io"))]
 pub use noweb::ReqwestOffscreenKernelEnvironment;
+
+/// Runs CPU-bound `work` inline when no native blocking pool is configured.
+#[cfg(not(all(not(target_arch = "wasm32"), feature = "native-io")))]
+pub(crate) async fn run_cpu_bound<R: Send + 'static>(
+    work: impl FnOnce() -> R + Send + 'static,
+) -> Result<R, Box<dyn std::error::Error + Send + Sync>> {
+    Ok(work())
+}
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "native-io"))]
 mod noweb;

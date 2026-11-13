@@ -141,88 +141,91 @@ fn drawn_width(pixels: &[u8], region: [u32; 4]) -> f32 {
     }
 }
 
-#[tokio::test]
-async fn geojson_labels_draw_with_the_font_and_sprite_they_ask_for_and_follow_set_data() {
-    let mut map = SymbolMap::new(style(collection(vec![
-        point(Some("Alps"), None, [-10.0, 6.0]),
-        point(Some("Жук"), None, [10.0, 6.0]),
-        point(None, Some("marker"), [10.0, -6.0]),
-    ])))
-    .await;
-    let pixels = map.settle().await;
-    assert_eq!(
-        map.server.glyph_requests(),
-        [
-            "https://glyphs.test/Noto%20Sans%20Regular/0-255.pbf",
-            "https://glyphs.test/Noto%20Sans%20Regular/1024-1279.pbf",
-        ],
-        "the label's own font, for its Latin and Cyrillic ranges"
-    );
-    let requested = map.server.requested();
-    for sprite in [
-        "https://sprites.test/sprite.json",
-        "https://sprites.test/sprite.png",
-    ] {
-        assert!(
-            requested.iter().any(|url| url == sprite),
-            "{sprite}: {requested:?}"
+#[test]
+fn geojson_labels_draw_with_the_font_and_sprite_they_ask_for_and_follow_set_data() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = SymbolMap::new(style(collection(vec![
+            point(Some("Alps"), None, [-10.0, 6.0]),
+            point(Some("Жук"), None, [10.0, 6.0]),
+            point(None, Some("marker"), [10.0, -6.0]),
+        ])))
+        .await;
+        let pixels = map.settle().await;
+        assert_eq!(
+            map.server.glyph_requests(),
+            [
+                "https://glyphs.test/Noto%20Sans%20Regular/0-255.pbf",
+                "https://glyphs.test/Noto%20Sans%20Regular/1024-1279.pbf",
+            ],
+            "the label's own font, for its Latin and Cyrillic ranges"
         );
-    }
-    // Every glyph drawn is the served font's: the Cyrillic range exists nowhere else, and the
-    // Latin glyphs are spaced as only the served range spaces them.
-    use prost::Message as _;
-    let served = crate::sdf::glyphs::Glyphs::decode(&super::latin()[..]).expect("served range");
-    let bundled =
-        crate::sdf::glyphs::Glyphs::decode(&include_bytes!("../../../../../data/0-255.pbf")[..])
-            .expect("bundled range");
-    assert_ne!(shapes(&served, "Alps"), shapes(&bundled, "Alps"));
-    assert_eq!(drawn_shapes(&map, "Alps"), shapes(&served, "Alps"));
-    let width = drawn_width(&pixels, NORTH_WEST);
-    let (spaced, unspaced) = (
-        set_width(&shapes(&served, "Alps"), 28.0),
-        set_width(&shapes(&bundled, "Alps"), 28.0),
-    );
-    assert!(
+        let requested = map.server.requested();
+        for sprite in [
+            "https://sprites.test/sprite.json",
+            "https://sprites.test/sprite.png",
+        ] {
+            assert!(
+                requested.iter().any(|url| url == sprite),
+                "{sprite}: {requested:?}"
+            );
+        }
+        // Every glyph drawn is the served font's: the Cyrillic range exists nowhere else, and the
+        // Latin glyphs are spaced as only the served range spaces them.
+        use prost::Message as _;
+        let served = crate::sdf::glyphs::Glyphs::decode(&super::latin()[..]).expect("served range");
+        let bundled = crate::sdf::glyphs::Glyphs::decode(
+            &include_bytes!("../../../../../data/0-255.pbf")[..],
+        )
+        .expect("bundled range");
+        assert_ne!(shapes(&served, "Alps"), shapes(&bundled, "Alps"));
+        assert_eq!(drawn_shapes(&map, "Alps"), shapes(&served, "Alps"));
+        let width = drawn_width(&pixels, NORTH_WEST);
+        let (spaced, unspaced) = (
+            set_width(&shapes(&served, "Alps"), 28.0),
+            set_width(&shapes(&bundled, "Alps"), 28.0),
+        );
+        assert!(
         (width - spaced).abs() < 3.0 && (width - unspaced).abs() > 4.0,
         "'Alps' is {width} px wide: {spaced} px in the served spacing, {unspaced} px in the bundled"
     );
-    assert_eq!(texts_in(&map, &pixels, NORTH_WEST), ["Alps"]);
-    assert_eq!(texts_in(&map, &pixels, NORTH_EAST), ["Жук"]);
-    let icon = count(&pixels, MARKER, SOUTH_EAST);
-    assert!(
-        icon.len() > 150,
-        "the sprite's marker is drawn: {} pixels",
-        icon.len()
-    );
-    assert!(count(&pixels, MARKER, SOUTH_WEST).is_empty());
+        assert_eq!(texts_in(&map, &pixels, NORTH_WEST), ["Alps"]);
+        assert_eq!(texts_in(&map, &pixels, NORTH_EAST), ["Жук"]);
+        let icon = count(&pixels, MARKER, SOUTH_EAST);
+        assert!(
+            icon.len() > 150,
+            "the sprite's marker is drawn: {} pixels",
+            icon.len()
+        );
+        assert!(count(&pixels, MARKER, SOUTH_WEST).is_empty());
 
-    // New data moves the Cyrillic label, renames it, and moves the icon.
-    map.map
-        .map_context
-        .set_geojson_data(
-            "places",
-            GeoJsonData::Inline(Arc::new(collection(vec![
-                point(Some("Мир"), None, [-10.0, -6.0]),
-                point(None, Some("marker"), [-10.0, 6.0]),
-            ]))),
-        )
-        .expect("set data");
-    let pixels = map.settle().await;
-    assert!(
-        texts_in(&map, &pixels, NORTH_EAST).is_empty(),
-        "the old label is gone"
-    );
-    assert!(
-        texts_in(&map, &pixels, NORTH_WEST).is_empty(),
-        "Alps is gone"
-    );
-    assert_eq!(texts_in(&map, &pixels, SOUTH_WEST), ["Мир"]);
-    assert!(
-        count(&pixels, MARKER, SOUTH_EAST).is_empty(),
-        "the icon left"
-    );
-    assert!(
-        count(&pixels, MARKER, NORTH_WEST).len() > 150,
-        "the icon moved"
-    );
+        // New data moves the Cyrillic label, renames it, and moves the icon.
+        map.map
+            .map_context
+            .set_geojson_data(
+                "places",
+                GeoJsonData::Inline(Arc::new(collection(vec![
+                    point(Some("Мир"), None, [-10.0, -6.0]),
+                    point(None, Some("marker"), [-10.0, 6.0]),
+                ]))),
+            )
+            .expect("set data");
+        let pixels = map.settle().await;
+        assert!(
+            texts_in(&map, &pixels, NORTH_EAST).is_empty(),
+            "the old label is gone"
+        );
+        assert!(
+            texts_in(&map, &pixels, NORTH_WEST).is_empty(),
+            "Alps is gone"
+        );
+        assert_eq!(texts_in(&map, &pixels, SOUTH_WEST), ["Мир"]);
+        assert!(
+            count(&pixels, MARKER, SOUTH_EAST).is_empty(),
+            "the icon left"
+        );
+        assert!(
+            count(&pixels, MARKER, NORTH_WEST).len() > 150,
+            "the icon moved"
+        );
+    })
 }

@@ -31,228 +31,241 @@ async fn free_map(center: LatLon) -> super::super::HeadlessMap {
     map
 }
 
-#[tokio::test]
-async fn a_frame_ends_free_navigation_when_the_style_projection_changes() {
-    let mut map = free_map(LatLon::new(40.0, 10.0)).await;
-    map.run_frame().expect("frame");
-    assert_eq!(
-        map.view_state().navigation_mode(),
-        NavigationMode::FreeGlobe
-    );
-    map.map_context.style.projection = Some(ProjectionSpecification {
-        projection_type: ProjectionType::Globe,
-    });
-    map.run_frame().expect("frame");
-    assert_eq!(
-        map.view_state().navigation_mode(),
-        NavigationMode::Constrained
-    );
-    assert_eq!(
-        map.view_state().navigation_limit(),
-        Some(NavigationLimit::ProjectionChanged)
-    );
-}
-
-#[tokio::test]
-async fn a_drag_over_a_cap_counts_as_a_move_though_the_flat_camera_stays() {
-    let mut map = free_map(LatLon::new(84.0, 10.0)).await;
-    // Drag north until the camera looks at the cap.
-    let center = Point2::new(32.0, 32.0);
-    while map
-        .view_state()
-        .pose_view()
-        .expect("free camera")
-        .center
-        .latitude
-        < 86.0
-    {
-        assert!(map
-            .map_context
-            .view_state
-            .drag_free_globe(center - cgmath::Vector2::new(0.0, 8.0), center));
-    }
-    map.run_frame().expect("frame");
-    let state = map.view_state();
-    let flat = (
-        state.zoom(),
-        state.camera().position(),
-        state.camera().get_bearing(),
-        state.camera().get_pitch(),
-        state.camera().get_roll(),
-    );
-    assert!(map
-        .map_context
-        .view_state
-        .drag_free_globe(center - cgmath::Vector2::new(0.0, 2.0), center));
-    // Over the cap the flat camera stays at the last row of tiles, but for rounding; put it
-    // back exactly, so only the pose tells the move.
-    let state = &mut map.map_context.view_state;
-    assert!((state.camera().position() - flat.1).x.abs() < 1e-6);
-    state.update_zoom(flat.0);
-    state.camera_mut().move_to(flat.1);
-    state.camera_mut().set_bearing(flat.2);
-    state.camera_mut().set_pitch(flat.3);
-    state.camera_mut().set_roll(flat.4);
-    assert!(
-        crate::render::frame_signals::camera_moved(&map.map_context.world, map.view_state()),
-        "the free camera moved"
-    );
-}
-
-#[tokio::test]
-async fn a_restored_pose_keeps_its_target_height_through_frames_without_terrain() {
-    let mut map = free_map(LatLon::new(40.0, 10.0)).await;
-    // The first frame fits the view to the surface; the pose is restored on a running map.
-    map.run_frame().expect("frame");
-    let mut pose = map.view_state().globe_pose().expect("pose");
-    pose.target_elevation_meters = 1200.0;
-    map.restore_globe_pose(pose).expect("restore");
-    let camera = |map: &super::super::HeadlessMap| {
-        let columns: [[f64; 4]; 4] =
-            crate::render::projection::globe_camera_for_view(map.view_state())
-                .expect("camera")
-                .view_projection()
-                .into();
-        columns
-    };
-    let restored = camera(&map);
-    for _ in 0..3 {
+#[test]
+fn a_frame_ends_free_navigation_when_the_style_projection_changes() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = free_map(LatLon::new(40.0, 10.0)).await;
         map.run_frame().expect("frame");
-    }
-    let held = map.view_state().globe_pose().expect("pose");
-    assert_eq!(held.target_elevation_meters, 1200.0);
-    assert_eq!(held.target, pose.target);
-    assert_eq!(camera(&map), restored);
-}
-
-#[tokio::test]
-async fn constrained_navigation_refuses_a_target_past_the_mercator_world() {
-    let mut map = free_map(LatLon::new(84.0, 10.0)).await;
-    let center = Point2::new(32.0, 32.0);
-    while map
-        .view_state()
-        .pose_view()
-        .expect("free camera")
-        .center
-        .latitude
-        < 86.0
-    {
-        assert!(map
-            .map_context
-            .view_state
-            .drag_free_globe(center - cgmath::Vector2::new(0.0, 8.0), center));
-    }
-    let pose = map.view_state().globe_pose();
-    assert!(matches!(
-        map.set_navigation_mode(NavigationMode::Constrained),
-        Err(crate::render::view_state::NavigationError::BeyondMercatorWorld { .. })
-    ));
-    assert_eq!(
-        map.view_state().navigation_mode(),
-        NavigationMode::FreeGlobe
-    );
-    assert_eq!(
-        map.view_state().globe_pose(),
-        pose,
-        "the free camera stays where it is"
-    );
-    while map
-        .view_state()
-        .pose_view()
-        .expect("free camera")
-        .center
-        .latitude
-        > 84.0
-    {
-        assert!(map
-            .map_context
-            .view_state
-            .drag_free_globe(center + cgmath::Vector2::new(0.0, 8.0), center));
-    }
-    map.set_navigation_mode(NavigationMode::Constrained)
-        .expect("back inside the Mercator world");
-    assert_eq!(
-        map.view_state().navigation_mode(),
-        NavigationMode::Constrained
-    );
-}
-
-#[tokio::test]
-async fn navigation_controls_settle_the_compass_and_publish_the_hud() {
-    let mut map = free_map(LatLon::new(40.0, 10.0)).await;
-    map.jump_to(crate::render::view_state::CameraOptions {
-        bearing: Some(cgmath::Deg(40.0)),
-        ..Default::default()
+        assert_eq!(
+            map.view_state().navigation_mode(),
+            NavigationMode::FreeGlobe
+        );
+        map.map_context.style.projection = Some(ProjectionSpecification {
+            projection_type: ProjectionType::Globe,
+        });
+        map.run_frame().expect("frame");
+        assert_eq!(
+            map.view_state().navigation_mode(),
+            NavigationMode::Constrained
+        );
+        assert_eq!(
+            map.view_state().navigation_limit(),
+            Some(NavigationLimit::ProjectionChanged)
+        );
     })
-    .expect("bearing");
-    map.run_frame().expect("frame");
-    let mut controls = crate::navigation::NavigationState::default();
-    let step = std::time::Duration::from_millis(16);
-    assert!(!map.navigate(&mut controls, step));
-    let hud = map
-        .context()
-        .world
-        .resources
-        .get::<crate::hud::NavigationHudState>()
-        .copied()
-        .expect("published HUD state");
-    assert!(hud.visible);
-    controls.trigger_compass(map.view_state().camera().get_bearing());
-    let mut frames = 0;
-    while map.navigate(&mut controls, step) {
-        map.run_frame().expect("frame");
-        frames += 1;
-        assert!(frames < 600, "compass reset never settled");
-    }
-    assert!(frames > 1, "compass reset should animate");
-    let bearing = map.view_state().camera().get_bearing().0;
-    assert!(
-        crate::navigation::normalize_angle_signed(bearing).abs() < 1e-3,
-        "{bearing}"
-    );
 }
 
-#[tokio::test]
-async fn the_hud_plugin_draws_the_controls_once_navigation_publishes_them() {
-    let style: crate::style::Style = serde_json::from_str(
-        r##"{"version":8,"center":[10,40],"zoom":3,"sources":{},
+#[test]
+fn a_drag_over_a_cap_counts_as_a_move_though_the_flat_camera_stays() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = free_map(LatLon::new(84.0, 10.0)).await;
+        // Drag north until the camera looks at the cap.
+        let center = Point2::new(32.0, 32.0);
+        while map
+            .view_state()
+            .pose_view()
+            .expect("free camera")
+            .center
+            .latitude
+            < 86.0
+        {
+            assert!(map
+                .map_context
+                .view_state
+                .drag_free_globe(center - cgmath::Vector2::new(0.0, 8.0), center));
+        }
+        map.run_frame().expect("frame");
+        let state = map.view_state();
+        let flat = (
+            state.zoom(),
+            state.camera().position(),
+            state.camera().get_bearing(),
+            state.camera().get_pitch(),
+            state.camera().get_roll(),
+        );
+        assert!(map
+            .map_context
+            .view_state
+            .drag_free_globe(center - cgmath::Vector2::new(0.0, 2.0), center));
+        // Over the cap the flat camera stays at the last row of tiles, but for rounding; put it
+        // back exactly, so only the pose tells the move.
+        let state = &mut map.map_context.view_state;
+        assert!((state.camera().position() - flat.1).x.abs() < 1e-6);
+        state.update_zoom(flat.0);
+        state.camera_mut().move_to(flat.1);
+        state.camera_mut().set_bearing(flat.2);
+        state.camera_mut().set_pitch(flat.3);
+        state.camera_mut().set_roll(flat.4);
+        assert!(
+            crate::render::frame_signals::camera_moved(&map.map_context.world, map.view_state()),
+            "the free camera moved"
+        );
+    })
+}
+
+#[test]
+fn a_restored_pose_keeps_its_target_height_through_frames_without_terrain() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = free_map(LatLon::new(40.0, 10.0)).await;
+        // The first frame fits the view to the surface; the pose is restored on a running map.
+        map.run_frame().expect("frame");
+        let mut pose = map.view_state().globe_pose().expect("pose");
+        pose.target_elevation_meters = 1200.0;
+        map.restore_globe_pose(pose).expect("restore");
+        let camera = |map: &super::super::HeadlessMap| {
+            let columns: [[f64; 4]; 4] =
+                crate::render::projection::globe_camera_for_view(map.view_state())
+                    .expect("camera")
+                    .view_projection()
+                    .into();
+            columns
+        };
+        let restored = camera(&map);
+        for _ in 0..3 {
+            map.run_frame().expect("frame");
+        }
+        let held = map.view_state().globe_pose().expect("pose");
+        assert_eq!(held.target_elevation_meters, 1200.0);
+        assert_eq!(held.target, pose.target);
+        assert_eq!(camera(&map), restored);
+    })
+}
+
+#[test]
+fn constrained_navigation_refuses_a_target_past_the_mercator_world() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = free_map(LatLon::new(84.0, 10.0)).await;
+        let center = Point2::new(32.0, 32.0);
+        while map
+            .view_state()
+            .pose_view()
+            .expect("free camera")
+            .center
+            .latitude
+            < 86.0
+        {
+            assert!(map
+                .map_context
+                .view_state
+                .drag_free_globe(center - cgmath::Vector2::new(0.0, 8.0), center));
+        }
+        let pose = map.view_state().globe_pose();
+        assert!(matches!(
+            map.set_navigation_mode(NavigationMode::Constrained),
+            Err(crate::render::view_state::NavigationError::BeyondMercatorWorld { .. })
+        ));
+        assert_eq!(
+            map.view_state().navigation_mode(),
+            NavigationMode::FreeGlobe
+        );
+        assert_eq!(
+            map.view_state().globe_pose(),
+            pose,
+            "the free camera stays where it is"
+        );
+        while map
+            .view_state()
+            .pose_view()
+            .expect("free camera")
+            .center
+            .latitude
+            > 84.0
+        {
+            assert!(map
+                .map_context
+                .view_state
+                .drag_free_globe(center + cgmath::Vector2::new(0.0, 8.0), center));
+        }
+        map.set_navigation_mode(NavigationMode::Constrained)
+            .expect("back inside the Mercator world");
+        assert_eq!(
+            map.view_state().navigation_mode(),
+            NavigationMode::Constrained
+        );
+    })
+}
+
+#[test]
+fn navigation_controls_settle_the_compass_and_publish_the_hud() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = free_map(LatLon::new(40.0, 10.0)).await;
+        map.jump_to(crate::render::view_state::CameraOptions {
+            bearing: Some(cgmath::Deg(40.0)),
+            ..Default::default()
+        })
+        .expect("bearing");
+        map.run_frame().expect("frame");
+        let mut controls = crate::navigation::NavigationState::default();
+        let step = std::time::Duration::from_millis(16);
+        assert!(!map.navigate(&mut controls, step));
+        let hud = map
+            .context()
+            .world
+            .resources
+            .get::<crate::hud::NavigationHudState>()
+            .copied()
+            .expect("published HUD state");
+        assert!(hud.visible);
+        controls.trigger_compass(map.view_state().camera().get_bearing());
+        let mut frames = 0;
+        while map.navigate(&mut controls, step) {
+            map.run_frame().expect("frame");
+            frames += 1;
+            assert!(frames < 600, "compass reset never settled");
+        }
+        assert!(frames > 1, "compass reset should animate");
+        let bearing = map.view_state().camera().get_bearing().0;
+        assert!(
+            crate::navigation::normalize_angle_signed(bearing).abs() < 1e-3,
+            "{bearing}"
+        );
+    })
+}
+
+#[test]
+fn the_hud_plugin_draws_the_controls_once_navigation_publishes_them() {
+    crate::headless::map::test_async::run_async(async {
+        let style: crate::style::Style = serde_json::from_str(
+            r##"{"version":8,"center":[10,40],"zoom":3,"sources":{},
             "layers":[{"id":"bg","type":"background","paint":{"background-color":"#000000"}}]}"##,
-    )
-    .expect("style");
-    let (kernel, renderer) = crate::headless::create_headless_renderer(256, 256, None)
-        .await
-        .expect("renderer");
-    let mut map = super::super::HeadlessMap::new(
-        style,
-        renderer,
-        kernel,
-        vec![
-            Box::new(crate::render::RenderPlugin),
-            Box::new(crate::background::BackgroundPlugin),
-            Box::new(crate::hud::NavigationHudPlugin),
-        ],
-    )
-    .expect("map");
-    let origin = crate::hud::NavigationHudState::panel_origin(
-        256.0,
-        256.0,
-        &crate::render::camera::EdgeInsets::default(),
-    );
-    // Sum of channels inside the capsule, where the zoom buttons sit.
-    let capsule = |map: &super::super::HeadlessMap| -> u64 {
-        let texture = map.head_texture().expect("head texture");
-        let pixels = super::super::readback::read_blocking(map, texture, wgpu::TextureAspect::All)
-            .expect("readback");
-        let (x0, y0) = (origin.x as usize + 8, origin.y as usize + 80);
-        (y0..y0 + 40)
-            .flat_map(|y| (x0..x0 + 20).map(move |x| (y * 256 + x) * 4))
-            .map(|i| pixels[i..i + 3].iter().map(|&c| u64::from(c)).sum::<u64>())
-            .sum()
-    };
-    map.run_frame().expect("frame");
-    assert_eq!(capsule(&map), 0, "no HUD before navigation publishes it");
-    let mut controls = crate::navigation::NavigationState::default();
-    map.navigate(&mut controls, std::time::Duration::from_millis(16));
-    map.run_frame().expect("frame");
-    assert!(capsule(&map) > 0, "HUD capsule should be drawn");
+        )
+        .expect("style");
+        let (kernel, renderer) = crate::headless::create_headless_renderer(256, 256, None)
+            .await
+            .expect("renderer");
+        let mut map = super::super::HeadlessMap::new(
+            style,
+            renderer,
+            kernel,
+            vec![
+                Box::new(crate::render::RenderPlugin),
+                Box::new(crate::background::BackgroundPlugin),
+                Box::new(crate::hud::NavigationHudPlugin),
+            ],
+        )
+        .expect("map");
+        let origin = crate::hud::NavigationHudState::panel_origin(
+            256.0,
+            256.0,
+            &crate::render::camera::EdgeInsets::default(),
+        );
+        // Sum of channels inside the capsule, where the zoom buttons sit.
+        let capsule = |map: &super::super::HeadlessMap| -> u64 {
+            let texture = map.head_texture().expect("head texture");
+            let pixels =
+                super::super::readback::read_blocking(map, texture, wgpu::TextureAspect::All)
+                    .expect("readback");
+            let (x0, y0) = (origin.x as usize + 8, origin.y as usize + 80);
+            (y0..y0 + 40)
+                .flat_map(|y| (x0..x0 + 20).map(move |x| (y * 256 + x) * 4))
+                .map(|i| pixels[i..i + 3].iter().map(|&c| u64::from(c)).sum::<u64>())
+                .sum()
+        };
+        map.run_frame().expect("frame");
+        assert_eq!(capsule(&map), 0, "no HUD before navigation publishes it");
+        let mut controls = crate::navigation::NavigationState::default();
+        map.navigate(&mut controls, std::time::Duration::from_millis(16));
+        map.run_frame().expect("frame");
+        assert!(capsule(&map) > 0, "HUD capsule should be drawn");
+    })
 }
