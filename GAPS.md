@@ -7,22 +7,6 @@ entry when it is closed.
 Sizes: **S** days, **M** weeks, **L** a month or more. Paths are relative to `maplibre/src` unless
 they start with another directory.
 
-## Conformance evidence and CI
-
-| Gap | State | Size |
-| --- | --- | --- |
-| Render suite gated in CI | `render-tests/` vendors the GL JS fixtures; no workflow runs them and no pass rate is recorded | M |
-| Ignore list with reasons for failing render cases | None | S |
-| Query cases (`expected.json`) gated | Not gated | S |
-| Expression cases for `at`, `split`, `join`, `error`, `within`, `distance`, `collator`, `number-format`, `feature-state`, `global-state` | Absent from the vendored suite; `tests/expression_conformance.rs` asserts a floor, not a named expected-failure list | S |
-| `headless` integration tests and six book examples compiled by a native CI job | Not run by any workflow | S |
-| CI build without `native-io` | None | S |
-| CI for `apple/visionos` | None | M |
-| Sanitizer job; Vulkan validation and Metal debug layers in test jobs | None | M |
-| `scripts/check-module-layout.py`, `scripts/check-immersive-stability.py` in CI | Not wired | S |
-| Coverage upload, MSRV job, `cargo-deny` | None | S |
-| Benchmark comparison against a base ref | Criterion benches run without comparison | M |
-
 ## Text and symbols
 
 | Gap | State | Size |
@@ -68,20 +52,11 @@ they start with another directory.
 | General C ABI | Partial; visionOS only (`apple/visionos/maplibre_visionos.h`) | L |
 | Thread-safe runtime and map handles | Partial; single-thread `MapHandle` (`map/handle.rs`) | M–L |
 | Android and iOS as embeddable SDKs | Partial; `android/src/lib.rs` and `apple/src/lib.rs` start the demo map | M |
-| Guard on the wasm build's dependency set | Missing | S |
-| Book | Architecture and platform pages predate the TCS, schedule, plugin, headless and XR design; `docs/src/user-guide/index.md` sets a field that does not exist (`auto_tilt_override`); no visionOS page; `docs/src/SUMMARY-book.md` lists a missing `developer-log.md` | M |
 
 ## Architecture and engineering
 
 | Gap | State | Size |
 | --- | --- | --- |
 | Crate layering | One crate holds the engine, with 34 `pub mod` | L |
-| Workspace lint policy | No `[workspace.lints]`; `unsafe_code`, `unwrap_used`, `expect_used` are not denied in the core crate | M |
-| Panic sites | Baselined per crate in `scripts/panic-baseline.json`, mostly `.expect`; no per-file ratchet | M |
-| Executor at the edge | Tokio reaches past `platform/noweb` into `io/cpu_work.rs` and `headless/map/` | L |
-| Global state | `SHARED_CACHE_FRONTENDS`, `IN_PROCESS_HANDLERS` (`platform/noweb/http_client.rs`), `LIVE_BYTES` (`tcs/system/heap.rs`) | S–M |
-| `unsafe` in the ECS | `tcs/tiles.rs`, `tcs/resources.rs` | M |
-| `experimental` feature on by default | Gates celestial, starfield and overlay code | S |
 | Style types generated from the spec JSON | Hand-written (`style/layer/paint.rs`, `style/property/`) | M |
-| Releases | No tags, no publish pipeline | M |
-| Leftovers | Six `mod.rs` files; `raster` and `geojson` features gate nothing; `maplibre/style-spec-v8.json` is unreferenced; edition 2021 | S |
+| Leftovers | `maplibre/style-spec-v8.json` is unreferenced | S |
