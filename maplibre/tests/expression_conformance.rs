@@ -16,7 +16,7 @@ use maplibre::style::expression::{
 use serde_json::Value as Json;
 
 /// Passing cases the vendored suite must keep producing.
-const MIN_PASSING_CASES: usize = 408;
+const MIN_PASSING_CASES: usize = 411;
 
 /// Types of the specification the engine has no value for.
 const UNSUPPORTED_TYPES: &[&str] = &[

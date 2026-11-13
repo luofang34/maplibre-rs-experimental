@@ -6,6 +6,7 @@ use crate::style::expression::{
     ast::{Arithmetic, Coercion, Comparison, Expression, MathFunction},
     collation::Collation,
     interpolation::{interpolate_number, ColorSpace},
+    number_format,
     value::{Color, Type, Value},
 };
 
@@ -379,4 +380,106 @@ pub(super) fn interpolate_values(
             found: from.type_of(),
         }),
     }
+}
+
+pub(super) fn eval_number_format(
+    input: &Expression,
+    options: &[(String, Expression)],
+    context: &EvaluationContext<'_>,
+) -> Result<Value> {
+    let number = expect_number(input.evaluate(context)?)?;
+    let read = |name: &str| -> Result<Option<Value>> {
+        options
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, option)| option.evaluate(context))
+            .transpose()
+    };
+    let digits = |value: Option<Value>| {
+        value
+            .and_then(|value| value.as_number())
+            .map(|digits| digits.clamp(0.0, 20.0) as usize)
+    };
+    let currency = read("currency")?.and_then(|value| value.as_str().map(str::to_owned));
+    let min = digits(read("min-fraction-digits")?);
+    let max = digits(read("max-fraction-digits")?);
+    Ok(Value::String(number_format::format(
+        number,
+        currency.as_deref(),
+        min,
+        max,
+    )))
+}
+
+pub(super) fn eval_at(
+    index: &Expression,
+    array: &Expression,
+    context: &EvaluationContext<'_>,
+) -> Result<Value> {
+    let index = expect_number(index.evaluate(context)?)?;
+    let items = match array.evaluate(context)? {
+        Value::Array(items) => items,
+        other => {
+            return Err(EvaluationError::Expected {
+                expected: Type::array(Type::Value, None),
+                found: other.type_of(),
+            });
+        }
+    };
+    if !index.is_finite() || index.fract() != 0.0 {
+        return Err(EvaluationError::InvalidArrayIndex {
+            reason: format!("Array index must be an integer, but found {index} instead."),
+        });
+    }
+    if index < 0.0 || (index as usize) >= items.len() {
+        return Err(EvaluationError::InvalidArrayIndex {
+            reason: format!(
+                "Array index out of bounds: {index} is not within 0..{}.",
+                items.len()
+            ),
+        });
+    }
+    Ok(items[index as usize].clone())
+}
+
+pub(super) fn eval_split(
+    input: &Expression,
+    delimiter: &Expression,
+    context: &EvaluationContext<'_>,
+) -> Result<Value> {
+    let text = expect_string(input.evaluate(context)?)?;
+    let delimiter = expect_string(delimiter.evaluate(context)?)?;
+    let parts = if delimiter.is_empty() {
+        text.chars()
+            .map(|ch| Value::String(ch.to_string()))
+            .collect()
+    } else {
+        text.split(&delimiter)
+            .map(|part| Value::String(part.to_owned()))
+            .collect()
+    };
+    Ok(Value::Array(parts))
+}
+
+pub(super) fn eval_join(
+    input: &Expression,
+    separator: &Expression,
+    context: &EvaluationContext<'_>,
+) -> Result<Value> {
+    let items = match input.evaluate(context)? {
+        Value::Array(items) => items,
+        other => {
+            return Err(EvaluationError::Expected {
+                expected: Type::array(Type::Value, None),
+                found: other.type_of(),
+            });
+        }
+    };
+    let separator = expect_string(separator.evaluate(context)?)?;
+    let joined = items
+        .iter()
+        .map(Value::to_display_string)
+        .collect::<Vec<_>>()
+        .join(&separator);
+    Ok(Value::String(joined))
 }

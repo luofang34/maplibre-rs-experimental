@@ -418,3 +418,69 @@ fn within_and_distance_read_the_geometry_a_feature_carries() {
         Value::from("1,234.50")
     );
 }
+
+#[test]
+fn at_error_split_and_join_follow_style_specification_semantics() {
+    let props = properties();
+    let eval_with = |expression: serde_json::Value| {
+        Expression::parse(&expression)
+            .expect("expression parses")
+            .evaluate(&EvaluationContext::for_feature(0.0, &props))
+    };
+
+    assert_eq!(
+        eval_with(json!(["at", 1, ["literal", ["a", "b", "c"]]])),
+        Ok(Value::from("b"))
+    );
+    assert!(matches!(
+        eval_with(json!(["at", -1, ["get", "tags"]])),
+        Err(EvaluationError::Expected { .. } | EvaluationError::InvalidArrayIndex { .. })
+    ));
+    assert!(Expression::parse(&json!(["at", 3, ["literal", [1, 2]]])).is_err());
+    assert!(Expression::parse(&json!(["at", 0.5, ["literal", [1, 2]]])).is_err());
+
+    assert_eq!(
+        eval_with(json!(["all", false, ["error", "unreachable"]])),
+        Ok(Value::Bool(false))
+    );
+    assert_eq!(
+        eval_with(json!(["any", true, ["error", "unreachable"]])),
+        Ok(Value::Bool(true))
+    );
+    assert_eq!(
+        eval_with(json!([
+            "case",
+            ["==", ["get", "kind"], "missing"],
+            ["error", "unreachable branch"],
+            "kept"
+        ])),
+        Ok(Value::from("kept"))
+    );
+    assert_eq!(
+        eval_with(json!(["error", "boom"])),
+        Err(EvaluationError::UserError {
+            message: "boom".to_string()
+        })
+    );
+
+    assert_eq!(
+        eval_with(json!(["split", "a;b;c", ";"])),
+        Ok(Value::Array(vec![
+            Value::from("a"),
+            Value::from("b"),
+            Value::from("c"),
+        ]))
+    );
+    assert_eq!(
+        eval_with(json!(["split", "hi", ""])),
+        Ok(Value::Array(vec![Value::from("h"), Value::from("i")]))
+    );
+    assert_eq!(
+        eval_with(json!(["join", ["split", "a,b,c", ","], " - "])),
+        Ok(Value::from("a - b - c"))
+    );
+    assert_eq!(
+        eval_with(json!(["join", ["literal", [1, null, true]], ":"])),
+        Ok(Value::from("1::true"))
+    );
+}

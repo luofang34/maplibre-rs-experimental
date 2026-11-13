@@ -371,6 +371,31 @@ pub enum Expression {
         /// The string.
         operand: Box<Expression>,
     },
+    /// `error`: raises a user-specified evaluation error when reached.
+    Error(Box<Expression>),
+    /// `at`: element lookup at an integer index in an array.
+    At {
+        /// Zero-based integer index.
+        index: Box<Expression>,
+        /// Array operand.
+        array: Box<Expression>,
+        /// Static item type of the array.
+        output: Type,
+    },
+    /// `split`: splits a string by a delimiter into `array<string>`.
+    Split {
+        /// Source string.
+        input: Box<Expression>,
+        /// Separator string.
+        delimiter: Box<Expression>,
+    },
+    /// `join`: joins array elements into a string with a separator.
+    Join {
+        /// Array operand.
+        input: Box<Expression>,
+        /// Separator string.
+        separator: Box<Expression>,
+    },
 }
 
 impl Expression {
@@ -379,6 +404,7 @@ impl Expression {
         match self {
             Self::Literal(value) => value.type_of(),
             Self::Folded { output, .. } => output.clone(),
+            Self::Error(_) => Type::Error,
             Self::Global(_) => Type::Number,
             Self::Feature(FeatureProperty::Id) => Type::Value,
             Self::Feature(FeatureProperty::GeometryType) => Type::String,
@@ -400,6 +426,7 @@ impl Expression {
             | Self::Match { output, .. }
             | Self::Coalesce { output, .. }
             | Self::Slice { output, .. }
+            | Self::At { output, .. }
             | Self::Interpolate { output, .. }
             | Self::Step { output, .. } => output.clone(),
             Self::IndexOf { .. }
@@ -409,9 +436,11 @@ impl Expression {
             | Self::MinMax { .. } => Type::Number,
             Self::TypeOf(_)
             | Self::Concat(_)
+            | Self::Join { .. }
             | Self::StringCase { .. }
             | Self::ResolvedLocale(_)
             | Self::NumberFormat { .. } => Type::String,
+            Self::Split { .. } => Type::array(Type::String, None),
             Self::Image(_) => Type::ResolvedImage,
             Self::Format(_) => Type::Formatted,
             Self::Assert { required, .. } => required.clone(),

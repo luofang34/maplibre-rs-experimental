@@ -92,6 +92,7 @@ const OPERATORS: &[&str] = &[
     "heatmap-density",
     "split",
     "join",
+    "error",
 ];
 
 /// Whether a JSON array is an expression rather than a literal array value: it starts with an

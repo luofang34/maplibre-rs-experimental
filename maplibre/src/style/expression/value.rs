@@ -338,6 +338,8 @@ pub enum Type {
     ResolvedImage,
     /// Text in sections.
     Formatted,
+    /// Bottom type produced by `["error", ...]` expressions; subtypes every type.
+    Error,
     /// Any value; the type of a property read or an untyped branch.
     Value,
     /// An array, with an item type and, when known, a length.
@@ -362,6 +364,7 @@ impl Type {
     /// `checkSubtype` decides.
     pub fn is_subtype_of(&self, expected: &Type) -> bool {
         match (expected, self) {
+            (_, Type::Error) => true,
             (
                 Type::Array {
                     item: expected_item,
@@ -391,6 +394,7 @@ impl Type {
             Self::Collator => "collator".to_string(),
             Self::ResolvedImage => "resolvedImage".to_string(),
             Self::Formatted => "formatted".to_string(),
+            Self::Error => "error".to_string(),
             Self::Value => "value".to_string(),
             Self::Array { item, length } => match (item.as_ref(), length) {
                 (_, Some(length)) => format!("array<{}, {length}>", item.name()),

@@ -84,6 +84,7 @@ impl Expression {
                 }
             }
             Self::Not(operand)
+            | Self::Error(operand)
             | Self::ResolvedLocale(operand)
             | Self::IsSupportedScript(operand)
             | Self::Length(operand)
@@ -92,9 +93,25 @@ impl Expression {
             | Self::Image(operand)
             | Self::ToRgba(operand)
             | Self::StringCase { operand, .. } => visit(operand),
-            Self::In { needle, haystack } => {
-                visit(needle);
-                visit(haystack);
+            Self::In {
+                needle: left,
+                haystack: right,
+            }
+            | Self::At {
+                index: left,
+                array: right,
+                ..
+            }
+            | Self::Split {
+                input: left,
+                delimiter: right,
+            }
+            | Self::Join {
+                input: left,
+                separator: right,
+            } => {
+                visit(left);
+                visit(right);
             }
             Self::IndexOf {
                 needle,

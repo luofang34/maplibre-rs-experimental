@@ -9,7 +9,6 @@ use super::{
     collation::{is_supported_script, Collation},
     feature_identity::{is_internal_property, GEOMETRY_TYPE_PROPERTY, ID_PROPERTY},
     geometry::{Geometry, GEOMETRY_PROPERTY},
-    number_format,
     value::{Type, Value},
 };
 
@@ -133,6 +132,18 @@ pub enum EvaluationError {
     /// A `step` or `interpolate` input was not a number, such as the result of dividing by zero.
     #[error("input is not a number")]
     InputNotANumber,
+    /// `["error", ...]` was reached during evaluation.
+    #[error("{message}")]
+    UserError {
+        /// User-provided error message.
+        message: String,
+    },
+    /// `at` received a non-integer or out-of-bounds array index.
+    #[error("{reason}")]
+    InvalidArrayIndex {
+        /// Diagnostic message describing the invalid index.
+        reason: String,
+    },
 }
 
 mod images;
@@ -274,31 +285,7 @@ impl Expression {
                     .and_then(|geometry| geometry.distance_to(other))
                     .unwrap_or(-1.0),
             )),
-            Self::NumberFormat { input, options } => {
-                let number = expect_number(input.evaluate(context)?)?;
-                let read = |name: &str| -> Result<Option<Value>> {
-                    options
-                        .iter()
-                        .find(|(key, _)| key == name)
-                        .map(|(_, option)| option.evaluate(context))
-                        .transpose()
-                };
-                let digits = |value: Option<Value>| {
-                    value
-                        .and_then(|value| value.as_number())
-                        .map(|digits| digits.clamp(0.0, 20.0) as usize)
-                };
-                let currency =
-                    read("currency")?.and_then(|value| value.as_str().map(str::to_owned));
-                let min = digits(read("min-fraction-digits")?);
-                let max = digits(read("max-fraction-digits")?);
-                Ok(Value::String(number_format::format(
-                    number,
-                    currency.as_deref(),
-                    min,
-                    max,
-                )))
-            }
+            Self::NumberFormat { input, options } => eval_number_format(input, options, context),
             Self::ResolvedLocale(collator) => Ok(match collator.evaluate(context)? {
                 Value::Collator(collation) => Value::String(collation.resolved_locale().to_owned()),
                 _ => Value::Null,
@@ -489,6 +476,12 @@ impl Expression {
                     super::ast::StringFunction::Downcase => text.to_lowercase(),
                 }))
             }
+            Self::Error(message) => Err(EvaluationError::UserError {
+                message: expect_string(message.evaluate(context)?)?,
+            }),
+            Self::At { index, array, .. } => eval_at(index, array, context),
+            Self::Split { input, delimiter } => eval_split(input, delimiter, context),
+            Self::Join { input, separator } => eval_join(input, separator, context),
         }
     }
 }

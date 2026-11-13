@@ -73,7 +73,9 @@ impl Parser {
             let index = offset * 2 + 1;
             let condition = self.parse_at(&pair[0], index, Some(&Type::Boolean))?;
             let result = self.parse_at(&pair[1], index + 1, output.as_ref())?;
-            output.get_or_insert_with(|| result.output_type());
+            if output.is_none() && result.output_type() != Type::Error {
+                output = Some(result.output_type());
+            }
             branches.push((condition, result));
         }
         let last = args.len() - 1;
@@ -148,7 +150,9 @@ impl Parser {
                 values.push(value);
             }
             let result = self.parse_at(&pair[1], index + 1, output.as_ref())?;
-            output.get_or_insert_with(|| result.output_type());
+            if output.is_none() && result.output_type() != Type::Error {
+                output = Some(result.output_type());
+            }
             cases.push((values, result));
         }
         let input = self.parse_at(&args[0], 1, Some(&Type::Value))?;
@@ -181,7 +185,9 @@ impl Parser {
         let mut operands = Vec::new();
         for (offset, arg) in args.iter().enumerate() {
             let operand = self.parse_unwrapped_at(arg, offset + 1, output.as_ref())?;
-            output.get_or_insert_with(|| operand.output_type());
+            if output.is_none() && operand.output_type() != Type::Error {
+                output = Some(operand.output_type());
+            }
             operands.push(operand);
         }
         let output = output.unwrap_or(Type::Value);
@@ -335,7 +341,9 @@ impl Parser {
                 )));
             }
             let parsed = self.parse_at(value, index, output.as_ref())?;
-            output.get_or_insert_with(|| parsed.output_type());
+            if output.is_none() && parsed.output_type() != Type::Error {
+                output = Some(parsed.output_type());
+            }
             stops.push((label, parsed));
             cursor += 1;
             index += 1;

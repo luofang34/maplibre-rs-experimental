@@ -229,8 +229,10 @@ impl Parser {
     /// Evaluates an expression that depends on nothing, as GL JS does while parsing, so an
     /// error in it surfaces once rather than per feature.
     fn fold(&self, parsed: Expression) -> Result<Expression> {
-        if matches!(parsed, Expression::Literal(_) | Expression::Folded { .. })
-            || !parsed.is_constant()
+        if matches!(
+            parsed,
+            Expression::Literal(_) | Expression::Folded { .. } | Expression::Error(_)
+        ) || !parsed.is_constant()
         {
             return Ok(parsed);
         }
@@ -318,6 +320,12 @@ impl Parser {
             "index-of" => self.parse_index_of(args),
             "slice" => self.parse_slice(args),
             "length" => self.parse_length(args),
+            "at" => self.parse_at_operator(args),
+            "split" => self.parse_split(args),
+            "join" => self.parse_join(args),
+            "error" => Ok(Expression::Error(Box::new(
+                self.parse_single(args, &Type::String)?,
+            ))),
             "+" => self.parse_arithmetic(Arithmetic::Add, args, None),
             "*" => self.parse_arithmetic(Arithmetic::Multiply, args, None),
             "-" => match args.len() {

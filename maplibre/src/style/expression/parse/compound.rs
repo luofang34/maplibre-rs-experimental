@@ -83,10 +83,18 @@ impl Parser {
         let (left_type, right_type) = (left.output_type(), right.output_type());
         for (index, side) in [(1, &left_type), (2, &right_type)] {
             let comparable = match operator_kind.is_ordering() {
-                true => matches!(side, Type::String | Type::Number | Type::Value),
+                true => matches!(
+                    side,
+                    Type::String | Type::Number | Type::Value | Type::Error
+                ),
                 false => matches!(
                     side,
-                    Type::Boolean | Type::String | Type::Number | Type::Null | Type::Value
+                    Type::Boolean
+                        | Type::String
+                        | Type::Number
+                        | Type::Null
+                        | Type::Value
+                        | Type::Error
                 ),
             };
             if !comparable {
@@ -99,7 +107,10 @@ impl Parser {
                 return Err(error);
             }
         }
-        if left_type != right_type && left_type != Type::Value && right_type != Type::Value {
+        if left_type != right_type
+            && !matches!(left_type, Type::Value | Type::Error)
+            && !matches!(right_type, Type::Value | Type::Error)
+        {
             return Err(self.error(format!(
                 "Cannot compare types '{left_type}' and '{right_type}'."
             )));
@@ -280,6 +291,56 @@ impl Parser {
             )));
         }
         Ok(Expression::Length(Box::new(input)))
+    }
+
+    pub(super) fn parse_at_operator(&mut self, args: &[Json]) -> Result<Expression> {
+        if args.len() != 2 {
+            return Err(self.error(format!(
+                "Expected 2 arguments, but found {} instead.",
+                args.len()
+            )));
+        }
+        let index = self.parse_at(&args[0], 1, Some(&Type::Number))?;
+        let array = self.parse_at(&args[1], 2, Some(&Type::array(Type::Value, None)))?;
+        let output = match array.output_type() {
+            Type::Array { item, .. } => *item,
+            _ => Type::Value,
+        };
+        Ok(Expression::At {
+            index: Box::new(index),
+            array: Box::new(array),
+            output,
+        })
+    }
+
+    pub(super) fn parse_split(&mut self, args: &[Json]) -> Result<Expression> {
+        if args.len() != 2 {
+            return Err(self.error(format!(
+                "Expected 2 arguments, but found {} instead.",
+                args.len()
+            )));
+        }
+        let input = self.parse_at(&args[0], 1, Some(&Type::String))?;
+        let delimiter = self.parse_at(&args[1], 2, Some(&Type::String))?;
+        Ok(Expression::Split {
+            input: Box::new(input),
+            delimiter: Box::new(delimiter),
+        })
+    }
+
+    pub(super) fn parse_join(&mut self, args: &[Json]) -> Result<Expression> {
+        if args.len() != 2 {
+            return Err(self.error(format!(
+                "Expected 2 arguments, but found {} instead.",
+                args.len()
+            )));
+        }
+        let input = self.parse_at(&args[0], 1, Some(&Type::array(Type::Value, None)))?;
+        let separator = self.parse_at(&args[1], 2, Some(&Type::String))?;
+        Ok(Expression::Join {
+            input: Box::new(input),
+            separator: Box::new(separator),
+        })
     }
 
     pub(super) fn parse_arithmetic(
