@@ -41,55 +41,36 @@
 
 ## Project
 
-This project aims to develop a MapLibre Style Spec compliant renderer in Rust, using WebGPU for cross-platform support.
+`maplibre-rs` is a pure-Rust, data-oriented 2D/3D vector and raster map rendering engine built on [`wgpu`](https://wgpu.rs/) and WGSL, targeting MapLibre Style Specification conformance across desktop, mobile, XR/spatial, headless server, and WebAssembly environments.
 
 ## Description
 
-maplibre-rs is a portable and performant vector maps renderer. We aim to support web, mobile and desktop applications. This
-is achieved by the novel [WebGPU](https://www.w3.org/TR/webgpu/) specification. Plenty of native implementations are
-already implementing this specification. On the web, it is implemented by Firefox, Chrome and Safari. There are also
-standalone implementations that directly use Vulkan, OpenGL or Metal as a backend. Those backends allow maplibre-rs to run on
-mobile and desktop applications.
+`maplibre-rs` combines a tile-component system (`TCS`), staged `Schedule` execution, slab-pooled GPU geometry/metadata buffers, and a modular `RenderGraph` on top of [WebGPU](https://www.w3.org/TR/webgpu/) (`wgpu`). A single WGSL shader and Rust rendering pipeline runs natively over Metal, Vulkan, DirectX 12, OpenGL ES, and browser WebGPU/WebGL2.
 
-Rust is used as a Lingua franca on all platforms. This is made possible by WebAssembly, which allows us to use Rust for
-web development.
-
-The goal of maplibre-rs is to render maps to visualize data. Right now the goal of maplibre-rs is not to replace existing
-vector map renderers like Google Maps, Apple Maps or MapLibre. The current implementation serves as a proof-of-concept
-of the used technology stack. It is unclear whether the high-performance requirements of rendering maps using vector
-graphics are achievable using the current stack.
+Unlike legacy C++ map engines bound to fixed single-camera class hierarchies, `maplibre-rs` treats 3D globe projection, 3D terrain elevation draping, stereo/multi-view XR rendering, upload/memory budgets, and headless offscreen capture as first-class render-graph capabilities.
 
 ## Demos
 
 - [WebGL](https://webgl.demo.maplibre-rs.maplibre.org)
 - [WebGL with multithreading](https://webgl-multithreaded.demo.maplibre-rs.maplibre.org) - Does not work on Safari right now
-- [WebGPU](https://webgpu.demo.maplibre-rs.maplibre.org) - Only works with development versions of Safari TP, Firefox and Chrome
+- [WebGPU](https://webgpu.demo.maplibre-rs.maplibre.org) - Supported in modern Chromium, Firefox, and Safari browsers
 
 ## Current Features
 
-* Runs on Linux, Android, iOS, macOS, Firefox, Safari (>=v16 due to (#166)[https://github.com/maplibre/maplibre-rs/issues/166]) and Chrome
-* Render a vector tile dataset
-* Simple navigation powered by winit
-* Multithreaded on all platforms
-* Querying feature data
+* **Cross-Platform & Embeddable `wgpu` Engine**: Runs on macOS, Linux, iOS, visionOS (`apple/`), Android (`android/`), WebAssembly (`web/`), and headless GPU/CPU offscreen targets (`headless` feature).
+* **Runtime-Agnostic Core (`native-io` Optional Feature)**: Disable default features (`--no-default-features`) to embed `maplibre` in custom event loops, game engines, or Wasm hosts without pulling in `tokio` or `reqwest`.
+* **Projections & 3D Terrain**: Flat Mercator and 3D Globe projections, raster-DEM 3D terrain mesh draping (`TerrainPlugin`), hillshade, color-relief, atmosphere, and celestial sky rendering.
+* **Style Layer Coverage**: `background`, `fill` (fast `earcut` polygon triangulation with `lyon` fallback and `fill-outline-color` / patterns), `line` (dashes, gradients, patterns, variable widths), `circle`, `heatmap`, `fill-extrusion` (3D buildings), `raster`, `hillshade`, `color-relief`, and `symbol` (SDF & bitmap glyphs, icons, variable text anchors, curved line labels, and screen-space collision detection).
+* **Data Sources & Tile Formats**: Mapbox Vector Tiles (MVT with pure-Rust `zlib-rs` decompression), MapLibre Tiles (MLT), GeoJSON (inline & tiled, `promoteId` & `generateId`), PMTiles archives, raster tiles, and Terrain-RGB / Terrarium DEM tiles.
+* **Style Specification Expressions & Dynamic State**: Full expression parser, type checker, constant folder, and evaluator (`let`/`var`, `match`, `case`, `coalesce`, `interpolate`/`interpolate-hcl`/`interpolate-lab`, `step`, `format`, `collator`, `number-format`, `within`, `distance`, `at`, `split`, `join`, `feature-state`, `global-state`).
+* **In-Place GPU Style & `feature-state` Updates**: Paint mutations, layer reordering, zoom-range/visibility edits, `set_global_state`, and `set_feature_state` / `remove_feature_state` refresh per-feature GPU metadata buffers in place without re-fetching or re-tessellating tiles.
+* **Spatial Feature Queries & Multi-View Rendering**: `query_rendered_features` (returning source properties and live `feature-state` maps) over R-tree indexed tile geometry, plus stereo/multi-view camera rendering for spatial computing.
 
-## Missing Features
+## Roadmap / Remaining Gaps
 
-* Rendering Text
-* Per-Feature Rendering
-* Rendering:
-    * Labels
-    * Symbols
-    * Raster data
-    * 3D terrain
-    * Hill-shade (DEM)
-* Collision detection
-* Support for:
-    * GeoJSON
-* API for:
-    * TypeScript
-    * Swift
-    * Java/Kotlin
+* Complex right-to-left / Indic text shaping (`harfbuzz` / `harfrust`) and runtime vertical CJK punctuation layout
+* Non-scalar expression interpolation types (`padding`, `variableAnchorOffsetCollection`, `projectionDefinition`)
+* Further splitting the core `maplibre` crate into smaller workspace sub-crates for faster incremental downstream builds
 
 ## Building & Running
 

@@ -114,7 +114,7 @@ pub fn build_style(mut style: Style) -> Style {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let base: Style = maplibre::platform::run_multithreaded(async {
-        Ok::<_, reqwest::Error>(reqwest::get(BASE_STYLE_URL).await?.json().await?)
+        reqwest::get(BASE_STYLE_URL).await?.json().await
     })?;
     run_headed_map(
         Some(PathBuf::from("./maplibre-cache")),
