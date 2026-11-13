@@ -38,11 +38,17 @@ pub(crate) fn platform_loader(_cache_directory: Option<String>) -> SharedLoader 
 }
 
 /// Reqwest with the configured on-disk cache.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "native-io"))]
 pub(crate) fn platform_loader(cache_directory: Option<String>) -> SharedLoader {
     SharedLoader::new(crate::platform::http_client::ReqwestHttpClient::new(
         cache_directory,
     ))
+}
+
+/// Offline empty tile client when `native-io` is disabled and the caller supplied no custom loader.
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "native-io")))]
+pub(crate) fn platform_loader(_cache_directory: Option<String>) -> SharedLoader {
+    SharedLoader::new(super::SuppliedTileClient)
 }
 
 #[cfg(test)]

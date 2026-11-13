@@ -23,7 +23,7 @@ pub struct CpuWorkError(#[source] Box<dyn std::error::Error + Send + Sync>);
 pub(crate) async fn run_cpu_bound<R: Send + 'static>(
     work: impl FnOnce() -> R + Send + 'static,
 ) -> Result<R, CpuWorkError> {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), feature = "native-io"))]
     if let Ok(runtime) = tokio::runtime::Handle::try_current() {
         return runtime
             .spawn_blocking(work)

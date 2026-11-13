@@ -1,29 +1,29 @@
 //! Handles platform specific code. Depending on the compilation target, different
 //! parts of this module are used.
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "native-io"))]
 pub use noweb::run_multithreaded;
-#[cfg(feature = "trace")]
+#[cfg(all(not(target_arch = "wasm32"), feature = "native-io", feature = "trace"))]
 pub use noweb::trace;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "native-io"))]
 pub use noweb::ReqwestOffscreenKernelEnvironment;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "native-io"))]
 mod noweb;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
-/// The platform's HTTP transport: Reqwest natively, `fetch` in the browser.
+/// The platform's HTTP transport: Reqwest natively (when `native-io` is enabled), `fetch` in the browser.
 pub mod http_client {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), feature = "native-io"))]
     pub use super::noweb::http_client::*;
     #[cfg(target_arch = "wasm32")]
     pub use super::web::http_client::*;
 }
 
-/// Scheduler for non-web targets.
+/// Scheduler for non-web targets (when `native-io` is enabled).
 pub mod scheduler {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), feature = "native-io"))]
     pub use super::noweb::scheduler::*;
 }
 

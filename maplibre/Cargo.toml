@@ -14,14 +14,24 @@ authors.workspace = true
 
 [features]
 # FIXME tcs: Remove raster from default
-default = ["raster", "mlt", "experimental"]
+default = ["native-io", "raster", "mlt", "experimental"]
+# Enables the default native Tokio task scheduler and Reqwest HTTP transport.
+# Disable (`default-features = false`) to embed `maplibre` in pure-Rust apps with a custom runtime/loader.
+native-io = [
+    "dep:tokio",
+    "dep:tokio-util",
+    "dep:env_logger",
+    "dep:reqwest",
+    "dep:http-cache-reqwest",
+    "dep:reqwest-middleware",
+]
 web-webgl = ["wgpu/webgl"]
 # Enable tracing using tracy on desktop/mobile and the chrome profiler on web
 trace = ["tracing-subscriber", "tracing-tracy"]
 thread-safe-futures = []
 embed-static-tiles = ["maplibre-build-tools/sqlite"]
 headless = ["png", "raster"]
-raster = ["image", "moxcms"]
+raster = []
 geojson = []
 # Reads MapLibre Tile (MLT) vector tiles. Its encoder dependencies reach `getrandom` 0.1,
 # which has no visionOS support, so a visionOS build turns it off.
@@ -30,12 +40,12 @@ experimental = []
 
 
 [target.'cfg(any(target_os = "macos", target_os = "ios", target_os = "visionos", target_os = "linux", target_os = "android", target_os = "windows"))'.dependencies]
-tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
-tokio-util.workspace = true
-env_logger.workspace = true
-reqwest.workspace = true
-http-cache-reqwest.workspace = true
-reqwest-middleware.workspace = true
+tokio = { workspace = true, optional = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
+tokio-util = { workspace = true, optional = true }
+env_logger = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+http-cache-reqwest = { workspace = true, optional = true }
+reqwest-middleware = { workspace = true, optional = true }
 tracing-tracy = { workspace = true, optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -43,9 +53,6 @@ wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 js-sys.workspace = true
 web-sys = { workspace = true, features = ["Request", "RequestInit", "Response", "Headers", "Window", "WorkerGlobalScope", "WorkerLocation"] }
-
-[target.'cfg(target_os = "android")'.dependencies]
-reqwest.workspace = true
 
 [dependencies]
 unicode-bidi = "0.3"
@@ -74,6 +81,7 @@ unicode-normalization.workspace = true
 wgpu.workspace = true
 #wgpu = { git = "https://github.com/gfx-rs/wgpu.git", rev = "" }
 lyon.workspace = true
+earcut.workspace = true
 
 # cached = "0.32"
 
@@ -101,10 +109,10 @@ downcast-rs.workspace = true
 smallvec.workspace = true
 rustc-hash.workspace = true
 
-# Headless
+# Headless / Image decoding
 png = { workspace = true, optional = true }
-image = { workspace = true, optional = true }
-moxcms = { version = "0.9.1", optional = true }
+image.workspace = true
+moxcms = "0.9.1"
 
 # Text/glyphs
 prost = "0.14.4"
@@ -112,6 +120,9 @@ prost = "0.14.4"
 [dev-dependencies]
 # Shaders stay WGSL; a native render node gets them through naga's own backends.
 naga = { workspace = true, features = ["msl-out", "spv-out"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test.workspace = true
