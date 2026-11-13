@@ -3,7 +3,7 @@
 </h1>
 
 <div style="text-align:center">
-  <strong>Native Maps for Web, Mobile and Linux</strong>
+  <strong>Maps for desktop, web, mobile, spatial and headless hosts</strong>
 </div>
 <div style="text-align:center">
   A map rendering library written in Rust.
@@ -12,81 +12,63 @@
 <div style="text-align:center">
   <img src="https://img.shields.io/badge/stability-experimental-orange.svg?style=flat-square"
       alt="Stability" />
-  <a href="https://github.com/maplibre/maplibre-rs/actions/workflows/on_main_push.yml">
-    <img src="https://github.com/maplibre/maplibre-rs/actions/workflows/on_main_push.yml/badge.svg"
-        alt="Build status" />
-  </a>
-  <a href="https://matrix.to/#/#maplibre:matrix.org">
-    <img src="https://img.shields.io/static/v1?label=Space&message=%23maplibre&color=blue&logo=matrix"
+  <a href="https://github.com/luofang34/maplibre-rs-experimental/actions/workflows/on_main_push.yml">
+    <img src="https://github.com/luofang34/maplibre-rs-experimental/actions/workflows/on_main_push.yml/badge.svg"
         alt="Build status" />
   </a>
 </div>
 
 <div style="text-align:center">
   <h3>
-    <a href="https://webgl.demo.maplibre-rs.maplibre.org">
-      WebGL Demo
-    </a> |
-    <a href="https://maplibre.org/maplibre-rs/docs/book/">
+    <a href="https://luofang34.github.io/maplibre-rs-experimental/docs/book/">
       Book
     </a> |
-    <a href="https://maplibre.org/maplibre-rs/docs/api/maplibre/">
+    <a href="https://luofang34.github.io/maplibre-rs-experimental/docs/api/maplibre/">
       API
-    </a> |
-    <a href="https://slack.openstreetmap.us/">
-      Chat (#maplibre-rs)
     </a>
   </h3>
 </div>
 
 ## Project
 
-`maplibre-rs` is a pure-Rust, data-oriented 2D/3D vector and raster map rendering engine built on [`wgpu`](https://wgpu.rs/) and WGSL, targeting MapLibre Style Specification conformance across desktop, mobile, XR/spatial, headless server, and WebAssembly environments.
+`maplibre-rs` is a pure-Rust, data-oriented 2D/3D vector and raster map rendering engine built on [`wgpu`](https://wgpu.rs/) and WGSL. It targets MapLibre Style Specification conformance, takes MapLibre GL JS as its behavioural reference, and runs on desktop, mobile, XR/spatial, headless and WebAssembly hosts.
+
+This repository is an experimental fork of [maplibre-rs](https://github.com/maplibre/maplibre-rs). No crate is published and the API is unstable.
 
 ## Description
 
-`maplibre-rs` combines a tile-component system (`TCS`), staged `Schedule` execution, slab-pooled GPU geometry/metadata buffers, and a modular `RenderGraph` on top of [WebGPU](https://www.w3.org/TR/webgpu/) (`wgpu`). A single WGSL shader and Rust rendering pipeline runs natively over Metal, Vulkan, DirectX 12, OpenGL ES, and browser WebGPU/WebGL2.
+`maplibre-rs` combines a tile-component system (`TCS`), staged `Schedule` execution, plugins, slab-pooled GPU geometry and metadata buffers, and a modular `RenderGraph` on top of [WebGPU](https://www.w3.org/TR/webgpu/) (`wgpu`). One WGSL shader set and one Rust rendering pipeline run over Metal, Vulkan, DirectX 12, OpenGL ES, and browser WebGPU/WebGL2.
 
-Unlike legacy C++ map engines bound to fixed single-camera class hierarchies, `maplibre-rs` treats 3D globe projection, 3D terrain elevation draping, stereo/multi-view XR rendering, upload/memory budgets, and headless offscreen capture as first-class render-graph capabilities.
+Globe projection, terrain draping, stereo and multi-view rendering, upload and memory budgets, and offscreen capture are render-graph capabilities of the same engine, not separate code paths.
 
-## Demos
+## Features
 
-- [WebGL](https://webgl.demo.maplibre-rs.maplibre.org)
-- [WebGL with multithreading](https://webgl-multithreaded.demo.maplibre-rs.maplibre.org) - Does not work on Safari right now
-- [WebGPU](https://webgpu.demo.maplibre-rs.maplibre.org) - Supported in modern Chromium, Firefox, and Safari browsers
-
-## Current Features
-
-* **Cross-Platform & Embeddable `wgpu` Engine**: Runs on macOS, Linux, iOS, visionOS (`apple/`), Android (`android/`), WebAssembly (`web/`), and headless GPU/CPU offscreen targets (`headless` feature).
-* **Runtime-Agnostic Core (`native-io` Optional Feature)**: Disable default features (`--no-default-features`) to embed `maplibre` in custom event loops, game engines, or Wasm hosts without pulling in `tokio` or `reqwest`.
-* **Projections & 3D Terrain**: Flat Mercator and 3D Globe projections, raster-DEM 3D terrain mesh draping (`TerrainPlugin`), hillshade, color-relief, atmosphere, and celestial sky rendering.
-* **Style Layer Coverage**: `background`, `fill` (fast `earcut` polygon triangulation with `lyon` fallback and `fill-outline-color` / patterns), `line` (dashes, gradients, patterns, variable widths), `circle`, `heatmap`, `fill-extrusion` (3D buildings), `raster`, `hillshade`, `color-relief`, and `symbol` (SDF & bitmap glyphs, icons, variable text anchors, curved line labels, and screen-space collision detection).
-* **Data Sources & Tile Formats**: Mapbox Vector Tiles (MVT with pure-Rust `zlib-rs` decompression), MapLibre Tiles (MLT), GeoJSON (inline & tiled, `promoteId` & `generateId`), PMTiles archives, raster tiles, and Terrain-RGB / Terrarium DEM tiles.
-* **Style Specification Expressions & Dynamic State**: Full expression parser, type checker, constant folder, and evaluator (`let`/`var`, `match`, `case`, `coalesce`, `interpolate`/`interpolate-hcl`/`interpolate-lab`, `step`, `format`, `collator`, `number-format`, `within`, `distance`, `at`, `split`, `join`, `feature-state`, `global-state`).
-* **In-Place GPU Style & `feature-state` Updates**: Paint mutations, layer reordering, zoom-range/visibility edits, `set_global_state`, and `set_feature_state` / `remove_feature_state` refresh per-feature GPU metadata buffers in place without re-fetching or re-tessellating tiles.
-* **Spatial Feature Queries & Multi-View Rendering**: `query_rendered_features` (returning source properties and live `feature-state` maps) over R-tree indexed tile geometry, plus stereo/multi-view camera rendering for spatial computing.
-
-## Roadmap / Remaining Gaps
-
-* Complex right-to-left / Indic text shaping (`harfbuzz` / `harfrust`) and runtime vertical CJK punctuation layout
-* Non-scalar expression interpolation types (`padding`, `variableAnchorOffsetCollection`, `projectionDefinition`)
-* Further splitting the core `maplibre` crate into smaller workspace sub-crates for faster incremental downstream builds
+* **Platforms**: macOS, Linux and Windows through `maplibre-winit` and `maplibre-demo`; WebAssembly (`web/`) on WebGPU or WebGL2, single- or multi-threaded; Android (`android/`) and iOS/macOS (`apple/`) launchers; visionOS (`apple/visionos`) as a C ABI static library with a Swift host app; headless offscreen rendering (`headless` feature).
+* **Embedding**: `HeadlessMap` renders on its own device or on a host-supplied `wgpu` device, into host textures, for one view or several view slots sharing one tile world (`run_multi_view_frame`, `run_xr_frame`). A host reports free memory with `set_available_memory`, and the engine lowers drape, in-flight tile and upload budgets under pressure.
+* **Optional native I/O**: the default `native-io` feature supplies the Tokio scheduler and Reqwest HTTP client. Without it a native host supplies its own scheduler and tile loader.
+* **Projections and terrain**: Mercator, globe and vertical-perspective projections, including projection expressions; raster-DEM terrain with draping and exaggeration; hillshade, color-relief, sky and atmosphere; stars and celestial bodies (`experimental` feature).
+* **Layers**: `background`, `fill` (`earcut` triangulation with a `lyon` fallback, outlines, patterns), `line` (dashes, gradients, patterns, data-driven widths), `circle`, `heatmap`, `fill-extrusion`, `raster`, `hillshade`, `color-relief` and `symbol` (SDF and bitmap glyphs, icons, variable anchors, line labels, collision detection).
+* **Sources and formats**: vector tiles as MVT or MLT (`mlt` feature), GeoJSON (inline or by URL, `promoteId`, `generateId`, clustering), raster, raster-dem (Mapbox Terrain-RGB and Terrarium), image sources, and PMTiles archives through `pmtiles://`.
+* **Expressions**: parser, type checker, constant folder and evaluator for the style-spec operators, including `let`/`var`, `match`, `case`, `coalesce`, `interpolate`, `interpolate-hcl`, `interpolate-lab`, `step`, `format`, `collator`, `number-format`, `within`, `distance`, `at`, `split`, `join`, `error`, `feature-state` and `global-state`.
+* **Runtime styling**: add, remove and move layers; `set_paint_property`, `set_layout_property`, `set_filter`, `set_layer_zoom_range`; add and remove sources; `set_geojson_data`; `set_global_state`; `set_feature_state` and `remove_feature_state`. Paint, ordering, visibility and feature-state edits that leave geometry unchanged update GPU buffers in place without re-fetching tiles.
+* **Queries and camera**: `query_rendered_features`, `query_rendered_symbols` and `query_source_features`; `jump_to` and `fly_to`; constrained and free-globe navigation modes.
+* **Text**: bidirectional text (`unicode-bidi`), Arabic presentation-form shaping and `text-writing-mode: vertical`.
 
 ## Building & Running
 
 Clone the project
 
 ```bash
-git clone https://github.com/maplibre/maplibre-rs.git
+git clone https://github.com/luofang34/maplibre-rs-experimental.git
 ```
 
-Build and run it on a desktop
+Open an interactive map window
 
 ```bash
-cargo run -p maplibre-demo
+cargo run -p maplibre-demo -- headed
 ```
 
-Render the world on a globe instead of the flat default style
+Choose a bundled style or load your own
 
 ```bash
 cargo run -p maplibre-demo -- headed --globe
@@ -94,35 +76,53 @@ cargo run -p maplibre-demo -- headed --terrain
 cargo run -p maplibre-demo -- headed --style path/to/style.json
 ```
 
-More information about running the demos on different platforms can be
-found [here](https://maplibre.org/maplibre-rs/docs/book/development-guide/how-to-run.html).
+`headed` also accepts `--projection globe|mercator|vertical-perspective`, `--source-url NAME=URL_OR_PATH`, `--max-pitch`, `--frames` and `--debug-tiles`; `--help` lists every option.
+
+Render offscreen with the `headless` feature
+
+```bash
+cargo run -p maplibre-demo --features headless -- snapshot --help
+cargo run -p maplibre-demo --features headless -- headless
+```
+
+The [book](https://luofang34.github.io/maplibre-rs-experimental/docs/book/development-guide/how-to-run.html) describes running the demos on the other platforms.
+
+## Cargo Features
+
+Features of the `maplibre` crate:
+
+| Feature | Default | Purpose |
+| --- | --- | --- |
+| `native-io` | yes | Tokio scheduler and Reqwest HTTP client on native targets |
+| `mlt` | yes | MapLibre Tiles decoding |
+| `experimental` | yes | Celestial bodies, starfield and overlay plugins |
+| `headless` | no | Offscreen rendering, readback and `HeadlessMap` |
+| `web-webgl` | no | WebGL2 backend for the browser |
+| `thread-safe-futures` | no | `Send` futures for multi-threaded hosts |
+| `trace` | no | Tracy profiling |
+| `embed-static-tiles` | no | Tiles embedded at build time |
 
 ## Rust Setup
 
 Install [rustup](https://rustup.rs/) because this is the recommended way of setting up Rust toolchains.
 
-The toolchain will be automatically downloaded when building this project.
-See [./rust-toolchain.toml](./rust-toolchain.toml) for more details about the toolchain.
+The workspace builds on the stable toolchain named in [./rust-toolchain.toml](./rust-toolchain.toml), which rustup downloads automatically. The web and Android recipes in the [justfile](./justfile) and the visionOS crate use nightly.
 
 ## API Documentation
 
-This generates the documentation for this crate and opens the browser. This also includes the documentation of every
-dependency.
-
 ```bash
-cargo doc --open
+cargo doc -p maplibre --no-deps --open
 ```
 
-You can also view the up-to-date documentation [here](https://maplibre.org/maplibre-rs/docs/api/maplibre/).
+The documentation of the main branch is published [here](https://luofang34.github.io/maplibre-rs-experimental/docs/api/maplibre/).
 
 ## Book
 
-The maplibre-rs [book](https://maplibre.org/maplibre-rs/docs/book/) features a high-level overview over the project from a user and development perspective.
+The [book](https://luofang34.github.io/maplibre-rs-experimental/docs/book/) gives an overview of the project for users and developers, with runnable examples.
 
 ## RFCs
 
-We established an RFC process which must be used to describe major changes to maplibre-rs.
-Current RFCs can be browsed in the [book](https://maplibre.org/maplibre-rs/docs/book/rfc/0001-rfc-process.html).
+Major changes are described through the RFC process in [rfc/0001-rfc-process.md](rfc/0001-rfc-process.md).
 
 
 ## License
