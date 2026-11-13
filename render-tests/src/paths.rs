@@ -8,6 +8,27 @@ pub(super) fn workspace_tests_dir() -> PathBuf {
     PathBuf::from("render-tests/src/tests")
 }
 
+pub(super) fn workspace_ignores_path() -> PathBuf {
+    PathBuf::from("render-tests/ignores.json")
+}
+
+/// Canonical slash-separated fixture ID relative to `render-tests/src/tests` (when under it)
+/// or `test_root` otherwise, avoiding collisions across deeply nested categories.
+pub(super) fn fixture_id(test_dir: &std::path::Path, test_root: &std::path::Path) -> String {
+    let canonical_base = workspace_tests_dir();
+    let relative = test_dir
+        .strip_prefix(&canonical_base)
+        .or_else(|_| test_dir.strip_prefix(test_root))
+        .ok()
+        .filter(|rel| !rel.as_os_str().is_empty())
+        .unwrap_or(test_dir);
+    relative
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 pub(super) fn workspace_templates_dir() -> PathBuf {
     PathBuf::from("render-tests/src/templates")
 }

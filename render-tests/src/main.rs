@@ -1,20 +1,12 @@
-//! Render test harness for maplibre-rs.
+//! Render and query conformance harness for `maplibre-rs`.
 //!
-//! Runs render tests from `render-tests/src/tests/`, compares against
-//! `expected.png`, writes `actual.png` and `diff.png`, and generates
-//! `render-tests/src/templates/results.html`.
-//!
-//! # Usage
-//!
-//! ```
-//! # Run all tests (from workspace root)
-//! cargo run -p render-tests
-//!
-//! # Run a single test or category
-//! cargo run -p render-tests -- render-tests/src/tests/fill-color
-//! ```
+//! Runs render tests (`expected*.png`) and query tests (`expected.json`) from
+//! `render-tests/src/tests/`, writes `actual.png` / `diff.png` / `actual.json`,
+//! generates `render-tests/src/templates/results.html`, and gates CI via
+//! `render-tests/ignores.json` when `--ci` is passed.
 
 use std::{
+    collections::BTreeMap,
     path::{Path, PathBuf},
     process::ExitCode,
     time::Instant,
@@ -24,6 +16,7 @@ use maplibre::platform::run_multithreaded;
 use serde_json::Value;
 
 mod camera_options;
+mod ci;
 mod comparison;
 mod image_sources;
 mod operations;
@@ -38,7 +31,10 @@ mod symbol_assets;
 mod tilesets;
 mod transitions;
 
-use paths::{collect_tests, workspace_templates_dir, workspace_tests_dir};
+use ci::{
+    build_updated_ignores, evaluate_ci, parse_cli_args, write_summaries, CliOptions, IgnoreFile,
+};
+use paths::{collect_tests, fixture_id, workspace_templates_dir, workspace_tests_dir};
 use render_case::run_test_inner;
 use report::generate_report;
 
@@ -165,9 +161,16 @@ fn parse_test_meta(style_value: &Value) -> TestMeta {
 // Single test
 // ---------------------------------------------------------------------------
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CaseKind {
+    Render,
+    Query,
+}
+
 #[derive(Debug)]
 struct TestOutcome {
     id: String,
+    kind: CaseKind,
     result: TestResult,
     attempts: u8,
 }
@@ -179,27 +182,23 @@ enum TestResult {
     Error(String),
 }
 
-/// Run one test in `test_dir`. Writes `actual.png` and `diff.png` into `test_dir`.
-async fn run_test(test_dir: PathBuf) -> TestOutcome {
-    let id = test_dir
-        .iter()
-        .rev()
-        .take(2)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<PathBuf>()
-        .to_string_lossy()
-        .into_owned();
-
+/// Run one test in `test_dir`. Retries unexpected failures up to 3 times to filter out
+/// transient software-GPU hiccups while skipping redundant retries on known ignored cases.
+async fn run_test(test_dir: PathBuf, id: String, retry_on_fail: bool) -> TestOutcome {
+    let kind = if test_dir.join("expected.json").is_file() {
+        CaseKind::Query
+    } else {
+        CaseKind::Render
+    };
     let mut result = run_test_isolated(&test_dir);
     let mut attempts = 1_u8;
-    while matches!(result, TestResult::Fail(_)) && attempts < 3 {
+    while retry_on_fail && matches!(result, TestResult::Fail(_)) && attempts < 3 {
         attempts = attempts.wrapping_add(1);
         result = run_test_isolated(&test_dir);
     }
     TestOutcome {
         id,
+        kind,
         result,
         attempts,
     }
@@ -231,54 +230,65 @@ fn run_test_isolated(test_dir: &Path) -> TestResult {
 // ---------------------------------------------------------------------------
 
 fn run() -> Result<bool, String> {
-    let args: Vec<String> = std::env::args().collect();
+    let options = parse_cli_args(std::env::args().skip(1))?;
 
-    let test_root = if args.len() > 1 {
-        PathBuf::from(&args[1])
-    } else {
-        workspace_tests_dir()
-    };
-
-    if !test_root.exists() {
+    if !options.test_root.exists() {
         return Err(format!(
-            "Test directory not found: {}. Usage: cargo run -p render-tests [test-dir]",
-            test_root.display()
+            "Test directory not found: {}. Usage: cargo run -p render-tests [--ci] [test-dir]",
+            options.test_root.display()
         ));
     }
 
-    let tests = collect_tests(&test_root);
+    let tests = collect_tests(&options.test_root);
     if tests.is_empty() {
-        return Err(format!("No tests found in {}", test_root.display()));
+        return Err(format!("No tests found in {}", options.test_root.display()));
     }
 
-    run_multithreaded(run_tests(test_root, tests))
+    let existing_ignores =
+        if options.ci || (options.write_ignores && options.ignores_path.is_file()) {
+            Some(IgnoreFile::load(&options.ignores_path)?)
+        } else {
+            None
+        };
+
+    run_multithreaded(run_tests(options, tests, existing_ignores))
 }
 
-async fn run_tests(test_root: PathBuf, tests: Vec<PathBuf>) -> Result<bool, String> {
+async fn run_tests(
+    options: CliOptions,
+    tests: Vec<PathBuf>,
+    existing_ignores: Option<IgnoreFile>,
+) -> Result<bool, String> {
     tracing::info!(
-        "Running {} render tests from {}",
+        "Running {} conformance tests from {}",
         tests.len(),
-        test_root.display()
+        options.test_root.display()
     );
     tracing::info!("{}", "-".repeat(70));
+
+    let active_ignores: BTreeMap<String, String> = existing_ignores
+        .as_ref()
+        .map(|file| file.ignores.clone())
+        .unwrap_or_default();
 
     let mut outcomes: Vec<TestOutcome> = Vec::new();
 
     for test_dir in &tests {
-        let name = test_dir
-            .strip_prefix(&test_root)
-            .unwrap_or(test_dir)
-            .display()
-            .to_string();
+        let id = fixture_id(test_dir, &options.test_root);
+        let is_ignored = active_ignores.contains_key(&id);
+        let retry_on_fail = !(options.ci && is_ignored);
 
         let start = Instant::now();
-        let outcome = run_test(test_dir.clone()).await;
+        let outcome = run_test(test_dir.clone(), id.clone(), retry_on_fail).await;
         let elapsed = start.elapsed();
 
-        let tag = match &outcome.result {
-            TestResult::Pass(difference) => format!("PASS  ({difference})"),
-            TestResult::Fail(difference) => format!("FAIL  ({difference})"),
-            TestResult::Error(msg) => format!("ERR   {msg}"),
+        let tag = match (&outcome.result, options.ci && is_ignored) {
+            (TestResult::Pass(difference), false) => format!("PASS  ({difference})"),
+            (TestResult::Pass(difference), true) => format!("UPASS ({difference})"),
+            (TestResult::Fail(difference), true) => format!("IGN   ({difference})"),
+            (TestResult::Error(msg), true) => format!("IGN   {msg}"),
+            (TestResult::Fail(difference), false) => format!("FAIL  ({difference})"),
+            (TestResult::Error(msg), false) => format!("ERR   {msg}"),
         };
         let retry_label = if outcome.attempts > 1 {
             format!(" [attempt {}]", outcome.attempts)
@@ -286,37 +296,66 @@ async fn run_tests(test_root: PathBuf, tests: Vec<PathBuf>) -> Result<bool, Stri
             String::new()
         };
 
-        tracing::info!("  {tag}  {name}{retry_label}  ({elapsed:.1?})");
-
+        tracing::info!("  {tag}  {id}{retry_label}  ({elapsed:.1?})");
         outcomes.push(outcome);
     }
-
-    let passed = outcomes
-        .iter()
-        .filter(|o| matches!(o.result, TestResult::Pass(_)))
-        .count();
-    let failed = outcomes
-        .iter()
-        .filter(|o| matches!(o.result, TestResult::Fail(_)))
-        .count();
-    let errored = outcomes
-        .iter()
-        .filter(|o| matches!(o.result, TestResult::Error(_)))
-        .count();
-
-    tracing::info!("{}", "-".repeat(70));
-    tracing::info!(
-        "Results: {} passed, {} failed, {} errors  (total {})",
-        passed,
-        failed,
-        errored,
-        outcomes.len()
-    );
 
     let report_path = generate_report(&outcomes, &workspace_templates_dir())?;
     tracing::info!("Report written to: {}", report_path.display());
 
-    Ok(failed == 0 && errored == 0)
+    if options.write_ignores {
+        let updated = build_updated_ignores(&outcomes, existing_ignores.as_ref());
+        updated.save(&options.ignores_path)?;
+        tracing::info!(
+            "Wrote {} ignore entries to {}",
+            updated.ignores.len(),
+            options.ignores_path.display()
+        );
+    }
+
+    let full_corpus = options.test_root == workspace_tests_dir();
+    let summary = evaluate_ci(&outcomes, &active_ignores, options.ci && full_corpus);
+    write_summaries(
+        &summary,
+        options.summary_json.as_deref(),
+        options.summary_md.as_deref(),
+    )?;
+
+    tracing::info!("{}", "-".repeat(70));
+    tracing::info!(
+        "Summary: {}/{} passed ({:.2}%), {} ignored, {} unexpected failures, {} unexpected passes",
+        summary.total.passed,
+        summary.total.total,
+        summary.total.pass_rate_percent,
+        summary.total.ignored,
+        summary.unexpected_failures.len(),
+        summary.unexpected_passes.len(),
+    );
+
+    if options.ci {
+        for failure in &summary.unexpected_failures {
+            tracing::error!("Unexpected failure: {failure}");
+        }
+        for id in &summary.unexpected_passes {
+            tracing::error!(
+                "Unexpected pass on ignored fixture `{id}` — remove it from {}",
+                options.ignores_path.display()
+            );
+        }
+        for id in &summary.stale_ignores {
+            tracing::error!(
+                "Stale ignore entry `{id}` in {} does not match any fixture",
+                options.ignores_path.display()
+            );
+        }
+        return Ok(summary.ci_passed());
+    }
+
+    if options.write_ignores {
+        return Ok(true);
+    }
+
+    Ok(summary.total.ignored == 0 && summary.unexpected_failures.is_empty())
 }
 
 fn main() -> ExitCode {
