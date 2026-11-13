@@ -1,5 +1,5 @@
 - Start Date: 2022-10-29
-- RFC PR: [maplibre/maplibre-rs#??](https://github.com/maplibre/maplibre-rs/pull/??)
+- RFC PR: [luofang34/maplibre-rs-experimental#??](https://github.com/luofang34/maplibre-rs-experimental/pull/??)
 - maplibre-rs Issue: N/A
 
 # Summary
@@ -61,7 +61,7 @@ RFC merged into the RFC repo as a markdown file. At that point the RFC
 is 'active' and may be implemented with the goal of eventual inclusion
 into maplibre-rs.
 
-* Fork the repo https://github.com/maplibre/maplibre-rs
+* Fork the repo https://github.com/luofang34/maplibre-rs-experimental
 * Copy `rfc/0000-template.md` to `rfc/0000-my-feature.md` (where
   'my-feature' is descriptive. don't assign an RFC number yet).
 * Fill in the RFC
@@ -81,7 +81,7 @@ Who ever merges the RFC should do the following:
   has multiple pull requests associated with it, choose one PR number,
   preferably the minimal one.)
 * Add the file in the `docs/src/rfc/` directory.
-* Create a corresponding issue on [maplibre-rs repo](https://github.com/maplibre/maplibre-rs)
+* Create a corresponding issue on [maplibre-rs repo](https://github.com/luofang34/maplibre-rs-experimental)
 * Fill in the remaining metadata in the RFC header, including links for
   the original pull request(s) and the newly created maplibre-rs issue.
 * Communicate that given RFC is now considered 'active' on the chat platform of maplibre-rs.

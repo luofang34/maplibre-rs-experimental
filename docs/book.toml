@@ -1,10 +1,13 @@
 [book]
-authors = ["Maximilian Ammann"]
+authors = ["Maximilian Ammann", "Fang Luo"]
 language = "en"
 src = "src"
-title = "MapLibre Rust Documentation"
+title = "maplibre-rs (experimental fork) Documentation"
 
 [output.html]
 additional-css = ["diff.css", "examples.css"]
 additional-js = ["examples.js"]
+git-repository-url = "https://github.com/luofang34/maplibre-rs-experimental"
+edit-url-template = "https://github.com/luofang34/maplibre-rs-experimental/edit/main/docs/{path}"
+site-url = "/maplibre-rs-experimental/docs/book/"
 

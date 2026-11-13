@@ -2,7 +2,6 @@
 
 [Introduction](./introduction.md)
 [Supported Platforms](./supported-platforms.md)
-[Developer Log](./developer-log.md)
 
 
 - [User Guide](./user-guide/index.md)
