@@ -83,40 +83,42 @@
 <a href=#83 id=83 data-nosnippet>83</a>    }
 <a href=#84 id=84 data-nosnippet>84</a>    .with_feature_opacity(paint.opacity(), style_zoom);
 <a href=#85 id=85 data-nosnippet>85</a>    tessellator.sort_key = SortKeys::by(sort_key_of(style_layer));
-<a href=#86 id=86 data-nosnippet>86</a>    <span class="kw">match </span>paint {
-<a href=#87 id=87 data-nosnippet>87</a>        LayerPaint::Fill(p) <span class="kw">if </span>p.fill_pattern.is_some() =&gt; {
-<a href=#88 id=88 data-nosnippet>88</a>            tessellator.fallback_color = [<span class="number">1.0</span>; <span class="number">4</span>];
-<a href=#89 id=89 data-nosnippet>89</a>            tessellator.pattern_property = <span class="kw">crate</span>::vector::pattern::per_feature_pattern(paint);
-<a href=#90 id=90 data-nosnippet>90</a>        }
-<a href=#91 id=91 data-nosnippet>91</a>        LayerPaint::Fill(p) =&gt; {
-<a href=#92 id=92 data-nosnippet>92</a>            tessellator.style_property = p.fill_color.clone();
-<a href=#93 id=93 data-nosnippet>93</a>            tessellator.outline_property = p.outline_color();
-<a href=#94 id=94 data-nosnippet>94</a>        }
-<a href=#95 id=95 data-nosnippet>95</a>        LayerPaint::FillExtrusion(p) <span class="kw">if </span>p.fill_extrusion_pattern.is_some() =&gt; {
-<a href=#96 id=96 data-nosnippet>96</a>            tessellator.fallback_color = [<span class="number">1.0</span>; <span class="number">4</span>];
-<a href=#97 id=97 data-nosnippet>97</a>            tessellator.pattern_property = <span class="kw">crate</span>::vector::pattern::per_feature_pattern(paint);
-<a href=#98 id=98 data-nosnippet>98</a>        }
-<a href=#99 id=99 data-nosnippet>99</a>        LayerPaint::FillExtrusion(p) =&gt; {
-<a href=#100 id=100 data-nosnippet>100</a>            tessellator.style_property = p.fill_extrusion_color.clone();
-<a href=#101 id=101 data-nosnippet>101</a>        }
-<a href=#102 id=102 data-nosnippet>102</a>        LayerPaint::Circle(p) =&gt; tessellator.style_property = p.circle_color.clone(),
-<a href=#103 id=103 data-nosnippet>103</a>        LayerPaint::Line(p) =&gt; {
-<a href=#104 id=104 data-nosnippet>104</a>            tessellator.pattern_property = <span class="kw">crate</span>::vector::pattern::per_feature_pattern(paint);
-<a href=#105 id=105 data-nosnippet>105</a>            tessellator.style_property = p.line_color.clone();
-<a href=#106 id=106 data-nosnippet>106</a>            tessellator.is_line_layer = <span class="bool-val">true</span>;
-<a href=#107 id=107 data-nosnippet>107</a>            tessellator.line_gradient = p.line_gradient.is_some();
-<a href=#108 id=108 data-nosnippet>108</a>            tessellator.split_corners =
-<a href=#109 id=109 data-nosnippet>109</a>                p.line_gradient.is_some() || p.line_pattern.is_some() || p.line_dasharray.is_some();
-<a href=#110 id=110 data-nosnippet>110</a>            tessellator.line_feature_style = LineFeatureStyle::for_paint(p, style_zoom);
-<a href=#111 id=111 data-nosnippet>111</a>            tessellator.line_elevation = LineElevationOptions::for_paint(p, style_zoom);
-<a href=#112 id=112 data-nosnippet>112</a>            tessellator.sharp_corner_offset = sharp_corner_offset(overscaling);
-<a href=#113 id=113 data-nosnippet>113</a>            tessellator.set_layer_strokes(style_layer);
-<a href=#114 id=114 data-nosnippet>114</a>        }
-<a href=#115 id=115 data-nosnippet>115</a>        LayerPaint::Background(p) =&gt; {
-<a href=#116 id=116 data-nosnippet>116</a>            tessellator.style_property = p.background_color.clone();
-<a href=#117 id=117 data-nosnippet>117</a>        }
-<a href=#118 id=118 data-nosnippet>118</a>        <span class="kw">_ </span>=&gt; {}
-<a href=#119 id=119 data-nosnippet>119</a>    }
-<a href=#120 id=120 data-nosnippet>120</a>    tessellator
-<a href=#121 id=121 data-nosnippet>121</a>}
+<a href=#86 id=86 data-nosnippet>86</a>    tessellator.retain_feature_paint =
+<a href=#87 id=87 data-nosnippet>87</a>        <span class="kw">crate</span>::vector::feature_paint::layer_retains_feature_paint(style_layer);
+<a href=#88 id=88 data-nosnippet>88</a>    <span class="kw">match </span>paint {
+<a href=#89 id=89 data-nosnippet>89</a>        LayerPaint::Fill(p) <span class="kw">if </span>p.fill_pattern.is_some() =&gt; {
+<a href=#90 id=90 data-nosnippet>90</a>            tessellator.fallback_color = [<span class="number">1.0</span>; <span class="number">4</span>];
+<a href=#91 id=91 data-nosnippet>91</a>            tessellator.pattern_property = <span class="kw">crate</span>::vector::pattern::per_feature_pattern(paint);
+<a href=#92 id=92 data-nosnippet>92</a>        }
+<a href=#93 id=93 data-nosnippet>93</a>        LayerPaint::Fill(p) =&gt; {
+<a href=#94 id=94 data-nosnippet>94</a>            tessellator.style_property = p.fill_color.clone();
+<a href=#95 id=95 data-nosnippet>95</a>            tessellator.outline_property = p.outline_color();
+<a href=#96 id=96 data-nosnippet>96</a>        }
+<a href=#97 id=97 data-nosnippet>97</a>        LayerPaint::FillExtrusion(p) <span class="kw">if </span>p.fill_extrusion_pattern.is_some() =&gt; {
+<a href=#98 id=98 data-nosnippet>98</a>            tessellator.fallback_color = [<span class="number">1.0</span>; <span class="number">4</span>];
+<a href=#99 id=99 data-nosnippet>99</a>            tessellator.pattern_property = <span class="kw">crate</span>::vector::pattern::per_feature_pattern(paint);
+<a href=#100 id=100 data-nosnippet>100</a>        }
+<a href=#101 id=101 data-nosnippet>101</a>        LayerPaint::FillExtrusion(p) =&gt; {
+<a href=#102 id=102 data-nosnippet>102</a>            tessellator.style_property = p.fill_extrusion_color.clone();
+<a href=#103 id=103 data-nosnippet>103</a>        }
+<a href=#104 id=104 data-nosnippet>104</a>        LayerPaint::Circle(p) =&gt; tessellator.style_property = p.circle_color.clone(),
+<a href=#105 id=105 data-nosnippet>105</a>        LayerPaint::Line(p) =&gt; {
+<a href=#106 id=106 data-nosnippet>106</a>            tessellator.pattern_property = <span class="kw">crate</span>::vector::pattern::per_feature_pattern(paint);
+<a href=#107 id=107 data-nosnippet>107</a>            tessellator.style_property = p.line_color.clone();
+<a href=#108 id=108 data-nosnippet>108</a>            tessellator.is_line_layer = <span class="bool-val">true</span>;
+<a href=#109 id=109 data-nosnippet>109</a>            tessellator.line_gradient = p.line_gradient.is_some();
+<a href=#110 id=110 data-nosnippet>110</a>            tessellator.split_corners =
+<a href=#111 id=111 data-nosnippet>111</a>                p.line_gradient.is_some() || p.line_pattern.is_some() || p.line_dasharray.is_some();
+<a href=#112 id=112 data-nosnippet>112</a>            tessellator.line_feature_style = LineFeatureStyle::for_paint(p, style_zoom);
+<a href=#113 id=113 data-nosnippet>113</a>            tessellator.line_elevation = LineElevationOptions::for_paint(p, style_zoom);
+<a href=#114 id=114 data-nosnippet>114</a>            tessellator.sharp_corner_offset = sharp_corner_offset(overscaling);
+<a href=#115 id=115 data-nosnippet>115</a>            tessellator.set_layer_strokes(style_layer);
+<a href=#116 id=116 data-nosnippet>116</a>        }
+<a href=#117 id=117 data-nosnippet>117</a>        LayerPaint::Background(p) =&gt; {
+<a href=#118 id=118 data-nosnippet>118</a>            tessellator.style_property = p.background_color.clone();
+<a href=#119 id=119 data-nosnippet>119</a>        }
+<a href=#120 id=120 data-nosnippet>120</a>        <span class="kw">_ </span>=&gt; {}
+<a href=#121 id=121 data-nosnippet>121</a>    }
+<a href=#122 id=122 data-nosnippet>122</a>    tessellator
+<a href=#123 id=123 data-nosnippet>123</a>}
 </code></pre></div></section></main></body></html>

@@ -213,96 +213,98 @@
 <a href=#213 id=213 data-nosnippet>213</a>        tessellator.source_ids = source_ids_for_slice(layer, slice);
 <a href=#214 id=214 data-nosnippet>214</a>        tessellator.shared_properties = shared_props_for_slice(shared_props, slice);
 <a href=#215 id=215 data-nosnippet>215</a>        tessellator.feature_state_ctx = state_ctx.clone();
-<a href=#216 id=216 data-nosnippet>216</a>        tessellator.sort_key = <span class="kw">crate</span>::vector::tessellation::SortKeys::by(
-<a href=#217 id=217 data-nosnippet>217</a>            <span class="kw">crate</span>::vector::tessellation::sort_key_of(style),
-<a href=#218 id=218 data-nosnippet>218</a>        );
-<a href=#219 id=219 data-nosnippet>219</a>        process_mvt_slice(layer, slice, shared_props.is_some(), <span class="kw-2">&amp;mut </span>tessellator)<span class="question-mark">?</span>;
-<a href=#220 id=220 data-nosnippet>220</a>        <span class="prelude-val">Ok</span>(tessellator)
-<a href=#221 id=221 data-nosnippet>221</a>    };
-<a href=#222 id=222 data-nosnippet>222</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(<span class="kw-2">mut </span>tessellator) = tessellate_readable(layer, selected, request.coords, build) <span class="kw">else </span>{
-<a href=#223 id=223 data-nosnippet>223</a>        <span class="kw">return </span>context.layer_missing(<span class="kw-2">&amp;</span>request.coords, <span class="kw-2">&amp;</span>layer.name);
-<a href=#224 id=224 data-nosnippet>224</a>    };
-<a href=#225 id=225 data-nosnippet>225</a>    tessellator.apply_sort_keys();
-<a href=#226 id=226 data-nosnippet>226</a>    <span class="kw">let </span>sort_keys = tessellator.sort_key_values();
-<a href=#227 id=227 data-nosnippet>227</a>    context.layer_tessellation_finished(
-<a href=#228 id=228 data-nosnippet>228</a>        <span class="kw-2">&amp;</span>request.coords,
-<a href=#229 id=229 data-nosnippet>229</a>        tessellator.buffer.into(),
-<a href=#230 id=230 data-nosnippet>230</a>        tessellator.feature_indices,
-<a href=#231 id=231 data-nosnippet>231</a>        (
-<a href=#232 id=232 data-nosnippet>232</a>            tessellator.feature_colors,
-<a href=#233 id=233 data-nosnippet>233</a>            sort_keys,
-<a href=#234 id=234 data-nosnippet>234</a>            tessellator.feature_paint,
-<a href=#235 id=235 data-nosnippet>235</a>        ),
-<a href=#236 id=236 data-nosnippet>236</a>        layer_header(layer),
-<a href=#237 id=237 data-nosnippet>237</a>        style.id.clone(),
-<a href=#238 id=238 data-nosnippet>238</a>    )
-<a href=#239 id=239 data-nosnippet>239</a>}
-<a href=#240 id=240 data-nosnippet>240</a>
-<a href=#241 id=241 data-nosnippet>241</a><span class="doccomment">/// Tessellates the layer with `build`. When a feature's geometry cannot be read, the features
-<a href=#242 id=242 data-nosnippet>242</a>/// whose geometry cannot are left out and the rest are tessellated, so one malformed feature
-<a href=#243 id=243 data-nosnippet>243</a>/// does not take the layer with it; `None` when the layer cannot be tessellated even so.
-<a href=#244 id=244 data-nosnippet>244</a></span><span class="kw">fn </span>tessellate_readable&lt;Tessellator&gt;(
-<a href=#245 id=245 data-nosnippet>245</a>    layer: <span class="kw-2">&amp;</span>tile::Layer,
-<a href=#246 id=246 data-nosnippet>246</a>    selected: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[usize]&gt;,
-<a href=#247 id=247 data-nosnippet>247</a>    coords: WorldTileCoords,
-<a href=#248 id=248 data-nosnippet>248</a>    <span class="kw-2">mut </span>build: <span class="kw">impl </span>FnMut(<span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[usize]&gt;) -&gt; geozero::error::Result&lt;Tessellator&gt;,
-<a href=#249 id=249 data-nosnippet>249</a>) -&gt; <span class="prelude-ty">Option</span>&lt;Tessellator&gt; {
-<a href=#250 id=250 data-nosnippet>250</a>    <span class="kw">let </span>error = <span class="kw">match </span>build(selected) {
-<a href=#251 id=251 data-nosnippet>251</a>        <span class="prelude-val">Ok</span>(tessellator) =&gt; <span class="kw">return </span><span class="prelude-val">Some</span>(tessellator),
-<a href=#252 id=252 data-nosnippet>252</a>        <span class="prelude-val">Err</span>(error) =&gt; error,
-<a href=#253 id=253 data-nosnippet>253</a>    };
-<a href=#254 id=254 data-nosnippet>254</a>    <span class="kw">let </span>(readable, dropped) = retain_readable_indices(layer, selected);
-<a href=#255 id=255 data-nosnippet>255</a>    <span class="kw">if </span>dropped == <span class="number">0 </span>{
-<a href=#256 id=256 data-nosnippet>256</a>        <span class="macro">tracing::error!</span>(%coords, layer = %layer.name, <span class="question-mark">?</span>error, <span class="string">"vector tessellation failed"</span>);
-<a href=#257 id=257 data-nosnippet>257</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#258 id=258 data-nosnippet>258</a>    }
-<a href=#259 id=259 data-nosnippet>259</a>    <span class="macro">tracing::warn!</span>(%coords, layer = %layer.name, dropped, <span class="question-mark">?</span>error, <span class="string">"features whose geometry cannot be read are left out"</span>);
-<a href=#260 id=260 data-nosnippet>260</a>    <span class="kw">match </span>build(<span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>readable)) {
-<a href=#261 id=261 data-nosnippet>261</a>        <span class="prelude-val">Ok</span>(tessellator) =&gt; <span class="prelude-val">Some</span>(tessellator),
-<a href=#262 id=262 data-nosnippet>262</a>        <span class="prelude-val">Err</span>(error) =&gt; {
-<a href=#263 id=263 data-nosnippet>263</a>            <span class="macro">tracing::error!</span>(%coords, layer = %layer.name, <span class="question-mark">?</span>error, <span class="string">"vector tessellation failed"</span>);
-<a href=#264 id=264 data-nosnippet>264</a>            <span class="prelude-val">None
-<a href=#265 id=265 data-nosnippet>265</a>        </span>}
-<a href=#266 id=266 data-nosnippet>266</a>    }
-<a href=#267 id=267 data-nosnippet>267</a>}
-<a href=#268 id=268 data-nosnippet>268</a>
-<a href=#269 id=269 data-nosnippet>269</a><span class="kw">fn </span>symbol_layer&lt;T: VectorTransferables, C: Context&gt;(
-<a href=#270 id=270 data-nosnippet>270</a>    layer: <span class="kw-2">&amp;</span>tile::Layer,
-<a href=#271 id=271 data-nosnippet>271</a>    selected: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[usize]&gt;,
-<a href=#272 id=272 data-nosnippet>272</a>    style: <span class="kw-2">&amp;</span>StyleLayer,
-<a href=#273 id=273 data-nosnippet>273</a>    paint: <span class="kw-2">&amp;</span><span class="kw">crate</span>::style::layer::SymbolPaint,
-<a href=#274 id=274 data-nosnippet>274</a>    request: <span class="kw-2">&amp;</span>VectorTileRequest,
-<a href=#275 id=275 data-nosnippet>275</a>    context: <span class="kw-2">&amp;mut </span>ProcessVectorContext&lt;T, C&gt;,
-<a href=#276 id=276 data-nosnippet>276</a>    atlas: std::sync::Arc&lt;<span class="kw">crate</span>::sdf::assets::SymbolAtlas&gt;,
-<a href=#277 id=277 data-nosnippet>277</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), ProcessVectorError&gt; {
-<a href=#278 id=278 data-nosnippet>278</a>    <span class="kw">let </span>zoom = request.style_zoom();
-<a href=#279 id=279 data-nosnippet>279</a>    <span class="kw">let </span>state_ctx = context.state_context_for_layer(<span class="kw-2">&amp;</span>layer.name);
-<a href=#280 id=280 data-nosnippet>280</a>    <span class="kw">let </span>build = |slice: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[usize]&gt;| {
-<a href=#281 id=281 data-nosnippet>281</a>        <span class="kw">let </span><span class="kw-2">mut </span>tessellator = TextTessellator::with_assets(paint.clone(), zoom, atlas.clone());
-<a href=#282 id=282 data-nosnippet>282</a>        tessellator.coordinate_scale = extent_scale(layer);
-<a href=#283 id=283 data-nosnippet>283</a>        tessellator.overscaling = request.overscaling();
-<a href=#284 id=284 data-nosnippet>284</a>        tessellator.source_ids = source_ids_for_slice(layer, slice);
-<a href=#285 id=285 data-nosnippet>285</a>        tessellator.feature_state_ctx = state_ctx.clone();
-<a href=#286 id=286 data-nosnippet>286</a>        process_mvt_slice(layer, slice, <span class="bool-val">false</span>, <span class="kw-2">&amp;mut </span>tessellator)<span class="question-mark">?</span>;
-<a href=#287 id=287 data-nosnippet>287</a>        <span class="prelude-val">Ok</span>(tessellator)
-<a href=#288 id=288 data-nosnippet>288</a>    };
-<a href=#289 id=289 data-nosnippet>289</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(<span class="kw-2">mut </span>tessellator) = tessellate_readable(layer, selected, request.coords, build) <span class="kw">else </span>{
-<a href=#290 id=290 data-nosnippet>290</a>        <span class="kw">return </span>context.layer_missing(<span class="kw-2">&amp;</span>request.coords, <span class="kw-2">&amp;</span>layer.name);
-<a href=#291 id=291 data-nosnippet>291</a>    };
-<a href=#292 id=292 data-nosnippet>292</a>    tessellator.finish();
-<a href=#293 id=293 data-nosnippet>293</a>    <span class="kw">let </span>has_geometry = !tessellator.quad_buffer.indices.is_empty();
-<a href=#294 id=294 data-nosnippet>294</a>    context.symbol_layer_tessellation_finished(
-<a href=#295 id=295 data-nosnippet>295</a>        <span class="kw">crate</span>::vector::transferables::DefaultSymbolLayerTessellated {
-<a href=#296 id=296 data-nosnippet>296</a>            coords: request.coords,
-<a href=#297 id=297 data-nosnippet>297</a>            buffer: tessellator.quad_buffer.into(),
-<a href=#298 id=298 data-nosnippet>298</a>            features: tessellator.features,
-<a href=#299 id=299 data-nosnippet>299</a>            atlas: has_geometry.then_some(atlas),
-<a href=#300 id=300 data-nosnippet>300</a>            layer_data: layer_header(layer),
-<a href=#301 id=301 data-nosnippet>301</a>            style_layer_id: style.id.clone(),
-<a href=#302 id=302 data-nosnippet>302</a>        },
-<a href=#303 id=303 data-nosnippet>303</a>    )
-<a href=#304 id=304 data-nosnippet>304</a>}
-<a href=#305 id=305 data-nosnippet>305</a>
-<a href=#306 id=306 data-nosnippet>306</a><span class="kw">mod </span>building_bases;
-<a href=#307 id=307 data-nosnippet>307</a><span class="kw">use </span>building_bases::unhide_unreplaced_building_bases;
+<a href=#216 id=216 data-nosnippet>216</a>        tessellator.retain_feature_paint =
+<a href=#217 id=217 data-nosnippet>217</a>            <span class="kw">crate</span>::vector::feature_paint::layer_retains_feature_paint(style);
+<a href=#218 id=218 data-nosnippet>218</a>        tessellator.sort_key = <span class="kw">crate</span>::vector::tessellation::SortKeys::by(
+<a href=#219 id=219 data-nosnippet>219</a>            <span class="kw">crate</span>::vector::tessellation::sort_key_of(style),
+<a href=#220 id=220 data-nosnippet>220</a>        );
+<a href=#221 id=221 data-nosnippet>221</a>        process_mvt_slice(layer, slice, shared_props.is_some(), <span class="kw-2">&amp;mut </span>tessellator)<span class="question-mark">?</span>;
+<a href=#222 id=222 data-nosnippet>222</a>        <span class="prelude-val">Ok</span>(tessellator)
+<a href=#223 id=223 data-nosnippet>223</a>    };
+<a href=#224 id=224 data-nosnippet>224</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(<span class="kw-2">mut </span>tessellator) = tessellate_readable(layer, selected, request.coords, build) <span class="kw">else </span>{
+<a href=#225 id=225 data-nosnippet>225</a>        <span class="kw">return </span>context.layer_missing(<span class="kw-2">&amp;</span>request.coords, <span class="kw-2">&amp;</span>layer.name);
+<a href=#226 id=226 data-nosnippet>226</a>    };
+<a href=#227 id=227 data-nosnippet>227</a>    tessellator.apply_sort_keys();
+<a href=#228 id=228 data-nosnippet>228</a>    <span class="kw">let </span>sort_keys = tessellator.sort_key_values();
+<a href=#229 id=229 data-nosnippet>229</a>    context.layer_tessellation_finished(
+<a href=#230 id=230 data-nosnippet>230</a>        <span class="kw-2">&amp;</span>request.coords,
+<a href=#231 id=231 data-nosnippet>231</a>        tessellator.buffer.into(),
+<a href=#232 id=232 data-nosnippet>232</a>        tessellator.feature_indices,
+<a href=#233 id=233 data-nosnippet>233</a>        (
+<a href=#234 id=234 data-nosnippet>234</a>            tessellator.feature_colors,
+<a href=#235 id=235 data-nosnippet>235</a>            sort_keys,
+<a href=#236 id=236 data-nosnippet>236</a>            tessellator.feature_paint,
+<a href=#237 id=237 data-nosnippet>237</a>        ),
+<a href=#238 id=238 data-nosnippet>238</a>        layer_header(layer),
+<a href=#239 id=239 data-nosnippet>239</a>        style.id.clone(),
+<a href=#240 id=240 data-nosnippet>240</a>    )
+<a href=#241 id=241 data-nosnippet>241</a>}
+<a href=#242 id=242 data-nosnippet>242</a>
+<a href=#243 id=243 data-nosnippet>243</a><span class="doccomment">/// Tessellates the layer with `build`. When a feature's geometry cannot be read, the features
+<a href=#244 id=244 data-nosnippet>244</a>/// whose geometry cannot are left out and the rest are tessellated, so one malformed feature
+<a href=#245 id=245 data-nosnippet>245</a>/// does not take the layer with it; `None` when the layer cannot be tessellated even so.
+<a href=#246 id=246 data-nosnippet>246</a></span><span class="kw">fn </span>tessellate_readable&lt;Tessellator&gt;(
+<a href=#247 id=247 data-nosnippet>247</a>    layer: <span class="kw-2">&amp;</span>tile::Layer,
+<a href=#248 id=248 data-nosnippet>248</a>    selected: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[usize]&gt;,
+<a href=#249 id=249 data-nosnippet>249</a>    coords: WorldTileCoords,
+<a href=#250 id=250 data-nosnippet>250</a>    <span class="kw-2">mut </span>build: <span class="kw">impl </span>FnMut(<span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[usize]&gt;) -&gt; geozero::error::Result&lt;Tessellator&gt;,
+<a href=#251 id=251 data-nosnippet>251</a>) -&gt; <span class="prelude-ty">Option</span>&lt;Tessellator&gt; {
+<a href=#252 id=252 data-nosnippet>252</a>    <span class="kw">let </span>error = <span class="kw">match </span>build(selected) {
+<a href=#253 id=253 data-nosnippet>253</a>        <span class="prelude-val">Ok</span>(tessellator) =&gt; <span class="kw">return </span><span class="prelude-val">Some</span>(tessellator),
+<a href=#254 id=254 data-nosnippet>254</a>        <span class="prelude-val">Err</span>(error) =&gt; error,
+<a href=#255 id=255 data-nosnippet>255</a>    };
+<a href=#256 id=256 data-nosnippet>256</a>    <span class="kw">let </span>(readable, dropped) = retain_readable_indices(layer, selected);
+<a href=#257 id=257 data-nosnippet>257</a>    <span class="kw">if </span>dropped == <span class="number">0 </span>{
+<a href=#258 id=258 data-nosnippet>258</a>        <span class="macro">tracing::error!</span>(%coords, layer = %layer.name, <span class="question-mark">?</span>error, <span class="string">"vector tessellation failed"</span>);
+<a href=#259 id=259 data-nosnippet>259</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#260 id=260 data-nosnippet>260</a>    }
+<a href=#261 id=261 data-nosnippet>261</a>    <span class="macro">tracing::warn!</span>(%coords, layer = %layer.name, dropped, <span class="question-mark">?</span>error, <span class="string">"features whose geometry cannot be read are left out"</span>);
+<a href=#262 id=262 data-nosnippet>262</a>    <span class="kw">match </span>build(<span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>readable)) {
+<a href=#263 id=263 data-nosnippet>263</a>        <span class="prelude-val">Ok</span>(tessellator) =&gt; <span class="prelude-val">Some</span>(tessellator),
+<a href=#264 id=264 data-nosnippet>264</a>        <span class="prelude-val">Err</span>(error) =&gt; {
+<a href=#265 id=265 data-nosnippet>265</a>            <span class="macro">tracing::error!</span>(%coords, layer = %layer.name, <span class="question-mark">?</span>error, <span class="string">"vector tessellation failed"</span>);
+<a href=#266 id=266 data-nosnippet>266</a>            <span class="prelude-val">None
+<a href=#267 id=267 data-nosnippet>267</a>        </span>}
+<a href=#268 id=268 data-nosnippet>268</a>    }
+<a href=#269 id=269 data-nosnippet>269</a>}
+<a href=#270 id=270 data-nosnippet>270</a>
+<a href=#271 id=271 data-nosnippet>271</a><span class="kw">fn </span>symbol_layer&lt;T: VectorTransferables, C: Context&gt;(
+<a href=#272 id=272 data-nosnippet>272</a>    layer: <span class="kw-2">&amp;</span>tile::Layer,
+<a href=#273 id=273 data-nosnippet>273</a>    selected: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[usize]&gt;,
+<a href=#274 id=274 data-nosnippet>274</a>    style: <span class="kw-2">&amp;</span>StyleLayer,
+<a href=#275 id=275 data-nosnippet>275</a>    paint: <span class="kw-2">&amp;</span><span class="kw">crate</span>::style::layer::SymbolPaint,
+<a href=#276 id=276 data-nosnippet>276</a>    request: <span class="kw-2">&amp;</span>VectorTileRequest,
+<a href=#277 id=277 data-nosnippet>277</a>    context: <span class="kw-2">&amp;mut </span>ProcessVectorContext&lt;T, C&gt;,
+<a href=#278 id=278 data-nosnippet>278</a>    atlas: std::sync::Arc&lt;<span class="kw">crate</span>::sdf::assets::SymbolAtlas&gt;,
+<a href=#279 id=279 data-nosnippet>279</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), ProcessVectorError&gt; {
+<a href=#280 id=280 data-nosnippet>280</a>    <span class="kw">let </span>zoom = request.style_zoom();
+<a href=#281 id=281 data-nosnippet>281</a>    <span class="kw">let </span>state_ctx = context.state_context_for_layer(<span class="kw-2">&amp;</span>layer.name);
+<a href=#282 id=282 data-nosnippet>282</a>    <span class="kw">let </span>build = |slice: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[usize]&gt;| {
+<a href=#283 id=283 data-nosnippet>283</a>        <span class="kw">let </span><span class="kw-2">mut </span>tessellator = TextTessellator::with_assets(paint.clone(), zoom, atlas.clone());
+<a href=#284 id=284 data-nosnippet>284</a>        tessellator.coordinate_scale = extent_scale(layer);
+<a href=#285 id=285 data-nosnippet>285</a>        tessellator.overscaling = request.overscaling();
+<a href=#286 id=286 data-nosnippet>286</a>        tessellator.source_ids = source_ids_for_slice(layer, slice);
+<a href=#287 id=287 data-nosnippet>287</a>        tessellator.feature_state_ctx = state_ctx.clone();
+<a href=#288 id=288 data-nosnippet>288</a>        process_mvt_slice(layer, slice, <span class="bool-val">false</span>, <span class="kw-2">&amp;mut </span>tessellator)<span class="question-mark">?</span>;
+<a href=#289 id=289 data-nosnippet>289</a>        <span class="prelude-val">Ok</span>(tessellator)
+<a href=#290 id=290 data-nosnippet>290</a>    };
+<a href=#291 id=291 data-nosnippet>291</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(<span class="kw-2">mut </span>tessellator) = tessellate_readable(layer, selected, request.coords, build) <span class="kw">else </span>{
+<a href=#292 id=292 data-nosnippet>292</a>        <span class="kw">return </span>context.layer_missing(<span class="kw-2">&amp;</span>request.coords, <span class="kw-2">&amp;</span>layer.name);
+<a href=#293 id=293 data-nosnippet>293</a>    };
+<a href=#294 id=294 data-nosnippet>294</a>    tessellator.finish();
+<a href=#295 id=295 data-nosnippet>295</a>    <span class="kw">let </span>has_geometry = !tessellator.quad_buffer.indices.is_empty();
+<a href=#296 id=296 data-nosnippet>296</a>    context.symbol_layer_tessellation_finished(
+<a href=#297 id=297 data-nosnippet>297</a>        <span class="kw">crate</span>::vector::transferables::DefaultSymbolLayerTessellated {
+<a href=#298 id=298 data-nosnippet>298</a>            coords: request.coords,
+<a href=#299 id=299 data-nosnippet>299</a>            buffer: tessellator.quad_buffer.into(),
+<a href=#300 id=300 data-nosnippet>300</a>            features: tessellator.features,
+<a href=#301 id=301 data-nosnippet>301</a>            atlas: has_geometry.then_some(atlas),
+<a href=#302 id=302 data-nosnippet>302</a>            layer_data: layer_header(layer),
+<a href=#303 id=303 data-nosnippet>303</a>            style_layer_id: style.id.clone(),
+<a href=#304 id=304 data-nosnippet>304</a>        },
+<a href=#305 id=305 data-nosnippet>305</a>    )
+<a href=#306 id=306 data-nosnippet>306</a>}
+<a href=#307 id=307 data-nosnippet>307</a>
+<a href=#308 id=308 data-nosnippet>308</a><span class="kw">mod </span>building_bases;
+<a href=#309 id=309 data-nosnippet>309</a><span class="kw">use </span>building_bases::unhide_unreplaced_building_bases;
 </code></pre></div></section></main></body></html>

@@ -189,7 +189,7 @@
 <a href=#189 id=189 data-nosnippet>189</a>    }
 <a href=#190 id=190 data-nosnippet>190</a>
 <a href=#191 id=191 data-nosnippet>191</a>    <span class="kw">fn </span>with_feature_paint(<span class="kw-2">mut </span><span class="self">self</span>, entries: Vec&lt;BucketFeatureEntry&gt;) -&gt; <span class="self">Self </span>{
-<a href=#192 id=192 data-nosnippet>192</a>        <span class="self">self</span>.feature_paint = <span class="prelude-val">Some</span>(entries);
+<a href=#192 id=192 data-nosnippet>192</a>        <span class="self">self</span>.feature_paint = (!entries.is_empty()).then_some(entries);
 <a href=#193 id=193 data-nosnippet>193</a>        <span class="self">self
 <a href=#194 id=194 data-nosnippet>194</a>    </span>}
 <a href=#195 id=195 data-nosnippet>195</a>

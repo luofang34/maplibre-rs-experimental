@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["finish_tile"],"struct":["PopulateWorldSystem"]};
+window.SIDEBAR_ITEMS = {"fn":["apply_vector_worker_batch","finish_tile"],"struct":["PopulateWorldSystem"]};
