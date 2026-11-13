@@ -15,7 +15,7 @@ use crate::{
 /// style contains 3D translucent extrusions or elevated 3D lines (`line-elevation`).
 const ELEVATED_3D_HEADROOM_METERS: f64 = 20_000.0;
 
-pub(super) fn style_elevated_headroom_meters(style: &Style) -> f64 {
+pub(crate) fn style_elevated_headroom_meters(style: &Style) -> f64 {
     let has_elevated_3d = style.layers.iter().any(|layer| match &layer.paint {
         Some(LayerPaint::FillExtrusion(paint)) => paint.fill_extrusion_translucent == Some(true),
         Some(LayerPaint::Line(paint)) => paint.line_elevation.is_some(),

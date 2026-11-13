@@ -54,9 +54,11 @@ pub(super) fn acquire_drapes(
     bool,
     Vec<DrapeState>,
 ) {
-    let keep = covering::retained_textures(specs.iter().map(|spec| spec.coords), |coords| {
-        terrain.drape_texture(coords).is_some()
-    });
+    let target_coords: Vec<WorldTileCoords> = specs.iter().map(|spec| spec.coords).collect();
+    let keep =
+        covering::retained_textures_with_zoom_out(&target_coords, ready, view_textures, |coords| {
+            terrain.drape_texture(coords).is_some()
+        });
     terrain.retain_drapes(&keep);
     // Unready tiles keep their last valid texture or a background surface.
     if memory.is_tight() {

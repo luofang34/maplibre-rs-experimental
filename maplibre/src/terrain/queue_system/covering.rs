@@ -74,6 +74,9 @@ pub(super) fn for_frame(
 #[cfg(test)]
 mod tests;
 
+/// Maximum levels below an unready zoom-out target within which active child drapes stay pinned.
+const ZOOM_OUT_DESCENDANT_DEPTH: u8 = 3;
+
 /// Keep only the nearest presented fallback for a target awaiting its first draw.
 pub(super) fn retained_textures(
     targets: impl Iterator<Item = WorldTileCoords>,
@@ -98,4 +101,71 @@ pub(super) fn retained_textures(
         }
     }
     kept
+}
+
+/// Retains target drapes, nearest ancestor drapes, and — while zooming out before a coarse
+/// target is ready — shallowest active descendant drapes within the remaining texture allowance.
+pub(super) fn retained_textures_with_zoom_out(
+    targets: &[WorldTileCoords],
+    ready: &[bool],
+    view_textures: usize,
+    present: impl Fn(WorldTileCoords) -> bool,
+) -> std::collections::HashSet<WorldTileCoords> {
+    let mut kept = retained_textures(targets.iter().copied(), &present);
+    let mut budget = view_textures.saturating_sub(kept.len());
+    if budget == 0 {
+        return kept;
+    }
+    for (target, is_ready) in targets.iter().copied().zip(ready.iter().copied()) {
+        if is_ready || present(target) || has_present_ancestor(target, &present) {
+            continue;
+        }
+        let mut descendants = Vec::new();
+        collect_present_descendants(
+            target,
+            ZOOM_OUT_DESCENDANT_DEPTH,
+            &present,
+            &mut descendants,
+        );
+        for desc in descendants {
+            if budget == 0 {
+                return kept;
+            }
+            if kept.insert(desc) {
+                budget -= 1;
+            }
+        }
+    }
+    kept
+}
+
+fn has_present_ancestor(
+    mut coords: WorldTileCoords,
+    present: &impl Fn(WorldTileCoords) -> bool,
+) -> bool {
+    while let Some(parent) = coords.get_parent() {
+        if present(parent) {
+            return true;
+        }
+        coords = parent;
+    }
+    false
+}
+
+fn collect_present_descendants(
+    coords: WorldTileCoords,
+    depth: u8,
+    present: &impl Fn(WorldTileCoords) -> bool,
+    out: &mut Vec<WorldTileCoords>,
+) {
+    if depth == 0 || usize::from(u8::from(coords.z)) + 1 >= crate::coords::MAX_ZOOM {
+        return;
+    }
+    for child in coords.get_children() {
+        if present(child) {
+            out.push(child);
+        } else {
+            collect_present_descendants(child, depth - 1, present, out);
+        }
+    }
 }

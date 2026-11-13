@@ -405,3 +405,51 @@ fn an_orbit_leaves_the_center_height_to_whatever_holds_it() {
         .expect("orbit");
     assert_eq!(state.center_elevation(), 777.0);
 }
+
+#[test]
+fn off_limb_empty_space_drag_pans_free_globe_in_finger_direction() {
+    let mut state = view(LatLon::new(0.0, 0.0), 1.0, 0.0, 0.0, 0.0);
+    state
+        .set_navigation_mode(NavigationMode::FreeGlobe, &VERTICAL)
+        .expect("free navigation");
+    let camera = globe_camera_for_view(&state).expect("camera");
+    let off_limb = Point2::new(40.0, 40.0);
+    assert!(
+        !camera.is_point_on_map_surface(off_limb),
+        "corner must lie in empty space outside the zoomed-out globe"
+    );
+    // Swipe right (+80 px) and up (-50 px) in empty space: globe moves right and up,
+    // so camera center moves west (lon < 0) and south (lat < 0).
+    assert!(state.drag_free_globe(off_limb, Point2::new(120.0, -10.0)));
+    let pose = state.pose_view().expect("pose");
+    assert!(
+        pose.center.longitude < -5.0,
+        "rightward swipe in empty space must move camera west, got {}",
+        pose.center.longitude
+    );
+    assert!(
+        pose.center.latitude < -3.0,
+        "upward swipe in empty space must move camera south, got {}",
+        pose.center.latitude
+    );
+}
+
+#[test]
+fn cross_limb_drag_continues_rotating_beyond_horizon() {
+    let mut state = view(LatLon::new(0.0, 0.0), 1.0, 0.0, 0.0, 0.0);
+    state
+        .set_navigation_mode(NavigationMode::FreeGlobe, &VERTICAL)
+        .expect("free navigation");
+    let center = Point2::new(state.width() * 0.5, state.height() * 0.5);
+    let far_right = Point2::new(state.width() - 10.0, state.height() * 0.5);
+    let camera = globe_camera_for_view(&state).expect("camera");
+    assert!(camera.is_point_on_map_surface(center));
+    assert!(!camera.is_point_on_map_surface(far_right));
+    assert!(state.drag_free_globe(center, far_right));
+    let pose = state.pose_view().expect("pose");
+    assert!(
+        pose.center.longitude < -45.0,
+        "dragging from center past limb must continue rotating past 45 deg, got {}",
+        pose.center.longitude
+    );
+}

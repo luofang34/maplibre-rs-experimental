@@ -51,11 +51,10 @@ pub fn queue_system(
     else {
         return Err(SystemError::Dependencies);
     };
+    let style_zoom = view_state.style_zoom().value();
     for layer in style.layers.iter().filter(|layer| layer.type_ == "raster") {
         let mut uniforms = match &layer.paint {
-            Some(LayerPaint::Raster(paint)) => {
-                RasterUniforms::from_paint(paint, view_state.zoom().value())
-            }
+            Some(LayerPaint::Raster(paint)) => RasterUniforms::from_paint(paint, style_zoom),
             _ => RasterUniforms::from_paint(&RasterPaint::default(), 0.0),
         };
         uniforms.align = crate::raster::paint::pixel_alignment(view_state);
@@ -77,9 +76,11 @@ pub fn queue_system(
         let coords = &view_tile.coords();
         tracing::trace!("Drawing tile at {coords}");
 
-        for style_layer in style.layers.iter().filter(|layer| {
-            layer.type_ == "raster" && layer.is_visible_at(view_state.zoom().value())
-        }) {
+        for style_layer in style
+            .layers
+            .iter()
+            .filter(|layer| layer.type_ == "raster" && layer.is_visible_at(style_zoom))
+        {
             let Some(source) = raster_resources.layer_source(&style_layer.id) else {
                 continue;
             };

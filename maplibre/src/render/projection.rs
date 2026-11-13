@@ -27,6 +27,7 @@ use crate::{
     style::Style,
 };
 mod covering;
+pub(crate) use covering::style_elevated_headroom_meters;
 #[cfg(test)]
 pub(crate) use covering::tests::sea_eye;
 pub use covering::{

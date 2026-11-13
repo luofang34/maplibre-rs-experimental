@@ -232,14 +232,22 @@ pub fn raster_source_regions(
     padding: ViewStatePadding,
 ) -> Result<crate::render::eye_covering::RasterCoverings, ProjectionStateError> {
     let zoom = view_state.zoom().value();
+    let style_zoom = view_state.style_zoom().value();
     let mut regions = Vec::new();
     for group in source_layer_groups(style, TileKind::Raster) {
-        if !group.layers.iter().any(|layer| layer.is_visible_at(zoom)) {
+        if !group
+            .layers
+            .iter()
+            .any(|layer| layer.is_visible_at(style_zoom))
+        {
             continue;
         }
         let source = RasterSourceId::new(group.source_name);
         let definition = source.name().and_then(|name| style.sources.get(name));
-        let request = raster_covering_request(zoom, definition);
+        let mut request = raster_covering_request(zoom, definition);
+        if !request.zoom_range.serves(request.level) && style_zoom > zoom {
+            request.level = raster_covering_request(style_zoom, definition).level;
+        }
         let history = world
             .resources
             .get::<FrameLodHistory>()
@@ -484,5 +492,6 @@ mod mercator;
 #[cfg(test)]
 pub(crate) mod tests;
 
-use elevation::{nadir_ground_elevation, style_elevated_headroom_meters, tile_elevation};
+pub(crate) use elevation::style_elevated_headroom_meters;
+use elevation::{nadir_ground_elevation, tile_elevation};
 use mercator::mercator_view_region;

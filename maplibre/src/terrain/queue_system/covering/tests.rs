@@ -100,3 +100,37 @@ fn completed_children_release_fallbacks_and_allow_further_refinement() {
         assert!(cache.get(child).is_some());
     }
 }
+
+#[test]
+fn zoom_out_retains_active_child_drapes_until_coarse_target_is_ready() {
+    use crate::terrain::drape_cache::DrapeCache;
+    let coarse = WorldTileCoords::from((2, 3, ZoomLevel::new(4)));
+    let children = coarse.get_children();
+    let mut cache = DrapeCache::<u8>::default();
+    for child in children {
+        cache.acquire(child, 1, true, || 2);
+    }
+
+    let kept_while_unready =
+        super::retained_textures_with_zoom_out(&[coarse], &[false], 16, |tile| {
+            cache.get(tile).is_some()
+        });
+    assert!(kept_while_unready.contains(&coarse));
+    for child in children {
+        assert!(
+            kept_while_unready.contains(&child),
+            "unready zoom-out target keeps active child drape {child:?}"
+        );
+    }
+
+    let kept_once_ready = super::retained_textures_with_zoom_out(&[coarse], &[true], 16, |tile| {
+        cache.get(tile).is_some()
+    });
+    assert!(kept_once_ready.contains(&coarse));
+    for child in children {
+        assert!(
+            !kept_once_ready.contains(&child),
+            "ready zoom-out target releases child drape {child:?}"
+        );
+    }
+}

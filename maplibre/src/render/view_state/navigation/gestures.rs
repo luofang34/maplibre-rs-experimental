@@ -4,7 +4,10 @@
 use cgmath::{InnerSpace, Point2, Vector3};
 
 use super::{turn_between, ViewState};
-use crate::{projection::globe::lat_lon_to_unit_sphere, render::projection::globe_camera_for_view};
+use crate::{
+    projection::globe::{interaction::pan_surface_location, lat_lon_to_unit_sphere},
+    render::projection::globe_camera_for_view,
+};
 
 /// Corrections that bring a zoom's anchor back under its pixel.
 const ANCHOR_PASSES: usize = 6;
@@ -26,14 +29,42 @@ impl ViewState {
     }
 
     /// Drags the free-globe camera so the ground under `from` moves under `to`, turning the
-    /// whole camera about the body's center. Returns whether it moved.
+    /// whole camera about the body's center. When `from` or `to` lies outside the visible limb,
+    /// translates the drag onto the virtual trackball anchored at `from` (or at the globe's
+    /// screen center when starting in empty space), matching GL JS / ForeFlight whole-globe pan.
+    /// Returns whether it moved.
     pub fn drag_free_globe(&mut self, from: Point2<f64>, to: Point2<f64>) -> bool {
         if self.navigation_mode() != super::NavigationMode::FreeGlobe {
             return false;
         }
-        let (Some(grabbed), Some(under)) = (self.grabbed(from), self.grabbed(to)) else {
+        let Ok(camera) = globe_camera_for_view(self) else {
             return false;
         };
+        let (grabbed, under) =
+            if camera.is_point_on_map_surface(from) && camera.is_point_on_map_surface(to) {
+                let (Some(grabbed), Some(under)) = (self.grabbed(from), self.grabbed(to)) else {
+                    return false;
+                };
+                (grabbed, under)
+            } else {
+                let center_px = camera.location_to_screen(camera.center(), self.center_elevation());
+                let anchor_px = if camera.is_point_on_map_surface(from) {
+                    from
+                } else {
+                    center_px
+                };
+                let target_px = anchor_px + (to - from);
+                let (Some(grabbed_loc), Some(under_loc)) = (
+                    pan_surface_location(&camera, anchor_px),
+                    pan_surface_location(&camera, target_px),
+                ) else {
+                    return false;
+                };
+                (
+                    lat_lon_to_unit_sphere(grabbed_loc),
+                    lat_lon_to_unit_sphere(under_loc),
+                )
+            };
         // The camera sees a point turned by the opposite of its own turn; the point under `to`
         // must turn onto the grabbed one. Eye and target turn together about the body's center,
         // keeping their heights, so a camera that could be drawn still can.

@@ -179,3 +179,104 @@ fn read_blocking(map: &HeadlessMap) -> Vec<u8> {
     buffer.unmap();
     bytes
 }
+
+#[tokio::test]
+async fn forward_pitched_external_eye_requests_high_zoom_terminal_raster_tiles() {
+    let style: Style = serde_json::from_value(serde_json::json!({
+        "version": 8,
+        "projection": { "type": "globe" },
+        "terrain": { "source": "dem" },
+        "sources": {
+            "vfr-sectional": {
+                "type": "raster",
+                "tiles": ["offline://sectional"],
+                "tileSize": 256,
+                "minzoom": 5,
+                "maxzoom": 12
+            },
+            "vfr-terminal": {
+                "type": "raster",
+                "tiles": ["offline://terminal"],
+                "tileSize": 256,
+                "minzoom": 10,
+                "maxzoom": 12
+            },
+            "dem": {
+                "type": "raster-dem",
+                "tiles": ["offline://dem"],
+                "tileSize": 256,
+                "maxzoom": 12,
+                "encoding": "terrarium"
+            }
+        },
+        "layers": [
+            { "id": "vfr-sectional-drape", "type": "raster", "source": "vfr-sectional", "minzoom": 5 },
+            { "id": "vfr-terminal-drape", "type": "raster", "source": "vfr-terminal", "minzoom": 10 }
+        ]
+    }))
+    .expect("style");
+    let (kernel, renderer) = create_headless_renderer(SIZE, SIZE, None)
+        .await
+        .expect("renderer");
+    let mut map = HeadlessMap::new(
+        style,
+        renderer,
+        kernel,
+        vec![
+            Box::new(RenderPlugin),
+            Box::new(RasterPlugin::<DefaultRasterTransferables>::default()),
+            Box::new(TerrainPlugin::<DefaultDemTransferables>::default()),
+            Box::new(
+                HeadlessPlugin::new(false)
+                    .preserve_tile_sources()
+                    .retain_supplied_tiles(),
+            ),
+        ],
+    )
+    .expect("map");
+
+    // 320 m aircraft eye pitched 88 degrees toward the horizon (looking nearly level north):
+    // gaze-ray intersection zoom drops to ~6, while physical eye-height style_zoom is ~15.5.
+    let forward_rot = Matrix4::from_angle_x(cgmath::Deg(88.0));
+    map.run_xr_frame(XrFrame {
+        timestamp: std::time::Duration::from_millis(16),
+        opaque_environment: true,
+        placement: ScenePlacement {
+            anchor: ExternalAnchor {
+                position: LatLon::new(40.6892, -74.0445),
+                altitude_meters: 0.0,
+            },
+            world_from_scene: Matrix4::identity(),
+        },
+        eyes: vec![XrEye {
+            world_from_eye: Matrix4::from_translation(Vector3::new(0.0, 0.0, 320.0)) * forward_rot,
+            frustum: EyeFrustum::symmetric(Rad(1.1), 1.0, 2.0, 50_000_000.0),
+            target: EyeTarget::default(),
+        }],
+        request_overscan: 1.0,
+        prefetch: None,
+    })
+    .expect("forward pitched frame");
+
+    assert!(
+        map.view_state().style_zoom().value() >= 14.0,
+        "physical eye height must keep style_zoom >= 14, got {}",
+        map.view_state().style_zoom().value()
+    );
+    let terminal_tiles = map
+        .required_raster_tile_coords("vfr-terminal")
+        .expect("terminal covering");
+    assert!(
+        !terminal_tiles.is_empty(),
+        "minzoom=10 TAC raster layer must remain visible and covered in forward-pitched flight"
+    );
+    let max_z = terminal_tiles
+        .iter()
+        .map(|coords| u8::from(coords.z))
+        .max()
+        .unwrap_or(0);
+    assert_eq!(
+        max_z, 12,
+        "forward-pitched aircraft must select z12 TAC tiles near the nose instead of coarse horizon zoom, got tiles: {terminal_tiles:?}"
+    );
+}

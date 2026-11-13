@@ -192,7 +192,7 @@ impl SourceContent for LoadedContent<'_> {
             .get_layers(coords)?
             .iter()
             .find(|entry| entry.style_layer.id == layer_id)
-            .map(|entry| entry.allocation_id())
+            .map(|entry| entry.content_revision())
     }
 
     fn raster_revision(&self, coords: WorldTileCoords, layer: &str) -> Option<u64> {

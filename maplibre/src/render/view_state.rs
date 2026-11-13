@@ -399,7 +399,7 @@ use external::ExternalEye;
 pub use external::{ExternalAnchor, ExternalView, ExternalViewError};
 pub use flight::{FlightCurve, FlightPath, FlyOptions};
 pub use horizon::HorizonLine;
-pub use navigation::{GlobePose, NavigationError, NavigationLimit, NavigationMode};
+pub use navigation::{GlobePose, NavigationError, NavigationLimit, NavigationMode, PoseView};
 pub(crate) use pose::ResolvedJump;
 pub use pose::{CameraOptions, CameraPose};
 

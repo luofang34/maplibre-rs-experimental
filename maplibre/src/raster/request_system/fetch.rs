@@ -89,6 +89,19 @@ async fn fetch_source<T: RasterTransferables, HC: HttpClient, C: Context + Clone
         )
         .await;
     }
+    if group.has_nothing_at(coords)
+        || group
+            .max_zoom
+            .is_some_and(|max_zoom| u8::from(coords.z) > max_zoom)
+    {
+        context
+            .send_back(<T as RasterTransferables>::LayerRasterMissing::build_from(
+                coords,
+                RasterSourceId::new(group.source_name.clone()),
+            ))
+            .map_err(ProcedureError::Send)?;
+        return Ok(false);
+    }
     if let Some(unpack) = dem_unpack {
         if group.source.format(&coords).is_some() {
             return fetch_dem_source::<T, _, _>(client, group, unpack, coords, context).await;

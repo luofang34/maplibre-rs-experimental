@@ -102,12 +102,19 @@ pub(super) struct FreeGlobe {
 }
 
 /// The parameters a globe camera is built from, decomposed from a pose.
-pub(crate) struct PoseView {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PoseView {
+    /// Target planetographic latitude and longitude at the camera's look-at center.
     pub center: LatLon,
+    /// Camera bearing clockwise from true north in degrees.
     pub bearing_degrees: f64,
+    /// Camera pitch away from nadir in degrees.
     pub pitch_degrees: f64,
+    /// Camera roll about the optical axis in degrees.
     pub roll_degrees: f64,
+    /// Apparent body radius in logical viewport pixels.
     pub radius_pixels: f64,
+    /// Equivalent MapLibre style zoom at `center.latitude`.
     pub style_zoom: f64,
 }
 
@@ -372,7 +379,7 @@ impl ViewState {
     }
 
     /// The center, angles, radius and style zoom of the free-globe camera, while there is one.
-    pub(crate) fn pose_view(&self) -> Option<PoseView> {
+    pub fn pose_view(&self) -> Option<PoseView> {
         let free = self.free_globe?;
         let (center, bearing, pitch, roll) = free.decompose();
         let distance = free.distance_meters / self.body().radius_meters;
