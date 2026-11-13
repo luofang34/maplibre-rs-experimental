@@ -60,7 +60,11 @@ impl SortKeys {
 struct Reordered<V, I> {
     vertices: Vec<V>,
     indices: Vec<I>,
-    entries: Vec<(u32, Option<[f32; 4]>)>,
+    entries: Vec<(
+        u32,
+        Option<[f32; 4]>,
+        Option<crate::vector::feature_paint::BucketFeatureEntry>,
+    )>,
 }
 
 impl<I> ZeroTessellator<I>
@@ -116,8 +120,11 @@ where
                 shifts[entry] = out.vertices.len() as i64 - first as i64;
                 out.vertices
                     .extend_from_slice(&self.buffer.vertices[first..first + count]);
-                out.entries
-                    .push((count as u32, self.feature_colors.get(entry).copied()));
+                out.entries.push((
+                    count as u32,
+                    self.feature_colors.get(entry).copied(),
+                    self.feature_paint.get(entry).cloned(),
+                ));
             }
             let entries = span.entries.clone();
             let ranges: Vec<(u32, u32, i64)> = entries
@@ -143,12 +150,19 @@ where
             vertices: out.vertices,
             indices: out.indices,
         };
-        self.feature_indices = out.entries.iter().map(|(count, _)| *count).collect();
+        self.feature_indices = out.entries.iter().map(|(count, _, _)| *count).collect();
         if !self.feature_colors.is_empty() {
             self.feature_colors = out
                 .entries
                 .iter()
-                .filter_map(|(_, colour)| *colour)
+                .filter_map(|(_, colour, _)| *colour)
+                .collect();
+        }
+        if !self.feature_paint.is_empty() {
+            self.feature_paint = out
+                .entries
+                .into_iter()
+                .filter_map(|(_, _, paint)| paint)
                 .collect();
         }
     }

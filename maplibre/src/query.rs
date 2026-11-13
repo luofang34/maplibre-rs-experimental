@@ -59,6 +59,8 @@ pub struct QueriedFeature {
     pub id: Option<u64>,
     /// The feature's attributes.
     pub properties: BTreeMap<String, serde_json::Value>,
+    /// Runtime `feature-state` entries currently assigned to this feature.
+    pub state: BTreeMap<String, serde_json::Value>,
     /// `Point` for a symbol, `Polygon` for a fill and `LineString` for a line.
     pub geometry_type: &'static str,
     /// The rendered text of a symbol.
@@ -73,23 +75,14 @@ impl From<RenderedSymbol> for QueriedFeature {
             source_layer: symbol.source_layer,
             id: symbol.id,
             properties: symbol.properties,
+            state: symbol.state,
             geometry_type: symbol.geometry_type.name(),
             text: Some(symbol.text),
         }
     }
 }
 
-/// A feature's properties as its source gives them, without the ones the renderer adds for
-/// expressions to read, such as feature state.
-pub(crate) fn source_properties(
-    properties: &crate::style::expression::FeatureProperties,
-) -> BTreeMap<String, serde_json::Value> {
-    properties
-        .iter()
-        .filter(|(key, _)| !crate::style::expression::is_internal_property(key))
-        .map(|(key, value)| (key.clone(), value.to_json()))
-        .collect()
-}
+pub(crate) use crate::style::feature_state::extract_source_properties as source_properties;
 
 /// Features under `geometry`, topmost style layer first, across flat Mercator, 3D terrain, and
 /// 3D globe / Mercator-to-globe transition views.
@@ -472,6 +465,7 @@ fn collect(
                     source_layer: geometry.source_layer.to_string(),
                     id: geometry.id,
                     properties: source_properties(&geometry.properties),
+                    state: crate::style::feature_state::extract_feature_state(&geometry.properties),
                     geometry_type,
                     text: None,
                 },

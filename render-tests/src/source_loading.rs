@@ -6,7 +6,7 @@ use maplibre::{
     coords::WorldTileCoords,
     geojson::index::GeoJsonIndex,
     headless::map::{
-        process_geojson_layers_with_atlas, process_tile_layers_with_atlas, HeadlessMap,
+        process_geojson_layers_with_atlas, process_tile_layers_for_style, HeadlessMap,
         ProcessedLayers,
     },
     io::tile_sources::{tile_in_bounds, MAX_OVERZOOMING},
@@ -29,7 +29,6 @@ use crate::{
     paths::{local_data_path, local_tile_path},
     source_tiles::source_tile_coords,
     symbol_assets::load_atlas_blocking,
-    vector_feature_state::VectorFeatureStates,
 };
 
 /// The tiles each raster source is fading out after a zoom, with the opacity they keep.
@@ -43,11 +42,7 @@ pub(super) fn load_sources_blocking(
         &HashMap<String, Vec<WorldTileCoords>>,
         &DepartingRasterTiles,
     ),
-    (images, pixel_ratio, vector_states): (
-        &HashMap<String, PlacedImage>,
-        f64,
-        &VectorFeatureStates,
-    ),
+    (images, pixel_ratio): (&HashMap<String, PlacedImage>, f64),
 ) -> Result<(ProcessedLayers, Vec<AvailableRasterLayerData>), String> {
     let mut all_layers = ProcessedLayers::default();
     let mut all_raster_layers = Vec::new();
@@ -82,7 +77,6 @@ pub(super) fn load_sources_blocking(
                 &layers,
                 target_coords,
                 (&projection, pixel_ratio),
-                vector_states,
             )?),
             // DEM images supply hillshade and colour relief independently from terrain meshes.
             Source::Image(_) => return Err(format!("Image source '{name}' was not lowered")),
@@ -110,7 +104,7 @@ fn load_geojson_blocking(
 ) -> Result<ProcessedLayers, String> {
     let data = &source.data;
     let loaded;
-    let value = match data {
+    let raw_value = match data {
         GeoJsonData::Inline(value) => value.as_ref(),
         GeoJsonData::Url(url) => {
             let path = local_data_path(url)?;
@@ -121,6 +115,8 @@ fn load_geojson_blocking(
             &loaded
         }
     };
+    let annotated = style.apply_feature_state_to_geojson(name, raw_value);
+    let value = annotated.as_ref();
     // A document that is not GeoJSON is reported and leaves the source empty, as in GL JS.
     let index = match GeoJsonIndex::from_value(value, source) {
         Ok(index) => index,
@@ -193,7 +189,6 @@ fn load_vector_blocking(
     layers: &[StyleLayer],
     target_coords: &[WorldTileCoords],
     (projection, pixel_ratio): (&ProjectionType, f64),
-    vector_states: &VectorFeatureStates,
 ) -> Result<ProcessedLayers, String> {
     let template = source
         .tiles
@@ -218,17 +213,13 @@ fn load_vector_blocking(
                 continue;
             }
         };
-        let data = if vector_states.has(name) {
-            vector_states.apply(name, &data)?.into_boxed_slice()
-        } else {
-            data
-        };
         let magnified = overscaled_zoom(map, style, source, coords);
         let atlas = symbol_atlas(style, layers, &data, (coords, magnified, pixel_ratio))?;
         for layer in layers {
             processed.append(
-                &mut process_tile_layers_with_atlas(
+                &mut process_tile_layers_for_style(
                     &data,
+                    style,
                     layer,
                     coords,
                     projection.clone(),

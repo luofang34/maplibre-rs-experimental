@@ -105,6 +105,68 @@ impl GeometryIndex {
             .map_or(0, |sources| sources.values().map(|s| s.bytes).sum())
     }
 
+    /// Records the `Arc<FeatureProperties>` pointers already counted by [`Self::tile_bytes`] at
+    /// `coords` so other tile components sharing those allocations do not double-count them.
+    pub(crate) fn record_tile_property_ptrs(
+        &self,
+        coords: WorldTileCoords,
+        seen: &mut FxHashSet<*const FeatureProperties>,
+    ) {
+        let Some(sources) = coords.build_quad_key().and_then(|key| self.index.get(&key)) else {
+            return;
+        };
+        for stored in sources.values() {
+            let mut record = |geom: &IndexedGeometry<f64>| {
+                seen.insert(Arc::as_ptr(&geom.properties));
+            };
+            match &stored.index {
+                TileIndex::Spatial { tree } => tree.iter().for_each(&mut record),
+                TileIndex::Linear { list } => list.iter().for_each(&mut record),
+            }
+        }
+    }
+
+    /// Synchronizes runtime `feature-state` in-place across all indexed tiles of `source`,
+    /// preserving shared `Arc<FeatureProperties>` identity across `memo`.
+    pub(crate) fn sync_source_feature_state_with_memo(
+        &mut self,
+        source: &str,
+        promote_id: Option<&crate::style::source::PromoteId>,
+        source_state: Option<&crate::style::feature_state::SourceFeatureState>,
+        memo: &mut FxHashMap<usize, (Arc<FeatureProperties>, bool)>,
+    ) {
+        for sources in self.index.values_mut() {
+            let Some(stored) = sources.get_mut(&Some(source.to_owned())) else {
+                continue;
+            };
+            let mut any_changed = false;
+            let mut sync_one = |geom: &mut IndexedGeometry<f64>| {
+                let layer = (!geom.source_layer.is_empty()).then_some(geom.source_layer.as_ref());
+                let promote_prop = promote_id.and_then(|p| p.property_for(layer));
+                any_changed |= crate::style::feature_state::sync_arc_properties_feature_state(
+                    &mut geom.properties,
+                    geom.id,
+                    promote_prop,
+                    source_state,
+                    layer,
+                    memo,
+                );
+            };
+            match &mut stored.index {
+                TileIndex::Spatial { tree } => tree.iter_mut().for_each(&mut sync_one),
+                TileIndex::Linear { list } => list.iter_mut().for_each(&mut sync_one),
+            }
+            if any_changed {
+                let new_bytes = stored.index.approximate_bytes();
+                self.total_bytes = self
+                    .total_bytes
+                    .saturating_sub(stored.bytes)
+                    .saturating_add(new_bytes);
+                stored.bytes = new_bytes;
+            }
+        }
+    }
+
     /// Finds geometries at world pixels measured at `zoom`, in the tile at grid level `z`.
     ///
     /// Returns `None` if that tile has no index; an indexed tile with no hits yields `Some`
@@ -331,7 +393,7 @@ where
 }
 
 /// Memory of a feature's properties: keys, values and the map entries that carry them.
-fn properties_bytes(properties: &FeatureProperties) -> usize {
+pub(crate) fn properties_bytes(properties: &FeatureProperties) -> usize {
     const ENTRY_OVERHEAD: usize = 2 * std::mem::size_of::<String>() + 16;
     properties
         .iter()

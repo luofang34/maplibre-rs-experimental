@@ -207,7 +207,7 @@ impl StyleLayer {
         .ok()
     }
 
-    fn property_maps(&self) -> Result<LayerProperties, serde_json::Error> {
+    pub(crate) fn property_maps(&self) -> Result<LayerProperties, serde_json::Error> {
         let mut paint = self.unrecognized.paint.clone();
         let mut layout = self.unrecognized.layout.clone();
         if let Some(model) = &self.paint {

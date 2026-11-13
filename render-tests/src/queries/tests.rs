@@ -40,6 +40,7 @@ fn features_compare_by_their_fields_without_geometry() {
         source_layer: "_geojsonTileLayer".into(),
         id: None,
         properties: [("name".to_owned(), json!("a"))].into(),
+        state: Default::default(),
         geometry_type: "Polygon",
         text: None,
     };

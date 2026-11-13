@@ -158,6 +158,7 @@ pub(crate) struct Feature {
     #[serde(skip_serializing_if = "Option::is_none")]
     id: Option<u64>,
     properties: std::collections::BTreeMap<String, serde_json::Value>,
+    state: std::collections::BTreeMap<String, serde_json::Value>,
     layer: LayerRef,
     source: Option<String>,
     source_layer: String,
@@ -177,6 +178,7 @@ impl From<QueriedFeature> for Feature {
             kind: "Feature",
             id: feature.id,
             properties: feature.properties,
+            state: feature.state,
             layer: LayerRef { id: feature.layer },
             source: feature.source,
             source_layer: feature.source_layer,

@@ -14,13 +14,13 @@ use maplibre::{
         AvailableRasterLayerData, LayerRaster, LayerRasterMissing, MissingRasterLayerData,
         RasterSourceId, RasterTransferables,
     },
-    render::{shaders::ShaderSymbolVertex, ShaderVertex},
+    render::shaders::ShaderSymbolVertex,
     sdf::{Feature, SymbolLayerData},
     terrain::transferables::{DemTransferables, LayerDem, LayerDemMissing},
     tile::Layer,
     vector::{
-        AvailableVectorLayerBucket, LayerIndexed, LayerMissing, LayerTessellated,
-        MissingVectorLayerBucket, SymbolLayerTessellated, TileTessellated, VectorTransferables,
+        LayerIndexed, LayerMissing, MissingVectorLayerBucket, SymbolLayerTessellated,
+        TileTessellated, VectorTransferables,
     },
 };
 
@@ -29,8 +29,7 @@ use crate::platform::singlethreaded::{
     transferables::{
         basic_generated::*, layer_dem_generated::*, layer_dem_missing_generated::*,
         layer_indexed_generated::*, layer_missing_generated::*, layer_raster_generated::*,
-        layer_tessellated_generated::*, symbol_layer_tessellated_generated::*,
-        tile_tessellated_generated::*,
+        symbol_layer_tessellated_generated::*, tile_tessellated_generated::*,
     },
 };
 
@@ -204,169 +203,8 @@ impl IntoMessage for FlatBufferTransferable {
     }
 }
 
-impl LayerTessellated for FlatBufferTransferable {
-    fn message_tag() -> &'static dyn MessageTag {
-        &WebMessageTag::LayerTessellated
-    }
-
-    fn style_layer_id(&self) -> &str {
-        let data = root_as_flat_layer_tessellated(&self.data[self.start..]).unwrap();
-        data.style_layer_id()
-            .unwrap_or_else(|| data.layer_name().unwrap_or(""))
-    }
-
-    fn build_from(
-        coords: WorldTileCoords,
-        buffer: OverAlignedVertexBuffer<ShaderVertex, IndexDataType>,
-        feature_indices: Vec<u32>,
-        feature_colors: Vec<[f32; 4]>,
-        feature_sort_keys: Vec<f32>,
-        layer_data: Layer,
-        style_layer_id: String,
-    ) -> Self {
-        let estimated_capacity = 256
-            + buffer.buffer.vertices.len() * 32
-            + buffer.buffer.indices.len() * 4
-            + feature_indices.len() * 4
-            + feature_colors.len() * 16
-            + feature_sort_keys.len() * 4;
-        let mut inner_builder = FlatBufferBuilder::with_capacity(estimated_capacity);
-
-        let vertices = inner_builder.create_vector(
-            &buffer
-                .buffer
-                .vertices
-                .iter()
-                .map(|vertex| {
-                    FlatShaderVertex::new(
-                        &vertex.position,
-                        &vertex.normal,
-                        vertex.elevation,
-                        vertex.edge_distance,
-                        vertex.corner_code,
-                    )
-                })
-                .collect::<Vec<_>>(),
-        );
-        let indices = inner_builder.create_vector(&buffer.buffer.indices);
-        let feature_indices = inner_builder.create_vector(&feature_indices);
-        let layer_name = inner_builder.create_string(&layer_data.name);
-        let style_layer_id_fb = inner_builder.create_string(&style_layer_id);
-        // Flatten Vec<[f32; 4]> into Vec<f32> for FlatBuffer storage
-        let flat_colors: Vec<f32> = feature_colors
-            .iter()
-            .flat_map(|c| c.iter().copied())
-            .collect();
-        let feature_colors_fb = inner_builder.create_vector(&flat_colors);
-        let feature_sort_keys_fb = inner_builder.create_vector(&feature_sort_keys);
-        let distances = inner_builder.create_vector(
-            &buffer
-                .buffer
-                .vertices
-                .iter()
-                .map(|v| v.distance)
-                .collect::<Vec<_>>(),
-        );
-
-        let mut builder = FlatLayerTessellatedBuilder::new(&mut inner_builder);
-
-        builder.add_coords(&FlatWorldTileCoords::new(
-            coords.x,
-            coords.y,
-            coords.z.into(),
-        ));
-        builder.add_layer_name(layer_name);
-        builder.add_vertices(vertices);
-        builder.add_indices(indices);
-        builder.add_feature_indices(feature_indices);
-        builder.add_usable_indices(buffer.usable_indices);
-        builder.add_style_layer_id(style_layer_id_fb);
-        builder.add_feature_colors(feature_colors_fb);
-        builder.add_vertex_distances(distances);
-        builder.add_feature_sort_keys(feature_sort_keys_fb);
-        let root = builder.finish();
-
-        inner_builder.finish(root, None);
-        let (data, start) = inner_builder.collapse();
-        FlatBufferTransferable {
-            tag: WebMessageTag::LayerTessellated,
-            data,
-            start,
-        }
-    }
-
-    fn coords(&self) -> WorldTileCoords {
-        let data = root_as_flat_layer_tessellated(&self.data[self.start..]).unwrap();
-        data.coords().unwrap().into()
-    }
-
-    fn is_empty(&self) -> bool {
-        let data = root_as_flat_layer_tessellated(&self.data[self.start..]).unwrap();
-        data.usable_indices() == 0
-    }
-
-    fn to_bucket(self) -> AvailableVectorLayerBucket {
-        let data = root_as_flat_layer_tessellated(&self.data[self.start..]).unwrap();
-        let vertices = data
-            .vertices()
-            .unwrap()
-            .iter()
-            .enumerate()
-            .map(|(index, vertex)| {
-                let mut result =
-                    ShaderVertex::new(vertex.position().into(), vertex.normal().into());
-                result.distance = data
-                    .vertex_distances()
-                    .and_then(|values| (index < values.len()).then(|| values.get(index)))
-                    .unwrap_or(0.0);
-                result.elevation = vertex.elevation();
-                result.edge_distance = vertex.edge_distance();
-                result.corner_code = vertex.corner_code();
-                result
-            });
-
-        let indices = data.indices().unwrap();
-        let feature_indices: Vec<u32> = data.feature_indices().unwrap().iter().collect();
-        let usable_indices = data.usable_indices();
-        let layer_name = data.layer_name().unwrap().to_owned();
-        let style_layer_id = data
-            .style_layer_id()
-            .map(|s| s.to_owned())
-            .unwrap_or_else(|| layer_name.clone());
-        // Reconstruct Vec<[f32; 4]> from the flat float array
-        let feature_colors: Vec<[f32; 4]> = data
-            .feature_colors()
-            .map(|fc| {
-                let count = fc.len() / 4;
-                (0..count)
-                    .map(|i| {
-                        let base = i * 4;
-                        [
-                            fc.get(base),
-                            fc.get(base + 1),
-                            fc.get(base + 2),
-                            fc.get(base + 3),
-                        ]
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        AvailableVectorLayerBucket {
-            coords: LayerTessellated::coords(&self),
-            source_layer: layer_name,
-            style_layer_id,
-            buffer: OverAlignedVertexBuffer::from_iters(vertices, indices, usable_indices),
-            feature_indices,
-            feature_colors,
-            feature_sort_keys: data
-                .feature_sort_keys()
-                .map(|keys| keys.iter().collect())
-                .unwrap_or_default(),
-        }
-    }
-}
-
 mod indexed;
+mod tessellated;
 
 mod raster;
 
@@ -392,62 +230,3 @@ mod terrain;
 
 mod completion;
 use self::completion::tile_completion;
-
-#[cfg(test)]
-mod tests {
-    use maplibre::{
-        coords::{WorldTileCoords, ZoomLevel},
-        render::ShaderVertex,
-        tile::Layer,
-        vector::{tessellation::OverAlignedVertexBuffer, LayerTessellated},
-    };
-    use wasm_bindgen_test::*;
-
-    use super::FlatBufferTransferable;
-
-    #[wasm_bindgen_test]
-    fn layer_tessellated_preserves_all_shader_vertex_fields() {
-        let packed_elevation = f32::from_bits(0xFF00_1234);
-        let input = ShaderVertex {
-            position: [128.5, 2048.25],
-            normal: [-0.5, 0.75],
-            distance: 42.0,
-            elevation: packed_elevation,
-            edge_distance: 19.5,
-            corner_code: 17.0,
-        };
-        let buffer = OverAlignedVertexBuffer::from_iters([input, input, input], [0_u32, 1, 2], 3);
-        let layer = Layer {
-            version: 2,
-            name: "boundary".into(),
-            features: Vec::new(),
-            keys: Vec::new(),
-            values: Vec::new(),
-            extent: Some(4096),
-        };
-        let transferable = <FlatBufferTransferable as LayerTessellated>::build_from(
-            WorldTileCoords {
-                x: 2,
-                y: 1,
-                z: ZoomLevel::new(2),
-            },
-            buffer,
-            vec![3],
-            vec![[0.2, 0.4, 0.6, 1.0]],
-            vec![],
-            layer,
-            "countries-boundary".into(),
-        );
-        let bucket = transferable.to_bucket();
-        let output = bucket.buffer.buffer.vertices[0];
-        assert_eq!(output.position, input.position);
-        assert_eq!(output.normal, input.normal);
-        assert_eq!(output.distance, input.distance);
-        assert_eq!(output.elevation.to_bits(), input.elevation.to_bits());
-        assert_eq!(
-            output.edge_distance.to_bits(),
-            input.edge_distance.to_bits()
-        );
-        assert_eq!(output.corner_code, input.corner_code);
-    }
-}

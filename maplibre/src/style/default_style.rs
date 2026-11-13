@@ -32,6 +32,7 @@ impl Default for Style {
             terrain: None,
             state: Default::default(),
             global_state: Default::default(),
+            feature_state: Default::default(),
             state_templates: Default::default(),
             light_template: None,
             images: Default::default(),

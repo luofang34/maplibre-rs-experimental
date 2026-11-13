@@ -167,6 +167,26 @@ impl StyleLayer {
                 .is_none_or(|minzoom| minzoom <= 0.0 || zoom >= minzoom)
             && self.maxzoom.is_none_or(|maxzoom| zoom < maxzoom)
     }
+
+    /// Whether both layers carry identical typed and unrecognized paint properties.
+    pub(crate) fn same_paint(&self, other: &Self) -> bool {
+        serde_json::to_value(&self.paint).ok() == serde_json::to_value(&other.paint).ok()
+            && self.unrecognized.paint == other.unrecognized.paint
+    }
+
+    /// Whether both layers share identical GPU-side draw order, visibility, zoom bounds, metadata
+    /// and paint properties.
+    pub(crate) fn same_gpu_definition(&self, other: &Self) -> bool {
+        self.index == other.index
+            && self.type_ == other.type_
+            && self.source == other.source
+            && self.source_layer == other.source_layer
+            && self.visibility == other.visibility
+            && self.minzoom == other.minzoom
+            && self.maxzoom == other.maxzoom
+            && self.metadata == other.metadata
+            && self.same_paint(other)
+    }
 }
 
 impl Eq for StyleLayer {}

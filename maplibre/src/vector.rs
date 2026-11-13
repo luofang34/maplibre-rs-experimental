@@ -33,7 +33,9 @@ use crate::{
     },
 };
 
+pub(crate) mod arrival_sync;
 pub(crate) mod content;
+pub mod feature_paint;
 #[cfg(feature = "mlt")]
 pub mod mlt;
 pub(crate) mod populate_world_system;

@@ -46,6 +46,29 @@ pub enum PromoteId {
     PerLayer(HashMap<String, String>),
 }
 
+impl PromoteId {
+    /// Returns the property promoted as the feature ID for `source_layer` (`None` or `_geojson`
+    /// selects the GeoJSON layer entry when `promoteId` is per-layer).
+    pub fn property_for(&self, source_layer: Option<&str>) -> Option<&str> {
+        match self {
+            Self::Property(name) => Some(name.as_str()),
+            Self::PerLayer(map) => {
+                let layer = match source_layer {
+                    None | Some("") => GEOJSON_LAYER,
+                    Some(name) => name,
+                };
+                map.get(layer)
+                    .or_else(|| {
+                        (layer != GEOJSON_LAYER)
+                            .then(|| map.get(GEOJSON_LAYER))
+                            .flatten()
+                    })
+                    .map(String::as_str)
+            }
+        }
+    }
+}
+
 /// The vector tile layer name GeoJSON features are tiled into, as GL JS names it.
 pub const GEOJSON_LAYER: &str = "_geojson";
 
@@ -134,7 +157,7 @@ pub const GEOJSON_MAX_TILED_ZOOM: u8 = 18;
 
 /// TileJSON-compatible addressing shared by vector and raster image sources.
 /// Raster sources additionally use `tile_size` to choose their visible tile zoom.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct VectorSource {
     /// String which contains attribution information for the used tiles.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -148,6 +171,9 @@ pub struct VectorSource {
     /// Min zoom level at which tiles are available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub minzoom: Option<u8>,
+    /// Property whose value becomes the feature id, either source-wide or per `source-layer`.
+    #[serde(rename = "promoteId", default, skip_serializing_if = "Option::is_none")]
+    pub promote_id: Option<PromoteId>,
     /// Y-axis convention for tile URL expansion; omission uses XYZ.
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]

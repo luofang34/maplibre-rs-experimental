@@ -9,10 +9,7 @@ use rstar::{RTree, RTreeObject, AABB};
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::{
-    coords::WorldTileCoords,
-    style::source::{GeoJsonSource, PromoteId, GEOJSON_LAYER},
-};
+use crate::{coords::WorldTileCoords, style::source::GeoJsonSource};
 
 /// Vector tile grid the features are quantized to.
 pub const EXTENT: u32 = 4096;
@@ -97,7 +94,10 @@ impl GeoJsonIndex {
 
     /// Indexes an inline document, applying the source's id options.
     pub fn from_value(document: &Value, source: &GeoJsonSource) -> Result<Self, GeoJsonError> {
-        let promote = promoted_property(source.promote_id.as_ref());
+        let promote = source
+            .promote_id
+            .as_ref()
+            .and_then(|p| p.property_for(None));
         let mut features = Vec::new();
         let mut entries = Vec::new();
         let mut bytes = 0;
@@ -123,11 +123,21 @@ impl GeoJsonIndex {
             let Some(bounds) = bounds_of(&parsed) else {
                 return Ok(());
             };
-            let properties: Vec<(String, Value)> = feature
+            let mut properties: Vec<(String, Value)> = feature
                 .get("properties")
                 .and_then(Value::as_object)
                 .map(|map| map.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
                 .unwrap_or_default();
+            if let Some(state_id) = crate::style::feature_state::resolve_geojson_state_id(
+                feature,
+                promote,
+                source.generate_id.then_some(index),
+            ) {
+                properties.push((
+                    crate::style::feature_state::STATE_ID_PROPERTY.to_owned(),
+                    Value::String(state_id),
+                ));
+            }
             let id = numeric_feature_id(feature, promote, source.generate_id.then_some(index));
             if source.cluster && is_single_point(geometry, &parsed) {
                 points.push(IndexedFeature {
@@ -331,13 +341,6 @@ impl GeoJsonIndex {
             layers: vec![encoder.finish()],
         }
         .encode_to_vec()
-    }
-}
-
-fn promoted_property(promote: Option<&PromoteId>) -> Option<&str> {
-    match promote? {
-        PromoteId::Property(name) => Some(name),
-        PromoteId::PerLayer(map) => map.get(GEOJSON_LAYER).map(String::as_str),
     }
 }
 

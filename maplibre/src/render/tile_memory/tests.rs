@@ -162,3 +162,69 @@ fn symbol_geometry_cache_budget_counts_each_cpu_allocation_once() {
     );
     assert!(!world.tiles.exists(coords));
 }
+
+#[test]
+fn feature_paint_properties_count_toward_cache_budget_once_per_shared_arc() {
+    use crate::{
+        io::geometry_index::{FeatureMeta, IndexedGeometry, TileIndex},
+        style::expression::{FeatureProperties, Value},
+        vector::feature_paint::{BucketEntryKind, BucketFeatureEntry, TileFeaturePaintComponent},
+    };
+
+    let mut world = World::default();
+    let coords = WorldTileCoords::default();
+    let mut raw_props = FeatureProperties::new();
+    raw_props.insert("description".to_string(), Value::String("x".repeat(4096)));
+    let shared_props = Arc::new(raw_props);
+
+    let entry = BucketFeatureEntry {
+        raw_id: Some(1),
+        properties: shared_props.clone(),
+        kind: BucketEntryKind::Feature,
+    };
+    let mut paint = TileFeaturePaintComponent::default();
+    paint
+        .committed
+        .insert("layer-a".to_string(), vec![entry.clone()]);
+    paint.committed.insert("layer-b".to_string(), vec![entry]);
+
+    world.tiles.spawn_mut(coords).expect("tile").insert(paint);
+
+    let bytes_two_layers = tile_bytes(&world.tiles, coords);
+    assert!(
+        bytes_two_layers > 4096 && bytes_two_layers < 8192,
+        "shared Arc<FeatureProperties> across two style layers must be counted once, got {bytes_two_layers}"
+    );
+
+    world.tiles.geometry_index.index_tile(
+        &coords,
+        Some("osm".to_string()),
+        TileIndex::Linear {
+            list: vec![IndexedGeometry::from_point(
+                geo_types::point!(x: 0.0_f64, y: 0.0_f64),
+                FeatureMeta {
+                    properties: shared_props,
+                    source_layer: Arc::from("parks"),
+                    id: Some(1),
+                    feature_index: 0,
+                },
+            )
+            .expect("point")],
+        },
+    );
+    let bytes_with_index = tile_bytes(&world.tiles, coords);
+    assert!(
+        bytes_with_index < 8192,
+        "FeatureProperties already counted by GeometryIndex must not be double-counted by feature_paint_bytes, got {bytes_with_index}"
+    );
+
+    let evicted = evict_beyond(
+        &mut world,
+        &HashSet::new(),
+        CacheBudget {
+            tiles: 10,
+            bytes: bytes_with_index - 1,
+        },
+    );
+    assert_eq!(evicted, vec![coords]);
+}

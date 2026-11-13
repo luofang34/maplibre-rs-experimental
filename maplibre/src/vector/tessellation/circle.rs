@@ -144,7 +144,7 @@ where
             return fill;
         };
         let stroke = stroke
-            .evaluate_for(&self.feature_properties, options.zoom)
+            .evaluate_for(self.props(), options.zoom)
             .map_or([0.0, 0.0, 0.0, 1.0], |color| color.to_array());
         pack_circle_colors(fill, stroke)
     }
@@ -157,9 +157,10 @@ where
         if !(0.0..extent).contains(&x) || !(0.0..extent).contains(&y) {
             return;
         }
+        let props = self.props();
         let radius = options
             .radius
-            .evaluate_for(&self.feature_properties, options.zoom)
+            .evaluate_for(props, options.zoom)
             .unwrap_or(options.radius_default)
             .max(0.0);
         // A radius that varies by feature and by zoom is stored for the tile's zoom and the one
@@ -169,13 +170,13 @@ where
         } else {
             options
                 .radius
-                .evaluate_for(&self.feature_properties, options.zoom + 1.0)
+                .evaluate_for(props, options.zoom + 1.0)
                 .unwrap_or(options.radius_default)
                 .max(0.0)
         };
         let stroke_width = options
             .stroke_width
-            .evaluate_for(&self.feature_properties, options.zoom)
+            .evaluate_for(props, options.zoom)
             .unwrap_or(options.stroke_width_default)
             .max(0.0);
 
@@ -183,7 +184,7 @@ where
         let per_feature = |property: &Option<StyleProperty<f32>>| {
             property
                 .as_ref()
-                .and_then(|property| property.evaluate_for(&self.feature_properties, options.zoom))
+                .and_then(|property| property.evaluate_for(props, options.zoom))
                 .map_or(-1.0, |value| value.max(0.0))
         };
         let (blur, stroke_opacity) = (

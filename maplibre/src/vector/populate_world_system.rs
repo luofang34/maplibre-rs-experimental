@@ -1,5 +1,7 @@
 use std::{borrow::Cow, marker::PhantomData, rc::Rc};
 
+use rustc_hash::FxHashMap;
+
 use crate::{
     context::MapContext,
     environment::Environment,
@@ -39,6 +41,7 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
                 || message.has_tag(T::LayerTessellated::message_tag())
                 || message.has_tag(T::LayerIndexed::message_tag())
         });
+        let mut memo = FxHashMap::default();
         apply_worker_messages(messages, |message| {
             let attempt = message.attempt();
             if message.has_tag(RequestKind::Vector.message_tag()) {
@@ -71,17 +74,32 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
                         .push(VectorLayerBucket::Missing(message.to_bucket()));
                 }
             } else if message.has_tag(T::LayerTessellated::message_tag()) {
-                let message = message.into_transferable::<T::LayerTessellated>()?;
+                let mut message = message.into_transferable::<T::LayerTessellated>()?;
                 // A layer removed while its tile was in flight must not come back with the reply.
                 let coords = message.coords();
-                let bucket = message.to_bucket();
+                let mut feature_paint = message.take_feature_paint();
+                let mut bucket = message.to_bucket();
                 if tile_retry::accepts(world, coords, RequestKind::Vector, attempt)
                     && style
                         .layers
                         .iter()
                         .any(|layer| layer.id == bucket.style_layer_id)
                 {
-                    super::content::accept_vector(world, bucket);
+                    let overscaled_zoom = world
+                        .tiles
+                        .query::<&VectorLayerBucketComponent>(coords)
+                        .map_or(0, |b| b.overscaled_zoom);
+                    let retessellate = super::arrival_sync::sync_arriving_vector_bucket(
+                        style,
+                        overscaled_zoom,
+                        &mut bucket,
+                        &mut feature_paint,
+                        &mut memo,
+                    );
+                    super::content::accept_vector_with_paint(world, bucket, feature_paint);
+                    if retessellate {
+                        tile_retry::refresh_tiles(world, RequestKind::Vector, &[coords]);
+                    }
                 }
             } else if message.has_tag(T::LayerIndexed::message_tag()) {
                 let message = message.into_transferable::<T::LayerIndexed>()?;
@@ -93,11 +111,19 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
                 {
                     return Ok(());
                 }
-                world.tiles.geometry_index.index_tile(
-                    &message.coords(),
-                    message.source(),
-                    message.to_tile_index(),
+                let coords = message.coords();
+                let source = message.source();
+                let mut index = message.to_tile_index();
+                super::arrival_sync::sync_arriving_tile_index(
+                    style,
+                    source.as_deref(),
+                    &mut index,
+                    &mut memo,
                 );
+                world
+                    .tiles
+                    .geometry_index
+                    .index_tile(&coords, source, index);
             }
             Ok(())
         })?;

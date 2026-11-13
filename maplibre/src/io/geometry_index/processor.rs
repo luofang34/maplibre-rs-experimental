@@ -21,10 +21,12 @@ pub struct IndexProcessor {
     geo_writer: GeoWriter,
     geometries: Vec<IndexedGeometry<f64>>,
     properties: FeatureProperties,
+    shared_properties: Vec<Arc<FeatureProperties>>,
     coordinate_scale: f64,
     source_layer: Arc<str>,
     ids: Vec<Option<u64>>,
     feature: usize,
+    feature_state_ctx: Option<crate::vector::tessellation::feature_paint::FeatureStateSyncContext>,
 }
 
 impl IndexProcessor {
@@ -34,11 +36,24 @@ impl IndexProcessor {
             geo_writer: GeoWriter::new(),
             geometries: Vec::new(),
             properties: FeatureProperties::new(),
+            shared_properties: Vec::new(),
             coordinate_scale: 1.0,
             source_layer: Arc::from(""),
             ids: Vec::new(),
             feature: 0,
+            feature_state_ctx: None,
         }
+    }
+
+    pub(crate) fn set_feature_state_context(
+        &mut self,
+        ctx: Option<crate::vector::tessellation::feature_paint::FeatureStateSyncContext>,
+    ) {
+        self.feature_state_ctx = ctx;
+    }
+
+    pub(crate) fn set_shared_properties(&mut self, props: Vec<Arc<FeatureProperties>>) {
+        self.shared_properties = props;
     }
 
     /// Names the source layer of the features that follow and gives their ids by position, as
@@ -46,6 +61,7 @@ impl IndexProcessor {
     pub fn begin_layer(&mut self, source_layer: &str, ids: Vec<Option<u64>>) {
         self.source_layer = Arc::from(source_layer);
         self.ids = ids;
+        self.shared_properties.clear();
     }
 
     /// Sets the factor from the next layer's coordinate extent to the 4096 tile grid.
@@ -77,10 +93,25 @@ impl IndexProcessor {
     }
 
     fn index_geometry(&mut self, geometry: Geometry<f64>) {
+        let id = self.ids.get(self.feature).copied().flatten();
+        let properties = if let Some(shared) = self.shared_properties.get(self.feature) {
+            Arc::clone(shared)
+        } else {
+            if let Some(ctx) = &self.feature_state_ctx {
+                crate::style::feature_state::sync_properties_feature_state(
+                    &mut self.properties,
+                    id,
+                    ctx.promote_property.as_deref(),
+                    ctx.source_state.as_deref(),
+                    ctx.source_layer.as_deref(),
+                );
+            }
+            Arc::new(std::mem::take(&mut self.properties))
+        };
         let meta = FeatureMeta {
-            properties: Arc::new(std::mem::take(&mut self.properties)),
+            properties,
             source_layer: self.source_layer.clone(),
-            id: self.ids.get(self.feature).copied().flatten(),
+            id,
             feature_index: u32::try_from(self.feature).unwrap_or(u32::MAX),
         };
         let mut pending = vec![geometry];
@@ -189,8 +220,10 @@ impl PropertyProcessor for IndexProcessor {
         name: &str,
         value: &ColumnValue,
     ) -> Result<bool, GeozeroError> {
-        self.properties
-            .insert(name.to_string(), column_value(value));
+        if self.shared_properties.get(self.feature).is_none() {
+            self.properties
+                .insert(name.to_string(), column_value(value));
+        }
         Ok(true)
     }
 }

@@ -1,9 +1,17 @@
-//! Adding, removing and updating a map's sources.
+//! Adding, removing and updating a map's sources and runtime `feature-state`.
 
-use super::{Map, MapError};
+use std::collections::BTreeMap;
+
+use serde_json::Value;
+
+use super::{CurrentMapContext, Map, MapError};
 use crate::{
     environment::Environment,
-    style::{mutation::StyleChange, source::Source},
+    style::{
+        feature_state::{FeatureId, FeatureStateTarget},
+        mutation::StyleChange,
+        source::Source,
+    },
     window::{HeadedMapWindow, MapWindowConfig},
 };
 
@@ -40,5 +48,50 @@ where
         coordinates: [[f64; 2]; 4],
     ) -> Result<StyleChange, MapError> {
         self.mutate_style(|style| style.set_image_coordinates(name, coordinates))
+    }
+
+    /// Merges `state` into the runtime state of feature `id` in `target`, before or after the
+    /// renderer is initialized, as GL JS `setFeatureState`.
+    pub fn set_feature_state(
+        &mut self,
+        target: FeatureStateTarget,
+        id: impl Into<FeatureId>,
+        state: serde_json::Map<String, Value>,
+    ) {
+        match &mut self.map_context {
+            CurrentMapContext::Ready(context) => context.set_feature_state(target, id, state),
+            CurrentMapContext::Pending(pending) => {
+                pending.style.set_feature_state(target, id, state);
+            }
+        }
+    }
+
+    /// Returns the runtime state map of feature `id` in `target`, if any, as GL JS
+    /// `getFeatureState`.
+    pub fn feature_state(
+        &self,
+        target: &FeatureStateTarget,
+        id: impl Into<FeatureId>,
+    ) -> Option<&BTreeMap<String, Value>> {
+        match &self.map_context {
+            CurrentMapContext::Ready(context) => context.feature_state(target, id),
+            CurrentMapContext::Pending(pending) => pending.style.feature_state(target, id),
+        }
+    }
+
+    /// Removes `key` (or all keys when `None`) from feature `id` (or all features of `target` when
+    /// `id` is `None`), before or after the renderer is initialized, as GL JS `removeFeatureState`.
+    pub fn remove_feature_state(
+        &mut self,
+        target: &FeatureStateTarget,
+        id: Option<FeatureId>,
+        key: Option<&str>,
+    ) {
+        match &mut self.map_context {
+            CurrentMapContext::Ready(context) => context.remove_feature_state(target, id, key),
+            CurrentMapContext::Pending(pending) => {
+                pending.style.remove_feature_state(target, id, key);
+            }
+        }
     }
 }

@@ -4,10 +4,7 @@
 
 use std::{collections::HashSet, marker::PhantomData};
 
-use geozero::{
-    mvt::{tile, Message},
-    GeozeroDatasource,
-};
+use geozero::mvt::{tile, Message};
 use thiserror::Error;
 
 use crate::{
@@ -21,7 +18,7 @@ use crate::{
     sdf::{assets::SymbolAssetError, tessellation::TextTessellator},
     style::{
         expression::{FeatureProperties, Value},
-        filter::{FeatureContext, Filter, GeometryType},
+        filter::Filter,
         layer::{LayerPaint, StyleLayer},
     },
     vector::{
@@ -135,25 +132,6 @@ pub(crate) fn feature_properties(
     properties
 }
 
-/// Keeps only the features of an MVT layer that pass the filter.
-fn apply_filter_to_layer(layer: &mut tile::Layer, filter: &Filter, zoom: f64) {
-    let keep: Vec<bool> = layer
-        .features
-        .iter()
-        .map(|feature| {
-            let properties = feature_properties(layer, feature);
-            filter.evaluate(&FeatureContext {
-                properties: &properties,
-                geometry_type: GeometryType::from_mvt(feature.r#type.unwrap_or_default()),
-                id: feature.id.map(|id| Value::Number(id as f64)),
-                zoom,
-            })
-        })
-        .collect();
-    let mut keep = keep.into_iter();
-    layer.features.retain(|_| keep.next().unwrap_or(false));
-}
-
 /// Decodes and processes a tile with the built-in fallback symbol atlas.
 /// Results stream through the context; decoding and delivery failures retain their causes.
 pub fn process_vector_tile<T: VectorTransferables, C: Context>(
@@ -170,6 +148,7 @@ pub fn process_vector_tile<T: VectorTransferables, C: Context>(
 }
 
 mod geometry_tags;
+mod mvt_slice;
 mod processing;
 
 /// Decodes a tile, tolerating the zero padding some tile servers append: a zero tag is not a
@@ -220,37 +199,59 @@ pub(crate) fn process_decoded_vector_tile_with_assets<T: VectorTransferables, C:
     context: &mut ProcessVectorContext<T, C>,
     atlas: std::sync::Arc<crate::sdf::assets::SymbolAtlas>,
 ) -> Result<(), ProcessVectorError> {
+    let mut shared_layer_props: rustc_hash::FxHashMap<
+        &str,
+        Option<Vec<std::sync::Arc<FeatureProperties>>>,
+    > = rustc_hash::FxHashMap::default();
     for style in &tile_request.layers {
         let (Some(_), Some(name)) = (&style.paint, &style.source_layer) else {
             tracing::error!(layer = %style.id, "vector style layer misses a required attribute");
             continue;
         };
-        // Omitted source layers must clear successful replacements just like empty geometry.
-        let layer = tile
-            .layers
-            .iter()
-            .find(|layer| &layer.name == name)
-            .cloned()
-            .unwrap_or_else(|| tile::Layer {
-                version: 2,
-                name: name.clone(),
-                extent: Some(4096),
-                ..Default::default()
-            });
-        processing::process_layer(layer, style, &tile_request, context, atlas.clone())?;
+        // Omitted source layers still emit an empty layer result to clear stale replacements.
+        let source_layer = tile.layers.iter().find(|layer| &layer.name == name);
+        let shared_props = source_layer.and_then(|layer| {
+            shared_layer_props
+                .entry(layer.name.as_str())
+                .or_insert_with(|| {
+                    let state_ctx = context.state_context_for_layer(&layer.name);
+                    mvt_slice::decode_layer_properties(layer, state_ctx.as_ref())
+                })
+                .as_deref()
+        });
+        processing::process_layer(
+            source_layer,
+            name,
+            shared_props,
+            style,
+            &tile_request,
+            context,
+            atlas.clone(),
+        )?;
     }
     if context.index_geometry {
         let geometries = if T::LayerIndexed::requires_geometry_index() {
             let mut index = IndexProcessor::new();
             for layer in &tile.layers {
                 index.set_coordinate_scale(extent_scale(layer));
+                let state_ctx = context.state_context_for_layer(&layer.name);
+                let shared = shared_layer_props
+                    .remove(layer.name.as_str())
+                    .flatten()
+                    .or_else(|| mvt_slice::decode_layer_properties(layer, state_ctx.as_ref()));
+                index.set_feature_state_context(state_ctx);
                 index.begin_layer(
                     &layer.name,
                     layer.features.iter().map(|feature| feature.id).collect(),
                 );
-                let mut layer = layer.clone();
+                let skip_props = shared.is_some();
+                if let Some(props) = shared {
+                    index.set_shared_properties(props);
+                }
                 // Query decoding cannot make successfully rendered geometry unavailable.
-                if let Err(error) = layer.process(&mut index) {
+                if let Err(error) =
+                    mvt_slice::process_mvt_slice(layer, None, skip_props, &mut index)
+                {
                     tracing::warn!(coords = %tile_request.coords, layer = %layer.name, ?error, "skipping query index for layer");
                 }
             }
@@ -279,6 +280,8 @@ pub struct ProcessVectorContext<T: VectorTransferables, C: Context> {
     context: C,
     completion: Completion,
     index_geometry: bool,
+    promote_id: Option<crate::style::source::PromoteId>,
+    feature_state: Option<std::sync::Arc<crate::style::feature_state::SourceFeatureState>>,
     phantom_t: PhantomData<T>,
 }
 
@@ -289,8 +292,41 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
             context,
             completion: Completion::Finished,
             index_geometry: true,
+            promote_id: None,
+            feature_state: None,
             phantom_t: Default::default(),
         }
+    }
+
+    /// Configures `promoteId` and active runtime `feature-state` for the tile's source.
+    pub fn with_source_feature_state(
+        mut self,
+        promote_id: Option<crate::style::source::PromoteId>,
+        feature_state: Option<crate::style::feature_state::SourceFeatureState>,
+    ) -> Self {
+        self.promote_id = promote_id;
+        self.feature_state = feature_state.map(std::sync::Arc::new);
+        self
+    }
+
+    pub(crate) fn state_context_for_layer(
+        &self,
+        source_layer: &str,
+    ) -> Option<crate::vector::tessellation::feature_paint::FeatureStateSyncContext> {
+        if self.promote_id.is_none() && self.feature_state.is_none() {
+            return None;
+        }
+        Some(
+            crate::vector::tessellation::feature_paint::FeatureStateSyncContext {
+                promote_property: self
+                    .promote_id
+                    .as_ref()
+                    .and_then(|p| p.property_for(Some(source_layer)))
+                    .map(str::to_owned),
+                source_state: self.feature_state.clone(),
+                source_layer: Some(source_layer.to_owned()),
+            },
+        )
     }
 }
 
@@ -341,12 +377,16 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
         coords: &WorldTileCoords,
         buffer: OverAlignedVertexBuffer<ShaderVertex, IndexDataType>,
         feature_indices: Vec<u32>,
-        (feature_colors, feature_sort_keys): (Vec<[f32; 4]>, Vec<f32>),
+        (feature_colors, feature_sort_keys, feature_paint): (
+            Vec<[f32; 4]>,
+            Vec<f32>,
+            Vec<crate::vector::feature_paint::BucketFeatureEntry>,
+        ),
         layer_data: tile::Layer,
         style_layer_id: String,
     ) -> Result<(), ProcessVectorError> {
         self.context
-            .send_back(T::LayerTessellated::build_from(
+            .send_back(T::LayerTessellated::build_from_with_paint(
                 *coords,
                 buffer,
                 feature_indices,
@@ -354,6 +394,7 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
                 feature_sort_keys,
                 layer_data,
                 style_layer_id,
+                feature_paint,
             ))
             .map_err(ProcessVectorError::SendError)
     }

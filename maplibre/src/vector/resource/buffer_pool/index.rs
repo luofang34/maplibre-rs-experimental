@@ -4,6 +4,7 @@ use super::*;
 #[derive(Debug, Clone)]
 pub struct IndexEntry {
     pub(super) allocation_id: u64,
+    pub(super) paint_revision: u64,
     pub(super) page: u16,
     /// Tile coordinates owning this layer geometry.
     pub coords: WorldTileCoords,
@@ -31,6 +32,13 @@ impl IndexEntry {
     /// Identifies this upload, even when an evicted layer reuses the same buffer range.
     pub fn allocation_id(&self) -> u64 {
         self.allocation_id
+    }
+
+    /// Combines [`Self::allocation_id`] with in-place paint/style revisions so cached terrain
+    /// drapes and symbol placements refresh when GPU metadata changes without re-allocating.
+    pub fn content_revision(&self) -> u64 {
+        self.allocation_id
+            .wrapping_add(self.paint_revision.wrapping_mul(0x9E37_79B9_7F4A_7C15))
     }
 
     /// Backing page slot holding this entry's vertex, index, and metadata buffers.
@@ -145,6 +153,21 @@ impl RingIndex {
     /// Iterates per-tile layer queues across the index in coarse-to-fine Morton order.
     pub fn iter(&self) -> impl Iterator<Item = impl Iterator<Item = &IndexEntry>> + '_ {
         self.pyramid.values().map(|entry| entry.layers.iter())
+    }
+
+    pub(super) fn get_layers_mut(
+        &mut self,
+        coords: WorldTileCoords,
+    ) -> Option<&mut VecDeque<IndexEntry>> {
+        self.pyramid.get_mut(coords).map(|entry| &mut entry.layers)
+    }
+
+    pub(super) fn iter_mut(
+        &mut self,
+    ) -> impl Iterator<Item = impl Iterator<Item = &mut IndexEntry>> + '_ {
+        self.pyramid
+            .values_mut()
+            .map(|entry| entry.layers.iter_mut())
     }
 
     pub(super) fn pop_front(&mut self) -> Option<IndexEntry> {

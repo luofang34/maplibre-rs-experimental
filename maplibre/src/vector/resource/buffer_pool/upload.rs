@@ -78,6 +78,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         let allocation_id = self.revision.wrapping_add(1);
         let entry = IndexEntry {
             allocation_id,
+            paint_revision: 0,
             page: alloc.page,
             coords,
             style_layer,

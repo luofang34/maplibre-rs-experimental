@@ -1,9 +1,9 @@
 //! Tile-space geometry tessellation with per-feature paint and GPU upload padding.
 
-use std::cell::RefCell;
+use std::{cell::RefCell, sync::Arc};
 
 pub use buffer::OverAlignedVertexBuffer;
-pub use circle::{CircleOptions, CIRCLE_QUAD_INDICES};
+pub use circle::{pack_circle_colors as circle_pack_colors, CircleOptions, CIRCLE_QUAD_INDICES};
 use geozero::{error::GeozeroError, ColumnValue, FeatureProcessor, PropertyProcessor};
 use lyon::{
     path::{path::Builder, Path},
@@ -41,6 +41,7 @@ mod buffer;
 mod circle;
 mod concave_join;
 mod earcut_fill;
+pub(crate) mod feature_paint;
 mod geometry;
 mod line_elevation;
 mod line_origin;
@@ -143,6 +144,17 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     pub sort_key: SortKeys,
     /// The sort key of each entry of `feature_indices`, set by `apply_sort_keys`.
     pub entry_sort_keys: Vec<f32>,
+    /// Source feature IDs indexed by position in the layer's feature stream.
+    pub(crate) source_ids: Vec<Option<u64>>,
+    /// Pre-decoded shared feature property maps indexed by position in the feature stream.
+    pub(crate) shared_properties: Vec<Arc<FeatureProperties>>,
+    current_shared_props: Option<Arc<FeatureProperties>>,
+    /// Source `promoteId` and active runtime `feature-state` snapshot for this layer.
+    pub(crate) feature_state_ctx: Option<feature_paint::FeatureStateSyncContext>,
+    current_raw_id: Option<u64>,
+    state_synced: bool,
+    /// Retained per-entry feature identity and attributes for in-place GPU paint refresh.
+    pub(crate) feature_paint: Vec<crate::vector::feature_paint::BucketFeatureEntry>,
     current_index: usize,
     earcut: earcut_fill::PolygonEarcut,
     fill_tessellator: FillTessellator,
@@ -191,6 +203,13 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             outline: VertexBuffers::new(),
             sort_key: Default::default(),
             entry_sort_keys: Vec::new(),
+            source_ids: Vec::new(),
+            shared_properties: Vec::new(),
+            current_shared_props: None,
+            feature_state_ctx: None,
+            current_raw_id: None,
+            state_synced: false,
+            feature_paint: Vec::new(),
             earcut: earcut_fill::PolygonEarcut::default(),
             fill_tessellator: FillTessellator::new(),
             stroke_tessellator: StrokeTessellator::new(),
@@ -261,9 +280,7 @@ where
             packed: self
                 .line_feature_style
                 .as_ref()
-                .map_or(PackedLine::LAYER, |style| {
-                    style.pack(&self.feature_properties)
-                }),
+                .map_or(PackedLine::LAYER, |style| style.pack(self.props())),
         };
 
         let join = self.feature_join();
@@ -299,7 +316,7 @@ where
             max_normal,
         );
         if let Some(options) = &self.line_elevation {
-            let (metres, datum) = options.evaluate(&self.feature_properties);
+            let (metres, datum) = options.evaluate(self.props());
             line_elevation::apply_elevation(
                 &mut self.buffer.vertices[vertex_start..],
                 metres,
@@ -312,7 +329,7 @@ where
     fn feature_join(&self) -> LineJoin {
         self.join_property
             .as_ref()
-            .and_then(|property| property.evaluate_for(&self.feature_properties, self.zoom))
+            .and_then(|property| property.evaluate_for(self.props(), self.zoom))
             .and_then(|name| crate::style::line_stroke::LineStroke::join_named(&name))
             .unwrap_or(self.stroke.join)
     }
@@ -335,8 +352,7 @@ where
         if let Some(buffer) = options.clip_buffer {
             path = extrusion::clipped(&path, buffer);
         }
-        let heights =
-            extrusion::ExtrusionHeights::for_feature(options, &self.feature_properties, self.zoom);
+        let heights = extrusion::ExtrusionHeights::for_feature(options, self.props(), self.zoom);
         let subdivision = crate::projection::globe::subdivision::FillSubdivisionOptions {
             granularity: self.subdivision_granularity,
             clip_x_to_tile: self.clip_x_to_tile,
@@ -427,8 +443,10 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> PropertyP
         name: &str,
         value: &ColumnValue,
     ) -> geozero::error::Result<bool> {
-        if let Some(value) = property_value(value) {
-            self.feature_properties.insert(name.to_string(), value);
+        if self.current_shared_props.is_none() {
+            if let Some(value) = property_value(value) {
+                self.feature_properties.insert(name.to_string(), value);
+            }
         }
         Ok(false)
     }
@@ -438,61 +456,18 @@ impl<I> FeatureProcessor for ZeroTessellator<I>
 where
     I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex + Copy + Into<u32>,
 {
-    fn feature_end(&mut self, _idx: u64) -> geozero::error::Result<()> {
-        let polygons = std::mem::take(&mut self.polygon_entries);
-        let first_entry = self.feature_indices.len() - polygons;
-        if polygons == 0 {
-            self.update_feature_indices();
-        }
-        let mut color = if let Some(style) = &self.style_property {
-            if let Some(c) = style.evaluate_for(&self.feature_properties, self.zoom) {
-                [c.r, c.g, c.b, c.a]
-            } else {
-                tracing::debug!(
-                    "Style evaluation failed for feature properties: {:?}, style: {:?}",
-                    self.feature_properties,
-                    style
-                );
-                self.fallback_color
-            }
-        } else {
-            self.fallback_color
-        };
-        if self.line_gradient {
-            color = [self.line_length, 0.0, 0.0, 1.0];
-            self.line_length = 0.0;
-        }
-        if let Some((opacity, zoom)) = &self.feature_opacity {
-            color[3] *= opacity
-                .evaluate_for(&self.feature_properties, *zoom)
-                .unwrap_or(1.0)
-                .clamp(0.0, 1.0);
-        }
+    fn feature_begin(&mut self, idx: u64) -> geozero::error::Result<()> {
+        self.begin_feature(idx);
+        Ok(())
+    }
 
-        // Features sharing a pattern end up side by side, so one draw can bind its image.
-        let pattern = self.pattern_property.as_ref().map(|property| {
-            crate::style::pattern_key::pattern_value(
-                property
-                    .evaluate_for(&self.feature_properties, self.zoom)
-                    .as_ref()
-                    .map(|name| name.0.as_str()),
-            )
-        });
-        if let Some(value) = pattern {
-            color[0] = value;
-        }
-        let color = self.circle_feature_color(color);
-        for _ in 0..polygons.max(1) {
-            self.feature_colors.push(color);
-        }
-        self.append_outline();
-        self.sort_key.record(
-            &self.feature_properties,
-            self.zoom,
-            first_entry..self.feature_indices.len(),
-            (self.buffer.indices.len(), pattern),
-        );
-        self.feature_properties.clear();
+    fn geometry_begin(&mut self) -> geozero::error::Result<()> {
+        self.ensure_feature_state_synced();
+        Ok(())
+    }
+
+    fn feature_end(&mut self, _idx: u64) -> geozero::error::Result<()> {
+        self.finish_feature();
         Ok(())
     }
 }

@@ -52,7 +52,7 @@ pub(super) fn build_tessellator(
                     ..defaults
                 });
             let min_grid = if extrusion.may_use_vertex_agl() {
-                16
+                32
             } else {
                 2
             };
@@ -65,7 +65,7 @@ pub(super) fn build_tessellator(
                     i64::from(coords.y) == last_tile,
                 )
             } else if extrusion.may_use_vertex_agl() {
-                tessellator.with_globe_subdivision(16, false, false, false)
+                tessellator.with_globe_subdivision(32, false, false, false)
             } else {
                 tessellator
             }

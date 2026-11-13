@@ -123,4 +123,44 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             bytemuck::cast_slice(indices),
         );
     }
+
+    /// Updates the cached [`StyleLayer`] on every resident allocation of `style_layer.id` whose
+    /// GPU-side definition changed, bumping [`IndexEntry::content_revision`] and returning the
+    /// tile coordinates touched.
+    pub fn sync_style_layer(&mut self, style_layer: &StyleLayer) -> Vec<WorldTileCoords> {
+        let mut touched = Vec::new();
+        for tile_layers in self.index.iter_mut() {
+            for entry in tile_layers {
+                if entry.style_layer.id == style_layer.id
+                    && !entry.style_layer.same_gpu_definition(style_layer)
+                {
+                    entry.style_layer = style_layer.clone();
+                    entry.paint_revision = entry.paint_revision.wrapping_add(1);
+                    touched.push(entry.coords);
+                }
+            }
+        }
+        if !touched.is_empty() {
+            self.revision = self.revision.wrapping_add(1);
+        }
+        touched
+    }
+
+    /// Advances [`IndexEntry::content_revision`] for one resident `(coords, id)` entry after an
+    /// in-place GPU metadata update so terrain drapes and symbol placement refresh.
+    pub fn bump_layer_paint_revision(&mut self, coords: WorldTileCoords, id: &str) -> bool {
+        let mut bumped = false;
+        if let Some(layers) = self.index.get_layers_mut(coords) {
+            for entry in layers {
+                if entry.style_layer.id == id {
+                    entry.paint_revision = entry.paint_revision.wrapping_add(1);
+                    bumped = true;
+                }
+            }
+        }
+        if bumped {
+            self.revision = self.revision.wrapping_add(1);
+        }
+        bumped
+    }
 }

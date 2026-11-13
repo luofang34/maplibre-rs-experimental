@@ -271,7 +271,7 @@ fn slice_linestring(xy: &[f64], start_coord: usize, end_coord: usize) -> LineStr
     LineString::new(coords)
 }
 
-fn encode_properties(props: &FeatureProperties, out: &mut Vec<u8>) {
+pub(crate) fn encode_properties(props: &FeatureProperties, out: &mut Vec<u8>) {
     out.extend_from_slice(&(props.len() as u32).to_le_bytes());
     for (key, value) in props {
         encode_str(key, out);
@@ -326,23 +326,27 @@ fn encode_value(value: &Value, out: &mut Vec<u8>) {
 }
 
 fn decode_properties(mut buf: &[u8]) -> Option<FeatureProperties> {
-    let count = read_u32(&mut buf)? as usize;
+    decode_properties_from(&mut buf)
+}
+
+pub(crate) fn decode_properties_from(buf: &mut &[u8]) -> Option<FeatureProperties> {
+    let count = read_u32(buf)? as usize;
     let mut props = FeatureProperties::new();
     for _ in 0..count {
-        let key = read_string(&mut buf)?;
-        let val = decode_value(&mut buf)?;
+        let key = read_string(buf)?;
+        let val = decode_value(buf)?;
         props.insert(key, val);
     }
     Some(props)
 }
 
-fn read_u8(buf: &mut &[u8]) -> Option<u8> {
+pub(crate) fn read_u8(buf: &mut &[u8]) -> Option<u8> {
     let (&byte, rest) = buf.split_first()?;
     *buf = rest;
     Some(byte)
 }
 
-fn read_u32(buf: &mut &[u8]) -> Option<u32> {
+pub(crate) fn read_u32(buf: &mut &[u8]) -> Option<u32> {
     if buf.len() < 4 {
         return None;
     }

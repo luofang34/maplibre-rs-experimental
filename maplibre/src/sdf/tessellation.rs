@@ -58,6 +58,9 @@ pub struct TextTessellator {
     pub overscaling: f64,
     /// Source IDs indexed by the feature order supplied to the geometry processor.
     pub source_ids: Vec<Option<u64>>,
+    /// Source `promoteId` and active runtime `feature-state` snapshot for this layer.
+    pub(crate) feature_state_ctx:
+        Option<crate::vector::tessellation::feature_paint::FeatureStateSyncContext>,
 }
 
 impl TextTessellator {
@@ -90,6 +93,7 @@ impl TextTessellator {
             coordinate_scale: 1.0,
             overscaling: 1.0,
             source_ids: Vec::new(),
+            feature_state_ctx: None,
         }
     }
 
@@ -417,6 +421,15 @@ impl FeatureProcessor for TextTessellator {
                 .ok()
                 .and_then(|idx| self.source_ids.get(idx).copied())
                 .flatten();
+            if let Some(ctx) = &self.feature_state_ctx {
+                crate::style::feature_state::sync_properties_feature_state(
+                    &mut self.properties,
+                    id,
+                    ctx.promote_property.as_deref(),
+                    ctx.source_state.as_deref(),
+                    ctx.source_layer.as_deref(),
+                );
+            }
             let kind = match &geometry {
                 Geometry::Point(_) | Geometry::MultiPoint(_) => GeometryType::Point,
                 Geometry::LineString(_) | Geometry::MultiLineString(_) => GeometryType::LineString,

@@ -205,21 +205,22 @@ impl Style {
         let position = self.position_before(before)?;
         self.ensure_supported(&parsed)?;
         self.ensure_shape(&parsed)?;
+        let needs_tessellation = from_vector_tiles(&parsed) && !parsed.is_hidden();
         self.layers.insert(position, parsed);
         let mut change = self.renumber();
         push_unique(&mut change.layers, &id);
         self.resolve_global_state();
-        Ok(self.finish(change))
+        change.redraw_tiles = needs_tessellation;
+        Ok(change)
     }
 
     /// Removes a layer.
     pub fn remove_layer(&mut self, id: &str) -> Result<StyleChange, StyleMutationError> {
         let position = self.position_of(id)?;
-        let removed = self.layers.remove(position);
+        let _removed = self.layers.remove(position);
         let mut change = self.renumber();
         push_unique(&mut change.layers, id);
         self.resolve_global_state();
-        change.redraw_tiles |= from_vector_tiles(&removed);
         change.removed_layers.push(id.to_owned());
         Ok(change)
     }
@@ -243,8 +244,7 @@ impl Style {
             }
         };
         self.layers.insert(target, layer);
-        let change = self.renumber();
-        Ok(self.finish(change))
+        Ok(self.renumber())
     }
 
     /// Sets a paint property; `null` restores its default.
@@ -403,7 +403,6 @@ impl Style {
             if layer.index != index {
                 layer.index = index;
                 change.layers.push(layer.id.clone());
-                change.redraw_tiles |= from_vector_tiles(layer);
             }
         }
         change
@@ -444,7 +443,8 @@ impl Style {
         // Only the zoom range is checked: an edit does not change the layer's source, so a layer
         // loaded in a legacy shape stays editable.
         ensure_zoom_range(&edited)?;
-        let before = serde_json::to_value(&self.layers[position]).ok();
+        let before_layer = self.layers[position].clone();
+        let before = serde_json::to_value(&before_layer).ok();
         self.layers[position] = edited;
         self.state_templates.remove(id);
         self.resolve_global_state();
@@ -452,41 +452,21 @@ impl Style {
         Ok(if before == after {
             StyleChange::default()
         } else {
-            self.finish(StyleChange {
+            StyleChange {
                 layers: vec![id.to_owned()],
+                redraw_tiles: classify::needs_tile_redraw(&before_layer, &self.layers[position]),
                 ..Default::default()
-            })
+            }
         })
     }
 }
 
-fn push_unique(ids: &mut Vec<String>, id: &str) {
-    if !ids.iter().any(|existing| existing == id) {
-        ids.push(id.to_owned());
-    }
-}
-
-/// Sets `document[section][name]`, or removes it for `null`.
-fn set_member(document: &mut Value, section: &str, name: &str, value: Value) {
-    let Some(map) = document.as_object_mut() else {
-        return;
-    };
-    if value.is_null() {
-        if let Some(Value::Object(members)) = map.get_mut(section) {
-            members.remove(name);
-        }
-        return;
-    }
-    let members = map.entry(section).or_insert_with(|| json!({}));
-    if let Some(members) = members.as_object_mut() {
-        members.insert(name.to_owned(), value);
-    }
-}
-
 mod apply;
+pub(crate) mod classify;
 mod image_source;
 mod shape;
 
+use classify::{push_unique, set_member};
 use shape::ensure_zoom_range;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

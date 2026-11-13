@@ -54,6 +54,8 @@ impl<E: Environment> Plugin<E> for BackgroundPlugin {
         );
         world.resources.init::<buffers::BackgroundGpuBuffers>();
 
+        #[cfg(not(feature = "experimental"))]
+        let _ = renderer;
         #[cfg(feature = "experimental")]
         {
             world.resources.insert(
@@ -65,6 +67,8 @@ impl<E: Environment> Plugin<E> for BackgroundPlugin {
             crate::render::RenderStageLabel::Queue,
             queue_system::queue_system,
         )?;
+        #[cfg(not(feature = "experimental"))]
+        let _ = renderer;
         #[cfg(feature = "experimental")]
         {
             schedule.add_system_to_stage(

@@ -1,6 +1,6 @@
 //! Rendering, querying and readback for maps supplied with decoded source tiles.
 
-use std::{cell::RefCell, collections::BTreeMap, ops::Deref, rc::Rc, time::Duration};
+use std::{cell::RefCell, ops::Deref, rc::Rc, time::Duration};
 
 use image::RgbaImage;
 
@@ -25,13 +25,8 @@ use crate::{
         Renderer,
     },
     schedule::Schedule,
-    sdf::SymbolLayersDataComponent,
     style::{layer::StyleLayer, Style},
     tcs::world::World,
-    vector::{
-        transferables::{LayerIndexed, SymbolLayerTessellated},
-        AvailableVectorLayerBucket, VectorLayerBucket, VectorLayerBucketComponent,
-    },
 };
 
 mod camera;
@@ -68,7 +63,8 @@ pub use multi_view::{
 };
 pub use processed::{
     process_geojson_layers, process_geojson_layers_with_atlas, process_tile_layers,
-    process_tile_layers_with_atlas, ProcessedLayers, SymbolLayer, VectorLayer,
+    process_tile_layers_for_style, process_tile_layers_with_atlas, ProcessedLayers, SymbolLayer,
+    VectorLayer,
 };
 pub use terrain_patch::TerrainPatchSnapshot;
 pub use xr::XrFrameError;
@@ -171,84 +167,7 @@ impl HeadlessMap {
             self.load_dem_tiles(dem_tiles)?;
         }
         let context = &mut self.map_context;
-        let tiles = &mut context.world.tiles;
-        let ProcessedLayers {
-            vector,
-            symbols,
-            indexes,
-        } = layers;
-        for index in indexes {
-            tiles.geometry_index.index_tile(
-                &index.coords(),
-                index.source(),
-                (*index).to_tile_index(),
-            );
-        }
-
-        let mut layers_by_tile = BTreeMap::new();
-        for layer in vector {
-            layers_by_tile
-                .entry(layer.coords)
-                .or_insert_with(Vec::new)
-                .push(VectorLayerBucket::AvailableLayer(
-                    AvailableVectorLayerBucket {
-                        coords: layer.coords,
-                        source_layer: layer.layer_data.name,
-                        style_layer_id: layer.style_layer_id,
-                        buffer: layer.buffer,
-                        feature_indices: layer.feature_indices,
-                        feature_colors: layer.feature_colors,
-                        feature_sort_keys: layer.feature_sort_keys,
-                    },
-                ));
-        }
-
-        for (coords, layers) in layers_by_tile {
-            tiles
-                .spawn_mut(coords)
-                .ok_or(HeadlessMapOperationError::InvalidTile { coords })?
-                .insert(VectorLayerBucketComponent {
-                    done: true,
-                    failed: false,
-                    layers,
-                    overscaled_zoom: 0,
-                });
-        }
-
-        let mut symbols_by_tile = BTreeMap::new();
-        for layer in symbols {
-            symbols_by_tile
-                .entry(layer.coords())
-                .or_insert_with(Vec::new)
-                .push((*layer).to_bucket());
-        }
-        // A tile whose only layers are symbols is still a delivered tile, as when a worker
-        // reports it finished, or its labels would never be covered.
-        for coords in symbols_by_tile.keys() {
-            if tiles
-                .query::<&VectorLayerBucketComponent>(*coords)
-                .is_none()
-            {
-                tiles
-                    .spawn_mut(*coords)
-                    .ok_or(HeadlessMapOperationError::InvalidTile { coords: *coords })?
-                    .insert(VectorLayerBucketComponent {
-                        done: true,
-                        failed: false,
-                        layers: Vec::new(),
-                        overscaled_zoom: 0,
-                    });
-            }
-        }
-        for (coords, layers) in symbols_by_tile {
-            tiles
-                .spawn_mut(coords)
-                .ok_or(HeadlessMapOperationError::InvalidTile { coords })?
-                .insert(SymbolLayersDataComponent {
-                    layers,
-                    pending_assets: false,
-                });
-        }
+        layers.insert_into_tiles(&context.style, &mut context.world.tiles)?;
 
         self.load_raster_layers(raster_layers)?;
         self.advance_frames(frame_count)

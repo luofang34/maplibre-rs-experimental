@@ -1,6 +1,7 @@
 //! Successful layer replacements wait for their GPU data before replacing displayed content.
 
 use super::{
+    feature_paint::{BucketFeatureEntry, TileFeaturePaintComponent},
     AvailableVectorLayerBucket, VectorBufferPool, VectorLayerBucket, VectorLayerBucketComponent,
 };
 use crate::{
@@ -32,9 +33,17 @@ impl TileComponent for LayerReplacements {}
 struct ContentClock(u64);
 
 pub(crate) fn ensure(tiles: &mut Tiles, coords: WorldTileCoords) {
-    if tiles.exists(coords) && tiles.query::<&LayerReplacements>(coords).is_none() {
+    if !tiles.exists(coords) {
+        return;
+    }
+    if tiles.query::<&LayerReplacements>(coords).is_none() {
         if let Some(mut tile) = tiles.spawn_mut(coords) {
             tile.insert(LayerReplacements::default());
+        }
+    }
+    if tiles.query::<&TileFeaturePaintComponent>(coords).is_none() {
+        if let Some(mut tile) = tiles.spawn_mut(coords) {
+            tile.insert(TileFeaturePaintComponent::default());
         }
     }
 }
@@ -81,7 +90,16 @@ pub(crate) fn drop_undelivered(world: &mut World, coords: WorldTileCoords) {
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn accept_vector(world: &mut World, bucket: AvailableVectorLayerBucket) {
+    accept_vector_with_paint(world, bucket, None);
+}
+
+pub(crate) fn accept_vector_with_paint(
+    world: &mut World,
+    bucket: AvailableVectorLayerBucket,
+    feature_paint: Option<Vec<BucketFeatureEntry>>,
+) {
     let coords = bucket.coords;
     if world
         .tiles
@@ -96,24 +114,41 @@ pub(crate) fn accept_vector(world: &mut World, bucket: AvailableVectorLayerBucke
     clock.0 = clock.0.wrapping_add(1);
     let revision = clock.0;
     ensure(&mut world.tiles, coords);
+    let layer_id = bucket.style_layer_id.clone();
     if let Some((layers, pending)) = world
         .tiles
         .query_mut::<(&mut VectorLayerBucketComponent, &mut LayerReplacements)>(coords)
     {
         pending.revision = revision;
-        if !pending.delivered.contains(&bucket.style_layer_id) {
-            pending.delivered.push(bucket.style_layer_id.clone());
+        if !pending.delivered.contains(&layer_id) {
+            pending.delivered.push(layer_id.clone());
         }
+        pending
+            .vector
+            .retain(|layer| layer.style_layer_id != layer_id);
         if uploaded {
-            pending
-                .vector
-                .retain(|layer| layer.style_layer_id != bucket.style_layer_id);
             pending.vector.push(bucket);
         } else {
-            pending
-                .vector
-                .retain(|layer| layer.style_layer_id != bucket.style_layer_id);
             commit_vector(layers, bucket);
+        }
+    }
+    if let Some(paint_store) = world
+        .tiles
+        .query_mut::<&mut TileFeaturePaintComponent>(coords)
+    {
+        if uploaded {
+            if let Some(entries) = feature_paint {
+                paint_store.pending.insert(layer_id, entries);
+            } else {
+                paint_store.pending.remove(&layer_id);
+            }
+        } else {
+            paint_store.pending.remove(&layer_id);
+            if let Some(entries) = feature_paint {
+                paint_store.committed.insert(layer_id, entries);
+            } else {
+                paint_store.committed.remove(&layer_id);
+            }
         }
     }
 }
@@ -129,6 +164,28 @@ pub(crate) fn commit_vector(
     layers
         .layers
         .push(VectorLayerBucket::AvailableLayer(bucket));
+}
+
+pub(crate) fn commit_pending_vector(tiles: &mut Tiles, coords: WorldTileCoords, index: usize) {
+    let promoted = tiles
+        .query_mut::<(&mut VectorLayerBucketComponent, &mut LayerReplacements)>(coords)
+        .and_then(|(layers, pending)| {
+            (index < pending.vector.len()).then(|| {
+                let replaced = pending.vector.remove(index);
+                let id = replaced.style_layer_id.clone();
+                commit_vector(layers, replaced);
+                id
+            })
+        });
+    if let Some(id) = promoted {
+        if let Some(paint_store) = tiles.query_mut::<&mut TileFeaturePaintComponent>(coords) {
+            if let Some(entries) = paint_store.pending.remove(&id) {
+                paint_store.committed.insert(id, entries);
+            } else {
+                paint_store.committed.remove(&id);
+            }
+        }
+    }
 }
 
 pub(crate) fn accept_symbols(world: &mut World, bucket: SymbolLayerData) {
@@ -229,6 +286,12 @@ fn purge_vector_layers(world: &mut World, at: WorldTileCoords, layers: &[String]
         pending
             .vector
             .retain(|layer| !layers.contains(&layer.style_layer_id));
+    }
+    if let Some(paint_store) = world.tiles.query_mut::<&mut TileFeaturePaintComponent>(at) {
+        for id in layers {
+            paint_store.committed.remove(id);
+            paint_store.pending.remove(id);
+        }
     }
     if let Some(Eventually::Initialized(pool)) =
         world.resources.get_mut::<Eventually<VectorBufferPool>>()

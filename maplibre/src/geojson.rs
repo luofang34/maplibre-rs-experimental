@@ -346,13 +346,16 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
             | LayerPaint::Background(_)
             | LayerPaint::Circle(_)
             | LayerPaint::Heatmap(_) => {
-                let tessellator = tessellator::build_tessellator(
+                let mut tessellator = tessellator::build_tessellator(
                     paint,
                     style_layer,
                     coords,
                     &request.projection,
                     (request.style_zoom(), request.overscaling(), request.buffer),
                 );
+                tessellator.source_ids = serde_json::from_str(&json_str)
+                    .map(|filtered| index::feature_ids(&filtered))
+                    .unwrap_or_default();
                 let mut projecting = ProjectingTessellator::new(coords, tessellator);
 
                 let mut geojson_src = geozero::geojson::GeoJson(json_str.as_str());
@@ -385,7 +388,7 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
 
                 let sort_keys = inner.sort_key_values();
                 context
-                    .send_back(T::LayerTessellated::build_from(
+                    .send_back(T::LayerTessellated::build_from_with_paint(
                         coords,
                         inner.buffer.into(),
                         inner.feature_indices,
@@ -393,6 +396,7 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                         sort_keys,
                         synthetic_layer,
                         style_layer.id.clone(),
+                        inner.feature_paint,
                     ))
                     .map_err(ProcessGeoJsonError::SendError)?;
             }

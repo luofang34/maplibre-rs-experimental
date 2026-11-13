@@ -199,11 +199,22 @@ async fn lay_out_sources<T: VectorTransferables, C: Context + Clone + Send, H: H
         // asked for again when the tile is retried.
         unavailable |= !assets.awaiting.is_empty();
         // The tile was completed already; these labels replace the ones it was drawn with.
+        let source_state = request
+            .layers
+            .iter()
+            .find_map(|l| l.source.as_deref())
+            .map_or((None, None), |name| {
+                (
+                    style.source_promote_id(name).cloned(),
+                    style.feature_state.source(name).cloned(),
+                )
+            });
         let (tile, request, atlas) = (tile.clone(), request.clone(), assets.atlas);
         run_cpu_bound_replying(context.clone(), move |context| {
             let mut processor = ProcessVectorContext::<T, _>::new(context)
                 .without_completion()
-                .without_indexing();
+                .without_indexing()
+                .with_source_feature_state(source_state.0, source_state.1);
             process_decoded_vector_tile_with_assets(&tile, request, &mut processor, atlas)
         })
         .await

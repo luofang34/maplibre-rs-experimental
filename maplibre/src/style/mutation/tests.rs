@@ -64,12 +64,19 @@ fn layers_are_added_removed_and_moved_with_their_order_renumbered() {
     let change = style.move_layer("road", None).expect("move to the top");
     assert_eq!(ids(&style), ["paper", "land", "tinted", "road"]);
     assert_eq!(indexes(&style), [0, 1, 2, 3]);
-    assert!(change.redraw_tiles);
+    assert!(
+        !change.redraw_tiles,
+        "moving layers updates GPU z-order metadata in-place without refetching tiles"
+    );
 
     let change = style.remove_layer("land").expect("remove");
     assert_eq!(ids(&style), ["paper", "tinted", "road"]);
     assert_eq!(indexes(&style), [0, 1, 2]);
-    assert!(change.redraw_tiles && change.layers.contains(&"land".to_owned()));
+    assert!(
+        !change.redraw_tiles
+            && change.layers.contains(&"land".to_owned())
+            && change.removed_layers == ["land"]
+    );
 
     style
         .add_layer(
@@ -138,7 +145,10 @@ fn properties_filters_and_zoom_ranges_are_changed_and_invalid_ones_refused() {
         Some(Color::from_rgba8(0x12, 0x34, 0x56, 255))
     );
     assert_eq!(change.layers, ["land"]);
-    assert!(change.redraw_tiles);
+    assert!(
+        !change.redraw_tiles,
+        "fill-color updates GPU feature metadata in-place without worker re-tessellation"
+    );
 
     assert!(
         style
@@ -170,9 +180,13 @@ fn properties_filters_and_zoom_ranges_are_changed_and_invalid_ones_refused() {
         Err(StyleMutationError::UnknownLayer { .. })
     ));
 
-    style
+    let filter_change = style
         .set_filter("land", Some(json!(["==", "kind", "park"])))
         .expect("filter");
+    assert!(
+        filter_change.redraw_tiles,
+        "filter changes require worker evaluation"
+    );
     assert_eq!(style.layers[1].filter, Some(json!(["==", "kind", "park"])));
     assert!(matches!(
         style.set_filter("land", Some(json!(["within", {}]))),
@@ -181,20 +195,32 @@ fn properties_filters_and_zoom_ranges_are_changed_and_invalid_ones_refused() {
     style.set_filter("land", None).expect("remove filter");
     assert_eq!(style.layers[1].filter, None);
 
-    style
+    let zoom_change = style
         .set_layer_zoom_range("land", Some(3.0), Some(9.0))
         .expect("range");
+    assert!(
+        !zoom_change.redraw_tiles,
+        "zoom range updates GPU pool visibility bounds in-place"
+    );
     assert_eq!(
         (style.layers[1].minzoom, style.layers[1].maxzoom),
         (Some(3.0), Some(9.0))
     );
-    style
+    let hide_change = style
         .set_layout_property("land", "visibility", json!("none"))
         .expect("hide");
+    assert!(
+        !hide_change.redraw_tiles,
+        "hiding a layer skips drawing in-place"
+    );
     assert!(style.layers[1].is_hidden());
-    style
+    let show_change = style
         .set_layout_property("land", "visibility", Value::Null)
         .expect("show");
+    assert!(
+        show_change.redraw_tiles,
+        "showing a previously hidden layer requests missing tile geometry"
+    );
     assert!(!style.layers[1].is_hidden());
 }
 

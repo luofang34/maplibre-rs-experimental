@@ -49,7 +49,7 @@ pub(super) fn style(icon: serde_json::Value) -> Style {
 }
 
 fn names(style: &Style) -> Vec<String> {
-    let (_, icons) = requests(&style.layers, &roads(), 14.0);
+    let (_, icons) = requests(&style.layers, &roads(), 14.0, Some(style));
     let mut icons: Vec<String> = icons.into_iter().collect();
     icons.sort();
     icons

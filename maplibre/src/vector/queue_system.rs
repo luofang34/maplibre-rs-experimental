@@ -93,11 +93,27 @@ pub fn queue_system(
         })
         .map(|layer| layer.id.as_str())
         .collect();
-    let mut active_vector_shapes: std::collections::HashSet<(i32, crate::coords::WorldTileCoords)> =
-        std::collections::HashSet::new();
+    let style_zoom = view_state.style_zoom().value();
+    let mut active_unclipped_3d_shapes: std::collections::HashSet<(
+        i32,
+        crate::coords::WorldTileCoords,
+        u32,
+    )> = std::collections::HashSet::new();
     for view_tile in tile_view_pattern.iter() {
         view_tile.render_kind(TileKind::Vector, |shape| {
-            active_vector_shapes.insert((shape.wrap, shape.coords()));
+            if let Some(layer_entries) = buffer_pool_index.get_layers(shape.coords()) {
+                for layer_entry in layer_entries {
+                    if unclipped_3d_layers.contains(layer_entry.style_layer.id.as_str())
+                        && layer_entry.style_layer.is_visible_at(style_zoom)
+                    {
+                        active_unclipped_3d_shapes.insert((
+                            shape.wrap,
+                            shape.coords(),
+                            layer_entry.style_layer.index,
+                        ));
+                    }
+                }
+            }
         });
     }
     // Every tile's depth is drawn before any tile's colour, so an extrusion that crosses tiles
@@ -148,9 +164,10 @@ pub fn queue_system(
                     }
                     if unclipped_3d_layers.contains(layer_entry.style_layer.id.as_str())
                         && (has_active_ancestor(
-                            &active_vector_shapes,
+                            &active_unclipped_3d_shapes,
                             source_shape.wrap,
                             source_shape.coords(),
+                            layer_entry.style_layer.index,
                         ) || !queued_unclipped_3d.insert((
                             source_shape.wrap,
                             source_shape.coords(),
@@ -293,16 +310,52 @@ pub fn queue_system(
 }
 
 fn has_active_ancestor(
-    active: &std::collections::HashSet<(i32, crate::coords::WorldTileCoords)>,
+    active: &std::collections::HashSet<(i32, crate::coords::WorldTileCoords, u32)>,
     wrap: i32,
     coords: crate::coords::WorldTileCoords,
+    layer_index: u32,
 ) -> bool {
     let mut current = coords.get_parent();
     while let Some(ancestor) = current {
-        if active.contains(&(wrap, ancestor)) {
+        if active.contains(&(wrap, ancestor, layer_index)) {
             return true;
         }
         current = ancestor.get_parent();
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use super::has_active_ancestor;
+    use crate::coords::{WorldTileCoords, ZoomLevel};
+
+    #[test]
+    fn ancestor_without_matching_3d_layer_never_blanks_descendant_airspace() {
+        let overview = WorldTileCoords {
+            x: 0,
+            y: 0,
+            z: ZoomLevel::new(0),
+        };
+        let parent_z8 = WorldTileCoords {
+            x: 75,
+            y: 96,
+            z: ZoomLevel::new(8),
+        };
+        let child_z10 = WorldTileCoords {
+            x: 300,
+            y: 384,
+            z: ZoomLevel::new(10),
+        };
+        let mut active = HashSet::new();
+        // Overview 0/0/0 only holds layer 1 (e.g. coastline/ice), NOT layer 9 (3D airspace).
+        active.insert((0, overview, 1));
+        assert!(!has_active_ancestor(&active, 0, child_z10, 9));
+
+        // When parent z8 actively draws the same 3D layer 9, child z10 yields to avoid double alpha.
+        active.insert((0, parent_z8, 9));
+        assert!(has_active_ancestor(&active, 0, child_z10, 9));
+    }
 }

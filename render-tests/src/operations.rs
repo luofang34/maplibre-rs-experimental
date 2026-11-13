@@ -47,106 +47,56 @@ fn add_image(style: &mut Style, name: &str, path: &Value, options: &Value) -> Re
     Ok(())
 }
 
-/// Whether a feature's id, or its promoted property, is `wanted`.
-fn has_id(feature: &Value, promote: Option<&str>, wanted: &str) -> bool {
-    let id = match promote {
-        Some(property) => feature
-            .get("properties")
-            .and_then(|props| props.get(property)),
-        None => feature.get("id"),
-    };
-    match id {
-        Some(Value::String(text)) => text == wanted,
-        Some(Value::Number(number)) => number.to_string() == wanted,
-        _ => false,
-    }
-}
-
-/// Stores the state of one GeoJSON feature among its properties, where `feature-state`
-/// expressions read it. `removing` deletes the named keys, or all of them for `null`.
+/// Applies `setFeatureState` or `removeFeatureState` through [`Style`]'s native `feature-state`
+/// store.
 fn feature_state(
     style: &mut Style,
     target: &Value,
     states: &Value,
-    (removing, vector_states): (bool, &mut crate::vector_feature_state::VectorFeatureStates),
+    removing: bool,
 ) -> Result<(), String> {
     use maplibre::style::{
-        expression::FEATURE_STATE_PREFIX,
-        source::{GeoJsonData, PromoteId, Source},
+        feature_state::{FeatureId, FeatureStateTarget},
+        source::Source,
     };
 
     let source = target
         .get("source")
         .and_then(Value::as_str)
         .ok_or("feature state needs a source")?;
-    // Removing state without an id removes it from every feature of the source.
-    let wanted = match target.get("id") {
-        Some(Value::String(text)) => Some(text.clone()),
-        Some(Value::Number(number)) => Some(number.to_string()),
-        None if removing => None,
-        _ => return Err("feature state needs an id".to_owned()),
-    };
-    if matches!(style.sources.get(source), Some(Source::Vector(_))) {
-        return if removing {
-            vector_states.remove(target, states)
-        } else {
-            vector_states.set(target, states)
-        };
-    }
-    let Some(Source::GeoJson(geojson)) = style.sources.get_mut(source) else {
+    if !matches!(
+        style.sources.get(source),
+        Some(Source::GeoJson(_) | Source::Vector(_))
+    ) {
         return Err(format!(
             "feature state on `{source}`: only GeoJSON and vector sources are supported"
         ));
-    };
-    let promote = match &geojson.promote_id {
-        Some(PromoteId::Property(property)) => Some(property.clone()),
-        _ => None,
-    };
-    let GeoJsonData::Inline(data) = &mut geojson.data else {
-        return Err("feature state needs inline GeoJSON".to_owned());
-    };
-    let mut document = data.as_ref().clone();
-    let features: Vec<&mut Value> = match document.get("type").and_then(Value::as_str) {
-        Some("FeatureCollection") => document
-            .get_mut("features")
-            .and_then(Value::as_array_mut)
-            .map(|features| features.iter_mut().collect())
-            .unwrap_or_default(),
-        Some("Feature") => vec![&mut document],
-        _ => Vec::new(),
-    };
-    for feature in features {
-        if wanted
-            .as_deref()
-            .is_some_and(|wanted| !has_id(feature, promote.as_deref(), wanted))
-        {
-            continue;
-        }
-        let Some(properties) = feature
-            .as_object_mut()
-            .map(|object| {
-                object
-                    .entry("properties")
-                    .or_insert_with(|| Value::Object(Default::default()))
-            })
-            .and_then(Value::as_object_mut)
-        else {
-            continue;
-        };
-        match (removing, states) {
-            (true, Value::String(key)) => {
-                properties.remove(&format!("{FEATURE_STATE_PREFIX}{key}"));
-            }
-            (true, _) => properties.retain(|key, _| !key.starts_with(FEATURE_STATE_PREFIX)),
-            (false, Value::Object(values)) => {
-                for (key, value) in values {
-                    properties.insert(format!("{FEATURE_STATE_PREFIX}{key}"), value.clone());
-                }
-            }
-            (false, _) => return Err("setFeatureState needs an object of states".to_owned()),
-        }
     }
-    *data = std::sync::Arc::new(document);
+    let source_layer = target
+        .get("sourceLayer")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let target_ref = FeatureStateTarget {
+        source: source.to_owned(),
+        source_layer,
+    };
+    let id = match target.get("id") {
+        Some(value) if !value.is_null() => Some(
+            FeatureId::from_json(value)
+                .ok_or_else(|| "feature state needs a string or number id".to_owned())?,
+        ),
+        _ if removing => None,
+        _ => return Err("feature state needs an id".to_owned()),
+    };
+    if removing {
+        style.remove_feature_state(&target_ref, id, states.as_str());
+        return Ok(());
+    }
+    let Value::Object(values) = states else {
+        return Err("setFeatureState needs an object of states".to_owned());
+    };
+    let id = id.ok_or_else(|| "feature state needs an id".to_owned())?;
+    style.set_feature_state(target_ref, id, values.clone());
     Ok(())
 }
 
@@ -164,9 +114,8 @@ pub(super) struct ZoomChange {
 pub(super) fn apply(
     style: &mut Style,
     operations: &[Value],
-    (transitions, vector_states, paused_tiles, zoom_change): (
+    (transitions, paused_tiles, zoom_change): (
         &mut crate::transitions::Transitions,
-        &mut crate::vector_feature_state::VectorFeatureStates,
         &mut std::collections::HashMap<String, f64>,
         &mut Option<ZoomChange>,
     ),
@@ -233,12 +182,9 @@ pub(super) fn apply(
                 };
                 Ok(())
             }
-            ("setFeatureState", _) => {
-                feature_state(style, &value(1), &value(2), (false, &mut *vector_states))
-            }
-            ("removeFeatureState", _) => {
-                feature_state(style, &value(1), &value(2), (true, &mut *vector_states))
-            }
+            ("setFeatureState", _) => feature_state(style, &value(1), &value(2), false),
+            ("removeFeatureState", _) => feature_state(style, &value(1), &value(2), true),
+            ("getFeatureState", _) => Ok(()),
             ("setGlobalStateProperty", Some(key)) => {
                 style.set_global_state(key, value(2));
                 Ok(())

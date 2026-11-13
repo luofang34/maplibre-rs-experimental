@@ -1,15 +1,19 @@
 //! Accounts for retained tile data, including symbol atlases shared by style layers.
 use std::{collections::HashSet, mem::size_of, sync::Arc};
 
+use rustc_hash::FxHashSet;
+
 use crate::{
     coords::WorldTileCoords,
     raster::{RasterLayerData, RasterLayersDataComponent},
     sdf::SymbolLayersDataComponent,
+    style::expression::FeatureProperties,
     tcs::tiles::Tiles,
     terrain::{DemLayersComponent, DemTileComponent},
     vector::{
-        content::LayerReplacements, AvailableVectorLayerBucket, VectorLayerBucket,
-        VectorLayerBucketComponent,
+        content::LayerReplacements,
+        feature_paint::{BucketFeatureEntry, TileFeaturePaintComponent},
+        AvailableVectorLayerBucket, VectorLayerBucket, VectorLayerBucketComponent,
     },
 };
 
@@ -68,6 +72,38 @@ pub(crate) fn tile_bytes(tiles: &Tiles, coords: WorldTileCoords) -> usize {
         + dem
         + symbols(tiles, coords)
         + tiles.geometry_index.tile_bytes(coords)
+        + feature_paint_bytes(tiles, coords)
+}
+
+fn feature_paint_bytes(tiles: &Tiles, coords: WorldTileCoords) -> usize {
+    let Some(paint) = tiles.query::<&TileFeaturePaintComponent>(coords) else {
+        return 0;
+    };
+    let mut seen_props: FxHashSet<*const FeatureProperties> = FxHashSet::default();
+    tiles
+        .geometry_index
+        .record_tile_property_ptrs(coords, &mut seen_props);
+    const ENTRY_OVERHEAD: usize = 2 * size_of::<String>() + 16;
+    let mut total = 0_usize;
+    for (layer_id, entries) in paint.committed.iter().chain(paint.pending.iter()) {
+        total = total
+            .saturating_add(size_of::<(String, Vec<BucketFeatureEntry>)>())
+            .saturating_add(layer_id.capacity())
+            .saturating_add(capacity(entries));
+        for entry in entries {
+            if seen_props.insert(Arc::as_ptr(&entry.properties)) {
+                let props_bytes: usize = entry
+                    .properties
+                    .iter()
+                    .map(|(k, v)| k.capacity() + value_bytes(v) + ENTRY_OVERHEAD)
+                    .sum();
+                total = total
+                    .saturating_add(size_of::<FeatureProperties>())
+                    .saturating_add(props_bytes);
+            }
+        }
+    }
+    total
 }
 
 fn symbols(tiles: &Tiles, coords: WorldTileCoords) -> usize {

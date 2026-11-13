@@ -242,7 +242,7 @@ fn allocation(world: &crate::tcs::world::World, coords: WorldTileCoords, id: &st
         .get_layers(coords)?
         .iter()
         .find(|entry| entry.style_layer.id == id)
-        .map(|entry| entry.allocation_id())
+        .map(|entry| entry.content_revision())
 }
 
 impl CollisionSystem {

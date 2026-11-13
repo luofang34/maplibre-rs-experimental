@@ -657,10 +657,9 @@ async fn reordering_and_background_edits_refresh_only_what_needs_it() {
     test.frame(2);
     assert_eq!(
         test.kernel.apc().pending(),
-        1,
-        "draw order is baked into the tiles"
+        0,
+        "draw order updates GPU layer z-index metadata in-place without refetching tiles"
     );
-    test.receive().await;
     assert_eq!(layers_with_geometry(&test), ["blue", "green"]);
 }
 

@@ -5,14 +5,10 @@ use crate::style::source::{DemEncoding, Source, TileAddressingScheme, VectorSour
 
 fn source(tiles: Option<Vec<String>>, maxzoom: Option<u8>) -> VectorSource {
     VectorSource {
-        attribution: None,
-        bounds: None,
         maxzoom,
-        minzoom: None,
-        scheme: None,
         tiles,
         url: Some("https://tiles.example/tiles.json".to_string()),
-        tile_size: None,
+        ..Default::default()
     }
 }
 

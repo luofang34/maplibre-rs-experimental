@@ -56,14 +56,21 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
                 let attempt = message.attempt();
                 let message = message.into_transferable::<T::SymbolLayerTessellated>()?;
                 let coords = message.coords();
-                let bucket = message.to_bucket();
+                let mut bucket = message.to_bucket();
                 if tile_retry::accepts(world, coords, RequestKind::Vector, attempt)
                     && style
                         .layers
                         .iter()
                         .any(|layer| layer.id == bucket.style_layer_id)
                 {
+                    let retessellate = crate::vector::arrival_sync::sync_arriving_symbol_bucket(
+                        style,
+                        &mut bucket,
+                    );
                     crate::vector::content::accept_symbols(world, bucket);
+                    if retessellate {
+                        tile_retry::refresh_tiles(world, RequestKind::Vector, &[coords]);
+                    }
                 }
             }
             Ok(())

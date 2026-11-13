@@ -44,10 +44,17 @@ fn a_feature_whose_geometry_cannot_be_read_is_left_out_without_its_layer() {
         "the square is tessellated"
     );
     assert_eq!(
-        layers[0].layer_data.features.len(),
+        layers[0]
+            .feature_paint
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .filter(|entry| entry.kind == crate::vector::feature_paint::BucketEntryKind::Feature)
+            .count(),
         1,
-        "the unreadable feature is left out of the layer data too"
+        "only the readable feature produces tessellated fill metadata, while layer_data carries header metadata only"
     );
+    assert!(layers[0].layer_data.features.is_empty());
 }
 
 #[test]

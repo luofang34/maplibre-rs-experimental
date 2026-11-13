@@ -42,6 +42,8 @@ pub struct SymbolAssetConfig<'a> {
     pub images: &'a HashMap<String, StyleImage>,
     /// Device pixels per layout pixel of the display, which provided images are made for.
     pub pixel_ratio: f32,
+    /// Full style used to resolve `promoteId` and `feature-state` while scanning symbol requests.
+    pub(crate) style: Option<&'a Style>,
 }
 
 impl<'a> SymbolAssetConfig<'a> {
@@ -52,6 +54,7 @@ impl<'a> SymbolAssetConfig<'a> {
             sprite: style.sprite.as_ref(),
             images: &style.images,
             pixel_ratio: 1.0,
+            style: Some(style),
         }
     }
 }
@@ -98,7 +101,7 @@ pub(crate) async fn load_symbol_assets_awaiting<'l, HC: HttpClient>(
     data: &[u8],
     zoom: f64,
 ) -> Result<LoadedSymbolAssets, SymbolAssetError> {
-    let (fonts, icons) = requests(layers, data, zoom);
+    let (fonts, icons) = requests(layers, data, zoom, config.style);
     load_symbol_assets_for_requests(client, config, fonts, icons).await
 }
 
@@ -111,7 +114,7 @@ pub(crate) async fn load_symbol_assets_awaiting_from_tile<'l, HC: HttpClient>(
     tile: &geozero::mvt::Tile,
     zoom: f64,
 ) -> Result<LoadedSymbolAssets, SymbolAssetError> {
-    let (fonts, icons) = requests_from_tile(layers, tile, zoom);
+    let (fonts, icons) = requests_from_tile(layers, tile, zoom, config.style);
     load_symbol_assets_for_requests(client, config, fonts, icons).await
 }
 

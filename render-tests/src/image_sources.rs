@@ -40,14 +40,9 @@ pub(super) fn lower(style: &mut Style) -> Result<HashMap<String, PlacedImage>, S
             },
         );
         *source = Source::Raster(VectorSource {
-            attribution: None,
-            bounds: None,
-            maxzoom: None,
-            minzoom: None,
-            scheme: None,
             tiles: Some(vec!["local://image-source".to_owned()]),
             tile_size: Some(maplibre::raster::image_source::IMAGE_TILE_SIZE),
-            url: None,
+            ..Default::default()
         });
     }
     Ok(images)

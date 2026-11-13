@@ -34,7 +34,7 @@ pub(super) async fn run_test_inner(test_dir: &Path) -> TestResult {
 }
 
 async fn render_fixture(test_dir: &Path) -> Result<(Difference, Difference), String> {
-    let (mut style, meta, vector_states) = load_style_blocking(test_dir)?;
+    let (mut style, meta) = load_style_blocking(test_dir)?;
     let images = crate::image_sources::lower(&mut style)?;
     let mut map = create_map(&style, &meta).await?;
     map.set_padding(maplibre::render::camera::EdgeInsets {
@@ -68,7 +68,7 @@ async fn render_fixture(test_dir: &Path) -> Result<(Difference, Difference), Str
         &mut map,
         &style,
         (&coords, &paused, &departing),
-        (&images, meta.pixel_ratio, &vector_states),
+        (&images, meta.pixel_ratio),
     )?;
     if !departing.is_empty() {
         let mut fade = RasterCrossFade::default();
@@ -140,16 +140,7 @@ async fn render_fixture(test_dir: &Path) -> Result<(Difference, Difference), Str
     ))
 }
 
-fn load_style_blocking(
-    test_dir: &Path,
-) -> Result<
-    (
-        Style,
-        TestMeta,
-        crate::vector_feature_state::VectorFeatureStates,
-    ),
-    String,
-> {
+fn load_style_blocking(test_dir: &Path) -> Result<(Style, TestMeta), String> {
     let text = std::fs::read_to_string(test_dir.join("style.json"))
         .map_err(|error| format!("Cannot read style.json: {error}"))?;
     let mut value: serde_json::Value =
@@ -165,13 +156,11 @@ fn load_style_blocking(
         .map_err(|error| format!("Cannot deserialize Style: {error}"))?;
     // The tiles are decoded from this copy of the style, so it carries the state's values too.
     style.resolve_global_state();
-    let mut vector_states = crate::vector_feature_state::VectorFeatureStates::default();
     crate::operations::apply(
         &mut style,
         &crate::operations::operations_of(&value),
         (
             &mut transitions,
-            &mut vector_states,
             &mut meta.paused_tiles,
             &mut meta.zoom_change,
         ),
@@ -182,7 +171,7 @@ fn load_style_blocking(
     for (index, layer) in style.layers.iter_mut().enumerate() {
         layer.index = index as u32 + 1; // The depth clear is zero.
     }
-    Ok((style, meta, vector_states))
+    Ok((style, meta))
 }
 
 /// The tiles of each raster source the last `setZoom` left that are still fading out, with

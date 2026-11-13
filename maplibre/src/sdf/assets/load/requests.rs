@@ -64,17 +64,19 @@ pub(super) fn requests<'l>(
     layers: impl IntoIterator<Item = &'l StyleLayer>,
     data: &[u8],
     zoom: f64,
+    style: Option<&crate::style::Style>,
 ) -> (GlyphRequests, HashSet<String>) {
     let Ok(tile) = geozero::mvt::Tile::decode(data) else {
         return (GlyphRequests::new(), HashSet::new());
     };
-    requests_from_tile(layers, &tile, zoom)
+    requests_from_tile(layers, &tile, zoom, style)
 }
 
 pub(super) fn requests_from_tile<'l>(
     layers: impl IntoIterator<Item = &'l StyleLayer>,
     tile: &geozero::mvt::Tile,
     zoom: f64,
+    style: Option<&crate::style::Style>,
 ) -> (GlyphRequests, HashSet<String>) {
     let mut fonts = GlyphRequests::new();
     let mut icons = HashSet::new();
@@ -101,8 +103,24 @@ pub(super) fn requests_from_tile<'l>(
             Some(Err(_)) => continue,
             None => None,
         };
+        let (promote_prop, source_state) = match (style, layer.source.as_deref()) {
+            (Some(style), Some(src_name)) => (
+                style
+                    .source_promote_id(src_name)
+                    .and_then(|p| p.property_for(Some(&source.name))),
+                style.feature_state.source(src_name),
+            ),
+            _ => (None, None),
+        };
         for feature in &source.features {
-            let properties = feature_properties(source, feature);
+            let mut properties = feature_properties(source, feature);
+            crate::style::feature_state::sync_properties_feature_state(
+                &mut properties,
+                feature.id,
+                promote_prop,
+                source_state,
+                Some(&source.name),
+            );
             if let Some(filter) = &filter {
                 if !filter.evaluate(&crate::style::filter::FeatureContext {
                     properties: &properties,

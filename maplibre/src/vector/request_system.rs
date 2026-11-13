@@ -71,19 +71,15 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
         let view_tiles_and_level = if let Some(multi) = &multi {
             Some((multi.vector_tiles.clone(), multi.max_view_level))
         } else {
+            let visible_level = view_state.zoom().zoom_level(DEFAULT_TILE_SIZE);
             let computed = view_region_for_projection(
                 style,
                 view_state,
                 world,
-                view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
+                visible_level,
                 ViewStatePadding::Loose,
             )?
-            .map(|region| {
-                (
-                    region.iter().collect::<Vec<_>>(),
-                    u8::from(view_state.zoom().zoom_level(DEFAULT_TILE_SIZE)),
-                )
-            });
+            .map(|region| (region.iter().collect::<Vec<_>>(), u8::from(visible_level)));
             let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
             let cache = world
                 .resources
@@ -129,12 +125,16 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                     z: crate::coords::ZoomLevel::new(0),
                 });
             let draped = style.terrain.is_some();
+            // View-space 3D volumes (`fill-extrusion`) and elevated 3D paths (`line-elevation`)
+            // draw from `view_tiles` (which carry vertical headroom) rather than terrain drapes.
+            let needs_view_tiles =
+                !draped || crate::render::projection::style_elevated_headroom_meters(style) > 0.0;
             let magnifies = depends_on_overscaling(style);
             let mut frame_style = FrameStyle::new(style);
             for coords in overview
                 .into_iter()
                 .chain(drapes)
-                .chain(view_tiles.into_iter().filter(|_| !draped))
+                .chain(view_tiles.into_iter().filter(|_| needs_view_tiles))
                 .chain(prefetch)
             {
                 // Past the deepest source zoom the ancestor tile is fetched once and the view

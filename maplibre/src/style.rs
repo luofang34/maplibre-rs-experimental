@@ -11,6 +11,8 @@ pub(crate) mod arabic_shaping;
 mod attribution;
 pub mod circle;
 pub mod expression;
+pub mod feature_state;
+pub use feature_state::{FeatureId, FeatureStateTarget};
 pub mod filter;
 pub mod heatmap;
 pub mod hillshade;
@@ -101,6 +103,13 @@ pub struct Style {
         skip_serializing_if = "HashMap::is_empty"
     )]
     pub global_state: HashMap<String, serde_json::Value>,
+    /// Per-feature key/value state set at runtime; travels with the style to workers.
+    #[serde(
+        default,
+        rename = "featureState",
+        skip_serializing_if = "feature_state::FeatureStateStore::is_empty"
+    )]
+    pub feature_state: feature_state::FeatureStateStore,
     /// Layers as declared, kept while the layers in use have global state substituted. Public
     /// only so a style can still be built with struct update syntax.
     #[doc(hidden)]

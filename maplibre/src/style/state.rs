@@ -245,16 +245,31 @@ fn substitute(value: &Value, lookup: &dyn Fn(&str) -> Value, whole: bool) -> Val
 }
 
 impl crate::context::MapContext {
-    /// Sets a global state key and asks the request system to fetch the loaded tiles of every
-    /// vector layer that read it again; their old content stays until the new tiles arrive.
+    /// Sets a global state key, updating paint-only layer dependencies in-place on resident GPU
+    /// buffers and refetching loaded vector tiles only when layout, filter, or geometry changed.
     pub fn set_global_state(&mut self, key: &str, value: Value) {
+        let before: HashMap<String, StyleLayer> = self
+            .style
+            .layers
+            .iter()
+            .map(|layer| (layer.id.clone(), layer.clone()))
+            .collect();
         let changed = self.style.set_global_state(key, value);
         crate::render::frame_signals::mark_dirty(&mut self.world);
-        let drawn_from_vector_tiles =
-            self.style.layers.iter().any(|layer| {
-                changed.contains(&layer.id) && super::mutation::from_vector_tiles(layer)
-            });
-        if drawn_from_vector_tiles {
+        if changed.is_empty() {
+            return;
+        }
+        let needs_redraw = self.style.layers.iter().any(|after| {
+            changed.contains(&after.id)
+                && before
+                    .get(&after.id)
+                    .is_none_or(|prev| super::mutation::classify::needs_tile_redraw(prev, after))
+        });
+        crate::vector::upload_system::style_refresh::DirtyVectorStyle::mark_style_edit(
+            &mut self.world,
+            changed,
+        );
+        if needs_redraw {
             crate::io::tile_retry::refresh(
                 &mut self.world,
                 crate::io::tile_retry::RequestKind::Vector,

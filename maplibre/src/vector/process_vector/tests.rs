@@ -477,4 +477,5 @@ fn a_tile_magnified_past_its_source_zoom_reports_its_overscaling() {
     assert_eq!(request(17).style_zoom(), 17.0);
 }
 
+mod shared_properties;
 mod unreadable;

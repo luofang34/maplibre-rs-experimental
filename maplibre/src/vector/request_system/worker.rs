@@ -189,6 +189,12 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
         .iter()
         .cloned()
         .partition(|layer| layer.type_ == "symbol");
+    let source_state = group.source_name.as_deref().map_or((None, None), |name| {
+        (
+            style.source_promote_id(name).cloned(),
+            style.feature_state.source(name).cloned(),
+        )
+    });
     let base_indexed = !base.is_empty();
     let request = VectorTileRequest {
         coords,
@@ -200,6 +206,7 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
         context.clone(),
         (last_source, true),
         (tile.clone(), request),
+        source_state.clone(),
         Arc::new(SymbolAtlas::default()),
     )
     .await?;
@@ -232,6 +239,7 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
         context,
         (last_source, !base_indexed),
         (tile, request),
+        source_state,
         assets.atlas,
     )
     .await?;
@@ -249,10 +257,15 @@ async fn tessellate<T: VectorTransferables, C: Context + Send>(
     context: C,
     (last_source, index_geometry): (bool, bool),
     (tile, request): (Arc<geozero::mvt::Tile>, VectorTileRequest),
+    (promote_id, feature_state): (
+        Option<crate::style::source::PromoteId>,
+        Option<crate::style::feature_state::SourceFeatureState>,
+    ),
     atlas: Arc<SymbolAtlas>,
 ) -> Result<(), ProcessVectorError> {
     run_cpu_bound_replying(context, move |context| {
-        let mut processor = source_processor::<T, _>(context, last_source);
+        let mut processor = source_processor::<T, _>(context, last_source)
+            .with_source_feature_state(promote_id, feature_state);
         if !index_geometry {
             processor = processor.without_indexing();
         }

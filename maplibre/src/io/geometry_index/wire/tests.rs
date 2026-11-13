@@ -1,5 +1,14 @@
 use super::*;
-use crate::coords::InnerCoords;
+use crate::{
+    coords::InnerCoords,
+    style::{
+        expression::FEATURE_STATE_PREFIX,
+        feature_state::{
+            extract_feature_state, extract_source_properties, sync_properties_feature_state,
+            FeatureId, FeatureStateStore, FeatureStateTarget, STATE_ID_PROPERTY,
+        },
+    },
+};
 
 #[test]
 fn spatial_and_linear_roundtrip_preserve_holes_and_shared_property_identity() {
@@ -98,5 +107,95 @@ fn spatial_and_linear_roundtrip_preserve_holes_and_shared_property_identity() {
             .point_query(InnerCoords { x: 700.0, y: 604.0 })
             .len(),
         1
+    );
+}
+
+#[test]
+fn wire_roundtrip_preserves_complex_values_and_feature_state_synchronization() {
+    let mut nested_obj = BTreeMap::new();
+    nested_obj.insert("tier".to_string(), Value::Number(2.0));
+    nested_obj.insert(
+        "badges".to_string(),
+        Value::Array(vec![Value::String("verified".into()), Value::Null]),
+    );
+
+    let mut props = FeatureProperties::new();
+    props.insert("osm_id".into(), Value::String("way/99".into()));
+    props.insert(
+        "tint".into(),
+        Value::Color(Color::new(0.25, 0.5, 0.75, 0.8)),
+    );
+    props.insert("meta".into(), Value::Object(nested_obj));
+    props.insert(STATE_ID_PROPERTY.into(), Value::String("way/99".into()));
+    props.insert(format!("{FEATURE_STATE_PREFIX}hover"), Value::Bool(true));
+    props.insert(
+        format!("{FEATURE_STATE_PREFIX}weights"),
+        Value::Array(vec![Value::Number(1.5), Value::Bool(false)]),
+    );
+
+    let geom = IndexedGeometry::from_linestring(
+        LineString::from(vec![(200.0, 512.0), (300.0, 512.0)]),
+        FeatureMeta {
+            properties: Arc::new(props.clone()),
+            source_layer: Arc::from("roads"),
+            id: Some(99),
+            feature_index: 3,
+        },
+    )
+    .expect("valid linestring");
+
+    let spatial = TileIndex::Spatial {
+        tree: RTree::bulk_load(vec![geom]),
+    };
+    let mut decoded = WireTileIndex::from_tile_index(&spatial).into_tile_index();
+    let hits = decoded.point_query(InnerCoords { x: 256.0, y: 512.0 });
+    assert_eq!(hits.len(), 1);
+    assert_eq!(*hits[0].properties, props);
+
+    // Internal state keys stay hidden from source properties while remaining readable as state.
+    let source_props = extract_source_properties(&hits[0].properties);
+    assert!(!source_props.contains_key(STATE_ID_PROPERTY));
+    assert!(!source_props
+        .keys()
+        .any(|k| k.starts_with(FEATURE_STATE_PREFIX)));
+    assert_eq!(
+        source_props.get("osm_id"),
+        Some(&serde_json::json!("way/99"))
+    );
+    let state_before = extract_feature_state(&hits[0].properties);
+    assert_eq!(state_before.get("hover"), Some(&serde_json::json!(true)));
+    assert_eq!(
+        state_before.get("weights"),
+        Some(&serde_json::json!([1.5, false]))
+    );
+
+    // Subsequent runtime `set_feature_state` updates mutate the decoded TileIndex in place.
+    let mut store = FeatureStateStore::default();
+    let mut next_state = serde_json::Map::new();
+    next_state.insert("hover".into(), serde_json::Value::Null);
+    next_state.insert("selected".into(), serde_json::json!("primary"));
+    store.set(
+        FeatureStateTarget::vector("composite", "roads"),
+        FeatureId::from("way/99"),
+        next_state,
+    );
+
+    let TileIndex::Spatial { tree } = &mut decoded else {
+        panic!("expected spatial index");
+    };
+    let mut items: Vec<IndexedGeometry<f64>> = std::mem::take(tree).into_iter().collect();
+    let item_id = items[0].id;
+    assert!(sync_properties_feature_state(
+        Arc::make_mut(&mut items[0].properties),
+        item_id,
+        Some("osm_id"),
+        store.source("composite"),
+        Some("roads"),
+    ));
+    let state_after = extract_feature_state(&items[0].properties);
+    assert!(!state_after.contains_key("hover"));
+    assert_eq!(
+        state_after.get("selected"),
+        Some(&serde_json::json!("primary"))
     );
 }

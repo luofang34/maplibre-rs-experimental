@@ -58,6 +58,8 @@ pub struct RenderedSymbol {
     pub id: Option<u64>,
     /// Original source attributes.
     pub properties: std::collections::BTreeMap<String, serde_json::Value>,
+    /// Runtime `feature-state` entries currently assigned to this feature.
+    pub state: std::collections::BTreeMap<String, serde_json::Value>,
     /// The kind of the source feature's geometry, which GL JS reports for a label.
     pub geometry_type: GeometryType,
     /// Rendered text, also useful for accessible selection feedback.
@@ -248,6 +250,7 @@ pub fn query_rendered_symbols_in(
                 source_layer: layer.source_layer.clone(),
                 id: feature.data.id,
                 properties: crate::query::source_properties(&feature.data.properties),
+                state: crate::style::feature_state::extract_feature_state(&feature.data.properties),
                 geometry_type: feature.data.geometry_type,
                 text: feature.str.clone(),
                 coordinates: [
