@@ -1,17 +1,12 @@
 //! Synchronizes arriving worker buckets and tile query indices against live `Style` state.
 
-use std::sync::Arc;
-
-use rustc_hash::FxHashMap;
-
 use crate::{
     io::geometry_index::{IndexedGeometry, TileIndex},
     sdf::SymbolLayerData,
     style::{
-        expression::FeatureProperties,
         feature_state::{
             layer_geometry_reads_feature_state, sync_arc_properties_feature_state,
-            sync_properties_feature_state,
+            sync_properties_feature_state, FeatureStateArcMemo,
         },
         Style,
     },
@@ -27,7 +22,7 @@ pub(crate) fn sync_arriving_tile_index(
     style: &Style,
     source: Option<&str>,
     index: &mut TileIndex,
-    memo: &mut FxHashMap<usize, (Arc<FeatureProperties>, bool)>,
+    memo: &mut FeatureStateArcMemo,
 ) {
     let Some(source) = source else {
         return;
@@ -60,7 +55,7 @@ pub(crate) fn sync_arriving_vector_bucket(
     overscaled_zoom: u8,
     bucket: &mut AvailableVectorLayerBucket,
     feature_paint: &mut Option<Vec<BucketFeatureEntry>>,
-    memo: &mut FxHashMap<usize, (Arc<FeatureProperties>, bool)>,
+    memo: &mut FeatureStateArcMemo,
 ) -> bool {
     let Some(style_layer) = style
         .layers

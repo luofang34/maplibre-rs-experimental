@@ -213,6 +213,8 @@ fn vector_layer<T: VectorTransferables, C: Context>(
         tessellator.source_ids = source_ids_for_slice(layer, slice);
         tessellator.shared_properties = shared_props_for_slice(shared_props, slice);
         tessellator.feature_state_ctx = state_ctx.clone();
+        tessellator.retain_feature_paint =
+            crate::vector::feature_paint::layer_retains_feature_paint(style);
         tessellator.sort_key = crate::vector::tessellation::SortKeys::by(
             crate::vector::tessellation::sort_key_of(style),
         );

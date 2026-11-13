@@ -7,8 +7,6 @@ use std::{
     sync::Arc,
 };
 
-use rustc_hash::FxHashMap;
-
 use super::{
     metadata::{feature_metadata, metadata_for_layer},
     paint, pattern_runs, VectorPaintFrame,
@@ -23,7 +21,10 @@ use crate::{
     },
     sdf::SymbolBufferPool,
     style::{
-        feature_state::{layer_geometry_reads_feature_state, layer_paint_reads_feature_state},
+        feature_state::{
+            layer_geometry_reads_feature_state, layer_paint_reads_feature_state,
+            FeatureStateArcMemo,
+        },
         layer::{LayerPaint, StyleLayer},
         Style,
     },
@@ -78,7 +79,7 @@ pub(super) fn apply_dirty_style(
     let mut recolor_layers = dirty.paint_layers;
 
     if !dirty.feature_state_sources.is_empty() {
-        let mut memo = FxHashMap::default();
+        let mut memo = FeatureStateArcMemo::default();
         for source in &dirty.feature_state_sources {
             world
                 .tiles

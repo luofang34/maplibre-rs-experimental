@@ -118,26 +118,28 @@ where
             first_entry..self.feature_indices.len(),
             (self.buffer.indices.len(), pattern),
         );
-        let main_kind = if self.is_line_layer {
-            BucketEntryKind::Line {
-                length: line_length,
+        if self.retain_feature_paint {
+            let main_kind = if self.is_line_layer {
+                BucketEntryKind::Line {
+                    length: line_length,
+                }
+            } else {
+                BucketEntryKind::Feature
+            };
+            for _ in 0..main_count {
+                self.feature_paint.push(BucketFeatureEntry {
+                    raw_id: self.current_raw_id,
+                    properties: props.clone(),
+                    kind: main_kind,
+                });
             }
-        } else {
-            BucketEntryKind::Feature
-        };
-        for _ in 0..main_count {
-            self.feature_paint.push(BucketFeatureEntry {
-                raw_id: self.current_raw_id,
-                properties: props.clone(),
-                kind: main_kind,
-            });
-        }
-        if outline_added {
-            self.feature_paint.push(BucketFeatureEntry {
-                raw_id: self.current_raw_id,
-                properties: props,
-                kind: BucketEntryKind::FillOutline,
-            });
+            if outline_added {
+                self.feature_paint.push(BucketFeatureEntry {
+                    raw_id: self.current_raw_id,
+                    properties: props,
+                    kind: BucketEntryKind::FillOutline,
+                });
+            }
         }
         self.current_raw_id = None;
         self.state_synced = false;

@@ -151,13 +151,13 @@ async fn feature_state_only_schedules_worker_retry_when_dependent_paint_store_is
             disposition: RequestDisposition::Complete,
         },
     );
-    map.map_context
-        .world
-        .tiles
-        .query_mut::<&mut TileFeaturePaintComponent>(tile())
-        .expect("paint component")
-        .committed
-        .clear();
+    assert!(
+        map.world()
+            .tiles
+            .query::<&TileFeaturePaintComponent>(tile())
+            .is_none(),
+        "constant-paint layers do not allocate a TileFeaturePaintComponent"
+    );
 
     let target = FeatureStateTarget::geojson("parks");
     let mut hover = serde_json::Map::new();

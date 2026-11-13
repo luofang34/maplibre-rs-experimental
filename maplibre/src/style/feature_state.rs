@@ -10,7 +10,7 @@ use serde_json::{Map, Value};
 pub(crate) use sync::{
     extract_feature_state, extract_source_properties, layer_geometry_reads_feature_state,
     layer_paint_reads_feature_state, resolve_geojson_state_id, sync_arc_properties_feature_state,
-    sync_properties_feature_state,
+    sync_properties_feature_state, FeatureStateArcMemo,
 };
 
 use crate::style::{

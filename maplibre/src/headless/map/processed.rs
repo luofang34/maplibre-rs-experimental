@@ -6,8 +6,6 @@
 
 use std::{collections::BTreeMap, ops::Deref, sync::Arc};
 
-use rustc_hash::FxHashMap;
-
 use crate::{
     coords::WorldTileCoords,
     geojson::{process_geojson_features, GeoJsonTileRequest},
@@ -18,13 +16,13 @@ use crate::{
         assets::{fallback_atlas, SymbolAtlas},
         SymbolLayersDataComponent,
     },
-    style::{layer::StyleLayer, Style},
+    style::{feature_state::FeatureStateArcMemo, layer::StyleLayer, Style},
     tcs::tiles::Tiles,
     vector::{
         arrival_sync::{
             sync_arriving_symbol_bucket, sync_arriving_tile_index, sync_arriving_vector_bucket,
         },
-        feature_paint::TileFeaturePaintComponent,
+        feature_paint::{intern::TilePropertyInterner, TileFeaturePaintComponent},
         process_vector_tile_with_assets,
         transferables::{LayerIndexed, LayerTessellated, SymbolLayerTessellated},
         DefaultVectorTransferables, ProcessVectorContext, VectorLayerBucket,
@@ -68,12 +66,14 @@ impl ProcessedLayers {
         style: &Style,
         tiles: &mut Tiles,
     ) -> Result<(), HeadlessMapOperationError> {
-        let mut memo = FxHashMap::default();
+        let mut memo = FeatureStateArcMemo::default();
+        let mut interner = TilePropertyInterner::default();
         for index in self.indexes {
             let coords = index.coords();
             let source = index.source();
             let mut tile_index = (*index).to_tile_index();
             sync_arriving_tile_index(style, source.as_deref(), &mut tile_index, &mut memo);
+            interner.intern_tile_index(tiles, coords, &mut tile_index);
             tiles.geometry_index.index_tile(&coords, source, tile_index);
         }
 
@@ -84,7 +84,8 @@ impl ProcessedLayers {
             let mut entries = layer.take_feature_paint();
             let mut bucket = (*layer).to_bucket();
             let _ = sync_arriving_vector_bucket(style, 0, &mut bucket, &mut entries, &mut memo);
-            if let Some(entries) = entries {
+            if let Some(mut entries) = entries.filter(|e| !e.is_empty()) {
+                interner.intern_entries(tiles, coords, &mut entries);
                 paint_by_tile
                     .entry(coords)
                     .or_default()

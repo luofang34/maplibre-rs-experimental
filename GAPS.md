@@ -7,14 +7,6 @@ entry when it is closed.
 Sizes: **S** days, **M** weeks, **L** a month or more. Paths are relative to `maplibre/src` unless
 they start with another directory.
 
-## Open defects
-
-| Defect | Where | Fix |
-| --- | --- | --- |
-| A memo keyed on `Arc` address drops the replaced `Arc`, so a reused address can give one feature another feature's properties (web wire path) | `style/feature_state/sync.rs` `sync_arc_properties_feature_state`; memo created in `vector/populate_world_system.rs` | Keep the original `Arc` alive in the memo entry or key on content; add a web test with two messages in one batch |
-| Property maps of id-bearing features are cloned on the main thread at arrival when the source has no feature-state (unverified) | `style/feature_state/sync.rs` `properties_need_feature_state_sync` | Write the state id in the worker, or skip the sync when the source has no state and no `promoteId` |
-| A property entry is retained for every feature of every non-symbol layer; the web path duplicates maps per style layer | `vector/tessellation/feature_paint.rs`, `vector/content.rs`, `vector/feature_paint/wire.rs` | Retain only for layers whose paint is data-driven or reads feature-state; share one decoded map per feature on web |
-
 ## Conformance evidence and CI
 
 | Gap | State | Size |

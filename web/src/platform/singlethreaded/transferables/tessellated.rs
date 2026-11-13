@@ -147,7 +147,7 @@ impl LayerTessellated for FlatBufferTransferable {
         style_layer_id: String,
         entries: Vec<BucketFeatureEntry>,
     ) -> Self {
-        let encoded = encode_feature_paint(&entries);
+        let encoded = (!entries.is_empty()).then(|| encode_feature_paint(&entries));
         pack_flat_layer_tessellated(
             coords,
             buffer,
@@ -156,12 +156,12 @@ impl LayerTessellated for FlatBufferTransferable {
             feature_sort_keys,
             &layer_data.name,
             &style_layer_id,
-            Some(&encoded),
+            encoded.as_deref(),
         )
     }
 
     fn with_feature_paint(self, entries: Vec<BucketFeatureEntry>) -> Self {
-        let encoded = encode_feature_paint(&entries);
+        let encoded = (!entries.is_empty()).then(|| encode_feature_paint(&entries));
         let bucket = self.to_bucket();
         pack_flat_layer_tessellated(
             bucket.coords,
@@ -171,7 +171,7 @@ impl LayerTessellated for FlatBufferTransferable {
             bucket.feature_sort_keys,
             &bucket.source_layer,
             &bucket.style_layer_id,
-            Some(&encoded),
+            encoded.as_deref(),
         )
     }
 
@@ -277,82 +277,4 @@ impl LayerTessellated for FlatBufferTransferable {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use maplibre::{
-        coords::{WorldTileCoords, ZoomLevel},
-        render::ShaderVertex,
-        style::expression::{FeatureProperties, Value},
-        tile::Layer,
-        vector::{
-            feature_paint::{BucketEntryKind, BucketFeatureEntry},
-            tessellation::OverAlignedVertexBuffer,
-            LayerTessellated,
-        },
-    };
-    use wasm_bindgen_test::*;
-
-    use super::FlatBufferTransferable;
-
-    #[wasm_bindgen_test]
-    fn layer_tessellated_preserves_all_shader_vertex_fields_and_feature_paint() {
-        let packed_elevation = f32::from_bits(0xFF00_1234);
-        let input = ShaderVertex {
-            position: [128.5, 2048.25],
-            normal: [-0.5, 0.75],
-            distance: 42.0,
-            elevation: packed_elevation,
-            edge_distance: 19.5,
-            corner_code: 17.0,
-        };
-        let buffer = OverAlignedVertexBuffer::from_iters([input, input, input], [0_u32, 1, 2], 3);
-        let layer = Layer {
-            version: 2,
-            name: "boundary".into(),
-            features: Vec::new(),
-            keys: Vec::new(),
-            values: Vec::new(),
-            extent: Some(4096),
-        };
-        let mut props = FeatureProperties::new();
-        props.insert("admin_level".into(), Value::Number(2.0));
-        let entry = BucketFeatureEntry {
-            raw_id: Some(7),
-            properties: Arc::new(props.clone()),
-            kind: BucketEntryKind::Feature,
-        };
-        let mut transferable = <FlatBufferTransferable as LayerTessellated>::build_from_with_paint(
-            WorldTileCoords {
-                x: 2,
-                y: 1,
-                z: ZoomLevel::new(2),
-            },
-            buffer,
-            vec![3],
-            vec![[0.2, 0.4, 0.6, 1.0]],
-            vec![],
-            layer,
-            "countries-boundary".into(),
-            vec![entry],
-        );
-        let paint = transferable
-            .take_feature_paint()
-            .expect("feature paint survives FlatBuffer roundtrip");
-        assert_eq!(paint.len(), 1);
-        assert_eq!(paint[0].raw_id, Some(7));
-        assert_eq!(*paint[0].properties, props);
-
-        let bucket = transferable.to_bucket();
-        let output = bucket.buffer.buffer.vertices[0];
-        assert_eq!(output.position, input.position);
-        assert_eq!(output.normal, input.normal);
-        assert_eq!(output.distance, input.distance);
-        assert_eq!(output.elevation.to_bits(), input.elevation.to_bits());
-        assert_eq!(
-            output.edge_distance.to_bits(),
-            input.edge_distance.to_bits()
-        );
-        assert_eq!(output.corner_code, input.corner_code);
-    }
-}
+mod tests;

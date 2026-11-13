@@ -1,21 +1,15 @@
 //! Synchronizes runtime `feature-state` across resident tile symbol and vector buckets.
 
-use std::{
-    collections::{BTreeSet, HashMap},
-    sync::Arc,
-};
-
-use rustc_hash::FxHashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use crate::{
     coords::WorldTileCoords,
     render::eventually::{Eventually, Eventually::Initialized},
     sdf::{SymbolBufferPool, SymbolLayersDataComponent},
     style::{
-        expression::FeatureProperties,
         feature_state::{
             layer_paint_reads_feature_state, sync_arc_properties_feature_state,
-            sync_properties_feature_state,
+            sync_properties_feature_state, FeatureStateArcMemo,
         },
         layer::StyleLayer,
         Style,
@@ -31,7 +25,7 @@ pub(super) fn sync_tile_feature_states(
     world: &mut World,
     style: &Style,
     dirty_sources: &BTreeSet<String>,
-    memo: &mut FxHashMap<usize, (Arc<FeatureProperties>, bool)>,
+    memo: &mut FeatureStateArcMemo,
     needs_worker_refresh: &mut bool,
 ) {
     let layer_by_id: HashMap<&str, &StyleLayer> =

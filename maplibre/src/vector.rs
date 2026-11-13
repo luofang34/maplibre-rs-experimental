@@ -39,6 +39,7 @@ pub mod feature_paint;
 #[cfg(feature = "mlt")]
 pub mod mlt;
 pub(crate) mod populate_world_system;
+pub use populate_world_system::apply_vector_worker_batch;
 mod process_vector;
 pub(crate) use process_vector::feature_properties;
 mod queue_system;

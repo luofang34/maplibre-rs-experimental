@@ -155,6 +155,8 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     state_synced: bool,
     /// Retained per-entry feature identity and attributes for in-place GPU paint refresh.
     pub(crate) feature_paint: Vec<crate::vector::feature_paint::BucketFeatureEntry>,
+    /// Whether this layer's paint depends on feature properties or `feature-state`.
+    pub(crate) retain_feature_paint: bool,
     current_index: usize,
     earcut: earcut_fill::PolygonEarcut,
     fill_tessellator: FillTessellator,
@@ -210,6 +212,7 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             current_raw_id: None,
             state_synced: false,
             feature_paint: Vec::new(),
+            retain_feature_paint: false,
             earcut: earcut_fill::PolygonEarcut::default(),
             fill_tessellator: FillTessellator::new(),
             stroke_tessellator: StrokeTessellator::new(),

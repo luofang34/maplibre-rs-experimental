@@ -115,6 +115,11 @@ pub(crate) fn resolve_geojson_state_id(
         .or_else(|| generated.map(|idx| idx.to_string()))
 }
 
+/// Memoizes synchronized `Arc<FeatureProperties>` maps within a batch while keeping the original
+/// `Arc` alive so its heap address cannot be freed and reused (`ABA`) by a subsequent message.
+pub(crate) type FeatureStateArcMemo =
+    FxHashMap<usize, (Arc<FeatureProperties>, Arc<FeatureProperties>, bool)>;
+
 /// Resolves a feature's canonical state ID and synchronizes its `\u{1}state:*` entries in
 /// `properties`, returning `true` when any `feature-state` value changed.
 pub(crate) fn sync_properties_feature_state(
@@ -124,15 +129,25 @@ pub(crate) fn sync_properties_feature_state(
     source_state: Option<&SourceFeatureState>,
     source_layer: Option<&str>,
 ) -> bool {
-    let resolved = if let Some(prop) = promote_property {
+    let non_empty_state = source_state.filter(|s| !s.is_empty());
+    if non_empty_state.is_none() {
+        let had = properties
+            .keys()
+            .any(|k| k.starts_with(FEATURE_STATE_PREFIX));
+        if had {
+            properties.retain(|k, _| !k.starts_with(FEATURE_STATE_PREFIX));
+        }
+        return had;
+    }
+    let resolved: Option<Cow<'_, str>> = if let Some(prop) = promote_property {
         properties
             .get(prop)
             .and_then(FeatureId::from_expr_value)
-            .map(FeatureId::into_string)
+            .map(|id| Cow::Owned(id.into_string()))
     } else if let Some(ExprValue::String(existing)) = properties.get(STATE_ID_PROPERTY) {
-        Some(existing.clone())
+        Some(Cow::Borrowed(existing.as_str()))
     } else {
-        raw_id.map(|id| id.to_string())
+        raw_id.map(|id| Cow::Owned(id.to_string()))
     };
     let Some(state_id) = resolved else {
         let had = properties
@@ -143,13 +158,7 @@ pub(crate) fn sync_properties_feature_state(
         }
         return had;
     };
-    if !matches!(properties.get(STATE_ID_PROPERTY), Some(ExprValue::String(s)) if s == &state_id) {
-        properties.insert(
-            STATE_ID_PROPERTY.to_owned(),
-            ExprValue::String(state_id.clone()),
-        );
-    }
-    let desired = source_state.and_then(|s| s.get(source_layer, &state_id));
+    let desired = non_empty_state.and_then(|s| s.get(source_layer, state_id.as_ref()));
     let mut changed = false;
     let stale: Vec<String> = properties
         .keys()
@@ -183,18 +192,18 @@ pub(crate) fn sync_properties_feature_state(
 }
 
 /// Synchronizes a shared `Arc<FeatureProperties>` against `source_state` without cloning unchanged
-/// maps, reusing updated `Arc` allocations in `memo` so shared feature parts and style layers keep
-/// identical `Arc` pointers.
+/// maps, reusing updated `Arc` allocations in `memo` (while keeping the original `Arc` alive so
+/// its address cannot be reused across messages in the same batch).
 pub(crate) fn sync_arc_properties_feature_state(
     properties: &mut Arc<FeatureProperties>,
     raw_id: Option<u64>,
     promote_property: Option<&str>,
     source_state: Option<&SourceFeatureState>,
     source_layer: Option<&str>,
-    memo: &mut FxHashMap<usize, (Arc<FeatureProperties>, bool)>,
+    memo: &mut FeatureStateArcMemo,
 ) -> bool {
     let ptr = Arc::as_ptr(properties) as usize;
-    if let Some((updated, changed)) = memo.get(&ptr) {
+    if let Some((_, updated, changed)) = memo.get(&ptr) {
         *properties = Arc::clone(updated);
         return *changed;
     }
@@ -207,6 +216,7 @@ pub(crate) fn sync_arc_properties_feature_state(
     ) {
         return false;
     }
+    let original = Arc::clone(properties);
     let mut next = (**properties).clone();
     let changed = sync_properties_feature_state(
         &mut next,
@@ -216,7 +226,7 @@ pub(crate) fn sync_arc_properties_feature_state(
         source_layer,
     );
     let next_arc = Arc::new(next);
-    memo.insert(ptr, (Arc::clone(&next_arc), changed));
+    memo.insert(ptr, (original, Arc::clone(&next_arc), changed));
     *properties = next_arc;
     changed
 }
@@ -228,6 +238,12 @@ fn properties_need_feature_state_sync(
     source_state: Option<&SourceFeatureState>,
     source_layer: Option<&str>,
 ) -> bool {
+    let non_empty_state = source_state.filter(|s| !s.is_empty());
+    if non_empty_state.is_none() {
+        return properties
+            .keys()
+            .any(|k| k.starts_with(FEATURE_STATE_PREFIX));
+    }
     let resolved: Option<Cow<'_, str>> = if let Some(prop) = promote_property {
         properties
             .get(prop)
@@ -243,11 +259,7 @@ fn properties_need_feature_state_sync(
             .keys()
             .any(|k| k.starts_with(FEATURE_STATE_PREFIX));
     };
-    if !matches!(properties.get(STATE_ID_PROPERTY), Some(ExprValue::String(s)) if s == state_id.as_ref())
-    {
-        return true;
-    }
-    let desired = source_state.and_then(|s| s.get(source_layer, state_id.as_ref()));
+    let desired = non_empty_state.and_then(|s| s.get(source_layer, state_id.as_ref()));
     if properties.keys().any(|k| {
         k.strip_prefix(FEATURE_STATE_PREFIX).is_some_and(|name| {
             desired

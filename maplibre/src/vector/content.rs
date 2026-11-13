@@ -41,11 +41,6 @@ pub(crate) fn ensure(tiles: &mut Tiles, coords: WorldTileCoords) {
             tile.insert(LayerReplacements::default());
         }
     }
-    if tiles.query::<&TileFeaturePaintComponent>(coords).is_none() {
-        if let Some(mut tile) = tiles.spawn_mut(coords) {
-            tile.insert(TileFeaturePaintComponent::default());
-        }
-    }
 }
 
 pub(crate) fn begin(world: &mut World, coords: WorldTileCoords, requested: Vec<String>) {
@@ -130,6 +125,17 @@ pub(crate) fn accept_vector_with_paint(
             pending.vector.push(bucket);
         } else {
             commit_vector(layers, bucket);
+        }
+    }
+    let feature_paint = feature_paint.filter(|entries| !entries.is_empty());
+    if feature_paint.is_some()
+        && world
+            .tiles
+            .query::<&TileFeaturePaintComponent>(coords)
+            .is_none()
+    {
+        if let Some(mut tile) = world.tiles.spawn_mut(coords) {
+            tile.insert(TileFeaturePaintComponent::default());
         }
     }
     if let Some(paint_store) = world

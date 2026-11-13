@@ -126,6 +126,24 @@ impl GeometryIndex {
         }
     }
 
+    /// Calls `f` on every indexed `Arc<FeatureProperties>` stored at `coords`.
+    pub(crate) fn for_each_tile_property(
+        &self,
+        coords: WorldTileCoords,
+        mut f: impl FnMut(&Arc<FeatureProperties>),
+    ) {
+        let Some(sources) = coords.build_quad_key().and_then(|key| self.index.get(&key)) else {
+            return;
+        };
+        for stored in sources.values() {
+            let mut visit = |geom: &IndexedGeometry<f64>| f(&geom.properties);
+            match &stored.index {
+                TileIndex::Spatial { tree } => tree.iter().for_each(&mut visit),
+                TileIndex::Linear { list } => list.iter().for_each(&mut visit),
+            }
+        }
+    }
+
     /// Synchronizes runtime `feature-state` in-place across all indexed tiles of `source`,
     /// preserving shared `Arc<FeatureProperties>` identity across `memo`.
     pub(crate) fn sync_source_feature_state_with_memo(
@@ -133,7 +151,7 @@ impl GeometryIndex {
         source: &str,
         promote_id: Option<&crate::style::source::PromoteId>,
         source_state: Option<&crate::style::feature_state::SourceFeatureState>,
-        memo: &mut FxHashMap<usize, (Arc<FeatureProperties>, bool)>,
+        memo: &mut crate::style::feature_state::FeatureStateArcMemo,
     ) {
         for sources in self.index.values_mut() {
             let Some(stored) = sources.get_mut(&Some(source.to_owned())) else {

@@ -189,7 +189,7 @@ impl LayerTessellated for DefaultLayerTessellated {
     }
 
     fn with_feature_paint(mut self, entries: Vec<BucketFeatureEntry>) -> Self {
-        self.feature_paint = Some(entries);
+        self.feature_paint = (!entries.is_empty()).then_some(entries);
         self
     }
 

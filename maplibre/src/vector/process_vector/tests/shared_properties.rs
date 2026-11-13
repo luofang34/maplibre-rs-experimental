@@ -42,7 +42,7 @@ fn multiple_style_layers_and_query_index_share_one_feature_properties_allocation
         "type": "fill",
         "source": "osm",
         "source-layer": "landuse",
-        "paint": {"fill-color": "#00ff00"}
+        "paint": {"fill-color": ["match", ["get", "class"], "park", "#00ff00", "#888888"]}
     }))
     .expect("fill layer");
     let outline: StyleLayer = serde_json::from_value(serde_json::json!({
@@ -50,9 +50,17 @@ fn multiple_style_layers_and_query_index_share_one_feature_properties_allocation
         "type": "line",
         "source": "osm",
         "source-layer": "landuse",
-        "paint": {"line-color": "#004400", "line-width": 2}
+        "paint": {"line-color": ["match", ["get", "class"], "park", "#004400", "#444444"], "line-width": 2}
     }))
     .expect("line layer");
+    let constant_fill: StyleLayer = serde_json::from_value(serde_json::json!({
+        "id": "park-constant",
+        "type": "fill",
+        "source": "osm",
+        "source-layer": "landuse",
+        "paint": {"fill-color": "#00ff00"}
+    }))
+    .expect("constant fill layer");
 
     let mut processor = ProcessVectorContext::<DefaultVectorTransferables, CollectingContext>::new(
         CollectingContext::default(),
@@ -61,7 +69,7 @@ fn multiple_style_layers_and_query_index_share_one_feature_properties_allocation
         &bytes,
         VectorTileRequest {
             coords: WorldTileCoords::default(),
-            layers: [fill, outline].into_iter().collect(),
+            layers: [fill, outline, constant_fill].into_iter().collect(),
             projection: ProjectionType::Mercator,
             overscaled_zoom: 0,
         },
@@ -70,15 +78,24 @@ fn multiple_style_layers_and_query_index_share_one_feature_properties_allocation
     .expect("tile processes");
 
     let mut paint_arcs = Vec::new();
+    let mut saw_constant = false;
     let mut index_arc = None;
     for message in processor.take_context().0.take() {
         if message.has_tag(DefaultLayerTessellated::message_tag()) {
             let mut layer = *message
                 .into_transferable::<DefaultLayerTessellated>()
                 .expect("tessellated layer");
-            let entries = layer.take_feature_paint().expect("feature paint entries");
-            assert!(!entries.is_empty());
-            paint_arcs.push(entries[0].properties.clone());
+            if layer.style_layer_id() == "park-constant" {
+                assert!(
+                    layer.take_feature_paint().is_none(),
+                    "constant-paint layers must not retain per-feature property entries"
+                );
+                saw_constant = true;
+            } else {
+                let entries = layer.take_feature_paint().expect("feature paint entries");
+                assert!(!entries.is_empty());
+                paint_arcs.push(entries[0].properties.clone());
+            }
         } else if message.has_tag(DefaultLayerIndexed::message_tag()) {
             let indexed = *message
                 .into_transferable::<DefaultLayerIndexed>()
@@ -91,10 +108,11 @@ fn multiple_style_layers_and_query_index_share_one_feature_properties_allocation
         }
     }
 
+    assert!(saw_constant, "constant layer was tessellated");
     assert_eq!(
         paint_arcs.len(),
         2,
-        "both style layers produced paint entries"
+        "both data-driven style layers produced paint entries"
     );
     let index_arc = index_arc.expect("indexed geometry present");
     assert!(

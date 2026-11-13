@@ -1,5 +1,7 @@
 //! Retained per-entry feature attributes for in-place GPU paint and `feature-state` updates.
 
+/// Per-tile deduplication of decoded `Arc<FeatureProperties>` across wire messages.
+pub(crate) mod intern;
 /// Binary wire encoding of [`BucketFeatureEntry`] slices for worker transport.
 pub mod wire;
 
@@ -8,12 +10,64 @@ use std::{collections::HashMap, sync::Arc};
 use crate::{
     style::{
         expression::FeatureProperties,
+        feature_state::layer_paint_reads_feature_state,
         layer::{LayerPaint, StyleLayer},
         pattern_key,
     },
     tcs::tiles::TileComponent,
     vector::{pattern::per_feature_pattern, tessellation::circle_pack_colors},
 };
+
+/// Returns `true` when `layer` is a non-symbol vector layer whose GPU feature paint depends on
+/// per-feature properties or runtime `feature-state`, requiring retained [`BucketFeatureEntry`]s.
+pub(crate) fn layer_retains_feature_paint(layer: &StyleLayer) -> bool {
+    if layer_paint_reads_feature_state(layer) {
+        return true;
+    }
+    let Some(paint) = layer.paint.as_ref() else {
+        return false;
+    };
+    layer_paint_varies_by_feature(paint)
+}
+
+/// Returns `true` when any GPU-evaluated paint property in `paint` varies by feature.
+pub(crate) fn layer_paint_varies_by_feature(paint: &LayerPaint) -> bool {
+    if paint
+        .opacity()
+        .as_ref()
+        .is_some_and(|prop| !prop.is_feature_constant())
+        || per_feature_pattern(paint).is_some()
+    {
+        return true;
+    }
+    match paint {
+        LayerPaint::Fill(fill) => {
+            fill.fill_color
+                .as_ref()
+                .is_some_and(|prop| !prop.is_feature_constant())
+                || fill
+                    .outline_color()
+                    .as_ref()
+                    .is_some_and(|prop| !prop.is_feature_constant())
+        }
+        LayerPaint::Line(line) => line
+            .line_color
+            .as_ref()
+            .is_some_and(|prop| !prop.is_feature_constant()),
+        LayerPaint::Circle(circle) => {
+            circle
+                .circle_color
+                .as_ref()
+                .is_some_and(|prop| !prop.is_feature_constant())
+                || circle.stroke_color_per_feature().is_some()
+        }
+        LayerPaint::FillExtrusion(ext) => ext
+            .fill_extrusion_color
+            .as_ref()
+            .is_some_and(|prop| !prop.is_feature_constant()),
+        _ => false,
+    }
+}
 
 /// Distinguishes how a bucket feature entry computes its RGBA metadata vector.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -42,8 +96,8 @@ pub struct BucketFeatureEntry {
 
 /// Per-style-layer retained feature entries for a loaded tile, mirroring committed and pending
 /// vector buckets so GPU `FillShaderFeatureMetadata` can be refreshed without re-tessellation.
-#[derive(Default)]
-pub(crate) struct TileFeaturePaintComponent {
+#[derive(Default, Debug)]
+pub struct TileFeaturePaintComponent {
     /// Entries matching the currently uploaded buckets in `VectorLayerBucketComponent`.
     pub committed: HashMap<String, Vec<BucketFeatureEntry>>,
     /// Entries matching staged replacement buckets in `LayerReplacements::vector`.

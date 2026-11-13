@@ -44,15 +44,13 @@ fn a_feature_whose_geometry_cannot_be_read_is_left_out_without_its_layer() {
         "the square is tessellated"
     );
     assert_eq!(
-        layers[0]
-            .feature_paint
-            .as_deref()
-            .unwrap_or_default()
-            .iter()
-            .filter(|entry| entry.kind == crate::vector::feature_paint::BucketEntryKind::Feature)
-            .count(),
-        1,
-        "only the readable feature produces tessellated fill metadata, while layer_data carries header metadata only"
+        layers[0].feature_indices.len(),
+        2,
+        "only the readable feature produces tessellated fill + default-outline metadata (2 entries, not 4)"
+    );
+    assert!(
+        layers[0].feature_paint.is_none(),
+        "constant-paint layers do not retain per-feature property maps"
     );
     assert!(layers[0].layer_data.features.is_empty());
 }
