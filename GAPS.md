@@ -17,17 +17,6 @@ they start with another directory.
 | Local glyph rasterisation for CJK ideographs | Missing; fixtures in `render-tests/src/tests/text-local-glyphs` | M |
 | `symbol-avoid-edges` | Missing | S |
 
-## Storage and offline
-
-| Gap | State | Size |
-| --- | --- | --- |
-| Offline regions and download | Missing; host-supplied tiles only (`headless/map/injected_loader.rs`) | L |
-| Tile cache in the browser build | Missing; `platform/web/http_client.rs` is plain `fetch` | M |
-| MBTiles at runtime | Missing; build-time embedding only (`maplibre-build-tools/src/mbtiles.rs`) | S–M |
-| Request and header transform hooks | Partial; only by replacing `ResourceLoader` or `HttpClient` | S |
-| Network status and offline mode | Missing | S |
-| Source `volatile` | Missing | S |
-
 ## Style specification and map API
 
 | Gap | State | Size |
@@ -36,9 +25,6 @@ they start with another directory.
 | Whole-style replacement with diffing | Missing; granular mutations only (`style/mutation.rs`) | M |
 | Camera bounds: fit to bounds, max bounds, min and max zoom | Missing; only `set_max_pitch` | M |
 | Typed event stream (load, idle, error, style and source changes) | Partial; polled signals in `map/signals.rs`, `render/frame_signals.rs` | M |
-| Expression value types `padding`, `numberArray`, `colorArray`, `projectionDefinition`, `variableAnchorOffsetCollection` | Unsupported (`tests/expression_conformance.rs` `UNSUPPORTED_TYPES`) | M |
-| `accumulated` outside cluster properties | Partial (`geojson/cluster.rs`) | S |
-| Locale data for `collator` and `number-format` | Partial; own tables, no ICU | M |
 | Style-level custom layer | Partial; plugins and host GPU only | M |
 | `styleimagemissing` event | Partial; pull-based `StyleImageProvider` | S |
 | Gesture recogniser independent of winit | Partial; handlers live in `maplibre-winit/src/input` | M |
@@ -58,5 +44,3 @@ they start with another directory.
 | Gap | State | Size |
 | --- | --- | --- |
 | Crate layering | One crate holds the engine, with 34 `pub mod` | L |
-| Style types generated from the spec JSON | Hand-written (`style/layer/paint.rs`, `style/property/`) | M |
-| Leftovers | `maplibre/style-spec-v8.json` is unreferenced | S |
