@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-04576098.js";
+            window.path_to_searchindex_js = "../searchindex-00ec32b3.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-ae8692d6.js"></script>
@@ -220,15 +220,8 @@ pub fn build_style(mut style: Style) -&gt; Style {
         style.sources.insert(
             "openfreemap".to_string(),
             Source::Vector(VectorSource {
-                attribution: None,
-                bounds: None,
-                maxzoom: None,
-                minzoom: None,
-                scheme: None,
-                tiles: None,
-                tile_size: None,
                 url: Some("https://tiles.openfreemap.org/planet".to_string()),
-                promote_id: None,
+                ..Default::default()
             }),
         );
         "openfreemap".to_string()

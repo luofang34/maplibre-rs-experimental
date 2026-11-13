@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["format","symbol"]};
+window.SIDEBAR_ITEMS = {"fn":["currency_unit","default_currency_digits","format","format_currency","parse_locale","uses_currency_suffix"],"struct":["CurrencyUnit"]};

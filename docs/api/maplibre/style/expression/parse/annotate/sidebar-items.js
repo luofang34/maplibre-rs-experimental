@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Annotation"],"fn":["composite_coercion"]};

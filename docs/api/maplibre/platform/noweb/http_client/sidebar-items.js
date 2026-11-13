@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["DISK_CACHE_IO_CONCURRENCY","MEMORY_CACHE_CAP_BYTES","MEMORY_CACHE_MAX_ITEM_BYTES","USER_AGENT"],"mod":["classify"],"struct":["HttpCacheFrontend","InProcessRoutes","MemoryTileCacheState","ReqwestHttpClient","SharedCacheFrontend"],"type":["InProcessHandler"]};
+window.SIDEBAR_ITEMS = {"constant":["USER_AGENT"],"fn":["build_header_map","format_cache_key"],"mod":["cache","classify"],"struct":["InProcessRoutes","InvalidHeaderError","ReqwestHttpClient"],"type":["InProcessHandler"]};

@@ -39,6 +39,7 @@ pub fn build_style(mut style: Style) -> Style {
             cluster_min_points: None,
             cluster_properties: None,
             filter: None,
+            volatile: false,
             generation: fresh_generation(),
         }),
     );

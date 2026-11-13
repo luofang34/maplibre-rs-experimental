@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["lookup_legacy_property_spec"]};

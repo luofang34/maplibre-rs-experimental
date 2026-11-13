@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["UNSUPPORTED_SCRIPTS"],"fn":["case_order","is_supported_script","split_accents"],"struct":["Collation"]};
+window.SIDEBAR_ITEMS = {"constant":["UNSUPPORTED_SCRIPTS"],"fn":["is_supported_script"],"struct":["Collation"]};

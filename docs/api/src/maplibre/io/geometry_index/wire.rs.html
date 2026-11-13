@@ -321,96 +321,103 @@
 <a href=#321 id=321 data-nosnippet>321</a>                encode_value(v, out);
 <a href=#322 id=322 data-nosnippet>322</a>            }
 <a href=#323 id=323 data-nosnippet>323</a>        }
-<a href=#324 id=324 data-nosnippet>324</a>        Value::Collator(<span class="kw">_</span>) | Value::Image(<span class="kw">_</span>) | Value::Formatted(<span class="kw">_</span>) =&gt; {
-<a href=#325 id=325 data-nosnippet>325</a>            out.push(TAG_NULL);
-<a href=#326 id=326 data-nosnippet>326</a>        }
-<a href=#327 id=327 data-nosnippet>327</a>    }
-<a href=#328 id=328 data-nosnippet>328</a>}
-<a href=#329 id=329 data-nosnippet>329</a>
-<a href=#330 id=330 data-nosnippet>330</a><span class="kw">fn </span>decode_properties(<span class="kw-2">mut </span>buf: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Option</span>&lt;FeatureProperties&gt; {
-<a href=#331 id=331 data-nosnippet>331</a>    decode_properties_from(<span class="kw-2">&amp;mut </span>buf)
-<a href=#332 id=332 data-nosnippet>332</a>}
-<a href=#333 id=333 data-nosnippet>333</a>
-<a href=#334 id=334 data-nosnippet>334</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>decode_properties_from(buf: <span class="kw-2">&amp;mut &amp;</span>[u8]) -&gt; <span class="prelude-ty">Option</span>&lt;FeatureProperties&gt; {
-<a href=#335 id=335 data-nosnippet>335</a>    <span class="kw">let </span>count = read_u32(buf)<span class="question-mark">? </span><span class="kw">as </span>usize;
-<a href=#336 id=336 data-nosnippet>336</a>    <span class="kw">let </span><span class="kw-2">mut </span>props = FeatureProperties::new();
-<a href=#337 id=337 data-nosnippet>337</a>    <span class="kw">for _ in </span><span class="number">0</span>..count {
-<a href=#338 id=338 data-nosnippet>338</a>        <span class="kw">let </span>key = read_string(buf)<span class="question-mark">?</span>;
-<a href=#339 id=339 data-nosnippet>339</a>        <span class="kw">let </span>val = decode_value(buf)<span class="question-mark">?</span>;
-<a href=#340 id=340 data-nosnippet>340</a>        props.insert(key, val);
-<a href=#341 id=341 data-nosnippet>341</a>    }
-<a href=#342 id=342 data-nosnippet>342</a>    <span class="prelude-val">Some</span>(props)
-<a href=#343 id=343 data-nosnippet>343</a>}
-<a href=#344 id=344 data-nosnippet>344</a>
-<a href=#345 id=345 data-nosnippet>345</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>read_u8(buf: <span class="kw-2">&amp;mut &amp;</span>[u8]) -&gt; <span class="prelude-ty">Option</span>&lt;u8&gt; {
-<a href=#346 id=346 data-nosnippet>346</a>    <span class="kw">let </span>(<span class="kw-2">&amp;</span>byte, rest) = buf.split_first()<span class="question-mark">?</span>;
-<a href=#347 id=347 data-nosnippet>347</a>    <span class="kw-2">*</span>buf = rest;
-<a href=#348 id=348 data-nosnippet>348</a>    <span class="prelude-val">Some</span>(byte)
-<a href=#349 id=349 data-nosnippet>349</a>}
-<a href=#350 id=350 data-nosnippet>350</a>
-<a href=#351 id=351 data-nosnippet>351</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>read_u32(buf: <span class="kw-2">&amp;mut &amp;</span>[u8]) -&gt; <span class="prelude-ty">Option</span>&lt;u32&gt; {
-<a href=#352 id=352 data-nosnippet>352</a>    <span class="kw">if </span>buf.len() &lt; <span class="number">4 </span>{
-<a href=#353 id=353 data-nosnippet>353</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#354 id=354 data-nosnippet>354</a>    }
-<a href=#355 id=355 data-nosnippet>355</a>    <span class="kw">let </span>(head, rest) = buf.split_at(<span class="number">4</span>);
-<a href=#356 id=356 data-nosnippet>356</a>    <span class="kw-2">*</span>buf = rest;
-<a href=#357 id=357 data-nosnippet>357</a>    <span class="prelude-val">Some</span>(u32::from_le_bytes(head.try_into().ok()<span class="question-mark">?</span>))
-<a href=#358 id=358 data-nosnippet>358</a>}
-<a href=#359 id=359 data-nosnippet>359</a>
-<a href=#360 id=360 data-nosnippet>360</a><span class="kw">fn </span>read_f64(buf: <span class="kw-2">&amp;mut &amp;</span>[u8]) -&gt; <span class="prelude-ty">Option</span>&lt;f64&gt; {
-<a href=#361 id=361 data-nosnippet>361</a>    <span class="kw">if </span>buf.len() &lt; <span class="number">8 </span>{
-<a href=#362 id=362 data-nosnippet>362</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#363 id=363 data-nosnippet>363</a>    }
-<a href=#364 id=364 data-nosnippet>364</a>    <span class="kw">let </span>(head, rest) = buf.split_at(<span class="number">8</span>);
-<a href=#365 id=365 data-nosnippet>365</a>    <span class="kw-2">*</span>buf = rest;
-<a href=#366 id=366 data-nosnippet>366</a>    <span class="prelude-val">Some</span>(f64::from_le_bytes(head.try_into().ok()<span class="question-mark">?</span>))
-<a href=#367 id=367 data-nosnippet>367</a>}
-<a href=#368 id=368 data-nosnippet>368</a>
-<a href=#369 id=369 data-nosnippet>369</a><span class="kw">fn </span>read_string(buf: <span class="kw-2">&amp;mut &amp;</span>[u8]) -&gt; <span class="prelude-ty">Option</span>&lt;String&gt; {
-<a href=#370 id=370 data-nosnippet>370</a>    <span class="kw">let </span>len = read_u32(buf)<span class="question-mark">? </span><span class="kw">as </span>usize;
-<a href=#371 id=371 data-nosnippet>371</a>    <span class="kw">if </span>buf.len() &lt; len {
-<a href=#372 id=372 data-nosnippet>372</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#373 id=373 data-nosnippet>373</a>    }
-<a href=#374 id=374 data-nosnippet>374</a>    <span class="kw">let </span>(head, rest) = buf.split_at(len);
-<a href=#375 id=375 data-nosnippet>375</a>    <span class="kw-2">*</span>buf = rest;
-<a href=#376 id=376 data-nosnippet>376</a>    std::str::from_utf8(head).ok().map(str::to_owned)
-<a href=#377 id=377 data-nosnippet>377</a>}
-<a href=#378 id=378 data-nosnippet>378</a>
-<a href=#379 id=379 data-nosnippet>379</a><span class="kw">fn </span>decode_value(buf: <span class="kw-2">&amp;mut &amp;</span>[u8]) -&gt; <span class="prelude-ty">Option</span>&lt;Value&gt; {
-<a href=#380 id=380 data-nosnippet>380</a>    <span class="kw">match </span>read_u8(buf)<span class="question-mark">? </span>{
-<a href=#381 id=381 data-nosnippet>381</a>        TAG_NULL =&gt; <span class="prelude-val">Some</span>(Value::Null),
-<a href=#382 id=382 data-nosnippet>382</a>        TAG_FALSE =&gt; <span class="prelude-val">Some</span>(Value::Bool(<span class="bool-val">false</span>)),
-<a href=#383 id=383 data-nosnippet>383</a>        TAG_TRUE =&gt; <span class="prelude-val">Some</span>(Value::Bool(<span class="bool-val">true</span>)),
-<a href=#384 id=384 data-nosnippet>384</a>        TAG_NUMBER =&gt; <span class="prelude-val">Some</span>(Value::Number(read_f64(buf)<span class="question-mark">?</span>)),
-<a href=#385 id=385 data-nosnippet>385</a>        TAG_STRING =&gt; <span class="prelude-val">Some</span>(Value::String(read_string(buf)<span class="question-mark">?</span>)),
-<a href=#386 id=386 data-nosnippet>386</a>        TAG_COLOR =&gt; <span class="prelude-val">Some</span>(Value::Color(Color::new(
-<a href=#387 id=387 data-nosnippet>387</a>            read_f64(buf)<span class="question-mark">?</span>,
-<a href=#388 id=388 data-nosnippet>388</a>            read_f64(buf)<span class="question-mark">?</span>,
-<a href=#389 id=389 data-nosnippet>389</a>            read_f64(buf)<span class="question-mark">?</span>,
-<a href=#390 id=390 data-nosnippet>390</a>            read_f64(buf)<span class="question-mark">?</span>,
-<a href=#391 id=391 data-nosnippet>391</a>        ))),
-<a href=#392 id=392 data-nosnippet>392</a>        TAG_ARRAY =&gt; {
-<a href=#393 id=393 data-nosnippet>393</a>            <span class="kw">let </span>len = read_u32(buf)<span class="question-mark">? </span><span class="kw">as </span>usize;
-<a href=#394 id=394 data-nosnippet>394</a>            <span class="kw">let </span><span class="kw-2">mut </span>items = Vec::with_capacity(len.min(<span class="number">1024</span>));
-<a href=#395 id=395 data-nosnippet>395</a>            <span class="kw">for _ in </span><span class="number">0</span>..len {
-<a href=#396 id=396 data-nosnippet>396</a>                items.push(decode_value(buf)<span class="question-mark">?</span>);
-<a href=#397 id=397 data-nosnippet>397</a>            }
-<a href=#398 id=398 data-nosnippet>398</a>            <span class="prelude-val">Some</span>(Value::Array(items))
-<a href=#399 id=399 data-nosnippet>399</a>        }
-<a href=#400 id=400 data-nosnippet>400</a>        TAG_OBJECT =&gt; {
-<a href=#401 id=401 data-nosnippet>401</a>            <span class="kw">let </span>len = read_u32(buf)<span class="question-mark">? </span><span class="kw">as </span>usize;
-<a href=#402 id=402 data-nosnippet>402</a>            <span class="kw">let </span><span class="kw-2">mut </span>map = BTreeMap::new();
-<a href=#403 id=403 data-nosnippet>403</a>            <span class="kw">for _ in </span><span class="number">0</span>..len {
-<a href=#404 id=404 data-nosnippet>404</a>                <span class="kw">let </span>k = read_string(buf)<span class="question-mark">?</span>;
-<a href=#405 id=405 data-nosnippet>405</a>                <span class="kw">let </span>v = decode_value(buf)<span class="question-mark">?</span>;
-<a href=#406 id=406 data-nosnippet>406</a>                map.insert(k, v);
-<a href=#407 id=407 data-nosnippet>407</a>            }
-<a href=#408 id=408 data-nosnippet>408</a>            <span class="prelude-val">Some</span>(Value::Object(map))
-<a href=#409 id=409 data-nosnippet>409</a>        }
-<a href=#410 id=410 data-nosnippet>410</a>        <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
-<a href=#411 id=411 data-nosnippet>411</a>    }
-<a href=#412 id=412 data-nosnippet>412</a>}
-<a href=#413 id=413 data-nosnippet>413</a>
-<a href=#414 id=414 data-nosnippet>414</a><span class="attr">#[cfg(test)]
-<a href=#415 id=415 data-nosnippet>415</a></span><span class="kw">mod </span>tests;
+<a href=#324 id=324 data-nosnippet>324</a>        Value::Collator(<span class="kw">_</span>)
+<a href=#325 id=325 data-nosnippet>325</a>        | Value::Image(<span class="kw">_</span>)
+<a href=#326 id=326 data-nosnippet>326</a>        | Value::Formatted(<span class="kw">_</span>)
+<a href=#327 id=327 data-nosnippet>327</a>        | Value::Padding(<span class="kw">_</span>)
+<a href=#328 id=328 data-nosnippet>328</a>        | Value::NumberArray(<span class="kw">_</span>)
+<a href=#329 id=329 data-nosnippet>329</a>        | Value::ColorArray(<span class="kw">_</span>)
+<a href=#330 id=330 data-nosnippet>330</a>        | Value::ProjectionDefinition(<span class="kw">_</span>)
+<a href=#331 id=331 data-nosnippet>331</a>        | Value::VariableAnchorOffsetCollection(<span class="kw">_</span>) =&gt; {
+<a href=#332 id=332 data-nosnippet>332</a>            out.push(TAG_NULL);
+<a href=#333 id=333 data-nosnippet>333</a>        }
+<a href=#334 id=334 data-nosnippet>334</a>    }
+<a href=#335 id=335 data-nosnippet>335</a>}
+<a href=#336 id=336 data-nosnippet>336</a>
+<a href=#337 id=337 data-nosnippet>337</a><span class="kw">fn </span>decode_properties(<span class="kw-2">mut </span>buf: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Option</span>&lt;FeatureProperties&gt; {
+<a href=#338 id=338 data-nosnippet>338</a>    decode_properties_from(<span class="kw-2">&amp;mut </span>buf)
+<a href=#339 id=339 data-nosnippet>339</a>}
+<a href=#340 id=340 data-nosnippet>340</a>
+<a href=#341 id=341 data-nosnippet>341</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>decode_properties_from(buf: <span class="kw-2">&amp;mut &amp;</span>[u8]) -&gt; <span class="prelude-ty">Option</span>&lt;FeatureProperties&gt; {
+<a href=#342 id=342 data-nosnippet>342</a>    <span class="kw">let </span>count = read_u32(buf)<span class="question-mark">? </span><span class="kw">as </span>usize;
+<a href=#343 id=343 data-nosnippet>343</a>    <span class="kw">let </span><span class="kw-2">mut </span>props = FeatureProperties::new();
+<a href=#344 id=344 data-nosnippet>344</a>    <span class="kw">for _ in </span><span class="number">0</span>..count {
+<a href=#345 id=345 data-nosnippet>345</a>        <span class="kw">let </span>key = read_string(buf)<span class="question-mark">?</span>;
+<a href=#346 id=346 data-nosnippet>346</a>        <span class="kw">let </span>val = decode_value(buf)<span class="question-mark">?</span>;
+<a href=#347 id=347 data-nosnippet>347</a>        props.insert(key, val);
+<a href=#348 id=348 data-nosnippet>348</a>    }
+<a href=#349 id=349 data-nosnippet>349</a>    <span class="prelude-val">Some</span>(props)
+<a href=#350 id=350 data-nosnippet>350</a>}
+<a href=#351 id=351 data-nosnippet>351</a>
+<a href=#352 id=352 data-nosnippet>352</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>read_u8(buf: <span class="kw-2">&amp;mut &amp;</span>[u8]) -&gt; <span class="prelude-ty">Option</span>&lt;u8&gt; {
+<a href=#353 id=353 data-nosnippet>353</a>    <span class="kw">let </span>(<span class="kw-2">&amp;</span>byte, rest) = buf.split_first()<span class="question-mark">?</span>;
+<a href=#354 id=354 data-nosnippet>354</a>    <span class="kw-2">*</span>buf = rest;
+<a href=#355 id=355 data-nosnippet>355</a>    <span class="prelude-val">Some</span>(byte)
+<a href=#356 id=356 data-nosnippet>356</a>}
+<a href=#357 id=357 data-nosnippet>357</a>
+<a href=#358 id=358 data-nosnippet>358</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>read_u32(buf: <span class="kw-2">&amp;mut &amp;</span>[u8]) -&gt; <span class="prelude-ty">Option</span>&lt;u32&gt; {
+<a href=#359 id=359 data-nosnippet>359</a>    <span class="kw">if </span>buf.len() &lt; <span class="number">4 </span>{
+<a href=#360 id=360 data-nosnippet>360</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#361 id=361 data-nosnippet>361</a>    }
+<a href=#362 id=362 data-nosnippet>362</a>    <span class="kw">let </span>(head, rest) = buf.split_at(<span class="number">4</span>);
+<a href=#363 id=363 data-nosnippet>363</a>    <span class="kw-2">*</span>buf = rest;
+<a href=#364 id=364 data-nosnippet>364</a>    <span class="prelude-val">Some</span>(u32::from_le_bytes(head.try_into().ok()<span class="question-mark">?</span>))
+<a href=#365 id=365 data-nosnippet>365</a>}
+<a href=#366 id=366 data-nosnippet>366</a>
+<a href=#367 id=367 data-nosnippet>367</a><span class="kw">fn </span>read_f64(buf: <span class="kw-2">&amp;mut &amp;</span>[u8]) -&gt; <span class="prelude-ty">Option</span>&lt;f64&gt; {
+<a href=#368 id=368 data-nosnippet>368</a>    <span class="kw">if </span>buf.len() &lt; <span class="number">8 </span>{
+<a href=#369 id=369 data-nosnippet>369</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#370 id=370 data-nosnippet>370</a>    }
+<a href=#371 id=371 data-nosnippet>371</a>    <span class="kw">let </span>(head, rest) = buf.split_at(<span class="number">8</span>);
+<a href=#372 id=372 data-nosnippet>372</a>    <span class="kw-2">*</span>buf = rest;
+<a href=#373 id=373 data-nosnippet>373</a>    <span class="prelude-val">Some</span>(f64::from_le_bytes(head.try_into().ok()<span class="question-mark">?</span>))
+<a href=#374 id=374 data-nosnippet>374</a>}
+<a href=#375 id=375 data-nosnippet>375</a>
+<a href=#376 id=376 data-nosnippet>376</a><span class="kw">fn </span>read_string(buf: <span class="kw-2">&amp;mut &amp;</span>[u8]) -&gt; <span class="prelude-ty">Option</span>&lt;String&gt; {
+<a href=#377 id=377 data-nosnippet>377</a>    <span class="kw">let </span>len = read_u32(buf)<span class="question-mark">? </span><span class="kw">as </span>usize;
+<a href=#378 id=378 data-nosnippet>378</a>    <span class="kw">if </span>buf.len() &lt; len {
+<a href=#379 id=379 data-nosnippet>379</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#380 id=380 data-nosnippet>380</a>    }
+<a href=#381 id=381 data-nosnippet>381</a>    <span class="kw">let </span>(head, rest) = buf.split_at(len);
+<a href=#382 id=382 data-nosnippet>382</a>    <span class="kw-2">*</span>buf = rest;
+<a href=#383 id=383 data-nosnippet>383</a>    std::str::from_utf8(head).ok().map(str::to_owned)
+<a href=#384 id=384 data-nosnippet>384</a>}
+<a href=#385 id=385 data-nosnippet>385</a>
+<a href=#386 id=386 data-nosnippet>386</a><span class="kw">fn </span>decode_value(buf: <span class="kw-2">&amp;mut &amp;</span>[u8]) -&gt; <span class="prelude-ty">Option</span>&lt;Value&gt; {
+<a href=#387 id=387 data-nosnippet>387</a>    <span class="kw">match </span>read_u8(buf)<span class="question-mark">? </span>{
+<a href=#388 id=388 data-nosnippet>388</a>        TAG_NULL =&gt; <span class="prelude-val">Some</span>(Value::Null),
+<a href=#389 id=389 data-nosnippet>389</a>        TAG_FALSE =&gt; <span class="prelude-val">Some</span>(Value::Bool(<span class="bool-val">false</span>)),
+<a href=#390 id=390 data-nosnippet>390</a>        TAG_TRUE =&gt; <span class="prelude-val">Some</span>(Value::Bool(<span class="bool-val">true</span>)),
+<a href=#391 id=391 data-nosnippet>391</a>        TAG_NUMBER =&gt; <span class="prelude-val">Some</span>(Value::Number(read_f64(buf)<span class="question-mark">?</span>)),
+<a href=#392 id=392 data-nosnippet>392</a>        TAG_STRING =&gt; <span class="prelude-val">Some</span>(Value::String(read_string(buf)<span class="question-mark">?</span>)),
+<a href=#393 id=393 data-nosnippet>393</a>        TAG_COLOR =&gt; <span class="prelude-val">Some</span>(Value::Color(Color::new(
+<a href=#394 id=394 data-nosnippet>394</a>            read_f64(buf)<span class="question-mark">?</span>,
+<a href=#395 id=395 data-nosnippet>395</a>            read_f64(buf)<span class="question-mark">?</span>,
+<a href=#396 id=396 data-nosnippet>396</a>            read_f64(buf)<span class="question-mark">?</span>,
+<a href=#397 id=397 data-nosnippet>397</a>            read_f64(buf)<span class="question-mark">?</span>,
+<a href=#398 id=398 data-nosnippet>398</a>        ))),
+<a href=#399 id=399 data-nosnippet>399</a>        TAG_ARRAY =&gt; {
+<a href=#400 id=400 data-nosnippet>400</a>            <span class="kw">let </span>len = read_u32(buf)<span class="question-mark">? </span><span class="kw">as </span>usize;
+<a href=#401 id=401 data-nosnippet>401</a>            <span class="kw">let </span><span class="kw-2">mut </span>items = Vec::with_capacity(len.min(<span class="number">1024</span>));
+<a href=#402 id=402 data-nosnippet>402</a>            <span class="kw">for _ in </span><span class="number">0</span>..len {
+<a href=#403 id=403 data-nosnippet>403</a>                items.push(decode_value(buf)<span class="question-mark">?</span>);
+<a href=#404 id=404 data-nosnippet>404</a>            }
+<a href=#405 id=405 data-nosnippet>405</a>            <span class="prelude-val">Some</span>(Value::Array(items))
+<a href=#406 id=406 data-nosnippet>406</a>        }
+<a href=#407 id=407 data-nosnippet>407</a>        TAG_OBJECT =&gt; {
+<a href=#408 id=408 data-nosnippet>408</a>            <span class="kw">let </span>len = read_u32(buf)<span class="question-mark">? </span><span class="kw">as </span>usize;
+<a href=#409 id=409 data-nosnippet>409</a>            <span class="kw">let </span><span class="kw-2">mut </span>map = BTreeMap::new();
+<a href=#410 id=410 data-nosnippet>410</a>            <span class="kw">for _ in </span><span class="number">0</span>..len {
+<a href=#411 id=411 data-nosnippet>411</a>                <span class="kw">let </span>k = read_string(buf)<span class="question-mark">?</span>;
+<a href=#412 id=412 data-nosnippet>412</a>                <span class="kw">let </span>v = decode_value(buf)<span class="question-mark">?</span>;
+<a href=#413 id=413 data-nosnippet>413</a>                map.insert(k, v);
+<a href=#414 id=414 data-nosnippet>414</a>            }
+<a href=#415 id=415 data-nosnippet>415</a>            <span class="prelude-val">Some</span>(Value::Object(map))
+<a href=#416 id=416 data-nosnippet>416</a>        }
+<a href=#417 id=417 data-nosnippet>417</a>        <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+<a href=#418 id=418 data-nosnippet>418</a>    }
+<a href=#419 id=419 data-nosnippet>419</a>}
+<a href=#420 id=420 data-nosnippet>420</a>
+<a href=#421 id=421 data-nosnippet>421</a><span class="attr">#[cfg(test)]
+<a href=#422 id=422 data-nosnippet>422</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

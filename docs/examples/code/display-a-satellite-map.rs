@@ -17,18 +17,12 @@ pub fn style() -> Style {
         sources: HashMap::from([(
             "satellite".to_string(),
             Source::Raster(VectorSource {
-                attribution: None,
-                bounds: None,
-                maxzoom: None,
-                minzoom: None,
-                scheme: None,
                 tiles: Some(vec![
                     "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg"
                         .to_string(),
                 ]),
                 tile_size: Some(256),
-                url: None,
-                promote_id: None,
+                ..Default::default()
             }),
         )]),
         layers: vec![StyleLayer {

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["StyleProperty"],"mod":["compiled","text"],"struct":["ColorList","FormattedText","ImageName","NumberList","PatternName","PropertyExpression","TextField","TextSection","UnsupportedProperty"],"trait":["PropertyValue"]};
+window.SIDEBAR_ITEMS = {"enum":["StyleProperty"],"fn":["lookup_legacy_property_spec"],"mod":["compiled","spec_bridge","text"],"struct":["ColorList","FormattedText","ImageName","NumberList","PatternName","PropertyExpression","TextField","TextSection","UnsupportedProperty"],"trait":["PropertyValue"]};

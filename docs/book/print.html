@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-04576098.js";
+            window.path_to_searchindex_js = "searchindex-00ec32b3.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-ae8692d6.js"></script>
@@ -505,18 +505,12 @@ pub fn style() -&gt; Style {
         sources: HashMap::from([(
             "satellite".to_string(),
             Source::Raster(VectorSource {
-                attribution: None,
-                bounds: None,
-                maxzoom: None,
-                minzoom: None,
-                scheme: None,
                 tiles: Some(vec![
                     "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg"
                         .to_string(),
                 ]),
                 tile_size: Some(256),
-                url: None,
-                promote_id: None,
+                ..Default::default()
             }),
         )]),
         layers: vec![StyleLayer {
@@ -764,18 +758,11 @@ pub fn style() -&gt; Style {
         sources: HashMap::from([(
             "satellite".to_string(),
             Source::Raster(VectorSource {
-                attribution: None,
-                bounds: None,
-                maxzoom: None,
-                minzoom: None,
-                scheme: None,
                 tiles: Some(vec![
                     "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg"
                         .to_string(),
                 ]),
-                tile_size: None,
-                url: None,
-                promote_id: None,
+                ..Default::default()
             }),
         )]),
         layers: vec![StyleLayer {
@@ -967,50 +954,26 @@ pub fn style() -&gt; Style {
                 "osm".to_string(),
                 Source::Raster(VectorSource {
                     attribution: Some("&amp;copy; OpenStreetMap Contributors".to_string()),
-                    bounds: None,
                     maxzoom: Some(19),
-                    minzoom: None,
-                    scheme: None,
                     tiles: Some(vec![
                         "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png".to_string()
                     ]),
                     tile_size: Some(256),
-                    url: None,
-                    promote_id: None,
+                    ..Default::default()
                 }),
             ),
             (
                 "terrainSource".to_string(),
                 Source::RasterDem(RasterDemSource {
-                    attribution: None,
-                    bounds: None,
-                    maxzoom: None,
-                    minzoom: None,
-                    tiles: None,
                     url: Some("https://tiles.mapterhorn.com/tilejson.json".to_string()),
-                    tile_size: None,
-                    encoding: None,
-                    red_factor: 1.0,
-                    green_factor: 1.0,
-                    blue_factor: 1.0,
-                    base_shift: 0.0,
+                    ..Default::default()
                 }),
             ),
             (
                 "hillshadeSource".to_string(),
                 Source::RasterDem(RasterDemSource {
-                    attribution: None,
-                    bounds: None,
-                    maxzoom: None,
-                    minzoom: None,
-                    tiles: None,
                     url: Some("https://tiles.mapterhorn.com/tilejson.json".to_string()),
-                    tile_size: None,
-                    encoding: None,
-                    red_factor: 1.0,
-                    green_factor: 1.0,
-                    blue_factor: 1.0,
-                    base_shift: 0.0,
+                    ..Default::default()
                 }),
             ),
         ]),
@@ -1230,18 +1193,9 @@ pub fn style() -&gt; Style {
         sources: HashMap::from([(
             "hillshadeSource".to_string(),
             Source::RasterDem(RasterDemSource {
-                attribution: None,
-                bounds: None,
-                maxzoom: None,
-                minzoom: None,
-                tiles: None,
                 url: Some("https://demotiles.maplibre.org/terrain-tiles/tiles.json".to_string()),
                 tile_size: Some(256),
-                encoding: None,
-                red_factor: 1.0,
-                green_factor: 1.0,
-                blue_factor: 1.0,
-                base_shift: 0.0,
+                ..Default::default()
             }),
         )]),
         layers: vec![StyleLayer {
@@ -1423,18 +1377,9 @@ pub fn style() -&gt; Style {
         sources: HashMap::from([(
             "elevationSource".to_string(),
             Source::RasterDem(RasterDemSource {
-                attribution: None,
-                bounds: None,
-                maxzoom: None,
-                minzoom: None,
-                tiles: None,
                 url: Some("https://demotiles.maplibre.org/terrain-tiles/tiles.json".to_string()),
                 tile_size: Some(256),
-                encoding: None,
-                red_factor: 1.0,
-                green_factor: 1.0,
-                blue_factor: 1.0,
-                base_shift: 0.0,
+                ..Default::default()
             }),
         )]),
         layers: vec![
@@ -1676,15 +1621,8 @@ pub fn build_style(mut style: Style) -&gt; Style {
         style.sources.insert(
             "openfreemap".to_string(),
             Source::Vector(VectorSource {
-                attribution: None,
-                bounds: None,
-                maxzoom: None,
-                minzoom: None,
-                scheme: None,
-                tiles: None,
-                tile_size: None,
                 url: Some("https://tiles.openfreemap.org/planet".to_string()),
-                promote_id: None,
+                ..Default::default()
             }),
         );
         "openfreemap".to_string()
@@ -1995,6 +1933,7 @@ pub fn build_style(mut style: Style) -&gt; Style {
             cluster_min_points: None,
             cluster_properties: None,
             filter: None,
+            volatile: false,
             generation: fresh_generation(),
         }),
     );
@@ -2260,6 +2199,7 @@ pub fn build_style(mut style: Style) -&gt; Style {
             cluster_min_points: None,
             cluster_properties: None,
             filter: None,
+            volatile: false,
             generation: fresh_generation(),
         }),
     );
@@ -2467,16 +2407,13 @@ pub fn style() -&gt; Style {
             "raster-tiles".to_string(),
             Source::Raster(VectorSource {
                 attribution: Some("© OpenStreetMap contributors".to_string()),
-                bounds: None,
                 maxzoom: Some(19),
                 minzoom: Some(0),
-                scheme: None,
                 tiles: Some(vec![
                     "https://tile.openstreetmap.org/{z}/{x}/{y}.png".to_string()
                 ]),
                 tile_size: Some(256),
-                url: None,
-                promote_id: None,
+                ..Default::default()
             }),
         )]),
         layers: vec![StyleLayer {
@@ -2873,6 +2810,7 @@ pub fn build_style(mut style: Style) -&gt; Style {
             cluster_min_points: None,
             cluster_properties: None,
             filter: None,
+            volatile: false,
             generation: fresh_generation(),
         }),
     );
@@ -3189,6 +3127,7 @@ pub fn build_style(mut style: Style) -&gt; Style {
             cluster_min_points: None,
             cluster_properties: None,
             filter: None,
+            volatile: false,
             generation: fresh_generation(),
         }),
     );
@@ -3471,6 +3410,7 @@ pub fn build_style(mut style: Style) -&gt; Style {
             cluster_min_points: None,
             cluster_properties: None,
             filter: None,
+            volatile: false,
             generation: fresh_generation(),
         }),
     );
@@ -3965,6 +3905,7 @@ pub fn build_style(mut style: Style) -&gt; Style {
             cluster_min_points: None,
             cluster_properties: None,
             filter: None,
+            volatile: false,
             generation: fresh_generation(),
         }),
     );

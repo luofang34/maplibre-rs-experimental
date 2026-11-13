@@ -22,50 +22,26 @@ pub fn style() -> Style {
                 "osm".to_string(),
                 Source::Raster(VectorSource {
                     attribution: Some("&copy; OpenStreetMap Contributors".to_string()),
-                    bounds: None,
                     maxzoom: Some(19),
-                    minzoom: None,
-                    scheme: None,
                     tiles: Some(vec![
                         "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png".to_string()
                     ]),
                     tile_size: Some(256),
-                    url: None,
-                    promote_id: None,
+                    ..Default::default()
                 }),
             ),
             (
                 "terrainSource".to_string(),
                 Source::RasterDem(RasterDemSource {
-                    attribution: None,
-                    bounds: None,
-                    maxzoom: None,
-                    minzoom: None,
-                    tiles: None,
                     url: Some("https://tiles.mapterhorn.com/tilejson.json".to_string()),
-                    tile_size: None,
-                    encoding: None,
-                    red_factor: 1.0,
-                    green_factor: 1.0,
-                    blue_factor: 1.0,
-                    base_shift: 0.0,
+                    ..Default::default()
                 }),
             ),
             (
                 "hillshadeSource".to_string(),
                 Source::RasterDem(RasterDemSource {
-                    attribution: None,
-                    bounds: None,
-                    maxzoom: None,
-                    minzoom: None,
-                    tiles: None,
                     url: Some("https://tiles.mapterhorn.com/tilejson.json".to_string()),
-                    tile_size: None,
-                    encoding: None,
-                    red_factor: 1.0,
-                    green_factor: 1.0,
-                    blue_factor: 1.0,
-                    base_shift: 0.0,
+                    ..Default::default()
                 }),
             ),
         ]),

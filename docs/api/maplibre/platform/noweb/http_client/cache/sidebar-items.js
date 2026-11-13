@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DISK_CACHE_IO_CONCURRENCY","MEMORY_CACHE_CAP_BYTES","MEMORY_CACHE_MAX_ITEM_BYTES"],"struct":["HttpCacheFrontend","MemoryTileCacheState","SharedCacheFrontend"]};

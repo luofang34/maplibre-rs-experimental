@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["arithmetic","clamp_index","coerce","compare","eval_at","eval_join","eval_number_format","eval_split","expect_bool","expect_color","expect_number","expect_object","expect_string","index_of","interpolate_values","js_round","math","rgba","searchable","slice","stop_at_or_below"]};
+window.SIDEBAR_ITEMS = {"fn":["arithmetic","clamp_index","compare","eval_at","eval_join","eval_number_format","eval_split","expect_bool","expect_color","expect_number","expect_object","expect_string","index_of","js_round","math","searchable","slice","stop_at_or_below"]};

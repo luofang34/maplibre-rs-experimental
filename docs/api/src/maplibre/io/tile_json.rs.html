@@ -139,7 +139,7 @@
 <a href=#139 id=139 data-nosnippet>139</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(url) = pending_tile_json_url(source) <span class="kw">else </span>{
 <a href=#140 id=140 data-nosnippet>140</a>            <span class="kw">continue</span>;
 <a href=#141 id=141 data-nosnippet>141</a>        };
-<a href=#142 id=142 data-nosnippet>142</a>        <span class="kw">match </span>client.fetch_url(<span class="kw-2">&amp;</span>url).<span class="kw">await </span>{
+<a href=#142 id=142 data-nosnippet>142</a>        <span class="kw">match </span>client.fetch_source_url(<span class="kw-2">&amp;</span>url, source.is_volatile()).<span class="kw">await </span>{
 <a href=#143 id=143 data-nosnippet>143</a>            <span class="prelude-val">Ok</span>(bytes) =&gt; <span class="kw">match </span>serde_json::from_slice::&lt;TileJson&gt;(<span class="kw-2">&amp;</span>bytes) {
 <a href=#144 id=144 data-nosnippet>144</a>                <span class="prelude-val">Ok</span>(tile_json) =&gt; {
 <a href=#145 id=145 data-nosnippet>145</a>                    <span class="macro">tracing::info!</span>(source = %name, %url, <span class="string">"resolved TileJSON source"</span>);

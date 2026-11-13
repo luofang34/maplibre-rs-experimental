@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["EvaluationError"],"fn":["feature_geometry"],"mod":["images","operations"],"struct":["EvaluationContext"],"trait":["ImageSet"],"type":["FeatureProperties","Result"]};
+window.SIDEBAR_ITEMS = {"fn":["feature_geometry"],"mod":["coercions","error","images","operations"],"struct":["EvaluationContext"],"trait":["ImageSet"],"type":["FeatureProperties","Result"]};

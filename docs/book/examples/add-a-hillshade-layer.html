@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-04576098.js";
+            window.path_to_searchindex_js = "../searchindex-00ec32b3.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-ae8692d6.js"></script>
@@ -210,18 +210,9 @@ pub fn style() -&gt; Style {
         sources: HashMap::from([(
             "hillshadeSource".to_string(),
             Source::RasterDem(RasterDemSource {
-                attribution: None,
-                bounds: None,
-                maxzoom: None,
-                minzoom: None,
-                tiles: None,
                 url: Some("https://demotiles.maplibre.org/terrain-tiles/tiles.json".to_string()),
                 tile_size: Some(256),
-                encoding: None,
-                red_factor: 1.0,
-                green_factor: 1.0,
-                blue_factor: 1.0,
-                base_shift: 0.0,
+                ..Default::default()
             }),
         )]),
         layers: vec![StyleLayer {

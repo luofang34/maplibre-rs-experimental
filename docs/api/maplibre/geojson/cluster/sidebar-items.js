@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["TILE_PIXELS"],"enum":["Clustered","Reduce"],"fn":["abbreviated","unproject"],"struct":["ClusterOptions","Clusters","Item","Level","Property"],"type":["ClusterInput"]};
+window.SIDEBAR_ITEMS = {"constant":["TILE_PIXELS"],"enum":["Clustered","Reduce"],"fn":["abbreviated","direct_property_key","unproject"],"struct":["ClusterOptions","Clusters","Item","Level","Property"],"type":["ClusterInput"]};

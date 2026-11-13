@@ -139,52 +139,48 @@
 <a href=#139 id=139 data-nosnippet>139</a>    </span><span class="kw">pub fn </span>evaluate(<span class="kw-2">&amp;</span><span class="self">self</span>, feature: <span class="kw-2">&amp;</span>FeatureContext) -&gt; bool {
 <a href=#140 id=140 data-nosnippet>140</a>        <span class="kw">let </span>context = EvaluationContext {
 <a href=#141 id=141 data-nosnippet>141</a>            zoom: feature.zoom,
-<a href=#142 id=142 data-nosnippet>142</a>            elevation: <span class="number">0.0</span>,
-<a href=#143 id=143 data-nosnippet>143</a>            heatmap_density: <span class="number">0.0</span>,
-<a href=#144 id=144 data-nosnippet>144</a>            line_progress: <span class="number">0.0</span>,
-<a href=#145 id=145 data-nosnippet>145</a>            properties: <span class="prelude-val">Some</span>(feature.properties),
-<a href=#146 id=146 data-nosnippet>146</a>            geometry_type: <span class="prelude-val">Some</span>(feature.geometry_type.name()),
-<a href=#147 id=147 data-nosnippet>147</a>            id: feature.id.as_ref(),
-<a href=#148 id=148 data-nosnippet>148</a>            global_state: <span class="prelude-val">None</span>,
-<a href=#149 id=149 data-nosnippet>149</a>            available_images: <span class="prelude-val">None</span>,
-<a href=#150 id=150 data-nosnippet>150</a>        };
-<a href=#151 id=151 data-nosnippet>151</a>        <span class="self">self</span>.expression
-<a href=#152 id=152 data-nosnippet>152</a>            .evaluate(<span class="kw-2">&amp;</span>context)
-<a href=#153 id=153 data-nosnippet>153</a>            .ok()
-<a href=#154 id=154 data-nosnippet>154</a>            .and_then(|value| value.as_bool())
-<a href=#155 id=155 data-nosnippet>155</a>            .unwrap_or(<span class="bool-val">false</span>)
-<a href=#156 id=156 data-nosnippet>156</a>    }
-<a href=#157 id=157 data-nosnippet>157</a>
-<a href=#158 id=158 data-nosnippet>158</a>    <span class="doccomment">/// The boolean expression the filter evaluates.
-<a href=#159 id=159 data-nosnippet>159</a>    </span><span class="kw">pub fn </span>expression(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>Expression {
-<a href=#160 id=160 data-nosnippet>160</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.expression
-<a href=#161 id=161 data-nosnippet>161</a>    }
-<a href=#162 id=162 data-nosnippet>162</a>}
-<a href=#163 id=163 data-nosnippet>163</a>
-<a href=#164 id=164 data-nosnippet>164</a><span class="kw">fn </span>kind_name(value: <span class="kw-2">&amp;</span>Json) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str {
-<a href=#165 id=165 data-nosnippet>165</a>    <span class="kw">match </span>value {
-<a href=#166 id=166 data-nosnippet>166</a>        Json::Null =&gt; <span class="string">"null"</span>,
-<a href=#167 id=167 data-nosnippet>167</a>        Json::Bool(<span class="kw">_</span>) =&gt; <span class="string">"boolean"</span>,
-<a href=#168 id=168 data-nosnippet>168</a>        Json::Number(<span class="kw">_</span>) =&gt; <span class="string">"number"</span>,
-<a href=#169 id=169 data-nosnippet>169</a>        Json::String(<span class="kw">_</span>) =&gt; <span class="string">"string"</span>,
-<a href=#170 id=170 data-nosnippet>170</a>        Json::Array(<span class="kw">_</span>) =&gt; <span class="string">"array"</span>,
-<a href=#171 id=171 data-nosnippet>171</a>        Json::Object(<span class="kw">_</span>) =&gt; <span class="string">"object"</span>,
-<a href=#172 id=172 data-nosnippet>172</a>    }
-<a href=#173 id=173 data-nosnippet>173</a>}
-<a href=#174 id=174 data-nosnippet>174</a>
-<a href=#175 id=175 data-nosnippet>175</a><span class="doccomment">/// Typed properties from a GeoJSON `properties` object.
-<a href=#176 id=176 data-nosnippet>176</a></span><span class="kw">pub fn </span>properties_from_json(properties: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Json&gt;) -&gt; FeatureProperties {
-<a href=#177 id=177 data-nosnippet>177</a>    properties
-<a href=#178 id=178 data-nosnippet>178</a>        .and_then(Json::as_object)
-<a href=#179 id=179 data-nosnippet>179</a>        .map(|object| {
-<a href=#180 id=180 data-nosnippet>180</a>            object
-<a href=#181 id=181 data-nosnippet>181</a>                .iter()
-<a href=#182 id=182 data-nosnippet>182</a>                .map(|(key, value)| (key.clone(), Value::from_json(value)))
-<a href=#183 id=183 data-nosnippet>183</a>                .collect()
-<a href=#184 id=184 data-nosnippet>184</a>        })
-<a href=#185 id=185 data-nosnippet>185</a>        .unwrap_or_default()
-<a href=#186 id=186 data-nosnippet>186</a>}
-<a href=#187 id=187 data-nosnippet>187</a>
-<a href=#188 id=188 data-nosnippet>188</a><span class="attr">#[cfg(test)]
-<a href=#189 id=189 data-nosnippet>189</a></span><span class="kw">mod </span>tests;
+<a href=#142 id=142 data-nosnippet>142</a>            properties: <span class="prelude-val">Some</span>(feature.properties),
+<a href=#143 id=143 data-nosnippet>143</a>            geometry_type: <span class="prelude-val">Some</span>(feature.geometry_type.name()),
+<a href=#144 id=144 data-nosnippet>144</a>            id: feature.id.as_ref(),
+<a href=#145 id=145 data-nosnippet>145</a>            ..EvaluationContext::default()
+<a href=#146 id=146 data-nosnippet>146</a>        };
+<a href=#147 id=147 data-nosnippet>147</a>        <span class="self">self</span>.expression
+<a href=#148 id=148 data-nosnippet>148</a>            .evaluate(<span class="kw-2">&amp;</span>context)
+<a href=#149 id=149 data-nosnippet>149</a>            .ok()
+<a href=#150 id=150 data-nosnippet>150</a>            .and_then(|value| value.as_bool())
+<a href=#151 id=151 data-nosnippet>151</a>            .unwrap_or(<span class="bool-val">false</span>)
+<a href=#152 id=152 data-nosnippet>152</a>    }
+<a href=#153 id=153 data-nosnippet>153</a>
+<a href=#154 id=154 data-nosnippet>154</a>    <span class="doccomment">/// The boolean expression the filter evaluates.
+<a href=#155 id=155 data-nosnippet>155</a>    </span><span class="kw">pub fn </span>expression(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>Expression {
+<a href=#156 id=156 data-nosnippet>156</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.expression
+<a href=#157 id=157 data-nosnippet>157</a>    }
+<a href=#158 id=158 data-nosnippet>158</a>}
+<a href=#159 id=159 data-nosnippet>159</a>
+<a href=#160 id=160 data-nosnippet>160</a><span class="kw">fn </span>kind_name(value: <span class="kw-2">&amp;</span>Json) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str {
+<a href=#161 id=161 data-nosnippet>161</a>    <span class="kw">match </span>value {
+<a href=#162 id=162 data-nosnippet>162</a>        Json::Null =&gt; <span class="string">"null"</span>,
+<a href=#163 id=163 data-nosnippet>163</a>        Json::Bool(<span class="kw">_</span>) =&gt; <span class="string">"boolean"</span>,
+<a href=#164 id=164 data-nosnippet>164</a>        Json::Number(<span class="kw">_</span>) =&gt; <span class="string">"number"</span>,
+<a href=#165 id=165 data-nosnippet>165</a>        Json::String(<span class="kw">_</span>) =&gt; <span class="string">"string"</span>,
+<a href=#166 id=166 data-nosnippet>166</a>        Json::Array(<span class="kw">_</span>) =&gt; <span class="string">"array"</span>,
+<a href=#167 id=167 data-nosnippet>167</a>        Json::Object(<span class="kw">_</span>) =&gt; <span class="string">"object"</span>,
+<a href=#168 id=168 data-nosnippet>168</a>    }
+<a href=#169 id=169 data-nosnippet>169</a>}
+<a href=#170 id=170 data-nosnippet>170</a>
+<a href=#171 id=171 data-nosnippet>171</a><span class="doccomment">/// Typed properties from a GeoJSON `properties` object.
+<a href=#172 id=172 data-nosnippet>172</a></span><span class="kw">pub fn </span>properties_from_json(properties: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Json&gt;) -&gt; FeatureProperties {
+<a href=#173 id=173 data-nosnippet>173</a>    properties
+<a href=#174 id=174 data-nosnippet>174</a>        .and_then(Json::as_object)
+<a href=#175 id=175 data-nosnippet>175</a>        .map(|object| {
+<a href=#176 id=176 data-nosnippet>176</a>            object
+<a href=#177 id=177 data-nosnippet>177</a>                .iter()
+<a href=#178 id=178 data-nosnippet>178</a>                .map(|(key, value)| (key.clone(), Value::from_json(value)))
+<a href=#179 id=179 data-nosnippet>179</a>                .collect()
+<a href=#180 id=180 data-nosnippet>180</a>        })
+<a href=#181 id=181 data-nosnippet>181</a>        .unwrap_or_default()
+<a href=#182 id=182 data-nosnippet>182</a>}
+<a href=#183 id=183 data-nosnippet>183</a>
+<a href=#184 id=184 data-nosnippet>184</a><span class="attr">#[cfg(test)]
+<a href=#185 id=185 data-nosnippet>185</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

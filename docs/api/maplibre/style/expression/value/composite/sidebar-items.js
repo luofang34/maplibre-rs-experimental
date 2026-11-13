@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["VALID_ANCHORS"],"enum":["ProjectionDefinition"],"fn":["is_valid_anchor"],"struct":["ColorArray","NumberArray","Padding","VariableAnchorOffsetCollection"]};

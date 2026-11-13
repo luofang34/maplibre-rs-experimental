@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-04576098.js";
+            window.path_to_searchindex_js = "../searchindex-00ec32b3.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-ae8692d6.js"></script>
@@ -230,6 +230,7 @@ pub fn build_style(mut style: Style) -&gt; Style {
             cluster_min_points: None,
             cluster_properties: None,
             filter: None,
+            volatile: false,
             generation: fresh_generation(),
         }),
     );

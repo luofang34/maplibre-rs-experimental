@@ -184,108 +184,98 @@
 <a href=#184 id=184 data-nosnippet>184</a>
 <a href=#185 id=185 data-nosnippet>185</a><span class="kw">impl </span>PropertyValue <span class="kw">for </span>ImageName {
 <a href=#186 id=186 data-nosnippet>186</a>    <span class="kw">fn </span>spec() -&gt; LegacyPropertySpec {
-<a href=#187 id=187 data-nosnippet>187</a>        LegacyPropertySpec {
-<a href=#188 id=188 data-nosnippet>188</a>            kind: PropertyKind::ResolvedImage,
-<a href=#189 id=189 data-nosnippet>189</a>            interpolated: <span class="bool-val">false</span>,
-<a href=#190 id=190 data-nosnippet>190</a>            default: <span class="prelude-val">None</span>,
-<a href=#191 id=191 data-nosnippet>191</a>            <span class="comment">// `icon-image` may name its image with `{token}` references to feature properties.
-<a href=#192 id=192 data-nosnippet>192</a>            </span>tokens: <span class="bool-val">true</span>,
-<a href=#193 id=193 data-nosnippet>193</a>        }
+<a href=#187 id=187 data-nosnippet>187</a>        <span class="kw">crate</span>::style::spec::SymbolLayoutProperty::IconImage
+<a href=#188 id=188 data-nosnippet>188</a>            .metadata()
+<a href=#189 id=189 data-nosnippet>189</a>            .legacy_property_spec()
+<a href=#190 id=190 data-nosnippet>190</a>    }
+<a href=#191 id=191 data-nosnippet>191</a>
+<a href=#192 id=192 data-nosnippet>192</a>    <span class="kw">fn </span>from_value(value: <span class="kw-2">&amp;</span>Value) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt; {
+<a href=#193 id=193 data-nosnippet>193</a>        image_name(value).map(<span class="self">Self</span>)
 <a href=#194 id=194 data-nosnippet>194</a>    }
-<a href=#195 id=195 data-nosnippet>195</a>
-<a href=#196 id=196 data-nosnippet>196</a>    <span class="kw">fn </span>from_value(value: <span class="kw-2">&amp;</span>Value) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt; {
-<a href=#197 id=197 data-nosnippet>197</a>        image_name(value).map(<span class="self">Self</span>)
-<a href=#198 id=198 data-nosnippet>198</a>    }
-<a href=#199 id=199 data-nosnippet>199</a>}
-<a href=#200 id=200 data-nosnippet>200</a>
-<a href=#201 id=201 data-nosnippet>201</a><span class="doccomment">/// The image a pattern property names: like [`ImageName`], without `{token}` references, which
-<a href=#202 id=202 data-nosnippet>202</a>/// the specification gives patterns none of.
-<a href=#203 id=203 data-nosnippet>203</a></span><span class="attr">#[derive(Clone, Debug, Default, PartialEq, Serialize)]
-<a href=#204 id=204 data-nosnippet>204</a></span><span class="kw">pub struct </span>PatternName(<span class="kw">pub </span>String);
-<a href=#205 id=205 data-nosnippet>205</a>
-<a href=#206 id=206 data-nosnippet>206</a><span class="kw">impl </span>PropertyValue <span class="kw">for </span>PatternName {
-<a href=#207 id=207 data-nosnippet>207</a>    <span class="kw">fn </span>spec() -&gt; LegacyPropertySpec {
-<a href=#208 id=208 data-nosnippet>208</a>        LegacyPropertySpec {
-<a href=#209 id=209 data-nosnippet>209</a>            kind: PropertyKind::ResolvedImage,
-<a href=#210 id=210 data-nosnippet>210</a>            interpolated: <span class="bool-val">false</span>,
-<a href=#211 id=211 data-nosnippet>211</a>            default: <span class="prelude-val">None</span>,
-<a href=#212 id=212 data-nosnippet>212</a>            tokens: <span class="bool-val">false</span>,
-<a href=#213 id=213 data-nosnippet>213</a>        }
-<a href=#214 id=214 data-nosnippet>214</a>    }
-<a href=#215 id=215 data-nosnippet>215</a>
-<a href=#216 id=216 data-nosnippet>216</a>    <span class="kw">fn </span>from_value(value: <span class="kw-2">&amp;</span>Value) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt; {
-<a href=#217 id=217 data-nosnippet>217</a>        image_name(value).map(<span class="self">Self</span>)
-<a href=#218 id=218 data-nosnippet>218</a>    }
-<a href=#219 id=219 data-nosnippet>219</a>}
-<a href=#220 id=220 data-nosnippet>220</a>
-<a href=#221 id=221 data-nosnippet>221</a><span class="doccomment">/// The name an image property's value gives.
-<a href=#222 id=222 data-nosnippet>222</a></span><span class="kw">fn </span>image_name(value: <span class="kw-2">&amp;</span>Value) -&gt; <span class="prelude-ty">Option</span>&lt;String&gt; {
-<a href=#223 id=223 data-nosnippet>223</a>    <span class="kw">match </span>value {
-<a href=#224 id=224 data-nosnippet>224</a>        Value::Image(image) =&gt; <span class="prelude-val">Some</span>(image.name.clone()),
-<a href=#225 id=225 data-nosnippet>225</a>        Value::String(name) =&gt; <span class="prelude-val">Some</span>(name.clone()),
-<a href=#226 id=226 data-nosnippet>226</a>        <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
-<a href=#227 id=227 data-nosnippet>227</a>    }
-<a href=#228 id=228 data-nosnippet>228</a>}
-<a href=#229 id=229 data-nosnippet>229</a>
-<a href=#230 id=230 data-nosnippet>230</a><span class="doccomment">/// The text of `text-field`: a [`TextField`] evaluated as formatted text, so the sections and
-<a href=#231 id=231 data-nosnippet>231</a>/// images a `case`, `match` or `coalesce` inside a `format` chooses stay sections and images.
-<a href=#232 id=232 data-nosnippet>232</a></span><span class="attr">#[derive(Clone, Debug, Default, PartialEq)]
-<a href=#233 id=233 data-nosnippet>233</a></span><span class="kw">pub struct </span>FormattedText(<span class="kw">pub </span>TextField);
-<a href=#234 id=234 data-nosnippet>234</a>
-<a href=#235 id=235 data-nosnippet>235</a><span class="doccomment">/// Text with sections is written as the `format` expression that makes it, so a layer that is
-<a href=#236 id=236 data-nosnippet>236</a>/// serialized and parsed again keeps its sections and images.
-<a href=#237 id=237 data-nosnippet>237</a></span><span class="kw">impl </span>Serialize <span class="kw">for </span>FormattedText {
-<a href=#238 id=238 data-nosnippet>238</a>    <span class="kw">fn </span>serialize&lt;S: Serializer&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, serializer: S) -&gt; <span class="prelude-ty">Result</span>&lt;S::Ok, S::Error&gt; {
-<a href=#239 id=239 data-nosnippet>239</a>        <span class="kw">let </span>TextField(text, sections) = <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span>;
-<a href=#240 id=240 data-nosnippet>240</a>        <span class="kw">if </span>sections.is_empty() {
-<a href=#241 id=241 data-nosnippet>241</a>            <span class="kw">return </span>serializer.serialize_str(text);
-<a href=#242 id=242 data-nosnippet>242</a>        }
-<a href=#243 id=243 data-nosnippet>243</a>        <span class="kw">let </span><span class="kw-2">mut </span>format = <span class="macro">vec!</span>[<span class="macro">serde_json::json!</span>(<span class="string">"format"</span>)];
-<a href=#244 id=244 data-nosnippet>244</a>        <span class="kw">let </span><span class="kw-2">mut </span>characters = text.chars();
-<a href=#245 id=245 data-nosnippet>245</a>        <span class="kw">for </span>section <span class="kw">in </span>sections {
-<a href=#246 id=246 data-nosnippet>246</a>            <span class="kw">let </span>content: String = characters.by_ref().take(section.length).collect();
-<a href=#247 id=247 data-nosnippet>247</a>            <span class="kw">let </span><span class="prelude-val">Some</span>(image) = <span class="kw-2">&amp;</span>section.image <span class="kw">else </span>{
-<a href=#248 id=248 data-nosnippet>248</a>                <span class="kw">let </span><span class="kw-2">mut </span>options = serde_json::Map::new();
-<a href=#249 id=249 data-nosnippet>249</a>                <span class="kw">if let </span><span class="prelude-val">Some</span>(scale) = section.scale {
-<a href=#250 id=250 data-nosnippet>250</a>                    options.insert(<span class="string">"font-scale"</span>.into(), <span class="macro">serde_json::json!</span>(scale));
-<a href=#251 id=251 data-nosnippet>251</a>                }
-<a href=#252 id=252 data-nosnippet>252</a>                <span class="kw">if let </span><span class="prelude-val">Some</span>([r, g, b, a]) = section.color {
-<a href=#253 id=253 data-nosnippet>253</a>                    <span class="kw">let </span>color = csscolorparser::Color::new(r, g, b, a);
-<a href=#254 id=254 data-nosnippet>254</a>                    options.insert(<span class="string">"text-color"</span>.into(), color.to_css_hex().to_string().into());
-<a href=#255 id=255 data-nosnippet>255</a>                }
-<a href=#256 id=256 data-nosnippet>256</a>                <span class="kw">if let </span><span class="prelude-val">Some</span>(font) = <span class="kw-2">&amp;</span>section.font {
-<a href=#257 id=257 data-nosnippet>257</a>                    <span class="kw">let </span>fonts: Vec&lt;<span class="kw-2">&amp;</span>str&gt; = font.split(<span class="string">','</span>).collect();
-<a href=#258 id=258 data-nosnippet>258</a>                    options.insert(<span class="string">"text-font"</span>.into(), <span class="macro">serde_json::json!</span>([<span class="string">"literal"</span>, fonts]));
-<a href=#259 id=259 data-nosnippet>259</a>                }
-<a href=#260 id=260 data-nosnippet>260</a>                format.extend([
-<a href=#261 id=261 data-nosnippet>261</a>                    <span class="macro">serde_json::json!</span>(content),
-<a href=#262 id=262 data-nosnippet>262</a>                    serde_json::Value::Object(options),
-<a href=#263 id=263 data-nosnippet>263</a>                ]);
-<a href=#264 id=264 data-nosnippet>264</a>                <span class="kw">continue</span>;
-<a href=#265 id=265 data-nosnippet>265</a>            };
-<a href=#266 id=266 data-nosnippet>266</a>            format.push(<span class="macro">serde_json::json!</span>([<span class="string">"image"</span>, image]));
-<a href=#267 id=267 data-nosnippet>267</a>        }
-<a href=#268 id=268 data-nosnippet>268</a>        serde_json::Value::Array(format).serialize(serializer)
-<a href=#269 id=269 data-nosnippet>269</a>    }
-<a href=#270 id=270 data-nosnippet>270</a>}
+<a href=#195 id=195 data-nosnippet>195</a>}
+<a href=#196 id=196 data-nosnippet>196</a>
+<a href=#197 id=197 data-nosnippet>197</a><span class="doccomment">/// The image a pattern property names: like [`ImageName`], without `{token}` references, which
+<a href=#198 id=198 data-nosnippet>198</a>/// the specification gives patterns none of.
+<a href=#199 id=199 data-nosnippet>199</a></span><span class="attr">#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+<a href=#200 id=200 data-nosnippet>200</a></span><span class="kw">pub struct </span>PatternName(<span class="kw">pub </span>String);
+<a href=#201 id=201 data-nosnippet>201</a>
+<a href=#202 id=202 data-nosnippet>202</a><span class="kw">impl </span>PropertyValue <span class="kw">for </span>PatternName {
+<a href=#203 id=203 data-nosnippet>203</a>    <span class="kw">fn </span>spec() -&gt; LegacyPropertySpec {
+<a href=#204 id=204 data-nosnippet>204</a>        <span class="kw">crate</span>::style::spec::FillPaintProperty::FillPattern
+<a href=#205 id=205 data-nosnippet>205</a>            .metadata()
+<a href=#206 id=206 data-nosnippet>206</a>            .legacy_property_spec()
+<a href=#207 id=207 data-nosnippet>207</a>    }
+<a href=#208 id=208 data-nosnippet>208</a>
+<a href=#209 id=209 data-nosnippet>209</a>    <span class="kw">fn </span>from_value(value: <span class="kw-2">&amp;</span>Value) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt; {
+<a href=#210 id=210 data-nosnippet>210</a>        image_name(value).map(<span class="self">Self</span>)
+<a href=#211 id=211 data-nosnippet>211</a>    }
+<a href=#212 id=212 data-nosnippet>212</a>}
+<a href=#213 id=213 data-nosnippet>213</a>
+<a href=#214 id=214 data-nosnippet>214</a><span class="doccomment">/// The name an image property's value gives.
+<a href=#215 id=215 data-nosnippet>215</a></span><span class="kw">fn </span>image_name(value: <span class="kw-2">&amp;</span>Value) -&gt; <span class="prelude-ty">Option</span>&lt;String&gt; {
+<a href=#216 id=216 data-nosnippet>216</a>    <span class="kw">match </span>value {
+<a href=#217 id=217 data-nosnippet>217</a>        Value::Image(image) =&gt; <span class="prelude-val">Some</span>(image.name.clone()),
+<a href=#218 id=218 data-nosnippet>218</a>        Value::String(name) =&gt; <span class="prelude-val">Some</span>(name.clone()),
+<a href=#219 id=219 data-nosnippet>219</a>        <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+<a href=#220 id=220 data-nosnippet>220</a>    }
+<a href=#221 id=221 data-nosnippet>221</a>}
+<a href=#222 id=222 data-nosnippet>222</a>
+<a href=#223 id=223 data-nosnippet>223</a><span class="doccomment">/// The text of `text-field`: a [`TextField`] evaluated as formatted text, so the sections and
+<a href=#224 id=224 data-nosnippet>224</a>/// images a `case`, `match` or `coalesce` inside a `format` chooses stay sections and images.
+<a href=#225 id=225 data-nosnippet>225</a></span><span class="attr">#[derive(Clone, Debug, Default, PartialEq)]
+<a href=#226 id=226 data-nosnippet>226</a></span><span class="kw">pub struct </span>FormattedText(<span class="kw">pub </span>TextField);
+<a href=#227 id=227 data-nosnippet>227</a>
+<a href=#228 id=228 data-nosnippet>228</a><span class="doccomment">/// Text with sections is written as the `format` expression that makes it, so a layer that is
+<a href=#229 id=229 data-nosnippet>229</a>/// serialized and parsed again keeps its sections and images.
+<a href=#230 id=230 data-nosnippet>230</a></span><span class="kw">impl </span>Serialize <span class="kw">for </span>FormattedText {
+<a href=#231 id=231 data-nosnippet>231</a>    <span class="kw">fn </span>serialize&lt;S: Serializer&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, serializer: S) -&gt; <span class="prelude-ty">Result</span>&lt;S::Ok, S::Error&gt; {
+<a href=#232 id=232 data-nosnippet>232</a>        <span class="kw">let </span>TextField(text, sections) = <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span>;
+<a href=#233 id=233 data-nosnippet>233</a>        <span class="kw">if </span>sections.is_empty() {
+<a href=#234 id=234 data-nosnippet>234</a>            <span class="kw">return </span>serializer.serialize_str(text);
+<a href=#235 id=235 data-nosnippet>235</a>        }
+<a href=#236 id=236 data-nosnippet>236</a>        <span class="kw">let </span><span class="kw-2">mut </span>format = <span class="macro">vec!</span>[<span class="macro">serde_json::json!</span>(<span class="string">"format"</span>)];
+<a href=#237 id=237 data-nosnippet>237</a>        <span class="kw">let </span><span class="kw-2">mut </span>characters = text.chars();
+<a href=#238 id=238 data-nosnippet>238</a>        <span class="kw">for </span>section <span class="kw">in </span>sections {
+<a href=#239 id=239 data-nosnippet>239</a>            <span class="kw">let </span>content: String = characters.by_ref().take(section.length).collect();
+<a href=#240 id=240 data-nosnippet>240</a>            <span class="kw">let </span><span class="prelude-val">Some</span>(image) = <span class="kw-2">&amp;</span>section.image <span class="kw">else </span>{
+<a href=#241 id=241 data-nosnippet>241</a>                <span class="kw">let </span><span class="kw-2">mut </span>options = serde_json::Map::new();
+<a href=#242 id=242 data-nosnippet>242</a>                <span class="kw">if let </span><span class="prelude-val">Some</span>(scale) = section.scale {
+<a href=#243 id=243 data-nosnippet>243</a>                    options.insert(<span class="string">"font-scale"</span>.into(), <span class="macro">serde_json::json!</span>(scale));
+<a href=#244 id=244 data-nosnippet>244</a>                }
+<a href=#245 id=245 data-nosnippet>245</a>                <span class="kw">if let </span><span class="prelude-val">Some</span>([r, g, b, a]) = section.color {
+<a href=#246 id=246 data-nosnippet>246</a>                    <span class="kw">let </span>color = csscolorparser::Color::new(r, g, b, a);
+<a href=#247 id=247 data-nosnippet>247</a>                    options.insert(<span class="string">"text-color"</span>.into(), color.to_css_hex().to_string().into());
+<a href=#248 id=248 data-nosnippet>248</a>                }
+<a href=#249 id=249 data-nosnippet>249</a>                <span class="kw">if let </span><span class="prelude-val">Some</span>(font) = <span class="kw-2">&amp;</span>section.font {
+<a href=#250 id=250 data-nosnippet>250</a>                    <span class="kw">let </span>fonts: Vec&lt;<span class="kw-2">&amp;</span>str&gt; = font.split(<span class="string">','</span>).collect();
+<a href=#251 id=251 data-nosnippet>251</a>                    options.insert(<span class="string">"text-font"</span>.into(), <span class="macro">serde_json::json!</span>([<span class="string">"literal"</span>, fonts]));
+<a href=#252 id=252 data-nosnippet>252</a>                }
+<a href=#253 id=253 data-nosnippet>253</a>                format.extend([
+<a href=#254 id=254 data-nosnippet>254</a>                    <span class="macro">serde_json::json!</span>(content),
+<a href=#255 id=255 data-nosnippet>255</a>                    serde_json::Value::Object(options),
+<a href=#256 id=256 data-nosnippet>256</a>                ]);
+<a href=#257 id=257 data-nosnippet>257</a>                <span class="kw">continue</span>;
+<a href=#258 id=258 data-nosnippet>258</a>            };
+<a href=#259 id=259 data-nosnippet>259</a>            format.push(<span class="macro">serde_json::json!</span>([<span class="string">"image"</span>, image]));
+<a href=#260 id=260 data-nosnippet>260</a>        }
+<a href=#261 id=261 data-nosnippet>261</a>        serde_json::Value::Array(format).serialize(serializer)
+<a href=#262 id=262 data-nosnippet>262</a>    }
+<a href=#263 id=263 data-nosnippet>263</a>}
+<a href=#264 id=264 data-nosnippet>264</a>
+<a href=#265 id=265 data-nosnippet>265</a><span class="kw">impl </span>PropertyValue <span class="kw">for </span>FormattedText {
+<a href=#266 id=266 data-nosnippet>266</a>    <span class="kw">fn </span>spec() -&gt; LegacyPropertySpec {
+<a href=#267 id=267 data-nosnippet>267</a>        <span class="kw">crate</span>::style::spec::SymbolLayoutProperty::TextField
+<a href=#268 id=268 data-nosnippet>268</a>            .metadata()
+<a href=#269 id=269 data-nosnippet>269</a>            .legacy_property_spec()
+<a href=#270 id=270 data-nosnippet>270</a>    }
 <a href=#271 id=271 data-nosnippet>271</a>
-<a href=#272 id=272 data-nosnippet>272</a><span class="kw">impl </span>PropertyValue <span class="kw">for </span>FormattedText {
-<a href=#273 id=273 data-nosnippet>273</a>    <span class="kw">fn </span>spec() -&gt; LegacyPropertySpec {
-<a href=#274 id=274 data-nosnippet>274</a>        LegacyPropertySpec {
-<a href=#275 id=275 data-nosnippet>275</a>            kind: PropertyKind::Formatted,
-<a href=#276 id=276 data-nosnippet>276</a>            interpolated: <span class="bool-val">false</span>,
-<a href=#277 id=277 data-nosnippet>277</a>            default: <span class="prelude-val">None</span>,
-<a href=#278 id=278 data-nosnippet>278</a>            tokens: <span class="bool-val">true</span>,
-<a href=#279 id=279 data-nosnippet>279</a>        }
-<a href=#280 id=280 data-nosnippet>280</a>    }
-<a href=#281 id=281 data-nosnippet>281</a>
-<a href=#282 id=282 data-nosnippet>282</a>    <span class="kw">fn </span>from_value(value: <span class="kw-2">&amp;</span>Value) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt; {
-<a href=#283 id=283 data-nosnippet>283</a>        <span class="kw">match </span>value {
-<a href=#284 id=284 data-nosnippet>284</a>            Value::Formatted(formatted) =&gt; <span class="prelude-val">Some</span>(<span class="self">Self</span>(TextField::from_formatted(formatted))),
-<a href=#285 id=285 data-nosnippet>285</a>            <span class="comment">// The written form of a text field with sections reads back into them.
-<a href=#286 id=286 data-nosnippet>286</a>            </span>Value::String(text) =&gt; <span class="prelude-val">Some</span>(<span class="self">Self</span>(TextField::decode(text))),
-<a href=#287 id=287 data-nosnippet>287</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
-<a href=#288 id=288 data-nosnippet>288</a>        }
-<a href=#289 id=289 data-nosnippet>289</a>    }
-<a href=#290 id=290 data-nosnippet>290</a>}
+<a href=#272 id=272 data-nosnippet>272</a>    <span class="kw">fn </span>from_value(value: <span class="kw-2">&amp;</span>Value) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt; {
+<a href=#273 id=273 data-nosnippet>273</a>        <span class="kw">match </span>value {
+<a href=#274 id=274 data-nosnippet>274</a>            Value::Formatted(formatted) =&gt; <span class="prelude-val">Some</span>(<span class="self">Self</span>(TextField::from_formatted(formatted))),
+<a href=#275 id=275 data-nosnippet>275</a>            <span class="comment">// The written form of a text field with sections reads back into them.
+<a href=#276 id=276 data-nosnippet>276</a>            </span>Value::String(text) =&gt; <span class="prelude-val">Some</span>(<span class="self">Self</span>(TextField::decode(text))),
+<a href=#277 id=277 data-nosnippet>277</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+<a href=#278 id=278 data-nosnippet>278</a>        }
+<a href=#279 id=279 data-nosnippet>279</a>    }
+<a href=#280 id=280 data-nosnippet>280</a>}
 </code></pre></div></section></main></body></html>

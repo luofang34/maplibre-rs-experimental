@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["OfflineStoreError"],"struct":["MemoryOfflineStore","OfflineRegionId","OfflineRegionStatus","OfflineRegionSummary"],"trait":["OfflineStore"]};

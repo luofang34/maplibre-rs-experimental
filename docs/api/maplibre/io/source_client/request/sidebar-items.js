@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["CachePolicy","ResourceKind"],"fn":["decode_base64","decode_data_url","is_remote_http_url","looks_like_glyph_range","percent_decode_bytes"],"struct":["DataUrlError","HttpRequest","TransformSlot"],"type":["RequestTransform"]};

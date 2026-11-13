@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_POOLED_CONNECTIONS","SCHEME"],"enum":["MbtilesFormatError","MbtilesUrl"],"fn":["failed","open_readonly_connection","parse_tile_y_segment"],"mod":["format"],"struct":["ArchiveState","MbtilesClient","MbtilesError","MbtilesReader"]};

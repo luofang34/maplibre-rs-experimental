@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_DOWNLOAD_CONCURRENCY"],"enum":["OfflineDownloadError","OfflineDownloadState"],"struct":["OfflineCancellationToken","OfflineDownloadProgress","OfflineManager"]};

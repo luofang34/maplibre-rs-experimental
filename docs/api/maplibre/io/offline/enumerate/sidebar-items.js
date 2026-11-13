@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["enumerate_source","enumerate_style_resources","extract_sprite_base_urls","format_glyph_url","format_sprite_url","pending_non_volatile_tile_json_urls"],"struct":["OfflineResourceDescriptor"]};

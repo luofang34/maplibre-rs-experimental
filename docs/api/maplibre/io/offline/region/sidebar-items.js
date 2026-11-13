@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_ENUMERABLE_ZOOM","MAX_MERCATOR_LAT"],"fn":["enumerate_style_resources","intersect_lon_spans","lat_tile_range","lat_to_mercator_frac","lon_intervals","lon_tile_range","pending_non_volatile_tile_json_urls"],"struct":["OfflineRegionDefinition","OfflineResourceDescriptor"]};

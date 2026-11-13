@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["run_cpu_bound","run_multithreaded"],"mod":["http_client","scheduler","trace"],"struct":["ReqwestOffscreenKernelEnvironment"]};
+window.SIDEBAR_ITEMS = {"fn":["native_http_client","run_cpu_bound","run_multithreaded"],"mod":["http_client","scheduler","trace"],"struct":["ReqwestOffscreenKernelEnvironment"],"type":["NativeHttpClient"]};
