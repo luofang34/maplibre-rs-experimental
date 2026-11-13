@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["capacity","symbols","tile_bytes","value_bytes","vector_bytes"]};
+window.SIDEBAR_ITEMS = {"fn":["capacity","feature_paint_bytes","symbols","tile_bytes","value_bytes","vector_bytes"]};

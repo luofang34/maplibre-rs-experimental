@@ -199,18 +199,29 @@
 <a href=#199 id=199 data-nosnippet>199</a>        // asked for again when the tile is retried.
 <a href=#200 id=200 data-nosnippet>200</a>        </span>unavailable |= !assets.awaiting.is_empty();
 <a href=#201 id=201 data-nosnippet>201</a>        <span class="comment">// The tile was completed already; these labels replace the ones it was drawn with.
-<a href=#202 id=202 data-nosnippet>202</a>        </span><span class="kw">let </span>(tile, request, atlas) = (tile.clone(), request.clone(), assets.atlas);
-<a href=#203 id=203 data-nosnippet>203</a>        run_cpu_bound_replying(context.clone(), <span class="kw">move </span>|context| {
-<a href=#204 id=204 data-nosnippet>204</a>            <span class="kw">let </span><span class="kw-2">mut </span>processor = ProcessVectorContext::&lt;T, <span class="kw">_</span>&gt;::new(context)
-<a href=#205 id=205 data-nosnippet>205</a>                .without_completion()
-<a href=#206 id=206 data-nosnippet>206</a>                .without_indexing();
-<a href=#207 id=207 data-nosnippet>207</a>            process_decoded_vector_tile_with_assets(<span class="kw-2">&amp;</span>tile, request, <span class="kw-2">&amp;mut </span>processor, atlas)
-<a href=#208 id=208 data-nosnippet>208</a>        })
-<a href=#209 id=209 data-nosnippet>209</a>        .<span class="kw">await
-<a href=#210 id=210 data-nosnippet>210</a>        </span>.map_err(ProcessVectorError::CpuWork)<span class="question-mark">??</span>;
-<a href=#211 id=211 data-nosnippet>211</a>        providers.count_relaid();
-<a href=#212 id=212 data-nosnippet>212</a>        <span class="macro">tracing::debug!</span>(%coords, images = gained.len(), <span class="string">"labels laid out again with provided images"</span>);
-<a href=#213 id=213 data-nosnippet>213</a>    }
-<a href=#214 id=214 data-nosnippet>214</a>    <span class="prelude-val">Ok</span>(unavailable)
-<a href=#215 id=215 data-nosnippet>215</a>}
+<a href=#202 id=202 data-nosnippet>202</a>        </span><span class="kw">let </span>source_state = request
+<a href=#203 id=203 data-nosnippet>203</a>            .layers
+<a href=#204 id=204 data-nosnippet>204</a>            .iter()
+<a href=#205 id=205 data-nosnippet>205</a>            .find_map(|l| l.source.as_deref())
+<a href=#206 id=206 data-nosnippet>206</a>            .map_or((<span class="prelude-val">None</span>, <span class="prelude-val">None</span>), |name| {
+<a href=#207 id=207 data-nosnippet>207</a>                (
+<a href=#208 id=208 data-nosnippet>208</a>                    style.source_promote_id(name).cloned(),
+<a href=#209 id=209 data-nosnippet>209</a>                    style.feature_state.source(name).cloned(),
+<a href=#210 id=210 data-nosnippet>210</a>                )
+<a href=#211 id=211 data-nosnippet>211</a>            });
+<a href=#212 id=212 data-nosnippet>212</a>        <span class="kw">let </span>(tile, request, atlas) = (tile.clone(), request.clone(), assets.atlas);
+<a href=#213 id=213 data-nosnippet>213</a>        run_cpu_bound_replying(context.clone(), <span class="kw">move </span>|context| {
+<a href=#214 id=214 data-nosnippet>214</a>            <span class="kw">let </span><span class="kw-2">mut </span>processor = ProcessVectorContext::&lt;T, <span class="kw">_</span>&gt;::new(context)
+<a href=#215 id=215 data-nosnippet>215</a>                .without_completion()
+<a href=#216 id=216 data-nosnippet>216</a>                .without_indexing()
+<a href=#217 id=217 data-nosnippet>217</a>                .with_source_feature_state(source_state.<span class="number">0</span>, source_state.<span class="number">1</span>);
+<a href=#218 id=218 data-nosnippet>218</a>            process_decoded_vector_tile_with_assets(<span class="kw-2">&amp;</span>tile, request, <span class="kw-2">&amp;mut </span>processor, atlas)
+<a href=#219 id=219 data-nosnippet>219</a>        })
+<a href=#220 id=220 data-nosnippet>220</a>        .<span class="kw">await
+<a href=#221 id=221 data-nosnippet>221</a>        </span>.map_err(ProcessVectorError::CpuWork)<span class="question-mark">??</span>;
+<a href=#222 id=222 data-nosnippet>222</a>        providers.count_relaid();
+<a href=#223 id=223 data-nosnippet>223</a>        <span class="macro">tracing::debug!</span>(%coords, images = gained.len(), <span class="string">"labels laid out again with provided images"</span>);
+<a href=#224 id=224 data-nosnippet>224</a>    }
+<a href=#225 id=225 data-nosnippet>225</a>    <span class="prelude-val">Ok</span>(unavailable)
+<a href=#226 id=226 data-nosnippet>226</a>}
 </code></pre></div></section></main></body></html>

@@ -37,6 +37,7 @@ pub fn build_style(mut style: Style) -> Style {
                 tiles: None,
                 tile_size: None,
                 url: Some("https://tiles.openfreemap.org/planet".to_string()),
+                promote_id: None,
             }),
         );
         "openfreemap".to_string()
@@ -117,7 +118,7 @@ pub fn build_style(mut style: Style) -> Style {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let base: Style = maplibre::platform::run_multithreaded(async {
-        Ok::<_, reqwest::Error>(reqwest::get(BASE_STYLE_URL).await?.json().await?)
+        reqwest::get(BASE_STYLE_URL).await?.json().await
     })?;
     let style = build_style(base);
 

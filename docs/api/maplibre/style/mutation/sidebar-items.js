@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["StyleMutationError"],"fn":["from_vector_tiles","push_unique","set_member"],"mod":["apply","image_source","shape"],"struct":["StyleChange"]};
+window.SIDEBAR_ITEMS = {"enum":["StyleMutationError"],"fn":["from_vector_tiles"],"mod":["apply","classify","image_source","shape"],"struct":["StyleChange"]};

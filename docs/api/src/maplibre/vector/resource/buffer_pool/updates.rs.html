@@ -123,5 +123,45 @@
 <a href=#123 id=123 data-nosnippet>123</a>            bytemuck::cast_slice(indices),
 <a href=#124 id=124 data-nosnippet>124</a>        );
 <a href=#125 id=125 data-nosnippet>125</a>    }
-<a href=#126 id=126 data-nosnippet>126</a>}
+<a href=#126 id=126 data-nosnippet>126</a>
+<a href=#127 id=127 data-nosnippet>127</a>    <span class="doccomment">/// Updates the cached [`StyleLayer`] on every resident allocation of `style_layer.id` whose
+<a href=#128 id=128 data-nosnippet>128</a>    /// GPU-side definition changed, bumping [`IndexEntry::content_revision`] and returning the
+<a href=#129 id=129 data-nosnippet>129</a>    /// tile coordinates touched.
+<a href=#130 id=130 data-nosnippet>130</a>    </span><span class="kw">pub fn </span>sync_style_layer(<span class="kw-2">&amp;mut </span><span class="self">self</span>, style_layer: <span class="kw-2">&amp;</span>StyleLayer) -&gt; Vec&lt;WorldTileCoords&gt; {
+<a href=#131 id=131 data-nosnippet>131</a>        <span class="kw">let </span><span class="kw-2">mut </span>touched = Vec::new();
+<a href=#132 id=132 data-nosnippet>132</a>        <span class="kw">for </span>tile_layers <span class="kw">in </span><span class="self">self</span>.index.iter_mut() {
+<a href=#133 id=133 data-nosnippet>133</a>            <span class="kw">for </span>entry <span class="kw">in </span>tile_layers {
+<a href=#134 id=134 data-nosnippet>134</a>                <span class="kw">if </span>entry.style_layer.id == style_layer.id
+<a href=#135 id=135 data-nosnippet>135</a>                    &amp;&amp; !entry.style_layer.same_gpu_definition(style_layer)
+<a href=#136 id=136 data-nosnippet>136</a>                {
+<a href=#137 id=137 data-nosnippet>137</a>                    entry.style_layer = style_layer.clone();
+<a href=#138 id=138 data-nosnippet>138</a>                    entry.paint_revision = entry.paint_revision.wrapping_add(<span class="number">1</span>);
+<a href=#139 id=139 data-nosnippet>139</a>                    touched.push(entry.coords);
+<a href=#140 id=140 data-nosnippet>140</a>                }
+<a href=#141 id=141 data-nosnippet>141</a>            }
+<a href=#142 id=142 data-nosnippet>142</a>        }
+<a href=#143 id=143 data-nosnippet>143</a>        <span class="kw">if </span>!touched.is_empty() {
+<a href=#144 id=144 data-nosnippet>144</a>            <span class="self">self</span>.revision = <span class="self">self</span>.revision.wrapping_add(<span class="number">1</span>);
+<a href=#145 id=145 data-nosnippet>145</a>        }
+<a href=#146 id=146 data-nosnippet>146</a>        touched
+<a href=#147 id=147 data-nosnippet>147</a>    }
+<a href=#148 id=148 data-nosnippet>148</a>
+<a href=#149 id=149 data-nosnippet>149</a>    <span class="doccomment">/// Advances [`IndexEntry::content_revision`] for one resident `(coords, id)` entry after an
+<a href=#150 id=150 data-nosnippet>150</a>    /// in-place GPU metadata update so terrain drapes and symbol placement refresh.
+<a href=#151 id=151 data-nosnippet>151</a>    </span><span class="kw">pub fn </span>bump_layer_paint_revision(<span class="kw-2">&amp;mut </span><span class="self">self</span>, coords: WorldTileCoords, id: <span class="kw-2">&amp;</span>str) -&gt; bool {
+<a href=#152 id=152 data-nosnippet>152</a>        <span class="kw">let </span><span class="kw-2">mut </span>bumped = <span class="bool-val">false</span>;
+<a href=#153 id=153 data-nosnippet>153</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(layers) = <span class="self">self</span>.index.get_layers_mut(coords) {
+<a href=#154 id=154 data-nosnippet>154</a>            <span class="kw">for </span>entry <span class="kw">in </span>layers {
+<a href=#155 id=155 data-nosnippet>155</a>                <span class="kw">if </span>entry.style_layer.id == id {
+<a href=#156 id=156 data-nosnippet>156</a>                    entry.paint_revision = entry.paint_revision.wrapping_add(<span class="number">1</span>);
+<a href=#157 id=157 data-nosnippet>157</a>                    bumped = <span class="bool-val">true</span>;
+<a href=#158 id=158 data-nosnippet>158</a>                }
+<a href=#159 id=159 data-nosnippet>159</a>            }
+<a href=#160 id=160 data-nosnippet>160</a>        }
+<a href=#161 id=161 data-nosnippet>161</a>        <span class="kw">if </span>bumped {
+<a href=#162 id=162 data-nosnippet>162</a>            <span class="self">self</span>.revision = <span class="self">self</span>.revision.wrapping_add(<span class="number">1</span>);
+<a href=#163 id=163 data-nosnippet>163</a>        }
+<a href=#164 id=164 data-nosnippet>164</a>        bumped
+<a href=#165 id=165 data-nosnippet>165</a>    }
+<a href=#166 id=166 data-nosnippet>166</a>}
 </code></pre></div></section></main></body></html>

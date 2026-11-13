@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["STATE_ID_PROPERTY"],"mod":["sync"],"struct":["FeatureId","FeatureStateStore","FeatureStateTarget","SourceFeatureState"]};

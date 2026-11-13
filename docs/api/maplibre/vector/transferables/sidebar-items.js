@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["VectorMessageTag"],"struct":["DefaultLayerIndexed","DefaultLayerMissing","DefaultLayerTessellated","DefaultSymbolLayerTessellated","DefaultTileTessellated","DefaultVectorTransferables"],"trait":["LayerIndexed","LayerMissing","LayerTessellated","SymbolLayerTessellated","TileTessellated","VectorTransferables"]};
+window.SIDEBAR_ITEMS = {"enum":["VectorMessageTag"],"mod":["defaults"],"trait":["LayerIndexed","LayerMissing","LayerTessellated","SymbolLayerTessellated","TileTessellated","VectorTransferables"]};

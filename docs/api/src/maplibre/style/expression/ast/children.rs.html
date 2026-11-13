@@ -84,46 +84,63 @@
 <a href=#84 id=84 data-nosnippet>84</a>                }
 <a href=#85 id=85 data-nosnippet>85</a>            }
 <a href=#86 id=86 data-nosnippet>86</a>            <span class="self">Self</span>::Not(operand)
-<a href=#87 id=87 data-nosnippet>87</a>            | <span class="self">Self</span>::ResolvedLocale(operand)
-<a href=#88 id=88 data-nosnippet>88</a>            | <span class="self">Self</span>::IsSupportedScript(operand)
-<a href=#89 id=89 data-nosnippet>89</a>            | <span class="self">Self</span>::Length(operand)
-<a href=#90 id=90 data-nosnippet>90</a>            | <span class="self">Self</span>::Math { operand, .. }
-<a href=#91 id=91 data-nosnippet>91</a>            | <span class="self">Self</span>::TypeOf(operand)
-<a href=#92 id=92 data-nosnippet>92</a>            | <span class="self">Self</span>::Image(operand)
-<a href=#93 id=93 data-nosnippet>93</a>            | <span class="self">Self</span>::ToRgba(operand)
-<a href=#94 id=94 data-nosnippet>94</a>            | <span class="self">Self</span>::StringCase { operand, .. } =&gt; visit(operand),
-<a href=#95 id=95 data-nosnippet>95</a>            <span class="self">Self</span>::In { needle, haystack } =&gt; {
-<a href=#96 id=96 data-nosnippet>96</a>                visit(needle);
-<a href=#97 id=97 data-nosnippet>97</a>                visit(haystack);
-<a href=#98 id=98 data-nosnippet>98</a>            }
-<a href=#99 id=99 data-nosnippet>99</a>            <span class="self">Self</span>::IndexOf {
-<a href=#100 id=100 data-nosnippet>100</a>                needle,
-<a href=#101 id=101 data-nosnippet>101</a>                haystack,
-<a href=#102 id=102 data-nosnippet>102</a>                from,
-<a href=#103 id=103 data-nosnippet>103</a>            } =&gt; {
-<a href=#104 id=104 data-nosnippet>104</a>                visit(needle);
-<a href=#105 id=105 data-nosnippet>105</a>                visit(haystack);
-<a href=#106 id=106 data-nosnippet>106</a>                <span class="kw">if let </span><span class="prelude-val">Some</span>(from) = from {
-<a href=#107 id=107 data-nosnippet>107</a>                    visit(from);
-<a href=#108 id=108 data-nosnippet>108</a>                }
-<a href=#109 id=109 data-nosnippet>109</a>            }
-<a href=#110 id=110 data-nosnippet>110</a>            <span class="self">Self</span>::Slice {
-<a href=#111 id=111 data-nosnippet>111</a>                input, from, to, ..
+<a href=#87 id=87 data-nosnippet>87</a>            | <span class="self">Self</span>::Error(operand)
+<a href=#88 id=88 data-nosnippet>88</a>            | <span class="self">Self</span>::ResolvedLocale(operand)
+<a href=#89 id=89 data-nosnippet>89</a>            | <span class="self">Self</span>::IsSupportedScript(operand)
+<a href=#90 id=90 data-nosnippet>90</a>            | <span class="self">Self</span>::Length(operand)
+<a href=#91 id=91 data-nosnippet>91</a>            | <span class="self">Self</span>::Math { operand, .. }
+<a href=#92 id=92 data-nosnippet>92</a>            | <span class="self">Self</span>::TypeOf(operand)
+<a href=#93 id=93 data-nosnippet>93</a>            | <span class="self">Self</span>::Image(operand)
+<a href=#94 id=94 data-nosnippet>94</a>            | <span class="self">Self</span>::ToRgba(operand)
+<a href=#95 id=95 data-nosnippet>95</a>            | <span class="self">Self</span>::StringCase { operand, .. } =&gt; visit(operand),
+<a href=#96 id=96 data-nosnippet>96</a>            <span class="self">Self</span>::In {
+<a href=#97 id=97 data-nosnippet>97</a>                needle: left,
+<a href=#98 id=98 data-nosnippet>98</a>                haystack: right,
+<a href=#99 id=99 data-nosnippet>99</a>            }
+<a href=#100 id=100 data-nosnippet>100</a>            | <span class="self">Self</span>::At {
+<a href=#101 id=101 data-nosnippet>101</a>                index: left,
+<a href=#102 id=102 data-nosnippet>102</a>                array: right,
+<a href=#103 id=103 data-nosnippet>103</a>                ..
+<a href=#104 id=104 data-nosnippet>104</a>            }
+<a href=#105 id=105 data-nosnippet>105</a>            | <span class="self">Self</span>::Split {
+<a href=#106 id=106 data-nosnippet>106</a>                input: left,
+<a href=#107 id=107 data-nosnippet>107</a>                delimiter: right,
+<a href=#108 id=108 data-nosnippet>108</a>            }
+<a href=#109 id=109 data-nosnippet>109</a>            | <span class="self">Self</span>::Join {
+<a href=#110 id=110 data-nosnippet>110</a>                input: left,
+<a href=#111 id=111 data-nosnippet>111</a>                separator: right,
 <a href=#112 id=112 data-nosnippet>112</a>            } =&gt; {
-<a href=#113 id=113 data-nosnippet>113</a>                visit(input);
-<a href=#114 id=114 data-nosnippet>114</a>                visit(from);
-<a href=#115 id=115 data-nosnippet>115</a>                <span class="kw">if let </span><span class="prelude-val">Some</span>(to) = to {
-<a href=#116 id=116 data-nosnippet>116</a>                    visit(to);
-<a href=#117 id=117 data-nosnippet>117</a>                }
-<a href=#118 id=118 data-nosnippet>118</a>            }
-<a href=#119 id=119 data-nosnippet>119</a>            <span class="self">Self</span>::Interpolate { input, stops, .. } | <span class="self">Self</span>::Step { input, stops, .. } =&gt; {
-<a href=#120 id=120 data-nosnippet>120</a>                visit(input);
-<a href=#121 id=121 data-nosnippet>121</a>                <span class="kw">for </span>(<span class="kw">_</span>, output) <span class="kw">in </span>stops {
-<a href=#122 id=122 data-nosnippet>122</a>                    visit(output);
-<a href=#123 id=123 data-nosnippet>123</a>                }
-<a href=#124 id=124 data-nosnippet>124</a>            }
-<a href=#125 id=125 data-nosnippet>125</a>            <span class="self">Self</span>::Format(sections) =&gt; sections.iter().for_each(|section| section.for_each(visit)),
-<a href=#126 id=126 data-nosnippet>126</a>        }
-<a href=#127 id=127 data-nosnippet>127</a>    }
-<a href=#128 id=128 data-nosnippet>128</a>}
+<a href=#113 id=113 data-nosnippet>113</a>                visit(left);
+<a href=#114 id=114 data-nosnippet>114</a>                visit(right);
+<a href=#115 id=115 data-nosnippet>115</a>            }
+<a href=#116 id=116 data-nosnippet>116</a>            <span class="self">Self</span>::IndexOf {
+<a href=#117 id=117 data-nosnippet>117</a>                needle,
+<a href=#118 id=118 data-nosnippet>118</a>                haystack,
+<a href=#119 id=119 data-nosnippet>119</a>                from,
+<a href=#120 id=120 data-nosnippet>120</a>            } =&gt; {
+<a href=#121 id=121 data-nosnippet>121</a>                visit(needle);
+<a href=#122 id=122 data-nosnippet>122</a>                visit(haystack);
+<a href=#123 id=123 data-nosnippet>123</a>                <span class="kw">if let </span><span class="prelude-val">Some</span>(from) = from {
+<a href=#124 id=124 data-nosnippet>124</a>                    visit(from);
+<a href=#125 id=125 data-nosnippet>125</a>                }
+<a href=#126 id=126 data-nosnippet>126</a>            }
+<a href=#127 id=127 data-nosnippet>127</a>            <span class="self">Self</span>::Slice {
+<a href=#128 id=128 data-nosnippet>128</a>                input, from, to, ..
+<a href=#129 id=129 data-nosnippet>129</a>            } =&gt; {
+<a href=#130 id=130 data-nosnippet>130</a>                visit(input);
+<a href=#131 id=131 data-nosnippet>131</a>                visit(from);
+<a href=#132 id=132 data-nosnippet>132</a>                <span class="kw">if let </span><span class="prelude-val">Some</span>(to) = to {
+<a href=#133 id=133 data-nosnippet>133</a>                    visit(to);
+<a href=#134 id=134 data-nosnippet>134</a>                }
+<a href=#135 id=135 data-nosnippet>135</a>            }
+<a href=#136 id=136 data-nosnippet>136</a>            <span class="self">Self</span>::Interpolate { input, stops, .. } | <span class="self">Self</span>::Step { input, stops, .. } =&gt; {
+<a href=#137 id=137 data-nosnippet>137</a>                visit(input);
+<a href=#138 id=138 data-nosnippet>138</a>                <span class="kw">for </span>(<span class="kw">_</span>, output) <span class="kw">in </span>stops {
+<a href=#139 id=139 data-nosnippet>139</a>                    visit(output);
+<a href=#140 id=140 data-nosnippet>140</a>                }
+<a href=#141 id=141 data-nosnippet>141</a>            }
+<a href=#142 id=142 data-nosnippet>142</a>            <span class="self">Self</span>::Format(sections) =&gt; sections.iter().for_each(|section| section.for_each(visit)),
+<a href=#143 id=143 data-nosnippet>143</a>        }
+<a href=#144 id=144 data-nosnippet>144</a>    }
+<a href=#145 id=145 data-nosnippet>145</a>}
 </code></pre></div></section></main></body></html>

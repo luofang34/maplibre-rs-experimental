@@ -71,70 +71,70 @@
 <a href=#71 id=71 data-nosnippet>71</a>        <span class="kw">let </span>view_tiles_and_level = <span class="kw">if let </span><span class="prelude-val">Some</span>(multi) = <span class="kw-2">&amp;</span>multi {
 <a href=#72 id=72 data-nosnippet>72</a>            <span class="prelude-val">Some</span>((multi.vector_tiles.clone(), multi.max_view_level))
 <a href=#73 id=73 data-nosnippet>73</a>        } <span class="kw">else </span>{
-<a href=#74 id=74 data-nosnippet>74</a>            <span class="kw">let </span>computed = view_region_for_projection(
-<a href=#75 id=75 data-nosnippet>75</a>                style,
-<a href=#76 id=76 data-nosnippet>76</a>                view_state,
-<a href=#77 id=77 data-nosnippet>77</a>                world,
-<a href=#78 id=78 data-nosnippet>78</a>                view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
-<a href=#79 id=79 data-nosnippet>79</a>                ViewStatePadding::Loose,
-<a href=#80 id=80 data-nosnippet>80</a>            )<span class="question-mark">?
-<a href=#81 id=81 data-nosnippet>81</a>            </span>.map(|region| {
-<a href=#82 id=82 data-nosnippet>82</a>                (
-<a href=#83 id=83 data-nosnippet>83</a>                    region.iter().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;(),
-<a href=#84 id=84 data-nosnippet>84</a>                    u8::from(view_state.zoom().zoom_level(DEFAULT_TILE_SIZE)),
-<a href=#85 id=85 data-nosnippet>85</a>                )
-<a href=#86 id=86 data-nosnippet>86</a>            });
-<a href=#87 id=87 data-nosnippet>87</a>            <span class="kw">let </span>host_frame = <span class="kw">crate</span>::render::frame_signals::host_frame_in_progress(world);
-<a href=#88 id=88 data-nosnippet>88</a>            <span class="kw">let </span>cache = world
-<a href=#89 id=89 data-nosnippet>89</a>                .resources
-<a href=#90 id=90 data-nosnippet>90</a>                .get_or_init_mut::&lt;<span class="kw">crate</span>::render::eye_covering::FrameLooseCovering&gt;();
-<a href=#91 id=91 data-nosnippet>91</a>            <span class="kw">if </span>cache.host_frame != host_frame {
-<a href=#92 id=92 data-nosnippet>92</a>                <span class="kw-2">*</span>cache = <span class="kw">crate</span>::render::eye_covering::FrameLooseCovering {
-<a href=#93 id=93 data-nosnippet>93</a>                    host_frame,
-<a href=#94 id=94 data-nosnippet>94</a>                    view_tiles: <span class="prelude-val">None</span>,
-<a href=#95 id=95 data-nosnippet>95</a>                    raster_tiles: <span class="prelude-val">None</span>,
-<a href=#96 id=96 data-nosnippet>96</a>                };
-<a href=#97 id=97 data-nosnippet>97</a>            }
-<a href=#98 id=98 data-nosnippet>98</a>            cache.view_tiles = <span class="prelude-val">Some</span>(
-<a href=#99 id=99 data-nosnippet>99</a>                computed
-<a href=#100 id=100 data-nosnippet>100</a>                    .as_ref()
-<a href=#101 id=101 data-nosnippet>101</a>                    .map_or_else(Vec::new, |(tiles, <span class="kw">_</span>)| tiles.clone()),
-<a href=#102 id=102 data-nosnippet>102</a>            );
-<a href=#103 id=103 data-nosnippet>103</a>            computed
-<a href=#104 id=104 data-nosnippet>104</a>        };
-<a href=#105 id=105 data-nosnippet>105</a>
-<a href=#106 id=106 data-nosnippet>106</a>        <span class="comment">// Tile arrivals, eviction and a settling eye can change the covering without motion.
-<a href=#107 id=107 data-nosnippet>107</a>        </span><span class="kw">if let </span><span class="prelude-val">Some</span>((view_tiles, level)) = view_tiles_and_level {
-<a href=#108 id=108 data-nosnippet>108</a>            <span class="kw">let </span>max_zoom = source_max_zoom(style, TileKind::Vector);
-<a href=#109 id=109 data-nosnippet>109</a>            <span class="kw">let </span>min_zoom = source_min_zoom(style, TileKind::Vector);
-<a href=#110 id=110 data-nosnippet>110</a>            <span class="kw">let </span><span class="kw-2">mut </span>requested = FxHashSet::default();
-<a href=#111 id=111 data-nosnippet>111</a>            <span class="kw">let </span><span class="kw-2">mut </span>budget = vector_request_budget(world, style.terrain.is_some());
-<a href=#112 id=112 data-nosnippet>112</a>
-<a href=#113 id=113 data-nosnippet>113</a>            <span class="kw">let </span>drapes = world
-<a href=#114 id=114 data-nosnippet>114</a>                .resources
-<a href=#115 id=115 data-nosnippet>115</a>                .get::&lt;<span class="kw">crate</span>::terrain::request_system::DrapeRequests&gt;()
-<a href=#116 id=116 data-nosnippet>116</a>                .map(|requests| requests.<span class="number">0</span>.clone())
-<a href=#117 id=117 data-nosnippet>117</a>                .unwrap_or_default();
-<a href=#118 id=118 data-nosnippet>118</a>            <span class="kw">let </span>prefetch = world
-<a href=#119 id=119 data-nosnippet>119</a>                .resources
-<a href=#120 id=120 data-nosnippet>120</a>                .get::&lt;<span class="kw">crate</span>::terrain::request_system::DrapePrefetchRequests&gt;()
-<a href=#121 id=121 data-nosnippet>121</a>                .map(|requests| requests.<span class="number">0</span>.clone())
-<a href=#122 id=122 data-nosnippet>122</a>                .unwrap_or_default();
-<a href=#123 id=123 data-nosnippet>123</a>            <span class="kw">let </span>overview = style
-<a href=#124 id=124 data-nosnippet>124</a>                .terrain
-<a href=#125 id=125 data-nosnippet>125</a>                .is_some()
-<a href=#126 id=126 data-nosnippet>126</a>                .then_some(<span class="kw">crate</span>::coords::WorldTileCoords {
-<a href=#127 id=127 data-nosnippet>127</a>                    x: <span class="number">0</span>,
-<a href=#128 id=128 data-nosnippet>128</a>                    y: <span class="number">0</span>,
-<a href=#129 id=129 data-nosnippet>129</a>                    z: <span class="kw">crate</span>::coords::ZoomLevel::new(<span class="number">0</span>),
-<a href=#130 id=130 data-nosnippet>130</a>                });
-<a href=#131 id=131 data-nosnippet>131</a>            <span class="kw">let </span>draped = style.terrain.is_some();
+<a href=#74 id=74 data-nosnippet>74</a>            <span class="kw">let </span>visible_level = view_state.zoom().zoom_level(DEFAULT_TILE_SIZE);
+<a href=#75 id=75 data-nosnippet>75</a>            <span class="kw">let </span>computed = view_region_for_projection(
+<a href=#76 id=76 data-nosnippet>76</a>                style,
+<a href=#77 id=77 data-nosnippet>77</a>                view_state,
+<a href=#78 id=78 data-nosnippet>78</a>                world,
+<a href=#79 id=79 data-nosnippet>79</a>                visible_level,
+<a href=#80 id=80 data-nosnippet>80</a>                ViewStatePadding::Loose,
+<a href=#81 id=81 data-nosnippet>81</a>            )<span class="question-mark">?
+<a href=#82 id=82 data-nosnippet>82</a>            </span>.map(|region| (region.iter().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;(), u8::from(visible_level)));
+<a href=#83 id=83 data-nosnippet>83</a>            <span class="kw">let </span>host_frame = <span class="kw">crate</span>::render::frame_signals::host_frame_in_progress(world);
+<a href=#84 id=84 data-nosnippet>84</a>            <span class="kw">let </span>cache = world
+<a href=#85 id=85 data-nosnippet>85</a>                .resources
+<a href=#86 id=86 data-nosnippet>86</a>                .get_or_init_mut::&lt;<span class="kw">crate</span>::render::eye_covering::FrameLooseCovering&gt;();
+<a href=#87 id=87 data-nosnippet>87</a>            <span class="kw">if </span>cache.host_frame != host_frame {
+<a href=#88 id=88 data-nosnippet>88</a>                <span class="kw-2">*</span>cache = <span class="kw">crate</span>::render::eye_covering::FrameLooseCovering {
+<a href=#89 id=89 data-nosnippet>89</a>                    host_frame,
+<a href=#90 id=90 data-nosnippet>90</a>                    view_tiles: <span class="prelude-val">None</span>,
+<a href=#91 id=91 data-nosnippet>91</a>                    raster_tiles: <span class="prelude-val">None</span>,
+<a href=#92 id=92 data-nosnippet>92</a>                };
+<a href=#93 id=93 data-nosnippet>93</a>            }
+<a href=#94 id=94 data-nosnippet>94</a>            cache.view_tiles = <span class="prelude-val">Some</span>(
+<a href=#95 id=95 data-nosnippet>95</a>                computed
+<a href=#96 id=96 data-nosnippet>96</a>                    .as_ref()
+<a href=#97 id=97 data-nosnippet>97</a>                    .map_or_else(Vec::new, |(tiles, <span class="kw">_</span>)| tiles.clone()),
+<a href=#98 id=98 data-nosnippet>98</a>            );
+<a href=#99 id=99 data-nosnippet>99</a>            computed
+<a href=#100 id=100 data-nosnippet>100</a>        };
+<a href=#101 id=101 data-nosnippet>101</a>
+<a href=#102 id=102 data-nosnippet>102</a>        <span class="comment">// Tile arrivals, eviction and a settling eye can change the covering without motion.
+<a href=#103 id=103 data-nosnippet>103</a>        </span><span class="kw">if let </span><span class="prelude-val">Some</span>((view_tiles, level)) = view_tiles_and_level {
+<a href=#104 id=104 data-nosnippet>104</a>            <span class="kw">let </span>max_zoom = source_max_zoom(style, TileKind::Vector);
+<a href=#105 id=105 data-nosnippet>105</a>            <span class="kw">let </span>min_zoom = source_min_zoom(style, TileKind::Vector);
+<a href=#106 id=106 data-nosnippet>106</a>            <span class="kw">let </span><span class="kw-2">mut </span>requested = FxHashSet::default();
+<a href=#107 id=107 data-nosnippet>107</a>            <span class="kw">let </span><span class="kw-2">mut </span>budget = vector_request_budget(world, style.terrain.is_some());
+<a href=#108 id=108 data-nosnippet>108</a>
+<a href=#109 id=109 data-nosnippet>109</a>            <span class="kw">let </span>drapes = world
+<a href=#110 id=110 data-nosnippet>110</a>                .resources
+<a href=#111 id=111 data-nosnippet>111</a>                .get::&lt;<span class="kw">crate</span>::terrain::request_system::DrapeRequests&gt;()
+<a href=#112 id=112 data-nosnippet>112</a>                .map(|requests| requests.<span class="number">0</span>.clone())
+<a href=#113 id=113 data-nosnippet>113</a>                .unwrap_or_default();
+<a href=#114 id=114 data-nosnippet>114</a>            <span class="kw">let </span>prefetch = world
+<a href=#115 id=115 data-nosnippet>115</a>                .resources
+<a href=#116 id=116 data-nosnippet>116</a>                .get::&lt;<span class="kw">crate</span>::terrain::request_system::DrapePrefetchRequests&gt;()
+<a href=#117 id=117 data-nosnippet>117</a>                .map(|requests| requests.<span class="number">0</span>.clone())
+<a href=#118 id=118 data-nosnippet>118</a>                .unwrap_or_default();
+<a href=#119 id=119 data-nosnippet>119</a>            <span class="kw">let </span>overview = style
+<a href=#120 id=120 data-nosnippet>120</a>                .terrain
+<a href=#121 id=121 data-nosnippet>121</a>                .is_some()
+<a href=#122 id=122 data-nosnippet>122</a>                .then_some(<span class="kw">crate</span>::coords::WorldTileCoords {
+<a href=#123 id=123 data-nosnippet>123</a>                    x: <span class="number">0</span>,
+<a href=#124 id=124 data-nosnippet>124</a>                    y: <span class="number">0</span>,
+<a href=#125 id=125 data-nosnippet>125</a>                    z: <span class="kw">crate</span>::coords::ZoomLevel::new(<span class="number">0</span>),
+<a href=#126 id=126 data-nosnippet>126</a>                });
+<a href=#127 id=127 data-nosnippet>127</a>            <span class="kw">let </span>draped = style.terrain.is_some();
+<a href=#128 id=128 data-nosnippet>128</a>            <span class="comment">// View-space 3D volumes (`fill-extrusion`) and elevated 3D paths (`line-elevation`)
+<a href=#129 id=129 data-nosnippet>129</a>            // draw from `view_tiles` (which carry vertical headroom) rather than terrain drapes.
+<a href=#130 id=130 data-nosnippet>130</a>            </span><span class="kw">let </span>needs_view_tiles =
+<a href=#131 id=131 data-nosnippet>131</a>                !draped || <span class="kw">crate</span>::render::projection::style_elevated_headroom_meters(style) &gt; <span class="number">0.0</span>;
 <a href=#132 id=132 data-nosnippet>132</a>            <span class="kw">let </span>magnifies = depends_on_overscaling(style);
 <a href=#133 id=133 data-nosnippet>133</a>            <span class="kw">let </span><span class="kw-2">mut </span>frame_style = FrameStyle::new(style);
 <a href=#134 id=134 data-nosnippet>134</a>            <span class="kw">for </span>coords <span class="kw">in </span>overview
 <a href=#135 id=135 data-nosnippet>135</a>                .into_iter()
 <a href=#136 id=136 data-nosnippet>136</a>                .chain(drapes)
-<a href=#137 id=137 data-nosnippet>137</a>                .chain(view_tiles.into_iter().filter(|<span class="kw">_</span>| !draped))
+<a href=#137 id=137 data-nosnippet>137</a>                .chain(view_tiles.into_iter().filter(|<span class="kw">_</span>| needs_view_tiles))
 <a href=#138 id=138 data-nosnippet>138</a>                .chain(prefetch)
 <a href=#139 id=139 data-nosnippet>139</a>            {
 <a href=#140 id=140 data-nosnippet>140</a>                <span class="comment">// Past the deepest source zoom the ancestor tile is fetched once and the view

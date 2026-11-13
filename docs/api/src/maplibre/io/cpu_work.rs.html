@@ -23,7 +23,7 @@
 <a href=#23 id=23 data-nosnippet>23</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">async fn </span>run_cpu_bound&lt;R: Send + <span class="lifetime">'static</span>&gt;(
 <a href=#24 id=24 data-nosnippet>24</a>    work: <span class="kw">impl </span>FnOnce() -&gt; R + Send + <span class="lifetime">'static</span>,
 <a href=#25 id=25 data-nosnippet>25</a>) -&gt; <span class="prelude-ty">Result</span>&lt;R, CpuWorkError&gt; {
-<a href=#26 id=26 data-nosnippet>26</a>    <span class="attr">#[cfg(not(target_arch = <span class="string">"wasm32"</span>))]
+<a href=#26 id=26 data-nosnippet>26</a>    <span class="attr">#[cfg(all(not(target_arch = <span class="string">"wasm32"</span>), feature = <span class="string">"native-io"</span>))]
 <a href=#27 id=27 data-nosnippet>27</a>    </span><span class="kw">if let </span><span class="prelude-val">Ok</span>(runtime) = tokio::runtime::Handle::try_current() {
 <a href=#28 id=28 data-nosnippet>28</a>        <span class="kw">return </span>runtime
 <a href=#29 id=29 data-nosnippet>29</a>            .spawn_blocking(work)

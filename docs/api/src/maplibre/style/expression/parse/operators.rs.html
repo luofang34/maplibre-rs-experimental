@@ -92,14 +92,15 @@
 <a href=#92 id=92 data-nosnippet>92</a>    <span class="string">"heatmap-density"</span>,
 <a href=#93 id=93 data-nosnippet>93</a>    <span class="string">"split"</span>,
 <a href=#94 id=94 data-nosnippet>94</a>    <span class="string">"join"</span>,
-<a href=#95 id=95 data-nosnippet>95</a>];
-<a href=#96 id=96 data-nosnippet>96</a>
-<a href=#97 id=97 data-nosnippet>97</a><span class="doccomment">/// Whether a JSON array is an expression rather than a literal array value: it starts with an
-<a href=#98 id=98 data-nosnippet>98</a>/// operator name, as GL JS `isExpression` decides.
-<a href=#99 id=99 data-nosnippet>99</a></span><span class="kw">pub fn </span>is_expression(items: <span class="kw-2">&amp;</span>[Json]) -&gt; bool {
-<a href=#100 id=100 data-nosnippet>100</a>    items
-<a href=#101 id=101 data-nosnippet>101</a>        .first()
-<a href=#102 id=102 data-nosnippet>102</a>        .and_then(Json::as_str)
-<a href=#103 id=103 data-nosnippet>103</a>        .is_some_and(|name| OPERATORS.contains(<span class="kw-2">&amp;</span>name))
-<a href=#104 id=104 data-nosnippet>104</a>}
+<a href=#95 id=95 data-nosnippet>95</a>    <span class="string">"error"</span>,
+<a href=#96 id=96 data-nosnippet>96</a>];
+<a href=#97 id=97 data-nosnippet>97</a>
+<a href=#98 id=98 data-nosnippet>98</a><span class="doccomment">/// Whether a JSON array is an expression rather than a literal array value: it starts with an
+<a href=#99 id=99 data-nosnippet>99</a>/// operator name, as GL JS `isExpression` decides.
+<a href=#100 id=100 data-nosnippet>100</a></span><span class="kw">pub fn </span>is_expression(items: <span class="kw-2">&amp;</span>[Json]) -&gt; bool {
+<a href=#101 id=101 data-nosnippet>101</a>    items
+<a href=#102 id=102 data-nosnippet>102</a>        .first()
+<a href=#103 id=103 data-nosnippet>103</a>        .and_then(Json::as_str)
+<a href=#104 id=104 data-nosnippet>104</a>        .is_some_and(|name| OPERATORS.contains(<span class="kw-2">&amp;</span>name))
+<a href=#105 id=105 data-nosnippet>105</a>}
 </code></pre></div></section></main></body></html>

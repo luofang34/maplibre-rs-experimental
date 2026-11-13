@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["is_data_driven","needs_paint_retessellation","needs_tile_redraw","push_unique","same_prop","set_member"]};

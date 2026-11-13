@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_SIMPLE_VERTICES"],"fn":["cross","on_segment","point_in_ring","rings_have_intersections","segments_touch_or_cross","signed_area","validate_ring_topology"],"struct":["PolygonEarcut"]};

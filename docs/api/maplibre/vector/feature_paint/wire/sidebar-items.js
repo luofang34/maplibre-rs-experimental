@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["KIND_FEATURE","KIND_FILL_OUTLINE","KIND_LINE"],"fn":["decode_feature_paint","encode_feature_paint"]};

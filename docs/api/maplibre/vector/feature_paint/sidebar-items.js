@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["BucketEntryKind"],"fn":["evaluate_bucket_colors"],"mod":["wire"],"struct":["BucketFeatureEntry","TileFeaturePaintComponent"]};

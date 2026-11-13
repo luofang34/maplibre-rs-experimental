@@ -245,24 +245,39 @@
 <a href=#245 id=245 data-nosnippet>245</a>}
 <a href=#246 id=246 data-nosnippet>246</a>
 <a href=#247 id=247 data-nosnippet>247</a><span class="kw">impl </span><span class="kw">crate</span>::context::MapContext {
-<a href=#248 id=248 data-nosnippet>248</a>    <span class="doccomment">/// Sets a global state key and asks the request system to fetch the loaded tiles of every
-<a href=#249 id=249 data-nosnippet>249</a>    /// vector layer that read it again; their old content stays until the new tiles arrive.
+<a href=#248 id=248 data-nosnippet>248</a>    <span class="doccomment">/// Sets a global state key, updating paint-only layer dependencies in-place on resident GPU
+<a href=#249 id=249 data-nosnippet>249</a>    /// buffers and refetching loaded vector tiles only when layout, filter, or geometry changed.
 <a href=#250 id=250 data-nosnippet>250</a>    </span><span class="kw">pub fn </span>set_global_state(<span class="kw-2">&amp;mut </span><span class="self">self</span>, key: <span class="kw-2">&amp;</span>str, value: Value) {
-<a href=#251 id=251 data-nosnippet>251</a>        <span class="kw">let </span>changed = <span class="self">self</span>.style.set_global_state(key, value);
-<a href=#252 id=252 data-nosnippet>252</a>        <span class="kw">crate</span>::render::frame_signals::mark_dirty(<span class="kw-2">&amp;mut </span><span class="self">self</span>.world);
-<a href=#253 id=253 data-nosnippet>253</a>        <span class="kw">let </span>drawn_from_vector_tiles =
-<a href=#254 id=254 data-nosnippet>254</a>            <span class="self">self</span>.style.layers.iter().any(|layer| {
-<a href=#255 id=255 data-nosnippet>255</a>                changed.contains(<span class="kw-2">&amp;</span>layer.id) &amp;&amp; <span class="kw">super</span>::mutation::from_vector_tiles(layer)
-<a href=#256 id=256 data-nosnippet>256</a>            });
-<a href=#257 id=257 data-nosnippet>257</a>        <span class="kw">if </span>drawn_from_vector_tiles {
-<a href=#258 id=258 data-nosnippet>258</a>            <span class="kw">crate</span>::io::tile_retry::refresh(
-<a href=#259 id=259 data-nosnippet>259</a>                <span class="kw-2">&amp;mut </span><span class="self">self</span>.world,
-<a href=#260 id=260 data-nosnippet>260</a>                <span class="kw">crate</span>::io::tile_retry::RequestKind::Vector,
-<a href=#261 id=261 data-nosnippet>261</a>            );
-<a href=#262 id=262 data-nosnippet>262</a>        }
-<a href=#263 id=263 data-nosnippet>263</a>    }
-<a href=#264 id=264 data-nosnippet>264</a>}
-<a href=#265 id=265 data-nosnippet>265</a>
-<a href=#266 id=266 data-nosnippet>266</a><span class="attr">#[cfg(all(test, not(target_arch = <span class="string">"wasm32"</span>)))]
-<a href=#267 id=267 data-nosnippet>267</a></span><span class="kw">mod </span>tests;
+<a href=#251 id=251 data-nosnippet>251</a>        <span class="kw">let </span>before: HashMap&lt;String, StyleLayer&gt; = <span class="self">self
+<a href=#252 id=252 data-nosnippet>252</a>            </span>.style
+<a href=#253 id=253 data-nosnippet>253</a>            .layers
+<a href=#254 id=254 data-nosnippet>254</a>            .iter()
+<a href=#255 id=255 data-nosnippet>255</a>            .map(|layer| (layer.id.clone(), layer.clone()))
+<a href=#256 id=256 data-nosnippet>256</a>            .collect();
+<a href=#257 id=257 data-nosnippet>257</a>        <span class="kw">let </span>changed = <span class="self">self</span>.style.set_global_state(key, value);
+<a href=#258 id=258 data-nosnippet>258</a>        <span class="kw">crate</span>::render::frame_signals::mark_dirty(<span class="kw-2">&amp;mut </span><span class="self">self</span>.world);
+<a href=#259 id=259 data-nosnippet>259</a>        <span class="kw">if </span>changed.is_empty() {
+<a href=#260 id=260 data-nosnippet>260</a>            <span class="kw">return</span>;
+<a href=#261 id=261 data-nosnippet>261</a>        }
+<a href=#262 id=262 data-nosnippet>262</a>        <span class="kw">let </span>needs_redraw = <span class="self">self</span>.style.layers.iter().any(|after| {
+<a href=#263 id=263 data-nosnippet>263</a>            changed.contains(<span class="kw-2">&amp;</span>after.id)
+<a href=#264 id=264 data-nosnippet>264</a>                &amp;&amp; before
+<a href=#265 id=265 data-nosnippet>265</a>                    .get(<span class="kw-2">&amp;</span>after.id)
+<a href=#266 id=266 data-nosnippet>266</a>                    .is_none_or(|prev| <span class="kw">super</span>::mutation::classify::needs_tile_redraw(prev, after))
+<a href=#267 id=267 data-nosnippet>267</a>        });
+<a href=#268 id=268 data-nosnippet>268</a>        <span class="kw">crate</span>::vector::upload_system::style_refresh::DirtyVectorStyle::mark_style_edit(
+<a href=#269 id=269 data-nosnippet>269</a>            <span class="kw-2">&amp;mut </span><span class="self">self</span>.world,
+<a href=#270 id=270 data-nosnippet>270</a>            changed,
+<a href=#271 id=271 data-nosnippet>271</a>        );
+<a href=#272 id=272 data-nosnippet>272</a>        <span class="kw">if </span>needs_redraw {
+<a href=#273 id=273 data-nosnippet>273</a>            <span class="kw">crate</span>::io::tile_retry::refresh(
+<a href=#274 id=274 data-nosnippet>274</a>                <span class="kw-2">&amp;mut </span><span class="self">self</span>.world,
+<a href=#275 id=275 data-nosnippet>275</a>                <span class="kw">crate</span>::io::tile_retry::RequestKind::Vector,
+<a href=#276 id=276 data-nosnippet>276</a>            );
+<a href=#277 id=277 data-nosnippet>277</a>        }
+<a href=#278 id=278 data-nosnippet>278</a>    }
+<a href=#279 id=279 data-nosnippet>279</a>}
+<a href=#280 id=280 data-nosnippet>280</a>
+<a href=#281 id=281 data-nosnippet>281</a><span class="attr">#[cfg(all(test, not(target_arch = <span class="string">"wasm32"</span>)))]
+<a href=#282 id=282 data-nosnippet>282</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

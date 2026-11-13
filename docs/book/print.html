@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-75b260b0.js";
+            window.path_to_searchindex_js = "searchindex-291985c9.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-609ab0bd.js"></script>
@@ -450,7 +450,7 @@ pub fn build_style(mut style: Style) -&gt; Style {
 
 fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
     let base: Style = maplibre::platform::run_multithreaded(async {
-        Ok::&lt;_, reqwest::Error&gt;(reqwest::get(BASE_STYLE_URL).await?.json().await?)
+        reqwest::get(BASE_STYLE_URL).await?.json().await
     })?;
     let style = build_style(base);
 
@@ -552,6 +552,7 @@ pub fn style() -&gt; Style {
                 ]),
                 tile_size: Some(256),
                 url: None,
+                promote_id: None,
             }),
         )]),
         layers: vec![StyleLayer {
@@ -701,7 +702,7 @@ pub fn build_style(mut style: Style) -&gt; Style {
 
 fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
     let base: Style = maplibre::platform::run_multithreaded(async {
-        Ok::&lt;_, reqwest::Error&gt;(reqwest::get(BASE_STYLE_URL).await?.json().await?)
+        reqwest::get(BASE_STYLE_URL).await?.json().await
     })?;
     let style = build_style(base);
 
@@ -810,6 +811,7 @@ pub fn style() -&gt; Style {
                 ]),
                 tile_size: None,
                 url: None,
+                promote_id: None,
             }),
         )]),
         layers: vec![StyleLayer {
@@ -1010,6 +1012,7 @@ pub fn style() -&gt; Style {
                     ]),
                     tile_size: Some(256),
                     url: None,
+                    promote_id: None,
                 }),
             ),
             (
@@ -1717,6 +1720,7 @@ pub fn build_style(mut style: Style) -&gt; Style {
                 tiles: None,
                 tile_size: None,
                 url: Some("https://tiles.openfreemap.org/planet".to_string()),
+                promote_id: None,
             }),
         );
         "openfreemap".to_string()
@@ -1797,7 +1801,7 @@ pub fn build_style(mut style: Style) -&gt; Style {
 
 fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
     let base: Style = maplibre::platform::run_multithreaded(async {
-        Ok::&lt;_, reqwest::Error&gt;(reqwest::get(BASE_STYLE_URL).await?.json().await?)
+        reqwest::get(BASE_STYLE_URL).await?.json().await
     })?;
     let style = build_style(base);
 
@@ -2059,7 +2063,7 @@ pub fn build_style(mut style: Style) -&gt; Style {
 
 fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
     let base: Style = maplibre::platform::run_multithreaded(async {
-        Ok::&lt;_, reqwest::Error&gt;(reqwest::get(BASE_STYLE_URL).await?.json().await?)
+        reqwest::get(BASE_STYLE_URL).await?.json().await
     })?;
     let style = build_style(base);
 
@@ -2317,7 +2321,7 @@ pub fn build_style(mut style: Style) -&gt; Style {
 
 fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
     let base: Style = maplibre::platform::run_multithreaded(async {
-        Ok::&lt;_, reqwest::Error&gt;(reqwest::get(BASE_STYLE_URL).await?.json().await?)
+        reqwest::get(BASE_STYLE_URL).await?.json().await
     })?;
     let style = build_style(base);
 
@@ -2508,6 +2512,7 @@ pub fn style() -&gt; Style {
                 ]),
                 tile_size: Some(256),
                 url: None,
+                promote_id: None,
             }),
         )]),
         layers: vec![StyleLayer {
@@ -2696,7 +2701,7 @@ pub fn build_style(mut style: Style) -&gt; Style {
 
 fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
     let base: Style = maplibre::platform::run_multithreaded(async {
-        Ok::&lt;_, reqwest::Error&gt;(reqwest::get(BASE_STYLE_URL).await?.json().await?)
+        reqwest::get(BASE_STYLE_URL).await?.json().await
     })?;
     run_headed_map(
         Some(PathBuf::from("./maplibre-cache")),
@@ -2930,7 +2935,7 @@ pub fn build_style(mut style: Style) -&gt; Style {
 
 fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
     let base: Style = maplibre::platform::run_multithreaded(async {
-        Ok::&lt;_, reqwest::Error&gt;(reqwest::get(BASE_STYLE_URL).await?.json().await?)
+        reqwest::get(BASE_STYLE_URL).await?.json().await
     })?;
     let style = build_style(base);
 
@@ -3268,7 +3273,7 @@ pub fn build_style(mut style: Style) -&gt; Style {
 
 fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
     let base: Style = maplibre::platform::run_multithreaded(async {
-        Ok::&lt;_, reqwest::Error&gt;(reqwest::get(BASE_STYLE_URL).await?.json().await?)
+        reqwest::get(BASE_STYLE_URL).await?.json().await
     })?;
     run_headed_map(
         Some(PathBuf::from("./maplibre-cache")),
@@ -3627,7 +3632,7 @@ pub fn build_style(mut style: Style) -&gt; Style {
 
 fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
     let base: Style = maplibre::platform::run_multithreaded(async {
-        Ok::&lt;_, reqwest::Error&gt;(reqwest::get(BASE_STYLE_URL).await?.json().await?)
+        reqwest::get(BASE_STYLE_URL).await?.json().await
     })?;
     let style = build_style(base);
 
@@ -4071,7 +4076,7 @@ pub fn build_style(mut style: Style) -&gt; Style {
 
 fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
     let base: Style = maplibre::platform::run_multithreaded(async {
-        Ok::&lt;_, reqwest::Error&gt;(reqwest::get(BASE_STYLE_URL).await?.json().await?)
+        reqwest::get(BASE_STYLE_URL).await?.json().await
     })?;
     let style = build_style(base);
 

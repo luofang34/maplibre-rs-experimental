@@ -28,6 +28,7 @@ pub fn style() -> Style {
                 ]),
                 tile_size: Some(256),
                 url: None,
+                promote_id: None,
             }),
         )]),
         layers: vec![StyleLayer {

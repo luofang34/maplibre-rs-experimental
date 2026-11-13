@@ -15,7 +15,7 @@
 <a href=#15 id=15 data-nosnippet>15</a>/// style contains 3D translucent extrusions or elevated 3D lines (`line-elevation`).
 <a href=#16 id=16 data-nosnippet>16</a></span><span class="kw">const </span>ELEVATED_3D_HEADROOM_METERS: f64 = <span class="number">20_000.0</span>;
 <a href=#17 id=17 data-nosnippet>17</a>
-<a href=#18 id=18 data-nosnippet>18</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>style_elevated_headroom_meters(style: <span class="kw-2">&amp;</span>Style) -&gt; f64 {
+<a href=#18 id=18 data-nosnippet>18</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>style_elevated_headroom_meters(style: <span class="kw-2">&amp;</span>Style) -&gt; f64 {
 <a href=#19 id=19 data-nosnippet>19</a>    <span class="kw">let </span>has_elevated_3d = style.layers.iter().any(|layer| <span class="kw">match </span><span class="kw-2">&amp;</span>layer.paint {
 <a href=#20 id=20 data-nosnippet>20</a>        <span class="prelude-val">Some</span>(LayerPaint::FillExtrusion(paint)) =&gt; paint.fill_extrusion_translucent == <span class="prelude-val">Some</span>(<span class="bool-val">true</span>),
 <a href=#21 id=21 data-nosnippet>21</a>        <span class="prelude-val">Some</span>(LayerPaint::Line(paint)) =&gt; paint.line_elevation.is_some(),

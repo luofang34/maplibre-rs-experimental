@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["decode_layer_properties","layer_header","process_feature_properties","process_mvt_slice","retain_readable_indices","select_filtered_features","shared_props_for_slice","source_ids_for_slice","tags_are_valid"]};

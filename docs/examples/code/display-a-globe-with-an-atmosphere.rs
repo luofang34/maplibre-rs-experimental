@@ -33,6 +33,7 @@ pub fn style() -> Style {
                 ]),
                 tile_size: None,
                 url: None,
+                promote_id: None,
             }),
         )]),
         layers: vec![StyleLayer {

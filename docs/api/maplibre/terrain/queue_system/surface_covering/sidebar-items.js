@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["drawn_surface_tiles","fit_metadata","for_frame","map_sources"],"struct":["SurfaceCopies","SurfaceTiles"]};
+window.SIDEBAR_ITEMS = {"fn":["drawn_surface_tiles","expand_zoom_out_surfaces","fit_metadata","for_frame","has_descendant_drape","map_sources","subdivide_to_descendant_drapes"],"struct":["SurfaceCopies","SurfaceTiles"]};

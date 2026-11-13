@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["bounded_covering_with_focus","focus_for_view","for_frame","retained_textures"],"struct":["CachedCovering"]};
+window.SIDEBAR_ITEMS = {"constant":["ZOOM_OUT_DESCENDANT_DEPTH"],"fn":["bounded_covering_with_focus","collect_present_descendants","focus_for_view","for_frame","has_present_ancestor","retained_textures","retained_textures_with_zoom_out"],"struct":["CachedCovering"]};
