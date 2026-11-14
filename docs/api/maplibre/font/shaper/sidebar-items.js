@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["GlyphKey"],"fn":["face_glyph_atlas_key","is_bidi_isolate_or_override","is_cluster_continuation","shape_single_line","shape_slice_with_font","shape_text_runs","split_by_face"],"struct":["ShapedGlyph"]};

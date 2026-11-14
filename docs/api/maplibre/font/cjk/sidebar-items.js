@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["is_complex_shaping_codepoint","is_local_cjk_codepoint"]};

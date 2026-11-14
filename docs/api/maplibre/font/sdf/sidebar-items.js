@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["EDT_INF","MAX_GLYPH_DIM","PBF_BASELINE_TOP","SDF_BUFFER","SDF_CUTOFF","SDF_EM_SIZE","SDF_RADIUS"],"enum":["Segment"],"fn":["coverage_to_sdf","edt_1d","edt_2d","rasterize_char_sdf","rasterize_glyph_from_ref","rasterize_glyph_sdf"],"struct":["RasterizedGlyph","RecordingPen"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["FontStyle"],"fn":["collect_urls","default_local_ideograph_font_family","deserialize_local_ideograph_font_family","extract_urls_from_str","is_default_local_ideograph_font_family","parse_font_stack_entry","parse_rule_object","parse_unicode_ranges_value"],"struct":["FontFaceRule","FontFaces","FontWeight","UnicodeRange"]};

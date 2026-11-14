@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["append_block","block","glyph_pass","justifications","line_sizes","place_line"],"mod":["bidirectional","extents","styles","vertical"],"struct":["Block","Emitter","Laid"],"type":["TextColorRun"]};
+window.SIDEBAR_ITEMS = {"fn":["append_block","block","glyph_pass","justifications","line_sizes","place_line"],"mod":["bidirectional","extents","shaped","styles","vertical"],"struct":["Block","Emitter","Laid"],"type":["TextColorRun"]};

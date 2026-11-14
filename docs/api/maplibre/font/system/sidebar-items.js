@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["inspect_face_metadata","stack_style_suffix"],"mod":["native"],"struct":["FontSystem","LoadedFace"]};

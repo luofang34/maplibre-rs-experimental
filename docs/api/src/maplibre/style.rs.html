@@ -58,109 +58,128 @@
 <a href=#58 id=58 data-nosnippet>58</a>    <span class="doccomment">/// URL template for font glyph ranges.
 <a href=#59 id=59 data-nosnippet>59</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"Option::is_none"</span>)]
 <a href=#60 id=60 data-nosnippet>60</a>    </span><span class="kw">pub </span>glyphs: <span class="prelude-ty">Option</span>&lt;String&gt;,
-<a href=#61 id=61 data-nosnippet>61</a>    <span class="doccomment">/// Sprite URL or named sprite sources.
-<a href=#62 id=62 data-nosnippet>62</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"Option::is_none"</span>)]
-<a href=#63 id=63 data-nosnippet>63</a>    </span><span class="kw">pub </span>sprite: <span class="prelude-ty">Option</span>&lt;serde_json::Value&gt;,
-<a href=#64 id=64 data-nosnippet>64</a>    <span class="doccomment">/// Initial `[longitude, latitude]` in degrees, before host camera overrides.
-<a href=#65 id=65 data-nosnippet>65</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"Option::is_none"</span>)]
-<a href=#66 id=66 data-nosnippet>66</a>    </span><span class="kw">pub </span>center: <span class="prelude-ty">Option</span>&lt;[f64; <span class="number">2</span>]&gt;,
-<a href=#67 id=67 data-nosnippet>67</a>    <span class="doccomment">/// Initial altitude in metres above sea level of the point the camera looks at, before
-<a href=#68 id=68 data-nosnippet>68</a>    /// host overrides; terrain that holds the center to the ground takes its place.
-<a href=#69 id=69 data-nosnippet>69</a>    </span><span class="attr">#[serde(
-<a href=#70 id=70 data-nosnippet>70</a>        default,
-<a href=#71 id=71 data-nosnippet>71</a>        rename = <span class="string">"centerAltitude"</span>,
-<a href=#72 id=72 data-nosnippet>72</a>        skip_serializing_if = <span class="string">"Option::is_none"
-<a href=#73 id=73 data-nosnippet>73</a>    </span>)]
-<a href=#74 id=74 data-nosnippet>74</a>    </span><span class="kw">pub </span>center_altitude: <span class="prelude-ty">Option</span>&lt;f64&gt;,
-<a href=#75 id=75 data-nosnippet>75</a>    <span class="doccomment">/// Initial continuous camera zoom, before host overrides.
-<a href=#76 id=76 data-nosnippet>76</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"Option::is_none"</span>)]
-<a href=#77 id=77 data-nosnippet>77</a>    </span><span class="kw">pub </span>zoom: <span class="prelude-ty">Option</span>&lt;f64&gt;,
-<a href=#78 id=78 data-nosnippet>78</a>    <span class="doccomment">/// Initial clockwise rotation from north in degrees.
-<a href=#79 id=79 data-nosnippet>79</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"Option::is_none"</span>)]
-<a href=#80 id=80 data-nosnippet>80</a>    </span><span class="kw">pub </span>bearing: <span class="prelude-ty">Option</span>&lt;f64&gt;,
-<a href=#81 id=81 data-nosnippet>81</a>    <span class="doccomment">/// Initial camera tilt from the map normal in degrees, clamped by the camera pitch limit.
-<a href=#82 id=82 data-nosnippet>82</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"Option::is_none"</span>)]
-<a href=#83 id=83 data-nosnippet>83</a>    </span><span class="kw">pub </span>pitch: <span class="prelude-ty">Option</span>&lt;f64&gt;,
-<a href=#84 id=84 data-nosnippet>84</a>    <span class="doccomment">/// Initial roll in degrees, counterclockwise about the camera's line of sight.
-<a href=#85 id=85 data-nosnippet>85</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"Option::is_none"</span>)]
-<a href=#86 id=86 data-nosnippet>86</a>    </span><span class="kw">pub </span>roll: <span class="prelude-ty">Option</span>&lt;f64&gt;,
-<a href=#87 id=87 data-nosnippet>87</a>    <span class="doccomment">/// Map projection and its parameters; omission uses the renderer's default projection.
-<a href=#88 id=88 data-nosnippet>88</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"Option::is_none"</span>)]
-<a href=#89 id=89 data-nosnippet>89</a>    </span><span class="kw">pub </span>projection: <span class="prelude-ty">Option</span>&lt;ProjectionSpecification&gt;,
-<a href=#90 id=90 data-nosnippet>90</a>    <span class="doccomment">/// Lighting parameters used by style-driven shading.
-<a href=#91 id=91 data-nosnippet>91</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"Option::is_none"</span>)]
-<a href=#92 id=92 data-nosnippet>92</a>    </span><span class="kw">pub </span>light: <span class="prelude-ty">Option</span>&lt;light::LightSpecification&gt;,
-<a href=#93 id=93 data-nosnippet>93</a>    <span class="doccomment">/// Sky and atmosphere appearance; omission leaves the sky layer disabled.
-<a href=#94 id=94 data-nosnippet>94</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"Option::is_none"</span>)]
-<a href=#95 id=95 data-nosnippet>95</a>    </span><span class="kw">pub </span>sky: <span class="prelude-ty">Option</span>&lt;sky::SkySpecification&gt;,
-<a href=#96 id=96 data-nosnippet>96</a>    <span class="doccomment">/// Elevation source and vertical exaggeration; omission renders without terrain.
-<a href=#97 id=97 data-nosnippet>97</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"Option::is_none"</span>)]
-<a href=#98 id=98 data-nosnippet>98</a>    </span><span class="kw">pub </span>terrain: <span class="prelude-ty">Option</span>&lt;terrain::TerrainSpecification&gt;,
-<a href=#99 id=99 data-nosnippet>99</a>    <span class="doccomment">/// Default duration and delay for animated paint property mutations.
-<a href=#100 id=100 data-nosnippet>100</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"Option::is_none"</span>)]
-<a href=#101 id=101 data-nosnippet>101</a>    </span><span class="kw">pub </span>transition: <span class="prelude-ty">Option</span>&lt;transitions::TransitionSpec&gt;,
-<a href=#102 id=102 data-nosnippet>102</a>    <span class="doccomment">/// In-flight paint property transitions driven by the frame clock.
-<a href=#103 id=103 data-nosnippet>103</a>    </span><span class="attr">#[doc(hidden)]
-<a href=#104 id=104 data-nosnippet>104</a>    #[serde(skip)]
-<a href=#105 id=105 data-nosnippet>105</a>    </span><span class="kw">pub </span>active_transitions: transitions::ActiveTransitions,
-<a href=#106 id=106 data-nosnippet>106</a>    <span class="doccomment">/// Defaults for the values `global-state` expressions read.
-<a href=#107 id=107 data-nosnippet>107</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"HashMap::is_empty"</span>)]
-<a href=#108 id=108 data-nosnippet>108</a>    </span><span class="kw">pub </span>state: HashMap&lt;String, state::StateDeclaration&gt;,
-<a href=#109 id=109 data-nosnippet>109</a>    <span class="doccomment">/// Values set at runtime; they override the defaults and travel with the style to workers.
-<a href=#110 id=110 data-nosnippet>110</a>    </span><span class="attr">#[serde(
-<a href=#111 id=111 data-nosnippet>111</a>        default,
-<a href=#112 id=112 data-nosnippet>112</a>        rename = <span class="string">"globalState"</span>,
-<a href=#113 id=113 data-nosnippet>113</a>        skip_serializing_if = <span class="string">"HashMap::is_empty"
-<a href=#114 id=114 data-nosnippet>114</a>    </span>)]
-<a href=#115 id=115 data-nosnippet>115</a>    </span><span class="kw">pub </span>global_state: HashMap&lt;String, serde_json::Value&gt;,
-<a href=#116 id=116 data-nosnippet>116</a>    <span class="doccomment">/// Per-feature key/value state set at runtime; travels with the style to workers.
-<a href=#117 id=117 data-nosnippet>117</a>    </span><span class="attr">#[serde(
-<a href=#118 id=118 data-nosnippet>118</a>        default,
-<a href=#119 id=119 data-nosnippet>119</a>        rename = <span class="string">"featureState"</span>,
-<a href=#120 id=120 data-nosnippet>120</a>        skip_serializing_if = <span class="string">"feature_state::FeatureStateStore::is_empty"
-<a href=#121 id=121 data-nosnippet>121</a>    </span>)]
-<a href=#122 id=122 data-nosnippet>122</a>    </span><span class="kw">pub </span>feature_state: feature_state::FeatureStateStore,
-<a href=#123 id=123 data-nosnippet>123</a>    <span class="doccomment">/// Layers as declared, kept while the layers in use have global state substituted. Public
-<a href=#124 id=124 data-nosnippet>124</a>    /// only so a style can still be built with struct update syntax.
-<a href=#125 id=125 data-nosnippet>125</a>    </span><span class="attr">#[doc(hidden)]
-<a href=#126 id=126 data-nosnippet>126</a>    #[serde(skip)]
-<a href=#127 id=127 data-nosnippet>127</a>    </span><span class="kw">pub </span>state_templates: HashMap&lt;String, state::StateTemplate&gt;,
-<a href=#128 id=128 data-nosnippet>128</a>    <span class="doccomment">/// The light as declared, kept while the light in use has global state substituted.
-<a href=#129 id=129 data-nosnippet>129</a>    </span><span class="attr">#[doc(hidden)]
-<a href=#130 id=130 data-nosnippet>130</a>    #[serde(skip)]
-<a href=#131 id=131 data-nosnippet>131</a>    </span><span class="kw">pub </span>light_template: <span class="prelude-ty">Option</span>&lt;light::LightSpecification&gt;,
-<a href=#132 id=132 data-nosnippet>132</a>    <span class="doccomment">/// Images a host added by name, which `icon-image` can use next to the sprite's own.
-<a href=#133 id=133 data-nosnippet>133</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"HashMap::is_empty"</span>)]
-<a href=#134 id=134 data-nosnippet>134</a>    </span><span class="kw">pub </span>images: HashMap&lt;String, StyleImage&gt;,
-<a href=#135 id=135 data-nosnippet>135</a>}
-<a href=#136 id=136 data-nosnippet>136</a>
-<a href=#137 id=137 data-nosnippet>137</a><span class="doccomment">/// An RGBA image a host added to the style, as GL JS `addImage` takes it.
-<a href=#138 id=138 data-nosnippet>138</a></span><span class="attr">#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-<a href=#139 id=139 data-nosnippet>139</a></span><span class="kw">pub struct </span>StyleImage {
-<a href=#140 id=140 data-nosnippet>140</a>    <span class="doccomment">/// Width in pixels.
-<a href=#141 id=141 data-nosnippet>141</a>    </span><span class="kw">pub </span>width: u32,
-<a href=#142 id=142 data-nosnippet>142</a>    <span class="doccomment">/// Height in pixels.
-<a href=#143 id=143 data-nosnippet>143</a>    </span><span class="kw">pub </span>height: u32,
-<a href=#144 id=144 data-nosnippet>144</a>    <span class="doccomment">/// Straight-alpha RGBA bytes, `width * height * 4` of them.
-<a href=#145 id=145 data-nosnippet>145</a>    </span><span class="kw">pub </span>data: Vec&lt;u8&gt;,
-<a href=#146 id=146 data-nosnippet>146</a>    <span class="doccomment">/// Image pixels per layout pixel; 1 unless the image is drawn smaller than it is.
-<a href=#147 id=147 data-nosnippet>147</a>    </span><span class="attr">#[serde(default = <span class="string">"one"</span>)]
-<a href=#148 id=148 data-nosnippet>148</a>    </span><span class="kw">pub </span>pixel_ratio: f32,
-<a href=#149 id=149 data-nosnippet>149</a>    <span class="doccomment">/// Whether the alpha channel is a signed distance field that `icon-color` tints.
-<a href=#150 id=150 data-nosnippet>150</a>    </span><span class="attr">#[serde(default)]
-<a href=#151 id=151 data-nosnippet>151</a>    </span><span class="kw">pub </span>sdf: bool,
-<a href=#152 id=152 data-nosnippet>152</a>}
-<a href=#153 id=153 data-nosnippet>153</a>
-<a href=#154 id=154 data-nosnippet>154</a><span class="kw">fn </span>one() -&gt; f32 {
-<a href=#155 id=155 data-nosnippet>155</a>    <span class="number">1.0
-<a href=#156 id=156 data-nosnippet>156</a></span>}
-<a href=#157 id=157 data-nosnippet>157</a>
-<a href=#158 id=158 data-nosnippet>158</a><span class="kw">mod </span>default_style;
-<a href=#159 id=159 data-nosnippet>159</a><span class="kw">mod </span>layer_order;
-<a href=#160 id=160 data-nosnippet>160</a><span class="kw">pub mod </span>mutation;
-<a href=#161 id=161 data-nosnippet>161</a><span class="kw">pub mod </span>pattern_key;
-<a href=#162 id=162 data-nosnippet>162</a><span class="kw">pub mod </span>state;
-<a href=#163 id=163 data-nosnippet>163</a>
-<a href=#164 id=164 data-nosnippet>164</a><span class="attr">#[cfg(test)]
-<a href=#165 id=165 data-nosnippet>165</a></span><span class="kw">mod </span>tests;
+<a href=#61 id=61 data-nosnippet>61</a>    <span class="doccomment">/// `@font-face` declarations mapping font families or stacks to TrueType, OpenType, WOFF, or
+<a href=#62 id=62 data-nosnippet>62</a>    /// WOFF2 font URLs.
+<a href=#63 id=63 data-nosnippet>63</a>    </span><span class="attr">#[serde(
+<a href=#64 id=64 data-nosnippet>64</a>        default,
+<a href=#65 id=65 data-nosnippet>65</a>        rename = <span class="string">"font-faces"</span>,
+<a href=#66 id=66 data-nosnippet>66</a>        alias = <span class="string">"fontFaces"</span>,
+<a href=#67 id=67 data-nosnippet>67</a>        skip_serializing_if = <span class="string">"Option::is_none"
+<a href=#68 id=68 data-nosnippet>68</a>    </span>)]
+<a href=#69 id=69 data-nosnippet>69</a>    </span><span class="kw">pub </span>font_faces: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::font::FontFaces&gt;,
+<a href=#70 id=70 data-nosnippet>70</a>    <span class="doccomment">/// Font family used to rasterise local CJK ideographs, Kana, and Hangul without requesting
+<a href=#71 id=71 data-nosnippet>71</a>    /// remote `.pbf` glyph ranges (`Some("sans-serif")` by default; `None` when disabled).
+<a href=#72 id=72 data-nosnippet>72</a>    </span><span class="attr">#[serde(
+<a href=#73 id=73 data-nosnippet>73</a>        default = <span class="string">"crate::font::default_local_ideograph_font_family"</span>,
+<a href=#74 id=74 data-nosnippet>74</a>        rename = <span class="string">"localIdeographFontFamily"</span>,
+<a href=#75 id=75 data-nosnippet>75</a>        alias = <span class="string">"local-ideograph-font-family"</span>,
+<a href=#76 id=76 data-nosnippet>76</a>        deserialize_with = <span class="string">"crate::font::deserialize_local_ideograph_font_family"</span>,
+<a href=#77 id=77 data-nosnippet>77</a>        skip_serializing_if = <span class="string">"crate::font::is_default_local_ideograph_font_family"
+<a href=#78 id=78 data-nosnippet>78</a>    </span>)]
+<a href=#79 id=79 data-nosnippet>79</a>    </span><span class="kw">pub </span>local_ideograph_font_family: <span class="prelude-ty">Option</span>&lt;String&gt;,
+<a href=#80 id=80 data-nosnippet>80</a>    <span class="doccomment">/// Sprite URL or named sprite sources.
+<a href=#81 id=81 data-nosnippet>81</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"Option::is_none"</span>)]
+<a href=#82 id=82 data-nosnippet>82</a>    </span><span class="kw">pub </span>sprite: <span class="prelude-ty">Option</span>&lt;serde_json::Value&gt;,
+<a href=#83 id=83 data-nosnippet>83</a>    <span class="doccomment">/// Initial `[longitude, latitude]` in degrees, before host camera overrides.
+<a href=#84 id=84 data-nosnippet>84</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"Option::is_none"</span>)]
+<a href=#85 id=85 data-nosnippet>85</a>    </span><span class="kw">pub </span>center: <span class="prelude-ty">Option</span>&lt;[f64; <span class="number">2</span>]&gt;,
+<a href=#86 id=86 data-nosnippet>86</a>    <span class="doccomment">/// Initial altitude in metres above sea level of the point the camera looks at, before
+<a href=#87 id=87 data-nosnippet>87</a>    /// host overrides; terrain that holds the center to the ground takes its place.
+<a href=#88 id=88 data-nosnippet>88</a>    </span><span class="attr">#[serde(
+<a href=#89 id=89 data-nosnippet>89</a>        default,
+<a href=#90 id=90 data-nosnippet>90</a>        rename = <span class="string">"centerAltitude"</span>,
+<a href=#91 id=91 data-nosnippet>91</a>        skip_serializing_if = <span class="string">"Option::is_none"
+<a href=#92 id=92 data-nosnippet>92</a>    </span>)]
+<a href=#93 id=93 data-nosnippet>93</a>    </span><span class="kw">pub </span>center_altitude: <span class="prelude-ty">Option</span>&lt;f64&gt;,
+<a href=#94 id=94 data-nosnippet>94</a>    <span class="doccomment">/// Initial continuous camera zoom, before host overrides.
+<a href=#95 id=95 data-nosnippet>95</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"Option::is_none"</span>)]
+<a href=#96 id=96 data-nosnippet>96</a>    </span><span class="kw">pub </span>zoom: <span class="prelude-ty">Option</span>&lt;f64&gt;,
+<a href=#97 id=97 data-nosnippet>97</a>    <span class="doccomment">/// Initial clockwise rotation from north in degrees.
+<a href=#98 id=98 data-nosnippet>98</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"Option::is_none"</span>)]
+<a href=#99 id=99 data-nosnippet>99</a>    </span><span class="kw">pub </span>bearing: <span class="prelude-ty">Option</span>&lt;f64&gt;,
+<a href=#100 id=100 data-nosnippet>100</a>    <span class="doccomment">/// Initial camera tilt from the map normal in degrees, clamped by the camera pitch limit.
+<a href=#101 id=101 data-nosnippet>101</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"Option::is_none"</span>)]
+<a href=#102 id=102 data-nosnippet>102</a>    </span><span class="kw">pub </span>pitch: <span class="prelude-ty">Option</span>&lt;f64&gt;,
+<a href=#103 id=103 data-nosnippet>103</a>    <span class="doccomment">/// Initial roll in degrees, counterclockwise about the camera's line of sight.
+<a href=#104 id=104 data-nosnippet>104</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"Option::is_none"</span>)]
+<a href=#105 id=105 data-nosnippet>105</a>    </span><span class="kw">pub </span>roll: <span class="prelude-ty">Option</span>&lt;f64&gt;,
+<a href=#106 id=106 data-nosnippet>106</a>    <span class="doccomment">/// Map projection and its parameters; omission uses the renderer's default projection.
+<a href=#107 id=107 data-nosnippet>107</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"Option::is_none"</span>)]
+<a href=#108 id=108 data-nosnippet>108</a>    </span><span class="kw">pub </span>projection: <span class="prelude-ty">Option</span>&lt;ProjectionSpecification&gt;,
+<a href=#109 id=109 data-nosnippet>109</a>    <span class="doccomment">/// Lighting parameters used by style-driven shading.
+<a href=#110 id=110 data-nosnippet>110</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"Option::is_none"</span>)]
+<a href=#111 id=111 data-nosnippet>111</a>    </span><span class="kw">pub </span>light: <span class="prelude-ty">Option</span>&lt;light::LightSpecification&gt;,
+<a href=#112 id=112 data-nosnippet>112</a>    <span class="doccomment">/// Sky and atmosphere appearance; omission leaves the sky layer disabled.
+<a href=#113 id=113 data-nosnippet>113</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"Option::is_none"</span>)]
+<a href=#114 id=114 data-nosnippet>114</a>    </span><span class="kw">pub </span>sky: <span class="prelude-ty">Option</span>&lt;sky::SkySpecification&gt;,
+<a href=#115 id=115 data-nosnippet>115</a>    <span class="doccomment">/// Elevation source and vertical exaggeration; omission renders without terrain.
+<a href=#116 id=116 data-nosnippet>116</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"Option::is_none"</span>)]
+<a href=#117 id=117 data-nosnippet>117</a>    </span><span class="kw">pub </span>terrain: <span class="prelude-ty">Option</span>&lt;terrain::TerrainSpecification&gt;,
+<a href=#118 id=118 data-nosnippet>118</a>    <span class="doccomment">/// Default duration and delay for animated paint property mutations.
+<a href=#119 id=119 data-nosnippet>119</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"Option::is_none"</span>)]
+<a href=#120 id=120 data-nosnippet>120</a>    </span><span class="kw">pub </span>transition: <span class="prelude-ty">Option</span>&lt;transitions::TransitionSpec&gt;,
+<a href=#121 id=121 data-nosnippet>121</a>    <span class="doccomment">/// In-flight paint property transitions driven by the frame clock.
+<a href=#122 id=122 data-nosnippet>122</a>    </span><span class="attr">#[doc(hidden)]
+<a href=#123 id=123 data-nosnippet>123</a>    #[serde(skip)]
+<a href=#124 id=124 data-nosnippet>124</a>    </span><span class="kw">pub </span>active_transitions: transitions::ActiveTransitions,
+<a href=#125 id=125 data-nosnippet>125</a>    <span class="doccomment">/// Defaults for the values `global-state` expressions read.
+<a href=#126 id=126 data-nosnippet>126</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"HashMap::is_empty"</span>)]
+<a href=#127 id=127 data-nosnippet>127</a>    </span><span class="kw">pub </span>state: HashMap&lt;String, state::StateDeclaration&gt;,
+<a href=#128 id=128 data-nosnippet>128</a>    <span class="doccomment">/// Values set at runtime; they override the defaults and travel with the style to workers.
+<a href=#129 id=129 data-nosnippet>129</a>    </span><span class="attr">#[serde(
+<a href=#130 id=130 data-nosnippet>130</a>        default,
+<a href=#131 id=131 data-nosnippet>131</a>        rename = <span class="string">"globalState"</span>,
+<a href=#132 id=132 data-nosnippet>132</a>        skip_serializing_if = <span class="string">"HashMap::is_empty"
+<a href=#133 id=133 data-nosnippet>133</a>    </span>)]
+<a href=#134 id=134 data-nosnippet>134</a>    </span><span class="kw">pub </span>global_state: HashMap&lt;String, serde_json::Value&gt;,
+<a href=#135 id=135 data-nosnippet>135</a>    <span class="doccomment">/// Per-feature key/value state set at runtime; travels with the style to workers.
+<a href=#136 id=136 data-nosnippet>136</a>    </span><span class="attr">#[serde(
+<a href=#137 id=137 data-nosnippet>137</a>        default,
+<a href=#138 id=138 data-nosnippet>138</a>        rename = <span class="string">"featureState"</span>,
+<a href=#139 id=139 data-nosnippet>139</a>        skip_serializing_if = <span class="string">"feature_state::FeatureStateStore::is_empty"
+<a href=#140 id=140 data-nosnippet>140</a>    </span>)]
+<a href=#141 id=141 data-nosnippet>141</a>    </span><span class="kw">pub </span>feature_state: feature_state::FeatureStateStore,
+<a href=#142 id=142 data-nosnippet>142</a>    <span class="doccomment">/// Layers as declared, kept while the layers in use have global state substituted. Public
+<a href=#143 id=143 data-nosnippet>143</a>    /// only so a style can still be built with struct update syntax.
+<a href=#144 id=144 data-nosnippet>144</a>    </span><span class="attr">#[doc(hidden)]
+<a href=#145 id=145 data-nosnippet>145</a>    #[serde(skip)]
+<a href=#146 id=146 data-nosnippet>146</a>    </span><span class="kw">pub </span>state_templates: HashMap&lt;String, state::StateTemplate&gt;,
+<a href=#147 id=147 data-nosnippet>147</a>    <span class="doccomment">/// The light as declared, kept while the light in use has global state substituted.
+<a href=#148 id=148 data-nosnippet>148</a>    </span><span class="attr">#[doc(hidden)]
+<a href=#149 id=149 data-nosnippet>149</a>    #[serde(skip)]
+<a href=#150 id=150 data-nosnippet>150</a>    </span><span class="kw">pub </span>light_template: <span class="prelude-ty">Option</span>&lt;light::LightSpecification&gt;,
+<a href=#151 id=151 data-nosnippet>151</a>    <span class="doccomment">/// Images a host added by name, which `icon-image` can use next to the sprite's own.
+<a href=#152 id=152 data-nosnippet>152</a>    </span><span class="attr">#[serde(default, skip_serializing_if = <span class="string">"HashMap::is_empty"</span>)]
+<a href=#153 id=153 data-nosnippet>153</a>    </span><span class="kw">pub </span>images: HashMap&lt;String, StyleImage&gt;,
+<a href=#154 id=154 data-nosnippet>154</a>}
+<a href=#155 id=155 data-nosnippet>155</a>
+<a href=#156 id=156 data-nosnippet>156</a><span class="doccomment">/// An RGBA image a host added to the style, as GL JS `addImage` takes it.
+<a href=#157 id=157 data-nosnippet>157</a></span><span class="attr">#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+<a href=#158 id=158 data-nosnippet>158</a></span><span class="kw">pub struct </span>StyleImage {
+<a href=#159 id=159 data-nosnippet>159</a>    <span class="doccomment">/// Width in pixels.
+<a href=#160 id=160 data-nosnippet>160</a>    </span><span class="kw">pub </span>width: u32,
+<a href=#161 id=161 data-nosnippet>161</a>    <span class="doccomment">/// Height in pixels.
+<a href=#162 id=162 data-nosnippet>162</a>    </span><span class="kw">pub </span>height: u32,
+<a href=#163 id=163 data-nosnippet>163</a>    <span class="doccomment">/// Straight-alpha RGBA bytes, `width * height * 4` of them.
+<a href=#164 id=164 data-nosnippet>164</a>    </span><span class="kw">pub </span>data: Vec&lt;u8&gt;,
+<a href=#165 id=165 data-nosnippet>165</a>    <span class="doccomment">/// Image pixels per layout pixel; 1 unless the image is drawn smaller than it is.
+<a href=#166 id=166 data-nosnippet>166</a>    </span><span class="attr">#[serde(default = <span class="string">"one"</span>)]
+<a href=#167 id=167 data-nosnippet>167</a>    </span><span class="kw">pub </span>pixel_ratio: f32,
+<a href=#168 id=168 data-nosnippet>168</a>    <span class="doccomment">/// Whether the alpha channel is a signed distance field that `icon-color` tints.
+<a href=#169 id=169 data-nosnippet>169</a>    </span><span class="attr">#[serde(default)]
+<a href=#170 id=170 data-nosnippet>170</a>    </span><span class="kw">pub </span>sdf: bool,
+<a href=#171 id=171 data-nosnippet>171</a>}
+<a href=#172 id=172 data-nosnippet>172</a>
+<a href=#173 id=173 data-nosnippet>173</a><span class="kw">fn </span>one() -&gt; f32 {
+<a href=#174 id=174 data-nosnippet>174</a>    <span class="number">1.0
+<a href=#175 id=175 data-nosnippet>175</a></span>}
+<a href=#176 id=176 data-nosnippet>176</a>
+<a href=#177 id=177 data-nosnippet>177</a><span class="kw">mod </span>default_style;
+<a href=#178 id=178 data-nosnippet>178</a><span class="kw">mod </span>layer_order;
+<a href=#179 id=179 data-nosnippet>179</a><span class="kw">pub mod </span>mutation;
+<a href=#180 id=180 data-nosnippet>180</a><span class="kw">pub mod </span>pattern_key;
+<a href=#181 id=181 data-nosnippet>181</a><span class="kw">pub mod </span>state;
+<a href=#182 id=182 data-nosnippet>182</a>
+<a href=#183 id=183 data-nosnippet>183</a><span class="attr">#[cfg(test)]
+<a href=#184 id=184 data-nosnippet>184</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

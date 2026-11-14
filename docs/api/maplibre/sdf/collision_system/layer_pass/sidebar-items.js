@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["empty_metadata","place_layer"],"mod":["anchors","metadata"],"struct":["FeaturePlacement","LayerFrame"]};
+window.SIDEBAR_ITEMS = {"fn":["empty_metadata","place_layer"],"mod":["anchors","avoid_edges","metadata"],"struct":["FeaturePlacement","LayerFrame"]};

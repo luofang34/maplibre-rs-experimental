@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_DECOMPRESSED_FONT_BYTES"],"enum":["FontContainerFormat"],"fn":["assemble_sfnt","detect_container_format","sfnt_checksum","unpack_font_container"],"struct":["SfntTable"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["KNOWN_TAGS","WOFF2_HEADER_SIZE"],"fn":["unpack_woff2"],"mod":["glyf_reconstruct"],"struct":["Cursor","Woff2DirEntry"]};

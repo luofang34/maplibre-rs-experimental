@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["build_shaped_block","place_shaped_line","shaped_line_width","unwrapped_shaped_width","wrap_ltr_paragraph","wrap_shaped_paragraphs"],"struct":["ShapedBlock"]};

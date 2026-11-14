@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["Joining"],"fn":["forms","is_shaped","is_transparent","lam_alef","needs_shaping","shape"]};
+window.SIDEBAR_ITEMS = {"enum":["Joining"],"fn":["is_transparent","lam_alef","letter_forms","needs_shaping","shape"]};

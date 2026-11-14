@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["decode_triplet","encode_truetype_points","reconstruct_glyf_loca","reconstruct_hmtx","scan_composite_components"],"struct":["ReconstructedGlyf"]};

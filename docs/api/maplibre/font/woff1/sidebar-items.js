@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["WOFF1_HEADER_SIZE","WOFF1_TABLE_DIR_ENTRY_SIZE"],"fn":["read_u16_be","read_u32_be","unpack_woff1"]};
