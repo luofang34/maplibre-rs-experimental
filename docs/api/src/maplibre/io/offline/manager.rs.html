@@ -439,11 +439,14 @@
 <a href=#439 id=439 data-nosnippet>439</a>                <span class="kw">match </span>src {
 <a href=#440 id=440 data-nosnippet>440</a>                    Source::Vector(v) | Source::Raster(v) =&gt; apply_tile_json(v, tile_json),
 <a href=#441 id=441 data-nosnippet>441</a>                    Source::RasterDem(d) =&gt; apply_tile_json_to_dem(d, tile_json),
-<a href=#442 id=442 data-nosnippet>442</a>                    Source::GeoJson(<span class="kw">_</span>) | Source::Image(<span class="kw">_</span>) =&gt; {}
-<a href=#443 id=443 data-nosnippet>443</a>                }
-<a href=#444 id=444 data-nosnippet>444</a>            }
-<a href=#445 id=445 data-nosnippet>445</a>        }
-<a href=#446 id=446 data-nosnippet>446</a>        <span class="prelude-val">Ok</span>(())
-<a href=#447 id=447 data-nosnippet>447</a>    }
-<a href=#448 id=448 data-nosnippet>448</a>}
+<a href=#442 id=442 data-nosnippet>442</a>                    Source::GeoJson(<span class="kw">_</span>)
+<a href=#443 id=443 data-nosnippet>443</a>                    | Source::Image(<span class="kw">_</span>)
+<a href=#444 id=444 data-nosnippet>444</a>                    | Source::Video(<span class="kw">_</span>)
+<a href=#445 id=445 data-nosnippet>445</a>                    | Source::Canvas(<span class="kw">_</span>) =&gt; {}
+<a href=#446 id=446 data-nosnippet>446</a>                }
+<a href=#447 id=447 data-nosnippet>447</a>            }
+<a href=#448 id=448 data-nosnippet>448</a>        }
+<a href=#449 id=449 data-nosnippet>449</a>        <span class="prelude-val">Ok</span>(())
+<a href=#450 id=450 data-nosnippet>450</a>    }
+<a href=#451 id=451 data-nosnippet>451</a>}
 </code></pre></div></section></main></body></html>

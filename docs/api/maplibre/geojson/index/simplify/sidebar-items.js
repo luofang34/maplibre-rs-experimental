@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["simplify_geometry","simplify_points","sq_seg_dist","squared_world_tolerance"]};

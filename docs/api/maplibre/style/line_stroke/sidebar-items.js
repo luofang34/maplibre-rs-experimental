@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["STROKE_LAYOUT"],"enum":["LineCap","LineJoin"],"struct":["LineStroke"]};
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_ROUND_LIMIT","STROKE_LAYOUT"],"enum":["LineCap","LineJoin"],"fn":["eval_zoom_f32","zoom_f32_parses"],"struct":["LineStroke"]};

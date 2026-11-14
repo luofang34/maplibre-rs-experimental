@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["style_transition_system"],"struct":["TransitionClock"]};

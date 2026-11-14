@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["central_angle","clip_edge","clip_line_with_metrics","clip_segment","flush_run","unproject_radians"],"struct":["MetricClippedLine"]};

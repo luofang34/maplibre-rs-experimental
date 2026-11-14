@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["canvas_definition_eq","collect_layer_transitions","geojson_definition_eq","image_definition_eq","is_raster_like","renumber_layers","video_definition_eq"],"struct":["StyleReplacementDiff"]};

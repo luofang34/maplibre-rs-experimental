@@ -205,86 +205,91 @@
 <a href=#205 id=205 data-nosnippet>205</a>        render::eventually::Eventually,
 <a href=#206 id=206 data-nosnippet>206</a>        style::source::Source,
 <a href=#207 id=207 data-nosnippet>207</a>    };
-<a href=#208 id=208 data-nosnippet>208</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(Source::Image(image)) = style.sources.get(name) <span class="kw">else </span>{
-<a href=#209 id=209 data-nosnippet>209</a>        <span class="kw">return</span>;
-<a href=#210 id=210 data-nosnippet>210</a>    };
-<a href=#211 id=211 data-nosnippet>211</a>    <span class="kw">let </span>source = RasterSourceId::from(name);
-<a href=#212 id=212 data-nosnippet>212</a>    <span class="kw">let </span>coords: Vec&lt;WorldTileCoords&gt; = world.tiles.tiles.values().map(|tile| tile.coords).collect();
-<a href=#213 id=213 data-nosnippet>213</a>    <span class="kw">for </span>coords <span class="kw">in </span>coords {
-<a href=#214 id=214 data-nosnippet>214</a>        <span class="kw">if </span>render_tile_bounds_reach(image.coordinates, coords) {
-<a href=#215 id=215 data-nosnippet>215</a>            <span class="kw">continue</span>;
-<a href=#216 id=216 data-nosnippet>216</a>        }
-<a href=#217 id=217 data-nosnippet>217</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(component) = world
-<a href=#218 id=218 data-nosnippet>218</a>            .tiles
-<a href=#219 id=219 data-nosnippet>219</a>            .query_mut::&lt;<span class="kw-2">&amp;mut </span>RasterLayersDataComponent&gt;(coords)
-<a href=#220 id=220 data-nosnippet>220</a>        {
-<a href=#221 id=221 data-nosnippet>221</a>            component.layers.retain(|layer| layer.source() != <span class="kw-2">&amp;</span>source);
-<a href=#222 id=222 data-nosnippet>222</a>        }
-<a href=#223 id=223 data-nosnippet>223</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(Eventually::Initialized(raster)) = world
-<a href=#224 id=224 data-nosnippet>224</a>            .resources
-<a href=#225 id=225 data-nosnippet>225</a>            .get_mut::&lt;Eventually&lt;<span class="kw">crate</span>::raster::resource::RasterResources&gt;&gt;()
-<a href=#226 id=226 data-nosnippet>226</a>        {
-<a href=#227 id=227 data-nosnippet>227</a>            raster.remove_source_texture(<span class="kw-2">&amp;</span>source, coords);
-<a href=#228 id=228 data-nosnippet>228</a>        }
-<a href=#229 id=229 data-nosnippet>229</a>    }
-<a href=#230 id=230 data-nosnippet>230</a>    tile_retry::refresh(world, RequestKind::Raster);
-<a href=#231 id=231 data-nosnippet>231</a>}
-<a href=#232 id=232 data-nosnippet>232</a>
-<a href=#233 id=233 data-nosnippet>233</a><span class="doccomment">/// Whether the picture stretched over `coordinates` can reach the tile: its corners' bounding box
-<a href=#234 id=234 data-nosnippet>234</a>/// overlaps the tile.
-<a href=#235 id=235 data-nosnippet>235</a></span><span class="kw">fn </span>render_tile_bounds_reach(coordinates: [[f64; <span class="number">2</span>]; <span class="number">4</span>], tile: WorldTileCoords) -&gt; bool {
-<a href=#236 id=236 data-nosnippet>236</a>    <span class="kw">let </span>tile_count = <span class="number">2_f64</span>.powi(i32::from(u8::from(tile.z)));
-<a href=#237 id=237 data-nosnippet>237</a>    <span class="kw">let </span>corners = coordinates.map(mercator);
-<a href=#238 id=238 data-nosnippet>238</a>    <span class="kw">let </span>fold = |axis: usize| {
-<a href=#239 id=239 data-nosnippet>239</a>        corners.iter().fold((f64::MAX, f64::MIN), |(lo, hi), c| {
-<a href=#240 id=240 data-nosnippet>240</a>            (lo.min(c[axis]), hi.max(c[axis]))
-<a href=#241 id=241 data-nosnippet>241</a>        })
-<a href=#242 id=242 data-nosnippet>242</a>    };
-<a href=#243 id=243 data-nosnippet>243</a>    <span class="kw">let </span>((west, east), (north, south)) = (fold(<span class="number">0</span>), fold(<span class="number">1</span>));
-<a href=#244 id=244 data-nosnippet>244</a>    <span class="kw">let </span>(left, top) = (
-<a href=#245 id=245 data-nosnippet>245</a>        f64::from(tile.x) / tile_count,
-<a href=#246 id=246 data-nosnippet>246</a>        f64::from(tile.y) / tile_count,
-<a href=#247 id=247 data-nosnippet>247</a>    );
-<a href=#248 id=248 data-nosnippet>248</a>    <span class="kw">let </span>size = <span class="number">1.0 </span>/ tile_count;
-<a href=#249 id=249 data-nosnippet>249</a>    <span class="comment">// A picture past the antimeridian shows in copies of the world, which this does not follow.
-<a href=#250 id=250 data-nosnippet>250</a>    </span><span class="kw">let </span>wraps = west &lt; <span class="number">0.0 </span>|| east &gt; <span class="number">1.0</span>;
-<a href=#251 id=251 data-nosnippet>251</a>    wraps || !(east &lt; left || west &gt; left + size || south &lt; top || north &gt; top + size)
-<a href=#252 id=252 data-nosnippet>252</a>}
-<a href=#253 id=253 data-nosnippet>253</a>
-<a href=#254 id=254 data-nosnippet>254</a><span class="doccomment">/// The tile `coords` of an image source, resampled from its picture, which is fetched and
-<a href=#255 id=255 data-nosnippet>255</a>/// decoded once through the client's shared asset cache. `Ok(None)` when the picture does not
-<a href=#256 id=256 data-nosnippet>256</a>/// reach the tile.
-<a href=#257 id=257 data-nosnippet>257</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">async fn </span>load_tile&lt;HC: <span class="kw">crate</span>::io::source_client::HttpClient&gt;(
-<a href=#258 id=258 data-nosnippet>258</a>    client: <span class="kw-2">&amp;</span><span class="kw">crate</span>::io::source_client::SourceClient&lt;HC&gt;,
-<a href=#259 id=259 data-nosnippet>259</a>    source: <span class="kw-2">&amp;</span><span class="kw">crate</span>::style::source::ImageSource,
-<a href=#260 id=260 data-nosnippet>260</a>    coords: WorldTileCoords,
-<a href=#261 id=261 data-nosnippet>261</a>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;RgbaImage&gt;, <span class="kw">crate</span>::sdf::assets::AssetFailure&gt; {
-<a href=#262 id=262 data-nosnippet>262</a>    <span class="kw">use crate</span>::{io::cpu_work::run_cpu_bound, sdf::assets::AssetFailure};
-<a href=#263 id=263 data-nosnippet>263</a>    <span class="kw">let </span>url = source.url.as_str();
-<a href=#264 id=264 data-nosnippet>264</a>    <span class="kw">let </span>picture = client
-<a href=#265 id=265 data-nosnippet>265</a>        .assets()
-<a href=#266 id=266 data-nosnippet>266</a>        .load(
-<a href=#267 id=267 data-nosnippet>267</a>            <span class="macro">format!</span>(<span class="string">"image-source:{url}#{}"</span>, source.generation),
-<a href=#268 id=268 data-nosnippet>268</a>            || <span class="kw">async </span>{
-<a href=#269 id=269 data-nosnippet>269</a>                <span class="kw">let </span>bytes = <span class="kw">crate</span>::sdf::assets::fetch(client, url, <span class="string">"image source"</span>).<span class="kw">await</span><span class="question-mark">?</span>;
-<a href=#270 id=270 data-nosnippet>270</a>                <span class="kw">let </span>picture = run_cpu_bound(<span class="kw">move </span>|| decode(<span class="kw-2">&amp;</span>bytes))
-<a href=#271 id=271 data-nosnippet>271</a>                    .<span class="kw">await
-<a href=#272 id=272 data-nosnippet>272</a>                    </span>.map_err(|error| AssetFailure::Terminal(<span class="macro">format!</span>(<span class="string">"decoding {url}: {error}"</span>)))<span class="question-mark">?
-<a href=#273 id=273 data-nosnippet>273</a>                    </span>.map_err(|error| {
-<a href=#274 id=274 data-nosnippet>274</a>                        <span class="macro">tracing::warn!</span>(%url, %error, <span class="string">"invalid image source picture"</span>);
-<a href=#275 id=275 data-nosnippet>275</a>                        AssetFailure::Terminal(<span class="macro">format!</span>(<span class="string">"invalid image {url}: {error}"</span>))
-<a href=#276 id=276 data-nosnippet>276</a>                    })<span class="question-mark">?</span>;
-<a href=#277 id=277 data-nosnippet>277</a>                <span class="kw">let </span>bytes = picture.as_raw().len();
-<a href=#278 id=278 data-nosnippet>278</a>                <span class="prelude-val">Ok</span>((picture, bytes))
-<a href=#279 id=279 data-nosnippet>279</a>            },
-<a href=#280 id=280 data-nosnippet>280</a>        )
-<a href=#281 id=281 data-nosnippet>281</a>        .<span class="kw">await</span><span class="question-mark">?</span>;
-<a href=#282 id=282 data-nosnippet>282</a>    <span class="kw">let </span>coordinates = source.coordinates;
-<a href=#283 id=283 data-nosnippet>283</a>    run_cpu_bound(<span class="kw">move </span>|| render_tile(<span class="kw-2">&amp;</span>picture, coordinates, coords))
-<a href=#284 id=284 data-nosnippet>284</a>        .<span class="kw">await
-<a href=#285 id=285 data-nosnippet>285</a>        </span>.map_err(|error| AssetFailure::Terminal(<span class="macro">format!</span>(<span class="string">"resampling {url}: {error}"</span>)))
-<a href=#286 id=286 data-nosnippet>286</a>}
-<a href=#287 id=287 data-nosnippet>287</a>
-<a href=#288 id=288 data-nosnippet>288</a><span class="attr">#[cfg(test)]
-<a href=#289 id=289 data-nosnippet>289</a></span><span class="kw">mod </span>tests;
+<a href=#208 id=208 data-nosnippet>208</a>    <span class="kw">let </span>(coordinates, is_remote_image) = <span class="kw">match </span>style.sources.get(name) {
+<a href=#209 id=209 data-nosnippet>209</a>        <span class="prelude-val">Some</span>(Source::Image(image)) =&gt; (image.coordinates, <span class="bool-val">true</span>),
+<a href=#210 id=210 data-nosnippet>210</a>        <span class="prelude-val">Some</span>(Source::Video(video)) =&gt; (video.coordinates, <span class="bool-val">false</span>),
+<a href=#211 id=211 data-nosnippet>211</a>        <span class="prelude-val">Some</span>(Source::Canvas(canvas)) =&gt; (canvas.coordinates, <span class="bool-val">false</span>),
+<a href=#212 id=212 data-nosnippet>212</a>        <span class="kw">_ </span>=&gt; <span class="kw">return</span>,
+<a href=#213 id=213 data-nosnippet>213</a>    };
+<a href=#214 id=214 data-nosnippet>214</a>    <span class="kw">let </span>source = RasterSourceId::from(name);
+<a href=#215 id=215 data-nosnippet>215</a>    <span class="kw">let </span>coords: Vec&lt;WorldTileCoords&gt; = world.tiles.tiles.values().map(|tile| tile.coords).collect();
+<a href=#216 id=216 data-nosnippet>216</a>    <span class="kw">for </span>coords <span class="kw">in </span>coords {
+<a href=#217 id=217 data-nosnippet>217</a>        <span class="kw">if </span>render_tile_bounds_reach(coordinates, coords) {
+<a href=#218 id=218 data-nosnippet>218</a>            <span class="kw">continue</span>;
+<a href=#219 id=219 data-nosnippet>219</a>        }
+<a href=#220 id=220 data-nosnippet>220</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(component) = world
+<a href=#221 id=221 data-nosnippet>221</a>            .tiles
+<a href=#222 id=222 data-nosnippet>222</a>            .query_mut::&lt;<span class="kw-2">&amp;mut </span>RasterLayersDataComponent&gt;(coords)
+<a href=#223 id=223 data-nosnippet>223</a>        {
+<a href=#224 id=224 data-nosnippet>224</a>            component.layers.retain(|layer| layer.source() != <span class="kw-2">&amp;</span>source);
+<a href=#225 id=225 data-nosnippet>225</a>        }
+<a href=#226 id=226 data-nosnippet>226</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(Eventually::Initialized(raster)) = world
+<a href=#227 id=227 data-nosnippet>227</a>            .resources
+<a href=#228 id=228 data-nosnippet>228</a>            .get_mut::&lt;Eventually&lt;<span class="kw">crate</span>::raster::resource::RasterResources&gt;&gt;()
+<a href=#229 id=229 data-nosnippet>229</a>        {
+<a href=#230 id=230 data-nosnippet>230</a>            raster.remove_source_texture(<span class="kw-2">&amp;</span>source, coords);
+<a href=#231 id=231 data-nosnippet>231</a>        }
+<a href=#232 id=232 data-nosnippet>232</a>    }
+<a href=#233 id=233 data-nosnippet>233</a>    <span class="kw">if </span>is_remote_image {
+<a href=#234 id=234 data-nosnippet>234</a>        tile_retry::refresh(world, RequestKind::Raster);
+<a href=#235 id=235 data-nosnippet>235</a>    }
+<a href=#236 id=236 data-nosnippet>236</a>}
+<a href=#237 id=237 data-nosnippet>237</a>
+<a href=#238 id=238 data-nosnippet>238</a><span class="doccomment">/// Whether the picture stretched over `coordinates` can reach the tile: its corners' bounding box
+<a href=#239 id=239 data-nosnippet>239</a>/// overlaps the tile.
+<a href=#240 id=240 data-nosnippet>240</a></span><span class="kw">fn </span>render_tile_bounds_reach(coordinates: [[f64; <span class="number">2</span>]; <span class="number">4</span>], tile: WorldTileCoords) -&gt; bool {
+<a href=#241 id=241 data-nosnippet>241</a>    <span class="kw">let </span>tile_count = <span class="number">2_f64</span>.powi(i32::from(u8::from(tile.z)));
+<a href=#242 id=242 data-nosnippet>242</a>    <span class="kw">let </span>corners = coordinates.map(mercator);
+<a href=#243 id=243 data-nosnippet>243</a>    <span class="kw">let </span>fold = |axis: usize| {
+<a href=#244 id=244 data-nosnippet>244</a>        corners.iter().fold((f64::MAX, f64::MIN), |(lo, hi), c| {
+<a href=#245 id=245 data-nosnippet>245</a>            (lo.min(c[axis]), hi.max(c[axis]))
+<a href=#246 id=246 data-nosnippet>246</a>        })
+<a href=#247 id=247 data-nosnippet>247</a>    };
+<a href=#248 id=248 data-nosnippet>248</a>    <span class="kw">let </span>((west, east), (north, south)) = (fold(<span class="number">0</span>), fold(<span class="number">1</span>));
+<a href=#249 id=249 data-nosnippet>249</a>    <span class="kw">let </span>(left, top) = (
+<a href=#250 id=250 data-nosnippet>250</a>        f64::from(tile.x) / tile_count,
+<a href=#251 id=251 data-nosnippet>251</a>        f64::from(tile.y) / tile_count,
+<a href=#252 id=252 data-nosnippet>252</a>    );
+<a href=#253 id=253 data-nosnippet>253</a>    <span class="kw">let </span>size = <span class="number">1.0 </span>/ tile_count;
+<a href=#254 id=254 data-nosnippet>254</a>    <span class="comment">// A picture past the antimeridian shows in copies of the world, which this does not follow.
+<a href=#255 id=255 data-nosnippet>255</a>    </span><span class="kw">let </span>wraps = west &lt; <span class="number">0.0 </span>|| east &gt; <span class="number">1.0</span>;
+<a href=#256 id=256 data-nosnippet>256</a>    wraps || !(east &lt; left || west &gt; left + size || south &lt; top || north &gt; top + size)
+<a href=#257 id=257 data-nosnippet>257</a>}
+<a href=#258 id=258 data-nosnippet>258</a>
+<a href=#259 id=259 data-nosnippet>259</a><span class="doccomment">/// The tile `coords` of an image source, resampled from its picture, which is fetched and
+<a href=#260 id=260 data-nosnippet>260</a>/// decoded once through the client's shared asset cache. `Ok(None)` when the picture does not
+<a href=#261 id=261 data-nosnippet>261</a>/// reach the tile.
+<a href=#262 id=262 data-nosnippet>262</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">async fn </span>load_tile&lt;HC: <span class="kw">crate</span>::io::source_client::HttpClient&gt;(
+<a href=#263 id=263 data-nosnippet>263</a>    client: <span class="kw-2">&amp;</span><span class="kw">crate</span>::io::source_client::SourceClient&lt;HC&gt;,
+<a href=#264 id=264 data-nosnippet>264</a>    source: <span class="kw-2">&amp;</span><span class="kw">crate</span>::style::source::ImageSource,
+<a href=#265 id=265 data-nosnippet>265</a>    coords: WorldTileCoords,
+<a href=#266 id=266 data-nosnippet>266</a>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;RgbaImage&gt;, <span class="kw">crate</span>::sdf::assets::AssetFailure&gt; {
+<a href=#267 id=267 data-nosnippet>267</a>    <span class="kw">use crate</span>::{io::cpu_work::run_cpu_bound, sdf::assets::AssetFailure};
+<a href=#268 id=268 data-nosnippet>268</a>    <span class="kw">let </span>url = source.url.as_str();
+<a href=#269 id=269 data-nosnippet>269</a>    <span class="kw">let </span>picture = client
+<a href=#270 id=270 data-nosnippet>270</a>        .assets()
+<a href=#271 id=271 data-nosnippet>271</a>        .load(
+<a href=#272 id=272 data-nosnippet>272</a>            <span class="macro">format!</span>(<span class="string">"image-source:{url}#{}"</span>, source.generation),
+<a href=#273 id=273 data-nosnippet>273</a>            || <span class="kw">async </span>{
+<a href=#274 id=274 data-nosnippet>274</a>                <span class="kw">let </span>bytes = <span class="kw">crate</span>::sdf::assets::fetch(client, url, <span class="string">"image source"</span>).<span class="kw">await</span><span class="question-mark">?</span>;
+<a href=#275 id=275 data-nosnippet>275</a>                <span class="kw">let </span>picture = run_cpu_bound(<span class="kw">move </span>|| decode(<span class="kw-2">&amp;</span>bytes))
+<a href=#276 id=276 data-nosnippet>276</a>                    .<span class="kw">await
+<a href=#277 id=277 data-nosnippet>277</a>                    </span>.map_err(|error| AssetFailure::Terminal(<span class="macro">format!</span>(<span class="string">"decoding {url}: {error}"</span>)))<span class="question-mark">?
+<a href=#278 id=278 data-nosnippet>278</a>                    </span>.map_err(|error| {
+<a href=#279 id=279 data-nosnippet>279</a>                        <span class="macro">tracing::warn!</span>(%url, %error, <span class="string">"invalid image source picture"</span>);
+<a href=#280 id=280 data-nosnippet>280</a>                        AssetFailure::Terminal(<span class="macro">format!</span>(<span class="string">"invalid image {url}: {error}"</span>))
+<a href=#281 id=281 data-nosnippet>281</a>                    })<span class="question-mark">?</span>;
+<a href=#282 id=282 data-nosnippet>282</a>                <span class="kw">let </span>bytes = picture.as_raw().len();
+<a href=#283 id=283 data-nosnippet>283</a>                <span class="prelude-val">Ok</span>((picture, bytes))
+<a href=#284 id=284 data-nosnippet>284</a>            },
+<a href=#285 id=285 data-nosnippet>285</a>        )
+<a href=#286 id=286 data-nosnippet>286</a>        .<span class="kw">await</span><span class="question-mark">?</span>;
+<a href=#287 id=287 data-nosnippet>287</a>    <span class="kw">let </span>coordinates = source.coordinates;
+<a href=#288 id=288 data-nosnippet>288</a>    run_cpu_bound(<span class="kw">move </span>|| render_tile(<span class="kw-2">&amp;</span>picture, coordinates, coords))
+<a href=#289 id=289 data-nosnippet>289</a>        .<span class="kw">await
+<a href=#290 id=290 data-nosnippet>290</a>        </span>.map_err(|error| AssetFailure::Terminal(<span class="macro">format!</span>(<span class="string">"resampling {url}: {error}"</span>)))
+<a href=#291 id=291 data-nosnippet>291</a>}
+<a href=#292 id=292 data-nosnippet>292</a>
+<a href=#293 id=293 data-nosnippet>293</a><span class="attr">#[cfg(test)]
+<a href=#294 id=294 data-nosnippet>294</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

@@ -57,6 +57,8 @@ pub fn build_style(mut style: Style) -> Style {
             }))),
             maxzoom: None,
             buffer: None,
+            tolerance: None,
+            line_metrics: true,
             minzoom: None,
             promote_id: None,
             generate_id: false,

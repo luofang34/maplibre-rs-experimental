@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["default_paint_json","interpolate_color","interpolate_paint_value","is_transitionable_property","parse_constant_color"]};

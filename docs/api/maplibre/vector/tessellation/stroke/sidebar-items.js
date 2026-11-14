@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["LINE_CLIP_END_PROPERTY","LINE_CLIP_START_PROPERTY"],"fn":["clip_metrics","corner_miter_ratio","joins_within_round_limit","path_length"]};

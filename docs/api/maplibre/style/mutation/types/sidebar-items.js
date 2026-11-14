@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["StyleMutationError"],"struct":["StyleChange"]};

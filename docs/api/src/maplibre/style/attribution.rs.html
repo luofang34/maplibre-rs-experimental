@@ -39,7 +39,7 @@
 <a href=#39 id=39 data-nosnippet>39</a>    <span class="kw">match </span>source {
 <a href=#40 id=40 data-nosnippet>40</a>        Source::Vector(source) | Source::Raster(source) =&gt; source.attribution.as_deref(),
 <a href=#41 id=41 data-nosnippet>41</a>        Source::RasterDem(source) =&gt; source.attribution.as_deref(),
-<a href=#42 id=42 data-nosnippet>42</a>        Source::GeoJson(<span class="kw">_</span>) | Source::Image(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
+<a href=#42 id=42 data-nosnippet>42</a>        Source::GeoJson(<span class="kw">_</span>) | Source::Image(<span class="kw">_</span>) | Source::Video(<span class="kw">_</span>) | Source::Canvas(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
 <a href=#43 id=43 data-nosnippet>43</a>    }
 <a href=#44 id=44 data-nosnippet>44</a>}
 <a href=#45 id=45 data-nosnippet>45</a>

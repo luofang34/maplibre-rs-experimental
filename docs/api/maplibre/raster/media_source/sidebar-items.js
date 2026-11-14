@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["cached_frame_image","is_media_source","quad_bounds","sync_media_sources"],"struct":["DynamicMediaState"]};

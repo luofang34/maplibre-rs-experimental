@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["build_rounded_extrusion","dedup_open_ring","emit_rounded_walls","push_smooth_wall","round_single_ring"],"struct":["RoundedRing"]};

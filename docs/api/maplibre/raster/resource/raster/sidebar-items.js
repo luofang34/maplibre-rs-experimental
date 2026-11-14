@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["RasterResources"]};
+window.SIDEBAR_ITEMS = {"mod":["has_tile"],"struct":["RasterResources"],"type":["DemSourceBindings"]};

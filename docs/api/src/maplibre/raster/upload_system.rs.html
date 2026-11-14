@@ -21,195 +21,198 @@
 <a href=#21 id=21 data-nosnippet>21</a>
 <a href=#22 id=22 data-nosnippet>22</a><span class="kw">pub fn </span>upload_system(
 <a href=#23 id=23 data-nosnippet>23</a>    MapContext {
-<a href=#24 id=24 data-nosnippet>24</a>        world,
-<a href=#25 id=25 data-nosnippet>25</a>        renderer: Renderer { device, queue, .. },
-<a href=#26 id=26 data-nosnippet>26</a>        ..
-<a href=#27 id=27 data-nosnippet>27</a>    }: <span class="kw-2">&amp;mut </span>MapContext,
-<a href=#28 id=28 data-nosnippet>28</a>) -&gt; SystemResult {
-<a href=#29 id=29 data-nosnippet>29</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(raster_state) = world.resources.get::&lt;Eventually&lt;RasterResources&gt;&gt;() <span class="kw">else </span>{
-<a href=#30 id=30 data-nosnippet>30</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(());
-<a href=#31 id=31 data-nosnippet>31</a>    };
-<a href=#32 id=32 data-nosnippet>32</a>    <span class="kw">if </span>!<span class="macro">matches!</span>(raster_state, Initialized(<span class="kw">_</span>)) {
-<a href=#33 id=33 data-nosnippet>33</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(SystemError::Dependencies);
-<a href=#34 id=34 data-nosnippet>34</a>    }
-<a href=#35 id=35 data-nosnippet>35</a>    <span class="kw">if </span><span class="kw">crate</span>::render::eye_covering::EyeInFrame::reuses_content(world) {
-<a href=#36 id=36 data-nosnippet>36</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(());
-<a href=#37 id=37 data-nosnippet>37</a>    }
-<a href=#38 id=38 data-nosnippet>38</a>    world.resources.get_or_init_mut::&lt;FrameUploads&gt;();
-<a href=#39 id=39 data-nosnippet>39</a>    world.resources.get_or_init_mut::&lt;GpuDemPool&gt;();
-<a href=#40 id=40 data-nosnippet>40</a>    <span class="kw">let </span><span class="prelude-val">Some</span>((Initialized(raster_resources), budget, gpu_dem_pool)) = world.resources.query_mut::&lt;(
-<a href=#41 id=41 data-nosnippet>41</a>        <span class="kw-2">&amp;mut </span>Eventually&lt;RasterResources&gt;,
-<a href=#42 id=42 data-nosnippet>42</a>        <span class="kw-2">&amp;mut </span>FrameUploads,
-<a href=#43 id=43 data-nosnippet>43</a>        <span class="kw-2">&amp;mut </span>GpuDemPool,
-<a href=#44 id=44 data-nosnippet>44</a>    )&gt;() <span class="kw">else </span>{
-<a href=#45 id=45 data-nosnippet>45</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(SystemError::Dependencies);
-<a href=#46 id=46 data-nosnippet>46</a>    };
-<a href=#47 id=47 data-nosnippet>47</a>
-<a href=#48 id=48 data-nosnippet>48</a>    <span class="comment">// Every loaded tile gets its texture, as GL JS uploads a raster tile when it arrives, as
-<a href=#49 id=49 data-nosnippet>49</a>    // far as the frame's image floor reaches; coarser tiles go first so an ancestor stand-in is
-<a href=#50 id=50 data-nosnippet>50</a>    // ready before a burst of finer children exhausts the frame budget.
-<a href=#51 id=51 data-nosnippet>51</a>    </span><span class="kw">let </span>source_tiles = world
-<a href=#52 id=52 data-nosnippet>52</a>        .tiles
-<a href=#53 id=53 data-nosnippet>53</a>        .pyramid_of::&lt;RasterLayersDataComponent&gt;()
-<a href=#54 id=54 data-nosnippet>54</a>        .coords_coarse_to_fine();
-<a href=#55 id=55 data-nosnippet>55</a>    <span class="kw">let </span><span class="kw-2">mut </span>deferred = upload_raster_layer(
-<a href=#56 id=56 data-nosnippet>56</a>        raster_resources,
-<a href=#57 id=57 data-nosnippet>57</a>        (device, queue),
-<a href=#58 id=58 data-nosnippet>58</a>        <span class="kw-2">&amp;</span>world.tiles,
-<a href=#59 id=59 data-nosnippet>59</a>        source_tiles,
-<a href=#60 id=60 data-nosnippet>60</a>        budget,
-<a href=#61 id=61 data-nosnippet>61</a>    );
-<a href=#62 id=62 data-nosnippet>62</a>    <span class="kw">if </span>!deferred {
-<a href=#63 id=63 data-nosnippet>63</a>        <span class="kw">let </span>dem_tiles = world
-<a href=#64 id=64 data-nosnippet>64</a>            .tiles
-<a href=#65 id=65 data-nosnippet>65</a>            .pyramid_of::&lt;DemLayersComponent&gt;()
-<a href=#66 id=66 data-nosnippet>66</a>            .coords_coarse_to_fine();
-<a href=#67 id=67 data-nosnippet>67</a>        deferred |= upload_dem_layers(
-<a href=#68 id=68 data-nosnippet>68</a>            raster_resources,
-<a href=#69 id=69 data-nosnippet>69</a>            gpu_dem_pool,
-<a href=#70 id=70 data-nosnippet>70</a>            (device, queue),
-<a href=#71 id=71 data-nosnippet>71</a>            <span class="kw-2">&amp;</span>world.tiles,
-<a href=#72 id=72 data-nosnippet>72</a>            dem_tiles,
-<a href=#73 id=73 data-nosnippet>73</a>            budget,
-<a href=#74 id=74 data-nosnippet>74</a>        );
-<a href=#75 id=75 data-nosnippet>75</a>    }
-<a href=#76 id=76 data-nosnippet>76</a>    <span class="kw">if </span>deferred {
-<a href=#77 id=77 data-nosnippet>77</a>        <span class="kw">crate</span>::render::frame_signals::keep_animating(world);
+<a href=#24 id=24 data-nosnippet>24</a>        style,
+<a href=#25 id=25 data-nosnippet>25</a>        view_state,
+<a href=#26 id=26 data-nosnippet>26</a>        world,
+<a href=#27 id=27 data-nosnippet>27</a>        renderer: Renderer { device, queue, .. },
+<a href=#28 id=28 data-nosnippet>28</a>        ..
+<a href=#29 id=29 data-nosnippet>29</a>    }: <span class="kw-2">&amp;mut </span>MapContext,
+<a href=#30 id=30 data-nosnippet>30</a>) -&gt; SystemResult {
+<a href=#31 id=31 data-nosnippet>31</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(raster_state) = world.resources.get::&lt;Eventually&lt;RasterResources&gt;&gt;() <span class="kw">else </span>{
+<a href=#32 id=32 data-nosnippet>32</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+<a href=#33 id=33 data-nosnippet>33</a>    };
+<a href=#34 id=34 data-nosnippet>34</a>    <span class="kw">if </span>!<span class="macro">matches!</span>(raster_state, Initialized(<span class="kw">_</span>)) {
+<a href=#35 id=35 data-nosnippet>35</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(SystemError::Dependencies);
+<a href=#36 id=36 data-nosnippet>36</a>    }
+<a href=#37 id=37 data-nosnippet>37</a>    <span class="kw">if </span><span class="kw">crate</span>::render::eye_covering::EyeInFrame::reuses_content(world) {
+<a href=#38 id=38 data-nosnippet>38</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+<a href=#39 id=39 data-nosnippet>39</a>    }
+<a href=#40 id=40 data-nosnippet>40</a>    <span class="kw">crate</span>::raster::media_source::sync_media_sources(style, view_state, world);
+<a href=#41 id=41 data-nosnippet>41</a>    world.resources.get_or_init_mut::&lt;FrameUploads&gt;();
+<a href=#42 id=42 data-nosnippet>42</a>    world.resources.get_or_init_mut::&lt;GpuDemPool&gt;();
+<a href=#43 id=43 data-nosnippet>43</a>    <span class="kw">let </span><span class="prelude-val">Some</span>((Initialized(raster_resources), budget, gpu_dem_pool)) = world.resources.query_mut::&lt;(
+<a href=#44 id=44 data-nosnippet>44</a>        <span class="kw-2">&amp;mut </span>Eventually&lt;RasterResources&gt;,
+<a href=#45 id=45 data-nosnippet>45</a>        <span class="kw-2">&amp;mut </span>FrameUploads,
+<a href=#46 id=46 data-nosnippet>46</a>        <span class="kw-2">&amp;mut </span>GpuDemPool,
+<a href=#47 id=47 data-nosnippet>47</a>    )&gt;() <span class="kw">else </span>{
+<a href=#48 id=48 data-nosnippet>48</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(SystemError::Dependencies);
+<a href=#49 id=49 data-nosnippet>49</a>    };
+<a href=#50 id=50 data-nosnippet>50</a>
+<a href=#51 id=51 data-nosnippet>51</a>    <span class="comment">// Every loaded tile gets its texture, as GL JS uploads a raster tile when it arrives, as
+<a href=#52 id=52 data-nosnippet>52</a>    // far as the frame's image floor reaches; coarser tiles go first so an ancestor stand-in is
+<a href=#53 id=53 data-nosnippet>53</a>    // ready before a burst of finer children exhausts the frame budget.
+<a href=#54 id=54 data-nosnippet>54</a>    </span><span class="kw">let </span>source_tiles = world
+<a href=#55 id=55 data-nosnippet>55</a>        .tiles
+<a href=#56 id=56 data-nosnippet>56</a>        .pyramid_of::&lt;RasterLayersDataComponent&gt;()
+<a href=#57 id=57 data-nosnippet>57</a>        .coords_coarse_to_fine();
+<a href=#58 id=58 data-nosnippet>58</a>    <span class="kw">let </span><span class="kw-2">mut </span>deferred = upload_raster_layer(
+<a href=#59 id=59 data-nosnippet>59</a>        raster_resources,
+<a href=#60 id=60 data-nosnippet>60</a>        (device, queue),
+<a href=#61 id=61 data-nosnippet>61</a>        <span class="kw-2">&amp;</span>world.tiles,
+<a href=#62 id=62 data-nosnippet>62</a>        source_tiles,
+<a href=#63 id=63 data-nosnippet>63</a>        budget,
+<a href=#64 id=64 data-nosnippet>64</a>    );
+<a href=#65 id=65 data-nosnippet>65</a>    <span class="kw">if </span>!deferred {
+<a href=#66 id=66 data-nosnippet>66</a>        <span class="kw">let </span>dem_tiles = world
+<a href=#67 id=67 data-nosnippet>67</a>            .tiles
+<a href=#68 id=68 data-nosnippet>68</a>            .pyramid_of::&lt;DemLayersComponent&gt;()
+<a href=#69 id=69 data-nosnippet>69</a>            .coords_coarse_to_fine();
+<a href=#70 id=70 data-nosnippet>70</a>        deferred |= upload_dem_layers(
+<a href=#71 id=71 data-nosnippet>71</a>            raster_resources,
+<a href=#72 id=72 data-nosnippet>72</a>            gpu_dem_pool,
+<a href=#73 id=73 data-nosnippet>73</a>            (device, queue),
+<a href=#74 id=74 data-nosnippet>74</a>            <span class="kw-2">&amp;</span>world.tiles,
+<a href=#75 id=75 data-nosnippet>75</a>            dem_tiles,
+<a href=#76 id=76 data-nosnippet>76</a>            budget,
+<a href=#77 id=77 data-nosnippet>77</a>        );
 <a href=#78 id=78 data-nosnippet>78</a>    }
-<a href=#79 id=79 data-nosnippet>79</a>
-<a href=#80 id=80 data-nosnippet>80</a>    <span class="prelude-val">Ok</span>(())
-<a href=#81 id=81 data-nosnippet>81</a>}
+<a href=#79 id=79 data-nosnippet>79</a>    <span class="kw">if </span>deferred {
+<a href=#80 id=80 data-nosnippet>80</a>        <span class="kw">crate</span>::render::frame_signals::keep_animating(world);
+<a href=#81 id=81 data-nosnippet>81</a>    }
 <a href=#82 id=82 data-nosnippet>82</a>
-<a href=#83 id=83 data-nosnippet>83</a><span class="doccomment">/// Uploads the imagery textures of loaded tiles that the frame's budget admits; `true` when some
-<a href=#84 id=84 data-nosnippet>84</a>/// wait for a later frame.
-<a href=#85 id=85 data-nosnippet>85</a></span><span class="attr">#[tracing::instrument(skip_all)]
-<a href=#86 id=86 data-nosnippet>86</a></span><span class="kw">fn </span>upload_raster_layer(
-<a href=#87 id=87 data-nosnippet>87</a>    raster_resources: <span class="kw-2">&amp;mut </span>RasterResources,
-<a href=#88 id=88 data-nosnippet>88</a>    (device, queue): (<span class="kw-2">&amp;</span>wgpu::Device, <span class="kw-2">&amp;</span><span class="kw">crate</span>::render::upload_queue::UploadQueue),
-<a href=#89 id=89 data-nosnippet>89</a>    tiles: <span class="kw-2">&amp;</span>Tiles,
-<a href=#90 id=90 data-nosnippet>90</a>    source_tiles: <span class="kw">impl </span>IntoIterator&lt;Item = WorldTileCoords&gt;,
-<a href=#91 id=91 data-nosnippet>91</a>    budget: <span class="kw-2">&amp;mut </span>FrameUploads,
-<a href=#92 id=92 data-nosnippet>92</a>) -&gt; bool {
-<a href=#93 id=93 data-nosnippet>93</a>    <span class="kw">let </span><span class="kw-2">mut </span>mipmapped = Vec::new();
-<a href=#94 id=94 data-nosnippet>94</a>    <span class="kw">let </span><span class="kw-2">mut </span>deferred = <span class="bool-val">false</span>;
-<a href=#95 id=95 data-nosnippet>95</a>    <span class="lifetime">'tiles</span>: <span class="kw">for </span>coords <span class="kw">in </span>source_tiles {
-<a href=#96 id=96 data-nosnippet>96</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(layers) = tiles.query::&lt;<span class="kw-2">&amp;</span>RasterLayersDataComponent&gt;(coords) <span class="kw">else </span>{
-<a href=#97 id=97 data-nosnippet>97</a>            <span class="kw">continue</span>;
-<a href=#98 id=98 data-nosnippet>98</a>        };
-<a href=#99 id=99 data-nosnippet>99</a>        <span class="kw">for </span>data <span class="kw">in </span><span class="kw-2">&amp;</span>layers.layers {
-<a href=#100 id=100 data-nosnippet>100</a>            <span class="kw">if let </span>RasterLayerData::Available(data) = data {
-<a href=#101 id=101 data-nosnippet>101</a>                <span class="kw">if </span>raster_resources.has_border(<span class="kw-2">&amp;</span>data.source) &amp;&amp; data.image.is_empty() {
-<a href=#102 id=102 data-nosnippet>102</a>                    <span class="kw">continue</span>;
-<a href=#103 id=103 data-nosnippet>103</a>                }
-<a href=#104 id=104 data-nosnippet>104</a>                <span class="comment">// A result that lands after its source left the style is never drawn.
-<a href=#105 id=105 data-nosnippet>105</a>                </span><span class="kw">if </span>raster_resources.draws(<span class="kw-2">&amp;</span>data.source)
-<a href=#106 id=106 data-nosnippet>106</a>                    &amp;&amp; raster_resources
-<a href=#107 id=107 data-nosnippet>107</a>                        .get_bound_texture(<span class="kw-2">&amp;</span>data.source, <span class="kw-2">&amp;</span>coords)
-<a href=#108 id=108 data-nosnippet>108</a>                        .is_none()
-<a href=#109 id=109 data-nosnippet>109</a>                {
-<a href=#110 id=110 data-nosnippet>110</a>                    <span class="kw">if </span>!budget.take(UploadKind::Image, data.image.as_raw().len()) {
-<a href=#111 id=111 data-nosnippet>111</a>                        deferred = <span class="bool-val">true</span>;
-<a href=#112 id=112 data-nosnippet>112</a>                        <span class="kw">break </span><span class="lifetime">'tiles</span>;
-<a href=#113 id=113 data-nosnippet>113</a>                    }
-<a href=#114 id=114 data-nosnippet>114</a>                    mipmapped.push(upload_imagery(
-<a href=#115 id=115 data-nosnippet>115</a>                        raster_resources,
-<a href=#116 id=116 data-nosnippet>116</a>                        device,
-<a href=#117 id=117 data-nosnippet>117</a>                        queue,
-<a href=#118 id=118 data-nosnippet>118</a>                        coords,
-<a href=#119 id=119 data-nosnippet>119</a>                        data,
-<a href=#120 id=120 data-nosnippet>120</a>                    ));
-<a href=#121 id=121 data-nosnippet>121</a>                }
-<a href=#122 id=122 data-nosnippet>122</a>            }
-<a href=#123 id=123 data-nosnippet>123</a>        }
-<a href=#124 id=124 data-nosnippet>124</a>    }
-<a href=#125 id=125 data-nosnippet>125</a>    <span class="comment">// One submission fills every new texture's mip chain.
-<a href=#126 id=126 data-nosnippet>126</a>    </span>raster_resources.generate_mipmaps(device, queue, <span class="kw-2">&amp;</span>mipmapped);
-<a href=#127 id=127 data-nosnippet>127</a>    deferred
-<a href=#128 id=128 data-nosnippet>128</a>}
-<a href=#129 id=129 data-nosnippet>129</a>
-<a href=#130 id=130 data-nosnippet>130</a><span class="doccomment">/// Uploads or reuses shared `(dim + 4) x (dim + 4)` DEM textures in [`GpuDemPool`] for every
-<a href=#131 id=131 data-nosnippet>131</a>/// `hillshade` and `color-relief` source drawn by the style.
-<a href=#132 id=132 data-nosnippet>132</a></span><span class="attr">#[tracing::instrument(skip_all)]
-<a href=#133 id=133 data-nosnippet>133</a></span><span class="kw">fn </span>upload_dem_layers(
-<a href=#134 id=134 data-nosnippet>134</a>    raster_resources: <span class="kw-2">&amp;mut </span>RasterResources,
-<a href=#135 id=135 data-nosnippet>135</a>    gpu_dem_pool: <span class="kw-2">&amp;mut </span>GpuDemPool,
-<a href=#136 id=136 data-nosnippet>136</a>    (device, queue): (<span class="kw-2">&amp;</span>wgpu::Device, <span class="kw-2">&amp;</span><span class="kw">crate</span>::render::upload_queue::UploadQueue),
-<a href=#137 id=137 data-nosnippet>137</a>    tiles: <span class="kw-2">&amp;</span>Tiles,
-<a href=#138 id=138 data-nosnippet>138</a>    dem_tiles: <span class="kw">impl </span>IntoIterator&lt;Item = WorldTileCoords&gt;,
-<a href=#139 id=139 data-nosnippet>139</a>    budget: <span class="kw-2">&amp;mut </span>FrameUploads,
-<a href=#140 id=140 data-nosnippet>140</a>) -&gt; bool {
-<a href=#141 id=141 data-nosnippet>141</a>    <span class="kw">let </span><span class="kw-2">mut </span>deferred = <span class="bool-val">false</span>;
-<a href=#142 id=142 data-nosnippet>142</a>    <span class="lifetime">'tiles</span>: <span class="kw">for </span>coords <span class="kw">in </span>dem_tiles {
-<a href=#143 id=143 data-nosnippet>143</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(layers) = tiles.query::&lt;<span class="kw-2">&amp;</span>DemLayersComponent&gt;(coords) <span class="kw">else </span>{
-<a href=#144 id=144 data-nosnippet>144</a>            <span class="kw">continue</span>;
-<a href=#145 id=145 data-nosnippet>145</a>        };
-<a href=#146 id=146 data-nosnippet>146</a>        <span class="kw">for </span>(source, dem) <span class="kw">in </span>layers.iter() {
-<a href=#147 id=147 data-nosnippet>147</a>            <span class="kw">if </span>!raster_resources.draws(source)
-<a href=#148 id=148 data-nosnippet>148</a>                || raster_resources.dem_is_current(source, coords, dem)
-<a href=#149 id=149 data-nosnippet>149</a>            {
-<a href=#150 id=150 data-nosnippet>150</a>                <span class="kw">continue</span>;
-<a href=#151 id=151 data-nosnippet>151</a>            }
-<a href=#152 id=152 data-nosnippet>152</a>            <span class="kw">let </span>needs_gpu_write = gpu_dem_pool.needs_upload(source, coords, dem);
-<a href=#153 id=153 data-nosnippet>153</a>            <span class="kw">if </span>needs_gpu_write &amp;&amp; !budget.take(UploadKind::Image, dem.tile.pixels().len()) {
-<a href=#154 id=154 data-nosnippet>154</a>                deferred = <span class="bool-val">true</span>;
-<a href=#155 id=155 data-nosnippet>155</a>                <span class="kw">break </span><span class="lifetime">'tiles</span>;
-<a href=#156 id=156 data-nosnippet>156</a>            }
-<a href=#157 id=157 data-nosnippet>157</a>            <span class="kw">let </span>entry = <span class="kw">if </span>needs_gpu_write {
-<a href=#158 id=158 data-nosnippet>158</a>                gpu_dem_pool.upload(device, queue, source, coords, dem)
-<a href=#159 id=159 data-nosnippet>159</a>            } <span class="kw">else if let </span><span class="prelude-val">Some</span>(existing) = gpu_dem_pool.get(source, coords) {
-<a href=#160 id=160 data-nosnippet>160</a>                existing
-<a href=#161 id=161 data-nosnippet>161</a>            } <span class="kw">else </span>{
-<a href=#162 id=162 data-nosnippet>162</a>                gpu_dem_pool.upload(device, queue, source, coords, dem)
-<a href=#163 id=163 data-nosnippet>163</a>            };
-<a href=#164 id=164 data-nosnippet>164</a>            raster_resources.bind_dem_texture(
-<a href=#165 id=165 data-nosnippet>165</a>                device,
-<a href=#166 id=166 data-nosnippet>166</a>                source,
-<a href=#167 id=167 data-nosnippet>167</a>                coords,
-<a href=#168 id=168 data-nosnippet>168</a>                <span class="kw-2">&amp;</span>entry.texture,
-<a href=#169 id=169 data-nosnippet>169</a>                dem.revision_key(),
-<a href=#170 id=170 data-nosnippet>170</a>            );
-<a href=#171 id=171 data-nosnippet>171</a>        }
-<a href=#172 id=172 data-nosnippet>172</a>    }
-<a href=#173 id=173 data-nosnippet>173</a>    deferred
-<a href=#174 id=174 data-nosnippet>174</a>}
-<a href=#175 id=175 data-nosnippet>175</a>
-<a href=#176 id=176 data-nosnippet>176</a><span class="doccomment">/// Uploads an imagery tile stored at `coords` and returns its `wgpu::Texture` handle for mipmap
-<a href=#177 id=177 data-nosnippet>177</a>/// generation.
-<a href=#178 id=178 data-nosnippet>178</a></span><span class="kw">fn </span>upload_imagery(
-<a href=#179 id=179 data-nosnippet>179</a>    raster_resources: <span class="kw-2">&amp;mut </span>RasterResources,
-<a href=#180 id=180 data-nosnippet>180</a>    device: <span class="kw-2">&amp;</span>wgpu::Device,
-<a href=#181 id=181 data-nosnippet>181</a>    queue: <span class="kw-2">&amp;</span><span class="kw">crate</span>::render::upload_queue::UploadQueue,
-<a href=#182 id=182 data-nosnippet>182</a>    coords: WorldTileCoords,
-<a href=#183 id=183 data-nosnippet>183</a>    data: <span class="kw-2">&amp;</span>AvailableRasterLayerData,
-<a href=#184 id=184 data-nosnippet>184</a>) -&gt; wgpu::Texture {
-<a href=#185 id=185 data-nosnippet>185</a>    <span class="kw">let </span>(width, height) = data.image.dimensions();
-<a href=#186 id=186 data-nosnippet>186</a>
-<a href=#187 id=187 data-nosnippet>187</a>    <span class="comment">// Raster style colors are sampled in the encoded color space, matching WebGL's default
-<a href=#188 id=188 data-nosnippet>188</a>    // RGBA upload path. An sRGB texture view would decode the texels to linear values before
-<a href=#189 id=189 data-nosnippet>189</a>    // writing them to the non-sRGB render target, making imagery too dark.
-<a href=#190 id=190 data-nosnippet>190</a>    </span><span class="kw">let </span>texture = raster_resources.create_imagery_texture(device, width, height);
-<a href=#191 id=191 data-nosnippet>191</a>
-<a href=#192 id=192 data-nosnippet>192</a>    queue.write_texture(
-<a href=#193 id=193 data-nosnippet>193</a>        wgpu::TexelCopyTextureInfo {
-<a href=#194 id=194 data-nosnippet>194</a>            aspect: wgpu::TextureAspect::All,
-<a href=#195 id=195 data-nosnippet>195</a>            texture: <span class="kw-2">&amp;</span>texture.texture,
-<a href=#196 id=196 data-nosnippet>196</a>            mip_level: <span class="number">0</span>,
-<a href=#197 id=197 data-nosnippet>197</a>            origin: wgpu::Origin3d::ZERO,
-<a href=#198 id=198 data-nosnippet>198</a>        },
-<a href=#199 id=199 data-nosnippet>199</a>        <span class="kw-2">&amp;</span>data.image,
-<a href=#200 id=200 data-nosnippet>200</a>        wgpu::TexelCopyBufferLayout {
-<a href=#201 id=201 data-nosnippet>201</a>            offset: <span class="number">0</span>,
-<a href=#202 id=202 data-nosnippet>202</a>            bytes_per_row: <span class="prelude-val">Some</span>(<span class="number">4 </span>* width),
-<a href=#203 id=203 data-nosnippet>203</a>            rows_per_image: <span class="prelude-val">Some</span>(height),
-<a href=#204 id=204 data-nosnippet>204</a>        },
-<a href=#205 id=205 data-nosnippet>205</a>        texture.size,
-<a href=#206 id=206 data-nosnippet>206</a>    );
-<a href=#207 id=207 data-nosnippet>207</a>
-<a href=#208 id=208 data-nosnippet>208</a>    <span class="kw">let </span>mips = texture.texture.clone();
-<a href=#209 id=209 data-nosnippet>209</a>    raster_resources.bind_texture(device, <span class="kw-2">&amp;</span>data.source, <span class="kw-2">&amp;</span>coords, texture);
-<a href=#210 id=210 data-nosnippet>210</a>    mips
-<a href=#211 id=211 data-nosnippet>211</a>}
-<a href=#212 id=212 data-nosnippet>212</a>
-<a href=#213 id=213 data-nosnippet>213</a><span class="attr">#[cfg(test)]
-<a href=#214 id=214 data-nosnippet>214</a></span><span class="kw">mod </span>tests;
+<a href=#83 id=83 data-nosnippet>83</a>    <span class="prelude-val">Ok</span>(())
+<a href=#84 id=84 data-nosnippet>84</a>}
+<a href=#85 id=85 data-nosnippet>85</a>
+<a href=#86 id=86 data-nosnippet>86</a><span class="doccomment">/// Uploads the imagery textures of loaded tiles that the frame's budget admits; `true` when some
+<a href=#87 id=87 data-nosnippet>87</a>/// wait for a later frame.
+<a href=#88 id=88 data-nosnippet>88</a></span><span class="attr">#[tracing::instrument(skip_all)]
+<a href=#89 id=89 data-nosnippet>89</a></span><span class="kw">fn </span>upload_raster_layer(
+<a href=#90 id=90 data-nosnippet>90</a>    raster_resources: <span class="kw-2">&amp;mut </span>RasterResources,
+<a href=#91 id=91 data-nosnippet>91</a>    (device, queue): (<span class="kw-2">&amp;</span>wgpu::Device, <span class="kw-2">&amp;</span><span class="kw">crate</span>::render::upload_queue::UploadQueue),
+<a href=#92 id=92 data-nosnippet>92</a>    tiles: <span class="kw-2">&amp;</span>Tiles,
+<a href=#93 id=93 data-nosnippet>93</a>    source_tiles: <span class="kw">impl </span>IntoIterator&lt;Item = WorldTileCoords&gt;,
+<a href=#94 id=94 data-nosnippet>94</a>    budget: <span class="kw-2">&amp;mut </span>FrameUploads,
+<a href=#95 id=95 data-nosnippet>95</a>) -&gt; bool {
+<a href=#96 id=96 data-nosnippet>96</a>    <span class="kw">let </span><span class="kw-2">mut </span>mipmapped = Vec::new();
+<a href=#97 id=97 data-nosnippet>97</a>    <span class="kw">let </span><span class="kw-2">mut </span>deferred = <span class="bool-val">false</span>;
+<a href=#98 id=98 data-nosnippet>98</a>    <span class="lifetime">'tiles</span>: <span class="kw">for </span>coords <span class="kw">in </span>source_tiles {
+<a href=#99 id=99 data-nosnippet>99</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(layers) = tiles.query::&lt;<span class="kw-2">&amp;</span>RasterLayersDataComponent&gt;(coords) <span class="kw">else </span>{
+<a href=#100 id=100 data-nosnippet>100</a>            <span class="kw">continue</span>;
+<a href=#101 id=101 data-nosnippet>101</a>        };
+<a href=#102 id=102 data-nosnippet>102</a>        <span class="kw">for </span>data <span class="kw">in </span><span class="kw-2">&amp;</span>layers.layers {
+<a href=#103 id=103 data-nosnippet>103</a>            <span class="kw">if let </span>RasterLayerData::Available(data) = data {
+<a href=#104 id=104 data-nosnippet>104</a>                <span class="kw">if </span>raster_resources.has_border(<span class="kw-2">&amp;</span>data.source) &amp;&amp; data.image.is_empty() {
+<a href=#105 id=105 data-nosnippet>105</a>                    <span class="kw">continue</span>;
+<a href=#106 id=106 data-nosnippet>106</a>                }
+<a href=#107 id=107 data-nosnippet>107</a>                <span class="comment">// A result that lands after its source left the style is never drawn.
+<a href=#108 id=108 data-nosnippet>108</a>                </span><span class="kw">if </span>raster_resources.draws(<span class="kw-2">&amp;</span>data.source)
+<a href=#109 id=109 data-nosnippet>109</a>                    &amp;&amp; raster_resources
+<a href=#110 id=110 data-nosnippet>110</a>                        .get_bound_texture(<span class="kw-2">&amp;</span>data.source, <span class="kw-2">&amp;</span>coords)
+<a href=#111 id=111 data-nosnippet>111</a>                        .is_none()
+<a href=#112 id=112 data-nosnippet>112</a>                {
+<a href=#113 id=113 data-nosnippet>113</a>                    <span class="kw">if </span>!budget.take(UploadKind::Image, data.image.as_raw().len()) {
+<a href=#114 id=114 data-nosnippet>114</a>                        deferred = <span class="bool-val">true</span>;
+<a href=#115 id=115 data-nosnippet>115</a>                        <span class="kw">break </span><span class="lifetime">'tiles</span>;
+<a href=#116 id=116 data-nosnippet>116</a>                    }
+<a href=#117 id=117 data-nosnippet>117</a>                    mipmapped.push(upload_imagery(
+<a href=#118 id=118 data-nosnippet>118</a>                        raster_resources,
+<a href=#119 id=119 data-nosnippet>119</a>                        device,
+<a href=#120 id=120 data-nosnippet>120</a>                        queue,
+<a href=#121 id=121 data-nosnippet>121</a>                        coords,
+<a href=#122 id=122 data-nosnippet>122</a>                        data,
+<a href=#123 id=123 data-nosnippet>123</a>                    ));
+<a href=#124 id=124 data-nosnippet>124</a>                }
+<a href=#125 id=125 data-nosnippet>125</a>            }
+<a href=#126 id=126 data-nosnippet>126</a>        }
+<a href=#127 id=127 data-nosnippet>127</a>    }
+<a href=#128 id=128 data-nosnippet>128</a>    <span class="comment">// One submission fills every new texture's mip chain.
+<a href=#129 id=129 data-nosnippet>129</a>    </span>raster_resources.generate_mipmaps(device, queue, <span class="kw-2">&amp;</span>mipmapped);
+<a href=#130 id=130 data-nosnippet>130</a>    deferred
+<a href=#131 id=131 data-nosnippet>131</a>}
+<a href=#132 id=132 data-nosnippet>132</a>
+<a href=#133 id=133 data-nosnippet>133</a><span class="doccomment">/// Uploads or reuses shared `(dim + 4) x (dim + 4)` DEM textures in [`GpuDemPool`] for every
+<a href=#134 id=134 data-nosnippet>134</a>/// `hillshade` and `color-relief` source drawn by the style.
+<a href=#135 id=135 data-nosnippet>135</a></span><span class="attr">#[tracing::instrument(skip_all)]
+<a href=#136 id=136 data-nosnippet>136</a></span><span class="kw">fn </span>upload_dem_layers(
+<a href=#137 id=137 data-nosnippet>137</a>    raster_resources: <span class="kw-2">&amp;mut </span>RasterResources,
+<a href=#138 id=138 data-nosnippet>138</a>    gpu_dem_pool: <span class="kw-2">&amp;mut </span>GpuDemPool,
+<a href=#139 id=139 data-nosnippet>139</a>    (device, queue): (<span class="kw-2">&amp;</span>wgpu::Device, <span class="kw-2">&amp;</span><span class="kw">crate</span>::render::upload_queue::UploadQueue),
+<a href=#140 id=140 data-nosnippet>140</a>    tiles: <span class="kw-2">&amp;</span>Tiles,
+<a href=#141 id=141 data-nosnippet>141</a>    dem_tiles: <span class="kw">impl </span>IntoIterator&lt;Item = WorldTileCoords&gt;,
+<a href=#142 id=142 data-nosnippet>142</a>    budget: <span class="kw-2">&amp;mut </span>FrameUploads,
+<a href=#143 id=143 data-nosnippet>143</a>) -&gt; bool {
+<a href=#144 id=144 data-nosnippet>144</a>    <span class="kw">let </span><span class="kw-2">mut </span>deferred = <span class="bool-val">false</span>;
+<a href=#145 id=145 data-nosnippet>145</a>    <span class="lifetime">'tiles</span>: <span class="kw">for </span>coords <span class="kw">in </span>dem_tiles {
+<a href=#146 id=146 data-nosnippet>146</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(layers) = tiles.query::&lt;<span class="kw-2">&amp;</span>DemLayersComponent&gt;(coords) <span class="kw">else </span>{
+<a href=#147 id=147 data-nosnippet>147</a>            <span class="kw">continue</span>;
+<a href=#148 id=148 data-nosnippet>148</a>        };
+<a href=#149 id=149 data-nosnippet>149</a>        <span class="kw">for </span>(source, dem) <span class="kw">in </span>layers.iter() {
+<a href=#150 id=150 data-nosnippet>150</a>            <span class="kw">if </span>!raster_resources.draws(source)
+<a href=#151 id=151 data-nosnippet>151</a>                || raster_resources.dem_is_current(source, coords, dem)
+<a href=#152 id=152 data-nosnippet>152</a>            {
+<a href=#153 id=153 data-nosnippet>153</a>                <span class="kw">continue</span>;
+<a href=#154 id=154 data-nosnippet>154</a>            }
+<a href=#155 id=155 data-nosnippet>155</a>            <span class="kw">let </span>needs_gpu_write = gpu_dem_pool.needs_upload(source, coords, dem);
+<a href=#156 id=156 data-nosnippet>156</a>            <span class="kw">if </span>needs_gpu_write &amp;&amp; !budget.take(UploadKind::Image, dem.tile.pixels().len()) {
+<a href=#157 id=157 data-nosnippet>157</a>                deferred = <span class="bool-val">true</span>;
+<a href=#158 id=158 data-nosnippet>158</a>                <span class="kw">break </span><span class="lifetime">'tiles</span>;
+<a href=#159 id=159 data-nosnippet>159</a>            }
+<a href=#160 id=160 data-nosnippet>160</a>            <span class="kw">let </span>entry = <span class="kw">if </span>needs_gpu_write {
+<a href=#161 id=161 data-nosnippet>161</a>                gpu_dem_pool.upload(device, queue, source, coords, dem)
+<a href=#162 id=162 data-nosnippet>162</a>            } <span class="kw">else if let </span><span class="prelude-val">Some</span>(existing) = gpu_dem_pool.get(source, coords) {
+<a href=#163 id=163 data-nosnippet>163</a>                existing
+<a href=#164 id=164 data-nosnippet>164</a>            } <span class="kw">else </span>{
+<a href=#165 id=165 data-nosnippet>165</a>                gpu_dem_pool.upload(device, queue, source, coords, dem)
+<a href=#166 id=166 data-nosnippet>166</a>            };
+<a href=#167 id=167 data-nosnippet>167</a>            raster_resources.bind_dem_texture(
+<a href=#168 id=168 data-nosnippet>168</a>                device,
+<a href=#169 id=169 data-nosnippet>169</a>                source,
+<a href=#170 id=170 data-nosnippet>170</a>                coords,
+<a href=#171 id=171 data-nosnippet>171</a>                <span class="kw-2">&amp;</span>entry.texture,
+<a href=#172 id=172 data-nosnippet>172</a>                dem.revision_key(),
+<a href=#173 id=173 data-nosnippet>173</a>            );
+<a href=#174 id=174 data-nosnippet>174</a>        }
+<a href=#175 id=175 data-nosnippet>175</a>    }
+<a href=#176 id=176 data-nosnippet>176</a>    deferred
+<a href=#177 id=177 data-nosnippet>177</a>}
+<a href=#178 id=178 data-nosnippet>178</a>
+<a href=#179 id=179 data-nosnippet>179</a><span class="doccomment">/// Uploads an imagery tile stored at `coords` and returns its `wgpu::Texture` handle for mipmap
+<a href=#180 id=180 data-nosnippet>180</a>/// generation.
+<a href=#181 id=181 data-nosnippet>181</a></span><span class="kw">fn </span>upload_imagery(
+<a href=#182 id=182 data-nosnippet>182</a>    raster_resources: <span class="kw-2">&amp;mut </span>RasterResources,
+<a href=#183 id=183 data-nosnippet>183</a>    device: <span class="kw-2">&amp;</span>wgpu::Device,
+<a href=#184 id=184 data-nosnippet>184</a>    queue: <span class="kw-2">&amp;</span><span class="kw">crate</span>::render::upload_queue::UploadQueue,
+<a href=#185 id=185 data-nosnippet>185</a>    coords: WorldTileCoords,
+<a href=#186 id=186 data-nosnippet>186</a>    data: <span class="kw-2">&amp;</span>AvailableRasterLayerData,
+<a href=#187 id=187 data-nosnippet>187</a>) -&gt; wgpu::Texture {
+<a href=#188 id=188 data-nosnippet>188</a>    <span class="kw">let </span>(width, height) = data.image.dimensions();
+<a href=#189 id=189 data-nosnippet>189</a>
+<a href=#190 id=190 data-nosnippet>190</a>    <span class="comment">// Raster style colors are sampled in the encoded color space, matching WebGL's default
+<a href=#191 id=191 data-nosnippet>191</a>    // RGBA upload path. An sRGB texture view would decode the texels to linear values before
+<a href=#192 id=192 data-nosnippet>192</a>    // writing them to the non-sRGB render target, making imagery too dark.
+<a href=#193 id=193 data-nosnippet>193</a>    </span><span class="kw">let </span>texture = raster_resources.create_imagery_texture(device, width, height);
+<a href=#194 id=194 data-nosnippet>194</a>
+<a href=#195 id=195 data-nosnippet>195</a>    queue.write_texture(
+<a href=#196 id=196 data-nosnippet>196</a>        wgpu::TexelCopyTextureInfo {
+<a href=#197 id=197 data-nosnippet>197</a>            aspect: wgpu::TextureAspect::All,
+<a href=#198 id=198 data-nosnippet>198</a>            texture: <span class="kw-2">&amp;</span>texture.texture,
+<a href=#199 id=199 data-nosnippet>199</a>            mip_level: <span class="number">0</span>,
+<a href=#200 id=200 data-nosnippet>200</a>            origin: wgpu::Origin3d::ZERO,
+<a href=#201 id=201 data-nosnippet>201</a>        },
+<a href=#202 id=202 data-nosnippet>202</a>        <span class="kw-2">&amp;</span>data.image,
+<a href=#203 id=203 data-nosnippet>203</a>        wgpu::TexelCopyBufferLayout {
+<a href=#204 id=204 data-nosnippet>204</a>            offset: <span class="number">0</span>,
+<a href=#205 id=205 data-nosnippet>205</a>            bytes_per_row: <span class="prelude-val">Some</span>(<span class="number">4 </span>* width),
+<a href=#206 id=206 data-nosnippet>206</a>            rows_per_image: <span class="prelude-val">Some</span>(height),
+<a href=#207 id=207 data-nosnippet>207</a>        },
+<a href=#208 id=208 data-nosnippet>208</a>        texture.size,
+<a href=#209 id=209 data-nosnippet>209</a>    );
+<a href=#210 id=210 data-nosnippet>210</a>
+<a href=#211 id=211 data-nosnippet>211</a>    <span class="kw">let </span>mips = texture.texture.clone();
+<a href=#212 id=212 data-nosnippet>212</a>    raster_resources.bind_texture(device, <span class="kw-2">&amp;</span>data.source, <span class="kw-2">&amp;</span>coords, texture);
+<a href=#213 id=213 data-nosnippet>213</a>    mips
+<a href=#214 id=214 data-nosnippet>214</a>}
+<a href=#215 id=215 data-nosnippet>215</a>
+<a href=#216 id=216 data-nosnippet>216</a><span class="attr">#[cfg(test)]
+<a href=#217 id=217 data-nosnippet>217</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

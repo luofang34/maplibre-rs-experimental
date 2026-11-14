@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_TRANSITION_DURATION_MS"],"fn":["default_duration","extract_layer_transitions","interpolate_paint_value","is_transitionable_property","merge_change"],"mod":["interpolate"],"struct":["ActiveTransition","ActiveTransitions","TransitionSpec"]};

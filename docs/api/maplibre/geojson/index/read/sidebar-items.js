@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_LATITUDE"],"fn":["bounds_of","coordinate_count","positions","project","read_geometry","read_ring","read_rings"]};
