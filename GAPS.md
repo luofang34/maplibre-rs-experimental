@@ -17,15 +17,6 @@ they start with another directory.
 | Local glyph rasterisation for CJK ideographs | Missing; fixtures in `render-tests/src/tests/text-local-glyphs` | M |
 | `symbol-avoid-edges` | Missing | S |
 
-## Style specification and map API
-
-| Gap | State | Size |
-| --- | --- | --- |
-| Property transitions (`*-transition`, root `transition`) | Missing in the core; `render-tests/src/transitions.rs` interpolates in the harness | M |
-| Whole-style replacement with diffing | Missing; granular mutations only (`style/mutation.rs`) | M |
-| `resampling` on hillshade and color-relief, `line-round-limit`, `fill-extrusion-rounded-corner-distance`, GeoJSON `lineMetrics` and `tolerance` | Missing | S each |
-| `video` and `canvas` sources | Missing | M |
-
 ## Architecture and engineering
 
 | Gap | State | Size |
