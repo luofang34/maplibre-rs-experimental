@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["queue_custom_layers_system"],"struct":["CustomLayerContext","CustomLayerFrameState","CustomLayerRegistry","DrawCustomLayer","RegisteredCustomLayer"],"trait":["CustomStyleLayer"]};

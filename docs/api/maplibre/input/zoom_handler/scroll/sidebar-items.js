@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FIRST_EVENT_WAIT","NEW_GESTURE_GAP","PIXELS_PER_LINE","TRACKPAD_MAX_DELTA","TRACKPAD_PACE","TRACKPAD_ZOOM_RATE","WHEEL_ZOOM_DELTA","WHEEL_ZOOM_RATE"],"enum":["ScrollDevice"],"fn":["is_wheel_step"],"struct":["Scroll","ScrollInput"]};

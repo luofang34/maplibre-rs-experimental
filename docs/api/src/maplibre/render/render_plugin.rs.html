@@ -109,48 +109,49 @@
 <a href=#109 id=109 data-nosnippet>109</a>            RenderStageLabel::Queue,
 <a href=#110 id=110 data-nosnippet>110</a>            queue_stage
 <a href=#111 id=111 data-nosnippet>111</a>                .with_system(tile_view_pattern_system)
-<a href=#112 id=112 data-nosnippet>112</a>                .with_system(upload_system),
-<a href=#113 id=113 data-nosnippet>113</a>        )<span class="question-mark">?</span>;
-<a href=#114 id=114 data-nosnippet>114</a>        schedule.add_stage(
-<a href=#115 id=115 data-nosnippet>115</a>            RenderStageLabel::PhaseSort,
-<a href=#116 id=116 data-nosnippet>116</a>            SystemStage::default().with_system(sort_phase_system),
-<a href=#117 id=117 data-nosnippet>117</a>        )<span class="question-mark">?</span>;
-<a href=#118 id=118 data-nosnippet>118</a>        schedule.add_stage(
-<a href=#119 id=119 data-nosnippet>119</a>            RenderStageLabel::Render,
-<a href=#120 id=120 data-nosnippet>120</a>            SystemStage::default()
-<a href=#121 id=121 data-nosnippet>121</a>                .with_system(<span class="kw">super</span>::gpu_timer::gpu_timer_system)
-<a href=#122 id=122 data-nosnippet>122</a>                .with_system(SystemContainer::new(GraphRunnerSystem)),
-<a href=#123 id=123 data-nosnippet>123</a>        )<span class="question-mark">?</span>;
-<a href=#124 id=124 data-nosnippet>124</a>        schedule.add_stage(
-<a href=#125 id=125 data-nosnippet>125</a>            RenderStageLabel::Cleanup,
-<a href=#126 id=126 data-nosnippet>126</a>            SystemStage::default()
-<a href=#127 id=127 data-nosnippet>127</a>                .with_system(cleanup_system)
-<a href=#128 id=128 data-nosnippet>128</a>                .with_system(retention_system),
-<a href=#129 id=129 data-nosnippet>129</a>        )<span class="question-mark">?</span>;
-<a href=#130 id=130 data-nosnippet>130</a>        <span class="comment">// A frame that fails part-way still clears its render phases, or the next frame
-<a href=#131 id=131 data-nosnippet>131</a>        // draws its items twice.
-<a href=#132 id=132 data-nosnippet>132</a>        </span>schedule.run_after_failure(RenderStageLabel::Cleanup)<span class="question-mark">?</span>;
-<a href=#133 id=133 data-nosnippet>133</a>        <span class="prelude-val">Ok</span>(())
-<a href=#134 id=134 data-nosnippet>134</a>    }
-<a href=#135 id=135 data-nosnippet>135</a>}
-<a href=#136 id=136 data-nosnippet>136</a>
-<a href=#137 id=137 data-nosnippet>137</a><span class="doccomment">/// Adds the main, scene, translucent and depth-copy passes in that order.
-<a href=#138 id=138 data-nosnippet>138</a></span><span class="kw">fn </span>add_draw_passes(graph: <span class="kw-2">&amp;mut </span>RenderGraph) -&gt; <span class="prelude-ty">Result</span>&lt;(), RenderGraphError&gt; {
-<a href=#139 id=139 data-nosnippet>139</a>    graph.add_node(draw_graph::node::MAIN_PASS, MainPassNode::new())<span class="question-mark">?</span>;
-<a href=#140 id=140 data-nosnippet>140</a>    graph.add_node(draw_graph::node::SCENE_3D_PASS, EmptyNode)<span class="question-mark">?</span>;
-<a href=#141 id=141 data-nosnippet>141</a>    graph.add_node(
-<a href=#142 id=142 data-nosnippet>142</a>        draw_graph::node::TRANSLUCENT_PASS,
-<a href=#143 id=143 data-nosnippet>143</a>        TranslucentPassNode::new(),
-<a href=#144 id=144 data-nosnippet>144</a>    )<span class="question-mark">?</span>;
-<a href=#145 id=145 data-nosnippet>145</a>    graph.add_node(draw_graph::node::DEPTH_COPY, DepthCopyNode)<span class="question-mark">?</span>;
-<a href=#146 id=146 data-nosnippet>146</a>    graph.add_node_edge(draw_graph::node::MAIN_PASS, draw_graph::node::SCENE_3D_PASS)<span class="question-mark">?</span>;
-<a href=#147 id=147 data-nosnippet>147</a>    graph.add_node_edge(
-<a href=#148 id=148 data-nosnippet>148</a>        draw_graph::node::SCENE_3D_PASS,
-<a href=#149 id=149 data-nosnippet>149</a>        draw_graph::node::TRANSLUCENT_PASS,
-<a href=#150 id=150 data-nosnippet>150</a>    )<span class="question-mark">?</span>;
-<a href=#151 id=151 data-nosnippet>151</a>    graph.add_node_edge(
-<a href=#152 id=152 data-nosnippet>152</a>        draw_graph::node::TRANSLUCENT_PASS,
-<a href=#153 id=153 data-nosnippet>153</a>        draw_graph::node::DEPTH_COPY,
-<a href=#154 id=154 data-nosnippet>154</a>    )
-<a href=#155 id=155 data-nosnippet>155</a>}
+<a href=#112 id=112 data-nosnippet>112</a>                .with_system(upload_system)
+<a href=#113 id=113 data-nosnippet>113</a>                .with_system(<span class="kw">crate</span>::custom_layer::queue_custom_layers_system),
+<a href=#114 id=114 data-nosnippet>114</a>        )<span class="question-mark">?</span>;
+<a href=#115 id=115 data-nosnippet>115</a>        schedule.add_stage(
+<a href=#116 id=116 data-nosnippet>116</a>            RenderStageLabel::PhaseSort,
+<a href=#117 id=117 data-nosnippet>117</a>            SystemStage::default().with_system(sort_phase_system),
+<a href=#118 id=118 data-nosnippet>118</a>        )<span class="question-mark">?</span>;
+<a href=#119 id=119 data-nosnippet>119</a>        schedule.add_stage(
+<a href=#120 id=120 data-nosnippet>120</a>            RenderStageLabel::Render,
+<a href=#121 id=121 data-nosnippet>121</a>            SystemStage::default()
+<a href=#122 id=122 data-nosnippet>122</a>                .with_system(<span class="kw">super</span>::gpu_timer::gpu_timer_system)
+<a href=#123 id=123 data-nosnippet>123</a>                .with_system(SystemContainer::new(GraphRunnerSystem)),
+<a href=#124 id=124 data-nosnippet>124</a>        )<span class="question-mark">?</span>;
+<a href=#125 id=125 data-nosnippet>125</a>        schedule.add_stage(
+<a href=#126 id=126 data-nosnippet>126</a>            RenderStageLabel::Cleanup,
+<a href=#127 id=127 data-nosnippet>127</a>            SystemStage::default()
+<a href=#128 id=128 data-nosnippet>128</a>                .with_system(cleanup_system)
+<a href=#129 id=129 data-nosnippet>129</a>                .with_system(retention_system),
+<a href=#130 id=130 data-nosnippet>130</a>        )<span class="question-mark">?</span>;
+<a href=#131 id=131 data-nosnippet>131</a>        <span class="comment">// A frame that fails part-way still clears its render phases, or the next frame
+<a href=#132 id=132 data-nosnippet>132</a>        // draws its items twice.
+<a href=#133 id=133 data-nosnippet>133</a>        </span>schedule.run_after_failure(RenderStageLabel::Cleanup)<span class="question-mark">?</span>;
+<a href=#134 id=134 data-nosnippet>134</a>        <span class="prelude-val">Ok</span>(())
+<a href=#135 id=135 data-nosnippet>135</a>    }
+<a href=#136 id=136 data-nosnippet>136</a>}
+<a href=#137 id=137 data-nosnippet>137</a>
+<a href=#138 id=138 data-nosnippet>138</a><span class="doccomment">/// Adds the main, scene, translucent and depth-copy passes in that order.
+<a href=#139 id=139 data-nosnippet>139</a></span><span class="kw">fn </span>add_draw_passes(graph: <span class="kw-2">&amp;mut </span>RenderGraph) -&gt; <span class="prelude-ty">Result</span>&lt;(), RenderGraphError&gt; {
+<a href=#140 id=140 data-nosnippet>140</a>    graph.add_node(draw_graph::node::MAIN_PASS, MainPassNode::new())<span class="question-mark">?</span>;
+<a href=#141 id=141 data-nosnippet>141</a>    graph.add_node(draw_graph::node::SCENE_3D_PASS, EmptyNode)<span class="question-mark">?</span>;
+<a href=#142 id=142 data-nosnippet>142</a>    graph.add_node(
+<a href=#143 id=143 data-nosnippet>143</a>        draw_graph::node::TRANSLUCENT_PASS,
+<a href=#144 id=144 data-nosnippet>144</a>        TranslucentPassNode::new(),
+<a href=#145 id=145 data-nosnippet>145</a>    )<span class="question-mark">?</span>;
+<a href=#146 id=146 data-nosnippet>146</a>    graph.add_node(draw_graph::node::DEPTH_COPY, DepthCopyNode)<span class="question-mark">?</span>;
+<a href=#147 id=147 data-nosnippet>147</a>    graph.add_node_edge(draw_graph::node::MAIN_PASS, draw_graph::node::SCENE_3D_PASS)<span class="question-mark">?</span>;
+<a href=#148 id=148 data-nosnippet>148</a>    graph.add_node_edge(
+<a href=#149 id=149 data-nosnippet>149</a>        draw_graph::node::SCENE_3D_PASS,
+<a href=#150 id=150 data-nosnippet>150</a>        draw_graph::node::TRANSLUCENT_PASS,
+<a href=#151 id=151 data-nosnippet>151</a>    )<span class="question-mark">?</span>;
+<a href=#152 id=152 data-nosnippet>152</a>    graph.add_node_edge(
+<a href=#153 id=153 data-nosnippet>153</a>        draw_graph::node::TRANSLUCENT_PASS,
+<a href=#154 id=154 data-nosnippet>154</a>        draw_graph::node::DEPTH_COPY,
+<a href=#155 id=155 data-nosnippet>155</a>    )
+<a href=#156 id=156 data-nosnippet>156</a>}
 </code></pre></div></section></main></body></html>

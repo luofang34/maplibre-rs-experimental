@@ -250,7 +250,7 @@
 <a href=#250 id=250 data-nosnippet>250</a><span class="kw">impl </span>SpecLayerType {
 <a href=#251 id=251 data-nosnippet>251</a>    <span class="doccomment">/// Whether `maplibre`'s layer pipeline renders layers of this `type` directly.
 <a href=#252 id=252 data-nosnippet>252</a>    </span><span class="kw">pub const fn </span>is_rendered_layer(<span class="self">self</span>) -&gt; bool {
-<a href=#253 id=253 data-nosnippet>253</a>        !<span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::Sky | <span class="self">Self</span>::Custom)
+<a href=#253 id=253 data-nosnippet>253</a>        !<span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::Sky)
 <a href=#254 id=254 data-nosnippet>254</a>    }
 <a href=#255 id=255 data-nosnippet>255</a>}
 <a href=#256 id=256 data-nosnippet>256</a>

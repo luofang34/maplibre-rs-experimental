@@ -1,0 +1,166 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `maplibre/src/input/inertia.rs`."><title>inertia.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="maplibre" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">maplibre/input/</div>inertia.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Drag-pan inertia with the velocity model and easing curve of GL JS.
+<a href=#2 id=2 data-nosnippet>2</a>
+<a href=#3 id=3 data-nosnippet>3</a></span><span class="kw">use </span>std::{collections::VecDeque, time::Duration};
+<a href=#4 id=4 data-nosnippet>4</a>
+<a href=#5 id=5 data-nosnippet>5</a><span class="kw">use </span>cgmath::{InnerSpace, Vector2, Zero};
+<a href=#6 id=6 data-nosnippet>6</a><span class="kw">use </span>instant::Instant;
+<a href=#7 id=7 data-nosnippet>7</a>
+<a href=#8 id=8 data-nosnippet>8</a><span class="doccomment">/// Samples older than this no longer contribute to the release velocity.
+<a href=#9 id=9 data-nosnippet>9</a></span><span class="kw">const </span>BUFFER_CUTOFF: Duration = Duration::from_millis(<span class="number">160</span>);
+<a href=#10 id=10 data-nosnippet>10</a><span class="kw">const </span>LINEARITY: f64 = <span class="number">0.3</span>;
+<a href=#11 id=11 data-nosnippet>11</a><span class="doccomment">/// Pixels per second squared.
+<a href=#12 id=12 data-nosnippet>12</a></span><span class="kw">const </span>DECELERATION: f64 = <span class="number">2500.0</span>;
+<a href=#13 id=13 data-nosnippet>13</a><span class="doccomment">/// Pixels per second.
+<a href=#14 id=14 data-nosnippet>14</a></span><span class="kw">const </span>MAX_SPEED: f64 = <span class="number">1400.0</span>;
+<a href=#15 id=15 data-nosnippet>15</a>
+<a href=#16 id=16 data-nosnippet>16</a><span class="kw">struct </span>Motion {
+<a href=#17 id=17 data-nosnippet>17</a>    started: Instant,
+<a href=#18 id=18 data-nosnippet>18</a>    duration: Duration,
+<a href=#19 id=19 data-nosnippet>19</a>    amount: Vector2&lt;f64&gt;,
+<a href=#20 id=20 data-nosnippet>20</a>    applied: Vector2&lt;f64&gt;,
+<a href=#21 id=21 data-nosnippet>21</a>}
+<a href=#22 id=22 data-nosnippet>22</a>
+<a href=#23 id=23 data-nosnippet>23</a><span class="doccomment">/// Records pointer movement during a drag and eases the pan out after release.
+<a href=#24 id=24 data-nosnippet>24</a></span><span class="attr">#[derive(Default)]
+<a href=#25 id=25 data-nosnippet>25</a></span><span class="kw">pub struct </span>PanInertia {
+<a href=#26 id=26 data-nosnippet>26</a>    samples: VecDeque&lt;(Instant, Vector2&lt;f64&gt;)&gt;,
+<a href=#27 id=27 data-nosnippet>27</a>    motion: <span class="prelude-ty">Option</span>&lt;Motion&gt;,
+<a href=#28 id=28 data-nosnippet>28</a>}
+<a href=#29 id=29 data-nosnippet>29</a>
+<a href=#30 id=30 data-nosnippet>30</a><span class="kw">impl </span>PanInertia {
+<a href=#31 id=31 data-nosnippet>31</a>    <span class="doccomment">/// Whether an inertial ease-out animation is currently running.
+<a href=#32 id=32 data-nosnippet>32</a>    </span><span class="kw">pub fn </span>is_active(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+<a href=#33 id=33 data-nosnippet>33</a>        <span class="self">self</span>.motion.is_some()
+<a href=#34 id=34 data-nosnippet>34</a>    }
+<a href=#35 id=35 data-nosnippet>35</a>
+<a href=#36 id=36 data-nosnippet>36</a>    <span class="doccomment">/// Records one pointer movement while dragging.
+<a href=#37 id=37 data-nosnippet>37</a>    </span><span class="kw">pub fn </span>record(<span class="kw-2">&amp;mut </span><span class="self">self</span>, now: Instant, delta: Vector2&lt;f64&gt;) {
+<a href=#38 id=38 data-nosnippet>38</a>        <span class="self">self</span>.motion = <span class="prelude-val">None</span>;
+<a href=#39 id=39 data-nosnippet>39</a>        <span class="self">self</span>.drain(now);
+<a href=#40 id=40 data-nosnippet>40</a>        <span class="self">self</span>.samples.push_back((now, delta));
+<a href=#41 id=41 data-nosnippet>41</a>    }
+<a href=#42 id=42 data-nosnippet>42</a>
+<a href=#43 id=43 data-nosnippet>43</a>    <span class="doccomment">/// Drops recorded movement and any running ease-out.
+<a href=#44 id=44 data-nosnippet>44</a>    </span><span class="kw">pub fn </span>cancel(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+<a href=#45 id=45 data-nosnippet>45</a>        <span class="self">self</span>.samples.clear();
+<a href=#46 id=46 data-nosnippet>46</a>        <span class="self">self</span>.motion = <span class="prelude-val">None</span>;
+<a href=#47 id=47 data-nosnippet>47</a>    }
+<a href=#48 id=48 data-nosnippet>48</a>
+<a href=#49 id=49 data-nosnippet>49</a>    <span class="doccomment">/// Starts easing out from the recorded movement; returns whether any motion follows.
+<a href=#50 id=50 data-nosnippet>50</a>    </span><span class="kw">pub fn </span>release(<span class="kw-2">&amp;mut </span><span class="self">self</span>, now: Instant) -&gt; bool {
+<a href=#51 id=51 data-nosnippet>51</a>        <span class="self">self</span>.drain(now);
+<a href=#52 id=52 data-nosnippet>52</a>        <span class="kw">let </span>(<span class="prelude-val">Some</span>((first, <span class="kw">_</span>)), <span class="bool-val">true</span>) = (<span class="self">self</span>.samples.front(), <span class="self">self</span>.samples.len() &gt;= <span class="number">2</span>) <span class="kw">else </span>{
+<a href=#53 id=53 data-nosnippet>53</a>            <span class="self">self</span>.samples.clear();
+<a href=#54 id=54 data-nosnippet>54</a>            <span class="kw">return </span><span class="bool-val">false</span>;
+<a href=#55 id=55 data-nosnippet>55</a>        };
+<a href=#56 id=56 data-nosnippet>56</a>        <span class="kw">let </span>elapsed = now.saturating_duration_since(<span class="kw-2">*</span>first).as_secs_f64();
+<a href=#57 id=57 data-nosnippet>57</a>        <span class="kw">let </span>travelled: Vector2&lt;f64&gt; = <span class="self">self</span>.samples.iter().map(|(<span class="kw">_</span>, delta)| <span class="kw-2">*</span>delta).sum();
+<a href=#58 id=58 data-nosnippet>58</a>        <span class="kw">let </span>distance = travelled.magnitude();
+<a href=#59 id=59 data-nosnippet>59</a>        <span class="self">self</span>.samples.clear();
+<a href=#60 id=60 data-nosnippet>60</a>        <span class="kw">if </span>elapsed &lt;= <span class="number">0.0 </span>|| distance &lt;= <span class="number">0.0 </span>{
+<a href=#61 id=61 data-nosnippet>61</a>            <span class="kw">return </span><span class="bool-val">false</span>;
+<a href=#62 id=62 data-nosnippet>62</a>        }
+<a href=#63 id=63 data-nosnippet>63</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(easing) = ease_out(distance, elapsed) <span class="kw">else </span>{
+<a href=#64 id=64 data-nosnippet>64</a>            <span class="kw">return </span><span class="bool-val">false</span>;
+<a href=#65 id=65 data-nosnippet>65</a>        };
+<a href=#66 id=66 data-nosnippet>66</a>        <span class="self">self</span>.motion = <span class="prelude-val">Some</span>(Motion {
+<a href=#67 id=67 data-nosnippet>67</a>            started: now,
+<a href=#68 id=68 data-nosnippet>68</a>            duration: easing.duration,
+<a href=#69 id=69 data-nosnippet>69</a>            amount: travelled * (easing.distance / distance),
+<a href=#70 id=70 data-nosnippet>70</a>            applied: Vector2::zero(),
+<a href=#71 id=71 data-nosnippet>71</a>        });
+<a href=#72 id=72 data-nosnippet>72</a>        <span class="bool-val">true
+<a href=#73 id=73 data-nosnippet>73</a>    </span>}
+<a href=#74 id=74 data-nosnippet>74</a>
+<a href=#75 id=75 data-nosnippet>75</a>    <span class="doccomment">/// Returns the pixel delta to apply this frame, or `None` once the ease-out has finished.
+<a href=#76 id=76 data-nosnippet>76</a>    </span><span class="kw">pub fn </span>step(<span class="kw-2">&amp;mut </span><span class="self">self</span>, now: Instant) -&gt; <span class="prelude-ty">Option</span>&lt;Vector2&lt;f64&gt;&gt; {
+<a href=#77 id=77 data-nosnippet>77</a>        <span class="kw">let </span>motion = <span class="self">self</span>.motion.as_mut()<span class="question-mark">?</span>;
+<a href=#78 id=78 data-nosnippet>78</a>        <span class="kw">let </span>progress = (now.saturating_duration_since(motion.started).as_secs_f64()
+<a href=#79 id=79 data-nosnippet>79</a>            / motion.duration.as_secs_f64())
+<a href=#80 id=80 data-nosnippet>80</a>        .min(<span class="number">1.0</span>);
+<a href=#81 id=81 data-nosnippet>81</a>        <span class="kw">let </span>target = motion.amount * ease(progress);
+<a href=#82 id=82 data-nosnippet>82</a>        <span class="kw">let </span>delta = target - motion.applied;
+<a href=#83 id=83 data-nosnippet>83</a>        motion.applied = target;
+<a href=#84 id=84 data-nosnippet>84</a>        <span class="kw">if </span>progress &gt;= <span class="number">1.0 </span>{
+<a href=#85 id=85 data-nosnippet>85</a>            <span class="self">self</span>.motion = <span class="prelude-val">None</span>;
+<a href=#86 id=86 data-nosnippet>86</a>        }
+<a href=#87 id=87 data-nosnippet>87</a>        <span class="prelude-val">Some</span>(delta)
+<a href=#88 id=88 data-nosnippet>88</a>    }
+<a href=#89 id=89 data-nosnippet>89</a>
+<a href=#90 id=90 data-nosnippet>90</a>    <span class="kw">fn </span>drain(<span class="kw-2">&amp;mut </span><span class="self">self</span>, now: Instant) {
+<a href=#91 id=91 data-nosnippet>91</a>        <span class="kw">while </span><span class="self">self
+<a href=#92 id=92 data-nosnippet>92</a>            </span>.samples
+<a href=#93 id=93 data-nosnippet>93</a>            .front()
+<a href=#94 id=94 data-nosnippet>94</a>            .is_some_and(|(time, <span class="kw">_</span>)| now.saturating_duration_since(<span class="kw-2">*</span>time) &gt; BUFFER_CUTOFF)
+<a href=#95 id=95 data-nosnippet>95</a>        {
+<a href=#96 id=96 data-nosnippet>96</a>            <span class="self">self</span>.samples.pop_front();
+<a href=#97 id=97 data-nosnippet>97</a>        }
+<a href=#98 id=98 data-nosnippet>98</a>    }
+<a href=#99 id=99 data-nosnippet>99</a>}
+<a href=#100 id=100 data-nosnippet>100</a>
+<a href=#101 id=101 data-nosnippet>101</a><span class="kw">struct </span>EaseOut {
+<a href=#102 id=102 data-nosnippet>102</a>    duration: Duration,
+<a href=#103 id=103 data-nosnippet>103</a>    distance: f64,
+<a href=#104 id=104 data-nosnippet>104</a>}
+<a href=#105 id=105 data-nosnippet>105</a>
+<a href=#106 id=106 data-nosnippet>106</a><span class="doccomment">/// GL JS `calculateEasing`: release speed clamped to `MAX_SPEED`, decelerated to a stop.
+<a href=#107 id=107 data-nosnippet>107</a></span><span class="kw">fn </span>ease_out(distance: f64, elapsed_seconds: f64) -&gt; <span class="prelude-ty">Option</span>&lt;EaseOut&gt; {
+<a href=#108 id=108 data-nosnippet>108</a>    <span class="kw">let </span>speed = (distance * LINEARITY / elapsed_seconds).min(MAX_SPEED);
+<a href=#109 id=109 data-nosnippet>109</a>    <span class="kw">let </span>duration = speed / (DECELERATION * LINEARITY);
+<a href=#110 id=110 data-nosnippet>110</a>    <span class="kw">if </span>!duration.is_finite() || duration &lt;= <span class="number">0.0 </span>{
+<a href=#111 id=111 data-nosnippet>111</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#112 id=112 data-nosnippet>112</a>    }
+<a href=#113 id=113 data-nosnippet>113</a>    <span class="prelude-val">Some</span>(EaseOut {
+<a href=#114 id=114 data-nosnippet>114</a>        duration: Duration::from_secs_f64(duration),
+<a href=#115 id=115 data-nosnippet>115</a>        distance: speed * duration / <span class="number">2.0</span>,
+<a href=#116 id=116 data-nosnippet>116</a>    })
+<a href=#117 id=117 data-nosnippet>117</a>}
+<a href=#118 id=118 data-nosnippet>118</a>
+<a href=#119 id=119 data-nosnippet>119</a><span class="doccomment">/// GL JS pan inertia easing: the cubic Bézier `(0, 0, 0.3, 1)`.
+<a href=#120 id=120 data-nosnippet>120</a></span><span class="kw">fn </span>ease(progress: f64) -&gt; f64 {
+<a href=#121 id=121 data-nosnippet>121</a>    unit_bezier(<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">0.3</span>, <span class="number">1.0</span>, progress)
+<a href=#122 id=122 data-nosnippet>122</a>}
+<a href=#123 id=123 data-nosnippet>123</a>
+<a href=#124 id=124 data-nosnippet>124</a><span class="kw">fn </span>unit_bezier(p1x: f64, p1y: f64, p2x: f64, p2y: f64, x: f64) -&gt; f64 {
+<a href=#125 id=125 data-nosnippet>125</a>    <span class="kw">let </span>cx = <span class="number">3.0 </span>* p1x;
+<a href=#126 id=126 data-nosnippet>126</a>    <span class="kw">let </span>bx = <span class="number">3.0 </span>* (p2x - p1x) - cx;
+<a href=#127 id=127 data-nosnippet>127</a>    <span class="kw">let </span>ax = <span class="number">1.0 </span>- cx - bx;
+<a href=#128 id=128 data-nosnippet>128</a>    <span class="kw">let </span>cy = <span class="number">3.0 </span>* p1y;
+<a href=#129 id=129 data-nosnippet>129</a>    <span class="kw">let </span>by = <span class="number">3.0 </span>* (p2y - p1y) - cy;
+<a href=#130 id=130 data-nosnippet>130</a>    <span class="kw">let </span>ay = <span class="number">1.0 </span>- cy - by;
+<a href=#131 id=131 data-nosnippet>131</a>    <span class="kw">let </span>sample_x = |t: f64| ((ax * t + bx) * t + cx) * t;
+<a href=#132 id=132 data-nosnippet>132</a>    <span class="kw">let </span>sample_y = |t: f64| ((ay * t + by) * t + cy) * t;
+<a href=#133 id=133 data-nosnippet>133</a>    <span class="kw">let </span>derivative_x = |t: f64| (<span class="number">3.0 </span>* ax * t + <span class="number">2.0 </span>* bx) * t + cx;
+<a href=#134 id=134 data-nosnippet>134</a>
+<a href=#135 id=135 data-nosnippet>135</a>    <span class="kw">let </span><span class="kw-2">mut </span>t = x;
+<a href=#136 id=136 data-nosnippet>136</a>    <span class="kw">for _ in </span><span class="number">0</span>..<span class="number">8 </span>{
+<a href=#137 id=137 data-nosnippet>137</a>        <span class="kw">let </span>error = sample_x(t) - x;
+<a href=#138 id=138 data-nosnippet>138</a>        <span class="kw">if </span>error.abs() &lt; <span class="number">1e-6 </span>{
+<a href=#139 id=139 data-nosnippet>139</a>            <span class="kw">return </span>sample_y(t);
+<a href=#140 id=140 data-nosnippet>140</a>        }
+<a href=#141 id=141 data-nosnippet>141</a>        <span class="kw">let </span>slope = derivative_x(t);
+<a href=#142 id=142 data-nosnippet>142</a>        <span class="kw">if </span>slope.abs() &lt; <span class="number">1e-6 </span>{
+<a href=#143 id=143 data-nosnippet>143</a>            <span class="kw">break</span>;
+<a href=#144 id=144 data-nosnippet>144</a>        }
+<a href=#145 id=145 data-nosnippet>145</a>        t -= error / slope;
+<a href=#146 id=146 data-nosnippet>146</a>    }
+<a href=#147 id=147 data-nosnippet>147</a>    <span class="kw">let </span>(<span class="kw-2">mut </span>low, <span class="kw-2">mut </span>high) = (<span class="number">0.0</span>, <span class="number">1.0</span>);
+<a href=#148 id=148 data-nosnippet>148</a>    t = x;
+<a href=#149 id=149 data-nosnippet>149</a>    <span class="kw">while </span>low &lt; high {
+<a href=#150 id=150 data-nosnippet>150</a>        <span class="kw">let </span>error = sample_x(t) - x;
+<a href=#151 id=151 data-nosnippet>151</a>        <span class="kw">if </span>error.abs() &lt; <span class="number">1e-6 </span>{
+<a href=#152 id=152 data-nosnippet>152</a>            <span class="kw">break</span>;
+<a href=#153 id=153 data-nosnippet>153</a>        }
+<a href=#154 id=154 data-nosnippet>154</a>        <span class="kw">if </span>error &gt; <span class="number">0.0 </span>{
+<a href=#155 id=155 data-nosnippet>155</a>            high = t;
+<a href=#156 id=156 data-nosnippet>156</a>        } <span class="kw">else </span>{
+<a href=#157 id=157 data-nosnippet>157</a>            low = t;
+<a href=#158 id=158 data-nosnippet>158</a>        }
+<a href=#159 id=159 data-nosnippet>159</a>        t = (low + high) / <span class="number">2.0</span>;
+<a href=#160 id=160 data-nosnippet>160</a>    }
+<a href=#161 id=161 data-nosnippet>161</a>    sample_y(t)
+<a href=#162 id=162 data-nosnippet>162</a>}
+<a href=#163 id=163 data-nosnippet>163</a>
+<a href=#164 id=164 data-nosnippet>164</a><span class="attr">#[cfg(test)]
+<a href=#165 id=165 data-nosnippet>165</a></span><span class="kw">mod </span>tests;
+</code></pre></div></section></main></body></html>

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ButtonState","InputEvent","MouseScrollDelta","NavKey","PointerButton","TouchPhase"],"struct":["ModifiersState"]};

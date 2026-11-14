@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["update_velocity_prefetch_view","view_snapshot"]};
