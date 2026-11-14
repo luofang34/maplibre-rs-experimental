@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-00ec32b3.js";
+            window.path_to_searchindex_js = "searchindex-129be78f.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-ae8692d6.js"></script>
@@ -1363,7 +1363,7 @@ use maplibre::{
     render::settings::WgpuSettings,
     style::{
         hillshade::{ColorReliefPaint, HillshadeMethod, HillshadePaint},
-        layer::{LayerPaint, StyleLayer, StyleProperty},
+        layer::{BackgroundPaint, LayerPaint, StyleLayer, StyleProperty},
         source::{RasterDemSource, Source},
         Style,
     },
@@ -1383,6 +1383,16 @@ pub fn style() -&gt; Style {
             }),
         )]),
         layers: vec![
+            StyleLayer {
+                index: 0,
+                id: "background".to_string(),
+                type_: "background".to_string(),
+                paint: Some(LayerPaint::Background(BackgroundPaint {
+                    background_color: Some(StyleProperty::parse(&amp;json!("#1b263b"))),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
             StyleLayer {
                 index: 1,
                 id: "color-relief".to_string(),
@@ -1456,6 +1466,13 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
             }
         },
         layers: [
+            {
+                id: 'background',
+                type: 'background',
+                paint: {
+                    'background-color': '#1b263b'
+                }
+            },
             {
                 id: 'color-relief',
                 type: 'color-relief',
@@ -1536,6 +1553,13 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
                     }
                 },
                 layers: [
+                    {
+                        id: 'background',
+                        type: 'background',
+                        paint: {
+                            'background-color': '#1b263b'
+                        }
+                    },
                     {
                         id: 'color-relief',
                         type: 'color-relief',

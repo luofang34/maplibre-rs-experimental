@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["Head"],"mod":["acquisition","offscreen","window"],"struct":["Surface"]};
+window.SIDEBAR_ITEMS = {"enum":["Head"],"fn":["clamp_size"],"mod":["acquisition","offscreen","window"],"struct":["Surface"]};

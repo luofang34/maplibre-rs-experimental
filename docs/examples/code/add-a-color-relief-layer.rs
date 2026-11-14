@@ -5,7 +5,7 @@ use maplibre::{
     render::settings::WgpuSettings,
     style::{
         hillshade::{ColorReliefPaint, HillshadeMethod, HillshadePaint},
-        layer::{LayerPaint, StyleLayer, StyleProperty},
+        layer::{BackgroundPaint, LayerPaint, StyleLayer, StyleProperty},
         source::{RasterDemSource, Source},
         Style,
     },
@@ -25,6 +25,16 @@ pub fn style() -> Style {
             }),
         )]),
         layers: vec![
+            StyleLayer {
+                index: 0,
+                id: "background".to_string(),
+                type_: "background".to_string(),
+                paint: Some(LayerPaint::Background(BackgroundPaint {
+                    background_color: Some(StyleProperty::parse(&json!("#1b263b"))),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
             StyleLayer {
                 index: 1,
                 id: "color-relief".to_string(),

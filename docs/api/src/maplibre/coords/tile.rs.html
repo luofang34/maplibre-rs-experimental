@@ -237,104 +237,108 @@
 <a href=#237 id=237 data-nosnippet>237</a>        })
 <a href=#238 id=238 data-nosnippet>238</a>    }
 <a href=#239 id=239 data-nosnippet>239</a>
-<a href=#240 id=240 data-nosnippet>240</a>    <span class="doccomment">/// Returns unique stencil reference values for WorldTileCoords which are 3D.
-<a href=#241 id=241 data-nosnippet>241</a>    /// Tiles from arbitrary `z` can lie next to each other, because we mix tiles from
-<a href=#242 id=242 data-nosnippet>242</a>    /// different levels based on availability.
-<a href=#243 id=243 data-nosnippet>243</a>    </span><span class="kw">pub fn </span>stencil_reference_value_3d(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u8 {
-<a href=#244 id=244 data-nosnippet>244</a>        <span class="kw">const </span>CASES: u8 = <span class="number">4</span>;
-<a href=#245 id=245 data-nosnippet>245</a>        <span class="kw">let </span>z = u8::from(<span class="self">self</span>.z);
-<a href=#246 id=246 data-nosnippet>246</a>        <span class="kw">match </span>(<span class="self">self</span>.x % <span class="number">2 </span>== <span class="number">0</span>, <span class="self">self</span>.y % <span class="number">2 </span>== <span class="number">0</span>) {
-<a href=#247 id=247 data-nosnippet>247</a>            (<span class="bool-val">true</span>, <span class="bool-val">true</span>) =&gt; z * CASES,
-<a href=#248 id=248 data-nosnippet>248</a>            (<span class="bool-val">true</span>, <span class="bool-val">false</span>) =&gt; <span class="number">1 </span>+ z * CASES,
-<a href=#249 id=249 data-nosnippet>249</a>            (<span class="bool-val">false</span>, <span class="bool-val">true</span>) =&gt; <span class="number">2 </span>+ z * CASES,
-<a href=#250 id=250 data-nosnippet>250</a>            (<span class="bool-val">false</span>, <span class="bool-val">false</span>) =&gt; <span class="number">3 </span>+ z * CASES,
-<a href=#251 id=251 data-nosnippet>251</a>        }
-<a href=#252 id=252 data-nosnippet>252</a>    }
-<a href=#253 id=253 data-nosnippet>253</a>}
-<a href=#254 id=254 data-nosnippet>254</a>
-<a href=#255 id=255 data-nosnippet>255</a><span class="kw">impl </span>From&lt;(i32, i32, ZoomLevel)&gt; <span class="kw">for </span>WorldTileCoords {
-<a href=#256 id=256 data-nosnippet>256</a>    <span class="kw">fn </span>from(tuple: (i32, i32, ZoomLevel)) -&gt; <span class="self">Self </span>{
-<a href=#257 id=257 data-nosnippet>257</a>        WorldTileCoords {
-<a href=#258 id=258 data-nosnippet>258</a>            x: tuple.<span class="number">0</span>,
-<a href=#259 id=259 data-nosnippet>259</a>            y: tuple.<span class="number">1</span>,
-<a href=#260 id=260 data-nosnippet>260</a>            z: tuple.<span class="number">2</span>,
-<a href=#261 id=261 data-nosnippet>261</a>        }
-<a href=#262 id=262 data-nosnippet>262</a>    }
-<a href=#263 id=263 data-nosnippet>263</a>}
-<a href=#264 id=264 data-nosnippet>264</a>
-<a href=#265 id=265 data-nosnippet>265</a><span class="doccomment">/// Upper-left anchor of a 2-by-2 tile block with x eastward and y southward.
-<a href=#266 id=266 data-nosnippet>266</a>/// [`WorldTileCoords::into_aligned`] supplies even indices; direct construction is unchecked.
-<a href=#267 id=267 data-nosnippet>267</a></span><span class="kw">pub struct </span>AlignedWorldTileCoords(
-<a href=#268 id=268 data-nosnippet>268</a>    <span class="doccomment">/// Anchor at the block's tile-grid level, with space for a neighbor at each index plus one.
-<a href=#269 id=269 data-nosnippet>269</a>    </span><span class="kw">pub </span>WorldTileCoords,
-<a href=#270 id=270 data-nosnippet>270</a>);
-<a href=#271 id=271 data-nosnippet>271</a>
-<a href=#272 id=272 data-nosnippet>272</a><span class="kw">impl </span>AlignedWorldTileCoords {
-<a href=#273 id=273 data-nosnippet>273</a>    <span class="doccomment">/// Returns the stored upper-left anchor.
-<a href=#274 id=274 data-nosnippet>274</a>    </span><span class="kw">pub fn </span>upper_left(<span class="self">self</span>) -&gt; WorldTileCoords {
-<a href=#275 id=275 data-nosnippet>275</a>        <span class="self">self</span>.<span class="number">0
-<a href=#276 id=276 data-nosnippet>276</a>    </span>}
-<a href=#277 id=277 data-nosnippet>277</a>
-<a href=#278 id=278 data-nosnippet>278</a>    <span class="doccomment">/// Returns the tile immediately east of the anchor.
-<a href=#279 id=279 data-nosnippet>279</a>    </span><span class="kw">pub fn </span>upper_right(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; WorldTileCoords {
-<a href=#280 id=280 data-nosnippet>280</a>        WorldTileCoords {
-<a href=#281 id=281 data-nosnippet>281</a>            x: <span class="self">self</span>.<span class="number">0</span>.x + <span class="number">1</span>,
-<a href=#282 id=282 data-nosnippet>282</a>            y: <span class="self">self</span>.<span class="number">0</span>.y,
-<a href=#283 id=283 data-nosnippet>283</a>            z: <span class="self">self</span>.<span class="number">0</span>.z,
-<a href=#284 id=284 data-nosnippet>284</a>        }
-<a href=#285 id=285 data-nosnippet>285</a>    }
-<a href=#286 id=286 data-nosnippet>286</a>
-<a href=#287 id=287 data-nosnippet>287</a>    <span class="doccomment">/// Returns the tile immediately south of the anchor.
-<a href=#288 id=288 data-nosnippet>288</a>    </span><span class="kw">pub fn </span>lower_left(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; WorldTileCoords {
-<a href=#289 id=289 data-nosnippet>289</a>        WorldTileCoords {
-<a href=#290 id=290 data-nosnippet>290</a>            x: <span class="self">self</span>.<span class="number">0</span>.x,
-<a href=#291 id=291 data-nosnippet>291</a>            y: <span class="self">self</span>.<span class="number">0</span>.y + <span class="number">1</span>,
-<a href=#292 id=292 data-nosnippet>292</a>            z: <span class="self">self</span>.<span class="number">0</span>.z,
-<a href=#293 id=293 data-nosnippet>293</a>        }
-<a href=#294 id=294 data-nosnippet>294</a>    }
-<a href=#295 id=295 data-nosnippet>295</a>
-<a href=#296 id=296 data-nosnippet>296</a>    <span class="doccomment">/// Returns the tile one column east and one row south of the anchor.
-<a href=#297 id=297 data-nosnippet>297</a>    </span><span class="kw">pub fn </span>lower_right(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; WorldTileCoords {
-<a href=#298 id=298 data-nosnippet>298</a>        WorldTileCoords {
-<a href=#299 id=299 data-nosnippet>299</a>            x: <span class="self">self</span>.<span class="number">0</span>.x + <span class="number">1</span>,
-<a href=#300 id=300 data-nosnippet>300</a>            y: <span class="self">self</span>.<span class="number">0</span>.y + <span class="number">1</span>,
-<a href=#301 id=301 data-nosnippet>301</a>            z: <span class="self">self</span>.<span class="number">0</span>.z,
-<a href=#302 id=302 data-nosnippet>302</a>        }
-<a href=#303 id=303 data-nosnippet>303</a>    }
-<a href=#304 id=304 data-nosnippet>304</a>}
-<a href=#305 id=305 data-nosnippet>305</a>
-<a href=#306 id=306 data-nosnippet>306</a><span class="kw">impl </span>Display <span class="kw">for </span>TileCoords {
-<a href=#307 id=307 data-nosnippet>307</a>    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; fmt::Result {
-<a href=#308 id=308 data-nosnippet>308</a>        <span class="macro">write!</span>(
-<a href=#309 id=309 data-nosnippet>309</a>            f,
-<a href=#310 id=310 data-nosnippet>310</a>            <span class="string">"T(x={x},y={y},z={z})"</span>,
-<a href=#311 id=311 data-nosnippet>311</a>            x = <span class="self">self</span>.x,
-<a href=#312 id=312 data-nosnippet>312</a>            y = <span class="self">self</span>.y,
-<a href=#313 id=313 data-nosnippet>313</a>            z = <span class="self">self</span>.z
-<a href=#314 id=314 data-nosnippet>314</a>        )
-<a href=#315 id=315 data-nosnippet>315</a>    }
-<a href=#316 id=316 data-nosnippet>316</a>}
-<a href=#317 id=317 data-nosnippet>317</a>
-<a href=#318 id=318 data-nosnippet>318</a><span class="kw">impl </span>Display <span class="kw">for </span>WorldTileCoords {
-<a href=#319 id=319 data-nosnippet>319</a>    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; fmt::Result {
-<a href=#320 id=320 data-nosnippet>320</a>        <span class="macro">write!</span>(
-<a href=#321 id=321 data-nosnippet>321</a>            f,
-<a href=#322 id=322 data-nosnippet>322</a>            <span class="string">"WT(x={x},y={y},z={z})"</span>,
-<a href=#323 id=323 data-nosnippet>323</a>            x = <span class="self">self</span>.x,
-<a href=#324 id=324 data-nosnippet>324</a>            y = <span class="self">self</span>.y,
-<a href=#325 id=325 data-nosnippet>325</a>            z = <span class="self">self</span>.z
-<a href=#326 id=326 data-nosnippet>326</a>        )
-<a href=#327 id=327 data-nosnippet>327</a>    }
-<a href=#328 id=328 data-nosnippet>328</a>}
-<a href=#329 id=329 data-nosnippet>329</a>
-<a href=#330 id=330 data-nosnippet>330</a><span class="attr">#[inline(always)]
-<a href=#331 id=331 data-nosnippet>331</a></span><span class="kw">const fn </span>spread_bits_32(v: u32) -&gt; u64 {
-<a href=#332 id=332 data-nosnippet>332</a>    <span class="kw">let </span><span class="kw-2">mut </span>x = v <span class="kw">as </span>u64;
-<a href=#333 id=333 data-nosnippet>333</a>    x = (x | (x &lt;&lt; <span class="number">16</span>)) &amp; <span class="number">0x0000_FFFF_0000_FFFF</span>;
-<a href=#334 id=334 data-nosnippet>334</a>    x = (x | (x &lt;&lt; <span class="number">8</span>)) &amp; <span class="number">0x00FF_00FF_00FF_00FF</span>;
-<a href=#335 id=335 data-nosnippet>335</a>    x = (x | (x &lt;&lt; <span class="number">4</span>)) &amp; <span class="number">0x0F0F_0F0F_0F0F_0F0F</span>;
-<a href=#336 id=336 data-nosnippet>336</a>    x = (x | (x &lt;&lt; <span class="number">2</span>)) &amp; <span class="number">0x3333_3333_3333_3333</span>;
-<a href=#337 id=337 data-nosnippet>337</a>    x = (x | (x &lt;&lt; <span class="number">1</span>)) &amp; <span class="number">0x5555_5555_5555_5555</span>;
-<a href=#338 id=338 data-nosnippet>338</a>    x
-<a href=#339 id=339 data-nosnippet>339</a>}
+<a href=#240 id=240 data-nosnippet>240</a>    <span class="doccomment">/// Returns 7-bit stencil reference values (`0..=123`) for 3D-compatible tile clipping.
+<a href=#241 id=241 data-nosnippet>241</a>    ///
+<a href=#242 id=242 data-nosnippet>242</a>    /// Wrapping zoom modulo `31` reserves `0x7f` (`127`) for `EMPTY_STENCIL_REFERENCE` while
+<a href=#243 id=243 data-nosnippet>243</a>    /// keeping bit 7 (`0x80`) clear for `STENCIL_MARK` in `extrusion_color_pipeline` and
+<a href=#244 id=244 data-nosnippet>244</a>    /// ensuring bitwise-inverted consumed raster stencils (`!ref` in `132..=255`) never match
+<a href=#245 id=245 data-nosnippet>245</a>    /// any tile or empty stencil reference.
+<a href=#246 id=246 data-nosnippet>246</a>    </span><span class="kw">pub fn </span>stencil_reference_value_3d(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u8 {
+<a href=#247 id=247 data-nosnippet>247</a>        <span class="kw">const </span>CASES: u8 = <span class="number">4</span>;
+<a href=#248 id=248 data-nosnippet>248</a>        <span class="kw">const </span>STENCIL_ZOOM_MODULO: u8 = <span class="number">31</span>;
+<a href=#249 id=249 data-nosnippet>249</a>        <span class="kw">let </span>z = u8::from(<span class="self">self</span>.z) % STENCIL_ZOOM_MODULO;
+<a href=#250 id=250 data-nosnippet>250</a>        <span class="kw">match </span>(<span class="self">self</span>.x % <span class="number">2 </span>== <span class="number">0</span>, <span class="self">self</span>.y % <span class="number">2 </span>== <span class="number">0</span>) {
+<a href=#251 id=251 data-nosnippet>251</a>            (<span class="bool-val">true</span>, <span class="bool-val">true</span>) =&gt; z * CASES,
+<a href=#252 id=252 data-nosnippet>252</a>            (<span class="bool-val">true</span>, <span class="bool-val">false</span>) =&gt; <span class="number">1 </span>+ z * CASES,
+<a href=#253 id=253 data-nosnippet>253</a>            (<span class="bool-val">false</span>, <span class="bool-val">true</span>) =&gt; <span class="number">2 </span>+ z * CASES,
+<a href=#254 id=254 data-nosnippet>254</a>            (<span class="bool-val">false</span>, <span class="bool-val">false</span>) =&gt; <span class="number">3 </span>+ z * CASES,
+<a href=#255 id=255 data-nosnippet>255</a>        }
+<a href=#256 id=256 data-nosnippet>256</a>    }
+<a href=#257 id=257 data-nosnippet>257</a>}
+<a href=#258 id=258 data-nosnippet>258</a>
+<a href=#259 id=259 data-nosnippet>259</a><span class="kw">impl </span>From&lt;(i32, i32, ZoomLevel)&gt; <span class="kw">for </span>WorldTileCoords {
+<a href=#260 id=260 data-nosnippet>260</a>    <span class="kw">fn </span>from(tuple: (i32, i32, ZoomLevel)) -&gt; <span class="self">Self </span>{
+<a href=#261 id=261 data-nosnippet>261</a>        WorldTileCoords {
+<a href=#262 id=262 data-nosnippet>262</a>            x: tuple.<span class="number">0</span>,
+<a href=#263 id=263 data-nosnippet>263</a>            y: tuple.<span class="number">1</span>,
+<a href=#264 id=264 data-nosnippet>264</a>            z: tuple.<span class="number">2</span>,
+<a href=#265 id=265 data-nosnippet>265</a>        }
+<a href=#266 id=266 data-nosnippet>266</a>    }
+<a href=#267 id=267 data-nosnippet>267</a>}
+<a href=#268 id=268 data-nosnippet>268</a>
+<a href=#269 id=269 data-nosnippet>269</a><span class="doccomment">/// Upper-left anchor of a 2-by-2 tile block with x eastward and y southward.
+<a href=#270 id=270 data-nosnippet>270</a>/// [`WorldTileCoords::into_aligned`] supplies even indices; direct construction is unchecked.
+<a href=#271 id=271 data-nosnippet>271</a></span><span class="kw">pub struct </span>AlignedWorldTileCoords(
+<a href=#272 id=272 data-nosnippet>272</a>    <span class="doccomment">/// Anchor at the block's tile-grid level, with space for a neighbor at each index plus one.
+<a href=#273 id=273 data-nosnippet>273</a>    </span><span class="kw">pub </span>WorldTileCoords,
+<a href=#274 id=274 data-nosnippet>274</a>);
+<a href=#275 id=275 data-nosnippet>275</a>
+<a href=#276 id=276 data-nosnippet>276</a><span class="kw">impl </span>AlignedWorldTileCoords {
+<a href=#277 id=277 data-nosnippet>277</a>    <span class="doccomment">/// Returns the stored upper-left anchor.
+<a href=#278 id=278 data-nosnippet>278</a>    </span><span class="kw">pub fn </span>upper_left(<span class="self">self</span>) -&gt; WorldTileCoords {
+<a href=#279 id=279 data-nosnippet>279</a>        <span class="self">self</span>.<span class="number">0
+<a href=#280 id=280 data-nosnippet>280</a>    </span>}
+<a href=#281 id=281 data-nosnippet>281</a>
+<a href=#282 id=282 data-nosnippet>282</a>    <span class="doccomment">/// Returns the tile immediately east of the anchor.
+<a href=#283 id=283 data-nosnippet>283</a>    </span><span class="kw">pub fn </span>upper_right(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; WorldTileCoords {
+<a href=#284 id=284 data-nosnippet>284</a>        WorldTileCoords {
+<a href=#285 id=285 data-nosnippet>285</a>            x: <span class="self">self</span>.<span class="number">0</span>.x + <span class="number">1</span>,
+<a href=#286 id=286 data-nosnippet>286</a>            y: <span class="self">self</span>.<span class="number">0</span>.y,
+<a href=#287 id=287 data-nosnippet>287</a>            z: <span class="self">self</span>.<span class="number">0</span>.z,
+<a href=#288 id=288 data-nosnippet>288</a>        }
+<a href=#289 id=289 data-nosnippet>289</a>    }
+<a href=#290 id=290 data-nosnippet>290</a>
+<a href=#291 id=291 data-nosnippet>291</a>    <span class="doccomment">/// Returns the tile immediately south of the anchor.
+<a href=#292 id=292 data-nosnippet>292</a>    </span><span class="kw">pub fn </span>lower_left(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; WorldTileCoords {
+<a href=#293 id=293 data-nosnippet>293</a>        WorldTileCoords {
+<a href=#294 id=294 data-nosnippet>294</a>            x: <span class="self">self</span>.<span class="number">0</span>.x,
+<a href=#295 id=295 data-nosnippet>295</a>            y: <span class="self">self</span>.<span class="number">0</span>.y + <span class="number">1</span>,
+<a href=#296 id=296 data-nosnippet>296</a>            z: <span class="self">self</span>.<span class="number">0</span>.z,
+<a href=#297 id=297 data-nosnippet>297</a>        }
+<a href=#298 id=298 data-nosnippet>298</a>    }
+<a href=#299 id=299 data-nosnippet>299</a>
+<a href=#300 id=300 data-nosnippet>300</a>    <span class="doccomment">/// Returns the tile one column east and one row south of the anchor.
+<a href=#301 id=301 data-nosnippet>301</a>    </span><span class="kw">pub fn </span>lower_right(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; WorldTileCoords {
+<a href=#302 id=302 data-nosnippet>302</a>        WorldTileCoords {
+<a href=#303 id=303 data-nosnippet>303</a>            x: <span class="self">self</span>.<span class="number">0</span>.x + <span class="number">1</span>,
+<a href=#304 id=304 data-nosnippet>304</a>            y: <span class="self">self</span>.<span class="number">0</span>.y + <span class="number">1</span>,
+<a href=#305 id=305 data-nosnippet>305</a>            z: <span class="self">self</span>.<span class="number">0</span>.z,
+<a href=#306 id=306 data-nosnippet>306</a>        }
+<a href=#307 id=307 data-nosnippet>307</a>    }
+<a href=#308 id=308 data-nosnippet>308</a>}
+<a href=#309 id=309 data-nosnippet>309</a>
+<a href=#310 id=310 data-nosnippet>310</a><span class="kw">impl </span>Display <span class="kw">for </span>TileCoords {
+<a href=#311 id=311 data-nosnippet>311</a>    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; fmt::Result {
+<a href=#312 id=312 data-nosnippet>312</a>        <span class="macro">write!</span>(
+<a href=#313 id=313 data-nosnippet>313</a>            f,
+<a href=#314 id=314 data-nosnippet>314</a>            <span class="string">"T(x={x},y={y},z={z})"</span>,
+<a href=#315 id=315 data-nosnippet>315</a>            x = <span class="self">self</span>.x,
+<a href=#316 id=316 data-nosnippet>316</a>            y = <span class="self">self</span>.y,
+<a href=#317 id=317 data-nosnippet>317</a>            z = <span class="self">self</span>.z
+<a href=#318 id=318 data-nosnippet>318</a>        )
+<a href=#319 id=319 data-nosnippet>319</a>    }
+<a href=#320 id=320 data-nosnippet>320</a>}
+<a href=#321 id=321 data-nosnippet>321</a>
+<a href=#322 id=322 data-nosnippet>322</a><span class="kw">impl </span>Display <span class="kw">for </span>WorldTileCoords {
+<a href=#323 id=323 data-nosnippet>323</a>    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; fmt::Result {
+<a href=#324 id=324 data-nosnippet>324</a>        <span class="macro">write!</span>(
+<a href=#325 id=325 data-nosnippet>325</a>            f,
+<a href=#326 id=326 data-nosnippet>326</a>            <span class="string">"WT(x={x},y={y},z={z})"</span>,
+<a href=#327 id=327 data-nosnippet>327</a>            x = <span class="self">self</span>.x,
+<a href=#328 id=328 data-nosnippet>328</a>            y = <span class="self">self</span>.y,
+<a href=#329 id=329 data-nosnippet>329</a>            z = <span class="self">self</span>.z
+<a href=#330 id=330 data-nosnippet>330</a>        )
+<a href=#331 id=331 data-nosnippet>331</a>    }
+<a href=#332 id=332 data-nosnippet>332</a>}
+<a href=#333 id=333 data-nosnippet>333</a>
+<a href=#334 id=334 data-nosnippet>334</a><span class="attr">#[inline(always)]
+<a href=#335 id=335 data-nosnippet>335</a></span><span class="kw">const fn </span>spread_bits_32(v: u32) -&gt; u64 {
+<a href=#336 id=336 data-nosnippet>336</a>    <span class="kw">let </span><span class="kw-2">mut </span>x = v <span class="kw">as </span>u64;
+<a href=#337 id=337 data-nosnippet>337</a>    x = (x | (x &lt;&lt; <span class="number">16</span>)) &amp; <span class="number">0x0000_FFFF_0000_FFFF</span>;
+<a href=#338 id=338 data-nosnippet>338</a>    x = (x | (x &lt;&lt; <span class="number">8</span>)) &amp; <span class="number">0x00FF_00FF_00FF_00FF</span>;
+<a href=#339 id=339 data-nosnippet>339</a>    x = (x | (x &lt;&lt; <span class="number">4</span>)) &amp; <span class="number">0x0F0F_0F0F_0F0F_0F0F</span>;
+<a href=#340 id=340 data-nosnippet>340</a>    x = (x | (x &lt;&lt; <span class="number">2</span>)) &amp; <span class="number">0x3333_3333_3333_3333</span>;
+<a href=#341 id=341 data-nosnippet>341</a>    x = (x | (x &lt;&lt; <span class="number">1</span>)) &amp; <span class="number">0x5555_5555_5555_5555</span>;
+<a href=#342 id=342 data-nosnippet>342</a>    x
+<a href=#343 id=343 data-nosnippet>343</a>}
 </code></pre></div></section></main></body></html>

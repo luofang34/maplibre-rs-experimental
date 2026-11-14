@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["TileMaskShader"]};
+window.SIDEBAR_ITEMS = {"struct":["FlatTileMaskShader","TileMaskShader"]};

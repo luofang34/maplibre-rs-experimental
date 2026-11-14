@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["STENCIL_MARK"],"fn":["resource_system"],"struct":["PipelineSetup"]};
+window.SIDEBAR_ITEMS = {"fn":["resource_system"],"struct":["PipelineSetup"]};

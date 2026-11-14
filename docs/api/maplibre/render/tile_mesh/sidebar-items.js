@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["GpuTileMeshError","TileMeshUsage"],"fn":["mesh_key","upload_indices"],"struct":["GlobeTileMeshCache","GpuTileMesh","TileMeshKey"]};
+window.SIDEBAR_ITEMS = {"enum":["GpuTileMeshError","TileMeshUsage"],"fn":["flat_mesh_key","mesh_key","upload_buffer","upload_indices"],"struct":["GlobeTileMeshCache","GpuTileMesh","GpuTileMeshVertex","TileMeshKey"]};

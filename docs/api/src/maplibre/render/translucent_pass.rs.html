@@ -50,91 +50,103 @@
 <a href=#50 id=50 data-nosnippet>50</a>                view: <span class="kw-2">&amp;</span>texture.view,
 <a href=#51 id=51 data-nosnippet>51</a>                ops: wgpu::Operations {
 <a href=#52 id=52 data-nosnippet>52</a>                    load: wgpu::LoadOp::Load,
-<a href=#53 id=53 data-nosnippet>53</a>                    store: StoreOp::Store,
-<a href=#54 id=54 data-nosnippet>54</a>                },
-<a href=#55 id=55 data-nosnippet>55</a>                resolve_target: <span class="prelude-val">Some</span>(render_target.deref()),
-<a href=#56 id=56 data-nosnippet>56</a>            }
-<a href=#57 id=57 data-nosnippet>57</a>        } <span class="kw">else </span>{
-<a href=#58 id=58 data-nosnippet>58</a>            wgpu::RenderPassColorAttachment {
-<a href=#59 id=59 data-nosnippet>59</a>                depth_slice: <span class="prelude-val">None</span>,
-<a href=#60 id=60 data-nosnippet>60</a>                view: render_target.deref(),
-<a href=#61 id=61 data-nosnippet>61</a>                ops: wgpu::Operations {
-<a href=#62 id=62 data-nosnippet>62</a>                    load: wgpu::LoadOp::Load,
-<a href=#63 id=63 data-nosnippet>63</a>                    store: StoreOp::Store,
-<a href=#64 id=64 data-nosnippet>64</a>                },
-<a href=#65 id=65 data-nosnippet>65</a>                resolve_target: <span class="prelude-val">None</span>,
-<a href=#66 id=66 data-nosnippet>66</a>            }
-<a href=#67 id=67 data-nosnippet>67</a>        };
-<a href=#68 id=68 data-nosnippet>68</a>
-<a href=#69 id=69 data-nosnippet>69</a>        <span class="kw">let </span>render_pass =
-<a href=#70 id=70 data-nosnippet>70</a>            render_context
-<a href=#71 id=71 data-nosnippet>71</a>                .command_encoder
-<a href=#72 id=72 data-nosnippet>72</a>                .begin_render_pass(<span class="kw-2">&amp;</span>wgpu::RenderPassDescriptor {
-<a href=#73 id=73 data-nosnippet>73</a>                    multiview_mask: <span class="prelude-val">None</span>,
-<a href=#74 id=74 data-nosnippet>74</a>                    label: <span class="prelude-val">Some</span>(<span class="string">"translucent_pass"</span>),
-<a href=#75 id=75 data-nosnippet>75</a>                    color_attachments: <span class="kw-2">&amp;</span>[<span class="prelude-val">Some</span>(color_attachment)],
-<a href=#76 id=76 data-nosnippet>76</a>                    depth_stencil_attachment: <span class="prelude-val">Some</span>(wgpu::RenderPassDepthStencilAttachment {
-<a href=#77 id=77 data-nosnippet>77</a>                        view: <span class="kw-2">&amp;</span>depth_texture.view,
-<a href=#78 id=78 data-nosnippet>78</a>                        depth_ops: <span class="prelude-val">Some</span>(wgpu::Operations {
-<a href=#79 id=79 data-nosnippet>79</a>                            load: wgpu::LoadOp::Load,
-<a href=#80 id=80 data-nosnippet>80</a>                            store: StoreOp::Store,
-<a href=#81 id=81 data-nosnippet>81</a>                        }),
-<a href=#82 id=82 data-nosnippet>82</a>                        stencil_ops: <span class="prelude-val">Some</span>(wgpu::Operations {
+<a href=#53 id=53 data-nosnippet>53</a>                    <span class="comment">// Resolved into `render_target`; discarding the transient MSAA surface avoids
+<a href=#54 id=54 data-nosnippet>54</a>                    // writing multisampled tile memory back to DRAM on mobile TBDR GPUs.
+<a href=#55 id=55 data-nosnippet>55</a>                    </span>store: StoreOp::Discard,
+<a href=#56 id=56 data-nosnippet>56</a>                },
+<a href=#57 id=57 data-nosnippet>57</a>                resolve_target: <span class="prelude-val">Some</span>(render_target.deref()),
+<a href=#58 id=58 data-nosnippet>58</a>            }
+<a href=#59 id=59 data-nosnippet>59</a>        } <span class="kw">else </span>{
+<a href=#60 id=60 data-nosnippet>60</a>            wgpu::RenderPassColorAttachment {
+<a href=#61 id=61 data-nosnippet>61</a>                depth_slice: <span class="prelude-val">None</span>,
+<a href=#62 id=62 data-nosnippet>62</a>                view: render_target.deref(),
+<a href=#63 id=63 data-nosnippet>63</a>                ops: wgpu::Operations {
+<a href=#64 id=64 data-nosnippet>64</a>                    load: wgpu::LoadOp::Load,
+<a href=#65 id=65 data-nosnippet>65</a>                    store: StoreOp::Store,
+<a href=#66 id=66 data-nosnippet>66</a>                },
+<a href=#67 id=67 data-nosnippet>67</a>                resolve_target: <span class="prelude-val">None</span>,
+<a href=#68 id=68 data-nosnippet>68</a>            }
+<a href=#69 id=69 data-nosnippet>69</a>        };
+<a href=#70 id=70 data-nosnippet>70</a>
+<a href=#71 id=71 data-nosnippet>71</a>        <span class="kw">let </span>needs_depth_after_pass = state.eye_depth_target.is_some()
+<a href=#72 id=72 data-nosnippet>72</a>            || <span class="macro">matches!</span>(state.depth_readout_texture, Initialized(<span class="kw">_</span>));
+<a href=#73 id=73 data-nosnippet>73</a>        <span class="kw">let </span>render_pass =
+<a href=#74 id=74 data-nosnippet>74</a>            render_context
+<a href=#75 id=75 data-nosnippet>75</a>                .command_encoder
+<a href=#76 id=76 data-nosnippet>76</a>                .begin_render_pass(<span class="kw-2">&amp;</span>wgpu::RenderPassDescriptor {
+<a href=#77 id=77 data-nosnippet>77</a>                    multiview_mask: <span class="prelude-val">None</span>,
+<a href=#78 id=78 data-nosnippet>78</a>                    label: <span class="prelude-val">Some</span>(<span class="string">"translucent_pass"</span>),
+<a href=#79 id=79 data-nosnippet>79</a>                    color_attachments: <span class="kw-2">&amp;</span>[<span class="prelude-val">Some</span>(color_attachment)],
+<a href=#80 id=80 data-nosnippet>80</a>                    depth_stencil_attachment: <span class="prelude-val">Some</span>(wgpu::RenderPassDepthStencilAttachment {
+<a href=#81 id=81 data-nosnippet>81</a>                        view: <span class="kw-2">&amp;</span>depth_texture.view,
+<a href=#82 id=82 data-nosnippet>82</a>                        depth_ops: <span class="prelude-val">Some</span>(wgpu::Operations {
 <a href=#83 id=83 data-nosnippet>83</a>                            load: wgpu::LoadOp::Load,
-<a href=#84 id=84 data-nosnippet>84</a>                            store: StoreOp::Store,
-<a href=#85 id=85 data-nosnippet>85</a>                        }),
-<a href=#86 id=86 data-nosnippet>86</a>                    }),
-<a href=#87 id=87 data-nosnippet>87</a>                    timestamp_writes: <span class="prelude-val">None</span>,
-<a href=#88 id=88 data-nosnippet>88</a>                    occlusion_query_set: <span class="prelude-val">None</span>,
-<a href=#89 id=89 data-nosnippet>89</a>                });
-<a href=#90 id=90 data-nosnippet>90</a>        <span class="kw">let </span><span class="kw-2">mut </span>render_pass = <span class="kw">crate</span>::render::tracked_pass::TrackedRenderPass::new(render_pass);
-<a href=#91 id=91 data-nosnippet>91</a>        <span class="comment">// Pass hooks at the beginning of translucent pass (e.g. sun, moon).
-<a href=#92 id=92 data-nosnippet>92</a>        </span><span class="kw">let </span>pass_hooks = world
-<a href=#93 id=93 data-nosnippet>93</a>            .resources
-<a href=#94 id=94 data-nosnippet>94</a>            .get::&lt;<span class="kw">crate</span>::render::PassDrawHooks&gt;()
-<a href=#95 id=95 data-nosnippet>95</a>            .map(|hooks| hooks.get_hooks(<span class="kw">crate</span>::render::PassHookPoint::TranslucentPassBegin));
-<a href=#96 id=96 data-nosnippet>96</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(hooks) = pass_hooks {
-<a href=#97 id=97 data-nosnippet>97</a>            <span class="kw">for </span>hook <span class="kw">in </span>hooks {
-<a href=#98 id=98 data-nosnippet>98</a>                hook.draw(<span class="kw-2">&amp;mut </span>render_pass, world);
-<a href=#99 id=99 data-nosnippet>99</a>            }
-<a href=#100 id=100 data-nosnippet>100</a>        }
-<a href=#101 id=101 data-nosnippet>101</a>
-<a href=#102 id=102 data-nosnippet>102</a>        <span class="comment">// TODO: Automatically raise error when items get linearly too many (+1k)
-<a href=#103 id=103 data-nosnippet>103</a>
-<a href=#104 id=104 data-nosnippet>104</a>        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(mask_items) = world.resources.get::&lt;RenderPhase&lt;TranslucentItem&gt;&gt;() {
-<a href=#105 id=105 data-nosnippet>105</a>            <span class="macro">log::trace!</span>(
-<a href=#106 id=106 data-nosnippet>106</a>                <span class="string">"RenderPhase&lt;TranslucentItem&gt;::size() = {}"</span>,
-<a href=#107 id=107 data-nosnippet>107</a>                mask_items.size()
-<a href=#108 id=108 data-nosnippet>108</a>            );
-<a href=#109 id=109 data-nosnippet>109</a>            <span class="kw">let </span>above = <span class="kw">super</span>::main_pass::above_symbols(world);
-<a href=#110 id=110 data-nosnippet>110</a>            <span class="kw">let </span><span class="kw-2">mut </span>previous = above.as_ref().map_or(<span class="kw-2">&amp;</span>[][..], |above| above.previous);
-<a href=#111 id=111 data-nosnippet>111</a>            <span class="kw">let </span><span class="kw-2">mut </span>groups = above
-<a href=#112 id=112 data-nosnippet>112</a>                .as_ref()
-<a href=#113 id=113 data-nosnippet>113</a>                .map_or(<span class="kw-2">&amp;</span>[][..], |above| above.items)
-<a href=#114 id=114 data-nosnippet>114</a>                .chunk_by(<span class="kw">super</span>::main_pass::same_layer)
-<a href=#115 id=115 data-nosnippet>115</a>                .peekable();
-<a href=#116 id=116 data-nosnippet>116</a>            <span class="kw">for </span>item <span class="kw">in </span>mask_items {
-<a href=#117 id=117 data-nosnippet>117</a>                <span class="kw">while let </span><span class="prelude-val">Some</span>(group) = groups.next_if(|group| group[<span class="number">0</span>].index &lt; item.index) {
-<a href=#118 id=118 data-nosnippet>118</a>                    <span class="kw">super</span>::main_pass::draw_group(<span class="kw-2">&amp;mut </span>render_pass, world, previous, group);
-<a href=#119 id=119 data-nosnippet>119</a>                    previous = group;
-<a href=#120 id=120 data-nosnippet>120</a>                }
-<a href=#121 id=121 data-nosnippet>121</a>                item.draw_function.draw(<span class="kw-2">&amp;mut </span>render_pass, world, item);
-<a href=#122 id=122 data-nosnippet>122</a>            }
-<a href=#123 id=123 data-nosnippet>123</a>            <span class="kw">for </span>group <span class="kw">in </span>groups {
-<a href=#124 id=124 data-nosnippet>124</a>                <span class="kw">super</span>::main_pass::draw_group(<span class="kw-2">&amp;mut </span>render_pass, world, previous, group);
-<a href=#125 id=125 data-nosnippet>125</a>                previous = group;
-<a href=#126 id=126 data-nosnippet>126</a>            }
-<a href=#127 id=127 data-nosnippet>127</a>        }
-<a href=#128 id=128 data-nosnippet>128</a>        <span class="kw">let </span>end_hooks = world
-<a href=#129 id=129 data-nosnippet>129</a>            .resources
-<a href=#130 id=130 data-nosnippet>130</a>            .get::&lt;<span class="kw">crate</span>::render::PassDrawHooks&gt;()
-<a href=#131 id=131 data-nosnippet>131</a>            .map(|hooks| hooks.get_hooks(<span class="kw">crate</span>::render::PassHookPoint::TranslucentPassEnd));
-<a href=#132 id=132 data-nosnippet>132</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(hooks) = end_hooks {
-<a href=#133 id=133 data-nosnippet>133</a>            <span class="kw">for </span>hook <span class="kw">in </span>hooks {
-<a href=#134 id=134 data-nosnippet>134</a>                hook.draw(<span class="kw-2">&amp;mut </span>render_pass, world);
-<a href=#135 id=135 data-nosnippet>135</a>            }
-<a href=#136 id=136 data-nosnippet>136</a>        }
-<a href=#137 id=137 data-nosnippet>137</a>        render_pass.finish(world);
-<a href=#138 id=138 data-nosnippet>138</a>    }
-<a href=#139 id=139 data-nosnippet>139</a>}
+<a href=#84 id=84 data-nosnippet>84</a>                            store: <span class="kw">if </span>needs_depth_after_pass {
+<a href=#85 id=85 data-nosnippet>85</a>                                StoreOp::Store
+<a href=#86 id=86 data-nosnippet>86</a>                            } <span class="kw">else </span>{
+<a href=#87 id=87 data-nosnippet>87</a>                                StoreOp::Discard
+<a href=#88 id=88 data-nosnippet>88</a>                            },
+<a href=#89 id=89 data-nosnippet>89</a>                        }),
+<a href=#90 id=90 data-nosnippet>90</a>                        stencil_ops: <span class="prelude-val">Some</span>(wgpu::Operations {
+<a href=#91 id=91 data-nosnippet>91</a>                            load: wgpu::LoadOp::Load,
+<a href=#92 id=92 data-nosnippet>92</a>                            store: <span class="kw">if </span>needs_depth_after_pass {
+<a href=#93 id=93 data-nosnippet>93</a>                                StoreOp::Store
+<a href=#94 id=94 data-nosnippet>94</a>                            } <span class="kw">else </span>{
+<a href=#95 id=95 data-nosnippet>95</a>                                StoreOp::Discard
+<a href=#96 id=96 data-nosnippet>96</a>                            },
+<a href=#97 id=97 data-nosnippet>97</a>                        }),
+<a href=#98 id=98 data-nosnippet>98</a>                    }),
+<a href=#99 id=99 data-nosnippet>99</a>                    timestamp_writes: <span class="prelude-val">None</span>,
+<a href=#100 id=100 data-nosnippet>100</a>                    occlusion_query_set: <span class="prelude-val">None</span>,
+<a href=#101 id=101 data-nosnippet>101</a>                });
+<a href=#102 id=102 data-nosnippet>102</a>        <span class="kw">let </span><span class="kw-2">mut </span>render_pass = <span class="kw">crate</span>::render::tracked_pass::TrackedRenderPass::new(render_pass);
+<a href=#103 id=103 data-nosnippet>103</a>        <span class="comment">// Pass hooks at the beginning of translucent pass (e.g. sun, moon).
+<a href=#104 id=104 data-nosnippet>104</a>        </span><span class="kw">let </span>pass_hooks = world
+<a href=#105 id=105 data-nosnippet>105</a>            .resources
+<a href=#106 id=106 data-nosnippet>106</a>            .get::&lt;<span class="kw">crate</span>::render::PassDrawHooks&gt;()
+<a href=#107 id=107 data-nosnippet>107</a>            .map(|hooks| hooks.get_hooks(<span class="kw">crate</span>::render::PassHookPoint::TranslucentPassBegin));
+<a href=#108 id=108 data-nosnippet>108</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(hooks) = pass_hooks {
+<a href=#109 id=109 data-nosnippet>109</a>            <span class="kw">for </span>hook <span class="kw">in </span>hooks {
+<a href=#110 id=110 data-nosnippet>110</a>                hook.draw(<span class="kw-2">&amp;mut </span>render_pass, world);
+<a href=#111 id=111 data-nosnippet>111</a>            }
+<a href=#112 id=112 data-nosnippet>112</a>        }
+<a href=#113 id=113 data-nosnippet>113</a>
+<a href=#114 id=114 data-nosnippet>114</a>        <span class="comment">// TODO: Automatically raise error when items get linearly too many (+1k)
+<a href=#115 id=115 data-nosnippet>115</a>
+<a href=#116 id=116 data-nosnippet>116</a>        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(mask_items) = world.resources.get::&lt;RenderPhase&lt;TranslucentItem&gt;&gt;() {
+<a href=#117 id=117 data-nosnippet>117</a>            <span class="macro">log::trace!</span>(
+<a href=#118 id=118 data-nosnippet>118</a>                <span class="string">"RenderPhase&lt;TranslucentItem&gt;::size() = {}"</span>,
+<a href=#119 id=119 data-nosnippet>119</a>                mask_items.size()
+<a href=#120 id=120 data-nosnippet>120</a>            );
+<a href=#121 id=121 data-nosnippet>121</a>            <span class="kw">let </span>above = <span class="kw">super</span>::main_pass::above_symbols(world);
+<a href=#122 id=122 data-nosnippet>122</a>            <span class="kw">let </span><span class="kw-2">mut </span>previous = above.as_ref().map_or(<span class="kw-2">&amp;</span>[][..], |above| above.previous);
+<a href=#123 id=123 data-nosnippet>123</a>            <span class="kw">let </span><span class="kw-2">mut </span>groups = above
+<a href=#124 id=124 data-nosnippet>124</a>                .as_ref()
+<a href=#125 id=125 data-nosnippet>125</a>                .map_or(<span class="kw-2">&amp;</span>[][..], |above| above.items)
+<a href=#126 id=126 data-nosnippet>126</a>                .chunk_by(<span class="kw">super</span>::main_pass::same_layer)
+<a href=#127 id=127 data-nosnippet>127</a>                .peekable();
+<a href=#128 id=128 data-nosnippet>128</a>            <span class="kw">for </span>item <span class="kw">in </span>mask_items {
+<a href=#129 id=129 data-nosnippet>129</a>                <span class="kw">while let </span><span class="prelude-val">Some</span>(group) = groups.next_if(|group| group[<span class="number">0</span>].index &lt; item.index) {
+<a href=#130 id=130 data-nosnippet>130</a>                    <span class="kw">super</span>::main_pass::draw_group(<span class="kw-2">&amp;mut </span>render_pass, world, previous, group);
+<a href=#131 id=131 data-nosnippet>131</a>                    previous = group;
+<a href=#132 id=132 data-nosnippet>132</a>                }
+<a href=#133 id=133 data-nosnippet>133</a>                item.draw_function.draw(<span class="kw-2">&amp;mut </span>render_pass, world, item);
+<a href=#134 id=134 data-nosnippet>134</a>            }
+<a href=#135 id=135 data-nosnippet>135</a>            <span class="kw">for </span>group <span class="kw">in </span>groups {
+<a href=#136 id=136 data-nosnippet>136</a>                <span class="kw">super</span>::main_pass::draw_group(<span class="kw-2">&amp;mut </span>render_pass, world, previous, group);
+<a href=#137 id=137 data-nosnippet>137</a>                previous = group;
+<a href=#138 id=138 data-nosnippet>138</a>            }
+<a href=#139 id=139 data-nosnippet>139</a>        }
+<a href=#140 id=140 data-nosnippet>140</a>        <span class="kw">let </span>end_hooks = world
+<a href=#141 id=141 data-nosnippet>141</a>            .resources
+<a href=#142 id=142 data-nosnippet>142</a>            .get::&lt;<span class="kw">crate</span>::render::PassDrawHooks&gt;()
+<a href=#143 id=143 data-nosnippet>143</a>            .map(|hooks| hooks.get_hooks(<span class="kw">crate</span>::render::PassHookPoint::TranslucentPassEnd));
+<a href=#144 id=144 data-nosnippet>144</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(hooks) = end_hooks {
+<a href=#145 id=145 data-nosnippet>145</a>            <span class="kw">for </span>hook <span class="kw">in </span>hooks {
+<a href=#146 id=146 data-nosnippet>146</a>                hook.draw(<span class="kw-2">&amp;mut </span>render_pass, world);
+<a href=#147 id=147 data-nosnippet>147</a>            }
+<a href=#148 id=148 data-nosnippet>148</a>        }
+<a href=#149 id=149 data-nosnippet>149</a>        render_pass.finish(world);
+<a href=#150 id=150 data-nosnippet>150</a>    }
+<a href=#151 id=151 data-nosnippet>151</a>}
 </code></pre></div></section></main></body></html>
