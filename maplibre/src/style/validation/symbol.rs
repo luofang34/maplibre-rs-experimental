@@ -58,7 +58,7 @@ fn property(name: &str) -> Option<Property> {
         | "text-optional"
         | "icon-optional" => Property::BooleanExpression,
         "text-overlap" | "icon-overlap" => Property::Enum(&["never", "always", "cooperative"]),
-        "text-keep-upright" | "icon-keep-upright" => Property::Boolean,
+        "text-keep-upright" | "icon-keep-upright" | "symbol-avoid-edges" => Property::Boolean,
         "text-offset" | "icon-offset" => Property::Pair(Feature),
         "text-font" => Property::Font,
         "text-transform" => Property::FeatureEnum(&["none", "uppercase", "lowercase"]),

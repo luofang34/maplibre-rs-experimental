@@ -58,6 +58,25 @@ pub struct Style {
     /// URL template for font glyph ranges.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub glyphs: Option<String>,
+    /// `@font-face` declarations mapping font families or stacks to TrueType, OpenType, WOFF, or
+    /// WOFF2 font URLs.
+    #[serde(
+        default,
+        rename = "font-faces",
+        alias = "fontFaces",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub font_faces: Option<crate::font::FontFaces>,
+    /// Font family used to rasterise local CJK ideographs, Kana, and Hangul without requesting
+    /// remote `.pbf` glyph ranges (`Some("sans-serif")` by default; `None` when disabled).
+    #[serde(
+        default = "crate::font::default_local_ideograph_font_family",
+        rename = "localIdeographFontFamily",
+        alias = "local-ideograph-font-family",
+        deserialize_with = "crate::font::deserialize_local_ideograph_font_family",
+        skip_serializing_if = "crate::font::is_default_local_ideograph_font_family"
+    )]
+    pub local_ideograph_font_family: Option<String>,
     /// Sprite URL or named sprite sources.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sprite: Option<serde_json::Value>,

@@ -70,8 +70,21 @@ impl LayerFrame<'_> {
                 }),
             ]
         };
+        let avoid_edges = self.paint.avoid_edges();
+        let shift_stays_in_tile = |shift: &[f32; 2]| {
+            !avoid_edges
+                || super::avoid_edges::stays_within_tile(
+                    layer,
+                    feature,
+                    &None,
+                    self.view_state,
+                    &self.uniforms,
+                    *shift,
+                )
+        };
         let fits_without_overlap = |shift: &[f32; 2]| {
-            rules.visible_without_text_overlap(moved(shift), glyph_boxes, grid, viewport)[0]
+            shift_stays_in_tile(shift)
+                && rules.visible_without_text_overlap(moved(shift), glyph_boxes, grid, viewport)[0]
         };
         // The anchor the label had is kept while it still fits, as GL JS keeps it, so a label
         // does not jump to an earlier anchor the moment that one frees up. Then every anchor is
@@ -85,10 +98,10 @@ impl LayerFrame<'_> {
             })
             .or_else(|| feature.anchor_shifts.iter().position(fits_without_overlap))
             .or_else(|| {
-                feature
-                    .anchor_shifts
-                    .iter()
-                    .position(|shift| rules.visible(moved(shift), glyph_boxes, grid, viewport)[0])
+                feature.anchor_shifts.iter().position(|shift| {
+                    shift_stays_in_tile(shift)
+                        && rules.visible(moved(shift), glyph_boxes, grid, viewport)[0]
+                })
             })
             .unwrap_or(0);
         let shift = feature.anchor_shifts[index];

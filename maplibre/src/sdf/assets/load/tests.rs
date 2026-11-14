@@ -9,6 +9,7 @@ use crate::io::source_client::{HttpSourceClient, SourceFetchError};
 mod names;
 mod provided;
 mod scope;
+mod wave5;
 
 #[derive(Clone)]
 struct Assets {

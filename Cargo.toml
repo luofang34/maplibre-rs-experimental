@@ -92,6 +92,12 @@ web-sys = "0.3"  # Individual features are customized in each crate
 wgpu = { version = "30.0.1", features = ["trace"] }
 http-cache-reqwest = "0.16.0"
 rustc-hash = "2.1"
+harfrust = "0.14.0"
+skrifa = "0.48.0"
+read-fonts = "0.45.0"
+ab_glyph_rasterizer = "0.1.10"
+brotli-decompressor = "5.0.3"
+fontdb = "0.24.0"
 
 [profile.release]
 lto = true

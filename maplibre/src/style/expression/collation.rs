@@ -71,19 +71,9 @@ impl Collation {
     }
 }
 
-/// Blocks of the scripts that need shaping the renderer does not do, as GL JS lists them; the
-/// right-to-left scripts count as supported, like GL JS with its right-to-left text plugin.
-const UNSUPPORTED_SCRIPTS: &[(u32, u32)] = &[
-    (0x0900, 0x0DFF),
-    (0x0F00, 0x0FFF),
-    (0x1000, 0x109F),
-    (0x1780, 0x17FF),
-    (0x19E0, 0x19FF),
-    (0x1CD0, 0x1CFF),
-    (0xA8E0, 0xA8FF),
-    (0xA9E0, 0xA9FF),
-    (0xAA60, 0xAA7F),
-];
+/// Scripts lacking shaping support (empty: complex Indic, Tibetan, Myanmar, Khmer, and RTL
+/// scripts are shaped via `harfrust` and `arabic_shaping`).
+const UNSUPPORTED_SCRIPTS: &[(u32, u32)] = &[];
 
 /// Whether every character of `text` is in a script the renderer can lay out.
 pub fn is_supported_script(text: &str) -> bool {

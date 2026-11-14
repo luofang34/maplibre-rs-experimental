@@ -14,6 +14,7 @@ use crate::{
 };
 
 mod anchors;
+mod avoid_edges;
 mod metadata;
 use anchors::{
     beyond_perspective_cutoff_with_clip, label_boxes, local_zoom_visible_from_clip,
@@ -330,9 +331,19 @@ impl LayerFrame<'_> {
                 };
             let repeat = Repeat::of(layer, feature, &rectangles, viewport);
             // A repeat too close to one already placed takes no room from labels after it.
-            let (rectangles, glyph_boxes) = if repeat
-                .as_ref()
-                .is_some_and(|repeat| history.repeats.too_close(repeat, was_visible))
+            let edge_clipped = self.paint.avoid_edges()
+                && !avoid_edges::stays_within_tile(
+                    layer,
+                    feature,
+                    &line,
+                    view_state,
+                    &self.uniforms,
+                    text_shift,
+                );
+            let (rectangles, glyph_boxes) = if edge_clipped
+                || repeat
+                    .as_ref()
+                    .is_some_and(|repeat| history.repeats.too_close(repeat, was_visible))
             {
                 ([None, None], Vec::new())
             } else {

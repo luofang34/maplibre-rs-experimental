@@ -154,6 +154,7 @@ fn load_style_blocking(test_dir: &Path) -> Result<(Style, TestMeta), String> {
     let mut transitions = crate::transitions::Transitions::extract(&mut value);
     let mut style: Style = serde_json::from_value(value.clone())
         .map_err(|error| format!("Cannot deserialize Style: {error}"))?;
+    apply_harness_ideograph_setting(&mut style, &value);
     // The tiles are decoded from this copy of the style, so it carries the state's values too.
     style.resolve_global_state();
     crate::operations::apply(
@@ -364,4 +365,22 @@ fn expected_images(test_dir: &Path) -> Result<Vec<PathBuf>, String> {
         .collect();
     references.sort();
     Ok(references)
+}
+
+fn apply_harness_ideograph_setting(style: &mut Style, raw_style: &serde_json::Value) {
+    if let Some(override_val) = raw_style.pointer("/metadata/test/localIdeographFontFamily") {
+        style.local_ideograph_font_family = match override_val {
+            serde_json::Value::Bool(false) | serde_json::Value::Null => None,
+            serde_json::Value::Bool(true) => Some("sans-serif".to_owned()),
+            serde_json::Value::String(family) => {
+                let trimmed = family.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_owned())
+            }
+            _ => None,
+        };
+    } else if raw_style.get("localIdeographFontFamily").is_none()
+        && raw_style.get("local-ideograph-font-family").is_none()
+    {
+        style.local_ideograph_font_family = None;
+    }
 }

@@ -359,3 +359,5 @@ fn a_label_keeps_the_id_and_geometry_kind_of_its_source_feature() {
         ]
     );
 }
+
+mod wave5;

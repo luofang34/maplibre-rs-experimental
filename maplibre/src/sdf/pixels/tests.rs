@@ -334,6 +334,8 @@ async fn fixture_map_after(
     map
 }
 
+mod avoid_edges;
+
 mod line_labels;
 
 mod loaded_assets;

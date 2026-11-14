@@ -1,10 +1,10 @@
 {
   "baseline": {
     "total": 1701,
-    "passed": 1621,
-    "ignored": 80,
+    "passed": 1620,
+    "ignored": 81,
     "render_total": 1564,
-    "render_passed": 1491,
+    "render_passed": 1490,
     "query_total": 137,
     "query_passed": 130
   },
@@ -25,6 +25,7 @@
     "icon-no-cross-source-collision/default": "Cross-source symbol collision ordering differs from GL JS placement priority",
     "icon-text-fit/textFit-grid-long-vertical": "Vertical writing-mode `icon-text-fit` stretch calculation differs from GL JS",
     "icon-text-fit/textFit-grid-short-vertical": "Vertical writing-mode `icon-text-fit` stretch calculation differs from GL JS",
+    "is-supported-script/layout": "GL JS reference expects `\"Not renderable\"` for Devanagari because GL JS lacks Indic shaping, whereas `maplibre-rs` supports Devanagari shaping via `harfrust`",
     "line-gradient/color-interpolation-transparent": "Translucent stop alpha interpolation along `line-gradient` differs from GL JS",
     "line-overlap": "Self-overlapping translucent line alpha accumulation differs from GL JS",
     "pixel-ratio/veryhigh": "Physical 8960x1280 target exceeds the guaranteed 8192 px WebGPU texture dimension limit",
@@ -87,7 +88,7 @@
     "terrain/tile-stiching": "DEM cross-zoom border vertex stitching differs from GL JS",
     "text-field/formatted-vertical-align": "Inline image `vertical-align` baseline offset in `format` sections differs from GL JS",
     "text-field/formatted-vertical-align-line": "Line-placed inline image `vertical-align` offset in `format` sections differs from GL JS",
-    "text-font/chinese": "Local CJK ideograph glyph rasterization is not implemented (GAPS.md)",
+    "text-font/chinese": "External `local://glyphs/NotoCJK/{range}.pbf` CJK ranges above `0-255` are not vendored in `render-tests/src/assets/glyphs/NotoCJK/`",
     "video/default": "Video source (`type: \"video\"`) is not implemented (GAPS.md)"
   }
 }

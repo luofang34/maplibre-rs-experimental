@@ -143,7 +143,9 @@ impl Style {
                 != serde_json::to_value(&next.light).ok(),
             projection_changed: self.projection != next.projection,
             sprite_changed: self.sprite != next.sprite || self.images != next.images,
-            glyphs_changed: self.glyphs != next.glyphs,
+            glyphs_changed: self.glyphs != next.glyphs
+                || self.font_faces != next.font_faces
+                || self.local_ideograph_font_family != next.local_ideograph_font_family,
             transition_changed: self.transition != next.transition,
             global_state_changed: self.global_state_values() != next.global_state_values(),
             ..Default::default()

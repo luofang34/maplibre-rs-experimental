@@ -74,6 +74,13 @@ pub struct SymbolAtlas {
     pub size: [u32; 2],
     /// Font stack and Unicode scalar to atlas entry.
     pub glyphs: HashMap<String, HashMap<u32, AtlasEntry>>,
+    /// OpenType glyph IDs (`"<face_id>:<glyph_id>"`) packed for shaped runs (including unencoded
+    /// ligature and Indic conjunct glyphs).
+    #[serde(default)]
+    pub face_glyphs: HashMap<String, AtlasEntry>,
+    /// Pre-shaped OpenType glyph runs keyed by font stack and plain transformed label text.
+    #[serde(default)]
+    pub shaped_runs: HashMap<String, HashMap<String, Vec<crate::font::ShapedGlyph>>>,
     /// Sprite names to atlas entries.
     pub icons: HashMap<String, AtlasEntry>,
 }
@@ -89,6 +96,28 @@ impl SymbolAtlas {
                     font.capacity()
                         + glyphs.capacity()
                             * (std::mem::size_of::<u32>() + std::mem::size_of::<AtlasEntry>())
+                })
+                .sum::<usize>()
+            + self
+                .face_glyphs
+                .keys()
+                .map(|key| key.capacity())
+                .sum::<usize>()
+            + self.face_glyphs.capacity()
+                * (std::mem::size_of::<String>() + std::mem::size_of::<AtlasEntry>())
+            + self
+                .shaped_runs
+                .iter()
+                .map(|(font, runs)| {
+                    font.capacity()
+                        + runs
+                            .iter()
+                            .map(|(text, glyphs)| {
+                                text.capacity()
+                                    + glyphs.capacity()
+                                        * std::mem::size_of::<crate::font::ShapedGlyph>()
+                            })
+                            .sum::<usize>()
                 })
                 .sum::<usize>()
             + self.icons.keys().map(|name| name.capacity()).sum::<usize>()
@@ -200,6 +229,61 @@ impl AtlasBuilder {
                     },
                 );
         }
+    }
+
+    pub(super) fn pack_rasterized_codepoint(
+        &mut self,
+        font: &str,
+        id: u32,
+        glyph: &crate::font::RasterizedGlyph,
+    ) {
+        if let Some(entry) = self.entry_for_rasterized(glyph) {
+            self.atlas
+                .glyphs
+                .entry(font.to_string())
+                .or_default()
+                .insert(id, entry);
+        }
+    }
+
+    pub(super) fn pack_rasterized_face_glyph(
+        &mut self,
+        key: String,
+        glyph: &crate::font::RasterizedGlyph,
+    ) {
+        if self.atlas.face_glyphs.contains_key(&key) {
+            return;
+        }
+        if let Some(entry) = self.entry_for_rasterized(glyph) {
+            self.atlas.face_glyphs.insert(key, entry);
+        }
+    }
+
+    fn entry_for_rasterized(&mut self, glyph: &crate::font::RasterizedGlyph) -> Option<AtlasEntry> {
+        if glyph.width > 1016 || glyph.height > 4088 {
+            return None;
+        }
+        let rect = if !glyph.bitmap.is_empty() {
+            let pixels: Vec<u8> = glyph
+                .bitmap
+                .iter()
+                .flat_map(|&value| [value, value, value, 255])
+                .collect();
+            self.pack(glyph.width + 6, glyph.height + 6, &pixels)?
+        } else {
+            [0; 4]
+        };
+        Some(AtlasEntry {
+            rect,
+            metrics: [
+                glyph.left as f32 - 3.0,
+                glyph.top as f32 + 3.0,
+                glyph.advance as f32,
+                1.0,
+            ],
+            kind: 0,
+            ..Default::default()
+        })
     }
 
     pub(super) fn finish(mut self) -> Arc<SymbolAtlas> {

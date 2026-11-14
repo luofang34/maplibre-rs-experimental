@@ -13,6 +13,8 @@ use crate::{
     style::{expression::FeatureProperties, layer::SymbolPaint},
 };
 
+mod avoid_edges;
+
 /// A polyline in tile units and the arc length from its start to a label's anchor.
 pub(super) type LineContext = (std::sync::Arc<[[f32; 2]]>, f32);
 
@@ -92,8 +94,7 @@ const POLE_PRECISION: f64 = 16.0;
 
 pub(super) fn append(
     symbol: &CollectedSymbol,
-    paint: &SymbolPaint,
-    zoom: f64,
+    (paint, zoom, overscaling): (&SymbolPaint, f64, f64),
     atlas: &SymbolAtlas,
     buffer: &mut VertexBuffers<ShaderSymbolVertex, u32>,
     features: &mut Vec<Feature>,
@@ -232,6 +233,20 @@ pub(super) fn append(
             text_part.bounds = [left, top, right, bottom].map(f64::from);
         }
     }
+    let anchor_shifts =
+        super::text_layout::variable_shifts_from_block(symbol, paint, zoom, text_block.as_ref());
+    if !avoid_edges::keep_symbol_within_tile(
+        symbol,
+        (paint, zoom, overscaling),
+        anchor,
+        &parts,
+        &anchor_shifts,
+        &glyph_offsets,
+    ) {
+        buffer.vertices.truncate(first_vertex);
+        buffer.indices.truncate(start);
+        return;
+    }
     features.push(Feature {
         parts,
         data: crate::sdf::SymbolFeatureData {
@@ -243,12 +258,7 @@ pub(super) fn append(
         bbox,
         indices: start..buffer.indices.len(),
         text_anchor: anchor,
-        anchor_shifts: super::text_layout::variable_shifts_from_block(
-            symbol,
-            paint,
-            zoom,
-            text_block.as_ref(),
-        ),
+        anchor_shifts,
         text_sets: laid.sets,
         anchor_sets: laid.anchor_sets,
         text_colors: laid.colors,

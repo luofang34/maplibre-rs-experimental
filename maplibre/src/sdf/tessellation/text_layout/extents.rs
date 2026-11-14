@@ -105,6 +105,9 @@ pub(in crate::sdf::tessellation) fn unwrapped_width(
     zoom: f64,
     atlas: &SymbolAtlas,
 ) -> f32 {
+    if let Some(width) = super::shaped::unwrapped_shaped_width(paint, symbol, zoom, atlas) {
+        return width;
+    }
     let Some(text) = paint.label_among(&symbol.properties, zoom, Some(&atlas.icons)) else {
         return 0.0;
     };

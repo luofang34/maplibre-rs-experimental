@@ -17,6 +17,8 @@ impl Default for Style {
         Self {
             version: 8,
             glyphs: None,
+            font_faces: None,
+            local_ideograph_font_family: crate::font::default_local_ideograph_font_family(),
             sprite: None,
             name: Some("Default Style".into()),
             metadata: Default::default(),

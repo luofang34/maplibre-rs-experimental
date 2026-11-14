@@ -52,6 +52,9 @@ reqwest-middleware = { workspace = true, optional = true }
 rusqlite = { workspace = true, optional = true }
 tracing-tracy = { workspace = true, optional = true }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+fontdb.workspace = true
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
@@ -118,12 +121,17 @@ png = { workspace = true, optional = true }
 image.workspace = true
 moxcms = "0.9.1"
 
-# Text/glyphs & locale-aware collation / number formatting
+# Text/glyphs, OpenType shaping, and locale-aware collation / number formatting
 prost = "0.14.4"
 fixed_decimal = { version = "0.7", features = ["ryu"] }
 icu_collator = "2.4"
 icu_decimal = { version = "2.4", features = ["alloc", "ryu"] }
 icu_locale_core = "2.4"
+harfrust.workspace = true
+skrifa.workspace = true
+read-fonts.workspace = true
+ab_glyph_rasterizer.workspace = true
+brotli-decompressor.workspace = true
 
 [dev-dependencies]
 geozero = { workspace = true, features = ["with-geojson"] }

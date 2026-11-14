@@ -1,6 +1,6 @@
 //! Loads the glyph ranges and sprite images referenced by visible tile features.
 use std::{
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     sync::Arc,
 };
 
@@ -15,8 +15,11 @@ use crate::{
     style::{layer::StyleLayer, Style, StyleImage},
 };
 
+mod local_fonts;
 mod requests;
-use requests::{requests, requests_from_tile};
+#[cfg(test)]
+use requests::requests;
+use requests::{symbol_requests, symbol_requests_from_tile};
 
 const BUNDLED_LATIN: &[u8] = include_bytes!("../../../../data/0-255.pbf");
 
@@ -101,8 +104,8 @@ pub(crate) async fn load_symbol_assets_awaiting<'l, HC: HttpClient>(
     data: &[u8],
     zoom: f64,
 ) -> Result<LoadedSymbolAssets, SymbolAssetError> {
-    let (fonts, icons) = requests(layers, data, zoom, config.style);
-    load_symbol_assets_for_requests(client, config, fonts, icons).await
+    let req = symbol_requests(layers, data, zoom, config.style);
+    load_symbol_assets_for_requests(client, config, req).await
 }
 
 /// Like [`load_symbol_assets_awaiting`], reading symbol glyph and icon requests from an
@@ -114,25 +117,19 @@ pub(crate) async fn load_symbol_assets_awaiting_from_tile<'l, HC: HttpClient>(
     tile: &geozero::mvt::Tile,
     zoom: f64,
 ) -> Result<LoadedSymbolAssets, SymbolAssetError> {
-    let (fonts, icons) = requests_from_tile(layers, tile, zoom, config.style);
-    load_symbol_assets_for_requests(client, config, fonts, icons).await
+    let req = symbol_requests_from_tile(layers, tile, zoom, config.style);
+    load_symbol_assets_for_requests(client, config, req).await
 }
 
 async fn load_symbol_assets_for_requests<HC: HttpClient>(
     client: &SourceClient<HC>,
     config: SymbolAssetConfig<'_>,
-    fonts: requests::GlyphRequests,
-    icons: HashSet<String>,
+    req: requests::SymbolRequests,
 ) -> Result<LoadedSymbolAssets, SymbolAssetError> {
     let mut builder = AtlasBuilder::new();
-    for (font, characters) in fonts {
-        let ranges: BTreeSet<_> = characters.iter().map(|code| (code / 256) * 256).collect();
-        for range in ranges {
-            if let Some(glyphs) = glyph_range(client, config.glyphs, &font, range).await? {
-                builder.glyph_subset(&font, &glyphs, Some(&characters));
-            }
-        }
-    }
+    local_fonts::load_fonts_and_shaping(client, config, req.fonts, req.labels, &mut builder)
+        .await?;
+    let icons = req.icons;
     if !icons.is_empty() {
         for (prefix, url) in sprite_sources(config.sprite) {
             load_sprites(client, &mut builder, &prefix, &url, &icons).await?;

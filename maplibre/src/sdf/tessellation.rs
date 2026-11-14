@@ -123,8 +123,7 @@ impl TextTessellator {
         for symbol in &self.collected {
             layout::append(
                 symbol,
-                &self.paint,
-                self.zoom,
+                (&self.paint, self.zoom, self.overscaling),
                 &self.atlas,
                 &mut self.quad_buffer,
                 &mut self.features,

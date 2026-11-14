@@ -18,7 +18,7 @@ struct LocalAssets {
 fn asset_path(url: &str) -> Option<PathBuf> {
     let relative = url.strip_prefix("local://")?;
     let (directory, rest) = relative.split_once('/')?;
-    if !matches!(directory, "glyphs" | "sprites") {
+    if !matches!(directory, "glyphs" | "sprites" | "fonts") {
         return None;
     }
     Some(

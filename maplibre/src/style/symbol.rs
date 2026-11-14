@@ -167,6 +167,38 @@ impl SymbolPaint {
             == "ground"
     }
 
+    /// Whether symbols crossing tile boundaries (`[0, 4096]`) are suppressed (`symbol-avoid-edges`).
+    pub fn avoid_edges(&self) -> bool {
+        self.properties
+            .get("symbol-avoid-edges")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false)
+    }
+
+    /// Plain `text-transform`ed label without legacy `.pbf` presentation-form mapping, or `None`
+    /// when the label is empty, carries `format` sections, or embeds inline images.
+    pub fn raw_label_among(
+        &self,
+        properties: &FeatureProperties,
+        zoom: f64,
+        images: Option<&dyn crate::style::expression::ImageSet>,
+    ) -> Option<String> {
+        let TextField(text, sections) = self.field(properties, zoom, images)?;
+        if !sections.is_empty() {
+            return None;
+        }
+        let text = match self.text("text-transform", properties, zoom).as_deref() {
+            Some("uppercase") => text.to_uppercase(),
+            Some("lowercase") => text.to_lowercase(),
+            _ => text,
+        };
+        let trimmed = text.trim();
+        if trimmed.is_empty() || trimmed.contains(crate::style::expression::FORMAT_IMAGE) {
+            return None;
+        }
+        Some(trimmed.to_string())
+    }
+
     /// Font stack requested by the style.
     pub fn font_stack(&self) -> String {
         self.properties

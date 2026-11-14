@@ -5,6 +5,7 @@ use lyon::tessellation::VertexBuffers;
 
 mod bidirectional;
 mod extents;
+mod shaped;
 mod styles;
 mod vertical;
 
@@ -48,6 +49,7 @@ pub(super) struct Block<'a> {
     offset: [f32; 2],
     /// Whether the label is written top to bottom.
     pub(super) vertical: bool,
+    pub(super) shaped: Option<shaped::ShapedBlock<'a>>,
 }
 
 /// The largest scale of any character in each line, how far each line grows past its height to
@@ -96,6 +98,9 @@ pub(super) fn block<'a>(
     zoom: f64,
     atlas: &'a SymbolAtlas,
 ) -> Option<Block<'a>> {
+    if let Some(shaped_block) = shaped::build_shaped_block(symbol, paint, zoom, atlas) {
+        return Some(shaped_block);
+    }
     let text = paint.label_among(&symbol.properties, zoom, Some(&atlas.icons))?;
     let chars: Vec<char> = text.chars().collect();
     let styles = char_styles(paint, symbol, zoom, atlas, chars.len())?;
@@ -179,6 +184,7 @@ pub(super) fn block<'a>(
         justify,
         offset,
         vertical,
+        shaped: None,
     })
 }
 
@@ -431,6 +437,17 @@ fn glyph_pass(
         };
         let baseline = -block.height * block.fractions[1] + leading + line_top + block.offset[1];
         line_top += block.line_height * largest + extra;
+        if let Some(shaped_block) = &block.shaped {
+            shaped::place_shaped_line(
+                &mut emit,
+                block,
+                shaped_block,
+                index,
+                (baseline, content),
+                justify,
+            );
+            continue;
+        }
         let width = line_width(&block.chars, &block.styles, line.clone(), block.spacing);
         let pen = -block.max_line * block.fractions[0]
             + (block.max_line - width) * justify

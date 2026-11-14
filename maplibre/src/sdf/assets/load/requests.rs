@@ -18,6 +18,15 @@ use crate::{
 /// Characters wanted from each font stack.
 pub(super) type GlyphRequests = HashMap<String, BTreeSet<u32>>;
 
+/// Glyph ranges, plain label strings (for OpenType shaping), and sprite names requested by one
+/// tile's visible symbol features.
+#[derive(Default)]
+pub(super) struct SymbolRequests {
+    pub(super) fonts: GlyphRequests,
+    pub(super) labels: HashMap<String, BTreeSet<String>>,
+    pub(super) icons: HashSet<String>,
+}
+
 /// Answers that no image exists and remembers every name asked about, so evaluating an
 /// expression against it walks each `image` it may reach and records that image's name,
 /// computed names and the fallbacks of a `coalesce` included.
@@ -35,6 +44,7 @@ impl ImageSet for NamesAsked {
 /// with `images` held.
 fn glyphs(
     fonts: &mut GlyphRequests,
+    labels: &mut HashMap<String, BTreeSet<String>>,
     paint: &crate::style::layer::SymbolPaint,
     (properties, zoom): (&crate::style::expression::FeatureProperties, f64),
     images: &dyn ImageSet,
@@ -42,7 +52,11 @@ fn glyphs(
     let Some(text) = paint.label_among(properties, zoom, Some(images)) else {
         return;
     };
-    fonts.entry(paint.font_stack()).or_default().extend(
+    let stack = paint.font_stack();
+    if let Some(raw) = paint.raw_label_among(properties, zoom, Some(images)) {
+        labels.entry(stack.clone()).or_default().insert(raw);
+    }
+    fonts.entry(stack).or_default().extend(
         text.chars()
             .filter(|c| *c != crate::style::expression::FORMAT_IMAGE)
             .map(|c| c as u32),
@@ -60,25 +74,37 @@ fn glyphs(
     }
 }
 
+#[cfg(test)]
 pub(super) fn requests<'l>(
     layers: impl IntoIterator<Item = &'l StyleLayer>,
     data: &[u8],
     zoom: f64,
     style: Option<&crate::style::Style>,
 ) -> (GlyphRequests, HashSet<String>) {
-    let Ok(tile) = geozero::mvt::Tile::decode(data) else {
-        return (GlyphRequests::new(), HashSet::new());
-    };
-    requests_from_tile(layers, &tile, zoom, style)
+    let req = symbol_requests(layers, data, zoom, style);
+    (req.fonts, req.icons)
 }
 
-pub(super) fn requests_from_tile<'l>(
+pub(super) fn symbol_requests<'l>(
+    layers: impl IntoIterator<Item = &'l StyleLayer>,
+    data: &[u8],
+    zoom: f64,
+    style: Option<&crate::style::Style>,
+) -> SymbolRequests {
+    let Ok(tile) = geozero::mvt::Tile::decode(data) else {
+        return SymbolRequests::default();
+    };
+    symbol_requests_from_tile(layers, &tile, zoom, style)
+}
+
+pub(super) fn symbol_requests_from_tile<'l>(
     layers: impl IntoIterator<Item = &'l StyleLayer>,
     tile: &geozero::mvt::Tile,
     zoom: f64,
     style: Option<&crate::style::Style>,
-) -> (GlyphRequests, HashSet<String>) {
+) -> SymbolRequests {
     let mut fonts = GlyphRequests::new();
+    let mut labels: HashMap<String, BTreeSet<String>> = HashMap::new();
     let mut icons = HashSet::new();
     for layer in layers {
         if layer.is_hidden() {
@@ -137,7 +163,7 @@ pub(super) fn requests_from_tile<'l>(
             }
             // Every image the label or icon can reach is asked about, so each is requested.
             let asked = NamesAsked::default();
-            glyphs(&mut fonts, paint, (&properties, zoom), &asked);
+            glyphs(&mut fonts, &mut labels, paint, (&properties, zoom), &asked);
             if let Some(icon) = paint
                 .text_among_images("icon-image", &properties, zoom, &asked)
                 .filter(|icon| !icon.is_empty())
@@ -153,5 +179,9 @@ pub(super) fn requests_from_tile<'l>(
             icons.extend(asked.0.into_inner());
         }
     }
-    (fonts, icons)
+    SymbolRequests {
+        fonts,
+        labels,
+        icons,
+    }
 }

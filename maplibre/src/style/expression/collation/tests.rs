@@ -84,8 +84,14 @@ fn resolved_locale_canonicalizes_bcp47_and_falls_back_on_invalid_tags() {
 }
 
 #[test]
-fn scripts_that_need_shaping_are_not_supported() {
+fn complex_indic_and_rtl_scripts_are_supported() {
     assert!(is_supported_script("Hello, \u{4e16}\u{754c}"));
-    assert!(!is_supported_script("\u{926}\u{947}\u{935}"));
+    assert!(is_supported_script("\u{926}\u{947}\u{935}"));
+    assert!(is_supported_script(
+        "\u{0B85}\u{0BAE}\u{0BCD}\u{0BAE}\u{0BE8}"
+    ));
+    assert!(is_supported_script(
+        "\u{1780}\u{17D2}\u{1798}\u{17C2}\u{179A}"
+    ));
     assert!(is_supported_script("\u{633}\u{644}\u{627}\u{645}"));
 }
