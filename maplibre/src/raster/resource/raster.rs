@@ -1,22 +1,26 @@
 use std::collections::{HashMap, HashSet};
 
+mod has_tile;
+
 use crate::{
     coords::WorldTileCoords,
     raster::{paint::RasterUniforms, RasterSourceId},
     render::{
         resource::{MipmapGenerator, Texture},
         settings::Msaa,
-        tile_view_pattern::HasTile,
     },
     style::Style,
-    tcs::{pyramid::TilePyramid, world::World},
+    tcs::pyramid::TilePyramid,
     terrain::{DemRevision, LoadedDem},
 };
+
+type DemSourceBindings = HashMap<WorldTileCoords, (Texture, Option<DemRevision>, wgpu::BindGroup)>;
 
 /// Raster pipeline and sampler with independent bindings for each source and tile.
 /// Raster imagery allocates mipmapped textures; `raster-dem` layers bind views into [`GpuDemPool`](crate::terrain::GpuDemPool).
 pub struct RasterResources {
     sampler: wgpu::Sampler,
+    nearest_sampler: wgpu::Sampler,
     mipmaps: MipmapGenerator,
     msaa: Msaa,
     pipeline: wgpu::RenderPipeline,
@@ -24,10 +28,9 @@ pub struct RasterResources {
     layer_sources: HashMap<String, RasterSourceId>,
     /// Sources backed by 2-texel bordered `raster-dem` elevation textures.
     dem_sources: HashSet<RasterSourceId>,
-    /// Tracks the shared [`Texture`] handle and [`DemRevision`] currently bound at each
-    /// `(source, coords)` so in-place border backfills reuse their existing `wgpu::BindGroup`
-    /// and shared GPU allocations remain alive until evicted from every consumer.
-    dem_bindings: HashMap<RasterSourceId, HashMap<WorldTileCoords, (Texture, Option<DemRevision>)>>,
+    /// Tracks the shared [`Texture`] handle, [`DemRevision`], and nearest-filtered bind group
+    /// currently bound at each `(source, coords)`.
+    dem_bindings: HashMap<RasterSourceId, DemSourceBindings>,
     /// Uniform buffer and bind group of each raster layer's paint adjustments, and of the
     /// same paint for the layer's departing tiles.
     layer_paints: HashMap<(String, bool), (wgpu::Buffer, wgpu::BindGroup)>,
@@ -49,8 +52,18 @@ impl RasterResources {
             mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             ..Default::default()
         });
+        let nearest_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
         Self {
             sampler,
+            nearest_sampler,
             mipmaps: MipmapGenerator::new(device, wgpu::TextureFormat::Rgba8Unorm),
             msaa,
             pipeline,
@@ -192,7 +205,7 @@ impl RasterResources {
                 .dem_bindings
                 .get(source)
                 .and_then(|bindings| bindings.get(&coords))
-                .is_some_and(|(_, rev)| rev.as_ref() == Some(&expected))
+                .is_some_and(|(_, rev, _)| rev.as_ref() == Some(&expected))
     }
 
     /// Binds a shared [`GpuDemPool`](crate::terrain::GpuDemPool) texture for `source` at `coords`,
@@ -211,7 +224,7 @@ impl RasterResources {
             .dem_bindings
             .get(source)
             .and_then(|bindings| bindings.get(&coords))
-            .is_some_and(|(prev, _)| prev.texture == texture.texture);
+            .is_some_and(|(prev, _, _)| prev.texture == texture.texture);
         let reused = if same_texture {
             if let Some((_, bound_rev, _)) = self
                 .bound_textures
@@ -246,11 +259,33 @@ impl RasterResources {
                 .or_default()
                 .insert(coords, (bind_group, revision, None));
         }
-        if let Some(shared) = texture.clone_handle() {
+        if same_texture {
+            if let Some((_, stored_rev, _)) = self
+                .dem_bindings
+                .get_mut(source)
+                .and_then(|bindings| bindings.get_mut(&coords))
+            {
+                *stored_rev = Some(dem_rev);
+            }
+        } else if let Some(shared) = texture.clone_handle() {
+            let nearest_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                layout: &self.pipeline.get_bind_group_layout(1),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&texture.view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.nearest_sampler),
+                    },
+                ],
+                label: Some("DEM nearest raster binding"),
+            });
             self.dem_bindings
                 .entry(source.clone())
                 .or_default()
-                .insert(coords, (shared, Some(dem_rev)));
+                .insert(coords, (shared, Some(dem_rev), nearest_bind_group));
         }
     }
 
@@ -318,7 +353,7 @@ impl RasterResources {
     /// Marks the texture of a tile whose CPU data changed for upload on the next Queue pass.
     pub(crate) fn tile_data_changed(&mut self, source: &RasterSourceId, coords: WorldTileCoords) {
         if self.has_border(source) {
-            if let Some((_, rev)) = self
+            if let Some((_, rev, _)) = self
                 .dem_bindings
                 .get_mut(source)
                 .and_then(|bindings| bindings.get_mut(&coords))
@@ -345,6 +380,25 @@ impl RasterResources {
         coords: &WorldTileCoords,
     ) -> Option<&wgpu::BindGroup> {
         self.get_bound_texture(self.layer_source(layer)?, coords)
+    }
+
+    pub(crate) fn layer_texture_filtered(
+        &self,
+        layer: &str,
+        coords: &WorldTileCoords,
+        nearest: bool,
+    ) -> Option<&wgpu::BindGroup> {
+        let source = self.layer_source(layer)?;
+        if nearest {
+            if let Some((_, _, group)) = self
+                .dem_bindings
+                .get(source)
+                .and_then(|bindings| bindings.get(coords))
+            {
+                return Some(group);
+            }
+        }
+        self.get_bound_texture(source, coords)
     }
 
     /// Writes a layer's paint uniforms, creating its buffer on first use.
@@ -416,68 +470,5 @@ impl Drop for RasterResources {
         for (_, (buffer, _)) in self.layer_paints.drain() {
             buffer.destroy();
         }
-    }
-}
-
-impl HasTile for RasterResources {
-    fn has_source_tile(
-        &self,
-        source: &RasterSourceId,
-        coords: WorldTileCoords,
-        _world: &World,
-    ) -> bool {
-        self.get_bound_texture(source, &coords).is_some()
-    }
-
-    fn has_tile(&self, coords: WorldTileCoords, _world: &World) -> bool {
-        self.bound_textures
-            .values()
-            .any(|textures| textures.contains(coords))
-    }
-
-    fn nearest_source_ancestor_candidate(
-        &self,
-        source: &RasterSourceId,
-        coords: WorldTileCoords,
-        _world: &World,
-    ) -> Option<WorldTileCoords> {
-        self.bound_textures
-            .get(source)?
-            .nearest_ancestor(coords)
-            .map(|(ancestor, _)| ancestor)
-    }
-
-    fn has_source_descendant_candidates(
-        &self,
-        source: &RasterSourceId,
-        coords: WorldTileCoords,
-        max_depth: usize,
-        _world: &World,
-    ) -> bool {
-        self.bound_textures
-            .get(source)
-            .is_some_and(|textures| textures.has_descendants(coords, max_depth))
-    }
-
-    fn nearest_ancestor_candidate(
-        &self,
-        coords: WorldTileCoords,
-        _world: &World,
-    ) -> Option<WorldTileCoords> {
-        self.bound_textures
-            .values()
-            .filter_map(|textures| textures.nearest_ancestor(coords).map(|(c, _)| c))
-            .max_by_key(|c| c.z)
-    }
-
-    fn has_descendant_candidates(
-        &self,
-        coords: WorldTileCoords,
-        max_depth: usize,
-        _world: &World,
-    ) -> bool {
-        self.bound_textures
-            .values()
-            .any(|textures| textures.has_descendants(coords, max_depth))
     }
 }

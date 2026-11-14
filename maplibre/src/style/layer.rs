@@ -151,6 +151,8 @@ pub struct StyleLayer {
     pub source_layer: Option<String>,
     /// Whether the layer is drawn at all.
     pub visibility: LayerVisibility,
+    /// Per-property `<prop>-transition` timing declarations carried in `paint`.
+    pub transitions: std::collections::BTreeMap<String, crate::style::transitions::TransitionSpec>,
     /// Properties without a typed representation, retained for diagnostics and round trips.
     pub unrecognized: LayerProperties,
 }
@@ -173,9 +175,10 @@ impl StyleLayer {
             && self.maxzoom.is_none_or(|maxzoom| zoom < maxzoom)
     }
 
-    /// Whether both layers carry identical typed and unrecognized paint properties.
+    /// Whether both layers carry identical typed, transition and unrecognized paint properties.
     pub(crate) fn same_paint(&self, other: &Self) -> bool {
         serde_json::to_value(&self.paint).ok() == serde_json::to_value(&other.paint).ok()
+            && self.transitions == other.transitions
             && self.unrecognized.paint == other.unrecognized.paint
     }
 
@@ -221,6 +224,7 @@ impl Default for StyleLayer {
             source: None,
             source_layer: Some("does not exist".to_string()),
             visibility: LayerVisibility::Visible,
+            transitions: Default::default(),
             unrecognized: Default::default(),
         }
     }

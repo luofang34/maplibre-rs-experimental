@@ -242,6 +242,10 @@ where
                         return Err(MapError::Plugin(error));
                     }
                 }
+                let _ = self.schedule.add_system_to_stage(
+                    crate::render::RenderStageLabel::Input,
+                    crate::context::style_transition_system,
+                );
 
                 self.map_context = CurrentMapContext::Ready(Box::new(MapContext {
                     world,
@@ -265,15 +269,11 @@ where
 
     /// Whether renderer initialization has succeeded since the last reset.
     pub fn is_initialized(&self) -> bool {
-        match &self.map_context {
-            CurrentMapContext::Ready(_) => true,
-            CurrentMapContext::Pending(_) => false,
-        }
+        matches!(self.map_context, CurrentMapContext::Ready(_))
     }
 
     /// Drops GPU/frame state and clears the schedule while retaining the window, style,
-    /// orbit camera, renderer settings and plugins. External eyes must be supplied for new frames.
-    /// Call [`Self::initialize_renderer`] before drawing again.
+    /// orbit camera, renderer settings and plugins. Call [`Self::initialize_renderer`] before drawing again.
     pub fn reset(&mut self) {
         self.schedule.clear();
         self.event_bus.reset_style_state();
@@ -333,6 +333,18 @@ where
                 Err(MapError::StyleChange(error))
             }
         }
+    }
+
+    /// Replaces the entire style via [`Style::diff_and_replace`], retaining unchanged source
+    /// generations and loaded tiles; works before or after the renderer is initialized.
+    pub fn set_style(&mut self, next: Style) -> crate::style::diff::StyleReplacementDiff {
+        let diff = match &mut self.map_context {
+            CurrentMapContext::Ready(context) => context.set_style(next),
+            CurrentMapContext::Pending(pending) => pending.style.diff_and_replace(next),
+        };
+        self.event_bus.mark_busy();
+        self.event_bus.emit(crate::event::MapEvent::StyleDataLoaded);
+        diff
     }
 
     /// Adds a layer given as style JSON above `before`, or on top; see [`Style::add_layer`].

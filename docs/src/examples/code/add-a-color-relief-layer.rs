@@ -61,6 +61,7 @@ pub fn style() -> Style {
                         3200,
                         "#ffffff"
                     ]))),
+                    ..Default::default()
                 })),
                 ..Default::default()
             },

@@ -27,7 +27,7 @@ pub enum TileAddressingScheme {
 }
 
 /// GeoJSON data — either an inline JSON value or a URL pointing to a GeoJSON file.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum GeoJsonData {
     /// Address of a GeoJSON document.
@@ -84,6 +84,14 @@ pub struct GeoJsonSource {
     /// defaults to 128.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub buffer: Option<u32>,
+    /// Douglas-Peucker simplification tolerance in pixels on a 512-pixel tile (`0.375` when
+    /// absent; `0.0` disables simplification).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tolerance: Option<f64>,
+    /// Computes cumulative distance metrics along `LineString` features so `line-gradient`
+    /// (`["line-progress"]`) interpolates smoothly across tile boundaries.
+    #[serde(rename = "lineMetrics", default, skip_serializing_if = "is_false")]
+    pub line_metrics: bool,
     /// Lower source zoom; nothing is tiled below it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub minzoom: Option<u8>,
@@ -152,6 +160,16 @@ pub fn fresh_generation() -> u64 {
 /// The GL JS default for a GeoJSON source's `maxzoom`.
 pub const GEOJSON_DEFAULT_MAXZOOM: u8 = 18;
 
+/// The GL JS default for a GeoJSON source's Douglas-Peucker `tolerance` (in 512-px tile pixels).
+pub const GEOJSON_DEFAULT_TOLERANCE: f64 = 0.375;
+
+impl GeoJsonSource {
+    /// Effective Douglas-Peucker simplification tolerance in 512-px tile pixels (`>= 0.0`).
+    pub fn effective_tolerance(&self) -> f64 {
+        self.tolerance.unwrap_or(GEOJSON_DEFAULT_TOLERANCE).max(0.0)
+    }
+}
+
 /// The GL JS default for a vector source's `maxzoom`, past which its last tiles are magnified.
 pub const VECTOR_DEFAULT_MAXZOOM: u8 = 22;
 
@@ -160,7 +178,7 @@ pub const GEOJSON_MAX_TILED_ZOOM: u8 = 18;
 
 /// TileJSON-compatible addressing shared by vector and raster image sources.
 /// Raster sources additionally use `tile_size` to choose their visible tile zoom.
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
 pub struct VectorSource {
     /// String which contains attribution information for the used tiles.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -329,6 +347,12 @@ pub enum Source {
     /// One image stretched over four geographic corners.
     #[serde(rename = "image")]
     Image(ImageSource),
+    /// Host-decoded video frames stretched over four geographic corners.
+    #[serde(rename = "video")]
+    Video(VideoSource),
+    /// Host-drawn 2D/WebGL canvas frames stretched over four geographic corners.
+    #[serde(rename = "canvas")]
+    Canvas(CanvasSource),
 }
 
 impl Source {
@@ -338,7 +362,7 @@ impl Source {
             Self::Vector(source) | Self::Raster(source) => source.volatile,
             Self::RasterDem(source) => source.volatile,
             Self::GeoJson(source) => source.volatile,
-            Self::Image(_) => false,
+            Self::Image(_) | Self::Video(_) | Self::Canvas(_) => false,
         }
     }
 }
@@ -355,6 +379,56 @@ pub struct ImageSource {
     /// again, as GL JS `updateImage` loads it again. Serialized so workers that receive the
     /// style as a message share the cached picture.
     #[serde(default = "fresh_generation")]
+    pub generation: u64,
+}
+
+/// Straight-alpha RGBA frame pixels pushed by the host for a [`VideoSource`] or [`CanvasSource`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MediaFrame {
+    /// Width of the frame in pixels (`> 0`).
+    pub width: u32,
+    /// Height of the frame in pixels (`> 0`).
+    pub height: u32,
+    /// Straight-alpha RGBA8 bytes (`width * height * 4`).
+    pub rgba: Arc<[u8]>,
+}
+
+/// A video placed on the map by the longitude and latitude of its four corners.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct VideoSource {
+    /// Candidate video URLs in preference order from the style document.
+    #[serde(default)]
+    pub urls: Vec<String>,
+    /// `[longitude, latitude]` of the top-left, top-right, bottom-right and bottom-left corners.
+    pub coordinates: [[f64; 2]; 4],
+    /// Latest RGBA frame pushed by the host; skipped when serializing the style document.
+    #[serde(skip)]
+    pub frame: Option<MediaFrame>,
+    /// Identifies the current frame and corner placement.
+    #[serde(skip, default = "fresh_generation")]
+    pub generation: u64,
+}
+
+fn default_animate() -> bool {
+    true
+}
+
+/// A host-drawn canvas placed on the map by the longitude and latitude of its four corners.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct CanvasSource {
+    /// Optional DOM or host canvas identifier from the style document.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub canvas: Option<String>,
+    /// `[longitude, latitude]` of the top-left, top-right, bottom-right and bottom-left corners.
+    pub coordinates: [[f64; 2]; 4],
+    /// Whether the canvas animates continuously (`true` when omitted per the MapLibre Style Spec).
+    #[serde(default = "default_animate")]
+    pub animate: bool,
+    /// Latest RGBA frame pushed by the host; skipped when serializing the style document.
+    #[serde(skip)]
+    pub frame: Option<MediaFrame>,
+    /// Identifies the current frame and corner placement.
+    #[serde(skip, default = "fresh_generation")]
     pub generation: u64,
 }
 

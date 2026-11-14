@@ -158,6 +158,15 @@ pub struct FillExtrusionPaint {
         skip_serializing_if = "Option::is_none"
     )]
     pub fill_extrusion_part: Option<StyleProperty<String>>,
+    /// Corner rounding radius in metres (or tile-scaled extrusion units) before extruding walls
+    /// and roof; `0` keeps sharp polygon corners.
+    #[serde(
+        rename = "fill-extrusion-rounded-corner-distance",
+        default,
+        deserialize_with = "StyleProperty::<f32>::deserialize_f32_or_none",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub fill_extrusion_rounded_corner_distance: Option<StyleProperty<f32>>,
     /// Translation in screen pixels before conversion to tile units.
     #[serde(rename = "fill-extrusion-translate", default)]
     pub fill_extrusion_translate: Option<crate::style::translation::Translation>,
@@ -261,7 +270,7 @@ pub struct LinePaint {
     pub line_elevation_datum: Option<StyleProperty<String>>,
 }
 
-/// Requested raster texture filter, a constant or a step function of zoom.
+/// Requested raster texture filter, a constant, a zoom stop table, or a zoom expression.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum RasterResampling {
@@ -272,6 +281,8 @@ pub enum RasterResampling {
         /// Stops as zoom and filter, in ascending zoom order.
         stops: Vec<(f64, ResamplingMode)>,
     },
+    /// Expression array evaluating to `"linear"` or `"nearest"` at the view zoom.
+    Expression(Vec<serde_json::Value>),
 }
 
 /// A raster texture filter.
@@ -288,16 +299,20 @@ pub enum ResamplingMode {
 impl RasterResampling {
     /// Whether texels are picked without interpolation at `zoom`.
     pub fn is_nearest_at(&self, zoom: f64) -> bool {
-        let mode = match self {
-            Self::Constant(mode) => Some(mode),
+        match self {
+            Self::Constant(mode) => *mode == ResamplingMode::Nearest,
             Self::ByZoom { stops } => stops
                 .iter()
                 .rev()
                 .find(|(stop, _)| *stop <= zoom)
                 .or_else(|| stops.first())
-                .map(|(_, mode)| mode),
-        };
-        mode == Some(&ResamplingMode::Nearest)
+                .is_some_and(|(_, mode)| *mode == ResamplingMode::Nearest),
+            Self::Expression(items) => {
+                StyleProperty::<String>::parse(&serde_json::Value::Array(items.clone()))
+                    .evaluate_at_zoom(zoom)
+                    .is_some_and(|mode| mode == "nearest")
+            }
+        }
     }
 }
 

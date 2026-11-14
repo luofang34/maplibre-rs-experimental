@@ -28,6 +28,7 @@ use crate::{
 
 pub mod cross_fade;
 pub mod image_source;
+pub(crate) mod media_source;
 
 /// Drops a source that left the style: its results on every tile and its textures, so neither
 /// outlives it.

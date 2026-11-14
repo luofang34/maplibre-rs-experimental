@@ -184,6 +184,7 @@ fn later_extrusion_polygons_leave_both_poles_exact() {
                 part: None,
                 translucent: false,
                 clip_buffer: None,
+                rounded_corner_distance: None,
                 overscale: 0,
             });
         assert_poles_survive_later_polygons(tessellator, multipolygon);

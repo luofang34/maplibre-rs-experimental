@@ -168,7 +168,7 @@ fn main(in: VertexOutput) -> @location(0) vec4<f32> {
     let texels = uv * vec2<f32>(dim);
     let texel_pixels = 1.0 / max(max(length(dpdx(texels)), length(dpdy(texels))), 1e-6);
     var deriv = slope_at(vec2<i32>(floor(texels)), dim, zoom);
-    if in.transition > 0.0 || texel_pixels > 1.25 {
+    if hillshade.padding == 0u && (in.transition > 0.0 || texel_pixels > 1.25) {
         let place = uv * vec2<f32>(dim) - vec2<f32>(0.5);
         let corner = vec2<i32>(floor(place));
         let blend = place - floor(place);

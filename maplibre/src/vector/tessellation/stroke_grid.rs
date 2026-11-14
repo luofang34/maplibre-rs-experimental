@@ -19,7 +19,7 @@ where
     /// this tile or any coarser one, so each straight piece lies on one planar face of the
     /// surface the shader lifts it onto.
     pub fn set_layer_strokes(&mut self, layer: &StyleLayer) {
-        self.stroke = LineStroke::of_layer(layer);
+        self.stroke = LineStroke::of_layer_at_zoom(layer, self.zoom);
         self.join_property = LineStroke::join_property(layer);
         if crate::vector::structures::is_overlay(layer) {
             self.subdivision_granularity = self.subdivision_granularity.max(TERRAIN_MESH_SIZE);

@@ -73,6 +73,12 @@ impl HillshadeUniforms {
         }
         uniforms
     }
+
+    /// Sets the resampling flag (`0` = linear slope blending, `1` = nearest-texel slope).
+    pub fn with_nearest(mut self, nearest: bool) -> Self {
+        self.padding = u32::from(nearest);
+        self
+    }
 }
 
 /// Sentinel keeping `color-relief` polar blending disabled when no [`PolarPoleElevations`](crate::terrain::PolarPoleElevations)
@@ -125,6 +131,7 @@ impl ColorReliefUniforms {
 
 struct LayerBinding {
     kind: DemLayerKind,
+    nearest: bool,
     fingerprint: u64,
     buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
@@ -159,7 +166,7 @@ impl HillshadeResources {
         }
     }
 
-    /// Writes a layer's uniforms, creating its buffer on first use or when its size changes.
+    /// Writes a layer's uniforms with default linear DEM sampling.
     pub fn write_layer(
         &mut self,
         device: &wgpu::Device,
@@ -168,8 +175,22 @@ impl HillshadeResources {
         kind: DemLayerKind,
         contents: &[u8],
     ) {
+        self.write_layer_filtered(device, queue, layer_id, kind, false, contents);
+    }
+
+    /// Writes a layer's uniforms and records whether its DEM texture should be sampled nearest.
+    pub fn write_layer_filtered(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &crate::render::upload_queue::UploadQueue,
+        layer_id: &str,
+        kind: DemLayerKind,
+        nearest: bool,
+        contents: &[u8],
+    ) {
         let mut hasher = std::hash::DefaultHasher::new();
         kind.hash(&mut hasher);
+        nearest.hash(&mut hasher);
         contents.hash(&mut hasher);
         let fingerprint = hasher.finish();
         let reusable = self.layers.get(layer_id).is_some_and(|binding| {
@@ -194,6 +215,7 @@ impl HillshadeResources {
                 layer_id.to_string(),
                 LayerBinding {
                     kind,
+                    nearest,
                     fingerprint,
                     buffer,
                     bind_group,
@@ -202,13 +224,21 @@ impl HillshadeResources {
         }
         if let Some(binding) = self.layers.get_mut(layer_id) {
             queue.write_buffer(&binding.buffer, 0, contents);
+            binding.nearest = nearest;
             binding.fingerprint = fingerprint;
         }
     }
 
-    /// Identity of the shader kind and evaluated uniforms written for this layer.
+    /// Identity of the shader kind, resampling mode, and evaluated uniforms written for this layer.
     pub(crate) fn layer_fingerprint(&self, layer_id: &str) -> Option<u64> {
         self.layers.get(layer_id).map(|binding| binding.fingerprint)
+    }
+
+    /// Whether `layer_id` requested `"nearest"` DEM resampling this frame.
+    pub fn layer_nearest(&self, layer_id: &str) -> bool {
+        self.layers
+            .get(layer_id)
+            .is_some_and(|binding| binding.nearest)
     }
 
     /// Kind and uniform bind group of a layer written this frame.

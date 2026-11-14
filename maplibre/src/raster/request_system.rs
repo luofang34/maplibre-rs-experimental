@@ -59,7 +59,7 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
             .get::<crate::render::eye_covering::MultiViewExtractCovering>()
             .filter(|m| m.active)
             .cloned();
-        let regions = if let Some(multi) = &multi {
+        let mut regions = if let Some(multi) = &multi {
             multi.raster_regions.clone()
         } else {
             let computed =
@@ -82,12 +82,18 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
             cache.raster_tiles = Some(flat);
             computed
         };
+        regions.retain(|(source, _)| {
+            !crate::raster::media_source::is_media_source(style, source.name())
+        });
         let mut requested = FxHashSet::default();
         let mut budget = request_budget(world);
         let stand_ins = drape_stand_ins(style, view_state, world);
         let wanted = wanted_tiles(regions, stand_ins, style, world);
         let sources: Vec<_> = source_layer_groups(style, TileKind::Raster)
             .into_iter()
+            .filter(|group| {
+                !crate::raster::media_source::is_media_source(style, group.source_name.as_deref())
+            })
             .map(|group| RasterSourceId::new(group.source_name))
             .collect();
         let mut frame_style = FrameStyle::new(style);

@@ -21,6 +21,8 @@ use crate::{
 
 pub fn upload_system(
     MapContext {
+        style,
+        view_state,
         world,
         renderer: Renderer { device, queue, .. },
         ..
@@ -35,6 +37,7 @@ pub fn upload_system(
     if crate::render::eye_covering::EyeInFrame::reuses_content(world) {
         return Ok(());
     }
+    crate::raster::media_source::sync_media_sources(style, view_state, world);
     world.resources.get_or_init_mut::<FrameUploads>();
     world.resources.get_or_init_mut::<GpuDemPool>();
     let Some((Initialized(raster_resources), budget, gpu_dem_pool)) = world.resources.query_mut::<(

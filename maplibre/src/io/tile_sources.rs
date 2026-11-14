@@ -220,6 +220,26 @@ pub fn source_layer_groups(style: &Style, kind: TileKind) -> Vec<SourceLayerGrou
                     source: image.clone(),
                 }),
             ),
+            Some((name, Some(Source::Video(video)))) if kind == TileKind::Raster => (
+                Some(name.clone()),
+                SourceType::Image(ImageTileSource {
+                    source: crate::style::source::ImageSource {
+                        url: String::new(),
+                        coordinates: video.coordinates,
+                        generation: video.generation,
+                    },
+                }),
+            ),
+            Some((name, Some(Source::Canvas(canvas)))) if kind == TileKind::Raster => (
+                Some(name.clone()),
+                SourceType::Image(ImageTileSource {
+                    source: crate::style::source::ImageSource {
+                        url: String::new(),
+                        coordinates: canvas.coordinates,
+                        generation: canvas.generation,
+                    },
+                }),
+            ),
             Some((name, Some(source))) => match kind.template_of(source) {
                 Some((template, scheme)) => (
                     Some(name.clone()),

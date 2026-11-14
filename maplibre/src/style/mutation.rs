@@ -9,138 +9,15 @@
 //! that read the live order.
 
 use serde_json::{json, Value};
-use thiserror::Error;
 
 use super::{
     layer::StyleLayer,
     source::{fresh_generation, Source},
-    validation::StyleValidationError,
     Style,
 };
 
-/// Why a change was refused.
-#[derive(Debug, Error)]
-pub enum StyleMutationError {
-    /// A layer with this id exists already.
-    #[error("style already has a layer `{layer}`")]
-    DuplicateLayer {
-        /// The clashing id.
-        layer: String,
-    },
-    /// The style has no layer with this id.
-    #[error("style has no layer `{layer}`")]
-    UnknownLayer {
-        /// The requested id.
-        layer: String,
-    },
-    /// A source with this name exists already.
-    #[error("style already has a source `{source_name}`")]
-    DuplicateSource {
-        /// The clashing name.
-        source_name: String,
-    },
-    /// The style has no source with this name.
-    #[error("style has no source `{source_name}`")]
-    UnknownSource {
-        /// The requested name.
-        source_name: String,
-    },
-    /// A layer names a source the style does not have.
-    #[error("layer `{layer}` uses source `{source_name}`, which the style does not have")]
-    MissingSource {
-        /// The layer.
-        layer: String,
-        /// The absent source.
-        source_name: String,
-    },
-    /// A layer still draws from the source.
-    #[error("source `{source_name}` is used by layer `{layer}`")]
-    SourceInUse {
-        /// The source.
-        source_name: String,
-        /// A layer using it.
-        layer: String,
-    },
-    /// A layer that draws from a source names none.
-    #[error("layer `{layer}` needs a source")]
-    SourceRequired {
-        /// The layer.
-        layer: String,
-    },
-    /// A layer on a vector source names no source layer.
-    #[error("layer `{layer}` needs a source-layer of vector source `{source_name}`")]
-    SourceLayerRequired {
-        /// The layer.
-        layer: String,
-        /// The vector source.
-        source_name: String,
-    },
-    /// The layer's type cannot draw from the kind of source it names.
-    #[error("layer `{layer}` of type `{kind}` cannot draw from source `{source_name}`")]
-    WrongSourceKind {
-        /// The layer.
-        layer: String,
-        /// The layer's type.
-        kind: String,
-        /// The source it names.
-        source_name: String,
-    },
-    /// The lower zoom bound is above the upper one.
-    #[error("layer `{layer}` has minzoom {minzoom} above maxzoom {maxzoom}")]
-    InvalidZoomRange {
-        /// The layer.
-        layer: String,
-        /// The lower bound.
-        minzoom: f64,
-        /// The upper bound.
-        maxzoom: f64,
-    },
-    /// A vector, raster or DEM source given only as a TileJSON url, which is not fetched here.
-    #[error("source `{source_name}` gives only a TileJSON url; list its tiles instead")]
-    TileJsonNotSupported {
-        /// The source.
-        source_name: String,
-    },
-    /// The layer, or the layer with the change applied, cannot be read.
-    #[error("layer `{layer}` is invalid")]
-    InvalidLayer {
-        /// The layer.
-        layer: String,
-        /// Why it cannot be read.
-        #[source]
-        source: serde_json::Error,
-    },
-    /// The layer uses something this renderer does not support.
-    #[error("layer `{layer}` is not supported: {}", findings.first().map(ToString::to_string).unwrap_or_default())]
-    Unsupported {
-        /// The layer.
-        layer: String,
-        /// Everything that is not supported.
-        findings: Vec<StyleValidationError>,
-    },
-    /// An image update names a source that is not an image source.
-    #[error("source `{source_name}` is not an image source")]
-    NotAnImageSource {
-        /// The source.
-        source_name: String,
-    },
-}
-
-/// What a change did.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct StyleChange {
-    /// Layers that were added, removed, edited or moved.
-    pub layers: Vec<String>,
-    /// Whether every loaded vector tile must be fetched again to show it. New data of a GeoJSON
-    /// source needs no flag: the map fetches again only the tiles the data changed in.
-    pub redraw_tiles: bool,
-    /// Layers that are gone, whose leftovers in loaded tiles must be dropped.
-    pub removed_layers: Vec<String>,
-    /// Image sources whose picture or corners changed, whose tiles must be made again.
-    pub reloaded_image_sources: Vec<String>,
-    /// Raster and image sources that are gone, whose tiles and textures must be dropped.
-    pub removed_raster_sources: Vec<String>,
-}
+mod types;
+pub use types::{StyleChange, StyleMutationError};
 
 /// Whether a layer's content lives in per-tile buffers built from vector tiles.
 pub(crate) fn from_vector_tiles(layer: &StyleLayer) -> bool {
@@ -219,6 +96,7 @@ impl Style {
     pub fn remove_layer(&mut self, id: &str) -> Result<StyleChange, StyleMutationError> {
         let position = self.position_of(id)?;
         let _removed = self.layers.remove(position);
+        self.active_transitions.remove_layer(id);
         let mut change = self.renumber();
         push_unique(&mut change.layers, id);
         self.resolve_global_state();
@@ -248,8 +126,18 @@ impl Style {
         Ok(self.renumber())
     }
 
-    /// Sets a paint property; `null` restores its default.
+    /// Sets a paint property; `null` restores its default. When the layer or root style declares
+    /// an active `transition` for `name`, starts an in-flight paint transition.
     pub fn set_paint_property(
+        &mut self,
+        layer: &str,
+        name: &str,
+        value: Value,
+    ) -> Result<StyleChange, StyleMutationError> {
+        self.apply_paint_with_transition(layer, name, value)
+    }
+
+    pub(crate) fn set_paint_property_immediate(
         &mut self,
         layer: &str,
         name: &str,
@@ -323,15 +211,19 @@ impl Style {
                 vector.tiles.is_none() && vector.url.is_some()
             }
             Source::RasterDem(dem) => dem.tiles.is_none() && dem.url.is_some(),
-            Source::GeoJson(_) | Source::Image(_) => false,
+            Source::GeoJson(_) | Source::Image(_) | Source::Video(_) | Source::Canvas(_) => false,
         };
         if url_only {
             return Err(StyleMutationError::TileJsonNotSupported {
                 source_name: name.to_owned(),
             });
         }
-        if let Source::GeoJson(geojson) = &mut source {
-            geojson.generation = fresh_generation();
+        match &mut source {
+            Source::GeoJson(geojson) => geojson.generation = fresh_generation(),
+            Source::Image(image) => image.generation = fresh_generation(),
+            Source::Video(video) => video.generation = fresh_generation(),
+            Source::Canvas(canvas) => canvas.generation = fresh_generation(),
+            Source::Vector(_) | Source::Raster(_) | Source::RasterDem(_) => {}
         }
         self.sources.insert(name.to_owned(), source);
         Ok(StyleChange::default())
@@ -358,7 +250,13 @@ impl Style {
         Ok(StyleChange {
             removed_raster_sources: matches!(
                 removed,
-                Some(Source::Raster(_) | Source::RasterDem(_) | Source::Image(_))
+                Some(
+                    Source::Raster(_)
+                        | Source::RasterDem(_)
+                        | Source::Image(_)
+                        | Source::Video(_)
+                        | Source::Canvas(_)
+                )
             )
             .then(|| name.to_owned())
             .into_iter()
@@ -465,6 +363,7 @@ impl Style {
 mod apply;
 pub(crate) mod classify;
 mod image_source;
+mod media_source;
 mod shape;
 
 use classify::{push_unique, set_member};

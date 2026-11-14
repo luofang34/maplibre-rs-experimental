@@ -62,7 +62,11 @@ pub async fn render_snapshot(
     let has_raster = opts.style.sources.values().any(|s| {
         matches!(
             s,
-            Source::Raster(_) | Source::RasterDem(_) | Source::Image(_)
+            Source::Raster(_)
+                | Source::RasterDem(_)
+                | Source::Image(_)
+                | Source::Video(_)
+                | Source::Canvas(_)
         )
     });
 

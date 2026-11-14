@@ -51,6 +51,11 @@ impl LayerValidation<'_> {
                     p.fill_extrusion_part.as_ref(),
                     Feature,
                 );
+                self.property(
+                    "paint.fill-extrusion-rounded-corner-distance",
+                    p.fill_extrusion_rounded_corner_distance.as_ref(),
+                    Feature,
+                );
                 let opacity = p.fill_extrusion_opacity.as_ref();
                 let opacity_scope = if p.fill_extrusion_translucent == Some(true) {
                     Feature

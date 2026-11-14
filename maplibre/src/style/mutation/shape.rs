@@ -26,7 +26,11 @@ impl Style {
         let fits = match layer.type_.as_str() {
             "raster" => matches!(
                 source,
-                Source::Raster(_) | Source::RasterDem(_) | Source::Image(_)
+                Source::Raster(_)
+                    | Source::RasterDem(_)
+                    | Source::Image(_)
+                    | Source::Video(_)
+                    | Source::Canvas(_)
             ),
             "hillshade" | "color-relief" => matches!(source, Source::RasterDem(_)),
             _ => matches!(source, Source::Vector(_) | Source::GeoJson(_)),

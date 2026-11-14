@@ -1,6 +1,10 @@
-//! `line-cap`, `line-join` and `line-miter-limit`, the layout properties that shape a stroke.
+//! `line-cap`, `line-join`, `line-miter-limit`, and `line-round-limit`, the layout properties
+//! that shape a stroke.
 
-use crate::style::layer::StyleLayer;
+use crate::style::layer::{StyleLayer, StyleProperty};
+
+/// Default MapLibre `line-round-limit` threshold (`1.05`).
+pub const DEFAULT_ROUND_LIMIT: f32 = 1.05;
 
 /// How the ends of a line are drawn.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -35,6 +39,8 @@ pub struct LineStroke {
     pub join: LineJoin,
     /// Longest miter, as a multiple of the half width, before a miter join becomes a bevel.
     pub miter_limit: f32,
+    /// Miter-ratio threshold (`<= round_limit`) below which shallow round joins convert to miters.
+    pub round_limit: f32,
 }
 
 impl Default for LineStroke {
@@ -43,16 +49,42 @@ impl Default for LineStroke {
             cap: LineCap::Butt,
             join: LineJoin::Miter,
             miter_limit: 2.0,
+            round_limit: DEFAULT_ROUND_LIMIT,
         }
     }
 }
 
 /// The layout properties [`LineStroke`] reads.
-pub const STROKE_LAYOUT: [&str; 3] = ["line-cap", "line-join", "line-miter-limit"];
+pub const STROKE_LAYOUT: [&str; 4] = [
+    "line-cap",
+    "line-join",
+    "line-miter-limit",
+    "line-round-limit",
+];
+
+fn eval_zoom_f32(value: &serde_json::Value, zoom: f64) -> Option<f32> {
+    if let Some(num) = value.as_f64() {
+        return Some(num as f32);
+    }
+    StyleProperty::<f32>::parse(value).evaluate_at_zoom(zoom)
+}
+
+fn zoom_f32_parses(value: &serde_json::Value) -> bool {
+    if value.is_number() {
+        return value.as_f64().is_some_and(|v| v.is_finite() && v >= 0.0);
+    }
+    let parsed = StyleProperty::<f32>::parse(value);
+    !matches!(parsed, StyleProperty::Unsupported(_)) && parsed.is_feature_constant()
+}
 
 impl LineStroke {
-    /// Reads the stroke properties from a layer's layout; anything else keeps its default.
+    /// Reads the stroke properties from a layer's layout at zoom `0.0`.
     pub fn of_layer(layer: &StyleLayer) -> Self {
+        Self::of_layer_at_zoom(layer, 0.0)
+    }
+
+    /// Reads the stroke properties from a layer's layout evaluated at `zoom`.
+    pub fn of_layer_at_zoom(layer: &StyleLayer, zoom: f64) -> Self {
         let layout = &layer.unrecognized.layout;
         let mut stroke = Self::default();
         match layout.get("line-cap").and_then(|value| value.as_str()) {
@@ -67,23 +99,29 @@ impl LineStroke {
         }
         if let Some(limit) = layout
             .get("line-miter-limit")
-            .and_then(|value| value.as_f64())
+            .and_then(|value| eval_zoom_f32(value, zoom))
         {
-            stroke.miter_limit = limit as f32;
+            stroke.miter_limit = limit.max(0.0);
+        }
+        if let Some(limit) = layout
+            .get("line-round-limit")
+            .and_then(|value| eval_zoom_f32(value, zoom))
+        {
+            stroke.round_limit = limit.max(0.0);
         }
         stroke
     }
 
     /// The `line-join` of a layer when it varies by feature or zoom, as an expression.
-    pub fn join_property(layer: &StyleLayer) -> Option<crate::style::layer::StyleProperty<String>> {
+    pub fn join_property(layer: &StyleLayer) -> Option<StyleProperty<String>> {
         let value = layer.unrecognized.layout.get("line-join")?;
-        (!value.is_string()).then(|| crate::style::layer::StyleProperty::parse(value))
+        (!value.is_string()).then(|| StyleProperty::parse(value))
     }
 
     fn join_property_parses(value: &serde_json::Value) -> bool {
         !matches!(
-            crate::style::layer::StyleProperty::<String>::parse(value),
-            crate::style::layer::StyleProperty::Unsupported(_)
+            StyleProperty::<String>::parse(value),
+            StyleProperty::Unsupported(_)
         )
     }
 
@@ -107,7 +145,7 @@ impl LineStroke {
                     .is_none_or(|name| Self::join_named(name).is_some())
                     && (value.is_string() || Self::join_property_parses(value))
             }
-            "line-miter-limit" => value.is_number(),
+            "line-miter-limit" | "line-round-limit" => zoom_f32_parses(value),
             _ => false,
         }
     }

@@ -93,6 +93,18 @@ impl StyleLayerDef {
 impl<'de> Deserialize<'de> for StyleLayer {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut def = StyleLayerDef::deserialize(deserializer)?;
+        if def.type_ == "fill-extrusion" {
+            if let Some(rounded) = def.layout.remove("fill-extrusion-rounded-corner-distance") {
+                let paint_obj = def.paint.get_or_insert_with(|| serde_json::json!({}));
+                if let Some(map) = paint_obj.as_object_mut() {
+                    map.entry("fill-extrusion-rounded-corner-distance")
+                        .or_insert(rounded);
+                }
+            }
+        }
+        let transitions =
+            crate::style::transitions::extract_layer_transitions(&def.id, &mut def.paint)
+                .map_err(serde::de::Error::custom)?;
         let mut unrecognized = LayerProperties::default();
         let mut paint = def.parse_paint(&mut unrecognized.paint).map_err(|error| {
             serde::de::Error::custom(format!("layer `{}` paint: {error}", def.id))
@@ -125,6 +137,7 @@ impl<'de> Deserialize<'de> for StyleLayer {
             source: def.source,
             source_layer: def.source_layer,
             visibility,
+            transitions,
             unrecognized,
         })
     }
@@ -226,6 +239,12 @@ impl StyleLayer {
                     destination.insert(name.clone(), value.clone());
                 }
             }
+        }
+        for (property, spec) in &self.transitions {
+            paint.insert(
+                format!("{property}-transition"),
+                serde_json::to_value(spec)?,
+            );
         }
         if self.is_hidden() {
             layout.insert("visibility".into(), Value::String("none".into()));

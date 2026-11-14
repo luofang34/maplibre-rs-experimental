@@ -39,7 +39,7 @@ fn attribution(source: &Source) -> Option<&str> {
     match source {
         Source::Vector(source) | Source::Raster(source) => source.attribution.as_deref(),
         Source::RasterDem(source) => source.attribution.as_deref(),
-        Source::GeoJson(_) | Source::Image(_) => None,
+        Source::GeoJson(_) | Source::Image(_) | Source::Video(_) | Source::Canvas(_) => None,
     }
 }
 

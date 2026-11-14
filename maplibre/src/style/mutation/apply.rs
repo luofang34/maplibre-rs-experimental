@@ -28,6 +28,9 @@ impl MapContext {
         let geojson = crate::geojson::update::GeoJsonVersions::of(&self.style);
         let change = apply(&mut self.style)?;
         crate::render::frame_signals::mark_dirty(&mut self.world);
+        if self.style.has_active_transitions() {
+            crate::render::frame_signals::keep_animating(&mut self.world);
+        }
         if !change.removed_layers.is_empty() {
             crate::vector::content::purge_layers(&mut self.world, &change.removed_layers);
         }
@@ -50,6 +53,95 @@ impl MapContext {
             }
         }
         Ok(change)
+    }
+
+    /// Replaces the style with `next` via [`Style::diff_and_replace`], retaining loaded tiles and
+    /// source generations for unchanged sources while refreshing only affected layers and caches.
+    pub fn set_style(&mut self, next: Style) -> crate::style::diff::StyleReplacementDiff {
+        #[cfg(feature = "geojson")]
+        let geojson = crate::geojson::update::GeoJsonVersions::of(&self.style);
+        let diff = self.style.diff_and_replace(next);
+        crate::render::frame_signals::mark_dirty(&mut self.world);
+        if self.style.has_active_transitions() {
+            crate::render::frame_signals::keep_animating(&mut self.world);
+        }
+        if !diff.removed_layers.is_empty() {
+            crate::vector::content::purge_layers(&mut self.world, &diff.removed_layers);
+        }
+        let affected = diff.affected_layers();
+        if !affected.is_empty() || !diff.removed_layers.is_empty() || diff.global_state_changed {
+            DirtyVectorStyle::mark_style_edit(&mut self.world, affected);
+        }
+        if diff.redraw_tiles {
+            tile_retry::refresh(&mut self.world, RequestKind::Vector);
+        } else {
+            #[cfg(feature = "geojson")]
+            geojson.refresh_changed(&self.style, &mut self.world);
+        }
+        #[cfg(feature = "raster")]
+        {
+            for name in &diff.removed_raster_sources {
+                crate::raster::forget_source(&mut self.world, name);
+            }
+            for name in &diff.reloaded_image_sources {
+                crate::raster::image_source::reload(&mut self.world, &self.style, name);
+            }
+            if diff.redraw_raster_tiles || diff.terrain_changed {
+                tile_retry::refresh(&mut self.world, RequestKind::Raster);
+            }
+        }
+        if diff.terrain_changed || diff.projection_changed {
+            crate::terrain::elevation::ground_center(&mut self.view_state, &self.world);
+        }
+        diff
+    }
+
+    /// Pushes a straight-alpha RGBA8 frame (`width * height * 4` bytes) and optional updated
+    /// `[longitude, latitude]` corner coordinates onto a `"video"` source.
+    pub fn set_video_source_frame(
+        &mut self,
+        source_name: &str,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+        coordinates: Option<[[f64; 2]; 4]>,
+    ) -> Result<StyleChange, StyleMutationError> {
+        self.mutate_style(|style| {
+            style.set_video_source_frame(source_name, width, height, rgba, coordinates)
+        })
+    }
+
+    /// Updates the four `[longitude, latitude]` corners of a `"video"` source.
+    pub fn set_video_coordinates(
+        &mut self,
+        source_name: &str,
+        coordinates: [[f64; 2]; 4],
+    ) -> Result<StyleChange, StyleMutationError> {
+        self.mutate_style(|style| style.set_video_coordinates(source_name, coordinates))
+    }
+
+    /// Pushes a straight-alpha RGBA8 frame (`width * height * 4` bytes) and optional updated
+    /// `[longitude, latitude]` corner coordinates onto a `"canvas"` source.
+    pub fn set_canvas_source_frame(
+        &mut self,
+        source_name: &str,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+        coordinates: Option<[[f64; 2]; 4]>,
+    ) -> Result<StyleChange, StyleMutationError> {
+        self.mutate_style(|style| {
+            style.set_canvas_source_frame(source_name, width, height, rgba, coordinates)
+        })
+    }
+
+    /// Updates the four `[longitude, latitude]` corners of a `"canvas"` source.
+    pub fn set_canvas_coordinates(
+        &mut self,
+        source_name: &str,
+        coordinates: [[f64; 2]; 4],
+    ) -> Result<StyleChange, StyleMutationError> {
+        self.mutate_style(|style| style.set_canvas_coordinates(source_name, coordinates))
     }
 
     /// Merges `state` into the runtime state of feature `id` in `target`, refreshing resident

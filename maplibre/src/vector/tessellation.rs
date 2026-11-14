@@ -16,26 +16,8 @@ use lyon::{
 use crate::{
     projection::globe::subdivision::subdivide_triangles,
     render::ShaderVertex,
-    style::{
-        expression::{FeatureProperties, Value},
-        line_stroke::{LineCap, LineJoin},
-    },
+    style::expression::{FeatureProperties, Value},
 };
-
-/// The length of the path's segments in tile units.
-fn path_length(path: &Path) -> f32 {
-    path.iter()
-        .map(|event| match event {
-            lyon::path::Event::Line { from, to } => (to - from).length(),
-            lyon::path::Event::End {
-                last,
-                first,
-                close: true,
-            } => (first - last).length(),
-            _ => 0.0,
-        })
-        .sum()
-}
 
 mod buffer;
 mod circle;
@@ -53,6 +35,7 @@ mod outline;
 mod sharp_corners;
 pub use sharp_corners::offset_for as sharp_corner_offset;
 mod sort_key;
+pub(crate) mod stroke;
 mod stroke_grid;
 pub use extrusion::{pack_extrusion_code, unpack_datum_pair, ExtrusionOptions};
 pub use sort_key::{sort_key_name, sort_key_of, SortKeys};
@@ -265,79 +248,6 @@ where
         let indices = (next_index - self.current_index) as u32;
         self.feature_indices.push(indices);
         self.current_index = next_index;
-    }
-
-    fn tessellate_strokes(&mut self) -> GeoResult<()> {
-        let mut path = self.path_builder.replace(Path::builder()).build();
-        if self.line_elevation.is_some() {
-            path = line_elevation::clip_elevated_path(&path);
-        }
-        if self.split_corners {
-            path = sharp_corners::split(&path, self.sharp_corner_offset);
-        }
-        self.line_length = self.line_length.max(path_length(&path));
-        // A gradient measures its progress along the whole line, not from the tile.
-        let constructor = line_origin::StrokeOrigins {
-            origins: if self.line_gradient {
-                Vec::new()
-            } else {
-                line_origin::entry_distances(&path)
-            },
-            packed: self
-                .line_feature_style
-                .as_ref()
-                .map_or(PackedLine::LAYER, |style| style.pack(self.props())),
-        };
-
-        let join = self.feature_join();
-        let vertex_start = self.buffer.vertices.len();
-        let stroke_index_start = self.buffer.indices.len();
-        self.stroke_tessellator
-            .tessellate_path(
-                &path,
-                &StrokeOptions::tolerance(DEFAULT_TOLERANCE)
-                    .with_line_cap(match self.stroke.cap {
-                        LineCap::Butt => lyon::tessellation::LineCap::Butt,
-                        LineCap::Round => lyon::tessellation::LineCap::Round,
-                        LineCap::Square => lyon::tessellation::LineCap::Square,
-                    })
-                    .with_line_join(match join {
-                        LineJoin::Miter => lyon::tessellation::LineJoin::Miter,
-                        LineJoin::Bevel => lyon::tessellation::LineJoin::Bevel,
-                        LineJoin::Round => lyon::tessellation::LineJoin::Round,
-                    })
-                    .with_miter_limit(self.stroke.miter_limit),
-                &mut BuffersBuilder::new(&mut self.buffer, constructor),
-            )
-            .map_err(|error| GeozeroError::Geometry(error.to_string()))?;
-        let max_normal = match join {
-            // Lyon's `miter_limit_is_exceeded` compares `|normal|` against `2.0 * miter_limit`.
-            LineJoin::Miter => (self.stroke.miter_limit * 2.0).max(2.0),
-            LineJoin::Bevel | LineJoin::Round => 2.0,
-        };
-        concave_join::split_unclipped_concave_joins(
-            &mut self.buffer,
-            vertex_start,
-            stroke_index_start,
-            max_normal,
-        );
-        if let Some(options) = &self.line_elevation {
-            let (metres, datum) = options.evaluate(self.props());
-            line_elevation::apply_elevation(
-                &mut self.buffer.vertices[vertex_start..],
-                metres,
-                datum,
-            );
-        }
-        Ok(())
-    }
-
-    fn feature_join(&self) -> LineJoin {
-        self.join_property
-            .as_ref()
-            .and_then(|property| property.evaluate_for(self.props(), self.zoom))
-            .and_then(|name| crate::style::line_stroke::LineStroke::join_named(&name))
-            .unwrap_or(self.stroke.join)
     }
 
     fn end(&mut self, close: bool) -> GeoResult<()> {

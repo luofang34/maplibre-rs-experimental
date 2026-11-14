@@ -227,7 +227,11 @@ pub fn default_plugins(style: &Style, debug_tiles: bool) -> Vec<MapPlugin> {
     let has_raster_sources = style.sources.values().any(|source| {
         matches!(
             source,
-            Source::Raster(_) | Source::RasterDem(_) | Source::Image(_)
+            Source::Raster(_)
+                | Source::RasterDem(_)
+                | Source::Image(_)
+                | Source::Video(_)
+                | Source::Canvas(_)
         )
     });
     let mut plugins: Vec<MapPlugin> = vec![

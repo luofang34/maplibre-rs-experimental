@@ -317,3 +317,136 @@ fn clustering_sources_tile_their_points_as_clusters_until_the_cluster_zoom_passe
         "past the cluster zoom every point stands alone"
     );
 }
+
+#[test]
+fn tolerance_simplifies_sub_threshold_vertices_unless_set_to_zero() {
+    // At zoom 0, 1 pixel on a 512-px tile is 360 / 512 = 0.703125 degrees at the equator.
+    // A 2.0-degree lateral wiggle (~2.84 pixels) survives `tolerance: 0.0` (and default 0.375)
+    // but simplifies to a two-point chord when `tolerance: 10.0`.
+    let wiggling_line = json!({
+        "type": "Feature",
+        "properties": {},
+        "geometry": {
+            "type": "LineString",
+            "coordinates": [
+                [-40.0, 0.0],
+                [-20.0, 2.0],
+                [0.0, -2.0],
+                [20.0, 2.0],
+                [40.0, 0.0]
+            ]
+        }
+    });
+    let exact =
+        features(&index(wiggling_line.clone(), json!({"tolerance": 0.0})).tile(tile(0, 0, 0)));
+    let coarse = features(&index(wiggling_line, json!({"tolerance": 10.0})).tile(tile(0, 0, 0)));
+    assert_eq!(exact.len(), 1);
+    assert_eq!(coarse.len(), 1);
+    // MoveTo(1) + 2 coords + LineTo(4) + 8 coords = 12 words vs MoveTo(1) + 2 + LineTo(1) + 2 = 6 words.
+    assert_eq!(
+        exact[0].geometry.len(),
+        12,
+        "tolerance 0 keeps all 5 vertices"
+    );
+    assert_eq!(
+        coarse[0].geometry.len(),
+        6,
+        "tolerance 10 simplifies to 2 endpoints"
+    );
+}
+
+#[cfg(feature = "headless")]
+#[test]
+fn line_metrics_preserves_continuous_gradient_progress_across_tile_boundaries() {
+    let line_doc = json!({
+        "type": "Feature",
+        "properties": {"kind": "route"},
+        "geometry": {
+            "type": "LineString",
+            "coordinates": [[-90.0, 0.0], [0.0, 0.0], [90.0, 0.0]]
+        }
+    });
+    let with_metrics = index(line_doc.clone(), json!({"lineMetrics": true}));
+    let without_metrics = index(line_doc, json!({"lineMetrics": false}));
+
+    let style: crate::style::Style = serde_json::from_value(json!({
+        "version": 8,
+        "sources": {},
+        "layers": [{
+            "id": "grad",
+            "type": "line",
+            "source-layer": "_geojson",
+            "paint": {
+                "line-width": 4.0,
+                "line-gradient": [
+                    "interpolate", ["linear"], ["line-progress"],
+                    0.0, "#ff0000",
+                    1.0, "#0000ff"
+                ]
+            }
+        }]
+    }))
+    .expect("style");
+
+    let west_layers = crate::headless::map::process_tile_layers(
+        &with_metrics.tile(tile(1, 0, 0)),
+        &style.layers[0],
+        tile(1, 0, 0),
+        Default::default(),
+    )
+    .expect("west tessellates");
+    let east_layers = crate::headless::map::process_tile_layers(
+        &with_metrics.tile(tile(1, 1, 0)),
+        &style.layers[0],
+        tile(1, 1, 0),
+        Default::default(),
+    )
+    .expect("east tessellates");
+    let east_unmetric = crate::headless::map::process_tile_layers(
+        &without_metrics.tile(tile(1, 1, 0)),
+        &style.layers[0],
+        tile(1, 1, 0),
+        Default::default(),
+    )
+    .expect("unmetric east tessellates");
+
+    let progress_at_x = |layers: &crate::headless::map::ProcessedLayers, target_x: f32| -> f32 {
+        let bucket = &layers.vector[0];
+        let full_len = bucket.feature_colors[0][0];
+        assert!(full_len > 0.0);
+        let verts = &bucket.buffer.buffer.vertices;
+        let lo = verts
+            .iter()
+            .min_by(|a, b| a.position[0].total_cmp(&b.position[0]))
+            .expect("min vertex");
+        let hi = verts
+            .iter()
+            .max_by(|a, b| a.position[0].total_cmp(&b.position[0]))
+            .expect("max vertex");
+        let t = ((target_x - lo.position[0]) / (hi.position[0] - lo.position[0])).clamp(0.0, 1.0);
+        (lo.distance + t * (hi.distance - lo.distance)) / full_len
+    };
+
+    // At zoom 1 row 0, [-90, 0] sits at x = 2048 in tile 1/0/0; the tile boundary is x = 4096 in
+    // 1/0/0 and x = 0 in 1/1/0; [90, 0] sits at x = 2048 in tile 1/1/0.
+    let west_start = progress_at_x(&west_layers, 2048.0);
+    let west_seam = progress_at_x(&west_layers, 4096.0);
+    let east_seam = progress_at_x(&east_layers, 0.0);
+    let east_end = progress_at_x(&east_layers, 2048.0);
+    let unmetric_seam = progress_at_x(&east_unmetric, 0.0);
+
+    assert!(west_start.abs() < 0.02, "starts at 0.0: {west_start}");
+    assert!(
+        (west_seam - 0.5).abs() < 0.02,
+        "reaches 0.5 at seam: {west_seam}"
+    );
+    assert!(
+        (east_seam - 0.5).abs() < 0.02,
+        "continues at 0.5 across seam: {east_seam}"
+    );
+    assert!((east_end - 1.0).abs() < 0.02, "ends at 1.0: {east_end}");
+    assert!(
+        unmetric_seam < 0.15,
+        "without lineMetrics the east tile restarts near 0: {unmetric_seam}"
+    );
+}

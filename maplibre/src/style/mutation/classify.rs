@@ -9,7 +9,7 @@ use crate::{
     vector::pattern::per_feature_pattern,
 };
 
-pub(super) fn push_unique(ids: &mut Vec<String>, id: &str) {
+pub(crate) fn push_unique(ids: &mut Vec<String>, id: &str) {
     if !ids.iter().any(|existing| existing == id) {
         ids.push(id.to_owned());
     }
@@ -133,6 +133,10 @@ fn needs_paint_retessellation(before: Option<&LayerPaint>, after: Option<&LayerP
                     &b.fill_extrusion_height_datum,
                 )
                 || !same_prop(&a.fill_extrusion_part, &b.fill_extrusion_part)
+                || !same_prop(
+                    &a.fill_extrusion_rounded_corner_distance,
+                    &b.fill_extrusion_rounded_corner_distance,
+                )
                 || a.fill_extrusion_translucent != b.fill_extrusion_translucent
                 || a.fill_extrusion_pattern != b.fill_extrusion_pattern
         }

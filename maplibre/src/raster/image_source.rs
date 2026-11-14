@@ -205,13 +205,16 @@ pub(crate) fn reload(
         render::eventually::Eventually,
         style::source::Source,
     };
-    let Some(Source::Image(image)) = style.sources.get(name) else {
-        return;
+    let (coordinates, is_remote_image) = match style.sources.get(name) {
+        Some(Source::Image(image)) => (image.coordinates, true),
+        Some(Source::Video(video)) => (video.coordinates, false),
+        Some(Source::Canvas(canvas)) => (canvas.coordinates, false),
+        _ => return,
     };
     let source = RasterSourceId::from(name);
     let coords: Vec<WorldTileCoords> = world.tiles.tiles.values().map(|tile| tile.coords).collect();
     for coords in coords {
-        if render_tile_bounds_reach(image.coordinates, coords) {
+        if render_tile_bounds_reach(coordinates, coords) {
             continue;
         }
         if let Some(component) = world
@@ -227,7 +230,9 @@ pub(crate) fn reload(
             raster.remove_source_texture(&source, coords);
         }
     }
-    tile_retry::refresh(world, RequestKind::Raster);
+    if is_remote_image {
+        tile_retry::refresh(world, RequestKind::Raster);
+    }
 }
 
 /// Whether the picture stretched over `coordinates` can reach the tile: its corners' bounding box

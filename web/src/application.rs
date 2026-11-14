@@ -196,6 +196,8 @@ pub fn default_plugins(style: &Style) -> Vec<MapPlugin> {
                     maplibre::style::source::Source::Raster(_)
                         | maplibre::style::source::Source::RasterDem(_)
                         | maplibre::style::source::Source::Image(_)
+                        | maplibre::style::source::Source::Video(_)
+                        | maplibre::style::source::Source::Canvas(_)
                 )
             })
     });

@@ -12,8 +12,7 @@ use maplibre::{
     sdf::query::QueryError,
     style::{
         feature_state::{FeatureId, FeatureStateTarget},
-        mutation::{StyleChange, StyleMutationError},
-        source::Source,
+        mutation::StyleMutationError,
         Style,
     },
 };
@@ -209,41 +208,8 @@ pub fn build_feature_state_target(source: &str, source_layer: Option<&str>) -> F
     }
 }
 
-/// Replaces `map`'s entire [`Style`] in-place, purging stale tile layers and triggering tile reload.
+/// Replaces `map`'s entire [`Style`] via [`HeadlessMap::set_style`], diffing layers and sources in-place.
 pub fn apply_whole_style(map: &mut HeadlessMap, next_style: Style) -> Result<(), FfiError> {
-    map.mutate_style(|style| {
-        let removed_layers: Vec<String> =
-            style.layers.iter().map(|layer| layer.id.clone()).collect();
-        let layers: Vec<String> = next_style
-            .layers
-            .iter()
-            .map(|layer| layer.id.clone())
-            .collect();
-        let removed_raster_sources: Vec<String> = style
-            .sources
-            .iter()
-            .filter(|(_, src)| {
-                matches!(
-                    src,
-                    Source::Raster(_) | Source::RasterDem(_) | Source::Image(_)
-                )
-            })
-            .map(|(name, _)| name.clone())
-            .collect();
-        let reloaded_image_sources: Vec<String> = next_style
-            .sources
-            .iter()
-            .filter(|(_, src)| matches!(src, Source::Image(_)))
-            .map(|(name, _)| name.clone())
-            .collect();
-        *style = next_style;
-        Ok(StyleChange {
-            layers,
-            redraw_tiles: true,
-            removed_layers,
-            reloaded_image_sources,
-            removed_raster_sources,
-        })
-    })?;
+    let _ = map.set_style(next_style);
     Ok(())
 }

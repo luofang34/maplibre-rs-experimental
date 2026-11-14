@@ -72,6 +72,8 @@ fn entry_parameter(from: lyon::math::Point, to: lyon::math::Point) -> Option<f32
 pub struct StrokeOrigins {
     /// Entry distance of each path endpoint's sub-path, from [`entry_distances`].
     pub origins: Vec<f32>,
+    /// Starting distance along the full unclipped line when `lineMetrics` clipped this segment.
+    pub gradient_offset: f32,
     /// What the feature's line style adds to each vertex.
     pub packed: PackedLine,
 }
@@ -95,7 +97,7 @@ impl StrokeVertexConstructor<ShaderVertex> for StrokeOrigins {
         // GL JS stores a vertex's distance in whole tile units, so the phase of a dash or pattern
         // drifts from one line to the next by up to one unit; a gradient keeps its fraction.
         output.distance = if self.origins.is_empty() {
-            distance
+            self.gradient_offset + distance
         } else {
             distance.floor()
         };

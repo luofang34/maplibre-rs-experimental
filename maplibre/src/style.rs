@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) mod arabic_shaping;
 mod attribution;
 pub mod circle;
+pub mod diff;
 pub mod expression;
 pub mod feature_state;
 pub use feature_state::{FeatureId, FeatureStateTarget};
@@ -27,6 +28,7 @@ pub mod source;
 pub mod spec;
 pub mod symbol;
 pub mod terrain;
+pub mod transitions;
 pub mod translation;
 pub mod validation;
 
@@ -94,6 +96,13 @@ pub struct Style {
     /// Elevation source and vertical exaggeration; omission renders without terrain.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terrain: Option<terrain::TerrainSpecification>,
+    /// Default duration and delay for animated paint property mutations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transition: Option<transitions::TransitionSpec>,
+    /// In-flight paint property transitions driven by the frame clock.
+    #[doc(hidden)]
+    #[serde(skip)]
+    pub active_transitions: transitions::ActiveTransitions,
     /// Defaults for the values `global-state` expressions read.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub state: HashMap<String, state::StateDeclaration>,

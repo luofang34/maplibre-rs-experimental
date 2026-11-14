@@ -58,32 +58,37 @@ pub fn prepare_system(
             });
         match (kind, &layer.paint) {
             (DemLayerKind::Hillshade, Some(LayerPaint::Hillshade(paint))) => {
+                let nearest = paint.is_nearest_at(zoom);
                 let uniforms = HillshadeUniforms::new(
                     unpack,
                     &paint.illumination(zoom, bearing),
                     paint.accent_at(zoom),
                     paint.exaggeration_at(zoom),
                     paint.hillshade_method.shader_code(),
-                );
-                resources.write_layer(
+                )
+                .with_nearest(nearest);
+                resources.write_layer_filtered(
                     device,
                     queue,
                     &layer.id,
                     kind,
+                    nearest,
                     bytemuck::bytes_of(&uniforms),
                 );
             }
             (DemLayerKind::ColorRelief, Some(LayerPaint::ColorRelief(paint))) => {
+                let nearest = paint.is_nearest_at(zoom);
                 let mut uniforms =
                     ColorReliefUniforms::new(unpack, paint.opacity_at(zoom), &paint.ramp());
                 if let Some(poles) = poles {
                     uniforms = uniforms.with_pole_elevations(poles);
                 }
-                resources.write_layer(
+                resources.write_layer_filtered(
                     device,
                     queue,
                     &layer.id,
                     kind,
+                    nearest,
                     bytemuck::bytes_of(&uniforms),
                 );
             }

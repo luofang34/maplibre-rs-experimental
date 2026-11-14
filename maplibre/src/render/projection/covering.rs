@@ -68,7 +68,7 @@ fn view_max_zoom(style: &Style) -> u8 {
             Source::Vector(s) | Source::Raster(s) => s.maxzoom,
             Source::RasterDem(s) => s.maxzoom,
             Source::GeoJson(s) => s.maxzoom,
-            Source::Image(_) => None,
+            Source::Image(_) | Source::Video(_) | Source::Canvas(_) => None,
         })
         .max()
         .unwrap_or(0);

@@ -386,9 +386,13 @@ impl MapContext {
                             RequestKind::Vector => {
                                 matches!(source, Source::Vector(_) | Source::GeoJson(_))
                             }
-                            RequestKind::Raster => {
-                                matches!(source, Source::Raster(_) | Source::Image(_))
-                            }
+                            RequestKind::Raster => matches!(
+                                source,
+                                Source::Raster(_)
+                                    | Source::Image(_)
+                                    | Source::Video(_)
+                                    | Source::Canvas(_)
+                            ),
                             RequestKind::Dem => matches!(source, Source::RasterDem(_)),
                         };
                         if matches_kind {

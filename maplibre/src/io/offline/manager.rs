@@ -439,7 +439,10 @@ impl<HC: HttpClient, S: OfflineStore> OfflineManager<HC, S> {
                 match src {
                     Source::Vector(v) | Source::Raster(v) => apply_tile_json(v, tile_json),
                     Source::RasterDem(d) => apply_tile_json_to_dem(d, tile_json),
-                    Source::GeoJson(_) | Source::Image(_) => {}
+                    Source::GeoJson(_)
+                    | Source::Image(_)
+                    | Source::Video(_)
+                    | Source::Canvas(_) => {}
                 }
             }
         }

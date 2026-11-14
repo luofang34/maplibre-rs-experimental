@@ -15,8 +15,6 @@ use crate::{coords::WorldTileCoords, style::source::GeoJsonSource};
 pub const EXTENT: u32 = 4096;
 /// Distance beyond the tile edge whose features are included, in tile grid units (GL JS default).
 const BUFFER: f64 = 128.0;
-/// Mercator latitude limit in degrees.
-const MAX_LATITUDE: f64 = 85.051_128_78;
 
 /// Why a document could not be indexed.
 #[derive(Debug, Error)]
@@ -55,6 +53,7 @@ struct Geometry {
 struct IndexedFeature {
     id: Option<u64>,
     geometry: Geometry,
+    is_line_string: bool,
     properties: Vec<(String, Value)>,
 }
 
@@ -81,6 +80,10 @@ pub struct GeoJsonIndex {
     clustered: Option<(Vec<IndexedFeature>, Clusters)>,
     /// Whether the source filters its features before they are tiled.
     filtered: bool,
+    /// Douglas-Peucker simplification tolerance in pixels on a 512-px tile.
+    tolerance: f64,
+    /// Whether `LineString` features carry cumulative distance fractions for `line-gradient`.
+    line_metrics: bool,
     tree: RTree<Entry>,
     approximate_bytes: usize,
 }
@@ -139,10 +142,12 @@ impl GeoJsonIndex {
                 ));
             }
             let id = numeric_feature_id(feature, promote, source.generate_id.then_some(index));
+            let is_line_string = geometry.get("type").and_then(Value::as_str) == Some("LineString");
             if source.cluster && is_single_point(geometry, &parsed) {
                 points.push(IndexedFeature {
                     id,
                     geometry: parsed,
+                    is_line_string: false,
                     properties,
                 });
                 return Ok(());
@@ -160,6 +165,7 @@ impl GeoJsonIndex {
             features.push(IndexedFeature {
                 id,
                 geometry: parsed,
+                is_line_string,
                 properties,
             });
             Ok(())
@@ -210,6 +216,8 @@ impl GeoJsonIndex {
             features,
             clustered,
             filtered: filter_declared,
+            tolerance: source.effective_tolerance(),
+            line_metrics: source.line_metrics,
             tree: RTree::bulk_load(entries),
             approximate_bytes: bytes,
         })
@@ -317,9 +325,27 @@ impl GeoJsonIndex {
                 ((point[1] - north) * tiles * f64::from(EXTENT)).round() as i32,
             )
         };
+        let sq_tol = simplify::squared_world_tolerance(self.tolerance, zoom);
         for index in hits {
             let feature = &self.features[index as usize];
-            encoder.feature(feature, &feature.geometry.within(bounds), &to_tile);
+            if self.line_metrics && feature.is_line_string {
+                for line in &feature.geometry.lines {
+                    for run in line_metrics::clip_line_with_metrics(line, bounds) {
+                        let simplified = simplify::simplify_points(&run.points, sq_tol);
+                        encoder.metric_line(
+                            feature,
+                            &simplified,
+                            run.start_fraction,
+                            run.end_fraction,
+                            &to_tile,
+                        );
+                    }
+                }
+            } else {
+                let mut clipped = feature.geometry.within(bounds);
+                simplify::simplify_geometry(&mut clipped, self.tolerance, zoom);
+                encoder.feature(feature, &clipped, &to_tile);
+            }
         }
         if let Some((points, clusters)) = &self.clustered {
             for item in clusters.within(zoom.min(24) as u8, bounds) {
@@ -331,6 +357,7 @@ impl GeoJsonIndex {
                             points: vec![position],
                             ..Geometry::default()
                         },
+                        is_line_string: false,
                         properties,
                     },
                 };
@@ -378,100 +405,15 @@ fn integer_id(value: &Value) -> Option<u64> {
     })
 }
 
-fn project(position: &Value) -> Result<Point, &'static str> {
-    let coordinates = position.as_array().ok_or("position is not an array")?;
-    let longitude = coordinates
-        .first()
-        .and_then(Value::as_f64)
-        .ok_or("position has no longitude")?;
-    let latitude = coordinates
-        .get(1)
-        .and_then(Value::as_f64)
-        .ok_or("position has no latitude")?;
-    let latitude = latitude.clamp(-MAX_LATITUDE, MAX_LATITUDE).to_radians();
-    Ok([
-        (longitude + 180.0) / 360.0,
-        0.5 - (std::f64::consts::FRAC_PI_4 + latitude / 2.0).tan().ln()
-            / (2.0 * std::f64::consts::PI),
-    ])
-}
-
-fn read_ring(value: &Value) -> Result<Ring, &'static str> {
-    value
-        .as_array()
-        .ok_or("coordinates are not an array")?
-        .iter()
-        .map(project)
-        .collect()
-}
-
-fn read_rings(value: &Value) -> Result<Vec<Ring>, &'static str> {
-    value
-        .as_array()
-        .ok_or("coordinates are not an array")?
-        .iter()
-        .map(read_ring)
-        .collect()
-}
-
-fn read_geometry(geometry: &Value, out: &mut Geometry) -> Result<(), &'static str> {
-    let coordinates = geometry.get("coordinates");
-    let need = || coordinates.ok_or("geometry has no coordinates");
-    match geometry.get("type").and_then(Value::as_str) {
-        Some("Point") => out.points.push(project(need()?)?),
-        Some("MultiPoint") => out.points.extend(read_ring(need()?)?),
-        Some("LineString") => out.lines.push(read_ring(need()?)?),
-        Some("MultiLineString") => out.lines.extend(read_rings(need()?)?),
-        Some("Polygon") => out.polygons.push(read_rings(need()?)?),
-        Some("MultiPolygon") => {
-            for polygon in need()?.as_array().ok_or("coordinates are not an array")? {
-                out.polygons.push(read_rings(polygon)?);
-            }
-        }
-        Some("GeometryCollection") => {
-            for member in geometry
-                .get("geometries")
-                .and_then(Value::as_array)
-                .ok_or("collection has no geometries")?
-            {
-                read_geometry(member, out)?;
-            }
-        }
-        _ => return Err("unsupported geometry type"),
-    }
-    Ok(())
-}
-
-fn positions(geometry: &Geometry) -> impl Iterator<Item = &Point> {
-    geometry
-        .points
-        .iter()
-        .chain(geometry.lines.iter().flatten())
-        .chain(geometry.polygons.iter().flatten().flatten())
-}
-
-fn coordinate_count(geometry: &Geometry) -> usize {
-    positions(geometry).count()
-}
-
-fn bounds_of(geometry: &Geometry) -> Option<[f64; 4]> {
-    positions(geometry).fold(None, |bounds, point| {
-        let [min_x, min_y, max_x, max_y] =
-            bounds.unwrap_or([point[0], point[1], point[0], point[1]]);
-        Some([
-            min_x.min(point[0]),
-            min_y.min(point[1]),
-            max_x.max(point[0]),
-            max_y.max(point[1]),
-        ])
-    })
-}
-
 mod clip;
 pub(super) mod coverage;
 mod encode;
+mod line_metrics;
+mod read;
+mod simplify;
 use coverage::TileWindow;
 use encode::TileEncoder;
+use read::{bounds_of, coordinate_count, read_geometry};
 
 use super::{
     cluster::{ClusterInput, ClusterOptions, Clustered, Clusters},

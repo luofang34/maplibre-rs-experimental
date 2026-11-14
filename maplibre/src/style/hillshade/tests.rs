@@ -80,4 +80,49 @@ fn a_relief_ramp_lists_the_elevation_stops_with_their_colours() {
     assert_eq!(ramp[0], (400.0, [1.0, 0.0, 0.0, 1.0]));
     assert_eq!(ramp[1], (800.0, [0.0, 0.0, 1.0, 1.0]));
     assert_eq!(paint.opacity_at(3.0), 1.0);
+    assert!(!paint.is_nearest_at(3.0));
+}
+
+#[test]
+fn hillshade_and_color_relief_resampling_support_constant_stops_and_mutation() {
+    let default_hs =
+        hillshade(serde_json::json!({"id": "h", "type": "hillshade", "source": "dem"}));
+    assert!(!default_hs.is_nearest_at(14.0));
+
+    let stop_hs = hillshade(serde_json::json!({
+        "id": "h",
+        "type": "hillshade",
+        "source": "dem",
+        "paint": {
+            "hillshade-resampling": { "stops": [[10.0, "linear"], [14.0, "nearest"]] }
+        }
+    }));
+    assert!(!stop_hs.is_nearest_at(12.0));
+    assert!(stop_hs.is_nearest_at(14.0));
+    assert!(stop_hs.is_nearest_at(18.0));
+
+    let mut style: crate::style::Style = serde_json::from_value(serde_json::json!({
+        "version": 8,
+        "sources": {
+            "dem": { "type": "raster-dem", "tiles": ["https://example.test/{z}/{x}/{y}.png"] }
+        },
+        "layers": [
+            { "id": "hs", "type": "hillshade", "source": "dem" },
+            { "id": "cr", "type": "color-relief", "source": "dem", "paint": { "color-relief-resampling": "nearest" } }
+        ]
+    }))
+    .expect("style parses");
+    match &style.layers[1].paint {
+        Some(LayerPaint::ColorRelief(cr)) => assert!(cr.is_nearest_at(5.0)),
+        other => panic!("expected color-relief paint, got {other:?}"),
+    }
+    let change = style
+        .set_paint_property("hs", "hillshade-resampling", serde_json::json!("nearest"))
+        .expect("hillshade-resampling mutates");
+    assert_eq!(change.layers, vec!["hs".to_string()]);
+    assert!(!change.redraw_tiles);
+    match &style.layers[0].paint {
+        Some(LayerPaint::Hillshade(hs)) => assert!(hs.is_nearest_at(5.0)),
+        other => panic!("expected hillshade paint, got {other:?}"),
+    }
 }

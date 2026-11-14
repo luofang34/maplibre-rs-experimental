@@ -204,6 +204,12 @@ pub(crate) fn resolve_relative_source_urls(style: &mut Style, base_uri: &str) {
             Source::Image(s) => {
                 s.url = resolve_uri_against_base(base_uri, &s.url);
             }
+            Source::Video(s) => {
+                for url in &mut s.urls {
+                    *url = resolve_uri_against_base(base_uri, url);
+                }
+            }
+            Source::Canvas(_) => {}
         }
     }
 }
@@ -272,6 +278,10 @@ pub(crate) fn apply_source_url_overrides(
             Source::Image(s) => {
                 s.url = resolved;
             }
+            Source::Video(s) => {
+                s.urls = vec![resolved];
+            }
+            Source::Canvas(_) => {}
         }
     }
     Ok(())

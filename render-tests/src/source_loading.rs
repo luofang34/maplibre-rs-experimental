@@ -79,7 +79,9 @@ pub(super) fn load_sources_blocking(
                 (&projection, pixel_ratio),
             )?),
             // DEM images supply hillshade and colour relief independently from terrain meshes.
-            Source::Image(_) => return Err(format!("Image source '{name}' was not lowered")),
+            Source::Image(_) | Source::Video(_) | Source::Canvas(_) => {
+                return Err(format!("Media/image source '{name}' was not lowered"));
+            }
             Source::Raster(_) | Source::RasterDem(_) => {
                 all_raster_layers.extend(match images.get(name) {
                     Some(placed) => load_image_blocking(map, name, placed)?,

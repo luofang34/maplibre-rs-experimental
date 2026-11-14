@@ -349,3 +349,4 @@ fn paint_only_global_state_refreshes_gpu_fill_in_place() {
 }
 
 mod review_regressions;
+mod transitions_media;

@@ -11,9 +11,11 @@ use crate::{
 
 mod flight;
 mod ground;
+mod transitions;
 
 pub(crate) use flight::camera_flight_system;
 pub use flight::{FlightId, FlightOutcome};
+pub(crate) use transitions::style_transition_system;
 
 /// Mutable frame state shared by scheduled systems, independent of host service types.
 pub struct MapContext {

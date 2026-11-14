@@ -110,7 +110,9 @@ fn pending_tile_json_url(source: &Source) -> Option<String> {
     let (tiles, url) = match source {
         Source::Vector(vector) | Source::Raster(vector) => (&vector.tiles, &vector.url),
         Source::RasterDem(dem) => (&dem.tiles, &dem.url),
-        Source::GeoJson(_) | Source::Image(_) => return None,
+        Source::GeoJson(_) | Source::Image(_) | Source::Video(_) | Source::Canvas(_) => {
+            return None;
+        }
     };
     tiles.is_none().then(|| url.clone()).flatten()
 }
@@ -119,7 +121,7 @@ fn apply_tile_json_to_source(source: &mut Source, tile_json: TileJson) {
     match source {
         Source::Vector(vector) | Source::Raster(vector) => apply_tile_json(vector, tile_json),
         Source::RasterDem(dem) => apply_tile_json_to_dem(dem, tile_json),
-        Source::GeoJson(_) | Source::Image(_) => {}
+        Source::GeoJson(_) | Source::Image(_) | Source::Video(_) | Source::Canvas(_) => {}
     }
 }
 

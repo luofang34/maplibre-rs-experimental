@@ -92,6 +92,13 @@ pub struct HillshadePaint {
     /// The shading method.
     #[serde(rename = "hillshade-method", default)]
     pub hillshade_method: HillshadeMethod,
+    /// DEM resampling mode (`"linear"` default or `"nearest"`).
+    #[serde(
+        rename = "hillshade-resampling",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub hillshade_resampling: Option<crate::style::layer::RasterResampling>,
 }
 
 /// The lights of a hillshade layer at one zoom, with every list padded to the same length as
@@ -174,6 +181,13 @@ impl HillshadePaint {
             .and_then(|property| property.evaluate_at_zoom(zoom))
             .map_or([0.0, 0.0, 0.0, 1.0], |color| premultiplied(&color.into()))
     }
+
+    /// Whether DEM texels are sampled without interpolation at `zoom`.
+    pub fn is_nearest_at(&self, zoom: f64) -> bool {
+        self.hillshade_resampling
+            .as_ref()
+            .is_some_and(|resampling| resampling.is_nearest_at(zoom))
+    }
 }
 
 fn pad<T: Clone>(list: &mut Vec<T>, count: usize) {
@@ -200,6 +214,13 @@ pub struct ColorReliefPaint {
     #[serde(rename = "color-relief-color", default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color_relief_color: Option<StyleProperty<csscolorparser::Color>>,
+    /// DEM resampling mode (`"linear"` default or `"nearest"`).
+    #[serde(
+        rename = "color-relief-resampling",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub color_relief_resampling: Option<crate::style::layer::RasterResampling>,
 }
 
 impl ColorReliefPaint {
@@ -209,6 +230,13 @@ impl ColorReliefPaint {
             .as_ref()
             .and_then(|property| property.evaluate_at_zoom(zoom))
             .unwrap_or(1.0)
+    }
+
+    /// Whether DEM elevations are sampled without bilinear interpolation at `zoom`.
+    pub fn is_nearest_at(&self, zoom: f64) -> bool {
+        self.color_relief_resampling
+            .as_ref()
+            .is_some_and(|resampling| resampling.is_nearest_at(zoom))
     }
 
     /// The colour ramp as ascending `(elevation, premultiplied colour)` stops.

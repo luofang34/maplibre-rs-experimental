@@ -40,6 +40,9 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
         let client = kernel.source_client();
         let mut fetches: FuturesUnordered<_> = source_layer_groups(&style, TileKind::Raster)
             .into_iter()
+            .filter(|group| {
+                !crate::raster::media_source::is_media_source(&style, group.source_name.as_deref())
+            })
             .map(|group| {
                 let dem_unpack = group
                     .source_name

@@ -6,7 +6,10 @@ use geozero::mvt::tile::{Feature, GeomType, Layer, Value as MvtValue};
 use serde_json::Value;
 
 use super::{Geometry, IndexedFeature, Point, EXTENT};
-use crate::style::source::GEOJSON_LAYER;
+use crate::{
+    style::source::GEOJSON_LAYER,
+    vector::tessellation::stroke::{LINE_CLIP_END_PROPERTY, LINE_CLIP_START_PROPERTY},
+};
 
 const MOVE_TO: u32 = 1;
 const LINE_TO: u32 = 2;
@@ -163,6 +166,38 @@ impl TileEncoder {
             }
         }
         self.push(source, GeomType::Polygon, polygons);
+    }
+
+    pub(super) fn metric_line(
+        &mut self,
+        source: &IndexedFeature,
+        line: &[Point],
+        start_fraction: f64,
+        end_fraction: f64,
+        to_tile: &impl Fn(&Point) -> (i32, i32),
+    ) {
+        let points = deduplicated(line.iter().map(to_tile));
+        if points.len() < 2 {
+            return;
+        }
+        let mut commands = Vec::new();
+        let mut cursor = (0, 0);
+        path(&mut commands, &mut cursor, &points, false);
+        let mut tags = self.tags(&source.properties);
+        if let Some(start_val) = self.value(&Value::from(start_fraction)) {
+            tags.push(self.key(LINE_CLIP_START_PROPERTY));
+            tags.push(start_val);
+        }
+        if let Some(end_val) = self.value(&Value::from(end_fraction)) {
+            tags.push(self.key(LINE_CLIP_END_PROPERTY));
+            tags.push(end_val);
+        }
+        self.features.push(Feature {
+            id: source.id,
+            tags,
+            r#type: Some(GeomType::Linestring as i32),
+            geometry: commands,
+        });
     }
 
     pub(super) fn finish(self) -> Layer {

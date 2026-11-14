@@ -21,6 +21,7 @@ use crate::{
 };
 
 mod clip;
+mod round;
 pub(super) use clip::clipped;
 use clip::{is_hole, normalized_rings, on_clipped_edge, rings, signed_area};
 
@@ -50,6 +51,8 @@ pub struct ExtrusionOptions {
     pub height_datum: Option<StyleProperty<String>>,
     /// Shell part selector (`"full"`, `"walls"`, `"roof"`, or `"floor"`).
     pub part: Option<StyleProperty<String>>,
+    /// Corner fillet setback distance along adjacent polygon segments.
+    pub rounded_corner_distance: Option<StyleProperty<f32>>,
     /// Closed translucent 3D volume mode: clips to `[0, 4096]`, omits tile-seam walls, and adds
     /// a bottom floor cap when `base > 0`.
     pub translucent: bool,
@@ -72,6 +75,7 @@ impl ExtrusionOptions {
             base_datum: paint.fill_extrusion_base_datum.clone(),
             height_datum: paint.fill_extrusion_height_datum.clone(),
             part: paint.fill_extrusion_part.clone(),
+            rounded_corner_distance: paint.fill_extrusion_rounded_corner_distance.clone(),
             translucent,
             clip_buffer: translucent.then_some(0.0),
             overscale: overscaling.log2().round().clamp(0.0, f64::from(u8::MAX)) as u8,
@@ -98,6 +102,8 @@ pub struct ExtrusionHeights {
     pub height_datum: ElevationDatum,
     /// Shell part emitted for this feature.
     pub part: ExtrusionPart,
+    /// Corner fillet setback distance in tile units (`0.0` for sharp corners).
+    pub rounded_corner_distance: f32,
     /// Whether this extrusion is a closed translucent 3D volume.
     pub translucent: bool,
     /// Whether walls lying along `0` or `4096` are suppressed as tile-partition seams.
@@ -153,6 +159,7 @@ impl ExtrusionHeights {
             base_datum: evaluate_datum(&options.base_datum),
             height_datum: evaluate_datum(&options.height_datum),
             part,
+            rounded_corner_distance: evaluate(&options.rounded_corner_distance, zoom),
             translucent: options.translucent,
             suppress_tile_boundary_walls: options.clip_buffer == Some(0.0),
         }
@@ -170,6 +177,7 @@ impl ExtrusionHeights {
             base_datum: ElevationDatum::CentroidAgl,
             height_datum: ElevationDatum::CentroidAgl,
             part: ExtrusionPart::Full,
+            rounded_corner_distance: 0.0,
             translucent: false,
             suppress_tile_boundary_walls: false,
         }
@@ -288,17 +296,20 @@ pub(super) fn extrude_with_tessellator<I>(
 where
     I: From<VertexId> + std::ops::Add + MaxIndex + Copy + Into<u32>,
 {
+    let rounded = round::build_rounded_extrusion(path, heights);
+    let active_path = rounded.as_ref().map_or(path, |(p, _)| p);
+
     if heights.part != ExtrusionPart::Walls {
         let cap_vertex_start = buffer.vertices.len();
         let cap_index_start = buffer.indices.len();
-        if !earcut.try_triangulate(path, true, buffer, |pos| {
+        if !earcut.try_triangulate(active_path, true, buffer, |pos| {
             let mut output = ShaderVertex::new(pos, [0.0, 0.0]);
             heights.apply(&mut output, true);
             output
         }) {
             tessellator
                 .tessellate_path(
-                    path,
+                    active_path,
                     &FillOptions::tolerance(tolerance).with_fill_rule(FillRule::EvenOdd),
                     &mut BuffersBuilder::new(buffer, RoofVertex { heights }),
                 )
@@ -329,6 +340,11 @@ where
                 heights,
             );
         }
+    }
+
+    if let Some((_, rounded_rings)) = &rounded {
+        round::emit_rounded_walls(buffer, rounded_rings, heights);
+        return Ok(());
     }
 
     let raw_rings = rings(path);

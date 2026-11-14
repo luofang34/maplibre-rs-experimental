@@ -30,6 +30,8 @@ impl Default for Style {
             light: None,
             sky: None,
             terrain: None,
+            transition: None,
+            active_transitions: Default::default(),
             state: Default::default(),
             global_state: Default::default(),
             feature_state: Default::default(),

@@ -49,6 +49,64 @@ impl HeadlessMap {
         )
     }
 
+    /// Replaces the entire style via [`Style::diff_and_replace`], retaining loaded tiles for
+    /// unchanged sources and refreshing affected GPU state on the next frame.
+    pub fn set_style(&mut self, next: Style) -> crate::style::diff::StyleReplacementDiff {
+        let bus = self.map_context.event_bus();
+        let diff = self.map_context.set_style(next);
+        bus.mark_busy();
+        bus.emit(crate::event::MapEvent::StyleDataLoaded);
+        diff
+    }
+
+    /// Pushes a straight-alpha RGBA8 frame (`width * height * 4` bytes) and optional updated
+    /// `[longitude, latitude]` corner coordinates onto a `"video"` source.
+    pub fn set_video_source_frame(
+        &mut self,
+        source_name: &str,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+        coordinates: Option<[[f64; 2]; 4]>,
+    ) -> Result<StyleChange, StyleMutationError> {
+        self.mutate_style(|style| {
+            style.set_video_source_frame(source_name, width, height, rgba, coordinates)
+        })
+    }
+
+    /// Updates the four `[longitude, latitude]` corners of a `"video"` source.
+    pub fn set_video_coordinates(
+        &mut self,
+        source_name: &str,
+        coordinates: [[f64; 2]; 4],
+    ) -> Result<StyleChange, StyleMutationError> {
+        self.mutate_style(|style| style.set_video_coordinates(source_name, coordinates))
+    }
+
+    /// Pushes a straight-alpha RGBA8 frame (`width * height * 4` bytes) and optional updated
+    /// `[longitude, latitude]` corner coordinates onto a `"canvas"` source.
+    pub fn set_canvas_source_frame(
+        &mut self,
+        source_name: &str,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+        coordinates: Option<[[f64; 2]; 4]>,
+    ) -> Result<StyleChange, StyleMutationError> {
+        self.mutate_style(|style| {
+            style.set_canvas_source_frame(source_name, width, height, rgba, coordinates)
+        })
+    }
+
+    /// Updates the four `[longitude, latitude]` corners of a `"canvas"` source.
+    pub fn set_canvas_coordinates(
+        &mut self,
+        source_name: &str,
+        coordinates: [[f64; 2]; 4],
+    ) -> Result<StyleChange, StyleMutationError> {
+        self.mutate_style(|style| style.set_canvas_coordinates(source_name, coordinates))
+    }
+
     /// Applies a style change and drops or reloads what it leaves stale, as
     /// [`crate::context::MapContext::mutate_style`] does.
     pub fn mutate_style(

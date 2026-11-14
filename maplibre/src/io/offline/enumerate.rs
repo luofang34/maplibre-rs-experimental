@@ -36,7 +36,9 @@ pub fn pending_non_volatile_tile_json_urls(style: &Style) -> Vec<(String, String
             let (tiles, url) = match src {
                 Source::Vector(v) | Source::Raster(v) => (&v.tiles, &v.url),
                 Source::RasterDem(d) => (&d.tiles, &d.url),
-                Source::GeoJson(_) | Source::Image(_) => return None,
+                Source::GeoJson(_) | Source::Image(_) | Source::Video(_) | Source::Canvas(_) => {
+                    return None;
+                }
             };
             if tiles.is_none() {
                 url.as_ref().map(|u| (name.clone(), u.clone()))
@@ -142,6 +144,7 @@ fn enumerate_source(
         Source::Image(img) => {
             push_unique(img.url.clone(), ResourceKind::Image, false);
         }
+        Source::Video(_) | Source::Canvas(_) => {}
         Source::Vector(vec_src) => {
             if let Some(url) = &vec_src.url {
                 push_unique(url.clone(), ResourceKind::Source, false);

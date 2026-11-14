@@ -58,6 +58,48 @@ where
         self.mutate_style(|style| style.set_image_coordinates(name, coordinates))
     }
 
+    /// Pushes an RGBA8 frame (`width * height * 4` bytes) onto a `"video"` source.
+    pub fn set_video_source_frame(
+        &mut self,
+        name: &str,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+        coordinates: Option<[[f64; 2]; 4]>,
+    ) -> Result<StyleChange, MapError> {
+        self.mutate_style(|s| s.set_video_source_frame(name, width, height, rgba, coordinates))
+    }
+
+    /// Updates the four `[longitude, latitude]` corners of a `"video"` source.
+    pub fn set_video_coordinates(
+        &mut self,
+        name: &str,
+        coordinates: [[f64; 2]; 4],
+    ) -> Result<StyleChange, MapError> {
+        self.mutate_style(|s| s.set_video_coordinates(name, coordinates))
+    }
+
+    /// Pushes an RGBA8 frame (`width * height * 4` bytes) onto a `"canvas"` source.
+    pub fn set_canvas_source_frame(
+        &mut self,
+        name: &str,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+        coordinates: Option<[[f64; 2]; 4]>,
+    ) -> Result<StyleChange, MapError> {
+        self.mutate_style(|s| s.set_canvas_source_frame(name, width, height, rgba, coordinates))
+    }
+
+    /// Updates the four `[longitude, latitude]` corners of a `"canvas"` source.
+    pub fn set_canvas_coordinates(
+        &mut self,
+        name: &str,
+        coordinates: [[f64; 2]; 4],
+    ) -> Result<StyleChange, MapError> {
+        self.mutate_style(|s| s.set_canvas_coordinates(name, coordinates))
+    }
+
     /// Merges `state` into the runtime state of feature `id` in `target`, before or after the
     /// renderer is initialized, as GL JS `setFeatureState`.
     pub fn set_feature_state(
