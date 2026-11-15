@@ -10,7 +10,7 @@ use super::{
     *,
 };
 
-pub(super) fn process_layer<T: VectorTransferables, C: Context>(
+pub(crate) fn process_layer<T: VectorTransferables, C: Context>(
     source_layer: Option<&tile::Layer>,
     layer_name: &str,
     predecoded_props: Option<&[Arc<FeatureProperties>]>,
@@ -103,7 +103,7 @@ pub(super) fn process_layer<T: VectorTransferables, C: Context>(
     }
 }
 
-pub(super) fn tessellator(
+pub(crate) fn tessellator(
     paint: &LayerPaint,
     request: &VectorTileRequest,
 ) -> ZeroTessellator<IndexDataType> {

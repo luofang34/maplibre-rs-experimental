@@ -1,8 +1,34 @@
-//! Direct zero-copy MapLibre Tile (MLT) decoding into vector tile structures.
+//! Direct zero-copy MapLibre Tile (MLT) columnar streaming and MVT fallback conversion.
+
+mod stream;
+mod tessellate;
 
 use mlt_core::{Decoder, Layer, Parser, PropValue, TileFeature, TileLayer};
+use rustc_hash::FxHashMap;
+pub(crate) use tessellate::{index_mlt_bytes, process_mlt_tile_with_assets, visit_mlt_features};
 
-/// Decodes an MLT payload directly into a vector tile without intermediate MVT protobuf re-encoding.
+/// Validates that `data` parses cleanly as one or more MLT layers without decoding column streams.
+pub(crate) fn validate_layers(data: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if data.is_empty() {
+        return Err("empty MLT payload".into());
+    }
+    let layers = Parser::default().parse_layers(data)?;
+    if layers.iter().any(|l| matches!(l, Layer::Tag01(_))) {
+        Ok(())
+    } else {
+        Err("MLT payload contains no Tag01 layers".into())
+    }
+}
+
+/// Returns `true` when `data` is a valid non-empty MLT layer stream.
+#[inline]
+pub(crate) fn is_valid_mlt(data: &[u8]) -> bool {
+    validate_layers(data).is_ok()
+}
+
+/// Decodes an MLT payload into a `geozero::mvt::Tile` using an O(1) value dictionary (used for
+/// parent-tile rescaling and external MVT-model callers; native tile rendering streams columnar
+/// `ParsedLayer01` directly into tessellators via [`process_mlt_tile_with_assets`]).
 pub fn decode(data: &[u8]) -> Result<geozero::mvt::Tile, Box<dyn std::error::Error>> {
     let layers = Parser::default().parse_layers(data)?;
     let mut decoder = Decoder::default();
@@ -18,12 +44,23 @@ pub fn decode(data: &[u8]) -> Result<geozero::mvt::Tile, Box<dyn std::error::Err
     })
 }
 
-fn convert_layer(layer: &TileLayer) -> geozero::mvt::tile::Layer {
+#[derive(PartialEq, Eq, Hash)]
+enum DictKey {
+    Bool(bool),
+    Sint(i64),
+    Uint(u64),
+    F32(u32),
+    F64(u64),
+    Str(String),
+}
+
+pub(super) fn convert_layer(layer: &TileLayer) -> geozero::mvt::tile::Layer {
     let mut values = Vec::new();
+    let mut dict: FxHashMap<DictKey, u32> = FxHashMap::default();
     let features = layer
         .features()
         .iter()
-        .map(|feat| convert_feature(feat, layer.property_names(), &mut values))
+        .map(|feat| convert_feature(feat, layer.property_names(), &mut values, &mut dict))
         .collect();
     geozero::mvt::tile::Layer {
         version: 2,
@@ -39,21 +76,20 @@ fn convert_feature(
     feat: &TileFeature,
     property_names: &[String],
     values: &mut Vec<geozero::mvt::tile::Value>,
+    dict: &mut FxHashMap<DictKey, u32>,
 ) -> geozero::mvt::tile::Feature {
     let (geom_type, geometry) = encode_geometry(feat.geometry());
     let mut tags = Vec::new();
     for (col_idx, prop) in feat.properties().iter().enumerate() {
         if col_idx < property_names.len() {
-            if let Some(val) = prop_to_value(prop) {
-                let val_idx = if let Some(idx) = values.iter().position(|v| v == &val) {
-                    idx
-                } else {
-                    let idx = values.len();
+            if let Some((key, val)) = prop_to_dict_value(prop) {
+                let val_idx = *dict.entry(key).or_insert_with(|| {
+                    let idx = u32::try_from(values.len()).unwrap_or(u32::MAX);
                     values.push(val);
                     idx
-                };
+                });
                 tags.push(col_idx as u32);
-                tags.push(val_idx as u32);
+                tags.push(val_idx);
             }
         }
     }
@@ -113,40 +149,11 @@ fn encode_geometry(geom: &geo_types::Geometry<i32>) -> (i32, Vec<u32>) {
             3
         }
         geo_types::Geometry::Rect(r) => {
-            let poly = geo_types::Polygon::new(
-                geo_types::LineString::from(vec![
-                    geo_types::Coord {
-                        x: r.min().x,
-                        y: r.min().y,
-                    },
-                    geo_types::Coord {
-                        x: r.max().x,
-                        y: r.min().y,
-                    },
-                    geo_types::Coord {
-                        x: r.max().x,
-                        y: r.max().y,
-                    },
-                    geo_types::Coord {
-                        x: r.min().x,
-                        y: r.max().y,
-                    },
-                    geo_types::Coord {
-                        x: r.min().x,
-                        y: r.min().y,
-                    },
-                ]),
-                vec![],
-            );
-            encode_polygon(&poly, &mut out, &mut cursor);
+            encode_polygon(&r.to_polygon(), &mut out, &mut cursor);
             3
         }
         geo_types::Geometry::Triangle(t) => {
-            let poly = geo_types::Polygon::new(
-                geo_types::LineString::from(vec![t.v1(), t.v2(), t.v3(), t.v1()]),
-                vec![],
-            );
-            encode_polygon(&poly, &mut out, &mut cursor);
+            encode_polygon(&t.to_polygon(), &mut out, &mut cursor);
             3
         }
         _ => 0,
@@ -155,7 +162,7 @@ fn encode_geometry(geom: &geo_types::Geometry<i32>) -> (i32, Vec<u32>) {
 }
 
 fn encode_point(p: &geo_types::Point<i32>, out: &mut Vec<u32>, cursor: &mut (i32, i32)) {
-    out.push((1 << 3) | 1); // MoveTo, count 1
+    out.push((1 << 3) | 1);
     out.push(zigzag(p.x() - cursor.0));
     out.push(zigzag(p.y() - cursor.1));
     *cursor = (p.x(), p.y());
@@ -165,7 +172,7 @@ fn encode_linestring(ls: &geo_types::LineString<i32>, out: &mut Vec<u32>, cursor
     if ls.0.is_empty() {
         return;
     }
-    out.push((1 << 3) | 1); // MoveTo, count 1
+    out.push((1 << 3) | 1);
     let first = ls.0[0];
     out.push(zigzag(first.x - cursor.0));
     out.push(zigzag(first.y - cursor.1));
@@ -173,7 +180,7 @@ fn encode_linestring(ls: &geo_types::LineString<i32>, out: &mut Vec<u32>, cursor
 
     let count = ls.0.len() - 1;
     if count > 0 {
-        out.push(((count as u32) << 3) | 2); // LineTo, count
+        out.push(((count as u32) << 3) | 2);
         for pt in &ls.0[1..] {
             out.push(zigzag(pt.x - cursor.0));
             out.push(zigzag(pt.y - cursor.1));
@@ -197,20 +204,20 @@ fn encode_ring(ring: &geo_types::LineString<i32>, out: &mut Vec<u32>, cursor: &m
     if coords.len() < 3 {
         return;
     }
-    out.push((1 << 3) | 1); // MoveTo, count 1
+    out.push((1 << 3) | 1);
     let first = coords[0];
     out.push(zigzag(first.x - cursor.0));
     out.push(zigzag(first.y - cursor.1));
     *cursor = (first.x, first.y);
 
     let line_to_count = coords.len() - 1;
-    out.push(((line_to_count as u32) << 3) | 2); // LineTo
+    out.push(((line_to_count as u32) << 3) | 2);
     for pt in &coords[1..] {
         out.push(zigzag(pt.x - cursor.0));
         out.push(zigzag(pt.y - cursor.1));
         *cursor = (pt.x, pt.y);
     }
-    out.push((1 << 3) | 7); // ClosePath
+    out.push((1 << 3) | 7);
 }
 
 #[inline]
@@ -218,48 +225,93 @@ fn zigzag(n: i32) -> u32 {
     ((n << 1) ^ (n >> 31)) as u32
 }
 
-fn prop_to_value(prop: &PropValue) -> Option<geozero::mvt::tile::Value> {
+fn prop_to_dict_value(prop: &PropValue) -> Option<(DictKey, geozero::mvt::tile::Value)> {
     match prop {
-        PropValue::Bool(Some(b)) => Some(geozero::mvt::tile::Value {
-            bool_value: Some(*b),
-            ..Default::default()
-        }),
-        PropValue::I8(Some(i)) => Some(geozero::mvt::tile::Value {
-            sint_value: Some(*i as i64),
-            ..Default::default()
-        }),
-        PropValue::U8(Some(u)) => Some(geozero::mvt::tile::Value {
-            uint_value: Some(*u as u64),
-            ..Default::default()
-        }),
-        PropValue::I32(Some(i)) => Some(geozero::mvt::tile::Value {
-            sint_value: Some(*i as i64),
-            ..Default::default()
-        }),
-        PropValue::U32(Some(u)) => Some(geozero::mvt::tile::Value {
-            uint_value: Some(*u as u64),
-            ..Default::default()
-        }),
-        PropValue::I64(Some(i)) => Some(geozero::mvt::tile::Value {
-            sint_value: Some(*i),
-            ..Default::default()
-        }),
-        PropValue::U64(Some(u)) => Some(geozero::mvt::tile::Value {
-            uint_value: Some(*u),
-            ..Default::default()
-        }),
-        PropValue::F32(Some(f)) => Some(geozero::mvt::tile::Value {
-            float_value: Some(*f),
-            ..Default::default()
-        }),
-        PropValue::F64(Some(f)) => Some(geozero::mvt::tile::Value {
-            double_value: Some(*f),
-            ..Default::default()
-        }),
-        PropValue::Str(Some(s)) => Some(geozero::mvt::tile::Value {
-            string_value: Some(s.to_string()),
-            ..Default::default()
-        }),
+        PropValue::Bool(Some(b)) => Some((
+            DictKey::Bool(*b),
+            geozero::mvt::tile::Value {
+                bool_value: Some(*b),
+                ..Default::default()
+            },
+        )),
+        PropValue::I8(Some(i)) => {
+            let v = i64::from(*i);
+            Some((
+                DictKey::Sint(v),
+                geozero::mvt::tile::Value {
+                    sint_value: Some(v),
+                    ..Default::default()
+                },
+            ))
+        }
+        PropValue::U8(Some(u)) => {
+            let v = u64::from(*u);
+            Some((
+                DictKey::Uint(v),
+                geozero::mvt::tile::Value {
+                    uint_value: Some(v),
+                    ..Default::default()
+                },
+            ))
+        }
+        PropValue::I32(Some(i)) => {
+            let v = i64::from(*i);
+            Some((
+                DictKey::Sint(v),
+                geozero::mvt::tile::Value {
+                    sint_value: Some(v),
+                    ..Default::default()
+                },
+            ))
+        }
+        PropValue::U32(Some(u)) => {
+            let v = u64::from(*u);
+            Some((
+                DictKey::Uint(v),
+                geozero::mvt::tile::Value {
+                    uint_value: Some(v),
+                    ..Default::default()
+                },
+            ))
+        }
+        PropValue::I64(Some(i)) => Some((
+            DictKey::Sint(*i),
+            geozero::mvt::tile::Value {
+                sint_value: Some(*i),
+                ..Default::default()
+            },
+        )),
+        PropValue::U64(Some(u)) => Some((
+            DictKey::Uint(*u),
+            geozero::mvt::tile::Value {
+                uint_value: Some(*u),
+                ..Default::default()
+            },
+        )),
+        PropValue::F32(Some(f)) => Some((
+            DictKey::F32(f.to_bits()),
+            geozero::mvt::tile::Value {
+                float_value: Some(*f),
+                ..Default::default()
+            },
+        )),
+        PropValue::F64(Some(f)) => Some((
+            DictKey::F64(f.to_bits()),
+            geozero::mvt::tile::Value {
+                double_value: Some(*f),
+                ..Default::default()
+            },
+        )),
+        PropValue::Str(Some(s)) => {
+            let text = s.to_string();
+            Some((
+                DictKey::Str(text.clone()),
+                geozero::mvt::tile::Value {
+                    string_value: Some(text),
+                    ..Default::default()
+                },
+            ))
+        }
         _ => None,
     }
 }

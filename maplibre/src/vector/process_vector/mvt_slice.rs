@@ -306,6 +306,10 @@ pub(crate) fn index_mvt_bytes(
     promote_id: Option<&crate::style::source::PromoteId>,
     feature_state: Option<&Arc<crate::style::feature_state::SourceFeatureState>>,
 ) -> Vec<crate::io::geometry_index::IndexedGeometry<f64>> {
+    #[cfg(feature = "mlt")]
+    if !looks_like_mvt(mvt_bytes) && crate::vector::mlt::is_valid_mlt(mvt_bytes) {
+        return crate::vector::mlt::index_mlt_bytes(mvt_bytes, promote_id, feature_state);
+    }
     let Ok(tile) = super::decode_tile(mvt_bytes) else {
         return Vec::new();
     };
@@ -333,6 +337,53 @@ pub(crate) fn index_mvt_bytes(
         let _ = process_mvt_slice(layer, None, skip_props, &mut index);
     }
     index.get_geometries()
+}
+
+/// Non-allocating check returning `true` when `data` is an empty/zero-padded buffer or frames
+/// cleanly as top-level MVT `Tile.layers` records (`field 3, wire_type 2`) with valid layer names.
+#[cfg(feature = "mlt")]
+pub(crate) fn looks_like_mvt(data: &[u8]) -> bool {
+    let end = data
+        .iter()
+        .rposition(|byte| *byte != 0)
+        .map_or(0, |idx| idx + 1);
+    let bytes = &data[..end];
+    if bytes.is_empty() {
+        return true;
+    }
+    let mut pos = 0;
+    let mut saw_mvt_layer = false;
+    while pos < bytes.len() {
+        let Some(tag) = read_varint(bytes, &mut pos) else {
+            return false;
+        };
+        let field_num = tag >> 3;
+        let wire_type = tag & 0x07;
+        if field_num == 3 && wire_type == 2 {
+            let Some(len) = read_varint(bytes, &mut pos).and_then(|v| usize::try_from(v).ok())
+            else {
+                return false;
+            };
+            let Some(slice_end) = pos.checked_add(len) else {
+                return false;
+            };
+            let Some(layer_bytes) = bytes.get(pos..slice_end) else {
+                return false;
+            };
+            pos = slice_end;
+            if scan_mvt_layer_name(layer_bytes).is_none() {
+                return false;
+            }
+            saw_mvt_layer = true;
+        } else if field_num >= 16 {
+            if skip_wire_value(bytes, &mut pos, wire_type).is_none() {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
+    saw_mvt_layer
 }
 
 /// Scans raw MVT protobuf wire tags (`Tile.layers = 3`, `Layer.name = 1`) and decodes only layers

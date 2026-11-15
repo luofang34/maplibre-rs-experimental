@@ -22,6 +22,7 @@ cgmath.workspace = true
 criterion.workspace = true
 geozero.workspace = true
 image.workspace = true
+mlt-core.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 wgpu.workspace = true

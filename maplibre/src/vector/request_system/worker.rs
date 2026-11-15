@@ -328,7 +328,9 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
     // Only a source still waiting for images keeps its tile and layers to lay out again.
     let again = (!assets.awaiting.is_empty()).then(|| (tile.clone(), request.clone()));
     if again.is_none() {
-        if let Some(inner) = Arc::get_mut(&mut tile) {
+        if let Some(crate::vector::process_vector::DecodedVectorTile::Mvt(inner)) =
+            Arc::get_mut(&mut tile)
+        {
             inner.layers.retain(|mvt| {
                 request
                     .layers
@@ -359,7 +361,10 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
 async fn tessellate<T: VectorTransferables, C: Context + Send>(
     context: C,
     (last_source, index_geometry): (bool, bool),
-    (tile, request): (Arc<geozero::mvt::Tile>, VectorTileRequest),
+    (tile, request): (
+        Arc<crate::vector::process_vector::DecodedVectorTile>,
+        VectorTileRequest,
+    ),
     (promote_id, feature_state): (
         Option<crate::style::source::PromoteId>,
         Option<crate::style::feature_state::SourceFeatureState>,

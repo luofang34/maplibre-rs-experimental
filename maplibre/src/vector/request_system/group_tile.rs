@@ -4,8 +4,10 @@
 
 use std::sync::Arc;
 
-use geozero::mvt::{Message, Tile};
+use geozero::mvt::Message;
 
+#[cfg(feature = "mlt")]
+use crate::vector::process_vector::looks_like_mvt;
 use crate::{
     coords::WorldTileCoords,
     io::{
@@ -14,11 +16,11 @@ use crate::{
         tile_sources::SourceLayerGroup,
     },
     sdf::assets::AssetFailure,
-    vector::process_vector::{decode_tile, decode_tile_for_layers},
+    vector::process_vector::{decode_tile, decode_tile_for_layers, DecodedVectorTile},
 };
 
 pub(super) struct GroupTile {
-    pub tile: Arc<Tile>,
+    pub tile: Arc<DecodedVectorTile>,
     pub mvt_bytes: Arc<[u8]>,
     pub mvt_compressed: bool,
 }
@@ -139,6 +141,20 @@ pub(super) fn decode_group_tile<H: HttpClient>(
     };
     match payload {
         RawPayload::Owned { bytes, label } => {
+            #[cfg(feature = "mlt")]
+            if source_tile == coords
+                && !looks_like_mvt(&bytes)
+                && crate::vector::mlt::is_valid_mlt(&bytes)
+            {
+                let raw_arc: Arc<[u8]> = Arc::from(bytes.as_slice());
+                let (mvt_bytes, mvt_compressed) =
+                    crate::io::geometry_index::LazyMvtIndex::pack_vec(bytes);
+                return Ok(GroupTile {
+                    tile: Arc::new(DecodedVectorTile::Mlt(raw_arc)),
+                    mvt_bytes,
+                    mvt_compressed,
+                });
+            }
             let decode_res = if source_tile == coords {
                 decode_tile_for_layers(&bytes, keep_layer)
             } else {
@@ -160,12 +176,26 @@ pub(super) fn decode_group_tile<H: HttpClient>(
                 crate::io::geometry_index::LazyMvtIndex::pack_vec(bytes)
             };
             Ok(GroupTile {
-                tile: Arc::new(tile),
+                tile: Arc::new(DecodedVectorTile::Mvt(tile)),
                 mvt_bytes,
                 mvt_compressed,
             })
         }
         RawPayload::Cached { bytes, url } => {
+            #[cfg(feature = "mlt")]
+            if source_tile == coords
+                && !looks_like_mvt(&bytes)
+                && crate::vector::mlt::is_valid_mlt(&bytes)
+            {
+                let raw_arc: Arc<[u8]> = Arc::from(bytes.as_slice());
+                let (mvt_bytes, mvt_compressed) =
+                    crate::io::geometry_index::LazyMvtIndex::pack_slice(bytes.as_slice());
+                return Ok(GroupTile {
+                    tile: Arc::new(DecodedVectorTile::Mlt(raw_arc)),
+                    mvt_bytes,
+                    mvt_compressed,
+                });
+            }
             let decode_res = if source_tile == coords {
                 decode_tile_for_layers(&bytes, keep_layer)
             } else {
@@ -188,7 +218,7 @@ pub(super) fn decode_group_tile<H: HttpClient>(
                 crate::io::geometry_index::LazyMvtIndex::pack_slice(bytes.as_slice())
             };
             Ok(GroupTile {
-                tile: Arc::new(tile),
+                tile: Arc::new(DecodedVectorTile::Mvt(tile)),
                 mvt_bytes,
                 mvt_compressed,
             })

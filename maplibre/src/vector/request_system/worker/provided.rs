@@ -27,7 +27,10 @@ use crate::{
 /// What one source's symbols need from providers.
 pub(super) struct Symbols {
     /// The source's decoded tile and symbol layers, kept while some images are still to come.
-    pub(super) again: Option<(Arc<geozero::mvt::Tile>, VectorTileRequest)>,
+    pub(super) again: Option<(
+        Arc<crate::vector::process_vector::DecodedVectorTile>,
+        VectorTileRequest,
+    )>,
     /// Device pixels per layout pixel the images are made for.
     pub(super) pixel_ratio: f32,
     /// Every provided name the labels ask for.

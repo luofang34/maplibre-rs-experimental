@@ -115,12 +115,13 @@ pub(crate) async fn load_symbol_assets_awaiting<'l, HC: HttpClient>(
 }
 
 /// Like [`load_symbol_assets_awaiting`], reading symbol glyph and icon requests from an
-/// already-decoded [`geozero::mvt::Tile`] so the worker does not decode the MVT protobuf again.
+/// already-decoded [`crate::vector::DecodedVectorTile`] so the worker does not decode the tile
+/// payload again.
 pub(crate) async fn load_symbol_assets_awaiting_from_tile<'l, HC: HttpClient>(
     client: &SourceClient<HC>,
     config: SymbolAssetConfig<'_>,
     layers: impl IntoIterator<Item = &'l StyleLayer>,
-    tile: &geozero::mvt::Tile,
+    tile: &crate::vector::DecodedVectorTile,
     zoom: f64,
 ) -> Result<LoadedSymbolAssets, SymbolAssetError> {
     let req = symbol_requests_from_tile(layers, tile, zoom, config.style);

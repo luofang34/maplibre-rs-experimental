@@ -91,26 +91,45 @@ pub(super) fn symbol_requests<'l>(
     zoom: f64,
     style: Option<&crate::style::Style>,
 ) -> SymbolRequests {
+    #[cfg(feature = "mlt")]
+    if !crate::vector::looks_like_mvt(data) && crate::vector::mlt::is_valid_mlt(data) {
+        return symbol_requests_from_mlt(layers, data, zoom, style);
+    }
     let Ok(tile) = geozero::mvt::Tile::decode(data) else {
         return SymbolRequests::default();
     };
-    symbol_requests_from_tile(layers, &tile, zoom, style)
+    symbol_requests_from_mvt(layers, &tile, zoom, style)
 }
 
 pub(super) fn symbol_requests_from_tile<'l>(
     layers: impl IntoIterator<Item = &'l StyleLayer>,
-    tile: &geozero::mvt::Tile,
+    tile: &crate::vector::DecodedVectorTile,
     zoom: f64,
     style: Option<&crate::style::Style>,
 ) -> SymbolRequests {
-    struct CompiledSymbolLayer<'a> {
-        paint: &'a crate::style::layer::SymbolPaint,
-        filter: Option<crate::style::filter::Filter>,
-        promote_prop: Option<&'a str>,
-        source_state: Option<&'a crate::style::feature_state::SourceFeatureState>,
+    match tile {
+        crate::vector::DecodedVectorTile::Mvt(mvt) => {
+            symbol_requests_from_mvt(layers, mvt, zoom, style)
+        }
+        #[cfg(feature = "mlt")]
+        crate::vector::DecodedVectorTile::Mlt(bytes) => {
+            symbol_requests_from_mlt(layers, bytes, zoom, style)
+        }
     }
+}
 
-    let mut by_source_layer: HashMap<&str, Vec<CompiledSymbolLayer<'_>>> = HashMap::new();
+struct CompiledSymbolLayer<'l, 's> {
+    paint: &'l crate::style::layer::SymbolPaint,
+    filter: Option<crate::style::filter::Filter>,
+    promote_prop: Option<&'s str>,
+    source_state: Option<&'s crate::style::feature_state::SourceFeatureState>,
+}
+
+fn compile_symbol_layers<'l, 's>(
+    layers: impl IntoIterator<Item = &'l StyleLayer>,
+    style: Option<&'s crate::style::Style>,
+) -> HashMap<&'l str, Vec<CompiledSymbolLayer<'l, 's>>> {
+    let mut by_source_layer: HashMap<&str, Vec<CompiledSymbolLayer<'_, '_>>> = HashMap::new();
     for layer in layers {
         if layer.is_hidden() {
             continue;
@@ -149,16 +168,81 @@ pub(super) fn symbol_requests_from_tile<'l>(
                 source_state,
             });
     }
+    by_source_layer
+}
 
-    let mut fonts = GlyphRequests::new();
-    let mut labels: HashMap<String, BTreeSet<String>> = HashMap::new();
-    let mut icons = HashSet::new();
-    if by_source_layer.is_empty() {
-        return SymbolRequests {
-            fonts,
-            labels,
-            icons,
+fn record_feature_symbol_requests(
+    out: &mut SymbolRequests,
+    compiled_layers: &[CompiledSymbolLayer<'_, '_>],
+    source_name: &str,
+    raw_id: Option<u64>,
+    geometry_type: crate::style::filter::GeometryType,
+    base_properties: &crate::style::expression::FeatureProperties,
+    zoom: f64,
+) {
+    let feature_id = raw_id.map(|id| crate::style::expression::Value::Number(id as f64));
+    let mut state_scratch: Option<crate::style::expression::FeatureProperties> = None;
+
+    for compiled in compiled_layers {
+        let props = if compiled.source_state.is_some() || compiled.promote_prop.is_some() {
+            let scratch = state_scratch.insert(base_properties.clone());
+            crate::style::feature_state::sync_properties_feature_state(
+                scratch,
+                raw_id,
+                compiled.promote_prop,
+                compiled.source_state,
+                Some(source_name),
+            );
+            &*scratch
+        } else {
+            base_properties
         };
+        if let Some(filter) = &compiled.filter {
+            if !filter.evaluate(&crate::style::filter::FeatureContext {
+                properties: props,
+                geometry_type,
+                id: feature_id.clone(),
+                zoom,
+            }) {
+                continue;
+            }
+        }
+        let asked = NamesAsked::default();
+        glyphs(
+            &mut out.fonts,
+            &mut out.labels,
+            compiled.paint,
+            (props, zoom),
+            &asked,
+        );
+        if let Some(icon) = compiled
+            .paint
+            .text_among_images("icon-image", props, zoom, &asked)
+            .filter(|icon| !icon.is_empty())
+        {
+            out.icons.insert(icon);
+        }
+        out.icons.extend(
+            compiled
+                .paint
+                .label_sections_among(props, zoom, Some(&asked))
+                .into_iter()
+                .filter_map(|section| section.image),
+        );
+        out.icons.extend(asked.0.into_inner());
+    }
+}
+
+fn symbol_requests_from_mvt<'l>(
+    layers: impl IntoIterator<Item = &'l StyleLayer>,
+    tile: &geozero::mvt::Tile,
+    zoom: f64,
+    style: Option<&crate::style::Style>,
+) -> SymbolRequests {
+    let by_source_layer = compile_symbol_layers(layers, style);
+    let mut out = SymbolRequests::default();
+    if by_source_layer.is_empty() {
+        return out;
     }
 
     let empty_props = crate::style::expression::empty_feature_properties();
@@ -181,65 +265,48 @@ pub(super) fn symbol_requests_from_tile<'l>(
                 };
             let geometry_type =
                 crate::style::filter::GeometryType::from_mvt(feature.r#type.unwrap_or_default());
-            let feature_id = feature
-                .id
-                .map(|id| crate::style::expression::Value::Number(id as f64));
-            let mut state_scratch: Option<crate::style::expression::FeatureProperties> = None;
-
-            for compiled in compiled_layers {
-                let props = if compiled.source_state.is_some() || compiled.promote_prop.is_some() {
-                    let scratch = state_scratch.insert(base_properties.clone());
-                    crate::style::feature_state::sync_properties_feature_state(
-                        scratch,
-                        feature.id,
-                        compiled.promote_prop,
-                        compiled.source_state,
-                        Some(&source.name),
-                    );
-                    &*scratch
-                } else {
-                    base_properties
-                };
-                if let Some(filter) = &compiled.filter {
-                    if !filter.evaluate(&crate::style::filter::FeatureContext {
-                        properties: props,
-                        geometry_type,
-                        id: feature_id.clone(),
-                        zoom,
-                    }) {
-                        continue;
-                    }
-                }
-                // Every image the label or icon can reach is asked about, so each is requested.
-                let asked = NamesAsked::default();
-                glyphs(
-                    &mut fonts,
-                    &mut labels,
-                    compiled.paint,
-                    (props, zoom),
-                    &asked,
-                );
-                if let Some(icon) = compiled
-                    .paint
-                    .text_among_images("icon-image", props, zoom, &asked)
-                    .filter(|icon| !icon.is_empty())
-                {
-                    icons.insert(icon);
-                }
-                icons.extend(
-                    compiled
-                        .paint
-                        .label_sections_among(props, zoom, Some(&asked))
-                        .into_iter()
-                        .filter_map(|section| section.image),
-                );
-                icons.extend(asked.0.into_inner());
-            }
+            record_feature_symbol_requests(
+                &mut out,
+                compiled_layers,
+                &source.name,
+                feature.id,
+                geometry_type,
+                base_properties,
+                zoom,
+            );
         }
     }
-    SymbolRequests {
-        fonts,
-        labels,
-        icons,
+    out
+}
+
+#[cfg(feature = "mlt")]
+fn symbol_requests_from_mlt<'l>(
+    layers: impl IntoIterator<Item = &'l StyleLayer>,
+    data: &[u8],
+    zoom: f64,
+    style: Option<&crate::style::Style>,
+) -> SymbolRequests {
+    let by_source_layer = compile_symbol_layers(layers, style);
+    let mut out = SymbolRequests::default();
+    if by_source_layer.is_empty() {
+        return out;
     }
+    crate::vector::mlt::visit_mlt_features(
+        data,
+        |name| by_source_layer.contains_key(name),
+        |source_name, raw_id, geometry_type, base_properties| {
+            if let Some(compiled_layers) = by_source_layer.get(source_name) {
+                record_feature_symbol_requests(
+                    &mut out,
+                    compiled_layers,
+                    source_name,
+                    raw_id,
+                    geometry_type,
+                    base_properties,
+                    zoom,
+                );
+            }
+        },
+    );
+    out
 }

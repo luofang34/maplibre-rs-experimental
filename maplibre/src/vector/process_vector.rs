@@ -152,6 +152,20 @@ mod mvt_slice;
 mod processing;
 mod shared_geometry;
 pub(crate) use mvt_slice::index_mvt_bytes;
+#[cfg(feature = "mlt")]
+pub(crate) use mvt_slice::looks_like_mvt;
+#[cfg(feature = "mlt")]
+pub(crate) use processing::{
+    process_layer as process_layer_from_mvt, tessellator as build_zero_tessellator,
+};
+
+/// Pre-decoded MVT protobuf or validated zero-copy MLT columnar byte slice shared across base and
+/// symbol passes of a tile worker.
+pub(crate) enum DecodedVectorTile {
+    Mvt(geozero::mvt::Tile),
+    #[cfg(feature = "mlt")]
+    Mlt(std::sync::Arc<[u8]>),
+}
 
 /// Decodes a tile, tolerating the zero padding some tile servers append: a zero tag is not a
 /// field, so a strict decoder rejects a tile that GL JS reads.
@@ -202,6 +216,10 @@ pub(crate) fn process_vector_tile_with_assets<T: VectorTransferables, C: Context
     context: &mut ProcessVectorContext<T, C>,
     atlas: std::sync::Arc<crate::sdf::assets::SymbolAtlas>,
 ) -> Result<(), ProcessVectorError> {
+    #[cfg(feature = "mlt")]
+    if !looks_like_mvt(data) && super::mlt::is_valid_mlt(data) {
+        return super::mlt::process_mlt_tile_with_assets(data, tile_request, context, atlas);
+    }
     let decode_res = if context.index_geometry && T::LayerIndexed::requires_geometry_index() {
         decode_tile(data)
     } else {
@@ -216,10 +234,27 @@ pub(crate) fn process_vector_tile_with_assets<T: VectorTransferables, C: Context
         coords: tile_request.coords,
         source,
     })?;
-    process_decoded_vector_tile_with_assets(&tile, tile_request, context, atlas)
+    process_mvt_tile_with_assets(&tile, tile_request, context, atlas)
 }
 
 pub(crate) fn process_decoded_vector_tile_with_assets<T: VectorTransferables, C: Context>(
+    decoded: &DecodedVectorTile,
+    tile_request: VectorTileRequest,
+    context: &mut ProcessVectorContext<T, C>,
+    atlas: std::sync::Arc<crate::sdf::assets::SymbolAtlas>,
+) -> Result<(), ProcessVectorError> {
+    match decoded {
+        DecodedVectorTile::Mvt(tile) => {
+            process_mvt_tile_with_assets(tile, tile_request, context, atlas)
+        }
+        #[cfg(feature = "mlt")]
+        DecodedVectorTile::Mlt(bytes) => {
+            super::mlt::process_mlt_tile_with_assets(bytes, tile_request, context, atlas)
+        }
+    }
+}
+
+fn process_mvt_tile_with_assets<T: VectorTransferables, C: Context>(
     tile: &geozero::mvt::Tile,
     tile_request: VectorTileRequest,
     context: &mut ProcessVectorContext<T, C>,
@@ -365,12 +400,20 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
         self
     }
 
+    #[cfg(feature = "mlt")]
+    pub(crate) fn index_geometry(&self) -> bool {
+        self.index_geometry
+    }
+
     /// Returns the owned reply endpoint after processing.
     pub fn take_context(self) -> C {
         self.context
     }
 
-    fn tile_finished(&mut self, coords: &WorldTileCoords) -> Result<(), ProcessVectorError> {
+    pub(crate) fn tile_finished(
+        &mut self,
+        coords: &WorldTileCoords,
+    ) -> Result<(), ProcessVectorError> {
         let message = match self.completion {
             Completion::Deferred => return Ok(()),
             Completion::PendingSymbols => T::TileTessellated::build_partial(*coords),
@@ -381,7 +424,7 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
             .map_err(ProcessVectorError::SendError)
     }
 
-    fn layer_missing(
+    pub(crate) fn layer_missing(
         &mut self,
         coords: &WorldTileCoords,
         layer_name: &str,
@@ -391,7 +434,7 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
             .map_err(ProcessVectorError::SendError)
     }
 
-    fn layer_tessellation_finished(
+    pub(crate) fn layer_tessellation_finished(
         &mut self,
         coords: &WorldTileCoords,
         buffer: OverAlignedVertexBuffer<ShaderVertex, IndexDataType>,
@@ -418,7 +461,7 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
             .map_err(ProcessVectorError::SendError)
     }
 
-    fn symbol_layer_tessellation_finished(
+    pub(crate) fn symbol_layer_tessellation_finished(
         &mut self,
         layer: crate::vector::transferables::DefaultSymbolLayerTessellated,
     ) -> Result<(), ProcessVectorError> {
@@ -434,7 +477,7 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
             .map_err(ProcessVectorError::SendError)
     }
 
-    fn layer_indexing_finished(
+    pub(crate) fn layer_indexing_finished(
         &mut self,
         coords: &WorldTileCoords,
         source: Option<String>,
