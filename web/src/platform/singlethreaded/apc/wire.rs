@@ -2,7 +2,10 @@
 
 #![deny(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::{
+    cell::RefCell,
+    sync::{Arc, Mutex, MutexGuard},
+};
 
 use js_sys::{ArrayBuffer, Uint8Array};
 use maplibre::{
@@ -15,7 +18,7 @@ use maplibre::{
 };
 use thiserror::Error;
 use wasm_bindgen::{JsCast, JsValue};
-use web_sys::DedicatedWorkerGlobalScope;
+use web_sys::{DedicatedWorkerGlobalScope, MessagePort};
 
 use super::WebMessageTag;
 use crate::{
@@ -24,6 +27,18 @@ use crate::{
 };
 
 pub(crate) const BATCH_ITEM_HEADER_BYTES: usize = 20;
+
+thread_local! {
+    static REPLY_PORT: RefCell<Option<MessagePort>> = const { RefCell::new(None) };
+}
+
+/// Binds a direct `MessagePort` for tile worker replies (used when a dedicated `OffscreenCanvas`
+/// render worker talks directly to tile workers without routing through the UI main thread).
+pub(crate) fn set_worker_reply_port(port: Option<MessagePort>) {
+    REPLY_PORT.with(|slot| {
+        *slot.borrow_mut() = port;
+    });
+}
 
 struct BufferedItem {
     tag: WebMessageTag,
@@ -50,7 +65,6 @@ impl PassingContext {
         if items.is_empty() {
             return Ok(());
         }
-        let global = worker_global_scope()?;
         let (wire_tag, buffer) = if items.len() == 1 {
             let mut iter = items.into_iter();
             let Some(item) = iter.next() else {
@@ -60,7 +74,7 @@ impl PassingContext {
         } else {
             (WebMessageTag::BatchPayload, encode_batch_items(&items))
         };
-        post_wire_message(&global, wire_tag, &buffer)
+        post_wire_message(wire_tag, &buffer)
     }
 }
 
@@ -82,20 +96,26 @@ fn worker_global_scope() -> Result<DedicatedWorkerGlobalScope, SendError> {
         })
 }
 
-fn post_wire_message(
-    global: &DedicatedWorkerGlobalScope,
-    tag: WebMessageTag,
-    buffer: &ArrayBuffer,
-) -> Result<(), SendError> {
-    global
-        .post_message_with_transfer(
-            &js_sys::Array::of2(&JsValue::from(tag as u32), buffer),
-            &js_sys::Array::of1(buffer),
-        )
-        .map_err(|source| SendError::Transmission {
-            operation: "posting a worker result",
+fn post_wire_message(tag: WebMessageTag, buffer: &ArrayBuffer) -> Result<(), SendError> {
+    let payload = js_sys::Array::of2(&JsValue::from(tag as u32), buffer);
+    let transfer = js_sys::Array::of1(buffer);
+    let posted = REPLY_PORT.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .map(|port| port.post_message_with_transferable(&payload, &transfer))
+    });
+    match posted {
+        Some(res) => res.map_err(|source| SendError::Transmission {
+            operation: "posting a worker result over MessagePort",
             source: Box::new(WebError::from(source)),
-        })
+        }),
+        None => worker_global_scope()?
+            .post_message_with_transfer(&payload, &transfer)
+            .map_err(|source| SendError::Transmission {
+                operation: "posting a worker result",
+                source: Box::new(WebError::from(source)),
+            }),
+    }
 }
 
 impl Context for PassingContext {
@@ -103,7 +123,6 @@ impl Context for PassingContext {
         let message = message.into();
         let attempt = message.attempt();
         let (tag, payload) = prepare_payload_bytes(message)?;
-        let global = worker_global_scope()?;
         if tag.is_intermediate_layer() {
             lock_pending(&self.pending).push(BufferedItem {
                 tag,
@@ -116,7 +135,7 @@ impl Context for PassingContext {
         if items.is_empty() {
             let (wire_tag, buffer) = encode_single_item(tag, attempt, &payload);
             drop(payload);
-            return post_wire_message(&global, wire_tag, &buffer);
+            return post_wire_message(wire_tag, &buffer);
         }
         items.push(BufferedItem {
             tag,
@@ -125,7 +144,7 @@ impl Context for PassingContext {
         });
         let buffer = encode_batch_items(&items);
         drop(items);
-        post_wire_message(&global, WebMessageTag::BatchPayload, &buffer)
+        post_wire_message(WebMessageTag::BatchPayload, &buffer)
     }
 }
 
@@ -305,9 +324,8 @@ pub(crate) fn decode_call_finished(buffer: &ArrayBuffer) -> Result<u64, CallErro
 
 /// Tells the main thread this worker stopped running the call for `attempt`.
 pub(crate) fn post_call_finished(attempt: u64) -> Result<(), SendError> {
-    let global = worker_global_scope()?;
     let buffer = encode_call_finished(attempt);
-    post_wire_message(&global, WebMessageTag::CallFinished, &buffer)
+    post_wire_message(WebMessageTag::CallFinished, &buffer)
 }
 
 #[derive(Debug, Error)]

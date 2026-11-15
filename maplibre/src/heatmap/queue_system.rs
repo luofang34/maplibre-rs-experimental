@@ -112,6 +112,7 @@ pub fn queue_system(
                         coords: entry.coords,
                     },
                     source_shape: source_shape.clone(),
+                    mask_group: crate::render::render_phase::MaskGroup::Vector,
                     run: None,
                 });
             }
@@ -133,6 +134,7 @@ pub fn queue_system(
                 coords: any_shape.coords(),
             },
             source_shape: any_shape.clone(),
+            mask_group: crate::render::render_phase::MaskGroup::Unmasked,
             run: None,
         });
     }

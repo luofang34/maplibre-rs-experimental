@@ -10,6 +10,8 @@ mod arena_telemetry;
 mod controller;
 mod environment;
 mod error;
+#[cfg(not(target_feature = "atomics"))]
+mod offscreen;
 mod platform;
 mod startup;
 

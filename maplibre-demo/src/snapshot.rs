@@ -88,10 +88,21 @@ pub async fn render_snapshot(
         settings.terrain_drape_size = 512;
     }
 
-    let (renderer_res, ()) = tokio::join!(
+    let timeout_budget = Duration::from_secs(opts.timeout_secs);
+    let deadline = Instant::now() + timeout_budget;
+    let (renderer_res, tile_json_res) = tokio::join!(
         create_headless_renderer_with_loader(opts.width, opts.height, settings, loader),
-        resolve_tile_json_sources(&mut opts.style, &source_client),
+        tokio::time::timeout(
+            timeout_budget,
+            resolve_tile_json_sources(&mut opts.style, &source_client),
+        ),
     );
+    if tile_json_res.is_err() {
+        tracing::warn!(
+            timeout_secs = opts.timeout_secs,
+            "TileJSON resolution timed out before snapshot frame loop"
+        );
+    }
     let (kernel, renderer) = renderer_res?;
 
     let notify = Arc::new(tokio::sync::Notify::new());
@@ -167,7 +178,6 @@ pub async fn render_snapshot(
         }
     }
 
-    let deadline = Instant::now() + Duration::from_secs(opts.timeout_secs);
     let mut idle_streak = 0_u32;
     let mut sim_time = Duration::ZERO;
     for frame in 0..opts.max_frames {

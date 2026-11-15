@@ -78,16 +78,12 @@ impl RenderCommand<TranslucentItem> for DrawSymbol {
             return RenderCommandResult::Failure;
         };
 
-        let reference = item.source_shape.coords().stencil_reference_value_3d() as u32;
-
         let index_range = entry.indices_buffer_range();
 
         if index_range.is_empty() {
             tracing::error!("Tried to draw a vector tile without any vertices");
             return RenderCommandResult::Failure;
         }
-
-        pass.set_stencil_reference(reference);
 
         let whole = world
             .resources

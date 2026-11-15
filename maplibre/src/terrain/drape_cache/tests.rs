@@ -23,6 +23,7 @@ fn spec(coords: WorldTileCoords, sources: &[WorldTileCoords]) -> TargetSpec {
             .map(|source| ShapeSpec {
                 view_complete: false,
                 source: *source,
+                is_vector: false,
                 vector_layers: vec![VectorLayerSpec {
                     id: "water".to_string(),
                     index: 2,

@@ -17,8 +17,8 @@ pub trait MapWindow {
 /// Window which references a physical `RawWindow`. This is only implemented by headed windows and
 /// not by headless windows.
 pub trait HeadedMapWindow: MapWindow {
-    /// A clonable owner of the window and display handles retained by each presentation surface.
-    type WindowHandle: wgpu::DisplayAndWindowHandle + Clone + 'static;
+    /// A clonable owner of the window or canvas surface target retained by each presentation surface.
+    type WindowHandle: Into<wgpu::SurfaceTarget<'static>> + Clone + 'static;
 
     /// Borrows the owner that surface creation clones to keep the platform window alive.
     fn handle(&self) -> &Self::WindowHandle;

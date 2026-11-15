@@ -16,7 +16,6 @@ use serde::{de::DeserializeOwned, Serialize};
 use wasm_bindgen::prelude::*;
 
 use crate::{
-    application::MapType,
     environment::CurrentEnvironment,
     error::{ArgumentError, JSError},
 };
@@ -28,11 +27,48 @@ use options::{
     try_read_camera_fast, Animation, Camera, CameraState, Feature, Query, ScreenGeometry,
 };
 
+#[derive(Clone)]
+pub(crate) enum ControllerHandle {
+    Main(MapHandle<CurrentEnvironment>),
+    #[cfg(not(target_feature = "atomics"))]
+    Offscreen(MapHandle<crate::offscreen::OffscreenEnvironment>),
+}
+
+impl ControllerHandle {
+    pub(crate) fn is_closed(&self) -> bool {
+        match self {
+            Self::Main(h) => h.is_closed(),
+            #[cfg(not(target_feature = "atomics"))]
+            Self::Offscreen(h) => h.is_closed(),
+        }
+    }
+
+    pub(crate) fn close(&self) {
+        match self {
+            Self::Main(h) => h.close(),
+            #[cfg(not(target_feature = "atomics"))]
+            Self::Offscreen(h) => h.close(),
+        }
+    }
+}
+
+macro_rules! with_controller_handle {
+    ($handle:expr, |$h:ident| $body:expr) => {
+        match $handle {
+            $crate::controller::ControllerHandle::Main($h) => $body,
+            #[cfg(not(target_feature = "atomics"))]
+            $crate::controller::ControllerHandle::Offscreen($h) => $body,
+        }
+    };
+}
+#[cfg(feature = "arena-telemetry")]
+pub(crate) use with_controller_handle;
+
 /// A running map, as `startMapLibre` resolves it.
 #[wasm_bindgen]
 #[derive(Clone)]
 pub struct MapController {
-    handle: MapHandle<CurrentEnvironment>,
+    pub(crate) handle: ControllerHandle,
     coalesced: Rc<CoalescedCommands>,
     #[cfg(feature = "arena-telemetry")]
     pub(crate) watchers: crate::arena_telemetry::TelemetryWatchers,
@@ -50,7 +86,17 @@ impl MapController {
     /// Controls the map `handle` sends commands to.
     pub fn new(handle: MapHandle<CurrentEnvironment>) -> Self {
         Self {
-            handle,
+            handle: ControllerHandle::Main(handle),
+            coalesced: Rc::default(),
+            #[cfg(feature = "arena-telemetry")]
+            watchers: Default::default(),
+        }
+    }
+
+    #[cfg(not(target_feature = "atomics"))]
+    pub(crate) fn new_offscreen(handle: MapHandle<crate::offscreen::OffscreenEnvironment>) -> Self {
+        Self {
+            handle: ControllerHandle::Offscreen(handle),
             coalesced: Rc::default(),
             #[cfg(feature = "arena-telemetry")]
             watchers: Default::default(),
@@ -58,27 +104,14 @@ impl MapController {
     }
 
     /// The handle underneath, for a Rust host that reads or changes what JavaScript cannot.
-    pub fn handle(&self) -> &MapHandle<CurrentEnvironment> {
-        &self.handle
-    }
-
-    /// Queues `command` and returns a promise of what it returns, encoded as JSON.
-    fn call<R: Serialize + 'static>(
-        &self,
-        command: impl FnOnce(&mut MapType) -> Result<R, JSError> + 'static,
-    ) -> js_sys::Promise {
-        if self.handle.is_closed() {
-            return js_sys::Promise::resolve(&JsValue::UNDEFINED);
+    ///
+    /// Returns `None` when the map runs inside a dedicated `OffscreenCanvas` worker.
+    pub fn try_handle(&self) -> Option<&MapHandle<CurrentEnvironment>> {
+        match &self.handle {
+            ControllerHandle::Main(handle) => Some(handle),
+            #[cfg(not(target_feature = "atomics"))]
+            ControllerHandle::Offscreen(_) => None,
         }
-        settle(flatten(self.handle.call(command)))
-    }
-
-    /// Queues a style change; GL JS's style setters return nothing.
-    fn change(
-        &self,
-        change: impl FnOnce(&mut MapType) -> Result<StyleChange, maplibre::map::MapError> + 'static,
-    ) -> js_sys::Promise {
-        self.call(move |map| change(map).map(drop).map_err(JSError::from))
     }
 
     /// Starts a move along `curve` and returns a promise of whether it arrived.
@@ -86,28 +119,51 @@ impl MapController {
         if self.handle.is_closed() {
             return js_sys::Promise::resolve(&JsValue::FALSE);
         }
-        let flight = Rc::new(Cell::new(None));
-        let started = {
-            let flight = flight.clone();
-            self.handle.call(move |map| {
-                flight.set(Some(map.fly_to(camera, curve)?));
-                Ok::<_, JSError>(())
+        with_controller_handle!(&self.handle, |handle| {
+            let flight = Rc::new(Cell::new(None));
+            let started = {
+                let flight = flight.clone();
+                handle.call(move |map| {
+                    flight.set(Some(map.fly_to(camera, curve)?));
+                    Ok::<_, JSError>(())
+                })
+            };
+            // Queued right behind the start, so it follows this move and no later one.
+            let arrived = handle.until(move |map| match flight.get() {
+                None => Some(false),
+                Some(id) => match map.flight_outcome(id) {
+                    FlightOutcome::Flying => None,
+                    FlightOutcome::Arrived => Some(true),
+                    FlightOutcome::Interrupted | FlightOutcome::Superseded => Some(false),
+                },
+            });
+            settle(async move {
+                started.await??;
+                Ok(arrived.await?)
             })
-        };
-        // Queued right behind the start, so it follows this move and no later one.
-        let arrived = self.handle.until(move |map| match flight.get() {
-            None => Some(false),
-            Some(id) => match map.flight_outcome(id) {
-                FlightOutcome::Flying => None,
-                FlightOutcome::Arrived => Some(true),
-                FlightOutcome::Interrupted | FlightOutcome::Superseded => Some(false),
-            },
-        });
-        settle(async move {
-            started.await??;
-            Ok(arrived.await?)
         })
     }
+}
+
+macro_rules! settle_call {
+    ($self:ident, |$map:ident| $body:expr) => {{
+        if $self.handle.is_closed() {
+            js_sys::Promise::resolve(&JsValue::UNDEFINED)
+        } else {
+            with_controller_handle!(&$self.handle, |handle| {
+                settle(flatten(handle.call(move |$map| $body)))
+            })
+        }
+    }};
+}
+
+macro_rules! settle_change {
+    ($self:ident, |$map:ident| $body:expr) => {
+        settle_call!($self, |$map| {
+            let _: StyleChange = ($body)?;
+            Ok::<_, JSError>(())
+        })
+    };
 }
 
 #[wasm_bindgen]
@@ -127,7 +183,8 @@ impl MapController {
             Err(error) => return rejected(error),
         };
 
-        let rx = enqueue_jump(&self.handle, &self.coalesced, camera);
+        let rx =
+            with_controller_handle!(&self.handle, |h| enqueue_jump(h, &self.coalesced, camera));
         settle(async move {
             match rx.await {
                 Ok(result) => result,
@@ -156,7 +213,7 @@ impl MapController {
 
     /// Stops a camera move where the camera is, as GL JS `stop`.
     pub fn stop(&self) -> js_sys::Promise {
-        self.call(|map| {
+        settle_call!(self, |map| {
             map.stop_flight();
             Ok(())
         })
@@ -165,7 +222,7 @@ impl MapController {
     /// The camera's center as `[lng, lat]`, zoom, bearing and pitch.
     #[wasm_bindgen(js_name = getCamera)]
     pub fn get_camera(&self) -> js_sys::Promise {
-        self.call(|map| Ok(CameraState::of(map.context()?)))
+        settle_call!(self, |map| Ok(CameraState::of(map.context()?)))
     }
 
     /// Replaces the entire style with a style JSON string, URL, or style object, diffing against
@@ -175,7 +232,7 @@ impl MapController {
         if self.handle.is_closed() {
             return js_sys::Promise::resolve(&JsValue::UNDEFINED);
         }
-        settle(apply_style_swap(self.handle.clone(), style))
+        with_controller_handle!(&self.handle, |h| settle(apply_style_swap(h.clone(), style)))
     }
 
     /// Sets a paint property, as GL JS `setPaintProperty`; `null` restores its default.
@@ -187,7 +244,7 @@ impl MapController {
         value: JsValue,
     ) -> js_sys::Promise {
         match read(&value, "paint value") {
-            Ok(value) => self.change(move |map| map.set_paint_property(&layer, &name, value)),
+            Ok(value) => settle_change!(self, |map| map.set_paint_property(&layer, &name, value)),
             Err(error) => rejected(error),
         }
     }
@@ -201,7 +258,7 @@ impl MapController {
         value: JsValue,
     ) -> js_sys::Promise {
         match read(&value, "layout value") {
-            Ok(value) => self.change(move |map| map.set_layout_property(&layer, &name, value)),
+            Ok(value) => settle_change!(self, |map| map.set_layout_property(&layer, &name, value)),
             Err(error) => rejected(error),
         }
     }
@@ -210,7 +267,7 @@ impl MapController {
     #[wasm_bindgen(js_name = setFilter)]
     pub fn set_filter(&self, layer: String, filter: JsValue) -> js_sys::Promise {
         match read_optional(&filter, "filter") {
-            Ok(filter) => self.change(move |map| map.set_filter(&layer, filter)),
+            Ok(filter) => settle_change!(self, |map| map.set_filter(&layer, filter)),
             Err(error) => rejected(error),
         }
     }
@@ -219,7 +276,7 @@ impl MapController {
     #[wasm_bindgen(js_name = addLayer)]
     pub fn add_layer(&self, layer: JsValue, before_id: Option<String>) -> js_sys::Promise {
         match read(&layer, "layer") {
-            Ok(layer) => self.change(move |map| map.add_layer(layer, before_id.as_deref())),
+            Ok(layer) => settle_change!(self, |map| map.add_layer(layer, before_id.as_deref())),
             Err(error) => rejected(error),
         }
     }
@@ -227,7 +284,7 @@ impl MapController {
     /// Removes a layer, as GL JS `removeLayer`.
     #[wasm_bindgen(js_name = removeLayer)]
     pub fn remove_layer(&self, id: String) -> js_sys::Promise {
-        self.change(move |map| map.remove_layer(&id))
+        settle_change!(self, |map| map.remove_layer(&id))
     }
 
     /// Sets a `global-state` value, as GL JS `setGlobalStateProperty`; `null` restores the
@@ -235,7 +292,7 @@ impl MapController {
     #[wasm_bindgen(js_name = setGlobalStateProperty)]
     pub fn set_global_state_property(&self, name: String, value: JsValue) -> js_sys::Promise {
         match read_optional(&value, "global state value") {
-            Ok(value) => self.call(move |map| {
+            Ok(value) => settle_call!(self, |map| {
                 map.set_global_state(&name, value.unwrap_or_default());
                 Ok(())
             }),
@@ -246,7 +303,7 @@ impl MapController {
     /// Every `global-state` key with its value, as GL JS `getGlobalState`.
     #[wasm_bindgen(js_name = getGlobalState)]
     pub fn get_global_state(&self) -> js_sys::Promise {
-        self.call(|map| Ok(map.global_state()))
+        settle_call!(self, |map| Ok(map.global_state()))
     }
 
     /// Replaces a GeoJSON source's data with a document or a URL, as GL JS
@@ -277,7 +334,9 @@ impl MapController {
             Err(error) => return rejected(error),
         };
 
-        let rx = enqueue_geojson(&self.handle, &self.coalesced, source, geojson);
+        let rx = with_controller_handle!(&self.handle, |h| {
+            enqueue_geojson(h, &self.coalesced, source, geojson)
+        });
         settle(async move {
             match rx.await {
                 Ok(result) => result,
@@ -291,7 +350,7 @@ impl MapController {
     #[wasm_bindgen(js_name = updateGeoJsonData)]
     pub fn update_geojson_data(&self, source: String, diff: JsValue) -> js_sys::Promise {
         match read(&diff, "GeoJSON diff") {
-            Ok(diff) => self.call(move |map| Ok(map.update_geojson_data(&source, &diff)?)),
+            Ok(diff) => settle_call!(self, |map| Ok(map.update_geojson_data(&source, &diff)?)),
             Err(error) => rejected(error),
         }
     }
@@ -309,7 +368,7 @@ impl MapController {
             Ok(arguments) => arguments,
             Err(error) => return rejected(error),
         };
-        self.call(move |map| {
+        settle_call!(self, |map| {
             let geometry = match geometry {
                 Some(geometry) => QueryGeometry::from(geometry),
                 None => {

@@ -9,7 +9,9 @@ use crate::{
     render::{
         eventually::{Eventually, Eventually::Initialized},
         render_commands::DrawMasks,
-        render_phase::{DrawState, LayerItem, ProjectionBinding, RenderPhase, TileMaskItem},
+        render_phase::{
+            DrawState, LayerItem, MaskGroup, ProjectionBinding, RenderPhase, TileMaskItem,
+        },
         tile_view_pattern::WgpuTileViewPattern,
         Renderer,
     },
@@ -133,6 +135,7 @@ fn source_draws(
             draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
             source_shape: source_shape.clone(),
             generate_borders: true,
+            is_vector: false,
         });
     }
     masks.push(TileMaskItem {
@@ -140,6 +143,7 @@ fn source_draws(
         draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
         source_shape: source_shape.clone(),
         generate_borders: false,
+        is_vector: false,
     });
     if source_shape.is_drawn_within_another() {
         // It draws inside the mask of the tile it is drawn over.
@@ -157,6 +161,7 @@ fn source_draws(
                 coords: source_shape.coords(),
             },
             source_shape: source_shape.clone(),
+            mask_group: MaskGroup::Mutating,
             run: None,
         });
     }
@@ -170,6 +175,7 @@ fn source_draws(
             coords: source_shape.coords(),
         },
         source_shape: source_shape.clone(),
+        mask_group: MaskGroup::Mutating,
         run: None,
     });
     (layers, masks)

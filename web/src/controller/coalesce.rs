@@ -17,7 +17,6 @@ use wasm_bindgen::JsValue;
 use super::options::merge_camera;
 use crate::{
     application::parse_style,
-    environment::CurrentEnvironment,
     error::{ArgumentError, JSError},
     platform::http_client::web_http_client,
 };
@@ -53,11 +52,16 @@ impl CoalescedCommands {
     }
 }
 
-pub(super) fn enqueue_jump(
-    handle: &MapHandle<CurrentEnvironment>,
+pub(super) fn enqueue_jump<E>(
+    handle: &MapHandle<E>,
     coalesced: &std::rc::Rc<CoalescedCommands>,
     camera: CameraOptions,
-) -> oneshot::Receiver<Result<(), JSError>> {
+) -> oneshot::Receiver<Result<(), JSError>>
+where
+    E: maplibre::environment::Environment,
+    <E::MapWindowConfig as maplibre::window::MapWindowConfig>::MapWindow:
+        maplibre::window::HeadedMapWindow,
+{
     let (tx, rx) = oneshot::channel();
     let should_enqueue = {
         let mut slot = coalesced.jump.borrow_mut();
@@ -97,12 +101,17 @@ pub(super) fn enqueue_jump(
     rx
 }
 
-pub(super) fn enqueue_geojson(
-    handle: &MapHandle<CurrentEnvironment>,
+pub(super) fn enqueue_geojson<E>(
+    handle: &MapHandle<E>,
     coalesced: &std::rc::Rc<CoalescedCommands>,
     source: String,
     geojson: GeoJsonData,
-) -> oneshot::Receiver<Result<(), JSError>> {
+) -> oneshot::Receiver<Result<(), JSError>>
+where
+    E: maplibre::environment::Environment,
+    <E::MapWindowConfig as maplibre::window::MapWindowConfig>::MapWindow:
+        maplibre::window::HeadedMapWindow,
+{
     let (tx, rx) = oneshot::channel();
     let should_enqueue = {
         let mut map_slot = coalesced.geojson.borrow_mut();
@@ -148,10 +157,12 @@ pub(super) fn enqueue_geojson(
     rx
 }
 
-pub(super) async fn apply_style_swap(
-    handle: MapHandle<CurrentEnvironment>,
-    style: JsValue,
-) -> Result<(), JSError> {
+pub(super) async fn apply_style_swap<E>(handle: MapHandle<E>, style: JsValue) -> Result<(), JSError>
+where
+    E: maplibre::environment::Environment,
+    <E::MapWindowConfig as maplibre::window::MapWindowConfig>::MapWindow:
+        maplibre::window::HeadedMapWindow,
+{
     let style_json =
         if let Some(text) = style.as_string() {
             let trimmed = text.trim();

@@ -71,7 +71,7 @@ impl<const RUNS: bool> RenderCommand<LayerItem> for DrawVectorTile<RUNS> {
 
         let source_shape = &item.source_shape;
 
-        let reference = source_shape.coords().stencil_reference_value_3d() as u32;
+        let reference = u32::from(source_shape.stencil_reference());
 
         tracing::trace!(
             "Drawing layer {:?} at {}",

@@ -326,6 +326,7 @@ pub fn queue_custom_layers_system(
             },
             source_shape: TileShape::default(),
             projection: ProjectionBinding::View,
+            mask_group: crate::render::render_phase::MaskGroup::Custom,
             run: None,
         });
     }

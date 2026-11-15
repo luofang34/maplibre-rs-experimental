@@ -1,7 +1,7 @@
 import * as maplibre from "../wasm/maplibre"
 import {initializeWasm} from "../wasm-instance.mjs";
 
-type MessageData = { type: 'wasm_init', module: WebAssembly.Module }
+type MessageData = { type: 'wasm_init', module: WebAssembly.Module, port?: MessagePort }
     | { type: 'kernel_config', config: string }
     | { type: 'call', procedure_ptr: number, attempt: bigint, style_revision: bigint, input: string }
     | { type: 'style', revision: bigint, style: string }
@@ -52,7 +52,7 @@ const workerCalls = (): TileWorkerCalls => {
     return calls
 }
 
-onmessage = async (message: MessageEvent<MessageData>) => {
+const handleMessage = async (message: MessageEvent<MessageData>) => {
     // Calls and cancels are noted before any await: the port delivers them in order, but
     // their handlers resume in the order their awaits settle.
     let call: { cancelled: boolean } = null
@@ -84,8 +84,14 @@ onmessage = async (message: MessageEvent<MessageData>) => {
     const type = message.data.type;
     if (type === 'wasm_init') {
         const data = message.data;
+        const port = data.port;
         let module = data.module;
-        initialised = initializeWasm(module, undefined).catch(err => {
+        initialised = initializeWasm(module, undefined).then(out => {
+            if (port) {
+                (maplibre as any).bind_worker_reply_port?.(port);
+            }
+            return out;
+        }).catch(err => {
             // Propagate to main `onerror`:
             setTimeout(() => {
                 throw err;
@@ -93,6 +99,9 @@ onmessage = async (message: MessageEvent<MessageData>) => {
             // Rethrow to keep promise rejected and prevent execution of further commands:
             throw err;
         });
+        if (port) {
+            port.onmessage = handleMessage;
+        }
         markStarted();
     } else if (type === 'call') {
         await providersRegistered;
@@ -131,3 +140,5 @@ onmessage = async (message: MessageEvent<MessageData>) => {
         set_kernel_config(data.config)
     }
 }
+
+onmessage = handleMessage;

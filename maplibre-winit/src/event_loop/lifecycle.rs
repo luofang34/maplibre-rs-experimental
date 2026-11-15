@@ -53,6 +53,8 @@ where
     state: State<E>,
     recovery: Rc<RefCell<Option<Dispatch<E>>>>,
     window: Weak<RawWinitWindow>,
+    #[cfg(target_arch = "wasm32")]
+    pub(super) active_window: super::ActiveWindowSlot,
     max_frames: Option<u64>,
     active: bool,
     initialized: bool,
@@ -76,6 +78,8 @@ where
             state: State::Dormant,
             recovery: Rc::new(RefCell::new(None)),
             window: Weak::new(),
+            #[cfg(target_arch = "wasm32")]
+            active_window: Rc::new(RefCell::new(None)),
             max_frames,
             active: false,
             initialized: false,
@@ -90,9 +94,19 @@ where
     pub fn handle(&self, wake: impl WakeHost + 'static) -> MapHandle<E> {
         self.commands.handle(wake)
     }
+    fn set_wake_window(&self, window: Option<Weak<RawWinitWindow>>) {
+        #[cfg(target_arch = "wasm32")]
+        if let Ok(mut slot) = self.active_window.try_borrow_mut() {
+            *slot = window;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = window;
+    }
+
     /// Applies the host's commands between frames, then draws only if they changed the map.
     fn apply_commands(&mut self, active: Option<&ActiveEventLoop>) -> bool {
         if self.commands.is_closed() {
+            self.set_wake_window(None);
             if let State::Ready(dispatch) = &mut self.state {
                 dispatch.clear_wake_timer();
             }
@@ -108,6 +122,7 @@ where
             if self.commands.is_closed() {
                 dispatch.clear_wake_timer();
                 self.state = State::Dormant;
+                self.set_wake_window(None);
                 drop(self.recovery.borrow_mut().take());
                 if let Some(active) = active {
                     active.exit();
@@ -130,6 +145,7 @@ where
     }
     fn fail(&mut self, active: &ActiveEventLoop, error: WinitApplicationError<C>) {
         tracing::error!(%error,"windowed map lifecycle failed");
+        self.set_wake_window(None);
         self.commands.close();
         self.state = State::Dormant;
         drop(self.recovery.borrow_mut().take());
@@ -159,6 +175,7 @@ where
         let initialization =
             super::initialization::Initialization::new(dispatch, self.recovery.clone());
         self.state = State::Initializing(Box::pin(initialization.run()));
+        self.set_wake_window(Some(self.window.clone()));
         self.poll_initialization(active);
         if matches!(self.state, State::Initializing(_) | State::Ready(_)) {
             if let Some(window) = self.window.upgrade() {
@@ -208,6 +225,7 @@ where
     }
     fn suspended(&mut self, _active: &ActiveEventLoop) {
         self.active = false;
+        self.set_wake_window(None);
         let state = std::mem::replace(&mut self.state, State::Dormant);
         self.state = match state {
             State::Ready(mut dispatch) => {
@@ -287,6 +305,7 @@ where
         }
     }
     fn exiting(&mut self, _active: &ActiveEventLoop) {
+        self.set_wake_window(None);
         self.commands.close();
         self.state = State::Dormant;
         drop(self.recovery.borrow_mut().take());

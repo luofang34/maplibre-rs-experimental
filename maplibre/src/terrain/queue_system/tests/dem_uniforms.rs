@@ -68,6 +68,7 @@ fn spec(x: i32, layer: &str) -> TargetSpec {
         shapes: vec![ShapeSpec {
             view_complete: false,
             source: coords,
+            is_vector: false,
             vector_layers: Vec::new(),
             raster_layers: vec![(layer.into(), 0, true)],
         }],

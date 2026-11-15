@@ -16,6 +16,7 @@ fn shape(source: WorldTileCoords, layer: &str) -> ShapeSpec {
     ShapeSpec {
         view_complete: false,
         source,
+        is_vector: false,
         vector_layers: Vec::new(),
         raster_layers: vec![(layer.into(), 0, layer != "imagery")],
     }
@@ -57,6 +58,7 @@ fn a_finished_vector_shape_cannot_hide_missing_raster_uploads() {
         shapes: vec![ShapeSpec {
             view_complete: false,
             source: coords,
+            is_vector: true,
             vector_layers: Vec::new(),
             raster_layers: Vec::new(),
         }],

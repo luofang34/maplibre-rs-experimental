@@ -17,7 +17,6 @@ use maplibre::{
     },
 };
 use wasm_bindgen::JsValue;
-use web_sys::Worker;
 
 #[cfg(test)]
 pub(crate) use self::wire::{encode_call_finished, prepare_message};
@@ -25,7 +24,10 @@ use self::{assignments::Assignments, style_revisions::StyleRevisions};
 pub use self::{raw_queue::PassingReceiveIter, tag::WebMessageTag, wire::PassingContext};
 pub(crate) use self::{
     raw_queue::QueuedMessage,
-    wire::{decode_call_finished, decode_message, post_call_finished, TrackedPayloadError},
+    wire::{
+        decode_call_finished, decode_message, post_call_finished, set_worker_reply_port,
+        TrackedPayloadError,
+    },
 };
 use crate::{error::WebError, platform::singlethreaded::UsedContext};
 
@@ -46,7 +48,7 @@ pub struct Received {
 pub type ReceivedType = RefCell<Received>;
 
 pub struct PassingAsyncProcedureCall {
-    workers: Vec<Worker>,
+    workers: Vec<recycle::WorkerEndpoint>,
     listeners: Vec<recycle::WorkerMessageClosure>,
     next_worker: Cell<usize>,
 

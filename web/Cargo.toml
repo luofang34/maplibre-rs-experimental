@@ -45,6 +45,7 @@ console_error_panic_hook.workspace = true
 web-sys = { workspace = true, features = [
     "Window",
     "Worker", "WorkerGlobalScope", "DedicatedWorkerGlobalScope", "MessageEvent",
+    "MessagePort", "OffscreenCanvas",
     "Request", "RequestInit", "RequestMode", "Response", "Headers",
     "ErrorEvent"
 ] }
@@ -52,6 +53,8 @@ js-sys.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 futures.workspace = true
+instant.workspace = true
+wgpu.workspace = true
 console_log.workspace = true
 tracing-wasm = { workspace = true, optional = true } # TODO: Low quality dependency (remove in a separate PR!)
 # For passing Inputs in AsyncProcedureCalls

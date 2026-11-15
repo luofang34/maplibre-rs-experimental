@@ -92,7 +92,8 @@ pub struct ShaderLayerMetadata {
     pub line_width: f32,
     /// Layer translation converted to tile units in map axes.
     pub translate: Vec2f32,
-    /// Circle stroke colour as straight RGBA; other layers leave it black.
+    /// Circle stroke colour, extrusion light colour, or uniform fill colour override (`x < 0.0`
+    /// selects per-vertex feature colours).
     pub stroke_color: Vec4f32,
     /// Circle opacity, stroke opacity and blur ratio; the last slot is padding.
     pub circle_params: Vec4f32,
@@ -101,13 +102,13 @@ pub struct ShaderLayerMetadata {
 }
 
 impl ShaderLayerMetadata {
-    /// Metadata for a layer without circle paint.
+    /// Metadata for a layer without circle paint or uniform fill colour override.
     pub fn new(z_index: f32, line_width: f32, translate: Vec2f32) -> Self {
         Self {
             z_index,
             line_width,
             translate,
-            stroke_color: [0.0, 0.0, 0.0, 1.0],
+            stroke_color: [-1.0, 0.0, 0.0, 1.0],
             circle_params: [1.0, 1.0, 0.0, 0.0],
             circle_flags: [0.0; 4],
         }

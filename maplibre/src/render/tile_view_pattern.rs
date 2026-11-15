@@ -150,6 +150,8 @@ pub struct TileShape {
     /// The tile whose stencil mask this shape draws within, when it is drawn over that tile
     /// rather than in its own place in the pyramid.
     within: Option<WorldTileCoords>,
+    /// Per-frame 7-bit stencil reference (`0..=123`) assigned during upload.
+    stencil_reference: u8,
 }
 
 impl TileShape {
@@ -161,6 +163,7 @@ impl TileShape {
             transform: coords.transform_for_zoom(zoom),
             buffer_range: None,
             within: None,
+            stencil_reference: coords.stencil_reference_value_3d(),
         }
     }
 
@@ -168,6 +171,7 @@ impl TileShape {
     #[cfg(feature = "raster")]
     fn within(mut self, tile: WorldTileCoords) -> Self {
         self.within = Some(tile);
+        self.stencil_reference = tile.stencil_reference_value_3d();
         self
     }
 
@@ -175,6 +179,16 @@ impl TileShape {
     /// another tile.
     pub fn stencil_coords(&self) -> WorldTileCoords {
         self.within.unwrap_or(self.coords)
+    }
+
+    /// Active 7-bit stencil reference (`0..=123`) for clipping this shape's draws.
+    pub fn stencil_reference(&self) -> u8 {
+        self.stencil_reference
+    }
+
+    /// Assigns the 7-bit stencil reference (`0..=123`) used for this frame's upload.
+    pub(crate) fn set_stencil_reference(&mut self, reference: u8) {
+        self.stencil_reference = reference;
     }
 
     /// Whether the shape is drawn within another tile's mask and so needs none of its own.

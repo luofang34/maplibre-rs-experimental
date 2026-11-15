@@ -1,4 +1,4 @@
-use super::{DrawState, LayerItem, RenderPhase, TileMaskItem};
+use super::{DrawState, LayerItem, MaskGroup, RenderPhase, TileMaskItem};
 use crate::{
     background::render_commands::{DrawBackgroundQuad, SetBackgroundPipeline},
     render::{
@@ -13,6 +13,7 @@ fn mask(generate_borders: bool) -> TileMaskItem {
         draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
         source_shape: Default::default(),
         generate_borders,
+        is_vector: false,
     }
 }
 
@@ -30,6 +31,7 @@ fn raster(index: u32, generate_borders: bool) -> LayerItem {
             coords: Default::default(),
         },
         source_shape: TileShape::default(),
+        mask_group: MaskGroup::Mutating,
         run: None,
     }
 }

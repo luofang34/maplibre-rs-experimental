@@ -1,5 +1,75 @@
 //! Paint shared by every feature must use the view zoom, including overzoomed source tiles.
-use crate::style::layer::{LayerPaint, StyleLayer, StyleProperty};
+use rustc_hash::FxHashMap;
+
+use super::{
+    metadata::{metadata_for_layer, paint_depends_on_bearing, same_quantized_rgba},
+    VectorPaintFrame,
+};
+use crate::{
+    render::shaders::{FillShaderFeatureMetadata, ShaderLayerMetadata},
+    style::layer::{LayerPaint, StyleLayer, StyleProperty},
+    vector::VectorBufferPool,
+};
+
+pub(super) fn refresh_layer_paint(
+    buffer_pool: &VectorBufferPool,
+    queue: &crate::render::upload_queue::UploadQueue,
+    source_tiles: &[crate::coords::WorldTileCoords],
+    frame: VectorPaintFrame,
+    previous: Option<VectorPaintFrame>,
+) {
+    let VectorPaintFrame { zoom, .. } = frame;
+    let zoom_unchanged = previous.is_some_and(|prev| prev.zoom == zoom);
+    let mut meta_memo: FxHashMap<(u32, u8), (ShaderLayerMetadata, bool)> = FxHashMap::default();
+    let mut color_memo: FxHashMap<u32, Option<[f32; 4]>> = FxHashMap::default();
+
+    for coords in source_tiles {
+        let tile_z = u8::from(coords.z);
+        for entry in buffer_pool
+            .index()
+            .get_layers(*coords)
+            .into_iter()
+            .flatten()
+        {
+            if zoom_unchanged && !paint_depends_on_bearing(entry.style_layer.paint.as_ref()) {
+                continue;
+            }
+            let (metadata, changed) = *meta_memo
+                .entry((entry.style_layer.index, tile_z))
+                .or_insert_with(|| {
+                    let metadata = metadata_for_layer(&entry.style_layer, *coords, frame);
+                    let changed = previous.is_none_or(|prev| {
+                        bytemuck::bytes_of(&metadata_for_layer(&entry.style_layer, *coords, prev))
+                            != bytemuck::bytes_of(&metadata)
+                    });
+                    (metadata, changed)
+                });
+            if changed {
+                buffer_pool.update_layer_metadata(queue, entry, metadata);
+            }
+            // Uniform fill colours already ride in `ShaderLayerMetadata::stroke_color`.
+            if zoom_unchanged || entry.style_layer.type_ == "fill" {
+                continue;
+            }
+            let changed_color = *color_memo
+                .entry(entry.style_layer.index)
+                .or_insert_with(|| {
+                    let color = uniform_color(&entry.style_layer, f64::from(zoom))?;
+                    let unchanged = previous
+                        .and_then(|prev| uniform_color(&entry.style_layer, f64::from(prev.zoom)))
+                        .is_some_and(|prev_color| same_quantized_rgba(prev_color, color));
+                    (!unchanged).then_some(color)
+                });
+            if let Some(color) = changed_color {
+                buffer_pool.fill_feature_metadata(
+                    queue,
+                    entry,
+                    FillShaderFeatureMetadata { color },
+                );
+            }
+        }
+    }
+}
 
 /// White with the opacity of a fill that repeats an image, unless the opacity varies by feature.
 fn pattern_color(opacity: Option<&StyleProperty<f32>>, zoom: f64) -> Option<[f32; 4]> {

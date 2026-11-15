@@ -45,6 +45,7 @@ fn metadata_shortage_defers_whole_textures_instead_of_caching_partial_coverage()
                 .map(|_| ShapeSpec {
                     view_complete: false,
                     source,
+                    is_vector: true,
                     vector_layers: Vec::new(),
                     raster_layers: Vec::new(),
                 })

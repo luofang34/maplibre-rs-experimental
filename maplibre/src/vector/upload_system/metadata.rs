@@ -30,6 +30,11 @@ pub(super) fn metadata_for_layer(
     let translate = layer_translate_tile_units(style_layer.paint.as_ref(), coords.z, zoom, bearing);
     let mut layer_metadata =
         ShaderLayerMetadata::new(style_layer.index as f32, line_width, translate);
+    if matches!(&style_layer.paint, Some(LayerPaint::Fill(_))) {
+        if let Some(color) = super::paint::uniform_color(style_layer, f64::from(zoom)) {
+            layer_metadata.stroke_color = color;
+        }
+    }
     if let Some(LayerPaint::Heatmap(paint)) = &style_layer.paint {
         let zoom = f64::from(zoom);
         // Radius and intensity are one value per layer, taken at the view zoom.

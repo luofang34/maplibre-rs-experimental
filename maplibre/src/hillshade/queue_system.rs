@@ -7,7 +7,9 @@ use crate::{
     render::{
         eventually::{Eventually, Eventually::Initialized},
         render_commands::DrawMasks,
-        render_phase::{DrawState, LayerItem, ProjectionBinding, RenderPhase, TileMaskItem},
+        render_phase::{
+            DrawState, LayerItem, MaskGroup, ProjectionBinding, RenderPhase, TileMaskItem,
+        },
         tile_view_pattern::WgpuTileViewPattern,
     },
     tcs::{
@@ -101,6 +103,7 @@ fn source_draws(
             draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
             source_shape: source_shape.clone(),
             generate_borders: true,
+            is_vector: false,
         });
     }
     masks.push(TileMaskItem {
@@ -108,6 +111,7 @@ fn source_draws(
         draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
         source_shape: source_shape.clone(),
         generate_borders: false,
+        is_vector: false,
     });
     let mut draws = Vec::with_capacity(2);
     if uses_globe {
@@ -121,6 +125,7 @@ fn source_draws(
                 coords: source_shape.coords(),
             },
             source_shape: source_shape.clone(),
+            mask_group: MaskGroup::Mutating,
             run: None,
         });
     }
@@ -136,6 +141,7 @@ fn source_draws(
             coords: source_shape.coords(),
         },
         source_shape: source_shape.clone(),
+        mask_group: MaskGroup::Mutating,
         run: None,
     });
     (draws, masks)

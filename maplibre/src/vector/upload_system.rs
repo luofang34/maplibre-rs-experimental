@@ -23,17 +23,14 @@ pub(crate) mod paint;
 mod sources;
 pub(crate) mod style_refresh;
 
-use metadata::{
-    feature_metadata_into, metadata_for_layer, paint_depends_on_bearing, same_quantized_rgba,
-    sort_runs, upload_size,
-};
+use metadata::{feature_metadata_into, metadata_for_layer, sort_runs, upload_size};
 
 pub(crate) fn drape_paint_zoom(zoom: f64) -> f64 {
     (zoom * 8.0).round() / 8.0
 }
 
 #[derive(Clone, Copy, PartialEq)]
-struct VectorPaintFrame {
+pub(super) struct VectorPaintFrame {
     zoom: f32,
     bearing: f32,
     /// The root light as extruded polygons are shaded with it.
@@ -76,7 +73,7 @@ pub fn upload_system(
         return Err(SystemError::Dependencies);
     };
     if refresh_paint {
-        refresh_layer_paint(
+        paint::refresh_layer_paint(
             buffer_pool,
             queue,
             &painted_tiles,
@@ -129,53 +126,6 @@ fn frame_paint(
     let previous_paint = world.resources.get::<VectorPaintFrame>().copied();
     world.resources.insert(paint_frame);
     (paint_frame, previous_paint)
-}
-
-fn refresh_layer_paint(
-    buffer_pool: &VectorBufferPool,
-    queue: &crate::render::upload_queue::UploadQueue,
-    source_tiles: &[crate::coords::WorldTileCoords],
-    frame: VectorPaintFrame,
-    previous: Option<VectorPaintFrame>,
-) {
-    let VectorPaintFrame { zoom, .. } = frame;
-    let zoom_unchanged = previous.is_some_and(|prev| prev.zoom == zoom);
-    for coords in source_tiles {
-        for entry in buffer_pool
-            .index()
-            .get_layers(*coords)
-            .into_iter()
-            .flatten()
-        {
-            if zoom_unchanged && !paint_depends_on_bearing(entry.style_layer.paint.as_ref()) {
-                continue;
-            }
-            let metadata = metadata_for_layer(&entry.style_layer, *coords, frame);
-            let unchanged = previous.is_some_and(|previous| {
-                bytemuck::bytes_of(&metadata_for_layer(&entry.style_layer, *coords, previous))
-                    == bytemuck::bytes_of(&metadata)
-            });
-            if !unchanged {
-                buffer_pool.update_layer_metadata(queue, entry, metadata);
-            }
-            if zoom_unchanged {
-                continue;
-            }
-            if let Some(color) = paint::uniform_color(&entry.style_layer, f64::from(zoom)) {
-                if previous
-                    .and_then(|prev| paint::uniform_color(&entry.style_layer, f64::from(prev.zoom)))
-                    .is_some_and(|prev_color| same_quantized_rgba(prev_color, color))
-                {
-                    continue;
-                }
-                buffer_pool.fill_feature_metadata(
-                    queue,
-                    entry,
-                    FillShaderFeatureMetadata { color },
-                );
-            }
-        }
-    }
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]

@@ -16,6 +16,10 @@ pub use lifecycle::Application as WinitApplication;
 mod completion;
 mod initialization;
 
+#[cfg(target_arch = "wasm32")]
+pub(crate) type ActiveWindowSlot =
+    std::rc::Rc<std::cell::RefCell<Option<std::sync::Weak<crate::RawWinitWindow>>>>;
+
 /// Platform event loop for application events.
 pub type RawWinitEventLoop<ET> = winit::event_loop::EventLoop<ET>;
 /// Platform user-event sender.
@@ -80,7 +84,11 @@ impl<ET: 'static + Clone> WinitEventLoop<ET> {
         let (callback, completion) = completion::channel();
         let mut app = lifecycle::Application::new(config, factory, max_frames);
         app.completion = Some(callback);
-        let handle = app.handle(self.create_proxy().waking_with(ET::default()));
+        let active_window = app.active_window.clone();
+        let handle = app.handle(
+            self.create_proxy()
+                .waking_window(ET::default(), active_window),
+        );
         self.event_loop.spawn_app(app);
         completion.await?;
         Ok(handle)
@@ -97,30 +105,46 @@ impl<ET: 'static + Clone> WinitEventLoopProxy<ET> {
     pub fn waking_with(self, event: ET) -> ProxyWake<ET> {
         #[cfg(target_arch = "wasm32")]
         {
-            use std::{cell::Cell, rc::Rc};
-
-            use wasm_bindgen::{closure::Closure, JsValue};
-
-            let queued = Rc::new(Cell::new(false));
-            let queued_reset = queued.clone();
-            let proxy = self.proxy.clone();
-            let ev = event.clone();
-            let closure = Rc::new(Closure::wrap(Box::new(move |_val: JsValue| {
-                queued_reset.set(false);
-                if proxy.send_event(ev.clone()).is_err() {
-                    tracing::debug!("the map's event loop closed before a command reached it");
-                }
-            }) as Box<dyn FnMut(JsValue)>));
-            ProxyWake {
-                proxy: self,
-                event,
-                queued,
-                microtask: closure,
-            }
+            self.waking_window(event, std::rc::Rc::new(std::cell::RefCell::new(None)))
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
             ProxyWake { proxy: self, event }
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn waking_window(self, event: ET, active_window: ActiveWindowSlot) -> ProxyWake<ET> {
+        use std::{cell::Cell, rc::Rc};
+
+        use wasm_bindgen::{closure::Closure, JsValue};
+
+        let queued = Rc::new(Cell::new(false));
+        let queued_reset = queued.clone();
+        let fallback_window = active_window.clone();
+        let proxy = self.proxy.clone();
+        let ev = event.clone();
+        let closure = Rc::new(Closure::wrap(Box::new(move |_val: JsValue| {
+            queued_reset.set(false);
+            let window = fallback_window
+                .try_borrow()
+                .ok()
+                .and_then(|slot| slot.as_ref().and_then(std::sync::Weak::upgrade));
+            let hidden = web_sys::window()
+                .and_then(|w| w.document())
+                .is_some_and(|doc| doc.hidden());
+            if let (Some(window), false) = (window, hidden) {
+                window.request_redraw();
+            } else if proxy.send_event(ev.clone()).is_err() {
+                tracing::debug!("the map's event loop closed before a command reached it");
+            }
+        }) as Box<dyn FnMut(JsValue)>));
+        ProxyWake {
+            proxy: self,
+            event,
+            active_window,
+            queued,
+            microtask: closure,
         }
     }
 }
@@ -132,6 +156,8 @@ pub struct ProxyWake<ET: 'static> {
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     event: ET,
     #[cfg(target_arch = "wasm32")]
+    active_window: ActiveWindowSlot,
+    #[cfg(target_arch = "wasm32")]
     queued: std::rc::Rc<std::cell::Cell<bool>>,
     #[cfg(target_arch = "wasm32")]
     microtask: std::rc::Rc<wasm_bindgen::closure::Closure<dyn FnMut(wasm_bindgen::JsValue)>>,
@@ -140,7 +166,20 @@ impl<ET: 'static + Clone> WakeHost for ProxyWake<ET> {
     fn wake(&self) {
         #[cfg(target_arch = "wasm32")]
         {
-            if !self.queued.replace(true) {
+            let window = self
+                .active_window
+                .try_borrow()
+                .ok()
+                .and_then(|slot| slot.as_ref().and_then(std::sync::Weak::upgrade));
+            let hidden = web_sys::window()
+                .and_then(|w| w.document())
+                .is_some_and(|doc| doc.hidden());
+            if let (Some(window), false) = (window, hidden) {
+                // Requesting redraw on an active web window is idempotent, whereas
+                // `EventLoopProxy::send_event` cancels pending `requestAnimationFrame` callbacks
+                // in winit 0.30 and starves rendering under external VSync command loops.
+                window.request_redraw();
+            } else if !self.queued.replace(true) {
                 let _ = js_sys::Promise::resolve(&wasm_bindgen::JsValue::UNDEFINED)
                     .then(&self.microtask);
             }

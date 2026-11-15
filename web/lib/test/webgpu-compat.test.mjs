@@ -152,3 +152,34 @@ test('bounds writeTexture SharedArrayBuffer copy to required texture slice', () 
     assert.equal(calls[0].lastByte, 0xcd);
     assert.equal(calls[0].offset, 0);
 });
+
+test('reuses unshared scratch ArrayBuffer across repeated writeBuffer and writeTexture calls', () => {
+    if (typeof SharedArrayBuffer === 'undefined') {
+        return;
+    }
+    const seenBuffers = [];
+    class MockReuseQueue {
+        writeBuffer(buf, offset, data, dataOffset, size) {
+            seenBuffers.push({buffer: data.buffer, size});
+        }
+        writeTexture(destination, data) {
+            seenBuffers.push({buffer: data.buffer, size: data.byteLength});
+        }
+    }
+
+    ensureWebGpuCompatibility({
+        SharedArrayBuffer,
+        GPUQueue: MockReuseQueue,
+    });
+
+    const sab = new SharedArrayBuffer(32768);
+    const u8 = new Uint8Array(sab);
+    const queue = new MockReuseQueue();
+    queue.writeBuffer({}, 0, u8, 0, 1024);
+    queue.writeBuffer({}, 0, u8, 1024, 4096);
+    queue.writeTexture({}, u8.subarray(0, 8192), {bytesPerRow: 256}, {width: 32, height: 32, depthOrArrayLayers: 1});
+
+    assert.equal(seenBuffers.length, 3);
+    assert.equal(seenBuffers[0].buffer, seenBuffers[1].buffer);
+    assert.equal(seenBuffers[1].buffer, seenBuffers[2].buffer);
+});

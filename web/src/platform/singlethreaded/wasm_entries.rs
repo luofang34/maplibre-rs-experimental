@@ -26,8 +26,8 @@ use crate::{
         http_client::web_http_client,
         singlethreaded::{
             apc::{
-                decode_call_finished, post_call_finished, QueuedMessage, ReceivedType,
-                WebMessageTag,
+                decode_call_finished, post_call_finished, set_worker_reply_port, QueuedMessage,
+                ReceivedType, WebMessageTag,
             },
             PassingContext, UsedContext,
         },
@@ -60,6 +60,13 @@ pub fn set_kernel_config(config: String) -> Result<(), JSError> {
         *slot.borrow_mut() = Some(config);
     });
     Ok(())
+}
+
+/// Binds a direct `MessagePort` so this tile worker posts replies straight to an `OffscreenCanvas`
+/// render worker instead of the UI main thread.
+#[wasm_bindgen]
+pub fn bind_worker_reply_port(port: Option<web_sys::MessagePort>) {
+    set_worker_reply_port(port);
 }
 
 /// The tile calls one worker runs, so the main thread can stop a call it gave up on.

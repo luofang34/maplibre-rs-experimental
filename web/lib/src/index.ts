@@ -3,10 +3,16 @@ import {initializeWasm} from "./wasm-instance.mjs";
 import {checkRequirements, checkWasmFeatures, ensureWebGpuCompatibility} from "./browser";
 import {preventDefaultTouchActions} from "./canvas";
 import {MapLibreMap} from "./map";
+import {startOffscreenController} from "./offscreen-client";
 // @ts-ignore esbuild plugin is handling this
 import MultithreadedPoolWorker from './multithreaded/multithreaded-pool.worker.js';
 // @ts-ignore esbuild plugin is handling this
 import PoolWorker from './singlethreaded/pool.worker.js';
+// @ts-ignore esbuild plugin is handling this
+import RenderWorker from './singlethreaded/render.worker.js';
+
+let mtWasmPrimed = false;
+const prewarmedMtWorkers: Worker[] = [];
 
 /**
  * Starts the map. `styleJson` is a MapLibre style document; without it the built-in style is used.
@@ -42,9 +48,45 @@ export const startMapLibre = async (wasmPath: string | WebAssembly.Module | unde
     }
 
     preventDefaultTouchActions();
+    const targetCanvasId = ARENA_TELEMETRY && canvasId ? canvasId : "maplibre";
+    const canvas = mapCanvas(targetCanvasId);
+
+    // Default single-threaded WebGPU path: run Map + WebGPU surface inside a dedicated
+    // OffscreenCanvas Render Worker wired directly to 4 Tile Workers over MessageChannel.
+    if (!MULTITHREADED && !WEBGL && canvas && typeof canvas.transferControlToOffscreen === "function") {
+        try {
+            const controller = await startOffscreenController({
+                canvas,
+                wasmPath,
+                workerPath,
+                styleJson,
+                imageProviderModules,
+                createRenderWorker: () => RenderWorker(),
+                createPoolWorker: () => PoolWorker(),
+            });
+            return new MapLibreMap(controller, canvas);
+        } catch (err) {
+            // Fall back to main-thread winit only if canvas control was not already transferred.
+            if (!(err instanceof DOMException && err.name === "InvalidStateError")) {
+                throw err;
+            }
+            console.warn("OffscreenCanvas unavailable on canvas, falling back to main-thread surface:", err);
+        }
+    }
+
+    const createMtWorker = (): Worker => workerPath ? new Worker(workerPath, {
+        type: 'module',
+    }) : MultithreadedPoolWorker();
+
+    if (MULTITHREADED && !mtWasmPrimed) {
+        mtWasmPrimed = true;
+        while (prewarmedMtWorkers.length < 2) {
+            prewarmedMtWorkers.push(createMtWorker());
+        }
+    }
+
     await initializeWasm(wasmPath, undefined);
 
-    const targetCanvasId = ARENA_TELEMETRY && canvasId ? canvasId : "maplibre";
     const invokeRun = (workerFactory: any) => {
         if (ARENA_TELEMETRY && canvasId) {
             return (maplibre as any).run_maplibre_on_canvas(canvasId, workerFactory, styleJson);
@@ -56,12 +98,8 @@ export const startMapLibre = async (wasmPath: string | WebAssembly.Module | unde
         if (imageProviderModules.length > 0) {
             console.warn("JavaScript image providers need a single-threaded build; register Rust providers through image_providers() instead.")
         }
-        const controller = await invokeRun(() => {
-            return workerPath ? new Worker(workerPath, {
-                type: 'module',
-            }) : MultithreadedPoolWorker();
-        });
-        return new MapLibreMap(controller, mapCanvas(targetCanvasId))
+        const controller = await invokeRun(() => prewarmedMtWorkers.pop() ?? createMtWorker());
+        return new MapLibreMap(controller, canvas)
     } else {
         const controller = await invokeRun((received_ptr: number) => {
             let worker: Worker = workerPath ? new Worker(workerPath, {
@@ -92,7 +130,7 @@ export const startMapLibre = async (wasmPath: string | WebAssembly.Module | unde
 
             return worker;
         });
-        return new MapLibreMap(controller, mapCanvas(targetCanvasId))
+        return new MapLibreMap(controller, canvas)
     }
 }
 

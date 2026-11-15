@@ -119,7 +119,11 @@ impl Node for TranslucentPassNode {
                 mask_items.size()
             );
             let above = super::main_pass::above_symbols(world);
-            let mut previous = above.as_ref().map_or(&[][..], |above| above.previous);
+            let mut stencil_state = above
+                .as_ref()
+                .map_or(super::main_pass::StencilState::Cleared, |above| {
+                    above.stencil_state
+                });
             let mut groups = above
                 .as_ref()
                 .map_or(&[][..], |above| above.items)
@@ -127,14 +131,17 @@ impl Node for TranslucentPassNode {
                 .peekable();
             for item in mask_items {
                 while let Some(group) = groups.next_if(|group| group[0].index < item.index) {
-                    super::main_pass::draw_group(&mut render_pass, world, previous, group);
-                    previous = group;
+                    super::main_pass::draw_group(
+                        &mut render_pass,
+                        world,
+                        &mut stencil_state,
+                        group,
+                    );
                 }
                 item.draw_function.draw(&mut render_pass, world, item);
             }
             for group in groups {
-                super::main_pass::draw_group(&mut render_pass, world, previous, group);
-                previous = group;
+                super::main_pass::draw_group(&mut render_pass, world, &mut stencil_state, group);
             }
         }
         let end_hooks = world

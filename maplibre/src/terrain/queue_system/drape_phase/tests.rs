@@ -20,6 +20,7 @@ fn draped_road_width_has_the_same_world_size_at_every_target_lod() {
             shapes: vec![ShapeSpec {
                 view_complete: false,
                 source: coords,
+                is_vector: true,
                 vector_layers: vec![],
                 raster_layers: vec![],
             }],

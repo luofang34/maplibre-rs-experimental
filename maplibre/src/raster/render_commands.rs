@@ -119,7 +119,7 @@ impl RenderCommand<LayerItem> for DrawRasterTile {
             return RenderCommandResult::Failure;
         };
 
-        let reference = source_shape.stencil_coords().stencil_reference_value_3d();
+        let reference = source_shape.stencil_reference();
         // Each raster draw inverts the stencil it passes, so no pixel is drawn twice; a shape
         // drawn over another tile finds that tile's reference inverted.
         let reference = u32::from(if source_shape.is_drawn_within_another() {

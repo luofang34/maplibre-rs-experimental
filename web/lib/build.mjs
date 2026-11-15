@@ -212,6 +212,7 @@ const wasmPack = () => {
         '--test',
         'test/wasm-instance.test.mjs',
         'test/webgpu-compat.test.mjs',
+        'test/offscreen-coalesce.test.mjs',
     ]);
     if (memoryTests.status !== 0) {
         throw new Error('Wasm instance initialization tests failed');
@@ -244,6 +245,7 @@ const wasmPack = () => {
             '--test',
             'test/wasm-instance.test.mjs',
             'test/webgpu-compat.test.mjs',
+            'test/offscreen-coalesce.test.mjs',
         ]);
         if (postOptTests.status !== 0) {
             throw new Error('Post-wasm-opt initialization tests failed');

@@ -5,7 +5,9 @@ use crate::{
     render::{
         eventually::{Eventually, Eventually::Initialized},
         render_commands::DrawMasks,
-        render_phase::{Draw, DrawState, LayerItem, ProjectionBinding, TileMaskItem},
+        render_phase::{
+            Draw, DrawState, LayerItem, MaskGroup, PhaseItem, ProjectionBinding, TileMaskItem,
+        },
         shaders::ShaderTileMetadata,
         tile_view_pattern::{TileShape, WgpuTileViewPattern},
     },
@@ -109,16 +111,30 @@ pub(super) fn build_drape_phase(
             masks: Vec::new(),
             layers: Vec::new(),
         };
+        let mut stencil_ids: std::collections::HashMap<crate::coords::WorldTileCoords, u8> =
+            std::collections::HashMap::with_capacity(spec.shapes.len());
+        let mut next_stencil = 0_u8;
         for (shape, slot) in spec.shapes.iter().zip(target_slots) {
             let Some(range) = slot.and_then(|index| ranges.get(index)) else {
                 continue;
             };
-            let source_shape = TileShape::with_buffer_range(shape.source, zoom, range.clone());
+            let mut source_shape = TileShape::with_buffer_range(shape.source, zoom, range.clone());
+            let stencil_ref = *stencil_ids.entry(shape.source).or_insert_with(|| {
+                if next_stencil < 124 {
+                    let assigned = next_stencil;
+                    next_stencil += 1;
+                    assigned
+                } else {
+                    shape.source.stencil_reference_value_3d()
+                }
+            });
+            source_shape.set_stencil_reference(stencil_ref);
             target.masks.push(TileMaskItem {
                 draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
                 source_shape: source_shape.clone(),
                 generate_borders: false,
                 projection: ProjectionBinding::Flat,
+                is_vector: shape.is_vector,
             });
             for layer in &shape.vector_layers {
                 let draw_function: Box<dyn Draw<LayerItem>> = if layer.is_line {
@@ -136,6 +152,7 @@ pub(super) fn build_drape_phase(
                     },
                     source_shape: source_shape.clone(),
                     projection: ProjectionBinding::Flat,
+                    mask_group: MaskGroup::Vector,
                     run: None,
                 });
             }
@@ -156,10 +173,12 @@ pub(super) fn build_drape_phase(
                     },
                     source_shape: source_shape.clone(),
                     projection: ProjectionBinding::Flat,
+                    mask_group: MaskGroup::Mutating,
                     run: None,
                 });
             }
         }
+        target.masks.sort_by_key(PhaseItem::sort_key);
         target.layers.sort_by_key(|item| item.index);
         phase.targets.push(target);
     }

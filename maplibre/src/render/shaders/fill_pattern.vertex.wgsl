@@ -26,6 +26,7 @@ fn main(
     @location(8) color: vec4<f32>,
     @location(9) zoom_factor: f32,
     @location(10) z_index: f32,
+    @location(14) layer_color: vec4<f32>,
     @location(15) layer_translate: vec2<f32>,
 ) -> VertexOutput {
     let projected = project_tile_position(
@@ -53,6 +54,7 @@ fn main(
     let low = coarse * 256.0 + lower;
     let offset = low - size * floor(low / size);
     let pattern_position = (position + layer_translate) * tile_units_to_pixels + offset;
+    let resolved_color = select(color, layer_color, layer_color.x >= 0.0);
 
-    return VertexOutput(color, pattern_position, projected.horizon_distance, final_position);
+    return VertexOutput(resolved_color, pattern_position, projected.horizon_distance, final_position);
 }

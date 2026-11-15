@@ -6,8 +6,6 @@ use crate::{
     render::{
         eventually::{Eventually, Eventually::Initialized},
         graph::{Node, RenderContext},
-        render_commands::{DrawMask, SetMaskPipeline},
-        render_phase::{RenderCommand, RenderCommandResult},
         RenderResources,
     },
     tcs::world::World,
@@ -96,39 +94,20 @@ impl Node for DrapePassNode {
 fn draw_layers<'w>(
     pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     world: &'w World,
-    target: &DrapeTarget,
+    target: &'w DrapeTarget,
 ) {
+    let mut stencil_state = crate::render::main_pass::StencilState::Cleared;
     for layers in target
         .layers
-        .chunk_by(|left, right| left.index == right.index)
+        .chunk_by(|left, right| left.index == right.index && left.style_layer == right.style_layer)
     {
-        let Some(first_mask) = target.masks.first() else {
-            continue;
-        };
-        if matches!(
-            SetMaskPipeline::render(world, first_mask, pass),
-            RenderCommandResult::Failure
-        ) {
-            continue;
-        }
-        // The source of a layer can use a different tile pyramid. Old stencil values must
-        // not clip its geometry or admit buffered geometry outside the current tile masks.
-        for mask in &target.masks {
-            DrawMask::render_with_reference(
-                world,
-                mask,
-                pass,
-                crate::render::EMPTY_STENCIL_REFERENCE,
-            );
-        }
-        for mask in &target.masks {
-            if layers
-                .iter()
-                .any(|layer| layer.source_shape.buffer_range() == mask.source_shape.buffer_range())
-            {
-                mask.draw_function.draw(pass, world, mask);
-            }
-        }
+        crate::render::main_pass::apply_layer_masks(
+            pass,
+            world,
+            &target.masks,
+            &mut stencil_state,
+            layers,
+        );
         for layer in layers {
             layer.draw_function.draw(pass, world, layer);
         }

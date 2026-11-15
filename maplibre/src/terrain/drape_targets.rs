@@ -42,6 +42,7 @@ pub(crate) struct VectorLayerSpec {
 #[derive(Clone, Debug)]
 pub(crate) struct ShapeSpec {
     pub(crate) source: WorldTileCoords,
+    pub(crate) is_vector: bool,
     pub(crate) vector_layers: Vec<VectorLayerSpec>,
     /// Raster and DEM-shaded layers as id, style index and whether the DEM shaders draw it.
     pub(crate) raster_layers: Vec<(String, u32, bool)>,
@@ -355,6 +356,7 @@ pub(crate) fn collect_layer_specs(
                     ShapeSpec {
                         view_complete: shape.view_complete,
                         source: shape.coords,
+                        is_vector: shape.raster_source.is_none(),
                         vector_layers: match (&shape.raster_source, vector) {
                             (None, Some(Initialized(pool))) => {
                                 vector_layer_specs(pool, shape.coords, zoom)

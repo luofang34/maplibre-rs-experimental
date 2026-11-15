@@ -183,6 +183,7 @@ pub fn queue_system(
                 generate_borders: false,
                 style_layer: layer.id.clone(),
                 source_shape: crate::render::tile_view_pattern::TileShape::default(),
+                mask_group: crate::render::render_phase::MaskGroup::Unmasked,
 
                 // We provide a dummy tile for background.
                 tile: crate::tcs::tiles::Tile {
@@ -201,6 +202,7 @@ pub fn queue_system(
                 generate_borders: false,
                 style_layer: "sky".to_string(),
                 source_shape: crate::render::tile_view_pattern::TileShape::default(),
+                mask_group: crate::render::render_phase::MaskGroup::Unmasked,
                 tile: crate::tcs::tiles::Tile {
                     coords: crate::coords::WorldTileCoords::default(),
                 },

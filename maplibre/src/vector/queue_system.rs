@@ -6,7 +6,8 @@ use crate::{
         eventually::{Eventually, Eventually::Initialized},
         render_commands::DrawMasks,
         render_phase::{
-            DrawState, LayerItem, ProjectionBinding, RenderPhase, SortedRun, TileMaskItem,
+            DrawState, LayerItem, MaskGroup, ProjectionBinding, RenderPhase, SortedRun,
+            TileMaskItem,
         },
         tile_view_pattern::WgpuTileViewPattern,
     },
@@ -138,6 +139,7 @@ pub fn queue_system(
                     draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
                     source_shape: source_shape.clone(),
                     generate_borders: true,
+                    is_vector: true,
                 });
             }
             mask_phase.add(TileMaskItem {
@@ -145,6 +147,7 @@ pub fn queue_system(
                 draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
                 source_shape: source_shape.clone(),
                 generate_borders: false,
+                is_vector: true,
             });
 
             if let Some(layer_entries) = buffer_pool_index.get_layers(source_shape.coords()) {
@@ -162,7 +165,9 @@ pub fn queue_system(
                     ) {
                         continue;
                     }
-                    if unclipped_3d_layers.contains(layer_entry.style_layer.id.as_str())
+                    let is_unclipped_3d =
+                        unclipped_3d_layers.contains(layer_entry.style_layer.id.as_str());
+                    if is_unclipped_3d
                         && (has_active_ancestor(
                             &active_unclipped_3d_shapes,
                             source_shape.wrap,
@@ -176,6 +181,11 @@ pub fn queue_system(
                     {
                         continue;
                     }
+                    let mask_group = if is_unclipped_3d {
+                        MaskGroup::Unmasked
+                    } else {
+                        MaskGroup::Vector
+                    };
                     let draw_function: Box<dyn crate::render::render_phase::Draw<LayerItem>> =
                         match layer_entry.style_layer.type_.as_str() {
                             // The heatmap plugin draws these into a density target instead.
@@ -199,6 +209,7 @@ pub fn queue_system(
                                         coords: layer_entry.coords,
                                     },
                                     source_shape: source_shape.clone(),
+                                    mask_group: MaskGroup::Unmasked,
                                     run: None,
                                 });
                                 Box::new(DrawState::<LayerItem, DrawExtrusionTranslucentBack>::new())
@@ -218,6 +229,7 @@ pub fn queue_system(
                                         coords: layer_entry.coords,
                                     },
                                     source_shape: source_shape.clone(),
+                                    mask_group: MaskGroup::Vector,
                                     run: None,
                                 });
                                 let color: Box<dyn crate::render::render_phase::Draw<LayerItem>> =
@@ -240,6 +252,7 @@ pub fn queue_system(
                                         coords: layer_entry.coords,
                                     },
                                     source_shape: source_shape.clone(),
+                                    mask_group: MaskGroup::Vector,
                                     run: None,
                                 });
                                 Box::new(DrawState::<LayerItem, DrawExtrusionDepth>::new())
@@ -273,6 +286,7 @@ pub fn queue_system(
                                     coords: layer_entry.coords,
                                 },
                                 source_shape: source_shape.clone(),
+                                mask_group: MaskGroup::Vector,
                                 run: Some(SortedRun {
                                     key: *key,
                                     range: range.clone(),
@@ -291,6 +305,7 @@ pub fn queue_system(
                             coords: layer_entry.coords,
                         },
                         source_shape: source_shape.clone(),
+                        mask_group,
                         run: None,
                     });
                 }

@@ -8,7 +8,7 @@ use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 use crate::{
-    controller::{options::CameraState, write_js, MapController},
+    controller::{options::CameraState, with_controller_handle, write_js, MapController},
     environment::WHATWGOffscreenKernelEnvironment,
     error::JSError,
 };
@@ -86,18 +86,20 @@ impl MapController {
         };
 
         let mut last_rev: Option<u64> = None;
-        let reply = self.handle().until(move |map| {
-            let Ok(context) = map.context() else {
-                return None;
-            };
-            let rev = context.camera_revision();
-            if last_rev != Some(rev) {
-                last_rev = Some(rev);
-                if let Ok(value) = write_js(&CameraState::of(context)) {
-                    let _ = callback.call1(&JsValue::NULL, &value);
+        let reply = with_controller_handle!(&self.handle, |handle| {
+            handle.until(move |map| {
+                let Ok(context) = map.context() else {
+                    return None;
+                };
+                let rev = context.camera_revision();
+                if last_rev != Some(rev) {
+                    last_rev = Some(rev);
+                    if let Ok(value) = write_js(&CameraState::of(context)) {
+                        let _ = callback.call1(&JsValue::NULL, &value);
+                    }
                 }
-            }
-            None
+                None
+            })
         });
         *self.watchers.camera.borrow_mut() = Some(reply);
     }
@@ -112,56 +114,58 @@ impl MapController {
         };
 
         let mut last_frame: u64 = 0;
-        let reply = self.handle().until(move |map| {
-            let Ok(context) = map.context() else {
-                return None;
-            };
-            let stats = context.last_frame_stats();
-            if stats.frame != 0 && stats.frame != last_frame {
-                last_frame = stats.frame;
-                let has_arrivals =
-                    AsyncProcedureCall::<WHATWGOffscreenKernelEnvironment>::has_arrivals(
-                        map.kernel().apc(),
-                    );
-                let reasons = context.redraw_reasons();
-                let loaded = !reasons.loading
-                    && !reasons.awaiting_images
-                    && !reasons.camera_moved
-                    && !has_arrivals;
-                let payload = ArenaFrameTelemetry {
-                    frame: stats.frame,
-                    host_frame: stats.host_frame,
-                    cpu_ms: stats.cpu().as_secs_f64() * 1000.0,
-                    gpu_ms: stats.gpu.map(|d| d.as_secs_f64() * 1000.0),
-                    upload_bytes: stats.upload_bytes,
-                    draws: stats.draws,
-                    drape_redraws: stats.drape_redraws,
-                    prefetch_drapes: stats.prefetch_drapes,
-                    loaded,
-                    settled: !reasons.any() && !has_arrivals,
-                    wasm_memory_bytes: wasm_linear_memory_bytes(),
-                    camera: CameraState::of(context),
-                    redraw_reasons: RedrawSnapshot {
-                        changed: reasons.changed,
-                        loading: reasons.loading,
-                        awaiting_images: reasons.awaiting_images,
-                        camera_moved: reasons.camera_moved,
-                        worker_results: reasons.worker_results || has_arrivals,
-                    },
-                    stages: stats
-                        .stages
-                        .iter()
-                        .map(|(name, duration)| StageSample {
-                            name: name.to_string(),
-                            ms: duration.as_secs_f64() * 1000.0,
-                        })
-                        .collect(),
+        let reply = with_controller_handle!(&self.handle, |handle| {
+            handle.until(move |map| {
+                let Ok(context) = map.context() else {
+                    return None;
                 };
-                if let Ok(value) = write_js(&payload) {
-                    let _ = callback.call1(&JsValue::NULL, &value);
+                let stats = context.last_frame_stats();
+                if stats.frame != 0 && stats.frame != last_frame {
+                    last_frame = stats.frame;
+                    let has_arrivals =
+                        AsyncProcedureCall::<WHATWGOffscreenKernelEnvironment>::has_arrivals(
+                            map.kernel().apc(),
+                        );
+                    let reasons = context.redraw_reasons();
+                    let loaded = !reasons.loading
+                        && !reasons.awaiting_images
+                        && !reasons.camera_moved
+                        && !has_arrivals;
+                    let payload = ArenaFrameTelemetry {
+                        frame: stats.frame,
+                        host_frame: stats.host_frame,
+                        cpu_ms: stats.cpu().as_secs_f64() * 1000.0,
+                        gpu_ms: stats.gpu.map(|d| d.as_secs_f64() * 1000.0),
+                        upload_bytes: stats.upload_bytes,
+                        draws: stats.draws,
+                        drape_redraws: stats.drape_redraws,
+                        prefetch_drapes: stats.prefetch_drapes,
+                        loaded,
+                        settled: !reasons.any() && !has_arrivals,
+                        wasm_memory_bytes: wasm_linear_memory_bytes(),
+                        camera: CameraState::of(context),
+                        redraw_reasons: RedrawSnapshot {
+                            changed: reasons.changed,
+                            loading: reasons.loading,
+                            awaiting_images: reasons.awaiting_images,
+                            camera_moved: reasons.camera_moved,
+                            worker_results: reasons.worker_results || has_arrivals,
+                        },
+                        stages: stats
+                            .stages
+                            .iter()
+                            .map(|(name, duration)| StageSample {
+                                name: name.to_string(),
+                                ms: duration.as_secs_f64() * 1000.0,
+                            })
+                            .collect(),
+                    };
+                    if let Ok(value) = write_js(&payload) {
+                        let _ = callback.call1(&JsValue::NULL, &value);
+                    }
                 }
-            }
-            None
+                None
+            })
         });
         *self.watchers.telemetry.borrow_mut() = Some(reply);
     }
@@ -170,23 +174,26 @@ impl MapController {
     /// least one frame has rendered them, without waiting for symbol fade opacity animations.
     #[wasm_bindgen(js_name = waitArenaLoaded)]
     pub fn wait_arena_loaded(&self) -> js_sys::Promise {
-        let reply = self.handle().until(|map| {
-            let has_arrivals = AsyncProcedureCall::<WHATWGOffscreenKernelEnvironment>::has_arrivals(
-                map.kernel().apc(),
-            );
-            let context = map.context().ok()?;
-            let stats = context.last_frame_stats();
-            let reasons = context.redraw_reasons();
-            if stats.frame > 0
-                && !reasons.loading
-                && !reasons.awaiting_images
-                && !reasons.camera_moved
-                && !has_arrivals
-            {
-                Some(CameraState::of(context))
-            } else {
-                None
-            }
+        let reply = with_controller_handle!(&self.handle, |handle| {
+            handle.until(|map| {
+                let has_arrivals =
+                    AsyncProcedureCall::<WHATWGOffscreenKernelEnvironment>::has_arrivals(
+                        map.kernel().apc(),
+                    );
+                let context = map.context().ok()?;
+                let stats = context.last_frame_stats();
+                let reasons = context.redraw_reasons();
+                if stats.frame > 0
+                    && !reasons.loading
+                    && !reasons.awaiting_images
+                    && !reasons.camera_moved
+                    && !has_arrivals
+                {
+                    Some(CameraState::of(context))
+                } else {
+                    None
+                }
+            })
         });
         wasm_bindgen_futures::future_to_promise(async move {
             let camera = reply.await.map_err(JSError::from)?;
@@ -198,17 +205,20 @@ impl MapController {
     /// pending tile loads, animations, or dirty state (`!needs_redraw()`).
     #[wasm_bindgen(js_name = waitArenaIdle)]
     pub fn wait_arena_idle(&self) -> js_sys::Promise {
-        let reply = self.handle().until(|map| {
-            let has_arrivals = AsyncProcedureCall::<WHATWGOffscreenKernelEnvironment>::has_arrivals(
-                map.kernel().apc(),
-            );
-            let context = map.context().ok()?;
-            let stats = context.last_frame_stats();
-            if stats.frame > 0 && !context.needs_redraw() && !has_arrivals {
-                Some(CameraState::of(context))
-            } else {
-                None
-            }
+        let reply = with_controller_handle!(&self.handle, |handle| {
+            handle.until(|map| {
+                let has_arrivals =
+                    AsyncProcedureCall::<WHATWGOffscreenKernelEnvironment>::has_arrivals(
+                        map.kernel().apc(),
+                    );
+                let context = map.context().ok()?;
+                let stats = context.last_frame_stats();
+                if stats.frame > 0 && !context.needs_redraw() && !has_arrivals {
+                    Some(CameraState::of(context))
+                } else {
+                    None
+                }
+            })
         });
         wasm_bindgen_futures::future_to_promise(async move {
             let camera = reply.await.map_err(JSError::from)?;

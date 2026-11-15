@@ -18,6 +18,7 @@ fn main(
     @location(8) color: vec4<f32>,
     @location(9) zoom_factor: f32,
     @location(10) z_index: f32,
+    @location(14) layer_color: vec4<f32>,
     @location(15) layer_translate: vec2<f32>,
 ) -> VertexOutput {
     // Tile-space z is elevation in metres; fills sit on the surface and take their
@@ -32,6 +33,7 @@ fn main(
     );
     var final_position = projected.clip_position;
     final_position.z = 0.0;
+    let resolved_color = select(color, layer_color, layer_color.x >= 0.0);
 
-    return VertexOutput(color, projected.horizon_distance, final_position);
+    return VertexOutput(resolved_color, projected.horizon_distance, final_position);
 }

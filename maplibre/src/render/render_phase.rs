@@ -73,6 +73,23 @@ impl<I: PhaseItem> RenderPhase<I> {
     }
 }
 
+/// How a [`LayerItem`] interacts with tile stencil masks in the active render pass.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum MaskGroup {
+    /// Neither tests nor mutates tile stencil masks (`background`, `sky`, `heatmap` composite,
+    /// `ElevatedLine`, translucent 3D extrusions).
+    #[default]
+    Unmasked,
+    /// Tests against the shared `TileKind::Vector` pyramid stencil (`0..=123`) without mutating
+    /// bits `0..=6` (and restores bit `7` to `0` before the layer group finishes).
+    Vector,
+    /// Tests against its own source's [`TileMaskItem`]s and mutates stencil via bitwise inversion
+    /// (`raster`, `hillshade`, `color-relief`).
+    Mutating,
+    /// Invokes custom render commands that may leave arbitrary stencil values.
+    Custom,
+}
+
 /// Main-pass draw sorted by style index, then interiors before borders within each layer.
 pub struct LayerItem {
     /// Command implementation invoked when this item is rendered.
@@ -91,6 +108,8 @@ pub struct LayerItem {
     pub source_shape: TileShape,
     /// Projection uniform the draw binds; drape draws use the flat one.
     pub projection: ProjectionBinding,
+    /// Stencil mask discipline for this draw item.
+    pub mask_group: MaskGroup,
     /// The part of the layer's geometry this draw covers, when features draw in the order of a
     /// sort key across tiles; the whole layer otherwise.
     pub run: Option<SortedRun>,
@@ -175,6 +194,8 @@ pub struct TileMaskItem {
     pub generate_borders: bool,
     /// Projection uniform the draw binds; drape draws use the flat one.
     pub projection: ProjectionBinding,
+    /// Whether this mask belongs to the shared `TileKind::Vector` pyramid.
+    pub is_vector: bool,
 }
 
 impl PhaseItem for TileMaskItem {

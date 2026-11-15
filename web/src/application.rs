@@ -207,9 +207,20 @@ pub fn create_kernel(
 /// The plugins a browser map needs: rendering, background, vector tiles with symbols and
 /// heatmaps, plus raster, hillshade, and terrain plugins (which no-op when inactive so runtime
 /// `setStyle` can transition between 2D vector, satellite raster, and 3D terrain seamlessly).
-pub fn default_plugins(_style: &Style) -> Vec<MapPlugin> {
+pub fn default_plugins(style: &Style) -> Vec<MapPlugin> {
+    default_plugins_for::<CurrentEnvironment>(style)
+}
+
+pub(crate) fn default_plugins_for<E>(_style: &Style) -> Vec<Box<dyn Plugin<E>>>
+where
+    E: maplibre::environment::Environment<
+        OffscreenKernelEnvironment = platform::UsedOffscreenKernelEnvironment,
+    >,
+    <E::MapWindowConfig as maplibre::window::MapWindowConfig>::MapWindow:
+        maplibre::window::HeadedMapWindow,
+{
     #[cfg_attr(not(debug_assertions), allow(unused_mut))]
-    let mut plugins: Vec<MapPlugin> = vec![
+    let mut plugins: Vec<Box<dyn Plugin<E>>> = vec![
         Box::<maplibre::render::RenderPlugin>::default(),
         Box::<maplibre::background::BackgroundPlugin>::default(),
         Box::<maplibre::vector::VectorPlugin<platform::UsedVectorTransferables>>::default(),

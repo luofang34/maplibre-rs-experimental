@@ -48,7 +48,7 @@ impl RenderCommand<TileMaskItem> for DrawMask {
             world,
             item,
             pass,
-            u32::from(item.source_shape.coords().stencil_reference_value_3d()),
+            u32::from(item.source_shape.stencil_reference()),
         )
     }
 }
