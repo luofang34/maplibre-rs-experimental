@@ -214,7 +214,7 @@ fn deliver_pending_vector_tiles(
                 [ShaderSymbolVertex {
                     a_pos_offset: [512, 512, 0, 0],
                     a_data: [0; 4],
-                    a_pixeloffset: [0; 4],
+                    a_pixel_and_height: [0; 2],
                 }; 4],
                 [0_u32, 1, 2, 1, 3, 2],
                 6,

@@ -1,4 +1,4 @@
-use super::{attribute, FillShaderFeatureMetadata, Shader, ShaderTileMetadata, ShaderVertex};
+use super::{attribute, FillShaderFeatureMetadata, GpuShaderVertex, Shader, ShaderTileMetadata};
 use crate::render::resource::{FragmentState, VertexBufferLayout, VertexState};
 
 /// The fill shader with the fill replaced by a repeating image.
@@ -49,7 +49,7 @@ impl Shader for FillShader {
             buffers: vec![
                 // vertex data
                 VertexBufferLayout {
-                    array_stride: std::mem::size_of::<ShaderVertex>() as u64,
+                    array_stride: std::mem::size_of::<GpuShaderVertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: vec![
                         attribute(0, wgpu::VertexFormat::Float32x2, 0),
@@ -79,7 +79,7 @@ impl Shader for FillShader {
                 VertexBufferLayout {
                     array_stride: std::mem::size_of::<FillShaderFeatureMetadata>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: vec![attribute(0, wgpu::VertexFormat::Float32x4, 8)],
+                    attributes: vec![attribute(0, wgpu::VertexFormat::Unorm8x4, 8)],
                 },
             ],
         }

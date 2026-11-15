@@ -53,8 +53,8 @@ struct VertexOutput {
 
 @vertex
 fn main(
-    @location(0) position: vec2<f32>,
-    @location(1) path: vec4<f32>,
+    @location(0) v_pos_q2: vec2<i32>,
+    @location(1) v_norm_packed: u32,
     @location(2) tile_mercator_coords: vec4<f32>,
     // Offset, gap width and blur of the line in pixels.
     @location(3) line_style: vec4<f32>,
@@ -64,7 +64,7 @@ fn main(
     @location(7) translate4: vec4<f32>,
     @location(8) color: vec4<f32>,
     @location(9) line_scale: vec2<f32>,
-    @location(10) packed_and_code: vec2<f32>,
+    @location(10) v_meta: vec2<u32>,
     @location(11) viewport: vec2<f32>,
     // The square of the tile this draw covers, as minimum and maximum tile coordinates.
     @location(12) clip_region: vec4<f32>,
@@ -72,34 +72,26 @@ fn main(
     @location(14) clip_antimeridian: u32,
     @location(15) layer_translate: vec2<f32>,
 ) -> VertexOutput {
-    let normal = path.xy;
-    let packed_style = packed_and_code.x;
+    let position = vec2<f32>(v_pos_q2) * 0.25 + vec2<f32>(2048.0);
+    let normal = unpack2x16float(v_norm_packed);
+    let path_dist = f32(v_meta.x & 0xffffffu) * 0.125;
+    let w3 = v_meta.y;
     let style_flags = u32(line_style.w + 0.5);
     let is_gradient = (style_flags & 1u) != 0u;
     let elevated_line = (style_flags & 2u) != 0u;
-    // A width or offset that varies by feature rides in the mantissa of `packed_style`.
-    let payload = bitcast<u32>(packed_style) & 0x7fffffu;
-    let per_feature = payload != 0u;
-    let feature_width = f32((payload >> 11u) & 0xfffu) / 16.0;
-    let feature_offset = f32(i32(payload & 0x7ffu) - 1024) / 8.0;
+    let spatial = (w3 >> 31u) != 0u;
+    let negative_side = ((w3 >> 30u) & 1u) != 0u;
+    let per_feature = ((w3 >> 29u) & 1u) != 0u;
+    let feature_width = f32((w3 >> 18u) & 0x7ffu) / 16.0;
+    let feature_offset = f32(i32((w3 >> 8u) & 0x3ffu) - 512) / 8.0;
     let line_width_px = select(line_width, feature_width, per_feature) * line_scale.x;
     // A gradient line measures its dashes in pixels rather than line widths.
     let dash_unit = select(line_width_px, 1.0, is_gradient);
     let line_offset = select(line_style.x, feature_offset, per_feature);
-    // A stroke's elevation slot carries its side and, in the mantissa, the gap width and blur of
-    // its feature in eighths of a pixel; all ones leaves the layer's own.
-    // A spatial line has a real elevation there instead, and keeps the layer's values.
-    let has_stroke_bits = path.w <= -1e20;
-    let stroke_bits = select(0x3fffffu, bitcast<u32>(path.w) & 0x7fffffu, has_stroke_bits);
-    let negative_side = select(
-        fract(packed_and_code.y) > 0.25,
-        ((stroke_bits >> 22u) & 1u) == 1u,
-        has_stroke_bits,
-    );
-    let gap_bits = (stroke_bits >> 11u) & 0x7ffu;
-    let blur_bits = stroke_bits & 0x7ffu;
-    let gap_width = select(f32(gap_bits) / 8.0, line_style.y, gap_bits == 0x7ffu);
-    let blur_width = select(f32(blur_bits) / 8.0, line_style.z, blur_bits == 0x7ffu);
+    let gap_u8 = select(w3 & 0xffu, 0xffu, spatial);
+    let blur_u8 = select((v_meta.x >> 24u) & 0xffu, 0xffu, spatial);
+    let gap_width = select(f32(gap_u8) / 8.0, line_style.y, gap_u8 == 0xffu);
+    let blur_width = select(f32(blur_u8) / 8.0, line_style.z, blur_u8 == 0xffu);
     let gapwidth = gap_width * 0.5;
 
     let halfwidth = line_width_px * 0.5;
@@ -112,9 +104,10 @@ fn main(
 
     let transform = mat4x4<f32>(translate1, translate2, translate3, translate4);
 
-    let spatial = path.w > -1e20;
+    let elev_u16 = (w3 & 0xffu) | (((v_meta.x >> 24u) & 0xffu) << 8u);
+    let spatial_elevation = f32(elev_u16) * 0.25 - 1000.0;
     let ground = line_ground(position + layer_translate, tile_mercator_coords);
-    let elevation = select(select(0.0, path.w, spatial), ground.elevation, ground.on_terrain);
+    let elevation = select(select(0.0, spatial_elevation, spatial), ground.elevation, ground.on_terrain);
     let projected_center = project_tile_position_3d(
         vec3<f32>(position + layer_translate, elevation),
         transform,
@@ -193,9 +186,13 @@ fn main(
     // a range of 32767, in widths rounded down: a pattern repeats every `sum * 16 * floor(width)`
     // of those units, as GL JS draws it.
     let floor_width = max(floor(select(line_width, feature_width, per_feature)), 1.0);
+    let grad_len_q4 = round(color.x * 255.0)
+        + round(color.y * 255.0) * 256.0
+        + round(color.z * 255.0) * 65536.0;
+    let grad_len = max(grad_len_q4 / 16.0, 1e-6);
     let gradient_dash = vec2<f32>(
-        path.z / max(color.x, 1e-6) * 32767.0 / (16.0 * floor_width),
-        color.x / max(dash_scale, 1e-6) * 16.0 * floor_width / 32767.0,
+        path_dist / grad_len * 32767.0 / (16.0 * floor_width),
+        grad_len / max(dash_scale, 1e-6) * 16.0 * floor_width / 32767.0,
     );
     return VertexOutput(
         center,
@@ -209,12 +206,12 @@ fn main(
         position.x,
         clip_antimeridian,
         select(
-            vec2<f32>(path.z / max(dash_scale * dash_unit, 1e-6), dash_unit),
+            vec2<f32>(path_dist / max(dash_scale * dash_unit, 1e-6), dash_unit),
             gradient_dash,
             is_gradient,
         ),
-        // A gradient layer carries the length of the line in the red channel of its colour.
-        path.z / max(color.x, 1e-6),
+        // A gradient layer carries the 24-bit fixed-point length of the line in `color.xyz`.
+        path_dist / grad_len,
         // Which side of the line the vertex is on: the elevation sentinel of a stroke encodes it.
         select(1.0, -1.0, negative_side) * min(length(normal), 1.0),
         blur_width,

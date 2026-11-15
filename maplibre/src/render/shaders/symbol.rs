@@ -21,7 +21,7 @@ impl Shader for SymbolShader {
                     array_stride: std::mem::size_of::<ShaderSymbolVertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes:
-                        wgpu::vertex_attr_array![0 => Sint32x4, 1 => Uint32x4, 2 => Sint32x4]
+                        wgpu::vertex_attr_array![0 => Sint16x4, 1 => Uint16x4, 2 => Sint32x2]
                             .to_vec(),
                 },
                 {
@@ -54,8 +54,7 @@ impl Shader for SymbolShader {
                     array_stride: std::mem::size_of::<SDFShaderFeatureMetadata>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: wgpu::vertex_attr_array![
-                        12 => Float32x4, 14 => Float32x4, 10 => Float32x4, 13 => Float32x4,
-                        15 => Float32x4
+                        15 => Uint32x4, 12 => Float32x2, 10 => Unorm8x4, 13 => Unorm8x4
                     ]
                     .to_vec(),
                 },

@@ -1,6 +1,6 @@
 use super::{
-    attribute, FillShaderFeatureMetadata, Shader, ShaderLayerMetadata, ShaderTileMetadata,
-    ShaderVertex,
+    attribute, FillShaderFeatureMetadata, GpuShaderVertex, Shader, ShaderLayerMetadata,
+    ShaderTileMetadata,
 };
 use crate::render::resource::{FragmentState, VertexBufferLayout, VertexState};
 
@@ -55,22 +55,14 @@ fn line_vertex(source: &'static str) -> VertexState {
         buffers: vec![
             // vertex data
             VertexBufferLayout {
-                array_stride: std::mem::size_of::<ShaderVertex>() as u64,
+                array_stride: std::mem::size_of::<GpuShaderVertex>() as u64,
                 step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: vec![
-                    attribute(0, wgpu::VertexFormat::Float32x2, 0),
-                    attribute(
-                        wgpu::VertexFormat::Float32x2.size(),
-                        wgpu::VertexFormat::Float32x4,
-                        1,
-                    ),
-                    // Packed per-feature width and offset in x, plus elevated-line datum/side in y.
-                    attribute(
-                        std::mem::offset_of!(ShaderVertex, edge_distance) as u64,
-                        wgpu::VertexFormat::Float32x2,
-                        10,
-                    ),
-                ],
+                attributes: wgpu::vertex_attr_array![
+                    0 => Sint16x2,
+                    1 => Uint32,
+                    10 => Uint32x2
+                ]
+                .to_vec(),
             },
             tile_layout(),
             // layer metadata
@@ -100,7 +92,7 @@ fn line_vertex(source: &'static str) -> VertexState {
             VertexBufferLayout {
                 array_stride: std::mem::size_of::<FillShaderFeatureMetadata>() as u64,
                 step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: vec![attribute(0, wgpu::VertexFormat::Float32x4, 8)],
+                attributes: vec![attribute(0, wgpu::VertexFormat::Unorm8x4, 8)],
             },
         ],
     }

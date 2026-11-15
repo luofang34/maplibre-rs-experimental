@@ -371,6 +371,7 @@ fn upload_bucket(
     if uniform.is_none() {
         feature_metadata_into(
             feature_metadata,
+            style_layer,
             feature_indices,
             active_colors,
             fallback_color,
@@ -393,6 +394,7 @@ fn upload_bucket(
 
     tracing::debug!(%coords, "allocating vector geometry");
     let upload_res = if let Some(color) = uniform {
+        let encoded = FillShaderFeatureMetadata::from_rgba(color);
         let records = feature_indices.iter().map(|&c| c as usize).sum();
         if uses_layer_metadata_uniform_color(style_layer) {
             buffer_pool.replace_layer_geometry_layer_uniform_shared_unless(
@@ -402,7 +404,7 @@ fn upload_bucket(
                 buffer,
                 fallback_vertices,
                 layer_metadata,
-                FillShaderFeatureMetadata { color },
+                encoded,
                 records,
                 |candidate| protected.contains(&candidate),
             )
@@ -414,7 +416,7 @@ fn upload_bucket(
                 buffer,
                 fallback_vertices,
                 layer_metadata,
-                FillShaderFeatureMetadata { color },
+                encoded,
                 records,
                 |candidate| protected.contains(&candidate),
             )

@@ -94,12 +94,25 @@ struct ExtrusionPipeline {
     translucent_front: crate::render::resource::FeaturePipelinePair,
 }
 
-struct CirclePipeline(crate::render::resource::FeaturePipelinePair);
+struct CirclePipeline {
+    pair: crate::render::resource::FeaturePipelinePair,
+    feature_stroke: wgpu::RenderPipeline,
+}
+impl CirclePipeline {
+    fn select_entry(&self, entry: Option<&resource::IndexEntry>) -> &wgpu::RenderPipeline {
+        if entry.is_some_and(resource::IndexEntry::is_dual_feature_metadata) {
+            &self.feature_stroke
+        } else {
+            self.pair
+                .select(entry.is_some_and(resource::IndexEntry::is_uniform_feature_metadata))
+        }
+    }
+}
 impl Deref for CirclePipeline {
     type Target = crate::render::resource::FeaturePipelinePair;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.pair
     }
 }
 

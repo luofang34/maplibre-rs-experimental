@@ -12,7 +12,7 @@ use crate::{
     plugin::Plugin,
     render::{
         eventually::Eventually,
-        shaders::{SDFShaderFeatureMetadata, ShaderLayerMetadata, ShaderSymbolVertex},
+        shaders::{EmptyLayerMetadata, SDFShaderFeatureMetadata, ShaderSymbolVertex},
         RenderStageLabel,
     },
     schedule::Schedule,
@@ -61,7 +61,7 @@ pub type SymbolBufferPool = BufferPool<
     wgpu::Buffer,
     ShaderSymbolVertex,
     IndexDataType,
-    ShaderLayerMetadata,
+    EmptyLayerMetadata,
     SDFShaderFeatureMetadata,
 >;
 

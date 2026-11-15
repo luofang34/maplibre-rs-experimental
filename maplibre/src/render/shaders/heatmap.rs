@@ -1,10 +1,7 @@
 //! Shader descriptors of the heatmap density pass and its colourising composite.
 
-use super::{Shader, ShaderLayerMetadata, ShaderTileMetadata};
-use crate::render::{
-    resource::{FragmentState, VertexBufferLayout, VertexState},
-    ShaderVertex,
-};
+use super::{GpuShaderVertex, Shader, ShaderLayerMetadata, ShaderTileMetadata};
+use crate::render::resource::{FragmentState, VertexBufferLayout, VertexState};
 
 /// Format of the density target. Half floats render and blend without device features.
 pub const DENSITY_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R16Float;
@@ -22,25 +19,14 @@ impl Shader for HeatmapDensityShader {
             entry_point: "main",
             buffers: vec![
                 VertexBufferLayout {
-                    array_stride: std::mem::size_of::<ShaderVertex>() as u64,
+                    array_stride: std::mem::size_of::<GpuShaderVertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: vec![
-                        wgpu::VertexAttribute {
-                            offset: 0,
-                            format: wgpu::VertexFormat::Float32x2,
-                            shader_location: 0,
-                        },
-                        wgpu::VertexAttribute {
-                            offset: std::mem::offset_of!(ShaderVertex, normal) as u64,
-                            format: wgpu::VertexFormat::Float32x4,
-                            shader_location: 1,
-                        },
-                        wgpu::VertexAttribute {
-                            offset: std::mem::offset_of!(ShaderVertex, corner_code) as u64,
-                            format: wgpu::VertexFormat::Float32,
-                            shader_location: 10,
-                        },
-                    ],
+                    attributes: wgpu::vertex_attr_array![
+                        0 => Sint16x2,
+                        1 => Uint32,
+                        10 => Uint32x2
+                    ]
+                    .to_vec(),
                 },
                 ShaderTileMetadata::basic_layout(),
                 VertexBufferLayout {

@@ -1,45 +1,68 @@
-use super::*;
+use super::{page::FmStorageKind, *};
 
 /// Metadata and buffer ranges of one uploaded tile style-layer allocation.
 #[derive(Debug, Clone)]
 pub struct IndexEntry {
     pub(super) allocation_id: u64,
     pub(super) paint_revision: u64,
-    pub(super) page: u16,
+    pub(super) vertex_page: u16,
+    pub(super) index_page: u16,
+    pub(super) layer_page: u16,
+    pub(super) feature_page: u16,
+    pub(super) index_u16: bool,
+    pub(super) fm_kind: FmStorageKind,
+    pub(super) shared_vertex_family: u8,
     /// Tile coordinates owning this layer geometry.
     pub coords: WorldTileCoords,
     /// Interned style layer identifier for `O(1)` equality checks during `Queue` and `Render`.
     pub style_layer_id: crate::style::StyleLayerId,
     /// Style layer definition at upload time.
     pub style_layer: StyleLayer,
-    // Range of bytes within the page's backing buffer for vertices
+    // Range of bytes within `vertex_slabs[vertex_page]` for vertices
     pub(super) buffer_vertices: Range<wgpu::BufferAddress>,
-    // Range of bytes within the page's backing buffer for indices
+    // Range of bytes within `index_{u16,native}_slabs[index_page]` for indices
     pub(super) buffer_indices: Range<wgpu::BufferAddress>,
-    // Range of bytes within the page's backing buffer for metadata
+    // Range of bytes within `layer_slabs[layer_page]` for metadata
     pub(super) buffer_layer_metadata: Range<wgpu::BufferAddress>,
-    // Range of bytes within the page's backing buffer for feature metadata
+    // Range of bytes within `paired_fm` or `feature_slabs[feature_page]` for feature metadata
     pub(super) buffer_feature_metadata: Range<wgpu::BufferAddress>,
-    // Element index of the first vertex within its page, which is also that of its first feature
-    // metadata record: drawn from the whole page buffers with this as the base vertex.
+    // Element index of the first vertex within `vertex_slabs[vertex_page]`.
     pub(super) first_vertex: u32,
-    // Element index of the first index within its page's index buffer.
+    // Element index of the first index within its index slab.
     pub(super) first_index: u32,
-    // Amount of actually usable indices. Each index has the size/format `IndexDataType`.
-    // Can be lower than size(buffer_indices) / indices_stride because of alignment.
+    // Amount of actually usable indices.
     pub(super) usable_indices: u32,
-    // True when `buffer_feature_metadata` holds a single instance-stepped record for the layer.
+    // True when `buffer_feature_metadata` holds a single instance-stepped record (or 0 bytes for layer-uniform).
     pub(super) uniform_feature_metadata: bool,
+    // True when `buffer_feature_metadata` stores two records per vertex (e.g. circle fill + stroke).
+    pub(super) dual_feature_metadata: bool,
     // Shared source-layer vertex slab key when sibling layers share `buffer_vertices`.
     pub(super) shared_geometry_key: Option<u64>,
 }
 
 impl IndexEntry {
-    /// Whether this entry stores one `VertexStepMode::Instance` feature metadata record instead of
-    /// one record per vertex.
+    /// Whether this entry stores one `VertexStepMode::Instance` feature metadata record (or zero
+    /// bytes when carried in `ShaderLayerMetadata`) instead of one record per vertex.
     #[inline]
     pub fn is_uniform_feature_metadata(&self) -> bool {
         self.uniform_feature_metadata
+    }
+
+    /// Whether this entry stores two feature metadata records per vertex.
+    #[inline]
+    pub fn is_dual_feature_metadata(&self) -> bool {
+        self.dual_feature_metadata
+    }
+
+    /// Whether indices for this entry are encoded as `u16` (`IndexFormat::Uint16`).
+    #[inline]
+    pub fn is_u16_indices(&self) -> bool {
+        self.index_u16
+    }
+
+    #[inline]
+    pub(super) fn has_paired_fm(&self) -> bool {
+        self.fm_kind == FmStorageKind::Paired
     }
 
     /// Batch-scoped shared vertex-slab identifier when sibling style layers share `buffer_vertices`.
@@ -47,6 +70,7 @@ impl IndexEntry {
     pub fn shared_geometry_key(&self) -> Option<u64> {
         self.shared_geometry_key
     }
+
     /// Identifies this upload, even when an evicted layer reuses the same buffer range.
     pub fn allocation_id(&self) -> u64 {
         self.allocation_id
@@ -59,9 +83,10 @@ impl IndexEntry {
             .wrapping_add(self.paint_revision.wrapping_mul(0x9E37_79B9_7F4A_7C15))
     }
 
-    /// Backing page slot holding this entry's vertex, index, and metadata buffers.
+    /// Backing layer-metadata slab index (used with `layer_metadata_buffer_range().start` to
+    /// deduplicate per-layer uniform updates across tiles).
     pub fn page(&self) -> u16 {
-        self.page
+        self.layer_page
     }
 
     /// Zero-based local index range `0..usable_indices` when bound as a sub-slice.
@@ -69,33 +94,33 @@ impl IndexEntry {
         0..self.usable_indices
     }
 
-    /// The layer's indices within its page's index buffer, offset by `base_vertex` when drawn.
+    /// The layer's indices within its index slab, offset by `base_vertex` when drawn.
     pub fn whole_buffer_indices(&self) -> Range<u32> {
         self.first_index..self.first_index + self.usable_indices
     }
 
-    /// Added to every index of the layer when drawn from the whole page vertex and feature
-    /// metadata buffers.
+    /// Added to every index of the layer when drawn from the whole vertex and paired feature
+    /// metadata slabs.
     pub fn base_vertex(&self) -> i32 {
         self.first_vertex as i32
     }
 
-    /// Byte range inside the entry's page index buffer.
+    /// Byte range inside the entry's index slab.
     pub fn indices_buffer_range(&self) -> Range<wgpu::BufferAddress> {
         self.buffer_indices.clone()
     }
 
-    /// Byte range inside the entry's page vertex buffer.
+    /// Byte range inside the entry's vertex slab.
     pub fn vertices_buffer_range(&self) -> Range<wgpu::BufferAddress> {
         self.buffer_vertices.clone()
     }
 
-    /// Byte range inside the entry's page layer-metadata buffer.
+    /// Byte range inside the entry's layer-metadata slab.
     pub fn layer_metadata_buffer_range(&self) -> Range<wgpu::BufferAddress> {
         self.buffer_layer_metadata.clone()
     }
 
-    /// Byte range inside the entry's page feature-metadata buffer.
+    /// Byte range inside the entry's feature-metadata slab.
     pub fn feature_metadata_buffer_range(&self) -> Range<wgpu::BufferAddress> {
         self.buffer_feature_metadata.clone()
     }

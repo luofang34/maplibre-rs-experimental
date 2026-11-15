@@ -285,13 +285,13 @@ async fn tile_eviction_clears_vector_and_symbol_gpu_geometry_together() {
 }
 
 #[cfg(all(feature = "headless", feature = "thread-safe-futures"))]
-fn insert_gpu_layer<V: bytemuck::Pod, FM: bytemuck::Pod>(
+fn insert_gpu_layer<V: crate::render::shaders::PoolVertex, TM: bytemuck::Pod, FM: bytemuck::Pod>(
     pool: &mut crate::vector::resource::BufferPool<
         crate::render::upload_queue::UploadQueue,
         wgpu::Buffer,
         V,
         u32,
-        crate::render::shaders::ShaderLayerMetadata,
+        TM,
         FM,
     >,
     queue: &crate::render::upload_queue::UploadQueue,
@@ -307,7 +307,7 @@ fn insert_gpu_layer<V: bytemuck::Pod, FM: bytemuck::Pod>(
         coords,
         crate::style::layer::StyleLayer::default(),
         &geometry,
-        crate::render::shaders::ShaderLayerMetadata::new(0.0, 0.0, [0.0; 2]),
+        TM::zeroed(),
         &[FM::zeroed(); 4],
     )
     .expect("fits");

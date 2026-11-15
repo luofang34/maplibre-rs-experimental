@@ -99,11 +99,18 @@ impl PlacementHistory {
         self.fade_duration_ms
     }
 
-    /// Advances the relative monotonic fade clock in milliseconds.
+    /// Advances the relative monotonic fade clock in milliseconds, capping idle gaps when no fade
+    /// is active so long browser-tab idle periods never exhaust compact GPU timestamp bits.
     pub(super) fn advance_clock(&mut self, now: Duration) -> f32 {
+        let was_fading = self.is_fading();
         if let Some(prev) = self.prev_now {
             if now > prev {
-                self.clock_ms += ((now - prev).as_secs_f64() * 1000.0) as f32;
+                let delta_ms = ((now - prev).as_secs_f64() * 1000.0) as f32;
+                self.clock_ms += if was_fading {
+                    delta_ms
+                } else {
+                    delta_ms.min(500.0)
+                };
             }
         }
         self.prev_now = Some(now);

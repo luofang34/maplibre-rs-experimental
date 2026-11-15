@@ -218,12 +218,12 @@ pub(super) fn append(
     if parts[0].is_none() {
         let image = buffer.vertices[first_vertex..]
             .iter()
-            .find(|vertex| vertex.a_data[2] == 3);
+            .find(|vertex| vertex.kind() == 3);
         if let (Some(vertex), Some(extent)) = (image, block_extent) {
             parts[0] = Some(crate::sdf::placement_geometry::SymbolBounds {
                 bounds: extent.map(f64::from),
-                height: f64::from(f32::from_bits(vertex.a_pixeloffset[2] as u32)),
-                angle: f64::from(f32::from_bits(vertex.a_pixeloffset[3] as u32)),
+                height: f64::from(vertex.height()),
+                angle: f64::from(vertex.angle()),
                 text: true,
             });
         }
@@ -402,16 +402,14 @@ pub(super) fn quad(
         let py = if index < 2 { bounds[1] } else { bounds[3] };
         // The quad turns about the anchor, offsets included, as GL JS rotates its corners.
         let (px, py) = (px * cos - py * sin, px * sin + py * cos);
-        buffer.vertices.push(ShaderSymbolVertex {
-            a_pos_offset: [
-                anchor.x().round() as i32,
-                anchor.y().round() as i32,
-                (px * 32.0).round() as i32,
-                (py * 32.0).round() as i32,
-            ],
-            a_data: [u, v, image.kind, 0],
-            a_pixeloffset: [0, 0, height.to_bits() as i32, angle.to_bits() as i32],
-        });
+        buffer.vertices.push(ShaderSymbolVertex::new(
+            [anchor.x().round() as i32, anchor.y().round() as i32],
+            [(px * 32.0).round() as i32, (py * 32.0).round() as i32],
+            [u, v],
+            image.kind,
+            height,
+            angle,
+        ));
     }
     buffer
         .indices
@@ -437,7 +435,7 @@ fn bounds(
     );
     for index in indices {
         let vertex = &vertices[*index as usize];
-        let scale = if matches!(vertex.a_data[2], 0 | 3) {
+        let scale = if matches!(vertex.kind(), 0 | 3) {
             text_size / 24.0
         } else {
             icon_size

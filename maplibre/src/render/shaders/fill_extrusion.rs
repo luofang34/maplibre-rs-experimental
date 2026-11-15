@@ -1,8 +1,8 @@
 //! Extruded polygon shader: the vector buffer layout with the extrusion slots exposed.
 
 use super::{
-    attribute, FillShaderFeatureMetadata, Shader, ShaderLayerMetadata, ShaderTileMetadata,
-    ShaderVertex,
+    attribute, FillShaderFeatureMetadata, GpuShaderVertex, Shader, ShaderLayerMetadata,
+    ShaderTileMetadata,
 };
 use crate::render::resource::{FragmentState, VertexBufferLayout, VertexState};
 
@@ -45,33 +45,14 @@ impl Shader for FillExtrusionShader {
             },
             buffers: vec![
                 VertexBufferLayout {
-                    array_stride: std::mem::size_of::<ShaderVertex>() as u64,
+                    array_stride: std::mem::size_of::<GpuShaderVertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: vec![
-                        attribute(0, wgpu::VertexFormat::Float32x2, 0),
-                        attribute(
-                            wgpu::VertexFormat::Float32x2.size(),
-                            wgpu::VertexFormat::Float32x2,
-                            1,
-                        ),
-                        attribute(
-                            std::mem::offset_of!(ShaderVertex, distance) as u64,
-                            wgpu::VertexFormat::Float32,
-                            3,
-                        ),
-                        attribute(
-                            std::mem::offset_of!(ShaderVertex, elevation) as u64,
-                            wgpu::VertexFormat::Float32,
-                            11,
-                        ),
-                        // The distance along the wall and, from `corner_code` after it, the
-                        // height one zoom up packed with the tile's overscale.
-                        attribute(
-                            std::mem::offset_of!(ShaderVertex, edge_distance) as u64,
-                            wgpu::VertexFormat::Float32x2,
-                            10,
-                        ),
-                    ],
+                    attributes: wgpu::vertex_attr_array![
+                        0 => Sint16x2,
+                        1 => Uint32,
+                        10 => Uint32x2
+                    ]
+                    .to_vec(),
                 },
                 ShaderTileMetadata::basic_layout(),
                 VertexBufferLayout {
@@ -103,7 +84,7 @@ impl Shader for FillExtrusionShader {
                 VertexBufferLayout {
                     array_stride: std::mem::size_of::<FillShaderFeatureMetadata>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: vec![attribute(0, wgpu::VertexFormat::Float32x4, 8)],
+                    attributes: vec![attribute(0, wgpu::VertexFormat::Unorm8x4, 8)],
                 },
             ],
         }

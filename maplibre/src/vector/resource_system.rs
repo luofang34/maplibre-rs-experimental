@@ -181,7 +181,7 @@ impl PipelineSetup<'_> {
             layer_slot: 2,
             feature_slot: 3,
             attribute: wgpu::VertexAttribute {
-                offset: std::mem::offset_of!(shaders::ShaderLayerMetadata, stroke_color) as u64,
+                offset: std::mem::offset_of!(shaders::ShaderLayerMetadata, uniform_color) as u64,
                 format: wgpu::VertexFormat::Float32x4,
                 shader_location: 8,
             },
@@ -209,18 +209,6 @@ impl PipelineSetup<'_> {
     ) -> crate::render::resource::FeaturePipelinePair {
         self.describe(name, shader, depth, clipped)
             .initialize_pair_with_binding(self.device, layouts, Self::layer_color_binding())
-    }
-
-    fn create_instance_uniform(
-        &self,
-        name: &'static str,
-        shader: &impl Shader,
-        layouts: &[&wgpu::BindGroupLayout],
-        depth: bool,
-        clipped: bool,
-    ) -> crate::render::resource::FeaturePipelinePair {
-        self.describe(name, shader, depth, clipped)
-            .initialize_pair_with_prefix_layouts(self.device, layouts, 3)
     }
 
     /// The pipeline of a line on the terrain surface: tested against the terrain depth as a
@@ -375,7 +363,7 @@ impl PipelineSetup<'_> {
         } else {
             &[self.projection]
         };
-        descriptor.initialize_pair_with_prefix_layouts(self.device, layouts, 3)
+        descriptor.initialize_pair_with_binding(self.device, layouts, Self::layer_color_binding())
     }
 
     fn initialize_extrusion(&self, extrusion: &mut Eventually<ExtrusionPipeline>) {
@@ -447,15 +435,27 @@ impl PipelineSetup<'_> {
         if needs_circle {
             circle.initialize(|| {
                 // Circles cross tile boundaries, as in GL JS, where each point belongs to one tile.
-                CirclePipeline(self.create_instance_uniform(
-                    "circle_pipeline",
-                    &shaders::CircleShader {
-                        format: self.format,
-                    },
-                    &[self.projection],
-                    false,
-                    false,
-                ))
+                CirclePipeline {
+                    pair: self.create_with_clipping(
+                        "circle_pipeline",
+                        &shaders::CircleShader {
+                            format: self.format,
+                        },
+                        &[self.projection],
+                        false,
+                        false,
+                    ),
+                    feature_stroke: self
+                        .describe(
+                            "circle_feature_stroke_pipeline",
+                            &shaders::CircleFeatureStrokeShader {
+                                format: self.format,
+                            },
+                            false,
+                            false,
+                        )
+                        .initialize_with_prefix_layouts(self.device, &[self.projection]),
+                }
             });
         }
     }

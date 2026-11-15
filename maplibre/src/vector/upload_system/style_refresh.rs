@@ -15,7 +15,7 @@ use crate::{
     io::tile_retry::{self, RequestKind},
     render::{
         eventually::{Eventually, Eventually::Initialized},
-        shaders::{FillShaderFeatureMetadata, ShaderLayerMetadata},
+        shaders::FillShaderFeatureMetadata,
         upload_queue::UploadQueue,
     },
     sdf::SymbolBufferPool,
@@ -110,7 +110,7 @@ pub(super) fn apply_dirty_style(
     }
 
     if dirty.sync_layers {
-        sync_symbol_pool_layers(world, style, queue);
+        sync_symbol_pool_layers(world, style);
     }
 
     if dirty.sync_layers || !recolor_layers.is_empty() {
@@ -130,7 +130,7 @@ pub(super) fn apply_dirty_style(
     }
 }
 
-fn sync_symbol_pool_layers(world: &mut World, style: &Style, queue: &UploadQueue) {
+fn sync_symbol_pool_layers(world: &mut World, style: &Style) {
     let Some(Initialized(symbol_pool)) = world.resources.get_mut::<Eventually<SymbolBufferPool>>()
     else {
         return;
@@ -139,17 +139,7 @@ fn sync_symbol_pool_layers(world: &mut World, style: &Style, queue: &UploadQueue
         if style_layer.type_ != "symbol" {
             continue;
         }
-        let touched = symbol_pool.sync_style_layer(style_layer);
-        let metadata = ShaderLayerMetadata::new(style_layer.index as f32, 0.0, [0.0; 2]);
-        for coords in touched {
-            if let Some(entry) = symbol_pool
-                .index()
-                .get_layers(coords)
-                .and_then(|layers| layers.iter().find(|e| e.style_layer.id == style_layer.id))
-            {
-                symbol_pool.update_layer_metadata(queue, entry, metadata);
-            }
-        }
+        let _ = symbol_pool.sync_style_layer(style_layer);
     }
 }
 
@@ -337,13 +327,19 @@ fn refresh_vector_pool(
                             continue;
                         }
                         let metadata = if let Some(color) = uniform {
-                            vec![FillShaderFeatureMetadata { color }; allocated_count]
+                            vec![FillShaderFeatureMetadata::from_rgba(color); allocated_count]
                         } else {
-                            feature_metadata(
+                            let built = feature_metadata(
+                                style_layer,
                                 &bucket.feature_indices,
                                 &bucket.feature_colors,
                                 fallback_color,
-                            )
+                            );
+                            if built.len() != allocated_count {
+                                *needs_worker_refresh = true;
+                                continue;
+                            }
+                            built
                         };
                         if style_layer
                             .paint
@@ -394,7 +390,10 @@ fn refresh_vector_pool(
                             gpu_updates.push(GpuPaintUpdate {
                                 coords,
                                 layer_id: style_layer.id.clone(),
-                                feature_meta: vec![FillShaderFeatureMetadata { color }; count],
+                                feature_meta: vec![
+                                    FillShaderFeatureMetadata::from_rgba(color);
+                                    count
+                                ],
                                 runs: None,
                                 bump_revision: !is_layer_touched,
                             });

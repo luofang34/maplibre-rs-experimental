@@ -48,12 +48,58 @@ impl Default for ShaderVertex {
     }
 }
 
-/// Per-vertex feature color for vector geometry.
+/// Per-vertex feature color (`Unorm8x4`, 4 bytes) for vector geometry.
 #[repr(C)]
-#[derive(Debug, Copy, Clone, Pod, Zeroable)]
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, Pod, Zeroable)]
 pub struct FillShaderFeatureMetadata {
-    /// Encoded-sRGB color with straight alpha; feature opacity is folded into alpha.
-    pub color: Vec4f32,
+    /// Quantized RGBA8 color (or 24-bit fixed-point `line-gradient` length + opacity in `a`).
+    pub color: [u8; 4],
+}
+
+impl FillShaderFeatureMetadata {
+    /// Quantizes floating-point `[r, g, b, a]` in `0.0..=1.0` into `Unorm8x4`.
+    #[inline]
+    pub fn from_rgba(color: [f32; 4]) -> Self {
+        Self {
+            color: color.map(|c| (c.clamp(0.0, 1.0) * 255.0).round() as u8),
+        }
+    }
+
+    /// Packs a `line-gradient` feature length in `1/16` tile units (`24-bit` unsigned fixed-point
+    /// in `rgb`, up to `1,048,575.9375` tile units) and straight opacity in `a`.
+    #[inline]
+    pub fn from_line_gradient(length: f32, opacity: f32) -> Self {
+        let len_q4 = (length.max(0.0) * 16.0).round().min(16_777_215.0) as u32;
+        Self {
+            color: [
+                (len_q4 & 0xFF) as u8,
+                ((len_q4 >> 8) & 0xFF) as u8,
+                ((len_q4 >> 16) & 0xFF) as u8,
+                (opacity.clamp(0.0, 1.0) * 255.0).round() as u8,
+            ],
+        }
+    }
+
+    /// Unpacks a `pack_circle_colors` negative-lane `[f32; 4]` pair into `[fill, stroke]`.
+    #[inline]
+    pub fn unpack_circle_pair(packed: [f32; 4]) -> [Self; 2] {
+        let pair = |lane: f32| -> [u8; 2] {
+            let v = (-lane - 1.0).max(0.0).round() as u32;
+            [((v >> 8) & 0xFF) as u8, (v & 0xFF) as u8]
+        };
+        let [fr, fg] = pair(packed[0]);
+        let [fb, fa] = pair(packed[1]);
+        let [sr, sg] = pair(packed[2]);
+        let [sb, sa] = pair(packed[3]);
+        [
+            Self {
+                color: [fr, fg, fb, fa],
+            },
+            Self {
+                color: [sr, sg, sb, sa],
+            },
+        ]
+    }
 }
 
 /// What the fourth lane of [`SDFShaderFeatureMetadata::pose`] holds for a glyph with a pose,
@@ -61,29 +107,124 @@ pub struct FillShaderFeatureMetadata {
 /// magnitude an `f32` keeps any rise on Earth to within a centimetre.
 pub const POSED_GLYPH: f32 = 65536.0;
 
-/// Per-vertex collision visibility, GPU fade ramp, and sampled terrain height for symbols.
+/// Per-vertex collision visibility, GPU fade ramp, and sampled terrain height for symbols (`32 B`).
+///
+/// Field offsets (`16 B`, `8 B`, `4 B`, `4 B`) preserve natural hardware alignment across
+/// WebGPU, Metal, and mobile Vulkan drivers while using only 4 vertex attribute locations.
 #[repr(C)]
-#[derive(Debug, Copy, Clone, Pod, Zeroable, Default)]
+#[derive(Debug, Copy, Clone, PartialEq, Pod, Zeroable, Default)]
 pub struct SDFShaderFeatureMetadata {
-    /// Target collision opacity in 0..=1 after fade completes (`@location(12).x`).
-    pub opacity: f32,
-    /// Sampled ground elevation in meters; symbol height offsets are carried in the geometry.
-    pub elevation: f32,
-    /// Starting collision opacity in 0..=1 when the current fade began (`@location(12).z`).
-    pub start_opacity: f32,
-    /// Monotonic fade clock timestamp in milliseconds when the current fade began (`@location(12).w`).
-    pub start_time_ms: f32,
-    /// Where a glyph placed along a line sits: the offset of its centre from the vertex anchor
-    /// in tile units, its direction in radians, and [`POSED_GLYPH`] plus how far the ground
-    /// under the glyph rises above the ground under the label's anchor, in metres, when the
-    /// glyph has such a pose.
-    pub pose: [f32; 4],
-    /// Fill colour of the symbol's text or icon, straight alpha, evaluated for its feature.
-    pub color: [f32; 4],
-    /// Halo colour of the text or icon.
-    pub halo: [f32; 4],
-    /// Size, halo width, halo blur and opacity of the text or icon.
-    pub params: [f32; 4],
+    /// Bit-packed symbol metrics, elevation, fade timestamp, and along-line angle/rise (`@location(15)`):
+    /// - `packed[0]`: `(elev_q4_i20 & 0x000f_ffff) | (halo_w_q4 << 20) | (has_pose << 28) | (start_hi3 << 29)`
+    /// - `packed[1]`: `size_f16 | (rise_f16 << 16)`
+    /// - `packed[2]`: `angle_u16 | (start_lo16 << 16)`
+    /// - `packed[3]`: `target_u8 | (start_u8 << 8) | (style_u8 << 16) | (halo_b_q4 << 24)`
+    pub packed: [u32; 4],
+    /// Full-precision `[shift_x, shift_y]` in layout px when `!has_pose`, or `[dx, dy]` in tile
+    /// units relative to the label's integer anchor when `has_pose` (`@location(12)`).
+    pub pose_xy: [f32; 2],
+    /// Fill colour of the symbol's text or icon (`Unorm8x4`, `@location(10)`).
+    pub color: [u8; 4],
+    /// Halo colour of the text or icon (`Unorm8x4`, `@location(13)`).
+    pub halo: [u8; 4],
+}
+
+impl SDFShaderFeatureMetadata {
+    /// Packs placement visibility, fade ramp, anchor shift, and paint style into 32 bytes.
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_placement(
+        target_opacity: f32,
+        elevation: f32,
+        start_opacity: f32,
+        start_time_ms: f32,
+        shift: [f32; 2],
+        color: [f32; 4],
+        halo: [f32; 4],
+        params: [f32; 4],
+    ) -> Self {
+        let u8_norm = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u32;
+        let target_u8 = u8_norm(target_opacity);
+        let start_u8 = u8_norm(start_opacity);
+        let style_op_u8 = u8_norm(params[3]);
+        let size_f16 = u32::from(super::f32_to_f16_bits(params[0].max(0.0)));
+        let halo_w_q4 = (params[1].max(0.0) * 16.0).round().min(255.0) as u32;
+        let halo_b_q4 = (params[2].max(0.0) * 16.0).round().min(255.0) as u32;
+        let elev_i20 = (elevation * 16.0).round().clamp(-524_288.0, 524_287.0) as i32;
+        let elev_bits = (elev_i20 as u32) & 0x000f_ffff;
+        let start_ticks = (start_time_ms.max(0.0) * 0.25).round().min(524_287.0) as u32;
+        Self {
+            packed: [
+                elev_bits | (halo_w_q4 << 20) | (((start_ticks >> 16) & 0x7) << 29),
+                size_f16,
+                (start_ticks & 0xffff) << 16,
+                target_u8 | (start_u8 << 8) | (style_op_u8 << 16) | (halo_b_q4 << 24),
+            ],
+            pose_xy: shift,
+            color: color.map(|c| (c.clamp(0.0, 1.0) * 255.0).round() as u8),
+            halo: halo.map(|c| (c.clamp(0.0, 1.0) * 255.0).round() as u8),
+        }
+    }
+
+    /// Encodes a glyph's curved-line pose (`dx, dy` in tile units, `angle` in radians, `rise` in metres).
+    #[inline]
+    pub fn set_glyph_pose(&mut self, dx: f32, dy: f32, angle: f32, rise: f32) {
+        let tau = std::f32::consts::TAU;
+        let angle_u16 = if angle.is_finite() {
+            (angle.rem_euclid(tau) * (65536.0 / tau)).round() as u32 & 0xffff
+        } else {
+            0
+        };
+        let rise_f16 = u32::from(super::f32_to_f16_bits(rise));
+        self.packed[0] |= 1_u32 << 28;
+        self.packed[1] = (self.packed[1] & 0xffff) | (rise_f16 << 16);
+        self.packed[2] = (self.packed[2] & 0xffff_0000) | angle_u16;
+        self.pose_xy = [dx, dy];
+    }
+
+    /// Whether target collision opacity is greater than zero.
+    #[inline]
+    pub const fn has_target_opacity(&self) -> bool {
+        (self.packed[3] & 0xff) != 0
+    }
+
+    /// Whether starting fade opacity is greater than zero.
+    #[inline]
+    pub const fn has_start_opacity(&self) -> bool {
+        ((self.packed[3] >> 8) & 0xff) != 0
+    }
+
+    /// Decodes the quantized fade start timestamp in milliseconds.
+    #[inline]
+    pub fn start_time_ms(&self) -> f32 {
+        let ticks = (self.packed[2] >> 16) | (((self.packed[0] >> 29) & 0x7) << 16);
+        (ticks as f32) * 4.0
+    }
+
+    /// Sets quantized target collision opacity (`0.0..=1.0`), used by unit tests.
+    #[inline]
+    pub fn set_target_opacity(&mut self, opacity: f32) {
+        let u = (opacity.clamp(0.0, 1.0) * 255.0).round() as u32;
+        self.packed[3] = (self.packed[3] & !0xff) | u;
+    }
+
+    /// Whether this vertex carries an along-line glyph pose (`true`) rather than an anchor shift.
+    #[inline]
+    pub const fn has_pose(&self) -> bool {
+        ((self.packed[0] >> 28) & 1) != 0
+    }
+
+    /// Decodes `[dx, dy, angle, POSED_GLYPH + rise]` (or `[shift_x, shift_y, 0.0, 0.0]` when unposed).
+    #[inline]
+    pub fn decoded_pose(&self) -> [f32; 4] {
+        if self.has_pose() {
+            let rise = super::f16_bits_to_f32((self.packed[1] >> 16) as u16);
+            let angle = (self.packed[2] & 0xffff) as f32 * (std::f32::consts::TAU / 65536.0);
+            [self.pose_xy[0], self.pose_xy[1], angle, POSED_GLYPH + rise]
+        } else {
+            [self.pose_xy[0], self.pose_xy[1], 0.0, 0.0]
+        }
+    }
 }
 
 /// Per-layer instance record shared across tile pipelines.
@@ -96,13 +237,14 @@ pub struct ShaderLayerMetadata {
     pub line_width: f32,
     /// Layer translation converted to tile units in map axes.
     pub translate: Vec2f32,
-    /// Circle stroke colour, extrusion light colour, or uniform fill colour override (`x < 0.0`
-    /// selects per-vertex feature colours).
+    /// Circle stroke colour or extrusion light colour.
     pub stroke_color: Vec4f32,
     /// Circle opacity, stroke opacity and blur ratio; the last slot is padding.
     pub circle_params: Vec4f32,
     /// Circle pitch-scale (x) and pitch-alignment (y), 1.0 for `map`; the rest is padding.
     pub circle_flags: Vec4f32,
+    /// Uniform fill/line/extrusion/circle colour (`@location(8)` on `uniform` pipelines).
+    pub uniform_color: Vec4f32,
 }
 
 impl ShaderLayerMetadata {
@@ -115,6 +257,7 @@ impl ShaderLayerMetadata {
             stroke_color: [-1.0, 0.0, 0.0, 1.0],
             circle_params: [1.0, 1.0, 0.0, 0.0],
             circle_flags: [0.0; 4],
+            uniform_color: [0.0, 0.0, 0.0, 1.0],
         }
     }
 }

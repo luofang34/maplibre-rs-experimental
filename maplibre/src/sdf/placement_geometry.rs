@@ -19,7 +19,8 @@ pub struct SymbolBounds {
 pub(crate) fn measure(vertices: &mut [ShaderSymbolVertex]) -> [Option<SymbolBounds>; 3] {
     let mut parts: [Option<SymbolBounds>; 3] = [None, None, None];
     for vertex in vertices.iter() {
-        let Some(slot) = parts.get_mut(vertex.a_data[2] as usize) else {
+        let kind = vertex.kind();
+        let Some(slot) = parts.get_mut(kind as usize) else {
             continue;
         };
         let part = slot.get_or_insert_with(|| SymbolBounds {
@@ -29,9 +30,9 @@ pub(crate) fn measure(vertices: &mut [ShaderSymbolVertex]) -> [Option<SymbolBoun
                 f64::NEG_INFINITY,
                 f64::NEG_INFINITY,
             ],
-            height: f64::from(f32::from_bits(vertex.a_pixeloffset[2] as u32)),
-            angle: f64::from(f32::from_bits(vertex.a_pixeloffset[3] as u32)),
-            text: vertex.a_data[2] == 0,
+            height: f64::from(vertex.height()),
+            angle: f64::from(vertex.angle()),
+            text: kind == 0,
         });
         let x = f64::from(vertex.a_pos_offset[2]) / 32.0;
         let y = f64::from(vertex.a_pos_offset[3]) / 32.0;
@@ -41,12 +42,12 @@ pub(crate) fn measure(vertices: &mut [ShaderSymbolVertex]) -> [Option<SymbolBoun
         part.bounds[3] = part.bounds[3].max(y);
     }
     for vertex in vertices {
-        if let Some(part) = parts.get(vertex.a_data[2] as usize).copied().flatten() {
+        if let Some(part) = parts.get(vertex.kind() as usize).copied().flatten() {
             let radius = part.bounds[0]
                 .abs()
                 .max(part.bounds[2].abs())
                 .hypot(part.bounds[1].abs().max(part.bounds[3].abs()));
-            vertex.a_data[3] = (radius as f32).to_bits();
+            vertex.set_radius(radius);
         }
     }
     parts

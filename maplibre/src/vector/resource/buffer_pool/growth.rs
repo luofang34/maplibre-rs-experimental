@@ -1,55 +1,102 @@
 use super::*;
 
-impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM, FM> {
-    pub(super) fn single_layer_limits(&self, strides: ElementStrides) -> [u64; 4] {
-        let max_v_base = capped_elem_limit(
-            self.max_capacities.vertices,
-            self.max_page_bytes,
-            strides.vertex,
-        );
-        let (max_v_elems, max_fm_elems) = if self.decoupled_feature_metadata {
-            let max_fm = capped_elem_limit(
-                self.max_capacities.feature_metadata,
+impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM, FM> {
+    pub(super) fn allocated_elements(&self) -> BufferPoolSizes {
+        let vertices = self
+            .vertex_slabs
+            .iter()
+            .flatten()
+            .map(|s| s.element_capacity)
+            .sum();
+        let indices = self
+            .index_u16_slabs
+            .iter()
+            .flatten()
+            .chain(self.index_native_slabs.iter().flatten())
+            .map(|s| s.element_capacity)
+            .sum();
+        let layer_metadata = self
+            .layer_slabs
+            .iter()
+            .flatten()
+            .map(|s| s.element_capacity)
+            .sum();
+        let paired_fm: u64 = self
+            .vertex_slabs
+            .iter()
+            .flatten()
+            .filter(|s| s.paired_fm.is_some())
+            .map(|s| s.element_capacity)
+            .sum();
+        let standalone_fm: u64 = self
+            .feature_slabs
+            .iter()
+            .flatten()
+            .map(|s| s.element_capacity)
+            .sum();
+        BufferPoolSizes {
+            vertices,
+            indices,
+            layer_metadata,
+            feature_metadata: paired_fm.saturating_add(standalone_fm),
+        }
+    }
+
+    pub(super) fn single_layer_limits(
+        &self,
+        req: SlabRequest,
+        strides: ElementStrides,
+    ) -> [u64; 4] {
+        let idx_stride = strides.active_index_stride(req.index_u16);
+        let max_v_base = self
+            .max_elements
+            .vertices
+            .min(page_elem_limit(self.max_page_bytes, strides.vertex));
+        let (max_v_elems, max_fm_elems) = if req.fm_kind == FmStorageKind::Paired
+            && strides.feature_metadata > 0
+        {
+            let clamped = max_v_base
+                .min(self.max_elements.feature_metadata)
+                .min(page_elem_limit(
+                    self.max_page_bytes,
+                    strides.feature_metadata,
+                ));
+            (clamped, clamped)
+        } else {
+            let max_fm = self.max_elements.feature_metadata.min(page_elem_limit(
                 self.max_page_bytes,
                 strides.feature_metadata,
-            );
+            ));
             (max_v_base, max_fm)
-        } else {
-            let clamped = match self
-                .max_capacities
-                .feature_metadata
-                .checked_div(strides.feature_metadata)
-                .zip(self.max_page_bytes.checked_div(strides.feature_metadata))
-            {
-                Some((fm_cap, fm_page)) => max_v_base.min(fm_cap).min(fm_page),
-                None => max_v_base,
-            };
-            (clamped, clamped)
         };
-        let max_i_elems = capped_elem_limit(
-            self.max_capacities.indices,
-            self.max_page_bytes,
-            strides.index,
-        );
-        let max_lm_elems = capped_elem_limit(
-            self.max_capacities.layer_metadata,
-            self.max_page_bytes,
-            strides.layer_metadata,
-        );
+        let max_i_elems = self
+            .max_elements
+            .indices
+            .min(page_elem_limit(self.max_page_bytes, idx_stride));
+        let max_lm_elems = self
+            .max_elements
+            .layer_metadata
+            .min(page_elem_limit(self.max_page_bytes, strides.layer_metadata));
         [
             max_v_elems * strides.vertex,
-            max_i_elems * strides.index,
+            max_i_elems * idx_stride,
             max_lm_elems * strides.layer_metadata,
             max_fm_elems * strides.feature_metadata,
         ]
     }
 
-    pub(super) fn validate_sizes(
+    pub(super) fn validate_request(
         &self,
-        sizes: [u64; 4],
+        req: SlabRequest,
         strides: ElementStrides,
     ) -> Result<(), AllocationError> {
-        let limits = self.single_layer_limits(strides);
+        let limits = self.single_layer_limits(req, strides);
+        let sizes = [
+            req.vertex_bytes,
+            req.index_bytes,
+            req.layer_bytes,
+            req.feature_bytes,
+        ];
         let types = [
             BackingBufferType::Vertices,
             BackingBufferType::Indices,
@@ -71,218 +118,182 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         Ok(())
     }
 
-    pub(super) fn try_grow_page_and_alloc(
+    pub(super) fn try_reserve_slabs(
         &mut self,
         queue: Option<&Q>,
-        sizes: [u64; 4],
+        req: SlabRequest,
         strides: ElementStrides,
-    ) -> Option<PageAllocation> {
-        self.page_factory.as_ref()?;
-        // Any empty page reached here failed `try_allocate` in step 1 (too small for `sizes`), so
-        // return its capacity to the unallocated pool before shaping a new page.
-        self.reclaim_empty_pages_with_queue(0, queue);
-
-        let rem = self
-            .max_capacities
-            .saturating_sub(self.allocated_capacities());
-        let req_v_elems = elem_div(sizes[0], strides.vertex);
-        let req_i_elems = elem_div(sizes[1], strides.index);
-        let req_lm_elems = elem_div(sizes[2], strides.layer_metadata);
-        let req_fm_elems = elem_div(sizes[3], strides.feature_metadata);
-
-        let rem_v_base = elem_div(rem.vertices, strides.vertex);
-        let rem_fm_opt = rem.feature_metadata.checked_div(strides.feature_metadata);
-        let rem_v_elems = if self.decoupled_feature_metadata {
-            rem_v_base
-        } else {
-            match rem_fm_opt {
-                Some(rem_fm) => rem_v_base.min(rem_fm),
-                None => rem_v_base,
-            }
-        };
-        let rem_i_elems = elem_div(rem.indices, strides.index);
-        let rem_lm_elems = elem_div(rem.layer_metadata, strides.layer_metadata);
-
-        if req_v_elems > rem_v_elems
-            || req_i_elems > rem_i_elems
-            || req_lm_elems > rem_lm_elems
-            || rem_fm_opt.is_some_and(|rem_fm| req_fm_elems > rem_fm)
+        layer_meta_key: Option<(crate::style::StyleLayerId, u8)>,
+        shared_vertex_slot: Option<(u16, Range<u64>)>,
+    ) -> Option<SlabAllocation> {
+        let needs_paired_fm = req.fm_kind == FmStorageKind::Paired && strides.feature_metadata > 0;
+        let (vertex_page, vertices, release_v_on_abort) = if let Some((vp, vr)) = shared_vertex_slot
         {
+            let slab = self.vertex_slabs.get_mut(usize::from(vp))?.as_mut()?;
+            slab.live_entries += 1;
+            (vp, vr, false)
+        } else {
+            let v_align = strides.vertex_byte_align(needs_paired_fm, req.vertex_elem_align);
+            let (vp, vr) = self.try_alloc_or_grow_vertex(
+                queue,
+                req.vertex_bytes,
+                v_align,
+                needs_paired_fm,
+                strides,
+            )?;
+            (vp, vr, true)
+        };
+
+        let paired_fm_range = if needs_paired_fm {
+            let first_v = vertices.start.checked_div(strides.vertex).unwrap_or(0);
+            let fm_start = first_v * strides.feature_metadata;
+            fm_start..fm_start + req.feature_bytes
+        } else {
+            0..0
+        };
+
+        let Some((index_page, indices)) =
+            self.try_alloc_or_grow_index(queue, req.index_bytes, req.index_u16, strides)
+        else {
+            self.abort_vertex(vertex_page, vertices, release_v_on_abort);
             return None;
-        }
+        };
 
-        let max_v_base = page_elem_limit(self.max_page_bytes, strides.vertex);
-        let max_v_page = if self.decoupled_feature_metadata {
-            max_v_base
+        let Some((layer_page, layer_metadata)) =
+            self.try_alloc_or_grow_layer(queue, req.layer_bytes, strides, layer_meta_key)
+        else {
+            self.abort_vertex(vertex_page, vertices, release_v_on_abort);
+            self.abort_index(index_page, indices, req.index_u16);
+            return None;
+        };
+
+        let (feature_page, feature_metadata) = if req.fm_kind == FmStorageKind::Standalone
+            && req.feature_bytes > 0
+        {
+            let Some((fp, fmr)) = self.try_alloc_or_grow_feature(queue, req.feature_bytes, strides)
+            else {
+                self.abort_vertex(vertex_page, vertices, release_v_on_abort);
+                self.abort_index(index_page, indices, req.index_u16);
+                self.abort_layer(layer_page, layer_metadata, layer_meta_key);
+                return None;
+            };
+            (fp, fmr)
+        } else if req.fm_kind == FmStorageKind::Paired {
+            (NO_SLAB, paired_fm_range)
         } else {
-            match self.max_page_bytes.checked_div(strides.feature_metadata) {
-                Some(fm_page) => max_v_base.min(fm_page),
-                None => max_v_base,
+            (NO_SLAB, 0..0)
+        };
+
+        Some(SlabAllocation {
+            vertex_page,
+            index_page,
+            layer_page,
+            feature_page,
+            index_u16: req.index_u16,
+            fm_kind: req.fm_kind,
+            vertices,
+            indices,
+            layer_metadata,
+            feature_metadata,
+        })
+    }
+
+    pub(super) fn abort_allocation(
+        &mut self,
+        alloc: SlabAllocation,
+        release_vertices: bool,
+        layer_meta_key: Option<(crate::style::StyleLayerId, u8)>,
+    ) {
+        self.abort_vertex(alloc.vertex_page, alloc.vertices, release_vertices);
+        self.abort_index(alloc.index_page, alloc.indices, alloc.index_u16);
+        self.abort_layer(alloc.layer_page, alloc.layer_metadata, layer_meta_key);
+        if alloc.fm_kind == FmStorageKind::Standalone && alloc.feature_page != NO_SLAB {
+            if let Some(slab) = self
+                .feature_slabs
+                .get_mut(usize::from(alloc.feature_page))
+                .and_then(Option::as_mut)
+            {
+                slab.alloc.free(alloc.feature_metadata);
+                slab.live_entries = slab.live_entries.saturating_sub(1);
             }
-        };
-        let max_i_page = page_elem_limit(self.max_page_bytes, strides.index);
-        let max_lm_page = page_elem_limit(self.max_page_bytes, strides.layer_metadata);
-        let max_fm_page = page_elem_limit(self.max_page_bytes, strides.feature_metadata);
-
-        #[cfg(target_arch = "wasm32")]
-        let target_page_v = match self.page_count() {
-            0 => 16 * 1024,
-            1 => 32 * 1024,
-            2 => 64 * 1024,
-            3 => 128 * 1024,
-            _ => DEFAULT_PAGE_VERTICES,
-        };
-        #[cfg(not(target_arch = "wasm32"))]
-        let target_page_v = match self.page_count() {
-            0 => 32 * 1024,
-            1 => 64 * 1024,
-            2 => 128 * 1024,
-            _ => DEFAULT_PAGE_VERTICES,
-        };
-        let page_v_elems = target_page_v
-            .min(max_v_page)
-            .max(req_v_elems.next_power_of_two().min(max_v_page))
-            .min(rem_v_elems)
-            .max(req_v_elems);
-        let prop_i = proportional_rem(rem_i_elems, page_v_elems, rem_v_elems);
-        let page_i_elems = prop_i
-            .min(max_i_page)
-            .max(req_i_elems.next_power_of_two().min(max_i_page))
-            .min(rem_i_elems)
-            .max(req_i_elems);
-        let prop_lm = proportional_rem(rem_lm_elems, page_v_elems, rem_v_elems)
-            .max(256.min(rem_lm_elems / 4));
-        let page_lm_elems = prop_lm
-            .min(max_lm_page)
-            .max(req_lm_elems.next_power_of_two().min(max_lm_page))
-            .min(rem_lm_elems)
-            .max(req_lm_elems);
-        let page_fm_elems = if self.decoupled_feature_metadata && strides.feature_metadata > 0 {
-            let rem_fm = rem_fm_opt.unwrap_or(0);
-            let prop_fm =
-                proportional_rem(rem_fm, page_v_elems, rem_v_elems).max(1024.min(rem_fm / 4));
-            prop_fm
-                .min(max_fm_page)
-                .max(req_fm_elems.next_power_of_two().min(max_fm_page))
-                .min(rem_fm)
-                .max(req_fm_elems)
-        } else {
-            page_v_elems
-        };
-
-        let v_bytes =
-            fitting_buffer_size(strides.vertex as usize, page_v_elems, self.max_page_bytes);
-        let i_bytes =
-            fitting_buffer_size(strides.index as usize, page_i_elems, self.max_page_bytes);
-        let lm_bytes = fitting_buffer_size(
-            strides.layer_metadata as usize,
-            page_lm_elems,
-            self.max_page_bytes,
-        );
-        let fm_bytes = fitting_buffer_size(
-            strides.feature_metadata as usize,
-            page_fm_elems,
-            self.max_page_bytes,
-        );
-
-        let slot_idx = self
-            .pages
-            .iter()
-            .position(Option::is_none)
-            .unwrap_or(self.pages.len());
-        let page_id = u16::try_from(slot_idx).ok()?;
-
-        let factory = self.page_factory.as_ref()?;
-        let v_buf = (factory.0)(BackingBufferType::Vertices, v_bytes);
-        let i_buf = (factory.0)(BackingBufferType::Indices, i_bytes);
-        let lm_buf = (factory.0)(BackingBufferType::Metadata, lm_bytes);
-        let fm_buf = (factory.0)(BackingBufferType::FeatureMetadata, fm_bytes);
-
-        let mut page = BufferPage::new(
-            BackingBufferDescriptor::new(v_buf, v_bytes),
-            BackingBufferDescriptor::new(i_buf, i_bytes),
-            BackingBufferDescriptor::new(lm_buf, lm_bytes),
-            BackingBufferDescriptor::new(fm_buf, fm_bytes),
-            strides,
-            self.decoupled_feature_metadata,
-        );
-        let alloc = page.try_allocate(page_id, sizes, strides)?;
-        if slot_idx == self.pages.len() {
-            self.pages.push(Some(page));
-        } else {
-            self.pages[slot_idx] = Some(page);
         }
-        Some(alloc)
+    }
+
+    fn abort_vertex(&mut self, page: u16, range: Range<u64>, release_range: bool) {
+        if page == NO_SLAB {
+            return;
+        }
+        if let Some(slab) = self
+            .vertex_slabs
+            .get_mut(usize::from(page))
+            .and_then(Option::as_mut)
+        {
+            if release_range {
+                slab.vertex_alloc.free(range);
+            }
+            slab.live_entries = slab.live_entries.saturating_sub(1);
+        }
+    }
+
+    fn abort_index(&mut self, page: u16, range: Range<u64>, use_u16: bool) {
+        if page == NO_SLAB {
+            return;
+        }
+        let slabs = if use_u16 {
+            &mut self.index_u16_slabs
+        } else {
+            &mut self.index_native_slabs
+        };
+        if let Some(slab) = slabs.get_mut(usize::from(page)).and_then(Option::as_mut) {
+            slab.alloc.free(range);
+            slab.live_entries = slab.live_entries.saturating_sub(1);
+        }
+    }
+
+    fn abort_layer(
+        &mut self,
+        page: u16,
+        range: Range<u64>,
+        layer_meta_key: Option<(crate::style::StyleLayerId, u8)>,
+    ) {
+        if page == NO_SLAB {
+            return;
+        }
+        let release_range = match layer_meta_key {
+            Some((lid, z)) => self.release_shared_layer_meta_ref(page, lid, z),
+            None => true,
+        };
+        if let Some(slab) = self
+            .layer_slabs
+            .get_mut(usize::from(page))
+            .and_then(Option::as_mut)
+        {
+            if release_range {
+                slab.alloc.free(range);
+            }
+            slab.live_entries = slab.live_entries.saturating_sub(1);
+        }
     }
 
     pub(super) fn saturation_error(
         &self,
-        sizes: [u64; 4],
+        req: SlabRequest,
         strides: ElementStrides,
     ) -> AllocationError {
-        let limits = self.single_layer_limits(strides);
-        let types = [
-            BackingBufferType::Vertices,
-            BackingBufferType::Indices,
-            BackingBufferType::Metadata,
-            BackingBufferType::FeatureMetadata,
-        ];
-        for ((typ, requested), capacity) in types.into_iter().zip(sizes).zip(limits) {
-            let fits_somewhere = self.pages.iter().flatten().any(|page| match typ {
-                BackingBufferType::Vertices => page.vertex_alloc.can_allocate(
-                    requested,
-                    strides.effective_vertex_align(page.decoupled_feature_metadata),
-                ),
-                BackingBufferType::Indices => page
-                    .index_alloc
-                    .can_allocate(requested, strides.index_align),
-                BackingBufferType::Metadata => page
-                    .layer_alloc
-                    .can_allocate(requested, strides.layer_align),
-                BackingBufferType::FeatureMetadata => {
-                    if page.decoupled_feature_metadata {
-                        page.feature_alloc
-                            .can_allocate(requested, strides.feature_align)
-                    } else {
-                        requested <= page.feature_metadata.inner_size
-                    }
-                }
-            });
-            if !fits_somewhere {
-                return AllocationError::Capacity {
-                    buffer: typ,
-                    requested,
-                    capacity,
-                };
-            }
-        }
+        let limits = self.single_layer_limits(req, strides);
         AllocationError::Capacity {
             buffer: BackingBufferType::Vertices,
-            requested: sizes[0],
+            requested: req.vertex_bytes,
             capacity: limits[0],
         }
     }
 }
 
-fn elem_div(bytes: u64, stride: u64) -> u64 {
-    bytes.checked_div(stride).unwrap_or(0)
-}
-
-fn proportional_rem(rem_elems: u64, page_v_elems: u64, rem_v_elems: u64) -> u64 {
-    if rem_v_elems == 0 {
-        rem_elems
-    } else {
-        (u128::from(rem_elems) * u128::from(page_v_elems)).div_ceil(u128::from(rem_v_elems)) as u64
-    }
-}
-
-fn page_elem_limit(max_page_bytes: u64, stride: u64) -> u64 {
+pub(super) fn page_elem_limit(max_page_bytes: u64, stride: u64) -> u64 {
     max_page_bytes
         .checked_div(stride)
         .unwrap_or(0)
         .min(u64::from(u32::MAX))
 }
 
-fn capped_elem_limit(max_pool_bytes: u64, max_page_bytes: u64, stride: u64) -> u64 {
-    elem_div(max_pool_bytes, stride).min(page_elem_limit(max_page_bytes, stride))
-}
+mod slabs;

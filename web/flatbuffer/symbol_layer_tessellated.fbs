@@ -1,9 +1,9 @@
 include "basic.fbs";
 
 struct FlatSymbolVertex {
-    a_pos_offset: [int:4];
-    a_data: [uint:4];
-    a_pixeloffset: [int:4];
+    a_pos_offset: [short:4];
+    a_data: [ushort:4];
+    a_pixel_and_height: [int:2];
 }
 
 table FlatSymbolLayerTessellated {

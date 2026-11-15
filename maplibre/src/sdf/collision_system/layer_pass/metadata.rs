@@ -1,7 +1,7 @@
 //! Writes the placement outcome of each feature into its per-vertex GPU metadata.
 
 use crate::{
-    render::shaders::{SDFShaderFeatureMetadata, POSED_GLYPH},
+    render::shaders::SDFShaderFeatureMetadata,
     sdf::{line_glyphs::GlyphPose, paint::feature_style},
 };
 
@@ -53,26 +53,25 @@ pub(in crate::sdf::collision_system) fn write_feature_metadata(
             } else {
                 ramps[kind]
             };
-            *vertex = SDFShaderFeatureMetadata {
-                opacity: ramp.target,
-                elevation: ground,
-                start_opacity: ramp.start,
-                start_time_ms: ramp.start_time_ms,
-                // A text vertex without a glyph pose carries its anchor shift here.
-                pose: [shifts[kind][0], shifts[kind][1], 0.0, 0.0],
-                // A `format` section may give its glyphs a colour of their own.
-                color: if kind == 0 {
-                    feature
-                        .text_colors
-                        .iter()
-                        .find(|(range, _)| range.contains(&index))
-                        .map_or(styles[0][0], |(_, color)| *color)
-                } else {
-                    styles[kind][0]
-                },
-                halo: styles[kind][1],
-                params: styles[kind][2],
+            let color = if kind == 0 {
+                feature
+                    .text_colors
+                    .iter()
+                    .find(|(range, _)| range.contains(&index))
+                    .map_or(styles[0][0], |(_, color)| *color)
+            } else {
+                styles[kind][0]
             };
+            *vertex = SDFShaderFeatureMetadata::from_placement(
+                ramp.target,
+                ground,
+                ramp.start,
+                ramp.start_time_ms,
+                shifts[kind],
+                color,
+                styles[kind][1],
+                styles[kind][2],
+            );
         }
     }
     if let (Some(line), Some(poses)) = (&feature.line, poses) {
@@ -121,12 +120,12 @@ fn write_glyph_poses_with_anchor(
                     [vertex.a_pos_offset[0] as f32, vertex.a_pos_offset[1] as f32]
                 });
             // The vertex anchor is the label anchor rounded to whole tile units.
-            entry.pose = [
+            entry.set_glyph_pose(
                 pose.point[0] - anchor_xy[0],
                 pose.point[1] - anchor_xy[1],
                 pose.angle,
-                POSED_GLYPH + pose.rise,
-            ];
+                pose.rise,
+            );
         }
     }
 }

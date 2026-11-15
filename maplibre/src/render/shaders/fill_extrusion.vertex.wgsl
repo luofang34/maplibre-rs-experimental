@@ -12,43 +12,37 @@ struct VertexOutput {
     @builtin(position) @invariant position: vec4<f32>,
 };
 
-// The range of the packed rise, centred on zero, which one overscale step adds;
-// `NEXT_ZOOM_CODE_SPAN` on the CPU.
-const NEXT_ZOOM_CODE_SPAN: f32 = 65536.0;
-// Stride per `(base_datum, height_datum)` pair packed above `next_zoom_code`.
-const DATUM_CODE_SPAN: f32 = 1048576.0;
-
 fn shade_extrusion(
-    position: vec2<f32>,
-    wall: vec2<f32>,
+    v_pos_q2: vec2<i32>,
+    v_wall_edge: u32,
     tile_mercator_coords: vec4<f32>,
-    base_in: f32,
     translate1: vec4<f32>,
     translate2: vec4<f32>,
     translate3: vec4<f32>,
     translate4: vec4<f32>,
     color: vec4<f32>,
     zoom_factor: f32,
-    edge_and_next: vec2<f32>,
-    height: f32,
+    v_heights: vec2<u32>,
     light_color: vec4<f32>,
     paint: vec4<f32>,
     light_position: vec4<f32>,
     layer_translate: vec2<f32>,
     translucent_shell: f32,
 ) -> VertexOutput {
-    let length_of_wall = length(wall);
-    let is_wall = length_of_wall > 0.5;
-    let is_floor = !is_wall && length_of_wall > 0.1;
-    let top = select(select(1.0, 0.0, is_floor), select(0.0, 1.0, length_of_wall > 1.5), is_wall);
+    let position = vec2<f32>(v_pos_q2) * 0.25 + vec2<f32>(2048.0);
+    let kind = v_wall_edge & 3u;
+    let is_wall = kind >= 2u;
+    let is_floor = kind == 1u;
+    let top = select(select(1.0, 0.0, is_floor), select(0.0, 1.0, kind == 3u), is_wall);
+    let angle = f32((v_wall_edge >> 2u) & 0x3fffu) * (PROJECTION_TWO_PI / 16384.0);
     let cap_normal = select(vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(0.0, 0.0, -1.0), is_floor);
-    let normal = select(cap_normal, vec3<f32>(wall / max(length_of_wall, 1e-6), 0.0), is_wall);
-    let edge_distance = edge_and_next.x;
-    // Strip the packed vertical-datum pair before decoding overscale and zoom rise.
-    let datum_code = floor(edge_and_next.y / DATUM_CODE_SPAN);
-    let zoom_code = edge_and_next.y - datum_code * DATUM_CODE_SPAN;
-    let overscale = floor(zoom_code / NEXT_ZOOM_CODE_SPAN);
-    let rise = zoom_code - overscale * NEXT_ZOOM_CODE_SPAN - 0.5 * NEXT_ZOOM_CODE_SPAN;
+    let normal = select(cap_normal, vec3<f32>(cos(angle), sin(angle), 0.0), is_wall);
+    let overscale = f32((v_wall_edge >> 16u) & 7u);
+    let edge_distance = f32(v_wall_edge >> 19u) * 2.0;
+    let base_in = f32(bitcast<i32>(v_heights.x << 8u) >> 8u) / 16.0;
+    let height = f32(bitcast<i32>(v_heights.y << 8u) >> 8u) / 16.0;
+    let rise_bits = (v_heights.x >> 24u) | ((v_heights.y >> 16u) & 0xff00u);
+    let rise = unpack2x16float(rise_bits).x;
     let default_blend = clamp(-log2(zoom_factor) - overscale, 0.0, 1.0);
     let top_blend = select(default_blend, paint.w - 1.0, paint.w >= 1.0);
     let base_blend = select(default_blend, light_position.w - 1.0, light_position.w >= 1.0);
@@ -128,27 +122,25 @@ fn shade_extrusion(
 
 @vertex
 fn main(
-    @location(0) position: vec2<f32>,
-    @location(1) wall: vec2<f32>,
+    @location(0) v_pos_q2: vec2<i32>,
+    @location(1) v_wall_edge: u32,
     @location(2) tile_mercator_coords: vec4<f32>,
-    @location(3) base_in: f32,
     @location(4) translate1: vec4<f32>,
     @location(5) translate2: vec4<f32>,
     @location(6) translate3: vec4<f32>,
     @location(7) translate4: vec4<f32>,
     @location(8) color: vec4<f32>,
     @location(9) zoom_factor: f32,
-    @location(10) edge_and_next: vec2<f32>,
-    @location(11) height: f32,
+    @location(10) v_heights: vec2<u32>,
     @location(12) light_color: vec4<f32>,
     @location(13) paint: vec4<f32>,
     @location(14) light_position: vec4<f32>,
     @location(15) layer_translate: vec2<f32>,
 ) -> VertexOutput {
     return shade_extrusion(
-        position, wall, tile_mercator_coords, base_in,
+        v_pos_q2, v_wall_edge, tile_mercator_coords,
         translate1, translate2, translate3, translate4,
-        color, zoom_factor, edge_and_next, height,
+        color, zoom_factor, v_heights,
         light_color, paint, light_position, layer_translate,
         0.0,
     );
@@ -156,27 +148,25 @@ fn main(
 
 @vertex
 fn translucent_back_main(
-    @location(0) position: vec2<f32>,
-    @location(1) wall: vec2<f32>,
+    @location(0) v_pos_q2: vec2<i32>,
+    @location(1) v_wall_edge: u32,
     @location(2) tile_mercator_coords: vec4<f32>,
-    @location(3) base_in: f32,
     @location(4) translate1: vec4<f32>,
     @location(5) translate2: vec4<f32>,
     @location(6) translate3: vec4<f32>,
     @location(7) translate4: vec4<f32>,
     @location(8) color: vec4<f32>,
     @location(9) zoom_factor: f32,
-    @location(10) edge_and_next: vec2<f32>,
-    @location(11) height: f32,
+    @location(10) v_heights: vec2<u32>,
     @location(12) light_color: vec4<f32>,
     @location(13) paint: vec4<f32>,
     @location(14) light_position: vec4<f32>,
     @location(15) layer_translate: vec2<f32>,
 ) -> VertexOutput {
     return shade_extrusion(
-        position, wall, tile_mercator_coords, base_in,
+        v_pos_q2, v_wall_edge, tile_mercator_coords,
         translate1, translate2, translate3, translate4,
-        color, zoom_factor, edge_and_next, height,
+        color, zoom_factor, v_heights,
         light_color, paint, light_position, layer_translate,
         0.55,
     );
@@ -184,27 +174,25 @@ fn translucent_back_main(
 
 @vertex
 fn translucent_front_main(
-    @location(0) position: vec2<f32>,
-    @location(1) wall: vec2<f32>,
+    @location(0) v_pos_q2: vec2<i32>,
+    @location(1) v_wall_edge: u32,
     @location(2) tile_mercator_coords: vec4<f32>,
-    @location(3) base_in: f32,
     @location(4) translate1: vec4<f32>,
     @location(5) translate2: vec4<f32>,
     @location(6) translate3: vec4<f32>,
     @location(7) translate4: vec4<f32>,
     @location(8) color: vec4<f32>,
     @location(9) zoom_factor: f32,
-    @location(10) edge_and_next: vec2<f32>,
-    @location(11) height: f32,
+    @location(10) v_heights: vec2<u32>,
     @location(12) light_color: vec4<f32>,
     @location(13) paint: vec4<f32>,
     @location(14) light_position: vec4<f32>,
     @location(15) layer_translate: vec2<f32>,
 ) -> VertexOutput {
     return shade_extrusion(
-        position, wall, tile_mercator_coords, base_in,
+        v_pos_q2, v_wall_edge, tile_mercator_coords,
         translate1, translate2, translate3, translate4,
-        color, zoom_factor, edge_and_next, height,
+        color, zoom_factor, v_heights,
         light_color, paint, light_position, layer_translate,
         1.0,
     );

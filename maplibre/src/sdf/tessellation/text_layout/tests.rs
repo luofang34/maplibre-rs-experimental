@@ -93,7 +93,7 @@ fn label_top(anchor: &str, field: &str) -> i32 {
     buffer
         .vertices
         .iter()
-        .map(|v| v.a_pos_offset[3])
+        .map(|v| i32::from(v.a_pos_offset[3]))
         .min()
         .expect("top")
 }

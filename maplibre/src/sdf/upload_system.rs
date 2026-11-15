@@ -9,7 +9,7 @@ use crate::{
     render::{
         eventually::{Eventually, Eventually::Initialized},
         memory_budget::{FrameUploads, UploadKind},
-        shaders::{SDFShaderFeatureMetadata, ShaderLayerMetadata},
+        shaders::{EmptyLayerMetadata, SDFShaderFeatureMetadata},
         Renderer,
     },
     sdf::{SymbolBufferPool, SymbolLayerData, SymbolLayersDataComponent},
@@ -142,10 +142,15 @@ fn upload_symbol_layer(
                     needs_refetch = true;
                     continue;
                 }
+                let index_stride = if buffer.buffer.vertices.len() <= 65_536 {
+                    size_of::<u16>()
+                } else {
+                    size_of::<u32>()
+                };
                 let size = buffer.buffer.vertices.len()
                     * (size_of::<crate::render::shaders::ShaderSymbolVertex>()
                         + size_of::<SDFShaderFeatureMetadata>())
-                    + buffer.buffer.indices.len() * size_of::<u32>();
+                    + buffer.buffer.indices.len() * index_stride;
                 if !budget.can_take(UploadKind::Geometry, size) {
                     return (true, needs_refetch);
                 }
@@ -245,7 +250,7 @@ fn upload_geometry(
         coords,
         style_layer.clone(),
         buffer,
-        ShaderLayerMetadata::new(style_layer.index as f32, 0.0, [0.0; 2]),
+        EmptyLayerMetadata([0; 0]),
         SDFShaderFeatureMetadata::default(),
         buffer.buffer.vertices.len(),
         |candidate| visible_set.contains(&candidate),

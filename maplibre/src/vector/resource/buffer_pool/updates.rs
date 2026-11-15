@@ -1,6 +1,6 @@
 use super::*;
 
-impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM, FM> {
+impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM, FM> {
     /// Returns `(bytes, copy_aligned_bytes)` for `elements` items of `stride` bytes.
     fn align(
         stride: wgpu::BufferAddress,
@@ -17,7 +17,9 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
     /// Rewrites a layer's vertices in place when spatial elevations change without changing vertex
     /// count.
     pub fn update_vertices(&self, queue: &Q, entry: &IndexEntry, vertices: &[V]) {
-        let bytes = bytemuck::cast_slice(vertices);
+        let mut scratch = Vec::new();
+        let gpu_vertices = V::encode_vertices(&entry.style_layer.type_, vertices, &mut scratch);
+        let bytes = bytemuck::cast_slice(gpu_vertices);
         let allocated = entry.buffer_vertices.end - entry.buffer_vertices.start;
         if bytes.len() as u64 != allocated
             || !(bytes.len() as u64).is_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT)
@@ -31,17 +33,16 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             );
             return;
         }
-        queue.write_buffer(
-            &self.page_of(entry).vertices.inner,
-            entry.buffer_vertices.start,
-            bytes,
-        );
+        queue.write_buffer(self.vertices_for(entry), entry.buffer_vertices.start, bytes);
     }
 
     /// Rewrites a layer's per-layer paint metadata in place.
     #[tracing::instrument(skip_all)]
     pub fn update_layer_metadata(&self, queue: &Q, entry: &IndexEntry, layer_metadata: TM) {
         let layer_metadata_stride = size_of::<TM>() as wgpu::BufferAddress;
+        if layer_metadata_stride == 0 || entry.layer_page == NO_SLAB {
+            return;
+        }
         let (layer_metadata_bytes, aligned_layer_metadata_bytes) =
             Self::align(layer_metadata_stride, 1, 1);
 
@@ -58,7 +59,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         }
 
         queue.write_buffer(
-            &self.page_of(entry).layer_metadata.inner,
+            self.metadata_for(entry),
             entry.buffer_layer_metadata.start,
             &bytemuck::cast_slice(&[layer_metadata])[0..aligned_layer_metadata_bytes as usize],
         );
@@ -93,7 +94,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         }
 
         queue.write_buffer(
-            &self.page_of(entry).feature_metadata.inner,
+            self.feature_metadata_for(entry),
             entry.buffer_feature_metadata.start,
             &bytemuck::cast_slice(feature_metadata)[0..aligned_feature_metadata_bytes as usize],
         );
@@ -134,7 +135,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             return;
         }
         queue.write_buffer(
-            &self.page_of(entry).feature_metadata.inner,
+            self.feature_metadata_for(entry),
             entry.buffer_feature_metadata.start + offset,
             bytemuck::cast_slice(slice),
         );
@@ -153,18 +154,42 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         }
         Self::write_repeated_feature_metadata(
             queue,
-            &self.page_of(entry).feature_metadata.inner,
+            self.feature_metadata_for(entry),
             entry.buffer_feature_metadata.start,
             value,
             count,
         );
     }
 
-    /// Rewrites a layer's indices in place, as when its labels are drawn in a new order; the
-    /// count must be the one it was uploaded with.
+    /// Rewrites a layer's indices in place, downcasting `u32 -> u16` when `entry` resides in a
+    /// `u16` index slab.
     pub fn update_indices(&self, queue: &Q, entry: &IndexEntry, indices: &[I]) {
-        let bytes = std::mem::size_of_val(indices) as wgpu::BufferAddress;
+        if entry.index_page == NO_SLAB {
+            return;
+        }
         let allocated = entry.buffer_indices.end - entry.buffer_indices.start;
+        if entry.index_u16 && size_of::<I>() == size_of::<u32>() {
+            let u32_slice: &[u32] = bytemuck::cast_slice(indices);
+            let usable = (entry.usable_indices as usize).min(u32_slice.len());
+            let padded = usable.next_multiple_of(2);
+            let bytes = (padded as u64) * 2;
+            if bytes > allocated || bytes == 0 {
+                return;
+            }
+            let mut u16_buf = Vec::with_capacity(padded);
+            u16_buf.extend(u32_slice[..usable].iter().map(|&idx| idx as u16));
+            if u16_buf.len() < padded {
+                u16_buf.push(0);
+            }
+            queue.write_buffer(
+                self.indices_for(entry),
+                entry.buffer_indices.start,
+                bytemuck::cast_slice(&u16_buf),
+            );
+            return;
+        }
+
+        let bytes = std::mem::size_of_val(indices) as wgpu::BufferAddress;
         if bytes > allocated || !bytes.is_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT) {
             tracing::error!(
                 coords = %entry.coords,
@@ -179,7 +204,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             return;
         }
         queue.write_buffer(
-            &self.page_of(entry).indices.inner,
+            self.indices_for(entry),
             entry.buffer_indices.start,
             bytemuck::cast_slice(indices),
         );

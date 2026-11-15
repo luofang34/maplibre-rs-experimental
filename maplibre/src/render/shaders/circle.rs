@@ -1,11 +1,10 @@
 //! Circle shader descriptor: the vector buffer layout with the circle slots of the layer
 //! metadata exposed.
 
-use super::{FillShaderFeatureMetadata, Shader, ShaderLayerMetadata, ShaderTileMetadata};
-use crate::render::{
-    resource::{FragmentState, VertexBufferLayout, VertexState},
-    ShaderVertex,
+use super::{
+    FillShaderFeatureMetadata, GpuShaderVertex, Shader, ShaderLayerMetadata, ShaderTileMetadata,
 };
+use crate::render::resource::{FragmentState, VertexBufferLayout, VertexState};
 
 /// The circle layer shader pair; the fragment output matches `format`.
 pub struct CircleShader {
@@ -23,11 +22,14 @@ impl Shader for CircleShader {
             entry_point: "main",
             buffers: vec![
                 VertexBufferLayout {
-                    array_stride: std::mem::size_of::<ShaderVertex>() as u64,
+                    array_stride: std::mem::size_of::<GpuShaderVertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes:
-                        wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 10 => Float32x4]
-                            .to_vec(),
+                    attributes: wgpu::vertex_attr_array![
+                        0 => Sint16x2,
+                        1 => Uint32,
+                        10 => Uint32x2
+                    ]
+                    .to_vec(),
                 },
                 {
                     let mut tile_attrs = ShaderTileMetadata::transform_attributes().to_vec();
@@ -55,11 +57,11 @@ impl Shader for CircleShader {
                     ]);
                     ShaderTileMetadata::instance_layout(tile_attrs)
                 },
-                circle_layer_layout(),
+                circle_layer_layout(true),
                 VertexBufferLayout {
                     array_stride: std::mem::size_of::<FillShaderFeatureMetadata>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: wgpu::vertex_attr_array![8 => Float32x4].to_vec(),
+                    attributes: wgpu::vertex_attr_array![8 => Unorm8x4].to_vec(),
                 },
             ],
         }
@@ -89,31 +91,64 @@ impl Shader for CircleShader {
     }
 }
 
-fn circle_layer_layout() -> VertexBufferLayout {
+/// Circle shader variant whose Slot 3 carries both per-vertex fill (`@location(8)`) and
+/// per-vertex stroke (`@location(3)`) colours (`8 B` stride).
+pub struct CircleFeatureStrokeShader {
+    /// Colour format of the render target the circles draw into.
+    pub format: wgpu::TextureFormat,
+}
+
+impl Shader for CircleFeatureStrokeShader {
+    fn describe_vertex(&self) -> VertexState {
+        let mut base = CircleShader {
+            format: self.format,
+        }
+        .describe_vertex();
+        base.buffers[2] = circle_layer_layout(false);
+        base.buffers[3] = VertexBufferLayout {
+            array_stride: 2 * std::mem::size_of::<FillShaderFeatureMetadata>() as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: wgpu::vertex_attr_array![8 => Unorm8x4, 3 => Unorm8x4].to_vec(),
+        };
+        base
+    }
+
+    fn describe_fragment(&self) -> FragmentState {
+        CircleShader {
+            format: self.format,
+        }
+        .describe_fragment()
+    }
+}
+
+fn circle_layer_layout(include_stroke: bool) -> VertexBufferLayout {
+    let mut attributes = vec![wgpu::VertexAttribute {
+        offset: std::mem::offset_of!(ShaderLayerMetadata, translate) as u64,
+        format: wgpu::VertexFormat::Float32x2,
+        shader_location: 15,
+    }];
+    if include_stroke {
+        attributes.push(wgpu::VertexAttribute {
+            offset: std::mem::offset_of!(ShaderLayerMetadata, stroke_color) as u64,
+            format: wgpu::VertexFormat::Float32x4,
+            shader_location: 3,
+        });
+    }
+    attributes.extend([
+        wgpu::VertexAttribute {
+            offset: std::mem::offset_of!(ShaderLayerMetadata, circle_params) as u64,
+            format: wgpu::VertexFormat::Float32x4,
+            shader_location: 13,
+        },
+        wgpu::VertexAttribute {
+            offset: std::mem::offset_of!(ShaderLayerMetadata, circle_flags) as u64,
+            format: wgpu::VertexFormat::Float32x4,
+            shader_location: 14,
+        },
+    ]);
     VertexBufferLayout {
         array_stride: 0,
         step_mode: wgpu::VertexStepMode::Instance,
-        attributes: vec![
-            wgpu::VertexAttribute {
-                offset: std::mem::offset_of!(ShaderLayerMetadata, translate) as u64,
-                format: wgpu::VertexFormat::Float32x2,
-                shader_location: 15,
-            },
-            wgpu::VertexAttribute {
-                offset: std::mem::offset_of!(ShaderLayerMetadata, stroke_color) as u64,
-                format: wgpu::VertexFormat::Float32x4,
-                shader_location: 3,
-            },
-            wgpu::VertexAttribute {
-                offset: std::mem::offset_of!(ShaderLayerMetadata, circle_params) as u64,
-                format: wgpu::VertexFormat::Float32x4,
-                shader_location: 13,
-            },
-            wgpu::VertexAttribute {
-                offset: std::mem::offset_of!(ShaderLayerMetadata, circle_flags) as u64,
-                format: wgpu::VertexFormat::Float32x4,
-                shader_location: 14,
-            },
-        ],
+        attributes,
     }
 }

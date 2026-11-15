@@ -84,14 +84,7 @@ fn layer(count: usize, atlas: Arc<SymbolAtlas>, text: &str) -> SymbolLayerData {
         style_layer_id: "label".into(),
         atlas: Some(atlas),
         buffer: OverAlignedVertexBuffer::from_iters(
-            std::iter::repeat_n(
-                ShaderSymbolVertex {
-                    a_pos_offset: [0; 4],
-                    a_data: [0; 4],
-                    a_pixeloffset: [0; 4],
-                },
-                count,
-            ),
+            std::iter::repeat_n(ShaderSymbolVertex::default(), count),
             [0, 1, 2],
             3,
         ),

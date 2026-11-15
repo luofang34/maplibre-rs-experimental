@@ -93,7 +93,7 @@ impl<V, I> OverAlignedVertexBuffer<V, I> {
 impl<I> OverAlignedVertexBuffer<crate::render::shaders::ShaderSymbolVertex, I> {
     pub(crate) fn is_icon_vertex(&self, index: usize) -> bool {
         if let Some(vertex) = self.buffer.vertices.get(index) {
-            matches!(vertex.a_data[2], 1 | 2)
+            matches!(vertex.kind(), 1 | 2)
         } else {
             self.icon_bits
                 .get(index / 64)
@@ -111,7 +111,7 @@ impl<I> OverAlignedVertexBuffer<crate::render::shaders::ShaderSymbolVertex, I> {
         let count = self.buffer.vertices.len();
         let mut bits = vec![0_u64; count.div_ceil(64)];
         for (i, vertex) in self.buffer.vertices.iter().enumerate() {
-            if matches!(vertex.a_data[2], 1 | 2) {
+            if matches!(vertex.kind(), 1 | 2) {
                 bits[i / 64] |= 1_u64 << (i % 64);
             }
         }

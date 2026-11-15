@@ -5,6 +5,7 @@ mod background;
 mod circle;
 mod fill;
 mod fill_extrusion;
+mod gpu_vertex;
 mod heatmap;
 mod line;
 mod symbol;
@@ -19,9 +20,13 @@ pub use background::{
     BackgroundShader, GlobeBackgroundPatternShader, GlobeBackgroundShader, SkyLayerMetadata,
     SkyShader,
 };
-pub use circle::CircleShader;
+pub use circle::{CircleFeatureStrokeShader, CircleShader};
 pub use fill::{FillPatternShader, FillShader};
 pub use fill_extrusion::{ExtrusionPass, FillExtrusionShader};
+pub use gpu_vertex::{
+    f16_bits_to_f32, f32_to_f16_bits, pack_f16_pair, EmptyLayerMetadata, GpuShaderVertex,
+    PoolVertex,
+};
 pub use heatmap::{HeatmapCompositeShader, HeatmapDensityShader, DENSITY_FORMAT};
 pub use line::{LineShader, TerrainLineShader};
 pub use symbol::SymbolShader;

@@ -45,9 +45,21 @@ impl Queue<TestBuffer> for TestQueue {
 }
 
 #[repr(C)]
-#[derive(Default, Copy, Clone, bytemuck_derive::Pod, bytemuck_derive::Zeroable)]
+#[derive(Default, Debug, Copy, Clone, bytemuck_derive::Pod, bytemuck_derive::Zeroable)]
 struct TestVertex {
     data: [u8; 24],
+}
+
+impl crate::render::shaders::PoolVertex for TestVertex {
+    type Gpu = Self;
+
+    fn encode_vertices<'a>(
+        _layer_type: &str,
+        src: &'a [Self],
+        _scratch: &'a mut Vec<Self::Gpu>,
+    ) -> &'a [Self::Gpu] {
+        src
+    }
 }
 
 fn pool() -> BufferPool<TestQueue, TestBuffer, TestVertex, u32, u32, u32> {
@@ -59,40 +71,89 @@ fn pool() -> BufferPool<TestQueue, TestBuffer, TestVertex, u32, u32, u32> {
     )
 }
 
-impl<Q: Queue<B>, B, V: bytemuck::Pod, I: bytemuck::Pod, TM: bytemuck::Pod, FM: bytemuck::Pod>
-    BufferPool<Q, B, V, I, TM, FM>
+impl<
+        Q: Queue<B>,
+        B,
+        V: crate::render::shaders::PoolVertex,
+        I: bytemuck::Pod,
+        TM: bytemuck::Pod,
+        FM: bytemuck::Pod,
+    > BufferPool<Q, B, V, I, TM, FM>
 {
     fn available_space(&self, typ: BackingBufferType) -> wgpu::BufferAddress {
-        let in_pages = self
-            .pages
-            .iter()
-            .flatten()
-            .map(|page| match typ {
-                BackingBufferType::Vertices => page.vertex_alloc.largest_free_block(),
-                BackingBufferType::Indices => page.index_alloc.largest_free_block(),
-                BackingBufferType::Metadata => page.layer_alloc.largest_free_block(),
-                BackingBufferType::FeatureMetadata => {
-                    if page.decoupled_feature_metadata {
-                        page.feature_alloc.largest_free_block()
-                    } else {
-                        let v_stride = std::mem::size_of::<V>() as u64;
-                        let fm_stride = std::mem::size_of::<FM>() as u64;
-                        page.vertex_alloc
-                            .largest_free_block()
-                            .checked_div(v_stride)
-                            .unwrap_or(0)
-                            * fm_stride
-                    }
+        let strides = super::page::ElementStrides::of::<V::Gpu, I, TM, FM>();
+        let in_pages = match typ {
+            BackingBufferType::Vertices => self
+                .vertex_slabs
+                .iter()
+                .flatten()
+                .map(|s| s.vertex_alloc.largest_free_block())
+                .max()
+                .unwrap_or(0),
+            BackingBufferType::Indices => self
+                .index_u16_slabs
+                .iter()
+                .flatten()
+                .chain(self.index_native_slabs.iter().flatten())
+                .map(|s| s.alloc.largest_free_block())
+                .max()
+                .unwrap_or(0),
+            BackingBufferType::Metadata => self
+                .layer_slabs
+                .iter()
+                .flatten()
+                .map(|s| s.alloc.largest_free_block())
+                .max()
+                .unwrap_or(0),
+            BackingBufferType::FeatureMetadata => {
+                if self.decoupled_feature_metadata {
+                    self.feature_slabs
+                        .iter()
+                        .flatten()
+                        .map(|s| s.alloc.largest_free_block())
+                        .max()
+                        .unwrap_or(0)
+                } else {
+                    self.vertex_slabs
+                        .iter()
+                        .flatten()
+                        .map(|s| {
+                            s.vertex_alloc
+                                .largest_free_block()
+                                .checked_div(strides.vertex)
+                                .unwrap_or(0)
+                                * strides.feature_metadata
+                        })
+                        .max()
+                        .unwrap_or(0)
                 }
-            })
-            .max()
-            .unwrap_or(0);
+            }
+        };
         if self.page_factory.is_some() {
-            let unallocated = self
-                .max_capacities
-                .saturating_sub(self.allocated_capacities())
-                .get(typ);
-            in_pages.max(unallocated.min(self.max_page_bytes))
+            let used = self.allocated_elements();
+            let unallocated_bytes = match typ {
+                BackingBufferType::Vertices => self
+                    .max_elements
+                    .vertices
+                    .saturating_sub(used.vertices)
+                    .saturating_mul(strides.vertex),
+                BackingBufferType::Indices => self
+                    .max_elements
+                    .indices
+                    .saturating_sub(used.indices)
+                    .saturating_mul(strides.index),
+                BackingBufferType::Metadata => self
+                    .max_elements
+                    .layer_metadata
+                    .saturating_sub(used.layer_metadata)
+                    .saturating_mul(strides.layer_metadata),
+                BackingBufferType::FeatureMetadata => self
+                    .max_elements
+                    .feature_metadata
+                    .saturating_sub(used.feature_metadata)
+                    .saturating_mul(strides.feature_metadata),
+            };
+            in_pages.max(unallocated_bytes.min(self.max_page_bytes))
         } else {
             in_pages
         }
@@ -380,4 +441,5 @@ fn more_feature_records_than_vertices_are_refused() {
     ));
 }
 
+mod compact;
 mod paging;

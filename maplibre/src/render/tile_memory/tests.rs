@@ -120,11 +120,7 @@ fn symbol_geometry_cache_budget_counts_each_cpu_allocation_once() {
     let mut world = World::default();
     let coords = WorldTileCoords::default();
     let buffer = OverAlignedVertexBuffer::from_iters(
-        [ShaderSymbolVertex {
-            a_pos_offset: [0; 4],
-            a_data: [0; 4],
-            a_pixeloffset: [0; 4],
-        }; 4],
+        [ShaderSymbolVertex::default(); 4],
         [0, 1, 2, 2, 3, 0],
         6,
     );

@@ -159,9 +159,7 @@ async fn default_gpu_pool_starts_at_zero_bytes_and_allocates_one_page_on_demand(
         style_layer("water"),
         &geom,
         ShaderLayerMetadata::new(0.0, 1.0, [0.0; 2]),
-        &[FillShaderFeatureMetadata {
-            color: [0.0, 0.5, 1.0, 1.0],
-        }; 4],
+        &[FillShaderFeatureMetadata::from_rgba([0.0, 0.5, 1.0, 1.0]); 4],
     )
     .expect("first GPU page upload");
 

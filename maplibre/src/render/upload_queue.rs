@@ -20,6 +20,16 @@ const MAX_STAGED_WRITE_BYTES: usize = 65_536;
 /// Minimum persistent GPU staging buffer capacity (`64 KiB`).
 const MIN_STAGING_BUFFER_CAPACITY: u64 = 64 * 1024;
 
+/// Steady-state post-burst staging buffer ceiling (`256 KiB`).
+const SHRINK_STAGING_BUFFER_CAPACITY: u64 = 256 * 1024;
+
+/// Hard upper bound on the persistent coalescing staging buffer (`2 MiB`) so initial tile upload
+/// bursts never pin tens of megabytes of transient staging memory.
+const MAX_STAGING_BUFFER_CAPACITY: u64 = 2 * 1024 * 1024;
+
+/// Consecutive low-volume frames before a burst-sized staging buffer shrinks back to `256 KiB`.
+const QUIET_FRAMES_BEFORE_SHRINK: u8 = 8;
+
 #[derive(Debug)]
 struct StagedCopy {
     dst: wgpu::Buffer,
@@ -33,6 +43,7 @@ struct StagingBeltState {
     payload: Vec<u8>,
     copies: Vec<StagedCopy>,
     buffer: Option<(wgpu::Buffer, u64)>,
+    quiet_frames: u8,
 }
 
 impl Drop for StagingBeltState {
@@ -99,15 +110,17 @@ impl UploadQueue {
                     return;
                 }
             }
-            let src_offset = staging.payload.len() as u64;
-            staging.payload.extend_from_slice(data);
-            staging.copies.push(StagedCopy {
-                dst: buffer.clone(),
-                src_offset,
-                dst_offset: offset,
-                size,
-            });
-            return;
+            if staging.payload.len() + data.len() <= MAX_STAGING_BUFFER_CAPACITY as usize {
+                let src_offset = staging.payload.len() as u64;
+                staging.payload.extend_from_slice(data);
+                staging.copies.push(StagedCopy {
+                    dst: buffer.clone(),
+                    src_offset,
+                    dst_offset: offset,
+                    size,
+                });
+                return;
+            }
         }
 
         if self.staging_enabled {
@@ -139,11 +152,36 @@ impl UploadQueue {
         let mut staging = crate::platform::lock_unpoisoned(&self.staging);
         if staging.copies.is_empty() {
             staging.payload.clear();
+            if staging
+                .buffer
+                .as_ref()
+                .is_some_and(|(_, cap)| *cap > SHRINK_STAGING_BUFFER_CAPACITY)
+            {
+                staging.quiet_frames = staging.quiet_frames.saturating_add(1);
+                if staging.quiet_frames >= QUIET_FRAMES_BEFORE_SHRINK {
+                    if let Some((old_buf, _)) = staging.buffer.take() {
+                        old_buf.destroy();
+                    }
+                    staging
+                        .payload
+                        .shrink_to(SHRINK_STAGING_BUFFER_CAPACITY as usize);
+                    staging.copies.shrink_to(256);
+                    staging.quiet_frames = 0;
+                }
+            }
             return None;
         }
 
         let payload_bytes = staging.payload.len() as u64;
-        let max_buf = device.limits().max_buffer_size;
+        if payload_bytes <= SHRINK_STAGING_BUFFER_CAPACITY {
+            staging.quiet_frames = staging.quiet_frames.saturating_add(1);
+        } else {
+            staging.quiet_frames = 0;
+        }
+        let max_buf = device
+            .limits()
+            .max_buffer_size
+            .min(MAX_STAGING_BUFFER_CAPACITY);
         if payload_bytes > max_buf {
             let StagingBeltState {
                 payload, copies, ..
@@ -159,16 +197,27 @@ impl UploadQueue {
             return None;
         }
 
-        let need_alloc = staging
-            .buffer
-            .as_ref()
-            .is_none_or(|(_, cap)| *cap < payload_bytes);
+        let should_shrink = staging.quiet_frames >= QUIET_FRAMES_BEFORE_SHRINK
+            && staging
+                .buffer
+                .as_ref()
+                .is_some_and(|(_, cap)| *cap > SHRINK_STAGING_BUFFER_CAPACITY);
+        let need_alloc = should_shrink
+            || staging
+                .buffer
+                .as_ref()
+                .is_none_or(|(_, cap)| *cap < payload_bytes);
         if need_alloc {
-            let next_cap = payload_bytes
-                .max(MIN_STAGING_BUFFER_CAPACITY)
-                .checked_next_power_of_two()
-                .unwrap_or(max_buf)
-                .min(max_buf);
+            let next_cap = if should_shrink {
+                staging.quiet_frames = 0;
+                SHRINK_STAGING_BUFFER_CAPACITY.min(max_buf)
+            } else {
+                payload_bytes
+                    .max(MIN_STAGING_BUFFER_CAPACITY)
+                    .checked_next_power_of_two()
+                    .unwrap_or(max_buf)
+                    .min(max_buf)
+            };
             let buf = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("upload_queue_staging_buffer"),
                 size: next_cap,
@@ -191,6 +240,7 @@ impl UploadQueue {
             payload,
             copies,
             buffer,
+            ..
         } = &mut *staging;
         if let Some((staging_buf, _)) = buffer.as_ref() {
             for copy in copies.drain(..) {
@@ -204,6 +254,10 @@ impl UploadQueue {
             }
         }
         payload.clear();
+        if should_shrink {
+            payload.shrink_to(SHRINK_STAGING_BUFFER_CAPACITY as usize);
+            copies.shrink_to(256);
+        }
         Some(encoder.finish())
     }
 

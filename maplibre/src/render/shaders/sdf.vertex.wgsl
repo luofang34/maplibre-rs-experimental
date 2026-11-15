@@ -48,7 +48,7 @@ fn anchor_visibility(clip: vec4<f32>) -> f32 {
 fn main(
     @location(0) a_pos_offset: vec4<i32>,
     @location(1) a_data: vec4<u32>,
-    @location(2) a_pixeloffset: vec4<i32>,
+    @location(2) a_pixel_and_height: vec2<i32>,
     @location(3) tile_mercator_coords: vec4<f32>,
     @location(4) translate1: vec4<f32>,
     @location(5) translate2: vec4<f32>,
@@ -57,27 +57,29 @@ fn main(
     @location(8) viewport_width: f32,
     @location(9) zoom_factor: f32,
     @location(11) viewport_height: f32,
-    // x = target_opacity, y = elevation, z = start_opacity, w = start_time_ms.
-    @location(12) feature: vec4<f32>,
-    // For a glyph placed along a line: the offset of its centre from the vertex anchor in tile
-    // units, its direction, and POSED_GLYPH plus how far the ground under it rises above the
-    // ground under the label's anchor, in metres.
-    @location(14) pose: vec4<f32>,
-    // Fill colour, halo colour, and size, halo width, halo blur and opacity of this feature.
+    // Packed elevation, fade timestamp, opacities, size/rise f16, angle_u16, and halo metrics.
+    @location(15) packed: vec4<u32>,
+    // Full-precision glyph pose (`dx, dy` in tile units) or variable-anchor shift (`shift_x, shift_y`).
+    @location(12) pose_xy: vec2<f32>,
     @location(10) style_fill: vec4<f32>,
     @location(13) style_halo: vec4<f32>,
-    @location(15) style_metrics: vec4<f32>,
 ) -> VertexOutput {
+    let kind = a_data.z & 3u;
+    let target_opacity = f32(packed.w & 0xffu) / 255.0;
+    let start_opacity = f32((packed.w >> 8u) & 0xffu) / 255.0;
+    let style_opacity = f32((packed.w >> 16u) & 0xffu) / 255.0;
+    let start_ticks = (packed.z >> 16u) | ((packed.x >> 29u) << 16u);
+    let start_time_ms = f32(start_ticks) * 4.0;
     let fade_alpha = select(
-        clamp((symbol_fade.x - feature.w) / max(symbol_fade.y, 0.001), 0.0, 1.0),
+        clamp((symbol_fade.x - start_time_ms) / max(symbol_fade.y, 0.001), 0.0, 1.0),
         1.0,
         symbol_fade.y <= 0.0,
     );
-    let fade_opacity = mix(feature.z, feature.x, fade_alpha);
-    if fade_opacity <= 0.001 || style_metrics.w <= 0.0 {
+    let fade_opacity = mix(start_opacity, target_opacity, fade_alpha);
+    if fade_opacity <= 0.001 || style_opacity <= 0.0 {
         return VertexOutput(
             vec2<f32>(0.0),
-            a_data.z,
+            kind,
             0.0,
             0.0,
             -1.0,
@@ -87,15 +89,27 @@ fn main(
             vec4<f32>(2.0, 2.0, 2.0, 1.0),
         );
     }
-    let has_pose = pose.w > 0.5;
+    let has_pose = ((packed.x >> 28u) & 1u) != 0u;
     // An image in text (kind three) is laid out with the text and drawn as an icon.
-    let is_text = a_data.z == 0u || a_data.z == 3u;
-    let metrics = style_metrics;
+    let is_text = kind == 0u || kind == 3u;
+    let size_and_rise = unpack2x16float(packed.y);
+    let metrics = vec4<f32>(
+        size_and_rise.x,
+        f32((packed.x >> 20u) & 0xffu) * 0.0625,
+        f32(packed.w >> 24u) * 0.0625,
+        style_opacity,
+    );
+    let ground_elev = f32((i32(packed.x) << 12u) >> 12u) * 0.0625;
+    let pose_angle = f32(packed.z & 0xffffu) * (PROJECTION_TWO_PI / 65536.0);
+    let pose_rise = size_and_rise.y;
+    let px_off_x = (a_pixel_and_height.x << 16u) >> 16u;
+    let px_off_y = a_pixel_and_height.x >> 16u;
+    let height_offset = bitcast<f32>(a_pixel_and_height.y);
     let alignment = select(symbol.icon_layout, symbol.text_layout, is_text);
-    let anchor = vec2<f32>(a_pos_offset.xy) + select(vec2<f32>(0.0), pose.xy, has_pose);
-    let label_elevation = feature.y * alignment.w + bitcast<f32>(a_pixeloffset.z);
+    let anchor = vec2<f32>(a_pos_offset.xy) + select(vec2<f32>(0.0), pose_xy, has_pose);
+    let label_elevation = ground_elev * alignment.w + height_offset;
     // A glyph along a line lies on the ground under it, so a label climbing a slope lies on it.
-    let elevation = label_elevation + select(0.0, pose.w - POSED_GLYPH, has_pose) * alignment.w;
+    let elevation = label_elevation + select(0.0, pose_rise, has_pose) * alignment.w;
     let transform = mat4x4<f32>(translate1, translate2, translate3, translate4);
     let projected = project_tile_position_3d(vec3<f32>(anchor, elevation), transform, tile_mercator_coords);
     // Every glyph of a label takes the size its anchor's depth gives, as GL JS sizes them, so
@@ -125,8 +139,8 @@ fn main(
         world_angle = atan2(up.y, up.x) + PROJECTION_PI * 0.5;
     }
     // The direction of a line a label sits on only turns a label that is aligned with the map.
-    let anchor_angle = select(0.0, bitcast<f32>(a_pixeloffset.w), alignment.y > 0.5);
-    var angle = alignment.z + select(anchor_angle, pose.z, has_pose);
+    let anchor_angle = select(0.0, f32(a_data.w) * (PROJECTION_TWO_PI / 65536.0), alignment.y > 0.5);
+    var angle = alignment.z + select(anchor_angle, pose_angle, has_pose);
     if alignment.y > 0.5 {
         // The screen direction of the line: its analytic tangent carried through the
         // perspective divide. Subtracting two projected points a few metres apart loses the
@@ -144,11 +158,11 @@ fn main(
     if alignment.x < 0.5 && alignment.y < 0.5 { angle += world_angle; }
     let rotation = mat2x2<f32>(cos(angle), sin(angle), -sin(angle), cos(angle));
     // A posed glyph is laid out around its own centre, which the vertex carries in 1/32 pixel.
-    let centre = vec2<f32>(f32(a_pixeloffset.x) / 32.0, 0.0);
+    let centre = vec2<f32>(f32(px_off_x) / 32.0, 0.0);
     // A label that took a later variable anchor is moved in layout pixels, which the size scales.
-    let anchor_shift = select(vec2<f32>(0.0), pose.xy * scale, !has_pose);
+    let anchor_shift = select(vec2<f32>(0.0), pose_xy * scale, !has_pose);
     let local = select(
-        vec2<f32>(a_pos_offset.zw) / 32.0 * scale + vec2<f32>(a_pixeloffset.xy) / 16.0 + anchor_shift,
+        vec2<f32>(a_pos_offset.zw) / 32.0 * scale + vec2<f32>(f32(px_off_x), f32(px_off_y)) / 16.0 + anchor_shift,
         (vec2<f32>(a_pos_offset.zw) / 32.0 - centre) * scale,
         has_pose);
     let offset = rotation * local;
@@ -168,7 +182,7 @@ fn main(
     position.z += max(abs(position.z) * 2e-5, 1e-10);
     var near_visibility = 1.0;
     if alignment.x > 0.5 {
-        let radius = bitcast<f32>(a_data.w) * scale * 8.0 * zoom_factor
+        let radius = (f32(a_data.z >> 2u) / 16.0) * scale * 8.0 * zoom_factor
             * project_symbol_scale(anchor.y, tile_mercator_coords);
         let x = project_tile_position_3d(vec3<f32>(anchor + vec2<f32>(radius,0.0),elevation),transform,tile_mercator_coords).clip_position;
         let y = project_tile_position_3d(vec3<f32>(anchor + vec2<f32>(0.0,radius),elevation),transform,tile_mercator_coords).clip_position;
@@ -180,6 +194,6 @@ fn main(
     let visibility = fade_opacity * metrics.w * near_visibility * anchor_visibility(label_clip);
     // Hidden geometry must not cross the eye plane and produce unbounded clipped triangles.
     if visibility <= 0.001 || projected.clip_position.w <= 0.0 { position = vec4<f32>(2.0, 2.0, 2.0, 1.0); }
-    return VertexOutput(vec2<f32>(a_data.xy) / symbol.atlas.xy, a_data.z, size,
-        visibility, projected.horizon_distance, style_fill, style_halo, style_metrics, position);
+    return VertexOutput(vec2<f32>(a_data.xy) / symbol.atlas.xy, kind, size,
+        visibility, projected.horizon_distance, style_fill, style_halo, metrics, position);
 }

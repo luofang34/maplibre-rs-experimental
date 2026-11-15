@@ -189,7 +189,12 @@ fn corner_offsets(tessellator: &TextTessellator) -> Vec<[i32; 2]> {
         .quad_buffer
         .vertices
         .iter()
-        .map(|vertex| [vertex.a_pos_offset[2], vertex.a_pos_offset[3]])
+        .map(|vertex| {
+            [
+                i32::from(vertex.a_pos_offset[2]),
+                i32::from(vertex.a_pos_offset[3]),
+            ]
+        })
         .collect()
 }
 

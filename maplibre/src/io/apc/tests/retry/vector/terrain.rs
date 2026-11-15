@@ -75,7 +75,7 @@ fn unrelated_upload(test: &mut Fixture) {
         test.context.style.layers[0].clone(),
         &bucket.buffer,
         ShaderLayerMetadata::new(0.0, 0.0, [0.0; 2]),
-        &vec![FillShaderFeatureMetadata { color: [1.0; 4] }; bucket.buffer.buffer.vertices.len()],
+        &vec![FillShaderFeatureMetadata::from_rgba([1.0; 4]); bucket.buffer.buffer.vertices.len()],
     )
     .expect("unrelated allocation");
 }

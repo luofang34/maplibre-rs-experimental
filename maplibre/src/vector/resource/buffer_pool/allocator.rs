@@ -87,17 +87,6 @@ impl RangeAllocator {
         self.free_by_size.last().map_or(0, |&(len, _)| len)
     }
 
-    /// Returns `true` if a contiguous block of `size` bytes aligned to `align` fits.
-    pub(super) fn can_allocate(&self, size: u64, align: u64) -> bool {
-        if size == 0 {
-            return true;
-        }
-        if size > self.capacity - self.used_bytes {
-            return false;
-        }
-        self.find_best_fit(size, align.max(1)).is_some()
-    }
-
     /// Allocates `size` bytes aligned to `align`, splitting any leftover prefix/suffix back into
     /// the free trees.
     pub(super) fn allocate(&mut self, size: u64, align: u64) -> Option<Range<u64>> {

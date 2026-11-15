@@ -34,7 +34,7 @@ impl MetadataScratchPool {
 
     /// Returns a `Vec<SDFShaderFeatureMetadata>` to the scratch pool if capacity is worth keeping.
     pub(super) fn recycle(&mut self, mut buf: Vec<SDFShaderFeatureMetadata>) {
-        if buf.capacity() > 0 && self.free.len() < 128 {
+        if buf.capacity() > 0 && buf.capacity() <= 65_536 && self.free.len() < 16 {
             buf.clear();
             self.free.push(buf);
         }
@@ -83,7 +83,13 @@ impl CachedBucketMetadata {
 /// Diffs `next` against `prev` (treating a fresh `allocation_id` as all-zero in GPU memory) and
 /// writes only coalesced dirty vertex ranges to `pool`.
 #[cfg(test)]
-pub(super) fn diff_and_upload_bucket<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod>(
+pub(super) fn diff_and_upload_bucket<
+    Q: Queue<B>,
+    B,
+    V: crate::render::shaders::PoolVertex,
+    I: Pod,
+    TM: Pod,
+>(
     pool: &BufferPool<Q, B, V, I, TM, SDFShaderFeatureMetadata>,
     queue: &Q,
     entry: &IndexEntry,
@@ -95,7 +101,13 @@ pub(super) fn diff_and_upload_bucket<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod>(
 }
 
 /// Diffs `next` against `prev` and recycles unused `SDFShaderFeatureMetadata` buffers into `scratch`.
-pub(super) fn diff_and_upload_bucket_with_scratch<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod>(
+pub(super) fn diff_and_upload_bucket_with_scratch<
+    Q: Queue<B>,
+    B,
+    V: crate::render::shaders::PoolVertex,
+    I: Pod,
+    TM: Pod,
+>(
     pool: &BufferPool<Q, B, V, I, TM, SDFShaderFeatureMetadata>,
     queue: &Q,
     entry: &IndexEntry,
@@ -162,11 +174,11 @@ pub(super) fn diff_and_upload_bucket_with_scratch<Q: Queue<B>, B, V: Pod, I: Pod
     let mut has_target_visible = false;
     let mut latest_fade_start_ms = -1.0_f32;
     for vertex in &next {
-        if vertex.opacity > 0.0 {
+        if vertex.has_target_opacity() {
             has_target_visible = true;
         }
-        if vertex.start_opacity > 0.0 {
-            latest_fade_start_ms = latest_fade_start_ms.max(vertex.start_time_ms);
+        if vertex.has_start_opacity() {
+            latest_fade_start_ms = latest_fade_start_ms.max(vertex.start_time_ms());
         }
     }
 
@@ -256,14 +268,7 @@ mod tests {
             z: ZoomLevel::from(10),
         };
         let mut buffer = OverAlignedVertexBuffer::empty();
-        buffer.buffer.vertices = vec![
-            ShaderSymbolVertex {
-                a_pos_offset: [0; 4],
-                a_data: [0; 4],
-                a_pixeloffset: [0; 4],
-            };
-            vertex_count
-        ];
+        buffer.buffer.vertices = vec![ShaderSymbolVertex::default(); vertex_count];
         buffer.buffer.indices = vec![0, 1, 2, 0, 2, 3];
         buffer.usable_indices = 6;
         let style_layer = StyleLayer {
@@ -295,7 +300,7 @@ mod tests {
         // Only 1 quad (vertices 100..104) is placed out of 200 vertices.
         let mut next = vec![SDFShaderFeatureMetadata::default(); 200];
         for v in &mut next[100..104] {
-            v.opacity = 1.0;
+            v.set_target_opacity(1.0);
         }
         let cached = diff_and_upload_bucket(&pool, &queue, entry, None, next.clone());
         assert_eq!(
@@ -327,7 +332,7 @@ mod tests {
         // Quads at 10..14 and 20..24 are separated by 6 clean vertices (<= 32) -> coalesced!
         // Quad at 120..124 is 96 clean vertices away (> 32) -> separate sub-range!
         for idx in (10..14).chain(20..24).chain(120..124) {
-            next[idx].opacity = 1.0;
+            next[idx].set_target_opacity(1.0);
         }
         let _ = diff_and_upload_bucket(&pool, &queue, entry, None, next);
         assert_eq!(

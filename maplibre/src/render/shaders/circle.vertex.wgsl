@@ -17,12 +17,9 @@ const TILE_UNITS_PER_PIXEL: f32 = 8.0;
 @vertex
 fn main(
     @builtin(vertex_index) vertex_index: u32,
-    @location(0) position: vec2<f32>,
-    @location(1) normal: vec2<f32>,
-    // A blur that varies by feature, negative to leave the layer's own; the ground under the
-    // circle, below -1e20 off terrain; the radius at the zoom above; and the corner code, whose
-    // fraction carries a stroke opacity that varies by feature.
-    @location(10) per_feature: vec4<f32>,
+    @location(0) v_pos_q2: vec2<i32>,
+    @location(1) v_norm_packed: u32,
+    @location(10) v_extra: vec2<u32>,
     @location(2) tile_mercator_coords: vec4<f32>,
     @location(4) translate1: vec4<f32>,
     @location(5) translate2: vec4<f32>,
@@ -37,22 +34,28 @@ fn main(
     @location(13) circle_params: vec4<f32>,
     @location(14) circle_flags: vec4<f32>,
 ) -> VertexOutput {
+    let position = vec2<f32>(v_pos_q2) * 0.25 + vec2<f32>(2048.0);
+    let normal = unpack2x16float(v_norm_packed);
+    let blur_and_next = unpack2x16float(v_extra.x);
+    let elev_in = unpack2x16float(v_extra.y & 0xffffu).x;
+    let cell_flags = (v_extra.y >> 16u) & 0xffu;
+    let corner_cell = cell_flags & 0x7fu;
+    let has_stroke_op = (cell_flags & 0x80u) != 0u;
+    let stroke_op_in = f32((v_extra.y >> 24u) & 0xffu) / 255.0;
     // Quads are emitted with four consecutive vertices; the corner follows the vertex order.
     let corner = vertex_index % 4u;
     var extrude = vec2<f32>(
         select(-1.0, 1.0, corner == 1u || corner == 2u),
         select(-1.0, 1.0, corner >= 2u),
     );
-    let corner_code = floor(per_feature.w);
-    let stroke_opacity_code = per_feature.w - corner_code;
     // A subdivided circle names its corner on an eight-by-eight grid, to follow the globe.
-    if corner_code > 0.5 {
-        let cell = u32(corner_code) - 1u;
+    if corner_cell > 0u {
+        let cell = corner_cell - 1u;
         extrude = vec2<f32>(f32(cell / 8u), f32(cell % 8u)) / 7.0 * 2.0 - vec2<f32>(1.0);
     }
     // The radius of a feature that varies with zoom is blended toward the zoom above the tile's.
     let zoom_blend = clamp(-log2(zoom_factor), 0.0, 1.0);
-    let radius = mix(normal.x, per_feature.z, zoom_blend);
+    let radius = mix(normal.x, blur_and_next.y, zoom_blend);
     let stroke_width = normal.y;
     let total = max(radius + stroke_width, 1e-3);
     let transform = mat4x4<f32>(translate1, translate2, translate3, translate4);
@@ -62,8 +65,8 @@ fn main(
     let scale_with_map = circle_flags.x > 0.5;
     let pitch_with_map = circle_flags.y > 0.5;
     // Over terrain the circle stands on the ground under its centre, as GL JS draws it.
-    let on_terrain = per_feature.y > -1e20;
-    let height = select(0.0, per_feature.y, on_terrain);
+    let on_terrain = elev_in > -30000.0;
+    let height = select(0.0, elev_in, on_terrain);
     let projected_center = project_circle_center(center, height, on_terrain, transform, tile_mercator_coords);
 
     var clip: vec4<f32>;
@@ -96,35 +99,17 @@ fn main(
     clip.z = 0.0;
 
     // Roughly one pixel of blur keeps the edge antialiased whatever the radius.
-    let blur = select(circle_params.z, per_feature.x, per_feature.x >= 0.0);
-    let stroke_opacity = select(
-        circle_params.y,
-        (stroke_opacity_code - 0.25) * 2.0,
-        stroke_opacity_code > 0.125,
-    );
+    let blur = select(circle_params.z, blur_and_next.x, blur_and_next.x >= 0.0);
+    let stroke_opacity = select(circle_params.y, stroke_op_in, has_stroke_op);
     let antialiasblur = -max(1.0 / total, blur);
-    // A stroke colour that varies by feature rides packed with the fill in the feature colour.
-    var fill = color;
-    var stroke = stroke_color;
-    if color.x < 0.0 {
-        fill = vec4<f32>(unpack_byte_pair(color.x), unpack_byte_pair(color.y)) / 255.0;
-        stroke = vec4<f32>(unpack_byte_pair(color.z), unpack_byte_pair(color.w)) / 255.0;
-    }
     return VertexOutput(
         clip,
-        fill,
-        stroke,
+        color,
+        stroke_color,
         vec3<f32>(extrude, antialiasblur),
         vec4<f32>(radius / total, circle_params.x, stroke_opacity, stroke_width),
         horizon,
     );
-}
-
-// Two 8-bit channels packed into one float as `-(256 high + low) - 1`.
-fn unpack_byte_pair(packed: f32) -> vec2<f32> {
-    let pair = -packed - 1.0;
-    let high = floor(pair / 256.0);
-    return vec2<f32>(high, pair - high * 256.0);
 }
 
 // The centre of a circle, on the terrain at `height` metres when it stands there; off terrain

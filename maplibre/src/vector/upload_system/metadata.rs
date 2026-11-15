@@ -8,11 +8,14 @@ use crate::{
     },
 };
 
-/// Whether uniform color for `style_layer` rides inside [`ShaderLayerMetadata::stroke_color`]
+/// Whether uniform color for `style_layer` rides inside [`ShaderLayerMetadata::uniform_color`]
 /// instead of binding a separate feature-metadata buffer at Slot 3.
 #[inline]
 pub(crate) fn uses_layer_metadata_uniform_color(style_layer: &StyleLayer) -> bool {
-    matches!(style_layer.type_.as_str(), "fill" | "line")
+    matches!(
+        style_layer.type_.as_str(),
+        "fill" | "line" | "fill-extrusion" | "circle" | "heatmap"
+    )
 }
 
 pub(super) fn metadata_for_layer(
@@ -39,7 +42,7 @@ pub(super) fn metadata_for_layer(
         ShaderLayerMetadata::new(style_layer.index as f32, line_width, translate);
     if uses_layer_metadata_uniform_color(style_layer) {
         if let Some(color) = super::paint::uniform_color(style_layer, f64::from(zoom)) {
-            layer_metadata.stroke_color = color;
+            layer_metadata.uniform_color = color;
         }
     }
     if let Some(LayerPaint::Heatmap(paint)) = &style_layer.paint {
@@ -121,34 +124,75 @@ pub(super) fn metadata_for_layer(
 }
 
 pub(super) fn feature_metadata(
+    style_layer: &StyleLayer,
     feature_indices: &[u32],
     feature_colors: &[[f32; 4]],
     fallback_color: [f32; 4],
 ) -> Vec<FillShaderFeatureMetadata> {
     let mut out = Vec::new();
-    feature_metadata_into(&mut out, feature_indices, feature_colors, fallback_color);
+    feature_metadata_into(
+        &mut out,
+        style_layer,
+        feature_indices,
+        feature_colors,
+        fallback_color,
+    );
     out
 }
 
 pub(super) fn feature_metadata_into(
     out: &mut Vec<FillShaderFeatureMetadata>,
+    style_layer: &StyleLayer,
     feature_indices: &[u32],
     feature_colors: &[[f32; 4]],
     fallback_color: [f32; 4],
 ) {
     out.clear();
-    let needed = feature_indices.iter().map(|&c| c as usize).sum::<usize>();
+    let is_line_gradient = matches!(
+        style_layer.paint,
+        Some(LayerPaint::Line(ref paint)) if paint.line_gradient.is_some()
+    );
+    let has_packed_circle = !is_line_gradient
+        && style_layer.type_ == "circle"
+        && feature_colors.iter().any(|c| c[0] < 0.0);
+    let total_vertices = feature_indices.iter().map(|&c| c as usize).sum::<usize>();
+    let needed = if has_packed_circle {
+        total_vertices * 2
+    } else {
+        total_vertices
+    };
     if out.capacity() < needed {
         out.reserve(needed - out.len());
     }
+    if has_packed_circle {
+        let default_stroke = match &style_layer.paint {
+            Some(LayerPaint::Circle(p)) => p.stroke_color_at(0.0),
+            _ => [0.0, 0.0, 0.0, 1.0],
+        };
+        for (idx, &count) in feature_indices.iter().enumerate() {
+            let current_color = feature_colors.get(idx).copied().unwrap_or(fallback_color);
+            let pair = if current_color[0] < 0.0 {
+                FillShaderFeatureMetadata::unpack_circle_pair(current_color)
+            } else {
+                [
+                    FillShaderFeatureMetadata::from_rgba(current_color),
+                    FillShaderFeatureMetadata::from_rgba(default_stroke),
+                ]
+            };
+            for _ in 0..count {
+                out.extend_from_slice(&pair);
+            }
+        }
+        return;
+    }
     for (idx, &count) in feature_indices.iter().enumerate() {
         let current_color = feature_colors.get(idx).copied().unwrap_or(fallback_color);
-        out.resize(
-            out.len() + count as usize,
-            FillShaderFeatureMetadata {
-                color: current_color,
-            },
-        );
+        let encoded = if is_line_gradient {
+            FillShaderFeatureMetadata::from_line_gradient(current_color[0], current_color[3])
+        } else {
+            FillShaderFeatureMetadata::from_rgba(current_color)
+        };
+        out.resize(out.len() + count as usize, encoded);
     }
 }
 
@@ -193,6 +237,9 @@ pub(super) fn paint_metadata_depends_on_zoom(paint: Option<&LayerPaint>) -> bool
         Some(LayerPaint::Circle(_) | LayerPaint::Heatmap(_)) => true,
         Some(LayerPaint::FillExtrusion(p)) => {
             p.fill_extrusion_translate.is_some()
+                || p.fill_extrusion_color
+                    .as_ref()
+                    .is_some_and(|v| !v.is_zoom_constant())
                 || p.fill_extrusion_opacity
                     .as_ref()
                     .is_some_and(|v| !v.is_zoom_constant())
@@ -258,8 +305,14 @@ pub(super) fn upload_size(
             .sum::<usize>()
             * std::mem::size_of::<FillShaderFeatureMetadata>()
     };
-    bucket.buffer.buffer.vertices.len() * std::mem::size_of::<crate::render::ShaderVertex>()
-        + bucket.buffer.buffer.indices.len() * std::mem::size_of::<u32>()
+    let index_stride = if bucket.buffer.buffer.vertices.len() <= 65_536 {
+        std::mem::size_of::<u16>()
+    } else {
+        std::mem::size_of::<u32>()
+    };
+    bucket.buffer.buffer.vertices.len()
+        * std::mem::size_of::<crate::render::shaders::GpuShaderVertex>()
+        + bucket.buffer.buffer.indices.len() * index_stride
         + fm_bytes
 }
 

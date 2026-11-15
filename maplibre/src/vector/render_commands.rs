@@ -12,12 +12,19 @@ use crate::{
 };
 
 #[inline]
-fn is_uniform_entry(world: &World, item: &LayerItem) -> bool {
-    let Some(Initialized(pool)) = world.resources.get::<Eventually<VectorBufferPool>>() else {
-        return false;
+fn resolve_vector_entry<'w>(
+    world: &'w World,
+    item: &LayerItem,
+) -> Option<&'w crate::vector::resource::IndexEntry> {
+    let Initialized(pool) = world.resources.get::<Eventually<VectorBufferPool>>()? else {
+        return None;
     };
     pool.index()
         .resolve_entry(item.tile.coords, item.style_layer, item.entry_slot)
+}
+
+fn is_uniform_entry(world: &World, item: &LayerItem) -> bool {
+    resolve_vector_entry(world, item)
         .is_some_and(crate::vector::resource::IndexEntry::is_uniform_feature_metadata)
 }
 
@@ -261,7 +268,7 @@ impl RenderCommand<LayerItem> for SetCircleTilePipeline {
             return RenderCommandResult::Failure;
         };
 
-        pass.set_pipeline(pipeline.select(is_uniform_entry(world, item)));
+        pass.set_pipeline(pipeline.select_entry(resolve_vector_entry(world, item)));
         pass.set_bind_group(
             0,
             projection_resources.bind_group_for(item.projection_binding()),

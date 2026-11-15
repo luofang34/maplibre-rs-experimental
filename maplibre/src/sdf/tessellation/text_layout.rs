@@ -308,7 +308,7 @@ impl Emitter<'_> {
             // The vertex carries where the centre lies in the straight layout, in 1/32 pixel.
             let first = self.buffer.vertices.len() - 4;
             for vertex in &mut self.buffer.vertices[first..] {
-                vertex.a_pixeloffset[0] = (centre * 32.0).round() as i32;
+                vertex.set_line_centre_q5((centre * 32.0).round() as i32);
             }
             self.centres.push(centre);
             // An image in the text collides by its own size; a glyph by the text size.

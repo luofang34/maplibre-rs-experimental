@@ -8,11 +8,7 @@ use crate::{
 };
 
 fn vertex(anchor: [i32; 2]) -> ShaderSymbolVertex {
-    ShaderSymbolVertex {
-        a_pos_offset: [anchor[0], anchor[1], 0, 0],
-        a_data: [0; 4],
-        a_pixeloffset: [0; 4],
-    }
+    ShaderSymbolVertex::new(anchor, [0, 0], [0, 0], 0, 0.0, 0.0)
 }
 
 #[test]
@@ -61,22 +57,24 @@ fn each_glyph_writes_its_own_pose_to_its_six_indices() {
     let mut metadata = vec![SDFShaderFeatureMetadata::default(); 12];
     write_glyph_poses(&layer, &line, &poses, &mut metadata);
     assert!(
-        metadata[..4].iter().all(|entry| entry.pose[3] == 0.0),
+        metadata[..4].iter().all(|entry| !entry.has_pose()),
         "the icon has no pose"
     );
-    assert!(metadata[4..8]
-        .iter()
-        .all(|entry| entry.pose == [-10.0, 0.0, 0.5, POSED_GLYPH]));
-    assert!(metadata[8..]
-        .iter()
-        .all(|entry| entry.pose == [10.0, 5.0, 0.75, POSED_GLYPH + 12.5]));
+    assert!(metadata[4..8].iter().all(|entry| {
+        let p = entry.decoded_pose();
+        [p[0], p[1], p[3]] == [-10.0, 0.0, POSED_GLYPH] && (p[2] - 0.5).abs() < 1e-4
+    }));
+    assert!(metadata[8..].iter().all(|entry| {
+        let p = entry.decoded_pose();
+        [p[0], p[1], p[3]] == [10.0, 5.0, POSED_GLYPH + 12.5] && (p[2] - 0.75).abs() < 1e-4
+    }));
 }
 
 #[test]
 fn a_changed_pose_is_detected_as_dirty_by_metadata_diff() {
     let before = vec![SDFShaderFeatureMetadata::default(); 4];
     let mut after = before.clone();
-    after[2].pose = [1.0, 0.0, 0.0, 1.0];
+    after[2].set_glyph_pose(1.0, 0.0, 0.0, 0.0);
     assert_ne!(
         bytemuck::bytes_of(&before[2]),
         bytemuck::bytes_of(&after[2])

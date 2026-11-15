@@ -19,10 +19,9 @@ const ZERO: f32 = 1.0 / 255.0 / 16.0;
 @vertex
 fn main(
     @builtin(vertex_index) vertex_index: u32,
-    @location(0) position: vec2<f32>,
-    // Radius factor, weight, path distance and, over terrain, the height of the point.
-    @location(1) path: vec4<f32>,
-    @location(10) corner_code: f32,
+    @location(0) v_pos_q2: vec2<i32>,
+    @location(1) v_norm_packed: u32,
+    @location(10) v_extra: vec2<u32>,
     @location(2) tile_mercator_coords: vec4<f32>,
     @location(4) translate1: vec4<f32>,
     @location(5) translate2: vec4<f32>,
@@ -32,6 +31,10 @@ fn main(
     @location(13) layer_radius: f32,
     @location(14) circle_params: vec4<f32>,
 ) -> VertexOutput {
+    let position = vec2<f32>(v_pos_q2) * 0.25 + vec2<f32>(2048.0);
+    let norm = unpack2x16float(v_norm_packed);
+    let elev_in = unpack2x16float(v_extra.y & 0xffffu).x;
+    let corner_cell = (v_extra.y >> 16u) & 0x7fu;
     // Quads are emitted with four consecutive vertices; the corner follows the vertex order.
     let corner = vertex_index % 4u;
     var extrude = vec2<f32>(
@@ -39,13 +42,13 @@ fn main(
         select(-1.0, 1.0, corner >= 2u),
     );
     // A subdivided kernel names its corner on an eight-by-eight grid, to follow the globe.
-    if corner_code > 0.5 {
-        let cell = u32(corner_code - 0.5);
+    if corner_cell > 0u {
+        let cell = corner_cell - 1u;
         extrude = vec2<f32>(f32(cell / 8u), f32(cell % 8u)) / 7.0 * 2.0 - vec2<f32>(1.0);
     }
     // One unit for a layer-wide radius, else the point's own radius in pixels.
-    let radius = layer_radius * path.x;
-    let weight = path.y;
+    let radius = layer_radius * norm.x;
+    let weight = norm.y;
     let intensity = circle_params.x;
     let strength = weight * intensity;
     // Extend the quad until the kernel falls below ZERO, so a strong point has no visible edge.
@@ -57,7 +60,7 @@ fn main(
     let corner_offset = reach * radius * TILE_UNITS_PER_PIXEL * zoom_factor;
     let corner_position = position + corner_offset;
     // A point over terrain stands on the surface, as GL JS places its kernels.
-    let spatial = path.w > -1e20;
+    let spatial = elev_in > -30000.0;
     var projected: ProjectedTilePosition;
     let transition = projection.transition_and_padding.x;
     if transition > 0.0 {
@@ -77,7 +80,7 @@ fn main(
         );
     } else if spatial {
         projected = project_tile_position_3d(
-            vec3<f32>(corner_position, path.w),
+            vec3<f32>(corner_position, elev_in),
             transform,
             tile_mercator_coords,
         );

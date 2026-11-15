@@ -1,4 +1,4 @@
-//! Reference-counted shared vertex slab allocations and 16-byte uniform feature metadata uploads.
+//! Reference-counted shared vertex & layer-metadata slab allocations and uniform uploads.
 
 use super::{allocator::RangeAllocator, *};
 
@@ -6,6 +6,7 @@ use super::{allocator::RangeAllocator, *};
 pub(super) struct SharedVertexAlloc {
     pub vertices: Range<wgpu::BufferAddress>,
     pub first_vertex: u32,
+    pub vertex_count: u64,
     pub ref_count: u32,
 }
 
@@ -15,10 +16,10 @@ pub(super) struct SharedLayerMetaAlloc {
     pub ref_count: u32,
 }
 
-impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM, FM> {
-    /// Shares one per-page `layer_metadata` record across all resident tiles of the same
+impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM, FM> {
+    /// Shares one `layer_metadata` record across all resident tiles of the same
     /// `(style_layer_id, tile_z)` so consecutive draws of the same style layer reuse one vertex
-    /// buffer slice at Slot 2.
+    /// buffer slice at Slot 2 across all vertex slabs.
     pub fn with_shared_layer_metadata(mut self) -> Self {
         self.shared_layer_metadata = true;
         self
@@ -36,14 +37,14 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
 
     pub(super) fn release_shared_layer_meta_ref(
         &mut self,
-        page: u16,
+        layer_page: u16,
         style_layer_id: crate::style::StyleLayerId,
         tile_z: u8,
     ) -> bool {
         if !self.shared_layer_metadata {
             return true;
         }
-        let map_key = (page, style_layer_id, tile_z);
+        let map_key = (layer_page, style_layer_id, tile_z);
         match self.shared_layer_meta.get_mut(&map_key) {
             Some(shared) if shared.ref_count > 1 => {
                 shared.ref_count -= 1;
@@ -57,83 +58,31 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         }
     }
 
-    pub(super) fn register_new_page_layer_meta(
-        &mut self,
-        alloc: &PageAllocation,
-        strides: ElementStrides,
-        layer_meta_key: Option<(crate::style::StyleLayerId, u8)>,
-    ) {
-        if let Some((lid, z)) = layer_meta_key.filter(|_| strides.layer_metadata > 0) {
-            self.shared_layer_meta.insert(
-                (alloc.page, lid, z),
-                SharedLayerMetaAlloc {
-                    range: alloc.layer_metadata.clone(),
-                    ref_count: 1,
-                },
-            );
-        }
-    }
-
-    pub(super) fn try_allocate_page_with_layer_meta(
-        &mut self,
-        page_id: u16,
-        mut sizes: [u64; 4],
-        strides: ElementStrides,
-        layer_meta_key: Option<(crate::style::StyleLayerId, u8)>,
-    ) -> Option<PageAllocation> {
-        let existing_meta = layer_meta_key.and_then(|(lid, z)| {
-            self.shared_layer_meta
-                .get(&(page_id, lid, z))
-                .map(|s| s.range.clone())
-        });
-        if existing_meta.is_some() {
-            sizes[2] = 0;
-        }
-        let mut alloc = self
-            .pages
-            .get_mut(usize::from(page_id))
-            .and_then(Option::as_mut)?
-            .try_allocate(page_id, sizes, strides)?;
-        if let Some((lid, z)) = layer_meta_key {
-            if let Some(range) = existing_meta {
-                if let Some(shared) = self.shared_layer_meta.get_mut(&(page_id, lid, z)) {
-                    shared.ref_count += 1;
-                }
-                alloc.layer_metadata = range;
-            } else if strides.layer_metadata > 0 {
-                self.shared_layer_meta.insert(
-                    (page_id, lid, z),
-                    SharedLayerMetaAlloc {
-                        range: alloc.layer_metadata.clone(),
-                        ref_count: 1,
-                    },
-                );
-            }
-        }
-        Some(alloc)
-    }
-    /// Marks this pool to suballocate `feature_metadata` independently from `vertices`, allowing
-    /// uniform-paint layers to reserve a single 16-byte `VertexStepMode::Instance` record and
-    /// sibling layers on the same source layer to share a single vertex range.
+    /// Marks this pool to suballocate `feature_metadata` independently from uniform `vertices`,
+    /// allowing uniform-paint layers to reserve zero `feature_metadata` bytes (or a single
+    /// instance-stepped record) and sibling layers on the same source layer to share vertices.
     pub fn with_decoupled_feature_metadata(mut self) -> Self {
         self.decoupled_feature_metadata = true;
-        let strides = ElementStrides::of::<V, I, TM, FM>();
-        for page in self.pages.iter_mut().flatten() {
-            page.decoupled_feature_metadata = true;
-            if page.is_empty() {
-                let usable_vertex_bytes = page
+        let strides = ElementStrides::of::<V::Gpu, I, TM, FM>();
+        for v_slab in self.vertex_slabs.iter_mut().flatten() {
+            if v_slab.is_empty() {
+                if let Some(paired) = v_slab.paired_fm.take() {
+                    let desc = BackingBufferDescriptor::new(paired.inner, paired.inner_size);
+                    self.feature_slabs
+                        .push(Some(BufferSlab::new(desc, strides.feature_metadata)));
+                }
+                v_slab.element_capacity = v_slab
                     .vertices
                     .inner_size
                     .checked_div(strides.vertex)
-                    .unwrap_or(0)
-                    * strides.vertex;
-                page.vertex_alloc = RangeAllocator::new(usable_vertex_bytes);
+                    .unwrap_or(0);
+                v_slab.vertex_alloc = RangeAllocator::new(v_slab.element_capacity * strides.vertex);
             }
         }
         self
     }
 
-    /// Whether `feature_metadata` is suballocated independently rather than in vertex lockstep.
+    /// Whether `feature_metadata` can be suballocated independently rather than strictly in lockstep.
     #[inline]
     pub fn is_decoupled_feature_metadata(&self) -> bool {
         self.decoupled_feature_metadata
@@ -142,13 +91,14 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
     pub(super) fn release_shared_vertex_ref(
         &mut self,
         coords: WorldTileCoords,
-        page: u16,
+        vertex_page: u16,
         shared_key: Option<u64>,
+        family: u8,
     ) -> bool {
         let Some(key) = shared_key else {
             return true;
         };
-        let map_key = (coords, page, key);
+        let map_key = (coords, vertex_page, key, family);
         match self.shared_vertices.get_mut(&map_key) {
             Some(shared) if shared.ref_count > 1 => {
                 shared.ref_count -= 1;
@@ -162,34 +112,19 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         }
     }
 
-    fn try_reuse_shared_page(
-        &mut self,
+    fn find_shared_vertex_slot(
+        &self,
         coords: WorldTileCoords,
         shared_key: u64,
-        sizes_without_vertices: [u64; 4],
-        strides: ElementStrides,
-        layer_meta_key: Option<(crate::style::StyleLayerId, u8)>,
-    ) -> Option<(PageAllocation, u32)> {
-        for idx in 0..self.pages.len() {
+        family: u8,
+    ) -> Option<(u16, SharedVertexAlloc)> {
+        for idx in 0..self.vertex_slabs.len() {
             let page_id = idx as u16;
-            if !self
+            if let Some(shared) = self
                 .shared_vertices
-                .contains_key(&(coords, page_id, shared_key))
+                .get(&(coords, page_id, shared_key, family))
             {
-                continue;
-            }
-            let alloc = self.try_allocate_page_with_layer_meta(
-                page_id,
-                sizes_without_vertices,
-                strides,
-                layer_meta_key,
-            );
-            if let Some(mut alloc) = alloc {
-                if let Some(shared) = self.shared_vertices.get_mut(&(coords, page_id, shared_key)) {
-                    shared.ref_count += 1;
-                    alloc.vertices = shared.vertices.clone();
-                    return Some((alloc, shared.first_vertex));
-                }
+                return Some((page_id, shared.clone()));
             }
         }
         None
@@ -224,8 +159,8 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
     }
 
     /// Replaces `style_layer` at `coords` with uniform feature metadata, reusing an already-uploaded
-    /// shared vertex buffer when `geometry.shared_geometry_key()` matches a resident sibling on the
-    /// same page, or falling back to `fallback_vertices` when spilling onto a new page.
+    /// shared vertex buffer when `geometry.shared_geometry_key()` matches a resident sibling of the
+    /// same encoding family, or falling back to `fallback_vertices` otherwise.
     #[allow(clippy::too_many_arguments)]
     pub fn replace_layer_geometry_uniform_shared_unless(
         &mut self,
@@ -267,8 +202,10 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             return Err(AllocationError::Coordinates { coords });
         }
         let style_layer_id = style_layer.layer_id();
+        let family = V::encoding_family(&style_layer.type_);
+        let vertex_elem_align = V::vertex_element_alignment(&style_layer.type_);
         let layer_meta_key = self.layer_meta_share_key(style_layer_id, coords);
-        let strides = ElementStrides::of::<V, I, TM, FM>();
+        let strides = ElementStrides::of::<V::Gpu, I, TM, FM>();
         let source_vertices: &[V] = if !geometry.buffer.vertices.is_empty() {
             &geometry.buffer.vertices
         } else {
@@ -277,7 +214,13 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         let shared_key = geometry
             .shared_geometry_key()
             .filter(|_| self.decoupled_feature_metadata);
-        let vertices = source_vertices.len() as u64;
+
+        let existing_shared =
+            shared_key.and_then(|key| self.find_shared_vertex_slot(coords, key, family));
+        let vertices = match &existing_shared {
+            Some((_, s)) if source_vertices.is_empty() => s.vertex_count,
+            _ => source_vertices.len() as u64,
+        };
         let records_u64 = records as u64;
         if !self.decoupled_feature_metadata && records_u64 > vertices {
             return Err(AllocationError::FeatureMetadata {
@@ -295,101 +238,104 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         } else {
             records
         };
-        let index_bytes = geometry.buffer.indices.len() as u64 * strides.index;
         let fm_bytes = (fm_records as u64) * strides.feature_metadata;
-
-        let reused = if let Some(key) = shared_key {
-            let reuse_sizes = [0, index_bytes, strides.layer_metadata, fm_bytes];
-            self.validate_sizes(reuse_sizes, strides)?;
-            self.try_reuse_shared_page(coords, key, reuse_sizes, strides, layer_meta_key)
+        let fm_kind = if !uniform_fm {
+            if strides.feature_metadata > 0 {
+                FmStorageKind::Paired
+            } else {
+                FmStorageKind::None
+            }
+        } else if fm_bytes > 0 {
+            FmStorageKind::Standalone
         } else {
-            None
+            FmStorageKind::None
         };
 
+        let (index_u16, index_bytes) = self.plan_index_upload(
+            &geometry.buffer.indices,
+            geometry.usable_indices,
+            vertices,
+            strides,
+        );
+
         let (alloc, first_vertex_u32, first_index_u32, uploaded_vertices) =
-            if let Some((alloc, fv)) = reused {
-                let first_index = alloc.indices.start.checked_div(strides.index).unwrap_or(0);
+            if let Some((vp, shared_info)) = existing_shared {
+                let req = SlabRequest {
+                    vertex_bytes: 0,
+                    vertex_elem_align,
+                    index_bytes,
+                    index_u16,
+                    layer_bytes: strides.layer_metadata,
+                    feature_bytes: fm_bytes,
+                    fm_kind,
+                };
+                self.validate_request(req, strides)?;
+                let alloc = self.reserve_allocation(
+                    Some(queue),
+                    req,
+                    strides,
+                    layer_meta_key,
+                    Some((vp, shared_info.vertices.clone())),
+                    |c| c == coords || protect(c),
+                )?;
+                let idx_stride = strides.active_index_stride(alloc.index_u16);
+                let first_index = alloc.indices.start.checked_div(idx_stride).unwrap_or(0);
                 let fi = match super::upload::element_index(first_index) {
                     Ok(fi) => fi,
                     Err(err) => {
-                        let release_v =
-                            self.release_shared_vertex_ref(coords, alloc.page, shared_key);
-                        let release_lm = self.release_shared_layer_meta_ref(
-                            alloc.page,
-                            style_layer_id,
-                            u8::from(coords.z),
-                        );
-                        if let Some(page) = self
-                            .pages
-                            .get_mut(usize::from(alloc.page))
-                            .and_then(Option::as_mut)
-                        {
-                            page.free(
-                                alloc.vertices,
-                                alloc.indices,
-                                alloc.layer_metadata,
-                                alloc.feature_metadata,
-                                (release_v, release_lm),
-                            );
-                        }
+                        self.abort_allocation(alloc, false, layer_meta_key);
                         return Err(err);
                     }
                 };
-                (alloc, fv, fi, false)
+                if let Some(key) = shared_key {
+                    if let Some(s) = self.shared_vertices.get_mut(&(coords, vp, key, family)) {
+                        s.ref_count += 1;
+                    }
+                }
+                (alloc, shared_info.first_vertex, fi, false)
             } else {
-                let sizes = [
-                    vertices * strides.vertex,
+                let req = SlabRequest {
+                    vertex_bytes: vertices * strides.vertex,
+                    vertex_elem_align,
                     index_bytes,
-                    strides.layer_metadata,
-                    fm_bytes,
-                ];
-                self.validate_sizes(sizes, strides)?;
-                let alloc = self.reserve_page_allocation(
+                    index_u16,
+                    layer_bytes: strides.layer_metadata,
+                    feature_bytes: fm_bytes,
+                    fm_kind,
+                };
+                self.validate_request(req, strides)?;
+                let alloc = self.reserve_allocation(
                     Some(queue),
-                    sizes,
+                    req,
                     strides,
                     layer_meta_key,
+                    None,
                     &mut protect,
                 )?;
+                let idx_stride = strides.active_index_stride(alloc.index_u16);
                 let first_vertex = alloc
                     .vertices
                     .start
                     .checked_div(strides.vertex)
                     .unwrap_or(0);
-                let first_index = alloc.indices.start.checked_div(strides.index).unwrap_or(0);
+                let first_index = alloc.indices.start.checked_div(idx_stride).unwrap_or(0);
                 let (fv, fi) = match (
                     super::upload::element_index(first_vertex),
                     super::upload::element_index(first_index),
                 ) {
                     (Ok(fv), Ok(fi)) => (fv, fi),
                     (Err(err), _) | (_, Err(err)) => {
-                        let release_lm = self.release_shared_layer_meta_ref(
-                            alloc.page,
-                            style_layer_id,
-                            u8::from(coords.z),
-                        );
-                        if let Some(page) = self
-                            .pages
-                            .get_mut(usize::from(alloc.page))
-                            .and_then(Option::as_mut)
-                        {
-                            page.free(
-                                alloc.vertices,
-                                alloc.indices,
-                                alloc.layer_metadata,
-                                alloc.feature_metadata,
-                                (true, release_lm),
-                            );
-                        }
+                        self.abort_allocation(alloc, true, layer_meta_key);
                         return Err(err);
                     }
                 };
                 if let Some(key) = shared_key {
                     self.shared_vertices.insert(
-                        (coords, alloc.page, key),
+                        (coords, alloc.vertex_page, key, family),
                         SharedVertexAlloc {
                             vertices: alloc.vertices.clone(),
                             first_vertex: fv,
+                            vertex_count: vertices,
                             ref_count: 1,
                         },
                     );
@@ -401,7 +347,13 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         let entry = IndexEntry {
             allocation_id,
             paint_revision: 0,
-            page: alloc.page,
+            vertex_page: alloc.vertex_page,
+            index_page: alloc.index_page,
+            layer_page: alloc.layer_page,
+            feature_page: alloc.feature_page,
+            index_u16: alloc.index_u16,
+            fm_kind: alloc.fm_kind,
+            shared_vertex_family: family,
             coords,
             style_layer_id,
             style_layer,
@@ -413,39 +365,67 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             buffer_layer_metadata: alloc.layer_metadata,
             buffer_feature_metadata: alloc.feature_metadata,
             uniform_feature_metadata: uniform_fm,
+            dual_feature_metadata: false,
             shared_geometry_key: shared_key,
         };
-        let page = self.page_of(&entry);
+
         if uploaded_vertices {
+            let mut scratch = std::mem::take(&mut self.vertex_scratch);
+            let gpu_verts =
+                V::encode_vertices(&entry.style_layer.type_, source_vertices, &mut scratch);
             queue.write_buffer(
-                &page.vertices.inner,
+                &self.vertex_slab_of(entry.vertex_page).vertices.inner,
                 entry.buffer_vertices.start,
-                bytemuck::cast_slice(source_vertices),
+                bytemuck::cast_slice(gpu_verts),
             );
+            self.vertex_scratch = scratch;
         }
-        if index_bytes > 0 {
+        self.write_uploaded_indices(
+            queue,
+            &entry,
+            &geometry.buffer.indices,
+            geometry.usable_indices,
+            index_bytes,
+        );
+        if strides.layer_metadata > 0 && entry.layer_page != NO_SLAB {
             queue.write_buffer(
-                &page.indices.inner,
-                entry.buffer_indices.start,
-                bytemuck::cast_slice(&geometry.buffer.indices),
-            );
-        }
-        if strides.layer_metadata > 0 {
-            queue.write_buffer(
-                &page.layer_metadata.inner,
+                self.metadata_for(&entry),
                 entry.buffer_layer_metadata.start,
                 bytemuck::bytes_of(&layer_metadata),
             );
         }
         if fm_bytes > 0 {
-            Self::write_repeated_feature_metadata(
-                queue,
-                &page.feature_metadata.inner,
-                entry.buffer_feature_metadata.start,
-                uniform_feature,
-                fm_records,
-            );
+            let skip_zero_fill = if entry.fm_kind == FmStorageKind::Paired {
+                let is_zero = self.zero_initialized_slabs
+                    && bytemuck::bytes_of(&uniform_feature).iter().all(|&b| b == 0);
+                if let Some(v_slab) = self
+                    .vertex_slabs
+                    .get_mut(usize::from(entry.vertex_page))
+                    .and_then(Option::as_mut)
+                {
+                    let untouched =
+                        entry.buffer_feature_metadata.start >= v_slab.paired_fm_dirty_end;
+                    v_slab.paired_fm_dirty_end = v_slab
+                        .paired_fm_dirty_end
+                        .max(entry.buffer_feature_metadata.end);
+                    is_zero && untouched
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+            if !skip_zero_fill {
+                Self::write_repeated_feature_metadata(
+                    queue,
+                    self.feature_metadata_for(&entry),
+                    entry.buffer_feature_metadata.start,
+                    uniform_feature,
+                    fm_records,
+                );
+            }
         }
+
         self.index.push_back(entry);
         self.revision = allocation_id;
         let removed = self

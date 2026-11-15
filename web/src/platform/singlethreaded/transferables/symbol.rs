@@ -97,7 +97,7 @@ impl SymbolLayerTessellated for FlatBufferTransferable {
                     out.push(ShaderSymbolVertex {
                         a_pos_offset: vertex.a_pos_offset().into(),
                         a_data: vertex.a_data().into(),
-                        a_pixeloffset: vertex.a_pixeloffset().into(),
+                        a_pixel_and_height: vertex.a_pixel_and_height().into(),
                     });
                 }
                 out
@@ -333,7 +333,11 @@ fn flat_vertices(vertices: &[ShaderSymbolVertex]) -> Vec<FlatSymbolVertex> {
     vertices
         .iter()
         .map(|vertex| {
-            FlatSymbolVertex::new(&vertex.a_pos_offset, &vertex.a_data, &vertex.a_pixeloffset)
+            FlatSymbolVertex::new(
+                &vertex.a_pos_offset,
+                &vertex.a_data,
+                &vertex.a_pixel_and_height,
+            )
         })
         .collect()
 }

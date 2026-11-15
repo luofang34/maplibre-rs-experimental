@@ -45,12 +45,7 @@ fn bench_buffer_pool_churn_and_coalesce(c: &mut Criterion) {
         96,
     );
     let layer_meta = ShaderLayerMetadata::new(0.0, 1.0, [0.0; 2]);
-    let feature_meta = vec![
-        FillShaderFeatureMetadata {
-            color: [0.5, 0.5, 0.5, 1.0]
-        };
-        64
-    ];
+    let feature_meta = vec![FillShaderFeatureMetadata::from_rgba([0.5, 0.5, 0.5, 1.0]); 64];
 
     c.bench_function("buffer_pool_mid_eviction_churn_256_tiles", |b| {
         b.iter(|| {
@@ -134,12 +129,7 @@ fn bench_gpu_pool_startup_and_first_tile(c: &mut Criterion) {
         192,
     );
     let layer_meta = ShaderLayerMetadata::new(0.0, 1.0, [0.0; 2]);
-    let feature_meta = vec![
-        FillShaderFeatureMetadata {
-            color: [0.0, 0.4, 0.8, 1.0]
-        };
-        128
-    ];
+    let feature_meta = vec![FillShaderFeatureMetadata::from_rgba([0.0, 0.4, 0.8, 1.0]); 128];
 
     c.bench_function("gpu_pool_init_both_and_upload_first_tile", |b| {
         b.iter(|| {

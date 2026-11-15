@@ -1,4 +1,4 @@
-//! Backing buffer page combining vertex, index, layer-metadata, and feature-metadata slabs.
+//! Independent GPU buffer slabs (`VertexSlab` and `BufferSlab`) for [`BufferPool`](super::BufferPool).
 
 use std::{fmt, ops::Range};
 
@@ -8,77 +8,50 @@ use super::{
 };
 use crate::render::resource::BackingBufferDescriptor;
 
-/// Steady-state vertices per on-demand GPU page (`256 Ki` after the initial `16 Ki..128 Ki` ramp).
-/// Index and metadata capacities per page scale proportionally with remaining [`BufferPoolSizes`](crate::render::settings::BufferPoolSizes).
+/// Sentinel page index for an unused slab family (e.g. `0`-byte `EmptyLayerMetadata` or `0`-byte uniform FM).
+pub(super) const NO_SLAB: u16 = u16::MAX;
+
+/// Steady-state vertices per on-demand GPU vertex slab (`256 Ki` after the initial `16 Ki..128 Ki` ramp).
 pub(super) const DEFAULT_PAGE_VERTICES: u64 = 256 * 1024;
 
-/// Byte capacities across the four buffer families of a pool or page.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) struct ByteCapacities {
-    pub vertices: u64,
-    pub indices: u64,
-    pub layer_metadata: u64,
-    pub feature_metadata: u64,
+/// Steady-state indices per on-demand GPU index slab (`1024 Ki` after the initial `64 Ki..512 Ki` ramp).
+pub(super) const DEFAULT_PAGE_INDICES: u64 = 1024 * 1024;
+
+/// Steady-state records per on-demand GPU layer-metadata slab (`1,024` records = `64 KiB` at `64 B` stride).
+pub(super) const DEFAULT_PAGE_LAYER_META: u64 = 1024;
+
+/// Steady-state records per standalone feature-metadata slab (`64 Ki` records = `256 KiB` at `4 B` stride).
+pub(super) const DEFAULT_PAGE_FEATURE_META: u64 = 64 * 1024;
+
+/// Where an [`IndexEntry`](super::IndexEntry)'s `feature_metadata` bytes reside.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum FmStorageKind {
+    /// Zero feature-metadata bytes reserved (uniform paint carried in `ShaderLayerMetadata`).
+    None,
+    /// Element-aligned 1:1 with `VertexSlab::vertices` inside `VertexSlab::paired_fm` (bound whole with `base_vertex`).
+    Paired,
+    /// Suballocated independently inside `feature_slabs` (`1`-record uniform FM or `2*V` dual circle stroke).
+    Standalone,
 }
 
-impl ByteCapacities {
-    #[inline]
-    pub const fn is_empty(&self) -> bool {
-        self.vertices == 0
-            && self.indices == 0
-            && self.layer_metadata == 0
-            && self.feature_metadata == 0
-    }
-
-    #[cfg(test)]
-    #[inline]
-    pub const fn get(&self, typ: BackingBufferType) -> u64 {
-        match typ {
-            BackingBufferType::Vertices => self.vertices,
-            BackingBufferType::Indices => self.indices,
-            BackingBufferType::Metadata => self.layer_metadata,
-            BackingBufferType::FeatureMetadata => self.feature_metadata,
-        }
-    }
-
-    #[inline]
-    pub const fn saturating_sub(self, rhs: Self) -> Self {
-        Self {
-            vertices: self.vertices.saturating_sub(rhs.vertices),
-            indices: self.indices.saturating_sub(rhs.indices),
-            layer_metadata: self.layer_metadata.saturating_sub(rhs.layer_metadata),
-            feature_metadata: self.feature_metadata.saturating_sub(rhs.feature_metadata),
-        }
-    }
-
-    #[inline]
-    pub const fn saturating_add(self, rhs: Self) -> Self {
-        Self {
-            vertices: self.vertices.saturating_add(rhs.vertices),
-            indices: self.indices.saturating_add(rhs.indices),
-            layer_metadata: self.layer_metadata.saturating_add(rhs.layer_metadata),
-            feature_metadata: self.feature_metadata.saturating_add(rhs.feature_metadata),
-        }
-    }
-}
-
-/// Stride configuration for the four typed sub-buffers of a [`BufferPool`](super::BufferPool).
+/// GPU byte strides and alignment invariants for `(V::Gpu, I, TM, FM)`.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct ElementStrides {
     pub vertex: u64,
     pub index: u64,
     pub layer_metadata: u64,
     pub feature_metadata: u64,
-    pub vertex_align: u64,
-    pub decoupled_vertex_align: u64,
+    pub paired_vertex_align: u64,
+    pub uniform_vertex_align: u64,
     pub index_align: u64,
+    pub u16_index_align: u64,
     pub layer_align: u64,
     pub feature_align: u64,
 }
 
 impl ElementStrides {
-    pub const fn of<V, I, TM, FM>() -> Self {
-        let vertex = std::mem::size_of::<V>() as u64;
+    pub const fn of<VGpu, I, TM, FM>() -> Self {
+        let vertex = std::mem::size_of::<VGpu>() as u64;
         let index = std::mem::size_of::<I>() as u64;
         let layer_metadata = std::mem::size_of::<TM>() as u64;
         let feature_metadata = std::mem::size_of::<FM>() as u64;
@@ -87,8 +60,8 @@ impl ElementStrides {
             index,
             layer_metadata,
             feature_metadata,
-            vertex_align: lockstep_vertex_alignment(vertex, feature_metadata),
-            decoupled_vertex_align: if vertex == 0 {
+            paired_vertex_align: lockstep_vertex_alignment(vertex, feature_metadata),
+            uniform_vertex_align: if vertex == 0 {
                 wgpu::COPY_BUFFER_ALIGNMENT
             } else {
                 lcm_u64(vertex, wgpu::COPY_BUFFER_ALIGNMENT)
@@ -98,6 +71,7 @@ impl ElementStrides {
             } else {
                 lcm_u64(index, wgpu::COPY_BUFFER_ALIGNMENT)
             },
+            u16_index_align: wgpu::COPY_BUFFER_ALIGNMENT,
             layer_align: if layer_metadata == 0 {
                 wgpu::COPY_BUFFER_ALIGNMENT
             } else {
@@ -112,16 +86,39 @@ impl ElementStrides {
     }
 
     #[inline]
-    pub const fn effective_vertex_align(self, decoupled: bool) -> u64 {
-        if decoupled {
-            self.decoupled_vertex_align
+    pub const fn vertex_byte_align(self, paired_fm: bool, elem_align: u64) -> u64 {
+        let base = if paired_fm {
+            self.paired_vertex_align
         } else {
-            self.vertex_align
+            self.uniform_vertex_align
+        };
+        if elem_align <= 1 || self.vertex == 0 {
+            base
+        } else {
+            lcm_u64(base, elem_align * self.vertex)
+        }
+    }
+
+    #[inline]
+    pub const fn active_index_stride(self, use_u16: bool) -> u64 {
+        if use_u16 {
+            2
+        } else {
+            self.index
+        }
+    }
+
+    #[inline]
+    pub const fn active_index_align(self, use_u16: bool) -> u64 {
+        if use_u16 {
+            self.u16_index_align
+        } else {
+            self.index_align
         }
     }
 }
 
-/// Allocates a backing buffer of type `B` on demand when a paged pool grows.
+/// Allocates a backing buffer of type `B` on demand when a slab family grows.
 pub(super) struct PageFactory<B>(
     pub(super) Box<dyn Fn(BackingBufferType, wgpu::BufferAddress) -> B>,
 );
@@ -132,99 +129,84 @@ impl<B> fmt::Debug for PageFactory<B> {
     }
 }
 
-/// Releases GPU device storage owned by a [`BufferPage`] when reclaimed or dropped.
-pub(super) struct PageDestroyer<B>(pub(super) fn(&BufferPage<B>));
+/// Releases GPU device storage owned by an individual backing buffer `B` when reclaimed or dropped.
+pub(super) struct SlabDestroyer<B>(pub(super) fn(&B));
 
-impl<B> fmt::Debug for PageDestroyer<B> {
+impl<B> fmt::Debug for SlabDestroyer<B> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("PageDestroyer(..)")
+        f.write_str("SlabDestroyer(..)")
     }
 }
 
-/// One self-contained slab page of vertex, index, layer-metadata, and feature-metadata buffers.
+/// Standalone homogeneous slab buffer (`u16` indices, `u32` indices, `layer_metadata`, or decoupled `feature_metadata`).
 #[derive(Debug)]
-pub(super) struct BufferPage<B> {
-    pub vertices: BackingBuffer<B>,
-    pub indices: BackingBuffer<B>,
-    pub layer_metadata: BackingBuffer<B>,
-    pub feature_metadata: BackingBuffer<B>,
-    pub vertex_alloc: RangeAllocator,
-    pub index_alloc: RangeAllocator,
-    pub layer_alloc: RangeAllocator,
-    pub feature_alloc: RangeAllocator,
-    pub decoupled_feature_metadata: bool,
+pub(super) struct BufferSlab<B> {
+    pub buffer: BackingBuffer<B>,
+    pub alloc: RangeAllocator,
+    pub element_capacity: u64,
     pub live_entries: u32,
 }
 
-/// Ranges reserved atomically on a single [`BufferPage`].
-#[derive(Clone, Debug)]
-pub(super) struct PageAllocation {
-    pub page: u16,
-    pub vertices: Range<u64>,
-    pub indices: Range<u64>,
-    pub layer_metadata: Range<u64>,
-    pub feature_metadata: Range<u64>,
-}
-
-impl<B> BufferPage<B> {
-    pub(super) fn new(
-        vertices: BackingBufferDescriptor<B>,
-        indices: BackingBufferDescriptor<B>,
-        layer_metadata: BackingBufferDescriptor<B>,
-        feature_metadata: BackingBufferDescriptor<B>,
-        strides: ElementStrides,
-        decoupled_feature_metadata: bool,
-    ) -> Self {
-        let v_cap = vertices.inner_size.checked_div(strides.vertex).unwrap_or(0);
-        let vertex_elements = if decoupled_feature_metadata {
-            v_cap
-        } else {
-            match feature_metadata
-                .inner_size
-                .checked_div(strides.feature_metadata)
-            {
-                Some(fm_cap) => v_cap.min(fm_cap),
-                None => v_cap,
-            }
-        };
-        let usable_vertex_bytes = vertex_elements * strides.vertex;
-        let usable_index_bytes =
-            indices.inner_size.checked_div(strides.index).unwrap_or(0) * strides.index;
-        let usable_layer_bytes = layer_metadata
-            .inner_size
-            .checked_div(strides.layer_metadata)
-            .unwrap_or(0)
-            * strides.layer_metadata;
-        let usable_feature_bytes = feature_metadata
-            .inner_size
-            .checked_div(strides.feature_metadata)
-            .unwrap_or(0)
-            * strides.feature_metadata;
-
+impl<B> BufferSlab<B> {
+    pub(super) fn new(desc: BackingBufferDescriptor<B>, elem_stride: u64) -> Self {
+        let element_capacity = desc.inner_size.checked_div(elem_stride).unwrap_or(0);
+        let usable_bytes = element_capacity * elem_stride;
         Self {
-            vertices: BackingBuffer::new(vertices.buffer, vertices.inner_size),
-            indices: BackingBuffer::new(indices.buffer, indices.inner_size),
-            layer_metadata: BackingBuffer::new(layer_metadata.buffer, layer_metadata.inner_size),
-            feature_metadata: BackingBuffer::new(
-                feature_metadata.buffer,
-                feature_metadata.inner_size,
-            ),
-            vertex_alloc: RangeAllocator::new(usable_vertex_bytes),
-            index_alloc: RangeAllocator::new(usable_index_bytes),
-            layer_alloc: RangeAllocator::new(usable_layer_bytes),
-            feature_alloc: RangeAllocator::new(usable_feature_bytes),
-            decoupled_feature_metadata,
+            buffer: BackingBuffer::new(desc.buffer, desc.inner_size),
+            alloc: RangeAllocator::new(usable_bytes),
+            element_capacity,
             live_entries: 0,
         }
     }
 
     #[inline]
-    pub(super) fn capacities(&self) -> ByteCapacities {
-        ByteCapacities {
-            vertices: self.vertices.inner_size,
-            indices: self.indices.inner_size,
-            layer_metadata: self.layer_metadata.inner_size,
-            feature_metadata: self.feature_metadata.inner_size,
+    pub(super) fn is_empty(&self) -> bool {
+        self.live_entries == 0
+    }
+
+    pub(super) fn clear(&mut self) {
+        self.alloc.clear();
+        self.live_entries = 0;
+    }
+}
+
+/// Vertex slab holding `V::Gpu` records and an optional 1:1 element-paired `FM` buffer.
+///
+/// Uniform layers suballocate from `VertexSlab`s with `paired_fm == None` (`0 B` feature metadata
+/// overhead), while 1:1 per-vertex data-driven layers and symbols suballocate from `VertexSlab`s
+/// with `paired_fm == Some(..)` so both Slot 0 and `feature_slot` bind whole (`slice(..)`) with `base_vertex`.
+#[derive(Debug)]
+pub(super) struct VertexSlab<B> {
+    pub vertices: BackingBuffer<B>,
+    pub paired_fm: Option<BackingBuffer<B>>,
+    pub vertex_alloc: RangeAllocator,
+    pub element_capacity: u64,
+    pub live_entries: u32,
+    pub paired_fm_dirty_end: u64,
+}
+
+impl<B> VertexSlab<B> {
+    pub(super) fn new(
+        vertices: BackingBufferDescriptor<B>,
+        paired_fm: Option<BackingBufferDescriptor<B>>,
+        strides: ElementStrides,
+    ) -> Self {
+        let v_cap = vertices.inner_size.checked_div(strides.vertex).unwrap_or(0);
+        let element_capacity = match &paired_fm {
+            Some(fm) => match fm.inner_size.checked_div(strides.feature_metadata) {
+                Some(fm_cap) => v_cap.min(fm_cap),
+                None => v_cap,
+            },
+            None => v_cap,
+        };
+        let usable_vertex_bytes = element_capacity * strides.vertex;
+        Self {
+            vertices: BackingBuffer::new(vertices.buffer, vertices.inner_size),
+            paired_fm: paired_fm.map(|fm| BackingBuffer::new(fm.buffer, fm.inner_size)),
+            vertex_alloc: RangeAllocator::new(usable_vertex_bytes),
+            element_capacity,
+            live_entries: 0,
+            paired_fm_dirty_end: 0,
         }
     }
 
@@ -235,86 +217,33 @@ impl<B> BufferPage<B> {
 
     pub(super) fn clear(&mut self) {
         self.vertex_alloc.clear();
-        self.index_alloc.clear();
-        self.layer_alloc.clear();
-        self.feature_alloc.clear();
         self.live_entries = 0;
     }
+}
 
-    pub(super) fn try_allocate(
-        &mut self,
-        page_id: u16,
-        sizes: [u64; 4],
-        strides: ElementStrides,
-    ) -> Option<PageAllocation> {
-        let v_align = strides.effective_vertex_align(self.decoupled_feature_metadata);
-        if self.decoupled_feature_metadata {
-            if !self
-                .feature_alloc
-                .can_allocate(sizes[3], strides.feature_align)
-            {
-                return None;
-            }
-        } else if sizes[3] > self.feature_metadata.inner_size {
-            return None;
-        }
-        if !self.vertex_alloc.can_allocate(sizes[0], v_align)
-            || !self.index_alloc.can_allocate(sizes[1], strides.index_align)
-            || !self.layer_alloc.can_allocate(sizes[2], strides.layer_align)
-        {
-            return None;
-        }
-        let vertices = self.vertex_alloc.allocate(sizes[0], v_align)?;
-        let Some(indices) = self.index_alloc.allocate(sizes[1], strides.index_align) else {
-            self.vertex_alloc.free(vertices);
-            return None;
-        };
-        let Some(layer_metadata) = self.layer_alloc.allocate(sizes[2], strides.layer_align) else {
-            self.vertex_alloc.free(vertices);
-            self.index_alloc.free(indices);
-            return None;
-        };
-        let feature_metadata = if self.decoupled_feature_metadata {
-            let Some(fm) = self.feature_alloc.allocate(sizes[3], strides.feature_align) else {
-                self.vertex_alloc.free(vertices);
-                self.index_alloc.free(indices);
-                self.layer_alloc.free(layer_metadata);
-                return None;
-            };
-            fm
-        } else {
-            let first_vertex = vertices.start.checked_div(strides.vertex).unwrap_or(0);
-            let fm_start = first_vertex * strides.feature_metadata;
-            fm_start..fm_start + sizes[3]
-        };
-        self.live_entries += 1;
-        Some(PageAllocation {
-            page: page_id,
-            vertices,
-            indices,
-            layer_metadata,
-            feature_metadata,
-        })
-    }
+/// Input byte/alignment requirements for a single layer reservation across the pool's slab classes.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct SlabRequest {
+    pub vertex_bytes: u64,
+    pub vertex_elem_align: u64,
+    pub index_bytes: u64,
+    pub index_u16: bool,
+    pub layer_bytes: u64,
+    pub feature_bytes: u64,
+    pub fm_kind: FmStorageKind,
+}
 
-    pub(super) fn free(
-        &mut self,
-        vertices: Range<u64>,
-        indices: Range<u64>,
-        layer_metadata: Range<u64>,
-        feature_metadata: Range<u64>,
-        (release_vertices, release_layer_meta): (bool, bool),
-    ) {
-        if release_vertices {
-            self.vertex_alloc.free(vertices);
-        }
-        self.index_alloc.free(indices);
-        if release_layer_meta {
-            self.layer_alloc.free(layer_metadata);
-        }
-        if self.decoupled_feature_metadata {
-            self.feature_alloc.free(feature_metadata);
-        }
-        self.live_entries = self.live_entries.saturating_sub(1);
-    }
+/// Slab indices and byte sub-ranges reserved atomically across the pool's slab vectors.
+#[derive(Clone, Debug)]
+pub(super) struct SlabAllocation {
+    pub vertex_page: u16,
+    pub index_page: u16,
+    pub layer_page: u16,
+    pub feature_page: u16,
+    pub index_u16: bool,
+    pub fm_kind: FmStorageKind,
+    pub vertices: Range<u64>,
+    pub indices: Range<u64>,
+    pub layer_metadata: Range<u64>,
+    pub feature_metadata: Range<u64>,
 }
