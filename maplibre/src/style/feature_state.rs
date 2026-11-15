@@ -314,6 +314,7 @@ impl Style {
         state: Map<String, Value>,
     ) {
         self.feature_state.set(target, id.into(), state);
+        self.bump_revision();
     }
 
     /// Returns the runtime state map of feature `id` in `target`, if any.
@@ -335,6 +336,7 @@ impl Style {
         key: Option<&str>,
     ) {
         self.feature_state.remove(target, id.as_ref(), key);
+        self.bump_revision();
     }
 
     /// Returns the `promoteId` configuration declared on `source_name`, if any.

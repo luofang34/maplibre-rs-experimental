@@ -24,6 +24,7 @@ impl Style {
         if let Some(coordinates) = coordinates {
             image.coordinates = coordinates;
         }
+        self.bump_revision();
         Ok(reloaded(name))
     }
 
@@ -36,6 +37,7 @@ impl Style {
         coordinates: [[f64; 2]; 4],
     ) -> Result<StyleChange, StyleMutationError> {
         image_source_mut(&mut self.sources, name)?.coordinates = coordinates;
+        self.bump_revision();
         Ok(reloaded(name))
     }
 }

@@ -350,7 +350,7 @@ pub unsafe extern "C" fn maplibre_visionos_set_geojson_source(
 /// `map` must come from [`maplibre_visionos_create`] and not have been destroyed; `source_name`
 /// and `url` must be valid NUL-terminated UTF-8 strings; `corners_lon_lat` must either be NULL
 /// or point to 8 contiguous `f64` values.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_set_image_source(
     map: *mut MaplibreVisionOSMap,
     source_name: *const c_char,
@@ -398,7 +398,7 @@ pub unsafe extern "C" fn maplibre_visionos_set_image_source(
 ///
 /// `map` must come from [`maplibre_visionos_create`] and not have been destroyed; `layer_id`
 /// must be a valid NUL-terminated UTF-8 string.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_visionos_set_layer_opacity(
     map: *mut MaplibreVisionOSMap,
     layer_id: *const c_char,

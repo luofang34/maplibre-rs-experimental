@@ -19,6 +19,20 @@ pub struct RenderContext<'d> {
     pub device: &'d wgpu::Device,
     /// The frame's single command stream; passes append to it and the runner submits it.
     pub command_encoder: wgpu::CommandEncoder,
+    /// Whether `main_pass` should inline `translucent_pass` draws directly into its own render pass
+    /// because no intermediate pass or symbol depth copy runs between them this frame.
+    pub(crate) inline_translucent_pass: bool,
+}
+
+impl<'d> RenderContext<'d> {
+    /// Creates a frame render context around `device` and `command_encoder`.
+    pub fn new(device: &'d wgpu::Device, command_encoder: wgpu::CommandEncoder) -> Self {
+        Self {
+            device,
+            command_encoder,
+            inline_translucent_pass: false,
+        }
+    }
 }
 
 /// One render pass of the frame.
@@ -32,6 +46,13 @@ pub trait Node: Send + Sync + 'static {
     fn writes_custom_scene_depth(&self) -> bool {
         true
     }
+
+    /// Whether this pass will record GPU commands on the current frame.
+    ///
+    /// Defaults to `true` so external host passes are never bypassed when fusing built-in passes.
+    fn has_active_work(&self, _resources: &RenderResources, _world: &World) -> bool {
+        true
+    }
 }
 
 /// A pass that records nothing, used as a named anchor other passes order themselves around.
@@ -41,6 +62,10 @@ impl Node for EmptyNode {
     fn run(&self, _: &mut RenderContext, _: &RenderResources, _: &World) {}
 
     fn writes_custom_scene_depth(&self) -> bool {
+        false
+    }
+
+    fn has_active_work(&self, _: &RenderResources, _: &World) -> bool {
         false
     }
 }
@@ -149,6 +174,22 @@ impl RenderGraph {
         let order = match &self.order {
             Some(order) => Cow::Borrowed(order),
             None => Cow::Owned(self.resolve()?),
+        };
+        let main_pos = order.iter().position(|&idx| {
+            self.passes[idx].name.as_ref() == crate::render::draw_graph::node::MAIN_PASS
+        });
+        let trans_pos = order.iter().position(|&idx| {
+            self.passes[idx].name.as_ref() == crate::render::draw_graph::node::TRANSLUCENT_PASS
+        });
+        render_context.inline_translucent_pass = match (main_pos, trans_pos) {
+            (Some(m), Some(t))
+                if m < t && !crate::render::translucent_pass::needs_symbol_depth_copy(world) =>
+            {
+                order[m + 1..t]
+                    .iter()
+                    .all(|&idx| !self.passes[idx].node.has_active_work(resources, world))
+            }
+            _ => false,
         };
         for &index in order.iter() {
             let pass = &self.passes[index];

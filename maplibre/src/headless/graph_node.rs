@@ -23,6 +23,7 @@ impl Node for CopySurfaceBufferNode {
         RenderContext {
             device,
             command_encoder,
+            ..
         }: &mut RenderContext,
         state: &RenderResources,
         _world: &World,

@@ -78,16 +78,29 @@ impl DrawMask {
 
         pass.set_stencil_reference(reference);
 
-        let Some(tile_view_pattern_buffer) = tile_mask.buffer_range() else {
-            return RenderCommandResult::Failure;
-        };
+        let whole = world
+            .resources
+            .get::<crate::render::tracked_pass::DrawCapabilities>()
+            .is_some_and(|capabilities| capabilities.base_vertex);
         pass.set_vertex_buffer(0, mesh.vertex_buffer().slice(..));
-        pass.set_vertex_buffer(
-            1,
-            tile_view_pattern.buffer().slice(tile_view_pattern_buffer),
-        );
+        let instances = if whole {
+            let Some(tile_instance) = tile_mask.instance_index() else {
+                return RenderCommandResult::Failure;
+            };
+            pass.set_vertex_buffer(1, tile_view_pattern.buffer().slice(..));
+            tile_instance..tile_instance + 1
+        } else {
+            let Some(tile_view_pattern_buffer) = tile_mask.buffer_range() else {
+                return RenderCommandResult::Failure;
+            };
+            pass.set_vertex_buffer(
+                1,
+                tile_view_pattern.buffer().slice(tile_view_pattern_buffer),
+            );
+            0..1
+        };
         pass.set_index_buffer(mesh.index_buffer().slice(..), mesh.index_format());
-        pass.draw_indexed(0..mesh.index_count(), 0, 0..1);
+        pass.draw_indexed(0..mesh.index_count(), 0, instances);
 
         RenderCommandResult::Success
     }

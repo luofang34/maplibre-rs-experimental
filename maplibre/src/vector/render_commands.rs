@@ -100,13 +100,22 @@ impl<const RUNS: bool> RenderCommand<LayerItem> for DrawVectorTile<RUNS> {
             .get::<crate::render::tracked_pass::DrawCapabilities>()
             .is_some_and(|capabilities| capabilities.base_vertex);
         let (first, base_vertex) = buffer_pool.bind_layer(pass, entry, (3, whole));
-        let Some(tile_view_pattern_buffer) = source_shape.buffer_range() else {
-            return RenderCommandResult::Failure;
+        let instances = if whole {
+            let Some(tile_instance) = source_shape.instance_index() else {
+                return RenderCommandResult::Failure;
+            };
+            pass.set_vertex_buffer(1, tile_view_pattern.buffer().slice(..));
+            tile_instance..tile_instance + 1
+        } else {
+            let Some(tile_view_pattern_buffer) = source_shape.buffer_range() else {
+                return RenderCommandResult::Failure;
+            };
+            pass.set_vertex_buffer(
+                1,
+                tile_view_pattern.buffer().slice(tile_view_pattern_buffer),
+            );
+            0..1
         };
-        pass.set_vertex_buffer(
-            1,
-            tile_view_pattern.buffer().slice(tile_view_pattern_buffer),
-        );
         pass.set_vertex_buffer(
             2,
             buffer_pool
@@ -114,7 +123,7 @@ impl<const RUNS: bool> RenderCommand<LayerItem> for DrawVectorTile<RUNS> {
                 .slice(entry.layer_metadata_buffer_range()),
         );
         if let Some(run) = &item.run {
-            pass.draw_indexed(first + run.start..first + run.end, base_vertex, 0..1);
+            pass.draw_indexed(first + run.start..first + run.end, base_vertex, instances);
             return RenderCommandResult::Success;
         }
         let runs = RUNS
@@ -124,7 +133,7 @@ impl<const RUNS: bool> RenderCommand<LayerItem> for DrawVectorTile<RUNS> {
             pass.draw_indexed(
                 first..first + entry.indices_range().len() as u32,
                 base_vertex,
-                0..1,
+                instances,
             );
             return RenderCommandResult::Success;
         };
@@ -141,7 +150,11 @@ impl<const RUNS: bool> RenderCommand<LayerItem> for DrawVectorTile<RUNS> {
                 continue;
             };
             pass.set_bind_group(1, image, &[]);
-            pass.draw_indexed(first + range.start..first + range.end, base_vertex, 0..1);
+            pass.draw_indexed(
+                first + range.start..first + range.end,
+                base_vertex,
+                instances.clone(),
+            );
         }
 
         RenderCommandResult::Success

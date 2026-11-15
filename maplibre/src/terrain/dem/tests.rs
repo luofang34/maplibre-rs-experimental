@@ -243,6 +243,7 @@ fn a_single_pixel_tile_can_fill_both_border_pixels() {
     assert_eq!(dem.elevation_at_tile_coords(EXTENT, EXTENT / 2.0), 150.0);
 }
 
+#[cfg(feature = "raster")]
 #[test]
 fn to_rgba_image_and_serialized_transferables_roundtrip_interior_samples() {
     use std::sync::Arc;

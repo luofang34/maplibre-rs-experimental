@@ -59,27 +59,24 @@ impl<E: Environment> Plugin<E> for StarfieldPlugin {
         schedule.add_system_to_stage(RenderStageLabel::Queue, upload::queue_system)?;
         schedule.add_system_to_stage(RenderStageLabel::Queue, sun::queue_system)?;
         schedule.add_system_to_stage(RenderStageLabel::Queue, moon::queue_system)?;
-        if let Some(hooks) = world.resources.get_mut::<crate::render::PassDrawHooks>() {
-            hooks.register(crate::render::PassHookPoint::MainPassBegin, draw);
-            hooks.register(
+        let register_hooks = |hooks: &mut crate::render::PassDrawHooks| {
+            hooks.register_conditional(crate::render::PassHookPoint::MainPassBegin, has_work, draw);
+            hooks.register_conditional(
                 crate::render::PassHookPoint::TranslucentPassBegin,
+                sun::has_work,
                 sun::draw,
             );
-            hooks.register(
+            hooks.register_conditional(
                 crate::render::PassHookPoint::TranslucentPassBegin,
+                moon::has_work,
                 moon::draw,
             );
+        };
+        if let Some(hooks) = world.resources.get_mut::<crate::render::PassDrawHooks>() {
+            register_hooks(hooks);
         } else {
             let mut hooks = crate::render::PassDrawHooks::new();
-            hooks.register(crate::render::PassHookPoint::MainPassBegin, draw);
-            hooks.register(
-                crate::render::PassHookPoint::TranslucentPassBegin,
-                sun::draw,
-            );
-            hooks.register(
-                crate::render::PassHookPoint::TranslucentPassBegin,
-                moon::draw,
-            );
+            register_hooks(&mut hooks);
             world.resources.insert(hooks);
         }
         add_sun_depth_copy(&mut renderer.render_graph)?;
@@ -103,6 +100,18 @@ fn add_sun_depth_copy(
         ),
     ];
     edges.into_iter().collect()
+}
+
+/// Whether stars are queued and ready to draw this frame.
+pub fn has_work(world: &World) -> bool {
+    matches!(
+        world.resources.query::<(
+            &Eventually<StarfieldPipeline>,
+            &Eventually<ProjectionGpuResources>,
+            &StarfieldGpu,
+        )>(),
+        Some((Initialized(_), Initialized(_), gpu)) if gpu.drawable().is_some()
+    )
 }
 
 /// Draws the stars queued for this frame, if any; the main pass calls it before any layer.

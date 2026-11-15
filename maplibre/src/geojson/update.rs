@@ -133,6 +133,7 @@ impl Style {
         }
         source.data = data;
         source.generation = fresh_generation();
+        self.bump_revision();
         Ok(())
     }
 
@@ -160,6 +161,7 @@ impl Style {
         })?;
         source.data = GeoJsonData::Inline(Arc::new(updated));
         source.generation = fresh_generation();
+        self.bump_revision();
         Ok(())
     }
 }

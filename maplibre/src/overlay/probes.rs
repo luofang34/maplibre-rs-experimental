@@ -324,6 +324,18 @@ impl Node for DepthProbePassNode {
         false
     }
 
+    fn has_active_work(&self, state: &RenderResources, world: &World) -> bool {
+        matches!(state.depth_texture, Initialized(_))
+            && matches!(
+                world.resources.get::<Eventually<ProbeGpu>>(),
+                Some(Initialized(gpu))
+                    if gpu
+                        .pending
+                        .as_ref()
+                        .is_some_and(|pending| pending.state.load(Ordering::Acquire) == TO_ENCODE)
+            )
+    }
+
     fn run(&self, render_context: &mut RenderContext, state: &RenderResources, world: &World) {
         let Some(Initialized(gpu)) = world.resources.get::<Eventually<ProbeGpu>>() else {
             return;

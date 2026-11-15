@@ -40,6 +40,7 @@ impl Default for Style {
             state_templates: Default::default(),
             light_template: None,
             images: Default::default(),
+            revision_state: Default::default(),
             zoom: Some(13.0),
             layers: default_layers(),
         }

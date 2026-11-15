@@ -31,12 +31,14 @@ impl Style {
     /// reported as changed, since any of them may name it.
     pub fn add_image(&mut self, name: &str, image: super::StyleImage) -> StyleChange {
         self.images.insert(name.to_owned(), image);
+        self.bump_revision();
         self.symbol_layers_changed()
     }
 
     /// Removes an added image; layers that named it lose the icon.
     pub fn remove_image(&mut self, name: &str) -> StyleChange {
         self.images.remove(name);
+        self.bump_revision();
         self.symbol_layers_changed()
     }
 
@@ -88,6 +90,7 @@ impl Style {
         let mut change = self.renumber();
         push_unique(&mut change.layers, &id);
         self.resolve_global_state();
+        self.bump_revision();
         change.redraw_tiles = needs_tessellation;
         Ok(change)
     }
@@ -100,6 +103,7 @@ impl Style {
         let mut change = self.renumber();
         push_unique(&mut change.layers, id);
         self.resolve_global_state();
+        self.bump_revision();
         change.removed_layers.push(id.to_owned());
         Ok(change)
     }
@@ -123,7 +127,9 @@ impl Style {
             }
         };
         self.layers.insert(target, layer);
-        Ok(self.renumber())
+        let change = self.renumber();
+        self.bump_revision();
+        Ok(change)
     }
 
     /// Sets a paint property; `null` restores its default. When the layer or root style declares
@@ -226,6 +232,7 @@ impl Style {
             Source::Vector(_) | Source::Raster(_) | Source::RasterDem(_) => {}
         }
         self.sources.insert(name.to_owned(), source);
+        self.bump_revision();
         Ok(StyleChange::default())
     }
 
@@ -247,6 +254,7 @@ impl Style {
             });
         }
         let removed = self.sources.remove(name);
+        self.bump_revision();
         Ok(StyleChange {
             removed_raster_sources: matches!(
                 removed,
@@ -351,6 +359,7 @@ impl Style {
         Ok(if before == after {
             StyleChange::default()
         } else {
+            self.bump_revision();
             StyleChange {
                 layers: vec![id.to_owned()],
                 redraw_tiles: classify::needs_tile_redraw(&before_layer, &self.layers[position]),

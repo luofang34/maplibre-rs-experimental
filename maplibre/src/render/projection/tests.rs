@@ -152,7 +152,7 @@ fn globe_view_region_uses_reference_covering_tiles() {
 
     assert_eq!(region.iter().collect::<Vec<_>>(), expected);
 }
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "raster", not(target_arch = "wasm32")))]
 #[tokio::test]
 async fn projection_aware_tile_pipelines_compile() {
     use crate::render::{

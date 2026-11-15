@@ -374,6 +374,7 @@ impl Style {
             }
         }
 
+        next.bump_revision();
         *self = next;
         diff
     }

@@ -27,7 +27,22 @@ impl Node for DebugPassNode {
         false
     }
 
+    fn has_active_work(&self, resources: &RenderResources, world: &World) -> bool {
+        matches!(resources.render_target, Initialized(_))
+            && world
+                .resources
+                .get::<RenderPhase<TileDebugItem>>()
+                .is_some_and(|items| items.size() > 0)
+    }
+
     fn run(&self, render_context: &mut RenderContext, resources: &RenderResources, world: &World) {
+        let Some(debug_items) = world
+            .resources
+            .get::<RenderPhase<TileDebugItem>>()
+            .filter(|items| items.size() > 0)
+        else {
+            return;
+        };
         let Initialized(render_target) = &resources.render_target else {
             return;
         };
@@ -56,14 +71,12 @@ impl Node for DebugPassNode {
                 });
         let mut render_pass = crate::render::tracked_pass::TrackedRenderPass::new(render_pass);
 
-        if let Some(debug_items) = world.resources.get::<RenderPhase<TileDebugItem>>() {
-            log::trace!(
-                "RenderPhase<TileDebugItem>::size() = {}",
-                debug_items.size()
-            );
-            for item in debug_items {
-                item.draw_function.draw(&mut render_pass, world, item);
-            }
+        log::trace!(
+            "RenderPhase<TileDebugItem>::size() = {}",
+            debug_items.size()
+        );
+        for item in debug_items {
+            item.draw_function.draw(&mut render_pass, world, item);
         }
         render_pass.finish(world);
     }

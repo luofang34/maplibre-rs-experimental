@@ -169,7 +169,7 @@ impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
         let Some(mut tile) = world.tiles.spawn_mut(coords) else {
             return Err(SystemError::InvalidTile { coords });
         };
-        let mut input = Input::new(coords, style.share(Style::clone), attempt);
+        let mut input = Input::new(coords, style.worker_snapshot(), attempt);
         input.only_sources = only_sources;
         self.kernel
             .apc()

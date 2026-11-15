@@ -20,11 +20,31 @@ impl<'a> FrameStyle<'a> {
         }
     }
 
-    /// The snapshot for workers, made from the style by `make` on the frame's first call.
-    pub(crate) fn share(&mut self, make: impl FnOnce(&Style) -> Style) -> Arc<Style> {
+    /// Reuses [`Style`]'s cached `Arc<Style>` worker snapshot across frames until the style mutates.
+    pub(crate) fn worker_snapshot(&mut self) -> Arc<Style> {
         let style = self.style;
         self.shared
-            .get_or_insert_with(|| Arc::new(make(style)))
+            .get_or_insert_with(|| style.worker_snapshot())
             .clone()
+    }
+
+    /// Reuses [`Style`]'s cached `Arc<Style>` worker snapshot filtered for disabled subsystems.
+    pub(crate) fn filtered_worker_snapshot(
+        &mut self,
+        vectors_disabled: bool,
+        symbols_disabled: bool,
+    ) -> Arc<Style> {
+        let style = self.style;
+        self.shared
+            .get_or_insert_with(|| {
+                style.filtered_worker_snapshot(vectors_disabled, symbols_disabled)
+            })
+            .clone()
+    }
+
+    /// Raw style reference borrowed for the current frame.
+    #[inline]
+    pub(crate) fn style(&self) -> &'a Style {
+        self.style
     }
 }

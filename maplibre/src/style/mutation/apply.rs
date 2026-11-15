@@ -28,6 +28,7 @@ impl MapContext {
         let geojson = crate::geojson::update::GeoJsonVersions::of(&self.style);
         let old_zooms = snapshot_layer_zooms(&self.style);
         let change = apply(&mut self.style)?;
+        self.style.bump_revision();
         let widened = zoom_bounds_widened(&old_zooms, &self.style);
         crate::render::frame_signals::mark_dirty(&mut self.world);
         if self.style.has_active_transitions() {

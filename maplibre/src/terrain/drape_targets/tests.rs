@@ -190,6 +190,7 @@ fn an_eyes_partial_children_without_an_ancestor_wait_for_complete_coverage() {
     .is_empty());
 }
 
+#[cfg(feature = "raster")]
 #[test]
 fn missing_children_wait_for_sparse_fallback_ancestor_before_settling() {
     let ancestor = WorldTileCoords::from((75, 96, 8_u8.into()));

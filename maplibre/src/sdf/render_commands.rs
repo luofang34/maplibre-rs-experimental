@@ -71,10 +71,6 @@ impl RenderCommand<TranslucentItem> for DrawSymbol {
         };
         pass.set_bind_group(1, &binding.group, &[]);
 
-        let Some(tile_view_pattern_buffer) = item.source_shape.buffer_range() else {
-            return RenderCommandResult::Failure;
-        };
-
         let index_range = entry.indices_buffer_range();
 
         if index_range.is_empty() {
@@ -86,20 +82,27 @@ impl RenderCommand<TranslucentItem> for DrawSymbol {
             .resources
             .get::<crate::render::tracked_pass::DrawCapabilities>()
             .is_some_and(|capabilities| capabilities.base_vertex);
-        let (first, base_vertex) = symbol_buffer_pool.bind_layer(pass, entry, (3, whole));
-        pass.set_vertex_buffer(1, covering.buffer.slice(tile_view_pattern_buffer));
-        pass.set_vertex_buffer(
-            2,
-            symbol_buffer_pool
-                .metadata_for(entry)
-                .slice(entry.layer_metadata_buffer_range()),
-        );
+        let (first, base_vertex) = symbol_buffer_pool.bind_layer(pass, entry, (2, whole));
+        let instances = if whole {
+            let Some(tile_instance) = item.source_shape.instance_index() else {
+                return RenderCommandResult::Failure;
+            };
+            pass.set_vertex_buffer(1, covering.buffer.slice(..));
+            tile_instance..tile_instance + 1
+        } else {
+            let Some(tile_view_pattern_buffer) = item.source_shape.buffer_range() else {
+                return RenderCommandResult::Failure;
+            };
+            pass.set_vertex_buffer(1, covering.buffer.slice(tile_view_pattern_buffer));
+            0..1
+        };
         draw_indices(
             pass,
             pipeline,
             (
                 first..first + entry.indices_range().len() as u32,
                 base_vertex,
+                instances,
             ),
             binding.separate_halo,
         );
@@ -110,16 +113,16 @@ impl RenderCommand<TranslucentItem> for DrawSymbol {
 fn draw_indices<'w>(
     pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     pipeline: &'w SymbolPipeline,
-    (indices, base_vertex): (std::ops::Range<u32>, i32),
+    (indices, base_vertex, instances): (std::ops::Range<u32>, i32, std::ops::Range<u32>),
     separate_halo: bool,
 ) {
     if separate_halo {
         // All halos must precede fills so an adjacent glyph cannot cover a finished stroke.
         pass.set_pipeline(&pipeline.halo);
-        pass.draw_indexed(indices.clone(), base_vertex, 0..1);
+        pass.draw_indexed(indices.clone(), base_vertex, instances.clone());
         pass.set_pipeline(&pipeline.fill);
     }
-    pass.draw_indexed(indices, base_vertex, 0..1);
+    pass.draw_indexed(indices, base_vertex, instances);
 }
 
 pub type DrawSymbols = (SetSymbolPipeline, DrawSymbol);

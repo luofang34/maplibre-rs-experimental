@@ -40,6 +40,7 @@ async fn parent() -> (Fixture, Frames) {
             source.maxzoom = Some(1);
         }
     }
+    test.context.style.bump_revision();
     test.context.view_state = ViewState::new(
         crate::window::PhysicalSize::new(16, 16).expect("size"),
         WorldCoords::from((256.0, 256.0)),

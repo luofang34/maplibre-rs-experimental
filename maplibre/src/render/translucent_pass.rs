@@ -32,13 +32,70 @@ pub(crate) fn has_work(world: &World) -> bool {
         .resources
         .get::<crate::render::PassDrawHooks>()
         .is_some_and(|hooks| {
-            !hooks
-                .get_hooks(crate::render::PassHookPoint::TranslucentPassBegin)
-                .is_empty()
-                || !hooks
-                    .get_hooks(crate::render::PassHookPoint::TranslucentPassEnd)
-                    .is_empty()
+            hooks.has_active_work(crate::render::PassHookPoint::TranslucentPassBegin, world)
+                || hooks.has_active_work(crate::render::PassHookPoint::TranslucentPassEnd, world)
         })
+}
+
+pub(crate) fn needs_symbol_depth_copy(world: &World) -> bool {
+    world
+        .resources
+        .get::<RenderPhase<TranslucentItem>>()
+        .is_some_and(|items| items.size() > 0)
+        && matches!(
+            world
+                .resources
+                .get::<crate::render::eventually::Eventually<crate::sdf::depth::SymbolDepth>>(),
+            Some(Initialized(symbol_depth)) if !symbol_depth.skip_depth_copy
+        )
+}
+
+pub(crate) fn draw_contents<'w>(
+    render_pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
+    world: &'w World,
+) {
+    if let Some(hooks) = world.resources.get::<crate::render::PassDrawHooks>() {
+        for hook in hooks.hooks(crate::render::PassHookPoint::TranslucentPassBegin) {
+            if hook.has_work(world) {
+                hook.draw(render_pass, world);
+            }
+        }
+    }
+
+    if let Some(mask_items) = world.resources.get::<RenderPhase<TranslucentItem>>() {
+        log::trace!(
+            "RenderPhase<TranslucentItem>::size() = {}",
+            mask_items.size()
+        );
+        let above = super::main_pass::above_symbols(world);
+        let mut stencil_state = above
+            .as_ref()
+            .map_or(super::main_pass::StencilState::Cleared, |above| {
+                above.stencil_state
+            });
+        let mut groups = above
+            .as_ref()
+            .map_or(&[][..], |above| above.items)
+            .chunk_by(super::main_pass::same_layer)
+            .peekable();
+        for item in mask_items {
+            while let Some(group) = groups.next_if(|group| group[0].index < item.index) {
+                super::main_pass::draw_group(render_pass, world, &mut stencil_state, group);
+            }
+            item.draw_function.draw(render_pass, world, item);
+        }
+        for group in groups {
+            super::main_pass::draw_group(render_pass, world, &mut stencil_state, group);
+        }
+    }
+
+    if let Some(hooks) = world.resources.get::<crate::render::PassDrawHooks>() {
+        for hook in hooks.hooks(crate::render::PassHookPoint::TranslucentPassEnd) {
+            if hook.has_work(world) {
+                hook.draw(render_pass, world);
+            }
+        }
+    }
 }
 
 impl Node for TranslucentPassNode {
@@ -46,8 +103,12 @@ impl Node for TranslucentPassNode {
         false
     }
 
+    fn has_active_work(&self, _state: &RenderResources, world: &World) -> bool {
+        has_work(world)
+    }
+
     fn run(&self, render_context: &mut RenderContext, state: &RenderResources, world: &World) {
-        if !has_work(world) {
+        if render_context.inline_translucent_pass || !has_work(world) {
             return;
         }
         let Initialized(render_target) = &state.render_target else {
@@ -60,24 +121,18 @@ impl Node for TranslucentPassNode {
         let Initialized(depth_texture) = &state.depth_texture else {
             return;
         };
-        let has_translucent_items = world
-            .resources
-            .get::<RenderPhase<TranslucentItem>>()
-            .is_some_and(|items| items.size() > 0);
-        if has_translucent_items {
+        if needs_symbol_depth_copy(world) {
             if let Some(Initialized(symbol_depth)) =
                 world
                     .resources
                     .get::<crate::render::eventually::Eventually<crate::sdf::depth::SymbolDepth>>()
             {
-                if !symbol_depth.skip_depth_copy {
-                    symbol_depth.copy.copy(
-                        render_context.device,
-                        &mut render_context.command_encoder,
-                        &depth_texture.texture,
-                        &symbol_depth.view,
-                    );
-                }
+                symbol_depth.copy.copy(
+                    render_context.device,
+                    &mut render_context.command_encoder,
+                    &depth_texture.texture,
+                    &symbol_depth.view,
+                );
             }
         }
         let color_attachment = if let Some(texture) = multisampling_texture {
@@ -136,59 +191,7 @@ impl Node for TranslucentPassNode {
                     occlusion_query_set: None,
                 });
         let mut render_pass = crate::render::tracked_pass::TrackedRenderPass::new(render_pass);
-        // Pass hooks at the beginning of translucent pass (e.g. sun, moon).
-        let pass_hooks = world
-            .resources
-            .get::<crate::render::PassDrawHooks>()
-            .map(|hooks| hooks.get_hooks(crate::render::PassHookPoint::TranslucentPassBegin));
-        if let Some(hooks) = pass_hooks {
-            for hook in hooks {
-                hook.draw(&mut render_pass, world);
-            }
-        }
-
-        // TODO: Automatically raise error when items get linearly too many (+1k)
-
-        if let Some(mask_items) = world.resources.get::<RenderPhase<TranslucentItem>>() {
-            log::trace!(
-                "RenderPhase<TranslucentItem>::size() = {}",
-                mask_items.size()
-            );
-            let above = super::main_pass::above_symbols(world);
-            let mut stencil_state = above
-                .as_ref()
-                .map_or(super::main_pass::StencilState::Cleared, |above| {
-                    above.stencil_state
-                });
-            let mut groups = above
-                .as_ref()
-                .map_or(&[][..], |above| above.items)
-                .chunk_by(super::main_pass::same_layer)
-                .peekable();
-            for item in mask_items {
-                while let Some(group) = groups.next_if(|group| group[0].index < item.index) {
-                    super::main_pass::draw_group(
-                        &mut render_pass,
-                        world,
-                        &mut stencil_state,
-                        group,
-                    );
-                }
-                item.draw_function.draw(&mut render_pass, world, item);
-            }
-            for group in groups {
-                super::main_pass::draw_group(&mut render_pass, world, &mut stencil_state, group);
-            }
-        }
-        let end_hooks = world
-            .resources
-            .get::<crate::render::PassDrawHooks>()
-            .map(|hooks| hooks.get_hooks(crate::render::PassHookPoint::TranslucentPassEnd));
-        if let Some(hooks) = end_hooks {
-            for hook in hooks {
-                hook.draw(&mut render_pass, world);
-            }
-        }
+        draw_contents(&mut render_pass, world);
         render_pass.finish(world);
     }
 }

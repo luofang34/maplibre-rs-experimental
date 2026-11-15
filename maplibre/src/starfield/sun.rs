@@ -136,6 +136,19 @@ pub(super) fn queue_system(
     Ok(())
 }
 
+/// Whether the sun and its glare are active and ready to draw this frame.
+pub fn has_work(world: &World) -> bool {
+    matches!(
+        world.resources.query::<(
+            &Eventually<SunPipeline>,
+            &Eventually<ProjectionGpuResources>,
+            &SunGpu,
+            &Eventually<depth::SunDepth>,
+        )>(),
+        Some((Initialized(_), Initialized(_), gpu, Initialized(_))) if gpu.drawable().is_some()
+    )
+}
+
 /// Draws the sun and its glare, if one is set; the translucent pass calls it before its items,
 /// so the atmosphere's glow lies over it.
 pub fn draw<'w>(pass: &mut TrackedRenderPass<'w>, world: &'w World) {

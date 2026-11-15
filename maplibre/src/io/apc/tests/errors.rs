@@ -4,7 +4,7 @@ use std::error::Error;
 
 use super::super::{CallError, ProcedureError, SendError};
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "native-io", not(target_arch = "wasm32")))]
 #[test]
 fn scheduling_failure_keeps_the_scheduler_cause() {
     use crate::{
@@ -36,7 +36,7 @@ fn scheduling_failure_keeps_the_scheduler_cause() {
     ));
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "native-io", not(target_arch = "wasm32")))]
 #[test]
 fn rejected_tracked_call_is_not_left_running() {
     use crate::{

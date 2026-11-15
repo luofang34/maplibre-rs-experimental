@@ -75,7 +75,7 @@ impl Shader for FillExtrusionShader {
                 },
                 ShaderTileMetadata::basic_layout(),
                 VertexBufferLayout {
-                    array_stride: std::mem::size_of::<ShaderLayerMetadata>() as u64,
+                    array_stride: 0,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: vec![
                         attribute(

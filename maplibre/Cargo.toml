@@ -150,11 +150,13 @@ ab_glyph_rasterizer = { workspace = true, optional = true }
 brotli-decompressor = { workspace = true, optional = true }
 
 [dev-dependencies]
+futures = { workspace = true, features = ["executor", "async-await"] }
 geozero = { workspace = true, features = ["with-geojson"] }
 # Shaders stay WGSL; a native render node gets them through naga's own backends.
 naga = { workspace = true, features = ["msl-out", "spv-out"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+env_logger.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]

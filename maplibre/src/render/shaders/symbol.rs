@@ -51,12 +51,6 @@ impl Shader for SymbolShader {
                     ShaderTileMetadata::instance_layout(tile_attrs)
                 },
                 VertexBufferLayout {
-                    array_stride: std::mem::size_of::<ShaderLayerMetadata>() as u64,
-                    step_mode: wgpu::VertexStepMode::Instance,
-                    // The paint that varies by feature travels with the features instead.
-                    attributes: Vec::new(),
-                },
-                VertexBufferLayout {
                     array_stride: std::mem::size_of::<SDFShaderFeatureMetadata>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: wgpu::vertex_attr_array![

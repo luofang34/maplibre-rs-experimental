@@ -47,6 +47,7 @@ impl Style {
         } else {
             self.global_state.insert(key.to_owned(), value);
         }
+        self.bump_revision();
         self.resolve_global_state()
     }
 
@@ -139,6 +140,9 @@ impl Style {
                 self.layers[position] = layer;
                 changed.push(id);
             }
+        }
+        if !changed.is_empty() {
+            self.bump_revision();
         }
         changed
     }

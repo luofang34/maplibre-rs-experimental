@@ -2,7 +2,7 @@
 mod admission;
 #[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 mod completeness;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "raster", not(target_arch = "wasm32")))]
 mod completion;
 mod errors;
 mod payload;
@@ -21,7 +21,7 @@ pub(crate) fn reply_context<K: super::OffscreenKernel, S: crate::io::scheduler::
     )
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "native-io", not(target_arch = "wasm32")))]
 #[test]
 #[allow(clippy::expect_used)]
 fn buffered_completion_messages_keep_fifo_order_and_drain_in_one_receive() {
@@ -85,7 +85,7 @@ fn buffered_completion_messages_keep_fifo_order_and_drain_in_one_receive() {
     assert_eq!(retained, [7], "other consumers must retain their messages");
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "native-io", not(target_arch = "wasm32")))]
 #[test]
 #[allow(clippy::expect_used)]
 fn arrivals_are_reported_until_a_receive_offers_them() {

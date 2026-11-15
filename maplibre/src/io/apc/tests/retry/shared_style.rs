@@ -40,8 +40,12 @@ async fn requests_share_one_style(kind: Kind) {
     );
     assert_eq!(
         Arc::strong_count(first),
-        requests.len(),
-        "nothing else keeps a copy"
+        requests.len() + 1,
+        "only the requests and Style's single cached worker snapshot hold references"
+    );
+    assert!(
+        Arc::ptr_eq(&test.context.style.worker_snapshot(), first),
+        "subsequent frames reuse the same cached worker snapshot until the style mutates"
     );
 }
 

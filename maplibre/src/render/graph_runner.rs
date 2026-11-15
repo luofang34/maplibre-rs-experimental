@@ -19,10 +19,10 @@ pub(crate) fn run_graph(
     state: &RenderResources,
     world: &World,
 ) -> Result<(), RenderGraphError> {
-    let mut render_context = RenderContext {
+    let mut render_context = RenderContext::new(
         device,
-        command_encoder: device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default()),
-    };
+        device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default()),
+    );
     graph.run(&mut render_context, state, world)?;
     if let Some(hooks) = world.resources.get::<BeforeSubmitHooks>() {
         hooks.run(world, &mut render_context.command_encoder);

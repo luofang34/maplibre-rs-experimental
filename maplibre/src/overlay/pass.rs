@@ -23,6 +23,23 @@ impl Node for OverlayPassNode {
         false
     }
 
+    fn has_active_work(&self, state: &RenderResources, world: &World) -> bool {
+        matches!(
+            (
+                world.resources.get::<Eventually<OverlayGpu>>(),
+                &state.render_target,
+                &state.multisampling_texture,
+                &state.depth_texture,
+            ),
+            (
+                Some(Initialized(gpu)),
+                Initialized(_),
+                Initialized(_),
+                Initialized(_),
+            ) if gpu.mesh.is_some()
+        )
+    }
+
     fn run(&self, render_context: &mut RenderContext, state: &RenderResources, world: &World) {
         let Some(Initialized(gpu)) = world.resources.get::<Eventually<OverlayGpu>>() else {
             return;

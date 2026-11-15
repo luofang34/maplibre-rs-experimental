@@ -8,6 +8,7 @@ use crate::io::source_client::{HttpSourceClient, SourceFetchError};
 
 mod names;
 mod provided;
+#[cfg(feature = "geojson")]
 mod scope;
 #[cfg(feature = "font-shaping")]
 mod wave5;

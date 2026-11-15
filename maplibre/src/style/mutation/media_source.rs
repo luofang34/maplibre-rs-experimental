@@ -27,6 +27,7 @@ impl Style {
             video.coordinates = coords;
         }
         video.generation = fresh_generation();
+        self.bump_revision();
         Ok(reloaded_media(self, source_name))
     }
 
@@ -40,6 +41,7 @@ impl Style {
         let video = video_source_mut(&mut self.sources, source_name)?;
         video.coordinates = coordinates;
         video.generation = fresh_generation();
+        self.bump_revision();
         Ok(reloaded_media(self, source_name))
     }
 
@@ -61,6 +63,7 @@ impl Style {
             canvas.coordinates = coords;
         }
         canvas.generation = fresh_generation();
+        self.bump_revision();
         Ok(reloaded_media(self, source_name))
     }
 
@@ -74,6 +77,7 @@ impl Style {
         let canvas = canvas_source_mut(&mut self.sources, source_name)?;
         canvas.coordinates = coordinates;
         canvas.generation = fresh_generation();
+        self.bump_revision();
         Ok(reloaded_media(self, source_name))
     }
 }

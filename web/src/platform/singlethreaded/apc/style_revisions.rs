@@ -36,8 +36,10 @@ fn json_fingerprint(json: &str) -> (usize, u64, u64) {
 /// The last style sent to every worker, and its revision.
 #[derive(Default)]
 pub(crate) struct StyleRevisions {
-    /// The snapshot the revision was last confirmed for; requests of one frame share it.
+    /// The snapshot the revision was last confirmed for; requests across frames share it.
     snapshot: Option<Arc<Style>>,
+    /// Monotonic [`Style::revision`] of the last style confirmed on workers.
+    confirmed_style_revision: Option<u64>,
     fingerprint: Option<(usize, u64, u64)>,
     revision: u64,
 }
@@ -49,6 +51,9 @@ impl StyleRevisions {
         style: &Style,
         post: impl FnOnce(u64, &str) -> Result<(), E>,
     ) -> Result<u64, StyleRevisionError<E>> {
+        if self.confirmed_style_revision == Some(style.revision()) {
+            return Ok(self.revision);
+        }
         let json = serde_json::to_string(style).map_err(StyleRevisionError::Encode)?;
         let fp = json_fingerprint(&json);
         if self.fingerprint != Some(fp) {
@@ -59,6 +64,7 @@ impl StyleRevisions {
             self.fingerprint = Some(fp);
             self.snapshot = None;
         }
+        self.confirmed_style_revision = Some(style.revision());
         Ok(self.revision)
     }
 
@@ -69,10 +75,11 @@ impl StyleRevisions {
         style: &Arc<Style>,
         post: impl FnOnce(u64, &str) -> Result<(), E>,
     ) -> Result<u64, StyleRevisionError<E>> {
-        if self
-            .snapshot
-            .as_ref()
-            .is_some_and(|sent| Arc::ptr_eq(sent, style))
+        if self.confirmed_style_revision == Some(style.revision())
+            || self
+                .snapshot
+                .as_ref()
+                .is_some_and(|sent| Arc::ptr_eq(sent, style))
         {
             return Ok(self.revision);
         }
@@ -87,6 +94,7 @@ impl StyleRevisions {
             self.fingerprint = Some(fp);
         }
         drop(json);
+        self.confirmed_style_revision = Some(style.revision());
         self.snapshot = Some(style.clone());
         Ok(self.revision)
     }

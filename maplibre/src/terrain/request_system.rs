@@ -18,7 +18,6 @@ use crate::{
     },
     kernel::Kernel,
     render::view_state::ViewStatePadding,
-    style::Style,
     tcs::{
         system::{System, SystemError, SystemResult},
         tiles::Tiles,
@@ -219,7 +218,7 @@ impl<E: Environment, T: DemTransferables> RequestSystem<E, T> {
         self.kernel
             .apc()
             .call(
-                Input::new(coords, style.share(Style::clone), attempt),
+                Input::new(coords, style.worker_snapshot(), attempt),
                 fetch_dem_apc::<E::OffscreenKernelEnvironment, T, _>,
             )
             .map_err(|source| SystemError::TileRequest {

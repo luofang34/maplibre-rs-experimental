@@ -138,11 +138,16 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                     z: crate::coords::ZoomLevel::new(0),
                 });
             let draped = style.terrain.is_some();
+            let derived =
+                style.cached_derived_facts(|style| crate::style::revision::DerivedStyleFacts {
+                    depends_on_overscaling: depends_on_overscaling(style),
+                    elevated_headroom_meters:
+                        crate::render::projection::style_elevated_headroom_meters(style),
+                });
             // View-space 3D volumes (`fill-extrusion`) and elevated 3D paths (`line-elevation`)
             // draw from `view_tiles` (which carry vertical headroom) rather than terrain drapes.
-            let needs_view_tiles =
-                !draped || crate::render::projection::style_elevated_headroom_meters(style) > 0.0;
-            let magnifies = depends_on_overscaling(style);
+            let needs_view_tiles = !draped || derived.elevated_headroom_meters > 0.0;
+            let magnifies = derived.depends_on_overscaling;
             let mut deferred = false;
             let mut frame_style = FrameStyle::new(style);
             for coords in overview
@@ -322,33 +327,28 @@ impl<E: Environment, T: VectorTransferables> RequestSystem<E, T> {
         let refetch = tile_retry::due(world, coords, RequestKind::Vector);
         let attempt = tile_retry::next_attempt(world);
         let issued_for = only_sources.clone();
-        let worker_style = style.share(|style| {
-            let mut worker_style = style.clone();
-            if symbols_disabled {
-                worker_style.layers.retain(|layer| layer.type_ != "symbol");
-            }
-            if vectors_disabled {
-                worker_style.layers.retain(|layer| layer.type_ == "symbol");
-            }
-            worker_style
-        });
+        let worker_style = style.filtered_worker_snapshot(vectors_disabled, symbols_disabled);
         // What the worker is asked to build: its style's non-symbol layers, for the refreshed
         // sources alone when the request is limited to them.
-        let requested: Vec<String> = worker_style
-            .layers
-            .iter()
-            .filter(|layer| {
-                layer.type_ != "symbol"
-                    && crate::style::mutation::from_vector_tiles(layer)
-                    && only_sources.as_ref().is_none_or(|sources| {
-                        layer
-                            .source
-                            .as_ref()
-                            .is_some_and(|source| sources.contains(source))
-                    })
-            })
-            .map(|layer| layer.id.clone())
-            .collect();
+        let requested: Vec<String> = if only_sources.is_none() && !vectors_disabled {
+            style.style().cached_vector_layer_ids().to_vec()
+        } else {
+            worker_style
+                .layers
+                .iter()
+                .filter(|layer| {
+                    layer.type_ != "symbol"
+                        && crate::style::mutation::from_vector_tiles(layer)
+                        && only_sources.as_ref().is_none_or(|sources| {
+                            layer
+                                .source
+                                .as_ref()
+                                .is_some_and(|source| sources.contains(source))
+                        })
+                })
+                .map(|layer| layer.id.clone())
+                .collect()
+        };
         self.kernel
             .apc()
             .call(

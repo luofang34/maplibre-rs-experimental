@@ -309,6 +309,15 @@ impl ShapeDrawData {
         self.has_buffer_range
             .then_some(self.buffer_start..self.buffer_start + u64::from(self.buffer_len))
     }
+
+    /// Element index inside [`WgpuTileViewPattern::buffer`] for whole-buffer `first_instance` draws.
+    #[inline]
+    pub fn instance_index(&self) -> Option<u32> {
+        if !self.has_buffer_range {
+            return None;
+        }
+        u32::try_from(self.buffer_start / size_of::<ShaderTileMetadata>() as u64).ok()
+    }
 }
 
 impl From<&TileShape> for ShapeDrawData {

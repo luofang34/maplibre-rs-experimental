@@ -98,6 +98,18 @@ impl Node for SunDepthCopyNode {
         false
     }
 
+    fn has_active_work(&self, resources: &RenderResources, world: &World) -> bool {
+        matches!(resources.depth_texture, Initialized(_))
+            && matches!(
+                world.resources.get::<Eventually<SunDepth>>(),
+                Some(Initialized(_))
+            )
+            && world
+                .resources
+                .get::<super::SunGpu>()
+                .is_some_and(|gpu| gpu.drawable().is_some())
+    }
+
     fn run(&self, render_context: &mut RenderContext, state: &RenderResources, world: &World) {
         let drawn = world
             .resources

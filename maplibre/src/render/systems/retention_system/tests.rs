@@ -372,6 +372,7 @@ fn wide_eye_view() -> crate::render::view_state::ViewState {
     eyed
 }
 
+#[cfg(feature = "raster")]
 #[test]
 fn settled_fine_tiles_stop_retaining_coarse_dem_and_raster_ancestors() {
     use rustc_hash::FxHashSet;

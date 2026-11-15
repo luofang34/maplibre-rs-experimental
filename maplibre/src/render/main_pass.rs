@@ -52,8 +52,10 @@ impl Node for MainPassNode {
         let Initialized(depth_texture) = &state.depth_texture else {
             return;
         };
-        let translucent_will_run = super::translucent_pass::has_work(world);
-        let keep_depth_stencil = translucent_will_run
+        let translucent_has_work = super::translucent_pass::has_work(world);
+        let inline_translucent = render_context.inline_translucent_pass;
+        let translucent_runs_separately = !inline_translucent && translucent_has_work;
+        let keep_depth_stencil = translucent_runs_separately
             || state.eye_depth_target.is_some()
             || matches!(state.depth_readout_texture, Initialized(_));
         let depth_stencil_store = if keep_depth_stencil {
@@ -64,7 +66,7 @@ impl Node for MainPassNode {
         let color = color_attachment(
             render_target.deref(),
             multisampling_texture.as_ref(),
-            translucent_will_run,
+            translucent_runs_separately,
         );
         let pass = render_context
             .command_encoder
@@ -92,6 +94,9 @@ impl Node for MainPassNode {
             });
         let mut pass = crate::render::tracked_pass::TrackedRenderPass::new(pass);
         draw_layers(&mut pass, world);
+        if inline_translucent && translucent_has_work {
+            super::translucent_pass::draw_contents(&mut pass, world);
+        }
         pass.finish(world);
     }
 }
@@ -233,13 +238,11 @@ fn draw_layers<'w>(
         .and_then(|ground| ground.0);
     let mut ground_pending = ground.is_some();
     // Pass hooks at the beginning of main pass (e.g. starfield).
-    let pass_hooks = world
-        .resources
-        .get::<crate::render::PassDrawHooks>()
-        .map(|hooks| hooks.get_hooks(crate::render::PassHookPoint::MainPassBegin));
-    if let Some(hooks) = pass_hooks {
-        for hook in hooks {
-            hook.draw(pass, world);
+    if let Some(hooks) = world.resources.get::<crate::render::PassDrawHooks>() {
+        for hook in hooks.hooks(crate::render::PassHookPoint::MainPassBegin) {
+            if hook.has_work(world) {
+                hook.draw(pass, world);
+            }
         }
     }
     let above = above_symbols(world);

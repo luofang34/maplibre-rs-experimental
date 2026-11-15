@@ -153,6 +153,10 @@ pub struct Style {
     /// Images a host added by name, which `icon-image` can use next to the sprite's own.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub images: HashMap<String, StyleImage>,
+    /// Monotonic revision and lazy worker-snapshot cache; skipped during JSON (de)serialization.
+    #[doc(hidden)]
+    #[serde(skip)]
+    pub revision_state: revision::StyleRevisionState,
 }
 
 /// An RGBA image a host added to the style, as GL JS `addImage` takes it.
@@ -180,6 +184,7 @@ mod default_style;
 mod layer_order;
 pub mod mutation;
 pub mod pattern_key;
+pub(crate) mod revision;
 pub mod state;
 
 #[cfg(test)]

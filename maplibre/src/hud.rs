@@ -253,10 +253,18 @@ impl<E: Environment> Plugin<E> for NavigationHudPlugin {
         schedule.add_system_to_stage(RenderStageLabel::Prepare, resource_system)?;
         schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system)?;
         if let Some(hooks) = world.resources.get_mut::<crate::render::PassDrawHooks>() {
-            hooks.register(crate::render::PassHookPoint::TranslucentPassEnd, draw);
+            hooks.register_conditional(
+                crate::render::PassHookPoint::TranslucentPassEnd,
+                has_work,
+                draw,
+            );
         } else {
             let mut hooks = crate::render::PassDrawHooks::new();
-            hooks.register(crate::render::PassHookPoint::TranslucentPassEnd, draw);
+            hooks.register_conditional(
+                crate::render::PassHookPoint::TranslucentPassEnd,
+                has_work,
+                draw,
+            );
             world.resources.insert(hooks);
         }
         Ok(())
@@ -410,6 +418,16 @@ fn queue_system(
         .queue
         .write_buffer(buffer, 0, bytemuck::bytes_of(&frame));
     Ok(())
+}
+
+/// Whether the navigation HUD is visible and ready to draw this frame.
+pub fn has_work(world: &World) -> bool {
+    matches!(
+        world
+            .resources
+            .query::<(&Eventually<NavigationHudPipeline>, &NavigationHudGpu)>(),
+        Some((Initialized(_), gpu)) if gpu.drawn && gpu.frame.is_some() && shown_in_current_view(world)
+    )
 }
 
 /// Draws the navigation HUD at the end of the translucent pass.

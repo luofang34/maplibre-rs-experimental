@@ -34,6 +34,7 @@ impl UniformFeatureBinding {
             Self::InstanceSlot(slot) => {
                 if let Some(buf) = vertex.buffers.get_mut(slot) {
                     buf.step_mode = wgpu::VertexStepMode::Instance;
+                    buf.array_stride = 0;
                 }
             }
             Self::LayerMetadata {

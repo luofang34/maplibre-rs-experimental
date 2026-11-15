@@ -231,6 +231,25 @@ impl Node for GlobeDaylightNode {
         false
     }
 
+    fn has_active_work(&self, state: &RenderResources, world: &World) -> bool {
+        matches!(
+            (
+                world.resources.get::<GlobeDaylightGpu>(),
+                world.resources.get::<Eventually<GlobeDaylightPipeline>>(),
+                &state.render_target,
+                &state.multisampling_texture,
+                &state.depth_texture,
+            ),
+            (
+                Some(GlobeDaylightGpu(Some(_))),
+                Some(Initialized(_)),
+                Initialized(_),
+                Initialized(_),
+                Initialized(_),
+            )
+        )
+    }
+
     fn run(&self, render_context: &mut RenderContext, state: &RenderResources, world: &World) {
         let (
             Some(GlobeDaylightGpu(Some(frame))),

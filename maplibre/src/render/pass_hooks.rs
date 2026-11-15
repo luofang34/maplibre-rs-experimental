@@ -17,6 +17,13 @@ pub enum PassHookPoint {
 
 /// A draw hook callable during render pass execution.
 pub trait PassDrawHook: 'static + Send + Sync {
+    /// Whether this hook has active draw work to record in the current frame.
+    ///
+    /// Defaults to `true` so custom closures without an explicit predicate always run.
+    fn has_work(&self, _world: &World) -> bool {
+        true
+    }
+
     /// Records draw commands into the given tracked render pass.
     fn draw<'w>(&self, pass: &mut TrackedRenderPass<'w>, world: &'w World);
 }
@@ -27,6 +34,25 @@ where
 {
     fn draw<'w>(&self, pass: &mut TrackedRenderPass<'w>, world: &'w World) {
         (self)(pass, world);
+    }
+}
+
+struct ConditionalHook<P, D> {
+    has_work: P,
+    draw: D,
+}
+
+impl<P, D> PassDrawHook for ConditionalHook<P, D>
+where
+    P: Fn(&World) -> bool + Send + Sync + 'static,
+    D: for<'w> Fn(&mut TrackedRenderPass<'w>, &'w World) + Send + Sync + 'static,
+{
+    fn has_work(&self, world: &World) -> bool {
+        (self.has_work)(world)
+    }
+
+    fn draw<'w>(&self, pass: &mut TrackedRenderPass<'w>, world: &'w World) {
+        (self.draw)(pass, world);
     }
 }
 
@@ -45,6 +71,25 @@ impl PassDrawHooks {
     /// Registers a draw hook for a specific hook point.
     pub fn register(&mut self, point: PassHookPoint, hook: impl PassDrawHook) {
         self.hooks.entry(point).or_default().push(Arc::new(hook));
+    }
+
+    /// Registers a draw hook guarded by a fast per-frame active-work predicate.
+    pub fn register_conditional<P, D>(&mut self, point: PassHookPoint, has_work: P, draw: D)
+    where
+        P: Fn(&World) -> bool + Send + Sync + 'static,
+        D: for<'w> Fn(&mut TrackedRenderPass<'w>, &'w World) + Send + Sync + 'static,
+    {
+        self.register(point, ConditionalHook { has_work, draw });
+    }
+
+    /// Borrows all registered hooks for `point` without heap allocation.
+    pub fn hooks(&self, point: PassHookPoint) -> &[Arc<dyn PassDrawHook>] {
+        self.hooks.get(&point).map_or(&[], Vec::as_slice)
+    }
+
+    /// Returns whether any hook registered at `point` reports active draw work for `world`.
+    pub fn has_active_work(&self, point: PassHookPoint, world: &World) -> bool {
+        self.hooks(point).iter().any(|hook| hook.has_work(world))
     }
 
     /// Retrieves cloned handles to all registered hooks for the hook point.

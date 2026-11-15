@@ -190,6 +190,18 @@ pub(super) fn queue_system(
     Ok(())
 }
 
+/// Whether the moon is active and ready to draw this frame.
+pub fn has_work(world: &World) -> bool {
+    matches!(
+        world.resources.query::<(
+            &Eventually<MoonPipeline>,
+            &Eventually<ProjectionGpuResources>,
+            &MoonGpu,
+        )>(),
+        Some((Initialized(_), Initialized(_), gpu)) if gpu.drawable().is_some()
+    )
+}
+
 /// Draws the moon, if one is set; the translucent pass calls it with the sun, before its items.
 pub fn draw<'w>(pass: &mut TrackedRenderPass<'w>, world: &'w World) {
     let Some((Initialized(MoonPipeline(pipeline)), Initialized(projection), gpu)) =
