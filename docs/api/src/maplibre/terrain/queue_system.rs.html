@@ -386,45 +386,52 @@
 <a href=#386 id=386 data-nosnippet>386</a>        <span class="kw">else </span>{
 <a href=#387 id=387 data-nosnippet>387</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(SystemError::Dependencies);
 <a href=#388 id=388 data-nosnippet>388</a>        };
-<a href=#389 id=389 data-nosnippet>389</a>        terrain.ensure_scratch(device);
-<a href=#390 id=390 data-nosnippet>390</a>        acquire_drapes(
-<a href=#391 id=391 data-nosnippet>391</a>            specs,
-<a href=#392 id=392 data-nosnippet>392</a>            (<span class="kw-2">&amp;</span>prints, <span class="kw-2">&amp;</span>ready, <span class="kw-2">&amp;</span>prefetch),
-<a href=#393 id=393 data-nosnippet>393</a>            (memory, view_textures),
-<a href=#394 id=394 data-nosnippet>394</a>            (budget, limit),
-<a href=#395 id=395 data-nosnippet>395</a>            terrain,
-<a href=#396 id=396 data-nosnippet>396</a>            device,
-<a href=#397 id=397 data-nosnippet>397</a>        )
-<a href=#398 id=398 data-nosnippet>398</a>    };
-<a href=#399 id=399 data-nosnippet>399</a>    <span class="kw">let </span>drawn = |ahead: bool| {
-<a href=#400 id=400 data-nosnippet>400</a>        redraw
-<a href=#401 id=401 data-nosnippet>401</a>            .iter()
-<a href=#402 id=402 data-nosnippet>402</a>            .zip(<span class="kw-2">&amp;</span>prefetch)
-<a href=#403 id=403 data-nosnippet>403</a>            .filter(|(drawn, prefetched)| <span class="kw-2">**</span>drawn &amp;&amp; <span class="kw-2">**</span>prefetched == ahead)
-<a href=#404 id=404 data-nosnippet>404</a>            .count()
+<a href=#389 id=389 data-nosnippet>389</a>        <span class="kw">let </span>(redraw, drape_sources, deferred, states) = acquire_drapes(
+<a href=#390 id=390 data-nosnippet>390</a>            specs,
+<a href=#391 id=391 data-nosnippet>391</a>            (<span class="kw-2">&amp;</span>prints, <span class="kw-2">&amp;</span>ready, <span class="kw-2">&amp;</span>prefetch),
+<a href=#392 id=392 data-nosnippet>392</a>            (memory, view_textures),
+<a href=#393 id=393 data-nosnippet>393</a>            (budget, limit),
+<a href=#394 id=394 data-nosnippet>394</a>            terrain,
+<a href=#395 id=395 data-nosnippet>395</a>            device,
+<a href=#396 id=396 data-nosnippet>396</a>        );
+<a href=#397 id=397 data-nosnippet>397</a>        <span class="kw">for </span>(spec, drawn) <span class="kw">in </span>specs.iter().zip(<span class="kw-2">&amp;</span>redraw) {
+<a href=#398 id=398 data-nosnippet>398</a>            <span class="kw">if </span><span class="kw-2">*</span>drawn {
+<a href=#399 id=399 data-nosnippet>399</a>                <span class="kw">if let </span><span class="prelude-val">Some</span>(edge_px) = terrain.drape_edge_px(spec.coords) {
+<a href=#400 id=400 data-nosnippet>400</a>                    terrain.ensure_scratch_for_size(device, edge_px);
+<a href=#401 id=401 data-nosnippet>401</a>                }
+<a href=#402 id=402 data-nosnippet>402</a>            }
+<a href=#403 id=403 data-nosnippet>403</a>        }
+<a href=#404 id=404 data-nosnippet>404</a>        (redraw, drape_sources, deferred, states)
 <a href=#405 id=405 data-nosnippet>405</a>    };
-<a href=#406 id=406 data-nosnippet>406</a>    <span class="kw">crate</span>::render::frame_signals::count_drape_redraws(world, drawn(<span class="bool-val">false</span>), drawn(<span class="bool-val">true</span>));
-<a href=#407 id=407 data-nosnippet>407</a>    activity::record(
-<a href=#408 id=408 data-nosnippet>408</a>        world,
-<a href=#409 id=409 data-nosnippet>409</a>        <span class="kw-2">&amp;</span>activity::FrameDrapes {
-<a href=#410 id=410 data-nosnippet>410</a>            specs,
-<a href=#411 id=411 data-nosnippet>411</a>            states: <span class="kw-2">&amp;</span>states,
-<a href=#412 id=412 data-nosnippet>412</a>            ready: <span class="kw-2">&amp;</span>ready,
-<a href=#413 id=413 data-nosnippet>413</a>            prefetch: <span class="kw-2">&amp;</span>prefetch,
-<a href=#414 id=414 data-nosnippet>414</a>            redraw: <span class="kw-2">&amp;</span>redraw,
-<a href=#415 id=415 data-nosnippet>415</a>            sources: <span class="kw-2">&amp;</span>drape_sources,
-<a href=#416 id=416 data-nosnippet>416</a>            budget: (budget, limit),
-<a href=#417 id=417 data-nosnippet>417</a>            paint_zoom,
-<a href=#418 id=418 data-nosnippet>418</a>        },
-<a href=#419 id=419 data-nosnippet>419</a>    );
-<a href=#420 id=420 data-nosnippet>420</a>    <span class="comment">// A drape left for a later frame's budget needs that frame.
-<a href=#421 id=421 data-nosnippet>421</a>    </span><span class="kw">if </span>deferred {
-<a href=#422 id=422 data-nosnippet>422</a>        <span class="kw">crate</span>::render::frame_signals::keep_animating(world);
-<a href=#423 id=423 data-nosnippet>423</a>    }
-<a href=#424 id=424 data-nosnippet>424</a>    <span class="prelude-val">Ok</span>(PreparedDrapes {
-<a href=#425 id=425 data-nosnippet>425</a>        redraw,
-<a href=#426 id=426 data-nosnippet>426</a>        sources: drape_sources,
-<a href=#427 id=427 data-nosnippet>427</a>        clear_color,
-<a href=#428 id=428 data-nosnippet>428</a>    })
-<a href=#429 id=429 data-nosnippet>429</a>}
+<a href=#406 id=406 data-nosnippet>406</a>    <span class="kw">let </span>drawn = |ahead: bool| {
+<a href=#407 id=407 data-nosnippet>407</a>        redraw
+<a href=#408 id=408 data-nosnippet>408</a>            .iter()
+<a href=#409 id=409 data-nosnippet>409</a>            .zip(<span class="kw-2">&amp;</span>prefetch)
+<a href=#410 id=410 data-nosnippet>410</a>            .filter(|(drawn, prefetched)| <span class="kw-2">**</span>drawn &amp;&amp; <span class="kw-2">**</span>prefetched == ahead)
+<a href=#411 id=411 data-nosnippet>411</a>            .count()
+<a href=#412 id=412 data-nosnippet>412</a>    };
+<a href=#413 id=413 data-nosnippet>413</a>    <span class="kw">crate</span>::render::frame_signals::count_drape_redraws(world, drawn(<span class="bool-val">false</span>), drawn(<span class="bool-val">true</span>));
+<a href=#414 id=414 data-nosnippet>414</a>    activity::record(
+<a href=#415 id=415 data-nosnippet>415</a>        world,
+<a href=#416 id=416 data-nosnippet>416</a>        <span class="kw-2">&amp;</span>activity::FrameDrapes {
+<a href=#417 id=417 data-nosnippet>417</a>            specs,
+<a href=#418 id=418 data-nosnippet>418</a>            states: <span class="kw-2">&amp;</span>states,
+<a href=#419 id=419 data-nosnippet>419</a>            ready: <span class="kw-2">&amp;</span>ready,
+<a href=#420 id=420 data-nosnippet>420</a>            prefetch: <span class="kw-2">&amp;</span>prefetch,
+<a href=#421 id=421 data-nosnippet>421</a>            redraw: <span class="kw-2">&amp;</span>redraw,
+<a href=#422 id=422 data-nosnippet>422</a>            sources: <span class="kw-2">&amp;</span>drape_sources,
+<a href=#423 id=423 data-nosnippet>423</a>            budget: (budget, limit),
+<a href=#424 id=424 data-nosnippet>424</a>            paint_zoom,
+<a href=#425 id=425 data-nosnippet>425</a>        },
+<a href=#426 id=426 data-nosnippet>426</a>    );
+<a href=#427 id=427 data-nosnippet>427</a>    <span class="comment">// A drape left for a later frame's budget needs that frame.
+<a href=#428 id=428 data-nosnippet>428</a>    </span><span class="kw">if </span>deferred {
+<a href=#429 id=429 data-nosnippet>429</a>        <span class="kw">crate</span>::render::frame_signals::keep_animating(world);
+<a href=#430 id=430 data-nosnippet>430</a>    }
+<a href=#431 id=431 data-nosnippet>431</a>    <span class="prelude-val">Ok</span>(PreparedDrapes {
+<a href=#432 id=432 data-nosnippet>432</a>        redraw,
+<a href=#433 id=433 data-nosnippet>433</a>        sources: drape_sources,
+<a href=#434 id=434 data-nosnippet>434</a>        clear_color,
+<a href=#435 id=435 data-nosnippet>435</a>    })
+<a href=#436 id=436 data-nosnippet>436</a>}
 </code></pre></div></section></main></body></html>

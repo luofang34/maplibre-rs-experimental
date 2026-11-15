@@ -40,7 +40,7 @@
 <a href=#40 id=40 data-nosnippet>40</a></span><span class="kw">const _</span>: () = <span class="macro">assert!</span>(std::mem::size_of::&lt;TerrainTileUniforms&gt;() <span class="kw">as </span>u64 &lt;= UNIFORM_STRIDE);
 <a href=#41 id=41 data-nosnippet>41</a><span class="kw">const _</span>: () = <span class="macro">assert!</span>(std::mem::size_of::&lt;TerrainTileUniforms&gt;() == <span class="number">512</span>);
 <a href=#42 id=42 data-nosnippet>42</a><span class="doccomment">/// Largest number of terrain tiles drawn in one frame.
-<a href=#43 id=43 data-nosnippet>43</a></span><span class="kw">const </span>UNIFORM_CAPACITY: u64 = <span class="number">1024</span>;
+<a href=#43 id=43 data-nosnippet>43</a></span><span class="kw">const </span>UNIFORM_CAPACITY: u64 = <span class="number">256</span>;
 <a href=#44 id=44 data-nosnippet>44</a>
 <a href=#45 id=45 data-nosnippet>45</a><span class="doccomment">/// Per-tile inputs of the terrain shaders, one block per drawn tile.
 <a href=#46 id=46 data-nosnippet>46</a></span><span class="attr">#[repr(C)]
@@ -151,7 +151,7 @@
 <a href=#151 id=151 data-nosnippet>151</a>    drapes: DrapeCache&lt;drapes::DrapeTexture, drapes::DrapeKey&gt;,
 <a href=#152 id=152 data-nosnippet>152</a>    <span class="doccomment">/// The view whose drapes the tile lookups below answer with.
 <a href=#153 id=153 data-nosnippet>153</a>    </span>drape_view: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::render::eye_covering::ViewSlotId&gt;,
-<a href=#154 id=154 data-nosnippet>154</a>    drape_scratch: <span class="prelude-ty">Option</span>&lt;DrapeScratch&gt;,
+<a href=#154 id=154 data-nosnippet>154</a>    drape_scratches: Vec&lt;(u32, DrapeScratch)&gt;,
 <a href=#155 id=155 data-nosnippet>155</a>    draws: Vec&lt;TerrainDraw&gt;,
 <a href=#156 id=156 data-nosnippet>156</a>    <span class="doccomment">/// Bind groups by DEM and drape texture, kept across frames: creating one per tile per
 <a href=#157 id=157 data-nosnippet>157</a>    /// frame is a hundred a frame, and on Metal the memory behind them is returned only
@@ -272,7 +272,7 @@
 <a href=#272 id=272 data-nosnippet>272</a>            empty_dem,
 <a href=#273 id=273 data-nosnippet>273</a>            drapes: DrapeCache::default(),
 <a href=#274 id=274 data-nosnippet>274</a>            drape_view: <span class="prelude-val">None</span>,
-<a href=#275 id=275 data-nosnippet>275</a>            drape_scratch: <span class="prelude-val">None</span>,
+<a href=#275 id=275 data-nosnippet>275</a>            drape_scratches: Vec::new(),
 <a href=#276 id=276 data-nosnippet>276</a>            draws: Vec::new(),
 <a href=#277 id=277 data-nosnippet>277</a>            bind_groups: HashMap::new(),
 <a href=#278 id=278 data-nosnippet>278</a>            edge_heights,
@@ -297,14 +297,14 @@
 <a href=#297 id=297 data-nosnippet>297</a>            TerrainDrapeMode::ProceduralRelief(style) =&gt; {
 <a href=#298 id=298 data-nosnippet>298</a>                <span class="self">self</span>.drape_mode = TerrainDrapeMode::ProceduralRelief(style);
 <a href=#299 id=299 data-nosnippet>299</a>                <span class="self">self</span>.drape_size = <span class="number">0</span>;
-<a href=#300 id=300 data-nosnippet>300</a>                <span class="self">self</span>.drape_scratch = <span class="prelude-val">None</span>;
+<a href=#300 id=300 data-nosnippet>300</a>                <span class="self">self</span>.drape_scratches.clear();
 <a href=#301 id=301 data-nosnippet>301</a>                <span class="self">self</span>.drapes = DrapeCache::default();
 <a href=#302 id=302 data-nosnippet>302</a>            }
 <a href=#303 id=303 data-nosnippet>303</a>            TerrainDrapeMode::Draped { edge_px } =&gt; {
 <a href=#304 id=304 data-nosnippet>304</a>                <span class="kw">let </span>clamped = edge_px.clamp(MIN_DRAPE_SIZE, max_dim);
 <a href=#305 id=305 data-nosnippet>305</a>                <span class="kw">if </span><span class="self">self</span>.drape_size != clamped {
 <a href=#306 id=306 data-nosnippet>306</a>                    <span class="self">self</span>.drape_size = clamped;
-<a href=#307 id=307 data-nosnippet>307</a>                    <span class="self">self</span>.drape_scratch = <span class="prelude-val">None</span>;
+<a href=#307 id=307 data-nosnippet>307</a>                    <span class="self">self</span>.drape_scratches.clear();
 <a href=#308 id=308 data-nosnippet>308</a>                    <span class="self">self</span>.drapes = DrapeCache::default();
 <a href=#309 id=309 data-nosnippet>309</a>                }
 <a href=#310 id=310 data-nosnippet>310</a>                <span class="self">self</span>.drape_mode = TerrainDrapeMode::Draped { edge_px: clamped };
@@ -347,116 +347,131 @@
 <a href=#347 id=347 data-nosnippet>347</a>
 <a href=#348 id=348 data-nosnippet>348</a>    <span class="doccomment">/// Bytes of drape textures, held and free, and of DEM textures.
 <a href=#349 id=349 data-nosnippet>349</a>    </span><span class="kw">pub fn </span>texture_bytes(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; (usize, usize) {
-<a href=#350 id=350 data-nosnippet>350</a>        <span class="kw">let </span>(held, free) = <span class="self">self</span>.drape_counts();
-<a href=#351 id=351 data-nosnippet>351</a>        <span class="comment">// Four bytes a texel, and a mip chain adds a third.
-<a href=#352 id=352 data-nosnippet>352</a>        </span><span class="kw">let </span>drape = (<span class="self">self</span>.drape_size <span class="kw">as </span>usize).pow(<span class="number">2</span>) * <span class="number">4 </span>* <span class="number">4 </span>/ <span class="number">3</span>;
-<a href=#353 id=353 data-nosnippet>353</a>        <span class="kw">let </span>dem = <span class="self">self
-<a href=#354 id=354 data-nosnippet>354</a>            </span>.dem_textures
-<a href=#355 id=355 data-nosnippet>355</a>            .values()
-<a href=#356 id=356 data-nosnippet>356</a>            .map(|dem| (dem.texture.size.width * dem.texture.size.height * <span class="number">4</span>) <span class="kw">as </span>usize)
-<a href=#357 id=357 data-nosnippet>357</a>            .sum();
-<a href=#358 id=358 data-nosnippet>358</a>        ((held + free) * drape, dem)
-<a href=#359 id=359 data-nosnippet>359</a>    }
-<a href=#360 id=360 data-nosnippet>360</a>
-<a href=#361 id=361 data-nosnippet>361</a>    <span class="doccomment">/// Creates the scratch attachments used by every drape pass.
-<a href=#362 id=362 data-nosnippet>362</a>    </span><span class="kw">pub fn </span>ensure_scratch(<span class="kw-2">&amp;mut </span><span class="self">self</span>, device: <span class="kw-2">&amp;</span>wgpu::Device) {
-<a href=#363 id=363 data-nosnippet>363</a>        <span class="kw">if </span><span class="self">self</span>.drape_scratch.is_some()
-<a href=#364 id=364 data-nosnippet>364</a>            || <span class="self">self</span>.drape_mode.is_procedural_relief()
-<a href=#365 id=365 data-nosnippet>365</a>            || <span class="self">self</span>.drape_size == <span class="number">0
-<a href=#366 id=366 data-nosnippet>366</a>        </span>{
-<a href=#367 id=367 data-nosnippet>367</a>            <span class="kw">return</span>;
-<a href=#368 id=368 data-nosnippet>368</a>        }
-<a href=#369 id=369 data-nosnippet>369</a>        <span class="kw">let </span>color = <span class="self">self</span>.msaa.is_multisampling().then(|| {
-<a href=#370 id=370 data-nosnippet>370</a>            Texture::new(
-<a href=#371 id=371 data-nosnippet>371</a>                <span class="prelude-val">Some</span>(<span class="string">"drape multisampled color"</span>),
-<a href=#372 id=372 data-nosnippet>372</a>                device,
-<a href=#373 id=373 data-nosnippet>373</a>                <span class="self">self</span>.color_format,
-<a href=#374 id=374 data-nosnippet>374</a>                <span class="self">self</span>.drape_size,
-<a href=#375 id=375 data-nosnippet>375</a>                <span class="self">self</span>.drape_size,
-<a href=#376 id=376 data-nosnippet>376</a>                <span class="self">self</span>.msaa,
-<a href=#377 id=377 data-nosnippet>377</a>                wgpu::TextureUsages::RENDER_ATTACHMENT,
-<a href=#378 id=378 data-nosnippet>378</a>            )
-<a href=#379 id=379 data-nosnippet>379</a>        });
-<a href=#380 id=380 data-nosnippet>380</a>        <span class="kw">let </span>depth_stencil = Texture::new(
-<a href=#381 id=381 data-nosnippet>381</a>            <span class="prelude-val">Some</span>(<span class="string">"drape depth stencil"</span>),
-<a href=#382 id=382 data-nosnippet>382</a>            device,
-<a href=#383 id=383 data-nosnippet>383</a>            <span class="self">self</span>.depth_format,
-<a href=#384 id=384 data-nosnippet>384</a>            <span class="self">self</span>.drape_size,
-<a href=#385 id=385 data-nosnippet>385</a>            <span class="self">self</span>.drape_size,
-<a href=#386 id=386 data-nosnippet>386</a>            <span class="self">self</span>.msaa,
-<a href=#387 id=387 data-nosnippet>387</a>            wgpu::TextureUsages::RENDER_ATTACHMENT,
-<a href=#388 id=388 data-nosnippet>388</a>        );
-<a href=#389 id=389 data-nosnippet>389</a>        <span class="self">self</span>.drape_scratch = <span class="prelude-val">Some</span>(DrapeScratch {
-<a href=#390 id=390 data-nosnippet>390</a>            color,
-<a href=#391 id=391 data-nosnippet>391</a>            depth_stencil,
-<a href=#392 id=392 data-nosnippet>392</a>        });
-<a href=#393 id=393 data-nosnippet>393</a>    }
-<a href=#394 id=394 data-nosnippet>394</a>
-<a href=#395 id=395 data-nosnippet>395</a>    <span class="doccomment">/// Scratch attachments of the drape passes.
-<a href=#396 id=396 data-nosnippet>396</a>    </span><span class="kw">pub fn </span>scratch(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>DrapeScratch&gt; {
-<a href=#397 id=397 data-nosnippet>397</a>        <span class="self">self</span>.drape_scratch.as_ref()
-<a href=#398 id=398 data-nosnippet>398</a>    }
-<a href=#399 id=399 data-nosnippet>399</a>
-<a href=#400 id=400 data-nosnippet>400</a>    <span class="doccomment">/// Writes the per-tile uniform blocks and returns how many fit.
-<a href=#401 id=401 data-nosnippet>401</a>    </span><span class="kw">pub fn </span>write_uniforms(
-<a href=#402 id=402 data-nosnippet>402</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#403 id=403 data-nosnippet>403</a>        queue: <span class="kw-2">&amp;</span><span class="kw">crate</span>::render::upload_queue::UploadQueue,
-<a href=#404 id=404 data-nosnippet>404</a>        uniforms: <span class="kw-2">&amp;</span>[TerrainTileUniforms],
-<a href=#405 id=405 data-nosnippet>405</a>    ) -&gt; usize {
-<a href=#406 id=406 data-nosnippet>406</a>        <span class="kw">let </span>capacity = (UNIFORM_CAPACITY <span class="kw">as </span>usize).min(<span class="self">self</span>.edge_heights.capacity());
-<a href=#407 id=407 data-nosnippet>407</a>        <span class="kw">let </span>count = uniforms.len().min(capacity);
-<a href=#408 id=408 data-nosnippet>408</a>        <span class="kw">if </span>count &lt; uniforms.len() {
-<a href=#409 id=409 data-nosnippet>409</a>            <span class="macro">tracing::warn!</span>(
-<a href=#410 id=410 data-nosnippet>410</a>                requested = uniforms.len(),
-<a href=#411 id=411 data-nosnippet>411</a>                capacity,
-<a href=#412 id=412 data-nosnippet>412</a>                <span class="string">"more terrain tiles than uniform blocks; distant tiles are skipped"
-<a href=#413 id=413 data-nosnippet>413</a>            </span>);
-<a href=#414 id=414 data-nosnippet>414</a>        }
-<a href=#415 id=415 data-nosnippet>415</a>        <span class="kw">let </span><span class="kw-2">mut </span>bytes = <span class="macro">vec!</span>[<span class="number">0_u8</span>; count * UNIFORM_STRIDE <span class="kw">as </span>usize];
-<a href=#416 id=416 data-nosnippet>416</a>        <span class="kw">for </span>(index, block) <span class="kw">in </span>uniforms.iter().take(count).enumerate() {
-<a href=#417 id=417 data-nosnippet>417</a>            <span class="kw">let </span>start = index * UNIFORM_STRIDE <span class="kw">as </span>usize;
-<a href=#418 id=418 data-nosnippet>418</a>            <span class="kw">let </span>raw = bytemuck::bytes_of(block);
-<a href=#419 id=419 data-nosnippet>419</a>            bytes[start..start + raw.len()].copy_from_slice(raw);
-<a href=#420 id=420 data-nosnippet>420</a>        }
-<a href=#421 id=421 data-nosnippet>421</a>        queue.write_buffer(<span class="kw-2">&amp;</span><span class="self">self</span>.uniform_buffer, <span class="number">0</span>, <span class="kw-2">&amp;</span>bytes);
-<a href=#422 id=422 data-nosnippet>422</a>        count
-<a href=#423 id=423 data-nosnippet>423</a>    }
-<a href=#424 id=424 data-nosnippet>424</a>
-<a href=#425 id=425 data-nosnippet>425</a>    <span class="doccomment">/// Replaces this frame's terrain draws.
-<a href=#426 id=426 data-nosnippet>426</a>    </span><span class="kw">pub fn </span>set_draws(<span class="kw-2">&amp;mut </span><span class="self">self</span>, draws: Vec&lt;TerrainDraw&gt;) {
-<a href=#427 id=427 data-nosnippet>427</a>        <span class="self">self</span>.draws = draws;
-<a href=#428 id=428 data-nosnippet>428</a>        <span class="comment">// A bind group keeps its textures alive; only the ones this frame draws with stay.
-<a href=#429 id=429 data-nosnippet>429</a>        </span><span class="attr">#[allow(
-<a href=#430 id=430 data-nosnippet>430</a>            clippy::mutable_key_type,
-<a href=#431 id=431 data-nosnippet>431</a>            reason = <span class="string">"wgpu hashes immutable resource identity, independent of internal synchronization"
-<a href=#432 id=432 data-nosnippet>432</a>        </span>)]
-<a href=#433 id=433 data-nosnippet>433</a>        </span><span class="kw">let </span>used: HashSet&lt;wgpu::BindGroup&gt; = <span class="self">self
-<a href=#434 id=434 data-nosnippet>434</a>            </span>.draws
-<a href=#435 id=435 data-nosnippet>435</a>            .iter()
-<a href=#436 id=436 data-nosnippet>436</a>            .map(|draw| draw.bind_group.as_ref().clone())
-<a href=#437 id=437 data-nosnippet>437</a>            .collect();
-<a href=#438 id=438 data-nosnippet>438</a>        <span class="self">self</span>.bind_groups
-<a href=#439 id=439 data-nosnippet>439</a>            .retain(|<span class="kw">_</span>, group| used.contains(group.as_ref()));
-<a href=#440 id=440 data-nosnippet>440</a>    }
-<a href=#441 id=441 data-nosnippet>441</a>
-<a href=#442 id=442 data-nosnippet>442</a>    <span class="doccomment">/// Terrain draws of the current frame.
-<a href=#443 id=443 data-nosnippet>443</a>    </span><span class="kw">pub fn </span>draws(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[TerrainDraw] {
-<a href=#444 id=444 data-nosnippet>444</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.draws
-<a href=#445 id=445 data-nosnippet>445</a>    }
-<a href=#446 id=446 data-nosnippet>446</a>
-<a href=#447 id=447 data-nosnippet>447</a>    <span class="doccomment">/// The draw of a terrain tile this frame, whose bind group also elevates symbols on it.
-<a href=#448 id=448 data-nosnippet>448</a>    </span><span class="kw">pub fn </span>draw_for(<span class="kw-2">&amp;</span><span class="self">self</span>, coords: WorldTileCoords) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>TerrainDraw&gt; {
-<a href=#449 id=449 data-nosnippet>449</a>        <span class="self">self</span>.draws.iter().find(|draw| draw.coords == coords)
-<a href=#450 id=450 data-nosnippet>450</a>    }
-<a href=#451 id=451 data-nosnippet>451</a>}
-<a href=#452 id=452 data-nosnippet>452</a>
-<a href=#453 id=453 data-nosnippet>453</a><span class="kw">impl </span>Drop <span class="kw">for </span>TerrainResources {
-<a href=#454 id=454 data-nosnippet>454</a>    <span class="kw">fn </span>drop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
-<a href=#455 id=455 data-nosnippet>455</a>        <span class="self">self</span>.draws.clear();
-<a href=#456 id=456 data-nosnippet>456</a>        <span class="self">self</span>.bind_groups.clear();
-<a href=#457 id=457 data-nosnippet>457</a>        <span class="self">self</span>.vertex_buffer.destroy();
-<a href=#458 id=458 data-nosnippet>458</a>        <span class="self">self</span>.index_buffer.destroy();
-<a href=#459 id=459 data-nosnippet>459</a>        <span class="self">self</span>.uniform_buffer.destroy();
+<a href=#350 id=350 data-nosnippet>350</a>        <span class="comment">// Four bytes a texel, and a mip chain adds a third.
+<a href=#351 id=351 data-nosnippet>351</a>        </span><span class="kw">let </span>drape = <span class="self">self</span>.drape_texture_bytes();
+<a href=#352 id=352 data-nosnippet>352</a>        <span class="kw">let </span>dem = <span class="self">self
+<a href=#353 id=353 data-nosnippet>353</a>            </span>.dem_textures
+<a href=#354 id=354 data-nosnippet>354</a>            .values()
+<a href=#355 id=355 data-nosnippet>355</a>            .map(|dem| (dem.texture.size.width * dem.texture.size.height * <span class="number">4</span>) <span class="kw">as </span>usize)
+<a href=#356 id=356 data-nosnippet>356</a>            .sum();
+<a href=#357 id=357 data-nosnippet>357</a>        (drape, dem)
+<a href=#358 id=358 data-nosnippet>358</a>    }
+<a href=#359 id=359 data-nosnippet>359</a>
+<a href=#360 id=360 data-nosnippet>360</a>    <span class="doccomment">/// Creates the scratch attachments used by drape passes at the configured maximum edge size.
+<a href=#361 id=361 data-nosnippet>361</a>    </span><span class="kw">pub fn </span>ensure_scratch(<span class="kw-2">&amp;mut </span><span class="self">self</span>, device: <span class="kw-2">&amp;</span>wgpu::Device) {
+<a href=#362 id=362 data-nosnippet>362</a>        <span class="self">self</span>.ensure_scratch_for_size(device, <span class="self">self</span>.drape_size);
+<a href=#363 id=363 data-nosnippet>363</a>    }
+<a href=#364 id=364 data-nosnippet>364</a>
+<a href=#365 id=365 data-nosnippet>365</a>    <span class="doccomment">/// Creates per-tier scratch attachments matching `edge_px` when not yet allocated.
+<a href=#366 id=366 data-nosnippet>366</a>    </span><span class="kw">pub fn </span>ensure_scratch_for_size(<span class="kw-2">&amp;mut </span><span class="self">self</span>, device: <span class="kw-2">&amp;</span>wgpu::Device, edge_px: u32) {
+<a href=#367 id=367 data-nosnippet>367</a>        <span class="kw">if </span><span class="self">self</span>.drape_mode.is_procedural_relief()
+<a href=#368 id=368 data-nosnippet>368</a>            || edge_px == <span class="number">0
+<a href=#369 id=369 data-nosnippet>369</a>            </span>|| <span class="self">self</span>.scratch_for_size(edge_px).is_some()
+<a href=#370 id=370 data-nosnippet>370</a>        {
+<a href=#371 id=371 data-nosnippet>371</a>            <span class="kw">return</span>;
+<a href=#372 id=372 data-nosnippet>372</a>        }
+<a href=#373 id=373 data-nosnippet>373</a>        <span class="kw">let </span>color = <span class="self">self</span>.msaa.is_multisampling().then(|| {
+<a href=#374 id=374 data-nosnippet>374</a>            Texture::new(
+<a href=#375 id=375 data-nosnippet>375</a>                <span class="prelude-val">Some</span>(<span class="string">"drape multisampled color"</span>),
+<a href=#376 id=376 data-nosnippet>376</a>                device,
+<a href=#377 id=377 data-nosnippet>377</a>                <span class="self">self</span>.color_format,
+<a href=#378 id=378 data-nosnippet>378</a>                edge_px,
+<a href=#379 id=379 data-nosnippet>379</a>                edge_px,
+<a href=#380 id=380 data-nosnippet>380</a>                <span class="self">self</span>.msaa,
+<a href=#381 id=381 data-nosnippet>381</a>                wgpu::TextureUsages::RENDER_ATTACHMENT,
+<a href=#382 id=382 data-nosnippet>382</a>            )
+<a href=#383 id=383 data-nosnippet>383</a>        });
+<a href=#384 id=384 data-nosnippet>384</a>        <span class="kw">let </span>depth_stencil = Texture::new(
+<a href=#385 id=385 data-nosnippet>385</a>            <span class="prelude-val">Some</span>(<span class="string">"drape depth stencil"</span>),
+<a href=#386 id=386 data-nosnippet>386</a>            device,
+<a href=#387 id=387 data-nosnippet>387</a>            <span class="self">self</span>.depth_format,
+<a href=#388 id=388 data-nosnippet>388</a>            edge_px,
+<a href=#389 id=389 data-nosnippet>389</a>            edge_px,
+<a href=#390 id=390 data-nosnippet>390</a>            <span class="self">self</span>.msaa,
+<a href=#391 id=391 data-nosnippet>391</a>            wgpu::TextureUsages::RENDER_ATTACHMENT,
+<a href=#392 id=392 data-nosnippet>392</a>        );
+<a href=#393 id=393 data-nosnippet>393</a>        <span class="self">self</span>.drape_scratches.push((
+<a href=#394 id=394 data-nosnippet>394</a>            edge_px,
+<a href=#395 id=395 data-nosnippet>395</a>            DrapeScratch {
+<a href=#396 id=396 data-nosnippet>396</a>                color,
+<a href=#397 id=397 data-nosnippet>397</a>                depth_stencil,
+<a href=#398 id=398 data-nosnippet>398</a>            },
+<a href=#399 id=399 data-nosnippet>399</a>        ));
+<a href=#400 id=400 data-nosnippet>400</a>    }
+<a href=#401 id=401 data-nosnippet>401</a>
+<a href=#402 id=402 data-nosnippet>402</a>    <span class="doccomment">/// Scratch attachments matching `edge_px` for a tiered drape pass.
+<a href=#403 id=403 data-nosnippet>403</a>    </span><span class="kw">pub fn </span>scratch_for_size(<span class="kw-2">&amp;</span><span class="self">self</span>, edge_px: u32) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>DrapeScratch&gt; {
+<a href=#404 id=404 data-nosnippet>404</a>        <span class="self">self</span>.drape_scratches
+<a href=#405 id=405 data-nosnippet>405</a>            .iter()
+<a href=#406 id=406 data-nosnippet>406</a>            .find(|(size, <span class="kw">_</span>)| <span class="kw-2">*</span>size == edge_px)
+<a href=#407 id=407 data-nosnippet>407</a>            .map(|(<span class="kw">_</span>, scratch)| scratch)
+<a href=#408 id=408 data-nosnippet>408</a>    }
+<a href=#409 id=409 data-nosnippet>409</a>
+<a href=#410 id=410 data-nosnippet>410</a>    <span class="doccomment">/// Scratch attachments of the configured primary drape size.
+<a href=#411 id=411 data-nosnippet>411</a>    </span><span class="kw">pub fn </span>scratch(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>DrapeScratch&gt; {
+<a href=#412 id=412 data-nosnippet>412</a>        <span class="self">self</span>.scratch_for_size(<span class="self">self</span>.drape_size)
+<a href=#413 id=413 data-nosnippet>413</a>    }
+<a href=#414 id=414 data-nosnippet>414</a>
+<a href=#415 id=415 data-nosnippet>415</a>    <span class="doccomment">/// Writes the per-tile uniform blocks and returns how many fit.
+<a href=#416 id=416 data-nosnippet>416</a>    </span><span class="kw">pub fn </span>write_uniforms(
+<a href=#417 id=417 data-nosnippet>417</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#418 id=418 data-nosnippet>418</a>        queue: <span class="kw-2">&amp;</span><span class="kw">crate</span>::render::upload_queue::UploadQueue,
+<a href=#419 id=419 data-nosnippet>419</a>        uniforms: <span class="kw-2">&amp;</span>[TerrainTileUniforms],
+<a href=#420 id=420 data-nosnippet>420</a>    ) -&gt; usize {
+<a href=#421 id=421 data-nosnippet>421</a>        <span class="kw">let </span>capacity = (UNIFORM_CAPACITY <span class="kw">as </span>usize).min(<span class="self">self</span>.edge_heights.capacity());
+<a href=#422 id=422 data-nosnippet>422</a>        <span class="kw">let </span>count = uniforms.len().min(capacity);
+<a href=#423 id=423 data-nosnippet>423</a>        <span class="kw">if </span>count &lt; uniforms.len() {
+<a href=#424 id=424 data-nosnippet>424</a>            <span class="macro">tracing::warn!</span>(
+<a href=#425 id=425 data-nosnippet>425</a>                requested = uniforms.len(),
+<a href=#426 id=426 data-nosnippet>426</a>                capacity,
+<a href=#427 id=427 data-nosnippet>427</a>                <span class="string">"more terrain tiles than uniform blocks; distant tiles are skipped"
+<a href=#428 id=428 data-nosnippet>428</a>            </span>);
+<a href=#429 id=429 data-nosnippet>429</a>        }
+<a href=#430 id=430 data-nosnippet>430</a>        <span class="kw">let </span><span class="kw-2">mut </span>bytes = <span class="macro">vec!</span>[<span class="number">0_u8</span>; count * UNIFORM_STRIDE <span class="kw">as </span>usize];
+<a href=#431 id=431 data-nosnippet>431</a>        <span class="kw">for </span>(index, block) <span class="kw">in </span>uniforms.iter().take(count).enumerate() {
+<a href=#432 id=432 data-nosnippet>432</a>            <span class="kw">let </span>start = index * UNIFORM_STRIDE <span class="kw">as </span>usize;
+<a href=#433 id=433 data-nosnippet>433</a>            <span class="kw">let </span>raw = bytemuck::bytes_of(block);
+<a href=#434 id=434 data-nosnippet>434</a>            bytes[start..start + raw.len()].copy_from_slice(raw);
+<a href=#435 id=435 data-nosnippet>435</a>        }
+<a href=#436 id=436 data-nosnippet>436</a>        queue.write_buffer(<span class="kw-2">&amp;</span><span class="self">self</span>.uniform_buffer, <span class="number">0</span>, <span class="kw-2">&amp;</span>bytes);
+<a href=#437 id=437 data-nosnippet>437</a>        count
+<a href=#438 id=438 data-nosnippet>438</a>    }
+<a href=#439 id=439 data-nosnippet>439</a>
+<a href=#440 id=440 data-nosnippet>440</a>    <span class="doccomment">/// Replaces this frame's terrain draws.
+<a href=#441 id=441 data-nosnippet>441</a>    </span><span class="kw">pub fn </span>set_draws(<span class="kw-2">&amp;mut </span><span class="self">self</span>, draws: Vec&lt;TerrainDraw&gt;) {
+<a href=#442 id=442 data-nosnippet>442</a>        <span class="self">self</span>.draws = draws;
+<a href=#443 id=443 data-nosnippet>443</a>        <span class="comment">// A bind group keeps its textures alive; only the ones this frame draws with stay.
+<a href=#444 id=444 data-nosnippet>444</a>        </span><span class="attr">#[allow(
+<a href=#445 id=445 data-nosnippet>445</a>            clippy::mutable_key_type,
+<a href=#446 id=446 data-nosnippet>446</a>            reason = <span class="string">"wgpu hashes immutable resource identity, independent of internal synchronization"
+<a href=#447 id=447 data-nosnippet>447</a>        </span>)]
+<a href=#448 id=448 data-nosnippet>448</a>        </span><span class="kw">let </span>used: HashSet&lt;wgpu::BindGroup&gt; = <span class="self">self
+<a href=#449 id=449 data-nosnippet>449</a>            </span>.draws
+<a href=#450 id=450 data-nosnippet>450</a>            .iter()
+<a href=#451 id=451 data-nosnippet>451</a>            .map(|draw| draw.bind_group.as_ref().clone())
+<a href=#452 id=452 data-nosnippet>452</a>            .collect();
+<a href=#453 id=453 data-nosnippet>453</a>        <span class="self">self</span>.bind_groups
+<a href=#454 id=454 data-nosnippet>454</a>            .retain(|<span class="kw">_</span>, group| used.contains(group.as_ref()));
+<a href=#455 id=455 data-nosnippet>455</a>    }
+<a href=#456 id=456 data-nosnippet>456</a>
+<a href=#457 id=457 data-nosnippet>457</a>    <span class="doccomment">/// Terrain draws of the current frame.
+<a href=#458 id=458 data-nosnippet>458</a>    </span><span class="kw">pub fn </span>draws(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[TerrainDraw] {
+<a href=#459 id=459 data-nosnippet>459</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.draws
 <a href=#460 id=460 data-nosnippet>460</a>    }
-<a href=#461 id=461 data-nosnippet>461</a>}
+<a href=#461 id=461 data-nosnippet>461</a>
+<a href=#462 id=462 data-nosnippet>462</a>    <span class="doccomment">/// The draw of a terrain tile this frame, whose bind group also elevates symbols on it.
+<a href=#463 id=463 data-nosnippet>463</a>    </span><span class="kw">pub fn </span>draw_for(<span class="kw-2">&amp;</span><span class="self">self</span>, coords: WorldTileCoords) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>TerrainDraw&gt; {
+<a href=#464 id=464 data-nosnippet>464</a>        <span class="self">self</span>.draws.iter().find(|draw| draw.coords == coords)
+<a href=#465 id=465 data-nosnippet>465</a>    }
+<a href=#466 id=466 data-nosnippet>466</a>}
+<a href=#467 id=467 data-nosnippet>467</a>
+<a href=#468 id=468 data-nosnippet>468</a><span class="kw">impl </span>Drop <span class="kw">for </span>TerrainResources {
+<a href=#469 id=469 data-nosnippet>469</a>    <span class="kw">fn </span>drop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+<a href=#470 id=470 data-nosnippet>470</a>        <span class="self">self</span>.draws.clear();
+<a href=#471 id=471 data-nosnippet>471</a>        <span class="self">self</span>.bind_groups.clear();
+<a href=#472 id=472 data-nosnippet>472</a>        <span class="self">self</span>.vertex_buffer.destroy();
+<a href=#473 id=473 data-nosnippet>473</a>        <span class="self">self</span>.index_buffer.destroy();
+<a href=#474 id=474 data-nosnippet>474</a>        <span class="self">self</span>.uniform_buffer.destroy();
+<a href=#475 id=475 data-nosnippet>475</a>    }
+<a href=#476 id=476 data-nosnippet>476</a>}
 </code></pre></div></section></main></body></html>

@@ -27,8 +27,8 @@
 <a href=#27 id=27 data-nosnippet>27</a>        </span>view_tile.render_kind(TileKind::Vector, |source_shape| {
 <a href=#28 id=28 data-nosnippet>28</a>            <span class="comment">// Draw masks for all source_shapes
 <a href=#29 id=29 data-nosnippet>29</a>            </span>tile_debug_phase.add(TileDebugItem {
-<a href=#30 id=30 data-nosnippet>30</a>                draw_function: Box::new(DrawState::&lt;TileDebugItem, DrawDebugOutlines&gt;::new()),
-<a href=#31 id=31 data-nosnippet>31</a>                source_shape: source_shape.clone(),
+<a href=#30 id=30 data-nosnippet>30</a>                draw_function: <span class="kw-2">&amp;</span>DrawState::&lt;TileDebugItem, DrawDebugOutlines&gt;::INSTANCE,
+<a href=#31 id=31 data-nosnippet>31</a>                source_shape: source_shape.draw_data(),
 <a href=#32 id=32 data-nosnippet>32</a>            });
 <a href=#33 id=33 data-nosnippet>33</a>        });
 <a href=#34 id=34 data-nosnippet>34</a>    }

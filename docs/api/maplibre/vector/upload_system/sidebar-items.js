@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["UploadOutcome"],"fn":["drape_paint_zoom","frame_paint","pattern_runs","refresh_layer_paint","upload_bucket","upload_system","upload_tessellated_layer"],"mod":["metadata","paint","sources","style_refresh"],"struct":["VectorPaintFrame"]};
+window.SIDEBAR_ITEMS = {"enum":["UploadOutcome"],"fn":["drape_paint_zoom","frame_paint","pattern_runs","upload_bucket","upload_system","upload_tessellated_layer"],"mod":["metadata","paint","sources","style_refresh"],"struct":["VectorPaintFrame"]};

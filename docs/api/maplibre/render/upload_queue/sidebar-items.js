@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["UploadQueue"]};
+window.SIDEBAR_ITEMS = {"constant":["MAX_STAGED_WRITE_BYTES","MIN_STAGING_BUFFER_CAPACITY"],"struct":["StagedCopy","StagingBeltState","UploadQueue"]};

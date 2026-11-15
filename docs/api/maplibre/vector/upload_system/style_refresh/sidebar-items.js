@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["apply_dirty_style","layer_is_feature_constant","recolor_cpu_bucket","refresh_vector_pool","sync_symbol_pool_layers"],"mod":["feature_state"],"struct":["DirtyVectorStyle"]};
+window.SIDEBAR_ITEMS = {"fn":["apply_dirty_style","refresh_vector_pool","sync_symbol_pool_layers"],"mod":["feature_state"],"struct":["DirtyVectorStyle"]};

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["current_zoom","next_zoom","pattern_color","stabilize_zoom","uniform_color"],"struct":["PaintZoom"]};
+window.SIDEBAR_ITEMS = {"fn":["current_zoom","next_zoom","pattern_color","refresh_layer_paint","stabilize_zoom","uniform_color"],"struct":["PaintZoom"]};

@@ -59,9 +59,9 @@
 <a href=#59 id=59 data-nosnippet>59</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>pattern;
 <a href=#60 id=60 data-nosnippet>60</a><span class="kw">pub mod </span>tessellation;
 <a href=#61 id=61 data-nosnippet>61</a>
-<a href=#62 id=62 data-nosnippet>62</a><span class="kw">struct </span>VectorPipeline(wgpu::RenderPipeline);
+<a href=#62 id=62 data-nosnippet>62</a><span class="kw">struct </span>VectorPipeline(<span class="kw">crate</span>::render::resource::FeaturePipelinePair);
 <a href=#63 id=63 data-nosnippet>63</a><span class="kw">impl </span>Deref <span class="kw">for </span>VectorPipeline {
-<a href=#64 id=64 data-nosnippet>64</a>    <span class="kw">type </span>Target = wgpu::RenderPipeline;
+<a href=#64 id=64 data-nosnippet>64</a>    <span class="kw">type </span>Target = <span class="kw">crate</span>::render::resource::FeaturePipelinePair;
 <a href=#65 id=65 data-nosnippet>65</a>
 <a href=#66 id=66 data-nosnippet>66</a>    <span class="kw">fn </span>deref(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="self">Self</span>::Target {
 <a href=#67 id=67 data-nosnippet>67</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0
@@ -71,32 +71,32 @@
 <a href=#71 id=71 data-nosnippet>71</a><span class="doccomment">/// The pipelines of stroked lines, by where a line lies.
 <a href=#72 id=72 data-nosnippet>72</a></span><span class="kw">struct </span>LinePipeline {
 <a href=#73 id=73 data-nosnippet>73</a>    <span class="doccomment">/// On the map plane, or draped into the terrain textures.
-<a href=#74 id=74 data-nosnippet>74</a>    </span>flat: wgpu::RenderPipeline,
+<a href=#74 id=74 data-nosnippet>74</a>    </span>flat: <span class="kw">crate</span>::render::resource::FeaturePipelinePair,
 <a href=#75 id=75 data-nosnippet>75</a>    <span class="doccomment">/// At heights of its own, as a bridge deck or tunnel is, tested against the terrain depth.
-<a href=#76 id=76 data-nosnippet>76</a>    </span>structure: <span class="prelude-ty">Option</span>&lt;wgpu::RenderPipeline&gt;,
+<a href=#76 id=76 data-nosnippet>76</a>    </span>structure: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::render::resource::FeaturePipelinePair&gt;,
 <a href=#77 id=77 data-nosnippet>77</a>    <span class="doccomment">/// Elevated 3D paths (`line-elevation`) clipped to `[0, 4096]`, depth-tested without 2D
 <a href=#78 id=78 data-nosnippet>78</a>    /// ground stencil clipping so high-altitude rims project freely under pitch.
-<a href=#79 id=79 data-nosnippet>79</a>    </span>elevated: <span class="prelude-ty">Option</span>&lt;wgpu::RenderPipeline&gt;,
+<a href=#79 id=79 data-nosnippet>79</a>    </span>elevated: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::render::resource::FeaturePipelinePair&gt;,
 <a href=#80 id=80 data-nosnippet>80</a>    <span class="doccomment">/// On the terrain surface at its width in screen pixels, with a terrain tile bound third.
-<a href=#81 id=81 data-nosnippet>81</a>    </span>terrain: <span class="prelude-ty">Option</span>&lt;wgpu::RenderPipeline&gt;,
+<a href=#81 id=81 data-nosnippet>81</a>    </span>terrain: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::render::resource::FeaturePipelinePair&gt;,
 <a href=#82 id=82 data-nosnippet>82</a>}
 <a href=#83 id=83 data-nosnippet>83</a>
 <a href=#84 id=84 data-nosnippet>84</a><span class="doccomment">/// The passes of extruded polygons: depth, colour once per pixel, stencil reset, and translucent shells.
 <a href=#85 id=85 data-nosnippet>85</a></span><span class="kw">struct </span>ExtrusionPipeline {
-<a href=#86 id=86 data-nosnippet>86</a>    depth: wgpu::RenderPipeline,
-<a href=#87 id=87 data-nosnippet>87</a>    color: wgpu::RenderPipeline,
-<a href=#88 id=88 data-nosnippet>88</a>    clear: wgpu::RenderPipeline,
+<a href=#86 id=86 data-nosnippet>86</a>    depth: <span class="kw">crate</span>::render::resource::FeaturePipelinePair,
+<a href=#87 id=87 data-nosnippet>87</a>    color: <span class="kw">crate</span>::render::resource::FeaturePipelinePair,
+<a href=#88 id=88 data-nosnippet>88</a>    clear: <span class="kw">crate</span>::render::resource::FeaturePipelinePair,
 <a href=#89 id=89 data-nosnippet>89</a>    <span class="doccomment">/// The colour pass with an image in place of the colour.
-<a href=#90 id=90 data-nosnippet>90</a>    </span>pattern: wgpu::RenderPipeline,
+<a href=#90 id=90 data-nosnippet>90</a>    </span>pattern: <span class="kw">crate</span>::render::resource::FeaturePipelinePair,
 <a href=#91 id=91 data-nosnippet>91</a>    <span class="doccomment">/// Back-facing shell of a closed translucent 3D volume (`depth_write = false`).
-<a href=#92 id=92 data-nosnippet>92</a>    </span>translucent_back: wgpu::RenderPipeline,
+<a href=#92 id=92 data-nosnippet>92</a>    </span>translucent_back: <span class="kw">crate</span>::render::resource::FeaturePipelinePair,
 <a href=#93 id=93 data-nosnippet>93</a>    <span class="doccomment">/// Front-facing shell of a closed translucent 3D volume (`depth_write = false`).
-<a href=#94 id=94 data-nosnippet>94</a>    </span>translucent_front: wgpu::RenderPipeline,
+<a href=#94 id=94 data-nosnippet>94</a>    </span>translucent_front: <span class="kw">crate</span>::render::resource::FeaturePipelinePair,
 <a href=#95 id=95 data-nosnippet>95</a>}
 <a href=#96 id=96 data-nosnippet>96</a>
-<a href=#97 id=97 data-nosnippet>97</a><span class="kw">struct </span>CirclePipeline(wgpu::RenderPipeline);
+<a href=#97 id=97 data-nosnippet>97</a><span class="kw">struct </span>CirclePipeline(<span class="kw">crate</span>::render::resource::FeaturePipelinePair);
 <a href=#98 id=98 data-nosnippet>98</a><span class="kw">impl </span>Deref <span class="kw">for </span>CirclePipeline {
-<a href=#99 id=99 data-nosnippet>99</a>    <span class="kw">type </span>Target = wgpu::RenderPipeline;
+<a href=#99 id=99 data-nosnippet>99</a>    <span class="kw">type </span>Target = <span class="kw">crate</span>::render::resource::FeaturePipelinePair;
 <a href=#100 id=100 data-nosnippet>100</a>
 <a href=#101 id=101 data-nosnippet>101</a>    <span class="kw">fn </span>deref(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="self">Self</span>::Target {
 <a href=#102 id=102 data-nosnippet>102</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0

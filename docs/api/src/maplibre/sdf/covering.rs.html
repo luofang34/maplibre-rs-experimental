@@ -146,49 +146,50 @@
 <a href=#146 id=146 data-nosnippet>146</a>        .is_none_or(|covering| covering.buffer.size() &lt; required);
 <a href=#147 id=147 data-nosnippet>147</a>    <span class="kw">if </span>grow {
 <a href=#148 id=148 data-nosnippet>148</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(old) = world.resources.remove::&lt;SymbolCovering&gt;() {
-<a href=#149 id=149 data-nosnippet>149</a>            old.buffer.destroy();
-<a href=#150 id=150 data-nosnippet>150</a>        }
-<a href=#151 id=151 data-nosnippet>151</a>        <span class="kw">let </span>buffer = device.create_buffer(<span class="kw-2">&amp;</span>wgpu::BufferDescriptor {
-<a href=#152 id=152 data-nosnippet>152</a>            label: <span class="prelude-val">Some</span>(<span class="string">"symbol tile transforms"</span>),
-<a href=#153 id=153 data-nosnippet>153</a>            size: required.next_power_of_two(),
-<a href=#154 id=154 data-nosnippet>154</a>            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-<a href=#155 id=155 data-nosnippet>155</a>            mapped_at_creation: <span class="bool-val">false</span>,
-<a href=#156 id=156 data-nosnippet>156</a>        });
-<a href=#157 id=157 data-nosnippet>157</a>        world.resources.insert(SymbolCovering {
-<a href=#158 id=158 data-nosnippet>158</a>            tiles: Vec::new(),
-<a href=#159 id=159 data-nosnippet>159</a>            buffer,
-<a href=#160 id=160 data-nosnippet>160</a>        });
-<a href=#161 id=161 data-nosnippet>161</a>    }
-<a href=#162 id=162 data-nosnippet>162</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(covering) = world.resources.get_mut::&lt;SymbolCovering&gt;() {
-<a href=#163 id=163 data-nosnippet>163</a>        queue.write_buffer(<span class="kw-2">&amp;</span>covering.buffer, <span class="number">0</span>, bytes);
-<a href=#164 id=164 data-nosnippet>164</a>        covering.tiles = tiles;
-<a href=#165 id=165 data-nosnippet>165</a>    }
-<a href=#166 id=166 data-nosnippet>166</a>}
-<a href=#167 id=167 data-nosnippet>167</a>
-<a href=#168 id=168 data-nosnippet>168</a><span class="kw">fn </span>metadata(coords: WorldTileCoords, view: <span class="kw-2">&amp;</span>ViewState) -&gt; ShaderTileMetadata {
-<a href=#169 id=169 data-nosnippet>169</a>    <span class="kw">let </span>zoom = view.zoom();
-<a href=#170 id=170 data-nosnippet>170</a>    <span class="kw">let </span>zoom_factor = view.style_zoom().scale_to_tile(<span class="kw-2">&amp;</span>coords) <span class="kw">as </span>f32;
-<a href=#171 id=171 data-nosnippet>171</a>    ShaderTileMetadata {
-<a href=#172 id=172 data-nosnippet>172</a>        transform: view
-<a href=#173 id=173 data-nosnippet>173</a>            .gpu_view_projection()
-<a href=#174 id=174 data-nosnippet>174</a>            .to_model_view_projection(coords.transform_for_zoom(zoom))
-<a href=#175 id=175 data-nosnippet>175</a>            .downcast()
-<a href=#176 id=176 data-nosnippet>176</a>            .into(),
-<a href=#177 id=177 data-nosnippet>177</a>        zoom_factor,
-<a href=#178 id=178 data-nosnippet>178</a>        viewport_width: view.width() <span class="kw">as </span>f32,
-<a href=#179 id=179 data-nosnippet>179</a>        viewport_height: view.height() <span class="kw">as </span>f32,
-<a href=#180 id=180 data-nosnippet>180</a>        tile_mercator_coords: tile_mercator_coordinates(
-<a href=#181 id=181 data-nosnippet>181</a>            coords.into_tile(<span class="kw">crate</span>::style::source::TileAddressingScheme::XYZ),
-<a href=#182 id=182 data-nosnippet>182</a>        )
-<a href=#183 id=183 data-nosnippet>183</a>        .into(),
-<a href=#184 id=184 data-nosnippet>184</a>        line_width_scale: <span class="number">1.0</span>,
-<a href=#185 id=185 data-nosnippet>185</a>        line_units_per_pixel: <span class="number">8.0 </span>* zoom_factor,
-<a href=#186 id=186 data-nosnippet>186</a>        clip_antimeridian: u32::from(u8::from(coords.z) == <span class="number">0</span>),
-<a href=#187 id=187 data-nosnippet>187</a>        clip_region: <span class="kw">crate</span>::render::shaders::WHOLE_TILE,
-<a href=#188 id=188 data-nosnippet>188</a>        _pad: [<span class="number">0</span>; <span class="number">2</span>],
-<a href=#189 id=189 data-nosnippet>189</a>    }
-<a href=#190 id=190 data-nosnippet>190</a>}
-<a href=#191 id=191 data-nosnippet>191</a>
-<a href=#192 id=192 data-nosnippet>192</a><span class="attr">#[cfg(test)]
-<a href=#193 id=193 data-nosnippet>193</a></span><span class="kw">mod </span>tests;
+<a href=#149 id=149 data-nosnippet>149</a>            queue.cancel_staged_buffer(<span class="kw-2">&amp;</span>old.buffer);
+<a href=#150 id=150 data-nosnippet>150</a>            old.buffer.destroy();
+<a href=#151 id=151 data-nosnippet>151</a>        }
+<a href=#152 id=152 data-nosnippet>152</a>        <span class="kw">let </span>buffer = device.create_buffer(<span class="kw-2">&amp;</span>wgpu::BufferDescriptor {
+<a href=#153 id=153 data-nosnippet>153</a>            label: <span class="prelude-val">Some</span>(<span class="string">"symbol tile transforms"</span>),
+<a href=#154 id=154 data-nosnippet>154</a>            size: required.next_power_of_two(),
+<a href=#155 id=155 data-nosnippet>155</a>            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+<a href=#156 id=156 data-nosnippet>156</a>            mapped_at_creation: <span class="bool-val">false</span>,
+<a href=#157 id=157 data-nosnippet>157</a>        });
+<a href=#158 id=158 data-nosnippet>158</a>        world.resources.insert(SymbolCovering {
+<a href=#159 id=159 data-nosnippet>159</a>            tiles: Vec::new(),
+<a href=#160 id=160 data-nosnippet>160</a>            buffer,
+<a href=#161 id=161 data-nosnippet>161</a>        });
+<a href=#162 id=162 data-nosnippet>162</a>    }
+<a href=#163 id=163 data-nosnippet>163</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(covering) = world.resources.get_mut::&lt;SymbolCovering&gt;() {
+<a href=#164 id=164 data-nosnippet>164</a>        queue.write_buffer(<span class="kw-2">&amp;</span>covering.buffer, <span class="number">0</span>, bytes);
+<a href=#165 id=165 data-nosnippet>165</a>        covering.tiles = tiles;
+<a href=#166 id=166 data-nosnippet>166</a>    }
+<a href=#167 id=167 data-nosnippet>167</a>}
+<a href=#168 id=168 data-nosnippet>168</a>
+<a href=#169 id=169 data-nosnippet>169</a><span class="kw">fn </span>metadata(coords: WorldTileCoords, view: <span class="kw-2">&amp;</span>ViewState) -&gt; ShaderTileMetadata {
+<a href=#170 id=170 data-nosnippet>170</a>    <span class="kw">let </span>zoom = view.zoom();
+<a href=#171 id=171 data-nosnippet>171</a>    <span class="kw">let </span>zoom_factor = view.style_zoom().scale_to_tile(<span class="kw-2">&amp;</span>coords) <span class="kw">as </span>f32;
+<a href=#172 id=172 data-nosnippet>172</a>    ShaderTileMetadata {
+<a href=#173 id=173 data-nosnippet>173</a>        transform: view
+<a href=#174 id=174 data-nosnippet>174</a>            .gpu_view_projection()
+<a href=#175 id=175 data-nosnippet>175</a>            .to_model_view_projection(coords.transform_for_zoom(zoom))
+<a href=#176 id=176 data-nosnippet>176</a>            .downcast()
+<a href=#177 id=177 data-nosnippet>177</a>            .into(),
+<a href=#178 id=178 data-nosnippet>178</a>        zoom_factor,
+<a href=#179 id=179 data-nosnippet>179</a>        viewport_width: view.width() <span class="kw">as </span>f32,
+<a href=#180 id=180 data-nosnippet>180</a>        viewport_height: view.height() <span class="kw">as </span>f32,
+<a href=#181 id=181 data-nosnippet>181</a>        tile_mercator_coords: tile_mercator_coordinates(
+<a href=#182 id=182 data-nosnippet>182</a>            coords.into_tile(<span class="kw">crate</span>::style::source::TileAddressingScheme::XYZ),
+<a href=#183 id=183 data-nosnippet>183</a>        )
+<a href=#184 id=184 data-nosnippet>184</a>        .into(),
+<a href=#185 id=185 data-nosnippet>185</a>        line_width_scale: <span class="number">1.0</span>,
+<a href=#186 id=186 data-nosnippet>186</a>        line_units_per_pixel: <span class="number">8.0 </span>* zoom_factor,
+<a href=#187 id=187 data-nosnippet>187</a>        clip_antimeridian: u32::from(u8::from(coords.z) == <span class="number">0</span>),
+<a href=#188 id=188 data-nosnippet>188</a>        clip_region: <span class="kw">crate</span>::render::shaders::WHOLE_TILE,
+<a href=#189 id=189 data-nosnippet>189</a>        _pad: [<span class="number">0</span>; <span class="number">2</span>],
+<a href=#190 id=190 data-nosnippet>190</a>    }
+<a href=#191 id=191 data-nosnippet>191</a>}
+<a href=#192 id=192 data-nosnippet>192</a>
+<a href=#193 id=193 data-nosnippet>193</a><span class="attr">#[cfg(test)]
+<a href=#194 id=194 data-nosnippet>194</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["ancestor_at","clip_region","covering_shapes_for","overlaps","selected_shapes","shapes_from_tiles","source_shapes","source_shapes_bounded"]};

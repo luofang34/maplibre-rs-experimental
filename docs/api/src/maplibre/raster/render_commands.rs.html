@@ -53,104 +53,105 @@
 <a href=#53 id=53 data-nosnippet>53</a>            <span class="kw">return </span>RenderCommandResult::Failure;
 <a href=#54 id=54 data-nosnippet>54</a>        };
 <a href=#55 id=55 data-nosnippet>55</a>
-<a href=#56 id=56 data-nosnippet>56</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(bind_group) = raster_resources.layer_texture(<span class="kw-2">&amp;</span>item.style_layer, <span class="kw-2">&amp;</span>item.tile.coords)
-<a href=#57 id=57 data-nosnippet>57</a>        <span class="kw">else </span>{
-<a href=#58 id=58 data-nosnippet>58</a>            <span class="kw">return </span>RenderCommandResult::Failure;
-<a href=#59 id=59 data-nosnippet>59</a>        };
-<a href=#60 id=60 data-nosnippet>60</a>
-<a href=#61 id=61 data-nosnippet>61</a>        pass.set_bind_group(<span class="number">1</span>, bind_group, <span class="kw-2">&amp;</span>[]);
-<a href=#62 id=62 data-nosnippet>62</a>        RenderCommandResult::Success
-<a href=#63 id=63 data-nosnippet>63</a>    }
-<a href=#64 id=64 data-nosnippet>64</a>}
-<a href=#65 id=65 data-nosnippet>65</a>
-<a href=#66 id=66 data-nosnippet>66</a><span class="doccomment">/// Binds the layer's paint adjustments at group two, faded for a tile that is departing.
-<a href=#67 id=67 data-nosnippet>67</a></span><span class="kw">pub struct </span>SetRasterPaintBindGroup;
-<a href=#68 id=68 data-nosnippet>68</a><span class="kw">impl </span>RenderCommand&lt;LayerItem&gt; <span class="kw">for </span>SetRasterPaintBindGroup {
-<a href=#69 id=69 data-nosnippet>69</a>    <span class="kw">fn </span>render&lt;<span class="lifetime">'w</span>&gt;(
-<a href=#70 id=70 data-nosnippet>70</a>        world: <span class="kw-2">&amp;</span><span class="lifetime">'w </span>World,
-<a href=#71 id=71 data-nosnippet>71</a>        item: <span class="kw-2">&amp;</span>LayerItem,
-<a href=#72 id=72 data-nosnippet>72</a>        pass: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::render::tracked_pass::TrackedRenderPass&lt;<span class="lifetime">'w</span>&gt;,
-<a href=#73 id=73 data-nosnippet>73</a>    ) -&gt; RenderCommandResult {
-<a href=#74 id=74 data-nosnippet>74</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(Initialized(raster_resources)) =
-<a href=#75 id=75 data-nosnippet>75</a>            world.resources.get::&lt;Eventually&lt;RasterResources&gt;&gt;()
-<a href=#76 id=76 data-nosnippet>76</a>        <span class="kw">else </span>{
-<a href=#77 id=77 data-nosnippet>77</a>            <span class="kw">return </span>RenderCommandResult::Failure;
-<a href=#78 id=78 data-nosnippet>78</a>        };
-<a href=#79 id=79 data-nosnippet>79</a>        <span class="kw">let </span>departing = world
-<a href=#80 id=80 data-nosnippet>80</a>            .resources
-<a href=#81 id=81 data-nosnippet>81</a>            .get::&lt;RasterCrossFade&gt;()
-<a href=#82 id=82 data-nosnippet>82</a>            .is_some_and(|fade| {
-<a href=#83 id=83 data-nosnippet>83</a>                fade.is_departing(
-<a href=#84 id=84 data-nosnippet>84</a>                    raster_resources
-<a href=#85 id=85 data-nosnippet>85</a>                        .layer_source(<span class="kw-2">&amp;</span>item.style_layer)
-<a href=#86 id=86 data-nosnippet>86</a>                        .and_then(RasterSourceId::name),
-<a href=#87 id=87 data-nosnippet>87</a>                    <span class="kw-2">&amp;</span>item.tile.coords,
-<a href=#88 id=88 data-nosnippet>88</a>                )
-<a href=#89 id=89 data-nosnippet>89</a>            });
-<a href=#90 id=90 data-nosnippet>90</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(bind_group) = raster_resources.layer_paint(<span class="kw-2">&amp;</span>item.style_layer, departing) <span class="kw">else </span>{
-<a href=#91 id=91 data-nosnippet>91</a>            <span class="kw">return </span>RenderCommandResult::Failure;
-<a href=#92 id=92 data-nosnippet>92</a>        };
-<a href=#93 id=93 data-nosnippet>93</a>        pass.set_bind_group(<span class="number">2</span>, bind_group, <span class="kw-2">&amp;</span>[]);
-<a href=#94 id=94 data-nosnippet>94</a>        RenderCommandResult::Success
-<a href=#95 id=95 data-nosnippet>95</a>    }
-<a href=#96 id=96 data-nosnippet>96</a>}
-<a href=#97 id=97 data-nosnippet>97</a>
-<a href=#98 id=98 data-nosnippet>98</a><span class="doccomment">/// Draws a cached tile mesh with the item's stencil reference and current metadata range.
-<a href=#99 id=99 data-nosnippet>99</a></span><span class="kw">pub struct </span>DrawRasterTile;
-<a href=#100 id=100 data-nosnippet>100</a><span class="kw">impl </span>RenderCommand&lt;LayerItem&gt; <span class="kw">for </span>DrawRasterTile {
-<a href=#101 id=101 data-nosnippet>101</a>    <span class="kw">fn </span>render&lt;<span class="lifetime">'w</span>&gt;(
-<a href=#102 id=102 data-nosnippet>102</a>        world: <span class="kw-2">&amp;</span><span class="lifetime">'w </span>World,
-<a href=#103 id=103 data-nosnippet>103</a>        item: <span class="kw-2">&amp;</span>LayerItem,
-<a href=#104 id=104 data-nosnippet>104</a>        pass: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::render::tracked_pass::TrackedRenderPass&lt;<span class="lifetime">'w</span>&gt;,
-<a href=#105 id=105 data-nosnippet>105</a>    ) -&gt; RenderCommandResult {
-<a href=#106 id=106 data-nosnippet>106</a>        <span class="kw">let </span><span class="prelude-val">Some</span>((Initialized(tile_view_pattern), tile_mesh_cache)) = world
-<a href=#107 id=107 data-nosnippet>107</a>            .resources
-<a href=#108 id=108 data-nosnippet>108</a>            .query::&lt;(<span class="kw-2">&amp;</span>Eventually&lt;WgpuTileViewPattern&gt;, <span class="kw-2">&amp;</span>GlobeTileMeshCache)&gt;()
-<a href=#109 id=109 data-nosnippet>109</a>        <span class="kw">else </span>{
-<a href=#110 id=110 data-nosnippet>110</a>            <span class="kw">return </span>RenderCommandResult::Failure;
-<a href=#111 id=111 data-nosnippet>111</a>        };
-<a href=#112 id=112 data-nosnippet>112</a>
-<a href=#113 id=113 data-nosnippet>113</a>        <span class="kw">let </span>source_shape = <span class="kw-2">&amp;</span>item.source_shape;
-<a href=#114 id=114 data-nosnippet>114</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(mesh) = tile_mesh_cache.get(
-<a href=#115 id=115 data-nosnippet>115</a>            source_shape.coords(),
-<a href=#116 id=116 data-nosnippet>116</a>            TileMeshUsage::Raster,
-<a href=#117 id=117 data-nosnippet>117</a>            item.generate_borders,
-<a href=#118 id=118 data-nosnippet>118</a>        ) <span class="kw">else </span>{
-<a href=#119 id=119 data-nosnippet>119</a>            <span class="kw">return </span>RenderCommandResult::Failure;
-<a href=#120 id=120 data-nosnippet>120</a>        };
-<a href=#121 id=121 data-nosnippet>121</a>
-<a href=#122 id=122 data-nosnippet>122</a>        <span class="kw">let </span>reference = source_shape.stencil_coords().stencil_reference_value_3d();
-<a href=#123 id=123 data-nosnippet>123</a>        <span class="comment">// Each raster draw inverts the stencil it passes, so no pixel is drawn twice; a shape
-<a href=#124 id=124 data-nosnippet>124</a>        // drawn over another tile finds that tile's reference inverted.
-<a href=#125 id=125 data-nosnippet>125</a>        </span><span class="kw">let </span>reference = u32::from(<span class="kw">if </span>source_shape.is_drawn_within_another() {
-<a href=#126 id=126 data-nosnippet>126</a>            !reference
-<a href=#127 id=127 data-nosnippet>127</a>        } <span class="kw">else </span>{
-<a href=#128 id=128 data-nosnippet>128</a>            reference
-<a href=#129 id=129 data-nosnippet>129</a>        });
-<a href=#130 id=130 data-nosnippet>130</a>
-<a href=#131 id=131 data-nosnippet>131</a>        pass.set_stencil_reference(reference);
-<a href=#132 id=132 data-nosnippet>132</a>
-<a href=#133 id=133 data-nosnippet>133</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(tile_view_pattern_buffer) = source_shape.buffer_range() <span class="kw">else </span>{
-<a href=#134 id=134 data-nosnippet>134</a>            <span class="kw">return </span>RenderCommandResult::Failure;
-<a href=#135 id=135 data-nosnippet>135</a>        };
-<a href=#136 id=136 data-nosnippet>136</a>        pass.set_vertex_buffer(<span class="number">0</span>, mesh.vertex_buffer().slice(..));
-<a href=#137 id=137 data-nosnippet>137</a>        pass.set_vertex_buffer(
-<a href=#138 id=138 data-nosnippet>138</a>            <span class="number">1</span>,
-<a href=#139 id=139 data-nosnippet>139</a>            tile_view_pattern.buffer().slice(tile_view_pattern_buffer),
-<a href=#140 id=140 data-nosnippet>140</a>        );
-<a href=#141 id=141 data-nosnippet>141</a>
-<a href=#142 id=142 data-nosnippet>142</a>        pass.set_index_buffer(mesh.index_buffer().slice(..), mesh.index_format());
-<a href=#143 id=143 data-nosnippet>143</a>        pass.draw_indexed(<span class="number">0</span>..mesh.index_count(), <span class="number">0</span>, <span class="number">0</span>..<span class="number">1</span>);
-<a href=#144 id=144 data-nosnippet>144</a>
-<a href=#145 id=145 data-nosnippet>145</a>        RenderCommandResult::Success
-<a href=#146 id=146 data-nosnippet>146</a>    }
-<a href=#147 id=147 data-nosnippet>147</a>}
-<a href=#148 id=148 data-nosnippet>148</a>
-<a href=#149 id=149 data-nosnippet>149</a><span class="doccomment">/// Binds the raster pipeline and image, then draws only when every command succeeds.
-<a href=#150 id=150 data-nosnippet>150</a></span><span class="kw">pub type </span>DrawRasterTiles = (
-<a href=#151 id=151 data-nosnippet>151</a>    SetRasterTilePipeline,
-<a href=#152 id=152 data-nosnippet>152</a>    SetRasterViewBindGroup,
-<a href=#153 id=153 data-nosnippet>153</a>    SetRasterPaintBindGroup,
-<a href=#154 id=154 data-nosnippet>154</a>    DrawRasterTile,
-<a href=#155 id=155 data-nosnippet>155</a>);
+<a href=#56 id=56 data-nosnippet>56</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(bind_group) =
+<a href=#57 id=57 data-nosnippet>57</a>            raster_resources.layer_texture(item.style_layer.as_str(), <span class="kw-2">&amp;</span>item.tile.coords)
+<a href=#58 id=58 data-nosnippet>58</a>        <span class="kw">else </span>{
+<a href=#59 id=59 data-nosnippet>59</a>            <span class="kw">return </span>RenderCommandResult::Failure;
+<a href=#60 id=60 data-nosnippet>60</a>        };
+<a href=#61 id=61 data-nosnippet>61</a>
+<a href=#62 id=62 data-nosnippet>62</a>        pass.set_bind_group(<span class="number">1</span>, bind_group, <span class="kw-2">&amp;</span>[]);
+<a href=#63 id=63 data-nosnippet>63</a>        RenderCommandResult::Success
+<a href=#64 id=64 data-nosnippet>64</a>    }
+<a href=#65 id=65 data-nosnippet>65</a>}
+<a href=#66 id=66 data-nosnippet>66</a>
+<a href=#67 id=67 data-nosnippet>67</a><span class="doccomment">/// Binds the layer's paint adjustments at group two, faded for a tile that is departing.
+<a href=#68 id=68 data-nosnippet>68</a></span><span class="kw">pub struct </span>SetRasterPaintBindGroup;
+<a href=#69 id=69 data-nosnippet>69</a><span class="kw">impl </span>RenderCommand&lt;LayerItem&gt; <span class="kw">for </span>SetRasterPaintBindGroup {
+<a href=#70 id=70 data-nosnippet>70</a>    <span class="kw">fn </span>render&lt;<span class="lifetime">'w</span>&gt;(
+<a href=#71 id=71 data-nosnippet>71</a>        world: <span class="kw-2">&amp;</span><span class="lifetime">'w </span>World,
+<a href=#72 id=72 data-nosnippet>72</a>        item: <span class="kw-2">&amp;</span>LayerItem,
+<a href=#73 id=73 data-nosnippet>73</a>        pass: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::render::tracked_pass::TrackedRenderPass&lt;<span class="lifetime">'w</span>&gt;,
+<a href=#74 id=74 data-nosnippet>74</a>    ) -&gt; RenderCommandResult {
+<a href=#75 id=75 data-nosnippet>75</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(Initialized(raster_resources)) =
+<a href=#76 id=76 data-nosnippet>76</a>            world.resources.get::&lt;Eventually&lt;RasterResources&gt;&gt;()
+<a href=#77 id=77 data-nosnippet>77</a>        <span class="kw">else </span>{
+<a href=#78 id=78 data-nosnippet>78</a>            <span class="kw">return </span>RenderCommandResult::Failure;
+<a href=#79 id=79 data-nosnippet>79</a>        };
+<a href=#80 id=80 data-nosnippet>80</a>        <span class="kw">let </span>departing = world
+<a href=#81 id=81 data-nosnippet>81</a>            .resources
+<a href=#82 id=82 data-nosnippet>82</a>            .get::&lt;RasterCrossFade&gt;()
+<a href=#83 id=83 data-nosnippet>83</a>            .is_some_and(|fade| {
+<a href=#84 id=84 data-nosnippet>84</a>                fade.is_departing(
+<a href=#85 id=85 data-nosnippet>85</a>                    raster_resources
+<a href=#86 id=86 data-nosnippet>86</a>                        .layer_source(item.style_layer.as_str())
+<a href=#87 id=87 data-nosnippet>87</a>                        .and_then(RasterSourceId::name),
+<a href=#88 id=88 data-nosnippet>88</a>                    <span class="kw-2">&amp;</span>item.tile.coords,
+<a href=#89 id=89 data-nosnippet>89</a>                )
+<a href=#90 id=90 data-nosnippet>90</a>            });
+<a href=#91 id=91 data-nosnippet>91</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(bind_group) = raster_resources.layer_paint(item.style_layer, departing) <span class="kw">else </span>{
+<a href=#92 id=92 data-nosnippet>92</a>            <span class="kw">return </span>RenderCommandResult::Failure;
+<a href=#93 id=93 data-nosnippet>93</a>        };
+<a href=#94 id=94 data-nosnippet>94</a>        pass.set_bind_group(<span class="number">2</span>, bind_group, <span class="kw-2">&amp;</span>[]);
+<a href=#95 id=95 data-nosnippet>95</a>        RenderCommandResult::Success
+<a href=#96 id=96 data-nosnippet>96</a>    }
+<a href=#97 id=97 data-nosnippet>97</a>}
+<a href=#98 id=98 data-nosnippet>98</a>
+<a href=#99 id=99 data-nosnippet>99</a><span class="doccomment">/// Draws a cached tile mesh with the item's stencil reference and current metadata range.
+<a href=#100 id=100 data-nosnippet>100</a></span><span class="kw">pub struct </span>DrawRasterTile;
+<a href=#101 id=101 data-nosnippet>101</a><span class="kw">impl </span>RenderCommand&lt;LayerItem&gt; <span class="kw">for </span>DrawRasterTile {
+<a href=#102 id=102 data-nosnippet>102</a>    <span class="kw">fn </span>render&lt;<span class="lifetime">'w</span>&gt;(
+<a href=#103 id=103 data-nosnippet>103</a>        world: <span class="kw-2">&amp;</span><span class="lifetime">'w </span>World,
+<a href=#104 id=104 data-nosnippet>104</a>        item: <span class="kw-2">&amp;</span>LayerItem,
+<a href=#105 id=105 data-nosnippet>105</a>        pass: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::render::tracked_pass::TrackedRenderPass&lt;<span class="lifetime">'w</span>&gt;,
+<a href=#106 id=106 data-nosnippet>106</a>    ) -&gt; RenderCommandResult {
+<a href=#107 id=107 data-nosnippet>107</a>        <span class="kw">let </span><span class="prelude-val">Some</span>((Initialized(tile_view_pattern), tile_mesh_cache)) = world
+<a href=#108 id=108 data-nosnippet>108</a>            .resources
+<a href=#109 id=109 data-nosnippet>109</a>            .query::&lt;(<span class="kw-2">&amp;</span>Eventually&lt;WgpuTileViewPattern&gt;, <span class="kw-2">&amp;</span>GlobeTileMeshCache)&gt;()
+<a href=#110 id=110 data-nosnippet>110</a>        <span class="kw">else </span>{
+<a href=#111 id=111 data-nosnippet>111</a>            <span class="kw">return </span>RenderCommandResult::Failure;
+<a href=#112 id=112 data-nosnippet>112</a>        };
+<a href=#113 id=113 data-nosnippet>113</a>
+<a href=#114 id=114 data-nosnippet>114</a>        <span class="kw">let </span>source_shape = <span class="kw-2">&amp;</span>item.source_shape;
+<a href=#115 id=115 data-nosnippet>115</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(mesh) = tile_mesh_cache.get(
+<a href=#116 id=116 data-nosnippet>116</a>            source_shape.coords(),
+<a href=#117 id=117 data-nosnippet>117</a>            TileMeshUsage::Raster,
+<a href=#118 id=118 data-nosnippet>118</a>            item.generate_borders,
+<a href=#119 id=119 data-nosnippet>119</a>        ) <span class="kw">else </span>{
+<a href=#120 id=120 data-nosnippet>120</a>            <span class="kw">return </span>RenderCommandResult::Failure;
+<a href=#121 id=121 data-nosnippet>121</a>        };
+<a href=#122 id=122 data-nosnippet>122</a>
+<a href=#123 id=123 data-nosnippet>123</a>        <span class="kw">let </span>reference = source_shape.stencil_reference();
+<a href=#124 id=124 data-nosnippet>124</a>        <span class="comment">// Each raster draw inverts the stencil it passes, so no pixel is drawn twice; a shape
+<a href=#125 id=125 data-nosnippet>125</a>        // drawn over another tile finds that tile's reference inverted.
+<a href=#126 id=126 data-nosnippet>126</a>        </span><span class="kw">let </span>reference = u32::from(<span class="kw">if </span>source_shape.is_drawn_within_another() {
+<a href=#127 id=127 data-nosnippet>127</a>            !reference
+<a href=#128 id=128 data-nosnippet>128</a>        } <span class="kw">else </span>{
+<a href=#129 id=129 data-nosnippet>129</a>            reference
+<a href=#130 id=130 data-nosnippet>130</a>        });
+<a href=#131 id=131 data-nosnippet>131</a>
+<a href=#132 id=132 data-nosnippet>132</a>        pass.set_stencil_reference(reference);
+<a href=#133 id=133 data-nosnippet>133</a>
+<a href=#134 id=134 data-nosnippet>134</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(tile_view_pattern_buffer) = source_shape.buffer_range() <span class="kw">else </span>{
+<a href=#135 id=135 data-nosnippet>135</a>            <span class="kw">return </span>RenderCommandResult::Failure;
+<a href=#136 id=136 data-nosnippet>136</a>        };
+<a href=#137 id=137 data-nosnippet>137</a>        pass.set_vertex_buffer(<span class="number">0</span>, mesh.vertex_buffer().slice(..));
+<a href=#138 id=138 data-nosnippet>138</a>        pass.set_vertex_buffer(
+<a href=#139 id=139 data-nosnippet>139</a>            <span class="number">1</span>,
+<a href=#140 id=140 data-nosnippet>140</a>            tile_view_pattern.buffer().slice(tile_view_pattern_buffer),
+<a href=#141 id=141 data-nosnippet>141</a>        );
+<a href=#142 id=142 data-nosnippet>142</a>
+<a href=#143 id=143 data-nosnippet>143</a>        pass.set_index_buffer(mesh.index_buffer().slice(..), mesh.index_format());
+<a href=#144 id=144 data-nosnippet>144</a>        pass.draw_indexed(<span class="number">0</span>..mesh.index_count(), <span class="number">0</span>, <span class="number">0</span>..<span class="number">1</span>);
+<a href=#145 id=145 data-nosnippet>145</a>
+<a href=#146 id=146 data-nosnippet>146</a>        RenderCommandResult::Success
+<a href=#147 id=147 data-nosnippet>147</a>    }
+<a href=#148 id=148 data-nosnippet>148</a>}
+<a href=#149 id=149 data-nosnippet>149</a>
+<a href=#150 id=150 data-nosnippet>150</a><span class="doccomment">/// Binds the raster pipeline and image, then draws only when every command succeeds.
+<a href=#151 id=151 data-nosnippet>151</a></span><span class="kw">pub type </span>DrawRasterTiles = (
+<a href=#152 id=152 data-nosnippet>152</a>    SetRasterTilePipeline,
+<a href=#153 id=153 data-nosnippet>153</a>    SetRasterViewBindGroup,
+<a href=#154 id=154 data-nosnippet>154</a>    SetRasterPaintBindGroup,
+<a href=#155 id=155 data-nosnippet>155</a>    DrawRasterTile,
+<a href=#156 id=156 data-nosnippet>156</a>);
 </code></pre></div></section></main></body></html>

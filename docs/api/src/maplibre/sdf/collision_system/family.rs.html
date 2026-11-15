@@ -20,7 +20,7 @@
 <a href=#20 id=20 data-nosnippet>20</a>
 <a href=#21 id=21 data-nosnippet>21</a><span class="doccomment">/// How one feature was placed, for the layers that share its placement.
 <a href=#22 id=22 data-nosnippet>22</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">struct </span>Outcome {
-<a href=#23 id=23 data-nosnippet>23</a>    <span class="kw">pub</span>(<span class="kw">super</span>) opacity: [f32; <span class="number">2</span>],
+<a href=#23 id=23 data-nosnippet>23</a>    <span class="kw">pub</span>(<span class="kw">super</span>) ramps: [<span class="kw">super</span>::temporal::FadeRamp; <span class="number">2</span>],
 <a href=#24 id=24 data-nosnippet>24</a>    <span class="kw">pub</span>(<span class="kw">super</span>) text_shift: [f32; <span class="number">2</span>],
 <a href=#25 id=25 data-nosnippet>25</a>    <span class="kw">pub</span>(<span class="kw">super</span>) anchor: usize,
 <a href=#26 id=26 data-nosnippet>26</a>    <span class="kw">pub</span>(<span class="kw">super</span>) ground: f32,
@@ -95,7 +95,7 @@
 <a href=#95 id=95 data-nosnippet>95</a>                write_feature_metadata(
 <a href=#96 id=96 data-nosnippet>96</a>                    member,
 <a href=#97 id=97 data-nosnippet>97</a>                    feature,
-<a href=#98 id=98 data-nosnippet>98</a>                    (outcome.opacity, outcome.text_shift, outcome.anchor),
+<a href=#98 id=98 data-nosnippet>98</a>                    (outcome.ramps, outcome.text_shift, outcome.anchor),
 <a href=#99 id=99 data-nosnippet>99</a>                    outcome.ground,
 <a href=#100 id=100 data-nosnippet>100</a>                    outcome.poses.as_deref(),
 <a href=#101 id=101 data-nosnippet>101</a>                    (paint, zoom, <span class="kw-2">&amp;mut </span>metadata),

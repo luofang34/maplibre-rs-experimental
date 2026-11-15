@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["feature_hash","matches","position"],"struct":["PlacementHistory","State"]};
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_FADE_DURATION_MS"],"fn":["feature_hash","matches","position"],"struct":["FadeRamp","PlacementHistory","State"]};

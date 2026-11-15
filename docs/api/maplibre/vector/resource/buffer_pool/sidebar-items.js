@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["BackingBufferType"],"fn":["fitting_buffer_size"],"mod":["allocation_error","allocator","device","growth","index","page","updates","upload"],"struct":["BackingBuffer","BufferPool"],"type":["PatternRuns","SortRuns"]};
+window.SIDEBAR_ITEMS = {"enum":["BackingBufferType"],"fn":["fitting_buffer_size"],"mod":["allocation_error","allocator","device","growth","index","page","shared","updates","upload"],"struct":["BackingBuffer","BufferPool"],"type":["PatternRuns","SortRuns"]};

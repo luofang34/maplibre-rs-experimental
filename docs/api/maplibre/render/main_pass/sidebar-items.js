@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["EMPTY_STENCIL_REFERENCE","STENCIL_MARK"],"fn":["above_symbols","color_attachment","draw_group","draw_layers","same_layer","set_layer_masks"],"struct":["AboveSymbols","MainPassNode"]};
+window.SIDEBAR_ITEMS = {"constant":["EMPTY_STENCIL_REFERENCE","STENCIL_MARK"],"enum":["StencilState"],"fn":["above_symbols","apply_layer_masks","color_attachment","draw_group","draw_layers","next_stencil_state","same_layer","unique_vector_stencils"],"struct":["AboveSymbols","MainPassNode"]};

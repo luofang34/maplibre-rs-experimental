@@ -93,49 +93,56 @@
 <a href=#93 id=93 data-nosnippet>93</a>
 <a href=#94 id=94 data-nosnippet>94</a>    <span class="kw">let </span>pool_index = buffer_pool.index();
 <a href=#95 id=95 data-nosnippet>95</a>    <span class="kw">for </span>layer <span class="kw">in </span>layers {
-<a href=#96 id=96 data-nosnippet>96</a>        <span class="kw">let </span><span class="kw-2">mut </span>items = Vec::new();
-<a href=#97 id=97 data-nosnippet>97</a>        <span class="kw">for </span>source_shape <span class="kw">in </span><span class="kw-2">&amp;</span>sources {
-<a href=#98 id=98 data-nosnippet>98</a>            <span class="kw">let </span><span class="prelude-val">Some</span>(entries) = pool_index.get_layers(source_shape.coords()) <span class="kw">else </span>{
-<a href=#99 id=99 data-nosnippet>99</a>                <span class="kw">continue</span>;
-<a href=#100 id=100 data-nosnippet>100</a>            };
-<a href=#101 id=101 data-nosnippet>101</a>            <span class="kw">for </span>entry <span class="kw">in </span>entries {
-<a href=#102 id=102 data-nosnippet>102</a>                <span class="kw">if </span>entry.style_layer.id != layer.id {
-<a href=#103 id=103 data-nosnippet>103</a>                    <span class="kw">continue</span>;
-<a href=#104 id=104 data-nosnippet>104</a>                }
-<a href=#105 id=105 data-nosnippet>105</a>                items.push(LayerItem {
-<a href=#106 id=106 data-nosnippet>106</a>                    projection: ProjectionBinding::View,
-<a href=#107 id=107 data-nosnippet>107</a>                    draw_function: Box::new(DrawState::&lt;LayerItem, DrawHeatmapDensityTiles&gt;::new()),
-<a href=#108 id=108 data-nosnippet>108</a>                    index: layer.index,
-<a href=#109 id=109 data-nosnippet>109</a>                    generate_borders: <span class="bool-val">false</span>,
-<a href=#110 id=110 data-nosnippet>110</a>                    style_layer: layer.id.clone(),
-<a href=#111 id=111 data-nosnippet>111</a>                    tile: Tile {
-<a href=#112 id=112 data-nosnippet>112</a>                        coords: entry.coords,
-<a href=#113 id=113 data-nosnippet>113</a>                    },
-<a href=#114 id=114 data-nosnippet>114</a>                    source_shape: source_shape.clone(),
-<a href=#115 id=115 data-nosnippet>115</a>                    run: <span class="prelude-val">None</span>,
-<a href=#116 id=116 data-nosnippet>116</a>                });
-<a href=#117 id=117 data-nosnippet>117</a>            }
-<a href=#118 id=118 data-nosnippet>118</a>        }
-<a href=#119 id=119 data-nosnippet>119</a>        density_phase.layers.push(DensityLayer {
-<a href=#120 id=120 data-nosnippet>120</a>            layer: layer.id.clone(),
-<a href=#121 id=121 data-nosnippet>121</a>            items,
-<a href=#122 id=122 data-nosnippet>122</a>        });
-<a href=#123 id=123 data-nosnippet>123</a>        <span class="comment">// Ignoring depth, the composite lands over opaque layers above it; at their index it
-<a href=#124 id=124 data-nosnippet>124</a>        // sorts behind them through the borders flag.
-<a href=#125 id=125 data-nosnippet>125</a>        </span><span class="kw">let </span>above = style.opaque_layer_above(layer, zoom);
-<a href=#126 id=126 data-nosnippet>126</a>        layer_item_phase.add(LayerItem {
-<a href=#127 id=127 data-nosnippet>127</a>            projection: ProjectionBinding::View,
-<a href=#128 id=128 data-nosnippet>128</a>            draw_function: Box::new(DrawState::&lt;LayerItem, DrawHeatmapComposite&gt;::new()),
-<a href=#129 id=129 data-nosnippet>129</a>            index: above.unwrap_or(layer.index),
-<a href=#130 id=130 data-nosnippet>130</a>            generate_borders: above.is_some(),
-<a href=#131 id=131 data-nosnippet>131</a>            style_layer: layer.id.clone(),
-<a href=#132 id=132 data-nosnippet>132</a>            tile: Tile {
-<a href=#133 id=133 data-nosnippet>133</a>                coords: any_shape.coords(),
-<a href=#134 id=134 data-nosnippet>134</a>            },
-<a href=#135 id=135 data-nosnippet>135</a>            source_shape: any_shape.clone(),
-<a href=#136 id=136 data-nosnippet>136</a>            run: <span class="prelude-val">None</span>,
-<a href=#137 id=137 data-nosnippet>137</a>        });
-<a href=#138 id=138 data-nosnippet>138</a>    }
-<a href=#139 id=139 data-nosnippet>139</a>    <span class="prelude-val">Ok</span>(())
-<a href=#140 id=140 data-nosnippet>140</a>}
+<a href=#96 id=96 data-nosnippet>96</a>        <span class="kw">let </span>layer_id = layer.layer_id();
+<a href=#97 id=97 data-nosnippet>97</a>        <span class="kw">let </span><span class="kw-2">mut </span>items = Vec::new();
+<a href=#98 id=98 data-nosnippet>98</a>        <span class="kw">for </span>source_shape <span class="kw">in </span><span class="kw-2">&amp;</span>sources {
+<a href=#99 id=99 data-nosnippet>99</a>            <span class="kw">let </span><span class="prelude-val">Some</span>(entries) = pool_index.get_layers(source_shape.coords()) <span class="kw">else </span>{
+<a href=#100 id=100 data-nosnippet>100</a>                <span class="kw">continue</span>;
+<a href=#101 id=101 data-nosnippet>101</a>            };
+<a href=#102 id=102 data-nosnippet>102</a>            <span class="kw">let </span>shape_data = source_shape.draw_data();
+<a href=#103 id=103 data-nosnippet>103</a>            <span class="kw">for </span>(slot_idx, entry) <span class="kw">in </span>entries.iter().enumerate() {
+<a href=#104 id=104 data-nosnippet>104</a>                <span class="kw">if </span>entry.style_layer_id != layer_id {
+<a href=#105 id=105 data-nosnippet>105</a>                    <span class="kw">continue</span>;
+<a href=#106 id=106 data-nosnippet>106</a>                }
+<a href=#107 id=107 data-nosnippet>107</a>                items.push(LayerItem {
+<a href=#108 id=108 data-nosnippet>108</a>                    projection: ProjectionBinding::View,
+<a href=#109 id=109 data-nosnippet>109</a>                    draw_function: <span class="kw-2">&amp;</span>DrawState::&lt;LayerItem, DrawHeatmapDensityTiles&gt;::INSTANCE,
+<a href=#110 id=110 data-nosnippet>110</a>                    index: layer.index,
+<a href=#111 id=111 data-nosnippet>111</a>                    generate_borders: <span class="bool-val">false</span>,
+<a href=#112 id=112 data-nosnippet>112</a>                    style_layer: layer_id,
+<a href=#113 id=113 data-nosnippet>113</a>                    entry_slot: u16::try_from(slot_idx)
+<a href=#114 id=114 data-nosnippet>114</a>                        .unwrap_or(<span class="kw">crate</span>::render::render_phase::UNSET_ENTRY_SLOT),
+<a href=#115 id=115 data-nosnippet>115</a>                    tile: Tile {
+<a href=#116 id=116 data-nosnippet>116</a>                        coords: entry.coords,
+<a href=#117 id=117 data-nosnippet>117</a>                    },
+<a href=#118 id=118 data-nosnippet>118</a>                    source_shape: shape_data,
+<a href=#119 id=119 data-nosnippet>119</a>                    mask_group: <span class="kw">crate</span>::render::render_phase::MaskGroup::Vector,
+<a href=#120 id=120 data-nosnippet>120</a>                    run: <span class="prelude-val">None</span>,
+<a href=#121 id=121 data-nosnippet>121</a>                });
+<a href=#122 id=122 data-nosnippet>122</a>            }
+<a href=#123 id=123 data-nosnippet>123</a>        }
+<a href=#124 id=124 data-nosnippet>124</a>        density_phase.layers.push(DensityLayer {
+<a href=#125 id=125 data-nosnippet>125</a>            layer: layer.id.clone(),
+<a href=#126 id=126 data-nosnippet>126</a>            items,
+<a href=#127 id=127 data-nosnippet>127</a>        });
+<a href=#128 id=128 data-nosnippet>128</a>        <span class="comment">// Ignoring depth, the composite lands over opaque layers above it; at their index it
+<a href=#129 id=129 data-nosnippet>129</a>        // sorts behind them through the borders flag.
+<a href=#130 id=130 data-nosnippet>130</a>        </span><span class="kw">let </span>above = style.opaque_layer_above(layer, zoom);
+<a href=#131 id=131 data-nosnippet>131</a>        layer_item_phase.add(LayerItem {
+<a href=#132 id=132 data-nosnippet>132</a>            projection: ProjectionBinding::View,
+<a href=#133 id=133 data-nosnippet>133</a>            draw_function: <span class="kw-2">&amp;</span>DrawState::&lt;LayerItem, DrawHeatmapComposite&gt;::INSTANCE,
+<a href=#134 id=134 data-nosnippet>134</a>            index: above.unwrap_or(layer.index),
+<a href=#135 id=135 data-nosnippet>135</a>            generate_borders: above.is_some(),
+<a href=#136 id=136 data-nosnippet>136</a>            style_layer: layer_id,
+<a href=#137 id=137 data-nosnippet>137</a>            entry_slot: <span class="kw">crate</span>::render::render_phase::UNSET_ENTRY_SLOT,
+<a href=#138 id=138 data-nosnippet>138</a>            tile: Tile {
+<a href=#139 id=139 data-nosnippet>139</a>                coords: any_shape.coords(),
+<a href=#140 id=140 data-nosnippet>140</a>            },
+<a href=#141 id=141 data-nosnippet>141</a>            source_shape: any_shape.draw_data(),
+<a href=#142 id=142 data-nosnippet>142</a>            mask_group: <span class="kw">crate</span>::render::render_phase::MaskGroup::Unmasked,
+<a href=#143 id=143 data-nosnippet>143</a>            run: <span class="prelude-val">None</span>,
+<a href=#144 id=144 data-nosnippet>144</a>        });
+<a href=#145 id=145 data-nosnippet>145</a>    }
+<a href=#146 id=146 data-nosnippet>146</a>    <span class="prelude-val">Ok</span>(())
+<a href=#147 id=147 data-nosnippet>147</a>}
 </code></pre></div></section></main></body></html>

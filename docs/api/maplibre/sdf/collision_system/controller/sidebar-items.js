@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CONTINUOUS_PLACEMENT_PERIOD","FAST_PLACEMENT_PERIOD"],"struct":["PlacementConfig","PlacementController","PlacementTriggers"]};

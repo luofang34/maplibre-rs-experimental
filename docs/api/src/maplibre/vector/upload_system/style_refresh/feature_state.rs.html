@@ -191,4 +191,65 @@
 <a href=#191 id=191 data-nosnippet>191</a>        }
 <a href=#192 id=192 data-nosnippet>192</a>    }
 <a href=#193 id=193 data-nosnippet>193</a>}
+<a href=#194 id=194 data-nosnippet>194</a>
+<a href=#195 id=195 data-nosnippet>195</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>recolor_cpu_bucket(
+<a href=#196 id=196 data-nosnippet>196</a>    style_layer: <span class="kw-2">&amp;</span><span class="kw">crate</span>::style::layer::StyleLayer,
+<a href=#197 id=197 data-nosnippet>197</a>    bucket: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::vector::AvailableVectorLayerBucket,
+<a href=#198 id=198 data-nosnippet>198</a>    entries: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[<span class="kw">crate</span>::vector::feature_paint::BucketFeatureEntry]&gt;,
+<a href=#199 id=199 data-nosnippet>199</a>    uniform: <span class="prelude-ty">Option</span>&lt;[f32; <span class="number">4</span>]&gt;,
+<a href=#200 id=200 data-nosnippet>200</a>    style_zoom: f64,
+<a href=#201 id=201 data-nosnippet>201</a>    needs_worker_refresh: <span class="kw-2">&amp;mut </span>bool,
+<a href=#202 id=202 data-nosnippet>202</a>) -&gt; (bool, bool) {
+<a href=#203 id=203 data-nosnippet>203</a>    <span class="kw">use </span><span class="kw">crate</span>::vector::feature_paint::{
+<a href=#204 id=204 data-nosnippet>204</a>        evaluate_bucket_colors, BucketEntryKind, BucketFeatureEntry,
+<a href=#205 id=205 data-nosnippet>205</a>    };
+<a href=#206 id=206 data-nosnippet>206</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(entries) = entries {
+<a href=#207 id=207 data-nosnippet>207</a>        <span class="kw">let </span>new_colors = evaluate_bucket_colors(style_layer, entries, style_zoom);
+<a href=#208 id=208 data-nosnippet>208</a>        <span class="kw">let </span>changed = new_colors != bucket.feature_colors;
+<a href=#209 id=209 data-nosnippet>209</a>        bucket.feature_colors = new_colors;
+<a href=#210 id=210 data-nosnippet>210</a>        (<span class="bool-val">true</span>, changed)
+<a href=#211 id=211 data-nosnippet>211</a>    } <span class="kw">else if </span>uniform.is_some() {
+<a href=#212 id=212 data-nosnippet>212</a>        (<span class="bool-val">true</span>, <span class="bool-val">false</span>)
+<a href=#213 id=213 data-nosnippet>213</a>    } <span class="kw">else if </span>layer_is_feature_constant(style_layer) {
+<a href=#214 id=214 data-nosnippet>214</a>        <span class="kw">let </span>single = [BucketFeatureEntry {
+<a href=#215 id=215 data-nosnippet>215</a>            raw_id: <span class="prelude-val">None</span>,
+<a href=#216 id=216 data-nosnippet>216</a>            properties: std::sync::Arc::default(),
+<a href=#217 id=217 data-nosnippet>217</a>            kind: BucketEntryKind::Feature,
+<a href=#218 id=218 data-nosnippet>218</a>        }];
+<a href=#219 id=219 data-nosnippet>219</a>        <span class="kw">let </span>const_color = evaluate_bucket_colors(style_layer, <span class="kw-2">&amp;</span>single, style_zoom)[<span class="number">0</span>];
+<a href=#220 id=220 data-nosnippet>220</a>        <span class="kw">let </span>new_colors = <span class="macro">vec!</span>[const_color; bucket.feature_indices.len()];
+<a href=#221 id=221 data-nosnippet>221</a>        <span class="kw">let </span>changed = new_colors != bucket.feature_colors;
+<a href=#222 id=222 data-nosnippet>222</a>        bucket.feature_colors = new_colors;
+<a href=#223 id=223 data-nosnippet>223</a>        (<span class="bool-val">true</span>, changed)
+<a href=#224 id=224 data-nosnippet>224</a>    } <span class="kw">else </span>{
+<a href=#225 id=225 data-nosnippet>225</a>        <span class="kw">if </span>bucket.buffer.usable_indices &gt; <span class="number">0 </span>|| !bucket.buffer.buffer.indices.is_empty() {
+<a href=#226 id=226 data-nosnippet>226</a>            <span class="kw-2">*</span>needs_worker_refresh = <span class="bool-val">true</span>;
+<a href=#227 id=227 data-nosnippet>227</a>        }
+<a href=#228 id=228 data-nosnippet>228</a>        (<span class="bool-val">false</span>, <span class="bool-val">false</span>)
+<a href=#229 id=229 data-nosnippet>229</a>    }
+<a href=#230 id=230 data-nosnippet>230</a>}
+<a href=#231 id=231 data-nosnippet>231</a>
+<a href=#232 id=232 data-nosnippet>232</a><span class="kw">fn </span>layer_is_feature_constant(layer: <span class="kw-2">&amp;</span><span class="kw">crate</span>::style::layer::StyleLayer) -&gt; bool {
+<a href=#233 id=233 data-nosnippet>233</a>    <span class="kw">use </span><span class="kw">crate</span>::style::layer::LayerPaint;
+<a href=#234 id=234 data-nosnippet>234</a>    <span class="kw">match </span>layer.paint.as_ref() {
+<a href=#235 id=235 data-nosnippet>235</a>        <span class="prelude-val">Some</span>(LayerPaint::Circle(c)) =&gt; {
+<a href=#236 id=236 data-nosnippet>236</a>            c.circle_color
+<a href=#237 id=237 data-nosnippet>237</a>                .as_ref()
+<a href=#238 id=238 data-nosnippet>238</a>                .is_none_or(|p| p.is_feature_constant())
+<a href=#239 id=239 data-nosnippet>239</a>                &amp;&amp; c.circle_opacity
+<a href=#240 id=240 data-nosnippet>240</a>                    .as_ref()
+<a href=#241 id=241 data-nosnippet>241</a>                    .is_none_or(|p| p.is_feature_constant())
+<a href=#242 id=242 data-nosnippet>242</a>                &amp;&amp; c.stroke_color_per_feature().is_none()
+<a href=#243 id=243 data-nosnippet>243</a>        }
+<a href=#244 id=244 data-nosnippet>244</a>        <span class="prelude-val">Some</span>(LayerPaint::FillExtrusion(e)) =&gt; {
+<a href=#245 id=245 data-nosnippet>245</a>            e.fill_extrusion_color
+<a href=#246 id=246 data-nosnippet>246</a>                .as_ref()
+<a href=#247 id=247 data-nosnippet>247</a>                .is_none_or(|p| p.is_feature_constant())
+<a href=#248 id=248 data-nosnippet>248</a>                &amp;&amp; e.fill_extrusion_opacity
+<a href=#249 id=249 data-nosnippet>249</a>                    .as_ref()
+<a href=#250 id=250 data-nosnippet>250</a>                    .is_none_or(|p| p.is_feature_constant())
+<a href=#251 id=251 data-nosnippet>251</a>        }
+<a href=#252 id=252 data-nosnippet>252</a>        <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+<a href=#253 id=253 data-nosnippet>253</a>    }
+<a href=#254 id=254 data-nosnippet>254</a>}
 </code></pre></div></section></main></body></html>

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["sync_tile_feature_states"]};
+window.SIDEBAR_ITEMS = {"fn":["layer_is_feature_constant","recolor_cpu_bucket","sync_tile_feature_states"]};

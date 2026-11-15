@@ -119,34 +119,41 @@
 <a href=#119 id=119 data-nosnippet>119</a>                mask_items.size()
 <a href=#120 id=120 data-nosnippet>120</a>            );
 <a href=#121 id=121 data-nosnippet>121</a>            <span class="kw">let </span>above = <span class="kw">super</span>::main_pass::above_symbols(world);
-<a href=#122 id=122 data-nosnippet>122</a>            <span class="kw">let </span><span class="kw-2">mut </span>previous = above.as_ref().map_or(<span class="kw-2">&amp;</span>[][..], |above| above.previous);
-<a href=#123 id=123 data-nosnippet>123</a>            <span class="kw">let </span><span class="kw-2">mut </span>groups = above
-<a href=#124 id=124 data-nosnippet>124</a>                .as_ref()
-<a href=#125 id=125 data-nosnippet>125</a>                .map_or(<span class="kw-2">&amp;</span>[][..], |above| above.items)
-<a href=#126 id=126 data-nosnippet>126</a>                .chunk_by(<span class="kw">super</span>::main_pass::same_layer)
-<a href=#127 id=127 data-nosnippet>127</a>                .peekable();
-<a href=#128 id=128 data-nosnippet>128</a>            <span class="kw">for </span>item <span class="kw">in </span>mask_items {
-<a href=#129 id=129 data-nosnippet>129</a>                <span class="kw">while let </span><span class="prelude-val">Some</span>(group) = groups.next_if(|group| group[<span class="number">0</span>].index &lt; item.index) {
-<a href=#130 id=130 data-nosnippet>130</a>                    <span class="kw">super</span>::main_pass::draw_group(<span class="kw-2">&amp;mut </span>render_pass, world, previous, group);
-<a href=#131 id=131 data-nosnippet>131</a>                    previous = group;
-<a href=#132 id=132 data-nosnippet>132</a>                }
-<a href=#133 id=133 data-nosnippet>133</a>                item.draw_function.draw(<span class="kw-2">&amp;mut </span>render_pass, world, item);
-<a href=#134 id=134 data-nosnippet>134</a>            }
-<a href=#135 id=135 data-nosnippet>135</a>            <span class="kw">for </span>group <span class="kw">in </span>groups {
-<a href=#136 id=136 data-nosnippet>136</a>                <span class="kw">super</span>::main_pass::draw_group(<span class="kw-2">&amp;mut </span>render_pass, world, previous, group);
-<a href=#137 id=137 data-nosnippet>137</a>                previous = group;
-<a href=#138 id=138 data-nosnippet>138</a>            }
-<a href=#139 id=139 data-nosnippet>139</a>        }
-<a href=#140 id=140 data-nosnippet>140</a>        <span class="kw">let </span>end_hooks = world
-<a href=#141 id=141 data-nosnippet>141</a>            .resources
-<a href=#142 id=142 data-nosnippet>142</a>            .get::&lt;<span class="kw">crate</span>::render::PassDrawHooks&gt;()
-<a href=#143 id=143 data-nosnippet>143</a>            .map(|hooks| hooks.get_hooks(<span class="kw">crate</span>::render::PassHookPoint::TranslucentPassEnd));
-<a href=#144 id=144 data-nosnippet>144</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(hooks) = end_hooks {
-<a href=#145 id=145 data-nosnippet>145</a>            <span class="kw">for </span>hook <span class="kw">in </span>hooks {
-<a href=#146 id=146 data-nosnippet>146</a>                hook.draw(<span class="kw-2">&amp;mut </span>render_pass, world);
-<a href=#147 id=147 data-nosnippet>147</a>            }
-<a href=#148 id=148 data-nosnippet>148</a>        }
-<a href=#149 id=149 data-nosnippet>149</a>        render_pass.finish(world);
-<a href=#150 id=150 data-nosnippet>150</a>    }
-<a href=#151 id=151 data-nosnippet>151</a>}
+<a href=#122 id=122 data-nosnippet>122</a>            <span class="kw">let </span><span class="kw-2">mut </span>stencil_state = above
+<a href=#123 id=123 data-nosnippet>123</a>                .as_ref()
+<a href=#124 id=124 data-nosnippet>124</a>                .map_or(<span class="kw">super</span>::main_pass::StencilState::Cleared, |above| {
+<a href=#125 id=125 data-nosnippet>125</a>                    above.stencil_state
+<a href=#126 id=126 data-nosnippet>126</a>                });
+<a href=#127 id=127 data-nosnippet>127</a>            <span class="kw">let </span><span class="kw-2">mut </span>groups = above
+<a href=#128 id=128 data-nosnippet>128</a>                .as_ref()
+<a href=#129 id=129 data-nosnippet>129</a>                .map_or(<span class="kw-2">&amp;</span>[][..], |above| above.items)
+<a href=#130 id=130 data-nosnippet>130</a>                .chunk_by(<span class="kw">super</span>::main_pass::same_layer)
+<a href=#131 id=131 data-nosnippet>131</a>                .peekable();
+<a href=#132 id=132 data-nosnippet>132</a>            <span class="kw">for </span>item <span class="kw">in </span>mask_items {
+<a href=#133 id=133 data-nosnippet>133</a>                <span class="kw">while let </span><span class="prelude-val">Some</span>(group) = groups.next_if(|group| group[<span class="number">0</span>].index &lt; item.index) {
+<a href=#134 id=134 data-nosnippet>134</a>                    <span class="kw">super</span>::main_pass::draw_group(
+<a href=#135 id=135 data-nosnippet>135</a>                        <span class="kw-2">&amp;mut </span>render_pass,
+<a href=#136 id=136 data-nosnippet>136</a>                        world,
+<a href=#137 id=137 data-nosnippet>137</a>                        <span class="kw-2">&amp;mut </span>stencil_state,
+<a href=#138 id=138 data-nosnippet>138</a>                        group,
+<a href=#139 id=139 data-nosnippet>139</a>                    );
+<a href=#140 id=140 data-nosnippet>140</a>                }
+<a href=#141 id=141 data-nosnippet>141</a>                item.draw_function.draw(<span class="kw-2">&amp;mut </span>render_pass, world, item);
+<a href=#142 id=142 data-nosnippet>142</a>            }
+<a href=#143 id=143 data-nosnippet>143</a>            <span class="kw">for </span>group <span class="kw">in </span>groups {
+<a href=#144 id=144 data-nosnippet>144</a>                <span class="kw">super</span>::main_pass::draw_group(<span class="kw-2">&amp;mut </span>render_pass, world, <span class="kw-2">&amp;mut </span>stencil_state, group);
+<a href=#145 id=145 data-nosnippet>145</a>            }
+<a href=#146 id=146 data-nosnippet>146</a>        }
+<a href=#147 id=147 data-nosnippet>147</a>        <span class="kw">let </span>end_hooks = world
+<a href=#148 id=148 data-nosnippet>148</a>            .resources
+<a href=#149 id=149 data-nosnippet>149</a>            .get::&lt;<span class="kw">crate</span>::render::PassDrawHooks&gt;()
+<a href=#150 id=150 data-nosnippet>150</a>            .map(|hooks| hooks.get_hooks(<span class="kw">crate</span>::render::PassHookPoint::TranslucentPassEnd));
+<a href=#151 id=151 data-nosnippet>151</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(hooks) = end_hooks {
+<a href=#152 id=152 data-nosnippet>152</a>            <span class="kw">for </span>hook <span class="kw">in </span>hooks {
+<a href=#153 id=153 data-nosnippet>153</a>                hook.draw(<span class="kw-2">&amp;mut </span>render_pass, world);
+<a href=#154 id=154 data-nosnippet>154</a>            }
+<a href=#155 id=155 data-nosnippet>155</a>        }
+<a href=#156 id=156 data-nosnippet>156</a>        render_pass.finish(world);
+<a href=#157 id=157 data-nosnippet>157</a>    }
+<a href=#158 id=158 data-nosnippet>158</a>}
 </code></pre></div></section></main></body></html>

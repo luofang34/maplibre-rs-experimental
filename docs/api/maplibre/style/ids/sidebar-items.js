@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SOURCE_LOCAL","STYLE_LOCAL"],"fn":["intern_with","resolve_with","source_global","style_global"],"static":["SOURCE_GLOBAL","SOURCE_RESERVED","STYLE_GLOBAL","STYLE_RESERVED"],"struct":["GlobalInterner","LocalInternerCache","SourceLayerId","StyleLayerId"]};

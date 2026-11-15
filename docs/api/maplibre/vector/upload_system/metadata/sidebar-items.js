@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["feature_metadata","feature_metadata_into","layer_translate_tile_units","metadata_for_layer","paint_depends_on_bearing","same_quantized_rgba","sort_runs","upload_size"]};
+window.SIDEBAR_ITEMS = {"fn":["feature_metadata","feature_metadata_into","find_shared_fallback_vertices","layer_translate_tile_units","metadata_for_layer","paint_depends_on_bearing","same_quantized_rgba","sort_runs","upload_size"]};
