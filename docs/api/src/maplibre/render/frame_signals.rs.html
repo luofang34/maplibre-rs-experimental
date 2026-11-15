@@ -264,7 +264,7 @@
 <a href=#264 id=264 data-nosnippet>264</a>        .world
 <a href=#265 id=265 data-nosnippet>265</a>        .resources
 <a href=#266 id=266 data-nosnippet>266</a>        .get::&lt;<span class="kw">crate</span>::render::tracked_pass::RenderStats&gt;()
-<a href=#267 id=267 data-nosnippet>267</a>        .map_or(<span class="number">0</span>, |stats| stats.peek().draws);
+<a href=#267 id=267 data-nosnippet>267</a>        .map_or(<span class="number">0</span>, |stats| stats.take_frame_draws());
 <a href=#268 id=268 data-nosnippet>268</a>    <span class="kw">let </span>drawn = camera(context);
 <a href=#269 id=269 data-nosnippet>269</a>    <span class="kw">let </span>eye = eye_index(<span class="kw-2">&amp;</span>context.world);
 <a href=#270 id=270 data-nosnippet>270</a>    <span class="kw">let </span>host_frame = host_frame_in_progress(<span class="kw-2">&amp;</span>context.world);

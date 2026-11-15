@@ -3,7 +3,7 @@
 <a href=#3 id=3 data-nosnippet>3</a></span><span class="kw">use </span>std::{
 <a href=#4 id=4 data-nosnippet>4</a>    any::{Any, TypeId},
 <a href=#5 id=5 data-nosnippet>5</a>    collections::HashMap,
-<a href=#6 id=6 data-nosnippet>6</a>    sync::{Mutex, PoisonError},
+<a href=#6 id=6 data-nosnippet>6</a>    sync::Mutex,
 <a href=#7 id=7 data-nosnippet>7</a>};
 <a href=#8 id=8 data-nosnippet>8</a>
 <a href=#9 id=9 data-nosnippet>9</a><span class="kw">use </span><span class="kw">crate</span>::style::property::{CompiledProperty, PropertyValue};
@@ -38,7 +38,7 @@
 <a href=#38 id=38 data-nosnippet>38</a>        </span>T: PropertyValue + Send + Sync + <span class="lifetime">'static</span>,
 <a href=#39 id=39 data-nosnippet>39</a>    {
 <a href=#40 id=40 data-nosnippet>40</a>        <span class="kw">let </span>kind = TypeId::of::&lt;T&gt;();
-<a href=#41 id=41 data-nosnippet>41</a>        <span class="kw">let </span><span class="kw-2">mut </span>guard = <span class="self">self</span>.<span class="number">0</span>.lock().unwrap_or_else(PoisonError::into_inner);
+<a href=#41 id=41 data-nosnippet>41</a>        <span class="kw">let </span><span class="kw-2">mut </span>guard = <span class="kw">crate</span>::platform::lock_unpoisoned(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span>);
 <a href=#42 id=42 data-nosnippet>42</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(entries) = guard.get_mut(name) {
 <a href=#43 id=43 data-nosnippet>43</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(entry) = entries.iter().find(|e| e.kind == kind) {
 <a href=#44 id=44 data-nosnippet>44</a>                <span class="kw">if </span>entry.source == <span class="kw-2">*</span>source {

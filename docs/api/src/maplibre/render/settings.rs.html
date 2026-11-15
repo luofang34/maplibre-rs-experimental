@@ -151,9 +151,9 @@
 <a href=#151 id=151 data-nosnippet>151</a>    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
 <a href=#152 id=152 data-nosnippet>152</a>        <span class="self">Self </span>{
 <a href=#153 id=153 data-nosnippet>153</a>            vertices: <span class="number">10 </span>* <span class="number">1_000_000</span>,
-<a href=#154 id=154 data-nosnippet>154</a>            indices: <span class="number">10 </span>* <span class="number">1_000_000</span>,
+<a href=#154 id=154 data-nosnippet>154</a>            indices: <span class="number">30 </span>* <span class="number">1_000_000</span>,
 <a href=#155 id=155 data-nosnippet>155</a>            feature_metadata: <span class="number">10 </span>* <span class="number">1024 </span>* <span class="number">1000</span>,
-<a href=#156 id=156 data-nosnippet>156</a>            layer_metadata: <span class="number">10 </span>* <span class="number">1024</span>,
+<a href=#156 id=156 data-nosnippet>156</a>            layer_metadata: <span class="number">64 </span>* <span class="number">1024</span>,
 <a href=#157 id=157 data-nosnippet>157</a>        }
 <a href=#158 id=158 data-nosnippet>158</a>    }
 <a href=#159 id=159 data-nosnippet>159</a>}
@@ -246,7 +246,7 @@
 <a href=#246 id=246 data-nosnippet>246</a>    </span><span class="kw">pub </span>present_mode: PresentMode,
 <a href=#247 id=247 data-nosnippet>247</a>    <span class="doccomment">/// Edge, in pixels, of the texture each terrain tile's map is drawn into. Each texture
 <a href=#248 id=248 data-nosnippet>248</a>    /// costs four bytes a texel and a third more for mipmaps, so the default of
-<a href=#249 id=249 data-nosnippet>249</a>    /// [`DRAPE_SIZE`](crate::terrain::resources::DRAPE_SIZE) holds about 21 MiB a tile; a
+<a href=#249 id=249 data-nosnippet>249</a>    /// [`DRAPE_SIZE`](crate::terrain::resources::DRAPE_SIZE) holds about 5.6 MiB a tile; a
 <a href=#250 id=250 data-nosnippet>250</a>    /// phone, which shares its memory with the GPU, keeps more tiles in less.
 <a href=#251 id=251 data-nosnippet>251</a>    </span><span class="kw">pub </span>terrain_drape_size: u32,
 <a href=#252 id=252 data-nosnippet>252</a>    <span class="doccomment">/// Whether terrain bakes 2D style drapes (`DRAPE_PASS`) or shades procedural DEM relief

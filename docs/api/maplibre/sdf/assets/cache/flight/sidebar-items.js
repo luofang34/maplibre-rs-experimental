@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["is_stale_failure","take_waiters","wake"],"struct":["Flight"]};

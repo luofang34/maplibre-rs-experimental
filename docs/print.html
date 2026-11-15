@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-26f17c1b.js";
+            window.path_to_searchindex_js = "searchindex-0a9629c7.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-ae8692d6.js"></script>
@@ -5261,7 +5261,15 @@ pub fn build_style(base: Style) -&gt; Result&lt;Style, serde_json::Error&gt; {
 
 /// Moves the point to where the International Space Station is now, and the camera with it.
 pub async fn update(map: &amp;MapHandle&lt;CurrentEnvironment&gt;) -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    #[cfg(not(target_arch = "wasm32"))]
     let body: Value = reqwest::get(ISS_URL).await?.json().await?;
+    #[cfg(target_arch = "wasm32")]
+    let body: Value = {
+        let bytes =
+            maplibre::io::source_client::HttpClient::fetch(&amp;web::web_http_client(), ISS_URL)
+                .await?;
+        serde_json::from_slice(&amp;bytes)?
+    };
     let longitude = body["longitude"]
         .as_f64()
         .ok_or("missing numeric `longitude` field")?;

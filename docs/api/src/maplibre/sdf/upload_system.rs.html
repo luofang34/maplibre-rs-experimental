@@ -111,126 +111,137 @@
 <a href=#111 id=111 data-nosnippet>111</a>            .into_iter()
 <a href=#112 id=112 data-nosnippet>112</a>            .map(str::to_owned)
 <a href=#113 id=113 data-nosnippet>113</a>            .collect();
-<a href=#114 id=114 data-nosnippet>114</a>        <span class="kw">for </span>style_layer <span class="kw">in </span>style
-<a href=#115 id=115 data-nosnippet>115</a>            .layers
-<a href=#116 id=116 data-nosnippet>116</a>            .iter()
-<a href=#117 id=117 data-nosnippet>117</a>            .filter(|layer| layer.is_visible_at(f64::from(zoom)))
-<a href=#118 id=118 data-nosnippet>118</a>        {
-<a href=#119 id=119 data-nosnippet>119</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(committed) = layers
-<a href=#120 id=120 data-nosnippet>120</a>                .layers
-<a href=#121 id=121 data-nosnippet>121</a>                .iter()
-<a href=#122 id=122 data-nosnippet>122</a>                .find(|layer| layer.style_layer_id == style_layer.id)
-<a href=#123 id=123 data-nosnippet>123</a>            {
-<a href=#124 id=124 data-nosnippet>124</a>                prepare_atlas(textures, gpu, committed, style_layer, zoom);
-<a href=#125 id=125 data-nosnippet>125</a>            }
-<a href=#126 id=126 data-nosnippet>126</a>            <span class="kw">let </span>replacement = pending
-<a href=#127 id=127 data-nosnippet>127</a>                .symbols
-<a href=#128 id=128 data-nosnippet>128</a>                .iter()
-<a href=#129 id=129 data-nosnippet>129</a>                .position(|layer| layer.style_layer_id == style_layer.id);
-<a href=#130 id=130 data-nosnippet>130</a>            <span class="kw">let </span>upload = replacement
-<a href=#131 id=131 data-nosnippet>131</a>                .map(|index| <span class="kw-2">&amp;</span>pending.symbols[index])
-<a href=#132 id=132 data-nosnippet>132</a>                .or_else(|| pending_layer_data(<span class="kw-2">&amp;</span>layers.layers, <span class="kw-2">&amp;</span>loaded, style_layer));
-<a href=#133 id=133 data-nosnippet>133</a>            <span class="kw">let </span>layer = upload.or_else(|| {
-<a href=#134 id=134 data-nosnippet>134</a>                layers
-<a href=#135 id=135 data-nosnippet>135</a>                    .layers
-<a href=#136 id=136 data-nosnippet>136</a>                    .iter()
-<a href=#137 id=137 data-nosnippet>137</a>                    .find(|layer| layer.style_layer_id == style_layer.id)
-<a href=#138 id=138 data-nosnippet>138</a>            });
-<a href=#139 id=139 data-nosnippet>139</a>            <span class="kw">let </span><span class="prelude-val">Some</span>(layer) = layer <span class="kw">else </span>{
-<a href=#140 id=140 data-nosnippet>140</a>                <span class="kw">continue</span>;
-<a href=#141 id=141 data-nosnippet>141</a>            };
-<a href=#142 id=142 data-nosnippet>142</a>            <span class="kw">if </span>upload.is_some() {
-<a href=#143 id=143 data-nosnippet>143</a>                <span class="kw">let </span>buffer = <span class="kw-2">&amp;</span>layer.buffer;
-<a href=#144 id=144 data-nosnippet>144</a>                <span class="kw">let </span>size = buffer.buffer.vertices.len()
-<a href=#145 id=145 data-nosnippet>145</a>                    * (size_of::&lt;<span class="kw">crate</span>::render::shaders::ShaderSymbolVertex&gt;()
-<a href=#146 id=146 data-nosnippet>146</a>                        + size_of::&lt;SDFShaderFeatureMetadata&gt;())
-<a href=#147 id=147 data-nosnippet>147</a>                    + buffer.buffer.indices.len() * size_of::&lt;u32&gt;();
-<a href=#148 id=148 data-nosnippet>148</a>                <span class="kw">if </span>!budget.take(UploadKind::Geometry, size) {
-<a href=#149 id=149 data-nosnippet>149</a>                    <span class="kw">return </span><span class="bool-val">true</span>;
-<a href=#150 id=150 data-nosnippet>150</a>                }
-<a href=#151 id=151 data-nosnippet>151</a>                <span class="kw">if </span>!upload_geometry(symbol_buffer_pool, gpu, coords, style_layer, buffer) {
-<a href=#152 id=152 data-nosnippet>152</a>                    <span class="kw">continue</span>;
-<a href=#153 id=153 data-nosnippet>153</a>                }
-<a href=#154 id=154 data-nosnippet>154</a>            }
-<a href=#155 id=155 data-nosnippet>155</a>            prepare_atlas(textures, gpu, layer, style_layer, zoom);
-<a href=#156 id=156 data-nosnippet>156</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(index) = replacement {
-<a href=#157 id=157 data-nosnippet>157</a>                <span class="kw">crate</span>::vector::content::commit_symbols(layers, pending.symbols.remove(index));
-<a href=#158 id=158 data-nosnippet>158</a>            }
-<a href=#159 id=159 data-nosnippet>159</a>        }
-<a href=#160 id=160 data-nosnippet>160</a>    }
-<a href=#161 id=161 data-nosnippet>161</a>    <span class="bool-val">false
-<a href=#162 id=162 data-nosnippet>162</a></span>}
-<a href=#163 id=163 data-nosnippet>163</a>
-<a href=#164 id=164 data-nosnippet>164</a><span class="kw">fn </span>prepare_atlas(
-<a href=#165 id=165 data-nosnippet>165</a>    textures: <span class="kw-2">&amp;mut </span>SymbolTextures,
-<a href=#166 id=166 data-nosnippet>166</a>    gpu: <span class="kw-2">&amp;</span>TextureContext&lt;<span class="lifetime">'_</span>&gt;,
-<a href=#167 id=167 data-nosnippet>167</a>    layer: <span class="kw-2">&amp;</span>SymbolLayerData,
-<a href=#168 id=168 data-nosnippet>168</a>    style: <span class="kw-2">&amp;</span>StyleLayer,
-<a href=#169 id=169 data-nosnippet>169</a>    zoom: f32,
-<a href=#170 id=170 data-nosnippet>170</a>) {
-<a href=#171 id=171 data-nosnippet>171</a>    <span class="kw">if let </span>(<span class="prelude-val">Some</span>(LayerPaint::Symbol(paint)), <span class="prelude-val">Some</span>(atlas)) = (<span class="kw-2">&amp;</span>style.paint, <span class="kw-2">&amp;</span>layer.atlas) {
-<a href=#172 id=172 data-nosnippet>172</a>        textures.prepare(
-<a href=#173 id=173 data-nosnippet>173</a>            gpu,
-<a href=#174 id=174 data-nosnippet>174</a>            (layer.coords, style.id.clone()),
-<a href=#175 id=175 data-nosnippet>175</a>            atlas,
-<a href=#176 id=176 data-nosnippet>176</a>            paint,
-<a href=#177 id=177 data-nosnippet>177</a>            f64::from(zoom),
-<a href=#178 id=178 data-nosnippet>178</a>        );
-<a href=#179 id=179 data-nosnippet>179</a>    }
-<a href=#180 id=180 data-nosnippet>180</a>}
-<a href=#181 id=181 data-nosnippet>181</a>
-<a href=#182 id=182 data-nosnippet>182</a><span class="doccomment">/// The tessellated data of a style layer that is not in the pool yet. Style layers sharing a
-<a href=#183 id=183 data-nosnippet>183</a>/// source layer each have their own data, so the match is on the style layer id: matching on
-<a href=#184 id=184 data-nosnippet>184</a>/// the source layer would upload one layer's geometry under every sibling's name.
-<a href=#185 id=185 data-nosnippet>185</a></span><span class="kw">fn </span>pending_layer_data&lt;<span class="lifetime">'a</span>&gt;(
-<a href=#186 id=186 data-nosnippet>186</a>    layers: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>[SymbolLayerData],
-<a href=#187 id=187 data-nosnippet>187</a>    loaded_style_layers: <span class="kw-2">&amp;</span>HashSet&lt;String&gt;,
-<a href=#188 id=188 data-nosnippet>188</a>    style_layer: <span class="kw-2">&amp;</span>StyleLayer,
-<a href=#189 id=189 data-nosnippet>189</a>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">'a </span>SymbolLayerData&gt; {
-<a href=#190 id=190 data-nosnippet>190</a>    <span class="kw">if </span>loaded_style_layers.contains(<span class="kw-2">&amp;</span>style_layer.id) {
-<a href=#191 id=191 data-nosnippet>191</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#192 id=192 data-nosnippet>192</a>    }
-<a href=#193 id=193 data-nosnippet>193</a>    layers
-<a href=#194 id=194 data-nosnippet>194</a>        .iter()
-<a href=#195 id=195 data-nosnippet>195</a>        .find(|layer| layer.style_layer_id == style_layer.id)
-<a href=#196 id=196 data-nosnippet>196</a>}
-<a href=#197 id=197 data-nosnippet>197</a>
-<a href=#198 id=198 data-nosnippet>198</a><span class="attr">#[cfg(test)]
-<a href=#199 id=199 data-nosnippet>199</a></span><span class="kw">mod </span>tests;
-<a href=#200 id=200 data-nosnippet>200</a>
-<a href=#201 id=201 data-nosnippet>201</a><span class="kw">fn </span>upload_geometry(
-<a href=#202 id=202 data-nosnippet>202</a>    symbol_buffer_pool: <span class="kw-2">&amp;mut </span>SymbolBufferPool,
-<a href=#203 id=203 data-nosnippet>203</a>    gpu: <span class="kw-2">&amp;</span>TextureContext&lt;<span class="lifetime">'_</span>&gt;,
-<a href=#204 id=204 data-nosnippet>204</a>    coords: <span class="kw">crate</span>::coords::WorldTileCoords,
-<a href=#205 id=205 data-nosnippet>205</a>    style_layer: <span class="kw-2">&amp;</span>StyleLayer,
-<a href=#206 id=206 data-nosnippet>206</a>    buffer: <span class="kw-2">&amp;</span><span class="kw">crate</span>::vector::tessellation::OverAlignedVertexBuffer&lt;
-<a href=#207 id=207 data-nosnippet>207</a>        <span class="kw">crate</span>::render::shaders::ShaderSymbolVertex,
-<a href=#208 id=208 data-nosnippet>208</a>        u32,
-<a href=#209 id=209 data-nosnippet>209</a>    &gt;,
-<a href=#210 id=210 data-nosnippet>210</a>) -&gt; bool {
-<a href=#211 id=211 data-nosnippet>211</a>    <span class="comment">// Collision placement supplies elevation before a new label can become visible.
-<a href=#212 id=212 data-nosnippet>212</a>    </span><span class="kw">let </span>feature_metadata = <span class="macro">vec!</span>[SDFShaderFeatureMetadata::default(); buffer.buffer.vertices.len()];
-<a href=#213 id=213 data-nosnippet>213</a>
-<a href=#214 id=214 data-nosnippet>214</a>    <span class="kw">if </span>buffer.buffer.indices.is_empty() {
-<a href=#215 id=215 data-nosnippet>215</a>        symbol_buffer_pool.remove_layer(coords, <span class="kw-2">&amp;</span>style_layer.id);
-<a href=#216 id=216 data-nosnippet>216</a>        <span class="kw">return </span><span class="bool-val">true</span>;
-<a href=#217 id=217 data-nosnippet>217</a>    }
-<a href=#218 id=218 data-nosnippet>218</a>
-<a href=#219 id=219 data-nosnippet>219</a>    <span class="macro">tracing::debug!</span>(%coords, <span class="string">"allocating symbol geometry"</span>);
-<a href=#220 id=220 data-nosnippet>220</a>    <span class="kw">if let </span><span class="prelude-val">Err</span>(error) = symbol_buffer_pool.replace_layer_geometry(
-<a href=#221 id=221 data-nosnippet>221</a>        gpu.queue,
-<a href=#222 id=222 data-nosnippet>222</a>        coords,
-<a href=#223 id=223 data-nosnippet>223</a>        style_layer.clone(),
-<a href=#224 id=224 data-nosnippet>224</a>        buffer,
-<a href=#225 id=225 data-nosnippet>225</a>        ShaderLayerMetadata::new(style_layer.index <span class="kw">as </span>f32, <span class="number">0.0</span>, [<span class="number">0.0</span>; <span class="number">2</span>]),
-<a href=#226 id=226 data-nosnippet>226</a>        <span class="kw-2">&amp;</span>feature_metadata,
-<a href=#227 id=227 data-nosnippet>227</a>    ) {
-<a href=#228 id=228 data-nosnippet>228</a>        <span class="macro">tracing::error!</span>(%coords, %error, <span class="string">"tile geometry upload failed"</span>);
-<a href=#229 id=229 data-nosnippet>229</a>        <span class="kw">return </span><span class="bool-val">false</span>;
-<a href=#230 id=230 data-nosnippet>230</a>    }
-<a href=#231 id=231 data-nosnippet>231</a>    <span class="bool-val">true
-<a href=#232 id=232 data-nosnippet>232</a></span>}
-<a href=#233 id=233 data-nosnippet>233</a>
-<a href=#234 id=234 data-nosnippet>234</a><span class="attr">#[cfg(all(test, feature = <span class="string">"headless"</span>, not(target_arch = <span class="string">"wasm32"</span>)))]
-<a href=#235 id=235 data-nosnippet>235</a></span><span class="kw">mod </span>retry;
+<a href=#114 id=114 data-nosnippet>114</a>        <span class="kw">for </span>style_layer <span class="kw">in </span>style.layers.iter().filter(|layer| !layer.is_hidden()) {
+<a href=#115 id=115 data-nosnippet>115</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(committed) = layers
+<a href=#116 id=116 data-nosnippet>116</a>                .layers
+<a href=#117 id=117 data-nosnippet>117</a>                .iter()
+<a href=#118 id=118 data-nosnippet>118</a>                .find(|layer| layer.style_layer_id == style_layer.id)
+<a href=#119 id=119 data-nosnippet>119</a>            {
+<a href=#120 id=120 data-nosnippet>120</a>                prepare_atlas(textures, gpu, committed, style_layer, zoom);
+<a href=#121 id=121 data-nosnippet>121</a>            }
+<a href=#122 id=122 data-nosnippet>122</a>            <span class="kw">let </span>replacement = pending
+<a href=#123 id=123 data-nosnippet>123</a>                .symbols
+<a href=#124 id=124 data-nosnippet>124</a>                .iter()
+<a href=#125 id=125 data-nosnippet>125</a>                .position(|layer| layer.style_layer_id == style_layer.id);
+<a href=#126 id=126 data-nosnippet>126</a>            <span class="kw">let </span>upload = replacement
+<a href=#127 id=127 data-nosnippet>127</a>                .map(|index| <span class="kw-2">&amp;</span>pending.symbols[index])
+<a href=#128 id=128 data-nosnippet>128</a>                .or_else(|| pending_layer_data(<span class="kw-2">&amp;</span>layers.layers, <span class="kw-2">&amp;</span>loaded, style_layer));
+<a href=#129 id=129 data-nosnippet>129</a>            <span class="kw">let </span>layer = upload.or_else(|| {
+<a href=#130 id=130 data-nosnippet>130</a>                layers
+<a href=#131 id=131 data-nosnippet>131</a>                    .layers
+<a href=#132 id=132 data-nosnippet>132</a>                    .iter()
+<a href=#133 id=133 data-nosnippet>133</a>                    .find(|layer| layer.style_layer_id == style_layer.id)
+<a href=#134 id=134 data-nosnippet>134</a>            });
+<a href=#135 id=135 data-nosnippet>135</a>            <span class="kw">let </span><span class="prelude-val">Some</span>(layer) = layer <span class="kw">else </span>{
+<a href=#136 id=136 data-nosnippet>136</a>                <span class="kw">continue</span>;
+<a href=#137 id=137 data-nosnippet>137</a>            };
+<a href=#138 id=138 data-nosnippet>138</a>            <span class="kw">let </span>did_upload = <span class="kw">if </span>upload.is_some() {
+<a href=#139 id=139 data-nosnippet>139</a>                <span class="kw">let </span>buffer = <span class="kw-2">&amp;</span>layer.buffer;
+<a href=#140 id=140 data-nosnippet>140</a>                <span class="kw">let </span>size = buffer.buffer.vertices.len()
+<a href=#141 id=141 data-nosnippet>141</a>                    * (size_of::&lt;<span class="kw">crate</span>::render::shaders::ShaderSymbolVertex&gt;()
+<a href=#142 id=142 data-nosnippet>142</a>                        + size_of::&lt;SDFShaderFeatureMetadata&gt;())
+<a href=#143 id=143 data-nosnippet>143</a>                    + buffer.buffer.indices.len() * size_of::&lt;u32&gt;();
+<a href=#144 id=144 data-nosnippet>144</a>                <span class="kw">if </span>!budget.take(UploadKind::Geometry, size) {
+<a href=#145 id=145 data-nosnippet>145</a>                    <span class="kw">return </span><span class="bool-val">true</span>;
+<a href=#146 id=146 data-nosnippet>146</a>                }
+<a href=#147 id=147 data-nosnippet>147</a>                <span class="kw">if </span>!upload_geometry(symbol_buffer_pool, gpu, coords, style_layer, buffer) {
+<a href=#148 id=148 data-nosnippet>148</a>                    <span class="kw">continue</span>;
+<a href=#149 id=149 data-nosnippet>149</a>                }
+<a href=#150 id=150 data-nosnippet>150</a>                <span class="bool-val">true
+<a href=#151 id=151 data-nosnippet>151</a>            </span>} <span class="kw">else </span>{
+<a href=#152 id=152 data-nosnippet>152</a>                <span class="bool-val">false
+<a href=#153 id=153 data-nosnippet>153</a>            </span>};
+<a href=#154 id=154 data-nosnippet>154</a>            prepare_atlas(textures, gpu, layer, style_layer, zoom);
+<a href=#155 id=155 data-nosnippet>155</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(index) = replacement {
+<a href=#156 id=156 data-nosnippet>156</a>                <span class="attr">#[allow(unused_mut)]
+<a href=#157 id=157 data-nosnippet>157</a>                </span><span class="kw">let </span><span class="kw-2">mut </span>committed = pending.symbols.remove(index);
+<a href=#158 id=158 data-nosnippet>158</a>                <span class="attr">#[cfg(target_arch = <span class="string">"wasm32"</span>)]
+<a href=#159 id=159 data-nosnippet>159</a>                </span>committed.buffer.release_uploaded_symbol_vertices();
+<a href=#160 id=160 data-nosnippet>160</a>                <span class="kw">crate</span>::vector::content::commit_symbols(layers, committed);
+<a href=#161 id=161 data-nosnippet>161</a>            } <span class="kw">else if </span>did_upload {
+<a href=#162 id=162 data-nosnippet>162</a>                <span class="attr">#[cfg(target_arch = <span class="string">"wasm32"</span>)]
+<a href=#163 id=163 data-nosnippet>163</a>                </span><span class="kw">if let </span><span class="prelude-val">Some</span>(committed) = layers
+<a href=#164 id=164 data-nosnippet>164</a>                    .layers
+<a href=#165 id=165 data-nosnippet>165</a>                    .iter_mut()
+<a href=#166 id=166 data-nosnippet>166</a>                    .find(|item| item.style_layer_id == style_layer.id)
+<a href=#167 id=167 data-nosnippet>167</a>                {
+<a href=#168 id=168 data-nosnippet>168</a>                    committed.buffer.release_uploaded_symbol_vertices();
+<a href=#169 id=169 data-nosnippet>169</a>                }
+<a href=#170 id=170 data-nosnippet>170</a>            }
+<a href=#171 id=171 data-nosnippet>171</a>        }
+<a href=#172 id=172 data-nosnippet>172</a>    }
+<a href=#173 id=173 data-nosnippet>173</a>    <span class="bool-val">false
+<a href=#174 id=174 data-nosnippet>174</a></span>}
+<a href=#175 id=175 data-nosnippet>175</a>
+<a href=#176 id=176 data-nosnippet>176</a><span class="kw">fn </span>prepare_atlas(
+<a href=#177 id=177 data-nosnippet>177</a>    textures: <span class="kw-2">&amp;mut </span>SymbolTextures,
+<a href=#178 id=178 data-nosnippet>178</a>    gpu: <span class="kw-2">&amp;</span>TextureContext&lt;<span class="lifetime">'_</span>&gt;,
+<a href=#179 id=179 data-nosnippet>179</a>    layer: <span class="kw-2">&amp;</span>SymbolLayerData,
+<a href=#180 id=180 data-nosnippet>180</a>    style: <span class="kw-2">&amp;</span>StyleLayer,
+<a href=#181 id=181 data-nosnippet>181</a>    zoom: f32,
+<a href=#182 id=182 data-nosnippet>182</a>) {
+<a href=#183 id=183 data-nosnippet>183</a>    <span class="kw">if let </span>(<span class="prelude-val">Some</span>(LayerPaint::Symbol(paint)), <span class="prelude-val">Some</span>(atlas)) = (<span class="kw-2">&amp;</span>style.paint, <span class="kw-2">&amp;</span>layer.atlas) {
+<a href=#184 id=184 data-nosnippet>184</a>        textures.prepare(
+<a href=#185 id=185 data-nosnippet>185</a>            gpu,
+<a href=#186 id=186 data-nosnippet>186</a>            (layer.coords, style.id.clone()),
+<a href=#187 id=187 data-nosnippet>187</a>            atlas,
+<a href=#188 id=188 data-nosnippet>188</a>            paint,
+<a href=#189 id=189 data-nosnippet>189</a>            f64::from(zoom),
+<a href=#190 id=190 data-nosnippet>190</a>        );
+<a href=#191 id=191 data-nosnippet>191</a>    }
+<a href=#192 id=192 data-nosnippet>192</a>}
+<a href=#193 id=193 data-nosnippet>193</a>
+<a href=#194 id=194 data-nosnippet>194</a><span class="doccomment">/// The tessellated data of a style layer that is not in the pool yet. Style layers sharing a
+<a href=#195 id=195 data-nosnippet>195</a>/// source layer each have their own data, so the match is on the style layer id: matching on
+<a href=#196 id=196 data-nosnippet>196</a>/// the source layer would upload one layer's geometry under every sibling's name.
+<a href=#197 id=197 data-nosnippet>197</a></span><span class="kw">fn </span>pending_layer_data&lt;<span class="lifetime">'a</span>&gt;(
+<a href=#198 id=198 data-nosnippet>198</a>    layers: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>[SymbolLayerData],
+<a href=#199 id=199 data-nosnippet>199</a>    loaded_style_layers: <span class="kw-2">&amp;</span>HashSet&lt;String&gt;,
+<a href=#200 id=200 data-nosnippet>200</a>    style_layer: <span class="kw-2">&amp;</span>StyleLayer,
+<a href=#201 id=201 data-nosnippet>201</a>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">'a </span>SymbolLayerData&gt; {
+<a href=#202 id=202 data-nosnippet>202</a>    <span class="kw">if </span>loaded_style_layers.contains(<span class="kw-2">&amp;</span>style_layer.id) {
+<a href=#203 id=203 data-nosnippet>203</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#204 id=204 data-nosnippet>204</a>    }
+<a href=#205 id=205 data-nosnippet>205</a>    layers
+<a href=#206 id=206 data-nosnippet>206</a>        .iter()
+<a href=#207 id=207 data-nosnippet>207</a>        .find(|layer| layer.style_layer_id == style_layer.id)
+<a href=#208 id=208 data-nosnippet>208</a>}
+<a href=#209 id=209 data-nosnippet>209</a>
+<a href=#210 id=210 data-nosnippet>210</a><span class="attr">#[cfg(test)]
+<a href=#211 id=211 data-nosnippet>211</a></span><span class="kw">mod </span>tests;
+<a href=#212 id=212 data-nosnippet>212</a>
+<a href=#213 id=213 data-nosnippet>213</a><span class="kw">fn </span>upload_geometry(
+<a href=#214 id=214 data-nosnippet>214</a>    symbol_buffer_pool: <span class="kw-2">&amp;mut </span>SymbolBufferPool,
+<a href=#215 id=215 data-nosnippet>215</a>    gpu: <span class="kw-2">&amp;</span>TextureContext&lt;<span class="lifetime">'_</span>&gt;,
+<a href=#216 id=216 data-nosnippet>216</a>    coords: <span class="kw">crate</span>::coords::WorldTileCoords,
+<a href=#217 id=217 data-nosnippet>217</a>    style_layer: <span class="kw-2">&amp;</span>StyleLayer,
+<a href=#218 id=218 data-nosnippet>218</a>    buffer: <span class="kw-2">&amp;</span><span class="kw">crate</span>::vector::tessellation::OverAlignedVertexBuffer&lt;
+<a href=#219 id=219 data-nosnippet>219</a>        <span class="kw">crate</span>::render::shaders::ShaderSymbolVertex,
+<a href=#220 id=220 data-nosnippet>220</a>        u32,
+<a href=#221 id=221 data-nosnippet>221</a>    &gt;,
+<a href=#222 id=222 data-nosnippet>222</a>) -&gt; bool {
+<a href=#223 id=223 data-nosnippet>223</a>    <span class="kw">if </span>buffer.buffer.indices.is_empty() {
+<a href=#224 id=224 data-nosnippet>224</a>        symbol_buffer_pool.remove_layer(coords, <span class="kw-2">&amp;</span>style_layer.id);
+<a href=#225 id=225 data-nosnippet>225</a>        <span class="kw">return </span><span class="bool-val">true</span>;
+<a href=#226 id=226 data-nosnippet>226</a>    }
+<a href=#227 id=227 data-nosnippet>227</a>    <span class="comment">// Collision placement supplies elevation before a new label can become visible.
+<a href=#228 id=228 data-nosnippet>228</a>    </span><span class="macro">tracing::debug!</span>(%coords, <span class="string">"allocating symbol geometry"</span>);
+<a href=#229 id=229 data-nosnippet>229</a>    <span class="kw">if let </span><span class="prelude-val">Err</span>(error) = symbol_buffer_pool.replace_layer_geometry_uniform_unless(
+<a href=#230 id=230 data-nosnippet>230</a>        gpu.queue,
+<a href=#231 id=231 data-nosnippet>231</a>        coords,
+<a href=#232 id=232 data-nosnippet>232</a>        style_layer.clone(),
+<a href=#233 id=233 data-nosnippet>233</a>        buffer,
+<a href=#234 id=234 data-nosnippet>234</a>        ShaderLayerMetadata::new(style_layer.index <span class="kw">as </span>f32, <span class="number">0.0</span>, [<span class="number">0.0</span>; <span class="number">2</span>]),
+<a href=#235 id=235 data-nosnippet>235</a>        SDFShaderFeatureMetadata::default(),
+<a href=#236 id=236 data-nosnippet>236</a>        buffer.buffer.vertices.len(),
+<a href=#237 id=237 data-nosnippet>237</a>        |<span class="kw">_</span>| <span class="bool-val">false</span>,
+<a href=#238 id=238 data-nosnippet>238</a>    ) {
+<a href=#239 id=239 data-nosnippet>239</a>        <span class="macro">tracing::error!</span>(%coords, %error, <span class="string">"tile geometry upload failed"</span>);
+<a href=#240 id=240 data-nosnippet>240</a>        <span class="kw">return </span><span class="bool-val">false</span>;
+<a href=#241 id=241 data-nosnippet>241</a>    }
+<a href=#242 id=242 data-nosnippet>242</a>    <span class="bool-val">true
+<a href=#243 id=243 data-nosnippet>243</a></span>}
+<a href=#244 id=244 data-nosnippet>244</a>
+<a href=#245 id=245 data-nosnippet>245</a><span class="attr">#[cfg(all(test, feature = <span class="string">"headless"</span>, not(target_arch = <span class="string">"wasm32"</span>)))]
+<a href=#246 id=246 data-nosnippet>246</a></span><span class="kw">mod </span>retry;
 </code></pre></div></section></main></body></html>

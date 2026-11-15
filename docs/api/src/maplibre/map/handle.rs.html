@@ -256,70 +256,93 @@
 <a href=#256 id=256 data-nosnippet>256</a>    </span><span class="kw">pub fn </span>close(<span class="kw-2">&amp;</span><span class="self">self</span>) {
 <a href=#257 id=257 data-nosnippet>257</a>        <span class="self">self</span>.queue.close();
 <a href=#258 id=258 data-nosnippet>258</a>    }
-<a href=#259 id=259 data-nosnippet>259</a>}
-<a href=#260 id=260 data-nosnippet>260</a>
-<a href=#261 id=261 data-nosnippet>261</a><span class="doccomment">/// Sends commands to a running map from its owner's thread.
-<a href=#262 id=262 data-nosnippet>262</a>///
-<a href=#263 id=263 data-nosnippet>263</a>/// The owner applies commands between frames, in the order they were sent, once the map's
-<a href=#264 id=264 data-nosnippet>264</a>/// renderer is ready; commands sent before then wait. A command is a closure over the map, so
-<a href=#265 id=265 data-nosnippet>265</a>/// everything [`Map`] offers is available without a mirror of its API. A handle stays valid
-<a href=#266 id=266 data-nosnippet>266</a>/// across suspension and window re-creation, and its replies resolve to [`MapClosed`] once
-<a href=#267 id=267 data-nosnippet>267</a>/// the owner closes the queue.
-<a href=#268 id=268 data-nosnippet>268</a></span><span class="kw">pub struct </span>MapHandle&lt;E: Environment&gt; {
-<a href=#269 id=269 data-nosnippet>269</a>    sender: Sender&lt;Map&lt;E&gt;&gt;,
-<a href=#270 id=270 data-nosnippet>270</a>}
-<a href=#271 id=271 data-nosnippet>271</a>
-<a href=#272 id=272 data-nosnippet>272</a><span class="kw">impl</span>&lt;E: Environment&gt; Clone <span class="kw">for </span>MapHandle&lt;E&gt; {
-<a href=#273 id=273 data-nosnippet>273</a>    <span class="kw">fn </span>clone(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
-<a href=#274 id=274 data-nosnippet>274</a>        <span class="self">Self </span>{
-<a href=#275 id=275 data-nosnippet>275</a>            sender: <span class="self">self</span>.sender.clone(),
-<a href=#276 id=276 data-nosnippet>276</a>        }
-<a href=#277 id=277 data-nosnippet>277</a>    }
-<a href=#278 id=278 data-nosnippet>278</a>}
-<a href=#279 id=279 data-nosnippet>279</a>
-<a href=#280 id=280 data-nosnippet>280</a><span class="kw">impl</span>&lt;E: Environment&gt; MapHandle&lt;E&gt;
-<a href=#281 id=281 data-nosnippet>281</a><span class="kw">where
-<a href=#282 id=282 data-nosnippet>282</a>    </span>&lt;E::MapWindowConfig <span class="kw">as </span>MapWindowConfig&gt;::MapWindow: HeadedMapWindow,
-<a href=#283 id=283 data-nosnippet>283</a>{
-<a href=#284 id=284 data-nosnippet>284</a>    <span class="doccomment">/// Applies `command` to the map and replies with what it returns.
-<a href=#285 id=285 data-nosnippet>285</a>    </span><span class="kw">pub fn </span>call&lt;R: <span class="lifetime">'static</span>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, command: <span class="kw">impl </span>FnOnce(<span class="kw-2">&amp;mut </span>Map&lt;E&gt;) -&gt; R + <span class="lifetime">'static</span>) -&gt; Reply&lt;R&gt; {
-<a href=#286 id=286 data-nosnippet>286</a>        <span class="self">self</span>.sender.call(command)
-<a href=#287 id=287 data-nosnippet>287</a>    }
-<a href=#288 id=288 data-nosnippet>288</a>
-<a href=#289 id=289 data-nosnippet>289</a>    <span class="doccomment">/// Replies with the first value `watch` returns, asking it when the command is applied and
-<a href=#290 id=290 data-nosnippet>290</a>    /// again after every frame and every later batch of commands, as a camera move is followed
-<a href=#291 id=291 data-nosnippet>291</a>    /// to its end.
-<a href=#292 id=292 data-nosnippet>292</a>    </span><span class="kw">pub fn </span>until&lt;R: <span class="lifetime">'static</span>&gt;(
-<a href=#293 id=293 data-nosnippet>293</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#294 id=294 data-nosnippet>294</a>        watch: <span class="kw">impl </span>FnMut(<span class="kw-2">&amp;mut </span>Map&lt;E&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;R&gt; + <span class="lifetime">'static</span>,
-<a href=#295 id=295 data-nosnippet>295</a>    ) -&gt; Reply&lt;R&gt; {
-<a href=#296 id=296 data-nosnippet>296</a>        <span class="self">self</span>.sender.until(watch)
-<a href=#297 id=297 data-nosnippet>297</a>    }
-<a href=#298 id=298 data-nosnippet>298</a>
-<a href=#299 id=299 data-nosnippet>299</a>    <span class="doccomment">/// Whether the owner has closed the queue, so commands are refused.
-<a href=#300 id=300 data-nosnippet>300</a>    </span><span class="kw">pub fn </span>is_closed(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
-<a href=#301 id=301 data-nosnippet>301</a>        <span class="self">self</span>.sender.is_closed()
+<a href=#259 id=259 data-nosnippet>259</a>
+<a href=#260 id=260 data-nosnippet>260</a>    <span class="doccomment">/// Whether [`Self::close`] has been called on this queue or its handles.
+<a href=#261 id=261 data-nosnippet>261</a>    </span><span class="kw">pub fn </span>is_closed(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+<a href=#262 id=262 data-nosnippet>262</a>        <span class="self">self</span>.queue.<span class="number">0</span>.borrow().closed
+<a href=#263 id=263 data-nosnippet>263</a>    }
+<a href=#264 id=264 data-nosnippet>264</a>}
+<a href=#265 id=265 data-nosnippet>265</a>
+<a href=#266 id=266 data-nosnippet>266</a><span class="doccomment">/// Sends commands to a running map from its owner's thread.
+<a href=#267 id=267 data-nosnippet>267</a>///
+<a href=#268 id=268 data-nosnippet>268</a>/// The owner applies commands between frames, in the order they were sent, once the map's
+<a href=#269 id=269 data-nosnippet>269</a>/// renderer is ready; commands sent before then wait. A command is a closure over the map, so
+<a href=#270 id=270 data-nosnippet>270</a>/// everything [`Map`] offers is available without a mirror of its API. A handle stays valid
+<a href=#271 id=271 data-nosnippet>271</a>/// across suspension and window re-creation, and its replies resolve to [`MapClosed`] once
+<a href=#272 id=272 data-nosnippet>272</a>/// the owner closes the queue.
+<a href=#273 id=273 data-nosnippet>273</a></span><span class="kw">pub struct </span>MapHandle&lt;E: Environment&gt; {
+<a href=#274 id=274 data-nosnippet>274</a>    sender: Sender&lt;Map&lt;E&gt;&gt;,
+<a href=#275 id=275 data-nosnippet>275</a>}
+<a href=#276 id=276 data-nosnippet>276</a>
+<a href=#277 id=277 data-nosnippet>277</a><span class="kw">impl</span>&lt;E: Environment&gt; Clone <span class="kw">for </span>MapHandle&lt;E&gt; {
+<a href=#278 id=278 data-nosnippet>278</a>    <span class="kw">fn </span>clone(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
+<a href=#279 id=279 data-nosnippet>279</a>        <span class="self">Self </span>{
+<a href=#280 id=280 data-nosnippet>280</a>            sender: <span class="self">self</span>.sender.clone(),
+<a href=#281 id=281 data-nosnippet>281</a>        }
+<a href=#282 id=282 data-nosnippet>282</a>    }
+<a href=#283 id=283 data-nosnippet>283</a>}
+<a href=#284 id=284 data-nosnippet>284</a>
+<a href=#285 id=285 data-nosnippet>285</a><span class="kw">impl</span>&lt;E: Environment&gt; MapHandle&lt;E&gt;
+<a href=#286 id=286 data-nosnippet>286</a><span class="kw">where
+<a href=#287 id=287 data-nosnippet>287</a>    </span>&lt;E::MapWindowConfig <span class="kw">as </span>MapWindowConfig&gt;::MapWindow: HeadedMapWindow,
+<a href=#288 id=288 data-nosnippet>288</a>{
+<a href=#289 id=289 data-nosnippet>289</a>    <span class="doccomment">/// Applies `command` to the map and replies with what it returns.
+<a href=#290 id=290 data-nosnippet>290</a>    </span><span class="kw">pub fn </span>call&lt;R: <span class="lifetime">'static</span>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, command: <span class="kw">impl </span>FnOnce(<span class="kw-2">&amp;mut </span>Map&lt;E&gt;) -&gt; R + <span class="lifetime">'static</span>) -&gt; Reply&lt;R&gt; {
+<a href=#291 id=291 data-nosnippet>291</a>        <span class="self">self</span>.sender.call(command)
+<a href=#292 id=292 data-nosnippet>292</a>    }
+<a href=#293 id=293 data-nosnippet>293</a>
+<a href=#294 id=294 data-nosnippet>294</a>    <span class="doccomment">/// Replies with the first value `watch` returns, asking it when the command is applied and
+<a href=#295 id=295 data-nosnippet>295</a>    /// again after every frame and every later batch of commands, as a camera move is followed
+<a href=#296 id=296 data-nosnippet>296</a>    /// to its end.
+<a href=#297 id=297 data-nosnippet>297</a>    </span><span class="kw">pub fn </span>until&lt;R: <span class="lifetime">'static</span>&gt;(
+<a href=#298 id=298 data-nosnippet>298</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#299 id=299 data-nosnippet>299</a>        watch: <span class="kw">impl </span>FnMut(<span class="kw-2">&amp;mut </span>Map&lt;E&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;R&gt; + <span class="lifetime">'static</span>,
+<a href=#300 id=300 data-nosnippet>300</a>    ) -&gt; Reply&lt;R&gt; {
+<a href=#301 id=301 data-nosnippet>301</a>        <span class="self">self</span>.sender.until(watch)
 <a href=#302 id=302 data-nosnippet>302</a>    }
-<a href=#303 id=303 data-nosnippet>303</a>}
-<a href=#304 id=304 data-nosnippet>304</a>
-<a href=#305 id=305 data-nosnippet>305</a><span class="kw">mod </span>sync_handle;
-<a href=#306 id=306 data-nosnippet>306</a><span class="kw">pub use </span>sync_handle::{SyncCommandQueue, SyncHandle, SyncMapCommands, SyncMapHandle, SyncWakeHost};
-<a href=#307 id=307 data-nosnippet>307</a><span class="attr">#[cfg(feature = <span class="string">"headless"</span>)]
-<a href=#308 id=308 data-nosnippet>308</a></span><span class="kw">pub use </span>sync_handle::{SyncHeadlessCommands, SyncHeadlessHandle};
-<a href=#309 id=309 data-nosnippet>309</a>
-<a href=#310 id=310 data-nosnippet>310</a><span class="attr">#[cfg(all(
-<a href=#311 id=311 data-nosnippet>311</a>    feature = <span class="string">"headless"</span>,
-<a href=#312 id=312 data-nosnippet>312</a>    feature = <span class="string">"native-io"</span>,
-<a href=#313 id=313 data-nosnippet>313</a>    not(target_arch = <span class="string">"wasm32"</span>)
-<a href=#314 id=314 data-nosnippet>314</a>))]
-<a href=#315 id=315 data-nosnippet>315</a></span><span class="kw">mod </span>headless_thread;
-<a href=#316 id=316 data-nosnippet>316</a><span class="attr">#[cfg(all(
-<a href=#317 id=317 data-nosnippet>317</a>    feature = <span class="string">"headless"</span>,
-<a href=#318 id=318 data-nosnippet>318</a>    feature = <span class="string">"native-io"</span>,
-<a href=#319 id=319 data-nosnippet>319</a>    not(target_arch = <span class="string">"wasm32"</span>)
-<a href=#320 id=320 data-nosnippet>320</a>))]
-<a href=#321 id=321 data-nosnippet>321</a></span><span class="kw">pub use </span>headless_thread::{HeadlessRuntimeConfig, HeadlessRuntimeError, HeadlessRuntimeThread};
-<a href=#322 id=322 data-nosnippet>322</a>
-<a href=#323 id=323 data-nosnippet>323</a><span class="attr">#[cfg(test)]
-<a href=#324 id=324 data-nosnippet>324</a></span><span class="kw">mod </span>tests;
+<a href=#303 id=303 data-nosnippet>303</a>
+<a href=#304 id=304 data-nosnippet>304</a>    <span class="doccomment">/// Whether the owner has closed the queue, so commands are refused.
+<a href=#305 id=305 data-nosnippet>305</a>    </span><span class="kw">pub fn </span>is_closed(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+<a href=#306 id=306 data-nosnippet>306</a>        <span class="self">self</span>.sender.is_closed()
+<a href=#307 id=307 data-nosnippet>307</a>    }
+<a href=#308 id=308 data-nosnippet>308</a>
+<a href=#309 id=309 data-nosnippet>309</a>    <span class="doccomment">/// Closes the command queue from a handle, refusing later commands and waking the owner so
+<a href=#310 id=310 data-nosnippet>310</a>    /// it can exit its event loop cleanly.
+<a href=#311 id=311 data-nosnippet>311</a>    </span><span class="kw">pub fn </span>close(<span class="kw-2">&amp;</span><span class="self">self</span>) {
+<a href=#312 id=312 data-nosnippet>312</a>        <span class="self">self</span>.sender.shared.borrow_mut().wake_pending = <span class="bool-val">true</span>;
+<a href=#313 id=313 data-nosnippet>313</a>        <span class="kw">let </span>wake = <span class="self">self</span>.sender.wake.clone();
+<a href=#314 id=314 data-nosnippet>314</a>        <span class="kw">let </span>(commands, watchers) = {
+<a href=#315 id=315 data-nosnippet>315</a>            <span class="kw">let </span><span class="kw-2">mut </span>shared = <span class="self">self</span>.sender.shared.borrow_mut();
+<a href=#316 id=316 data-nosnippet>316</a>            shared.closed = <span class="bool-val">true</span>;
+<a href=#317 id=317 data-nosnippet>317</a>            (
+<a href=#318 id=318 data-nosnippet>318</a>                std::mem::take(<span class="kw-2">&amp;mut </span>shared.commands),
+<a href=#319 id=319 data-nosnippet>319</a>                std::mem::take(<span class="kw-2">&amp;mut </span>shared.watchers),
+<a href=#320 id=320 data-nosnippet>320</a>            )
+<a href=#321 id=321 data-nosnippet>321</a>        };
+<a href=#322 id=322 data-nosnippet>322</a>        drop(commands);
+<a href=#323 id=323 data-nosnippet>323</a>        drop(watchers);
+<a href=#324 id=324 data-nosnippet>324</a>        wake.wake();
+<a href=#325 id=325 data-nosnippet>325</a>    }
+<a href=#326 id=326 data-nosnippet>326</a>}
+<a href=#327 id=327 data-nosnippet>327</a>
+<a href=#328 id=328 data-nosnippet>328</a><span class="kw">mod </span>sync_handle;
+<a href=#329 id=329 data-nosnippet>329</a><span class="kw">pub use </span>sync_handle::{SyncCommandQueue, SyncHandle, SyncMapCommands, SyncMapHandle, SyncWakeHost};
+<a href=#330 id=330 data-nosnippet>330</a><span class="attr">#[cfg(feature = <span class="string">"headless"</span>)]
+<a href=#331 id=331 data-nosnippet>331</a></span><span class="kw">pub use </span>sync_handle::{SyncHeadlessCommands, SyncHeadlessHandle};
+<a href=#332 id=332 data-nosnippet>332</a>
+<a href=#333 id=333 data-nosnippet>333</a><span class="attr">#[cfg(all(
+<a href=#334 id=334 data-nosnippet>334</a>    feature = <span class="string">"headless"</span>,
+<a href=#335 id=335 data-nosnippet>335</a>    feature = <span class="string">"native-io"</span>,
+<a href=#336 id=336 data-nosnippet>336</a>    not(target_arch = <span class="string">"wasm32"</span>)
+<a href=#337 id=337 data-nosnippet>337</a>))]
+<a href=#338 id=338 data-nosnippet>338</a></span><span class="kw">mod </span>headless_thread;
+<a href=#339 id=339 data-nosnippet>339</a><span class="attr">#[cfg(all(
+<a href=#340 id=340 data-nosnippet>340</a>    feature = <span class="string">"headless"</span>,
+<a href=#341 id=341 data-nosnippet>341</a>    feature = <span class="string">"native-io"</span>,
+<a href=#342 id=342 data-nosnippet>342</a>    not(target_arch = <span class="string">"wasm32"</span>)
+<a href=#343 id=343 data-nosnippet>343</a>))]
+<a href=#344 id=344 data-nosnippet>344</a></span><span class="kw">pub use </span>headless_thread::{HeadlessRuntimeConfig, HeadlessRuntimeError, HeadlessRuntimeThread};
+<a href=#345 id=345 data-nosnippet>345</a>
+<a href=#346 id=346 data-nosnippet>346</a><span class="attr">#[cfg(test)]
+<a href=#347 id=347 data-nosnippet>347</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

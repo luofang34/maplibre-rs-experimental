@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["icon_stretch","parse_sprite_document","ranges","text_fit"],"struct":["SpriteEntry"]};

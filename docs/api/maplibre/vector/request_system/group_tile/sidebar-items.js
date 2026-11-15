@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["fetch_failure","fetch_group_tile"]};
+window.SIDEBAR_ITEMS = {"enum":["RawPayload"],"fn":["decode_group_tile","fetch_failure","fetch_raw_group_tile"],"struct":["GroupTile","RawGroupTile"]};

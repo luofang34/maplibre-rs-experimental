@@ -40,7 +40,15 @@ pub fn build_style(base: Style) -> Result<Style, serde_json::Error> {
 
 /// Moves the point to where the International Space Station is now, and the camera with it.
 pub async fn update(map: &MapHandle<CurrentEnvironment>) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(not(target_arch = "wasm32"))]
     let body: Value = reqwest::get(ISS_URL).await?.json().await?;
+    #[cfg(target_arch = "wasm32")]
+    let body: Value = {
+        let bytes =
+            maplibre::io::source_client::HttpClient::fetch(&web::web_http_client(), ISS_URL)
+                .await?;
+        serde_json::from_slice(&bytes)?
+    };
     let longitude = body["longitude"]
         .as_f64()
         .ok_or("missing numeric `longitude` field")?;

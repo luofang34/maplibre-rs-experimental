@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["USER_AGENT"],"fn":["build_header_map","format_cache_key"],"mod":["cache","classify"],"struct":["InProcessRoutes","InvalidHeaderError","ReqwestHttpClient"],"type":["InProcessHandler"]};
+window.SIDEBAR_ITEMS = {"constant":["USER_AGENT"],"fn":["build_header_map","format_cache_key"],"mod":["cache","classify"],"static":["SHARED_DIRECT_CLIENT","SHARED_RANGE_CLIENT"],"struct":["InProcessRoutes","InvalidHeaderError","ReqwestHttpClient"],"type":["InProcessHandler"]};

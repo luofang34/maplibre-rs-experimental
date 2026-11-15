@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["Outcome"],"fn":["load_local_file","percent_decode_path"],"struct":["Failure","Inner","Key","Leader","SharedFailure","SharedLoader"],"trait":["ResourceLoader"]};
+window.SIDEBAR_ITEMS = {"enum":["Outcome"],"fn":["percent_decode_path"],"struct":["Failure","Inner","Key","Leader","SharedFailure","SharedLoader"],"trait":["ResourceLoader"]};

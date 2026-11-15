@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {};
+window.SIDEBAR_ITEMS = {"fn":["snapshot_layer_zooms","zoom_bounds_widened"]};

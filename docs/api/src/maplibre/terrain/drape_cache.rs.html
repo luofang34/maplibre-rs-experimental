@@ -14,7 +14,7 @@
 <a href=#14 id=14 data-nosnippet>14</a><span class="kw">use crate</span>::{coords::WorldTileCoords, terrain::drape_targets::TargetSpec};
 <a href=#15 id=15 data-nosnippet>15</a>
 <a href=#16 id=16 data-nosnippet>16</a><span class="doccomment">/// Largest number of released textures kept for reuse.
-<a href=#17 id=17 data-nosnippet>17</a></span><span class="kw">const </span>MAX_FREE_TEXTURES: usize = <span class="number">8</span>;
+<a href=#17 id=17 data-nosnippet>17</a></span><span class="kw">const </span>MAX_FREE_TEXTURES: usize = <span class="number">4</span>;
 <a href=#18 id=18 data-nosnippet>18</a><span class="doccomment">/// Hard ceiling on total drape textures (`entries + parked + free`) held in [`DrapeCache`].
 <a href=#19 id=19 data-nosnippet>19</a></span><span class="kw">pub const </span>HARD_MAX_DRAPE_TEXTURES: usize = <span class="kw">crate</span>::render::memory_budget::DRAPE_TEXTURE_LIMIT;
 <a href=#20 id=20 data-nosnippet>20</a>
@@ -95,7 +95,7 @@
 <a href=#95 id=95 data-nosnippet>95</a>
 <a href=#96 id=96 data-nosnippet>96</a><span class="doccomment">/// Released textures kept with their content, newest first, so a tile that leaves the view
 <a href=#97 id=97 data-nosnippet>97</a>/// and returns, as tiles do when the head turns, is not drawn again.
-<a href=#98 id=98 data-nosnippet>98</a></span><span class="kw">const </span>PARKED_TEXTURES: usize = <span class="number">8</span>;
+<a href=#98 id=98 data-nosnippet>98</a></span><span class="kw">const </span>PARKED_TEXTURES: usize = <span class="number">4</span>;
 <a href=#99 id=99 data-nosnippet>99</a>
 <a href=#100 id=100 data-nosnippet>100</a><span class="doccomment">/// Drape textures by key, a view tile or a view tile of one of several views, with the
 <a href=#101 id=101 data-nosnippet>101</a>/// textures of tiles that left their view parked with their content and a free list of blank

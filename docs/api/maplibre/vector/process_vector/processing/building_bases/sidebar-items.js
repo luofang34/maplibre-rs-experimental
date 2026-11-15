@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["decode_mvt_rings","feature_bool_tag","feature_number_tag","point_in_mvt_ring","remove_feature_tag","rings_bbox","set_feature_tag","unhide_unreplaced_building_bases"]};
+window.SIDEBAR_ITEMS = {"fn":["decode_mvt_rings","feature_bool_tag","feature_number_tag","geometry_bbox","point_in_mvt_ring","remove_feature_tag","rings_bbox","set_feature_tag","unhide_unreplaced_building_bases"]};

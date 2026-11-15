@@ -24,17 +24,17 @@
 <a href=#24 id=24 data-nosnippet>24</a>        ..
 <a href=#25 id=25 data-nosnippet>25</a>    }: <span class="kw-2">&amp;mut </span>MapContext,
 <a href=#26 id=26 data-nosnippet>26</a>) -&gt; SystemResult {
-<a href=#27 id=27 data-nosnippet>27</a>    <span class="kw">let </span><span class="prelude-val">Some</span>((
-<a href=#28 id=28 data-nosnippet>28</a>        Initialized(tile_view_pattern),
-<a href=#29 id=29 data-nosnippet>29</a>        Initialized(raster_resources),
-<a href=#30 id=30 data-nosnippet>30</a>        Initialized(resources),
-<a href=#31 id=31 data-nosnippet>31</a>    )) = world.resources.query::&lt;(
-<a href=#32 id=32 data-nosnippet>32</a>        <span class="kw-2">&amp;</span>Eventually&lt;WgpuTileViewPattern&gt;,
-<a href=#33 id=33 data-nosnippet>33</a>        <span class="kw-2">&amp;</span>Eventually&lt;RasterResources&gt;,
-<a href=#34 id=34 data-nosnippet>34</a>        <span class="kw-2">&amp;</span>Eventually&lt;HillshadeResources&gt;,
-<a href=#35 id=35 data-nosnippet>35</a>    )&gt;()
+<a href=#27 id=27 data-nosnippet>27</a>    <span class="kw">let </span><span class="prelude-val">Some</span>((tile_view_pattern, raster_resources, resources)) = world.resources.query::&lt;(
+<a href=#28 id=28 data-nosnippet>28</a>        <span class="kw-2">&amp;</span>Eventually&lt;WgpuTileViewPattern&gt;,
+<a href=#29 id=29 data-nosnippet>29</a>        <span class="kw-2">&amp;</span>Eventually&lt;RasterResources&gt;,
+<a href=#30 id=30 data-nosnippet>30</a>        <span class="kw-2">&amp;</span>Eventually&lt;HillshadeResources&gt;,
+<a href=#31 id=31 data-nosnippet>31</a>    )&gt;() <span class="kw">else </span>{
+<a href=#32 id=32 data-nosnippet>32</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(SystemError::Dependencies);
+<a href=#33 id=33 data-nosnippet>33</a>    };
+<a href=#34 id=34 data-nosnippet>34</a>    <span class="kw">let </span>(Initialized(tile_view_pattern), Initialized(raster_resources), Initialized(resources)) =
+<a href=#35 id=35 data-nosnippet>35</a>        (tile_view_pattern, raster_resources, resources)
 <a href=#36 id=36 data-nosnippet>36</a>    <span class="kw">else </span>{
-<a href=#37 id=37 data-nosnippet>37</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(SystemError::Dependencies);
+<a href=#37 id=37 data-nosnippet>37</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(());
 <a href=#38 id=38 data-nosnippet>38</a>    };
 <a href=#39 id=39 data-nosnippet>39</a>    <span class="kw">let </span>zoom = view_state.zoom().value();
 <a href=#40 id=40 data-nosnippet>40</a>    <span class="kw">let </span>uses_globe = style

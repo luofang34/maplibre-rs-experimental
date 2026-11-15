@@ -102,123 +102,139 @@
 <a href=#102 id=102 data-nosnippet>102</a>        <span class="kw">let </span>total_i_elems = elem_div(<span class="self">self</span>.max_capacities.indices, strides.index);
 <a href=#103 id=103 data-nosnippet>103</a>        <span class="kw">let </span>total_lm_elems = elem_div(<span class="self">self</span>.max_capacities.layer_metadata, strides.layer_metadata);
 <a href=#104 id=104 data-nosnippet>104</a>
-<a href=#105 id=105 data-nosnippet>105</a>        <span class="kw">let </span>page_v_elems = DEFAULT_PAGE_VERTICES
-<a href=#106 id=106 data-nosnippet>106</a>            .min(max_v_page)
-<a href=#107 id=107 data-nosnippet>107</a>            .max(req_v_elems.next_power_of_two().min(max_v_page))
-<a href=#108 id=108 data-nosnippet>108</a>            .min(rem_v_elems)
-<a href=#109 id=109 data-nosnippet>109</a>            .max(req_v_elems);
-<a href=#110 id=110 data-nosnippet>110</a>        <span class="kw">let </span>prop_i = (u128::from(total_i_elems) * u128::from(page_v_elems))
-<a href=#111 id=111 data-nosnippet>111</a>            .div_ceil(u128::from(total_v_elems)) <span class="kw">as </span>u64;
-<a href=#112 id=112 data-nosnippet>112</a>        <span class="kw">let </span>page_i_elems = prop_i
-<a href=#113 id=113 data-nosnippet>113</a>            .min(max_i_page)
-<a href=#114 id=114 data-nosnippet>114</a>            .max(req_i_elems.next_power_of_two().min(max_i_page))
-<a href=#115 id=115 data-nosnippet>115</a>            .min(rem_i_elems)
-<a href=#116 id=116 data-nosnippet>116</a>            .max(req_i_elems);
-<a href=#117 id=117 data-nosnippet>117</a>        <span class="kw">let </span>prop_lm = (u128::from(total_lm_elems) * u128::from(page_v_elems))
-<a href=#118 id=118 data-nosnippet>118</a>            .div_ceil(u128::from(total_v_elems)) <span class="kw">as </span>u64;
-<a href=#119 id=119 data-nosnippet>119</a>        <span class="kw">let </span>page_lm_elems = prop_lm
-<a href=#120 id=120 data-nosnippet>120</a>            .min(max_lm_page)
-<a href=#121 id=121 data-nosnippet>121</a>            .max(req_lm_elems.next_power_of_two().min(max_lm_page))
-<a href=#122 id=122 data-nosnippet>122</a>            .min(rem_lm_elems)
-<a href=#123 id=123 data-nosnippet>123</a>            .max(req_lm_elems);
-<a href=#124 id=124 data-nosnippet>124</a>
-<a href=#125 id=125 data-nosnippet>125</a>        <span class="kw">let </span>v_bytes =
-<a href=#126 id=126 data-nosnippet>126</a>            fitting_buffer_size(strides.vertex <span class="kw">as </span>usize, page_v_elems, <span class="self">self</span>.max_page_bytes);
-<a href=#127 id=127 data-nosnippet>127</a>        <span class="kw">let </span>i_bytes =
-<a href=#128 id=128 data-nosnippet>128</a>            fitting_buffer_size(strides.index <span class="kw">as </span>usize, page_i_elems, <span class="self">self</span>.max_page_bytes);
-<a href=#129 id=129 data-nosnippet>129</a>        <span class="kw">let </span>lm_bytes = fitting_buffer_size(
-<a href=#130 id=130 data-nosnippet>130</a>            strides.layer_metadata <span class="kw">as </span>usize,
-<a href=#131 id=131 data-nosnippet>131</a>            page_lm_elems,
-<a href=#132 id=132 data-nosnippet>132</a>            <span class="self">self</span>.max_page_bytes,
-<a href=#133 id=133 data-nosnippet>133</a>        );
-<a href=#134 id=134 data-nosnippet>134</a>        <span class="kw">let </span>fm_bytes = fitting_buffer_size(
-<a href=#135 id=135 data-nosnippet>135</a>            strides.feature_metadata <span class="kw">as </span>usize,
-<a href=#136 id=136 data-nosnippet>136</a>            page_v_elems,
-<a href=#137 id=137 data-nosnippet>137</a>            <span class="self">self</span>.max_page_bytes,
-<a href=#138 id=138 data-nosnippet>138</a>        );
-<a href=#139 id=139 data-nosnippet>139</a>
-<a href=#140 id=140 data-nosnippet>140</a>        <span class="kw">let </span>slot_idx = <span class="self">self
-<a href=#141 id=141 data-nosnippet>141</a>            </span>.pages
-<a href=#142 id=142 data-nosnippet>142</a>            .iter()
-<a href=#143 id=143 data-nosnippet>143</a>            .position(Option::is_none)
-<a href=#144 id=144 data-nosnippet>144</a>            .unwrap_or(<span class="self">self</span>.pages.len());
-<a href=#145 id=145 data-nosnippet>145</a>        <span class="kw">let </span>page_id = u16::try_from(slot_idx).ok()<span class="question-mark">?</span>;
-<a href=#146 id=146 data-nosnippet>146</a>
-<a href=#147 id=147 data-nosnippet>147</a>        <span class="kw">let </span>factory = <span class="self">self</span>.page_factory.as_ref()<span class="question-mark">?</span>;
-<a href=#148 id=148 data-nosnippet>148</a>        <span class="kw">let </span>v_buf = (factory.<span class="number">0</span>)(BackingBufferType::Vertices, v_bytes);
-<a href=#149 id=149 data-nosnippet>149</a>        <span class="kw">let </span>i_buf = (factory.<span class="number">0</span>)(BackingBufferType::Indices, i_bytes);
-<a href=#150 id=150 data-nosnippet>150</a>        <span class="kw">let </span>lm_buf = (factory.<span class="number">0</span>)(BackingBufferType::Metadata, lm_bytes);
-<a href=#151 id=151 data-nosnippet>151</a>        <span class="kw">let </span>fm_buf = (factory.<span class="number">0</span>)(BackingBufferType::FeatureMetadata, fm_bytes);
-<a href=#152 id=152 data-nosnippet>152</a>
-<a href=#153 id=153 data-nosnippet>153</a>        <span class="kw">let </span><span class="kw-2">mut </span>page = BufferPage::new(
-<a href=#154 id=154 data-nosnippet>154</a>            BackingBufferDescriptor::new(v_buf, v_bytes),
-<a href=#155 id=155 data-nosnippet>155</a>            BackingBufferDescriptor::new(i_buf, i_bytes),
-<a href=#156 id=156 data-nosnippet>156</a>            BackingBufferDescriptor::new(lm_buf, lm_bytes),
-<a href=#157 id=157 data-nosnippet>157</a>            BackingBufferDescriptor::new(fm_buf, fm_bytes),
-<a href=#158 id=158 data-nosnippet>158</a>            strides,
-<a href=#159 id=159 data-nosnippet>159</a>        );
-<a href=#160 id=160 data-nosnippet>160</a>        <span class="kw">let </span>alloc = page.try_allocate(page_id, sizes, strides)<span class="question-mark">?</span>;
-<a href=#161 id=161 data-nosnippet>161</a>        <span class="kw">if </span>slot_idx == <span class="self">self</span>.pages.len() {
-<a href=#162 id=162 data-nosnippet>162</a>            <span class="self">self</span>.pages.push(<span class="prelude-val">Some</span>(page));
-<a href=#163 id=163 data-nosnippet>163</a>        } <span class="kw">else </span>{
-<a href=#164 id=164 data-nosnippet>164</a>            <span class="self">self</span>.pages[slot_idx] = <span class="prelude-val">Some</span>(page);
-<a href=#165 id=165 data-nosnippet>165</a>        }
-<a href=#166 id=166 data-nosnippet>166</a>        <span class="prelude-val">Some</span>(alloc)
-<a href=#167 id=167 data-nosnippet>167</a>    }
+<a href=#105 id=105 data-nosnippet>105</a>        <span class="attr">#[cfg(target_arch = <span class="string">"wasm32"</span>)]
+<a href=#106 id=106 data-nosnippet>106</a>        </span><span class="kw">let </span>target_page_v = <span class="kw">match </span><span class="self">self</span>.page_count() {
+<a href=#107 id=107 data-nosnippet>107</a>            <span class="number">0 </span>=&gt; <span class="number">16 </span>* <span class="number">1024</span>,
+<a href=#108 id=108 data-nosnippet>108</a>            <span class="number">1 </span>=&gt; <span class="number">32 </span>* <span class="number">1024</span>,
+<a href=#109 id=109 data-nosnippet>109</a>            <span class="number">2 </span>=&gt; <span class="number">64 </span>* <span class="number">1024</span>,
+<a href=#110 id=110 data-nosnippet>110</a>            <span class="number">3 </span>=&gt; <span class="number">128 </span>* <span class="number">1024</span>,
+<a href=#111 id=111 data-nosnippet>111</a>            <span class="kw">_ </span>=&gt; DEFAULT_PAGE_VERTICES,
+<a href=#112 id=112 data-nosnippet>112</a>        };
+<a href=#113 id=113 data-nosnippet>113</a>        <span class="attr">#[cfg(not(target_arch = <span class="string">"wasm32"</span>))]
+<a href=#114 id=114 data-nosnippet>114</a>        </span><span class="kw">let </span>target_page_v = <span class="kw">match </span><span class="self">self</span>.page_count() {
+<a href=#115 id=115 data-nosnippet>115</a>            <span class="number">0 </span>=&gt; <span class="number">32 </span>* <span class="number">1024</span>,
+<a href=#116 id=116 data-nosnippet>116</a>            <span class="number">1 </span>=&gt; <span class="number">64 </span>* <span class="number">1024</span>,
+<a href=#117 id=117 data-nosnippet>117</a>            <span class="number">2 </span>=&gt; <span class="number">128 </span>* <span class="number">1024</span>,
+<a href=#118 id=118 data-nosnippet>118</a>            <span class="kw">_ </span>=&gt; DEFAULT_PAGE_VERTICES,
+<a href=#119 id=119 data-nosnippet>119</a>        };
+<a href=#120 id=120 data-nosnippet>120</a>        <span class="kw">let </span>page_v_elems = target_page_v
+<a href=#121 id=121 data-nosnippet>121</a>            .min(max_v_page)
+<a href=#122 id=122 data-nosnippet>122</a>            .max(req_v_elems.next_power_of_two().min(max_v_page))
+<a href=#123 id=123 data-nosnippet>123</a>            .min(rem_v_elems)
+<a href=#124 id=124 data-nosnippet>124</a>            .max(req_v_elems);
+<a href=#125 id=125 data-nosnippet>125</a>        <span class="kw">let </span>prop_i = (u128::from(total_i_elems) * u128::from(page_v_elems))
+<a href=#126 id=126 data-nosnippet>126</a>            .div_ceil(u128::from(total_v_elems)) <span class="kw">as </span>u64;
+<a href=#127 id=127 data-nosnippet>127</a>        <span class="kw">let </span>page_i_elems = prop_i
+<a href=#128 id=128 data-nosnippet>128</a>            .min(max_i_page)
+<a href=#129 id=129 data-nosnippet>129</a>            .max(req_i_elems.next_power_of_two().min(max_i_page))
+<a href=#130 id=130 data-nosnippet>130</a>            .min(rem_i_elems)
+<a href=#131 id=131 data-nosnippet>131</a>            .max(req_i_elems);
+<a href=#132 id=132 data-nosnippet>132</a>        <span class="kw">let </span>prop_lm = ((u128::from(total_lm_elems) * u128::from(page_v_elems))
+<a href=#133 id=133 data-nosnippet>133</a>            .div_ceil(u128::from(total_v_elems)) <span class="kw">as </span>u64)
+<a href=#134 id=134 data-nosnippet>134</a>            .max(<span class="number">2048</span>.min(total_lm_elems / <span class="number">4</span>));
+<a href=#135 id=135 data-nosnippet>135</a>        <span class="kw">let </span>page_lm_elems = prop_lm
+<a href=#136 id=136 data-nosnippet>136</a>            .min(max_lm_page)
+<a href=#137 id=137 data-nosnippet>137</a>            .max(req_lm_elems.next_power_of_two().min(max_lm_page))
+<a href=#138 id=138 data-nosnippet>138</a>            .min(rem_lm_elems)
+<a href=#139 id=139 data-nosnippet>139</a>            .max(req_lm_elems);
+<a href=#140 id=140 data-nosnippet>140</a>
+<a href=#141 id=141 data-nosnippet>141</a>        <span class="kw">let </span>v_bytes =
+<a href=#142 id=142 data-nosnippet>142</a>            fitting_buffer_size(strides.vertex <span class="kw">as </span>usize, page_v_elems, <span class="self">self</span>.max_page_bytes);
+<a href=#143 id=143 data-nosnippet>143</a>        <span class="kw">let </span>i_bytes =
+<a href=#144 id=144 data-nosnippet>144</a>            fitting_buffer_size(strides.index <span class="kw">as </span>usize, page_i_elems, <span class="self">self</span>.max_page_bytes);
+<a href=#145 id=145 data-nosnippet>145</a>        <span class="kw">let </span>lm_bytes = fitting_buffer_size(
+<a href=#146 id=146 data-nosnippet>146</a>            strides.layer_metadata <span class="kw">as </span>usize,
+<a href=#147 id=147 data-nosnippet>147</a>            page_lm_elems,
+<a href=#148 id=148 data-nosnippet>148</a>            <span class="self">self</span>.max_page_bytes,
+<a href=#149 id=149 data-nosnippet>149</a>        );
+<a href=#150 id=150 data-nosnippet>150</a>        <span class="kw">let </span>fm_bytes = fitting_buffer_size(
+<a href=#151 id=151 data-nosnippet>151</a>            strides.feature_metadata <span class="kw">as </span>usize,
+<a href=#152 id=152 data-nosnippet>152</a>            page_v_elems,
+<a href=#153 id=153 data-nosnippet>153</a>            <span class="self">self</span>.max_page_bytes,
+<a href=#154 id=154 data-nosnippet>154</a>        );
+<a href=#155 id=155 data-nosnippet>155</a>
+<a href=#156 id=156 data-nosnippet>156</a>        <span class="kw">let </span>slot_idx = <span class="self">self
+<a href=#157 id=157 data-nosnippet>157</a>            </span>.pages
+<a href=#158 id=158 data-nosnippet>158</a>            .iter()
+<a href=#159 id=159 data-nosnippet>159</a>            .position(Option::is_none)
+<a href=#160 id=160 data-nosnippet>160</a>            .unwrap_or(<span class="self">self</span>.pages.len());
+<a href=#161 id=161 data-nosnippet>161</a>        <span class="kw">let </span>page_id = u16::try_from(slot_idx).ok()<span class="question-mark">?</span>;
+<a href=#162 id=162 data-nosnippet>162</a>
+<a href=#163 id=163 data-nosnippet>163</a>        <span class="kw">let </span>factory = <span class="self">self</span>.page_factory.as_ref()<span class="question-mark">?</span>;
+<a href=#164 id=164 data-nosnippet>164</a>        <span class="kw">let </span>v_buf = (factory.<span class="number">0</span>)(BackingBufferType::Vertices, v_bytes);
+<a href=#165 id=165 data-nosnippet>165</a>        <span class="kw">let </span>i_buf = (factory.<span class="number">0</span>)(BackingBufferType::Indices, i_bytes);
+<a href=#166 id=166 data-nosnippet>166</a>        <span class="kw">let </span>lm_buf = (factory.<span class="number">0</span>)(BackingBufferType::Metadata, lm_bytes);
+<a href=#167 id=167 data-nosnippet>167</a>        <span class="kw">let </span>fm_buf = (factory.<span class="number">0</span>)(BackingBufferType::FeatureMetadata, fm_bytes);
 <a href=#168 id=168 data-nosnippet>168</a>
-<a href=#169 id=169 data-nosnippet>169</a>    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>saturation_error(
-<a href=#170 id=170 data-nosnippet>170</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#171 id=171 data-nosnippet>171</a>        sizes: [u64; <span class="number">4</span>],
-<a href=#172 id=172 data-nosnippet>172</a>        strides: ElementStrides,
-<a href=#173 id=173 data-nosnippet>173</a>    ) -&gt; AllocationError {
-<a href=#174 id=174 data-nosnippet>174</a>        <span class="kw">let </span>limits = <span class="self">self</span>.single_layer_limits(strides);
-<a href=#175 id=175 data-nosnippet>175</a>        <span class="kw">let </span>types = [
-<a href=#176 id=176 data-nosnippet>176</a>            BackingBufferType::Vertices,
-<a href=#177 id=177 data-nosnippet>177</a>            BackingBufferType::Indices,
-<a href=#178 id=178 data-nosnippet>178</a>            BackingBufferType::Metadata,
-<a href=#179 id=179 data-nosnippet>179</a>            BackingBufferType::FeatureMetadata,
-<a href=#180 id=180 data-nosnippet>180</a>        ];
-<a href=#181 id=181 data-nosnippet>181</a>        <span class="kw">for </span>((typ, requested), capacity) <span class="kw">in </span>types.into_iter().zip(sizes).zip(limits) {
-<a href=#182 id=182 data-nosnippet>182</a>            <span class="kw">let </span>fits_somewhere = <span class="self">self</span>.pages.iter().flatten().any(|page| <span class="kw">match </span>typ {
-<a href=#183 id=183 data-nosnippet>183</a>                BackingBufferType::Vertices =&gt; page
-<a href=#184 id=184 data-nosnippet>184</a>                    .vertex_alloc
-<a href=#185 id=185 data-nosnippet>185</a>                    .can_allocate(requested, strides.vertex_align),
-<a href=#186 id=186 data-nosnippet>186</a>                BackingBufferType::Indices =&gt; page
-<a href=#187 id=187 data-nosnippet>187</a>                    .index_alloc
-<a href=#188 id=188 data-nosnippet>188</a>                    .can_allocate(requested, strides.index_align),
-<a href=#189 id=189 data-nosnippet>189</a>                BackingBufferType::Metadata =&gt; page
-<a href=#190 id=190 data-nosnippet>190</a>                    .layer_alloc
-<a href=#191 id=191 data-nosnippet>191</a>                    .can_allocate(requested, strides.layer_align),
-<a href=#192 id=192 data-nosnippet>192</a>                BackingBufferType::FeatureMetadata =&gt; requested &lt;= page.feature_metadata.inner_size,
-<a href=#193 id=193 data-nosnippet>193</a>            });
-<a href=#194 id=194 data-nosnippet>194</a>            <span class="kw">if </span>!fits_somewhere {
-<a href=#195 id=195 data-nosnippet>195</a>                <span class="kw">return </span>AllocationError::Capacity {
-<a href=#196 id=196 data-nosnippet>196</a>                    buffer: typ,
-<a href=#197 id=197 data-nosnippet>197</a>                    requested,
-<a href=#198 id=198 data-nosnippet>198</a>                    capacity,
-<a href=#199 id=199 data-nosnippet>199</a>                };
-<a href=#200 id=200 data-nosnippet>200</a>            }
-<a href=#201 id=201 data-nosnippet>201</a>        }
-<a href=#202 id=202 data-nosnippet>202</a>        AllocationError::Capacity {
-<a href=#203 id=203 data-nosnippet>203</a>            buffer: BackingBufferType::Vertices,
-<a href=#204 id=204 data-nosnippet>204</a>            requested: sizes[<span class="number">0</span>],
-<a href=#205 id=205 data-nosnippet>205</a>            capacity: limits[<span class="number">0</span>],
-<a href=#206 id=206 data-nosnippet>206</a>        }
-<a href=#207 id=207 data-nosnippet>207</a>    }
-<a href=#208 id=208 data-nosnippet>208</a>}
-<a href=#209 id=209 data-nosnippet>209</a>
-<a href=#210 id=210 data-nosnippet>210</a><span class="kw">fn </span>elem_div(bytes: u64, stride: u64) -&gt; u64 {
-<a href=#211 id=211 data-nosnippet>211</a>    bytes.checked_div(stride).unwrap_or(<span class="number">0</span>)
-<a href=#212 id=212 data-nosnippet>212</a>}
-<a href=#213 id=213 data-nosnippet>213</a>
-<a href=#214 id=214 data-nosnippet>214</a><span class="kw">fn </span>page_elem_limit(max_page_bytes: u64, stride: u64) -&gt; u64 {
-<a href=#215 id=215 data-nosnippet>215</a>    max_page_bytes
-<a href=#216 id=216 data-nosnippet>216</a>        .checked_div(stride)
-<a href=#217 id=217 data-nosnippet>217</a>        .unwrap_or(<span class="number">0</span>)
-<a href=#218 id=218 data-nosnippet>218</a>        .min(u64::from(u32::MAX))
-<a href=#219 id=219 data-nosnippet>219</a>}
-<a href=#220 id=220 data-nosnippet>220</a>
-<a href=#221 id=221 data-nosnippet>221</a><span class="kw">fn </span>capped_elem_limit(max_pool_bytes: u64, max_page_bytes: u64, stride: u64) -&gt; u64 {
-<a href=#222 id=222 data-nosnippet>222</a>    elem_div(max_pool_bytes, stride).min(page_elem_limit(max_page_bytes, stride))
-<a href=#223 id=223 data-nosnippet>223</a>}
+<a href=#169 id=169 data-nosnippet>169</a>        <span class="kw">let </span><span class="kw-2">mut </span>page = BufferPage::new(
+<a href=#170 id=170 data-nosnippet>170</a>            BackingBufferDescriptor::new(v_buf, v_bytes),
+<a href=#171 id=171 data-nosnippet>171</a>            BackingBufferDescriptor::new(i_buf, i_bytes),
+<a href=#172 id=172 data-nosnippet>172</a>            BackingBufferDescriptor::new(lm_buf, lm_bytes),
+<a href=#173 id=173 data-nosnippet>173</a>            BackingBufferDescriptor::new(fm_buf, fm_bytes),
+<a href=#174 id=174 data-nosnippet>174</a>            strides,
+<a href=#175 id=175 data-nosnippet>175</a>        );
+<a href=#176 id=176 data-nosnippet>176</a>        <span class="kw">let </span>alloc = page.try_allocate(page_id, sizes, strides)<span class="question-mark">?</span>;
+<a href=#177 id=177 data-nosnippet>177</a>        <span class="kw">if </span>slot_idx == <span class="self">self</span>.pages.len() {
+<a href=#178 id=178 data-nosnippet>178</a>            <span class="self">self</span>.pages.push(<span class="prelude-val">Some</span>(page));
+<a href=#179 id=179 data-nosnippet>179</a>        } <span class="kw">else </span>{
+<a href=#180 id=180 data-nosnippet>180</a>            <span class="self">self</span>.pages[slot_idx] = <span class="prelude-val">Some</span>(page);
+<a href=#181 id=181 data-nosnippet>181</a>        }
+<a href=#182 id=182 data-nosnippet>182</a>        <span class="prelude-val">Some</span>(alloc)
+<a href=#183 id=183 data-nosnippet>183</a>    }
+<a href=#184 id=184 data-nosnippet>184</a>
+<a href=#185 id=185 data-nosnippet>185</a>    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>saturation_error(
+<a href=#186 id=186 data-nosnippet>186</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#187 id=187 data-nosnippet>187</a>        sizes: [u64; <span class="number">4</span>],
+<a href=#188 id=188 data-nosnippet>188</a>        strides: ElementStrides,
+<a href=#189 id=189 data-nosnippet>189</a>    ) -&gt; AllocationError {
+<a href=#190 id=190 data-nosnippet>190</a>        <span class="kw">let </span>limits = <span class="self">self</span>.single_layer_limits(strides);
+<a href=#191 id=191 data-nosnippet>191</a>        <span class="kw">let </span>types = [
+<a href=#192 id=192 data-nosnippet>192</a>            BackingBufferType::Vertices,
+<a href=#193 id=193 data-nosnippet>193</a>            BackingBufferType::Indices,
+<a href=#194 id=194 data-nosnippet>194</a>            BackingBufferType::Metadata,
+<a href=#195 id=195 data-nosnippet>195</a>            BackingBufferType::FeatureMetadata,
+<a href=#196 id=196 data-nosnippet>196</a>        ];
+<a href=#197 id=197 data-nosnippet>197</a>        <span class="kw">for </span>((typ, requested), capacity) <span class="kw">in </span>types.into_iter().zip(sizes).zip(limits) {
+<a href=#198 id=198 data-nosnippet>198</a>            <span class="kw">let </span>fits_somewhere = <span class="self">self</span>.pages.iter().flatten().any(|page| <span class="kw">match </span>typ {
+<a href=#199 id=199 data-nosnippet>199</a>                BackingBufferType::Vertices =&gt; page
+<a href=#200 id=200 data-nosnippet>200</a>                    .vertex_alloc
+<a href=#201 id=201 data-nosnippet>201</a>                    .can_allocate(requested, strides.vertex_align),
+<a href=#202 id=202 data-nosnippet>202</a>                BackingBufferType::Indices =&gt; page
+<a href=#203 id=203 data-nosnippet>203</a>                    .index_alloc
+<a href=#204 id=204 data-nosnippet>204</a>                    .can_allocate(requested, strides.index_align),
+<a href=#205 id=205 data-nosnippet>205</a>                BackingBufferType::Metadata =&gt; page
+<a href=#206 id=206 data-nosnippet>206</a>                    .layer_alloc
+<a href=#207 id=207 data-nosnippet>207</a>                    .can_allocate(requested, strides.layer_align),
+<a href=#208 id=208 data-nosnippet>208</a>                BackingBufferType::FeatureMetadata =&gt; requested &lt;= page.feature_metadata.inner_size,
+<a href=#209 id=209 data-nosnippet>209</a>            });
+<a href=#210 id=210 data-nosnippet>210</a>            <span class="kw">if </span>!fits_somewhere {
+<a href=#211 id=211 data-nosnippet>211</a>                <span class="kw">return </span>AllocationError::Capacity {
+<a href=#212 id=212 data-nosnippet>212</a>                    buffer: typ,
+<a href=#213 id=213 data-nosnippet>213</a>                    requested,
+<a href=#214 id=214 data-nosnippet>214</a>                    capacity,
+<a href=#215 id=215 data-nosnippet>215</a>                };
+<a href=#216 id=216 data-nosnippet>216</a>            }
+<a href=#217 id=217 data-nosnippet>217</a>        }
+<a href=#218 id=218 data-nosnippet>218</a>        AllocationError::Capacity {
+<a href=#219 id=219 data-nosnippet>219</a>            buffer: BackingBufferType::Vertices,
+<a href=#220 id=220 data-nosnippet>220</a>            requested: sizes[<span class="number">0</span>],
+<a href=#221 id=221 data-nosnippet>221</a>            capacity: limits[<span class="number">0</span>],
+<a href=#222 id=222 data-nosnippet>222</a>        }
+<a href=#223 id=223 data-nosnippet>223</a>    }
+<a href=#224 id=224 data-nosnippet>224</a>}
+<a href=#225 id=225 data-nosnippet>225</a>
+<a href=#226 id=226 data-nosnippet>226</a><span class="kw">fn </span>elem_div(bytes: u64, stride: u64) -&gt; u64 {
+<a href=#227 id=227 data-nosnippet>227</a>    bytes.checked_div(stride).unwrap_or(<span class="number">0</span>)
+<a href=#228 id=228 data-nosnippet>228</a>}
+<a href=#229 id=229 data-nosnippet>229</a>
+<a href=#230 id=230 data-nosnippet>230</a><span class="kw">fn </span>page_elem_limit(max_page_bytes: u64, stride: u64) -&gt; u64 {
+<a href=#231 id=231 data-nosnippet>231</a>    max_page_bytes
+<a href=#232 id=232 data-nosnippet>232</a>        .checked_div(stride)
+<a href=#233 id=233 data-nosnippet>233</a>        .unwrap_or(<span class="number">0</span>)
+<a href=#234 id=234 data-nosnippet>234</a>        .min(u64::from(u32::MAX))
+<a href=#235 id=235 data-nosnippet>235</a>}
+<a href=#236 id=236 data-nosnippet>236</a>
+<a href=#237 id=237 data-nosnippet>237</a><span class="kw">fn </span>capped_elem_limit(max_pool_bytes: u64, max_page_bytes: u64, stride: u64) -&gt; u64 {
+<a href=#238 id=238 data-nosnippet>238</a>    elem_div(max_pool_bytes, stride).min(page_elem_limit(max_page_bytes, stride))
+<a href=#239 id=239 data-nosnippet>239</a>}
 </code></pre></div></section></main></body></html>

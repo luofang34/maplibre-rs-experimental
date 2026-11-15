@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["preferred_system_fallbacks"],"struct":["NativeFontDb"]};
+window.SIDEBAR_ITEMS = {"fn":["is_cjk_or_hangul_or_kana","load_existing_font_files","load_tier1_system_fonts","load_tier2_cjk_system_fonts","preferred_system_fallbacks"],"struct":["NativeFontDb"]};

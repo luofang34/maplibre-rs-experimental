@@ -259,21 +259,30 @@
 <a href=#259 id=259 data-nosnippet>259</a>
 <a href=#260 id=260 data-nosnippet>260</a><span class="doccomment">/// Decodes PNG/JPEG/WebP bytes into RGBA8 pixels off the threads that drive fetches.
 <a href=#261 id=261 data-nosnippet>261</a></span><span class="kw">async fn </span>decode_rgba(data: Vec&lt;u8&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;RgbaImage, CachedTileFailure&gt; {
-<a href=#262 id=262 data-nosnippet>262</a>    run_cpu_bound(<span class="kw">move </span>|| image::load_from_memory(<span class="kw-2">&amp;</span>data).map(|image| image.to_rgba8()))
-<a href=#263 id=263 data-nosnippet>263</a>        .<span class="kw">await
-<a href=#264 id=264 data-nosnippet>264</a>        </span>.map_err(|error| CachedTileFailure::Decode(error.to_string()))<span class="question-mark">?
-<a href=#265 id=265 data-nosnippet>265</a>        </span>.map_err(|error| CachedTileFailure::Decode(error.to_string()))
-<a href=#266 id=266 data-nosnippet>266</a>}
-<a href=#267 id=267 data-nosnippet>267</a>
-<a href=#268 id=268 data-nosnippet>268</a><span class="doccomment">/// Unpacks and despikes elevation samples off the threads that drive fetches.
-<a href=#269 id=269 data-nosnippet>269</a></span><span class="kw">async fn </span>decode_dem(
-<a href=#270 id=270 data-nosnippet>270</a>    image: Arc&lt;RgbaImage&gt;,
-<a href=#271 id=271 data-nosnippet>271</a>    unpack: [f64; <span class="number">4</span>],
-<a href=#272 id=272 data-nosnippet>272</a>    sample_metres: f64,
-<a href=#273 id=273 data-nosnippet>273</a>) -&gt; <span class="prelude-ty">Result</span>&lt;DemTile, CachedTileFailure&gt; {
-<a href=#274 id=274 data-nosnippet>274</a>    run_cpu_bound(<span class="kw">move </span>|| DemTile::from_image_despiked(<span class="kw-2">&amp;</span>image, unpack, sample_metres))
-<a href=#275 id=275 data-nosnippet>275</a>        .<span class="kw">await
-<a href=#276 id=276 data-nosnippet>276</a>        </span>.map_err(|error| CachedTileFailure::Decode(error.to_string()))<span class="question-mark">?
-<a href=#277 id=277 data-nosnippet>277</a>        </span>.map_err(|error| CachedTileFailure::Decode(error.to_string()))
-<a href=#278 id=278 data-nosnippet>278</a>}
+<a href=#262 id=262 data-nosnippet>262</a>    <span class="attr">#[cfg(not(target_arch = <span class="string">"wasm32"</span>))]
+<a href=#263 id=263 data-nosnippet>263</a>    </span>{
+<a href=#264 id=264 data-nosnippet>264</a>        run_cpu_bound(<span class="kw">move </span>|| image::load_from_memory(<span class="kw-2">&amp;</span>data).map(|image| image.to_rgba8()))
+<a href=#265 id=265 data-nosnippet>265</a>            .<span class="kw">await
+<a href=#266 id=266 data-nosnippet>266</a>            </span>.map_err(|error| CachedTileFailure::Decode(error.to_string()))<span class="question-mark">?
+<a href=#267 id=267 data-nosnippet>267</a>            </span>.map_err(|error| CachedTileFailure::Decode(error.to_string()))
+<a href=#268 id=268 data-nosnippet>268</a>    }
+<a href=#269 id=269 data-nosnippet>269</a>    <span class="attr">#[cfg(target_arch = <span class="string">"wasm32"</span>)]
+<a href=#270 id=270 data-nosnippet>270</a>    </span>{
+<a href=#271 id=271 data-nosnippet>271</a>        <span class="kw">crate</span>::platform::decode_rgba_bytes(<span class="kw-2">&amp;</span>data)
+<a href=#272 id=272 data-nosnippet>272</a>            .<span class="kw">await
+<a href=#273 id=273 data-nosnippet>273</a>            </span>.map_err(CachedTileFailure::Decode)
+<a href=#274 id=274 data-nosnippet>274</a>    }
+<a href=#275 id=275 data-nosnippet>275</a>}
+<a href=#276 id=276 data-nosnippet>276</a>
+<a href=#277 id=277 data-nosnippet>277</a><span class="doccomment">/// Unpacks and despikes elevation samples off the threads that drive fetches.
+<a href=#278 id=278 data-nosnippet>278</a></span><span class="kw">async fn </span>decode_dem(
+<a href=#279 id=279 data-nosnippet>279</a>    image: Arc&lt;RgbaImage&gt;,
+<a href=#280 id=280 data-nosnippet>280</a>    unpack: [f64; <span class="number">4</span>],
+<a href=#281 id=281 data-nosnippet>281</a>    sample_metres: f64,
+<a href=#282 id=282 data-nosnippet>282</a>) -&gt; <span class="prelude-ty">Result</span>&lt;DemTile, CachedTileFailure&gt; {
+<a href=#283 id=283 data-nosnippet>283</a>    run_cpu_bound(<span class="kw">move </span>|| DemTile::from_image_despiked(<span class="kw-2">&amp;</span>image, unpack, sample_metres))
+<a href=#284 id=284 data-nosnippet>284</a>        .<span class="kw">await
+<a href=#285 id=285 data-nosnippet>285</a>        </span>.map_err(|error| CachedTileFailure::Decode(error.to_string()))<span class="question-mark">?
+<a href=#286 id=286 data-nosnippet>286</a>        </span>.map_err(|error| CachedTileFailure::Decode(error.to_string()))
+<a href=#287 id=287 data-nosnippet>287</a>}
 </code></pre></div></section></main></body></html>

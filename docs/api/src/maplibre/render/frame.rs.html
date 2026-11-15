@@ -38,6 +38,10 @@
 <a href=#38 id=38 data-nosnippet>38</a>        .resources
 <a href=#39 id=39 data-nosnippet>39</a>        .get_or_init_mut::&lt;FrameTimings&gt;()
 <a href=#40 id=40 data-nosnippet>40</a>        .end_frame();
-<a href=#41 id=41 data-nosnippet>41</a>    result
-<a href=#42 id=42 data-nosnippet>42</a>}
+<a href=#41 id=41 data-nosnippet>41</a>    <span class="attr">#[cfg(not(target_arch = <span class="string">"wasm32"</span>))]
+<a href=#42 id=42 data-nosnippet>42</a>    </span><span class="kw">if let </span><span class="prelude-val">Err</span>(error) = context.renderer.device.poll(wgpu::PollType::Poll) {
+<a href=#43 id=43 data-nosnippet>43</a>        <span class="macro">tracing::debug!</span>(%error, <span class="string">"device poll failed"</span>);
+<a href=#44 id=44 data-nosnippet>44</a>    }
+<a href=#45 id=45 data-nosnippet>45</a>    result
+<a href=#46 id=46 data-nosnippet>46</a>}
 </code></pre></div></section></main></body></html>
