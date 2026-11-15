@@ -314,15 +314,29 @@
 <a href=#314 id=314 data-nosnippet>314</a>        stage.add_system(system);
 <a href=#315 id=315 data-nosnippet>315</a>        <span class="prelude-val">Ok</span>(<span class="self">self</span>)
 <a href=#316 id=316 data-nosnippet>316</a>    }
-<a href=#317 id=317 data-nosnippet>317</a>}
-<a href=#318 id=318 data-nosnippet>318</a>
-<a href=#319 id=319 data-nosnippet>319</a><span class="kw">impl </span>Stage <span class="kw">for </span>Schedule {
-<a href=#320 id=320 data-nosnippet>320</a>    <span class="kw">fn </span>run(<span class="kw-2">&amp;mut </span><span class="self">self</span>, context: <span class="kw-2">&amp;mut </span>MapContext) -&gt; StageResult {
-<a href=#321 id=321 data-nosnippet>321</a>        <span class="self">self</span>.run_once(context)<span class="question-mark">?</span>;
-<a href=#322 id=322 data-nosnippet>322</a>        <span class="prelude-val">Ok</span>(())
-<a href=#323 id=323 data-nosnippet>323</a>    }
-<a href=#324 id=324 data-nosnippet>324</a>}
-<a href=#325 id=325 data-nosnippet>325</a>
-<a href=#326 id=326 data-nosnippet>326</a><span class="attr">#[cfg(all(test, feature = <span class="string">"headless"</span>))]
-<a href=#327 id=327 data-nosnippet>327</a></span><span class="kw">mod </span>tests;
+<a href=#317 id=317 data-nosnippet>317</a>
+<a href=#318 id=318 data-nosnippet>318</a>    <span class="doccomment">/// Adds a system to the leading group of the [`Stage`] identified by `stage_label`, preserving
+<a href=#319 id=319 data-nosnippet>319</a>    /// registration order among early systems ahead of regular stage systems.
+<a href=#320 id=320 data-nosnippet>320</a>    </span><span class="kw">pub fn </span>add_early_system_to_stage(
+<a href=#321 id=321 data-nosnippet>321</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#322 id=322 data-nosnippet>322</a>        stage_label: <span class="kw">impl </span>StageLabel,
+<a href=#323 id=323 data-nosnippet>323</a>        system: <span class="kw">impl </span>IntoSystemContainer,
+<a href=#324 id=324 data-nosnippet>324</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw-2">&amp;mut </span><span class="self">Self</span>, ScheduleError&gt; {
+<a href=#325 id=325 data-nosnippet>325</a>        <span class="kw">let </span>stage = <span class="self">self
+<a href=#326 id=326 data-nosnippet>326</a>            </span>.get_stage_mut::&lt;SystemStage&gt;(<span class="kw-2">&amp;</span>stage_label)
+<a href=#327 id=327 data-nosnippet>327</a>            .ok_or_else(|| ScheduleError::NotASystemStage(<span class="macro">format!</span>(<span class="string">"{stage_label:?}"</span>)))<span class="question-mark">?</span>;
+<a href=#328 id=328 data-nosnippet>328</a>        stage.add_early_system(system);
+<a href=#329 id=329 data-nosnippet>329</a>        <span class="prelude-val">Ok</span>(<span class="self">self</span>)
+<a href=#330 id=330 data-nosnippet>330</a>    }
+<a href=#331 id=331 data-nosnippet>331</a>}
+<a href=#332 id=332 data-nosnippet>332</a>
+<a href=#333 id=333 data-nosnippet>333</a><span class="kw">impl </span>Stage <span class="kw">for </span>Schedule {
+<a href=#334 id=334 data-nosnippet>334</a>    <span class="kw">fn </span>run(<span class="kw-2">&amp;mut </span><span class="self">self</span>, context: <span class="kw-2">&amp;mut </span>MapContext) -&gt; StageResult {
+<a href=#335 id=335 data-nosnippet>335</a>        <span class="self">self</span>.run_once(context)<span class="question-mark">?</span>;
+<a href=#336 id=336 data-nosnippet>336</a>        <span class="prelude-val">Ok</span>(())
+<a href=#337 id=337 data-nosnippet>337</a>    }
+<a href=#338 id=338 data-nosnippet>338</a>}
+<a href=#339 id=339 data-nosnippet>339</a>
+<a href=#340 id=340 data-nosnippet>340</a><span class="attr">#[cfg(all(test, feature = <span class="string">"headless"</span>))]
+<a href=#341 id=341 data-nosnippet>341</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

@@ -161,49 +161,50 @@
 <a href=#161 id=161 data-nosnippet>161</a>                device.create_buffer(<span class="kw-2">&amp;</span>tile_view_buffer_desc),
 <a href=#162 id=162 data-nosnippet>162</a>                tile_view_buffer_desc.size,
 <a href=#163 id=163 data-nosnippet>163</a>            ))
-<a href=#164 id=164 data-nosnippet>164</a>        });
-<a href=#165 id=165 data-nosnippet>165</a>
-<a href=#166 id=166 data-nosnippet>166</a>        mask_pipeline.initialize(|| {
-<a href=#167 id=167 data-nosnippet>167</a>            <span class="kw">let </span>options = <span class="kw">crate</span>::render::resource::TilePipelineOptions {
-<a href=#168 id=168 data-nosnippet>168</a>                depth_stencil_enabled: <span class="bool-val">true</span>,
-<a href=#169 id=169 data-nosnippet>169</a>                update_stencil: <span class="bool-val">true</span>,
-<a href=#170 id=170 data-nosnippet>170</a>                debug_stencil: <span class="bool-val">false</span>,
-<a href=#171 id=171 data-nosnippet>171</a>                wireframe: <span class="bool-val">false</span>,
-<a href=#172 id=172 data-nosnippet>172</a>                multisampling: surface.is_multisampling_supported(settings.msaa),
-<a href=#173 id=173 data-nosnippet>173</a>                textured: <span class="bool-val">false</span>,
-<a href=#174 id=174 data-nosnippet>174</a>            };
-<a href=#175 id=175 data-nosnippet>175</a>            <span class="kw">let </span>flat_shader = shaders::FlatTileMaskShader {
-<a href=#176 id=176 data-nosnippet>176</a>                format: surface.surface_format(),
-<a href=#177 id=177 data-nosnippet>177</a>            };
-<a href=#178 id=178 data-nosnippet>178</a>            <span class="kw">let </span>flat = TilePipeline::new(
-<a href=#179 id=179 data-nosnippet>179</a>                <span class="string">"mask_pipeline_flat"</span>.into(),
-<a href=#180 id=180 data-nosnippet>180</a>                <span class="kw-2">*</span>settings,
-<a href=#181 id=181 data-nosnippet>181</a>                flat_shader.describe_vertex(),
-<a href=#182 id=182 data-nosnippet>182</a>                flat_shader.describe_fragment(),
-<a href=#183 id=183 data-nosnippet>183</a>                options,
-<a href=#184 id=184 data-nosnippet>184</a>            )
-<a href=#185 id=185 data-nosnippet>185</a>            .describe_render_pipeline()
-<a href=#186 id=186 data-nosnippet>186</a>            .initialize_with_prefix_layouts(device, <span class="kw-2">&amp;</span>[projection_resources.bind_group_layout()]);
-<a href=#187 id=187 data-nosnippet>187</a>
-<a href=#188 id=188 data-nosnippet>188</a>            <span class="kw">let </span>globe_shader = shaders::TileMaskShader {
-<a href=#189 id=189 data-nosnippet>189</a>                format: surface.surface_format(),
-<a href=#190 id=190 data-nosnippet>190</a>                draw_colors: <span class="bool-val">false</span>,
-<a href=#191 id=191 data-nosnippet>191</a>                debug_lines: <span class="bool-val">false</span>,
-<a href=#192 id=192 data-nosnippet>192</a>            };
-<a href=#193 id=193 data-nosnippet>193</a>            <span class="kw">let </span>globe = TilePipeline::new(
-<a href=#194 id=194 data-nosnippet>194</a>                <span class="string">"mask_pipeline"</span>.into(),
-<a href=#195 id=195 data-nosnippet>195</a>                <span class="kw-2">*</span>settings,
-<a href=#196 id=196 data-nosnippet>196</a>                globe_shader.describe_vertex(),
-<a href=#197 id=197 data-nosnippet>197</a>                globe_shader.describe_fragment(),
-<a href=#198 id=198 data-nosnippet>198</a>                options,
-<a href=#199 id=199 data-nosnippet>199</a>            )
-<a href=#200 id=200 data-nosnippet>200</a>            .describe_render_pipeline()
-<a href=#201 id=201 data-nosnippet>201</a>            .initialize_with_prefix_layouts(device, <span class="kw-2">&amp;</span>[projection_resources.bind_group_layout()]);
-<a href=#202 id=202 data-nosnippet>202</a>
-<a href=#203 id=203 data-nosnippet>203</a>            MaskPipeline { flat, globe }
-<a href=#204 id=204 data-nosnippet>204</a>        });
-<a href=#205 id=205 data-nosnippet>205</a>
-<a href=#206 id=206 data-nosnippet>206</a>        <span class="prelude-val">Ok</span>(())
-<a href=#207 id=207 data-nosnippet>207</a>    }
-<a href=#208 id=208 data-nosnippet>208</a>}
+<a href=#164 id=164 data-nosnippet>164</a>            .with_buffer_destroyer(wgpu::Buffer::destroy)
+<a href=#165 id=165 data-nosnippet>165</a>        });
+<a href=#166 id=166 data-nosnippet>166</a>
+<a href=#167 id=167 data-nosnippet>167</a>        mask_pipeline.initialize(|| {
+<a href=#168 id=168 data-nosnippet>168</a>            <span class="kw">let </span>options = <span class="kw">crate</span>::render::resource::TilePipelineOptions {
+<a href=#169 id=169 data-nosnippet>169</a>                depth_stencil_enabled: <span class="bool-val">true</span>,
+<a href=#170 id=170 data-nosnippet>170</a>                update_stencil: <span class="bool-val">true</span>,
+<a href=#171 id=171 data-nosnippet>171</a>                debug_stencil: <span class="bool-val">false</span>,
+<a href=#172 id=172 data-nosnippet>172</a>                wireframe: <span class="bool-val">false</span>,
+<a href=#173 id=173 data-nosnippet>173</a>                multisampling: surface.is_multisampling_supported(settings.msaa),
+<a href=#174 id=174 data-nosnippet>174</a>                textured: <span class="bool-val">false</span>,
+<a href=#175 id=175 data-nosnippet>175</a>            };
+<a href=#176 id=176 data-nosnippet>176</a>            <span class="kw">let </span>flat_shader = shaders::FlatTileMaskShader {
+<a href=#177 id=177 data-nosnippet>177</a>                format: surface.surface_format(),
+<a href=#178 id=178 data-nosnippet>178</a>            };
+<a href=#179 id=179 data-nosnippet>179</a>            <span class="kw">let </span>flat = TilePipeline::new(
+<a href=#180 id=180 data-nosnippet>180</a>                <span class="string">"mask_pipeline_flat"</span>.into(),
+<a href=#181 id=181 data-nosnippet>181</a>                <span class="kw-2">*</span>settings,
+<a href=#182 id=182 data-nosnippet>182</a>                flat_shader.describe_vertex(),
+<a href=#183 id=183 data-nosnippet>183</a>                flat_shader.describe_fragment(),
+<a href=#184 id=184 data-nosnippet>184</a>                options,
+<a href=#185 id=185 data-nosnippet>185</a>            )
+<a href=#186 id=186 data-nosnippet>186</a>            .describe_render_pipeline()
+<a href=#187 id=187 data-nosnippet>187</a>            .initialize_with_prefix_layouts(device, <span class="kw-2">&amp;</span>[projection_resources.bind_group_layout()]);
+<a href=#188 id=188 data-nosnippet>188</a>
+<a href=#189 id=189 data-nosnippet>189</a>            <span class="kw">let </span>globe_shader = shaders::TileMaskShader {
+<a href=#190 id=190 data-nosnippet>190</a>                format: surface.surface_format(),
+<a href=#191 id=191 data-nosnippet>191</a>                draw_colors: <span class="bool-val">false</span>,
+<a href=#192 id=192 data-nosnippet>192</a>                debug_lines: <span class="bool-val">false</span>,
+<a href=#193 id=193 data-nosnippet>193</a>            };
+<a href=#194 id=194 data-nosnippet>194</a>            <span class="kw">let </span>globe = TilePipeline::new(
+<a href=#195 id=195 data-nosnippet>195</a>                <span class="string">"mask_pipeline"</span>.into(),
+<a href=#196 id=196 data-nosnippet>196</a>                <span class="kw-2">*</span>settings,
+<a href=#197 id=197 data-nosnippet>197</a>                globe_shader.describe_vertex(),
+<a href=#198 id=198 data-nosnippet>198</a>                globe_shader.describe_fragment(),
+<a href=#199 id=199 data-nosnippet>199</a>                options,
+<a href=#200 id=200 data-nosnippet>200</a>            )
+<a href=#201 id=201 data-nosnippet>201</a>            .describe_render_pipeline()
+<a href=#202 id=202 data-nosnippet>202</a>            .initialize_with_prefix_layouts(device, <span class="kw-2">&amp;</span>[projection_resources.bind_group_layout()]);
+<a href=#203 id=203 data-nosnippet>203</a>
+<a href=#204 id=204 data-nosnippet>204</a>            MaskPipeline { flat, globe }
+<a href=#205 id=205 data-nosnippet>205</a>        });
+<a href=#206 id=206 data-nosnippet>206</a>
+<a href=#207 id=207 data-nosnippet>207</a>        <span class="prelude-val">Ok</span>(())
+<a href=#208 id=208 data-nosnippet>208</a>    }
+<a href=#209 id=209 data-nosnippet>209</a>}
 </code></pre></div></section></main></body></html>

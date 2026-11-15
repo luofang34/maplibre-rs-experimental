@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["MAX_TILES_IN_FLIGHT"],"fn":["dem_request_budget","is_settled","request_budget","tiles_in_flight","vector_request_budget"]};
+window.SIDEBAR_ITEMS = {"constant":["MAX_TILES_IN_FLIGHT"],"fn":["allowed_in_flight","dem_request_budget","has_ready_deferred_requests","has_unrequested_visible_tiles","is_settled","request_budget","set_dem_deferred","set_raster_deferred","set_vector_deferred","tiles_in_flight","total_tile_requests","vector_request_budget"],"struct":["BackpressureDeferred"]};

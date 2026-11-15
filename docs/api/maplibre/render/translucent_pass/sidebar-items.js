@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["TranslucentPassNode"]};
+window.SIDEBAR_ITEMS = {"fn":["has_work"],"struct":["TranslucentPassNode"]};

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["indices_in_order"],"struct":["DrawSort"]};
+window.SIDEBAR_ITEMS = {"constant":["BEARING_BUCKETS"],"fn":["bearing_bucket","bucket_angle_rad","indices_in_order"],"struct":["DrawSort"]};

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["LoadState"],"fn":["abandoned","is_loading","issued","landed","loading_count","prune","set"],"struct":["LoadingTiles","TileLoad"]};
+window.SIDEBAR_ITEMS = {"enum":["LoadState"],"fn":["abandoned","is_loading","issued","landed","loading_count","prune","set","total_issued"],"struct":["LoadingTiles","TileLoad","TotalRequestsIssued"]};

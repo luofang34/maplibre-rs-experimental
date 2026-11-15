@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["FeaturePipelinePair","RenderPipelineDescriptor"],"trait":["RenderPipeline"]};
+window.SIDEBAR_ITEMS = {"enum":["UniformFeatureBinding"],"struct":["FeaturePipelinePair","RenderPipelineDescriptor"],"trait":["RenderPipeline"]};

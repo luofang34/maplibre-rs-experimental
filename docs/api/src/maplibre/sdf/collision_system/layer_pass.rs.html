@@ -18,7 +18,7 @@
 <a href=#18 id=18 data-nosnippet>18</a><span class="kw">mod </span>metadata;
 <a href=#19 id=19 data-nosnippet>19</a><span class="kw">use </span>anchors::{
 <a href=#20 id=20 data-nosnippet>20</a>    beyond_perspective_cutoff_with_clip, label_boxes, local_zoom_visible_from_clip,
-<a href=#21 id=21 data-nosnippet>21</a>    ordered_features,
+<a href=#21 id=21 data-nosnippet>21</a>    ordered_features, tile_culled_on_flat_mercator,
 <a href=#22 id=22 data-nosnippet>22</a>};
 <a href=#23 id=23 data-nosnippet>23</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">use </span>metadata::write_feature_metadata;
 <a href=#24 id=24 data-nosnippet>24</a>
@@ -66,345 +66,369 @@
 <a href=#66 id=66 data-nosnippet>66</a>        <span class="kw-2">&amp;mut </span>CollisionGrid,
 <a href=#67 id=67 data-nosnippet>67</a>        <span class="kw-2">&amp;mut </span>PlacedSymbols,
 <a href=#68 id=68 data-nosnippet>68</a>        <span class="kw-2">&amp;mut </span>temporal::PlacementHistory,
-<a href=#69 id=69 data-nosnippet>69</a>    ),
-<a href=#70 id=70 data-nosnippet>70</a>) -&gt; (Vec&lt;Vec&lt;SDFShaderFeatureMetadata&gt;&gt;, <span class="kw">super</span>::family::Outcomes) {
-<a href=#71 id=71 data-nosnippet>71</a>    <span class="kw">let </span>(boxes, placed, history) = placement;
-<a href=#72 id=72 data-nosnippet>72</a>    <span class="kw">let </span><span class="kw-2">mut </span>metadata: Vec&lt;<span class="kw">_</span>&gt; = layers.iter().map(|layer| empty_metadata(layer)).collect();
-<a href=#73 id=73 data-nosnippet>73</a>    <span class="kw">let </span><span class="kw-2">mut </span>outcomes: <span class="kw">super</span>::family::Outcomes = (<span class="number">0</span>..layers.len()).map(|<span class="kw">_</span>| Vec::new()).collect();
-<a href=#74 id=74 data-nosnippet>74</a>    <span class="kw">let </span>zoom = view_state.style_zoom().value();
-<a href=#75 id=75 data-nosnippet>75</a>    <span class="kw">let </span>has_data_driven_sizes = paint
-<a href=#76 id=76 data-nosnippet>76</a>        .text_size
-<a href=#77 id=77 data-nosnippet>77</a>        .as_ref()
-<a href=#78 id=78 data-nosnippet>78</a>        .is_some_and(|s| !s.is_feature_constant())
-<a href=#79 id=79 data-nosnippet>79</a>        || paint
-<a href=#80 id=80 data-nosnippet>80</a>            .compiled_property::&lt;f32&gt;(<span class="string">"icon-size"</span>)
-<a href=#81 id=81 data-nosnippet>81</a>            .is_some_and(|s| !s.is_feature_constant());
-<a href=#82 id=82 data-nosnippet>82</a>    <span class="kw">let </span>has_terrain_or_height = world
-<a href=#83 id=83 data-nosnippet>83</a>        .resources
-<a href=#84 id=84 data-nosnippet>84</a>        .get::&lt;<span class="kw">crate</span>::terrain::coverage::TerrainCoverageIndex&gt;()
-<a href=#85 id=85 data-nosnippet>85</a>        .is_some()
-<a href=#86 id=86 data-nosnippet>86</a>        || paint.uses_shared_height();
-<a href=#87 id=87 data-nosnippet>87</a>    <span class="kw">let </span>visibility_policy = world
-<a href=#88 id=88 data-nosnippet>88</a>        .resources
-<a href=#89 id=89 data-nosnippet>89</a>        .get::&lt;<span class="kw">crate</span>::sdf::visibility::SymbolVisibility&gt;();
-<a href=#90 id=90 data-nosnippet>90</a>    <span class="kw">let </span>frame = LayerFrame {
-<a href=#91 id=91 data-nosnippet>91</a>        world,
-<a href=#92 id=92 data-nosnippet>92</a>        view_state,
-<a href=#93 id=93 data-nosnippet>93</a>        projection,
-<a href=#94 id=94 data-nosnippet>94</a>        paint,
-<a href=#95 id=95 data-nosnippet>95</a>        uniforms: SymbolUniforms::new(paint, zoom, [<span class="number">1</span>, <span class="number">1</span>]),
-<a href=#96 id=96 data-nosnippet>96</a>        zoom_limits,
-<a href=#97 id=97 data-nosnippet>97</a>        glyphs_stay_upright: <span class="kw">crate</span>::sdf::paint::glyphs_stay_upright(paint, zoom),
-<a href=#98 id=98 data-nosnippet>98</a>        has_data_driven_sizes,
-<a href=#99 id=99 data-nosnippet>99</a>        has_terrain_or_height,
-<a href=#100 id=100 data-nosnippet>100</a>        has_icon_text_fit: paint.properties.contains_key(<span class="string">"icon-text-fit"</span>),
-<a href=#101 id=101 data-nosnippet>101</a>        constant_rules: rules::PlacementRules::constant_for_layer(paint, zoom),
-<a href=#102 id=102 data-nosnippet>102</a>        visibility_policy,
-<a href=#103 id=103 data-nosnippet>103</a>    };
-<a href=#104 id=104 data-nosnippet>104</a>    <span class="kw">for </span>(position, feature_index, feature, was_visible) <span class="kw">in </span>ordered_features(layers, history) {
-<a href=#105 id=105 data-nosnippet>105</a>        <span class="comment">// A second way of writing a label is placed with the first, and only when that finds
-<a href=#106 id=106 data-nosnippet>106</a>        // no place.
-<a href=#107 id=107 data-nosnippet>107</a>        </span><span class="kw">if </span>feature.fallback {
-<a href=#108 id=108 data-nosnippet>108</a>            <span class="kw">continue</span>;
-<a href=#109 id=109 data-nosnippet>109</a>        }
-<a href=#110 id=110 data-nosnippet>110</a>        <span class="kw">let </span>layer = layers[position];
-<a href=#111 id=111 data-nosnippet>111</a>        <span class="kw">let </span><span class="kw-2">mut </span>next = <span class="prelude-val">Some</span>((feature_index, feature, was_visible, <span class="bool-val">false</span>));
-<a href=#112 id=112 data-nosnippet>112</a>        <span class="kw">while let </span><span class="prelude-val">Some</span>((index, feature, was_visible, suppressed)) = next.take() {
-<a href=#113 id=113 data-nosnippet>113</a>            <span class="kw">let </span>frame = LayerFrame {
-<a href=#114 id=114 data-nosnippet>114</a>                uniforms: <span class="kw">if </span>frame.has_data_driven_sizes {
-<a href=#115 id=115 data-nosnippet>115</a>                    frame
-<a href=#116 id=116 data-nosnippet>116</a>                        .uniforms
-<a href=#117 id=117 data-nosnippet>117</a>                        .with_feature_sizes(paint, <span class="kw-2">&amp;</span>feature.data.properties, zoom)
-<a href=#118 id=118 data-nosnippet>118</a>                } <span class="kw">else </span>{
-<a href=#119 id=119 data-nosnippet>119</a>                    frame.uniforms
-<a href=#120 id=120 data-nosnippet>120</a>                },
-<a href=#121 id=121 data-nosnippet>121</a>                ..frame
-<a href=#122 id=122 data-nosnippet>122</a>            };
-<a href=#123 id=123 data-nosnippet>123</a>            <span class="kw">let </span>outcome = frame.place_feature(
-<a href=#124 id=124 data-nosnippet>124</a>                (layer, feature, index, was_visible, suppressed),
-<a href=#125 id=125 data-nosnippet>125</a>                (<span class="kw-2">&amp;mut *</span>boxes, <span class="kw-2">&amp;mut *</span>placed, <span class="kw-2">&amp;mut *</span>history),
-<a href=#126 id=126 data-nosnippet>126</a>            );
-<a href=#127 id=127 data-nosnippet>127</a>            <span class="kw">let </span>poses = <span class="kw">match </span><span class="kw-2">&amp;</span>outcome.line {
-<a href=#128 id=128 data-nosnippet>128</a>                <span class="prelude-val">Some</span>(LinePoses::Poses(poses)) =&gt; <span class="prelude-val">Some</span>(poses.clone()),
-<a href=#129 id=129 data-nosnippet>129</a>                <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
-<a href=#130 id=130 data-nosnippet>130</a>            };
-<a href=#131 id=131 data-nosnippet>131</a>            write_feature_metadata(
-<a href=#132 id=132 data-nosnippet>132</a>                layer,
-<a href=#133 id=133 data-nosnippet>133</a>                feature,
-<a href=#134 id=134 data-nosnippet>134</a>                (outcome.ramps, outcome.text_shift, outcome.anchor),
-<a href=#135 id=135 data-nosnippet>135</a>                outcome.ground,
-<a href=#136 id=136 data-nosnippet>136</a>                poses.as_deref(),
-<a href=#137 id=137 data-nosnippet>137</a>                (
-<a href=#138 id=138 data-nosnippet>138</a>                    paint,
-<a href=#139 id=139 data-nosnippet>139</a>                    view_state.style_zoom().value(),
-<a href=#140 id=140 data-nosnippet>140</a>                    <span class="kw-2">&amp;mut </span>metadata[position],
-<a href=#141 id=141 data-nosnippet>141</a>                ),
-<a href=#142 id=142 data-nosnippet>142</a>            );
-<a href=#143 id=143 data-nosnippet>143</a>            <span class="kw">if </span>!outcome.ramps[<span class="number">0</span>].is_hidden() || !outcome.ramps[<span class="number">1</span>].is_hidden() {
-<a href=#144 id=144 data-nosnippet>144</a>                <span class="kw">if </span>outcomes[position].is_empty() {
-<a href=#145 id=145 data-nosnippet>145</a>                    outcomes[position].resize_with(layer.features.len(), || <span class="prelude-val">None</span>);
-<a href=#146 id=146 data-nosnippet>146</a>                }
-<a href=#147 id=147 data-nosnippet>147</a>                <span class="kw">if let </span><span class="prelude-val">Some</span>(slot) = outcomes[position].get_mut(index) {
-<a href=#148 id=148 data-nosnippet>148</a>                    <span class="kw-2">*</span>slot = <span class="prelude-val">Some</span>(<span class="kw">super</span>::family::Outcome {
-<a href=#149 id=149 data-nosnippet>149</a>                        ramps: outcome.ramps,
-<a href=#150 id=150 data-nosnippet>150</a>                        text_shift: outcome.text_shift,
-<a href=#151 id=151 data-nosnippet>151</a>                        anchor: outcome.anchor,
-<a href=#152 id=152 data-nosnippet>152</a>                        ground: outcome.ground,
-<a href=#153 id=153 data-nosnippet>153</a>                        poses,
-<a href=#154 id=154 data-nosnippet>154</a>                    });
-<a href=#155 id=155 data-nosnippet>155</a>                }
-<a href=#156 id=156 data-nosnippet>156</a>            }
-<a href=#157 id=157 data-nosnippet>157</a>            next = layer
-<a href=#158 id=158 data-nosnippet>158</a>                .features
-<a href=#159 id=159 data-nosnippet>159</a>                .get(index + <span class="number">1</span>)
-<a href=#160 id=160 data-nosnippet>160</a>                .filter(|other| other.fallback)
-<a href=#161 id=161 data-nosnippet>161</a>                .map(|other| {
-<a href=#162 id=162 data-nosnippet>162</a>                    (
-<a href=#163 id=163 data-nosnippet>163</a>                        index + <span class="number">1</span>,
-<a href=#164 id=164 data-nosnippet>164</a>                        other,
-<a href=#165 id=165 data-nosnippet>165</a>                        history.was_visible(layer, other),
-<a href=#166 id=166 data-nosnippet>166</a>                        suppressed || outcome.placed,
-<a href=#167 id=167 data-nosnippet>167</a>                    )
-<a href=#168 id=168 data-nosnippet>168</a>                });
-<a href=#169 id=169 data-nosnippet>169</a>        }
-<a href=#170 id=170 data-nosnippet>170</a>    }
-<a href=#171 id=171 data-nosnippet>171</a>    (metadata, outcomes)
-<a href=#172 id=172 data-nosnippet>172</a>}
-<a href=#173 id=173 data-nosnippet>173</a>
-<a href=#174 id=174 data-nosnippet>174</a><span class="kw">impl </span>LayerFrame&lt;<span class="lifetime">'_</span>&gt; {
-<a href=#175 id=175 data-nosnippet>175</a>    <span class="doccomment">/// Zoom range a label may show in; one that was visible keeps a margin so it does not
-<a href=#176 id=176 data-nosnippet>176</a>    /// blink at the edge.
-<a href=#177 id=177 data-nosnippet>177</a>    </span><span class="kw">fn </span>limits_for(<span class="kw-2">&amp;</span><span class="self">self</span>, was_visible: bool) -&gt; [f64; <span class="number">2</span>] {
-<a href=#178 id=178 data-nosnippet>178</a>        <span class="kw">let </span>margin = <span class="kw">if </span>was_visible { <span class="number">0.15 </span>} <span class="kw">else </span>{ <span class="number">0.0 </span>};
-<a href=#179 id=179 data-nosnippet>179</a>        [<span class="self">self</span>.zoom_limits[<span class="number">0</span>] - margin, <span class="self">self</span>.zoom_limits[<span class="number">1</span>] + margin]
-<a href=#180 id=180 data-nosnippet>180</a>    }
-<a href=#181 id=181 data-nosnippet>181</a>
-<a href=#182 id=182 data-nosnippet>182</a>    <span class="doccomment">/// The rectangles with the text moved to the first anchor of `text-variable-anchor` that
-<a href=#183 id=183 data-nosnippet>183</a>    /// fits, and that move in layout pixels; the first anchor when none does.
-<a href=#184 id=184 data-nosnippet>184</a>    </span><span class="kw">fn </span>place_feature(
-<a href=#185 id=185 data-nosnippet>185</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#186 id=186 data-nosnippet>186</a>        (layer, feature, feature_index, was_visible, suppressed): (
-<a href=#187 id=187 data-nosnippet>187</a>            <span class="kw-2">&amp;</span><span class="kw">crate</span>::sdf::SymbolLayerData,
-<a href=#188 id=188 data-nosnippet>188</a>            <span class="kw-2">&amp;</span><span class="kw">crate</span>::sdf::Feature,
-<a href=#189 id=189 data-nosnippet>189</a>            usize,
-<a href=#190 id=190 data-nosnippet>190</a>            bool,
-<a href=#191 id=191 data-nosnippet>191</a>            bool,
-<a href=#192 id=192 data-nosnippet>192</a>        ),
-<a href=#193 id=193 data-nosnippet>193</a>        (boxes, placed, history): (
-<a href=#194 id=194 data-nosnippet>194</a>            <span class="kw-2">&amp;mut </span>CollisionGrid,
-<a href=#195 id=195 data-nosnippet>195</a>            <span class="kw-2">&amp;mut </span>PlacedSymbols,
-<a href=#196 id=196 data-nosnippet>196</a>            <span class="kw-2">&amp;mut </span>temporal::PlacementHistory,
-<a href=#197 id=197 data-nosnippet>197</a>        ),
-<a href=#198 id=198 data-nosnippet>198</a>    ) -&gt; FeaturePlacement {
-<a href=#199 id=199 data-nosnippet>199</a>        <span class="kw">let </span>(view_state, projection) = (<span class="self">self</span>.view_state, <span class="self">self</span>.projection);
-<a href=#200 id=200 data-nosnippet>200</a>        <span class="kw">let </span>zoom = view_state.style_zoom().value();
-<a href=#201 id=201 data-nosnippet>201</a>        <span class="kw">let </span>label_ground = <span class="kw">if </span><span class="self">self</span>.has_terrain_or_height {
-<a href=#202 id=202 data-nosnippet>202</a>            LabelGround::new(<span class="self">self</span>.world, layer, feature, <span class="self">self</span>.paint, zoom)
-<a href=#203 id=203 data-nosnippet>203</a>        } <span class="kw">else </span>{
-<a href=#204 id=204 data-nosnippet>204</a>            LabelGround::flat(<span class="self">self</span>.world, layer.coords)
-<a href=#205 id=205 data-nosnippet>205</a>        };
-<a href=#206 id=206 data-nosnippet>206</a>        <span class="kw">let </span>ground = label_ground.elevation;
-<a href=#207 id=207 data-nosnippet>207</a>        <span class="kw">let </span>relevance = <span class="self">self</span>.visibility_policy.map_or(<span class="number">1.0</span>, |policy| {
-<a href=#208 id=208 data-nosnippet>208</a>            policy.opacity(layer, feature, ground, view_state)
-<a href=#209 id=209 data-nosnippet>209</a>        });
-<a href=#210 id=210 data-nosnippet>210</a>        <span class="kw">let </span>limits = <span class="self">self</span>.limits_for(was_visible);
-<a href=#211 id=211 data-nosnippet>211</a>        <span class="kw">let </span>anchor_clip = (!suppressed &amp;&amp; relevance &gt; <span class="number">0.0</span>)
-<a href=#212 id=212 data-nosnippet>212</a>            .then(|| {
-<a href=#213 id=213 data-nosnippet>213</a>                <span class="kw">crate</span>::sdf::placement::project(
-<a href=#214 id=214 data-nosnippet>214</a>                    layer.coords,
-<a href=#215 id=215 data-nosnippet>215</a>                    [
-<a href=#216 id=216 data-nosnippet>216</a>                        f64::from(feature.text_anchor.x),
-<a href=#217 id=217 data-nosnippet>217</a>                        f64::from(feature.text_anchor.y),
-<a href=#218 id=218 data-nosnippet>218</a>                    ],
-<a href=#219 id=219 data-nosnippet>219</a>                    f64::from(ground),
-<a href=#220 id=220 data-nosnippet>220</a>                    view_state,
-<a href=#221 id=221 data-nosnippet>221</a>                    projection,
-<a href=#222 id=222 data-nosnippet>222</a>                )
-<a href=#223 id=223 data-nosnippet>223</a>            })
-<a href=#224 id=224 data-nosnippet>224</a>            .flatten();
-<a href=#225 id=225 data-nosnippet>225</a>        <span class="kw">let </span>pre_shown = !suppressed
-<a href=#226 id=226 data-nosnippet>226</a>            &amp;&amp; relevance &gt; <span class="number">0.0
-<a href=#227 id=227 data-nosnippet>227</a>            </span>&amp;&amp; (feature.line.is_some()
-<a href=#228 id=228 data-nosnippet>228</a>                || <span class="self">self</span>.uniforms.text_layout[<span class="number">0</span>] &gt; <span class="number">0.5
-<a href=#229 id=229 data-nosnippet>229</a>                </span>|| <span class="self">self</span>.uniforms.icon_layout[<span class="number">0</span>] &gt; <span class="number">0.5
-<a href=#230 id=230 data-nosnippet>230</a>                </span>|| anchor_clip.is_some_and(|clip| {
-<a href=#231 id=231 data-nosnippet>231</a>                    <span class="kw">if </span>clip.w &lt;= <span class="number">0.0 </span>{
-<a href=#232 id=232 data-nosnippet>232</a>                        <span class="kw">return </span><span class="bool-val">false</span>;
-<a href=#233 id=233 data-nosnippet>233</a>                    }
-<a href=#234 id=234 data-nosnippet>234</a>                    <span class="kw">let </span>sx = (clip.x / clip.w + <span class="number">1.0</span>) * <span class="number">0.5 </span>* view_state.width();
-<a href=#235 id=235 data-nosnippet>235</a>                    <span class="kw">let </span>sy = (<span class="number">1.0 </span>- clip.y / clip.w) * <span class="number">0.5 </span>* view_state.height();
-<a href=#236 id=236 data-nosnippet>236</a>                    sx &gt;= -<span class="number">500.0
-<a href=#237 id=237 data-nosnippet>237</a>                        </span>&amp;&amp; sx &lt;= view_state.width() + <span class="number">500.0
-<a href=#238 id=238 data-nosnippet>238</a>                        </span>&amp;&amp; sy &gt;= -<span class="number">500.0
-<a href=#239 id=239 data-nosnippet>239</a>                        </span>&amp;&amp; sy &lt;= view_state.height() + <span class="number">500.0
-<a href=#240 id=240 data-nosnippet>240</a>                </span>}))
-<a href=#241 id=241 data-nosnippet>241</a>            &amp;&amp; local_zoom_visible_from_clip(anchor_clip, view_state, limits)
-<a href=#242 id=242 data-nosnippet>242</a>            &amp;&amp; !beyond_perspective_cutoff_with_clip(
-<a href=#243 id=243 data-nosnippet>243</a>                layer,
-<a href=#244 id=244 data-nosnippet>244</a>                feature,
-<a href=#245 id=245 data-nosnippet>245</a>                ground,
-<a href=#246 id=246 data-nosnippet>246</a>                view_state,
-<a href=#247 id=247 data-nosnippet>247</a>                projection,
-<a href=#248 id=248 data-nosnippet>248</a>                <span class="kw-2">&amp;</span><span class="self">self</span>.uniforms,
-<a href=#249 id=249 data-nosnippet>249</a>                anchor_clip.map(|clip| (f64::from(ground), clip)),
-<a href=#250 id=250 data-nosnippet>250</a>            )
-<a href=#251 id=251 data-nosnippet>251</a>            &amp;&amp; (!<span class="self">self</span>.has_terrain_or_height
-<a href=#252 id=252 data-nosnippet>252</a>                || !<span class="kw">crate</span>::sdf::placement::buried_in_terrain(<span class="self">self</span>.world, layer, feature, ground));
-<a href=#253 id=253 data-nosnippet>253</a>        <span class="kw">let </span>line = <span class="kw">if </span>pre_shown || was_visible {
-<a href=#254 id=254 data-nosnippet>254</a>            feature.line.as_ref().map(|<span class="kw">_</span>| {
-<a href=#255 id=255 data-nosnippet>255</a>                line_glyph_poses(
-<a href=#256 id=256 data-nosnippet>256</a>                    layer,
-<a href=#257 id=257 data-nosnippet>257</a>                    feature,
-<a href=#258 id=258 data-nosnippet>258</a>                    <span class="kw-2">&amp;</span>label_ground,
-<a href=#259 id=259 data-nosnippet>259</a>                    view_state,
-<a href=#260 id=260 data-nosnippet>260</a>                    projection,
-<a href=#261 id=261 data-nosnippet>261</a>                    (<span class="kw-2">&amp;</span><span class="self">self</span>.uniforms, <span class="self">self</span>.glyphs_stay_upright),
-<a href=#262 id=262 data-nosnippet>262</a>                )
-<a href=#263 id=263 data-nosnippet>263</a>            })
-<a href=#264 id=264 data-nosnippet>264</a>        } <span class="kw">else </span>{
-<a href=#265 id=265 data-nosnippet>265</a>            <span class="prelude-val">None
-<a href=#266 id=266 data-nosnippet>266</a>        </span>};
-<a href=#267 id=267 data-nosnippet>267</a>        <span class="kw">let </span>shown = pre_shown &amp;&amp; !<span class="macro">matches!</span>(line, <span class="prelude-val">Some</span>(LinePoses::DoesNotFit));
-<a href=#268 id=268 data-nosnippet>268</a>        <span class="kw">let </span>(rectangles, glyph_boxes) = <span class="kw">if </span>shown {
-<a href=#269 id=269 data-nosnippet>269</a>            label_boxes(
-<a href=#270 id=270 data-nosnippet>270</a>                (layer, feature, ground),
-<a href=#271 id=271 data-nosnippet>271</a>                (<span class="kw-2">&amp;</span>line, <span class="self">self</span>.glyphs_stay_upright),
-<a href=#272 id=272 data-nosnippet>272</a>                (view_state, projection, <span class="kw-2">&amp;</span><span class="self">self</span>.uniforms),
+<a href=#69 id=69 data-nosnippet>69</a>        <span class="kw-2">&amp;mut </span><span class="kw">super</span>::upload_diff::MetadataScratchPool,
+<a href=#70 id=70 data-nosnippet>70</a>    ),
+<a href=#71 id=71 data-nosnippet>71</a>) -&gt; (Vec&lt;Vec&lt;SDFShaderFeatureMetadata&gt;&gt;, <span class="kw">super</span>::family::Outcomes) {
+<a href=#72 id=72 data-nosnippet>72</a>    <span class="kw">let </span>(boxes, placed, history, scratch) = placement;
+<a href=#73 id=73 data-nosnippet>73</a>    <span class="kw">let </span><span class="kw-2">mut </span>metadata: Vec&lt;<span class="kw">_</span>&gt; = layers.iter().map(|layer| empty_metadata(layer)).collect();
+<a href=#74 id=74 data-nosnippet>74</a>    <span class="kw">let </span><span class="kw-2">mut </span>outcomes: <span class="kw">super</span>::family::Outcomes = (<span class="number">0</span>..layers.len()).map(|<span class="kw">_</span>| Vec::new()).collect();
+<a href=#75 id=75 data-nosnippet>75</a>    <span class="kw">let </span>zoom = view_state.style_zoom().value();
+<a href=#76 id=76 data-nosnippet>76</a>    <span class="kw">let </span>has_data_driven_sizes = paint
+<a href=#77 id=77 data-nosnippet>77</a>        .text_size
+<a href=#78 id=78 data-nosnippet>78</a>        .as_ref()
+<a href=#79 id=79 data-nosnippet>79</a>        .is_some_and(|s| !s.is_feature_constant())
+<a href=#80 id=80 data-nosnippet>80</a>        || paint
+<a href=#81 id=81 data-nosnippet>81</a>            .compiled_property::&lt;f32&gt;(<span class="string">"icon-size"</span>)
+<a href=#82 id=82 data-nosnippet>82</a>            .is_some_and(|s| !s.is_feature_constant());
+<a href=#83 id=83 data-nosnippet>83</a>    <span class="kw">let </span>has_terrain_or_height = world
+<a href=#84 id=84 data-nosnippet>84</a>        .resources
+<a href=#85 id=85 data-nosnippet>85</a>        .get::&lt;<span class="kw">crate</span>::terrain::coverage::TerrainCoverageIndex&gt;()
+<a href=#86 id=86 data-nosnippet>86</a>        .is_some()
+<a href=#87 id=87 data-nosnippet>87</a>        || paint.uses_shared_height();
+<a href=#88 id=88 data-nosnippet>88</a>    <span class="kw">let </span>visibility_policy = world
+<a href=#89 id=89 data-nosnippet>89</a>        .resources
+<a href=#90 id=90 data-nosnippet>90</a>        .get::&lt;<span class="kw">crate</span>::sdf::visibility::SymbolVisibility&gt;();
+<a href=#91 id=91 data-nosnippet>91</a>    <span class="kw">let </span>frame = LayerFrame {
+<a href=#92 id=92 data-nosnippet>92</a>        world,
+<a href=#93 id=93 data-nosnippet>93</a>        view_state,
+<a href=#94 id=94 data-nosnippet>94</a>        projection,
+<a href=#95 id=95 data-nosnippet>95</a>        paint,
+<a href=#96 id=96 data-nosnippet>96</a>        uniforms: SymbolUniforms::new(paint, zoom, [<span class="number">1</span>, <span class="number">1</span>]),
+<a href=#97 id=97 data-nosnippet>97</a>        zoom_limits,
+<a href=#98 id=98 data-nosnippet>98</a>        glyphs_stay_upright: <span class="kw">crate</span>::sdf::paint::glyphs_stay_upright(paint, zoom),
+<a href=#99 id=99 data-nosnippet>99</a>        has_data_driven_sizes,
+<a href=#100 id=100 data-nosnippet>100</a>        has_terrain_or_height,
+<a href=#101 id=101 data-nosnippet>101</a>        has_icon_text_fit: paint.properties.contains_key(<span class="string">"icon-text-fit"</span>),
+<a href=#102 id=102 data-nosnippet>102</a>        constant_rules: rules::PlacementRules::constant_for_layer(paint, zoom),
+<a href=#103 id=103 data-nosnippet>103</a>        visibility_policy,
+<a href=#104 id=104 data-nosnippet>104</a>    };
+<a href=#105 id=105 data-nosnippet>105</a>    <span class="kw">let </span>culled: Vec&lt;bool&gt; = layers
+<a href=#106 id=106 data-nosnippet>106</a>        .iter()
+<a href=#107 id=107 data-nosnippet>107</a>        .map(|layer| {
+<a href=#108 id=108 data-nosnippet>108</a>            tile_culled_on_flat_mercator(
+<a href=#109 id=109 data-nosnippet>109</a>                layer,
+<a href=#110 id=110 data-nosnippet>110</a>                view_state,
+<a href=#111 id=111 data-nosnippet>111</a>                projection,
+<a href=#112 id=112 data-nosnippet>112</a>                <span class="kw-2">&amp;</span>frame.uniforms,
+<a href=#113 id=113 data-nosnippet>113</a>                has_terrain_or_height,
+<a href=#114 id=114 data-nosnippet>114</a>                history,
+<a href=#115 id=115 data-nosnippet>115</a>            )
+<a href=#116 id=116 data-nosnippet>116</a>        })
+<a href=#117 id=117 data-nosnippet>117</a>        .collect();
+<a href=#118 id=118 data-nosnippet>118</a>    <span class="kw">if </span>culled.iter().all(|<span class="kw-2">&amp;</span>c| c) {
+<a href=#119 id=119 data-nosnippet>119</a>        <span class="kw">return </span>(metadata, outcomes);
+<a href=#120 id=120 data-nosnippet>120</a>    }
+<a href=#121 id=121 data-nosnippet>121</a>    <span class="kw">for </span>(position, feature_index, feature, was_visible) <span class="kw">in
+<a href=#122 id=122 data-nosnippet>122</a>        </span>ordered_features(layers, <span class="kw-2">&amp;</span>culled, history)
+<a href=#123 id=123 data-nosnippet>123</a>    {
+<a href=#124 id=124 data-nosnippet>124</a>        <span class="comment">// A second way of writing a label is placed with the first, and only when that finds
+<a href=#125 id=125 data-nosnippet>125</a>        // no place.
+<a href=#126 id=126 data-nosnippet>126</a>        </span><span class="kw">if </span>feature.fallback {
+<a href=#127 id=127 data-nosnippet>127</a>            <span class="kw">continue</span>;
+<a href=#128 id=128 data-nosnippet>128</a>        }
+<a href=#129 id=129 data-nosnippet>129</a>        <span class="kw">let </span>layer = layers[position];
+<a href=#130 id=130 data-nosnippet>130</a>        <span class="kw">let </span><span class="kw-2">mut </span>next = <span class="prelude-val">Some</span>((feature_index, feature, was_visible, <span class="bool-val">false</span>));
+<a href=#131 id=131 data-nosnippet>131</a>        <span class="kw">while let </span><span class="prelude-val">Some</span>((index, feature, was_visible, suppressed)) = next.take() {
+<a href=#132 id=132 data-nosnippet>132</a>            <span class="kw">let </span>frame = LayerFrame {
+<a href=#133 id=133 data-nosnippet>133</a>                uniforms: <span class="kw">if </span>frame.has_data_driven_sizes {
+<a href=#134 id=134 data-nosnippet>134</a>                    frame
+<a href=#135 id=135 data-nosnippet>135</a>                        .uniforms
+<a href=#136 id=136 data-nosnippet>136</a>                        .with_feature_sizes(paint, <span class="kw-2">&amp;</span>feature.data.properties, zoom)
+<a href=#137 id=137 data-nosnippet>137</a>                } <span class="kw">else </span>{
+<a href=#138 id=138 data-nosnippet>138</a>                    frame.uniforms
+<a href=#139 id=139 data-nosnippet>139</a>                },
+<a href=#140 id=140 data-nosnippet>140</a>                ..frame
+<a href=#141 id=141 data-nosnippet>141</a>            };
+<a href=#142 id=142 data-nosnippet>142</a>            <span class="kw">let </span>outcome = frame.place_feature(
+<a href=#143 id=143 data-nosnippet>143</a>                (layer, feature, index, was_visible, suppressed),
+<a href=#144 id=144 data-nosnippet>144</a>                (<span class="kw-2">&amp;mut *</span>boxes, <span class="kw-2">&amp;mut *</span>placed, <span class="kw-2">&amp;mut *</span>history),
+<a href=#145 id=145 data-nosnippet>145</a>            );
+<a href=#146 id=146 data-nosnippet>146</a>            <span class="kw">let </span>poses = <span class="kw">match </span><span class="kw-2">&amp;</span>outcome.line {
+<a href=#147 id=147 data-nosnippet>147</a>                <span class="prelude-val">Some</span>(LinePoses::Poses(poses)) =&gt; <span class="prelude-val">Some</span>(poses.clone()),
+<a href=#148 id=148 data-nosnippet>148</a>                <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+<a href=#149 id=149 data-nosnippet>149</a>            };
+<a href=#150 id=150 data-nosnippet>150</a>            <span class="kw">if </span>(!outcome.ramps[<span class="number">0</span>].is_hidden() || !outcome.ramps[<span class="number">1</span>].is_hidden())
+<a href=#151 id=151 data-nosnippet>151</a>                &amp;&amp; metadata[position].capacity() == <span class="number">0
+<a href=#152 id=152 data-nosnippet>152</a>            </span>{
+<a href=#153 id=153 data-nosnippet>153</a>                metadata[position] = scratch.acquire();
+<a href=#154 id=154 data-nosnippet>154</a>            }
+<a href=#155 id=155 data-nosnippet>155</a>            write_feature_metadata(
+<a href=#156 id=156 data-nosnippet>156</a>                layer,
+<a href=#157 id=157 data-nosnippet>157</a>                feature,
+<a href=#158 id=158 data-nosnippet>158</a>                (outcome.ramps, outcome.text_shift, outcome.anchor),
+<a href=#159 id=159 data-nosnippet>159</a>                outcome.ground,
+<a href=#160 id=160 data-nosnippet>160</a>                poses.as_deref(),
+<a href=#161 id=161 data-nosnippet>161</a>                (
+<a href=#162 id=162 data-nosnippet>162</a>                    paint,
+<a href=#163 id=163 data-nosnippet>163</a>                    view_state.style_zoom().value(),
+<a href=#164 id=164 data-nosnippet>164</a>                    <span class="kw-2">&amp;mut </span>metadata[position],
+<a href=#165 id=165 data-nosnippet>165</a>                ),
+<a href=#166 id=166 data-nosnippet>166</a>            );
+<a href=#167 id=167 data-nosnippet>167</a>            <span class="kw">if </span>!outcome.ramps[<span class="number">0</span>].is_hidden() || !outcome.ramps[<span class="number">1</span>].is_hidden() {
+<a href=#168 id=168 data-nosnippet>168</a>                <span class="kw">if </span>outcomes[position].is_empty() {
+<a href=#169 id=169 data-nosnippet>169</a>                    outcomes[position].resize_with(layer.features.len(), || <span class="prelude-val">None</span>);
+<a href=#170 id=170 data-nosnippet>170</a>                }
+<a href=#171 id=171 data-nosnippet>171</a>                <span class="kw">if let </span><span class="prelude-val">Some</span>(slot) = outcomes[position].get_mut(index) {
+<a href=#172 id=172 data-nosnippet>172</a>                    <span class="kw-2">*</span>slot = <span class="prelude-val">Some</span>(<span class="kw">super</span>::family::Outcome {
+<a href=#173 id=173 data-nosnippet>173</a>                        ramps: outcome.ramps,
+<a href=#174 id=174 data-nosnippet>174</a>                        text_shift: outcome.text_shift,
+<a href=#175 id=175 data-nosnippet>175</a>                        anchor: outcome.anchor,
+<a href=#176 id=176 data-nosnippet>176</a>                        ground: outcome.ground,
+<a href=#177 id=177 data-nosnippet>177</a>                        poses,
+<a href=#178 id=178 data-nosnippet>178</a>                    });
+<a href=#179 id=179 data-nosnippet>179</a>                }
+<a href=#180 id=180 data-nosnippet>180</a>            }
+<a href=#181 id=181 data-nosnippet>181</a>            next = layer
+<a href=#182 id=182 data-nosnippet>182</a>                .features
+<a href=#183 id=183 data-nosnippet>183</a>                .get(index + <span class="number">1</span>)
+<a href=#184 id=184 data-nosnippet>184</a>                .filter(|other| other.fallback)
+<a href=#185 id=185 data-nosnippet>185</a>                .map(|other| {
+<a href=#186 id=186 data-nosnippet>186</a>                    (
+<a href=#187 id=187 data-nosnippet>187</a>                        index + <span class="number">1</span>,
+<a href=#188 id=188 data-nosnippet>188</a>                        other,
+<a href=#189 id=189 data-nosnippet>189</a>                        history.was_visible(layer, other),
+<a href=#190 id=190 data-nosnippet>190</a>                        suppressed || outcome.placed,
+<a href=#191 id=191 data-nosnippet>191</a>                    )
+<a href=#192 id=192 data-nosnippet>192</a>                });
+<a href=#193 id=193 data-nosnippet>193</a>        }
+<a href=#194 id=194 data-nosnippet>194</a>    }
+<a href=#195 id=195 data-nosnippet>195</a>    (metadata, outcomes)
+<a href=#196 id=196 data-nosnippet>196</a>}
+<a href=#197 id=197 data-nosnippet>197</a>
+<a href=#198 id=198 data-nosnippet>198</a><span class="kw">impl </span>LayerFrame&lt;<span class="lifetime">'_</span>&gt; {
+<a href=#199 id=199 data-nosnippet>199</a>    <span class="doccomment">/// Zoom range a label may show in; one that was visible keeps a margin so it does not
+<a href=#200 id=200 data-nosnippet>200</a>    /// blink at the edge.
+<a href=#201 id=201 data-nosnippet>201</a>    </span><span class="kw">fn </span>limits_for(<span class="kw-2">&amp;</span><span class="self">self</span>, was_visible: bool) -&gt; [f64; <span class="number">2</span>] {
+<a href=#202 id=202 data-nosnippet>202</a>        <span class="kw">let </span>margin = <span class="kw">if </span>was_visible { <span class="number">0.15 </span>} <span class="kw">else </span>{ <span class="number">0.0 </span>};
+<a href=#203 id=203 data-nosnippet>203</a>        [<span class="self">self</span>.zoom_limits[<span class="number">0</span>] - margin, <span class="self">self</span>.zoom_limits[<span class="number">1</span>] + margin]
+<a href=#204 id=204 data-nosnippet>204</a>    }
+<a href=#205 id=205 data-nosnippet>205</a>
+<a href=#206 id=206 data-nosnippet>206</a>    <span class="doccomment">/// The rectangles with the text moved to the first anchor of `text-variable-anchor` that
+<a href=#207 id=207 data-nosnippet>207</a>    /// fits, and that move in layout pixels; the first anchor when none does.
+<a href=#208 id=208 data-nosnippet>208</a>    </span><span class="kw">fn </span>place_feature(
+<a href=#209 id=209 data-nosnippet>209</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#210 id=210 data-nosnippet>210</a>        (layer, feature, feature_index, was_visible, suppressed): (
+<a href=#211 id=211 data-nosnippet>211</a>            <span class="kw-2">&amp;</span><span class="kw">crate</span>::sdf::SymbolLayerData,
+<a href=#212 id=212 data-nosnippet>212</a>            <span class="kw-2">&amp;</span><span class="kw">crate</span>::sdf::Feature,
+<a href=#213 id=213 data-nosnippet>213</a>            usize,
+<a href=#214 id=214 data-nosnippet>214</a>            bool,
+<a href=#215 id=215 data-nosnippet>215</a>            bool,
+<a href=#216 id=216 data-nosnippet>216</a>        ),
+<a href=#217 id=217 data-nosnippet>217</a>        (boxes, placed, history): (
+<a href=#218 id=218 data-nosnippet>218</a>            <span class="kw-2">&amp;mut </span>CollisionGrid,
+<a href=#219 id=219 data-nosnippet>219</a>            <span class="kw-2">&amp;mut </span>PlacedSymbols,
+<a href=#220 id=220 data-nosnippet>220</a>            <span class="kw-2">&amp;mut </span>temporal::PlacementHistory,
+<a href=#221 id=221 data-nosnippet>221</a>        ),
+<a href=#222 id=222 data-nosnippet>222</a>    ) -&gt; FeaturePlacement {
+<a href=#223 id=223 data-nosnippet>223</a>        <span class="kw">let </span>(view_state, projection) = (<span class="self">self</span>.view_state, <span class="self">self</span>.projection);
+<a href=#224 id=224 data-nosnippet>224</a>        <span class="kw">let </span>zoom = view_state.style_zoom().value();
+<a href=#225 id=225 data-nosnippet>225</a>        <span class="kw">let </span>label_ground = <span class="kw">if </span><span class="self">self</span>.has_terrain_or_height {
+<a href=#226 id=226 data-nosnippet>226</a>            LabelGround::new(<span class="self">self</span>.world, layer, feature, <span class="self">self</span>.paint, zoom)
+<a href=#227 id=227 data-nosnippet>227</a>        } <span class="kw">else </span>{
+<a href=#228 id=228 data-nosnippet>228</a>            LabelGround::flat(<span class="self">self</span>.world, layer.coords)
+<a href=#229 id=229 data-nosnippet>229</a>        };
+<a href=#230 id=230 data-nosnippet>230</a>        <span class="kw">let </span>ground = label_ground.elevation;
+<a href=#231 id=231 data-nosnippet>231</a>        <span class="kw">let </span>relevance = <span class="self">self</span>.visibility_policy.map_or(<span class="number">1.0</span>, |policy| {
+<a href=#232 id=232 data-nosnippet>232</a>            policy.opacity(layer, feature, ground, view_state)
+<a href=#233 id=233 data-nosnippet>233</a>        });
+<a href=#234 id=234 data-nosnippet>234</a>        <span class="kw">let </span>limits = <span class="self">self</span>.limits_for(was_visible);
+<a href=#235 id=235 data-nosnippet>235</a>        <span class="kw">let </span>anchor_clip = (!suppressed &amp;&amp; relevance &gt; <span class="number">0.0</span>)
+<a href=#236 id=236 data-nosnippet>236</a>            .then(|| {
+<a href=#237 id=237 data-nosnippet>237</a>                <span class="kw">crate</span>::sdf::placement::project(
+<a href=#238 id=238 data-nosnippet>238</a>                    layer.coords,
+<a href=#239 id=239 data-nosnippet>239</a>                    [
+<a href=#240 id=240 data-nosnippet>240</a>                        f64::from(feature.text_anchor.x),
+<a href=#241 id=241 data-nosnippet>241</a>                        f64::from(feature.text_anchor.y),
+<a href=#242 id=242 data-nosnippet>242</a>                    ],
+<a href=#243 id=243 data-nosnippet>243</a>                    f64::from(ground),
+<a href=#244 id=244 data-nosnippet>244</a>                    view_state,
+<a href=#245 id=245 data-nosnippet>245</a>                    projection,
+<a href=#246 id=246 data-nosnippet>246</a>                )
+<a href=#247 id=247 data-nosnippet>247</a>            })
+<a href=#248 id=248 data-nosnippet>248</a>            .flatten();
+<a href=#249 id=249 data-nosnippet>249</a>        <span class="kw">let </span>pre_shown = !suppressed
+<a href=#250 id=250 data-nosnippet>250</a>            &amp;&amp; relevance &gt; <span class="number">0.0
+<a href=#251 id=251 data-nosnippet>251</a>            </span>&amp;&amp; (feature.line.is_some()
+<a href=#252 id=252 data-nosnippet>252</a>                || <span class="self">self</span>.uniforms.text_layout[<span class="number">0</span>] &gt; <span class="number">0.5
+<a href=#253 id=253 data-nosnippet>253</a>                </span>|| <span class="self">self</span>.uniforms.icon_layout[<span class="number">0</span>] &gt; <span class="number">0.5
+<a href=#254 id=254 data-nosnippet>254</a>                </span>|| anchor_clip.is_some_and(|clip| {
+<a href=#255 id=255 data-nosnippet>255</a>                    <span class="kw">if </span>clip.w &lt;= <span class="number">0.0 </span>{
+<a href=#256 id=256 data-nosnippet>256</a>                        <span class="kw">return </span><span class="bool-val">false</span>;
+<a href=#257 id=257 data-nosnippet>257</a>                    }
+<a href=#258 id=258 data-nosnippet>258</a>                    <span class="kw">let </span>sx = (clip.x / clip.w + <span class="number">1.0</span>) * <span class="number">0.5 </span>* view_state.width();
+<a href=#259 id=259 data-nosnippet>259</a>                    <span class="kw">let </span>sy = (<span class="number">1.0 </span>- clip.y / clip.w) * <span class="number">0.5 </span>* view_state.height();
+<a href=#260 id=260 data-nosnippet>260</a>                    sx &gt;= -<span class="number">500.0
+<a href=#261 id=261 data-nosnippet>261</a>                        </span>&amp;&amp; sx &lt;= view_state.width() + <span class="number">500.0
+<a href=#262 id=262 data-nosnippet>262</a>                        </span>&amp;&amp; sy &gt;= -<span class="number">500.0
+<a href=#263 id=263 data-nosnippet>263</a>                        </span>&amp;&amp; sy &lt;= view_state.height() + <span class="number">500.0
+<a href=#264 id=264 data-nosnippet>264</a>                </span>}))
+<a href=#265 id=265 data-nosnippet>265</a>            &amp;&amp; local_zoom_visible_from_clip(anchor_clip, view_state, limits)
+<a href=#266 id=266 data-nosnippet>266</a>            &amp;&amp; !beyond_perspective_cutoff_with_clip(
+<a href=#267 id=267 data-nosnippet>267</a>                layer,
+<a href=#268 id=268 data-nosnippet>268</a>                feature,
+<a href=#269 id=269 data-nosnippet>269</a>                ground,
+<a href=#270 id=270 data-nosnippet>270</a>                view_state,
+<a href=#271 id=271 data-nosnippet>271</a>                projection,
+<a href=#272 id=272 data-nosnippet>272</a>                <span class="kw-2">&amp;</span><span class="self">self</span>.uniforms,
 <a href=#273 id=273 data-nosnippet>273</a>                anchor_clip.map(|clip| (f64::from(ground), clip)),
 <a href=#274 id=274 data-nosnippet>274</a>            )
-<a href=#275 id=275 data-nosnippet>275</a>        } <span class="kw">else </span>{
-<a href=#276 id=276 data-nosnippet>276</a>            ([<span class="prelude-val">None</span>, <span class="prelude-val">None</span>], Vec::new())
-<a href=#277 id=277 data-nosnippet>277</a>        };
-<a href=#278 id=278 data-nosnippet>278</a>        <span class="kw">let </span>(rectangles, glyph_boxes, text_shift, anchor, visible, duplicate) = <span class="kw">if </span>rectangles
-<a href=#279 id=279 data-nosnippet>279</a>            == [<span class="prelude-val">None</span>, <span class="prelude-val">None</span>]
-<a href=#280 id=280 data-nosnippet>280</a>        {
-<a href=#281 id=281 data-nosnippet>281</a>            ([<span class="prelude-val">None</span>, <span class="prelude-val">None</span>], Vec::new(), [<span class="number">0.0</span>; <span class="number">2</span>], <span class="number">0</span>, [<span class="bool-val">false</span>, <span class="bool-val">false</span>], <span class="bool-val">false</span>)
-<a href=#282 id=282 data-nosnippet>282</a>        } <span class="kw">else </span>{
-<a href=#283 id=283 data-nosnippet>283</a>            <span class="kw">let </span>rules = <span class="self">self</span>.constant_rules.unwrap_or_else(|| {
-<a href=#284 id=284 data-nosnippet>284</a>                rules::PlacementRules::new(<span class="self">self</span>.paint, <span class="kw-2">&amp;</span>feature.data.properties, zoom)
-<a href=#285 id=285 data-nosnippet>285</a>            });
-<a href=#286 id=286 data-nosnippet>286</a>            <span class="kw">let </span>viewport = [view_state.width(), view_state.height()];
-<a href=#287 id=287 data-nosnippet>287</a>            <span class="kw">let </span>(rectangles, text_shift, anchor) =
-<a href=#288 id=288 data-nosnippet>288</a>                <span class="kw">if let </span>(<span class="prelude-val">Some</span>(text), <span class="bool-val">true</span>) = (rectangles[<span class="number">0</span>], feature.anchor_shifts.len() &gt; <span class="number">1</span>) {
-<a href=#289 id=289 data-nosnippet>289</a>                    <span class="kw">if </span><span class="self">self</span>.uniforms.text_layout[<span class="number">0</span>] &lt;= <span class="number">0.5
-<a href=#290 id=290 data-nosnippet>290</a>                        </span>&amp;&amp; (text[<span class="number">2</span>] &lt; -<span class="number">400.0
-<a href=#291 id=291 data-nosnippet>291</a>                            </span>|| text[<span class="number">3</span>] &lt; -<span class="number">400.0
-<a href=#292 id=292 data-nosnippet>292</a>                            </span>|| text[<span class="number">0</span>] &gt; viewport[<span class="number">0</span>] + <span class="number">400.0
-<a href=#293 id=293 data-nosnippet>293</a>                            </span>|| text[<span class="number">1</span>] &gt; viewport[<span class="number">1</span>] + <span class="number">400.0</span>)
-<a href=#294 id=294 data-nosnippet>294</a>                    {
-<a href=#295 id=295 data-nosnippet>295</a>                        (rectangles, [<span class="number">0.0</span>; <span class="number">2</span>], <span class="number">0</span>)
-<a href=#296 id=296 data-nosnippet>296</a>                    } <span class="kw">else </span>{
-<a href=#297 id=297 data-nosnippet>297</a>                        <span class="kw">let </span>clip_with_ground = anchor_clip.map(|clip| (f64::from(ground), clip));
-<a href=#298 id=298 data-nosnippet>298</a>                        <span class="self">self</span>.first_fitting_anchor(
-<a href=#299 id=299 data-nosnippet>299</a>                            (
-<a href=#300 id=300 data-nosnippet>300</a>                                layer,
-<a href=#301 id=301 data-nosnippet>301</a>                                feature,
-<a href=#302 id=302 data-nosnippet>302</a>                                ground,
-<a href=#303 id=303 data-nosnippet>303</a>                                history.previous_anchor(layer, feature),
-<a href=#304 id=304 data-nosnippet>304</a>                            ),
-<a href=#305 id=305 data-nosnippet>305</a>                            (rectangles, <span class="kw-2">&amp;</span>glyph_boxes),
-<a href=#306 id=306 data-nosnippet>306</a>                            (<span class="kw-2">&amp;</span>rules, <span class="kw-2">&amp;*</span>boxes, viewport),
-<a href=#307 id=307 data-nosnippet>307</a>                            (
-<a href=#308 id=308 data-nosnippet>308</a>                                text_perspective_scale(
-<a href=#309 id=309 data-nosnippet>309</a>                                    layer,
-<a href=#310 id=310 data-nosnippet>310</a>                                    feature,
-<a href=#311 id=311 data-nosnippet>311</a>                                    ground,
-<a href=#312 id=312 data-nosnippet>312</a>                                    view_state,
-<a href=#313 id=313 data-nosnippet>313</a>                                    projection,
-<a href=#314 id=314 data-nosnippet>314</a>                                    <span class="kw-2">&amp;</span><span class="self">self</span>.uniforms,
-<a href=#315 id=315 data-nosnippet>315</a>                                    clip_with_ground,
-<a href=#316 id=316 data-nosnippet>316</a>                                ),
-<a href=#317 id=317 data-nosnippet>317</a>                                text_rotation(
-<a href=#318 id=318 data-nosnippet>318</a>                                    layer,
-<a href=#319 id=319 data-nosnippet>319</a>                                    feature,
-<a href=#320 id=320 data-nosnippet>320</a>                                    ground,
-<a href=#321 id=321 data-nosnippet>321</a>                                    view_state,
-<a href=#322 id=322 data-nosnippet>322</a>                                    projection,
-<a href=#323 id=323 data-nosnippet>323</a>                                    <span class="kw-2">&amp;</span><span class="self">self</span>.uniforms,
-<a href=#324 id=324 data-nosnippet>324</a>                                    clip_with_ground,
-<a href=#325 id=325 data-nosnippet>325</a>                                ),
-<a href=#326 id=326 data-nosnippet>326</a>                            ),
-<a href=#327 id=327 data-nosnippet>327</a>                        )
-<a href=#328 id=328 data-nosnippet>328</a>                    }
-<a href=#329 id=329 data-nosnippet>329</a>                } <span class="kw">else </span>{
-<a href=#330 id=330 data-nosnippet>330</a>                    (rectangles, [<span class="number">0.0</span>; <span class="number">2</span>], <span class="number">0</span>)
-<a href=#331 id=331 data-nosnippet>331</a>                };
-<a href=#332 id=332 data-nosnippet>332</a>            <span class="kw">let </span>repeat = Repeat::of(layer, feature, <span class="kw-2">&amp;</span>rectangles, viewport);
-<a href=#333 id=333 data-nosnippet>333</a>            <span class="comment">// A repeat too close to one already placed takes no room from labels after it.
-<a href=#334 id=334 data-nosnippet>334</a>            </span><span class="kw">let </span>edge_clipped = <span class="self">self</span>.paint.avoid_edges()
-<a href=#335 id=335 data-nosnippet>335</a>                &amp;&amp; !avoid_edges::stays_within_tile(
-<a href=#336 id=336 data-nosnippet>336</a>                    layer,
-<a href=#337 id=337 data-nosnippet>337</a>                    feature,
-<a href=#338 id=338 data-nosnippet>338</a>                    <span class="kw-2">&amp;</span>line,
-<a href=#339 id=339 data-nosnippet>339</a>                    view_state,
-<a href=#340 id=340 data-nosnippet>340</a>                    <span class="kw-2">&amp;</span><span class="self">self</span>.uniforms,
-<a href=#341 id=341 data-nosnippet>341</a>                    text_shift,
-<a href=#342 id=342 data-nosnippet>342</a>                );
-<a href=#343 id=343 data-nosnippet>343</a>            <span class="kw">let </span>(rectangles, glyph_boxes) = <span class="kw">if </span>edge_clipped
-<a href=#344 id=344 data-nosnippet>344</a>                || repeat
-<a href=#345 id=345 data-nosnippet>345</a>                    .as_ref()
-<a href=#346 id=346 data-nosnippet>346</a>                    .is_some_and(|repeat| history.repeats.too_close(repeat, was_visible))
-<a href=#347 id=347 data-nosnippet>347</a>            {
-<a href=#348 id=348 data-nosnippet>348</a>                ([<span class="prelude-val">None</span>, <span class="prelude-val">None</span>], Vec::new())
-<a href=#349 id=349 data-nosnippet>349</a>            } <span class="kw">else </span>{
-<a href=#350 id=350 data-nosnippet>350</a>                (rectangles, glyph_boxes)
-<a href=#351 id=351 data-nosnippet>351</a>            };
-<a href=#352 id=352 data-nosnippet>352</a>            <span class="kw">let </span>visible = rules.place_along_line(rectangles, <span class="kw-2">&amp;</span>glyph_boxes, boxes, viewport);
-<a href=#353 id=353 data-nosnippet>353</a>            <span class="kw">let </span>any_visible = visible[<span class="number">0</span>] || visible[<span class="number">1</span>];
-<a href=#354 id=354 data-nosnippet>354</a>            <span class="kw">let </span>duplicate = any_visible &amp;&amp; history.shown_elsewhere(layer, feature);
-<a href=#355 id=355 data-nosnippet>355</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(repeat) = repeat.filter(|<span class="kw">_</span>| any_visible &amp;&amp; !duplicate) {
-<a href=#356 id=356 data-nosnippet>356</a>                history.repeats.remember(repeat);
-<a href=#357 id=357 data-nosnippet>357</a>            }
-<a href=#358 id=358 data-nosnippet>358</a>            (
-<a href=#359 id=359 data-nosnippet>359</a>                rectangles,
-<a href=#360 id=360 data-nosnippet>360</a>                glyph_boxes,
-<a href=#361 id=361 data-nosnippet>361</a>                text_shift,
-<a href=#362 id=362 data-nosnippet>362</a>                anchor,
-<a href=#363 id=363 data-nosnippet>363</a>                visible,
-<a href=#364 id=364 data-nosnippet>364</a>                duplicate,
-<a href=#365 id=365 data-nosnippet>365</a>            )
-<a href=#366 id=366 data-nosnippet>366</a>        };
-<a href=#367 id=367 data-nosnippet>367</a>        <span class="kw">let </span>ramps = history.fade_ramps(layer, feature, visible);
-<a href=#368 id=368 data-nosnippet>368</a>        <span class="kw">if </span>visible[<span class="number">0</span>] || was_visible {
-<a href=#369 id=369 data-nosnippet>369</a>            history.remember_anchor(layer, feature, visible[<span class="number">0</span>].then_some(anchor));
-<a href=#370 id=370 data-nosnippet>370</a>        }
-<a href=#371 id=371 data-nosnippet>371</a>        <span class="comment">// A placed label is found from its first frame, while it starts fading in, as GL JS
-<a href=#372 id=372 data-nosnippet>372</a>        // queries its collision index; a copy drawn by another tile is found once.
-<a href=#373 id=373 data-nosnippet>373</a>        </span><span class="kw">if </span>visible.iter().any(|v| <span class="kw-2">*</span>v) &amp;&amp; !duplicate {
-<a href=#374 id=374 data-nosnippet>374</a>            placed.<span class="number">0</span>.push(PlacedSymbol {
-<a href=#375 id=375 data-nosnippet>375</a>                coords: layer.coords,
-<a href=#376 id=376 data-nosnippet>376</a>                layer: layer.style_layer_id.clone(),
-<a href=#377 id=377 data-nosnippet>377</a>                feature: feature_index,
-<a href=#378 id=378 data-nosnippet>378</a>                rectangles: [<span class="number">0</span>, <span class="number">1</span>].map(|i| <span class="kw">if </span>visible[i] { rectangles[i] } <span class="kw">else </span>{ <span class="prelude-val">None </span>}),
-<a href=#379 id=379 data-nosnippet>379</a>                glyph_boxes: <span class="kw">if </span>visible[<span class="number">0</span>] { glyph_boxes } <span class="kw">else </span>{ Vec::new() },
-<a href=#380 id=380 data-nosnippet>380</a>            });
-<a href=#381 id=381 data-nosnippet>381</a>        }
-<a href=#382 id=382 data-nosnippet>382</a>        FeaturePlacement {
-<a href=#383 id=383 data-nosnippet>383</a>            placed: visible.iter().any(|v| <span class="kw-2">*</span>v),
-<a href=#384 id=384 data-nosnippet>384</a>            text_shift,
-<a href=#385 id=385 data-nosnippet>385</a>            anchor,
-<a href=#386 id=386 data-nosnippet>386</a>            ramps: {
-<a href=#387 id=387 data-nosnippet>387</a>                <span class="kw">let </span><span class="kw-2">mut </span>ramps = ramps.map(|ramp| ramp.scale(relevance));
-<a href=#388 id=388 data-nosnippet>388</a>                <span class="comment">// Text that follows its line has no layout off it: while the line cannot hold
-<a href=#389 id=389 data-nosnippet>389</a>                // it, its glyphs are hidden at once, as GL JS hides them, rather than fading out
-<a href=#390 id=390 data-nosnippet>390</a>                // in the straight layout they were cut from.
-<a href=#391 id=391 data-nosnippet>391</a>                </span><span class="kw">if </span><span class="macro">matches!</span>(line, <span class="prelude-val">Some</span>(LinePoses::DoesNotFit)) {
-<a href=#392 id=392 data-nosnippet>392</a>                    ramps[<span class="number">0</span>] = temporal::FadeRamp::default();
-<a href=#393 id=393 data-nosnippet>393</a>                }
-<a href=#394 id=394 data-nosnippet>394</a>                ramps
-<a href=#395 id=395 data-nosnippet>395</a>            },
-<a href=#396 id=396 data-nosnippet>396</a>            ground,
-<a href=#397 id=397 data-nosnippet>397</a>            line,
-<a href=#398 id=398 data-nosnippet>398</a>        }
-<a href=#399 id=399 data-nosnippet>399</a>    }
-<a href=#400 id=400 data-nosnippet>400</a>}
-<a href=#401 id=401 data-nosnippet>401</a>
-<a href=#402 id=402 data-nosnippet>402</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>empty_metadata(
-<a href=#403 id=403 data-nosnippet>403</a>    _layer: <span class="kw-2">&amp;</span><span class="kw">crate</span>::sdf::SymbolLayerData,
-<a href=#404 id=404 data-nosnippet>404</a>) -&gt; Vec&lt;SDFShaderFeatureMetadata&gt; {
-<a href=#405 id=405 data-nosnippet>405</a>    Vec::new()
-<a href=#406 id=406 data-nosnippet>406</a>}
-<a href=#407 id=407 data-nosnippet>407</a>
-<a href=#408 id=408 data-nosnippet>408</a><span class="attr">#[cfg(test)]
-<a href=#409 id=409 data-nosnippet>409</a></span><span class="kw">mod </span>tests;
+<a href=#275 id=275 data-nosnippet>275</a>            &amp;&amp; (!<span class="self">self</span>.has_terrain_or_height
+<a href=#276 id=276 data-nosnippet>276</a>                || !<span class="kw">crate</span>::sdf::placement::buried_in_terrain(<span class="self">self</span>.world, layer, feature, ground));
+<a href=#277 id=277 data-nosnippet>277</a>        <span class="kw">let </span>line = <span class="kw">if </span>pre_shown || was_visible {
+<a href=#278 id=278 data-nosnippet>278</a>            feature.line.as_ref().map(|<span class="kw">_</span>| {
+<a href=#279 id=279 data-nosnippet>279</a>                line_glyph_poses(
+<a href=#280 id=280 data-nosnippet>280</a>                    layer,
+<a href=#281 id=281 data-nosnippet>281</a>                    feature,
+<a href=#282 id=282 data-nosnippet>282</a>                    <span class="kw-2">&amp;</span>label_ground,
+<a href=#283 id=283 data-nosnippet>283</a>                    view_state,
+<a href=#284 id=284 data-nosnippet>284</a>                    projection,
+<a href=#285 id=285 data-nosnippet>285</a>                    (<span class="kw-2">&amp;</span><span class="self">self</span>.uniforms, <span class="self">self</span>.glyphs_stay_upright),
+<a href=#286 id=286 data-nosnippet>286</a>                )
+<a href=#287 id=287 data-nosnippet>287</a>            })
+<a href=#288 id=288 data-nosnippet>288</a>        } <span class="kw">else </span>{
+<a href=#289 id=289 data-nosnippet>289</a>            <span class="prelude-val">None
+<a href=#290 id=290 data-nosnippet>290</a>        </span>};
+<a href=#291 id=291 data-nosnippet>291</a>        <span class="kw">let </span>shown = pre_shown &amp;&amp; !<span class="macro">matches!</span>(line, <span class="prelude-val">Some</span>(LinePoses::DoesNotFit));
+<a href=#292 id=292 data-nosnippet>292</a>        <span class="kw">let </span>(rectangles, glyph_boxes) = <span class="kw">if </span>shown {
+<a href=#293 id=293 data-nosnippet>293</a>            label_boxes(
+<a href=#294 id=294 data-nosnippet>294</a>                (layer, feature, ground),
+<a href=#295 id=295 data-nosnippet>295</a>                (<span class="kw-2">&amp;</span>line, <span class="self">self</span>.glyphs_stay_upright),
+<a href=#296 id=296 data-nosnippet>296</a>                (view_state, projection, <span class="kw-2">&amp;</span><span class="self">self</span>.uniforms),
+<a href=#297 id=297 data-nosnippet>297</a>                anchor_clip.map(|clip| (f64::from(ground), clip)),
+<a href=#298 id=298 data-nosnippet>298</a>            )
+<a href=#299 id=299 data-nosnippet>299</a>        } <span class="kw">else </span>{
+<a href=#300 id=300 data-nosnippet>300</a>            ([<span class="prelude-val">None</span>, <span class="prelude-val">None</span>], Vec::new())
+<a href=#301 id=301 data-nosnippet>301</a>        };
+<a href=#302 id=302 data-nosnippet>302</a>        <span class="kw">let </span>(rectangles, glyph_boxes, text_shift, anchor, visible, duplicate) = <span class="kw">if </span>rectangles
+<a href=#303 id=303 data-nosnippet>303</a>            == [<span class="prelude-val">None</span>, <span class="prelude-val">None</span>]
+<a href=#304 id=304 data-nosnippet>304</a>        {
+<a href=#305 id=305 data-nosnippet>305</a>            ([<span class="prelude-val">None</span>, <span class="prelude-val">None</span>], Vec::new(), [<span class="number">0.0</span>; <span class="number">2</span>], <span class="number">0</span>, [<span class="bool-val">false</span>, <span class="bool-val">false</span>], <span class="bool-val">false</span>)
+<a href=#306 id=306 data-nosnippet>306</a>        } <span class="kw">else </span>{
+<a href=#307 id=307 data-nosnippet>307</a>            <span class="kw">let </span>rules = <span class="self">self</span>.constant_rules.unwrap_or_else(|| {
+<a href=#308 id=308 data-nosnippet>308</a>                rules::PlacementRules::new(<span class="self">self</span>.paint, <span class="kw-2">&amp;</span>feature.data.properties, zoom)
+<a href=#309 id=309 data-nosnippet>309</a>            });
+<a href=#310 id=310 data-nosnippet>310</a>            <span class="kw">let </span>viewport = [view_state.width(), view_state.height()];
+<a href=#311 id=311 data-nosnippet>311</a>            <span class="kw">let </span>(rectangles, text_shift, anchor) =
+<a href=#312 id=312 data-nosnippet>312</a>                <span class="kw">if let </span>(<span class="prelude-val">Some</span>(text), <span class="bool-val">true</span>) = (rectangles[<span class="number">0</span>], feature.anchor_shifts.len() &gt; <span class="number">1</span>) {
+<a href=#313 id=313 data-nosnippet>313</a>                    <span class="kw">if </span><span class="self">self</span>.uniforms.text_layout[<span class="number">0</span>] &lt;= <span class="number">0.5
+<a href=#314 id=314 data-nosnippet>314</a>                        </span>&amp;&amp; (text[<span class="number">2</span>] &lt; -<span class="number">400.0
+<a href=#315 id=315 data-nosnippet>315</a>                            </span>|| text[<span class="number">3</span>] &lt; -<span class="number">400.0
+<a href=#316 id=316 data-nosnippet>316</a>                            </span>|| text[<span class="number">0</span>] &gt; viewport[<span class="number">0</span>] + <span class="number">400.0
+<a href=#317 id=317 data-nosnippet>317</a>                            </span>|| text[<span class="number">1</span>] &gt; viewport[<span class="number">1</span>] + <span class="number">400.0</span>)
+<a href=#318 id=318 data-nosnippet>318</a>                    {
+<a href=#319 id=319 data-nosnippet>319</a>                        (rectangles, [<span class="number">0.0</span>; <span class="number">2</span>], <span class="number">0</span>)
+<a href=#320 id=320 data-nosnippet>320</a>                    } <span class="kw">else </span>{
+<a href=#321 id=321 data-nosnippet>321</a>                        <span class="kw">let </span>clip_with_ground = anchor_clip.map(|clip| (f64::from(ground), clip));
+<a href=#322 id=322 data-nosnippet>322</a>                        <span class="self">self</span>.first_fitting_anchor(
+<a href=#323 id=323 data-nosnippet>323</a>                            (
+<a href=#324 id=324 data-nosnippet>324</a>                                layer,
+<a href=#325 id=325 data-nosnippet>325</a>                                feature,
+<a href=#326 id=326 data-nosnippet>326</a>                                ground,
+<a href=#327 id=327 data-nosnippet>327</a>                                history.previous_anchor(layer, feature),
+<a href=#328 id=328 data-nosnippet>328</a>                            ),
+<a href=#329 id=329 data-nosnippet>329</a>                            (rectangles, <span class="kw-2">&amp;</span>glyph_boxes),
+<a href=#330 id=330 data-nosnippet>330</a>                            (<span class="kw-2">&amp;</span>rules, <span class="kw-2">&amp;*</span>boxes, viewport),
+<a href=#331 id=331 data-nosnippet>331</a>                            (
+<a href=#332 id=332 data-nosnippet>332</a>                                text_perspective_scale(
+<a href=#333 id=333 data-nosnippet>333</a>                                    layer,
+<a href=#334 id=334 data-nosnippet>334</a>                                    feature,
+<a href=#335 id=335 data-nosnippet>335</a>                                    ground,
+<a href=#336 id=336 data-nosnippet>336</a>                                    view_state,
+<a href=#337 id=337 data-nosnippet>337</a>                                    projection,
+<a href=#338 id=338 data-nosnippet>338</a>                                    <span class="kw-2">&amp;</span><span class="self">self</span>.uniforms,
+<a href=#339 id=339 data-nosnippet>339</a>                                    clip_with_ground,
+<a href=#340 id=340 data-nosnippet>340</a>                                ),
+<a href=#341 id=341 data-nosnippet>341</a>                                text_rotation(
+<a href=#342 id=342 data-nosnippet>342</a>                                    layer,
+<a href=#343 id=343 data-nosnippet>343</a>                                    feature,
+<a href=#344 id=344 data-nosnippet>344</a>                                    ground,
+<a href=#345 id=345 data-nosnippet>345</a>                                    view_state,
+<a href=#346 id=346 data-nosnippet>346</a>                                    projection,
+<a href=#347 id=347 data-nosnippet>347</a>                                    <span class="kw-2">&amp;</span><span class="self">self</span>.uniforms,
+<a href=#348 id=348 data-nosnippet>348</a>                                    clip_with_ground,
+<a href=#349 id=349 data-nosnippet>349</a>                                ),
+<a href=#350 id=350 data-nosnippet>350</a>                            ),
+<a href=#351 id=351 data-nosnippet>351</a>                        )
+<a href=#352 id=352 data-nosnippet>352</a>                    }
+<a href=#353 id=353 data-nosnippet>353</a>                } <span class="kw">else </span>{
+<a href=#354 id=354 data-nosnippet>354</a>                    (rectangles, [<span class="number">0.0</span>; <span class="number">2</span>], <span class="number">0</span>)
+<a href=#355 id=355 data-nosnippet>355</a>                };
+<a href=#356 id=356 data-nosnippet>356</a>            <span class="kw">let </span>repeat = Repeat::of(layer, feature, <span class="kw-2">&amp;</span>rectangles, viewport);
+<a href=#357 id=357 data-nosnippet>357</a>            <span class="comment">// A repeat too close to one already placed takes no room from labels after it.
+<a href=#358 id=358 data-nosnippet>358</a>            </span><span class="kw">let </span>edge_clipped = <span class="self">self</span>.paint.avoid_edges()
+<a href=#359 id=359 data-nosnippet>359</a>                &amp;&amp; !avoid_edges::stays_within_tile(
+<a href=#360 id=360 data-nosnippet>360</a>                    layer,
+<a href=#361 id=361 data-nosnippet>361</a>                    feature,
+<a href=#362 id=362 data-nosnippet>362</a>                    <span class="kw-2">&amp;</span>line,
+<a href=#363 id=363 data-nosnippet>363</a>                    view_state,
+<a href=#364 id=364 data-nosnippet>364</a>                    <span class="kw-2">&amp;</span><span class="self">self</span>.uniforms,
+<a href=#365 id=365 data-nosnippet>365</a>                    text_shift,
+<a href=#366 id=366 data-nosnippet>366</a>                );
+<a href=#367 id=367 data-nosnippet>367</a>            <span class="kw">let </span>(rectangles, glyph_boxes) = <span class="kw">if </span>edge_clipped
+<a href=#368 id=368 data-nosnippet>368</a>                || repeat
+<a href=#369 id=369 data-nosnippet>369</a>                    .as_ref()
+<a href=#370 id=370 data-nosnippet>370</a>                    .is_some_and(|repeat| history.repeats.too_close(repeat, was_visible))
+<a href=#371 id=371 data-nosnippet>371</a>            {
+<a href=#372 id=372 data-nosnippet>372</a>                ([<span class="prelude-val">None</span>, <span class="prelude-val">None</span>], Vec::new())
+<a href=#373 id=373 data-nosnippet>373</a>            } <span class="kw">else </span>{
+<a href=#374 id=374 data-nosnippet>374</a>                (rectangles, glyph_boxes)
+<a href=#375 id=375 data-nosnippet>375</a>            };
+<a href=#376 id=376 data-nosnippet>376</a>            <span class="kw">let </span>visible = rules.place_along_line(rectangles, <span class="kw-2">&amp;</span>glyph_boxes, boxes, viewport);
+<a href=#377 id=377 data-nosnippet>377</a>            <span class="kw">let </span>any_visible = visible[<span class="number">0</span>] || visible[<span class="number">1</span>];
+<a href=#378 id=378 data-nosnippet>378</a>            <span class="kw">let </span>duplicate = any_visible &amp;&amp; history.shown_elsewhere(layer, feature);
+<a href=#379 id=379 data-nosnippet>379</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(repeat) = repeat.filter(|<span class="kw">_</span>| any_visible &amp;&amp; !duplicate) {
+<a href=#380 id=380 data-nosnippet>380</a>                history.repeats.remember(repeat);
+<a href=#381 id=381 data-nosnippet>381</a>            }
+<a href=#382 id=382 data-nosnippet>382</a>            (
+<a href=#383 id=383 data-nosnippet>383</a>                rectangles,
+<a href=#384 id=384 data-nosnippet>384</a>                glyph_boxes,
+<a href=#385 id=385 data-nosnippet>385</a>                text_shift,
+<a href=#386 id=386 data-nosnippet>386</a>                anchor,
+<a href=#387 id=387 data-nosnippet>387</a>                visible,
+<a href=#388 id=388 data-nosnippet>388</a>                duplicate,
+<a href=#389 id=389 data-nosnippet>389</a>            )
+<a href=#390 id=390 data-nosnippet>390</a>        };
+<a href=#391 id=391 data-nosnippet>391</a>        <span class="kw">let </span>ramps = history.fade_ramps(layer, feature, visible);
+<a href=#392 id=392 data-nosnippet>392</a>        <span class="kw">if </span>visible[<span class="number">0</span>] || was_visible {
+<a href=#393 id=393 data-nosnippet>393</a>            history.remember_anchor(layer, feature, visible[<span class="number">0</span>].then_some(anchor));
+<a href=#394 id=394 data-nosnippet>394</a>        }
+<a href=#395 id=395 data-nosnippet>395</a>        <span class="comment">// A placed label is found from its first frame, while it starts fading in, as GL JS
+<a href=#396 id=396 data-nosnippet>396</a>        // queries its collision index; a copy drawn by another tile is found once.
+<a href=#397 id=397 data-nosnippet>397</a>        </span><span class="kw">if </span>visible.iter().any(|v| <span class="kw-2">*</span>v) &amp;&amp; !duplicate {
+<a href=#398 id=398 data-nosnippet>398</a>            placed.<span class="number">0</span>.push(PlacedSymbol {
+<a href=#399 id=399 data-nosnippet>399</a>                coords: layer.coords,
+<a href=#400 id=400 data-nosnippet>400</a>                layer: layer.style_layer_id.clone(),
+<a href=#401 id=401 data-nosnippet>401</a>                feature: feature_index,
+<a href=#402 id=402 data-nosnippet>402</a>                rectangles: [<span class="number">0</span>, <span class="number">1</span>].map(|i| <span class="kw">if </span>visible[i] { rectangles[i] } <span class="kw">else </span>{ <span class="prelude-val">None </span>}),
+<a href=#403 id=403 data-nosnippet>403</a>                glyph_boxes: <span class="kw">if </span>visible[<span class="number">0</span>] { glyph_boxes } <span class="kw">else </span>{ Vec::new() },
+<a href=#404 id=404 data-nosnippet>404</a>            });
+<a href=#405 id=405 data-nosnippet>405</a>        }
+<a href=#406 id=406 data-nosnippet>406</a>        FeaturePlacement {
+<a href=#407 id=407 data-nosnippet>407</a>            placed: visible.iter().any(|v| <span class="kw-2">*</span>v),
+<a href=#408 id=408 data-nosnippet>408</a>            text_shift,
+<a href=#409 id=409 data-nosnippet>409</a>            anchor,
+<a href=#410 id=410 data-nosnippet>410</a>            ramps: {
+<a href=#411 id=411 data-nosnippet>411</a>                <span class="kw">let </span><span class="kw-2">mut </span>ramps = ramps.map(|ramp| ramp.scale(relevance));
+<a href=#412 id=412 data-nosnippet>412</a>                <span class="comment">// Text that follows its line has no layout off it: while the line cannot hold
+<a href=#413 id=413 data-nosnippet>413</a>                // it, its glyphs are hidden at once, as GL JS hides them, rather than fading out
+<a href=#414 id=414 data-nosnippet>414</a>                // in the straight layout they were cut from.
+<a href=#415 id=415 data-nosnippet>415</a>                </span><span class="kw">if </span><span class="macro">matches!</span>(line, <span class="prelude-val">Some</span>(LinePoses::DoesNotFit)) {
+<a href=#416 id=416 data-nosnippet>416</a>                    ramps[<span class="number">0</span>] = temporal::FadeRamp::default();
+<a href=#417 id=417 data-nosnippet>417</a>                }
+<a href=#418 id=418 data-nosnippet>418</a>                ramps
+<a href=#419 id=419 data-nosnippet>419</a>            },
+<a href=#420 id=420 data-nosnippet>420</a>            ground,
+<a href=#421 id=421 data-nosnippet>421</a>            line,
+<a href=#422 id=422 data-nosnippet>422</a>        }
+<a href=#423 id=423 data-nosnippet>423</a>    }
+<a href=#424 id=424 data-nosnippet>424</a>}
+<a href=#425 id=425 data-nosnippet>425</a>
+<a href=#426 id=426 data-nosnippet>426</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>empty_metadata(
+<a href=#427 id=427 data-nosnippet>427</a>    _layer: <span class="kw-2">&amp;</span><span class="kw">crate</span>::sdf::SymbolLayerData,
+<a href=#428 id=428 data-nosnippet>428</a>) -&gt; Vec&lt;SDFShaderFeatureMetadata&gt; {
+<a href=#429 id=429 data-nosnippet>429</a>    Vec::new()
+<a href=#430 id=430 data-nosnippet>430</a>}
+<a href=#431 id=431 data-nosnippet>431</a>
+<a href=#432 id=432 data-nosnippet>432</a><span class="attr">#[cfg(test)]
+<a href=#433 id=433 data-nosnippet>433</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>
