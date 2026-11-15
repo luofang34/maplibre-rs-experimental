@@ -210,8 +210,20 @@ impl RingIndex {
             .map(|entry| entry.layers.iter_mut())
     }
 
-    pub(super) fn pop_front(&mut self) -> Option<IndexEntry> {
-        let (alloc_id, coords) = self.order.pop_first()?;
+    /// Removes and returns the oldest resident allocation with `allocation_id >= *min_alloc_id`
+    /// whose tile is not matched by `protect`, advancing `*min_alloc_id` past any skipped
+    /// protected entries so repeated eviction steps stay `O(N)` total.
+    pub(super) fn pop_oldest_from(
+        &mut self,
+        min_alloc_id: &mut u64,
+        protect: &mut impl FnMut(WorldTileCoords) -> bool,
+    ) -> Option<IndexEntry> {
+        let (&alloc_id, &coords) = self
+            .order
+            .range(*min_alloc_id..)
+            .find(|&(_, &coords)| !protect(coords))?;
+        *min_alloc_id = alloc_id.saturating_add(1);
+        self.order.remove(&alloc_id);
         let entry = self.pyramid.get_mut(coords)?;
         let pos = entry
             .layers

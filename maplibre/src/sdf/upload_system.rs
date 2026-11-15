@@ -146,7 +146,7 @@ fn upload_symbol_layer(
                     * (size_of::<crate::render::shaders::ShaderSymbolVertex>()
                         + size_of::<SDFShaderFeatureMetadata>())
                     + buffer.buffer.indices.len() * size_of::<u32>();
-                if !budget.take(UploadKind::Geometry, size) {
+                if !budget.can_take(UploadKind::Geometry, size) {
                     return (true, needs_refetch);
                 }
                 if !upload_geometry(
@@ -159,6 +159,7 @@ fn upload_symbol_layer(
                 ) {
                     continue;
                 }
+                budget.take(UploadKind::Geometry, size);
                 true
             } else {
                 false

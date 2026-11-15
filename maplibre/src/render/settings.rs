@@ -181,7 +181,7 @@ impl Default for BufferPoolSizes {
                 vertices: 6_000_000,
                 indices: 18_000_000,
                 feature_metadata: 5_000_000,
-                layer_metadata: 32_768,
+                layer_metadata: 65_536,
             }
         }
         #[cfg(not(target_arch = "wasm32"))]

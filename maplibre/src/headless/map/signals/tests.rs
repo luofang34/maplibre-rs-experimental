@@ -229,18 +229,18 @@ async fn heavy_map(layers: usize) -> Option<HeadlessMap> {
 
 /// The main pass's GPU time of one frame of `map`, or `None` where no time is reported.
 fn gpu_time_of_frame(map: &mut HeadlessMap) -> Option<std::time::Duration> {
+    map.render_source_frames(Default::default(), Vec::new(), 1)
+        .expect("frame");
     map.device()
         .poll(wgpu::PollType::wait_indefinitely())
         .expect("device poll");
-    map.render_source_frames(Default::default(), Vec::new(), 1)
-        .expect("frame");
     map.last_frame_stats().gpu
 }
 
 #[test]
 fn gpu_time_grows_with_the_work_a_frame_draws() {
     crate::headless::map::test_async::run_async(async {
-        let (Some(mut light), Some(mut heavy)) = (heavy_map(1).await, heavy_map(96).await) else {
+        let (Some(mut light), Some(mut heavy)) = (heavy_map(1).await, heavy_map(256).await) else {
             return;
         };
         // Work other processes give the GPU between a frame's timestamps only adds to its time,
@@ -257,11 +257,11 @@ fn gpu_time_grows_with_the_work_a_frame_draws() {
         };
         assert!(
             heavy > std::time::Duration::from_micros(20),
-            "covering a large target 96 times takes measurable GPU time: {heavy:?}"
+            "covering a large target 256 times takes measurable GPU time: {heavy:?}"
         );
         assert!(
             heavy > light * 4,
-            "96 layers take far longer than one: {heavy:?} against {light:?}"
+            "256 layers take far longer than one: {heavy:?} against {light:?}"
         );
     })
 }

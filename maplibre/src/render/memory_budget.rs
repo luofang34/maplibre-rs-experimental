@@ -162,34 +162,47 @@ pub(crate) struct FrameUploads {
 }
 
 impl FrameUploads {
-    /// Admits an upload of `bytes` of `kind`, counting it, or refuses it for a later frame.
-    pub(crate) fn take(&mut self, kind: UploadKind, bytes: usize) -> bool {
+    /// Returns `true` if `bytes` of `kind` fits in this frame's remaining upload allowance without
+    /// consuming it yet, so a saturated or skipped upload does not burn the frame budget.
+    pub(crate) fn can_take(&self, kind: UploadKind, bytes: usize) -> bool {
         if bytes == 0 {
             return true;
         }
         let used = self.geometry_bytes + self.image_bytes;
-        let (allowed, started, counted) = match kind {
-            // Geometry leaves the images their floor.
+        let (allowed, started) = match kind {
             UploadKind::Geometry => (
                 FRAME_UPLOAD_BYTES
                     .saturating_sub(IMAGE_UPLOAD_FLOOR_BYTES.saturating_sub(self.image_bytes))
                     .saturating_sub(used),
-                &mut self.geometry_started,
-                &mut self.geometry_bytes,
+                self.geometry_started,
             ),
             UploadKind::Image => (
                 FRAME_UPLOAD_BYTES
                     .saturating_sub(used)
                     .max(IMAGE_UPLOAD_FLOOR_BYTES.saturating_sub(self.image_bytes)),
-                &mut self.image_started,
-                &mut self.image_bytes,
+                self.image_started,
             ),
         };
-        if *started && bytes > allowed {
+        !started || bytes <= allowed
+    }
+
+    /// Admits an upload of `bytes` of `kind`, counting it, or refuses it for a later frame.
+    pub(crate) fn take(&mut self, kind: UploadKind, bytes: usize) -> bool {
+        if !self.can_take(kind, bytes) {
             return false;
         }
-        *started = true;
-        *counted += bytes;
+        if bytes > 0 {
+            match kind {
+                UploadKind::Geometry => {
+                    self.geometry_started = true;
+                    self.geometry_bytes += bytes;
+                }
+                UploadKind::Image => {
+                    self.image_started = true;
+                    self.image_bytes += bytes;
+                }
+            }
+        }
         true
     }
 

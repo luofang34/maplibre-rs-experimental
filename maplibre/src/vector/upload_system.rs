@@ -216,49 +216,56 @@ fn upload_tessellated_layer(
                         needs_refetch = true;
                     }
                     continue;
-                } else if budget.geometry_tiles_exhausted()
-                    || !budget.take(
-                        UploadKind::Geometry,
-                        upload_size(style_layer, bucket, is_uniform),
-                    )
-                {
-                    Step::Exhausted
                 } else {
-                    #[cfg(target_arch = "wasm32")]
-                    let release_cpu = (allow_cpu_release
-                        && metadata::can_release_cpu_geometry(style_layer, bucket, has_dem_source))
-                    .then(|| bucket.buffer.shared_geometry_key());
-                    let fallback_vertices =
-                        metadata::find_shared_fallback_vertices(bucket, layers, pending);
-                    let paint_store =
-                        tiles.query::<&super::feature_paint::TileFeaturePaintComponent>(coords);
-                    let paint_entries = if replacement.is_some() {
-                        paint_store
-                            .and_then(|s| s.pending.get(&style_layer.id))
-                            .map(Vec::as_slice)
+                    let bytes = upload_size(style_layer, bucket, is_uniform);
+                    if budget.geometry_tiles_exhausted()
+                        || !budget.can_take(UploadKind::Geometry, bytes)
+                    {
+                        Step::Exhausted
                     } else {
-                        paint_store
-                            .and_then(|s| s.committed.get(&style_layer.id))
-                            .map(Vec::as_slice)
-                    };
-                    match upload_bucket(
-                        buffer_pool,
-                        queue,
-                        style_layer,
-                        bucket,
-                        fallback_vertices,
-                        (paint_entries, layers.overscaled_zoom),
-                        (spatial, paint),
-                        (&protected, &mut feature_meta_scratch),
-                    ) {
-                        UploadOutcome::Uploaded => Step::Commit {
-                            replacement,
-                            did_upload: true,
-                            #[cfg(target_arch = "wasm32")]
-                            release_cpu,
-                        },
-                        UploadOutcome::PoolSaturated => Step::Saturated,
-                        UploadOutcome::Failed => Step::Skip,
+                        #[cfg(target_arch = "wasm32")]
+                        let release_cpu = (allow_cpu_release
+                            && metadata::can_release_cpu_geometry(
+                                style_layer,
+                                bucket,
+                                has_dem_source,
+                            ))
+                        .then(|| bucket.buffer.shared_geometry_key());
+                        let fallback_vertices =
+                            metadata::find_shared_fallback_vertices(bucket, layers, pending);
+                        let paint_store =
+                            tiles.query::<&super::feature_paint::TileFeaturePaintComponent>(coords);
+                        let paint_entries = if replacement.is_some() {
+                            paint_store
+                                .and_then(|s| s.pending.get(&style_layer.id))
+                                .map(Vec::as_slice)
+                        } else {
+                            paint_store
+                                .and_then(|s| s.committed.get(&style_layer.id))
+                                .map(Vec::as_slice)
+                        };
+                        match upload_bucket(
+                            buffer_pool,
+                            queue,
+                            style_layer,
+                            bucket,
+                            fallback_vertices,
+                            (paint_entries, layers.overscaled_zoom),
+                            (spatial, paint),
+                            (&protected, &mut feature_meta_scratch),
+                        ) {
+                            UploadOutcome::Uploaded => {
+                                budget.take(UploadKind::Geometry, bytes);
+                                Step::Commit {
+                                    replacement,
+                                    did_upload: true,
+                                    #[cfg(target_arch = "wasm32")]
+                                    release_cpu,
+                                }
+                            }
+                            UploadOutcome::PoolSaturated => Step::Saturated,
+                            UploadOutcome::Failed => Step::Skip,
+                        }
                     }
                 }
             };

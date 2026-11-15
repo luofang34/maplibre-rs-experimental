@@ -41,6 +41,7 @@ pub(crate) fn set_vector_deferred(world: &mut World, deferred: bool) {
 }
 
 /// Updates whether the raster request pass deferred wanted tiles under backpressure.
+#[cfg(any(test, feature = "raster"))]
 pub(crate) fn set_raster_deferred(world: &mut World, deferred: bool) {
     world
         .resources

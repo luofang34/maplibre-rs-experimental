@@ -8,11 +8,8 @@ use super::{
 };
 use crate::render::resource::BackingBufferDescriptor;
 
-/// Default vertices per on-demand GPU page (`64 Ki` on `wasm32`, `256 Ki` on native).
-/// Index and layer-metadata capacities per page scale proportionally with [`BufferPoolSizes`](crate::render::settings::BufferPoolSizes).
-#[cfg(target_arch = "wasm32")]
-pub(super) const DEFAULT_PAGE_VERTICES: u64 = 64 * 1024;
-#[cfg(not(target_arch = "wasm32"))]
+/// Steady-state vertices per on-demand GPU page (`256 Ki` after the initial `16 Ki..128 Ki` ramp).
+/// Index and metadata capacities per page scale proportionally with remaining [`BufferPoolSizes`](crate::render::settings::BufferPoolSizes).
 pub(super) const DEFAULT_PAGE_VERTICES: u64 = 256 * 1024;
 
 /// Byte capacities across the four buffer families of a pool or page.

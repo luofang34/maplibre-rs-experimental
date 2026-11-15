@@ -360,3 +360,84 @@ fn shared_layer_metadata_reuses_one_slot_across_tiles_and_reserves_zero_feature_
         "shared layer metadata is freed once the last tile on the page is removed"
     );
 }
+
+#[test]
+fn eviction_skips_protected_front_tile_and_reclaims_unprotected_tail_tiles() {
+    let mut pool = BufferPool::new(
+        BackingBufferDescriptor::new(TestBuffer { size: 96 }, 96),
+        BackingBufferDescriptor::new(TestBuffer { size: 128 }, 128),
+        BackingBufferDescriptor::new(TestBuffer { size: 128 }, 128),
+        BackingBufferDescriptor::new(TestBuffer { size: 128 }, 128),
+    );
+    let front_protected = WorldTileCoords::from((0, 0, 3_u8.into()));
+    let stale_behind = WorldTileCoords::from((1, 0, 3_u8.into()));
+    let incoming_visible = WorldTileCoords::from((2, 0, 3_u8.into()));
+
+    // Upload `front_protected` (2 vertices) first, then `stale_behind` (2 vertices), filling 4/4.
+    for coords in [front_protected, stale_behind] {
+        pool.allocate_layer_geometry(
+            &TestQueue,
+            coords,
+            style_layer("buildings"),
+            &geometry(2),
+            0,
+            &[0; 2],
+        )
+        .expect("initial fill");
+    }
+    assert_eq!(pool.available_space(BackingBufferType::Vertices), 0);
+
+    // `front_protected` is at `index.front()` and remains visible; `stale_behind` left the view.
+    pool.allocate_layer_geometry_unless(
+        &TestQueue,
+        incoming_visible,
+        style_layer("buildings"),
+        &geometry(2),
+        0,
+        &[0; 2],
+        |tile| tile == front_protected || tile == incoming_visible,
+    )
+    .expect("eviction must skip protected front tile and reclaim unprotected tile behind it");
+
+    assert!(pool.has_layer(front_protected, "buildings"));
+    assert!(!pool.has_layer(stale_behind, "buildings"));
+    assert!(pool.has_layer(incoming_visible, "buildings"));
+}
+
+#[test]
+fn paged_pool_utilizes_vertex_budget_without_layer_metadata_starvation() {
+    let mut pool: BufferPool<TestQueue, TestBuffer, TestVertex, u32, [u32; 16], u32> =
+        BufferPool::with_page_factory(
+            BufferPoolSizes {
+                vertices: 6_000_000,
+                indices: 18_000_000,
+                feature_metadata: 5_000_000,
+                layer_metadata: 32_768,
+            },
+            64 * 1024 * 24,
+            move |_typ, bytes| TestBuffer {
+                size: bytes.max(16),
+            },
+        )
+        .with_decoupled_feature_metadata()
+        .with_shared_layer_metadata();
+
+    let dense_geom = geometry(60_000);
+    // 60 tiles * 60_000 vertices = 3.6M vertices across 60 `64K`-capped pages (> 16 pages).
+    for x in 0..60 {
+        let coords = WorldTileCoords::from((x, 0, 13_u8.into()));
+        pool.replace_layer_geometry_layer_uniform_shared_unless(
+            &TestQueue,
+            coords,
+            style_layer("building"),
+            &dense_geom,
+            None,
+            [0_u32; 16],
+            0_u32,
+            60_000,
+            |_| true,
+        )
+        .expect("layer_metadata page sizing must not starve multi-page vertex capacity");
+    }
+    assert!(pool.page_count() >= 50);
+}

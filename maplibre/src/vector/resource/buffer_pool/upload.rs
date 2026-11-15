@@ -305,14 +305,10 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             return Ok(alloc);
         }
 
-        // 3. Evict oldest unprotected allocations in FIFO order, coalescing freed blocks.
-        while let Some(oldest) = self.index.front() {
-            if protect(oldest.coords) {
-                break;
-            }
-            let Some(evicted) = self.index.pop_front() else {
-                break;
-            };
+        // 3. Evict oldest unprotected allocations in FIFO order, skipping protected visible tiles
+        // so an early-arriving visible tile never blocks eviction of stale tiles behind it.
+        let mut min_alloc_id = 0_u64;
+        while let Some(evicted) = self.index.pop_oldest_from(&mut min_alloc_id, &mut protect) {
             self.pattern_runs
                 .remove(&(evicted.coords, evicted.style_layer_id));
             self.sort_runs

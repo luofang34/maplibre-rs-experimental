@@ -124,14 +124,6 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         let max_lm_page = page_elem_limit(self.max_page_bytes, strides.layer_metadata);
         let max_fm_page = page_elem_limit(self.max_page_bytes, strides.feature_metadata);
 
-        let total_v_elems = elem_div(self.max_capacities.vertices, strides.vertex).max(1);
-        let total_i_elems = elem_div(self.max_capacities.indices, strides.index);
-        let total_lm_elems = elem_div(self.max_capacities.layer_metadata, strides.layer_metadata);
-        let total_fm_elems = elem_div(
-            self.max_capacities.feature_metadata,
-            strides.feature_metadata,
-        );
-
         #[cfg(target_arch = "wasm32")]
         let target_page_v = match self.page_count() {
             0 => 16 * 1024,
@@ -152,16 +144,14 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             .max(req_v_elems.next_power_of_two().min(max_v_page))
             .min(rem_v_elems)
             .max(req_v_elems);
-        let prop_i = (u128::from(total_i_elems) * u128::from(page_v_elems))
-            .div_ceil(u128::from(total_v_elems)) as u64;
+        let prop_i = proportional_rem(rem_i_elems, page_v_elems, rem_v_elems);
         let page_i_elems = prop_i
             .min(max_i_page)
             .max(req_i_elems.next_power_of_two().min(max_i_page))
             .min(rem_i_elems)
             .max(req_i_elems);
-        let prop_lm = ((u128::from(total_lm_elems) * u128::from(page_v_elems))
-            .div_ceil(u128::from(total_v_elems)) as u64)
-            .max(2048.min(total_lm_elems / 4));
+        let prop_lm = proportional_rem(rem_lm_elems, page_v_elems, rem_v_elems)
+            .max(256.min(rem_lm_elems / 4));
         let page_lm_elems = prop_lm
             .min(max_lm_page)
             .max(req_lm_elems.next_power_of_two().min(max_lm_page))
@@ -169,9 +159,8 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             .max(req_lm_elems);
         let page_fm_elems = if self.decoupled_feature_metadata && strides.feature_metadata > 0 {
             let rem_fm = rem_fm_opt.unwrap_or(0);
-            let prop_fm = ((u128::from(total_fm_elems) * u128::from(page_v_elems))
-                .div_ceil(u128::from(total_v_elems)) as u64)
-                .max(4096.min(total_fm_elems / 4));
+            let prop_fm =
+                proportional_rem(rem_fm, page_v_elems, rem_v_elems).max(1024.min(rem_fm / 4));
             prop_fm
                 .min(max_fm_page)
                 .max(req_fm_elems.next_power_of_two().min(max_fm_page))
@@ -277,6 +266,14 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
 
 fn elem_div(bytes: u64, stride: u64) -> u64 {
     bytes.checked_div(stride).unwrap_or(0)
+}
+
+fn proportional_rem(rem_elems: u64, page_v_elems: u64, rem_v_elems: u64) -> u64 {
+    if rem_v_elems == 0 {
+        rem_elems
+    } else {
+        (u128::from(rem_elems) * u128::from(page_v_elems)).div_ceil(u128::from(rem_v_elems)) as u64
+    }
 }
 
 fn page_elem_limit(max_page_bytes: u64, stride: u64) -> u64 {

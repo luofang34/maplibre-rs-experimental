@@ -345,7 +345,7 @@ fn with_departing<T: HasTile>(
             .copied()
             .filter(|departed| {
                 departed.z > tile.z
-                    && ancestor_at(*departed, tile.z) == Some(tile)
+                    && cover::ancestor_at(*departed, tile.z) == Some(tile)
                     && availability.has_tile(*departed, world)
             })
             .collect();
@@ -399,4 +399,4 @@ fn raster_shapes<T: HasTile>(
 
 mod cover;
 pub use cover::covering_shapes_for;
-use cover::{ancestor_at, clip_region, selected_shapes, source_shapes, source_shapes_bounded};
+use cover::{clip_region, selected_shapes, source_shapes, source_shapes_bounded};

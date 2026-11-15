@@ -109,5 +109,17 @@ fn images_use_what_geometry_leaves() {
     assert!(!frame.take(Geometry, 1));
 }
 
+#[test]
+fn can_take_probes_allowance_without_burning_budget_on_saturated_uploads() {
+    use super::{FrameUploads, UploadKind::*, FRAME_UPLOAD_BYTES, IMAGE_UPLOAD_FLOOR_BYTES};
+    let geometry_share = FRAME_UPLOAD_BYTES - IMAGE_UPLOAD_FLOOR_BYTES;
+    let mut frame = FrameUploads::default();
+    assert!(frame.can_take(Geometry, 2 * FRAME_UPLOAD_BYTES));
+    assert_eq!(frame.used(), 0, "can_take must not consume allowance");
+    assert!(frame.take(Geometry, geometry_share - 4));
+    assert!(!frame.can_take(Geometry, 8));
+    assert!(frame.can_take(Geometry, 4));
+}
+
 #[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 mod uploads;
