@@ -28,7 +28,7 @@ impl RenderCommand<LayerItem> for SetDemPipeline {
         else {
             return RenderCommandResult::Failure;
         };
-        let Some((kind, _)) = resources.layer(&item.style_layer) else {
+        let Some((kind, _)) = resources.layer(item.style_layer.as_str()) else {
             return RenderCommandResult::Failure;
         };
         pass.set_pipeline(resources.pipeline(kind));
@@ -49,7 +49,7 @@ impl RenderCommand<LayerItem> for SetDemLayerBindGroup {
         else {
             return RenderCommandResult::Failure;
         };
-        let Some((_, bind_group)) = resources.layer(&item.style_layer) else {
+        let Some((_, bind_group)) = resources.layer(item.style_layer.as_str()) else {
             return RenderCommandResult::Failure;
         };
         pass.set_bind_group(2, bind_group, &[]);
@@ -75,9 +75,10 @@ impl RenderCommand<LayerItem> for SetDemViewBindGroup {
         else {
             return RenderCommandResult::Failure;
         };
-        let nearest = hillshade.layer_nearest(&item.style_layer);
+        let layer_name = item.style_layer.as_str();
+        let nearest = hillshade.layer_nearest(layer_name);
         let Some(bind_group) =
-            raster_resources.layer_texture_filtered(&item.style_layer, &item.tile.coords, nearest)
+            raster_resources.layer_texture_filtered(layer_name, &item.tile.coords, nearest)
         else {
             return RenderCommandResult::Failure;
         };

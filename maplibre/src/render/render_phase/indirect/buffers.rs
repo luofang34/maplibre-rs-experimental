@@ -335,8 +335,12 @@ fn upload_delta<T: bytemuck::Pod>(
     if data.len() <= *uploaded_len {
         return;
     }
+    let prev_retired = retired_buffers.len();
     let (backing, reallocated) =
         ensure_indirect_buffer::<T>(device, slot, retired_buffers, data.len(), usages, label);
+    for retired in &retired_buffers[prev_retired..] {
+        queue.cancel_staged_buffer(retired);
+    }
     let start = if reallocated { 0 } else { *uploaded_len };
     let byte_offset = (start * size_of::<T>()) as wgpu::BufferAddress;
     let slice_bytes = bytemuck::cast_slice(&data[start..]);

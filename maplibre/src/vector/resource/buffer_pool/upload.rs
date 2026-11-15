@@ -53,7 +53,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         ];
         self.validate_sizes(sizes, strides)?;
 
-        let alloc = self.reserve_page_allocation(sizes, strides, &mut protect)?;
+        let alloc = self.reserve_page_allocation(Some(queue), sizes, strides, &mut protect)?;
         let first_vertex = alloc
             .vertices
             .start
@@ -76,11 +76,13 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             };
 
         let allocation_id = self.revision.wrapping_add(1);
+        let style_layer_id = style_layer.layer_id();
         let entry = IndexEntry {
             allocation_id,
             paint_revision: 0,
             page: alloc.page,
             coords,
+            style_layer_id,
             style_layer,
             usable_indices: geometry.usable_indices,
             first_vertex: first_vertex_u32,
@@ -179,7 +181,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             records_u64 * strides.feature_metadata,
         ];
         self.validate_sizes(sizes, strides)?;
-        let alloc = self.reserve_page_allocation(sizes, strides, &mut protect)?;
+        let alloc = self.reserve_page_allocation(Some(queue), sizes, strides, &mut protect)?;
         let first_vertex = alloc
             .vertices
             .start
@@ -200,13 +202,14 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
                     return Err(err);
                 }
             };
-        let id = style_layer.id.clone();
+        let style_layer_id = style_layer.layer_id();
         let allocation_id = self.revision.wrapping_add(1);
         let entry = IndexEntry {
             allocation_id,
             paint_revision: 0,
             page: alloc.page,
             coords,
+            style_layer_id,
             style_layer,
             usable_indices: geometry.usable_indices,
             first_vertex: first_vertex_u32,
@@ -250,12 +253,14 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         }
         self.index.push_back(entry);
         self.revision = allocation_id;
-        let removed = self.index.remove_layer(coords, &id, Some(self.revision));
+        let removed = self
+            .index
+            .remove_layer(coords, style_layer_id, Some(self.revision));
         for old in &removed {
             self.free_entry_ranges(old);
         }
         if !removed.is_empty() {
-            self.reclaim_empty_pages(1);
+            self.reclaim_empty_pages_with_queue(1, Some(queue));
         }
         Ok(())
     }
@@ -293,7 +298,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         feature_metadata: &[FM],
         protect: impl FnMut(WorldTileCoords) -> bool,
     ) -> Result<(), AllocationError> {
-        let id = style_layer.id.clone();
+        let style_layer_id = style_layer.layer_id();
         self.allocate_layer_geometry_unless(
             queue,
             coords,
@@ -303,12 +308,14 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             feature_metadata,
             protect,
         )?;
-        let removed = self.index.remove_layer(coords, &id, Some(self.revision));
+        let removed = self
+            .index
+            .remove_layer(coords, style_layer_id, Some(self.revision));
         for entry in &removed {
             self.free_entry_ranges(entry);
         }
         if !removed.is_empty() {
-            self.reclaim_empty_pages(1);
+            self.reclaim_empty_pages_with_queue(1, Some(queue));
         }
         Ok(())
     }
@@ -338,6 +345,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
 
     fn reserve_page_allocation(
         &mut self,
+        queue: Option<&Q>,
         sizes: [u64; 4],
         strides: ElementStrides,
         mut protect: impl FnMut(WorldTileCoords) -> bool,
@@ -352,7 +360,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         }
 
         // 2. Grow by allocating a new page if total pool capacity permits.
-        if let Some(alloc) = self.try_grow_page_and_alloc(sizes, strides) {
+        if let Some(alloc) = self.try_grow_page_and_alloc(queue, sizes, strides) {
             return Ok(alloc);
         }
 
@@ -365,9 +373,9 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
                 break;
             };
             self.pattern_runs
-                .remove(&(evicted.coords, evicted.style_layer.id.clone()));
+                .remove(&(evicted.coords, evicted.style_layer_id));
             self.sort_runs
-                .remove(&(evicted.coords, evicted.style_layer.id.clone()));
+                .remove(&(evicted.coords, evicted.style_layer_id));
             let page_id = evicted.page;
             self.free_entry_ranges(&evicted);
 
@@ -380,7 +388,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
                     return Ok(alloc);
                 }
                 if page.is_empty() {
-                    if let Some(alloc) = self.try_grow_page_and_alloc(sizes, strides) {
+                    if let Some(alloc) = self.try_grow_page_and_alloc(queue, sizes, strides) {
                         return Ok(alloc);
                     }
                 }

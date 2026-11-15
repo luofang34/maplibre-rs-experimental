@@ -1,17 +1,21 @@
-use super::{DrawState, LayerItem, MaskGroup, RenderPhase, TileMaskItem};
+use super::{
+    DrawState, LayerItem, MaskGroup, RenderPhase, TileMaskItem, TranslucentItem, UNSET_ENTRY_SLOT,
+};
 use crate::{
     background::render_commands::{DrawBackgroundQuad, SetBackgroundPipeline},
     render::{
-        render_commands::DrawMasks, render_phase::ProjectionBinding, tile_view_pattern::TileShape,
+        render_commands::DrawMasks, render_phase::ProjectionBinding,
+        tile_view_pattern::ShapeDrawData,
     },
+    style::StyleLayerId,
     tcs::tiles::Tile,
 };
 
 fn mask(generate_borders: bool) -> TileMaskItem {
     TileMaskItem {
         projection: ProjectionBinding::View,
-        draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
-        source_shape: Default::default(),
+        draw_function: &DrawState::<TileMaskItem, DrawMasks>::INSTANCE,
+        source_shape: ShapeDrawData::default(),
         generate_borders,
         is_vector: false,
     }
@@ -20,20 +24,30 @@ fn mask(generate_borders: bool) -> TileMaskItem {
 fn raster(index: u32, generate_borders: bool) -> LayerItem {
     LayerItem {
         projection: ProjectionBinding::View,
-        draw_function: Box::new(DrawState::<
-            LayerItem,
-            (SetBackgroundPipeline, DrawBackgroundQuad),
-        >::new()),
+        draw_function:
+            &DrawState::<LayerItem, (SetBackgroundPipeline, DrawBackgroundQuad)>::INSTANCE,
         index,
         generate_borders,
-        style_layer: "raster".to_string(),
+        style_layer: StyleLayerId::intern("raster"),
+        entry_slot: UNSET_ENTRY_SLOT,
         tile: Tile {
             coords: Default::default(),
         },
-        source_shape: TileShape::default(),
+        source_shape: ShapeDrawData::default(),
         mask_group: MaskGroup::Mutating,
         run: None,
     }
+}
+
+#[test]
+fn phase_items_are_copy_and_cache_line_compact() {
+    fn assert_copy<T: Copy>() {}
+    assert_copy::<LayerItem>();
+    assert_copy::<TranslucentItem>();
+    assert_copy::<TileMaskItem>();
+    assert!(std::mem::size_of::<LayerItem>() <= 96);
+    assert!(std::mem::size_of::<TranslucentItem>() <= 80);
+    assert!(std::mem::size_of::<TileMaskItem>() <= 64);
 }
 
 #[test]

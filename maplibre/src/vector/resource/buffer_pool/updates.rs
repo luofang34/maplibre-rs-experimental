@@ -190,12 +190,14 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
     /// tile coordinates touched.
     pub fn sync_style_layer(&mut self, style_layer: &StyleLayer) -> Vec<WorldTileCoords> {
         let mut touched = Vec::new();
+        let target_id = style_layer.layer_id();
         for tile_layers in self.index.iter_mut() {
             for entry in tile_layers {
-                if entry.style_layer.id == style_layer.id
+                if entry.style_layer_id == target_id
                     && !entry.style_layer.same_gpu_definition(style_layer)
                 {
                     entry.style_layer = style_layer.clone();
+                    entry.style_layer_id = target_id;
                     entry.paint_revision = entry.paint_revision.wrapping_add(1);
                     touched.push(entry.coords);
                 }
@@ -211,9 +213,10 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
     /// in-place GPU metadata update so terrain drapes and symbol placement refresh.
     pub fn bump_layer_paint_revision(&mut self, coords: WorldTileCoords, id: &str) -> bool {
         let mut bumped = false;
+        let target_id = crate::style::StyleLayerId::intern(id);
         if let Some(layers) = self.index.get_layers_mut(coords) {
             for entry in layers {
-                if entry.style_layer.id == id {
+                if entry.style_layer_id == target_id {
                     entry.paint_revision = entry.paint_revision.wrapping_add(1);
                     bumped = true;
                 }

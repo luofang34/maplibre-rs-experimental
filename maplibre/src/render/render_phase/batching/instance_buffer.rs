@@ -322,6 +322,7 @@ fn upload_delta_bytes(
             usage: usages,
             mapped_at_creation: false,
         })) {
+            queue.cancel_staged_buffer(&old);
             retired_buffers.push(old);
         }
         *gpu_capacity_bytes = new_cap;

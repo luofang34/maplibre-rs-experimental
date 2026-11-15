@@ -27,10 +27,15 @@ pub(crate) fn run_graph(
     if let Some(hooks) = world.resources.get::<BeforeSubmitHooks>() {
         hooks.run(world, &mut render_context.command_encoder);
     }
+    let staged_uploads = queue.flush_staged(device);
     {
         #[cfg(feature = "trace")]
         let _span = tracing::info_span!("submit_graph_commands").entered();
-        queue.submit(vec![render_context.command_encoder.finish()]);
+        if let Some(upload_cmd) = staged_uploads {
+            queue.submit([upload_cmd, render_context.command_encoder.finish()]);
+        } else {
+            queue.submit([render_context.command_encoder.finish()]);
+        }
     }
     if let Some(callbacks) = world.resources.get::<AfterSubmitCallbacks>() {
         callbacks.run(world);

@@ -1,4 +1,6 @@
 //! Queues [PhaseItems](crate::render::render_phase::PhaseItem) for rendering.
+use rustc_hash::FxHashSet;
+
 use crate::{
     context::MapContext,
     io::tile_sources::TileKind,
@@ -7,10 +9,11 @@ use crate::{
         render_commands::DrawMasks,
         render_phase::{
             DrawState, LayerItem, MaskGroup, ProjectionBinding, RenderPhase, SortedRun,
-            TileMaskItem,
+            TileMaskItem, UNSET_ENTRY_SLOT,
         },
         tile_view_pattern::WgpuTileViewPattern,
     },
+    style::StyleLayerId,
     tcs::{
         system::{SystemError, SystemResult},
         tiles::Tile,
@@ -59,7 +62,7 @@ pub fn queue_system(
         .as_ref()
         .is_some_and(|specification| specification.projection_type.uses_globe_rendering(zoom));
 
-    let pattern_layers: std::collections::HashSet<&str> = style
+    let pattern_layers: FxHashSet<StyleLayerId> = style
         .layers
         .iter()
         .filter(|layer| {
@@ -68,9 +71,9 @@ pub fn queue_system(
                     || super::pattern::per_feature_pattern(paint).is_some()
             })
         })
-        .map(|layer| layer.id.as_str())
+        .map(crate::style::layer::StyleLayer::layer_id)
         .collect();
-    let translucent_extrusion_layers: std::collections::HashSet<&str> = style
+    let translucent_extrusion_layers: FxHashSet<StyleLayerId> = style
         .layers
         .iter()
         .filter(|layer| {
@@ -80,31 +83,28 @@ pub fn queue_system(
                     if paint.fill_extrusion_translucent == Some(true)
             )
         })
-        .map(|layer| layer.id.as_str())
+        .map(crate::style::layer::StyleLayer::layer_id)
         .collect();
-    let unclipped_3d_layers: std::collections::HashSet<&str> = style
+    let unclipped_3d_layers: FxHashSet<StyleLayerId> = style
         .layers
         .iter()
         .filter(|layer| {
-            translucent_extrusion_layers.contains(layer.id.as_str())
+            translucent_extrusion_layers.contains(&layer.layer_id())
                 || matches!(
                     super::structures::kind(layer),
                     Some(super::structures::StructureKind::ElevatedLine)
                 )
         })
-        .map(|layer| layer.id.as_str())
+        .map(crate::style::layer::StyleLayer::layer_id)
         .collect();
     let style_zoom = view_state.style_zoom().value();
-    let mut active_unclipped_3d_shapes: std::collections::HashSet<(
-        i32,
-        crate::coords::WorldTileCoords,
-        u32,
-    )> = std::collections::HashSet::new();
+    let mut active_unclipped_3d_shapes: FxHashSet<(i32, crate::coords::WorldTileCoords, u32)> =
+        FxHashSet::default();
     for view_tile in tile_view_pattern.iter() {
         view_tile.render_kind(TileKind::Vector, |shape| {
             if let Some(layer_entries) = buffer_pool_index.get_layers(shape.coords()) {
                 for layer_entry in layer_entries {
-                    if unclipped_3d_layers.contains(layer_entry.style_layer.id.as_str())
+                    if unclipped_3d_layers.contains(&layer_entry.style_layer_id)
                         && layer_entry.style_layer.is_visible_at(style_zoom)
                     {
                         active_unclipped_3d_shapes.insert((
@@ -122,36 +122,34 @@ pub fn queue_system(
     let mut extrusion_colors = Vec::new();
     let mut extrusion_clears = Vec::new();
     let mut translucent_fronts = Vec::new();
-    let mut queued_unclipped_3d: std::collections::HashSet<(
-        i32,
-        crate::coords::WorldTileCoords,
-        u32,
-    )> = std::collections::HashSet::new();
+    let mut queued_unclipped_3d: FxHashSet<(i32, crate::coords::WorldTileCoords, u32)> =
+        FxHashSet::default();
     for view_tile in tile_view_pattern.iter() {
         let coords = &view_tile.coords();
         tracing::trace!("Drawing tile at {coords}");
 
         // draw tile normal or the source e.g. parent or children
         view_tile.render_kind(TileKind::Vector, |source_shape| {
+            let shape_data = source_shape.draw_data();
             if uses_globe {
                 mask_phase.add(TileMaskItem {
                     projection: ProjectionBinding::View,
-                    draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
-                    source_shape: source_shape.clone(),
+                    draw_function: &DrawState::<TileMaskItem, DrawMasks>::INSTANCE,
+                    source_shape: shape_data,
                     generate_borders: true,
                     is_vector: true,
                 });
             }
             mask_phase.add(TileMaskItem {
                 projection: ProjectionBinding::View,
-                draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
-                source_shape: source_shape.clone(),
+                draw_function: &DrawState::<TileMaskItem, DrawMasks>::INSTANCE,
+                source_shape: shape_data,
                 generate_borders: false,
                 is_vector: true,
             });
 
             if let Some(layer_entries) = buffer_pool_index.get_layers(source_shape.coords()) {
-                for layer_entry in layer_entries {
+                for (slot_idx, layer_entry) in layer_entries.iter().enumerate() {
                     if !layer_entry
                         .style_layer
                         .is_visible_at(view_state.style_zoom().value())
@@ -165,8 +163,9 @@ pub fn queue_system(
                     ) {
                         continue;
                     }
-                    let is_unclipped_3d =
-                        unclipped_3d_layers.contains(layer_entry.style_layer.id.as_str());
+                    let layer_id = layer_entry.style_layer_id;
+                    let entry_slot = u16::try_from(slot_idx).unwrap_or(UNSET_ENTRY_SLOT);
+                    let is_unclipped_3d = unclipped_3d_layers.contains(&layer_id);
                     if is_unclipped_3d
                         && (has_active_ancestor(
                             &active_unclipped_3d_shapes,
@@ -186,110 +185,102 @@ pub fn queue_system(
                     } else {
                         MaskGroup::Vector
                     };
-                    let draw_function: Box<dyn crate::render::render_phase::Draw<LayerItem>> =
+                    let draw_function: &'static dyn crate::render::render_phase::Draw<LayerItem> =
                         match layer_entry.style_layer.type_.as_str() {
                             // The heatmap plugin draws these into a density target instead.
                             "heatmap" => continue,
-                            "line" => Box::new(DrawState::<LayerItem, DrawLineTiles>::new()),
-                            "circle" => Box::new(DrawState::<LayerItem, DrawCircleTiles>::new()),
+                            "line" => &DrawState::<LayerItem, DrawLineTiles>::INSTANCE,
+                            "circle" => &DrawState::<LayerItem, DrawCircleTiles>::INSTANCE,
                             "fill-extrusion"
-                                if translucent_extrusion_layers
-                                    .contains(layer_entry.style_layer.id.as_str()) =>
+                                if translucent_extrusion_layers.contains(&layer_id) =>
                             {
                                 translucent_fronts.push(LayerItem {
                                     projection: ProjectionBinding::View,
-                                    draw_function: Box::new(DrawState::<
+                                    draw_function: &DrawState::<
                                         LayerItem,
                                         DrawExtrusionTranslucentFront,
-                                    >::new()),
+                                    >::INSTANCE,
                                     index: layer_entry.style_layer.index,
                                     generate_borders: false,
-                                    style_layer: layer_entry.style_layer.id.clone(),
+                                    style_layer: layer_id,
+                                    entry_slot,
                                     tile: Tile {
                                         coords: layer_entry.coords,
                                     },
-                                    source_shape: source_shape.clone(),
+                                    source_shape: shape_data,
                                     mask_group: MaskGroup::Unmasked,
                                     run: None,
                                 });
-                                Box::new(DrawState::<LayerItem, DrawExtrusionTranslucentBack>::new())
+                                &DrawState::<LayerItem, DrawExtrusionTranslucentBack>::INSTANCE
                             }
                             "fill-extrusion" => {
                                 extrusion_clears.push(LayerItem {
                                     projection: ProjectionBinding::View,
-                                    draw_function: Box::new(DrawState::<
-                                        LayerItem,
-                                        DrawExtrusionClear,
-                                    >::new(
-                                    )),
+                                    draw_function:
+                                        &DrawState::<LayerItem, DrawExtrusionClear>::INSTANCE,
                                     index: layer_entry.style_layer.index,
                                     generate_borders: false,
-                                    style_layer: layer_entry.style_layer.id.clone(),
+                                    style_layer: layer_id,
+                                    entry_slot,
                                     tile: Tile {
                                         coords: layer_entry.coords,
                                     },
-                                    source_shape: source_shape.clone(),
+                                    source_shape: shape_data,
                                     mask_group: MaskGroup::Vector,
                                     run: None,
                                 });
-                                let color: Box<dyn crate::render::render_phase::Draw<LayerItem>> =
-                                    if pattern_layers.contains(layer_entry.style_layer.id.as_str())
-                                    {
-                                        Box::new(
-                                            DrawState::<LayerItem, DrawExtrusionPatternColor>::new(
-                                            ),
-                                        )
-                                    } else {
-                                        Box::new(DrawState::<LayerItem, DrawExtrusionColor>::new())
-                                    };
+                                let color: &'static dyn crate::render::render_phase::Draw<
+                                    LayerItem,
+                                > = if pattern_layers.contains(&layer_id) {
+                                    &DrawState::<LayerItem, DrawExtrusionPatternColor>::INSTANCE
+                                } else {
+                                    &DrawState::<LayerItem, DrawExtrusionColor>::INSTANCE
+                                };
                                 extrusion_colors.push(LayerItem {
                                     projection: ProjectionBinding::View,
                                     draw_function: color,
                                     index: layer_entry.style_layer.index,
                                     generate_borders: false,
-                                    style_layer: layer_entry.style_layer.id.clone(),
+                                    style_layer: layer_id,
+                                    entry_slot,
                                     tile: Tile {
                                         coords: layer_entry.coords,
                                     },
-                                    source_shape: source_shape.clone(),
+                                    source_shape: shape_data,
                                     mask_group: MaskGroup::Vector,
                                     run: None,
                                 });
-                                Box::new(DrawState::<LayerItem, DrawExtrusionDepth>::new())
+                                &DrawState::<LayerItem, DrawExtrusionDepth>::INSTANCE
                             }
-                            "fill"
-                                if pattern_layers.contains(layer_entry.style_layer.id.as_str()) =>
-                            {
-                                Box::new(DrawState::<LayerItem, DrawPatternTiles>::new())
+                            "fill" if pattern_layers.contains(&layer_id) => {
+                                &DrawState::<LayerItem, DrawPatternTiles>::INSTANCE
                             }
-                            _ => Box::new(DrawState::<LayerItem, DrawVectorTiles>::new()),
+                            _ => &DrawState::<LayerItem, DrawVectorTiles>::INSTANCE,
                         };
 
                     // Features that draw in the order of a sort key, across tiles, draw a run at
                     // a time.
                     let runs = (layer_entry.style_layer.type_ == "circle")
-                        .then(|| {
-                            buffer_pool.sort_runs(layer_entry.coords, &layer_entry.style_layer.id)
-                        })
+                        .then(|| buffer_pool.sort_runs_by_id(layer_entry.coords, layer_id))
                         .flatten();
                     if let Some(runs) = runs.filter(|runs| !runs.is_empty()) {
                         for (key, range) in runs {
                             layer_item_phase.add(LayerItem {
                                 projection: ProjectionBinding::View,
-                                draw_function: Box::new(
-                                    DrawState::<LayerItem, DrawCircleTiles>::new(),
-                                ),
+                                draw_function: &DrawState::<LayerItem, DrawCircleTiles>::INSTANCE,
                                 index: layer_entry.style_layer.index,
                                 generate_borders: false,
-                                style_layer: layer_entry.style_layer.id.clone(),
+                                style_layer: layer_id,
+                                entry_slot,
                                 tile: Tile {
                                     coords: layer_entry.coords,
                                 },
-                                source_shape: source_shape.clone(),
+                                source_shape: shape_data,
                                 mask_group: MaskGroup::Vector,
                                 run: Some(SortedRun {
                                     key: *key,
-                                    range: range.clone(),
+                                    start: range.start,
+                                    end: range.end,
                                 }),
                             });
                         }
@@ -300,11 +291,12 @@ pub fn queue_system(
                         draw_function,
                         index: layer_entry.style_layer.index,
                         generate_borders: false,
-                        style_layer: layer_entry.style_layer.id.clone(),
+                        style_layer: layer_id,
+                        entry_slot,
                         tile: Tile {
                             coords: layer_entry.coords,
                         },
-                        source_shape: source_shape.clone(),
+                        source_shape: shape_data,
                         mask_group,
                         run: None,
                     });
@@ -325,7 +317,7 @@ pub fn queue_system(
 }
 
 fn has_active_ancestor(
-    active: &std::collections::HashSet<(i32, crate::coords::WorldTileCoords, u32)>,
+    active: &FxHashSet<(i32, crate::coords::WorldTileCoords, u32)>,
     wrap: i32,
     coords: crate::coords::WorldTileCoords,
     layer_index: u32,
@@ -342,7 +334,7 @@ fn has_active_ancestor(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
+    use rustc_hash::FxHashSet;
 
     use super::has_active_ancestor;
     use crate::coords::{WorldTileCoords, ZoomLevel};
@@ -364,7 +356,7 @@ mod tests {
             y: 384,
             z: ZoomLevel::new(10),
         };
-        let mut active = HashSet::new();
+        let mut active = FxHashSet::default();
         // Overview 0/0/0 only holds layer 1 (e.g. coastline/ice), NOT layer 9 (3D airspace).
         active.insert((0, overview, 1));
         assert!(!has_active_ancestor(&active, 0, child_z10, 9));

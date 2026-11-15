@@ -276,7 +276,7 @@ impl Renderer {
         Ok(Self {
             instance,
             device: share_gpu(device),
-            queue: upload_queue::UploadQueue::new(queue),
+            queue: upload_queue::UploadQueue::with_staging(queue),
             adapter,
             wgpu_settings,
             settings,
@@ -330,7 +330,7 @@ impl Renderer {
         Ok(Self {
             instance,
             device: share_gpu(device),
-            queue: upload_queue::UploadQueue::new(queue),
+            queue: upload_queue::UploadQueue::with_staging(queue),
             adapter,
             wgpu_settings,
             settings,

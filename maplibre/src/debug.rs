@@ -15,7 +15,7 @@ use crate::{
     render::{
         eventually::Eventually,
         render_phase::{Draw, PhaseItem, RenderPhase},
-        tile_view_pattern::TileShape,
+        tile_view_pattern::ShapeDrawData,
         RenderStageLabel,
     },
     schedule::Schedule,
@@ -46,9 +46,10 @@ impl Deref for DebugPipeline {
     }
 }
 
+#[derive(Clone, Copy)]
 struct TileDebugItem {
-    pub draw_function: Box<dyn Draw<TileDebugItem>>,
-    pub source_shape: TileShape,
+    pub draw_function: &'static dyn Draw<TileDebugItem>,
+    pub source_shape: ShapeDrawData,
 }
 
 impl PhaseItem for TileDebugItem {
@@ -59,7 +60,7 @@ impl PhaseItem for TileDebugItem {
     }
 
     fn draw_function(&self) -> &dyn Draw<TileDebugItem> {
-        self.draw_function.as_ref()
+        self.draw_function
     }
 }
 

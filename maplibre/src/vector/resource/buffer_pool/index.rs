@@ -8,6 +8,8 @@ pub struct IndexEntry {
     pub(super) page: u16,
     /// Tile coordinates owning this layer geometry.
     pub coords: WorldTileCoords,
+    /// Interned style layer identifier for `O(1)` equality checks during `Queue` and `Render`.
+    pub style_layer_id: crate::style::StyleLayerId,
     /// Style layer definition at upload time.
     pub style_layer: StyleLayer,
     // Range of bytes within the page's backing buffer for vertices
@@ -144,6 +146,28 @@ impl RingIndex {
         self.pyramid.get(coords).map(|entry| &entry.layers)
     }
 
+    /// Resolves a resident [`IndexEntry`] in `O(1)` using `slot_hint`, falling back to integer
+    /// [`StyleLayerId`](crate::style::StyleLayerId) scan only when the queue shifted.
+    #[inline]
+    pub fn resolve_entry(
+        &self,
+        coords: WorldTileCoords,
+        style_layer_id: crate::style::StyleLayerId,
+        slot_hint: u16,
+    ) -> Option<&IndexEntry> {
+        let layers = self.get_layers(coords)?;
+        if slot_hint != crate::render::render_phase::UNSET_ENTRY_SLOT {
+            if let Some(entry) = layers.get(usize::from(slot_hint)) {
+                if entry.style_layer_id == style_layer_id {
+                    return Some(entry);
+                }
+            }
+        }
+        layers
+            .iter()
+            .find(|entry| entry.style_layer_id == style_layer_id)
+    }
+
     /// Highest zoom level among all resident allocations in `O(1)`.
     #[inline]
     pub fn max_zoom(&self) -> Option<u8> {
@@ -199,7 +223,7 @@ impl RingIndex {
     pub(super) fn remove_layer(
         &mut self,
         coords: WorldTileCoords,
-        id: &str,
+        id: crate::style::StyleLayerId,
         keep: Option<u64>,
     ) -> Vec<IndexEntry> {
         let Some(entry) = self.pyramid.get_mut(coords) else {
@@ -209,7 +233,7 @@ impl RingIndex {
         let mut i = 0;
         while i < entry.layers.len() {
             let should_remove =
-                entry.layers[i].style_layer.id == id && keep != Some(entry.layers[i].allocation_id);
+                entry.layers[i].style_layer_id == id && keep != Some(entry.layers[i].allocation_id);
             if should_remove {
                 if let Some(layer) = entry.layers.remove(i) {
                     self.order.remove(&layer.allocation_id);

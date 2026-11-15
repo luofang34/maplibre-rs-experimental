@@ -58,13 +58,10 @@ impl<const RUNS: bool> RenderCommand<LayerItem> for DrawVectorTile<RUNS> {
             return RenderCommandResult::Failure;
         };
 
-        let Some(vector_layers) = buffer_pool.index().get_layers(item.tile.coords) else {
-            return RenderCommandResult::Failure;
-        };
-
-        let Some(entry) = vector_layers
-            .iter()
-            .find(|entry| entry.style_layer.id == item.style_layer)
+        let Some(entry) =
+            buffer_pool
+                .index()
+                .resolve_entry(item.tile.coords, item.style_layer, item.entry_slot)
         else {
             return RenderCommandResult::Failure;
         };
@@ -107,15 +104,11 @@ impl<const RUNS: bool> RenderCommand<LayerItem> for DrawVectorTile<RUNS> {
                 .slice(entry.layer_metadata_buffer_range()),
         );
         if let Some(run) = &item.run {
-            pass.draw_indexed(
-                first + run.range.start..first + run.range.end,
-                base_vertex,
-                0..1,
-            );
+            pass.draw_indexed(first + run.start..first + run.end, base_vertex, 0..1);
             return RenderCommandResult::Success;
         }
         let runs = RUNS
-            .then(|| buffer_pool.pattern_runs(item.tile.coords, &item.style_layer))
+            .then(|| buffer_pool.pattern_runs_by_id(item.tile.coords, item.style_layer))
             .flatten();
         let Some(runs) = runs else {
             pass.draw_indexed(
@@ -163,13 +156,11 @@ fn line_mode(world: &World, item: &LayerItem) -> LineMode {
         .resources
         .get::<Eventually<VectorBufferPool>>()
         .and_then(|pool| match pool {
-            Initialized(pool) => pool.index().get_layers(item.tile.coords),
+            Initialized(pool) => {
+                pool.index()
+                    .resolve_entry(item.tile.coords, item.style_layer, item.entry_slot)
+            }
             _ => None,
-        })
-        .and_then(|layers| {
-            layers
-                .iter()
-                .find(|entry| entry.style_layer.id == item.style_layer)
         })
         .and_then(|entry| super::structures::kind(&entry.style_layer));
     if matches!(kind, Some(super::structures::StructureKind::ElevatedLine)) {
@@ -225,7 +216,7 @@ impl RenderCommand<LayerItem> for SetLineTilePipeline {
         let Some(dashes) = world.resources.get::<super::line_dash::LineDashResources>() else {
             return RenderCommandResult::Failure;
         };
-        pass.set_bind_group(1, dashes.binding(&item.style_layer), &[]);
+        pass.set_bind_group(1, dashes.binding(item.style_layer), &[]);
         RenderCommandResult::Success
     }
 }
@@ -271,8 +262,8 @@ impl RenderCommand<LayerItem> for SetPatternTilePipeline {
         ) else {
             return RenderCommandResult::Failure;
         };
-        let binding = patterns.binding(&item.style_layer);
-        if binding.is_none() && !patterns.is_per_feature(&item.style_layer) {
+        let binding = patterns.binding(item.style_layer);
+        if binding.is_none() && !patterns.is_per_feature(item.style_layer) {
             return RenderCommandResult::Failure;
         }
         let Some(pipeline) = patterns.pipeline() else {
@@ -354,9 +345,9 @@ impl RenderCommand<LayerItem> for SetPatternBindGroup {
         let Some(patterns) = world.resources.get::<super::pattern::PatternResources>() else {
             return RenderCommandResult::Failure;
         };
-        match patterns.binding(&item.style_layer) {
+        match patterns.binding(item.style_layer) {
             Some(binding) => pass.set_bind_group(1, binding, &[]),
-            None if patterns.is_per_feature(&item.style_layer) => {}
+            None if patterns.is_per_feature(item.style_layer) => {}
             None => return RenderCommandResult::Failure,
         }
         RenderCommandResult::Success

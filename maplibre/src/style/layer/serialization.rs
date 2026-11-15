@@ -125,6 +125,10 @@ impl<'de> Deserialize<'de> for StyleLayer {
         } else {
             unrecognized.layout = def.layout;
         }
+        let _ = crate::style::StyleLayerId::intern(&def.id);
+        if let Some(source_layer) = &def.source_layer {
+            let _ = crate::style::SourceLayerId::intern(source_layer);
+        }
         Ok(Self {
             index: 0,
             id: def.id,

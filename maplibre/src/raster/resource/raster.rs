@@ -33,7 +33,8 @@ pub struct RasterResources {
     dem_bindings: HashMap<RasterSourceId, DemSourceBindings>,
     /// Uniform buffer and bind group of each raster layer's paint adjustments, and of the
     /// same paint for the layer's departing tiles.
-    layer_paints: HashMap<(String, bool), (wgpu::Buffer, wgpu::BindGroup)>,
+    layer_paints:
+        rustc_hash::FxHashMap<(crate::style::StyleLayerId, bool), (wgpu::Buffer, wgpu::BindGroup)>,
     /// Advances whenever a texture is bound or updated, so cached renders of raster tiles refresh.
     revision: u64,
 }
@@ -341,13 +342,8 @@ impl RasterResources {
             }
         }
         let active_layers = &self.layer_sources;
-        self.layer_paints.retain(|(layer_id, _), (buffer, _)| {
-            let keep = active_layers.contains_key(layer_id);
-            if !keep {
-                buffer.destroy();
-            }
-            keep
-        });
+        self.layer_paints
+            .retain(|(layer_id, _), _| active_layers.contains_key(layer_id.as_str()));
     }
 
     /// Marks the texture of a tile whose CPU data changed for upload on the next Queue pass.
@@ -430,7 +426,7 @@ impl RasterResources {
         (layer_id, departing): (&str, bool),
         uniforms: &RasterUniforms,
     ) {
-        let key = (layer_id.to_owned(), departing);
+        let key = (crate::style::StyleLayerId::intern(layer_id), departing);
         let pipeline = &self.pipeline;
         let (buffer, _) = self.layer_paints.entry(key).or_insert_with(|| {
             let buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -453,9 +449,14 @@ impl RasterResources {
     }
 
     /// The paint bind group of a layer written this frame, or of its departing tiles.
-    pub(crate) fn layer_paint(&self, layer_id: &str, departing: bool) -> Option<&wgpu::BindGroup> {
+    #[inline]
+    pub(crate) fn layer_paint(
+        &self,
+        layer_id: crate::style::StyleLayerId,
+        departing: bool,
+    ) -> Option<&wgpu::BindGroup> {
         self.layer_paints
-            .get(&(layer_id.to_owned(), departing))
+            .get(&(layer_id, departing))
             .map(|(_, group)| group)
     }
 

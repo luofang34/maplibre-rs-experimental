@@ -93,25 +93,29 @@ pub fn queue_system(
 
     let pool_index = buffer_pool.index();
     for layer in layers {
+        let layer_id = layer.layer_id();
         let mut items = Vec::new();
         for source_shape in &sources {
             let Some(entries) = pool_index.get_layers(source_shape.coords()) else {
                 continue;
             };
-            for entry in entries {
-                if entry.style_layer.id != layer.id {
+            let shape_data = source_shape.draw_data();
+            for (slot_idx, entry) in entries.iter().enumerate() {
+                if entry.style_layer_id != layer_id {
                     continue;
                 }
                 items.push(LayerItem {
                     projection: ProjectionBinding::View,
-                    draw_function: Box::new(DrawState::<LayerItem, DrawHeatmapDensityTiles>::new()),
+                    draw_function: &DrawState::<LayerItem, DrawHeatmapDensityTiles>::INSTANCE,
                     index: layer.index,
                     generate_borders: false,
-                    style_layer: layer.id.clone(),
+                    style_layer: layer_id,
+                    entry_slot: u16::try_from(slot_idx)
+                        .unwrap_or(crate::render::render_phase::UNSET_ENTRY_SLOT),
                     tile: Tile {
                         coords: entry.coords,
                     },
-                    source_shape: source_shape.clone(),
+                    source_shape: shape_data,
                     mask_group: crate::render::render_phase::MaskGroup::Vector,
                     run: None,
                 });
@@ -126,14 +130,15 @@ pub fn queue_system(
         let above = style.opaque_layer_above(layer, zoom);
         layer_item_phase.add(LayerItem {
             projection: ProjectionBinding::View,
-            draw_function: Box::new(DrawState::<LayerItem, DrawHeatmapComposite>::new()),
+            draw_function: &DrawState::<LayerItem, DrawHeatmapComposite>::INSTANCE,
             index: above.unwrap_or(layer.index),
             generate_borders: above.is_some(),
-            style_layer: layer.id.clone(),
+            style_layer: layer_id,
+            entry_slot: crate::render::render_phase::UNSET_ENTRY_SLOT,
             tile: Tile {
                 coords: any_shape.coords(),
             },
-            source_shape: any_shape.clone(),
+            source_shape: any_shape.draw_data(),
             mask_group: crate::render::render_phase::MaskGroup::Unmasked,
             run: None,
         });

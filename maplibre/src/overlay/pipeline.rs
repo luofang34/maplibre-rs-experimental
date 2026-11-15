@@ -199,6 +199,7 @@ impl OverlayGpu {
         let buffers = match self.mesh.as_mut() {
             Some(existing) => {
                 if v_bytes.len() as u64 > existing.vertex_capacity {
+                    queue.cancel_staged_buffer(&existing.vertices);
                     existing.vertices.destroy();
                     existing.vertex_capacity = grow(v_bytes.len());
                     existing.vertices = alloc(
@@ -208,6 +209,7 @@ impl OverlayGpu {
                     );
                 }
                 if i_bytes.len() as u64 > existing.index_capacity {
+                    queue.cancel_staged_buffer(&existing.indices);
                     existing.indices.destroy();
                     existing.index_capacity = grow(i_bytes.len());
                     existing.indices = alloc(

@@ -20,7 +20,7 @@ pub struct BackgroundBuffers {
     /// Background layer paint metadata.
     pub metadata_buffer: wgpu::Buffer,
     /// Instance of each background style layer in `metadata_buffer`.
-    pub instances: std::collections::HashMap<String, u32>,
+    pub instances: rustc_hash::FxHashMap<crate::style::StyleLayerId, u32>,
     /// The tile transform of each of `globe_tiles`, in order, used by globe meshes.
     pub tile_metadata_buffer: wgpu::Buffer,
     /// The tiles the globe's background is drawn on.
@@ -135,6 +135,7 @@ impl BackgroundGpuBuffers {
         let needed_capacity = metadatas.len().max(1);
         if needed_capacity > inner.metadata_capacity {
             let new_capacity = (inner.metadata_capacity * 2).max(needed_capacity);
+            queue.cancel_staged_buffer(&inner.metadata_buffer);
             inner.metadata_buffer.destroy();
             inner.metadata_buffer = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Background Metadata Buffer"),
@@ -162,6 +163,7 @@ impl BackgroundGpuBuffers {
         let needed_capacity = tile_metadata.len().max(1);
         if needed_capacity > inner.tile_metadata_capacity {
             let new_capacity = (inner.tile_metadata_capacity * 2).max(needed_capacity);
+            queue.cancel_staged_buffer(&inner.tile_metadata_buffer);
             inner.tile_metadata_buffer.destroy();
             inner.tile_metadata_buffer = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Globe Background Tile Metadata Buffer"),

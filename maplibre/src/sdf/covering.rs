@@ -146,6 +146,7 @@ pub(super) fn update(
         .is_none_or(|covering| covering.buffer.size() < required);
     if grow {
         if let Some(old) = world.resources.remove::<SymbolCovering>() {
+            queue.cancel_staged_buffer(&old.buffer);
             old.buffer.destroy();
         }
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {

@@ -1,7 +1,5 @@
 //! Uploads data to the GPU which is needed for rendering.
 
-use std::collections::HashSet;
-
 use super::{
     textures::{SymbolTextures, TextureContext},
     SymbolPipeline,
@@ -105,12 +103,7 @@ fn upload_symbol_layer(
         )>(coords) else {
             continue;
         };
-        let loaded: HashSet<String> = symbol_buffer_pool
-            .get_loaded_style_layers_at(coords)
-            .unwrap_or_default()
-            .into_iter()
-            .map(str::to_owned)
-            .collect();
+        let loaded = symbol_buffer_pool.loaded_style_layer_ids_at(coords);
         for style_layer in style.layers.iter().filter(|layer| !layer.is_hidden()) {
             if let Some(committed) = layers
                 .layers
@@ -183,7 +176,7 @@ fn prepare_atlas(
     if let (Some(LayerPaint::Symbol(paint)), Some(atlas)) = (&style.paint, &layer.atlas) {
         textures.prepare(
             gpu,
-            (layer.coords, style.id.clone()),
+            (layer.coords, style.layer_id()),
             atlas,
             paint,
             f64::from(zoom),
@@ -196,10 +189,10 @@ fn prepare_atlas(
 /// the source layer would upload one layer's geometry under every sibling's name.
 fn pending_layer_data<'a>(
     layers: &'a [SymbolLayerData],
-    loaded_style_layers: &HashSet<String>,
+    loaded_style_layers: &rustc_hash::FxHashSet<crate::style::StyleLayerId>,
     style_layer: &StyleLayer,
 ) -> Option<&'a SymbolLayerData> {
-    if loaded_style_layers.contains(&style_layer.id) {
+    if loaded_style_layers.contains(&style_layer.layer_id()) {
         return None;
     }
     layers

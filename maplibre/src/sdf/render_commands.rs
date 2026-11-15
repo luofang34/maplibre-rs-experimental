@@ -54,21 +54,18 @@ impl RenderCommand<TranslucentItem> for DrawSymbol {
             return RenderCommandResult::Failure;
         };
 
-        let Some(vector_layers) = symbol_buffer_pool.index().get_layers(item.tile.coords) else {
-            return RenderCommandResult::Failure;
-        };
-
-        let Some(entry) = vector_layers
-            .iter()
-            .find(|entry| entry.style_layer.id == item.style_layer)
-        else {
+        let Some(entry) = symbol_buffer_pool.index().resolve_entry(
+            item.tile.coords,
+            item.style_layer,
+            item.entry_slot,
+        ) else {
             return RenderCommandResult::Failure;
         };
 
         let Some(binding) = world
             .resources
             .get::<SymbolTextures>()
-            .and_then(|textures| textures.binding(item.tile.coords, &item.style_layer))
+            .and_then(|textures| textures.binding_by_id(item.tile.coords, item.style_layer))
         else {
             return RenderCommandResult::Failure;
         };

@@ -129,28 +129,30 @@ pub(super) fn build_drape_phase(
                 }
             });
             source_shape.set_stencil_reference(stencil_ref);
+            let shape_data = source_shape.draw_data();
             target.masks.push(TileMaskItem {
-                draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
-                source_shape: source_shape.clone(),
+                draw_function: &DrawState::<TileMaskItem, DrawMasks>::INSTANCE,
+                source_shape: shape_data,
                 generate_borders: false,
                 projection: ProjectionBinding::Flat,
                 is_vector: shape.is_vector,
             });
             for layer in &shape.vector_layers {
-                let draw_function: Box<dyn Draw<LayerItem>> = if layer.is_line {
-                    Box::new(DrawState::<LayerItem, DrawLineTiles>::new())
+                let draw_function: &'static dyn Draw<LayerItem> = if layer.is_line {
+                    &DrawState::<LayerItem, DrawLineTiles>::INSTANCE
                 } else {
-                    Box::new(DrawState::<LayerItem, DrawVectorTiles>::new())
+                    &DrawState::<LayerItem, DrawVectorTiles>::INSTANCE
                 };
                 target.layers.push(LayerItem {
                     draw_function,
                     index: layer.index,
                     generate_borders: false,
-                    style_layer: layer.id.clone(),
+                    style_layer: crate::style::StyleLayerId::intern(&layer.id),
+                    entry_slot: crate::render::render_phase::UNSET_ENTRY_SLOT,
                     tile: Tile {
                         coords: layer.coords,
                     },
-                    source_shape: source_shape.clone(),
+                    source_shape: shape_data,
                     projection: ProjectionBinding::Flat,
                     mask_group: MaskGroup::Vector,
                     run: None,
@@ -158,20 +160,21 @@ pub(super) fn build_drape_phase(
             }
             #[cfg(feature = "raster")]
             for (id, index, dem) in &shape.raster_layers {
-                let draw_function: Box<dyn Draw<LayerItem>> = if *dem {
-                    Box::new(DrawState::<LayerItem, DrawDemTiles>::new())
+                let draw_function: &'static dyn Draw<LayerItem> = if *dem {
+                    &DrawState::<LayerItem, DrawDemTiles>::INSTANCE
                 } else {
-                    Box::new(DrawState::<LayerItem, DrawRasterTiles>::new())
+                    &DrawState::<LayerItem, DrawRasterTiles>::INSTANCE
                 };
                 target.layers.push(LayerItem {
                     draw_function,
                     index: *index,
                     generate_borders: false,
-                    style_layer: id.clone(),
+                    style_layer: crate::style::StyleLayerId::intern(id),
+                    entry_slot: crate::render::render_phase::UNSET_ENTRY_SLOT,
                     tile: Tile {
                         coords: shape.source,
                     },
-                    source_shape: source_shape.clone(),
+                    source_shape: shape_data,
                     projection: ProjectionBinding::Flat,
                     mask_group: MaskGroup::Mutating,
                     run: None,

@@ -1,11 +1,11 @@
 //! What the frame's terrain hands the main pass: whether it draws, its ground surface, and
 //! which layers the drapes already show.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use crate::{
     render::render_phase::{LayerItem, RenderPhase},
-    style::Style,
+    style::{Style, StyleLayerId},
     tcs::world::World,
     terrain::{drape_targets::is_drapeable, TerrainFrame},
 };
@@ -25,15 +25,15 @@ pub(super) fn set_frame(world: &mut World, frame: TerrainFrame) {
 }
 
 pub(super) fn hide_draped_layers(world: &mut World, style: &Style) {
-    let drapeable: HashSet<&str> = style
+    let drapeable: FxHashSet<StyleLayerId> = style
         .layers
         .iter()
         .filter(|layer| {
             is_drapeable(&layer.type_) && crate::vector::structures::kind(layer).is_none()
         })
-        .map(|layer| layer.id.as_str())
+        .map(crate::style::layer::StyleLayer::layer_id)
         .collect();
     if let Some(layer_phase) = world.resources.get_mut::<RenderPhase<LayerItem>>() {
-        layer_phase.retain(|item| !drapeable.contains(item.style_layer.as_str()));
+        layer_phase.retain(|item| !drapeable.contains(&item.style_layer));
     }
 }

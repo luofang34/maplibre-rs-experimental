@@ -45,9 +45,10 @@ impl RenderCommand<LayerItem> for DrawHeatmapComposite {
         else {
             return RenderCommandResult::Failure;
         };
+        let layer_name = item.style_layer.as_str();
         let (Some(density), Some(ramp)) = (
-            resources.density_bind_group(&item.style_layer),
-            resources.ramp_bind_group(&item.style_layer),
+            resources.density_bind_group(layer_name),
+            resources.ramp_bind_group(layer_name),
         ) else {
             return RenderCommandResult::Failure;
         };

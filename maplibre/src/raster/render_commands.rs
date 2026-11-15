@@ -53,7 +53,8 @@ impl RenderCommand<LayerItem> for SetRasterViewBindGroup {
             return RenderCommandResult::Failure;
         };
 
-        let Some(bind_group) = raster_resources.layer_texture(&item.style_layer, &item.tile.coords)
+        let Some(bind_group) =
+            raster_resources.layer_texture(item.style_layer.as_str(), &item.tile.coords)
         else {
             return RenderCommandResult::Failure;
         };
@@ -82,12 +83,12 @@ impl RenderCommand<LayerItem> for SetRasterPaintBindGroup {
             .is_some_and(|fade| {
                 fade.is_departing(
                     raster_resources
-                        .layer_source(&item.style_layer)
+                        .layer_source(item.style_layer.as_str())
                         .and_then(RasterSourceId::name),
                     &item.tile.coords,
                 )
             });
-        let Some(bind_group) = raster_resources.layer_paint(&item.style_layer, departing) else {
+        let Some(bind_group) = raster_resources.layer_paint(item.style_layer, departing) else {
             return RenderCommandResult::Failure;
         };
         pass.set_bind_group(2, bind_group, &[]);

@@ -28,10 +28,17 @@ pub trait Queue<B> {
     /// Copies bytes into `buffer` at a byte offset, subject to the backend's bounds and alignment.
     /// Implementations must consume or copy `data` before returning; GPU execution may be deferred.
     fn write_buffer(&self, buffer: &B, offset: wgpu::BufferAddress, data: &[u8]);
+
+    /// Cancels any deferred staged writes targeting `buffer` before `buffer` is destroyed.
+    fn cancel_pending_writes(&self, _buffer: &B) {}
 }
 
 impl Queue<wgpu::Buffer> for super::upload_queue::UploadQueue {
     fn write_buffer(&self, buffer: &wgpu::Buffer, offset: wgpu::BufferAddress, data: &[u8]) {
         super::upload_queue::UploadQueue::write_buffer(self, buffer, offset, data)
+    }
+
+    fn cancel_pending_writes(&self, buffer: &wgpu::Buffer) {
+        super::upload_queue::UploadQueue::cancel_staged_buffer(self, buffer);
     }
 }

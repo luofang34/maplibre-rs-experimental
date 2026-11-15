@@ -50,10 +50,10 @@ pub struct BufferPool<Q, B, V, I, TM, FM> {
     index: RingIndex,
     /// For layers whose pattern varies by feature: the pattern key and index range of each run
     /// of features sharing one image, relative to the layer's first index.
-    pattern_runs: std::collections::HashMap<(WorldTileCoords, String), PatternRuns>,
+    pattern_runs: rustc_hash::FxHashMap<(WorldTileCoords, crate::style::StyleLayerId), PatternRuns>,
     /// For layers whose features draw in the order of a sort key across tiles: the key and index
     /// range of each run of features sharing one, relative to the layer's first index.
-    sort_runs: std::collections::HashMap<(WorldTileCoords, String), SortRuns>,
+    sort_runs: rustc_hash::FxHashMap<(WorldTileCoords, crate::style::StyleLayerId), SortRuns>,
     /// Advances whenever geometry is allocated or evicted, so cached renders can refresh.
     revision: u64,
     phantom_v: PhantomData<V>,
@@ -183,6 +183,10 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
     /// Passing `1` retains one warm page to avoid allocation churn across pan/reload boundaries;
     /// passing `0` under memory pressure releases all unused GPU pages immediately.
     pub fn reclaim_empty_pages(&mut self, keep_spare: usize) {
+        self.reclaim_empty_pages_with_queue(keep_spare, None);
+    }
+
+    pub(super) fn reclaim_empty_pages_with_queue(&mut self, keep_spare: usize, queue: Option<&Q>) {
         if self.page_factory.is_none() {
             return;
         }
@@ -193,6 +197,12 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
                 if spare_kept < keep_spare {
                     spare_kept += 1;
                 } else if let Some(page) = slot.take() {
+                    if let Some(q) = queue {
+                        q.cancel_pending_writes(&page.vertices.inner);
+                        q.cancel_pending_writes(&page.indices.inner);
+                        q.cancel_pending_writes(&page.layer_metadata.inner);
+                        q.cancel_pending_writes(&page.feature_metadata.inner);
+                    }
                     if let Some(destroyer) = &self.page_destroyer {
                         (destroyer.0)(&page);
                     }
@@ -230,9 +240,10 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
 
     /// Removes one style layer without evicting other sources at the same coordinates.
     pub fn remove_layer(&mut self, coords: WorldTileCoords, id: &str) {
-        self.pattern_runs.remove(&(coords, id.to_owned()));
-        self.sort_runs.remove(&(coords, id.to_owned()));
-        let removed = self.index.remove_layer(coords, id, None);
+        let layer_id = crate::style::StyleLayerId::intern(id);
+        self.pattern_runs.remove(&(coords, layer_id));
+        self.sort_runs.remove(&(coords, layer_id));
+        let removed = self.index.remove_layer(coords, layer_id, None);
         if !removed.is_empty() {
             for entry in &removed {
                 self.free_entry_ranges(entry);
@@ -249,33 +260,53 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         id: &str,
         runs: Option<PatternRuns>,
     ) {
+        let layer_id = crate::style::StyleLayerId::intern(id);
         match runs {
-            Some(runs) => self.pattern_runs.insert((coords, id.to_owned()), runs),
-            None => self.pattern_runs.remove(&(coords, id.to_owned())),
+            Some(runs) => self.pattern_runs.insert((coords, layer_id), runs),
+            None => self.pattern_runs.remove(&(coords, layer_id)),
         };
     }
 
     /// Records, or with `None` forgets, the sort runs of a layer's geometry.
     pub fn set_sort_runs(&mut self, coords: WorldTileCoords, id: &str, runs: Option<SortRuns>) {
+        let layer_id = crate::style::StyleLayerId::intern(id);
         match runs {
-            Some(runs) => self.sort_runs.insert((coords, id.to_owned()), runs),
-            None => self.sort_runs.remove(&(coords, id.to_owned())),
+            Some(runs) => self.sort_runs.insert((coords, layer_id), runs),
+            None => self.sort_runs.remove(&(coords, layer_id)),
         };
     }
 
     /// The sort runs of a layer's geometry, when its features draw in the order of a sort key
     /// across tiles.
+    #[inline]
     pub fn sort_runs(&self, coords: WorldTileCoords, id: &str) -> Option<&[(f32, Range<u32>)]> {
-        self.sort_runs
-            .get(&(coords, id.to_owned()))
-            .map(Vec::as_slice)
+        self.sort_runs_by_id(coords, crate::style::StyleLayerId::intern(id))
+    }
+
+    /// Zero-allocation [`StyleLayerId`](crate::style::StyleLayerId) lookup for [`Self::sort_runs`].
+    #[inline]
+    pub fn sort_runs_by_id(
+        &self,
+        coords: WorldTileCoords,
+        id: crate::style::StyleLayerId,
+    ) -> Option<&[(f32, Range<u32>)]> {
+        self.sort_runs.get(&(coords, id)).map(Vec::as_slice)
     }
 
     /// The pattern runs of a layer's geometry, when its pattern varies by feature.
+    #[inline]
     pub fn pattern_runs(&self, coords: WorldTileCoords, id: &str) -> Option<&[(u32, Range<u32>)]> {
-        self.pattern_runs
-            .get(&(coords, id.to_owned()))
-            .map(Vec::as_slice)
+        self.pattern_runs_by_id(coords, crate::style::StyleLayerId::intern(id))
+    }
+
+    /// Zero-allocation [`StyleLayerId`](crate::style::StyleLayerId) lookup for [`Self::pattern_runs`].
+    #[inline]
+    pub fn pattern_runs_by_id(
+        &self,
+        coords: WorldTileCoords,
+        id: crate::style::StyleLayerId,
+    ) -> Option<&[(u32, Range<u32>)]> {
+        self.pattern_runs.get(&(coords, id)).map(Vec::as_slice)
     }
 
     #[cfg(test)]
@@ -358,13 +389,23 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         })
     }
 
+    /// Interned [`StyleLayerId`](crate::style::StyleLayerId)s currently resident at `coords`.
+    pub fn loaded_style_layer_ids_at(
+        &self,
+        coords: WorldTileCoords,
+    ) -> rustc_hash::FxHashSet<crate::style::StyleLayerId> {
+        self.index
+            .get_layers(coords)
+            .map(|layers| layers.iter().map(|entry| entry.style_layer_id).collect())
+            .unwrap_or_default()
+    }
+
     /// Whether `style_layer_id` has resident GPU geometry at `coords`.
     pub fn has_layer(&self, coords: WorldTileCoords, style_layer_id: &str) -> bool {
-        self.index.get_layers(coords).is_some_and(|layers| {
-            layers
-                .iter()
-                .any(|entry| entry.style_layer.id == style_layer_id)
-        })
+        let id = crate::style::StyleLayerId::intern(style_layer_id);
+        self.index
+            .get_layers(coords)
+            .is_some_and(|layers| layers.iter().any(|entry| entry.style_layer_id == id))
     }
 
     /// Borrows the spatial/temporal index of resident allocations.

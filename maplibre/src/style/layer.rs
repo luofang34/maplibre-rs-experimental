@@ -158,6 +158,21 @@ pub struct StyleLayer {
 }
 
 impl StyleLayer {
+    /// Interned 32-bit [`StyleLayerId`](crate::style::StyleLayerId) for zero-allocation phase items
+    /// and GPU lookup tables.
+    #[inline]
+    pub fn layer_id(&self) -> crate::style::StyleLayerId {
+        crate::style::StyleLayerId::intern(&self.id)
+    }
+
+    /// Interned 32-bit [`SourceLayerId`](crate::style::SourceLayerId) when `source_layer` is set.
+    #[inline]
+    pub fn source_layer_id(&self) -> Option<crate::style::SourceLayerId> {
+        self.source_layer
+            .as_deref()
+            .map(crate::style::SourceLayerId::intern)
+    }
+
     /// Whether the layer is switched off by its `layout.visibility`, at every zoom.
     pub fn is_hidden(&self) -> bool {
         self.visibility == LayerVisibility::None

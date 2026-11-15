@@ -8,11 +8,12 @@ use crate::{
     context::MapContext,
     coords::LatLon,
     render::{
-        render_phase::{Draw, LayerItem, ProjectionBinding, RenderPhase},
-        tile_view_pattern::TileShape,
+        render_phase::{Draw, LayerItem, ProjectionBinding, RenderPhase, UNSET_ENTRY_SLOT},
+        tile_view_pattern::ShapeDrawData,
         tracked_pass::TrackedRenderPass,
         upload_queue::UploadQueue,
     },
+    style::StyleLayerId,
     tcs::{
         system::{SystemError, SystemResult},
         tiles::Tile,
@@ -206,7 +207,7 @@ impl Draw<LayerItem> for DrawCustomLayer {
         let Some(frame) = world.resources.get::<CustomLayerFrameState>() else {
             return;
         };
-        let Some(entry) = registry.layers.get(&item.style_layer) else {
+        let Some(entry) = registry.layers.get(item.style_layer.as_str()) else {
             return;
         };
         let ctx = frame.as_context();
@@ -317,14 +318,15 @@ pub fn queue_custom_layers_system(
     };
     for (index, style_layer) in queued_items {
         layer_phase.add(LayerItem {
-            draw_function: Box::new(DrawCustomLayer),
+            draw_function: &DrawCustomLayer,
             index,
             generate_borders: false,
-            style_layer,
+            style_layer: StyleLayerId::intern(&style_layer),
+            entry_slot: UNSET_ENTRY_SLOT,
             tile: Tile {
                 coords: crate::coords::WorldTileCoords::default(),
             },
-            source_shape: TileShape::default(),
+            source_shape: ShapeDrawData::default(),
             projection: ProjectionBinding::View,
             mask_group: crate::render::render_phase::MaskGroup::Custom,
             run: None,

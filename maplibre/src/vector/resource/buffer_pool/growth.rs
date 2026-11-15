@@ -63,13 +63,14 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
 
     pub(super) fn try_grow_page_and_alloc(
         &mut self,
+        queue: Option<&Q>,
         sizes: [u64; 4],
         strides: ElementStrides,
     ) -> Option<PageAllocation> {
         self.page_factory.as_ref()?;
         // Any empty page reached here failed `try_allocate` in step 1 (too small for `sizes`), so
         // return its capacity to the unallocated pool before shaping a new page.
-        self.reclaim_empty_pages(0);
+        self.reclaim_empty_pages_with_queue(0, queue);
 
         let rem = self
             .max_capacities

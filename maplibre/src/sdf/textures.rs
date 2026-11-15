@@ -44,7 +44,7 @@ pub(super) struct TextureContext<'a> {
 pub(super) struct SymbolTextures {
     atlases: HashMap<usize, Weak<TileAtlas>>,
     tile_atlases: HashMap<(WorldTileCoords, usize), Arc<TileAtlas>>,
-    bindings: HashMap<(WorldTileCoords, String), DrawBinding>,
+    bindings: rustc_hash::FxHashMap<(WorldTileCoords, crate::style::StyleLayerId), DrawBinding>,
     /// Tiles whose labels gained an atlas since the last drain.
     bound: Vec<WorldTileCoords>,
 }
@@ -53,7 +53,7 @@ impl SymbolTextures {
     pub fn prepare(
         &mut self,
         gpu: &TextureContext<'_>,
-        key: (WorldTileCoords, String),
+        key: (WorldTileCoords, crate::style::StyleLayerId),
         atlas: &Arc<SymbolAtlas>,
         paint: &SymbolPaint,
         zoom: f64,
@@ -97,8 +97,12 @@ impl SymbolTextures {
         if !self.bound.contains(&key.0) {
             self.bound.push(key.0);
         }
-        self.bindings
-            .insert(key, DrawBinding::new(gpu, texture, uniforms, separate_halo));
+        if let Some(old) = self
+            .bindings
+            .insert(key, DrawBinding::new(gpu, texture, uniforms, separate_halo))
+        {
+            gpu.queue.cancel_staged_buffer(&old.buffer);
+        }
     }
 
     /// Tiles whose glyphs and icons became drawable since the last call.
@@ -106,8 +110,18 @@ impl SymbolTextures {
         std::mem::take(&mut self.bound)
     }
 
+    #[cfg(test)]
     pub fn binding(&self, coords: WorldTileCoords, layer: &str) -> Option<&DrawBinding> {
-        self.bindings.get(&(coords, layer.to_string()))
+        self.binding_by_id(coords, crate::style::StyleLayerId::intern(layer))
+    }
+
+    #[inline]
+    pub fn binding_by_id(
+        &self,
+        coords: WorldTileCoords,
+        layer: crate::style::StyleLayerId,
+    ) -> Option<&DrawBinding> {
+        self.bindings.get(&(coords, layer))
     }
 
     pub fn retain(&mut self, tiles: &crate::tcs::tiles::Tiles) {

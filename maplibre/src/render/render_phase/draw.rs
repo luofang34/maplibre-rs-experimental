@@ -3,7 +3,7 @@ use std::{any::TypeId, collections::HashMap, marker::PhantomData, num::NonZeroU3
 use crate::tcs::world::World;
 
 /// Encodes a phase item's draw commands using resources borrowed from the frame's world.
-pub trait Draw<P: ?Sized>: 'static {
+pub trait Draw<P: ?Sized>: Send + Sync + 'static {
     /// Draws `item` by issuing state bindings and draw calls via [`TrackedRenderPass`](crate::render::tracked_pass::TrackedRenderPass).
     fn draw<'w>(
         &self,
@@ -93,6 +93,9 @@ pub struct DrawState<P, C> {
 }
 
 impl<P, C> DrawState<P, C> {
+    /// Stateless singleton value promotable to `'static` (`&DrawState::<P, C>::INSTANCE`).
+    pub const INSTANCE: Self = Self::new();
+
     /// Creates a stateless [`Draw`] adapter for render command `C`.
     pub const fn new() -> Self {
         DrawState {

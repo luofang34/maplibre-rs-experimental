@@ -1,13 +1,12 @@
 //! The images that `fill-pattern` layers repeat, and the bindings that draw them.
 
-use std::{
-    collections::HashMap,
-    hash::{Hash, Hasher},
-};
+use std::hash::{Hash, Hasher};
+
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::style::{
     layer::{LayerPaint, PatternName, StyleProperty},
-    Style, StyleImage,
+    Style, StyleImage, StyleLayerId,
 };
 
 struct PatternBinding {
@@ -34,11 +33,11 @@ pub(crate) struct PatternResources {
     /// The fill pipeline, once a vector plugin has built it; backgrounds need only the images.
     pipeline: Option<wgpu::RenderPipeline>,
     layout: wgpu::BindGroupLayout,
-    layers: HashMap<String, PatternBinding>,
+    layers: FxHashMap<StyleLayerId, PatternBinding>,
     /// Layers whose pattern varies by feature, and so bind an image per run of features.
-    per_feature: std::collections::HashSet<String>,
+    per_feature: FxHashSet<StyleLayerId>,
     /// Every image of the style by its pattern key, for the layers in `per_feature`.
-    images: HashMap<u32, PatternBinding>,
+    images: FxHashMap<u32, PatternBinding>,
     sampler: wgpu::Sampler,
 }
 
@@ -163,9 +162,9 @@ impl PatternResources {
         Self {
             pipeline: None,
             layout,
-            layers: HashMap::new(),
-            per_feature: Default::default(),
-            images: HashMap::new(),
+            layers: FxHashMap::default(),
+            per_feature: FxHashSet::default(),
+            images: FxHashMap::default(),
             sampler,
         }
     }
@@ -180,29 +179,39 @@ impl PatternResources {
         zoom: f64,
     ) {
         let scale = pattern_scale(zoom);
-        self.layers
-            .retain(|id, _| style.layers.iter().any(|layer| &layer.id == id));
-        self.per_feature = style
-            .layers
-            .iter()
-            .filter(|layer| layer.paint.as_ref().and_then(per_feature_pattern).is_some())
-            .map(|layer| layer.id.clone())
-            .collect();
+        self.layers.retain(|id, binding| {
+            let keep = style.layers.iter().any(|layer| layer.layer_id() == *id);
+            if !keep {
+                queue.cancel_staged_buffer(&binding.size);
+            }
+            keep
+        });
+        self.per_feature.clear();
+        self.per_feature.extend(
+            style
+                .layers
+                .iter()
+                .filter(|layer| layer.paint.as_ref().and_then(per_feature_pattern).is_some())
+                .map(|layer| layer.layer_id()),
+        );
         self.update_images(device, queue, style, scale);
         for layer in &style.layers {
+            let layer_id = layer.layer_id();
             let image = layer
                 .paint
                 .as_ref()
                 .and_then(|paint| pattern_name(paint, zoom))
                 .and_then(|name| style.images.get(&name).map(|image| (name, image)));
             let Some((name, image)) = image else {
-                self.layers.remove(&layer.id);
+                if let Some(old) = self.layers.remove(&layer_id) {
+                    queue.cancel_staged_buffer(&old.size);
+                }
                 continue;
             };
             let fingerprint = fingerprint(&name, image);
             if let Some(binding) = self
                 .layers
-                .get_mut(&layer.id)
+                .get_mut(&layer_id)
                 .filter(|binding| binding.fingerprint == fingerprint)
             {
                 if binding.scale != scale {
@@ -216,7 +225,9 @@ impl PatternResources {
                 continue;
             }
             if let Some(binding) = self.bind(device, queue, image, (fingerprint, scale)) {
-                self.layers.insert(layer.id.clone(), binding);
+                if let Some(old) = self.layers.insert(layer_id, binding) {
+                    queue.cancel_staged_buffer(&old.size);
+                }
             }
         }
     }
@@ -230,10 +241,12 @@ impl PatternResources {
         scale: f32,
     ) {
         if self.per_feature.is_empty() {
-            self.images.clear();
+            for (_, old) in self.images.drain() {
+                queue.cancel_staged_buffer(&old.size);
+            }
             return;
         }
-        let mut keys = std::collections::HashSet::new();
+        let mut keys = FxHashSet::default();
         for (name, image) in &style.images {
             let key = crate::style::pattern_key::pattern_key(name);
             keys.insert(key);
@@ -255,19 +268,30 @@ impl PatternResources {
             }
             match self.bind(device, queue, image, (fingerprint, scale)) {
                 Some(binding) => {
-                    self.images.insert(key, binding);
+                    if let Some(old) = self.images.insert(key, binding) {
+                        queue.cancel_staged_buffer(&old.size);
+                    }
                 }
                 None => {
-                    self.images.remove(&key);
+                    if let Some(old) = self.images.remove(&key) {
+                        queue.cancel_staged_buffer(&old.size);
+                    }
                 }
             }
         }
-        self.images.retain(|key, _| keys.contains(key));
+        self.images.retain(|key, old| {
+            let keep = keys.contains(key);
+            if !keep {
+                queue.cancel_staged_buffer(&old.size);
+            }
+            keep
+        });
     }
 
     /// Whether the layer picks its image per feature.
-    pub(crate) fn is_per_feature(&self, layer: &str) -> bool {
-        self.per_feature.contains(layer)
+    #[inline]
+    pub(crate) fn is_per_feature(&self, layer: StyleLayerId) -> bool {
+        self.per_feature.contains(&layer)
     }
 
     /// The image a pattern key names, for a layer that picks its image per feature.
@@ -355,8 +379,9 @@ impl PatternResources {
         self.pipeline.as_ref()
     }
 
-    pub(crate) fn binding(&self, layer: &str) -> Option<&wgpu::BindGroup> {
-        self.layers.get(layer).map(|binding| &binding.bind_group)
+    #[inline]
+    pub(crate) fn binding(&self, layer: StyleLayerId) -> Option<&wgpu::BindGroup> {
+        self.layers.get(&layer).map(|binding| &binding.bind_group)
     }
 }
 

@@ -17,6 +17,8 @@ pub use feature_state::{FeatureId, FeatureStateTarget};
 pub mod filter;
 pub mod heatmap;
 pub mod hillshade;
+pub mod ids;
+pub use ids::{SourceLayerId, StyleLayerId};
 pub mod layer;
 pub mod light;
 pub mod line_gradient;

@@ -244,6 +244,85 @@ impl TileShape {
     pub fn same_placement(&self, other: &Self) -> bool {
         self.coords == other.coords && self.transform == other.transform
     }
+
+    /// Extracts the compact `Copy` [`ShapeDrawData`] needed by render-phase items.
+    #[inline]
+    pub fn draw_data(&self) -> ShapeDrawData {
+        let (buffer_start, buffer_len, has_buffer_range) = match &self.buffer_range {
+            Some(range) => (
+                range.start,
+                u32::try_from(range.end.saturating_sub(range.start)).unwrap_or(u32::MAX),
+                true,
+            ),
+            None => (0, 0, false),
+        };
+        ShapeDrawData {
+            buffer_start,
+            coords: self.coords,
+            wrap: self.wrap,
+            buffer_len,
+            stencil_reference: self.stencil_reference,
+            within_another: self.within.is_some(),
+            has_buffer_range,
+        }
+    }
+}
+
+/// Compact `Copy` draw descriptor extracted from [`TileShape`] for [`PhaseItem`](crate::render::render_phase::PhaseItem)s.
+///
+/// Drops [`TileShape`]'s 128-byte CPU `Matrix4<f64>` transform once its GPU metadata slot has
+/// been uploaded, shrinking phase items onto a single cache line with zero `Drop` glue.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ShapeDrawData {
+    buffer_start: wgpu::BufferAddress,
+    coords: WorldTileCoords,
+    /// How many worlds from the tile's own this shape is drawn, for a copy of the world.
+    pub(crate) wrap: i32,
+    buffer_len: u32,
+    stencil_reference: u8,
+    within_another: bool,
+    has_buffer_range: bool,
+}
+
+impl ShapeDrawData {
+    /// Tile coordinate represented by this entry.
+    #[inline]
+    pub fn coords(&self) -> WorldTileCoords {
+        self.coords
+    }
+
+    /// Active 7-bit stencil reference (`0..=123`) for clipping this shape's draws.
+    #[inline]
+    pub fn stencil_reference(&self) -> u8 {
+        self.stencil_reference
+    }
+
+    /// Whether the shape is drawn within another tile's mask and so needs none of its own.
+    #[inline]
+    pub fn is_drawn_within_another(&self) -> bool {
+        self.within_another
+    }
+
+    /// Byte range populated by the latest upload, or `None` before upload or on overflow.
+    #[inline]
+    pub fn buffer_range(&self) -> Option<Range<wgpu::BufferAddress>> {
+        self.has_buffer_range
+            .then_some(self.buffer_start..self.buffer_start + u64::from(self.buffer_len))
+    }
+}
+
+impl From<&TileShape> for ShapeDrawData {
+    #[inline]
+    fn from(shape: &TileShape) -> Self {
+        shape.draw_data()
+    }
+}
+
+impl From<TileShape> for ShapeDrawData {
+    #[inline]
+    fn from(shape: TileShape) -> Self {
+        shape.draw_data()
+    }
 }
 
 impl Default for TileShape {

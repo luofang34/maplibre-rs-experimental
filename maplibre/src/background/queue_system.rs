@@ -70,7 +70,7 @@ pub fn queue_system(
         [size.width() as f32, size.height() as f32]
     };
     let world_rows = world_rows(view_state, style.terrain.is_none());
-    let mut instances = std::collections::HashMap::new();
+    let mut instances = rustc_hash::FxHashMap::default();
     let projection_transition = style.projection.as_ref().map_or(0.0, |specification| {
         specification
             .projection_type
@@ -119,7 +119,7 @@ pub fn queue_system(
             return Err(SystemError::Dependencies);
         };
 
-        let patterned: std::collections::HashSet<&str> = style
+        let patterned: rustc_hash::FxHashSet<crate::style::StyleLayerId> = style
             .layers
             .iter()
             .filter(|layer| {
@@ -128,7 +128,7 @@ pub fn queue_system(
                         .is_some()
                 })
             })
-            .map(|layer| layer.id.as_str())
+            .map(crate::style::layer::StyleLayer::layer_id)
             .collect();
         let mut background_index = 0;
         for layer in &style.layers {
@@ -151,7 +151,8 @@ pub fn queue_system(
             background_index = background_index.max(layer.index);
             let c = background_color(layer, view_state.zoom().value());
             let z_index = layer.index as f32;
-            instances.insert(layer.id.clone(), metadatas.len() as u32);
+            let layer_id = layer.layer_id();
+            instances.insert(layer_id, metadatas.len() as u32);
             metadatas.push(BackgroundLayerMetadata {
                 color: c,
                 z_index,
@@ -166,23 +167,24 @@ pub fn queue_system(
                 world_rows,
             });
 
-            let draw_function: Box<dyn crate::render::render_phase::Draw<LayerItem>> =
-                if uses_globe && patterned.contains(layer.id.as_str()) {
-                    Box::new(DrawState::<LayerItem, DrawGlobeBackgroundPattern>::new())
+            let draw_function: &'static dyn crate::render::render_phase::Draw<LayerItem> =
+                if uses_globe && patterned.contains(&layer_id) {
+                    &DrawState::<LayerItem, DrawGlobeBackgroundPattern>::INSTANCE
                 } else if uses_globe {
-                    Box::new(DrawState::<LayerItem, DrawGlobeBackground>::new())
-                } else if patterned.contains(layer.id.as_str()) {
-                    Box::new(DrawState::<LayerItem, DrawBackgroundPattern>::new())
+                    &DrawState::<LayerItem, DrawGlobeBackground>::INSTANCE
+                } else if patterned.contains(&layer_id) {
+                    &DrawState::<LayerItem, DrawBackgroundPattern>::INSTANCE
                 } else {
-                    Box::new(DrawState::<LayerItem, DrawBackground>::new())
+                    &DrawState::<LayerItem, DrawBackground>::INSTANCE
                 };
             layer_item_phase.add(LayerItem {
                 projection: ProjectionBinding::View,
                 draw_function,
                 index: layer.index,
                 generate_borders: false,
-                style_layer: layer.id.clone(),
-                source_shape: crate::render::tile_view_pattern::TileShape::default(),
+                style_layer: layer_id,
+                entry_slot: crate::render::render_phase::UNSET_ENTRY_SLOT,
+                source_shape: crate::render::tile_view_pattern::ShapeDrawData::default(),
                 mask_group: crate::render::render_phase::MaskGroup::Unmasked,
 
                 // We provide a dummy tile for background.
@@ -197,11 +199,12 @@ pub fn queue_system(
         if sky_metadata.is_some() {
             layer_item_phase.add(LayerItem {
                 projection: ProjectionBinding::View,
-                draw_function: Box::new(DrawState::<LayerItem, DrawSky>::new()),
+                draw_function: &DrawState::<LayerItem, DrawSky>::INSTANCE,
                 index: background_index,
                 generate_borders: false,
-                style_layer: "sky".to_string(),
-                source_shape: crate::render::tile_view_pattern::TileShape::default(),
+                style_layer: crate::style::StyleLayerId::SKY,
+                entry_slot: crate::render::render_phase::UNSET_ENTRY_SLOT,
+                source_shape: crate::render::tile_view_pattern::ShapeDrawData::default(),
                 mask_group: crate::render::render_phase::MaskGroup::Unmasked,
                 tile: crate::tcs::tiles::Tile {
                     coords: crate::coords::WorldTileCoords::default(),
@@ -211,13 +214,14 @@ pub fn queue_system(
         }
         if atmosphere_blend > 0.0 {
             translucent_phase.add(TranslucentItem {
-                draw_function: Box::new(DrawState::<TranslucentItem, DrawAtmosphere>::new()),
+                draw_function: &DrawState::<TranslucentItem, DrawAtmosphere>::INSTANCE,
                 index: u32::MAX,
-                style_layer: "atmosphere".to_string(),
+                style_layer: crate::style::StyleLayerId::ATMOSPHERE,
+                entry_slot: crate::render::render_phase::UNSET_ENTRY_SLOT,
                 tile: crate::tcs::tiles::Tile {
                     coords: crate::coords::WorldTileCoords::default(),
                 },
-                source_shape: crate::render::tile_view_pattern::TileShape::default(),
+                source_shape: crate::render::tile_view_pattern::ShapeDrawData::default(),
             });
         }
     }

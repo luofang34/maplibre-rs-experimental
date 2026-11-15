@@ -1,10 +1,10 @@
 //! A small repeating distance texture for each evaluated line dash pattern.
-use std::collections::HashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::style::{
     layer::LayerPaint,
     property::{NumberList, StyleProperty},
-    Style,
+    Style, StyleLayerId,
 };
 
 mod image;
@@ -35,11 +35,11 @@ impl Drop for DashEntry {
 }
 pub(crate) struct LineDashResources {
     pub(crate) layout: wgpu::BindGroupLayout,
-    entries: HashMap<String, DashEntry>,
+    entries: FxHashMap<StyleLayerId, DashEntry>,
     solid: DashEntry,
     /// Layers whose pattern varies by feature, and the entry of each style image by its key.
-    per_feature: std::collections::HashSet<String>,
-    images: HashMap<u32, DashEntry>,
+    per_feature: FxHashSet<StyleLayerId>,
+    images: FxHashMap<u32, DashEntry>,
 }
 
 impl LineDashResources {
@@ -104,10 +104,10 @@ impl LineDashResources {
         );
         Self {
             layout,
-            entries: HashMap::new(),
+            entries: FxHashMap::default(),
             solid,
-            per_feature: Default::default(),
-            images: HashMap::new(),
+            per_feature: FxHashSet::default(),
+            images: FxHashMap::default(),
         }
     }
 
@@ -118,26 +118,34 @@ impl LineDashResources {
         style: &Style,
         zoom: f64,
     ) {
-        self.entries
-            .retain(|id, _| style.layers.iter().any(|layer| &layer.id == id));
+        self.entries.retain(|id, entry| {
+            let keep = style.layers.iter().any(|layer| layer.layer_id() == *id);
+            if !keep {
+                queue.cancel_staged_buffer(&entry.uniform);
+            }
+            keep
+        });
         let scale = dash_scale(zoom);
-        self.per_feature = style
-            .layers
-            .iter()
-            .filter(|layer| {
-                layer
-                    .paint
-                    .as_ref()
-                    .is_some_and(|paint| super::pattern::per_feature_pattern(paint).is_some())
-            })
-            .filter(|layer| matches!(layer.paint, Some(LayerPaint::Line(_))))
-            .map(|layer| layer.id.clone())
-            .collect();
+        self.per_feature.clear();
+        self.per_feature.extend(
+            style
+                .layers
+                .iter()
+                .filter(|layer| {
+                    layer
+                        .paint
+                        .as_ref()
+                        .is_some_and(|paint| super::pattern::per_feature_pattern(paint).is_some())
+                })
+                .filter(|layer| matches!(layer.paint, Some(LayerPaint::Line(_))))
+                .map(|layer| layer.layer_id()),
+        );
         self.update_images(device, queue, style, scale);
         for layer in &style.layers {
             let Some(LayerPaint::Line(paint)) = &layer.paint else {
                 continue;
             };
+            let layer_id = layer.layer_id();
             let pattern = paint
                 .line_dasharray
                 .as_ref()
@@ -150,10 +158,12 @@ impl LineDashResources {
                 && crate::style::line_stroke::LineStroke::of_layer(layer).cap
                     == crate::style::line_stroke::LineCap::Round;
             if pattern.is_empty() && image == LineImage::None {
-                self.entries.remove(&layer.id);
+                if let Some(old) = self.entries.remove(&layer_id) {
+                    queue.cancel_staged_buffer(&old.uniform);
+                }
                 continue;
             }
-            if let Some(entry) = self.entries.get_mut(&layer.id).filter(|entry| {
+            if let Some(entry) = self.entries.get_mut(&layer_id).filter(|entry| {
                 entry.pattern == pattern && entry.round == round && entry.image == image
             }) {
                 if entry.scale != scale {
@@ -163,8 +173,8 @@ impl LineDashResources {
                 }
                 continue;
             }
-            self.entries.insert(
-                layer.id.clone(),
+            if let Some(old) = self.entries.insert(
+                layer_id,
                 create_entry(
                     device,
                     queue,
@@ -172,7 +182,9 @@ impl LineDashResources {
                     (&pattern, round),
                     (&image, scale),
                 ),
-            );
+            ) {
+                queue.cancel_staged_buffer(&old.uniform);
+            }
         }
     }
 
@@ -185,15 +197,19 @@ impl LineDashResources {
         scale: f32,
     ) {
         if self.per_feature.is_empty() {
-            self.images.clear();
+            for (_, old) in self.images.drain() {
+                queue.cancel_staged_buffer(&old.uniform);
+            }
             return;
         }
-        let mut keys = std::collections::HashSet::new();
+        let mut keys = FxHashSet::default();
         for (name, image) in &style.images {
             let key = crate::style::pattern_key::pattern_key(name);
             keys.insert(key);
             let Some(line_image) = pattern_image(image) else {
-                self.images.remove(&key);
+                if let Some(old) = self.images.remove(&key) {
+                    queue.cancel_staged_buffer(&old.uniform);
+                }
                 continue;
             };
             if let Some(entry) = self
@@ -215,9 +231,17 @@ impl LineDashResources {
                 (&[], false),
                 (&line_image, scale),
             );
-            self.images.insert(key, entry);
+            if let Some(old) = self.images.insert(key, entry) {
+                queue.cancel_staged_buffer(&old.uniform);
+            }
         }
-        self.images.retain(|key, _| keys.contains(key));
+        self.images.retain(|key, old| {
+            let keep = keys.contains(key);
+            if !keep {
+                queue.cancel_staged_buffer(&old.uniform);
+            }
+            keep
+        });
     }
 
     /// The image a pattern key names, for a layer that picks its image per feature.
@@ -225,8 +249,9 @@ impl LineDashResources {
         self.images.get(&key).map(|entry| &entry.binding)
     }
 
-    pub(crate) fn binding(&self, layer: &str) -> &wgpu::BindGroup {
-        &self.entries.get(layer).unwrap_or(&self.solid).binding
+    #[inline]
+    pub(crate) fn binding(&self, layer: StyleLayerId) -> &wgpu::BindGroup {
+        &self.entries.get(&layer).unwrap_or(&self.solid).binding
     }
 }
 

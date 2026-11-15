@@ -96,20 +96,22 @@ fn source_draws(
     style_layer: &crate::style::layer::StyleLayer,
     uses_globe: bool,
 ) -> (Vec<LayerItem>, Vec<TileMaskItem>) {
+    let shape_data = source_shape.draw_data();
+    let layer_id = style_layer.layer_id();
     let mut masks = Vec::with_capacity(2);
     if uses_globe {
         masks.push(TileMaskItem {
             projection: ProjectionBinding::View,
-            draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
-            source_shape: source_shape.clone(),
+            draw_function: &DrawState::<TileMaskItem, DrawMasks>::INSTANCE,
+            source_shape: shape_data,
             generate_borders: true,
             is_vector: false,
         });
     }
     masks.push(TileMaskItem {
         projection: ProjectionBinding::View,
-        draw_function: Box::new(DrawState::<TileMaskItem, DrawMasks>::new()),
-        source_shape: source_shape.clone(),
+        draw_function: &DrawState::<TileMaskItem, DrawMasks>::INSTANCE,
+        source_shape: shape_data,
         generate_borders: false,
         is_vector: false,
     });
@@ -117,14 +119,15 @@ fn source_draws(
     if uses_globe {
         draws.push(LayerItem {
             projection: ProjectionBinding::View,
-            draw_function: Box::new(DrawState::<LayerItem, DrawDemTiles>::new()),
+            draw_function: &DrawState::<LayerItem, DrawDemTiles>::INSTANCE,
             index: style_layer.index,
             generate_borders: true,
-            style_layer: style_layer.id.clone(),
+            style_layer: layer_id,
+            entry_slot: crate::render::render_phase::UNSET_ENTRY_SLOT,
             tile: Tile {
                 coords: source_shape.coords(),
             },
-            source_shape: source_shape.clone(),
+            source_shape: shape_data,
             mask_group: MaskGroup::Mutating,
             run: None,
         });
@@ -133,14 +136,15 @@ fn source_draws(
     // translucent shading; the flat map has no cracks to hide, as in GL JS.
     draws.push(LayerItem {
         projection: ProjectionBinding::View,
-        draw_function: Box::new(DrawState::<LayerItem, DrawDemTiles>::new()),
+        draw_function: &DrawState::<LayerItem, DrawDemTiles>::INSTANCE,
         index: style_layer.index,
         generate_borders: false,
-        style_layer: style_layer.id.clone(),
+        style_layer: layer_id,
+        entry_slot: crate::render::render_phase::UNSET_ENTRY_SLOT,
         tile: Tile {
             coords: source_shape.coords(),
         },
-        source_shape: source_shape.clone(),
+        source_shape: shape_data,
         mask_group: MaskGroup::Mutating,
         run: None,
     });

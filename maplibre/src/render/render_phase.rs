@@ -8,7 +8,7 @@ pub use draw::*;
 pub use indirect::*;
 pub use plugin::*;
 
-use crate::{render::tile_view_pattern::TileShape, tcs::tiles::Tile};
+use crate::{render::tile_view_pattern::ShapeDrawData, style::StyleLayerId, tcs::tiles::Tile};
 
 mod batching;
 mod binned;
@@ -90,22 +90,30 @@ pub enum MaskGroup {
     Custom,
 }
 
+/// Sentinel slot index indicating that a [`LayerItem`] or [`TranslucentItem`] is not backed by a
+/// [`RingIndex`](crate::vector::resource::RingIndex) entry.
+pub const UNSET_ENTRY_SLOT: u16 = u16::MAX;
+
 /// Main-pass draw sorted by style index, then interiors before borders within each layer.
+#[derive(Clone, Copy)]
 pub struct LayerItem {
-    /// Command implementation invoked when this item is rendered.
-    pub draw_function: Box<dyn Draw<LayerItem>>,
+    /// Static command implementation invoked when this item is rendered.
+    pub draw_function: &'static dyn Draw<LayerItem>,
     /// Style painter-order index; lower indices are rendered first.
     pub index: u32,
     /// Whether projection-aware raster draws use the seam-expanding mesh variant.
     pub generate_borders: bool,
 
-    /// Style layer ID used to locate matching geometry and paint resources.
-    pub style_layer: String,
+    /// Interned style layer ID used to locate matching geometry and paint resources.
+    pub style_layer: StyleLayerId,
+    /// Direct `O(1)` slot hint into the tile's [`RingIndex`](crate::vector::resource::RingIndex)
+    /// queue, or [`UNSET_ENTRY_SLOT`] when not backed by a buffer pool.
+    pub entry_slot: u16,
 
     /// Tile that owns the geometry or texture used by this draw.
     pub tile: Tile,
-    /// Source transform and metadata range valid for the current frame upload.
-    pub source_shape: TileShape,
+    /// Compact `Copy` source stencil and metadata range valid for the current frame upload.
+    pub source_shape: ShapeDrawData,
     /// Projection uniform the draw binds; drape draws use the flat one.
     pub projection: ProjectionBinding,
     /// Stencil mask discipline for this draw item.
@@ -116,12 +124,14 @@ pub struct LayerItem {
 }
 
 /// Features of a layer that share a sort key, as a range of its indices.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SortedRun {
     /// The sort key; greater keys draw later.
     pub key: f32,
-    /// Index range relative to the layer's first index.
-    pub range: std::ops::Range<u32>,
+    /// Start index relative to the layer's first index.
+    pub start: u32,
+    /// Exclusive end index relative to the layer's first index.
+    pub end: u32,
 }
 
 impl SortedRun {
@@ -148,7 +158,7 @@ impl PhaseItem for LayerItem {
     }
 
     fn draw_function(&self) -> &dyn Draw<LayerItem> {
-        self.draw_function.as_ref()
+        self.draw_function
     }
 
     fn projection_binding(&self) -> ProjectionBinding {
@@ -157,19 +167,23 @@ impl PhaseItem for LayerItem {
 }
 
 /// Translucent-pass draw sorted by ascending style index; equal indices keep queue order.
+#[derive(Clone, Copy)]
 pub struct TranslucentItem {
-    /// Command implementation invoked when this item is rendered.
-    pub draw_function: Box<dyn Draw<TranslucentItem>>,
+    /// Static command implementation invoked when this item is rendered.
+    pub draw_function: &'static dyn Draw<TranslucentItem>,
     /// Style painter-order index; lower indices are rendered first.
     pub index: u32,
 
-    /// Style layer ID used to locate matching geometry and paint resources.
-    pub style_layer: String,
+    /// Interned style layer ID used to locate matching geometry and paint resources.
+    pub style_layer: StyleLayerId,
+    /// Direct `O(1)` slot hint into the tile's [`RingIndex`](crate::vector::resource::RingIndex)
+    /// queue, or [`UNSET_ENTRY_SLOT`] when not backed by a buffer pool.
+    pub entry_slot: u16,
 
     /// Tile that owns the geometry or texture used by this draw.
     pub tile: Tile,
-    /// Source transform and metadata range valid for the current frame upload.
-    pub source_shape: TileShape,
+    /// Compact `Copy` source stencil and metadata range valid for the current frame upload.
+    pub source_shape: ShapeDrawData,
 }
 
 impl PhaseItem for TranslucentItem {
@@ -180,16 +194,17 @@ impl PhaseItem for TranslucentItem {
     }
 
     fn draw_function(&self) -> &dyn Draw<TranslucentItem> {
-        self.draw_function.as_ref()
+        self.draw_function
     }
 }
 
 /// Stencil draw sorted with seam-expanding masks before tile interiors.
+#[derive(Clone, Copy)]
 pub struct TileMaskItem {
-    /// Command implementation invoked when this item is rendered.
-    pub draw_function: Box<dyn Draw<TileMaskItem>>,
-    /// Source transform and metadata range valid for the current frame upload.
-    pub source_shape: TileShape,
+    /// Static command implementation invoked when this item is rendered.
+    pub draw_function: &'static dyn Draw<TileMaskItem>,
+    /// Compact `Copy` source stencil and metadata range valid for the current frame upload.
+    pub source_shape: ShapeDrawData,
     /// Selects a mesh expanded across tile seams when `true`.
     pub generate_borders: bool,
     /// Projection uniform the draw binds; drape draws use the flat one.
@@ -210,7 +225,7 @@ impl PhaseItem for TileMaskItem {
     }
 
     fn draw_function(&self) -> &dyn Draw<TileMaskItem> {
-        self.draw_function.as_ref()
+        self.draw_function
     }
 
     fn projection_binding(&self) -> ProjectionBinding {

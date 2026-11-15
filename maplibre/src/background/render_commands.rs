@@ -159,7 +159,7 @@ impl RenderCommand<LayerItem> for SetGlobeBackgroundPatternPipeline {
             return RenderCommandResult::Failure;
         };
         let (Some((pipeline, world_size)), Some(image)) =
-            (gpu.globe(), patterns.binding(&item.style_layer))
+            (gpu.globe(), patterns.binding(item.style_layer))
         else {
             return RenderCommandResult::Failure;
         };
@@ -290,7 +290,7 @@ impl RenderCommand<LayerItem> for SetBackgroundPatternPipeline {
         ) else {
             return RenderCommandResult::Failure;
         };
-        let Some(image) = patterns.binding(&item.style_layer) else {
+        let Some(image) = patterns.binding(item.style_layer) else {
             return RenderCommandResult::Failure;
         };
         pass.set_pipeline(gpu.pipeline());

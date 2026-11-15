@@ -27,8 +27,8 @@ pub fn queue_system(MapContext { world, .. }: &mut MapContext) -> SystemResult {
         view_tile.render_kind(TileKind::Vector, |source_shape| {
             // Draw masks for all source_shapes
             tile_debug_phase.add(TileDebugItem {
-                draw_function: Box::new(DrawState::<TileDebugItem, DrawDebugOutlines>::new()),
-                source_shape: source_shape.clone(),
+                draw_function: &DrawState::<TileDebugItem, DrawDebugOutlines>::INSTANCE,
+                source_shape: source_shape.draw_data(),
             });
         });
     }
