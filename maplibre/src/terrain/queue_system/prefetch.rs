@@ -28,6 +28,14 @@ pub(super) fn prepare(
     visible: &[WorldTileCoords],
     (memory, drape_targets): (MemoryBudget, usize),
 ) {
+    if world
+        .resources
+        .get::<crate::render::settings::TightTileRequests>()
+        .is_some_and(|tight| tight.0)
+    {
+        world.resources.insert(DrapePrefetchRequests::default());
+        return;
+    }
     let limit = match memory.pressure() {
         MemoryPressure::Comfortable => 8,
         MemoryPressure::Low => 4,

@@ -15,11 +15,7 @@ use crate::{
 };
 
 /// Tiles that may be fetched or processed at the same time across every source.
-#[cfg(target_arch = "wasm32")]
 pub const MAX_TILES_IN_FLIGHT: usize = 16;
-/// Tiles that may be fetched or processed at the same time across every source.
-#[cfg(not(target_arch = "wasm32"))]
-pub const MAX_TILES_IN_FLIGHT: usize = 32;
 
 /// Whether every request for the tile has produced its outcome or was given up.
 pub(crate) fn is_settled(tiles: &Tiles, coords: WorldTileCoords) -> bool {

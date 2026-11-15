@@ -98,6 +98,11 @@ pub fn queue_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
+    world
+        .resources
+        .insert(crate::render::settings::TightTileRequests(
+            settings.tight_tile_requests,
+        ));
     let drape_mode = world
         .resources
         .get::<crate::render::settings::TerrainDrapeMode>()

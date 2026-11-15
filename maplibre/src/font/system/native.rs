@@ -301,9 +301,36 @@ fn load_tier1_system_fonts(db: &mut fontdb::Database) {
             ],
         );
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(target_os = "windows")]
     {
-        let _ = db;
+        load_existing_font_files(
+            db,
+            &[
+                "C:/Windows/Fonts/arial.ttf",
+                "C:/Windows/Fonts/arialbd.ttf",
+                "C:/Windows/Fonts/segoeui.ttf",
+            ],
+        );
+    }
+    #[cfg(target_os = "android")]
+    {
+        load_existing_font_files(
+            db,
+            &[
+                "/system/fonts/Roboto-Regular.ttf",
+                "/system/fonts/Roboto-Bold.ttf",
+                "/system/fonts/DroidSans.ttf",
+            ],
+        );
+    }
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "android"
+    )))]
+    {
+        load_existing_font_files(db, &["/System/Library/Fonts/CoreUI/SFUI.ttf"]);
     }
 }
 
@@ -327,8 +354,30 @@ fn load_tier2_cjk_system_fonts(db: &mut fontdb::Database) {
             "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
         ],
     );
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    let _ = db;
+    #[cfg(target_os = "windows")]
+    load_existing_font_files(
+        db,
+        &[
+            "C:/Windows/Fonts/msyh.ttc",
+            "C:/Windows/Fonts/msgothic.ttc",
+            "C:/Windows/Fonts/malgun.ttf",
+        ],
+    );
+    #[cfg(target_os = "android")]
+    load_existing_font_files(
+        db,
+        &[
+            "/system/fonts/NotoSansCJK-Regular.ttc",
+            "/system/fonts/DroidSansFallback.ttf",
+        ],
+    );
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "android"
+    )))]
+    load_existing_font_files(db, &["/System/Library/Fonts/Core/PingFang.ttc"]);
 }
 
 fn preferred_system_fallbacks(ch: char) -> &'static [&'static str] {

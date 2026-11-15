@@ -75,9 +75,10 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
             Some((multi.vector_tiles.clone(), multi.max_view_level))
         } else {
             let visible_level = view_state.zoom().zoom_level(DEFAULT_TILE_SIZE);
-            let request_padding = if cfg!(target_arch = "wasm32")
-                && style.terrain.is_none()
-                && !view_state.has_external_view()
+            let request_padding = if renderer.settings.tight_tile_requests
+                || (cfg!(target_arch = "wasm32")
+                    && style.terrain.is_none()
+                    && !view_state.has_external_view())
             {
                 ViewStatePadding::Tight
             } else {

@@ -47,7 +47,7 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
             style,
             view_state,
             world,
-            ..
+            renderer,
         }: &mut MapContext,
     ) -> SystemResult {
         tile_retry::stop_cancelled(world, self.kernel.apc());
@@ -62,9 +62,10 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
         let mut regions = if let Some(multi) = &multi {
             multi.raster_regions.clone()
         } else {
-            let request_padding = if cfg!(target_arch = "wasm32")
-                && style.terrain.is_none()
-                && !view_state.has_external_view()
+            let request_padding = if renderer.settings.tight_tile_requests
+                || (cfg!(target_arch = "wasm32")
+                    && style.terrain.is_none()
+                    && !view_state.has_external_view())
             {
                 ViewStatePadding::Tight
             } else {

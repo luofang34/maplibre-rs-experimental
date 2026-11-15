@@ -395,6 +395,7 @@ impl Inner {
                 }
                 #[cfg(not(unix))]
                 {
+                    let _ = file;
                     use std::io::{Read, Seek, SeekFrom};
                     let mut fresh = std::fs::File::open(&decoded)
                         .map_err(|err| SourceFetchError(Box::new(err)))?;

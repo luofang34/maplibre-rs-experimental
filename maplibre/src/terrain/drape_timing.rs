@@ -76,7 +76,10 @@ impl DrapeCost {
     /// Adds a measurement of one drape's cost.
     pub fn measured(&mut self, per_drape: Duration) {
         self.per_drape = Some(match self.per_drape {
-            Some(average) => average.mul_f64(1.0 - SMOOTHING) + per_drape.mul_f64(SMOOTHING),
+            Some(average) => {
+                let capped = average.min(per_drape.saturating_mul(8));
+                capped.mul_f64(1.0 - SMOOTHING) + per_drape.mul_f64(SMOOTHING)
+            }
             None => per_drape,
         });
     }

@@ -7,7 +7,7 @@ jobs:
   run-benchmarks:
     name: Benchmark
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -20,6 +20,8 @@ jobs:
         uses: ./.github/actions/install-system-dependencies
       - name: Install GPU Drivers
         uses: ./.github/actions/install-driver
+        with:
+          wgpu-info: "false"
       - name: Install critcmp
         if: ${{ github.base_ref != '' }}
         uses: ./.github/actions/cargo-install

@@ -117,5 +117,8 @@ fn terrain_and_vectors_both_make_progress_under_low_memory() {
 fn dem_budget_leaves_headroom_for_raster_requests() {
     let world = World::default();
     assert_eq!(dem_request_budget(&world, false), MAX_TILES_IN_FLIGHT);
-    assert_eq!(dem_request_budget(&world, true), MAX_TILES_IN_FLIGHT - 8);
+    assert_eq!(
+        dem_request_budget(&world, true),
+        MAX_TILES_IN_FLIGHT - (MAX_TILES_IN_FLIGHT / 3).min(8)
+    );
 }

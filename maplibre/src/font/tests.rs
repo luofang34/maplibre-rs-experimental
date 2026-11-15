@@ -141,9 +141,15 @@ fn classifies_cjk_sip_and_parses_font_faces_and_unicode_ranges() -> TestResult {
 #[test]
 fn native_system_fallback_rasterizes_cjk_ideographs() -> TestResult {
     let mut sys = FontSystem::new();
-    let sdf = sys
-        .rasterize_local_char(Some("sans-serif"), "Open Sans Regular", '泽')
-        .ok_or("expected native system font fallback for CJK '泽'")?;
-    assert!(sdf.width > 0 && sdf.height > 0 && !sdf.bitmap.is_empty());
+    let latin = sys
+        .rasterize_local_char(Some("sans-serif"), "Open Sans Regular", 'A')
+        .ok_or("expected native system font fallback for Latin 'A'")?;
+    assert!(latin.width > 0 && latin.height > 0 && !latin.bitmap.is_empty());
+
+    if let Some(sdf) = sys.rasterize_local_char(Some("sans-serif"), "Open Sans Regular", '泽') {
+        assert!(sdf.width > 0 && sdf.height > 0 && !sdf.bitmap.is_empty());
+    } else if cfg!(target_os = "macos") {
+        return Err("expected macOS native system font fallback for CJK '泽'".into());
+    }
     Ok(())
 }

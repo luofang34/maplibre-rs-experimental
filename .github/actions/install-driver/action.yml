@@ -17,7 +17,7 @@ runs:
     #  run: sudo apt-get update -y -qq && sudo add-apt-repository ppa:oibaf/graphics-drivers -y
     - name: Install Mesa Dependencies
       shell: bash
-      run: sudo apt-get update -y -qq && sudo apt-get install -y libegl1-mesa libgl1-mesa-dri libxcb-xfixes0-dev mesa-vulkan-drivers
+      run: sudo apt-get update -y -qq && sudo apt-get install -y libegl1 libgl1-mesa-dri libxcb-xfixes0-dev mesa-vulkan-drivers
     - name: Install wgpu-info
       if: inputs.wgpu-info == 'true'
       shell: bash

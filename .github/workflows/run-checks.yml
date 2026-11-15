@@ -82,6 +82,10 @@ jobs:
         uses: ./.github/actions/setup
       - name: Install Dependencies
         uses: ./.github/actions/install-system-dependencies
+      - name: Install GPU Drivers
+        uses: ./.github/actions/install-driver
+        with:
+          wgpu-info: "false"
       - name: Install llvm-tools-preview
         shell: bash
         run: rustup component add llvm-tools-preview --toolchain stable

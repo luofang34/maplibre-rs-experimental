@@ -258,7 +258,14 @@ pub struct RendererSettings {
     /// Allocates and populates a persistent single-sample reversed-Z `Depth32Float` attachment
     /// via `DEPTH_COPY` on offscreen targets so hosts can sample or copy depth without `XrFrame`.
     pub depth_readout: bool,
+    /// Omits the 1-tile surround prefetch ring when requesting tiles for stationary one-shot
+    /// offscreen snapshots.
+    pub tight_tile_requests: bool,
 }
+
+/// Resource mirroring [`RendererSettings::tight_tile_requests`] for world-only prefetch helpers.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TightTileRequests(pub bool);
 
 impl RendererSettings {
     /// Resolves the active [`TerrainDrapeMode`], honoring legacy `terrain_drape_size` overrides
@@ -312,6 +319,7 @@ impl Default for RendererSettings {
             present_mode: PresentMode::AutoVsync,
             overdraw_inspector: false,
             depth_readout: false,
+            tight_tile_requests: false,
         }
     }
 }

@@ -79,6 +79,7 @@ pub async fn render_snapshot(
 
     let mut settings = RendererSettings {
         msaa: Msaa { samples: 1 },
+        tight_tile_requests: true,
         ..RendererSettings::default()
     };
     if !has_vector {
