@@ -18,6 +18,8 @@ use crate::{
     },
 };
 
+pub(crate) mod dynamic_points;
+
 /// Why a source's data could not be changed. The source keeps its previous data.
 #[derive(Debug, Error)]
 pub enum SourceUpdateError {
@@ -123,18 +125,31 @@ impl Style {
         data: GeoJsonData,
     ) -> Result<(), SourceUpdateError> {
         let source = geojson_source_mut(self, source_name)?;
+        let next_gen = fresh_generation();
         if let GeoJsonData::Inline(document) = &data {
-            GeoJsonIndex::from_value(document, source).map_err(|source| {
+            let index = GeoJsonIndex::from_value(document, source).map_err(|source| {
                 SourceUpdateError::Invalid {
                     source_name: source_name.to_owned(),
                     source,
                 }
             })?;
+            super::store::prime_geojson_index(next_gen, Arc::new(index));
         }
         source.data = data;
-        source.generation = fresh_generation();
+        source.generation = next_gen;
         self.bump_revision();
         Ok(())
+    }
+
+    /// Replaces the data of a GeoJSON source from raw UTF-8 JSON bytes or a URL string.
+    pub fn set_geojson_bytes(
+        &mut self,
+        source_name: &str,
+        bytes: &[u8],
+        was_string: bool,
+    ) -> Result<(), SourceUpdateError> {
+        let data = parse_geojson_bytes_payload(source_name, bytes, was_string)?;
+        self.set_geojson_data(source_name, data)
     }
 
     /// Adds, changes and removes features of an inline source, as GL JS `updateData`.
@@ -153,14 +168,16 @@ impl Style {
         let mut features = feature_list(document).into_owned();
         apply(&mut features, diff, promoted.as_deref(), source_name)?;
         let updated = json!({"type": "FeatureCollection", "features": features});
-        GeoJsonIndex::from_value(&updated, source).map_err(|source| {
+        let index = GeoJsonIndex::from_value(&updated, source).map_err(|source| {
             SourceUpdateError::Invalid {
                 source_name: source_name.to_owned(),
                 source,
             }
         })?;
+        let next_gen = fresh_generation();
+        super::store::prime_geojson_index(next_gen, Arc::new(index));
         source.data = GeoJsonData::Inline(Arc::new(updated));
-        source.generation = fresh_generation();
+        source.generation = next_gen;
         self.bump_revision();
         Ok(())
     }
@@ -175,10 +192,44 @@ impl MapContext {
         source_name: &str,
         data: GeoJsonData,
     ) -> Result<(), SourceUpdateError> {
+        if let GeoJsonData::Inline(ref doc) = data {
+            if dynamic_points::try_apply_stationary_inline(
+                &mut self.style,
+                &mut self.world,
+                source_name,
+                doc,
+            ) {
+                return Ok(());
+            }
+        }
+        dynamic_points::flush_deferred_geojson_bytes(&mut self.style, &mut self.world);
         let before = GeoJsonVersions::of(&self.style);
         self.style.set_geojson_data(source_name, data)?;
+        dynamic_points::seed_from_inline(&self.style, &mut self.world, source_name);
         before.refresh_changed(&self.style, &mut self.world);
         Ok(())
+    }
+
+    /// Replaces a GeoJSON source's data from UTF-8 JSON `bytes` (or a URL string when `was_string`
+    /// is true), taking the zero-DOM stationary-point fast path whenever eligible.
+    pub fn set_geojson_bytes(
+        &mut self,
+        source_name: &str,
+        bytes: &[u8],
+        was_string: bool,
+    ) -> Result<(), SourceUpdateError> {
+        if !was_string || trim_ascii_start(bytes).starts_with(b"{") {
+            if dynamic_points::try_apply_stationary_bytes(
+                &self.style,
+                &mut self.world,
+                source_name,
+                bytes,
+            ) {
+                return Ok(());
+            }
+        }
+        let data = parse_geojson_bytes_payload(source_name, bytes, was_string)?;
+        self.set_geojson_data(source_name, data)
     }
 
     /// Applies a feature diff to an inline GeoJSON source and refreshes the loaded tiles it
@@ -188,11 +239,49 @@ impl MapContext {
         source_name: &str,
         diff: &GeoJsonDiff,
     ) -> Result<(), SourceUpdateError> {
+        dynamic_points::flush_deferred_geojson_bytes(&mut self.style, &mut self.world);
         let before = GeoJsonVersions::of(&self.style);
         self.style.update_geojson_data(source_name, diff)?;
+        dynamic_points::seed_from_inline(&self.style, &mut self.world, source_name);
         before.refresh_changed(&self.style, &mut self.world);
         Ok(())
     }
+}
+
+fn trim_ascii_start(bytes: &[u8]) -> &[u8] {
+    let idx = bytes
+        .iter()
+        .position(|b| !b.is_ascii_whitespace())
+        .unwrap_or(bytes.len());
+    &bytes[idx..]
+}
+
+fn parse_geojson_bytes_payload(
+    source_name: &str,
+    bytes: &[u8],
+    was_string: bool,
+) -> Result<GeoJsonData, SourceUpdateError> {
+    if was_string {
+        let trimmed = trim_ascii_start(bytes);
+        if !trimmed.starts_with(b"{") && !trimmed.starts_with(b"[") {
+            let url = std::str::from_utf8(bytes).map_err(|_| {
+                let err = serde_json::from_slice::<Value>(b"\xff")
+                    .err()
+                    .unwrap_or_else(|| serde::de::Error::custom("invalid UTF-8"));
+                SourceUpdateError::Invalid {
+                    source_name: source_name.to_owned(),
+                    source: GeoJsonError::Json(err),
+                }
+            })?;
+            return Ok(GeoJsonData::Url(url.to_owned()));
+        }
+    }
+    let value =
+        serde_json::from_slice::<Value>(bytes).map_err(|err| SourceUpdateError::Invalid {
+            source_name: source_name.to_owned(),
+            source: GeoJsonError::Json(err),
+        })?;
+    Ok(GeoJsonData::Inline(Arc::new(value)))
 }
 
 fn geojson_source_mut<'a>(

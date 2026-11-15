@@ -20,7 +20,9 @@ pub use background::{
     BackgroundShader, GlobeBackgroundPatternShader, GlobeBackgroundShader, SkyLayerMetadata,
     SkyShader,
 };
-pub use circle::{CircleFeatureStrokeShader, CircleShader};
+pub use circle::{
+    pack_dynamic_circle_radii, CircleDynamicRadiusShader, CircleFeatureStrokeShader, CircleShader,
+};
 pub use fill::{FillPatternShader, FillShader};
 pub use fill_extrusion::{ExtrusionPass, FillExtrusionShader};
 pub use gpu_vertex::{

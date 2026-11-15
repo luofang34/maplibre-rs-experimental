@@ -5,7 +5,6 @@ use crate::{
     render::{
         eventually::{Eventually, Eventually::Initialized},
         memory_budget::{FrameUploads, UploadKind},
-        shaders::{FillShaderFeatureMetadata, Vec4f32},
         Renderer,
     },
     style::Style,
@@ -13,20 +12,38 @@ use crate::{
         system::{SystemError, SystemResult},
         tiles::Tiles,
     },
-    vector::{
-        AvailableVectorLayerBucket, VectorBufferPool, VectorLayerBucket, VectorLayerBucketComponent,
-    },
+    vector::{VectorBufferPool, VectorLayerBucket, VectorLayerBucketComponent},
 };
 
+mod bucket;
 mod metadata;
 pub(crate) mod paint;
 mod sources;
 pub(crate) mod style_refresh;
 
-use metadata::{
-    feature_metadata_into, metadata_for_layer, sort_runs, upload_size,
-    uses_layer_metadata_uniform_color,
-};
+use bucket::{upload_bucket, UploadOutcome};
+use metadata::upload_size;
+#[cfg(test)]
+use metadata::{metadata_for_layer, pattern_runs, sort_runs};
+
+#[cfg(feature = "geojson")]
+type DynPoints = crate::geojson::update::dynamic_points::DynamicPointGeoJson;
+#[cfg(not(feature = "geojson"))]
+#[derive(Default)]
+struct DynPoints;
+
+#[inline]
+fn layer_is_dynamic_circle(style: &Style, style_layer: &crate::style::layer::StyleLayer) -> bool {
+    #[cfg(feature = "geojson")]
+    {
+        crate::geojson::update::dynamic_points::uses_dynamic_circle_metadata(style, style_layer)
+    }
+    #[cfg(not(feature = "geojson"))]
+    {
+        let _ = (style, style_layer);
+        false
+    }
+}
 
 pub(crate) fn drape_paint_zoom(zoom: f64) -> f64 {
     (zoom * 8.0).round() / 8.0
@@ -68,11 +85,15 @@ pub fn upload_system(
         sources::frame_sources_and_painted(world, style, view_state)?;
     let (spatial, changed) = super::structures::for_frame(world, style, &painted_tiles);
     world.resources.get_or_init_mut::<FrameUploads>();
+    world.resources.get_or_init_mut::<DynPoints>();
+    #[cfg(feature = "geojson")]
+    crate::geojson::update::dynamic_points::ensure_seeded_for_style(world, style);
     style_refresh::apply_dirty_style(world, style, queue, paint_frame);
-    let Some((Initialized(buffer_pool), budget)) = world
-        .resources
-        .query_mut::<(&mut Eventually<VectorBufferPool>, &mut FrameUploads)>()
-    else {
+    let Some((Initialized(buffer_pool), budget, dyn_points)) = world.resources.query_mut::<(
+        &mut Eventually<VectorBufferPool>,
+        &mut FrameUploads,
+        &mut DynPoints,
+    )>() else {
         return Err(SystemError::Dependencies);
     };
     if refresh_paint {
@@ -96,7 +117,14 @@ pub fn upload_system(
         style,
         source_tiles,
         (&spatial, paint_frame),
-        (budget, allow_cpu_release),
+        (budget, allow_cpu_release, dyn_points),
+    );
+    #[cfg(feature = "geojson")]
+    crate::geojson::update::dynamic_points::refresh_dynamic_point_layers(
+        world,
+        style,
+        queue,
+        &painted_tiles,
     );
     if deferred {
         crate::render::frame_signals::keep_animating(world);
@@ -142,7 +170,7 @@ fn upload_tessellated_layer(
     style: &Style,
     source_tiles: Vec<crate::coords::WorldTileCoords>,
     (spatial, paint): (&[super::structures::SpatialBuffer], VectorPaintFrame),
-    (budget, allow_cpu_release): (&mut FrameUploads, bool),
+    (budget, allow_cpu_release, dyn_points): (&mut FrameUploads, bool, &mut DynPoints),
 ) -> (bool, bool) {
     #[cfg(target_arch = "wasm32")]
     let has_dem_source = crate::terrain::source::dem_source(style).is_some();
@@ -202,7 +230,9 @@ fn upload_tessellated_layer(
                 if replacement.is_none() && buffer_pool.has_layer(coords, &style_layer.id) {
                     continue;
                 }
-                let is_uniform = paint::uniform_color(style_layer, f64::from(paint.zoom)).is_some();
+                let is_dynamic_circle = layer_is_dynamic_circle(style, style_layer);
+                let is_uniform = !is_dynamic_circle
+                    && paint::uniform_color(style_layer, f64::from(paint.zoom)).is_some();
                 if bucket.buffer.usable_indices == 0 && bucket.buffer.buffer.indices.is_empty() {
                     buffer_pool.remove_layer(coords, &style_layer.id);
                     Step::Commit {
@@ -217,7 +247,7 @@ fn upload_tessellated_layer(
                     }
                     continue;
                 } else {
-                    let bytes = upload_size(style_layer, bucket, is_uniform);
+                    let bytes = upload_size(style_layer, bucket, is_uniform, is_dynamic_circle);
                     if budget.geometry_tiles_exhausted()
                         || !budget.can_take(UploadKind::Geometry, bytes)
                     {
@@ -250,9 +280,9 @@ fn upload_tessellated_layer(
                             style_layer,
                             bucket,
                             fallback_vertices,
-                            (paint_entries, layers.overscaled_zoom),
+                            (paint_entries, layers.overscaled_zoom, is_dynamic_circle),
                             (spatial, paint),
-                            (&protected, &mut feature_meta_scratch),
+                            (&protected, &mut feature_meta_scratch, dyn_points),
                         ) {
                             UploadOutcome::Uploaded => {
                                 budget.take(UploadKind::Geometry, bytes);
@@ -313,174 +343,6 @@ fn upload_tessellated_layer(
         }
     }
     (false, needs_refetch)
-}
-
-enum UploadOutcome {
-    Uploaded,
-    PoolSaturated,
-    Failed,
-}
-
-#[allow(clippy::too_many_arguments)]
-fn upload_bucket(
-    buffer_pool: &mut VectorBufferPool,
-    queue: &crate::render::upload_queue::UploadQueue,
-    style_layer: &crate::style::layer::StyleLayer,
-    bucket: &AvailableVectorLayerBucket,
-    fallback_vertices: Option<&[crate::render::ShaderVertex]>,
-    (paint_entries, overscaled_zoom): (Option<&[super::feature_paint::BucketFeatureEntry]>, u8),
-    (spatial, paint): (&[super::structures::SpatialBuffer], VectorPaintFrame),
-    (protected, feature_metadata): (
-        &std::collections::HashSet<crate::coords::WorldTileCoords>,
-        &mut Vec<FillShaderFeatureMetadata>,
-    ),
-) -> UploadOutcome {
-    let VectorPaintFrame { zoom, .. } = paint;
-    let AvailableVectorLayerBucket {
-        coords,
-        buffer,
-        feature_indices,
-        feature_colors,
-        feature_sort_keys,
-        ..
-    } = bucket;
-    let coords = *coords;
-    let color: Option<Vec4f32> = style_layer
-        .paint
-        .as_ref()
-        .and_then(|paint| paint.get_color())
-        .map(|color| color.into());
-
-    // Assign every feature in the layer the color from the style if no parsed feature_color exist.
-    let fallback_color = color.unwrap_or([0.0, 0.0, 0.0, 1.0]);
-    let evaluated_colors;
-    let active_colors: &[[f32; 4]] = match (
-        paint::uniform_color(style_layer, f64::from(zoom)),
-        paint_entries,
-    ) {
-        (None, Some(entries)) => {
-            let style_zoom = f64::from(overscaled_zoom.max(u8::from(coords.z)));
-            evaluated_colors =
-                super::feature_paint::evaluate_bucket_colors(style_layer, entries, style_zoom);
-            &evaluated_colors
-        }
-        _ => feature_colors,
-    };
-
-    let uniform = paint::uniform_color(style_layer, f64::from(zoom));
-    if uniform.is_none() {
-        feature_metadata_into(
-            feature_metadata,
-            style_layer,
-            feature_indices,
-            active_colors,
-            fallback_color,
-        );
-    }
-
-    let buffer = spatial
-        .iter()
-        .find(|(tile, id, _)| *tile == coords && *id == style_layer.id)
-        .map_or(buffer, |(_, _, spatial)| spatial);
-    let layer_metadata = metadata_for_layer(style_layer, coords, paint);
-    let runs = style_layer
-        .paint
-        .as_ref()
-        .and_then(super::pattern::per_feature_pattern)
-        .map(|_| pattern_runs(feature_indices, active_colors, &buffer.buffer.indices));
-
-    let sort_runs = (style_layer.type_ == "circle" && !feature_sort_keys.is_empty())
-        .then(|| sort_runs(feature_indices, feature_sort_keys, &buffer.buffer.indices));
-
-    tracing::debug!(%coords, "allocating vector geometry");
-    let upload_res = if let Some(color) = uniform {
-        let encoded = FillShaderFeatureMetadata::from_rgba(color);
-        let records = feature_indices.iter().map(|&c| c as usize).sum();
-        if uses_layer_metadata_uniform_color(style_layer) {
-            buffer_pool.replace_layer_geometry_layer_uniform_shared_unless(
-                queue,
-                coords,
-                style_layer.clone(),
-                buffer,
-                fallback_vertices,
-                layer_metadata,
-                encoded,
-                records,
-                |candidate| protected.contains(&candidate),
-            )
-        } else {
-            buffer_pool.replace_layer_geometry_uniform_shared_unless(
-                queue,
-                coords,
-                style_layer.clone(),
-                buffer,
-                fallback_vertices,
-                layer_metadata,
-                encoded,
-                records,
-                |candidate| protected.contains(&candidate),
-            )
-        }
-    } else {
-        buffer_pool.replace_layer_geometry_unless(
-            queue,
-            coords,
-            style_layer.clone(),
-            buffer,
-            layer_metadata,
-            feature_metadata,
-            |candidate| protected.contains(&candidate),
-        )
-    };
-    if let Err(error) = upload_res {
-        if matches!(
-            error,
-            crate::vector::resource::AllocationError::Capacity { .. }
-        ) {
-            tracing::debug!(
-                %coords,
-                %error,
-                "vector buffer pool saturated by higher-priority tiles; skipping peripheral upload"
-            );
-            return UploadOutcome::PoolSaturated;
-        }
-        tracing::error!(%coords, %error, "tile geometry upload failed");
-        return UploadOutcome::Failed;
-    }
-    buffer_pool.set_pattern_runs(coords, &style_layer.id, runs);
-    buffer_pool.set_sort_runs(coords, &style_layer.id, sort_runs);
-    UploadOutcome::Uploaded
-}
-
-/// The index range of each run of consecutive features that share a pattern key.
-pub(super) fn pattern_runs(
-    feature_indices: &[u32],
-    feature_colors: &[[f32; 4]],
-    indices: &[u32],
-) -> Vec<(u32, std::ops::Range<u32>)> {
-    let mut runs: Vec<(u32, std::ops::Range<u32>)> = Vec::new();
-    let (mut vertex_end, mut position) = (0_u32, 0_u32);
-    for (feature, count) in feature_indices.iter().enumerate() {
-        vertex_end = vertex_end.wrapping_add(*count);
-        let first = position;
-        while indices
-            .get(position as usize)
-            .is_some_and(|index| *index < vertex_end)
-        {
-            position = position.wrapping_add(1);
-        }
-        let key = feature_colors
-            .get(feature)
-            .and_then(|color| crate::style::pattern_key::key_of_value(color[0]));
-        let Some(key) = key.filter(|_| position > first) else {
-            continue;
-        };
-        match runs.last_mut() {
-            Some((last, range)) if *last == key && range.end == first => range.end = position,
-            _ => runs.push((key, first..position)),
-        }
-    }
-    runs
 }
 
 #[cfg(test)]

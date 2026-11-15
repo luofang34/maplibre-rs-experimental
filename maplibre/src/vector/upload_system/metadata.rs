@@ -71,18 +71,26 @@ pub(super) fn metadata_for_layer(
             f32::from(flags),
         ];
     }
-    if let Some(LayerPaint::Circle(paint)) = &style_layer.paint {
-        let zoom = f64::from(zoom);
-        layer_metadata.stroke_color = paint.stroke_color_at(zoom);
-        // Fill opacity is already folded into each feature's colour alpha.
-        layer_metadata.circle_params =
-            [1.0, paint.stroke_opacity_at(zoom), paint.blur_at(zoom), 0.0];
-        layer_metadata.circle_flags = [
-            f32::from(paint.circle_pitch_scale == CirclePitchScale::Map),
-            f32::from(paint.circle_pitch_alignment == CirclePitchAlignment::Map),
-            0.0,
-            0.0,
-        ];
+    match &style_layer.paint {
+        Some(LayerPaint::Circle(paint)) => {
+            let zoom = f64::from(zoom);
+            layer_metadata.stroke_color = paint.stroke_color_at(zoom);
+            // Fill opacity is already folded into each feature's colour alpha.
+            layer_metadata.circle_params =
+                [1.0, paint.stroke_opacity_at(zoom), paint.blur_at(zoom), 0.0];
+            layer_metadata.circle_flags = [
+                f32::from(paint.circle_pitch_scale == CirclePitchScale::Map),
+                f32::from(paint.circle_pitch_alignment == CirclePitchAlignment::Map),
+                translate[0],
+                translate[1],
+            ];
+        }
+        None if style_layer.type_ == "circle" => {
+            layer_metadata.stroke_color = [0.0, 0.0, 0.0, 1.0];
+            layer_metadata.circle_params = [1.0, 1.0, 0.0, 0.0];
+            layer_metadata.circle_flags = [1.0, 0.0, translate[0], translate[1]];
+        }
+        _ => {}
     }
 
     if let Some(LayerPaint::FillExtrusion(paint)) = &style_layer.paint {
@@ -290,8 +298,11 @@ pub(super) fn upload_size(
     style_layer: &StyleLayer,
     bucket: &crate::vector::AvailableVectorLayerBucket,
     is_uniform: bool,
+    is_dynamic_circle: bool,
 ) -> usize {
-    let fm_bytes = if is_uniform {
+    let fm_bytes = if is_dynamic_circle {
+        bucket.buffer.buffer.vertices.len() * 2 * std::mem::size_of::<FillShaderFeatureMetadata>()
+    } else if is_uniform {
         if uses_layer_metadata_uniform_color(style_layer) {
             0
         } else {
@@ -356,6 +367,37 @@ pub(super) fn sort_runs(
             continue;
         }
         let key = feature_sort_keys.get(feature).copied().unwrap_or(0.0);
+        match runs.last_mut() {
+            Some((last, range)) if *last == key && range.end == first => range.end = position,
+            _ => runs.push((key, first..position)),
+        }
+    }
+    runs
+}
+
+/// The index range of each run of consecutive features that share a pattern key.
+pub(super) fn pattern_runs(
+    feature_indices: &[u32],
+    feature_colors: &[[f32; 4]],
+    indices: &[u32],
+) -> Vec<(u32, std::ops::Range<u32>)> {
+    let mut runs: Vec<(u32, std::ops::Range<u32>)> = Vec::new();
+    let (mut vertex_end, mut position) = (0_u32, 0_u32);
+    for (feature, count) in feature_indices.iter().enumerate() {
+        vertex_end = vertex_end.wrapping_add(*count);
+        let first = position;
+        while indices
+            .get(position as usize)
+            .is_some_and(|index| *index < vertex_end)
+        {
+            position = position.wrapping_add(1);
+        }
+        let key = feature_colors
+            .get(feature)
+            .and_then(|color| crate::style::pattern_key::key_of_value(color[0]));
+        let Some(key) = key.filter(|_| position > first) else {
+            continue;
+        };
         match runs.last_mut() {
             Some((last, range)) if *last == key && range.end == first => range.end = position,
             _ => runs.push((key, first..position)),

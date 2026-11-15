@@ -34,8 +34,10 @@ pub struct IndexEntry {
     pub(super) usable_indices: u32,
     // True when `buffer_feature_metadata` holds a single instance-stepped record (or 0 bytes for layer-uniform).
     pub(super) uniform_feature_metadata: bool,
-    // True when `buffer_feature_metadata` stores two records per vertex (e.g. circle fill + stroke).
+    // True when `buffer_feature_metadata` stores two records per vertex (e.g. circle fill + stroke or fill + dynamic radius).
     pub(super) dual_feature_metadata: bool,
+    // True when a `dual_feature_metadata` allocation carries `[fill_rgba8, dyn_radius_u32]`.
+    pub(super) dynamic_circle_metadata: bool,
     // Shared source-layer vertex slab key when sibling layers share `buffer_vertices`.
     pub(super) shared_geometry_key: Option<u64>,
 }
@@ -52,6 +54,12 @@ impl IndexEntry {
     #[inline]
     pub fn is_dual_feature_metadata(&self) -> bool {
         self.dual_feature_metadata
+    }
+
+    /// Whether this entry stores `[fill_rgba8, dyn_radius_u32]` (`CircleDynamicRadiusShader`).
+    #[inline]
+    pub fn is_dynamic_circle_metadata(&self) -> bool {
+        self.dynamic_circle_metadata
     }
 
     /// Whether indices for this entry are encoded as `u16` (`IndexFormat::Uint16`).

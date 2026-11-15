@@ -95,3 +95,32 @@ test("flushBeforeOrderedRpc dispatches pending jumpTo before getCamera", () => {
     assert.equal(rpcCalls[0].method, "jumpTo");
     assert.equal(rpcCalls[1].method, "getCamera");
 });
+
+test("setGeoJsonData defers UTF-8 encoding past microtasks and transfers ArrayBuffer", async () => {
+    const rpcCalls = [];
+    const coalescer = createOffscreenCoalescer(
+        () => {},
+        (method, args, transfer) => {
+            rpcCalls.push({method, args, transfer});
+            return Promise.resolve(undefined);
+        },
+        () => false,
+    );
+
+    const p1 = coalescer.setGeoJsonData("sensors", {type: "FeatureCollection", features: [{id: 1}]});
+    const p2 = coalescer.setGeoJsonData("sensors", {type: "FeatureCollection", features: [{id: 2}]});
+    await new Promise(resolve => queueMicrotask(resolve));
+    assert.equal(rpcCalls.length, 0, "defers serialization out of rAF / microtask checkpoint");
+
+    await Promise.all([p1, p2]);
+    assert.equal(rpcCalls.length, 1);
+    assert.equal(rpcCalls[0].method, "setGeoJsonBytes");
+    assert.equal(rpcCalls[0].args[0], "sensors");
+    assert.ok(rpcCalls[0].args[1] instanceof Uint8Array);
+    assert.equal(rpcCalls[0].args[2], false);
+    assert.equal(rpcCalls[0].transfer.length, 1);
+    assert.equal(rpcCalls[0].transfer[0], rpcCalls[0].args[1].buffer);
+    const decoded = JSON.parse(new TextDecoder().decode(rpcCalls[0].args[1]));
+    assert.deepEqual(decoded, {type: "FeatureCollection", features: [{id: 2}]});
+    coalescer.rejectQueued(new Error("done"));
+});

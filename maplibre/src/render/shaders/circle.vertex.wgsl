@@ -29,7 +29,7 @@ fn main(
     @location(9) zoom_factor: f32,
     @location(11) viewport_width: f32,
     @location(12) viewport_height: f32,
-    @location(15) layer_translate: vec2<f32>,
+    @location(15) dyn_radius_packed: u32,
     @location(3) stroke_color: vec4<f32>,
     @location(13) circle_params: vec4<f32>,
     @location(14) circle_flags: vec4<f32>,
@@ -55,11 +55,17 @@ fn main(
     }
     // The radius of a feature that varies with zoom is blended toward the zoom above the tile's.
     let zoom_blend = clamp(-log2(zoom_factor), 0.0, 1.0);
-    let radius = mix(normal.x, blur_and_next.y, zoom_blend);
+    let base_radii = vec2<f32>(normal.x, blur_and_next.y);
+    let radii = select(
+        base_radii,
+        max(unpack2x16float(dyn_radius_packed), vec2<f32>(0.0)),
+        dyn_radius_packed != 0u,
+    );
+    let radius = mix(radii.x, radii.y, zoom_blend);
     let stroke_width = normal.y;
     let total = max(radius + stroke_width, 1e-3);
     let transform = mat4x4<f32>(translate1, translate2, translate3, translate4);
-    let center = position + layer_translate;
+    let center = position + circle_flags.zw;
     // Clip-space w of the view center, so pitch-scale `map` shrinks circles with distance.
     let center_distance = projection.transition_and_padding.y;
     let scale_with_map = circle_flags.x > 0.5;

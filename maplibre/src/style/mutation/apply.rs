@@ -25,10 +25,20 @@ impl MapContext {
         apply: impl FnOnce(&mut Style) -> Result<StyleChange, StyleMutationError>,
     ) -> Result<StyleChange, StyleMutationError> {
         #[cfg(feature = "geojson")]
+        crate::geojson::update::dynamic_points::flush_deferred_geojson_bytes(
+            &mut self.style,
+            &mut self.world,
+        );
+        #[cfg(feature = "geojson")]
         let geojson = crate::geojson::update::GeoJsonVersions::of(&self.style);
         let old_zooms = snapshot_layer_zooms(&self.style);
         let change = apply(&mut self.style)?;
         self.style.bump_revision();
+        #[cfg(feature = "geojson")]
+        crate::geojson::update::dynamic_points::invalidate_after_style_change(
+            &self.style,
+            &mut self.world,
+        );
         let widened = zoom_bounds_widened(&old_zooms, &self.style);
         crate::render::frame_signals::mark_dirty(&mut self.world);
         if self.style.has_active_transitions() {
@@ -62,10 +72,20 @@ impl MapContext {
     /// source generations for unchanged sources while refreshing only affected layers and caches.
     pub fn set_style(&mut self, next: Style) -> crate::style::diff::StyleReplacementDiff {
         #[cfg(feature = "geojson")]
+        crate::geojson::update::dynamic_points::flush_deferred_geojson_bytes(
+            &mut self.style,
+            &mut self.world,
+        );
+        #[cfg(feature = "geojson")]
         let geojson = crate::geojson::update::GeoJsonVersions::of(&self.style);
         let old_zooms = snapshot_layer_zooms(&self.style);
         let had_dem = crate::terrain::source::dem_source(&self.style).is_some();
         let diff = self.style.diff_and_replace(next);
+        #[cfg(feature = "geojson")]
+        crate::geojson::update::dynamic_points::invalidate_after_style_change(
+            &self.style,
+            &mut self.world,
+        );
         let widened = zoom_bounds_widened(&old_zooms, &self.style);
         let enabled_dem = !had_dem && crate::terrain::source::dem_source(&self.style).is_some();
         crate::render::frame_signals::mark_dirty(&mut self.world);

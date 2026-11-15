@@ -455,6 +455,16 @@ impl PipelineSetup<'_> {
                             false,
                         )
                         .initialize_with_prefix_layouts(self.device, &[self.projection]),
+                    dynamic_radius: self
+                        .describe(
+                            "circle_dynamic_radius_pipeline",
+                            &shaders::CircleDynamicRadiusShader {
+                                format: self.format,
+                            },
+                            false,
+                            false,
+                        )
+                        .initialize_with_prefix_layouts(self.device, &[self.projection]),
                 }
             });
         }

@@ -366,6 +366,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             buffer_feature_metadata: alloc.feature_metadata,
             uniform_feature_metadata: uniform_fm,
             dual_feature_metadata: false,
+            dynamic_circle_metadata: false,
             shared_geometry_key: shared_key,
         };
 

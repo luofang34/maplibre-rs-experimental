@@ -4,7 +4,7 @@ use crate::{
     coords::WorldTileCoords,
     render::{settings::BufferPoolSizes, tile_memory::tile_bytes, ShaderVertex},
     tcs::world::World,
-    vector::{content, tessellation::OverAlignedVertexBuffer},
+    vector::{content, tessellation::OverAlignedVertexBuffer, AvailableVectorLayerBucket},
 };
 
 fn bucket(coords: WorldTileCoords, x: f32) -> AvailableVectorLayerBucket {
@@ -55,6 +55,7 @@ fn upload(
         (
             &mut crate::render::memory_budget::FrameUploads::default(),
             false,
+            &mut super::DynPoints::default(),
         ),
     );
 }

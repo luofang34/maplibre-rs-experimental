@@ -1,3 +1,5 @@
+const utf8Encoder = typeof TextEncoder !== "undefined" ? new TextEncoder() : null;
+
 const isPlainCameraObject = val =>
     typeof val === "object" && val !== null && !Array.isArray(val);
 
@@ -31,6 +33,8 @@ export const createOffscreenCoalescer = (post, rawRpc, isClosed) => {
     let jumpFlushScheduled = false;
     const queuedGeoJson = new Map();
     const geoJsonInFlight = new Set();
+    let geoJsonFlushScheduled = false;
+    let geoJsonChannel = null;
 
     const flushInput = () => {
         if (inputRafId !== null && typeof cancelAnimationFrame === "function") {
@@ -159,7 +163,26 @@ export const createOffscreenCoalescer = (post, rawRpc, isClosed) => {
         if (!batch) return;
         queuedGeoJson.delete(source);
         geoJsonInFlight.add(source);
-        rawRpc("setGeoJsonData", [source, batch.data]).then(
+        let rpcPromise;
+        if (utf8Encoder) {
+            try {
+                const wasString = typeof batch.data === "string";
+                const text = wasString ? batch.data : JSON.stringify(batch.data);
+                if (typeof text !== "string") {
+                    throw new TypeError("GeoJSON data is not JSON-serializable");
+                }
+                const bytes = utf8Encoder.encode(text);
+                rpcPromise = rawRpc("setGeoJsonBytes", [source, bytes, wasString], [bytes.buffer]);
+            } catch (err) {
+                geoJsonInFlight.delete(source);
+                for (const w of batch.waiters) w.reject(err);
+                if (queuedGeoJson.has(source)) dispatchQueuedGeoJson(source);
+                return;
+            }
+        } else {
+            rpcPromise = rawRpc("setGeoJsonData", [source, batch.data]);
+        }
+        rpcPromise.then(
             res => {
                 geoJsonInFlight.delete(source);
                 for (const w of batch.waiters) w.resolve(res);
@@ -173,6 +196,29 @@ export const createOffscreenCoalescer = (post, rawRpc, isClosed) => {
         );
     };
 
+    const flushQueuedGeoJson = () => {
+        geoJsonFlushScheduled = false;
+        if (isClosed() || queuedGeoJson.size === 0) return;
+        for (const source of Array.from(queuedGeoJson.keys())) {
+            dispatchQueuedGeoJson(source);
+        }
+    };
+
+    const scheduleGeoJsonFlush = () => {
+        if (geoJsonFlushScheduled) return;
+        geoJsonFlushScheduled = true;
+        if (typeof MessageChannel === "function") {
+            if (!geoJsonChannel) {
+                geoJsonChannel = new MessageChannel();
+                geoJsonChannel.port1.onmessage = flushQueuedGeoJson;
+                geoJsonChannel.port1.unref?.();
+            }
+            geoJsonChannel.port2.postMessage(0);
+        } else {
+            setTimeout(flushQueuedGeoJson, 0);
+        }
+    };
+
     const setGeoJsonData = (source, data) => {
         if (isClosed()) return Promise.resolve(undefined);
         return new Promise((resolve, reject) => {
@@ -182,8 +228,8 @@ export const createOffscreenCoalescer = (post, rawRpc, isClosed) => {
                 existing.waiters.push({resolve, reject});
             } else {
                 queuedGeoJson.set(source, {data, waiters: [{resolve, reject}]});
-                queueMicrotask(() => dispatchQueuedGeoJson(source));
             }
+            scheduleGeoJsonFlush();
         });
     };
 
@@ -191,6 +237,9 @@ export const createOffscreenCoalescer = (post, rawRpc, isClosed) => {
         flushInput();
         if (queuedJump && !jumpInFlight) {
             dispatchQueuedJump();
+        }
+        if (queuedGeoJson.size > 0) {
+            flushQueuedGeoJson();
         }
     };
 
@@ -200,6 +249,13 @@ export const createOffscreenCoalescer = (post, rawRpc, isClosed) => {
         }
         inputRafId = null;
         inputMicrotaskQueued = false;
+        geoJsonFlushScheduled = false;
+        if (geoJsonChannel) {
+            geoJsonChannel.port1.onmessage = null;
+            geoJsonChannel.port1.close?.();
+            geoJsonChannel.port2.close?.();
+            geoJsonChannel = null;
+        }
         pendingPointer = null;
         pendingWheel = null;
         pendingTouchMoves.clear();

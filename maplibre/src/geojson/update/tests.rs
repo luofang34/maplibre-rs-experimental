@@ -210,3 +210,117 @@ fn feature_diffs_need_inline_data() {
         Err(SourceUpdateError::NotInline { .. })
     ));
 }
+
+#[test]
+fn dynamic_circle_detection_checks_layer_and_source_invariants() {
+    let eligible: Style = serde_json::from_value(json!({
+        "version": 8,
+        "sources": {
+            "sensors": {"type": "geojson", "data": collection(json!([]))}
+        },
+        "layers": [{
+            "id": "pulses",
+            "type": "circle",
+            "source": "sensors",
+            "paint": {
+                "circle-radius": ["interpolate", ["linear"], ["coalesce", ["get", "load"], 0.5], 0, 4, 1, 13],
+                "circle-color": ["interpolate", ["linear"], ["coalesce", ["get", "load"], 0.5], 0, "#22d3ee", 1, "#f43f5e"],
+                "circle-opacity": 0.88,
+                "circle-stroke-width": 1,
+                "circle-stroke-color": "#f8fafc"
+            }
+        }]
+    }))
+    .expect("eligible style");
+    assert!(super::dynamic_points::uses_dynamic_circle_metadata(
+        &eligible,
+        &eligible.layers[0]
+    ));
+
+    let with_symbol: Style = serde_json::from_value(json!({
+        "version": 8,
+        "sources": {
+            "sensors": {"type": "geojson", "data": collection(json!([]))}
+        },
+        "layers": [
+            {"id": "pulses", "type": "circle", "source": "sensors", "paint": {"circle-radius": ["get", "load"]}},
+            {"id": "labels", "type": "symbol", "source": "sensors"}
+        ]
+    }))
+    .expect("mixed style");
+    assert!(!super::dynamic_points::uses_dynamic_circle_metadata(
+        &with_symbol,
+        &with_symbol.layers[0]
+    ));
+}
+
+#[test]
+fn stationary_point_bytes_update_skips_generation_and_flushes_cleanly() {
+    let mut s: Style = serde_json::from_value(json!({
+        "version": 8,
+        "sources": {
+            "places": {
+                "type": "geojson",
+                "data": collection(json!([
+                    {"type": "Feature", "id": 1, "properties": {"load": 0.1}, "geometry": {"type": "Point", "coordinates": [-122.4, 37.7]}},
+                    {"type": "Feature", "id": 2, "properties": {"load": 0.2}, "geometry": {"type": "Point", "coordinates": [-122.3, 37.8]}}
+                ]))
+            }
+        },
+        "layers": [{
+            "id": "pulses",
+            "type": "circle",
+            "source": "places",
+            "paint": {"circle-radius": ["get", "load"], "circle-color": "#22d3ee"}
+        }]
+    }))
+    .expect("style");
+    let mut world = crate::tcs::world::World::default();
+    let gen_before = generation(&s);
+    let rev_before = s.revision();
+
+    let next_bytes = serde_json::to_vec(&collection(json!([
+        {"type": "Feature", "id": 1, "properties": {"load": 0.85}, "geometry": {"type": "Point", "coordinates": [-122.4, 37.7]}},
+        {"type": "Feature", "id": 2, "properties": {"load": 0.45}, "geometry": {"type": "Point", "coordinates": [-122.3, 37.8]}}
+    ])))
+    .expect("json bytes");
+
+    assert!(super::dynamic_points::try_apply_stationary_bytes(
+        &s,
+        &mut world,
+        "places",
+        &next_bytes
+    ));
+    assert_eq!(generation(&s), gen_before);
+    assert_eq!(s.revision(), rev_before);
+
+    let deferred =
+        super::dynamic_points::deferred_inline_value(&world, "places").expect("deferred value");
+    assert_eq!(deferred["features"][0]["properties"]["load"], json!(0.85));
+
+    // Moving a coordinate rejects the stationary fast path without corrupting stored properties.
+    let moved_bytes = serde_json::to_vec(&collection(json!([
+        {"type": "Feature", "id": 1, "properties": {"load": 0.99}, "geometry": {"type": "Point", "coordinates": [-122.0, 37.7]}},
+        {"type": "Feature", "id": 2, "properties": {"load": 0.45}, "geometry": {"type": "Point", "coordinates": [-122.3, 37.8]}}
+    ])))
+    .expect("moved bytes");
+    assert!(!super::dynamic_points::try_apply_stationary_bytes(
+        &s,
+        &mut world,
+        "places",
+        &moved_bytes
+    ));
+
+    super::dynamic_points::flush_deferred_geojson_bytes(&mut s, &mut world);
+    assert_eq!(data(&s)["features"][0]["properties"]["load"], json!(0.85));
+}
+
+#[test]
+fn pack_dynamic_circle_radii_encodes_nonzero_zero_sentinel() {
+    let zero = crate::render::shaders::pack_dynamic_circle_radii(0.0, 0.0);
+    assert_eq!(u32::from_le_bytes(zero.color), 0x8000_0000);
+    let normal = crate::render::shaders::pack_dynamic_circle_radii(4.0, 13.0);
+    let raw = u32::from_le_bytes(normal.color);
+    assert_ne!(raw, 0);
+    assert_ne!(raw, 0x8000_0000);
+}

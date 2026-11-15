@@ -3,10 +3,11 @@
 
 use super::{
     fill_extrusion::ExtrusionPass, texture::DemShading, AtmosphereShader, BackgroundPatternShader,
-    BackgroundShader, CircleShader, FillExtrusionShader, FillPatternShader, FillShader,
-    FlatTileMaskShader, GlobeBackgroundPatternShader, GlobeBackgroundShader,
-    HeatmapCompositeShader, HeatmapDensityShader, LineShader, RasterShader, Shader,
-    ShaderTileMetadata, SkyShader, SymbolShader, TerrainLineShader, TerrainShader, TileMaskShader,
+    BackgroundShader, CircleDynamicRadiusShader, CircleFeatureStrokeShader, CircleShader,
+    FillExtrusionShader, FillPatternShader, FillShader, FlatTileMaskShader,
+    GlobeBackgroundPatternShader, GlobeBackgroundShader, HeatmapCompositeShader,
+    HeatmapDensityShader, LineShader, RasterShader, Shader, ShaderTileMetadata, SkyShader,
+    SymbolShader, TerrainLineShader, TerrainShader, TileMaskShader,
 };
 
 /// A stage's WGSL and its entry point.
@@ -79,6 +80,14 @@ fn stages() -> Vec<Stage> {
         ("line", Box::new(LineShader { format })),
         ("terrain line", Box::new(TerrainLineShader { format })),
         ("circle", Box::new(CircleShader { format })),
+        (
+            "circle feature stroke",
+            Box::new(CircleFeatureStrokeShader { format }),
+        ),
+        (
+            "circle dynamic radius",
+            Box::new(CircleDynamicRadiusShader { format }),
+        ),
     ];
     let extrusions = [
         ExtrusionPass::Depth,

@@ -175,6 +175,41 @@ where
         }
     }
 
+    /// Replaces the data of a GeoJSON source from raw UTF-8 JSON bytes or a URL string.
+    #[cfg(feature = "geojson")]
+    pub fn set_geojson_bytes(
+        &mut self,
+        source_name: &str,
+        bytes: &[u8],
+        was_string: bool,
+    ) -> Result<(), MapError> {
+        let result = match &mut self.map_context {
+            CurrentMapContext::Ready(context) => {
+                context.set_geojson_bytes(source_name, bytes, was_string)
+            }
+            CurrentMapContext::Pending(pending) => {
+                pending
+                    .style
+                    .set_geojson_bytes(source_name, bytes, was_string)
+            }
+        };
+        match result {
+            Ok(()) => {
+                self.event_bus.mark_busy();
+                self.event_bus
+                    .emit(crate::event::MapEvent::SourceDataLoaded {
+                        source: source_name.to_owned(),
+                    });
+                Ok(())
+            }
+            Err(error) => {
+                self.event_bus
+                    .emit_error(crate::event::MapErrorKind::Source, error.to_string());
+                Err(MapError::SourceUpdate(error))
+            }
+        }
+    }
+
     /// Adds, changes and removes features of an inline GeoJSON source.
     #[cfg(feature = "geojson")]
     pub fn update_geojson_data(
@@ -213,10 +248,13 @@ where
         source_name: &str,
         options: &SourceQueryOptions,
     ) -> Result<Vec<SourceFeature>, MapError> {
-        let style = match &self.map_context {
-            CurrentMapContext::Ready(context) => &context.style,
-            CurrentMapContext::Pending(pending) => &pending.style,
-        };
-        Ok(style.query_source_features(source_name, options)?)
+        match &self.map_context {
+            CurrentMapContext::Ready(context) => {
+                Ok(context.query_source_features(source_name, options)?)
+            }
+            CurrentMapContext::Pending(pending) => {
+                Ok(pending.style.query_source_features(source_name, options)?)
+            }
+        }
     }
 }

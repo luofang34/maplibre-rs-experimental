@@ -26,8 +26,13 @@ struct PendingJump {
     waiters: Vec<oneshot::Sender<Result<(), JSError>>>,
 }
 
+pub(super) enum PendingGeoJsonPayload {
+    Data(GeoJsonData),
+    Bytes { bytes: Vec<u8>, was_string: bool },
+}
+
 struct PendingGeoJson {
-    data: GeoJsonData,
+    payload: PendingGeoJsonPayload,
     waiters: Vec<oneshot::Sender<Result<(), JSError>>>,
 }
 
@@ -105,7 +110,7 @@ pub(super) fn enqueue_geojson<E>(
     handle: &MapHandle<E>,
     coalesced: &std::rc::Rc<CoalescedCommands>,
     source: String,
-    geojson: GeoJsonData,
+    payload: PendingGeoJsonPayload,
 ) -> oneshot::Receiver<Result<(), JSError>>
 where
     E: maplibre::environment::Environment,
@@ -117,7 +122,7 @@ where
         let mut map_slot = coalesced.geojson.borrow_mut();
         match map_slot.get_mut(&source) {
             Some(pending) => {
-                pending.data = geojson;
+                pending.payload = payload;
                 pending.waiters.push(tx);
                 false
             }
@@ -125,7 +130,7 @@ where
                 map_slot.insert(
                     source.clone(),
                     PendingGeoJson {
-                        data: geojson,
+                        payload,
                         waiters: vec![tx],
                     },
                 );
@@ -138,10 +143,15 @@ where
         let coalesced = coalesced.clone();
         drop(handle.call(move |map| {
             if let Some(pending) = coalesced.geojson.borrow_mut().remove(&source) {
-                let err_msg = map
-                    .set_geojson_data(&source, pending.data)
-                    .err()
-                    .map(|e| e.to_string());
+                let outcome = match pending.payload {
+                    PendingGeoJsonPayload::Data(data) => {
+                        map.set_geojson_data(&source, data).map_err(JSError::from)
+                    }
+                    PendingGeoJsonPayload::Bytes { bytes, was_string } => map
+                        .set_geojson_bytes(&source, &bytes, was_string)
+                        .map_err(JSError::from),
+                };
+                let err_msg = outcome.err().map(|e| e.to_string());
                 for waiter in pending.waiters {
                     let res = match &err_msg {
                         None => Ok(()),

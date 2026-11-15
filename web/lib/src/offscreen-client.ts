@@ -88,12 +88,16 @@ export const startOffscreenController = async ({
     let cameraListener: ((camera: CameraState) => void) | null = null;
     let telemetryListener: ((telemetry: ArenaFrameTelemetry) => void) | null = null;
 
-    const rawRpc = (method: string, args: unknown[]): Promise<any> => {
+    const rawRpc = (method: string, args: unknown[], transfer?: Transferable[]): Promise<any> => {
         if (closed) return Promise.resolve(undefined);
         const id = nextRpcId++;
         return new Promise((resolve, reject) => {
             pending.set(id, {resolve, reject});
-            renderWorker.postMessage({type: "rpc", id, method, args});
+            if (transfer && transfer.length > 0) {
+                renderWorker.postMessage({type: "rpc", id, method, args}, transfer);
+            } else {
+                renderWorker.postMessage({type: "rpc", id, method, args});
+            }
         });
     };
 

@@ -85,6 +85,15 @@ impl Style {
         source_name: &str,
         options: &SourceQueryOptions,
     ) -> Result<Vec<SourceFeature>, SourceQueryError> {
+        self.query_source_features_with_override(source_name, None, options)
+    }
+
+    pub(crate) fn query_source_features_with_override(
+        &self,
+        source_name: &str,
+        inline_override: Option<&Value>,
+        options: &SourceQueryOptions,
+    ) -> Result<Vec<SourceFeature>, SourceQueryError> {
         let source = match self.sources.get(source_name) {
             Some(Source::GeoJson(source)) => source,
             Some(_) => {
@@ -98,10 +107,14 @@ impl Style {
                 })
             }
         };
-        let GeoJsonData::Inline(document) = &source.data else {
-            return Err(SourceQueryError::NotLoaded {
-                source_name: source_name.to_owned(),
-            });
+        let document: &Value = match (inline_override, &source.data) {
+            (Some(doc), _) => doc,
+            (None, GeoJsonData::Inline(document)) => document,
+            (None, GeoJsonData::Url(_)) => {
+                return Err(SourceQueryError::NotLoaded {
+                    source_name: source_name.to_owned(),
+                });
+            }
         };
         let filter = options
             .filter
@@ -168,7 +181,10 @@ impl MapContext {
         source_name: &str,
         options: &SourceQueryOptions,
     ) -> Result<Vec<SourceFeature>, SourceQueryError> {
-        self.style.query_source_features(source_name, options)
+        let deferred =
+            super::update::dynamic_points::deferred_inline_value(&self.world, source_name);
+        self.style
+            .query_source_features_with_override(source_name, deferred.as_ref(), options)
     }
 }
 

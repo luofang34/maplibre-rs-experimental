@@ -7,8 +7,8 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use feature_state::recolor_cpu_bucket;
 
 use super::{
-    metadata::{feature_metadata, metadata_for_layer},
-    paint, pattern_runs, VectorPaintFrame,
+    metadata::{feature_metadata, metadata_for_layer, pattern_runs},
+    paint, VectorPaintFrame,
 };
 use crate::{
     coords::WorldTileCoords,
@@ -212,6 +212,11 @@ fn refresh_vector_pool(
 
     for style_layer in &style.layers {
         if !recolor_layers.contains(&style_layer.id) {
+            continue;
+        }
+        #[cfg(feature = "geojson")]
+        if crate::geojson::update::dynamic_points::uses_dynamic_circle_metadata(style, style_layer)
+        {
             continue;
         }
         let uniform = paint::uniform_color(style_layer, f64::from(frame.zoom));

@@ -97,10 +97,13 @@ struct ExtrusionPipeline {
 struct CirclePipeline {
     pair: crate::render::resource::FeaturePipelinePair,
     feature_stroke: wgpu::RenderPipeline,
+    dynamic_radius: wgpu::RenderPipeline,
 }
 impl CirclePipeline {
     fn select_entry(&self, entry: Option<&resource::IndexEntry>) -> &wgpu::RenderPipeline {
-        if entry.is_some_and(resource::IndexEntry::is_dual_feature_metadata) {
+        if entry.is_some_and(resource::IndexEntry::is_dynamic_circle_metadata) {
+            &self.dynamic_radius
+        } else if entry.is_some_and(resource::IndexEntry::is_dual_feature_metadata) {
             &self.feature_stroke
         } else {
             self.pair

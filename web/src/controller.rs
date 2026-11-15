@@ -22,7 +22,9 @@ use crate::{
 
 mod coalesce;
 pub(crate) mod options;
-use coalesce::{apply_style_swap, enqueue_geojson, enqueue_jump, CoalescedCommands};
+use coalesce::{
+    apply_style_swap, enqueue_geojson, enqueue_jump, CoalescedCommands, PendingGeoJsonPayload,
+};
 use options::{
     try_read_camera_fast, Animation, Camera, CameraState, Feature, Query, ScreenGeometry,
 };
@@ -329,7 +331,40 @@ impl MapController {
         };
 
         let rx = with_controller_handle!(&self.handle, |h| {
-            enqueue_geojson(h, &self.coalesced, source, geojson)
+            enqueue_geojson(
+                h,
+                &self.coalesced,
+                source,
+                PendingGeoJsonPayload::Data(geojson),
+            )
+        });
+        settle(async move {
+            match rx.await {
+                Ok(result) => result,
+                Err(oneshot::Canceled) => Err(JSError::from(MapClosed)),
+            }
+        })
+    }
+
+    /// Replaces a GeoJSON source's data from a UTF-8 byte buffer transferred directly across
+    /// `postMessage`, avoiding `JsValue` structured cloning and `JSON.stringify` on the render thread.
+    #[wasm_bindgen(js_name = setGeoJsonBytes)]
+    pub fn set_geojson_bytes(
+        &self,
+        source: String,
+        bytes: Vec<u8>,
+        was_string: bool,
+    ) -> js_sys::Promise {
+        if self.handle.is_closed() {
+            return js_sys::Promise::resolve(&JsValue::UNDEFINED);
+        }
+        let rx = with_controller_handle!(&self.handle, |h| {
+            enqueue_geojson(
+                h,
+                &self.coalesced,
+                source,
+                PendingGeoJsonPayload::Bytes { bytes, was_string },
+            )
         });
         settle(async move {
             match rx.await {

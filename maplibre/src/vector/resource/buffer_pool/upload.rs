@@ -166,6 +166,12 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             };
 
         let allocation_id = self.revision.wrapping_add(1);
+        let dynamic_circle_fm = dual_fm
+            && matches!(
+                style_layer.paint.as_ref(),
+                Some(crate::style::layer::LayerPaint::Circle(paint))
+                    if paint.stroke_color_per_feature().is_none()
+            );
         let entry = IndexEntry {
             allocation_id,
             paint_revision: 0,
@@ -188,6 +194,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             buffer_feature_metadata: alloc.feature_metadata,
             uniform_feature_metadata: false,
             dual_feature_metadata: dual_fm,
+            dynamic_circle_metadata: dynamic_circle_fm,
             shared_geometry_key: None,
         };
 

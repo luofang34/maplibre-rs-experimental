@@ -1,6 +1,9 @@
 //! The shared, parse-once index of each GeoJSON source generation.
 
-use std::sync::Arc;
+use std::{
+    collections::VecDeque,
+    sync::{Arc, LazyLock, Mutex},
+};
 
 use super::index::GeoJsonIndex;
 use crate::{
@@ -8,6 +11,32 @@ use crate::{
     sdf::assets::{fetch, AssetCache, AssetFailure},
     style::source::{GeoJsonData, GeoJsonSource},
 };
+
+const MAX_PRIMED_INDICES: usize = 16;
+
+type PrimedQueue = VecDeque<(u64, Arc<GeoJsonIndex>)>;
+
+static PRIMED_INDICES: LazyLock<Mutex<PrimedQueue>> =
+    LazyLock::new(|| Mutex::new(VecDeque::with_capacity(MAX_PRIMED_INDICES)));
+
+/// Retains a pre-validated [`GeoJsonIndex`] built during [`crate::style::Style::set_geojson_data`]
+/// or [`crate::style::Style::update_geojson_data`] so in-process tiling reuses it without parsing
+/// and bulk-loading the R-tree a second time.
+pub(crate) fn prime_geojson_index(generation: u64, index: Arc<GeoJsonIndex>) {
+    let mut guard = PRIMED_INDICES.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.len() >= MAX_PRIMED_INDICES {
+        guard.pop_front();
+    }
+    guard.push_back((generation, index));
+}
+
+fn primed_geojson_index(generation: u64) -> Option<Arc<GeoJsonIndex>> {
+    let guard = PRIMED_INDICES.lock().unwrap_or_else(|e| e.into_inner());
+    guard
+        .iter()
+        .rev()
+        .find_map(|(gen_id, idx)| (*gen_id == generation).then(|| Arc::clone(idx)))
+}
 
 impl AssetCache {
     /// The index of a GeoJSON source, parsed and, for URL data, fetched once per generation
@@ -18,6 +47,9 @@ impl AssetCache {
         name: &str,
         source: &GeoJsonSource,
     ) -> Result<Arc<GeoJsonIndex>, AssetFailure> {
+        if let Some(cached) = primed_geojson_index(source.generation) {
+            return Ok(cached);
+        }
         let key = format!("geojson:{name}:{}", source.generation);
         self.load(key, || async {
             let index = match &source.data {
