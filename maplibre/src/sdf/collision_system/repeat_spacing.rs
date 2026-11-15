@@ -25,6 +25,7 @@ type Positions = HashMap<String, HashMap<Arc<str>, Vec<[f64; 2]>>>;
 pub(super) struct RepeatSpacing {
     placed: Positions,
     previous: Positions,
+    yielded_to_previous: std::cell::Cell<bool>,
 }
 
 /// A label that repeats along lines, and the centre of its box on screen.
@@ -63,6 +64,13 @@ impl RepeatSpacing {
     /// Starts a placement; the one that ends becomes the previous.
     pub(super) fn begin(&mut self) {
         self.previous = std::mem::take(&mut self.placed);
+        self.yielded_to_previous.set(false);
+    }
+
+    /// Whether any repeat in the current placement yielded to a position from the previous
+    /// placement while the placed set itself changed (requiring one follow-up settle pass).
+    pub(super) fn yielded_to_previous(&self) -> bool {
+        self.yielded_to_previous.get() && self.placed != self.previous
     }
 
     /// Whether `repeat` would sit closer than [`MIN_REPEAT_DISTANCE`] to a repeat of its label
@@ -84,7 +92,14 @@ impl RepeatSpacing {
                     })
                 })
         };
-        near(&self.placed) || (!was_visible && near(&self.previous))
+        if near(&self.placed) {
+            return true;
+        }
+        if !was_visible && near(&self.previous) {
+            self.yielded_to_previous.set(true);
+            return true;
+        }
+        false
     }
 
     /// Records that `repeat` took its place.

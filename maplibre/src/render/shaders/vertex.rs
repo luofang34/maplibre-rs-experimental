@@ -61,14 +61,18 @@ pub struct FillShaderFeatureMetadata {
 /// magnitude an `f32` keeps any rise on Earth to within a centimetre.
 pub const POSED_GLYPH: f32 = 65536.0;
 
-/// Per-vertex collision visibility and sampled terrain height for symbols.
+/// Per-vertex collision visibility, GPU fade ramp, and sampled terrain height for symbols.
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Pod, Zeroable, Default)]
 pub struct SDFShaderFeatureMetadata {
-    /// Collision and fade opacity in 0..=1, repeated for the symbol's vertices.
+    /// Target collision opacity in 0..=1 after fade completes (`@location(12).x`).
     pub opacity: f32,
     /// Sampled ground elevation in meters; symbol height offsets are carried in the geometry.
     pub elevation: f32,
+    /// Starting collision opacity in 0..=1 when the current fade began (`@location(12).z`).
+    pub start_opacity: f32,
+    /// Monotonic fade clock timestamp in milliseconds when the current fade began (`@location(12).w`).
+    pub start_time_ms: f32,
     /// Where a glyph placed along a line sits: the offset of its centre from the vertex anchor
     /// in tile units, its direction in radians, and [`POSED_GLYPH`] plus how far the ground
     /// under the glyph rises above the ground under the label's anchor, in metres, when the

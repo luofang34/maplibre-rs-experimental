@@ -99,6 +99,47 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         );
     }
 
+    /// Rewrites a contiguous `[start_element..start_element + slice.len()]` sub-range of a
+    /// layer's per-vertex feature metadata in place without re-uploading clean vertices.
+    pub fn update_feature_metadata_range(
+        &self,
+        queue: &Q,
+        entry: &IndexEntry,
+        start_element: usize,
+        slice: &[FM],
+    ) {
+        if slice.is_empty() {
+            return;
+        }
+        let stride = size_of::<FM>() as wgpu::BufferAddress;
+        let offset = (start_element as wgpu::BufferAddress) * stride;
+        let (bytes, aligned_bytes) = Self::align(
+            stride,
+            slice.len() as wgpu::BufferAddress,
+            slice.len() as wgpu::BufferAddress,
+        );
+        let allocated = entry.buffer_feature_metadata.end - entry.buffer_feature_metadata.start;
+        if offset + aligned_bytes > allocated
+            || bytes != aligned_bytes
+            || !offset.is_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT)
+        {
+            tracing::error!(
+                coords = %entry.coords,
+                layer = %entry.style_layer.id,
+                allocated,
+                offset,
+                offered = bytes,
+                "feature metadata sub-range update skipped: out of bounds or unaligned"
+            );
+            return;
+        }
+        queue.write_buffer(
+            &self.page_of(entry).feature_metadata.inner,
+            entry.buffer_feature_metadata.start + offset,
+            bytemuck::cast_slice(slice),
+        );
+    }
+
     /// Rewrites all feature metadata slots of `entry` with a single uniform `value` without heap scratch.
     pub fn fill_feature_metadata(&self, queue: &Q, entry: &IndexEntry, value: FM) {
         let stride = size_of::<FM>() as wgpu::BufferAddress;

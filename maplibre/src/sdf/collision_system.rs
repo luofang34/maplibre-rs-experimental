@@ -1,11 +1,15 @@
-//! Places elevated text and icons once for both eyes, caching metadata by content and allocation.
+//! Places elevated text and icons on discrete placement epochs, interpolating fades on the GPU.
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
+    sync::Arc,
 };
 
+pub use controller::PlacementConfig;
+use controller::{PlacementController, PlacementTriggers};
 use layer_pass::place_layer;
+use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 
 #[cfg(test)]
 use super::placement::canonical_tile;
@@ -16,22 +20,40 @@ use crate::{
     render::{
         eventually::{Eventually, Eventually::Initialized},
         projection::projection_data_for_view,
-        shaders::SDFShaderFeatureMetadata,
     },
     sdf::{SymbolBufferPool, SymbolLayersDataComponent},
     style::layer::LayerPaint,
     tcs::system::{System, SystemError, SystemResult},
 };
 
-/// Places visible symbols across tiles and shares placement between eyes in the same frame.
-/// Retains fade history and refreshes opacity/elevation uploads when content or allocation changes.
+mod controller;
+mod draw_sort;
+mod family;
+mod layer_pass;
+mod repeat_spacing;
+mod rules;
+mod temporal;
+mod upload_diff;
+
+#[cfg(test)]
+mod tests;
+
+type ViewSignature = (cgmath::Matrix4<f64>, (f64, f64));
+
+/// Places visible symbols across tiles on throttled epochs and shares placement between eyes.
 #[derive(Default)]
 pub struct CollisionSystem {
     runs: u32,
-    /// View the last placement ran for; a different one makes it stale within a frame.
-    placed_view: Option<(cgmath::Matrix4<f64>, (f64, f64))>,
+    controller: PlacementController,
+    /// View the last committed placement epoch ran for.
+    placed_view: Option<ViewSignature>,
+    /// View seen on the immediately preceding frame, used to detect single-step XR movement.
+    last_frame_view: Option<ViewSignature>,
+    last_content_signature: Option<u64>,
+    last_terrain_signature: Option<u64>,
+    last_external_view: Option<bool>,
     history: temporal::PlacementHistory,
-    uploaded: HashMap<(WorldTileCoords, String), (u64, u64)>,
+    uploaded: HashMap<(WorldTileCoords, String), upload_diff::CachedBucketMetadata>,
     draw_sort: draw_sort::DrawSort,
     /// Revision of the host's label obstacles the last placement kept clear.
     obstacles: u64,
@@ -45,7 +67,7 @@ pub struct CollisionStats {
 }
 
 impl CollisionSystem {
-    /// Starts with no placement history or uploaded metadata fingerprints.
+    /// Starts with no placement history or uploaded metadata cache.
     pub fn new() -> Self {
         Self::default()
     }
@@ -53,23 +75,6 @@ impl CollisionSystem {
     /// Number of times placement checks have executed on this system instance.
     pub fn runs(&self) -> u32 {
         self.runs
-    }
-}
-
-fn opacity_fingerprint(metadata: &[SDFShaderFeatureMetadata]) -> u64 {
-    let mut hash = rustc_hash::FxHasher::default();
-    let mut non_empty = false;
-    for (i, entry) in metadata.iter().enumerate() {
-        if entry.opacity != 0.0 || entry.elevation != 0.0 || entry.pose != [0.0; 4] {
-            non_empty = true;
-            i.hash(&mut hash);
-            bytemuck::bytes_of(entry).hash(&mut hash);
-        }
-    }
-    if non_empty {
-        hash.finish()
-    } else {
-        0
     }
 }
 
@@ -88,58 +93,87 @@ impl System for CollisionSystem {
             ..
         }: &mut MapContext,
     ) -> SystemResult {
-        if renderer.settings.symbol_pools.is_empty()
-            || crate::render::eye_covering::EyeInFrame::reuses_content(world)
-        {
+        if renderer.settings.symbol_pools.is_empty() {
             return Ok(());
         }
+        let config = world
+            .resources
+            .get::<PlacementConfig>()
+            .copied()
+            .unwrap_or_default();
+        if crate::render::eye_covering::EyeInFrame::reuses_content(world) {
+            sync_symbol_depth_fade(world, &renderer.queue, &self.history);
+            return Ok(());
+        }
+
+        let now = world
+            .resources
+            .get::<crate::render::frame_input::FrameInput>()
+            .map_or(std::time::Duration::ZERO, |input| input.timestamp);
+        self.history.set_fade_duration(config.fade_duration);
+        self.history.advance_clock(now);
+
         self.runs = self.runs.wrapping_add(1);
         let stats = world.resources.get_or_init_mut::<CollisionStats>();
         stats.runs = stats.runs.wrapping_add(1);
-        let seen: HashSet<_> = world
+
+        let seen: FxHashSet<_> = world
             .resources
             .get::<super::covering::SymbolCovering>()
             .map(|covering| covering.tiles.iter().copied().collect())
             .unwrap_or_default();
-        let mut layers = visible_layers(world, style, view_state.style_zoom().value(), &seen);
-        let new_content = layers.iter().any(|(_, layer, _)| {
-            allocation(world, layer.coords, &layer.style_layer_id)
-                != self
-                    .uploaded
-                    .get(&(layer.coords, layer.style_layer_id.clone()))
-                    .map(|entry| entry.0)
-        });
+        let zoom = view_state.style_zoom().value();
+        let mut layers = visible_layers(world, style, zoom, &seen);
+
+        let content_sig = content_signature(world, &layers);
+        let terrain_sig = terrain_signature(world);
+        let external_view = view_state.has_external_view();
         let view = (view_state.view_projection().0, view_state.viewport_size());
-        // A head-tracked view changes every frame, so it keeps the periodic cadence instead of
-        // placing every label each frame.
-        let moved = !view_state.has_external_view()
-            && AsRef::<[[f64; 4]; 4]>::as_ref(&view.0)
-                .iter()
-                .flatten()
-                .all(|value| value.is_finite())
-            && self.placed_view.as_ref() != Some(&view);
+        let view_valid = AsRef::<[[f64; 4]; 4]>::as_ref(&view.0)
+            .iter()
+            .flatten()
+            .all(|value| value.is_finite());
+        let moved = !external_view && view_valid && self.placed_view.as_ref() != Some(&view);
+        let external_moved =
+            external_view && view_valid && self.last_frame_view.as_ref() != Some(&view);
+        if view_valid {
+            self.last_frame_view = Some(view);
+        }
+
         let obstacles = world
             .resources
             .get::<super::obstacles::LabelObstacles>()
             .map_or(0, super::obstacles::LabelObstacles::revision);
-        let obstructed = obstacles != self.obstacles;
-        if !new_content
-            && !moved
-            && !obstructed
-            && !self.history.fading
-            && !self.runs.is_multiple_of(8)
-        {
+        let triggers = PlacementTriggers {
+            moved,
+            external_view,
+            external_moved,
+            new_content: self.last_content_signature != Some(content_sig),
+            environment_changed: self.last_terrain_signature != Some(terrain_sig)
+                || self.last_external_view != Some(external_view),
+            obstructed: obstacles != self.obstacles,
+        };
+
+        if !self.controller.should_place(now, zoom, config, triggers) {
+            sync_symbol_depth_fade(world, &renderer.queue, &self.history);
+            if self.history.is_fading() || self.controller.is_pending() {
+                crate::render::frame_signals::keep_animating(world);
+            }
             return Ok(());
         }
+
         self.obstacles = obstacles;
-        self.placed_view = Some(view);
+        if view_valid {
+            self.placed_view = Some(view);
+        }
+        self.last_content_signature = Some(content_sig);
+        self.last_terrain_signature = Some(terrain_sig);
+        self.last_external_view = Some(external_view);
+
         self.draw_sort.follow_bearing(
             world,
             &renderer.queue,
-            (
-                view_state.camera().get_bearing().0,
-                view_state.style_zoom().value(),
-            ),
+            (view_state.camera().get_bearing().0, zoom),
             &layers,
         );
         layers.sort_by_key(|(index, layer, _)| {
@@ -154,12 +188,8 @@ impl System for CollisionSystem {
             tracing::error!(%error, "symbol projection failed");
             SystemError::Setup
         })?;
-        self.history.begin(
-            world
-                .resources
-                .get::<crate::render::frame_input::FrameInput>()
-                .map_or(std::time::Duration::ZERO, |input| input.timestamp),
-        );
+        let has_symbols = !layers.is_empty();
+        self.history.begin_with_duration(now, config.fade_duration);
         let placed = self.place_layers(
             world,
             style,
@@ -169,55 +199,121 @@ impl System for CollisionSystem {
             layers,
         );
         self.uploaded.retain(|(coords, _), _| seen.contains(coords));
+        let followup_needed = self.history.repeats.yielded_to_previous();
+        self.controller
+            .record_commit(zoom, has_symbols, followup_needed);
+
         world.resources.insert(placed);
         world.resources.insert(super::query::PlacementBearing(
             view_state.camera().get_bearing().0,
         ));
-        // Labels still fading in or out change the next frame.
-        if self.history.fading {
+        sync_symbol_depth_fade(world, &renderer.queue, &self.history);
+        if self.history.is_fading() || self.controller.is_pending() {
             crate::render::frame_signals::keep_animating(world);
         }
         Ok(())
     }
 }
 
-mod draw_sort;
-mod family;
-mod layer_pass;
-mod repeat_spacing;
-mod rules;
-mod temporal;
-
-#[cfg(test)]
-mod tests;
+fn sync_symbol_depth_fade(
+    world: &mut crate::tcs::world::World,
+    queue: &crate::render::upload_queue::UploadQueue,
+    history: &temporal::PlacementHistory,
+) {
+    let time_ms = history.effective_shader_time_ms();
+    let duration_ms = history.fade_duration_ms();
+    if let Some(Initialized(depth)) = world
+        .resources
+        .get_mut::<Eventually<super::depth::SymbolDepth>>()
+    {
+        depth.write_fade_time(queue, time_ms, duration_ms);
+    }
+}
 
 fn visible_layers<'a>(
     world: &'a crate::tcs::world::World,
     style: &'a crate::style::Style,
     zoom: f64,
-    seen: &HashSet<WorldTileCoords>,
-) -> Vec<(
-    u32,
-    &'a crate::sdf::SymbolLayerData,
-    &'a crate::style::layer::SymbolPaint,
-)> {
+    seen: &FxHashSet<WorldTileCoords>,
+) -> Vec<VisibleLayer<'a>> {
+    if seen.is_empty() {
+        return Vec::new();
+    }
+    let mut style_map: FxHashMap<&str, (u32, &'a crate::style::layer::SymbolPaint)> =
+        FxHashMap::default();
+    for style_layer in &style.layers {
+        if let Some(LayerPaint::Symbol(paint)) = &style_layer.paint {
+            if style_layer.is_visible_at(zoom) {
+                style_map.insert(style_layer.id.as_str(), (style_layer.index, paint));
+            }
+        }
+    }
+    if style_map.is_empty() {
+        return Vec::new();
+    }
     let mut layers = Vec::new();
     for coords in seen {
         if let Some(component) = world.tiles.query::<&SymbolLayersDataComponent>(*coords) {
             for layer in &component.layers {
-                if let Some(style_layer) = style
-                    .layers
-                    .iter()
-                    .find(|style| style.id == layer.style_layer_id && style.is_visible_at(zoom))
-                {
-                    if let Some(LayerPaint::Symbol(paint)) = &style_layer.paint {
-                        layers.push((style_layer.index, layer, paint));
-                    }
+                if let Some(&(index, paint)) = style_map.get(layer.style_layer_id.as_str()) {
+                    layers.push((index, layer, paint));
                 }
             }
         }
     }
     layers
+}
+
+fn content_signature(world: &crate::tcs::world::World, layers: &[VisibleLayer<'_>]) -> u64 {
+    let pool = match world.resources.get::<Eventually<SymbolBufferPool>>() {
+        Some(Initialized(pool)) => Some(pool),
+        _ => None,
+    };
+    let mut acc = 0_u64;
+    for &(index, layer, _) in layers {
+        let rev = pool.and_then(|pool| {
+            pool.index()
+                .get_layers(layer.coords)?
+                .iter()
+                .find(|entry| entry.style_layer.id == layer.style_layer_id)
+                .map(|entry| entry.content_revision())
+        });
+        let mut h = FxHasher::default();
+        layer.coords.hash(&mut h);
+        layer.style_layer_id.hash(&mut h);
+        index.hash(&mut h);
+        rev.hash(&mut h);
+        layer.features.len().hash(&mut h);
+        layer.buffer.buffer.indices.len().hash(&mut h);
+        layer
+            .atlas
+            .as_ref()
+            .map_or(0_usize, |atlas| Arc::as_ptr(atlas) as usize)
+            .hash(&mut h);
+        // Pure wrapping addition over 64-bit hashes is strictly commutative, independent of
+        // tile iteration order.
+        acc = acc.wrapping_add(h.finish());
+    }
+    acc
+}
+
+fn terrain_signature(world: &crate::tcs::world::World) -> u64 {
+    let Some(coverage) = world
+        .resources
+        .get::<crate::terrain::coverage::TerrainCoverageIndex>()
+    else {
+        return 0;
+    };
+    let mut acc = coverage.exaggeration().to_bits()
+        ^ coverage.min_elevation().to_bits().rotate_left(13)
+        ^ coverage.max_elevation().to_bits().rotate_left(29);
+    for coords in coverage.rendered_tiles() {
+        let mut h = FxHasher::default();
+        coords.hash(&mut h);
+        coverage.loaded_dem_for(coords).hash(&mut h);
+        acc = acc.wrapping_add(h.finish());
+    }
+    acc
 }
 
 /// The collision grid of a `width` by `height` view, holding the host's obstacles before any
@@ -232,17 +328,6 @@ fn obstructed_grid(
         grid.insert_as(rect, false);
     }
     grid
-}
-
-fn allocation(world: &crate::tcs::world::World, coords: WorldTileCoords, id: &str) -> Option<u64> {
-    let Initialized(pool) = world.resources.get::<Eventually<SymbolBufferPool>>()? else {
-        return None;
-    };
-    pool.index()
-        .get_layers(coords)?
-        .iter()
-        .find(|entry| entry.style_layer.id == id)
-        .map(|entry| entry.content_revision())
 }
 
 impl CollisionSystem {
@@ -260,7 +345,6 @@ impl CollisionSystem {
             view_state.height(),
             world.resources.get::<super::obstacles::LabelObstacles>(),
         );
-        let mut updates = Vec::new();
         let mut placed = PlacedSymbols::default();
         let mut groups: Vec<(
             u32,
@@ -327,34 +411,21 @@ impl CollisionSystem {
             );
             placed_layers.push((members, metadata));
         }
-        for (members, metadata) in placed_layers {
-            for (layer, mut metadata) in members.into_iter().zip(metadata) {
-                let key = (layer.coords, layer.style_layer_id.clone());
-                let Some(generation) = allocation(world, layer.coords, &layer.style_layer_id)
-                else {
-                    continue;
-                };
-                let fingerprint = opacity_fingerprint(&metadata);
-                if self.uploaded.get(&key) != Some(&(generation, fingerprint)) {
-                    if metadata.is_empty() && layer.buffer.vertex_count() > 0 {
-                        metadata.resize(
-                            layer.buffer.vertex_count(),
-                            SDFShaderFeatureMetadata::default(),
-                        );
-                    }
-                    updates.push((key.clone(), metadata));
-                    self.uploaded.insert(key, (generation, fingerprint));
-                }
-            }
-        }
         if let Some(Initialized(pool)) = world.resources.get::<Eventually<SymbolBufferPool>>() {
-            for ((coords, id), metadata) in updates {
-                if let Some(entry) = pool
-                    .index()
-                    .get_layers(coords)
-                    .and_then(|entries| entries.iter().find(|entry| entry.style_layer.id == id))
-                {
-                    pool.update_feature_metadata(queue, entry, &metadata);
+            for (members, metadata) in placed_layers {
+                for (layer, metadata) in members.into_iter().zip(metadata) {
+                    let Some(entry) = pool.index().get_layers(layer.coords).and_then(|entries| {
+                        entries
+                            .iter()
+                            .find(|entry| entry.style_layer.id == layer.style_layer_id)
+                    }) else {
+                        continue;
+                    };
+                    let key = (layer.coords, layer.style_layer_id.clone());
+                    let prev = self.uploaded.get(&key);
+                    let next_cached =
+                        upload_diff::diff_and_upload_bucket(pool, queue, entry, prev, metadata);
+                    self.uploaded.insert(key, next_cached);
                 }
             }
         }

@@ -27,6 +27,7 @@ use crate::{
 pub mod assets;
 mod collision_grid;
 pub mod collision_system;
+pub use collision_system::PlacementConfig;
 pub(crate) mod covering;
 pub(crate) mod depth;
 mod line_glyphs;

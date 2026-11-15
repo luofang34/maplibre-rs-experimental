@@ -20,7 +20,7 @@ use crate::{
 
 /// How one feature was placed, for the layers that share its placement.
 pub(super) struct Outcome {
-    pub(super) opacity: [f32; 2],
+    pub(super) ramps: [super::temporal::FadeRamp; 2],
     pub(super) text_shift: [f32; 2],
     pub(super) anchor: usize,
     pub(super) ground: f32,
@@ -95,7 +95,7 @@ pub(super) fn mirror(
                 write_feature_metadata(
                     member,
                     feature,
-                    (outcome.opacity, outcome.text_shift, outcome.anchor),
+                    (outcome.ramps, outcome.text_shift, outcome.anchor),
                     outcome.ground,
                     outcome.poses.as_deref(),
                     (paint, zoom, &mut metadata),

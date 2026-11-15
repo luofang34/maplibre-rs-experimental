@@ -14,6 +14,7 @@ struct VertexOutput {
 };
 
 @group(2) @binding(0) var scene_depth: texture_2d<f32>;
+@group(2) @binding(1) var<uniform> symbol_fade: vec4<f32>;
 
 // What a posed glyph's `pose.w` holds before its rise in metres is added; 0 means no pose.
 const POSED_GLYPH: f32 = 65536.0;
@@ -55,7 +56,8 @@ fn main(
     @location(8) viewport_width: f32,
     @location(9) zoom_factor: f32,
     @location(11) viewport_height: f32,
-    @location(12) feature: vec2<f32>,
+    // x = target_opacity, y = elevation, z = start_opacity, w = start_time_ms.
+    @location(12) feature: vec4<f32>,
     // For a glyph placed along a line: the offset of its centre from the vertex anchor in tile
     // units, its direction, and POSED_GLYPH plus how far the ground under it rises above the
     // ground under the label's anchor, in metres.
@@ -65,7 +67,13 @@ fn main(
     @location(13) style_halo: vec4<f32>,
     @location(15) style_metrics: vec4<f32>,
 ) -> VertexOutput {
-    if feature.x <= 0.0 || style_metrics.w <= 0.0 {
+    let fade_alpha = select(
+        clamp((symbol_fade.x - feature.w) / max(symbol_fade.y, 0.001), 0.0, 1.0),
+        1.0,
+        symbol_fade.y <= 0.0,
+    );
+    let fade_opacity = mix(feature.z, feature.x, fade_alpha);
+    if fade_opacity <= 0.001 || style_metrics.w <= 0.0 {
         return VertexOutput(
             vec2<f32>(0.0),
             a_data.z,
@@ -75,7 +83,7 @@ fn main(
             vec4<f32>(0.0),
             vec4<f32>(0.0),
             vec4<f32>(0.0),
-            vec4<f32>(0.0, 0.0, 0.0, 1.0),
+            vec4<f32>(2.0, 2.0, 2.0, 1.0),
         );
     }
     let has_pose = pose.w > 0.5;
@@ -168,9 +176,9 @@ fn main(
     }
     // A label is hidden or faded as a whole, judged at its anchor as GL JS judges it, so ground
     // under one glyph never takes part of a word and glyphs do not flicker one by one.
-    let visibility = feature.x * metrics.w * near_visibility * anchor_visibility(label_clip);
+    let visibility = fade_opacity * metrics.w * near_visibility * anchor_visibility(label_clip);
     // Hidden geometry must not cross the eye plane and produce unbounded clipped triangles.
-    if visibility <= 0.0 || projected.clip_position.w <= 0.0 { position = vec4<f32>(0.0, 0.0, 0.0, 1.0); }
+    if visibility <= 0.001 || projected.clip_position.w <= 0.0 { position = vec4<f32>(2.0, 2.0, 2.0, 1.0); }
     return VertexOutput(vec2<f32>(a_data.xy) / symbol.atlas.xy, a_data.z, size,
         visibility, projected.horizon_distance, style_fill, style_halo, style_metrics, position);
 }

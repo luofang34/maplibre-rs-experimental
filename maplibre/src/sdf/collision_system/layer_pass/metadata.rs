@@ -8,7 +8,7 @@ use crate::{
 pub(in crate::sdf::collision_system) fn write_feature_metadata(
     layer: &crate::sdf::SymbolLayerData,
     feature: &crate::sdf::Feature,
-    (opacity, text_shift, anchor): ([f32; 2], [f32; 2], usize),
+    (ramps, text_shift, anchor): ([super::super::temporal::FadeRamp; 2], [f32; 2], usize),
     ground: f32,
     poses: Option<&[GlyphPose]>,
     (paint, zoom, metadata): (
@@ -17,7 +17,7 @@ pub(in crate::sdf::collision_system) fn write_feature_metadata(
         &mut Vec<SDFShaderFeatureMetadata>,
     ),
 ) {
-    if opacity == [0.0, 0.0] {
+    if ramps[0].is_hidden() && ramps[1].is_hidden() {
         return;
     }
     let vertex_count = layer.buffer.vertex_count();
@@ -48,13 +48,16 @@ pub(in crate::sdf::collision_system) fn write_feature_metadata(
         let v_idx = v_idx as usize;
         let kind = usize::from(layer.buffer.is_icon_vertex(v_idx));
         if let Some(vertex) = metadata.get_mut(v_idx) {
+            let ramp = if kind == 0 && shown_set.is_some_and(|set| !set.contains(&index)) {
+                super::super::temporal::FadeRamp::default()
+            } else {
+                ramps[kind]
+            };
             *vertex = SDFShaderFeatureMetadata {
-                opacity: if kind == 0 && shown_set.is_some_and(|set| !set.contains(&index)) {
-                    0.0
-                } else {
-                    opacity[kind]
-                },
+                opacity: ramp.target,
                 elevation: ground,
+                start_opacity: ramp.start,
+                start_time_ms: ramp.start_time_ms,
                 // A text vertex without a glyph pose carries its anchor shift here.
                 pose: [shifts[kind][0], shifts[kind][1], 0.0, 0.0],
                 // A `format` section may give its glyphs a colour of their own.

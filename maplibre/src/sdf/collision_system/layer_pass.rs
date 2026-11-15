@@ -45,7 +45,7 @@ struct FeaturePlacement {
     text_shift: [f32; 2],
     /// The `text-variable-anchor` entry the text took.
     anchor: usize,
-    opacity: [f32; 2],
+    ramps: [temporal::FadeRamp; 2],
     ground: f32,
     line: Option<LinePoses>,
     /// Whether the label found a place this frame, which its fade may not show yet.
@@ -131,7 +131,7 @@ pub(super) fn place_layer(
             write_feature_metadata(
                 layer,
                 feature,
-                (outcome.opacity, outcome.text_shift, outcome.anchor),
+                (outcome.ramps, outcome.text_shift, outcome.anchor),
                 outcome.ground,
                 poses.as_deref(),
                 (
@@ -140,13 +140,13 @@ pub(super) fn place_layer(
                     &mut metadata[position],
                 ),
             );
-            if outcome.opacity != [0.0, 0.0] {
+            if !outcome.ramps[0].is_hidden() || !outcome.ramps[1].is_hidden() {
                 if outcomes[position].is_empty() {
                     outcomes[position].resize_with(layer.features.len(), || None);
                 }
                 if let Some(slot) = outcomes[position].get_mut(index) {
                     *slot = Some(super::family::Outcome {
-                        opacity: outcome.opacity,
+                        ramps: outcome.ramps,
                         text_shift: outcome.text_shift,
                         anchor: outcome.anchor,
                         ground: outcome.ground,
@@ -364,7 +364,7 @@ impl LayerFrame<'_> {
                 duplicate,
             )
         };
-        let opacity = history.opacity(layer, feature, visible);
+        let ramps = history.fade_ramps(layer, feature, visible);
         if visible[0] || was_visible {
             history.remember_anchor(layer, feature, visible[0].then_some(anchor));
         }
@@ -383,15 +383,15 @@ impl LayerFrame<'_> {
             placed: visible.iter().any(|v| *v),
             text_shift,
             anchor,
-            opacity: {
-                let mut opacity = opacity.map(|value| value * relevance);
+            ramps: {
+                let mut ramps = ramps.map(|ramp| ramp.scale(relevance));
                 // Text that follows its line has no layout off it: while the line cannot hold
                 // it, its glyphs are hidden at once, as GL JS hides them, rather than fading out
                 // in the straight layout they were cut from.
                 if matches!(line, Some(LinePoses::DoesNotFit)) {
-                    opacity[0] = 0.0;
+                    ramps[0] = temporal::FadeRamp::default();
                 }
-                opacity
+                ramps
             },
             ground,
             line,
@@ -406,86 +406,4 @@ pub(super) fn empty_metadata(
 }
 
 #[cfg(test)]
-mod tests {
-    #![allow(clippy::expect_used, clippy::panic)]
-    use super::{metadata::write_glyph_poses, *};
-    use crate::{
-        coords::ZoomLevel,
-        render::shaders::{ShaderSymbolVertex, POSED_GLYPH},
-        sdf::{line_glyphs::GlyphPose, Feature, LineLabel},
-        vector::tessellation::OverAlignedVertexBuffer,
-    };
-
-    fn vertex(anchor: [i32; 2]) -> ShaderSymbolVertex {
-        ShaderSymbolVertex {
-            a_pos_offset: [anchor[0], anchor[1], 0, 0],
-            a_data: [0; 4],
-            a_pixeloffset: [0; 4],
-        }
-    }
-
-    #[test]
-    fn each_glyph_writes_its_own_pose_to_its_six_indices() {
-        // Two glyph quads after one icon quad: vertices 4..8 and 8..12.
-        let mut buffer = OverAlignedVertexBuffer::empty();
-        buffer.buffer.vertices = (0..12).map(|_| vertex([100, 200])).collect();
-        for quad in 0..3_u32 {
-            let base = quad * 4;
-            buffer
-                .buffer
-                .indices
-                .extend([base, base + 1, base + 2, base, base + 2, base + 3]);
-        }
-        let layer = crate::sdf::SymbolLayerData {
-            atlas: None,
-            coords: crate::coords::WorldTileCoords {
-                x: 0,
-                y: 0,
-                z: ZoomLevel::from(0),
-            },
-            source_layer: "roads".into(),
-            style_layer_id: "label".into(),
-            buffer,
-            features: Vec::<Feature>::new(),
-        };
-        let line = LineLabel {
-            polyline: [[0.0, 0.0], [500.0, 0.0]].into(),
-            anchor_distance: 250.0,
-            glyph_offsets: vec![-10.0, 10.0],
-            image_sizes: vec![[0.0; 2]; 2],
-            first_glyph_index: 6,
-        };
-        let poses = [
-            GlyphPose {
-                point: [90.0, 200.0],
-                angle: 0.5,
-                rise: 0.0,
-            },
-            GlyphPose {
-                point: [110.0, 205.0],
-                angle: 0.75,
-                rise: 12.5,
-            },
-        ];
-        let mut metadata = vec![SDFShaderFeatureMetadata::default(); 12];
-        write_glyph_poses(&layer, &line, &poses, &mut metadata);
-        assert!(
-            metadata[..4].iter().all(|entry| entry.pose[3] == 0.0),
-            "the icon has no pose"
-        );
-        assert!(metadata[4..8]
-            .iter()
-            .all(|entry| entry.pose == [-10.0, 0.0, 0.5, POSED_GLYPH]));
-        assert!(metadata[8..]
-            .iter()
-            .all(|entry| entry.pose == [10.0, 5.0, 0.75, POSED_GLYPH + 12.5]));
-    }
-
-    #[test]
-    fn a_changed_pose_changes_the_upload_fingerprint() {
-        let mut metadata = vec![SDFShaderFeatureMetadata::default(); 4];
-        let before = super::super::opacity_fingerprint(&metadata);
-        metadata[2].pose = [1.0, 0.0, 0.0, 1.0];
-        assert_ne!(before, super::super::opacity_fingerprint(&metadata));
-    }
-}
+mod tests;
