@@ -28,6 +28,63 @@ use crate::{
     },
 };
 
+#[derive(Default)]
+struct VectorQueueScratch {
+    cached_style_key: Option<(u64, u64)>,
+    pattern_layers: FxHashSet<StyleLayerId>,
+    translucent_extrusion_layers: FxHashSet<StyleLayerId>,
+    unclipped_3d_layers: FxHashSet<StyleLayerId>,
+    zero_opacity_layers: FxHashSet<StyleLayerId>,
+    active_unclipped_3d_shapes: FxHashSet<(i32, crate::coords::WorldTileCoords, u32)>,
+    queued_unclipped_3d: FxHashSet<(i32, crate::coords::WorldTileCoords, u32)>,
+    extrusion_colors: Vec<LayerItem>,
+    extrusion_clears: Vec<LayerItem>,
+    translucent_fronts: Vec<LayerItem>,
+}
+
+impl VectorQueueScratch {
+    fn sync_style_sets(&mut self, style: &crate::style::Style, style_zoom: f64) {
+        let key = (style.revision(), style_zoom.to_bits());
+        if self.cached_style_key == Some(key) {
+            return;
+        }
+        self.cached_style_key = Some(key);
+        self.pattern_layers.clear();
+        self.translucent_extrusion_layers.clear();
+        self.unclipped_3d_layers.clear();
+        self.zero_opacity_layers.clear();
+
+        for layer in &style.layers {
+            let id = layer.layer_id();
+            if layer.paint.as_ref().is_some_and(|paint| {
+                super::pattern::pattern_name(paint, style_zoom).is_some()
+                    || super::pattern::per_feature_pattern(paint).is_some()
+            }) {
+                self.pattern_layers.insert(id);
+            }
+            let is_translucent_extrusion = matches!(
+                &layer.paint,
+                Some(crate::style::layer::LayerPaint::FillExtrusion(paint))
+                    if paint.fill_extrusion_translucent == Some(true)
+            );
+            if is_translucent_extrusion {
+                self.translucent_extrusion_layers.insert(id);
+            }
+            if is_translucent_extrusion
+                || matches!(
+                    super::structures::kind(layer),
+                    Some(super::structures::StructureKind::ElevatedLine)
+                )
+            {
+                self.unclipped_3d_layers.insert(id);
+            }
+            if is_zero_opacity_vector_layer(layer, style_zoom) {
+                self.zero_opacity_layers.insert(id);
+            }
+        }
+    }
+}
+
 pub fn queue_system(
     MapContext {
         style,
@@ -40,16 +97,19 @@ pub fn queue_system(
     if renderer.settings.buffer_pools.is_empty() {
         return Ok(());
     }
+    let _ = world.resources.get_or_init_mut::<VectorQueueScratch>();
     let Some((
         Initialized(tile_view_pattern),
         Initialized(buffer_pool),
         mask_phase,
         layer_item_phase,
+        scratch,
     )) = world.resources.query_mut::<(
         &mut Eventually<WgpuTileViewPattern>,
         &mut Eventually<VectorBufferPool>,
         &mut RenderPhase<TileMaskItem>,
         &mut RenderPhase<LayerItem>,
+        &mut VectorQueueScratch,
     )>()
     else {
         return Err(SystemError::Dependencies);
@@ -57,55 +117,26 @@ pub fn queue_system(
 
     let buffer_pool_index = buffer_pool.index();
     let zoom = view_state.zoom().value();
+    let style_zoom = view_state.style_zoom().value();
     let uses_globe = style
         .projection
         .as_ref()
         .is_some_and(|specification| specification.projection_type.uses_globe_rendering(zoom));
 
-    let pattern_layers: FxHashSet<StyleLayerId> = style
-        .layers
-        .iter()
-        .filter(|layer| {
-            layer.paint.as_ref().is_some_and(|paint| {
-                super::pattern::pattern_name(paint, view_state.style_zoom().value()).is_some()
-                    || super::pattern::per_feature_pattern(paint).is_some()
-            })
-        })
-        .map(crate::style::layer::StyleLayer::layer_id)
-        .collect();
-    let translucent_extrusion_layers: FxHashSet<StyleLayerId> = style
-        .layers
-        .iter()
-        .filter(|layer| {
-            matches!(
-                &layer.paint,
-                Some(crate::style::layer::LayerPaint::FillExtrusion(paint))
-                    if paint.fill_extrusion_translucent == Some(true)
-            )
-        })
-        .map(crate::style::layer::StyleLayer::layer_id)
-        .collect();
-    let unclipped_3d_layers: FxHashSet<StyleLayerId> = style
-        .layers
-        .iter()
-        .filter(|layer| {
-            translucent_extrusion_layers.contains(&layer.layer_id())
-                || matches!(
-                    super::structures::kind(layer),
-                    Some(super::structures::StructureKind::ElevatedLine)
-                )
-        })
-        .map(crate::style::layer::StyleLayer::layer_id)
-        .collect();
-    let style_zoom = view_state.style_zoom().value();
-    let zero_opacity_layers: FxHashSet<StyleLayerId> = style
-        .layers
-        .iter()
-        .filter(|layer| is_zero_opacity_vector_layer(layer, style_zoom))
-        .map(crate::style::layer::StyleLayer::layer_id)
-        .collect();
-    let mut active_unclipped_3d_shapes: FxHashSet<(i32, crate::coords::WorldTileCoords, u32)> =
-        FxHashSet::default();
+    scratch.sync_style_sets(style, style_zoom);
+    let VectorQueueScratch {
+        pattern_layers,
+        translucent_extrusion_layers,
+        unclipped_3d_layers,
+        zero_opacity_layers,
+        active_unclipped_3d_shapes,
+        queued_unclipped_3d,
+        extrusion_colors,
+        extrusion_clears,
+        translucent_fronts,
+        ..
+    } = scratch;
+    active_unclipped_3d_shapes.clear();
     for view_tile in tile_view_pattern.iter() {
         view_tile.render_kind(TileKind::Vector, |shape| {
             if let Some(layer_entries) = buffer_pool_index.get_layers(shape.coords()) {
@@ -126,11 +157,10 @@ pub fn queue_system(
     }
     // Every tile's depth is drawn before any tile's colour, so an extrusion that crosses tiles
     // shows its nearest surface once instead of once per tile.
-    let mut extrusion_colors = Vec::new();
-    let mut extrusion_clears = Vec::new();
-    let mut translucent_fronts = Vec::new();
-    let mut queued_unclipped_3d: FxHashSet<(i32, crate::coords::WorldTileCoords, u32)> =
-        FxHashSet::default();
+    extrusion_colors.clear();
+    extrusion_clears.clear();
+    translucent_fronts.clear();
+    queued_unclipped_3d.clear();
     for view_tile in tile_view_pattern.iter() {
         let coords = &view_tile.coords();
         tracing::trace!("Drawing tile at {coords}");
@@ -174,7 +204,7 @@ pub fn queue_system(
                     let is_unclipped_3d = unclipped_3d_layers.contains(&layer_id);
                     if is_unclipped_3d
                         && (has_active_ancestor(
-                            &active_unclipped_3d_shapes,
+                            active_unclipped_3d_shapes,
                             source_shape.wrap,
                             source_shape.coords(),
                             layer_entry.style_layer.index,
@@ -312,9 +342,9 @@ pub fn queue_system(
     }
 
     for item in extrusion_colors
-        .into_iter()
-        .chain(extrusion_clears)
-        .chain(translucent_fronts)
+        .drain(..)
+        .chain(extrusion_clears.drain(..))
+        .chain(translucent_fronts.drain(..))
     {
         layer_item_phase.add(item);
     }
@@ -391,5 +421,37 @@ mod tests {
         // When parent z8 actively draws the same 3D layer 9, child z10 yields to avoid double alpha.
         active.insert((0, parent_z8, 9));
         assert!(has_active_ancestor(&active, 0, child_z10, 9));
+    }
+
+    #[test]
+    fn scratch_style_sets_reuse_cache_and_refresh_on_revision_or_zoom() {
+        let mut style: crate::style::Style = serde_json::from_str(
+            r#"{
+                "version": 8,
+                "sources": { "v": { "type": "vector", "tiles": ["https://example.invalid/{z}/{x}/{y}.pbf"] } },
+                "layers": [
+                    { "id": "hidden", "type": "fill", "source": "v", "source-layer": "s", "paint": { "fill-opacity": 0.0 } },
+                    { "id": "glass", "type": "fill-extrusion", "source": "v", "source-layer": "s", "paint": { "fill-extrusion-translucent": true } }
+                ]
+            }"#,
+        )
+        .expect("valid style");
+        let mut scratch = super::VectorQueueScratch::default();
+        scratch.sync_style_sets(&style, 12.0);
+        assert!(scratch.zero_opacity_layers.contains(&"hidden".into()));
+        assert!(scratch
+            .translucent_extrusion_layers
+            .contains(&"glass".into()));
+        assert!(scratch.unclipped_3d_layers.contains(&"glass".into()));
+
+        style.layers[0].paint = Some(crate::style::layer::LayerPaint::Fill(Default::default()));
+        // Without bumping revision or changing zoom, cached sets remain untouched.
+        scratch.sync_style_sets(&style, 12.0);
+        assert!(scratch.zero_opacity_layers.contains(&"hidden".into()));
+
+        // Bumping style revision refreshes the cached sets in a single pass.
+        style.bump_revision();
+        scratch.sync_style_sets(&style, 12.0);
+        assert!(!scratch.zero_opacity_layers.contains(&"hidden".into()));
     }
 }

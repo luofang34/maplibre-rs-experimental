@@ -48,7 +48,11 @@ interface OffscreenStartArgs {
 }
 
 const ST_TILE_WORKER_COUNT = 4;
-const MT_TILE_WORKER_COUNT = 2;
+
+export const computeMtTileWorkerCount = (): number => {
+    const hc = (typeof navigator !== "undefined" && navigator.hardwareConcurrency) || 4;
+    return Math.min(4, Math.max(2, Math.floor(hc / 2)));
+};
 
 export const startOffscreenController = async ({
     canvas,
@@ -62,7 +66,7 @@ export const startOffscreenController = async ({
     const offscreen = canvas.transferControlToOffscreen();
 
     // Spawn render worker + tile workers immediately at t=0 in parallel with WASM compilation.
-    const workerCount = MULTITHREADED ? MT_TILE_WORKER_COUNT : ST_TILE_WORKER_COUNT;
+    const workerCount = MULTITHREADED ? computeMtTileWorkerCount() : ST_TILE_WORKER_COUNT;
     const renderWorker = createRenderWorker();
     const tileWorkers: Worker[] = [];
     const channels: MessageChannel[] = [];

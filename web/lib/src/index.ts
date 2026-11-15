@@ -3,7 +3,7 @@ import {initializeWasm} from "./wasm-instance.mjs";
 import {checkRequirements, checkWasmFeatures, ensureWebGpuCompatibility} from "./browser";
 import {preventDefaultTouchActions} from "./canvas";
 import {MapLibreMap} from "./map";
-import {startOffscreenController} from "./offscreen-client";
+import {computeMtTileWorkerCount, startOffscreenController} from "./offscreen-client";
 // @ts-ignore esbuild plugin is handling this
 import MultithreadedPoolWorker from './multithreaded/multithreaded-pool.worker.js';
 // @ts-ignore esbuild plugin is handling this
@@ -83,7 +83,8 @@ export const startMapLibre = async (wasmPath: string | WebAssembly.Module | unde
 
     if (MULTITHREADED && !mtWasmPrimed) {
         mtWasmPrimed = true;
-        while (prewarmedMtWorkers.length < 2) {
+        const targetMtWorkers = computeMtTileWorkerCount();
+        while (prewarmedMtWorkers.length < targetMtWorkers) {
             prewarmedMtWorkers.push(createMtWorker());
         }
     }
