@@ -30,20 +30,24 @@ impl Node for DrapePassNode {
         let Some(phase) = world.resources.get::<DrapePhase>() else {
             return;
         };
-        let Some(scratch) = terrain.scratch() else {
+        if phase.targets.is_empty() {
             return;
-        };
+        }
         tracing::trace!(targets = phase.targets.len(), "drape pass");
         let drawn: Vec<_> = phase
             .targets
             .iter()
-            .filter_map(|target| Some((target, terrain.drape_target(target.coords)?)))
+            .filter_map(|target| {
+                let (texture, top_level) = terrain.drape_target(target.coords)?;
+                let scratch = terrain.scratch_for_size(texture.size.width)?;
+                Some((target, texture, top_level, scratch))
+            })
             .collect();
         // The drape passes are timed together: the first writes the start, the last the end.
         let timer = world
             .resources
             .get::<crate::terrain::drape_timing::DrapeTimerSlot>();
-        for (index, (target, (texture, top_level))) in drawn.iter().enumerate() {
+        for (index, (target, texture, top_level, scratch)) in drawn.iter().enumerate() {
             let timestamp_writes = timer.and_then(|slot| {
                 let writes = slot
                     .timer

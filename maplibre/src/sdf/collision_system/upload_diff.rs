@@ -21,8 +21,31 @@ const MAX_CLEAN_GAP_VERTICES: usize = 32;
 pub(super) struct CachedBucketMetadata {
     /// `IndexEntry::allocation_id()` of the backing GPU buffer slice.
     pub allocation_id: u64,
+    /// Whether at least one vertex in `vertices` has target `opacity > 0.0`.
+    pub has_target_visible: bool,
+    /// Latest `start_time_ms` among vertices with `start_opacity > 0.0`, or `-1.0` when none.
+    pub latest_fade_start_ms: f32,
     /// Empty when all GPU vertices in this allocation are `SDFShaderFeatureMetadata::default()`.
     pub vertices: Vec<SDFShaderFeatureMetadata>,
+}
+
+impl CachedBucketMetadata {
+    fn empty(allocation_id: u64) -> Self {
+        Self {
+            allocation_id,
+            has_target_visible: false,
+            latest_fade_start_ms: -1.0,
+            vertices: Vec::new(),
+        }
+    }
+
+    /// Whether any vertex in this bucket evaluates to non-zero opacity at `now_ms`.
+    pub(super) fn is_active_at(&self, now_ms: f32, fade_duration_ms: f32) -> bool {
+        self.has_target_visible
+            || (fade_duration_ms > 0.0
+                && self.latest_fade_start_ms >= 0.0
+                && now_ms < self.latest_fade_start_ms + fade_duration_ms)
+    }
 }
 
 /// Diffs `next` against `prev` (treating a fresh `allocation_id` as all-zero in GPU memory) and
@@ -39,10 +62,7 @@ pub(super) fn diff_and_upload_bucket<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod>(
     let range = entry.feature_metadata_buffer_range();
     let allocated_vertices = ((range.end - range.start) / stride) as usize;
     if allocated_vertices == 0 {
-        return CachedBucketMetadata {
-            allocation_id,
-            vertices: Vec::new(),
-        };
+        return CachedBucketMetadata::empty(allocation_id);
     }
 
     let prev_slice = prev
@@ -51,10 +71,7 @@ pub(super) fn diff_and_upload_bucket<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod>(
 
     // Fast path 1: all symbols hidden on a newly zeroed allocation or already-zeroed bucket.
     if next.is_empty() && prev_slice.is_empty() {
-        return CachedBucketMetadata {
-            allocation_id,
-            vertices: Vec::new(),
-        };
+        return CachedBucketMetadata::empty(allocation_id);
     }
 
     // Fast path 2: bucket became completely hidden after having visible symbols.
@@ -67,10 +84,7 @@ pub(super) fn diff_and_upload_bucket<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod>(
             let zeros = vec![zero; end - start];
             pool.update_feature_metadata_range(queue, entry, start, &zeros);
         }
-        return CachedBucketMetadata {
-            allocation_id,
-            vertices: Vec::new(),
-        };
+        return CachedBucketMetadata::empty(allocation_id);
     }
 
     let mut next = next;
@@ -96,8 +110,21 @@ pub(super) fn diff_and_upload_bucket<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod>(
         }
     }
 
+    let mut has_target_visible = false;
+    let mut latest_fade_start_ms = -1.0_f32;
+    for vertex in &next {
+        if vertex.opacity > 0.0 {
+            has_target_visible = true;
+        }
+        if vertex.start_opacity > 0.0 {
+            latest_fade_start_ms = latest_fade_start_ms.max(vertex.start_time_ms);
+        }
+    }
+
     CachedBucketMetadata {
         allocation_id,
+        has_target_visible,
+        latest_fade_start_ms,
         vertices: next,
     }
 }

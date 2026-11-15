@@ -53,7 +53,8 @@ pub struct CollisionSystem {
     last_terrain_signature: Option<u64>,
     last_external_view: Option<bool>,
     history: temporal::PlacementHistory,
-    uploaded: HashMap<(WorldTileCoords, String), upload_diff::CachedBucketMetadata>,
+    uploaded:
+        FxHashMap<(WorldTileCoords, crate::style::StyleLayerId), upload_diff::CachedBucketMetadata>,
     draw_sort: draw_sort::DrawSort,
     /// Revision of the host's label obstacles the last placement kept clear.
     obstacles: u64,
@@ -103,6 +104,7 @@ impl System for CollisionSystem {
             .unwrap_or_default();
         if crate::render::eye_covering::EyeInFrame::reuses_content(world) {
             sync_symbol_depth_fade(world, &renderer.queue, &self.history);
+            self.prune_inactive_symbol_draws(world);
             return Ok(());
         }
 
@@ -156,6 +158,7 @@ impl System for CollisionSystem {
 
         if !self.controller.should_place(now, zoom, config, triggers) {
             sync_symbol_depth_fade(world, &renderer.queue, &self.history);
+            self.prune_inactive_symbol_draws(world);
             if self.history.is_fading() || self.controller.is_pending() {
                 crate::render::frame_signals::keep_animating(world);
             }
@@ -208,6 +211,7 @@ impl System for CollisionSystem {
             view_state.camera().get_bearing().0,
         ));
         sync_symbol_depth_fade(world, &renderer.queue, &self.history);
+        self.prune_inactive_symbol_draws(world);
         if self.history.is_fading() || self.controller.is_pending() {
             crate::render::frame_signals::keep_animating(world);
         }
@@ -414,14 +418,15 @@ impl CollisionSystem {
         if let Some(Initialized(pool)) = world.resources.get::<Eventually<SymbolBufferPool>>() {
             for (members, metadata) in placed_layers {
                 for (layer, metadata) in members.into_iter().zip(metadata) {
+                    let layer_id = crate::style::StyleLayerId::intern(&layer.style_layer_id);
                     let Some(entry) = pool.index().get_layers(layer.coords).and_then(|entries| {
                         entries
                             .iter()
-                            .find(|entry| entry.style_layer.id == layer.style_layer_id)
+                            .find(|entry| entry.style_layer_id == layer_id)
                     }) else {
                         continue;
                     };
-                    let key = (layer.coords, layer.style_layer_id.clone());
+                    let key = (layer.coords, layer_id);
                     let prev = self.uploaded.get(&key);
                     let next_cached =
                         upload_diff::diff_and_upload_bucket(pool, queue, entry, prev, metadata);
@@ -430,6 +435,40 @@ impl CollisionSystem {
             }
         }
         placed
+    }
+
+    fn prune_inactive_symbol_draws(&self, world: &mut crate::tcs::world::World) {
+        use crate::{
+            render::render_phase::{Draw, DrawState, RenderPhase, TranslucentItem},
+            sdf::render_commands::DrawSymbols,
+        };
+        let now_ms = self.history.effective_shader_time_ms();
+        let fade_duration_ms = self.history.fade_duration_ms();
+        let Some((phase, Initialized(pool))) = world.resources.query_mut::<(
+            &mut RenderPhase<TranslucentItem>,
+            &Eventually<SymbolBufferPool>,
+        )>() else {
+            return;
+        };
+        let symbol_draw: &dyn Draw<TranslucentItem> =
+            &DrawState::<TranslucentItem, DrawSymbols>::INSTANCE;
+        phase.retain(|item| {
+            if !std::ptr::addr_eq(item.draw_function, symbol_draw) {
+                return true;
+            }
+            let Some(entry) =
+                pool.index()
+                    .resolve_entry(item.tile.coords, item.style_layer, item.entry_slot)
+            else {
+                return false;
+            };
+            self.uploaded
+                .get(&(item.tile.coords, item.style_layer))
+                .is_some_and(|cached| {
+                    cached.allocation_id == entry.allocation_id()
+                        && cached.is_active_at(now_ms, fade_duration_ms)
+                })
+        });
     }
 }
 

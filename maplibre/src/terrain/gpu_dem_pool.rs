@@ -13,7 +13,7 @@ use crate::{
 };
 
 /// Default hard LRU cap on GPU DEM textures held in [`GpuDemPool`].
-pub const MAX_GPU_DEM_TEXTURES: usize = 256;
+pub const MAX_GPU_DEM_TEXTURES: usize = 64;
 
 /// One resident GPU elevation texture in [`GpuDemPool`].
 pub struct GpuDemEntry {

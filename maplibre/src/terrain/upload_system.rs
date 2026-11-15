@@ -28,7 +28,10 @@ pub fn upload_system(
     let Some(dem_spec) = dem_source(style) else {
         return Ok(());
     };
-    let source_id = RasterSourceId::from(dem_spec.name.as_str());
+    let source_id = crate::terrain::dem_store::canonical_dem_source(
+        style,
+        &RasterSourceId::from(dem_spec.name.as_str()),
+    );
     world.resources.get_or_init_mut::<FrameUploads>();
     world.resources.get_or_init_mut::<GpuDemPool>();
     let Some(Initialized(terrain_resources)) =

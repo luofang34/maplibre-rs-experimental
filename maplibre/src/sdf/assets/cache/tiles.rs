@@ -164,7 +164,8 @@ impl AssetCache {
         };
         let is_mock =
             url.contains("127.0.0.1") || url.contains("localhost") || url.contains("/unstable/");
-        if is_mock {
+        let retain_tiles = !is_mock && self.0.budget_bytes > super::DEFAULT_BUDGET_BYTES;
+        if !retain_tiles {
             let data = client.fetch(coords, source).await.map_err(|error| {
                 if error.is_not_found() {
                     CachedTileFailure::NotFound
@@ -220,33 +221,54 @@ impl AssetCache {
         };
         let is_mock =
             url.contains("127.0.0.1") || url.contains("localhost") || url.contains("/unstable/");
-        if is_mock {
-            let image = self.load_raster_tile(client, source, coords).await?;
-            let sample_metres = dem::sample_metres(*coords, image.width(), circumference_meters);
-            let tile = decode_dem(image.clone(), unpack, sample_metres).await?;
+        let retain_tiles = !is_mock && self.0.budget_bytes > super::DEFAULT_BUDGET_BYTES;
+        if !retain_tiles {
+            let data = client.fetch(coords, source).await.map_err(|error| {
+                if error.is_not_found() {
+                    CachedTileFailure::NotFound
+                } else {
+                    CachedTileFailure::Transport {
+                        retryable: error.is_retryable(),
+                        message: error.describe(),
+                    }
+                }
+            })?;
+            let rgba = decode_rgba(data).await?;
+            let sample_metres = dem::sample_metres(*coords, rgba.width(), circumference_meters);
+            let tile = decode_dem(Arc::new(rgba), unpack, sample_metres).await?;
             self.0.dem_decodes.fetch_add(1, Ordering::Relaxed);
             return Ok(Arc::new(CachedDemEntry {
                 tile: Arc::new(tile),
-                image,
+                image: Arc::new(RgbaImage::new(0, 0)),
                 circumference_meters,
             }));
         }
         let key = dem_cache_key(&url, coords, unpack, circumference_meters);
         self.load::<CachedDemEntry, _, _>(key, || async {
-            let image = self
-                .load_raster_tile(client, source, coords)
+            let data = client.fetch(coords, source).await.map_err(|error| {
+                if error.is_not_found() {
+                    CachedTileFailure::NotFound.into_asset_failure()
+                } else {
+                    CachedTileFailure::Transport {
+                        retryable: error.is_retryable(),
+                        message: error.describe(),
+                    }
+                    .into_asset_failure()
+                }
+            })?;
+            let rgba = decode_rgba(data)
                 .await
                 .map_err(CachedTileFailure::into_asset_failure)?;
-            let sample_metres = dem::sample_metres(*coords, image.width(), circumference_meters);
-            let tile = decode_dem(image.clone(), unpack, sample_metres)
+            let sample_metres = dem::sample_metres(*coords, rgba.width(), circumference_meters);
+            let tile = decode_dem(Arc::new(rgba), unpack, sample_metres)
                 .await
                 .map_err(CachedTileFailure::into_asset_failure)?;
             self.0.dem_decodes.fetch_add(1, Ordering::Relaxed);
-            let bytes = tile.pixels().len() + image.as_raw().len();
+            let bytes = tile.pixels().len();
             Ok((
                 CachedDemEntry {
                     tile: Arc::new(tile),
-                    image,
+                    image: Arc::new(RgbaImage::new(0, 0)),
                     circumference_meters,
                 },
                 bytes,

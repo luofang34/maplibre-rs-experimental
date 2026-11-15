@@ -98,9 +98,9 @@ pub async fn render_snapshot(
         ),
     );
     if tile_json_res.is_err() {
-        tracing::warn!(
-            timeout_secs = opts.timeout_secs,
-            "TileJSON resolution timed out before snapshot frame loop"
+        eprintln!(
+            "warning: TileJSON resolution timed out after {}s before snapshot frame loop",
+            opts.timeout_secs
         );
     }
     let (kernel, renderer) = renderer_res?;

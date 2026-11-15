@@ -106,6 +106,11 @@ impl<E: Environment, T: DemTransferables> System for PopulateWorldSystem<E, T> {
                 }
             }
             if loaded {
+                crate::terrain::dem_store::release_terrain_store_mirrors(
+                    &mut world.tiles,
+                    style,
+                    coords,
+                );
                 backfill_neighbours(&mut world.tiles, coords);
                 crate::terrain::dem_store::sync_terrain_dem_to_store(
                     &mut world.tiles,

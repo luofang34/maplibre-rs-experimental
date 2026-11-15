@@ -361,11 +361,6 @@ fn drop_cancelled<S: BuildHasher>(
     drop_gpu_data_with_queue(world, &cancelled, queue);
 }
 
-#[cfg(all(test, feature = "headless"))]
-fn drop_gpu_data(world: &mut World, evicted: &[WorldTileCoords]) {
-    drop_gpu_data_with_queue(world, evicted, None);
-}
-
 fn drop_gpu_data_with_queue(
     world: &mut World,
     evicted: &[WorldTileCoords],

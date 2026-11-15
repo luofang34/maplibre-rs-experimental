@@ -23,9 +23,7 @@ use crate::{
         world::World,
     },
     terrain::{
-        dem_store::{
-            decode_image_to_dem, dem_unpack_for_source, ingest_source_dem, is_terrain_source,
-        },
+        dem_store::{decode_image_to_dem, dem_unpack_for_source, ingest_source_dem_with_style},
         LoadedDem,
     },
 };
@@ -135,12 +133,12 @@ pub(crate) fn apply_raster_message_with_style<T: RasterTransferables>(
             };
             match loaded {
                 Some(dem) => {
-                    ingest_source_dem(
+                    ingest_source_dem_with_style(
                         &mut world.tiles,
+                        Some(style),
                         &source,
                         coords,
                         dem,
-                        is_terrain_source(style, &source),
                     );
                     (
                         coords,

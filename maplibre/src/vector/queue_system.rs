@@ -98,6 +98,12 @@ pub fn queue_system(
         .map(crate::style::layer::StyleLayer::layer_id)
         .collect();
     let style_zoom = view_state.style_zoom().value();
+    let zero_opacity_layers: FxHashSet<StyleLayerId> = style
+        .layers
+        .iter()
+        .filter(|layer| is_zero_opacity_vector_layer(layer, style_zoom))
+        .map(crate::style::layer::StyleLayer::layer_id)
+        .collect();
     let mut active_unclipped_3d_shapes: FxHashSet<(i32, crate::coords::WorldTileCoords, u32)> =
         FxHashSet::default();
     for view_tile in tile_view_pattern.iter() {
@@ -105,6 +111,7 @@ pub fn queue_system(
             if let Some(layer_entries) = buffer_pool_index.get_layers(shape.coords()) {
                 for layer_entry in layer_entries {
                     if unclipped_3d_layers.contains(&layer_entry.style_layer_id)
+                        && !zero_opacity_layers.contains(&layer_entry.style_layer_id)
                         && layer_entry.style_layer.is_visible_at(style_zoom)
                     {
                         active_unclipped_3d_shapes.insert((
@@ -150,9 +157,8 @@ pub fn queue_system(
 
             if let Some(layer_entries) = buffer_pool_index.get_layers(source_shape.coords()) {
                 for (slot_idx, layer_entry) in layer_entries.iter().enumerate() {
-                    if !layer_entry
-                        .style_layer
-                        .is_visible_at(view_state.style_zoom().value())
+                    if zero_opacity_layers.contains(&layer_entry.style_layer_id)
+                        || !layer_entry.style_layer.is_visible_at(style_zoom)
                     {
                         continue;
                     }
@@ -314,6 +320,27 @@ pub fn queue_system(
     }
 
     Ok(())
+}
+
+fn is_zero_opacity_vector_layer(layer: &crate::style::layer::StyleLayer, style_zoom: f64) -> bool {
+    if !layer.transitions.is_empty() {
+        return false;
+    }
+    let is_zero = |prop: &Option<crate::style::property::StyleProperty<f32>>| {
+        prop.as_ref().is_some_and(|p| {
+            p.is_feature_constant() && p.evaluate_at_zoom(style_zoom).is_some_and(|v| v <= 0.0)
+        })
+    };
+    match &layer.paint {
+        Some(crate::style::layer::LayerPaint::Fill(paint)) => is_zero(&paint.fill_opacity),
+        Some(crate::style::layer::LayerPaint::Line(paint)) => {
+            is_zero(&paint.line_opacity) || is_zero(&paint.line_width)
+        }
+        Some(crate::style::layer::LayerPaint::FillExtrusion(paint)) => {
+            is_zero(&paint.fill_extrusion_opacity)
+        }
+        _ => false,
+    }
 }
 
 fn has_active_ancestor(

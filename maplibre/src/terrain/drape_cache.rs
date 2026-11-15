@@ -134,6 +134,7 @@ pub enum DrapeState {
 impl<T, K: Copy + Eq + std::hash::Hash> DrapeCache<T, K> {
     /// Ensures `coords` has a texture and reports what it holds: a tile with an unchanged
     /// fingerprint keeps its content.
+    #[cfg(test)]
     pub fn acquire(
         &mut self,
         coords: K,
@@ -141,11 +142,32 @@ impl<T, K: Copy + Eq + std::hash::Hash> DrapeCache<T, K> {
         may_create: bool,
         create: impl FnOnce() -> T,
     ) -> DrapeState {
-        self.acquire_as(coords, fingerprint, (may_create, true), create)
+        self.acquire_matching(coords, fingerprint, may_create, |_| true, |_| true, create)
+    }
+
+    /// Like [`acquire`](Self::acquire), matching desired texture dimensions for tiered LOD reuse.
+    pub fn acquire_matching(
+        &mut self,
+        coords: K,
+        fingerprint: u64,
+        may_create: bool,
+        keep_existing: impl Fn(&T) -> bool,
+        reusable: impl Fn(&T) -> bool,
+        create: impl FnOnce() -> T,
+    ) -> DrapeState {
+        self.acquire_as(
+            coords,
+            fingerprint,
+            (may_create, true),
+            keep_existing,
+            reusable,
+            create,
+        )
     }
 
     /// Like [`acquire`](Self::acquire), for a drape prepared ahead of the view, which a view
     /// has not shown until one acquires it.
+    #[cfg(test)]
     pub fn acquire_ahead(
         &mut self,
         coords: K,
@@ -153,7 +175,46 @@ impl<T, K: Copy + Eq + std::hash::Hash> DrapeCache<T, K> {
         may_create: bool,
         create: impl FnOnce() -> T,
     ) -> DrapeState {
-        self.acquire_as(coords, fingerprint, (may_create, false), create)
+        self.acquire_ahead_matching(coords, fingerprint, may_create, |_| true, |_| true, create)
+    }
+
+    /// Like [`acquire_ahead`](Self::acquire_ahead), matching desired texture dimensions.
+    pub fn acquire_ahead_matching(
+        &mut self,
+        coords: K,
+        fingerprint: u64,
+        may_create: bool,
+        keep_existing: impl Fn(&T) -> bool,
+        reusable: impl Fn(&T) -> bool,
+        create: impl FnOnce() -> T,
+    ) -> DrapeState {
+        self.acquire_as(
+            coords,
+            fingerprint,
+            (may_create, false),
+            keep_existing,
+            reusable,
+            create,
+        )
+    }
+
+    fn recycle_to_free(&mut self, texture: T) {
+        if self.free.len() < MAX_FREE_TEXTURES {
+            self.free.push(texture);
+        }
+    }
+
+    fn make_room_for_create(&mut self) {
+        if self.total_textures() < HARD_MAX_DRAPE_TEXTURES {
+            return;
+        }
+        if self.free.pop().is_some() {
+            return;
+        }
+        if self.take_unshown().is_some() {
+            return;
+        }
+        let _ = self.parked.pop_back();
     }
 
     fn acquire_as(
@@ -161,55 +222,86 @@ impl<T, K: Copy + Eq + std::hash::Hash> DrapeCache<T, K> {
         coords: K,
         fingerprint: u64,
         (may_create, shown): (bool, bool),
+        keep_existing: impl Fn(&T) -> bool,
+        reusable: impl Fn(&T) -> bool,
         create: impl FnOnce() -> T,
     ) -> DrapeState {
-        match self.entries.get_mut(&coords) {
-            // A drape prepared ahead keeps what it was prepared with while it is out of view:
-            // the looser covering it follows shifts as the view moves, and redrawing it for
-            // that would draw what no one sees. The view checks it once it shows the tile.
-            Some(entry) if !shown && entry.has_content => DrapeState::Unchanged,
-            Some(entry) => {
-                entry.shown |= shown;
-                entry.acquire(fingerprint)
+        let has_reusable_free = self.free.iter().any(&reusable);
+        if let Some(entry) = self.entries.get_mut(&coords) {
+            if !shown && entry.has_content {
+                return DrapeState::Unchanged;
             }
-            None => {
-                if let Some(index) = self.parked.iter().position(|(parked, _)| *parked == coords) {
-                    if let Some((_, mut entry)) = self.parked.remove(index) {
-                        entry.shown |= shown;
-                        let state = entry.acquire(fingerprint);
-                        self.entries.insert(coords, entry);
-                        return state;
-                    }
+            if keep_existing(&entry.texture) || (!may_create && !has_reusable_free) {
+                entry.shown |= shown;
+                return entry.acquire(fingerprint);
+            }
+            if let Some(old) = self.entries.remove(&coords) {
+                self.recycle_to_free(old.texture);
+            }
+        } else if let Some(index) = self.parked.iter().position(|(parked, _)| *parked == coords) {
+            if let Some((_, mut entry)) = self.parked.remove(index) {
+                if keep_existing(&entry.texture) || (!may_create && !has_reusable_free) {
+                    entry.shown |= shown;
+                    let state = entry.acquire(fingerprint);
+                    self.entries.insert(coords, entry);
+                    return state;
                 }
-                // A spare texture first, then a new one while the budget allows. Past the budget
-                // a view takes the texture of a drape prepared ahead of it that none has shown,
-                // then the one parked longest ago; a drape prepared ahead takes neither, and a
-                // tile that finds none goes without.
-                let can_create = may_create && self.total_textures() < HARD_MAX_DRAPE_TEXTURES;
-                let texture = match self.free.pop() {
-                    Some(texture) => texture,
-                    None if can_create => create(),
-                    None if !shown => return DrapeState::Withheld,
-                    None => match self
-                        .take_unshown()
+                self.recycle_to_free(entry.texture);
+            }
+        }
+
+        // A matching spare texture first, then a new one while the budget allows. Past the budget
+        // a view takes the texture of a drape prepared ahead of it that none has shown, then the
+        // one parked longest ago; a drape prepared ahead takes neither, and a tile that finds none
+        // goes without.
+        let matching_free = self
+            .free
+            .iter()
+            .rposition(&reusable)
+            .map(|idx| self.free.swap_remove(idx));
+        let texture = match matching_free {
+            Some(texture) => texture,
+            None if may_create => {
+                self.make_room_for_create();
+                if self.total_textures() < HARD_MAX_DRAPE_TEXTURES {
+                    create()
+                } else if !shown {
+                    return DrapeState::Withheld;
+                } else {
+                    match self
+                        .take_unshown_matching(&reusable)
+                        .or_else(|| self.take_parked_matching(&reusable))
+                        .or_else(|| self.free.pop())
+                        .or_else(|| self.take_unshown())
                         .or_else(|| self.parked.pop_back().map(|(_, entry)| entry.texture))
                     {
                         Some(texture) => texture,
                         None => return DrapeState::Withheld,
-                    },
-                };
-                self.entries.insert(
-                    coords,
-                    Entry {
-                        texture,
-                        fingerprint: Some(fingerprint),
-                        has_content: true,
-                        shown,
-                    },
-                );
-                DrapeState::New
+                    }
+                }
             }
-        }
+            None if !shown => return DrapeState::Withheld,
+            None => match self
+                .take_unshown_matching(&reusable)
+                .or_else(|| self.take_parked_matching(&reusable))
+                .or_else(|| self.free.pop())
+                .or_else(|| self.take_unshown())
+                .or_else(|| self.parked.pop_back().map(|(_, entry)| entry.texture))
+            {
+                Some(texture) => texture,
+                None => return DrapeState::Withheld,
+            },
+        };
+        self.entries.insert(
+            coords,
+            Entry {
+                texture,
+                fingerprint: Some(fingerprint),
+                has_content: true,
+                shown,
+            },
+        );
+        DrapeState::New
     }
 
     /// Removes a drape prepared ahead of the view that none has shown, for its texture.
@@ -220,6 +312,32 @@ impl<T, K: Copy + Eq + std::hash::Hash> DrapeCache<T, K> {
             .find(|(_, entry)| !entry.shown)
             .map(|(coords, _)| *coords)?;
         self.entries.remove(&coords).map(|entry| entry.texture)
+    }
+
+    fn take_unshown_matching(&mut self, reusable: impl Fn(&T) -> bool) -> Option<T> {
+        let coords = self
+            .entries
+            .iter()
+            .find(|(_, entry)| !entry.shown && reusable(&entry.texture))
+            .map(|(coords, _)| *coords)?;
+        self.entries.remove(&coords).map(|entry| entry.texture)
+    }
+
+    fn take_parked_matching(&mut self, reusable: impl Fn(&T) -> bool) -> Option<T> {
+        let idx = self
+            .parked
+            .iter()
+            .rposition(|(_, entry)| reusable(&entry.texture))?;
+        self.parked.remove(idx).map(|(_, entry)| entry.texture)
+    }
+
+    /// Iterates over every active, parked, and free texture currently held by the cache.
+    pub fn iter_all_textures(&self) -> impl Iterator<Item = &T> {
+        self.entries
+            .values()
+            .map(|entry| &entry.texture)
+            .chain(self.parked.iter().map(|(_, entry)| &entry.texture))
+            .chain(self.free.iter())
     }
 
     /// Textures held, parked and spare together.

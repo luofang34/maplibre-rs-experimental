@@ -54,14 +54,15 @@ pub fn upload_system(
     // Every loaded tile gets its texture, as GL JS uploads a raster tile when it arrives, as
     // far as the frame's image floor reaches; coarser tiles go first so an ancestor stand-in is
     // ready before a burst of finer children exhausts the frame budget.
-    let source_tiles = world
+    let source_tiles: Vec<WorldTileCoords> = world
         .tiles
         .pyramid_of::<RasterLayersDataComponent>()
-        .coords_coarse_to_fine();
+        .coords_coarse_to_fine()
+        .collect();
     let mut deferred = upload_raster_layer(
         raster_resources,
         (device, queue),
-        &world.tiles,
+        &mut world.tiles,
         source_tiles,
         budget,
     );
@@ -71,6 +72,7 @@ pub fn upload_system(
             .pyramid_of::<DemLayersComponent>()
             .coords_coarse_to_fine();
         deferred |= upload_dem_layers(
+            style,
             raster_resources,
             gpu_dem_pool,
             (device, queue),
@@ -86,45 +88,50 @@ pub fn upload_system(
     Ok(())
 }
 
-/// Uploads the imagery textures of loaded tiles that the frame's budget admits; `true` when some
-/// wait for a later frame.
+/// Uploads the imagery textures of loaded tiles that the frame's budget admits, immediately
+/// releasing uploaded CPU `RgbaImage` pixel buffers; returns `true` when some wait for a later frame.
 #[tracing::instrument(skip_all)]
 fn upload_raster_layer(
     raster_resources: &mut RasterResources,
     (device, queue): (&wgpu::Device, &crate::render::upload_queue::UploadQueue),
-    tiles: &Tiles,
+    tiles: &mut Tiles,
     source_tiles: impl IntoIterator<Item = WorldTileCoords>,
     budget: &mut FrameUploads,
 ) -> bool {
     let mut mipmapped = Vec::new();
     let mut deferred = false;
     'tiles: for coords in source_tiles {
-        let Some(layers) = tiles.query::<&RasterLayersDataComponent>(coords) else {
+        let Some(layers) = tiles.query_mut::<&mut RasterLayersDataComponent>(coords) else {
             continue;
         };
-        for data in &layers.layers {
+        for data in &mut layers.layers {
             if let RasterLayerData::Available(data) = data {
-                if raster_resources.has_border(&data.source) && data.image.is_empty() {
+                if data.image.is_empty() {
                     continue;
                 }
                 // A result that lands after its source left the style is never drawn.
-                if raster_resources.draws(&data.source)
-                    && raster_resources
-                        .get_bound_texture(&data.source, &coords)
-                        .is_none()
-                {
-                    if !budget.take(UploadKind::Image, data.image.as_raw().len()) {
-                        deferred = true;
-                        break 'tiles;
-                    }
-                    mipmapped.push(upload_imagery(
-                        raster_resources,
-                        device,
-                        queue,
-                        coords,
-                        data,
-                    ));
+                if !raster_resources.draws(&data.source) {
+                    continue;
                 }
+                if raster_resources
+                    .get_bound_texture(&data.source, &coords)
+                    .is_some()
+                {
+                    data.image = image::RgbaImage::new(0, 0);
+                    continue;
+                }
+                if !budget.take(UploadKind::Image, data.image.as_raw().len()) {
+                    deferred = true;
+                    break 'tiles;
+                }
+                mipmapped.push(upload_imagery(
+                    raster_resources,
+                    device,
+                    queue,
+                    coords,
+                    data,
+                ));
+                data.image = image::RgbaImage::new(0, 0);
             }
         }
     }
@@ -137,6 +144,7 @@ fn upload_raster_layer(
 /// `hillshade` and `color-relief` source drawn by the style.
 #[tracing::instrument(skip_all)]
 fn upload_dem_layers(
+    style: &crate::style::Style,
     raster_resources: &mut RasterResources,
     gpu_dem_pool: &mut GpuDemPool,
     (device, queue): (&wgpu::Device, &crate::render::upload_queue::UploadQueue),
@@ -155,17 +163,18 @@ fn upload_dem_layers(
             {
                 continue;
             }
-            let needs_gpu_write = gpu_dem_pool.needs_upload(source, coords, dem);
+            let pool_source = crate::terrain::dem_store::canonical_dem_source(style, source);
+            let needs_gpu_write = gpu_dem_pool.needs_upload(&pool_source, coords, dem);
             if needs_gpu_write && !budget.take(UploadKind::Image, dem.tile.pixels().len()) {
                 deferred = true;
                 break 'tiles;
             }
             let entry = if needs_gpu_write {
-                gpu_dem_pool.upload(device, queue, source, coords, dem)
-            } else if let Some(existing) = gpu_dem_pool.get(source, coords) {
+                gpu_dem_pool.upload(device, queue, &pool_source, coords, dem)
+            } else if let Some(existing) = gpu_dem_pool.get(&pool_source, coords) {
                 existing
             } else {
-                gpu_dem_pool.upload(device, queue, source, coords, dem)
+                gpu_dem_pool.upload(device, queue, &pool_source, coords, dem)
             };
             raster_resources.bind_dem_texture(
                 device,

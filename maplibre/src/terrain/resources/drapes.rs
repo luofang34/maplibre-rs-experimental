@@ -54,7 +54,23 @@ impl TerrainResources {
         (self.drape_view, coords)
     }
 
-    /// Gives a view tile a drape texture and reports what it holds.
+    /// Selects the tiered drape texture edge resolution by camera-distance rank:
+    /// focus tiles (`rank < 4`) use `self.drape_size` (`1024`), mid-range tiles (`4..12`) use
+    /// `<= 512`, and distant horizon or prefetch tiles (`rank >= 12 || prefetch`) use `<= 256`.
+    pub fn tier_drape_size(&self, rank: usize, prefetch: bool) -> u32 {
+        if self.drape_size == 0 {
+            return 0;
+        }
+        if prefetch || rank >= 12 {
+            self.drape_size.min(super::MIN_DRAPE_SIZE)
+        } else if rank >= 4 {
+            self.drape_size.min(512)
+        } else {
+            self.drape_size
+        }
+    }
+
+    /// Gives a view tile a drape texture at full `self.drape_size` and reports what it holds.
     pub fn acquire_drape(
         &mut self,
         device: &wgpu::Device,
@@ -62,19 +78,38 @@ impl TerrainResources {
         fingerprint: u64,
         may_create: bool,
     ) -> DrapeState {
+        self.acquire_drape_ranked(device, coords, 0, fingerprint, may_create)
+    }
+
+    /// Gives a view tile a distance-LOD tiered drape texture according to its nearest-first `rank`.
+    pub fn acquire_drape_ranked(
+        &mut self,
+        device: &wgpu::Device,
+        coords: WorldTileCoords,
+        rank: usize,
+        fingerprint: u64,
+        may_create: bool,
+    ) -> DrapeState {
         let format = self.color_format;
-        let size = self.drape_size;
+        let size = self.tier_drape_size(rank, false);
         let key = self.drape_key(coords);
-        self.drapes.acquire(key, fingerprint, may_create, || {
-            DrapeTexture::new(Texture::new_mipmapped(
-                Some("drape texture"),
-                device,
-                format,
-                size,
-                size,
-                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            ))
-        })
+        self.drapes.acquire_matching(
+            key,
+            fingerprint,
+            may_create,
+            |drape| drape.texture.size.width >= size,
+            |drape| drape.texture.size.width == size,
+            || {
+                DrapeTexture::new(Texture::new_mipmapped(
+                    Some("drape texture"),
+                    device,
+                    format,
+                    size,
+                    size,
+                    wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                ))
+            },
+        )
     }
 
     /// Like [`acquire_drape`](Self::acquire_drape), for a drape prepared ahead of the view.
@@ -86,18 +121,25 @@ impl TerrainResources {
         may_create: bool,
     ) -> DrapeState {
         let format = self.color_format;
-        let size = self.drape_size;
+        let size = self.tier_drape_size(usize::MAX, true);
         let key = self.drape_key(coords);
-        self.drapes.acquire_ahead(key, fingerprint, may_create, || {
-            DrapeTexture::new(Texture::new_mipmapped(
-                Some("drape texture"),
-                device,
-                format,
-                size,
-                size,
-                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            ))
-        })
+        self.drapes.acquire_ahead_matching(
+            key,
+            fingerprint,
+            may_create,
+            |drape| drape.texture.size.width >= size,
+            |drape| drape.texture.size.width == size,
+            || {
+                DrapeTexture::new(Texture::new_mipmapped(
+                    Some("drape texture"),
+                    device,
+                    format,
+                    size,
+                    size,
+                    wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                ))
+            },
+        )
     }
 
     /// Whether the view may take a texture for the tile while holding at most `allowed`: a
@@ -155,6 +197,19 @@ impl TerrainResources {
         self.drapes
             .get(self.drape_key(coords))
             .map(|drape| &drape.texture)
+    }
+
+    /// Edge resolution in pixels of the resident drape texture assigned to `coords`, if any.
+    pub fn drape_edge_px(&self, coords: WorldTileCoords) -> Option<u32> {
+        self.drape_texture(coords).map(|tex| tex.size.width)
+    }
+
+    /// Total GPU bytes held by all active, parked, and free mipmapped drape textures.
+    pub(super) fn drape_texture_bytes(&self) -> usize {
+        self.drapes
+            .iter_all_textures()
+            .map(|drape| (drape.texture.size.width as usize).pow(2) * 4 * 4 / 3)
+            .sum()
     }
 
     /// Drape texture of a view tile with the view of its first level, the one drawn into.

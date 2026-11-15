@@ -40,7 +40,7 @@ pub const UNIFORM_STRIDE: u64 = 512;
 const _: () = assert!(std::mem::size_of::<TerrainTileUniforms>() as u64 <= UNIFORM_STRIDE);
 const _: () = assert!(std::mem::size_of::<TerrainTileUniforms>() == 512);
 /// Largest number of terrain tiles drawn in one frame.
-const UNIFORM_CAPACITY: u64 = 1024;
+const UNIFORM_CAPACITY: u64 = 256;
 
 /// Per-tile inputs of the terrain shaders, one block per drawn tile.
 #[repr(C)]
@@ -151,7 +151,7 @@ pub struct TerrainResources {
     drapes: DrapeCache<drapes::DrapeTexture, drapes::DrapeKey>,
     /// The view whose drapes the tile lookups below answer with.
     drape_view: Option<crate::render::eye_covering::ViewSlotId>,
-    drape_scratch: Option<DrapeScratch>,
+    drape_scratches: Vec<(u32, DrapeScratch)>,
     draws: Vec<TerrainDraw>,
     /// Bind groups by DEM and drape texture, kept across frames: creating one per tile per
     /// frame is a hundred a frame, and on Metal the memory behind them is returned only
@@ -272,7 +272,7 @@ impl TerrainResources {
             empty_dem,
             drapes: DrapeCache::default(),
             drape_view: None,
-            drape_scratch: None,
+            drape_scratches: Vec::new(),
             draws: Vec::new(),
             bind_groups: HashMap::new(),
             edge_heights,
@@ -297,14 +297,14 @@ impl TerrainResources {
             TerrainDrapeMode::ProceduralRelief(style) => {
                 self.drape_mode = TerrainDrapeMode::ProceduralRelief(style);
                 self.drape_size = 0;
-                self.drape_scratch = None;
+                self.drape_scratches.clear();
                 self.drapes = DrapeCache::default();
             }
             TerrainDrapeMode::Draped { edge_px } => {
                 let clamped = edge_px.clamp(MIN_DRAPE_SIZE, max_dim);
                 if self.drape_size != clamped {
                     self.drape_size = clamped;
-                    self.drape_scratch = None;
+                    self.drape_scratches.clear();
                     self.drapes = DrapeCache::default();
                 }
                 self.drape_mode = TerrainDrapeMode::Draped { edge_px: clamped };
@@ -347,22 +347,26 @@ impl TerrainResources {
 
     /// Bytes of drape textures, held and free, and of DEM textures.
     pub fn texture_bytes(&self) -> (usize, usize) {
-        let (held, free) = self.drape_counts();
         // Four bytes a texel, and a mip chain adds a third.
-        let drape = (self.drape_size as usize).pow(2) * 4 * 4 / 3;
+        let drape = self.drape_texture_bytes();
         let dem = self
             .dem_textures
             .values()
             .map(|dem| (dem.texture.size.width * dem.texture.size.height * 4) as usize)
             .sum();
-        ((held + free) * drape, dem)
+        (drape, dem)
     }
 
-    /// Creates the scratch attachments used by every drape pass.
+    /// Creates the scratch attachments used by drape passes at the configured maximum edge size.
     pub fn ensure_scratch(&mut self, device: &wgpu::Device) {
-        if self.drape_scratch.is_some()
-            || self.drape_mode.is_procedural_relief()
-            || self.drape_size == 0
+        self.ensure_scratch_for_size(device, self.drape_size);
+    }
+
+    /// Creates per-tier scratch attachments matching `edge_px` when not yet allocated.
+    pub fn ensure_scratch_for_size(&mut self, device: &wgpu::Device, edge_px: u32) {
+        if self.drape_mode.is_procedural_relief()
+            || edge_px == 0
+            || self.scratch_for_size(edge_px).is_some()
         {
             return;
         }
@@ -371,8 +375,8 @@ impl TerrainResources {
                 Some("drape multisampled color"),
                 device,
                 self.color_format,
-                self.drape_size,
-                self.drape_size,
+                edge_px,
+                edge_px,
                 self.msaa,
                 wgpu::TextureUsages::RENDER_ATTACHMENT,
             )
@@ -381,20 +385,31 @@ impl TerrainResources {
             Some("drape depth stencil"),
             device,
             self.depth_format,
-            self.drape_size,
-            self.drape_size,
+            edge_px,
+            edge_px,
             self.msaa,
             wgpu::TextureUsages::RENDER_ATTACHMENT,
         );
-        self.drape_scratch = Some(DrapeScratch {
-            color,
-            depth_stencil,
-        });
+        self.drape_scratches.push((
+            edge_px,
+            DrapeScratch {
+                color,
+                depth_stencil,
+            },
+        ));
     }
 
-    /// Scratch attachments of the drape passes.
+    /// Scratch attachments matching `edge_px` for a tiered drape pass.
+    pub fn scratch_for_size(&self, edge_px: u32) -> Option<&DrapeScratch> {
+        self.drape_scratches
+            .iter()
+            .find(|(size, _)| *size == edge_px)
+            .map(|(_, scratch)| scratch)
+    }
+
+    /// Scratch attachments of the configured primary drape size.
     pub fn scratch(&self) -> Option<&DrapeScratch> {
-        self.drape_scratch.as_ref()
+        self.scratch_for_size(self.drape_size)
     }
 
     /// Writes the per-tile uniform blocks and returns how many fit.

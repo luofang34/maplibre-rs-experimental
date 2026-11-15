@@ -24,9 +24,9 @@ use crate::{
 
 /// Decoded assets are evicted least recently used once they exceed this many bytes.
 #[cfg(target_arch = "wasm32")]
-const DEFAULT_BUDGET_BYTES: usize = 1024 * 1024;
+pub(super) const DEFAULT_BUDGET_BYTES: usize = 1024 * 1024;
 #[cfg(not(target_arch = "wasm32"))]
-const DEFAULT_BUDGET_BYTES: usize = 24 * 1024 * 1024;
+pub(super) const DEFAULT_BUDGET_BYTES: usize = 2 * 1024 * 1024;
 
 /// A missing or undecodable asset is not requested again for this long.
 const NEGATIVE_TTL: Duration = Duration::from_secs(30);

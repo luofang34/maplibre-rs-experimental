@@ -357,3 +357,43 @@ fn hard_max_drape_textures_caps_allocations_even_when_creation_is_allowed() {
     assert_eq!(created as usize, super::HARD_MAX_DRAPE_TEXTURES);
     assert_eq!(cache.total_textures(), super::HARD_MAX_DRAPE_TEXTURES);
 }
+
+#[test]
+fn tiered_matching_upgrades_distant_tile_and_reuses_same_size_spares() {
+    let mut cache = DrapeCache::<u32>::default();
+    let focus = tile(1, 1, 5);
+    let horizon = tile(4, 4, 5);
+
+    assert_eq!(
+        cache.acquire_ahead_matching(horizon, 10, true, |s| *s >= 256, |s| *s == 256, || 256),
+        DrapeState::New
+    );
+    assert_eq!(cache.get(horizon), Some(&256));
+
+    // Horizon tile moves into camera focus (`1024`): upgrades and recycles `256` into free list.
+    assert_eq!(
+        cache.acquire_matching(horizon, 10, true, |s| *s >= 1024, |s| *s == 1024, || 1024),
+        DrapeState::New
+    );
+    assert_eq!(cache.get(horizon), Some(&1024));
+    assert_eq!(cache.free_len(), 1);
+
+    // Next horizon tile reuses the recycled `256` texture without creating a new one.
+    let mut created_far = 0_u32;
+    assert_eq!(
+        cache.acquire_matching(
+            focus,
+            11,
+            true,
+            |s| *s >= 256,
+            |s| *s == 256,
+            || {
+                created_far += 1;
+                256
+            }
+        ),
+        DrapeState::New
+    );
+    assert_eq!(created_far, 0, "recycled 256px spare must be reused");
+    assert_eq!(cache.get(focus), Some(&256));
+}

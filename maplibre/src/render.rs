@@ -402,7 +402,7 @@ impl Renderer {
                 label: settings.device_label.as_ref().map(|a| a.as_ref()),
                 required_features: features,
                 required_limits: limits,
-                memory_hints: wgpu::MemoryHints::default(),
+                memory_hints: wgpu::MemoryHints::MemoryUsage,
                 trace,
                 ..Default::default()
             })

@@ -168,13 +168,12 @@ fn bucket_key(
     source_layer: Option<&tile::Layer>,
     request: &VectorTileRequest,
 ) -> Option<GeometryBucketKey> {
-    let layer = source_layer.filter(|l| !l.features.is_empty())?;
+    let _ = source_layer.filter(|l| !l.features.is_empty())?;
     let edge_y = (1_i32 << u8::from(request.coords.z).min(30)) - 1;
-    if request.coords.y <= 0 || request.coords.y >= edge_y {
-        return None;
-    }
     let style_zoom = request.style_zoom();
-    if layer_reads_geometry(style)
+    if request.coords.y <= 0
+        || request.coords.y >= edge_y
+        || layer_reads_geometry(style)
         || layer_reads_identity(style)
         || layer_paint_reads_feature_state(style)
         || layer_geometry_reads_feature_state(style)
@@ -184,33 +183,28 @@ fn bucket_key(
     {
         return None;
     }
-    let _ = layer;
     let paint = style.paint.as_ref()?;
     match paint {
-        LayerPaint::Fill(fill) => {
-            if fill.outline_color().is_some() || per_feature_pattern(paint).is_some() {
-                return None;
-            }
+        LayerPaint::Fill(fill)
+            if fill.outline_color().is_none() && per_feature_pattern(paint).is_none() =>
+        {
             Some(GeometryBucketKey::Fill)
         }
-        LayerPaint::Line(line) => {
-            if line.may_use_vertex_agl()
-                || line.line_gradient.is_some()
-                || per_feature_pattern(paint).is_some()
-                || LineFeatureStyle::for_paint(line, style_zoom).is_some()
-                || LineElevationOptions::for_paint(line, style_zoom).is_some()
-                || LineStroke::join_property(style).is_some()
-            {
-                return None;
-            }
+        LayerPaint::Line(line)
+            if !line.may_use_vertex_agl()
+                && line.line_gradient.is_none()
+                && per_feature_pattern(paint).is_none()
+                && LineFeatureStyle::for_paint(line, style_zoom).is_none()
+                && LineElevationOptions::for_paint(line, style_zoom).is_none()
+                && LineStroke::join_property(style).is_none() =>
+        {
             let stroke = LineStroke::of_layer_at_zoom(style, style_zoom);
-            let split_corners = line.line_pattern.is_some() || line.line_dasharray.is_some();
             Some(GeometryBucketKey::Line {
                 cap: stroke.cap,
                 join: stroke.join,
                 miter_bits: stroke.miter_limit.to_bits(),
                 round_bits: stroke.round_limit.to_bits(),
-                split_corners,
+                split_corners: line.line_pattern.is_some() || line.line_dasharray.is_some(),
             })
         }
         _ => None,
@@ -300,8 +294,7 @@ fn process_shared_group<T: VectorTransferables, C: crate::io::apc::Context>(
         layer,
         &union_indices,
         shared_props,
-        first_style,
-        first_paint,
+        (first_style, first_paint),
         request,
         state_ctx,
     ) else {
@@ -387,8 +380,7 @@ fn tessellate_union_with_fallback(
     layer: &tile::Layer,
     union_indices: &[usize],
     shared_props: Option<&[Arc<FeatureProperties>]>,
-    first_style: &StyleLayer,
-    first_paint: &LayerPaint,
+    first: (&StyleLayer, &LayerPaint),
     request: &VectorTileRequest,
     state_ctx: Option<crate::vector::tessellation::feature_paint::FeatureStateSyncContext>,
 ) -> Option<(Vec<ShaderVertex>, Vec<IndexDataType>, Vec<FeatureSpan>)> {
@@ -396,8 +388,7 @@ fn tessellate_union_with_fallback(
         layer,
         union_indices,
         shared_props,
-        first_style,
-        first_paint,
+        first,
         request,
         state_ctx.clone(),
     ) {
@@ -409,16 +400,7 @@ fn tessellate_union_with_fallback(
                 return None;
             }
             tracing::warn!(coords = %request.coords, layer = %layer.name, dropped, ?error, "features whose geometry cannot be read are left out");
-            tessellate_union(
-                layer,
-                &readable,
-                shared_props,
-                first_style,
-                first_paint,
-                request,
-                state_ctx,
-            )
-            .ok()
+            tessellate_union(layer, &readable, shared_props, first, request, state_ctx).ok()
         }
     }
 }
@@ -427,8 +409,7 @@ fn tessellate_union(
     layer: &tile::Layer,
     slice: &[usize],
     shared_props: Option<&[Arc<FeatureProperties>]>,
-    first_style: &StyleLayer,
-    first_paint: &LayerPaint,
+    (first_style, first_paint): (&StyleLayer, &LayerPaint),
     request: &VectorTileRequest,
     state_ctx: Option<crate::vector::tessellation::feature_paint::FeatureStateSyncContext>,
 ) -> geozero::error::Result<(Vec<ShaderVertex>, Vec<IndexDataType>, Vec<FeatureSpan>)> {
@@ -501,9 +482,9 @@ fn eval_sort_key(
     if let Some(props) = shared_props.and_then(|all| all.get(feat_idx)) {
         return sort_prop.evaluate_for(props, zoom).unwrap_or(0.0);
     }
-    let Some(feature) = layer.features.get(feat_idx) else {
-        return 0.0;
-    };
-    let props = feature_properties(layer, feature);
-    sort_prop.evaluate_for(&props, zoom).unwrap_or(0.0)
+    layer
+        .features
+        .get(feat_idx)
+        .and_then(|feat| sort_prop.evaluate_for(&feature_properties(layer, feat), zoom))
+        .unwrap_or(0.0)
 }

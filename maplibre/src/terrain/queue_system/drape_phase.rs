@@ -28,6 +28,7 @@ type TargetSlots = Vec<Option<usize>>;
 ///
 /// Shapes past `capacity` get no slot: a view falling back to many small child tiles can ask
 /// for more than the metadata buffer holds, and those shapes wait for their own tiles.
+#[cfg(test)]
 pub(super) fn drape_metadata(
     specs: &[TargetSpec],
     redraw: &[bool],
@@ -35,10 +36,21 @@ pub(super) fn drape_metadata(
     view_zoom: Zoom,
     drape_size: u32,
 ) -> (Vec<ShaderTileMetadata>, Vec<TargetSlots>) {
+    let target_sizes = vec![drape_size; specs.len()];
+    drape_metadata_sized(specs, redraw, &target_sizes, capacity, view_zoom)
+}
+
+pub(super) fn drape_metadata_sized(
+    specs: &[TargetSpec],
+    redraw: &[bool],
+    target_sizes: &[u32],
+    capacity: usize,
+    view_zoom: Zoom,
+) -> (Vec<ShaderTileMetadata>, Vec<TargetSlots>) {
     let mut metadata = Vec::new();
     let mut slots = Vec::with_capacity(specs.len());
     let mut skipped = 0_usize;
-    for (spec, redraw) in specs.iter().zip(redraw) {
+    for ((spec, redraw), &drape_size) in specs.iter().zip(redraw).zip(target_sizes) {
         let texture_zoom = Zoom::new(
             f64::from(u8::from(spec.coords.z)) + (f64::from(drape_size) / TILE_SIZE).log2(),
         );
@@ -229,11 +241,17 @@ pub(super) fn encode_drapes(
         _ => return Err(SystemError::Dependencies),
     };
 
-    let drape_size = match world.resources.get::<Eventually<TerrainResources>>() {
-        Some(Initialized(terrain)) => terrain.drape_size(),
+    let target_sizes: Vec<u32> = match world.resources.get::<Eventually<TerrainResources>>() {
+        Some(Initialized(terrain)) => {
+            let fallback = terrain.drape_size();
+            specs
+                .iter()
+                .map(|spec| terrain.drape_edge_px(spec.coords).unwrap_or(fallback))
+                .collect()
+        }
         _ => return Err(SystemError::Dependencies),
     };
-    let (metadata, slots) = drape_metadata(specs, redraw, capacity, zoom, drape_size);
+    let (metadata, slots) = drape_metadata_sized(specs, redraw, &target_sizes, capacity, zoom);
     let ranges = {
         let Some(Initialized(pattern)) =
             world.resources.get_mut::<Eventually<WgpuTileViewPattern>>()

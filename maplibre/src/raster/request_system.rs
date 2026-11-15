@@ -2,7 +2,7 @@
 
 use std::{borrow::Cow, marker::PhantomData, rc::Rc};
 
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
     context::MapContext,
@@ -96,8 +96,8 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
         let mut requested = FxHashSet::default();
         let mut budget = request_budget(world);
         let stand_ins = drape_stand_ins(style, view_state, world);
-        let wanted = wanted_tiles(regions, stand_ins, style, world);
-        let sources: Vec<_> = source_layer_groups(style, TileKind::Raster)
+        let (wanted, wanted_sources) = wanted_tiles_with_sources(regions, stand_ins, style, world);
+        let all_sources: Vec<_> = source_layer_groups(style, TileKind::Raster)
             .into_iter()
             .filter(|group| {
                 !crate::raster::media_source::is_media_source(style, group.source_name.as_deref())
@@ -114,7 +114,14 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
             if tile_retry::waiting(world, coords, RequestKind::Raster) && !retry_due {
                 continue;
             }
-            if !retry_due && all_sources_ready(&world.tiles, &sources, coords) {
+            let target_sources = wanted_sources
+                .get(&coords)
+                .map_or(all_sources.as_slice(), Vec::as_slice);
+            let pending_sources: Vec<&RasterSourceId> = target_sources
+                .iter()
+                .filter(|source| retry_due || !source_ready_at(&world.tiles, source, coords))
+                .collect();
+            if pending_sources.is_empty() {
                 continue;
             }
             // The rest wait for a later frame, once tiles in flight have landed.
@@ -123,8 +130,12 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
             }
             budget -= 1;
 
+            let only_sources = pending_sources
+                .iter()
+                .map(|source| source.name().map(str::to_owned))
+                .collect::<Option<Vec<String>>>();
             // One rejected tile must not cost the frame its other tiles.
-            if let Err(error) = self.request(coords, &mut frame_style, world) {
+            if let Err(error) = self.request(coords, only_sources, &mut frame_style, world) {
                 tracing::warn!(%error, "tile request rejected; it is requested again after a backoff");
                 tile_retry::rejected(world, coords, RequestKind::Raster, None);
             }
@@ -142,6 +153,7 @@ impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
     fn request(
         &self,
         coords: crate::coords::WorldTileCoords,
+        only_sources: Option<Vec<String>>,
         style: &mut FrameStyle,
         world: &mut crate::tcs::world::World,
     ) -> SystemResult {
@@ -153,10 +165,12 @@ impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
         let Some(mut tile) = world.tiles.spawn_mut(coords) else {
             return Err(SystemError::InvalidTile { coords });
         };
+        let mut input = Input::new(coords, style.share(Style::clone), attempt);
+        input.only_sources = only_sources;
         self.kernel
             .apc()
             .call(
-                Input::new(coords, style.share(Style::clone), attempt),
+                input,
                 fetch_raster_apc::<E::OffscreenKernelEnvironment, T, _>,
             )
             .map_err(|source| SystemError::TileRequest {
@@ -186,20 +200,15 @@ fn source_ready_at(
             .is_some_and(|component| component.contains(source))
 }
 
-fn all_sources_ready(
-    tiles: &crate::tcs::tiles::Tiles,
-    sources: &[RasterSourceId],
+fn record_wanted_source(
+    map: &mut FxHashMap<WorldTileCoords, Vec<RasterSourceId>>,
     coords: WorldTileCoords,
-) -> bool {
-    let raster = tiles.query::<&RasterLayersDataComponent>(coords);
-    let dem = tiles.query::<&crate::terrain::DemLayersComponent>(coords);
-    if raster.is_none() && dem.is_none() {
-        return false;
+    source: &RasterSourceId,
+) {
+    let list = map.entry(coords).or_default();
+    if !list.contains(source) {
+        list.push(source.clone());
     }
-    sources.iter().all(|source| {
-        raster.is_some_and(|component| component.has_source_result(source))
-            || dem.is_some_and(|component| component.contains(source))
-    })
 }
 
 fn coarse_raster_ancestor(coords: WorldTileCoords, minzoom: u8) -> Option<WorldTileCoords> {
@@ -252,18 +261,33 @@ fn stand_in_tile(target: WorldTileCoords, minzoom: u8, maxzoom: u8) -> Option<Wo
 /// its own to show until a tile covering all of it has loaded. Each of `drape_targets` is
 /// therefore requested from every source before any finer tile, so the ground out to the
 /// horizon holds imagery while the detail streams in behind it.
+#[cfg(test)]
 fn wanted_tiles(
     regions: Vec<(RasterSourceId, Vec<WorldTileCoords>)>,
     drape_targets: Vec<WorldTileCoords>,
     style: &crate::style::Style,
     world: &crate::tcs::world::World,
 ) -> Vec<WorldTileCoords> {
+    wanted_tiles_with_sources(regions, drape_targets, style, world).0
+}
+
+fn wanted_tiles_with_sources(
+    regions: Vec<(RasterSourceId, Vec<WorldTileCoords>)>,
+    drape_targets: Vec<WorldTileCoords>,
+    style: &crate::style::Style,
+    world: &crate::tcs::world::World,
+) -> (
+    Vec<WorldTileCoords>,
+    FxHashMap<WorldTileCoords, Vec<RasterSourceId>>,
+) {
     let mut stand_ins = Vec::new();
     let mut seen_stand_ins = FxHashSet::default();
     let mut wanted = Vec::new();
     let mut coarse_ancestors = Vec::new();
     let mut seen_coarse = FxHashSet::default();
     let mut needed_coarse = FxHashSet::default();
+    let mut sources_by_coord: FxHashMap<WorldTileCoords, Vec<RasterSourceId>> =
+        FxHashMap::default();
     let is_terrain = style.terrain.is_some();
     for (source, tiles) in regions {
         let minzoom = match source.name().and_then(|name| style.sources.get(name)) {
@@ -284,17 +308,20 @@ fn wanted_tiles(
         }
         .unwrap_or(u8::MAX);
         if !tiles.is_empty() {
-            stand_ins.extend(
-                drape_targets
-                    .iter()
-                    .filter_map(|target| stand_in_tile(*target, minzoom, maxzoom))
-                    .filter(|coords| {
-                        bounds.is_none_or(|bounds| {
-                            crate::io::tile_sources::tile_in_bounds(*coords, bounds)
-                        })
+            for coords in drape_targets
+                .iter()
+                .filter_map(|target| stand_in_tile(*target, minzoom, maxzoom))
+                .filter(|coords| {
+                    bounds.is_none_or(|bounds| {
+                        crate::io::tile_sources::tile_in_bounds(*coords, bounds)
                     })
-                    .filter(|coords| seen_stand_ins.insert(*coords)),
-            );
+                })
+            {
+                record_wanted_source(&mut sources_by_coord, coords, &source);
+                if seen_stand_ins.insert(coords) {
+                    stand_ins.push(coords);
+                }
+            }
         }
         for coords in tiles {
             // Tiles outside the source's declared bounds are never requested.
@@ -309,9 +336,11 @@ fn wanted_tiles(
                     }
                     if !source_ready_at(&world.tiles, &source, coords) {
                         needed_coarse.insert(ancestor);
+                        record_wanted_source(&mut sources_by_coord, ancestor, &source);
                     }
                 }
             }
+            record_wanted_source(&mut sources_by_coord, coords, &source);
             wanted.push(coords);
             if let Some(parent) = missing_tile_fallback(coords, minzoom, |coords| {
                 world
@@ -319,6 +348,7 @@ fn wanted_tiles(
                     .query::<&RasterLayersDataComponent>(coords)
                     .is_some_and(|component| component.source_is_missing(&source))
             }) {
+                record_wanted_source(&mut sources_by_coord, parent, &source);
                 wanted.push(parent);
             }
         }
@@ -331,10 +361,10 @@ fn wanted_tiles(
         coarse_ancestors.extend(wanted);
         coarse_ancestors.extend(remaining);
         stand_ins.extend(coarse_ancestors);
-        return stand_ins;
+        return (stand_ins, sources_by_coord);
     }
     stand_ins.extend(wanted);
-    stand_ins
+    (stand_ins, sources_by_coord)
 }
 
 /// The bounds `(west, south, east, north)` of an image's corners, so tiles it cannot reach are

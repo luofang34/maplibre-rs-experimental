@@ -386,15 +386,22 @@ fn prepare_drapes(
         else {
             return Err(SystemError::Dependencies);
         };
-        terrain.ensure_scratch(device);
-        acquire_drapes(
+        let (redraw, drape_sources, deferred, states) = acquire_drapes(
             specs,
             (&prints, &ready, &prefetch),
             (memory, view_textures),
             (budget, limit),
             terrain,
             device,
-        )
+        );
+        for (spec, drawn) in specs.iter().zip(&redraw) {
+            if *drawn {
+                if let Some(edge_px) = terrain.drape_edge_px(spec.coords) {
+                    terrain.ensure_scratch_for_size(device, edge_px);
+                }
+            }
+        }
+        (redraw, drape_sources, deferred, states)
     };
     let drawn = |ahead: bool| {
         redraw

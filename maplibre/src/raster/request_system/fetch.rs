@@ -34,6 +34,7 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
             coords,
             style,
             attempt,
+            only_sources,
             ..
         } = input;
         let context = AttemptContext::new(context, attempt);
@@ -42,6 +43,12 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
             .into_iter()
             .filter(|group| {
                 !crate::raster::media_source::is_media_source(&style, group.source_name.as_deref())
+                    && only_sources.as_ref().is_none_or(|only| {
+                        group
+                            .source_name
+                            .as_deref()
+                            .is_some_and(|name| only.iter().any(|allowed| allowed == name))
+                    })
             })
             .map(|group| {
                 let dem_unpack = group
@@ -119,14 +126,11 @@ async fn fetch_source<T: RasterTransferables, HC: HttpClient, C: Context + Clone
         {
             Ok(rgba) => {
                 let source = RasterSourceId::new(group.source_name.clone());
-                // The shared image is copied into the reply, which is a full pass over
-                // its pixels.
+                let owned_rgba =
+                    std::sync::Arc::try_unwrap(rgba).unwrap_or_else(|arc| (*arc).clone());
                 let delivered = run_cpu_bound_replying(context.clone(), move |context| {
-                    ProcessRasterContext::<T, _>::new(context).finish_decoded(
-                        &coords,
-                        source,
-                        (*rgba).clone(),
-                    )
+                    ProcessRasterContext::<T, _>::new(context)
+                        .finish_decoded(&coords, source, owned_rgba)
                 })
                 .await;
                 match delivered {

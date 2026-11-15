@@ -71,7 +71,8 @@ pub(super) fn acquire_drapes(
         .zip(prints)
         .zip(ready)
         .zip(prefetch)
-        .map(|(((spec, print), ready), prefetch)| {
+        .enumerate()
+        .map(|(rank, (((spec, print), ready), prefetch))| {
             if !*ready {
                 return DrapeState::Unchanged;
             }
@@ -84,7 +85,7 @@ pub(super) fn acquire_drapes(
             if *prefetch {
                 terrain.acquire_ahead_drape(device, spec.coords, *print, may_create)
             } else {
-                terrain.acquire_drape(device, spec.coords, *print, may_create)
+                terrain.acquire_drape_ranked(device, spec.coords, rank, *print, may_create)
             }
         })
         .collect();

@@ -269,7 +269,7 @@ async fn tile_eviction_clears_vector_and_symbol_gpu_geometry_together() {
         CacheBudget { tiles: 0, bytes: 0 },
     );
     assert_eq!(evicted, vec![coords]);
-    super::drop_gpu_data(&mut world, &evicted);
+    super::drop_gpu_data_with_queue(&mut world, &evicted, None);
     let Some(Eventually::Initialized(vectors)) =
         world.resources.get::<Eventually<VectorBufferPool>>()
     else {

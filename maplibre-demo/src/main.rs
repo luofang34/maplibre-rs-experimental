@@ -14,6 +14,8 @@ use coordinates::parse_lat_long;
 use maplibre_winit::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
 
 #[cfg(feature = "headless")]
+mod bench;
+#[cfg(feature = "headless")]
 mod headless;
 #[cfg(feature = "headless")]
 mod snapshot;
@@ -151,6 +153,27 @@ enum Commands {
         #[clap(long)]
         out: PathBuf,
     },
+    /// Runs warm headless Metal/Vulkan frame-time, draw-call, and RSS benchmarks.
+    #[cfg(feature = "headless")]
+    Bench {
+        /// Benchmark scenario (`all`, `s1`, `s3`, `s5`).
+        #[clap(long, value_enum, default_value_t = bench::BenchScenario::All)]
+        scenario: bench::BenchScenario,
+        /// Optional custom MapLibre style JSON file path or URL.
+        #[clap(long)]
+        style: Option<String>,
+        #[clap(long, default_value_t = 1024)]
+        width: u32,
+        #[clap(long, default_value_t = 768)]
+        height: u32,
+        #[clap(long, default_value_t = 120)]
+        frames: usize,
+        #[clap(long, default_value_t = 30)]
+        timeout_secs: u64,
+        /// Emit structured JSON benchmark report to stdout.
+        #[clap(long)]
+        json: bool,
+    },
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -269,6 +292,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     out_path: out,
                 })
                 .await
+            })?;
+        }
+        #[cfg(feature = "headless")]
+        Commands::Bench {
+            scenario,
+            style,
+            width,
+            height,
+            frames,
+            timeout_secs,
+            json,
+        } => {
+            bench::run_bench(&bench::BenchOptions {
+                scenario: *scenario,
+                style_override: style.clone(),
+                width: *width,
+                height: *height,
+                frames: *frames,
+                timeout_secs: *timeout_secs,
+                json: *json,
             })?;
         }
     }

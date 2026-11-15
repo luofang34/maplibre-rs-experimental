@@ -93,22 +93,31 @@ async fn a_bound_tile_is_not_uploaded_again() {
             })],
         });
 
-    let upload = |resources: &mut RasterResources| {
+    let upload = |resources: &mut RasterResources, world: &mut World| {
         upload_raster_layer(
             resources,
             (&device, &queue),
-            &world.tiles,
+            &mut world.tiles,
             vec![stored],
             &mut FrameUploads::default(),
         );
     };
-    upload(&mut resources);
+    upload(&mut resources, &mut world);
+    let uploaded_empty = world
+        .tiles
+        .query::<&RasterLayersDataComponent>(stored)
+        .and_then(|c| c.layers.first())
+        .is_some_and(|l| matches!(l, RasterLayerData::Available(d) if d.image.is_empty()));
+    assert!(
+        uploaded_empty,
+        "CPU RgbaImage pixels must be released immediately after GPU upload"
+    );
     assert!(resources.get_bound_texture(&source, &stored).is_some());
     assert!(resources.get_bound_texture(&source, &carried).is_none());
     let revision = resources.revision();
     queue.take_written_bytes();
     for _ in 0..3 {
-        upload(&mut resources);
+        upload(&mut resources, &mut world);
     }
     assert_eq!(resources.revision(), revision, "no texture was bound again");
     assert_eq!(
@@ -178,10 +187,19 @@ async fn deferred_child_tile_waits_for_gpu_upload_before_claiming_coverage() {
     assert!(upload_raster_layer(
         &mut resources,
         (&device, &queue),
-        &world.tiles,
+        &mut world.tiles,
         ordered.clone(),
         &mut budget,
     ));
+    let child_retained = world
+        .tiles
+        .query::<&RasterLayersDataComponent>(child)
+        .and_then(|c| c.layers.first())
+        .is_some_and(|l| matches!(l, RasterLayerData::Available(d) if !d.image.is_empty()));
+    assert!(
+        child_retained,
+        "deferred child tile must retain its CPU RgbaImage until uploaded"
+    );
     world.resources.insert(Eventually::Initialized(resources));
 
     let sources = world
@@ -209,10 +227,16 @@ async fn deferred_child_tile_waits_for_gpu_upload_before_claiming_coverage() {
     assert!(!upload_raster_layer(
         &mut resources,
         (&device, &queue),
-        &world.tiles,
+        &mut world.tiles,
         ordered,
         &mut budget,
     ));
+    let child_released = world
+        .tiles
+        .query::<&RasterLayersDataComponent>(child)
+        .and_then(|c| c.layers.first())
+        .is_some_and(|l| matches!(l, RasterLayerData::Available(d) if d.image.is_empty()));
+    assert!(child_released);
     world.resources.insert(Eventually::Initialized(resources));
     let sources = world
         .resources
