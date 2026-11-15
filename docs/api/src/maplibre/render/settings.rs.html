@@ -258,61 +258,69 @@
 <a href=#258 id=258 data-nosnippet>258</a>    <span class="doccomment">/// Allocates and populates a persistent single-sample reversed-Z `Depth32Float` attachment
 <a href=#259 id=259 data-nosnippet>259</a>    /// via `DEPTH_COPY` on offscreen targets so hosts can sample or copy depth without `XrFrame`.
 <a href=#260 id=260 data-nosnippet>260</a>    </span><span class="kw">pub </span>depth_readout: bool,
-<a href=#261 id=261 data-nosnippet>261</a>}
-<a href=#262 id=262 data-nosnippet>262</a>
-<a href=#263 id=263 data-nosnippet>263</a><span class="kw">impl </span>RendererSettings {
-<a href=#264 id=264 data-nosnippet>264</a>    <span class="doccomment">/// Resolves the active [`TerrainDrapeMode`], honoring legacy `terrain_drape_size` overrides
-<a href=#265 id=265 data-nosnippet>265</a>    /// when `terrain_drape_mode` was left at its default.
-<a href=#266 id=266 data-nosnippet>266</a>    </span><span class="kw">pub fn </span>effective_terrain_drape_mode(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; TerrainDrapeMode {
-<a href=#267 id=267 data-nosnippet>267</a>        <span class="kw">match </span><span class="self">self</span>.terrain_drape_mode {
-<a href=#268 id=268 data-nosnippet>268</a>            TerrainDrapeMode::ProceduralRelief(style) =&gt; TerrainDrapeMode::ProceduralRelief(style),
-<a href=#269 id=269 data-nosnippet>269</a>            TerrainDrapeMode::Draped { edge_px }
-<a href=#270 id=270 data-nosnippet>270</a>                <span class="kw">if </span>edge_px != <span class="kw">crate</span>::terrain::resources::DRAPE_SIZE =&gt;
-<a href=#271 id=271 data-nosnippet>271</a>            {
-<a href=#272 id=272 data-nosnippet>272</a>                TerrainDrapeMode::Draped { edge_px }
-<a href=#273 id=273 data-nosnippet>273</a>            }
-<a href=#274 id=274 data-nosnippet>274</a>            TerrainDrapeMode::Draped { .. } =&gt; TerrainDrapeMode::Draped {
-<a href=#275 id=275 data-nosnippet>275</a>                edge_px: <span class="self">self</span>.terrain_drape_size,
-<a href=#276 id=276 data-nosnippet>276</a>            },
-<a href=#277 id=277 data-nosnippet>277</a>        }
-<a href=#278 id=278 data-nosnippet>278</a>    }
-<a href=#279 id=279 data-nosnippet>279</a>
-<a href=#280 id=280 data-nosnippet>280</a>    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>with_backend_msaa(<span class="kw-2">mut </span><span class="self">self</span>, backend: wgpu::Backend) -&gt; <span class="self">Self </span>{
-<a href=#281 id=281 data-nosnippet>281</a>        <span class="comment">// Symbol occlusion and compositor depth copies sample the depth attachment.
-<a href=#282 id=282 data-nosnippet>282</a>        // WebGL supports multisampled renderbuffers, but cannot sample their depth.
-<a href=#283 id=283 data-nosnippet>283</a>        </span><span class="kw">if </span><span class="macro">cfg!</span>(target_arch = <span class="string">"wasm32"</span>) &amp;&amp; backend == wgpu::Backend::Gl {
-<a href=#284 id=284 data-nosnippet>284</a>            <span class="self">self</span>.msaa.samples = <span class="number">1</span>;
-<a href=#285 id=285 data-nosnippet>285</a>        }
-<a href=#286 id=286 data-nosnippet>286</a>        <span class="self">self
-<a href=#287 id=287 data-nosnippet>287</a>    </span>}
-<a href=#288 id=288 data-nosnippet>288</a>
-<a href=#289 id=289 data-nosnippet>289</a>    <span class="doccomment">/// Selects 32-bit float depth when the device offers it.
-<a href=#290 id=290 data-nosnippet>290</a>    ///
-<a href=#291 id=291 data-nosnippet>291</a>    /// Reversed-Z only recovers precision on a float depth buffer; the 24-bit fallback keeps
-<a href=#292 id=292 data-nosnippet>292</a>    /// rendering correct but leaves depth precision at fixed-point levels.
-<a href=#293 id=293 data-nosnippet>293</a>    </span><span class="kw">pub fn </span>with_float_depth_if_supported(<span class="kw-2">mut </span><span class="self">self</span>, features: Features) -&gt; <span class="self">Self </span>{
-<a href=#294 id=294 data-nosnippet>294</a>        <span class="kw">if </span>features.contains(Features::DEPTH32FLOAT_STENCIL8) {
-<a href=#295 id=295 data-nosnippet>295</a>            <span class="self">self</span>.depth_texture_format = TextureFormat::Depth32FloatStencil8;
-<a href=#296 id=296 data-nosnippet>296</a>        }
-<a href=#297 id=297 data-nosnippet>297</a>        <span class="self">self
-<a href=#298 id=298 data-nosnippet>298</a>    </span>}
-<a href=#299 id=299 data-nosnippet>299</a>}
-<a href=#300 id=300 data-nosnippet>300</a>
-<a href=#301 id=301 data-nosnippet>301</a><span class="kw">impl </span>Default <span class="kw">for </span>RendererSettings {
-<a href=#302 id=302 data-nosnippet>302</a>    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
-<a href=#303 id=303 data-nosnippet>303</a>        <span class="self">Self </span>{
-<a href=#304 id=304 data-nosnippet>304</a>            msaa: Msaa::default(),
-<a href=#305 id=305 data-nosnippet>305</a>            buffer_pools: BufferPoolSizes::default(),
-<a href=#306 id=306 data-nosnippet>306</a>            symbol_pools: BufferPoolSizes::default(),
-<a href=#307 id=307 data-nosnippet>307</a>            terrain_drape_size: <span class="kw">crate</span>::terrain::resources::DRAPE_SIZE,
-<a href=#308 id=308 data-nosnippet>308</a>            terrain_drape_mode: TerrainDrapeMode::default(),
-<a href=#309 id=309 data-nosnippet>309</a>            texture_format: <span class="prelude-val">None</span>,
-<a href=#310 id=310 data-nosnippet>310</a>
-<a href=#311 id=311 data-nosnippet>311</a>            depth_texture_format: TextureFormat::Depth24PlusStencil8,
-<a href=#312 id=312 data-nosnippet>312</a>            present_mode: PresentMode::AutoVsync,
-<a href=#313 id=313 data-nosnippet>313</a>            overdraw_inspector: <span class="bool-val">false</span>,
-<a href=#314 id=314 data-nosnippet>314</a>            depth_readout: <span class="bool-val">false</span>,
-<a href=#315 id=315 data-nosnippet>315</a>        }
-<a href=#316 id=316 data-nosnippet>316</a>    }
-<a href=#317 id=317 data-nosnippet>317</a>}
+<a href=#261 id=261 data-nosnippet>261</a>    <span class="doccomment">/// Omits the 1-tile surround prefetch ring when requesting tiles for stationary one-shot
+<a href=#262 id=262 data-nosnippet>262</a>    /// offscreen snapshots.
+<a href=#263 id=263 data-nosnippet>263</a>    </span><span class="kw">pub </span>tight_tile_requests: bool,
+<a href=#264 id=264 data-nosnippet>264</a>}
+<a href=#265 id=265 data-nosnippet>265</a>
+<a href=#266 id=266 data-nosnippet>266</a><span class="doccomment">/// Resource mirroring [`RendererSettings::tight_tile_requests`] for world-only prefetch helpers.
+<a href=#267 id=267 data-nosnippet>267</a></span><span class="attr">#[derive(Clone, Copy, Debug, Default)]
+<a href=#268 id=268 data-nosnippet>268</a></span><span class="kw">pub struct </span>TightTileRequests(<span class="kw">pub </span>bool);
+<a href=#269 id=269 data-nosnippet>269</a>
+<a href=#270 id=270 data-nosnippet>270</a><span class="kw">impl </span>RendererSettings {
+<a href=#271 id=271 data-nosnippet>271</a>    <span class="doccomment">/// Resolves the active [`TerrainDrapeMode`], honoring legacy `terrain_drape_size` overrides
+<a href=#272 id=272 data-nosnippet>272</a>    /// when `terrain_drape_mode` was left at its default.
+<a href=#273 id=273 data-nosnippet>273</a>    </span><span class="kw">pub fn </span>effective_terrain_drape_mode(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; TerrainDrapeMode {
+<a href=#274 id=274 data-nosnippet>274</a>        <span class="kw">match </span><span class="self">self</span>.terrain_drape_mode {
+<a href=#275 id=275 data-nosnippet>275</a>            TerrainDrapeMode::ProceduralRelief(style) =&gt; TerrainDrapeMode::ProceduralRelief(style),
+<a href=#276 id=276 data-nosnippet>276</a>            TerrainDrapeMode::Draped { edge_px }
+<a href=#277 id=277 data-nosnippet>277</a>                <span class="kw">if </span>edge_px != <span class="kw">crate</span>::terrain::resources::DRAPE_SIZE =&gt;
+<a href=#278 id=278 data-nosnippet>278</a>            {
+<a href=#279 id=279 data-nosnippet>279</a>                TerrainDrapeMode::Draped { edge_px }
+<a href=#280 id=280 data-nosnippet>280</a>            }
+<a href=#281 id=281 data-nosnippet>281</a>            TerrainDrapeMode::Draped { .. } =&gt; TerrainDrapeMode::Draped {
+<a href=#282 id=282 data-nosnippet>282</a>                edge_px: <span class="self">self</span>.terrain_drape_size,
+<a href=#283 id=283 data-nosnippet>283</a>            },
+<a href=#284 id=284 data-nosnippet>284</a>        }
+<a href=#285 id=285 data-nosnippet>285</a>    }
+<a href=#286 id=286 data-nosnippet>286</a>
+<a href=#287 id=287 data-nosnippet>287</a>    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>with_backend_msaa(<span class="kw-2">mut </span><span class="self">self</span>, backend: wgpu::Backend) -&gt; <span class="self">Self </span>{
+<a href=#288 id=288 data-nosnippet>288</a>        <span class="comment">// Symbol occlusion and compositor depth copies sample the depth attachment.
+<a href=#289 id=289 data-nosnippet>289</a>        // WebGL supports multisampled renderbuffers, but cannot sample their depth.
+<a href=#290 id=290 data-nosnippet>290</a>        </span><span class="kw">if </span><span class="macro">cfg!</span>(target_arch = <span class="string">"wasm32"</span>) &amp;&amp; backend == wgpu::Backend::Gl {
+<a href=#291 id=291 data-nosnippet>291</a>            <span class="self">self</span>.msaa.samples = <span class="number">1</span>;
+<a href=#292 id=292 data-nosnippet>292</a>        }
+<a href=#293 id=293 data-nosnippet>293</a>        <span class="self">self
+<a href=#294 id=294 data-nosnippet>294</a>    </span>}
+<a href=#295 id=295 data-nosnippet>295</a>
+<a href=#296 id=296 data-nosnippet>296</a>    <span class="doccomment">/// Selects 32-bit float depth when the device offers it.
+<a href=#297 id=297 data-nosnippet>297</a>    ///
+<a href=#298 id=298 data-nosnippet>298</a>    /// Reversed-Z only recovers precision on a float depth buffer; the 24-bit fallback keeps
+<a href=#299 id=299 data-nosnippet>299</a>    /// rendering correct but leaves depth precision at fixed-point levels.
+<a href=#300 id=300 data-nosnippet>300</a>    </span><span class="kw">pub fn </span>with_float_depth_if_supported(<span class="kw-2">mut </span><span class="self">self</span>, features: Features) -&gt; <span class="self">Self </span>{
+<a href=#301 id=301 data-nosnippet>301</a>        <span class="kw">if </span>features.contains(Features::DEPTH32FLOAT_STENCIL8) {
+<a href=#302 id=302 data-nosnippet>302</a>            <span class="self">self</span>.depth_texture_format = TextureFormat::Depth32FloatStencil8;
+<a href=#303 id=303 data-nosnippet>303</a>        }
+<a href=#304 id=304 data-nosnippet>304</a>        <span class="self">self
+<a href=#305 id=305 data-nosnippet>305</a>    </span>}
+<a href=#306 id=306 data-nosnippet>306</a>}
+<a href=#307 id=307 data-nosnippet>307</a>
+<a href=#308 id=308 data-nosnippet>308</a><span class="kw">impl </span>Default <span class="kw">for </span>RendererSettings {
+<a href=#309 id=309 data-nosnippet>309</a>    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
+<a href=#310 id=310 data-nosnippet>310</a>        <span class="self">Self </span>{
+<a href=#311 id=311 data-nosnippet>311</a>            msaa: Msaa::default(),
+<a href=#312 id=312 data-nosnippet>312</a>            buffer_pools: BufferPoolSizes::default(),
+<a href=#313 id=313 data-nosnippet>313</a>            symbol_pools: BufferPoolSizes::default(),
+<a href=#314 id=314 data-nosnippet>314</a>            terrain_drape_size: <span class="kw">crate</span>::terrain::resources::DRAPE_SIZE,
+<a href=#315 id=315 data-nosnippet>315</a>            terrain_drape_mode: TerrainDrapeMode::default(),
+<a href=#316 id=316 data-nosnippet>316</a>            texture_format: <span class="prelude-val">None</span>,
+<a href=#317 id=317 data-nosnippet>317</a>
+<a href=#318 id=318 data-nosnippet>318</a>            depth_texture_format: TextureFormat::Depth24PlusStencil8,
+<a href=#319 id=319 data-nosnippet>319</a>            present_mode: PresentMode::AutoVsync,
+<a href=#320 id=320 data-nosnippet>320</a>            overdraw_inspector: <span class="bool-val">false</span>,
+<a href=#321 id=321 data-nosnippet>321</a>            depth_readout: <span class="bool-val">false</span>,
+<a href=#322 id=322 data-nosnippet>322</a>            tight_tile_requests: <span class="bool-val">false</span>,
+<a href=#323 id=323 data-nosnippet>323</a>        }
+<a href=#324 id=324 data-nosnippet>324</a>    }
+<a href=#325 id=325 data-nosnippet>325</a>}
 </code></pre></div></section></main></body></html>
