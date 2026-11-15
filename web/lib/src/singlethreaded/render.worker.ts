@@ -27,7 +27,7 @@ type RenderWorkerMessage =
     | { type: "rpc", id: number, method: string, args: unknown[] }
     | { type: "destroy" }
 
-if (!MULTITHREADED && !WEBGL) {
+if (!WEBGL) {
     ensureWebGpuCompatibility(self);
 }
 
@@ -39,14 +39,19 @@ const postReply = (id: number, ok: boolean, value: unknown) => {
     postMessage(ok ? {type: "rpc_ok", id, result: value} : {type: "rpc_err", id, error: String(value)});
 };
 
-if (!MULTITHREADED && !WEBGL) {
+if (!WEBGL) {
 onmessage = async (event: MessageEvent<RenderWorkerMessage>) => {
     const msg = event.data;
     if (!msg) return;
 
     if (msg.type === "init") {
         const initPromise = (async () => {
-            await initializeWasm(msg.module, undefined);
+            const wasm = await initializeWasm(msg.module, undefined);
+            if (MULTITHREADED) {
+                for (const port of msg.ports) {
+                    port.postMessage({type: "wasm_init", module: msg.module, memory: wasm.memory});
+                }
+            }
             let nextPort = 0;
             runner = await (maplibre as any).run_maplibre_offscreen(
                 msg.canvas,

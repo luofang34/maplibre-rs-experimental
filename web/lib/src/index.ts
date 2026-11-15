@@ -51,18 +51,21 @@ export const startMapLibre = async (wasmPath: string | WebAssembly.Module | unde
     const targetCanvasId = ARENA_TELEMETRY && canvasId ? canvasId : "maplibre";
     const canvas = mapCanvas(targetCanvasId);
 
-    // Default single-threaded WebGPU path: run Map + WebGPU surface inside a dedicated
-    // OffscreenCanvas Render Worker wired directly to 4 Tile Workers over MessageChannel.
-    if (!MULTITHREADED && !WEBGL && canvas && typeof canvas.transferControlToOffscreen === "function") {
+    // Default WebGPU path (single-threaded and multithreaded): run Map + WebGPU surface inside a
+    // dedicated OffscreenCanvas Render Worker wired directly to Tile Workers over MessageChannel.
+    if (!WEBGL && canvas && typeof canvas.transferControlToOffscreen === "function") {
+        if (MULTITHREADED && imageProviderModules.length > 0) {
+            console.warn("JavaScript image providers need a single-threaded build; register Rust providers through image_providers() instead.");
+        }
         try {
             const controller = await startOffscreenController({
                 canvas,
                 wasmPath,
                 workerPath,
                 styleJson,
-                imageProviderModules,
+                imageProviderModules: MULTITHREADED ? [] : imageProviderModules,
                 createRenderWorker: () => RenderWorker(),
-                createPoolWorker: () => PoolWorker(),
+                createPoolWorker: () => MULTITHREADED ? MultithreadedPoolWorker() : PoolWorker(),
             });
             return new MapLibreMap(controller, canvas);
         } catch (err) {

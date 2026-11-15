@@ -19,10 +19,15 @@ use maplibre::{
 };
 use web_sys::OffscreenCanvas;
 
-use crate::platform::{
-    http_client::WebHttpClient, singlethreaded::apc::PassingAsyncProcedureCall,
+use crate::platform::{http_client::WebHttpClient, UsedOffscreenKernelEnvironment};
+
+#[cfg(not(target_feature = "atomics"))]
+pub(super) type WorkerApc = crate::platform::singlethreaded::apc::PassingAsyncProcedureCall;
+#[cfg(target_feature = "atomics")]
+pub(super) type WorkerApc = maplibre::io::apc::SchedulerAsyncProcedureCall<
     UsedOffscreenKernelEnvironment,
-};
+    crate::platform::multithreaded::pool_scheduler::WebWorkerPoolScheduler,
+>;
 
 static NEXT_RUNNER_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -124,7 +129,7 @@ pub struct OffscreenEnvironment;
 
 impl Environment for OffscreenEnvironment {
     type MapWindowConfig = OffscreenMapWindowConfig;
-    type AsyncProcedureCall = PassingAsyncProcedureCall;
+    type AsyncProcedureCall = WorkerApc;
     type HttpClient = WebHttpClient;
     type OffscreenKernelEnvironment = UsedOffscreenKernelEnvironment;
 }

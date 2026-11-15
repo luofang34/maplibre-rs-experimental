@@ -30,7 +30,6 @@ use options::{
 #[derive(Clone)]
 pub(crate) enum ControllerHandle {
     Main(MapHandle<CurrentEnvironment>),
-    #[cfg(not(target_feature = "atomics"))]
     Offscreen(MapHandle<crate::offscreen::OffscreenEnvironment>),
 }
 
@@ -38,7 +37,6 @@ impl ControllerHandle {
     pub(crate) fn is_closed(&self) -> bool {
         match self {
             Self::Main(h) => h.is_closed(),
-            #[cfg(not(target_feature = "atomics"))]
             Self::Offscreen(h) => h.is_closed(),
         }
     }
@@ -46,7 +44,6 @@ impl ControllerHandle {
     pub(crate) fn close(&self) {
         match self {
             Self::Main(h) => h.close(),
-            #[cfg(not(target_feature = "atomics"))]
             Self::Offscreen(h) => h.close(),
         }
     }
@@ -56,7 +53,6 @@ macro_rules! with_controller_handle {
     ($handle:expr, |$h:ident| $body:expr) => {
         match $handle {
             $crate::controller::ControllerHandle::Main($h) => $body,
-            #[cfg(not(target_feature = "atomics"))]
             $crate::controller::ControllerHandle::Offscreen($h) => $body,
         }
     };
@@ -93,7 +89,6 @@ impl MapController {
         }
     }
 
-    #[cfg(not(target_feature = "atomics"))]
     pub(crate) fn new_offscreen(handle: MapHandle<crate::offscreen::OffscreenEnvironment>) -> Self {
         Self {
             handle: ControllerHandle::Offscreen(handle),
@@ -109,7 +104,6 @@ impl MapController {
     pub fn try_handle(&self) -> Option<&MapHandle<CurrentEnvironment>> {
         match &self.handle {
             ControllerHandle::Main(handle) => Some(handle),
-            #[cfg(not(target_feature = "atomics"))]
             ControllerHandle::Offscreen(_) => None,
         }
     }

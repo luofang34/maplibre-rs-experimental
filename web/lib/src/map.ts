@@ -70,6 +70,10 @@ export interface ArenaFrameTelemetry {
     gpuMs?: number | null
     uploadBytes: number
     draws: number
+    passes?: number
+    setVertexBuffers?: number
+    writeBufferCalls?: number
+    writeBufferBytes?: number
     drapeRedraws: number
     prefetchDrapes: number
     loaded: boolean

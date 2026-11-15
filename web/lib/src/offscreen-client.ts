@@ -47,7 +47,8 @@ interface OffscreenStartArgs {
     createPoolWorker: () => Worker
 }
 
-const TILE_WORKER_COUNT = 4;
+const ST_TILE_WORKER_COUNT = 4;
+const MT_TILE_WORKER_COUNT = 2;
 
 export const startOffscreenController = async ({
     canvas,
@@ -61,18 +62,24 @@ export const startOffscreenController = async ({
     const offscreen = canvas.transferControlToOffscreen();
 
     // Spawn render worker + tile workers immediately at t=0 in parallel with WASM compilation.
+    const workerCount = MULTITHREADED ? MT_TILE_WORKER_COUNT : ST_TILE_WORKER_COUNT;
     const renderWorker = createRenderWorker();
     const tileWorkers: Worker[] = [];
     const channels: MessageChannel[] = [];
     const providerUrls = imageProviderModules.map(url => new URL(url, location.href).href);
 
-    for (let i = 0; i < TILE_WORKER_COUNT; i++) {
+    for (let i = 0; i < workerCount; i++) {
         const worker = workerPath ? new Worker(workerPath, {type: "module"}) : createPoolWorker();
-        if (providerUrls.length > 0) {
+        if (!MULTITHREADED && providerUrls.length > 0) {
             worker.postMessage({type: "image_provider_modules", urls: providerUrls});
         }
+        const channel = new MessageChannel();
+        if (MULTITHREADED) {
+            const port2 = channel.port2;
+            worker.postMessage({type: "bind_port", port: port2}, [port2]);
+        }
         tileWorkers.push(worker);
-        channels.push(new MessageChannel());
+        channels.push(channel);
     }
 
     let nextRpcId = 1;
@@ -161,9 +168,11 @@ export const startOffscreenController = async ({
     try {
         const module = await compileWasmModule(wasmPath);
 
-        for (let i = 0; i < TILE_WORKER_COUNT; i++) {
-            const port2 = channels[i].port2;
-            tileWorkers[i].postMessage({type: "wasm_init", module, port: port2}, [port2]);
+        if (!MULTITHREADED) {
+            for (let i = 0; i < workerCount; i++) {
+                const port2 = channels[i].port2;
+                tileWorkers[i].postMessage({type: "wasm_init", module, port: port2}, [port2]);
+            }
         }
 
         const measure = () => {

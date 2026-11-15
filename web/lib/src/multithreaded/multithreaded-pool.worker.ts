@@ -1,21 +1,24 @@
 import * as maplibre from "../wasm/maplibre"
 import {initializeWasm} from "../wasm-instance.mjs";
 
-type MessageData = {type: 'wasm_init', module: WebAssembly.Module, memory: WebAssembly.Memory}
+type BindPortMessage = {type: 'bind_port', port: MessagePort}
+type MessageData =
+    | {type: 'wasm_init', module: WebAssembly.Module, memory: WebAssembly.Memory}
     | {type: 'pool_call', work_ptr: number}
 
 let initialised: Promise<maplibre.InitOutput> = null
 
-onmessage = async (message: MessageEvent<MessageData>) => {
+const handleMessage = async (message: MessageEvent<MessageData>) => {
+    const data = message.data;
+    if (!data) return;
 
     if (initialised) {
-        // This will queue further commands up until the module is fully initialised:
+        // Queue further commands up until the module is fully initialised:
         await initialised;
     }
 
-    const type = message.data.type;
+    const type = data.type;
     if (type === 'wasm_init') {
-        const data = message.data;
         const module = data.module;
         const memory = data.memory;
         initialised = initializeWasm(module, memory).catch(err => {
@@ -27,7 +30,7 @@ onmessage = async (message: MessageEvent<MessageData>) => {
             throw err;
         });
     } else if (type === 'pool_call') {
-        const work_ptr = message.data.work_ptr; // because memory is shared, this pointer is valid in the memory of the main thread and this worker thread
+        const work_ptr = data.work_ptr; // shared memory pointer valid across render worker and pool workers
 
         const process_data: (msg: any) => Promise<void> = maplibre["multithreaded_process_data"]
 
@@ -37,4 +40,19 @@ onmessage = async (message: MessageEvent<MessageData>) => {
 
         await process_data(work_ptr);
     }
+}
+
+onmessage = (message: MessageEvent<BindPortMessage | MessageData>) => {
+    const data = message.data;
+    if (!data) return;
+    if (data.type === 'bind_port') {
+        const port = data.port;
+        (self as any).__maplibreRenderPort = port;
+        port.onmessage = (ev: MessageEvent<MessageData>) => {
+            void handleMessage(ev);
+        };
+        port.start?.();
+        return;
+    }
+    void handleMessage(message as MessageEvent<MessageData>);
 }

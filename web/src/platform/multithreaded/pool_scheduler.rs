@@ -1,8 +1,8 @@
 use std::future::Future;
 
 use maplibre::{benchmarking::io::scheduler::ScheduleError, io::scheduler::Scheduler};
-use wasm_bindgen::prelude::*;
-use web_sys::Worker;
+use wasm_bindgen::{prelude::*, JsCast};
+use web_sys::{MessagePort, Worker};
 
 use super::pool::WorkerPool;
 use crate::error::WebError;
@@ -23,6 +23,20 @@ impl WebWorkerPoolScheduler {
                     .map_err(WebError::from)?
                     .dyn_into::<Worker>()
                     .map_err(|_e| WebError::TypeError("Unable to cast to Worker".into()))
+            }),
+        )?;
+        Ok(Self { pool })
+    }
+
+    pub fn from_ports(new_port: js_sys::Function) -> Result<Self, WebError> {
+        let pool = WorkerPool::from_ports(
+            2,
+            Box::new(move || {
+                new_port
+                    .call0(&JsValue::undefined())
+                    .map_err(WebError::from)?
+                    .dyn_into::<MessagePort>()
+                    .map_err(|_e| WebError::TypeError("Unable to cast to MessagePort".into()))
             }),
         )?;
         Ok(Self { pool })

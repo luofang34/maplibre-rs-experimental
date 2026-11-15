@@ -1,4 +1,4 @@
-//! Dedicated `OffscreenCanvas` render-worker host for single-threaded WebGPU builds.
+//! Dedicated `OffscreenCanvas` render-worker host for single-threaded and multithreaded WebGPU builds.
 
 #![forbid(unsafe_code)]
 #![deny(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
@@ -27,7 +27,7 @@ use wasm_bindgen::{closure::Closure, prelude::*, JsCast};
 use web_sys::{DedicatedWorkerGlobalScope, OffscreenCanvas};
 
 use self::window::{
-    next_runner_id, register_runner_waker, unregister_runner_waker, SharedWindowState,
+    next_runner_id, register_runner_waker, unregister_runner_waker, SharedWindowState, WorkerApc,
 };
 pub use self::window::{
     OffscreenCanvasHandle, OffscreenEnvironment, OffscreenMapWindow, OffscreenMapWindowConfig,
@@ -36,15 +36,10 @@ use crate::{
     application::{default_plugins_for, parse_style},
     controller::MapController,
     error::{JSError, WebError},
-    platform::{
-        self, http_client::web_http_client, singlethreaded::apc::PassingAsyncProcedureCall,
-        UsedOffscreenKernelEnvironment,
-    },
+    platform::{self, http_client::web_http_client, UsedOffscreenKernelEnvironment},
 };
 
 const MAX_INPUT_DT: Duration = Duration::from_millis(50);
-
-type WorkerApc = PassingAsyncProcedureCall;
 
 fn apc_has_arrivals(apc: &WorkerApc) -> bool {
     <WorkerApc as AsyncProcedureCall<UsedOffscreenKernelEnvironment>>::has_arrivals(apc)
@@ -349,7 +344,17 @@ pub async fn run_maplibre_offscreen(
         image_providers: platform::image_providers().clone(),
         ..Default::default()
     };
-    let apc = PassingAsyncProcedureCall::new(new_worker, 4, offscreen_kernel_config.clone())?;
+    #[cfg(not(target_feature = "atomics"))]
+    let apc = platform::singlethreaded::apc::PassingAsyncProcedureCall::new(
+        new_worker,
+        4,
+        offscreen_kernel_config.clone(),
+    )?;
+    #[cfg(target_feature = "atomics")]
+    let apc = maplibre::io::apc::SchedulerAsyncProcedureCall::new(
+        platform::multithreaded::pool_scheduler::WebWorkerPoolScheduler::from_ports(new_worker)?,
+        offscreen_kernel_config.clone(),
+    );
     let kernel = KernelBuilder::new()
         .with_map_window_config(window_config)
         .with_http_client(web_http_client())
