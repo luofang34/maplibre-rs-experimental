@@ -10,13 +10,53 @@ pub trait RenderPipeline {
     fn describe_render_pipeline(self) -> RenderPipelineDescriptor;
 }
 
+/// How [`FeaturePipelinePair::uniform`] sources its uniform feature attribute.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UniformFeatureBinding {
+    /// Flips `vertex.buffers[slot].step_mode` to [`wgpu::VertexStepMode::Instance`].
+    InstanceSlot(usize),
+    /// Truncates `vertex.buffers` to `feature_slot` and appends `attribute` onto
+    /// `vertex.buffers[layer_slot]` (`VertexStepMode::Instance`), eliminating the feature buffer
+    /// binding slot completely for uniform draws.
+    LayerMetadata {
+        /// Existing instance-stepped layer metadata buffer slot.
+        layer_slot: usize,
+        /// Per-vertex feature metadata buffer slot to truncate from the uniform pipeline.
+        feature_slot: usize,
+        /// Uniform color attribute read from the layer metadata buffer.
+        attribute: wgpu::VertexAttribute,
+    },
+}
+
+impl UniformFeatureBinding {
+    fn apply(self, vertex: &mut VertexState) {
+        match self {
+            Self::InstanceSlot(slot) => {
+                if let Some(buf) = vertex.buffers.get_mut(slot) {
+                    buf.step_mode = wgpu::VertexStepMode::Instance;
+                }
+            }
+            Self::LayerMetadata {
+                layer_slot,
+                feature_slot,
+                attribute,
+            } => {
+                vertex.buffers.truncate(feature_slot);
+                if let Some(buf) = vertex.buffers.get_mut(layer_slot) {
+                    buf.attributes.push(attribute);
+                }
+            }
+        }
+    }
+}
+
 /// Pair of render pipelines sharing one compiled WGSL shader pair and pipeline layout:
-/// `per_vertex` steps `FillShaderFeatureMetadata` per vertex, while `uniform` steps a single
-/// 16-byte `FillShaderFeatureMetadata` record per instance (`0..1`).
+/// `per_vertex` steps `FillShaderFeatureMetadata` per vertex, while `uniform` sources uniform
+/// feature paint from either an instance-stepped record or [`ShaderLayerMetadata`](crate::render::shaders::ShaderLayerMetadata).
 pub struct FeaturePipelinePair {
     /// Pipeline stepping the feature-metadata buffer with [`wgpu::VertexStepMode::Vertex`].
     pub per_vertex: wgpu::RenderPipeline,
-    /// Pipeline stepping the feature-metadata buffer with [`wgpu::VertexStepMode::Instance`].
+    /// Pipeline sourcing uniform feature paint per instance without per-vertex feature attributes.
     pub uniform: wgpu::RenderPipeline,
 }
 
@@ -146,16 +186,30 @@ impl RenderPipelineDescriptor {
     /// compiled [`wgpu::ShaderModule`] pair, flipping `vertex.buffers[uniform_slot].step_mode` to
     /// [`wgpu::VertexStepMode::Instance`] for the `uniform` variant.
     pub fn initialize_pair_with_prefix_layouts(
-        mut self,
+        self,
         device: &wgpu::Device,
         prefix_layouts: &[&wgpu::BindGroupLayout],
         uniform_slot: usize,
     ) -> FeaturePipelinePair {
+        self.initialize_pair_with_binding(
+            device,
+            prefix_layouts,
+            UniformFeatureBinding::InstanceSlot(uniform_slot),
+        )
+    }
+
+    /// Compiles `(per_vertex, uniform)` render pipelines sharing one [`wgpu::PipelineLayout`] and
+    /// compiled [`wgpu::ShaderModule`] pair, transforming `vertex.buffers` via `binding` for the
+    /// `uniform` variant.
+    pub fn initialize_pair_with_binding(
+        mut self,
+        device: &wgpu::Device,
+        prefix_layouts: &[&wgpu::BindGroupLayout],
+        binding: UniformFeatureBinding,
+    ) -> FeaturePipelinePair {
         if let Some(cache) = super::pipeline_cache::SharedPipelines::active() {
             let per_vertex = cache.render_pipeline(device, &self, prefix_layouts);
-            if let Some(buf) = self.vertex.buffers.get_mut(uniform_slot) {
-                buf.step_mode = wgpu::VertexStepMode::Instance;
-            }
+            binding.apply(&mut self.vertex);
             if let Some(label) = self.label.take() {
                 self.label = Some(Cow::Owned(format!("{label}_uniform")));
             }
@@ -238,9 +292,7 @@ impl RenderPipelineDescriptor {
         };
 
         let per_vertex = build(&self, self.label.as_deref());
-        if let Some(buf) = self.vertex.buffers.get_mut(uniform_slot) {
-            buf.step_mode = wgpu::VertexStepMode::Instance;
-        }
+        binding.apply(&mut self.vertex);
         let uniform_label = self.label.as_deref().map(|l| format!("{l}_uniform"));
         let uniform = build(&self, uniform_label.as_deref());
         FeaturePipelinePair {

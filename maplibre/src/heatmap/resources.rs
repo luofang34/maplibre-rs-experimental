@@ -10,12 +10,21 @@ use crate::{render::shaders::DENSITY_FORMAT, style::heatmap::RAMP_TEXELS};
 
 struct LayerTargets {
     size: (u32, u32),
+    density: wgpu::Texture,
     density_view: wgpu::TextureView,
     density_bind_group: wgpu::BindGroup,
     ramp: wgpu::Texture,
     ramp_fingerprint: u64,
     opacity: wgpu::Buffer,
     ramp_bind_group: wgpu::BindGroup,
+}
+
+impl Drop for LayerTargets {
+    fn drop(&mut self) {
+        self.density.destroy();
+        self.ramp.destroy();
+        self.opacity.destroy();
+    }
 }
 
 /// The density and composite pipelines, and the targets of every visible heatmap layer.
@@ -163,6 +172,7 @@ impl HeatmapResources {
         });
         LayerTargets {
             size,
+            density,
             density_view,
             density_bind_group,
             ramp,

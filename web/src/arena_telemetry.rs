@@ -54,6 +54,10 @@ struct ArenaFrameTelemetry {
     gpu_ms: Option<f64>,
     upload_bytes: u64,
     draws: u32,
+    passes: u32,
+    set_vertex_buffers: u32,
+    write_buffer_calls: u32,
+    write_buffer_bytes: u64,
     drape_redraws: u32,
     prefetch_drapes: u32,
     loaded: bool,
@@ -85,6 +89,28 @@ fn live_gpu_buffer_bytes() -> u64 {
     .ok()
     .and_then(|val| val.as_f64())
     .map_or(0, |bytes| bytes.max(0.0) as u64)
+}
+
+fn last_gpu_api_stats() -> (u32, u32, u32, u64) {
+    use wasm_bindgen::JsCast;
+    let Ok(val) = js_sys::Reflect::get(
+        &js_sys::global(),
+        &JsValue::from_str("__maplibreLastGpuApiStats"),
+    ) else {
+        return (0, 0, 0, 0);
+    };
+    let Ok(arr) = val.dyn_into::<js_sys::Float64Array>() else {
+        return (0, 0, 0, 0);
+    };
+    if arr.length() < 4 {
+        return (0, 0, 0, 0);
+    }
+    (
+        arr.get_index(0).max(0.0) as u32,
+        arr.get_index(1).max(0.0) as u32,
+        arr.get_index(2).max(0.0) as u32,
+        arr.get_index(3).max(0.0) as u64,
+    )
 }
 
 #[wasm_bindgen]
@@ -144,6 +170,8 @@ impl MapController {
                         && !reasons.awaiting_images
                         && !reasons.camera_moved
                         && !has_arrivals;
+                    let (passes, set_vertex_buffers, write_buffer_calls, write_buffer_bytes) =
+                        last_gpu_api_stats();
                     let payload = ArenaFrameTelemetry {
                         frame: stats.frame,
                         host_frame: stats.host_frame,
@@ -151,6 +179,10 @@ impl MapController {
                         gpu_ms: stats.gpu.map(|d| d.as_secs_f64() * 1000.0),
                         upload_bytes: stats.upload_bytes,
                         draws: stats.draws,
+                        passes,
+                        set_vertex_buffers,
+                        write_buffer_calls,
+                        write_buffer_bytes,
                         drape_redraws: stats.drape_redraws,
                         prefetch_drapes: stats.prefetch_drapes,
                         loaded,

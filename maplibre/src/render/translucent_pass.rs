@@ -20,8 +20,36 @@ impl TranslucentPassNode {
     }
 }
 
+pub(crate) fn has_work(world: &World) -> bool {
+    if world
+        .resources
+        .get::<RenderPhase<TranslucentItem>>()
+        .is_some_and(|items| items.size() > 0)
+    {
+        return true;
+    }
+    world
+        .resources
+        .get::<crate::render::PassDrawHooks>()
+        .is_some_and(|hooks| {
+            !hooks
+                .get_hooks(crate::render::PassHookPoint::TranslucentPassBegin)
+                .is_empty()
+                || !hooks
+                    .get_hooks(crate::render::PassHookPoint::TranslucentPassEnd)
+                    .is_empty()
+        })
+}
+
 impl Node for TranslucentPassNode {
+    fn writes_custom_scene_depth(&self) -> bool {
+        false
+    }
+
     fn run(&self, render_context: &mut RenderContext, state: &RenderResources, world: &World) {
+        if !has_work(world) {
+            return;
+        }
         let Initialized(render_target) = &state.render_target else {
             return;
         };
@@ -32,17 +60,25 @@ impl Node for TranslucentPassNode {
         let Initialized(depth_texture) = &state.depth_texture else {
             return;
         };
-        if let Some(Initialized(symbol_depth)) =
-            world
-                .resources
-                .get::<crate::render::eventually::Eventually<crate::sdf::depth::SymbolDepth>>()
-        {
-            symbol_depth.copy.copy(
-                render_context.device,
-                &mut render_context.command_encoder,
-                &depth_texture.texture,
-                &symbol_depth.view,
-            );
+        let has_translucent_items = world
+            .resources
+            .get::<RenderPhase<TranslucentItem>>()
+            .is_some_and(|items| items.size() > 0);
+        if has_translucent_items {
+            if let Some(Initialized(symbol_depth)) =
+                world
+                    .resources
+                    .get::<crate::render::eventually::Eventually<crate::sdf::depth::SymbolDepth>>()
+            {
+                if !symbol_depth.skip_depth_copy {
+                    symbol_depth.copy.copy(
+                        render_context.device,
+                        &mut render_context.command_encoder,
+                        &depth_texture.texture,
+                        &symbol_depth.view,
+                    );
+                }
+            }
         }
         let color_attachment = if let Some(texture) = multisampling_texture {
             wgpu::RenderPassColorAttachment {

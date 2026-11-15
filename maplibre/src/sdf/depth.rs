@@ -7,7 +7,8 @@ pub(crate) struct SymbolDepth {
     samples: u32,
     pub view: wgpu::TextureView,
     fade_buffer: wgpu::Buffer,
-    last_fade_bits: Option<[u32; 2]>,
+    last_fade_bits: Option<[u32; 3]>,
+    pub skip_depth_copy: bool,
     pub binding: wgpu::BindGroup,
     pub copy: DepthCopyPipeline,
 }
@@ -81,6 +82,7 @@ impl SymbolDepth {
             view,
             fade_buffer,
             last_fade_bits: None,
+            skip_depth_copy: false,
             binding,
             samples,
             copy: DepthCopyPipeline::new(device, samples),
@@ -92,10 +94,21 @@ impl SymbolDepth {
         queue: &crate::render::upload_queue::UploadQueue,
         fade_time_ms: f32,
         fade_duration_ms: f32,
+        skip_depth_occlusion: bool,
     ) {
-        let bits = [fade_time_ms.to_bits(), fade_duration_ms.to_bits()];
+        self.skip_depth_copy = skip_depth_occlusion;
+        let skip_flag = if skip_depth_occlusion {
+            1.0_f32
+        } else {
+            0.0_f32
+        };
+        let bits = [
+            fade_time_ms.to_bits(),
+            fade_duration_ms.to_bits(),
+            skip_flag.to_bits(),
+        ];
         if self.last_fade_bits != Some(bits) {
-            let payload = [fade_time_ms, fade_duration_ms, 0.0_f32, 0.0_f32];
+            let payload = [fade_time_ms, fade_duration_ms, skip_flag, 0.0_f32];
             queue.write_buffer(&self.fade_buffer, 0, bytemuck::bytes_of(&payload));
             self.last_fade_bits = Some(bits);
         }

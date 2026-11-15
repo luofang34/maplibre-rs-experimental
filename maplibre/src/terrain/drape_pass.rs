@@ -22,6 +22,10 @@ pub const DRAPE_PASS: &str = "drape_pass";
 pub struct DrapePassNode;
 
 impl Node for DrapePassNode {
+    fn writes_custom_scene_depth(&self) -> bool {
+        false
+    }
+
     fn run(&self, render_context: &mut RenderContext, _resources: &RenderResources, world: &World) {
         let Some(Initialized(terrain)) = world.resources.get::<Eventually<TerrainResources>>()
         else {

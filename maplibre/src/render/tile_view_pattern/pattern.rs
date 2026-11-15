@@ -46,9 +46,18 @@ impl<B> BackingBuffer<B> {
 pub struct TileViewPattern<Q, B> {
     view_tiles: Vec<ViewTile>,
     view_tiles_buffer: BackingBuffer<B>,
+    buffer_destroyer: Option<fn(&B)>,
     /// Occupied entries, including appended metadata; a view-pattern upload starts a new frame.
     uploaded: u64,
     phantom_q: PhantomData<Q>,
+}
+
+impl<Q, B> Drop for TileViewPattern<Q, B> {
+    fn drop(&mut self) {
+        if let Some(destroy) = self.buffer_destroyer {
+            destroy(&self.view_tiles_buffer.inner);
+        }
+    }
 }
 
 /// The metadata buffer cannot hold every requested entry.
@@ -70,9 +79,16 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
                 view_tiles_buffer.buffer,
                 view_tiles_buffer.inner_size,
             ),
+            buffer_destroyer: None,
             uploaded: 0,
             phantom_q: Default::default(),
         }
+    }
+
+    /// Registers a destructor invoked on the backing metadata buffer when dropped.
+    pub fn with_buffer_destroyer(mut self, destroyer: fn(&B)) -> Self {
+        self.buffer_destroyer = Some(destroyer);
+        self
     }
 
     /// Number of metadata entries still available in this frame.

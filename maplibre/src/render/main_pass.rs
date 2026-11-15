@@ -38,6 +38,10 @@ impl MainPassNode {
 }
 
 impl Node for MainPassNode {
+    fn writes_custom_scene_depth(&self) -> bool {
+        false
+    }
+
     fn run(&self, render_context: &mut RenderContext, state: &RenderResources, world: &World) {
         let Initialized(render_target) = &state.render_target else {
             return;
@@ -48,7 +52,20 @@ impl Node for MainPassNode {
         let Initialized(depth_texture) = &state.depth_texture else {
             return;
         };
-        let color = color_attachment(render_target.deref(), multisampling_texture.as_ref());
+        let translucent_will_run = super::translucent_pass::has_work(world);
+        let keep_depth_stencil = translucent_will_run
+            || state.eye_depth_target.is_some()
+            || matches!(state.depth_readout_texture, Initialized(_));
+        let depth_stencil_store = if keep_depth_stencil {
+            StoreOp::Store
+        } else {
+            StoreOp::Discard
+        };
+        let color = color_attachment(
+            render_target.deref(),
+            multisampling_texture.as_ref(),
+            translucent_will_run,
+        );
         let pass = render_context
             .command_encoder
             .begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -59,11 +76,11 @@ impl Node for MainPassNode {
                     view: &depth_texture.view,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(0.0),
-                        store: StoreOp::Store,
+                        store: depth_stencil_store,
                     }),
                     stencil_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(EMPTY_STENCIL_REFERENCE),
-                        store: StoreOp::Store,
+                        store: depth_stencil_store,
                     }),
                 }),
                 timestamp_writes: world
@@ -333,10 +350,19 @@ pub(crate) fn apply_layer_masks<'w>(
 fn color_attachment<'a>(
     target: &'a wgpu::TextureView,
     multisampled: Option<&'a Texture>,
+    keep_multisampled: bool,
 ) -> wgpu::RenderPassColorAttachment<'a> {
-    let (view, resolve_target) = match multisampled {
-        Some(texture) => (texture.view.deref(), Some(target)),
-        None => (target, None),
+    let (view, resolve_target, store) = match multisampled {
+        Some(texture) => (
+            texture.view.deref(),
+            Some(target),
+            if keep_multisampled {
+                StoreOp::Store
+            } else {
+                StoreOp::Discard
+            },
+        ),
+        None => (target, None, StoreOp::Store),
     };
     wgpu::RenderPassColorAttachment {
         depth_slice: None,
@@ -344,7 +370,7 @@ fn color_attachment<'a>(
         resolve_target,
         ops: wgpu::Operations {
             load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-            store: StoreOp::Store,
+            store,
         },
     }
 }

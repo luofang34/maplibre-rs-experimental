@@ -161,6 +161,7 @@ impl System for ResourceSystem {
                 device.create_buffer(&tile_view_buffer_desc),
                 tile_view_buffer_desc.size,
             ))
+            .with_buffer_destroyer(wgpu::Buffer::destroy)
         });
 
         mask_pipeline.initialize(|| {

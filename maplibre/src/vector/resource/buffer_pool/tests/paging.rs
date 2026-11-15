@@ -271,3 +271,92 @@ fn decoupled_pool_shares_vertex_allocation_and_uses_single_uniform_metadata_reco
         (256 / 24) * 24
     );
 }
+
+#[test]
+fn shared_layer_metadata_reuses_one_slot_across_tiles_and_reserves_zero_feature_bytes() {
+    #[repr(C)]
+    #[derive(
+        Default, Copy, Clone, Debug, PartialEq, bytemuck_derive::Pod, bytemuck_derive::Zeroable,
+    )]
+    struct LayerMeta64 {
+        words: [u32; 16],
+    }
+
+    let mut pool: BufferPool<TestQueue, TestBuffer, TestVertex, u32, LayerMeta64, u32> =
+        BufferPool::new(
+            BackingBufferDescriptor::new(TestBuffer { size: 512 }, 512),
+            BackingBufferDescriptor::new(TestBuffer { size: 512 }, 512),
+            BackingBufferDescriptor::new(TestBuffer { size: 256 }, 256),
+            BackingBufferDescriptor::new(TestBuffer { size: 256 }, 256),
+        )
+        .with_decoupled_feature_metadata()
+        .with_shared_layer_metadata();
+
+    let t0 = WorldTileCoords::from((0, 0, 4_u8.into()));
+    let t1 = WorldTileCoords::from((1, 0, 4_u8.into()));
+    let meta = LayerMeta64 { words: [7; 16] };
+
+    pool.replace_layer_geometry_layer_uniform_shared_unless(
+        &TestQueue,
+        t0,
+        style_layer("roads"),
+        &geometry(3),
+        None,
+        meta,
+        0_u32,
+        3,
+        |_| false,
+    )
+    .expect("first tile");
+    let lm_free_after_first = pool.available_space(BackingBufferType::Metadata);
+    assert_eq!(lm_free_after_first, 256 - 64);
+    assert_eq!(
+        pool.available_space(BackingBufferType::FeatureMetadata),
+        256,
+        "layer-uniform fill/line must reserve 0 feature-metadata bytes"
+    );
+
+    pool.replace_layer_geometry_layer_uniform_shared_unless(
+        &TestQueue,
+        t1,
+        style_layer("roads"),
+        &geometry(3),
+        None,
+        meta,
+        0_u32,
+        3,
+        |_| false,
+    )
+    .expect("second tile at same zoom shares layer metadata");
+
+    assert_eq!(
+        pool.available_space(BackingBufferType::Metadata),
+        lm_free_after_first,
+        "second tile of same style layer and zoom must share the 64-byte layer metadata slot"
+    );
+    assert_eq!(
+        pool.available_space(BackingBufferType::FeatureMetadata),
+        256
+    );
+
+    let r0 = pool.index().get_layers(t0).expect("t0")[0].layer_metadata_buffer_range();
+    let r1 = pool.index().get_layers(t1).expect("t1")[0].layer_metadata_buffer_range();
+    assert_eq!(r0, r1);
+    assert!(pool.index().get_layers(t0).expect("t0")[0]
+        .feature_metadata_buffer_range()
+        .is_empty());
+
+    pool.remove_tile(t0);
+    assert_eq!(
+        pool.available_space(BackingBufferType::Metadata),
+        lm_free_after_first,
+        "shared layer metadata stays allocated while t1 still references it"
+    );
+
+    pool.remove_tile(t1);
+    assert_eq!(
+        pool.available_space(BackingBufferType::Metadata),
+        256,
+        "shared layer metadata is freed once the last tile on the page is removed"
+    );
+}

@@ -122,3 +122,45 @@ pub(super) fn obstructed_grid(
     }
     grid
 }
+
+/// Returns `true` when the main pass or a custom graph node writes non-zero scene depth that
+/// symbol anchors must test against via `symbol_depth.copy`.
+pub(super) fn has_symbol_depth_occluders(
+    world: &crate::tcs::world::World,
+    render_graph: &crate::render::graph::RenderGraph,
+) -> bool {
+    use crate::render::{
+        projection::ProjectionGpuResources,
+        render_phase::{LayerItem, MaskGroup, ProjectionBinding, RenderPhase},
+    };
+    if render_graph.has_custom_scene_depth_writers() {
+        return true;
+    }
+    if world
+        .resources
+        .get::<crate::render::ground::FrameGround>()
+        .is_some_and(|ground| ground.0.is_some())
+    {
+        return true;
+    }
+    if world
+        .resources
+        .get::<crate::terrain::TerrainFrame>()
+        .is_some_and(|terrain| terrain.active)
+    {
+        return true;
+    }
+    if let Some(Initialized(proj)) = world.resources.get::<Eventually<ProjectionGpuResources>>() {
+        if proj.is_globe_active(ProjectionBinding::View) {
+            return true;
+        }
+    }
+    world
+        .resources
+        .get::<RenderPhase<LayerItem>>()
+        .is_some_and(|layers| {
+            layers
+                .into_iter()
+                .any(|item| matches!(item.mask_group, MaskGroup::Mutating | MaskGroup::Custom))
+        })
+}

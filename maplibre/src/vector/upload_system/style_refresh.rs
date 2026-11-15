@@ -409,6 +409,8 @@ fn refresh_vector_pool(
     else {
         return;
     };
+    let mut updated_layer_slots: rustc_hash::FxHashSet<(u16, u64)> =
+        rustc_hash::FxHashSet::default();
     for style_layer in &style.layers {
         let Some(coords_set) = touched_by_layer.get(&style_layer.id) else {
             continue;
@@ -420,7 +422,11 @@ fn refresh_vector_pool(
                 .get_layers(coords)
                 .and_then(|layers| layers.iter().find(|e| e.style_layer.id == style_layer.id))
             {
-                vector_pool.update_layer_metadata(queue, entry, layer_meta);
+                if updated_layer_slots
+                    .insert((entry.page(), entry.layer_metadata_buffer_range().start))
+                {
+                    vector_pool.update_layer_metadata(queue, entry, layer_meta);
+                }
             }
         }
     }

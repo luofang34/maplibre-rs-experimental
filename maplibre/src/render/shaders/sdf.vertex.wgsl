@@ -21,6 +21,7 @@ const POSED_GLYPH: f32 = 65536.0;
 
 fn anchor_visibility(clip: vec4<f32>) -> f32 {
     if clip.w <= 0.0 { return 0.0; }
+    if symbol_fade.z > 0.5 { return 1.0; }
     // The snapshot holds one texel per device pixel of the whole target, which on a denser
     // display is not the viewport's layout pixel.
     let size = vec2<i32>(textureDimensions(scene_depth));

@@ -81,12 +81,9 @@ impl<V: Pod, I: Pod, TM: Pod, FM: Pod>
         let page = self.page_of(entry);
         if entry.is_uniform_feature_metadata() {
             let fm_range = entry.feature_metadata_buffer_range();
-            let fm_slice = if fm_range.is_empty() {
-                page.feature_metadata.inner.slice(..)
-            } else {
-                page.feature_metadata.inner.slice(fm_range)
-            };
-            pass.set_vertex_buffer(feature_slot, fm_slice);
+            if !fm_range.is_empty() {
+                pass.set_vertex_buffer(feature_slot, page.feature_metadata.inner.slice(fm_range));
+            }
             if whole {
                 pass.set_index_buffer(page.indices.inner.slice(..), format);
                 pass.set_vertex_buffer(0, page.vertices.inner.slice(..));
@@ -104,6 +101,16 @@ impl<V: Pod, I: Pod, TM: Pod, FM: Pod>
             pass.set_vertex_buffer(0, page.vertices.inner.slice(..));
             pass.set_vertex_buffer(feature_slot, page.feature_metadata.inner.slice(..));
             (entry.whole_buffer_indices().start, entry.base_vertex())
+        } else if whole {
+            pass.set_index_buffer(page.indices.inner.slice(..), format);
+            pass.set_vertex_buffer(0, page.vertices.inner.slice(entry.vertices_buffer_range()));
+            pass.set_vertex_buffer(
+                feature_slot,
+                page.feature_metadata
+                    .inner
+                    .slice(entry.buffer_feature_metadata.start..),
+            );
+            (entry.whole_buffer_indices().start, 0)
         } else {
             pass.set_index_buffer(
                 page.indices.inner.slice(entry.indices_buffer_range()),

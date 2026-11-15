@@ -11,6 +11,15 @@ use crate::{
 /// symbol shader samples an elevation of zero.
 pub struct SymbolTerrainFallback {
     bind_group: wgpu::BindGroup,
+    uniforms: wgpu::Buffer,
+    _dem: Texture,
+    _drape: Texture,
+}
+
+impl Drop for SymbolTerrainFallback {
+    fn drop(&mut self) {
+        self.uniforms.destroy();
+    }
 }
 
 impl SymbolTerrainFallback {
@@ -62,7 +71,12 @@ impl SymbolTerrainFallback {
                 },
             ],
         });
-        Self { bind_group }
+        Self {
+            bind_group,
+            uniforms,
+            _dem: dem,
+            _drape: drape,
+        }
     }
 
     /// The stand-in bind group.

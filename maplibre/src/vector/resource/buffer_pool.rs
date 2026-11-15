@@ -47,9 +47,12 @@ pub struct BufferPool<Q, B, V, I, TM, FM> {
     page_factory: Option<PageFactory<B>>,
     page_destroyer: Option<PageDestroyer<B>>,
     decoupled_feature_metadata: bool,
+    shared_layer_metadata: bool,
 
     index: RingIndex,
     shared_vertices: rustc_hash::FxHashMap<(WorldTileCoords, u16, u64), shared::SharedVertexAlloc>,
+    shared_layer_meta:
+        rustc_hash::FxHashMap<(u16, crate::style::StyleLayerId, u8), shared::SharedLayerMetaAlloc>,
     /// For layers whose pattern varies by feature: the pattern key and index range of each run
     /// of features sharing one image, relative to the layer's first index.
     pattern_runs: rustc_hash::FxHashMap<(WorldTileCoords, crate::style::StyleLayerId), PatternRuns>,
@@ -131,8 +134,10 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             page_factory: None,
             page_destroyer: None,
             decoupled_feature_metadata: false,
+            shared_layer_metadata: false,
             index: RingIndex::new(),
             shared_vertices: Default::default(),
+            shared_layer_meta: Default::default(),
             pattern_runs: Default::default(),
             sort_runs: Default::default(),
             revision: 0,
@@ -166,8 +171,10 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             page_factory: (!max_capacities.is_empty()).then(|| PageFactory(Box::new(factory))),
             page_destroyer: None,
             decoupled_feature_metadata: sizes.feature_metadata < sizes.vertices,
+            shared_layer_metadata: false,
             index: RingIndex::new(),
             shared_vertices: Default::default(),
+            shared_layer_meta: Default::default(),
             pattern_runs: Default::default(),
             sort_runs: Default::default(),
             revision: 0,
@@ -183,6 +190,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
     pub fn clear(&mut self) {
         self.index.clear();
         self.shared_vertices.clear();
+        self.shared_layer_meta.clear();
         self.pattern_runs.clear();
         self.sort_runs.clear();
         for page in self.pages.iter_mut().flatten() {
@@ -327,43 +335,6 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         id: crate::style::StyleLayerId,
     ) -> Option<&[(u32, Range<u32>)]> {
         self.pattern_runs.get(&(coords, id)).map(Vec::as_slice)
-    }
-
-    #[cfg(test)]
-    fn available_space(&self, typ: BackingBufferType) -> wgpu::BufferAddress {
-        let in_pages = self
-            .pages
-            .iter()
-            .flatten()
-            .map(|page| match typ {
-                BackingBufferType::Vertices => page.vertex_alloc.largest_free_block(),
-                BackingBufferType::Indices => page.index_alloc.largest_free_block(),
-                BackingBufferType::Metadata => page.layer_alloc.largest_free_block(),
-                BackingBufferType::FeatureMetadata => {
-                    if page.decoupled_feature_metadata {
-                        page.feature_alloc.largest_free_block()
-                    } else {
-                        let v_stride = size_of::<V>() as u64;
-                        let fm_stride = size_of::<FM>() as u64;
-                        page.vertex_alloc
-                            .largest_free_block()
-                            .checked_div(v_stride)
-                            .unwrap_or(0)
-                            * fm_stride
-                    }
-                }
-            })
-            .max()
-            .unwrap_or(0);
-        if self.page_factory.is_some() {
-            let unallocated = self
-                .max_capacities
-                .saturating_sub(self.allocated_capacities())
-                .get(typ);
-            in_pages.max(unallocated.min(self.max_page_bytes))
-        } else {
-            in_pages
-        }
     }
 
     /// Backing vertex buffer of `entry`'s page.

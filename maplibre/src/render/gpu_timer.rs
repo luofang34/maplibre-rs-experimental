@@ -34,6 +34,14 @@ pub struct GpuTimer {
     frame: std::sync::atomic::AtomicU64,
 }
 
+impl Drop for GpuTimer {
+    fn drop(&mut self) {
+        self.queries.destroy();
+        self.resolved.destroy();
+        self.readback.destroy();
+    }
+}
+
 impl GpuTimer {
     /// A timer for a device that can write timestamps in render passes, or `None`.
     pub fn new(device: &wgpu::Device) -> Option<Self> {

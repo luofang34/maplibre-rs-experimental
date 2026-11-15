@@ -17,8 +17,8 @@ use wgpu::util::DeviceExt;
 /// Maximum single `write_buffer` payload (exclusive) staged into the per-frame coalescing belt.
 const MAX_STAGED_WRITE_BYTES: usize = 65_536;
 
-/// Minimum persistent GPU staging buffer capacity (`512 KiB`).
-const MIN_STAGING_BUFFER_CAPACITY: u64 = 512 * 1024;
+/// Minimum persistent GPU staging buffer capacity (`64 KiB`).
+const MIN_STAGING_BUFFER_CAPACITY: u64 = 64 * 1024;
 
 #[derive(Debug)]
 struct StagedCopy {
@@ -33,6 +33,14 @@ struct StagingBeltState {
     payload: Vec<u8>,
     copies: Vec<StagedCopy>,
     buffer: Option<(wgpu::Buffer, u64)>,
+}
+
+impl Drop for StagingBeltState {
+    fn drop(&mut self) {
+        if let Some((buf, _)) = self.buffer.take() {
+            buf.destroy();
+        }
+    }
 }
 
 /// A [`wgpu::Queue`] that counts the bytes written through it and optionally coalesces small
@@ -167,7 +175,9 @@ impl UploadQueue {
                 usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
-            staging.buffer = Some((buf, next_cap));
+            if let Some((old_buf, _)) = staging.buffer.replace((buf, next_cap)) {
+                old_buf.destroy();
+            }
         }
 
         let (staging_buf, _) = staging.buffer.as_ref()?;

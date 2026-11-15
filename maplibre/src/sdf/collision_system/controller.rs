@@ -65,6 +65,7 @@ pub(super) struct PlacementTriggers {
 pub(super) struct PlacementController {
     initialized: bool,
     prev_raw_now: Option<Duration>,
+    last_dt_non_zero: bool,
     clock: Duration,
     last_commit_clock: Duration,
     last_commit_zoom: f64,
@@ -81,8 +82,13 @@ impl PlacementController {
 
     /// Whether a moving frame whose earlier stages already consumed most of a 16.6 ms budget may
     /// defer a non-initial symbol placement pass by one frame without starving placement.
+    /// Single-step headless callers (`dt == 0`) never defer.
     pub(super) fn defer_for_frame_budget(&mut self, triggers: PlacementTriggers) -> bool {
-        if !self.initialized || triggers.obstructed || self.deferred_budget_frames >= 2 {
+        if !self.initialized
+            || !self.last_dt_non_zero
+            || triggers.obstructed
+            || self.deferred_budget_frames >= 2
+        {
             return false;
         }
         self.deferred_budget_frames = self.deferred_budget_frames.saturating_add(1);
@@ -105,6 +111,7 @@ impl PlacementController {
             _ => Duration::ZERO,
         };
         self.prev_raw_now = Some(now);
+        self.last_dt_non_zero = !dt.is_zero();
         self.clock = self.clock.saturating_add(dt);
 
         if !self.initialized || triggers.obstructed {

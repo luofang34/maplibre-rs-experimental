@@ -23,6 +23,10 @@ impl DebugPassNode {
 }
 
 impl Node for DebugPassNode {
+    fn writes_custom_scene_depth(&self) -> bool {
+        false
+    }
+
     fn run(&self, render_context: &mut RenderContext, resources: &RenderResources, world: &World) {
         let Initialized(render_target) = &resources.render_target else {
             return;

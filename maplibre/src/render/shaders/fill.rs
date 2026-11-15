@@ -72,11 +72,6 @@ impl Shader for FillShader {
                     attributes: vec![
                         attribute(0, wgpu::VertexFormat::Float32, 10),
                         attribute(
-                            std::mem::offset_of!(ShaderLayerMetadata, stroke_color) as u64,
-                            wgpu::VertexFormat::Float32x4,
-                            14,
-                        ),
-                        attribute(
                             2 * wgpu::VertexFormat::Float32.size(),
                             wgpu::VertexFormat::Float32x2,
                             15,

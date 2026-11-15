@@ -53,7 +53,15 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         ];
         self.validate_sizes(sizes, strides)?;
 
-        let alloc = self.reserve_page_allocation(Some(queue), sizes, strides, &mut protect)?;
+        let style_layer_id = style_layer.layer_id();
+        let layer_meta_key = self.layer_meta_share_key(style_layer_id, coords);
+        let alloc = self.reserve_page_allocation(
+            Some(queue),
+            sizes,
+            strides,
+            layer_meta_key,
+            &mut protect,
+        )?;
         let first_vertex = alloc
             .vertices
             .start
@@ -64,6 +72,11 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             match (element_index(first_vertex), element_index(first_index)) {
                 (Ok(fv), Ok(fi)) => (fv, fi),
                 (Err(err), _) | (_, Err(err)) => {
+                    let release_lm = self.release_shared_layer_meta_ref(
+                        alloc.page,
+                        style_layer_id,
+                        u8::from(coords.z),
+                    );
                     if let Some(page) = self
                         .pages
                         .get_mut(usize::from(alloc.page))
@@ -74,7 +87,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
                             alloc.indices,
                             alloc.layer_metadata,
                             alloc.feature_metadata,
-                            true,
+                            (true, release_lm),
                         );
                     }
                     return Err(err);
@@ -82,7 +95,6 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             };
 
         let allocation_id = self.revision.wrapping_add(1);
-        let style_layer_id = style_layer.layer_id();
         let entry = IndexEntry {
             allocation_id,
             paint_revision: 0,
@@ -241,6 +253,11 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
     pub(super) fn free_entry_ranges(&mut self, entry: &IndexEntry) {
         let release_vertices =
             self.release_shared_vertex_ref(entry.coords, entry.page, entry.shared_geometry_key);
+        let release_layer_meta = self.release_shared_layer_meta_ref(
+            entry.page,
+            entry.style_layer_id,
+            u8::from(entry.coords.z),
+        );
         if let Some(page) = self
             .pages
             .get_mut(usize::from(entry.page))
@@ -251,7 +268,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
                 entry.buffer_indices.clone(),
                 entry.buffer_layer_metadata.clone(),
                 entry.buffer_feature_metadata.clone(),
-                release_vertices,
+                (release_vertices, release_layer_meta),
             );
         }
     }
@@ -270,19 +287,21 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         queue: Option<&Q>,
         sizes: [u64; 4],
         strides: ElementStrides,
+        layer_meta_key: Option<(crate::style::StyleLayerId, u8)>,
         mut protect: impl FnMut(WorldTileCoords) -> bool,
     ) -> Result<PageAllocation, AllocationError> {
         // 1. Suballocate inside an already-allocated page if one has room.
-        for (idx, slot) in self.pages.iter_mut().enumerate() {
-            if let Some(page) = slot.as_mut() {
-                if let Some(alloc) = page.try_allocate(idx as u16, sizes, strides) {
-                    return Ok(alloc);
-                }
+        for idx in 0..self.pages.len() {
+            if let Some(alloc) =
+                self.try_allocate_page_with_layer_meta(idx as u16, sizes, strides, layer_meta_key)
+            {
+                return Ok(alloc);
             }
         }
 
         // 2. Grow by allocating a new page if total pool capacity permits.
         if let Some(alloc) = self.try_grow_page_and_alloc(queue, sizes, strides) {
+            self.register_new_page_layer_meta(&alloc, strides, layer_meta_key);
             return Ok(alloc);
         }
 
@@ -301,18 +320,20 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             let page_id = evicted.page;
             self.free_entry_ranges(&evicted);
 
-            if let Some(page) = self
-                .pages
-                .get_mut(usize::from(page_id))
-                .and_then(Option::as_mut)
+            if let Some(alloc) =
+                self.try_allocate_page_with_layer_meta(page_id, sizes, strides, layer_meta_key)
             {
-                if let Some(alloc) = page.try_allocate(page_id, sizes, strides) {
+                return Ok(alloc);
+            }
+            let page_empty = self
+                .pages
+                .get(usize::from(page_id))
+                .and_then(Option::as_ref)
+                .is_some_and(BufferPage::is_empty);
+            if page_empty {
+                if let Some(alloc) = self.try_grow_page_and_alloc(queue, sizes, strides) {
+                    self.register_new_page_layer_meta(&alloc, strides, layer_meta_key);
                     return Ok(alloc);
-                }
-                if page.is_empty() {
-                    if let Some(alloc) = self.try_grow_page_and_alloc(queue, sizes, strides) {
-                        return Ok(alloc);
-                    }
                 }
             }
         }

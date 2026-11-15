@@ -25,6 +25,13 @@ pub struct RenderContext<'d> {
 pub trait Node: Send + Sync + 'static {
     /// Records the pass's commands. A pass whose inputs are not ready records nothing.
     fn run(&self, render_context: &mut RenderContext, resources: &RenderResources, world: &World);
+
+    /// Whether this pass may write 3D occluders into the shared scene depth attachment outside
+    /// `main_pass` (defaults to `true` so external custom 3D scene passes preserve symbol depth
+    /// occlusion automatically).
+    fn writes_custom_scene_depth(&self) -> bool {
+        true
+    }
 }
 
 /// A pass that records nothing, used as a named anchor other passes order themselves around.
@@ -32,6 +39,10 @@ pub struct EmptyNode;
 
 impl Node for EmptyNode {
     fn run(&self, _: &mut RenderContext, _: &RenderResources, _: &World) {}
+
+    fn writes_custom_scene_depth(&self) -> bool {
+        false
+    }
 }
 
 /// A pass could not be added, ordered or resolved.
@@ -99,6 +110,13 @@ impl RenderGraph {
     /// Whether a pass with this name exists.
     pub fn contains(&self, name: &str) -> bool {
         self.index(name).is_some()
+    }
+
+    /// Whether any registered pass may write custom 3D scene depth outside `main_pass`.
+    pub(crate) fn has_custom_scene_depth_writers(&self) -> bool {
+        self.passes
+            .iter()
+            .any(|pass| pass.node.writes_custom_scene_depth())
     }
 
     /// Resolves the run order after passes or constraints changed.

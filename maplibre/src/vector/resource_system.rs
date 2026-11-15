@@ -84,6 +84,7 @@ pub fn resource_system(
     buffer_pool.initialize(|| {
         BufferPool::from_device_with_sizes(device, settings.buffer_pools)
             .with_decoupled_feature_metadata()
+            .with_shared_layer_metadata()
     });
 
     let setup = PipelineSetup {
@@ -175,6 +176,18 @@ struct PipelineSetup<'a> {
 }
 
 impl PipelineSetup<'_> {
+    fn layer_color_binding() -> crate::render::resource::UniformFeatureBinding {
+        crate::render::resource::UniformFeatureBinding::LayerMetadata {
+            layer_slot: 2,
+            feature_slot: 3,
+            attribute: wgpu::VertexAttribute {
+                offset: std::mem::offset_of!(shaders::ShaderLayerMetadata, stroke_color) as u64,
+                format: wgpu::VertexFormat::Float32x4,
+                shader_location: 8,
+            },
+        }
+    }
+
     fn create(
         &self,
         name: &'static str,
@@ -187,6 +200,18 @@ impl PipelineSetup<'_> {
 
     /// `clipped` keeps the pipeline inside its tile's stencil mask.
     fn create_with_clipping(
+        &self,
+        name: &'static str,
+        shader: &impl Shader,
+        layouts: &[&wgpu::BindGroupLayout],
+        depth: bool,
+        clipped: bool,
+    ) -> crate::render::resource::FeaturePipelinePair {
+        self.describe(name, shader, depth, clipped)
+            .initialize_pair_with_binding(self.device, layouts, Self::layer_color_binding())
+    }
+
+    fn create_instance_uniform(
         &self,
         name: &'static str,
         shader: &impl Shader,
@@ -213,7 +238,11 @@ impl PipelineSetup<'_> {
         descriptor.layout = Some(vec![
             crate::terrain::resources::TerrainResources::bind_group_layout_entries(),
         ]);
-        descriptor.initialize_pair_with_prefix_layouts(self.device, &[self.projection, dashes], 3)
+        descriptor.initialize_pair_with_binding(
+            self.device,
+            &[self.projection, dashes],
+            Self::layer_color_binding(),
+        )
     }
 
     fn describe(
@@ -418,7 +447,7 @@ impl PipelineSetup<'_> {
         if needs_circle {
             circle.initialize(|| {
                 // Circles cross tile boundaries, as in GL JS, where each point belongs to one tile.
-                CirclePipeline(self.create_with_clipping(
+                CirclePipeline(self.create_instance_uniform(
                     "circle_pipeline",
                     &shaders::CircleShader {
                         format: self.format,

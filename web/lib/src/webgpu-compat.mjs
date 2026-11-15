@@ -100,13 +100,29 @@ export const ensureWebGpuCompatibility = (scope = globalThis) => {
         }
         return byteScratch;
     };
+    let curPasses = 0;
+    let curSetVertexBuffers = 0;
+    let curWriteBufferCalls = 0;
+    let curWriteBufferBytes = 0;
+    const lastGpuApiStats = new Float64Array(4);
+    try {
+        Object.defineProperty(scope, "__maplibreLastGpuApiStats", {
+            get: () => lastGpuApiStats,
+            configurable: true,
+        });
+    } catch {
+        // Ignore non-extensible global objects.
+    }
+
     const queueProto = scope?.GPUQueue?.prototype;
     if (queueProto) {
         if (typeof queueProto.writeBuffer === "function") {
             const origWriteBuffer = queueProto.writeBuffer;
             queueProto.writeBuffer = function (buffer, bufferOffset, data, dataOffset, size) {
+                curWriteBufferCalls++;
                 const copy = unshareByteSource(data, dataOffset, size, sabCtor, getByteScratch);
                 if (copy) {
+                    curWriteBufferBytes += copy.byteLength;
                     return origWriteBuffer.call(
                         this,
                         buffer,
@@ -116,11 +132,34 @@ export const ensureWebGpuCompatibility = (scope = globalThis) => {
                         copy.byteLength,
                     );
                 }
+                if (data) {
+                    const bpe = ArrayBuffer.isView(data) ? (data.BYTES_PER_ELEMENT || 1) : 1;
+                    const elemOff = dataOffset ?? 0;
+                    const elemLen = size ?? (data.byteLength / bpe - elemOff);
+                    curWriteBufferBytes += Math.max(0, elemLen * bpe);
+                }
                 return size === undefined
                     ? dataOffset === undefined
                         ? origWriteBuffer.call(this, buffer, bufferOffset, data)
                         : origWriteBuffer.call(this, buffer, bufferOffset, data, dataOffset)
                     : origWriteBuffer.call(this, buffer, bufferOffset, data, dataOffset, size);
+            };
+        }
+
+        if (typeof queueProto.submit === "function") {
+            const origSubmit = queueProto.submit;
+            queueProto.submit = function (commandBuffers) {
+                if (curPasses > 0) {
+                    lastGpuApiStats[0] = curPasses;
+                    lastGpuApiStats[1] = curSetVertexBuffers;
+                    lastGpuApiStats[2] = curWriteBufferCalls;
+                    lastGpuApiStats[3] = curWriteBufferBytes;
+                    curPasses = 0;
+                    curSetVertexBuffers = 0;
+                    curWriteBufferCalls = 0;
+                    curWriteBufferBytes = 0;
+                }
+                return origSubmit.call(this, commandBuffers);
             };
         }
 
@@ -201,7 +240,31 @@ export const ensureWebGpuCompatibility = (scope = globalThis) => {
     patchSetBindGroup(scope?.GPUComputePassEncoder?.prototype);
     patchSetBindGroup(scope?.GPURenderBundleEncoder?.prototype);
 
+    const encProto = scope?.GPUCommandEncoder?.prototype;
+    if (encProto && typeof encProto.beginRenderPass === "function") {
+        const origBeginRenderPass = encProto.beginRenderPass;
+        encProto.beginRenderPass = function (descriptor) {
+            curPasses++;
+            return origBeginRenderPass.call(this, descriptor);
+        };
+    }
+    const rpeProto = scope?.GPURenderPassEncoder?.prototype;
+    if (rpeProto && typeof rpeProto.setVertexBuffer === "function") {
+        const origSetVertexBuffer = rpeProto.setVertexBuffer;
+        rpeProto.setVertexBuffer = function (slot, buffer, offset, size) {
+            curSetVertexBuffers++;
+            if (arguments.length <= 2) {
+                return origSetVertexBuffer.call(this, slot, buffer);
+            }
+            if (arguments.length === 3) {
+                return origSetVertexBuffer.call(this, slot, buffer, offset);
+            }
+            return origSetVertexBuffer.call(this, slot, buffer, offset, size);
+        };
+    }
+
     let liveGpuBufferBytes = 0;
+    const deviceReleasers = typeof WeakMap === "function" ? new WeakMap() : null;
     try {
         Object.defineProperty(scope, "__maplibreLiveGpuBufferBytes", {
             get: () => liveGpuBufferBytes,
@@ -218,13 +281,28 @@ export const ensureWebGpuCompatibility = (scope = globalThis) => {
             const buf = origCreateBuffer.call(this, descriptor);
             if (buf && bytes > 0) {
                 liveGpuBufferBytes += bytes;
+                let released = false;
+                const release = () => {
+                    if (!released) {
+                        released = true;
+                        liveGpuBufferBytes = Math.max(0, liveGpuBufferBytes - bytes);
+                    }
+                };
+                if (deviceReleasers && this && typeof this === "object") {
+                    let set = deviceReleasers.get(this);
+                    if (!set) {
+                        set = new Set();
+                        deviceReleasers.set(this, set);
+                    }
+                    set.add(release);
+                }
                 if (typeof buf.destroy === "function") {
                     const origDestroy = buf.destroy;
-                    let released = false;
+                    const dev = this;
                     buf.destroy = function () {
-                        if (!released) {
-                            released = true;
-                            liveGpuBufferBytes = Math.max(0, liveGpuBufferBytes - bytes);
+                        release();
+                        if (deviceReleasers && dev && typeof dev === "object") {
+                            deviceReleasers.get(dev)?.delete(release);
                         }
                         return origDestroy.call(this);
                     };
@@ -232,6 +310,19 @@ export const ensureWebGpuCompatibility = (scope = globalThis) => {
             }
             return buf;
         };
+        if (deviceReleasers && typeof devProto.destroy === "function") {
+            const origDevDestroy = devProto.destroy;
+            devProto.destroy = function () {
+                const set = deviceReleasers.get(this);
+                if (set) {
+                    for (const release of set) {
+                        release();
+                    }
+                    set.clear();
+                }
+                return origDevDestroy.call(this);
+            };
+        }
     }
 };
 

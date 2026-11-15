@@ -9,7 +9,8 @@ use controller::{PlacementController, PlacementTriggers};
 use layer_pass::place_layer;
 use rustc_hash::{FxHashMap, FxHashSet};
 use signatures::{
-    content_signature, obstructed_grid, terrain_signature, visible_layers, VisibleLayer,
+    content_signature, has_symbol_depth_occluders, obstructed_grid, terrain_signature,
+    visible_layers, VisibleLayer,
 };
 
 #[cfg(test)]
@@ -105,7 +106,12 @@ impl System for CollisionSystem {
             .copied()
             .unwrap_or_default();
         if crate::render::eye_covering::EyeInFrame::reuses_content(world) {
-            sync_symbol_depth_fade(world, &renderer.queue, &self.history);
+            sync_symbol_depth_fade(
+                world,
+                &renderer.queue,
+                &renderer.render_graph,
+                &self.history,
+            );
             self.prune_inactive_symbol_draws(world);
             return Ok(());
         }
@@ -176,7 +182,12 @@ impl System for CollisionSystem {
                 && earlier_stage_spent > std::time::Duration::from_millis(4)
                 && self.controller.defer_for_frame_budget(triggers))
         {
-            sync_symbol_depth_fade(world, &renderer.queue, &self.history);
+            sync_symbol_depth_fade(
+                world,
+                &renderer.queue,
+                &renderer.render_graph,
+                &self.history,
+            );
             self.prune_inactive_symbol_draws(world);
             if self.history.is_fading() || self.controller.is_pending() {
                 crate::render::frame_signals::keep_animating(world);
@@ -235,7 +246,12 @@ impl System for CollisionSystem {
         world.resources.insert(super::query::PlacementBearing(
             view_state.camera().get_bearing().0,
         ));
-        sync_symbol_depth_fade(world, &renderer.queue, &self.history);
+        sync_symbol_depth_fade(
+            world,
+            &renderer.queue,
+            &renderer.render_graph,
+            &self.history,
+        );
         self.prune_inactive_symbol_draws(world);
         if self.history.is_fading() || self.controller.is_pending() {
             crate::render::frame_signals::keep_animating(world);
@@ -247,15 +263,17 @@ impl System for CollisionSystem {
 fn sync_symbol_depth_fade(
     world: &mut crate::tcs::world::World,
     queue: &crate::render::upload_queue::UploadQueue,
+    render_graph: &crate::render::graph::RenderGraph,
     history: &temporal::PlacementHistory,
 ) {
     let time_ms = history.effective_shader_time_ms();
     let duration_ms = history.fade_duration_ms();
+    let skip_depth_occlusion = !has_symbol_depth_occluders(world, render_graph);
     if let Some(Initialized(depth)) = world
         .resources
         .get_mut::<Eventually<super::depth::SymbolDepth>>()
     {
-        depth.write_fade_time(queue, time_ms, duration_ms);
+        depth.write_fade_time(queue, time_ms, duration_ms, skip_depth_occlusion);
     }
 }
 

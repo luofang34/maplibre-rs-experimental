@@ -65,6 +65,13 @@ pub struct GpuTileMesh {
     index_count: u32,
 }
 
+impl Drop for GpuTileMesh {
+    fn drop(&mut self) {
+        self.vertex_buffer.destroy();
+        self.index_buffer.destroy();
+    }
+}
+
 impl GpuTileMesh {
     /// Returns the vertex buffer containing 32-bit float tile positions.
     pub fn vertex_buffer(&self) -> &wgpu::Buffer {

@@ -14,6 +14,10 @@ use crate::{
 pub struct CopySurfaceBufferNode;
 
 impl Node for CopySurfaceBufferNode {
+    fn writes_custom_scene_depth(&self) -> bool {
+        false
+    }
+
     fn run(
         &self,
         RenderContext {

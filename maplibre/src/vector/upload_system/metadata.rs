@@ -8,6 +8,13 @@ use crate::{
     },
 };
 
+/// Whether uniform color for `style_layer` rides inside [`ShaderLayerMetadata::stroke_color`]
+/// instead of binding a separate feature-metadata buffer at Slot 3.
+#[inline]
+pub(crate) fn uses_layer_metadata_uniform_color(style_layer: &StyleLayer) -> bool {
+    matches!(style_layer.type_.as_str(), "fill" | "line")
+}
+
 pub(super) fn metadata_for_layer(
     style_layer: &StyleLayer,
     coords: WorldTileCoords,
@@ -30,7 +37,7 @@ pub(super) fn metadata_for_layer(
     let translate = layer_translate_tile_units(style_layer.paint.as_ref(), coords.z, zoom, bearing);
     let mut layer_metadata =
         ShaderLayerMetadata::new(style_layer.index as f32, line_width, translate);
-    if matches!(&style_layer.paint, Some(LayerPaint::Fill(_))) {
+    if uses_layer_metadata_uniform_color(style_layer) {
         if let Some(color) = super::paint::uniform_color(style_layer, f64::from(zoom)) {
             layer_metadata.stroke_color = color;
         }
@@ -171,7 +178,9 @@ pub(super) fn paint_metadata_depends_on_zoom(paint: Option<&LayerPaint>) -> bool
         }
         Some(LayerPaint::Line(p)) => {
             p.line_translate.is_some()
+                || p.line_color.as_ref().is_some_and(|v| !v.is_zoom_constant())
                 || [
+                    p.line_opacity.as_ref(),
                     p.line_width.as_ref(),
                     p.line_offset.as_ref(),
                     p.line_gap_width.as_ref(),
@@ -202,12 +211,6 @@ pub(super) fn paint_metadata_depends_on_zoom(paint: Option<&LayerPaint>) -> bool
 #[inline]
 pub(super) fn uniform_color_depends_on_zoom(layer: &StyleLayer) -> bool {
     match layer.paint.as_ref() {
-        Some(LayerPaint::Line(p)) => {
-            p.line_color.as_ref().is_some_and(|v| !v.is_zoom_constant())
-                || p.line_opacity
-                    .as_ref()
-                    .is_some_and(|v| !v.is_zoom_constant())
-        }
         Some(LayerPaint::FillExtrusion(p)) => {
             p.fill_extrusion_color
                 .as_ref()
@@ -237,11 +240,16 @@ pub(super) fn same_quantized_rgba(a: [f32; 4], b: [f32; 4]) -> bool {
 }
 
 pub(super) fn upload_size(
+    style_layer: &StyleLayer,
     bucket: &crate::vector::AvailableVectorLayerBucket,
     is_uniform: bool,
 ) -> usize {
     let fm_bytes = if is_uniform {
-        std::mem::size_of::<FillShaderFeatureMetadata>()
+        if uses_layer_metadata_uniform_color(style_layer) {
+            0
+        } else {
+            std::mem::size_of::<FillShaderFeatureMetadata>()
+        }
     } else {
         bucket
             .feature_indices

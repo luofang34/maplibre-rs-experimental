@@ -320,6 +320,10 @@ pub(super) fn prepare_system(
 pub(super) struct DepthProbePassNode;
 
 impl Node for DepthProbePassNode {
+    fn writes_custom_scene_depth(&self) -> bool {
+        false
+    }
+
     fn run(&self, render_context: &mut RenderContext, state: &RenderResources, world: &World) {
         let Some(Initialized(gpu)) = world.resources.get::<Eventually<ProbeGpu>>() else {
             return;

@@ -150,6 +150,10 @@ impl crate::render::eventually::HasChanged for DepthCopyPipeline {
 pub struct DepthCopyNode;
 
 impl Node for DepthCopyNode {
+    fn writes_custom_scene_depth(&self) -> bool {
+        false
+    }
+
     fn run(&self, render_context: &mut RenderContext, state: &RenderResources, world: &World) {
         let target: Option<&wgpu::TextureView> =
             state

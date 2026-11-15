@@ -23,7 +23,10 @@ pub(crate) mod paint;
 mod sources;
 pub(crate) mod style_refresh;
 
-use metadata::{feature_metadata_into, metadata_for_layer, sort_runs, upload_size};
+use metadata::{
+    feature_metadata_into, metadata_for_layer, sort_runs, upload_size,
+    uses_layer_metadata_uniform_color,
+};
 
 pub(crate) fn drape_paint_zoom(zoom: f64) -> f64 {
     (zoom * 8.0).round() / 8.0
@@ -214,7 +217,10 @@ fn upload_tessellated_layer(
                     }
                     continue;
                 } else if budget.geometry_tiles_exhausted()
-                    || !budget.take(UploadKind::Geometry, upload_size(bucket, is_uniform))
+                    || !budget.take(
+                        UploadKind::Geometry,
+                        upload_size(style_layer, bucket, is_uniform),
+                    )
                 {
                     Step::Exhausted
                 } else {
@@ -381,17 +387,31 @@ fn upload_bucket(
     tracing::debug!(%coords, "allocating vector geometry");
     let upload_res = if let Some(color) = uniform {
         let records = feature_indices.iter().map(|&c| c as usize).sum();
-        buffer_pool.replace_layer_geometry_uniform_shared_unless(
-            queue,
-            coords,
-            style_layer.clone(),
-            buffer,
-            fallback_vertices,
-            layer_metadata,
-            FillShaderFeatureMetadata { color },
-            records,
-            |candidate| protected.contains(&candidate),
-        )
+        if uses_layer_metadata_uniform_color(style_layer) {
+            buffer_pool.replace_layer_geometry_layer_uniform_shared_unless(
+                queue,
+                coords,
+                style_layer.clone(),
+                buffer,
+                fallback_vertices,
+                layer_metadata,
+                FillShaderFeatureMetadata { color },
+                records,
+                |candidate| protected.contains(&candidate),
+            )
+        } else {
+            buffer_pool.replace_layer_geometry_uniform_shared_unless(
+                queue,
+                coords,
+                style_layer.clone(),
+                buffer,
+                fallback_vertices,
+                layer_metadata,
+                FillShaderFeatureMetadata { color },
+                records,
+                |candidate| protected.contains(&candidate),
+            )
+        }
     } else {
         buffer_pool.replace_layer_geometry_unless(
             queue,

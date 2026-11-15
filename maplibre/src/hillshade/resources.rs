@@ -137,6 +137,12 @@ struct LayerBinding {
     bind_group: wgpu::BindGroup,
 }
 
+impl Drop for LayerBinding {
+    fn drop(&mut self) {
+        self.buffer.destroy();
+    }
+}
+
 /// The pipelines of both layer kinds and the uniform buffer of every DEM-shaded layer.
 pub struct HillshadeResources {
     hillshade_pipeline: wgpu::RenderPipeline,

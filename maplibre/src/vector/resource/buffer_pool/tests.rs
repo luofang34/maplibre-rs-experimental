@@ -59,6 +59,46 @@ fn pool() -> BufferPool<TestQueue, TestBuffer, TestVertex, u32, u32, u32> {
     )
 }
 
+impl<Q: Queue<B>, B, V: bytemuck::Pod, I: bytemuck::Pod, TM: bytemuck::Pod, FM: bytemuck::Pod>
+    BufferPool<Q, B, V, I, TM, FM>
+{
+    fn available_space(&self, typ: BackingBufferType) -> wgpu::BufferAddress {
+        let in_pages = self
+            .pages
+            .iter()
+            .flatten()
+            .map(|page| match typ {
+                BackingBufferType::Vertices => page.vertex_alloc.largest_free_block(),
+                BackingBufferType::Indices => page.index_alloc.largest_free_block(),
+                BackingBufferType::Metadata => page.layer_alloc.largest_free_block(),
+                BackingBufferType::FeatureMetadata => {
+                    if page.decoupled_feature_metadata {
+                        page.feature_alloc.largest_free_block()
+                    } else {
+                        let v_stride = std::mem::size_of::<V>() as u64;
+                        let fm_stride = std::mem::size_of::<FM>() as u64;
+                        page.vertex_alloc
+                            .largest_free_block()
+                            .checked_div(v_stride)
+                            .unwrap_or(0)
+                            * fm_stride
+                    }
+                }
+            })
+            .max()
+            .unwrap_or(0);
+        if self.page_factory.is_some() {
+            let unallocated = self
+                .max_capacities
+                .saturating_sub(self.allocated_capacities())
+                .get(typ);
+            in_pages.max(unallocated.min(self.max_page_bytes))
+        } else {
+            in_pages
+        }
+    }
+}
+
 fn style_layer(id: &str) -> StyleLayer {
     serde_json::from_value(serde_json::json!({
         "id": id, "type": "symbol", "source": "s", "source-layer": "place"

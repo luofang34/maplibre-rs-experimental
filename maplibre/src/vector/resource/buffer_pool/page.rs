@@ -306,13 +306,15 @@ impl<B> BufferPage<B> {
         indices: Range<u64>,
         layer_metadata: Range<u64>,
         feature_metadata: Range<u64>,
-        release_vertices: bool,
+        (release_vertices, release_layer_meta): (bool, bool),
     ) {
         if release_vertices {
             self.vertex_alloc.free(vertices);
         }
         self.index_alloc.free(indices);
-        self.layer_alloc.free(layer_metadata);
+        if release_layer_meta {
+            self.layer_alloc.free(layer_metadata);
+        }
         if self.decoupled_feature_metadata {
             self.feature_alloc.free(feature_metadata);
         }

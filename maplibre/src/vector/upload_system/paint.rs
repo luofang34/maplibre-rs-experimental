@@ -1,10 +1,10 @@
 //! Paint shared by every feature must use the view zoom, including overzoomed source tiles.
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{
     metadata::{
         metadata_for_layer, paint_depends_on_bearing, paint_metadata_depends_on_zoom,
-        same_quantized_rgba, uniform_color_depends_on_zoom,
+        same_quantized_rgba, uniform_color_depends_on_zoom, uses_layer_metadata_uniform_color,
     },
     VectorPaintFrame,
 };
@@ -26,6 +26,7 @@ pub(super) fn refresh_layer_paint(
     let bearing_changed = previous.is_none_or(|prev| prev.bearing != frame.bearing);
     let light_changed = previous.is_none_or(|prev| prev.light != frame.light);
     let mut meta_memo: FxHashMap<(u32, u8), (ShaderLayerMetadata, bool)> = FxHashMap::default();
+    let mut updated_layer_slots: FxHashSet<(u16, u64)> = FxHashSet::default();
     let mut color_memo: FxHashMap<u32, Option<[f32; 4]>> = FxHashMap::default();
 
     for coords in source_tiles {
@@ -54,13 +55,16 @@ pub(super) fn refresh_layer_paint(
                         });
                         (metadata, changed)
                     });
-                if changed {
+                if changed
+                    && updated_layer_slots
+                        .insert((entry.page(), entry.layer_metadata_buffer_range().start))
+                {
                     buffer_pool.update_layer_metadata(queue, entry, metadata);
                 }
             }
-            // Uniform fill colours already ride in `ShaderLayerMetadata::stroke_color`.
+            // Uniform fill and line colours already ride in `ShaderLayerMetadata::stroke_color`.
             if !zoom_changed
-                || entry.style_layer.type_ == "fill"
+                || uses_layer_metadata_uniform_color(&entry.style_layer)
                 || !uniform_color_depends_on_zoom(&entry.style_layer)
             {
                 continue;

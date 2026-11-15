@@ -19,6 +19,10 @@ pub const DENSITY_PASS: &str = "heatmap_density_pass";
 pub struct DensityPassNode;
 
 impl Node for DensityPassNode {
+    fn writes_custom_scene_depth(&self) -> bool {
+        false
+    }
+
     fn run(&self, render_context: &mut RenderContext, _resources: &RenderResources, world: &World) {
         let Some(Initialized(resources)) = world.resources.get::<Eventually<HeatmapResources>>()
         else {
