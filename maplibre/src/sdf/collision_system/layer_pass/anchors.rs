@@ -111,15 +111,81 @@ impl LayerFrame<'_> {
 
 pub(super) type OrderedFeature<'a> = (usize, usize, &'a crate::sdf::Feature, bool);
 
-/// Features of all `layers` in placement order: ascending `symbol-sort-key`, equal keys in tile
-/// order, and within a tile the labels that were visible first so they keep their place.
+/// Whether an entire flat-Mercator symbol tile lies behind the camera, beyond GL JS's
+/// `perspectiveRatioCutoff` (`0.6`), or strictly outside the screen guard band while holding no
+/// active/fading state in `history`.
+pub(super) fn tile_culled_on_flat_mercator(
+    layer: &crate::sdf::SymbolLayerData,
+    view_state: &crate::render::view_state::ViewState,
+    projection: &crate::render::projection::ShaderProjectionData,
+    uniforms: &crate::sdf::paint::SymbolUniforms,
+    has_terrain_or_height: bool,
+    history: &super::temporal::PlacementHistory,
+) -> bool {
+    if layer.features.is_empty() {
+        return true;
+    }
+    if has_terrain_or_height || projection.transition > 0.0 {
+        return false;
+    }
+    if crate::sdf::placement::canonical_tile(layer.coords).is_none() {
+        return !history.tile_has_active_state(&layer.style_layer_id, layer.coords);
+    }
+    let mvp = view_state
+        .gpu_view_projection()
+        .to_model_view_projection(layer.coords.transform_for_zoom(view_state.zoom()))
+        .get();
+    const MIN_EXTENT: f64 = -512.0;
+    const MAX_EXTENT: f64 = 4608.0;
+    let corners = [
+        mvp * cgmath::Vector4::new(MIN_EXTENT, MIN_EXTENT, 0.0, 1.0),
+        mvp * cgmath::Vector4::new(MAX_EXTENT, MIN_EXTENT, 0.0, 1.0),
+        mvp * cgmath::Vector4::new(MIN_EXTENT, MAX_EXTENT, 0.0, 1.0),
+        mvp * cgmath::Vector4::new(MAX_EXTENT, MAX_EXTENT, 0.0, 1.0),
+    ];
+    let max_w = corners
+        .iter()
+        .fold(f64::NEG_INFINITY, |acc, c| acc.max(c.w));
+    let min_w = corners.iter().fold(f64::INFINITY, |acc, c| acc.min(c.w));
+    let behind_camera = max_w <= 0.0;
+    let beyond_horizon = !crate::render::projection::fixed_symbol_scale(view_state)
+        && min_w > 0.0
+        && min_w > 5.001 * f64::from(projection.center_clip_w);
+    let map_aligned = uniforms.text_layout[0] > 0.5 || uniforms.icon_layout[0] > 0.5;
+    let offscreen = if !behind_camera && !beyond_horizon && !map_aligned && min_w > 0.0 {
+        let w = view_state.width();
+        let h = view_state.height();
+        let mut sx_min = f64::INFINITY;
+        let mut sx_max = f64::NEG_INFINITY;
+        let mut sy_min = f64::INFINITY;
+        let mut sy_max = f64::NEG_INFINITY;
+        for c in &corners {
+            let sx = (c.x / c.w + 1.0) * 0.5 * w;
+            let sy = (1.0 - c.y / c.w) * 0.5 * h;
+            sx_min = sx_min.min(sx);
+            sx_max = sx_max.max(sx);
+            sy_min = sy_min.min(sy);
+            sy_max = sy_max.max(sy);
+        }
+        sx_max < -550.0 || sx_min > w + 550.0 || sy_max < -550.0 || sy_min > h + 550.0
+    } else {
+        false
+    };
+    (behind_camera || beyond_horizon || offscreen)
+        && !history.tile_has_active_state(&layer.style_layer_id, layer.coords)
+}
+
+/// Features of unculled `layers` in placement order: ascending `symbol-sort-key`, equal keys in
+/// tile order, and within a tile the labels that were visible first so they keep their place.
 pub(super) fn ordered_features<'a>(
     layers: &[&'a crate::sdf::SymbolLayerData],
+    culled: &[bool],
     history: &super::temporal::PlacementHistory,
 ) -> Vec<OrderedFeature<'a>> {
     let mut features: Vec<_> = layers
         .iter()
         .enumerate()
+        .filter(|(position, _)| !culled.get(*position).copied().unwrap_or(false))
         .flat_map(|(position, layer)| {
             layer
                 .features

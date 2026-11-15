@@ -159,6 +159,38 @@ impl PlacementHistory {
             .is_some_and(|state| state.target.iter().any(|v| *v))
     }
 
+    /// Whether any visible or actively fading symbol state for `style_layer_id` could match a
+    /// feature inside `tile` (including tile margin padding), allowing horizon/off-screen tiles
+    /// without active fades to skip per-feature projection completely.
+    pub(super) fn tile_has_active_state(
+        &self,
+        style_layer_id: &str,
+        tile: WorldTileCoords,
+    ) -> bool {
+        let Some(layer_states) = self.states.get(style_layer_id) else {
+            return false;
+        };
+        let scale = 2_f64.powi(i32::from(u8::from(tile.z)));
+        let center_x = (f64::from(tile.x) + 0.5) / scale;
+        let center_y = (f64::from(tile.y) + 0.5) / scale;
+        let half_span = 0.76 / scale;
+        layer_states.values().flatten().any(|state| {
+            if !state.target[0]
+                && !state.target[1]
+                && state.ramp[0].is_hidden()
+                && state.ramp[1].is_hidden()
+            {
+                return false;
+            }
+            if state.claimed_by == tile {
+                return true;
+            }
+            let dx = (state.position[0] - center_x + 0.5).rem_euclid(1.0) - 0.5;
+            let dy = state.position[1] - center_y;
+            dx.abs() <= half_span && dy.abs() <= half_span
+        })
+    }
+
     /// Whether another tile's copy of the label already took it this frame, so this copy is
     /// neither drawn nor found by a query. Asked before [`Self::fade_ramps`] takes it.
     pub(super) fn shown_elsewhere(&self, layer: &SymbolLayerData, feature: &Feature) -> bool {

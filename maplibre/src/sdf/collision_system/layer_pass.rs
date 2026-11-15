@@ -18,7 +18,7 @@ mod avoid_edges;
 mod metadata;
 use anchors::{
     beyond_perspective_cutoff_with_clip, label_boxes, local_zoom_visible_from_clip,
-    ordered_features,
+    ordered_features, tile_culled_on_flat_mercator,
 };
 pub(super) use metadata::write_feature_metadata;
 
@@ -66,9 +66,10 @@ pub(super) fn place_layer(
         &mut CollisionGrid,
         &mut PlacedSymbols,
         &mut temporal::PlacementHistory,
+        &mut super::upload_diff::MetadataScratchPool,
     ),
 ) -> (Vec<Vec<SDFShaderFeatureMetadata>>, super::family::Outcomes) {
-    let (boxes, placed, history) = placement;
+    let (boxes, placed, history, scratch) = placement;
     let mut metadata: Vec<_> = layers.iter().map(|layer| empty_metadata(layer)).collect();
     let mut outcomes: super::family::Outcomes = (0..layers.len()).map(|_| Vec::new()).collect();
     let zoom = view_state.style_zoom().value();
@@ -101,7 +102,25 @@ pub(super) fn place_layer(
         constant_rules: rules::PlacementRules::constant_for_layer(paint, zoom),
         visibility_policy,
     };
-    for (position, feature_index, feature, was_visible) in ordered_features(layers, history) {
+    let culled: Vec<bool> = layers
+        .iter()
+        .map(|layer| {
+            tile_culled_on_flat_mercator(
+                layer,
+                view_state,
+                projection,
+                &frame.uniforms,
+                has_terrain_or_height,
+                history,
+            )
+        })
+        .collect();
+    if culled.iter().all(|&c| c) {
+        return (metadata, outcomes);
+    }
+    for (position, feature_index, feature, was_visible) in
+        ordered_features(layers, &culled, history)
+    {
         // A second way of writing a label is placed with the first, and only when that finds
         // no place.
         if feature.fallback {
@@ -128,6 +147,11 @@ pub(super) fn place_layer(
                 Some(LinePoses::Poses(poses)) => Some(poses.clone()),
                 _ => None,
             };
+            if (!outcome.ramps[0].is_hidden() || !outcome.ramps[1].is_hidden())
+                && metadata[position].capacity() == 0
+            {
+                metadata[position] = scratch.acquire();
+            }
             write_feature_metadata(
                 layer,
                 feature,

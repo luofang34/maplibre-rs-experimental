@@ -34,6 +34,13 @@ impl FrameTimings {
         std::mem::take(&mut self.stages)
     }
 
+    /// Wall-clock CPU time spent across stages already completed in the current in-progress frame.
+    pub fn elapsed_this_frame(&self) -> Duration {
+        self.stages
+            .iter()
+            .fold(Duration::ZERO, |acc, (_, spent)| acc.saturating_add(*spent))
+    }
+
     /// The `count` entries that kept the most heap, as kilobytes per frame, largest first.
     /// Reading them does not start a new report; [`Self::take_top`] does.
     pub fn top_growth(&self, count: usize) -> Vec<(Cow<'static, str>, f64)> {

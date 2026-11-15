@@ -60,3 +60,16 @@ fn a_turned_map_draws_its_labels_by_their_rotated_height() {
         "a quarter turn draws by the tile's x axis, right to left"
     );
 }
+
+#[test]
+fn quantized_bearing_buckets_absorb_sub_degree_jitter_and_preserve_cardinal_angles() {
+    assert_eq!(bearing_bucket(0.0), 0);
+    assert_eq!(bearing_bucket(0.5_f64.to_radians()), 0);
+    assert_eq!(bearing_bucket(-0.5_f64.to_radians()), 0);
+    assert_eq!(bearing_bucket(std::f64::consts::FRAC_PI_2), 24);
+    assert!(
+        (bucket_angle_rad(24) - std::f64::consts::FRAC_PI_2).abs() < 1e-12,
+        "90 degrees maps exactly to bucket 24"
+    );
+    assert_ne!(bearing_bucket(0.0), bearing_bucket(4.0_f64.to_radians()));
+}

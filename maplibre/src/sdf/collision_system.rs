@@ -2,18 +2,19 @@
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
-    hash::{Hash, Hasher},
-    sync::Arc,
 };
 
 pub use controller::PlacementConfig;
 use controller::{PlacementController, PlacementTriggers};
 use layer_pass::place_layer;
-use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
+use rustc_hash::{FxHashMap, FxHashSet};
+use signatures::{
+    content_signature, obstructed_grid, terrain_signature, visible_layers, VisibleLayer,
+};
 
 #[cfg(test)]
 use super::placement::canonical_tile;
-use super::{collision_grid::CollisionGrid, query::PlacedSymbols};
+use super::query::PlacedSymbols;
 use crate::{
     context::MapContext,
     coords::WorldTileCoords,
@@ -21,8 +22,7 @@ use crate::{
         eventually::{Eventually, Eventually::Initialized},
         projection::projection_data_for_view,
     },
-    sdf::{SymbolBufferPool, SymbolLayersDataComponent},
-    style::layer::LayerPaint,
+    sdf::SymbolBufferPool,
     tcs::system::{System, SystemError, SystemResult},
 };
 
@@ -32,6 +32,7 @@ mod family;
 mod layer_pass;
 mod repeat_spacing;
 mod rules;
+mod signatures;
 mod temporal;
 mod upload_diff;
 
@@ -55,6 +56,7 @@ pub struct CollisionSystem {
     history: temporal::PlacementHistory,
     uploaded:
         FxHashMap<(WorldTileCoords, crate::style::StyleLayerId), upload_diff::CachedBucketMetadata>,
+    scratch: upload_diff::MetadataScratchPool,
     draw_sort: draw_sort::DrawSort,
     /// Revision of the host's label obstacles the last placement kept clear.
     obstacles: u64,
@@ -135,9 +137,13 @@ impl System for CollisionSystem {
             .iter()
             .flatten()
             .all(|value| value.is_finite());
+        let prev_frame_view = self.last_frame_view;
         let moved = !external_view && view_valid && self.placed_view.as_ref() != Some(&view);
-        let external_moved =
-            external_view && view_valid && self.last_frame_view.as_ref() != Some(&view);
+        let moving_this_frame = !external_view
+            && view_valid
+            && prev_frame_view.is_some()
+            && prev_frame_view.as_ref() != Some(&view);
+        let external_moved = external_view && view_valid && prev_frame_view.as_ref() != Some(&view);
         if view_valid {
             self.last_frame_view = Some(view);
         }
@@ -148,6 +154,7 @@ impl System for CollisionSystem {
             .map_or(0, super::obstacles::LabelObstacles::revision);
         let triggers = PlacementTriggers {
             moved,
+            moving_this_frame,
             external_view,
             external_moved,
             new_content: self.last_content_signature != Some(content_sig),
@@ -156,7 +163,19 @@ impl System for CollisionSystem {
             obstructed: obstacles != self.obstacles,
         };
 
-        if !self.controller.should_place(now, zoom, config, triggers) {
+        let earlier_stage_spent = world
+            .resources
+            .get::<crate::tcs::system::timings::FrameTimings>()
+            .map_or(
+                std::time::Duration::ZERO,
+                crate::tcs::system::timings::FrameTimings::elapsed_this_frame,
+            );
+        if !self.controller.should_place(now, zoom, config, triggers)
+            || (moving_this_frame
+                && !config.fade_duration.is_zero()
+                && earlier_stage_spent > std::time::Duration::from_millis(4)
+                && self.controller.defer_for_frame_budget(triggers))
+        {
             sync_symbol_depth_fade(world, &renderer.queue, &self.history);
             self.prune_inactive_symbol_draws(world);
             if self.history.is_fading() || self.controller.is_pending() {
@@ -193,6 +212,13 @@ impl System for CollisionSystem {
         })?;
         let has_symbols = !layers.is_empty();
         self.history.begin_with_duration(now, config.fade_duration);
+        self.uploaded.retain(|(coords, _), cached| {
+            let keep = seen.contains(coords);
+            if !keep {
+                self.scratch.recycle(std::mem::take(&mut cached.vertices));
+            }
+            keep
+        });
         let placed = self.place_layers(
             world,
             style,
@@ -201,7 +227,6 @@ impl System for CollisionSystem {
             &renderer.queue,
             layers,
         );
-        self.uploaded.retain(|(coords, _), _| seen.contains(coords));
         let followup_needed = self.history.repeats.yielded_to_previous();
         self.controller
             .record_commit(zoom, has_symbols, followup_needed);
@@ -232,106 +257,6 @@ fn sync_symbol_depth_fade(
     {
         depth.write_fade_time(queue, time_ms, duration_ms);
     }
-}
-
-fn visible_layers<'a>(
-    world: &'a crate::tcs::world::World,
-    style: &'a crate::style::Style,
-    zoom: f64,
-    seen: &FxHashSet<WorldTileCoords>,
-) -> Vec<VisibleLayer<'a>> {
-    if seen.is_empty() {
-        return Vec::new();
-    }
-    let mut style_map: FxHashMap<&str, (u32, &'a crate::style::layer::SymbolPaint)> =
-        FxHashMap::default();
-    for style_layer in &style.layers {
-        if let Some(LayerPaint::Symbol(paint)) = &style_layer.paint {
-            if style_layer.is_visible_at(zoom) {
-                style_map.insert(style_layer.id.as_str(), (style_layer.index, paint));
-            }
-        }
-    }
-    if style_map.is_empty() {
-        return Vec::new();
-    }
-    let mut layers = Vec::new();
-    for coords in seen {
-        if let Some(component) = world.tiles.query::<&SymbolLayersDataComponent>(*coords) {
-            for layer in &component.layers {
-                if let Some(&(index, paint)) = style_map.get(layer.style_layer_id.as_str()) {
-                    layers.push((index, layer, paint));
-                }
-            }
-        }
-    }
-    layers
-}
-
-fn content_signature(world: &crate::tcs::world::World, layers: &[VisibleLayer<'_>]) -> u64 {
-    let pool = match world.resources.get::<Eventually<SymbolBufferPool>>() {
-        Some(Initialized(pool)) => Some(pool),
-        _ => None,
-    };
-    let mut acc = 0_u64;
-    for &(index, layer, _) in layers {
-        let rev = pool.and_then(|pool| {
-            pool.index()
-                .get_layers(layer.coords)?
-                .iter()
-                .find(|entry| entry.style_layer.id == layer.style_layer_id)
-                .map(|entry| entry.content_revision())
-        });
-        let mut h = FxHasher::default();
-        layer.coords.hash(&mut h);
-        layer.style_layer_id.hash(&mut h);
-        index.hash(&mut h);
-        rev.hash(&mut h);
-        layer.features.len().hash(&mut h);
-        layer.buffer.buffer.indices.len().hash(&mut h);
-        layer
-            .atlas
-            .as_ref()
-            .map_or(0_usize, |atlas| Arc::as_ptr(atlas) as usize)
-            .hash(&mut h);
-        // Pure wrapping addition over 64-bit hashes is strictly commutative, independent of
-        // tile iteration order.
-        acc = acc.wrapping_add(h.finish());
-    }
-    acc
-}
-
-fn terrain_signature(world: &crate::tcs::world::World) -> u64 {
-    let Some(coverage) = world
-        .resources
-        .get::<crate::terrain::coverage::TerrainCoverageIndex>()
-    else {
-        return 0;
-    };
-    let mut acc = coverage.exaggeration().to_bits()
-        ^ coverage.min_elevation().to_bits().rotate_left(13)
-        ^ coverage.max_elevation().to_bits().rotate_left(29);
-    for coords in coverage.rendered_tiles() {
-        let mut h = FxHasher::default();
-        coords.hash(&mut h);
-        coverage.loaded_dem_for(coords).hash(&mut h);
-        acc = acc.wrapping_add(h.finish());
-    }
-    acc
-}
-
-/// The collision grid of a `width` by `height` view, holding the host's obstacles before any
-/// label, so labels are placed around them.
-fn obstructed_grid(
-    width: f64,
-    height: f64,
-    obstacles: Option<&super::obstacles::LabelObstacles>,
-) -> CollisionGrid {
-    let mut grid = CollisionGrid::new(width, height);
-    for &rect in obstacles.map_or(&[][..], super::obstacles::LabelObstacles::boxes) {
-        grid.insert_as(rect, false);
-    }
-    grid
 }
 
 impl CollisionSystem {
@@ -396,7 +321,12 @@ impl CollisionSystem {
                 &members,
                 paint,
                 limits,
-                (&mut boxes, &mut placed, &mut self.history),
+                (
+                    &mut boxes,
+                    &mut placed,
+                    &mut self.history,
+                    &mut self.scratch,
+                ),
             );
             if leaders.get(&id) == Some(&id) {
                 outcomes.insert(id, (members.clone(), outcome));
@@ -424,12 +354,22 @@ impl CollisionSystem {
                             .iter()
                             .find(|entry| entry.style_layer_id == layer_id)
                     }) else {
+                        self.scratch.recycle(metadata);
                         continue;
                     };
                     let key = (layer.coords, layer_id);
-                    let prev = self.uploaded.get(&key);
-                    let next_cached =
-                        upload_diff::diff_and_upload_bucket(pool, queue, entry, prev, metadata);
+                    let prev = self.uploaded.remove(&key);
+                    let next_cached = upload_diff::diff_and_upload_bucket_with_scratch(
+                        pool,
+                        queue,
+                        entry,
+                        prev.as_ref(),
+                        metadata,
+                        &mut self.scratch,
+                    );
+                    if let Some(prev) = prev {
+                        self.scratch.recycle(prev.vertices);
+                    }
                     self.uploaded.insert(key, next_cached);
                 }
             }
@@ -471,9 +411,3 @@ impl CollisionSystem {
         });
     }
 }
-
-type VisibleLayer<'a> = (
-    u32,
-    &'a crate::sdf::SymbolLayerData,
-    &'a crate::style::layer::SymbolPaint,
-);

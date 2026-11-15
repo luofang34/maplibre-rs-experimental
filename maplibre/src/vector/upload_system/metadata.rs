@@ -145,15 +145,78 @@ pub(super) fn feature_metadata_into(
     }
 }
 
-/// Whether `paint`'s per-layer GPU metadata can change when only camera bearing or light changes
-/// while zoom remains constant.
+/// Whether `paint`'s per-layer GPU metadata can change when camera bearing changes while zoom and
+/// extrusion lighting remain constant.
 #[inline]
 pub(super) fn paint_depends_on_bearing(paint: Option<&LayerPaint>) -> bool {
     match paint {
-        Some(LayerPaint::FillExtrusion(_)) => true,
+        Some(LayerPaint::FillExtrusion(p)) => p.fill_extrusion_translate.is_some(),
         Some(LayerPaint::Fill(p)) => p.fill_translate.is_some(),
         Some(LayerPaint::Line(p)) => p.line_translate.is_some(),
         Some(LayerPaint::Circle(p)) => p.circle_translate.is_some(),
+        _ => false,
+    }
+}
+
+/// Whether `paint`'s [`ShaderLayerMetadata`] fields can change when only view zoom changes.
+#[inline]
+pub(super) fn paint_metadata_depends_on_zoom(paint: Option<&LayerPaint>) -> bool {
+    match paint {
+        Some(LayerPaint::Fill(p)) => {
+            p.fill_translate.is_some()
+                || p.fill_color.as_ref().is_some_and(|v| !v.is_zoom_constant())
+                || p.fill_opacity
+                    .as_ref()
+                    .is_some_and(|v| !v.is_zoom_constant())
+        }
+        Some(LayerPaint::Line(p)) => {
+            p.line_translate.is_some()
+                || [
+                    p.line_width.as_ref(),
+                    p.line_offset.as_ref(),
+                    p.line_gap_width.as_ref(),
+                    p.line_blur.as_ref(),
+                ]
+                .into_iter()
+                .flatten()
+                .any(|v| !v.is_zoom_constant())
+        }
+        Some(LayerPaint::Circle(_) | LayerPaint::Heatmap(_)) => true,
+        Some(LayerPaint::FillExtrusion(p)) => {
+            p.fill_extrusion_translate.is_some()
+                || p.fill_extrusion_opacity
+                    .as_ref()
+                    .is_some_and(|v| !v.is_zoom_constant())
+                || p.fill_extrusion_height
+                    .as_ref()
+                    .is_some_and(|v| !v.is_zoom_constant())
+                || p.fill_extrusion_base
+                    .as_ref()
+                    .is_some_and(|v| !v.is_zoom_constant())
+        }
+        _ => false,
+    }
+}
+
+/// Whether `layer`'s uniform `FillShaderFeatureMetadata` record can change when view zoom changes.
+#[inline]
+pub(super) fn uniform_color_depends_on_zoom(layer: &StyleLayer) -> bool {
+    match layer.paint.as_ref() {
+        Some(LayerPaint::Line(p)) => {
+            p.line_color.as_ref().is_some_and(|v| !v.is_zoom_constant())
+                || p.line_opacity
+                    .as_ref()
+                    .is_some_and(|v| !v.is_zoom_constant())
+        }
+        Some(LayerPaint::FillExtrusion(p)) => {
+            p.fill_extrusion_color
+                .as_ref()
+                .is_some_and(|v| !v.is_zoom_constant())
+                || (p.fill_extrusion_translucent == Some(true)
+                    && p.fill_extrusion_opacity
+                        .as_ref()
+                        .is_some_and(|v| !v.is_zoom_constant()))
+        }
         _ => false,
     }
 }

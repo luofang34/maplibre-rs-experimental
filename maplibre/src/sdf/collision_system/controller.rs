@@ -46,6 +46,8 @@ impl PlacementConfig {
 pub(super) struct PlacementTriggers {
     /// Standard camera view-projection or viewport size changed since the last placement epoch.
     pub moved: bool,
+    /// Standard camera view-projection or viewport size changed since the immediately preceding frame.
+    pub moving_this_frame: bool,
     /// Host drives the camera externally (e.g. head-tracked XR).
     pub external_view: bool,
     /// External XR eye matrix changed since the last frame.
@@ -68,12 +70,25 @@ pub(super) struct PlacementController {
     last_commit_zoom: f64,
     stale: bool,
     fast_followup: bool,
+    deferred_budget_frames: u8,
 }
 
 impl PlacementController {
     /// Whether a throttled placement epoch is still waiting for its debounce window to elapse.
     pub(super) fn is_pending(&self) -> bool {
         self.stale
+    }
+
+    /// Whether a moving frame whose earlier stages already consumed most of a 16.6 ms budget may
+    /// defer a non-initial symbol placement pass by one frame without starving placement.
+    pub(super) fn defer_for_frame_budget(&mut self, triggers: PlacementTriggers) -> bool {
+        if !self.initialized || triggers.obstructed || self.deferred_budget_frames >= 2 {
+            return false;
+        }
+        self.deferred_budget_frames = self.deferred_budget_frames.saturating_add(1);
+        self.stale = true;
+        self.fast_followup |= triggers.new_content || triggers.environment_changed;
+        true
     }
 
     /// Evaluates whether `CollisionSystem` should run a placement epoch on this frame.
@@ -110,11 +125,14 @@ impl PlacementController {
         }
 
         let integer_zoom_crossed = (zoom.floor() as i32) != (self.last_commit_zoom.floor() as i32);
-        let fast = triggers.new_content
-            || triggers.environment_changed
-            || integer_zoom_crossed
-            || self.fast_followup;
-        let dirty = self.stale || fast || triggers.moved || triggers.external_view;
+        let settle_fast =
+            triggers.new_content || triggers.environment_changed || self.fast_followup;
+        // During active continuous camera motion (`moving_this_frame`), streaming tile arrivals and
+        // repeat-spacing followups must NOT collapse the 250 ms (`4 Hz`) cadence down to 30 ms
+        // (`33 Hz`). Record `fast_followup` so once camera motion stops, a crisp 30 ms settle pass
+        // still fires immediately.
+        let fast = integer_zoom_crossed || (!triggers.moving_this_frame && settle_fast);
+        let dirty = self.stale || settle_fast || fast || triggers.moved || triggers.external_view;
         if !dirty {
             return false;
         }
@@ -128,13 +146,14 @@ impl PlacementController {
             true
         } else {
             self.stale = true;
-            self.fast_followup |= fast;
+            self.fast_followup |= settle_fast || integer_zoom_crossed;
             false
         }
     }
 
     /// Records the outcome of a placement epoch.
     pub(super) fn record_commit(&mut self, zoom: f64, has_symbols: bool, followup_needed: bool) {
+        self.deferred_budget_frames = 0;
         if !has_symbols {
             // Keep uninitialized across empty warmup frames so the first frame with actual
             // symbol buckets places immediately without waiting for a 250 ms timer.
@@ -304,6 +323,81 @@ mod tests {
             cfg,
             PlacementTriggers {
                 moved: true,
+                ..Default::default()
+            }
+        ));
+    }
+
+    #[test]
+    fn streaming_tiles_during_continuous_motion_keep_250ms_cadence_then_settle_fast() {
+        let mut ctrl = PlacementController::default();
+        let cfg = PlacementConfig::default();
+
+        assert!(ctrl.should_place(
+            Duration::ZERO,
+            14.2,
+            cfg,
+            PlacementTriggers {
+                moved: true,
+                moving_this_frame: true,
+                new_content: true,
+                ..Default::default()
+            }
+        ));
+        // Even with `followup_needed: true` and continuous `new_content: true`, active motion must
+        // stay at 250 ms (`4 Hz`) rather than collapsing to 30 ms (`33 Hz`).
+        ctrl.record_commit(14.2, true, true);
+
+        for ms in [16_u64, 32, 48, 80, 128, 200, 240] {
+            assert!(
+                !ctrl.should_place(
+                    Duration::from_millis(ms),
+                    14.3,
+                    cfg,
+                    PlacementTriggers {
+                        moved: true,
+                        moving_this_frame: true,
+                        new_content: true,
+                        ..Default::default()
+                    }
+                ),
+                "streaming tile arrival during continuous flight must not trigger early placement at {ms} ms"
+            );
+        }
+
+        // At 256 ms (>= 250 ms), the next 4 Hz motion epoch commits.
+        assert!(ctrl.should_place(
+            Duration::from_millis(256),
+            14.3,
+            cfg,
+            PlacementTriggers {
+                moved: true,
+                moving_this_frame: true,
+                new_content: true,
+                ..Default::default()
+            }
+        ));
+        ctrl.record_commit(14.3, true, false);
+
+        // One more tile uploads while moving at 272 ms, then camera stops at 290 ms (> 30 ms after 256 ms).
+        assert!(!ctrl.should_place(
+            Duration::from_millis(272),
+            14.35,
+            cfg,
+            PlacementTriggers {
+                moved: true,
+                moving_this_frame: true,
+                new_content: true,
+                ..Default::default()
+            }
+        ));
+        assert!(ctrl.should_place(
+            Duration::from_millis(290),
+            14.35,
+            cfg,
+            PlacementTriggers {
+                moved: true,
+                moving_this_frame: false,
                 ..Default::default()
             }
         ));

@@ -16,6 +16,38 @@ use crate::{
 /// `32 * 80 B = 2,560 B`, balancing fewer WebGPU IPC calls against minimal clean-byte over-upload.
 const MAX_CLEAN_GAP_VERTICES: usize = 32;
 
+/// Reusable pool of per-bucket `SDFShaderFeatureMetadata` vectors and zeroed staging slices so
+/// placement epochs do not churn multi-hundred-kilobyte heap allocations on WASM or native.
+#[derive(Default)]
+pub(super) struct MetadataScratchPool {
+    free: Vec<Vec<SDFShaderFeatureMetadata>>,
+    zeros: Vec<SDFShaderFeatureMetadata>,
+}
+
+impl MetadataScratchPool {
+    /// Pops a cleared `Vec<SDFShaderFeatureMetadata>` with retained capacity when available.
+    pub(super) fn acquire(&mut self) -> Vec<SDFShaderFeatureMetadata> {
+        let mut buf = self.free.pop().unwrap_or_default();
+        buf.clear();
+        buf
+    }
+
+    /// Returns a `Vec<SDFShaderFeatureMetadata>` to the scratch pool if capacity is worth keeping.
+    pub(super) fn recycle(&mut self, mut buf: Vec<SDFShaderFeatureMetadata>) {
+        if buf.capacity() > 0 && self.free.len() < 128 {
+            buf.clear();
+            self.free.push(buf);
+        }
+    }
+
+    fn zero_slice(&mut self, len: usize) -> &[SDFShaderFeatureMetadata] {
+        if self.zeros.len() < len {
+            self.zeros.resize(len, SDFShaderFeatureMetadata::default());
+        }
+        &self.zeros[..len]
+    }
+}
+
 /// Last GPU-resident `SDFShaderFeatureMetadata` state for one `(WorldTileCoords, style_layer_id)` bucket.
 #[derive(Clone, Debug, Default)]
 pub(super) struct CachedBucketMetadata {
@@ -50,6 +82,7 @@ impl CachedBucketMetadata {
 
 /// Diffs `next` against `prev` (treating a fresh `allocation_id` as all-zero in GPU memory) and
 /// writes only coalesced dirty vertex ranges to `pool`.
+#[cfg(test)]
 pub(super) fn diff_and_upload_bucket<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod>(
     pool: &BufferPool<Q, B, V, I, TM, SDFShaderFeatureMetadata>,
     queue: &Q,
@@ -57,11 +90,25 @@ pub(super) fn diff_and_upload_bucket<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod>(
     prev: Option<&CachedBucketMetadata>,
     next: Vec<SDFShaderFeatureMetadata>,
 ) -> CachedBucketMetadata {
+    let mut scratch = MetadataScratchPool::default();
+    diff_and_upload_bucket_with_scratch(pool, queue, entry, prev, next, &mut scratch)
+}
+
+/// Diffs `next` against `prev` and recycles unused `SDFShaderFeatureMetadata` buffers into `scratch`.
+pub(super) fn diff_and_upload_bucket_with_scratch<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod>(
+    pool: &BufferPool<Q, B, V, I, TM, SDFShaderFeatureMetadata>,
+    queue: &Q,
+    entry: &IndexEntry,
+    prev: Option<&CachedBucketMetadata>,
+    next: Vec<SDFShaderFeatureMetadata>,
+    scratch: &mut MetadataScratchPool,
+) -> CachedBucketMetadata {
     let allocation_id = entry.allocation_id();
     let stride = size_of::<SDFShaderFeatureMetadata>() as u64;
     let range = entry.feature_metadata_buffer_range();
     let allocated_vertices = ((range.end - range.start) / stride) as usize;
     if allocated_vertices == 0 {
+        scratch.recycle(next);
         return CachedBucketMetadata::empty(allocation_id);
     }
 
@@ -71,18 +118,20 @@ pub(super) fn diff_and_upload_bucket<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod>(
 
     // Fast path 1: all symbols hidden on a newly zeroed allocation or already-zeroed bucket.
     if next.is_empty() && prev_slice.is_empty() {
+        scratch.recycle(next);
         return CachedBucketMetadata::empty(allocation_id);
     }
 
     // Fast path 2: bucket became completely hidden after having visible symbols.
     if next.is_empty() {
+        scratch.recycle(next);
         let zero = SDFShaderFeatureMetadata::default();
         let zero_bytes = bytemuck::bytes_of(&zero);
         let limit = prev_slice.len().min(allocated_vertices);
         for (start, end) in dirty_runs(limit, |i| bytemuck::bytes_of(&prev_slice[i]) != zero_bytes)
         {
-            let zeros = vec![zero; end - start];
-            pool.update_feature_metadata_range(queue, entry, start, &zeros);
+            let zeros = scratch.zero_slice(end - start);
+            pool.update_feature_metadata_range(queue, entry, start, zeros);
         }
         return CachedBucketMetadata::empty(allocation_id);
     }
@@ -105,8 +154,8 @@ pub(super) fn diff_and_upload_bucket<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod>(
         for (rel_start, rel_end) in dirty_runs(tail_end - limit, |i| {
             bytemuck::bytes_of(&prev_slice[limit + i]) != zero_bytes
         }) {
-            let zeros = vec![zero; rel_end - rel_start];
-            pool.update_feature_metadata_range(queue, entry, limit + rel_start, &zeros);
+            let zeros = scratch.zero_slice(rel_end - rel_start);
+            pool.update_feature_metadata_range(queue, entry, limit + rel_start, zeros);
         }
     }
 

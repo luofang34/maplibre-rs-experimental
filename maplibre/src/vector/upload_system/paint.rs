@@ -2,7 +2,10 @@
 use rustc_hash::FxHashMap;
 
 use super::{
-    metadata::{metadata_for_layer, paint_depends_on_bearing, same_quantized_rgba},
+    metadata::{
+        metadata_for_layer, paint_depends_on_bearing, paint_metadata_depends_on_zoom,
+        same_quantized_rgba, uniform_color_depends_on_zoom,
+    },
     VectorPaintFrame,
 };
 use crate::{
@@ -19,7 +22,9 @@ pub(super) fn refresh_layer_paint(
     previous: Option<VectorPaintFrame>,
 ) {
     let VectorPaintFrame { zoom, .. } = frame;
-    let zoom_unchanged = previous.is_some_and(|prev| prev.zoom == zoom);
+    let zoom_changed = previous.is_none_or(|prev| prev.zoom != zoom);
+    let bearing_changed = previous.is_none_or(|prev| prev.bearing != frame.bearing);
+    let light_changed = previous.is_none_or(|prev| prev.light != frame.light);
     let mut meta_memo: FxHashMap<(u32, u8), (ShaderLayerMetadata, bool)> = FxHashMap::default();
     let mut color_memo: FxHashMap<u32, Option<[f32; 4]>> = FxHashMap::default();
 
@@ -31,24 +36,33 @@ pub(super) fn refresh_layer_paint(
             .into_iter()
             .flatten()
         {
-            if zoom_unchanged && !paint_depends_on_bearing(entry.style_layer.paint.as_ref()) {
-                continue;
-            }
-            let (metadata, changed) = *meta_memo
-                .entry((entry.style_layer.index, tile_z))
-                .or_insert_with(|| {
-                    let metadata = metadata_for_layer(&entry.style_layer, *coords, frame);
-                    let changed = previous.is_none_or(|prev| {
-                        bytemuck::bytes_of(&metadata_for_layer(&entry.style_layer, *coords, prev))
-                            != bytemuck::bytes_of(&metadata)
+            let paint = entry.style_layer.paint.as_ref();
+            let meta_dirty = (zoom_changed && paint_metadata_depends_on_zoom(paint))
+                || (bearing_changed && paint_depends_on_bearing(paint))
+                || (light_changed && matches!(paint, Some(LayerPaint::FillExtrusion(_))));
+            if meta_dirty {
+                let (metadata, changed) = *meta_memo
+                    .entry((entry.style_layer.index, tile_z))
+                    .or_insert_with(|| {
+                        let metadata = metadata_for_layer(&entry.style_layer, *coords, frame);
+                        let changed = previous.is_none_or(|prev| {
+                            bytemuck::bytes_of(&metadata_for_layer(
+                                &entry.style_layer,
+                                *coords,
+                                prev,
+                            )) != bytemuck::bytes_of(&metadata)
+                        });
+                        (metadata, changed)
                     });
-                    (metadata, changed)
-                });
-            if changed {
-                buffer_pool.update_layer_metadata(queue, entry, metadata);
+                if changed {
+                    buffer_pool.update_layer_metadata(queue, entry, metadata);
+                }
             }
             // Uniform fill colours already ride in `ShaderLayerMetadata::stroke_color`.
-            if zoom_unchanged || entry.style_layer.type_ == "fill" {
+            if !zoom_changed
+                || entry.style_layer.type_ == "fill"
+                || !uniform_color_depends_on_zoom(&entry.style_layer)
+            {
                 continue;
             }
             let changed_color = *color_memo

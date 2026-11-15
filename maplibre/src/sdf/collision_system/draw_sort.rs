@@ -17,15 +17,32 @@ use crate::{
     style::layer::SymbolPaint,
 };
 
-/// The bearing each layer's indices were last sorted for, by tile and allocation.
+/// Discrete angular steps around `2π` (`96` steps = `3.75°` per bucket, hitting `0°`, `45°`,
+/// `90°`, `180°`, and `270°` exactly while suppressing sub-degree orbit index-buffer rewrites).
+const BEARING_BUCKETS: u16 = 96;
+
+fn bearing_bucket(bearing: f64) -> u16 {
+    if !bearing.is_finite() {
+        return 0;
+    }
+    let normalized = bearing.rem_euclid(std::f64::consts::TAU);
+    ((normalized / std::f64::consts::TAU) * f64::from(BEARING_BUCKETS)).round() as u16
+        % BEARING_BUCKETS
+}
+
+fn bucket_angle_rad(bucket: u16) -> f64 {
+    (f64::from(bucket) / f64::from(BEARING_BUCKETS)) * std::f64::consts::TAU
+}
+
+/// The quantized bearing bucket each layer's indices were last sorted for, by tile and allocation.
 #[derive(Default)]
 pub(super) struct DrawSort {
-    sorted: HashMap<(WorldTileCoords, String), (u64, u64)>,
+    sorted: HashMap<(WorldTileCoords, String), (u64, u16)>,
 }
 
 impl DrawSort {
     /// Rewrites the indices of the `layers` that sort by height and were sorted for another
-    /// bearing; an upload that has not been sorted yet holds the unrotated order.
+    /// bearing bucket; an upload that has not been sorted yet holds the unrotated (`0`) order.
     pub(super) fn follow_bearing(
         &mut self,
         world: &crate::tcs::world::World,
@@ -36,6 +53,8 @@ impl DrawSort {
         let Some(Initialized(pool)) = world.resources.get::<Eventually<SymbolBufferPool>>() else {
             return;
         };
+        let bucket = bearing_bucket(bearing);
+        let sort_bearing = bucket_angle_rad(bucket);
         // Uploads that left the pool take their entries with them.
         self.sorted
             .retain(|(coords, _), _| pool.index().get_layers(*coords).is_some());
@@ -55,14 +74,13 @@ impl DrawSort {
                 .sorted
                 .get(&key)
                 .filter(|(allocation, _)| *allocation == entry.allocation_id())
-                .map_or(0.0_f64.to_bits(), |(_, bearing)| *bearing);
-            if sorted_for != bearing.to_bits() {
-                if let Some(indices) = indices_in_order(layer, bearing) {
+                .map_or(0_u16, |(_, b)| *b);
+            if sorted_for != bucket {
+                if let Some(indices) = indices_in_order(layer, sort_bearing) {
                     pool.update_indices(queue, entry, &indices);
                 }
             }
-            self.sorted
-                .insert(key, (entry.allocation_id(), bearing.to_bits()));
+            self.sorted.insert(key, (entry.allocation_id(), bucket));
         }
     }
 }
