@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {ensureWebGpuCompatibility} from '../src/webgpu-compat.mjs';
+import {ensureWebGpuCompatibility, getLiveGpuBufferBytes} from '../src/webgpu-compat.mjs';
 
 test('populates missing Safari GPUAdapterInfo subgroup and fallback fields', () => {
     class MockSafariAdapterInfo {
@@ -182,4 +182,34 @@ test('reuses unshared scratch ArrayBuffer across repeated writeBuffer and writeT
     assert.equal(seenBuffers.length, 3);
     assert.equal(seenBuffers[0].buffer, seenBuffers[1].buffer);
     assert.equal(seenBuffers[1].buffer, seenBuffers[2].buffer);
+});
+
+test('tracks live GPUDevice createBuffer minus idempotent destroy bytes', () => {
+    class MockDevice {
+        createBuffer(desc) {
+            return {
+                size: desc.size,
+                destroyed: false,
+                destroy() {
+                    this.destroyed = true;
+                },
+            };
+        }
+    }
+    const scope = {GPUDevice: MockDevice};
+    ensureWebGpuCompatibility(scope);
+    assert.equal(getLiveGpuBufferBytes(scope), 0);
+
+    const dev = new MockDevice();
+    const b1 = dev.createBuffer({size: 4096});
+    const b2 = dev.createBuffer({size: 16384});
+    assert.equal(getLiveGpuBufferBytes(scope), 20480);
+
+    b1.destroy();
+    b1.destroy();
+    assert.equal(b1.destroyed, true);
+    assert.equal(getLiveGpuBufferBytes(scope), 16384);
+
+    b2.destroy();
+    assert.equal(getLiveGpuBufferBytes(scope), 0);
 });

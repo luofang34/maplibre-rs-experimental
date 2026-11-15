@@ -89,7 +89,7 @@ async fn empty_tiles_do_not_starve_later_geometry_uploads() {
             });
     }
     let wanted = *coords.last().expect("geometry tile");
-    let deferred = super::upload_tessellated_layer(
+    let (deferred, _) = super::upload_tessellated_layer(
         &mut pool,
         &renderer.queue,
         &mut tiles,
@@ -199,21 +199,24 @@ async fn deferred_uploads_keep_parent_stand_in_and_flag_animation() {
         light: Default::default(),
     };
     // Upload parent first, as an earlier low-zoom frame did.
-    assert!(!super::upload_tessellated_layer(
-        &mut pool,
-        &renderer.queue,
-        &mut world.tiles,
-        &style,
-        vec![parent],
-        (&[], paint),
-        (
-            &mut crate::render::memory_budget::FrameUploads::default(),
-            false
-        ),
-    ));
+    assert!(
+        !super::upload_tessellated_layer(
+            &mut pool,
+            &renderer.queue,
+            &mut world.tiles,
+            &style,
+            vec![parent],
+            (&[], paint),
+            (
+                &mut crate::render::memory_budget::FrameUploads::default(),
+                false
+            ),
+        )
+        .0
+    );
 
     // Zooming in finishes more children than UPLOADS_PER_FRAME allows in one frame.
-    let deferred = super::upload_tessellated_layer(
+    let (deferred, _) = super::upload_tessellated_layer(
         &mut pool,
         &renderer.queue,
         &mut world.tiles,
@@ -411,7 +414,7 @@ async fn peripheral_tiles_never_evict_focus_tile_or_thrash_saturated_pool() {
         light: Default::default(),
     };
     for _frame in 0..4 {
-        let deferred = super::upload_tessellated_layer(
+        let (deferred, _) = super::upload_tessellated_layer(
             &mut pool,
             &renderer.queue,
             &mut tiles,
@@ -441,7 +444,7 @@ async fn peripheral_tiles_never_evict_focus_tile_or_thrash_saturated_pool() {
 
     // Once the camera pans so `source_tiles[2..4]` become the focus, the old tiles are evicted.
     let panned = vec![source_tiles[2], source_tiles[3]];
-    let deferred = super::upload_tessellated_layer(
+    let (deferred, _) = super::upload_tessellated_layer(
         &mut pool,
         &renderer.queue,
         &mut tiles,

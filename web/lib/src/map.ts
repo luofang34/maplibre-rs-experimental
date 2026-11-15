@@ -75,6 +75,9 @@ export interface ArenaFrameTelemetry {
     loaded: boolean
     settled: boolean
     wasmMemoryBytes: number
+    gpuMemoryBytes: number
+    pendingRequests: number
+    totalRequests: number
     camera: CameraState
     redrawReasons: {
         changed: boolean

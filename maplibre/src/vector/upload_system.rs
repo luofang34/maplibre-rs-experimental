@@ -86,7 +86,7 @@ pub fn upload_system(
     }
     let allow_cpu_release =
         cfg!(target_arch = "wasm32") && settings.buffer_pools.vertices >= 1_000_000;
-    let deferred = upload_tessellated_layer(
+    let (deferred, needs_refetch) = upload_tessellated_layer(
         buffer_pool,
         queue,
         &mut world.tiles,
@@ -97,6 +97,9 @@ pub fn upload_system(
     );
     if deferred {
         crate::render::frame_signals::keep_animating(world);
+    }
+    if needs_refetch {
+        crate::render::frame_signals::mark_dirty(world);
     }
     Ok(())
 }
@@ -137,13 +140,13 @@ fn upload_tessellated_layer(
     source_tiles: Vec<crate::coords::WorldTileCoords>,
     (spatial, paint): (&[super::structures::SpatialBuffer], VectorPaintFrame),
     (budget, allow_cpu_release): (&mut FrameUploads, bool),
-) -> bool {
+) -> (bool, bool) {
     #[cfg(target_arch = "wasm32")]
     let has_dem_source = crate::terrain::source::dem_source(style).is_some();
     let mut feature_meta_scratch = Vec::new();
-    let mut protected = std::collections::HashSet::with_capacity(source_tiles.len());
+    let mut needs_refetch = false;
+    let protected: std::collections::HashSet<_> = source_tiles.iter().copied().collect();
     for coords in source_tiles {
-        protected.insert(coords);
         super::content::ensure(tiles, coords);
         if tiles
             .query::<(
@@ -155,7 +158,6 @@ fn upload_tessellated_layer(
             continue;
         }
         let mut uploaded = false;
-        let mut saturated = false;
         #[cfg(target_arch = "wasm32")]
         let mut pending_cpu_releases: Vec<(String, Option<u64>, bool)> = Vec::new();
         for style_layer in &style.layers {
@@ -207,6 +209,9 @@ fn upload_tessellated_layer(
                         release_cpu: None,
                     }
                 } else if bucket.buffer.buffer.indices.is_empty() {
+                    if !style_layer.is_hidden() {
+                        needs_refetch = true;
+                    }
                     continue;
                 } else if budget.geometry_tiles_exhausted()
                     || !budget.take(UploadKind::Geometry, upload_size(bucket, is_uniform))
@@ -252,7 +257,7 @@ fn upload_tessellated_layer(
                 }
             };
             match step {
-                Step::Skip => continue,
+                Step::Skip | Step::Saturated => continue,
                 Step::Exhausted => {
                     #[cfg(target_arch = "wasm32")]
                     metadata::flush_safe_cpu_releases(
@@ -261,11 +266,7 @@ fn upload_tessellated_layer(
                         coords,
                         &pending_cpu_releases,
                     );
-                    return true;
-                }
-                Step::Saturated => {
-                    saturated = true;
-                    break;
+                    return (true, needs_refetch);
                 }
                 Step::Commit {
                     replacement,
@@ -297,11 +298,8 @@ fn upload_tessellated_layer(
         if uploaded {
             budget.count_geometry_tile();
         }
-        if saturated {
-            return false;
-        }
     }
-    false
+    (false, needs_refetch)
 }
 
 enum UploadOutcome {

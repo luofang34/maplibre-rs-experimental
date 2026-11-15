@@ -324,7 +324,8 @@ impl MapContext {
         let signals = self.world.resources.get::<FrameSignals>();
         RedrawReasons {
             changed: signals.is_none_or(|signals| signals.dirty),
-            loading: crate::io::tile_retry::needs_frame(&self.world),
+            loading: crate::io::tile_retry::needs_frame(&self.world)
+                || crate::io::tile_backpressure::has_unrequested_visible_tiles(&self.world),
             awaiting_images: crate::sdf::provided::awaiting(&self.world),
             camera_moved: signals.is_some_and(|signals| {
                 signals.cameras.get(eye_index(&self.world)) != Some(&camera(self))
@@ -334,15 +335,18 @@ impl MapContext {
     }
 
     /// Whether the map has immediately actionable frame work: it has never drawn, something
-    /// changed or continues animating since the last frame, a retry backoff timer is due, or
-    /// the camera moved — excluding remote tile fetches that are merely in flight on the wire.
+    /// changed or continues animating since the last frame, a retry backoff timer is due,
+    /// backpressure-deferred visible tiles now have in-flight budget available, or the camera
+    /// moved — excluding remote tile fetches that are merely in flight on the wire.
     pub fn has_ready_work(&self) -> bool {
         let retry_due = self.next_retry_delay() == Some(Duration::ZERO);
+        let deferred_ready = crate::io::tile_backpressure::has_ready_deferred_requests(&self.world);
         let Some(signals) = self.world.resources.get::<FrameSignals>() else {
             return true;
         };
         signals.dirty
             || retry_due
+            || deferred_ready
             || signals.cameras.get(eye_index(&self.world)) != Some(&camera(self))
     }
 

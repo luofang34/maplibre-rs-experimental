@@ -154,13 +154,13 @@ impl<E: Environment, T: DemTransferables> Plugin<E> for TerrainPlugin<T> {
         world.resources.init::<TerrainFrame>();
         world.resources.init::<TerrainCoverageIndex>();
 
-        schedule.add_system_to_stage(
+        schedule.add_early_system_to_stage(
             RenderStageLabel::Request,
-            SystemContainer::new(RequestSystem::<E, T>::new(&kernel)),
+            SystemContainer::new(PopulateWorldSystem::<E, T>::new(&kernel)),
         )?;
         schedule.add_system_to_stage(
             RenderStageLabel::Request,
-            SystemContainer::new(PopulateWorldSystem::<E, T>::new(&kernel)),
+            SystemContainer::new(RequestSystem::<E, T>::new(&kernel)),
         )?;
         // Prepare rather than Request: headless rendering drops the Request stage, and the
         // elevation must be known before the Queue stage builds the view pattern. The index

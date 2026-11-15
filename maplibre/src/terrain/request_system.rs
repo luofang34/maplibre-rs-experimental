@@ -117,6 +117,7 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
         }: &mut MapContext,
     ) -> SystemResult {
         tile_retry::stop_cancelled(world, self.kernel.apc());
+        crate::io::tile_backpressure::set_dem_deferred(world, false);
         let Some(dem) = dem_source(style) else {
             return Ok(());
         };
@@ -169,6 +170,7 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
             dem.minzoom,
             dem.maxzoom,
         ));
+        let mut deferred = false;
         let mut frame_style = FrameStyle::new(style);
         for coords in wanted {
             if coords.build_quad_key().is_none() || !requested.insert(coords) {
@@ -182,6 +184,7 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
             }
             // The rest wait for a later frame, once tiles in flight have landed.
             if budget == 0 {
+                deferred = true;
                 continue;
             }
             budget -= 1;
@@ -191,6 +194,7 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
                 tile_retry::rejected(world, coords, RequestKind::Dem, None);
             }
         }
+        crate::io::tile_backpressure::set_dem_deferred(world, deferred);
         if let Some(multi) = &multi {
             requested.extend(multi.skipped_wanted_dem.iter().copied());
         }

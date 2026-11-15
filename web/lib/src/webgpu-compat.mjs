@@ -200,4 +200,40 @@ export const ensureWebGpuCompatibility = (scope = globalThis) => {
     patchSetBindGroup(scope?.GPURenderPassEncoder?.prototype);
     patchSetBindGroup(scope?.GPUComputePassEncoder?.prototype);
     patchSetBindGroup(scope?.GPURenderBundleEncoder?.prototype);
+
+    let liveGpuBufferBytes = 0;
+    try {
+        Object.defineProperty(scope, "__maplibreLiveGpuBufferBytes", {
+            get: () => liveGpuBufferBytes,
+            configurable: true,
+        });
+    } catch {
+        // Ignore non-extensible global objects.
+    }
+    const devProto = scope?.GPUDevice?.prototype;
+    if (devProto && typeof devProto.createBuffer === "function") {
+        const origCreateBuffer = devProto.createBuffer;
+        devProto.createBuffer = function (descriptor) {
+            const bytes = Math.max(0, Number(descriptor?.size ?? 0));
+            const buf = origCreateBuffer.call(this, descriptor);
+            if (buf && bytes > 0) {
+                liveGpuBufferBytes += bytes;
+                if (typeof buf.destroy === "function") {
+                    const origDestroy = buf.destroy;
+                    let released = false;
+                    buf.destroy = function () {
+                        if (!released) {
+                            released = true;
+                            liveGpuBufferBytes = Math.max(0, liveGpuBufferBytes - bytes);
+                        }
+                        return origDestroy.call(this);
+                    };
+                }
+            }
+            return buf;
+        };
+    }
 };
+
+export const getLiveGpuBufferBytes = (scope = globalThis) =>
+    Math.max(0, Number(scope?.__maplibreLiveGpuBufferBytes ?? 0));

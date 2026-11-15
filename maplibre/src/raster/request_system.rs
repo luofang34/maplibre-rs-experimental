@@ -51,6 +51,7 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
         }: &mut MapContext,
     ) -> SystemResult {
         tile_retry::stop_cancelled(world, self.kernel.apc());
+        crate::io::tile_backpressure::set_raster_deferred(world, false);
         // Missing ancestors and deferred tiles must progress while the camera is stationary.
         // Each raster source covers the view at its own tile size and rounding, as GL JS's
         // per-source tile managers do; the tiles of every source are requested together.
@@ -104,6 +105,7 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
             })
             .map(|group| RasterSourceId::new(group.source_name))
             .collect();
+        let mut deferred = false;
         let mut frame_style = FrameStyle::new(style);
         for coords in wanted {
             if !requested.insert(coords) {
@@ -119,13 +121,14 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
                 .map_or(all_sources.as_slice(), Vec::as_slice);
             let pending_sources: Vec<&RasterSourceId> = target_sources
                 .iter()
-                .filter(|source| retry_due || !source_ready_at(&world.tiles, source, coords))
+                .filter(|source| retry_due || !source_ready_at(world, source, coords))
                 .collect();
             if pending_sources.is_empty() {
                 continue;
             }
             // The rest wait for a later frame, once tiles in flight have landed.
             if budget == 0 {
+                deferred = true;
                 continue;
             }
             budget -= 1;
@@ -140,6 +143,7 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
                 tile_retry::rejected(world, coords, RequestKind::Raster, None);
             }
         }
+        crate::io::tile_backpressure::set_raster_deferred(world, deferred);
         if let Some(multi) = &multi {
             requested.extend(multi.skipped_wanted_raster.iter().copied());
         }
@@ -188,16 +192,39 @@ impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
 }
 
 fn source_ready_at(
-    tiles: &crate::tcs::tiles::Tiles,
+    world: &crate::tcs::world::World,
     source: &RasterSourceId,
     coords: WorldTileCoords,
 ) -> bool {
-    tiles
-        .query::<&RasterLayersDataComponent>(coords)
-        .is_some_and(|component| component.has_source_result(source))
-        || tiles
-            .query::<&crate::terrain::DemLayersComponent>(coords)
-            .is_some_and(|component| component.contains(source))
+    if world
+        .tiles
+        .query::<&crate::terrain::DemLayersComponent>(coords)
+        .is_some_and(|component| component.contains(source))
+    {
+        return true;
+    }
+    let Some(component) = world.tiles.query::<&RasterLayersDataComponent>(coords) else {
+        return false;
+    };
+    let Some(layer) = component.layers.iter().find(|l| l.source() == source) else {
+        return false;
+    };
+    match layer {
+        crate::raster::RasterLayerData::Missing(_) => true,
+        crate::raster::RasterLayerData::Available(avail) if !avail.image.is_empty() => true,
+        crate::raster::RasterLayerData::Available(_) => match world
+            .resources
+            .get::<crate::render::eventually::Eventually<
+            crate::raster::resource::RasterResources,
+        >>() {
+            Some(crate::render::eventually::Eventually::Initialized(resources))
+                if resources.draws(source) =>
+            {
+                resources.get_bound_texture(source, &coords).is_some()
+            }
+            _ => true,
+        },
+    }
 }
 
 fn record_wanted_source(
@@ -334,7 +361,7 @@ fn wanted_tiles_with_sources(
                     if seen_coarse.insert(ancestor) {
                         coarse_ancestors.push(ancestor);
                     }
-                    if !source_ready_at(&world.tiles, &source, coords) {
+                    if !source_ready_at(world, &source, coords) {
                         needed_coarse.insert(ancestor);
                         record_wanted_source(&mut sources_by_coord, ancestor, &source);
                     }

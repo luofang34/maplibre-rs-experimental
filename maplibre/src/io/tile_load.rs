@@ -59,6 +59,10 @@ impl TileLoad {
 #[derive(Debug, Default)]
 struct LoadingTiles(HashSet<WorldTileCoords>);
 
+/// Cumulative count of tile requests admitted across all families in this world.
+#[derive(Clone, Copy, Debug, Default)]
+struct TotalRequestsIssued(u64);
+
 /// Marks the family's request for the tile in flight.
 pub(crate) fn issued(world: &mut World, coords: WorldTileCoords, kind: RequestKind) {
     if world.tiles.query::<&TileLoad>(coords).is_none() {
@@ -80,6 +84,8 @@ pub(crate) fn issued(world: &mut World, coords: WorldTileCoords, kind: RequestKi
         .get_or_init_mut::<LoadingTiles>()
         .0
         .insert(coords);
+    let total = world.resources.get_or_init_mut::<TotalRequestsIssued>();
+    total.0 = total.0.saturating_add(1);
 }
 
 /// Settles the family's request for the tile: loaded, or errored when it is retried later.
@@ -131,6 +137,14 @@ pub(crate) fn loading_count(world: &World) -> usize {
             .filter(|coords| is_loading(&world.tiles, **coords))
             .count()
     })
+}
+
+/// Cumulative count of tile requests admitted across all families in `world`.
+pub(crate) fn total_issued(world: &World) -> u64 {
+    world
+        .resources
+        .get::<TotalRequestsIssued>()
+        .map_or(0, |total| total.0)
 }
 
 /// Drops the tiles that settled or were evicted since they were marked loading.

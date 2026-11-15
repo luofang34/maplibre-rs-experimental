@@ -276,6 +276,107 @@ pub(crate) fn vector_layers(
     layers
 }
 
+/// Whether any committed vector bucket at `coords` released its CPU indices after upload and
+/// subsequently had its GPU allocation evicted from [`VectorBufferPool`].
+pub(crate) fn has_evicted_cpu_released_vector_layers(
+    coords: WorldTileCoords,
+    world: &World,
+) -> bool {
+    let Some(Eventually::Initialized(pool)) = world.resources.get::<Eventually<VectorBufferPool>>()
+    else {
+        return false;
+    };
+    if !pool.has_capacity() {
+        return false;
+    }
+    let Some(layers) = world.tiles.query::<&VectorLayerBucketComponent>(coords) else {
+        return false;
+    };
+    let pending = world.tiles.query::<&LayerReplacements>(coords);
+    layers.layers.iter().any(|layer| match layer {
+        VectorLayerBucket::AvailableLayer(bucket) => {
+            bucket.buffer.usable_indices > 0
+                && bucket.buffer.buffer.indices.is_empty()
+                && !pool.has_layer(coords, &bucket.style_layer_id)
+                && !pending.is_some_and(|p| {
+                    p.vector
+                        .iter()
+                        .any(|item| item.style_layer_id == bucket.style_layer_id)
+                })
+        }
+        VectorLayerBucket::Missing(_) => false,
+    })
+}
+
+/// Whether `coords` holds CPU-released vector or symbol buckets whose GPU pool allocations were
+/// evicted while no replacement is pending, requiring a fresh worker pass to restore geometry.
+pub(crate) fn has_evicted_gpu_geometry(
+    world: &World,
+    style: &crate::style::Style,
+    (vectors_disabled, symbols_disabled): (bool, bool),
+    coords: WorldTileCoords,
+) -> bool {
+    let pending = world.tiles.query::<&LayerReplacements>(coords);
+    if !vectors_disabled {
+        if let Some(Eventually::Initialized(pool)) =
+            world.resources.get::<Eventually<VectorBufferPool>>()
+        {
+            if pool.has_capacity() {
+                if let Some(layers) = world.tiles.query::<&VectorLayerBucketComponent>(coords) {
+                    let evicted_vector = layers.layers.iter().any(|layer| match layer {
+                        VectorLayerBucket::AvailableLayer(bucket) => {
+                            bucket.buffer.usable_indices > 0
+                                && bucket.buffer.buffer.indices.is_empty()
+                                && !pool.has_layer(coords, &bucket.style_layer_id)
+                                && !pending.is_some_and(|p| {
+                                    p.vector
+                                        .iter()
+                                        .any(|item| item.style_layer_id == bucket.style_layer_id)
+                                })
+                                && style
+                                    .layers
+                                    .iter()
+                                    .any(|l| l.id == bucket.style_layer_id && !l.is_hidden())
+                        }
+                        VectorLayerBucket::Missing(_) => false,
+                    });
+                    if evicted_vector {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    if !symbols_disabled {
+        if let Some(Eventually::Initialized(pool)) =
+            world.resources.get::<Eventually<SymbolBufferPool>>()
+        {
+            if pool.has_capacity() {
+                if let Some(symbols) = world.tiles.query::<&SymbolLayersDataComponent>(coords) {
+                    let evicted_symbol = symbols.layers.iter().any(|layer| {
+                        layer.buffer.usable_indices > 0
+                            && layer.buffer.buffer.vertices.is_empty()
+                            && !pool.has_layer(coords, &layer.style_layer_id)
+                            && !pending.is_some_and(|p| {
+                                p.symbols
+                                    .iter()
+                                    .any(|item| item.style_layer_id == layer.style_layer_id)
+                            })
+                            && style
+                                .layers
+                                .iter()
+                                .any(|l| l.id == layer.style_layer_id && !l.is_hidden())
+                    });
+                    if evicted_symbol {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
 /// Drops everything the removed style layers left in loaded tiles: their buckets, pending
 /// replacements and GPU buffers. Buckets are otherwise only ever replaced by layer id, so a layer
 /// that is no longer in the style would keep its geometry until the tile is evicted.

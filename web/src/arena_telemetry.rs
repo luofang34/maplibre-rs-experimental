@@ -59,6 +59,9 @@ struct ArenaFrameTelemetry {
     loaded: bool,
     settled: bool,
     wasm_memory_bytes: u64,
+    gpu_memory_bytes: u64,
+    pending_requests: u32,
+    total_requests: u64,
     camera: CameraState,
     redraw_reasons: RedrawSnapshot,
     stages: Vec<StageSample>,
@@ -72,6 +75,16 @@ fn wasm_linear_memory_bytes() -> u64 {
         .and_then(|mem| js_sys::Reflect::get(&mem.buffer(), &JsValue::from_str("byteLength")).ok())
         .and_then(|val| val.as_f64())
         .map_or(0, |bytes| bytes.max(0.0) as u64)
+}
+
+fn live_gpu_buffer_bytes() -> u64 {
+    js_sys::Reflect::get(
+        &js_sys::global(),
+        &JsValue::from_str("__maplibreLiveGpuBufferBytes"),
+    )
+    .ok()
+    .and_then(|val| val.as_f64())
+    .map_or(0, |bytes| bytes.max(0.0) as u64)
 }
 
 #[wasm_bindgen]
@@ -143,6 +156,14 @@ impl MapController {
                         loaded,
                         settled: !reasons.any() && !has_arrivals,
                         wasm_memory_bytes: wasm_linear_memory_bytes(),
+                        gpu_memory_bytes: live_gpu_buffer_bytes(),
+                        pending_requests: u32::try_from(
+                            maplibre::io::tile_backpressure::tiles_in_flight(&context.world),
+                        )
+                        .unwrap_or(u32::MAX),
+                        total_requests: maplibre::io::tile_backpressure::total_tile_requests(
+                            &context.world,
+                        ),
                         camera: CameraState::of(context),
                         redraw_reasons: RedrawSnapshot {
                             changed: reasons.changed,

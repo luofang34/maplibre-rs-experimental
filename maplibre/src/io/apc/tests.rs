@@ -1,5 +1,7 @@
 #[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 mod admission;
+#[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
+mod completeness;
 #[cfg(not(target_arch = "wasm32"))]
 mod completion;
 mod errors;

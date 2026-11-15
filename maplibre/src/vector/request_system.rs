@@ -60,6 +60,7 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
         }: &mut MapContext,
     ) -> SystemResult {
         tile_retry::stop_cancelled(world, self.kernel.apc());
+        crate::io::tile_backpressure::set_vector_deferred(world, false);
         let vectors_disabled = renderer.settings.buffer_pools.is_empty();
         let symbols_disabled = renderer.settings.symbol_pools.is_empty();
         if vectors_disabled && symbols_disabled {
@@ -142,6 +143,7 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
             let needs_view_tiles =
                 !draped || crate::render::projection::style_elevated_headroom_meters(style) > 0.0;
             let magnifies = depends_on_overscaling(style);
+            let mut deferred = false;
             let mut frame_style = FrameStyle::new(style);
             for coords in overview
                 .into_iter()
@@ -176,18 +178,31 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                         0
                     };
                 let laid_out_for = (magnifies.then_some(overscaled_zoom), pixel_ratio);
+                let evicted_gpu = !tile_retry::is_pending(world, coords, RequestKind::Vector)
+                    && super::content::has_evicted_gpu_geometry(
+                        world,
+                        style,
+                        (vectors_disabled, symbols_disabled),
+                        coords,
+                    );
                 if tile_retry::backing_off(world, coords, RequestKind::Vector)
-                    || is_current(world, coords, laid_out_for)
+                    || (!evicted_gpu && is_current(world, coords, laid_out_for))
                 {
                     continue;
                 }
                 // The rest wait for a later frame, once tiles in flight have landed.
                 if budget == 0 {
+                    deferred = true;
                     continue;
                 }
                 budget -= 1;
 
-                let only_sources = refresh_only(world, coords, laid_out_for);
+                let only_sources = if evicted_gpu {
+                    let _ = tile_retry::take_refresh_sources(world, coords);
+                    None
+                } else {
+                    refresh_only(world, coords, laid_out_for)
+                };
                 // One rejected tile must not cost the frame its other tiles.
                 if let Err(error) = self.request(
                     coords,
@@ -206,6 +221,7 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                     );
                 }
             }
+            crate::io::tile_backpressure::set_vector_deferred(world, deferred);
             if let Some(multi) = &multi {
                 requested.extend(multi.skipped_wanted_vector.iter().copied());
             }

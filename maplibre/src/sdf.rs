@@ -90,7 +90,7 @@ impl<E: Environment, T: VectorTransferables> Plugin<E> for SdfPlugin<T> {
         resources.insert(textures::SymbolTextures::default());
         resources.insert(Eventually::<depth::SymbolDepth>::Uninitialized);
 
-        schedule.add_system_to_stage(
+        schedule.add_early_system_to_stage(
             RenderStageLabel::Request,
             SystemContainer::new(populate_world_system::PopulateWorldSystem::<E, T>::new(
                 &kernel,

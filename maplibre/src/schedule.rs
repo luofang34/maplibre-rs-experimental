@@ -314,6 +314,20 @@ impl Schedule {
         stage.add_system(system);
         Ok(self)
     }
+
+    /// Adds a system to the leading group of the [`Stage`] identified by `stage_label`, preserving
+    /// registration order among early systems ahead of regular stage systems.
+    pub fn add_early_system_to_stage(
+        &mut self,
+        stage_label: impl StageLabel,
+        system: impl IntoSystemContainer,
+    ) -> Result<&mut Self, ScheduleError> {
+        let stage = self
+            .get_stage_mut::<SystemStage>(&stage_label)
+            .ok_or_else(|| ScheduleError::NotASystemStage(format!("{stage_label:?}")))?;
+        stage.add_early_system(system);
+        Ok(self)
+    }
 }
 
 impl Stage for Schedule {

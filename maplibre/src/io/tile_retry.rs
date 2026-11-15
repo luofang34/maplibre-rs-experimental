@@ -283,6 +283,28 @@ pub(crate) fn due(world: &mut World, coords: WorldTileCoords, kind: RequestKind)
         })
 }
 
+pub(crate) fn is_pending(world: &World, coords: WorldTileCoords, kind: RequestKind) -> bool {
+    world
+        .tiles
+        .query::<&TileRequestRetries>(coords)
+        .is_some_and(|retries| retries.0[kind.index()].pending)
+}
+
+#[cfg(all(test, feature = "headless", not(target_arch = "wasm32")))]
+pub(crate) fn pending_attempt(
+    world: &World,
+    coords: WorldTileCoords,
+    kind: RequestKind,
+) -> Option<u64> {
+    world
+        .tiles
+        .query::<&TileRequestRetries>(coords)
+        .and_then(|retries| {
+            let state = &retries.0[kind.index()];
+            state.pending.then_some(state.attempt).flatten()
+        })
+}
+
 #[cfg(any(test, feature = "raster"))]
 pub(crate) fn waiting(world: &World, coords: WorldTileCoords, kind: RequestKind) -> bool {
     world

@@ -107,13 +107,13 @@ impl<E: Environment, T: RasterTransferables> Plugin<E> for RasterPlugin<T> {
             .get_or_init_mut::<ViewTileSources>()
             .add::<RasterTilesDone>(TileKind::Raster);
 
-        schedule.add_system_to_stage(
+        schedule.add_early_system_to_stage(
             RenderStageLabel::Request,
-            SystemContainer::new(RequestSystem::<E, T>::new(&kernel)),
+            SystemContainer::new(PopulateWorldSystem::<E, T>::new(&kernel)),
         )?;
         schedule.add_system_to_stage(
             RenderStageLabel::Request,
-            SystemContainer::new(PopulateWorldSystem::<E, T>::new(&kernel)),
+            SystemContainer::new(RequestSystem::<E, T>::new(&kernel)),
         )?;
         schedule.add_system_to_stage(RenderStageLabel::Prepare, resource_system)?;
         schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system)?;

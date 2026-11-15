@@ -59,7 +59,7 @@ pub fn upload_system(
     textures.retain(&world.tiles);
     let zoom = view_state.style_zoom().level();
 
-    let deferred = upload_symbol_layer(
+    let (deferred, needs_refetch) = upload_symbol_layer(
         symbol_buffer_pool,
         textures,
         &TextureContext {
@@ -75,6 +75,9 @@ pub fn upload_system(
     if deferred {
         crate::render::frame_signals::keep_animating(world);
     }
+    if needs_refetch {
+        crate::render::frame_signals::mark_dirty(world);
+    }
     for coords in bound {
         crate::render::frame_signals::resource_ready(
             world,
@@ -85,8 +88,8 @@ pub fn upload_system(
     Ok(())
 }
 
-/// Uploads the labels of `visible` tiles that the frame's budget admits; `true` when some wait
-/// for a later frame.
+/// Uploads the labels of `visible` tiles that the frame's budget admits; returns
+/// `(deferred, needs_refetch)`.
 fn upload_symbol_layer(
     symbol_buffer_pool: &mut SymbolBufferPool,
     textures: &mut SymbolTextures,
@@ -94,7 +97,9 @@ fn upload_symbol_layer(
     tiles: &mut Tiles,
     (style, visible, zoom): (&Style, &[crate::coords::WorldTileCoords], f32),
     budget: &mut FrameUploads,
-) -> bool {
+) -> (bool, bool) {
+    let visible_set: rustc_hash::FxHashSet<_> = visible.iter().copied().collect();
+    let mut needs_refetch = false;
     for &coords in visible {
         crate::vector::content::ensure(tiles, coords);
         let Some((layers, pending)) = tiles.query_mut::<(
@@ -130,14 +135,28 @@ fn upload_symbol_layer(
             };
             let did_upload = if upload.is_some() {
                 let buffer = &layer.buffer;
+                if replacement.is_none()
+                    && buffer.usable_indices > 0
+                    && buffer.buffer.vertices.is_empty()
+                {
+                    needs_refetch = true;
+                    continue;
+                }
                 let size = buffer.buffer.vertices.len()
                     * (size_of::<crate::render::shaders::ShaderSymbolVertex>()
                         + size_of::<SDFShaderFeatureMetadata>())
                     + buffer.buffer.indices.len() * size_of::<u32>();
                 if !budget.take(UploadKind::Geometry, size) {
-                    return true;
+                    return (true, needs_refetch);
                 }
-                if !upload_geometry(symbol_buffer_pool, gpu, coords, style_layer, buffer) {
+                if !upload_geometry(
+                    symbol_buffer_pool,
+                    gpu,
+                    coords,
+                    style_layer,
+                    buffer,
+                    &visible_set,
+                ) {
                     continue;
                 }
                 true
@@ -163,7 +182,7 @@ fn upload_symbol_layer(
             }
         }
     }
-    false
+    (false, needs_refetch)
 }
 
 fn prepare_atlas(
@@ -212,6 +231,7 @@ fn upload_geometry(
         crate::render::shaders::ShaderSymbolVertex,
         u32,
     >,
+    visible_set: &rustc_hash::FxHashSet<crate::coords::WorldTileCoords>,
 ) -> bool {
     if buffer.buffer.indices.is_empty() {
         symbol_buffer_pool.remove_layer(coords, &style_layer.id);
@@ -227,7 +247,7 @@ fn upload_geometry(
         ShaderLayerMetadata::new(style_layer.index as f32, 0.0, [0.0; 2]),
         SDFShaderFeatureMetadata::default(),
         buffer.buffer.vertices.len(),
-        |_| false,
+        |candidate| visible_set.contains(&candidate),
     ) {
         tracing::error!(%coords, %error, "tile geometry upload failed");
         return false;

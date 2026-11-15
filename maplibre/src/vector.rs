@@ -134,6 +134,7 @@ impl HasTile for VectorTilesDone {
             .tiles
             .query::<&VectorLayerBucketComponent>(coords)
             .is_some_and(|buckets| buckets.done && !buckets.failed)
+            && !content::has_evicted_cpu_released_vector_layers(coords, world)
     }
 
     fn nearest_ancestor_candidate(
@@ -250,13 +251,13 @@ impl<E: Environment, T: VectorTransferables> Plugin<E> for VectorPlugin<T> {
             .get_or_init_mut::<ViewTileSources>()
             .add::<VectorTilesDone>(TileKind::Vector);
 
-        schedule.add_system_to_stage(
+        schedule.add_early_system_to_stage(
             RenderStageLabel::Request,
-            SystemContainer::new(RequestSystem::<E, T>::new(&kernel)),
+            SystemContainer::new(PopulateWorldSystem::<E, T>::new(&kernel)),
         )?;
         schedule.add_system_to_stage(
             RenderStageLabel::Request,
-            SystemContainer::new(PopulateWorldSystem::<E, T>::new(&kernel)),
+            SystemContainer::new(RequestSystem::<E, T>::new(&kernel)),
         )?;
 
         schedule.add_system_to_stage(RenderStageLabel::Prepare, resource_system)?;

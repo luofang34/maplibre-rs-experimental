@@ -10,6 +10,7 @@ use crate::{
 #[derive(Default)]
 pub struct SystemStage {
     systems: Vec<SystemContainer>,
+    prepend_count: usize,
 }
 
 impl SystemStage {
@@ -17,6 +18,15 @@ impl SystemStage {
     #[must_use]
     pub fn with_system(mut self, system: impl IntoSystemContainer) -> Self {
         self.add_system(system);
+        self
+    }
+
+    /// Inserts a system into the stage's leading group, preserving registration order among
+    /// early systems so worker completions drain before new requests are dispatched.
+    pub fn add_early_system(&mut self, system: impl IntoSystemContainer) -> &mut Self {
+        let index = self.prepend_count.min(self.systems.len());
+        self.systems.insert(index, system.into_container());
+        self.prepend_count += 1;
         self
     }
 
