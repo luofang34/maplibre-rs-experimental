@@ -23,11 +23,7 @@ impl LayerDem for FlatBufferTransferable {
         let root = builder.finish();
         inner_builder.finish(root, None);
         let (data, start) = inner_builder.collapse();
-        FlatBufferTransferable {
-            tag: WebMessageTag::LayerDem,
-            data,
-            start,
-        }
+        FlatBufferTransferable::from_vec(WebMessageTag::LayerDem, data, start)
     }
 
     fn coords(&self) -> WorldTileCoords {
@@ -64,11 +60,7 @@ impl LayerDemMissing for FlatBufferTransferable {
         let root = builder.finish();
         inner_builder.finish(root, None);
         let (data, start) = inner_builder.collapse();
-        FlatBufferTransferable {
-            tag: WebMessageTag::LayerDemMissing,
-            data,
-            start,
-        }
+        FlatBufferTransferable::from_vec(WebMessageTag::LayerDemMissing, data, start)
     }
 
     fn coords(&self) -> WorldTileCoords {

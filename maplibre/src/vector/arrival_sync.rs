@@ -6,7 +6,7 @@ use crate::{
     style::{
         feature_state::{
             layer_geometry_reads_feature_state, sync_arc_properties_feature_state,
-            sync_properties_feature_state, FeatureStateArcMemo,
+            FeatureStateArcMemo,
         },
         Style,
     },
@@ -44,6 +44,16 @@ pub(crate) fn sync_arriving_tile_index(
     match index {
         TileIndex::Spatial { tree } => tree.iter_mut().for_each(&mut sync_one),
         TileIndex::Linear { list } => list.iter_mut().for_each(&mut sync_one),
+        TileIndex::LazyMvt(lazy) => {
+            if let Some(list) = lazy.materialized_mut() {
+                list.iter_mut().for_each(&mut sync_one);
+            } else {
+                lazy.update_unmaterialized_state(
+                    promote_id.cloned(),
+                    source_state.cloned().map(std::sync::Arc::new),
+                );
+            }
+        }
     }
 }
 
@@ -92,7 +102,11 @@ pub(crate) fn sync_arriving_vector_bucket(
 /// Synchronizes an arriving symbol bucket's per-feature properties against live
 /// `style.feature_state`, returning `true` when a layout/geometry-affecting `feature-state` value
 /// changed while the tile was in flight.
-pub(crate) fn sync_arriving_symbol_bucket(style: &Style, bucket: &mut SymbolLayerData) -> bool {
+pub(crate) fn sync_arriving_symbol_bucket(
+    style: &Style,
+    bucket: &mut SymbolLayerData,
+    memo: &mut FeatureStateArcMemo,
+) -> bool {
     let Some(style_layer) = style
         .layers
         .iter()
@@ -110,12 +124,13 @@ pub(crate) fn sync_arriving_symbol_bucket(style: &Style, bucket: &mut SymbolLaye
     let source_state = style.feature_state.source(source);
     let mut any_changed = false;
     for feature in &mut bucket.features {
-        any_changed |= sync_properties_feature_state(
+        any_changed |= sync_arc_properties_feature_state(
             &mut feature.data.properties,
             feature.data.id,
             promote_prop,
             source_state,
             src_layer,
+            memo,
         );
     }
     any_changed && layer_geometry_reads_feature_state(style_layer)

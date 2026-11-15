@@ -62,8 +62,15 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
         let mut regions = if let Some(multi) = &multi {
             multi.raster_regions.clone()
         } else {
-            let computed =
-                raster_source_regions(style, view_state, world, ViewStatePadding::Loose)?;
+            let request_padding = if cfg!(target_arch = "wasm32")
+                && style.terrain.is_none()
+                && !view_state.has_external_view()
+            {
+                ViewStatePadding::Tight
+            } else {
+                ViewStatePadding::Loose
+            };
+            let computed = raster_source_regions(style, view_state, world, request_padding)?;
             let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
             let flat: Vec<WorldTileCoords> = computed
                 .iter()

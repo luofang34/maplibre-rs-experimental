@@ -3,7 +3,7 @@
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
-    sync::{Mutex, PoisonError},
+    sync::Mutex,
 };
 
 use crate::style::property::{CompiledProperty, PropertyValue};
@@ -38,7 +38,7 @@ impl CompiledProperties {
         T: PropertyValue + Send + Sync + 'static,
     {
         let kind = TypeId::of::<T>();
-        let mut guard = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut guard = crate::platform::lock_unpoisoned(&self.0);
         if let Some(entries) = guard.get_mut(name) {
             if let Some(entry) = entries.iter().find(|e| e.kind == kind) {
                 if entry.source == *source {

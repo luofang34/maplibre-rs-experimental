@@ -7,7 +7,7 @@
 
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex, PoisonError},
+    sync::{Arc, Mutex},
 };
 
 use async_trait::async_trait;
@@ -185,18 +185,14 @@ impl PmtilesReader {
             leaves: Mutex::default(),
         });
         if !base.cache_policy.is_volatile() {
-            self.archives
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
+            crate::platform::lock_unpoisoned(&self.archives)
                 .insert(archive.to_owned(), opened.clone());
         }
         Ok(opened)
     }
 
     fn cached(&self, archive: &str) -> Option<Arc<Archive>> {
-        self.archives
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+        crate::platform::lock_unpoisoned(&self.archives)
             .get(archive)
             .cloned()
     }
@@ -234,10 +230,7 @@ impl PmtilesReader {
                 Some(Found::Tile(entry)) => return Ok(Some(entry)),
                 Some(Found::Leaf(leaf)) => {
                     let offset = opened.header.leaves_offset + leaf.offset;
-                    let known = opened
-                        .leaves
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
+                    let known = crate::platform::lock_unpoisoned(&opened.leaves)
                         .get(&offset)
                         .cloned();
                     directory = match known {
@@ -255,10 +248,7 @@ impl PmtilesReader {
                                 )
                                 .await?,
                             );
-                            opened
-                                .leaves
-                                .lock()
-                                .unwrap_or_else(PoisonError::into_inner)
+                            crate::platform::lock_unpoisoned(&opened.leaves)
                                 .insert(offset, entries.clone());
                             entries
                         }

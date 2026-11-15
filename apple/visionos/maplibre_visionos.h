@@ -141,6 +141,15 @@ void maplibre_visionos_set_available_memory(MaplibreVisionOSMap *map, uint64_t a
 bool maplibre_visionos_set_geojson_source(MaplibreVisionOSMap *map, const char *source_name,
                                           const char *geojson_json);
 
+// Updates a named image source URL and optional 4-corner [NW, NE, SE, SW] coordinates
+// (8 contiguous doubles: nw_lon, nw_lat, ne_lon, ne_lat, se_lon, se_lat, sw_lon, sw_lat) in-place.
+bool maplibre_visionos_set_image_source(MaplibreVisionOSMap *map, const char *source_name,
+                                        const char *url, const double *corners_lon_lat);
+
+// Updates raster-opacity (0.0..1.0) on a named raster layer in-place without recreating the map.
+bool maplibre_visionos_set_layer_opacity(MaplibreVisionOSMap *map, const char *layer_id,
+                                         double opacity);
+
 void maplibre_visionos_destroy(MaplibreVisionOSMap *map);
 
 // Images labels name in a namespace, made by the host on request, such as road shields drawn

@@ -58,6 +58,8 @@ fn density_format_supported(adapter: &wgpu::Adapter) -> bool {
 pub fn resource_system(
     MapContext {
         world,
+        #[cfg(target_arch = "wasm32")]
+        style,
         renderer:
             Renderer {
                 device,
@@ -69,6 +71,21 @@ pub fn resource_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
+    #[cfg(target_arch = "wasm32")]
+    if world
+        .resources
+        .get::<Eventually<HeatmapResources>>()
+        .is_some_and(|res| matches!(res, Eventually::Uninitialized))
+        && !style.layers.iter().any(|layer| {
+            layer.type_ == "heatmap"
+                || matches!(
+                    layer.paint,
+                    Some(crate::style::layer::LayerPaint::Heatmap(_))
+                )
+        })
+    {
+        return Ok(());
+    }
     if !density_format_supported(adapter) {
         if world.resources.get::<DensityUnsupported>().is_none() {
             tracing::error!(

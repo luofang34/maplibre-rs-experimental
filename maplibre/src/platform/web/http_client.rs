@@ -209,19 +209,36 @@ impl WHATWGFetchHttpClient {
             if let Some(hit) = self.memory.get(&mem_key) {
                 return Ok(hit.to_vec());
             }
-            if req.range.is_none() && req.headers.is_empty() {
-                if let Some(persisted) = match_browser_cache(&req.url).await {
-                    self.memory.insert(&mem_key, &persisted);
-                    return Ok(persisted);
-                }
-            }
         }
 
-        if status.is_offline() && is_remote_http_url(&req.url) {
+        if !volatile
+            && req.range.is_none()
+            && req.headers.is_empty()
+            && is_remote_http_url(&req.url)
+        {
+            if let Some(persisted) = match_browser_cache(&req.url).await {
+                self.memory.insert(&mem_key, &persisted);
+                return Ok(persisted);
+            }
+            if status.is_offline() {
+                return Err(SourceFetchError::offline(&req.url));
+            }
+        } else if status.is_offline() && is_remote_http_url(&req.url) {
             return Err(SourceFetchError::offline(&req.url));
         }
 
-        let payload = Self::fetch_wire(req).await?;
+        let payload = match Self::fetch_wire(req).await {
+            Ok(payload) => payload,
+            Err(err) => {
+                if !volatile && req.range.is_none() && req.headers.is_empty() {
+                    if let Some(persisted) = match_browser_cache(&req.url).await {
+                        self.memory.insert(&mem_key, &persisted);
+                        return Ok(persisted);
+                    }
+                }
+                return Err(err);
+            }
+        };
         if !volatile {
             self.memory.insert(&mem_key, &payload.bytes);
             if req.headers.is_empty()
@@ -232,7 +249,11 @@ impl WHATWGFetchHttpClient {
                     payload.cache_control.as_deref(),
                 )
             {
-                put_browser_cache(&req.url, &payload.bytes).await;
+                let url = req.url.clone();
+                let bytes_copy = payload.bytes.clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    put_browser_cache(&url, &bytes_copy).await;
+                });
             }
         }
         Ok(payload.bytes)

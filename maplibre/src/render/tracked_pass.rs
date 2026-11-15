@@ -36,36 +36,30 @@ impl PassStats {
 #[derive(Default)]
 pub struct RenderStats {
     recorded: std::sync::Mutex<PassStats>,
+    frame_draws: std::sync::atomic::AtomicU32,
 }
 
 impl RenderStats {
     fn record(&self, stats: PassStats) {
-        match self.recorded.lock() {
-            Ok(mut recorded) => recorded.add(stats),
-            Err(error) => tracing::error!(%error, "render statistics are poisoned"),
-        }
+        self.frame_draws
+            .fetch_add(stats.draws, std::sync::atomic::Ordering::Relaxed);
+        crate::platform::lock_unpoisoned(&self.recorded).add(stats);
+    }
+
+    /// Takes the draw calls recorded during the current frame without resetting [`Self::take`].
+    pub(crate) fn take_frame_draws(&self) -> u32 {
+        self.frame_draws
+            .swap(0, std::sync::atomic::Ordering::Relaxed)
     }
 
     /// The counts since the last [`Self::take`], leaving them in place.
     pub fn peek(&self) -> PassStats {
-        match self.recorded.lock() {
-            Ok(recorded) => *recorded,
-            Err(error) => {
-                tracing::error!(%error, "render statistics are poisoned");
-                PassStats::default()
-            }
-        }
+        *crate::platform::lock_unpoisoned(&self.recorded)
     }
 
     /// The counts since the last call, leaving zero behind.
     pub fn take(&self) -> PassStats {
-        match self.recorded.lock() {
-            Ok(mut recorded) => std::mem::take(&mut *recorded),
-            Err(error) => {
-                tracing::error!(%error, "render statistics are poisoned");
-                PassStats::default()
-            }
-        }
+        std::mem::take(&mut *crate::platform::lock_unpoisoned(&self.recorded))
     }
 }
 

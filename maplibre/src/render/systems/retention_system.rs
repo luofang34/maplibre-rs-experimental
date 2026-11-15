@@ -42,17 +42,24 @@ mod summary;
 
 pub(crate) use ancestors::finish_tiles_in_use;
 
-/// Out-of-view tiles kept per tile in use, as GL JS `MAX_TILE_CACHE_ZOOM_LEVELS`.
-const CACHE_TILES_PER_VIEW_TILE: usize = 5;
+/// Out-of-view tiles kept per tile in use.
+const CACHE_TILES_PER_VIEW_TILE: usize = 2;
 /// Smallest cache, so a tiny viewport still keeps some history for panning back.
-const MIN_CACHE_TILES: usize = 64;
+#[cfg(target_arch = "wasm32")]
+const MIN_CACHE_TILES: usize = 4;
+#[cfg(not(target_arch = "wasm32"))]
+const MIN_CACHE_TILES: usize = 16;
 /// Hard ceiling on out-of-view cached tiles so wide oblique/globe coverings cannot accumulate
 /// hundreds of multi-megabyte raster/DEM tiles along a corridor.
-const MAX_CACHE_TILES: usize = 256;
-/// Tessellated geometry the out-of-view cache may hold. The tile count is GL JS's, sized for
-/// a flat viewport of a few dozen tiles; an eye on terrain draws hundreds, and a planet tile
-/// at low zoom weighs tens of megabytes, so the cache is bounded in bytes as well.
-const CACHE_BYTES: usize = 128 << 20;
+#[cfg(target_arch = "wasm32")]
+const MAX_CACHE_TILES: usize = 8;
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_CACHE_TILES: usize = 64;
+/// Tessellated geometry the out-of-view cache may hold.
+#[cfg(target_arch = "wasm32")]
+const CACHE_BYTES: usize = 4 << 20;
+#[cfg(not(target_arch = "wasm32"))]
+const CACHE_BYTES: usize = 32 << 20;
 /// Frames between resident-memory summaries for hosts driving the map from an eye, which
 /// run on devices with a memory limit.
 const SUMMARY_EVERY_FRAMES: u64 = 90;
@@ -200,6 +207,14 @@ pub(crate) fn tiles_in_use(
         .get::<crate::render::eye_covering::FrameLooseCovering>()
         .filter(|cache| cache.host_frame == host_frame);
 
+    let request_padding = if cfg!(target_arch = "wasm32")
+        && style.terrain.is_none()
+        && !view_state.has_external_view()
+    {
+        ViewStatePadding::Tight
+    } else {
+        ViewStatePadding::Loose
+    };
     let max_zoom = source_max_zoom(style, TileKind::Vector);
     if let Some(cached_view) = loose_cache.and_then(|c| c.view_tiles.as_ref()) {
         for &coords in cached_view {
@@ -211,7 +226,7 @@ pub(crate) fn tiles_in_use(
             view_state,
             world,
             view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
-            ViewStatePadding::Loose,
+            request_padding,
         ) {
             Ok(Some(requested)) => {
                 // The request systems fetch the ancestor at the source's maximum zoom in place of
@@ -227,12 +242,9 @@ pub(crate) fn tiles_in_use(
 
     if let Some(cached_raster) = loose_cache.and_then(|c| c.raster_tiles.as_ref()) {
         in_use.extend(cached_raster.iter().copied());
-    } else if let Ok(regions) = crate::render::projection::raster_source_regions(
-        style,
-        view_state,
-        world,
-        ViewStatePadding::Loose,
-    ) {
+    } else if let Ok(regions) =
+        crate::render::projection::raster_source_regions(style, view_state, world, request_padding)
+    {
         for (_, tiles) in regions {
             in_use.extend(tiles);
         }
@@ -379,6 +391,9 @@ fn drop_gpu_data(world: &mut World, evicted: &[WorldTileCoords]) {
 }
 
 fn reclaim_pool_pages(world: &mut World) {
+    #[cfg(target_arch = "wasm32")]
+    let keep_spare = 0;
+    #[cfg(not(target_arch = "wasm32"))]
     let keep_spare = usize::from(
         !world
             .resources

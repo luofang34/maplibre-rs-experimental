@@ -43,6 +43,7 @@ pub(super) struct TextureContext<'a> {
 #[derive(Default)]
 pub(super) struct SymbolTextures {
     atlases: HashMap<usize, Weak<TileAtlas>>,
+    tile_atlases: HashMap<(WorldTileCoords, usize), Arc<TileAtlas>>,
     bindings: HashMap<(WorldTileCoords, String), DrawBinding>,
     /// Tiles whose labels gained an atlas since the last drain.
     bound: Vec<WorldTileCoords>,
@@ -76,14 +77,23 @@ impl SymbolTextures {
         // Source atlases can share tile coordinates without sharing sprite or font pixels.
         let identity = Arc::as_ptr(atlas) as usize;
         let texture = self
-            .atlases
-            .get(&identity)
-            .and_then(Weak::upgrade)
+            .tile_atlases
+            .get(&(key.0, identity))
+            .filter(|cached| Arc::ptr_eq(&cached.source, atlas))
+            .cloned()
+            .or_else(|| {
+                self.atlases
+                    .get(&identity)
+                    .and_then(Weak::upgrade)
+                    .filter(|cached| Arc::ptr_eq(&cached.source, atlas))
+            })
             .unwrap_or_else(|| {
                 let texture = share_gpu(TileAtlas::new(gpu, atlas));
                 self.atlases.insert(identity, Arc::downgrade(&texture));
                 texture
             });
+        self.tile_atlases
+            .insert((key.0, identity), Arc::clone(&texture));
         if !self.bound.contains(&key.0) {
             self.bound.push(key.0);
         }
@@ -106,12 +116,28 @@ impl SymbolTextures {
                 .query::<&super::SymbolLayersDataComponent>(*coords)
                 .is_some()
         });
+        self.tile_atlases.retain(|(coords, _), _| {
+            tiles
+                .query::<&super::SymbolLayersDataComponent>(*coords)
+                .is_some()
+        });
         self.atlases.retain(|_, atlas| atlas.strong_count() > 0);
     }
 }
 
 impl TileAtlas {
     fn new(gpu: &TextureContext<'_>, atlas: &Arc<SymbolAtlas>) -> Self {
+        let pixel_bytes = atlas.take_pixels_for_gpu();
+        let expected_len = (atlas.size[0] as usize)
+            .saturating_mul(atlas.size[1] as usize)
+            .saturating_mul(4);
+        let fallback_zeroes;
+        let upload_slice: &[u8] = if pixel_bytes.len() == expected_len {
+            &pixel_bytes
+        } else {
+            fallback_zeroes = vec![0_u8; expected_len];
+            &fallback_zeroes
+        };
         let texture = gpu.queue.create_texture_with_data(
             gpu.device,
             &wgpu::TextureDescriptor {
@@ -129,7 +155,7 @@ impl TileAtlas {
                 view_formats: &[],
             },
             TextureDataOrder::LayerMajor,
-            &atlas.pixels,
+            upload_slice,
         );
         Self {
             source: atlas.clone(),

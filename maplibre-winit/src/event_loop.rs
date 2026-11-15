@@ -95,17 +95,57 @@ impl<ET: 'static + Clone> WinitEventLoopProxy<ET> {
     /// Wakes the loop for a map handle by sending `event`, which the loop's handler passes
     /// to [`WinitApplication`]'s `user_event`.
     pub fn waking_with(self, event: ET) -> ProxyWake<ET> {
-        ProxyWake { proxy: self, event }
+        #[cfg(target_arch = "wasm32")]
+        {
+            use std::{cell::Cell, rc::Rc};
+
+            use wasm_bindgen::{closure::Closure, JsValue};
+
+            let queued = Rc::new(Cell::new(false));
+            let queued_reset = queued.clone();
+            let proxy = self.proxy.clone();
+            let ev = event.clone();
+            let closure = Rc::new(Closure::wrap(Box::new(move |_val: JsValue| {
+                queued_reset.set(false);
+                if proxy.send_event(ev.clone()).is_err() {
+                    tracing::debug!("the map's event loop closed before a command reached it");
+                }
+            }) as Box<dyn FnMut(JsValue)>));
+            ProxyWake {
+                proxy: self,
+                event,
+                queued,
+                microtask: closure,
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            ProxyWake { proxy: self, event }
+        }
     }
 }
 
 /// Wakes an idle event loop so it applies a map handle's commands.
 pub struct ProxyWake<ET: 'static> {
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     proxy: WinitEventLoopProxy<ET>,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     event: ET,
+    #[cfg(target_arch = "wasm32")]
+    queued: std::rc::Rc<std::cell::Cell<bool>>,
+    #[cfg(target_arch = "wasm32")]
+    microtask: std::rc::Rc<wasm_bindgen::closure::Closure<dyn FnMut(wasm_bindgen::JsValue)>>,
 }
 impl<ET: 'static + Clone> WakeHost for ProxyWake<ET> {
     fn wake(&self) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            if !self.queued.replace(true) {
+                let _ = js_sys::Promise::resolve(&wasm_bindgen::JsValue::UNDEFINED)
+                    .then(&self.microtask);
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
         if self.proxy.send_event(self.event.clone()).is_err() {
             tracing::debug!("the map's event loop closed before a command reached it");
         }

@@ -3,330 +3,57 @@
 // A failure here must reach the map as a typed error: a panic on the render thread stops it.
 #![deny(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
-use std::{cell::RefCell, rc::Rc, vec::IntoIter};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+    sync::Arc,
+};
 
-use js_sys::{ArrayBuffer, Uint8Array};
 use maplibre::{
     environment::{OffscreenKernel, OffscreenKernelConfig},
     io::{
-        apc::{
-            AsyncProcedure, AsyncProcedureCall, CallError, Context, Input, IntoMessage, Message,
-            MessageTag, SendError,
-        },
+        apc::{AsyncProcedure, AsyncProcedureCall, CallError, Input, Message},
         scheduler::ScheduleError,
-        source_client::SourceClient,
-        tile_retry::{RequestKind, TileRequestOutcome},
     },
-    sdf::provided::ProvidedImagesReport,
 };
-use rand::{rng, RngExt};
-use thiserror::Error;
-use wasm_bindgen::{JsCast, JsValue};
-use web_sys::{DedicatedWorkerGlobalScope, Worker};
+use wasm_bindgen::JsValue;
+use web_sys::Worker;
 
+#[cfg(test)]
+pub(crate) use self::wire::{encode_call_finished, prepare_message};
 use self::{assignments::Assignments, style_revisions::StyleRevisions};
-use crate::{
-    error::WebError,
-    platform::singlethreaded::{
-        transferables::FlatBufferTransferable, UsedContext, UsedHttpClient,
-    },
+pub use self::{raw_queue::PassingReceiveIter, tag::WebMessageTag, wire::PassingContext};
+pub(crate) use self::{
+    raw_queue::QueuedMessage,
+    wire::{decode_call_finished, decode_message, post_call_finished, TrackedPayloadError},
 };
-
-/// Error which happens during serialization or deserialization of the tag
-#[derive(Error, Debug)]
-#[error("failed to deserialize message tag")]
-pub struct MessageTagDeserializeError;
-
-impl MessageTag for WebMessageTag {
-    fn dyn_clone(&self) -> Box<dyn MessageTag> {
-        Box::new(*self)
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub enum WebMessageTag {
-    TileTessellated = 1,
-    LayerMissing = 2,
-    LayerTessellated = 3,
-    LayerIndexed = 4,
-    LayerRaster = 5,
-    LayerRasterMissing = 6,
-    SymbolLayerTessellated = 7,
-    LayerDem = 8,
-    LayerDemMissing = 9,
-    TileRequestOutcome = 10,
-    TrackedPayload = 11,
-    ProvidedImages = 12,
-    /// A worker stopped running the call for the attempt in the payload, either way.
-    CallFinished = 13,
-}
-
-impl WebMessageTag {
-    pub fn to_static(self) -> &'static WebMessageTag {
-        match self {
-            WebMessageTag::LayerRaster => &WebMessageTag::LayerRaster,
-            WebMessageTag::LayerMissing => &WebMessageTag::LayerMissing,
-            WebMessageTag::LayerIndexed => &WebMessageTag::LayerIndexed,
-            WebMessageTag::TileTessellated => &WebMessageTag::TileTessellated,
-            WebMessageTag::LayerTessellated => &WebMessageTag::LayerTessellated,
-            WebMessageTag::LayerRasterMissing => &WebMessageTag::LayerRasterMissing,
-            WebMessageTag::SymbolLayerTessellated => &WebMessageTag::SymbolLayerTessellated,
-            WebMessageTag::LayerDem => &WebMessageTag::LayerDem,
-            WebMessageTag::LayerDemMissing => &WebMessageTag::LayerDemMissing,
-            WebMessageTag::TileRequestOutcome => &WebMessageTag::TileRequestOutcome,
-            WebMessageTag::TrackedPayload => &WebMessageTag::TrackedPayload,
-            WebMessageTag::ProvidedImages => &WebMessageTag::ProvidedImages,
-            WebMessageTag::CallFinished => &WebMessageTag::CallFinished,
-        }
-    }
-
-    pub fn from_u32(tag: u32) -> Result<Self, MessageTagDeserializeError> {
-        match tag {
-            x if x == WebMessageTag::LayerMissing as u32 => Ok(WebMessageTag::LayerMissing),
-            x if x == WebMessageTag::LayerTessellated as u32 => Ok(WebMessageTag::LayerTessellated),
-            x if x == WebMessageTag::TileTessellated as u32 => Ok(WebMessageTag::TileTessellated),
-            x if x == WebMessageTag::LayerIndexed as u32 => Ok(WebMessageTag::LayerIndexed),
-            x if x == WebMessageTag::LayerRaster as u32 => Ok(WebMessageTag::LayerRaster),
-            x if x == WebMessageTag::LayerRasterMissing as u32 => {
-                Ok(WebMessageTag::LayerRasterMissing)
-            }
-            x if x == WebMessageTag::SymbolLayerTessellated as u32 => {
-                Ok(WebMessageTag::SymbolLayerTessellated)
-            }
-            x if x == WebMessageTag::LayerDem as u32 => Ok(WebMessageTag::LayerDem),
-            x if x == WebMessageTag::LayerDemMissing as u32 => Ok(WebMessageTag::LayerDemMissing),
-            x if x == WebMessageTag::TileRequestOutcome as u32 => {
-                Ok(WebMessageTag::TileRequestOutcome)
-            }
-            x if x == WebMessageTag::TrackedPayload as u32 => Ok(WebMessageTag::TrackedPayload),
-            x if x == WebMessageTag::ProvidedImages as u32 => Ok(WebMessageTag::ProvidedImages),
-            x if x == WebMessageTag::CallFinished as u32 => Ok(WebMessageTag::CallFinished),
-            _ => Err(MessageTagDeserializeError),
-        }
-    }
-}
-
-impl From<WebMessageTag> for u32 {
-    fn from(val: WebMessageTag) -> Self {
-        val as u32
-    }
-}
-
-#[derive(Clone)]
-pub struct PassingContext {
-    pub source_client: SourceClient<UsedHttpClient>,
-}
-
-impl Context for PassingContext {
-    fn send_back<T: IntoMessage>(&self, message: T) -> Result<(), SendError> {
-        let (tag, buffer) = prepare_message(message.into())?;
-        let global: DedicatedWorkerGlobalScope =
-            js_sys::global()
-                .dyn_into()
-                .map_err(|_| SendError::Transmission {
-                    operation: "accessing the worker global scope",
-                    source: Box::new(WebError::TypeError(
-                        "not a dedicated worker global scope".into(),
-                    )),
-                })?;
-        global
-            .post_message_with_transfer(
-                &js_sys::Array::of2(&JsValue::from(tag as u32), &buffer),
-                &js_sys::Array::of1(&buffer),
-            )
-            .map_err(|source| SendError::Transmission {
-                operation: "posting a worker result",
-                source: Box::new(WebError::from(source)),
-            })
-    }
-}
-
-fn prepare_message(message: Message) -> Result<(WebMessageTag, ArrayBuffer), SendError> {
-    let attempt = message.attempt();
-    let (tag, payload) = prepare_payload_bytes(message)?;
-    match attempt {
-        Some(attempt) => {
-            let payload_slice = payload.as_slice();
-            let total_len = 12 + payload_slice.len();
-            let out = Uint8Array::new_with_length(total_len as u32);
-            let mut header = [0u8; 12];
-            header[0..4].copy_from_slice(&(tag as u32).to_le_bytes());
-            header[4..12].copy_from_slice(&attempt.to_le_bytes());
-            out.subarray(0, 12).copy_from(&header);
-            if !payload_slice.is_empty() {
-                out.subarray(12, total_len as u32).copy_from(payload_slice);
-            }
-            Ok((WebMessageTag::TrackedPayload, out.buffer()))
-        }
-        None => Ok((tag, Uint8Array::from(payload.as_slice()).buffer())),
-    }
-}
-
-enum PayloadBytes {
-    Vec(Vec<u8>),
-    Transferable(Box<FlatBufferTransferable>),
-}
-
-impl PayloadBytes {
-    fn as_slice(&self) -> &[u8] {
-        match self {
-            Self::Vec(bytes) => bytes.as_slice(),
-            Self::Transferable(transferable) => transferable.data(),
-        }
-    }
-}
-
-fn prepare_payload_bytes(message: Message) -> Result<(WebMessageTag, PayloadBytes), SendError> {
-    if message.has_tag(RequestKind::Raster.message_tag())
-        || message.has_tag(RequestKind::Dem.message_tag())
-        || message.has_tag(RequestKind::Vector.message_tag())
-    {
-        let outcome = message.into_transferable::<TileRequestOutcome>()?;
-        let data = serde_json::to_vec(&*outcome).map_err(|source| SendError::Transmission {
-            operation: "encoding a tile request outcome",
-            source: Box::new(source),
-        })?;
-        return Ok((WebMessageTag::TileRequestOutcome, PayloadBytes::Vec(data)));
-    }
-    if message.has_tag(ProvidedImagesReport::message_tag()) {
-        let report = message.into_transferable::<ProvidedImagesReport>()?;
-        let data = serde_json::to_vec(&*report).map_err(|source| SendError::Transmission {
-            operation: "encoding a provided images report",
-            source: Box::new(source),
-        })?;
-        return Ok((WebMessageTag::ProvidedImages, PayloadBytes::Vec(data)));
-    }
-    let tag = message
-        .tag()
-        .as_any()
-        .downcast_ref::<WebMessageTag>()
-        .copied()
-        .ok_or(SendError::UnsupportedTag { tag: message.tag() })?;
-    let transferable = message.into_transferable::<FlatBufferTransferable>()?;
-    tracing::debug!(
-        ?tag,
-        bytes = transferable.data().len(),
-        "sending worker result"
-    );
-    Ok((tag, PayloadBytes::Transferable(transferable)))
-}
-
-pub(crate) fn decode_message(
-    tag: WebMessageTag,
-    buffer: ArrayBuffer,
-) -> Result<Message, CallError> {
-    let bytes = Uint8Array::new(&buffer).to_vec();
-    decode_message_bytes(tag, bytes, 0)
-}
-
-fn decode_message_bytes(
-    tag: WebMessageTag,
-    bytes: Vec<u8>,
-    offset: usize,
-) -> Result<Message, CallError> {
-    let slice = bytes.get(offset..).unwrap_or_default();
-    if tag == WebMessageTag::TrackedPayload {
-        let header = slice.first_chunk::<12>().ok_or_else(|| {
-            CallError::Deserialize(Box::new(TrackedPayloadError::Header { bytes: slice.len() }))
-        })?;
-        let inner_tag = WebMessageTag::from_u32(u32::from_le_bytes([
-            header[0], header[1], header[2], header[3],
-        ]))
-        .map_err(|error| CallError::Deserialize(Box::new(error)))?;
-        if inner_tag == WebMessageTag::TrackedPayload {
-            return Err(CallError::Deserialize(Box::new(
-                TrackedPayloadError::Nested,
-            )));
-        }
-        let attempt = u64::from_le_bytes([
-            header[4], header[5], header[6], header[7], header[8], header[9], header[10],
-            header[11],
-        ]);
-        return decode_message_bytes(inner_tag, bytes, offset + 12)
-            .map(|message| message.with_attempt(attempt));
-    }
-    if tag == WebMessageTag::TileRequestOutcome {
-        let outcome: TileRequestOutcome = serde_json::from_slice(slice)
-            .map_err(|source| CallError::Deserialize(Box::new(source)))?;
-        return Ok(IntoMessage::into(outcome));
-    }
-    if tag == WebMessageTag::ProvidedImages {
-        let report: ProvidedImagesReport = serde_json::from_slice(slice)
-            .map_err(|source| CallError::Deserialize(Box::new(source)))?;
-        return Ok(IntoMessage::into(report));
-    }
-    Ok(Message::new(
-        tag.to_static(),
-        Box::new(FlatBufferTransferable::from_vec(tag, bytes, offset)),
-    ))
-}
-
-/// Encodes the payload of a [`WebMessageTag::CallFinished`] message.
-pub(crate) fn encode_call_finished(attempt: u64) -> ArrayBuffer {
-    Uint8Array::from(attempt.to_le_bytes().as_slice()).buffer()
-}
-
-/// Reads the attempt from the payload of a [`WebMessageTag::CallFinished`] message.
-pub(crate) fn decode_call_finished(buffer: &ArrayBuffer) -> Result<u64, CallError> {
-    let bytes = Uint8Array::new(buffer).to_vec();
-    let attempt = <[u8; 8]>::try_from(bytes.as_slice()).map_err(|_| {
-        CallError::Deserialize(Box::new(TrackedPayloadError::Finished {
-            bytes: bytes.len(),
-        }))
-    })?;
-    Ok(u64::from_le_bytes(attempt))
-}
-
-/// Tells the main thread this worker stopped running the call for `attempt`.
-pub(crate) fn post_call_finished(attempt: u64) -> Result<(), SendError> {
-    let global: DedicatedWorkerGlobalScope =
-        js_sys::global()
-            .dyn_into()
-            .map_err(|_| SendError::Transmission {
-                operation: "accessing the worker global scope",
-                source: Box::new(WebError::TypeError(
-                    "not a dedicated worker global scope".into(),
-                )),
-            })?;
-    let buffer = encode_call_finished(attempt);
-    global
-        .post_message_with_transfer(
-            &js_sys::Array::of2(&JsValue::from(WebMessageTag::CallFinished as u32), &buffer),
-            &js_sys::Array::of1(&buffer),
-        )
-        .map_err(|source| SendError::Transmission {
-            operation: "posting a finished call",
-            source: Box::new(WebError::from(source)),
-        })
-}
-
-#[derive(Debug, Error)]
-enum TrackedPayloadError {
-    #[error("tracked worker payload has {bytes} bytes; its header requires 12")]
-    Header { bytes: usize },
-    #[error("tracked worker payload contains a nested tracking envelope")]
-    Nested,
-    #[error("finished call payload has {bytes} bytes; its attempt requires 8")]
-    Finished { bytes: usize },
-}
+use crate::{error::WebError, platform::singlethreaded::UsedContext};
 
 /// What the workers sent since the last receive.
 #[derive(Default)]
 pub struct Received {
-    /// Results, in delivery order.
+    /// Pre-decoded results (used by unit tests), in delivery order.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) messages: Vec<Message>,
+    /// Wire payloads held in JS `ArrayBuffer`s until a consumer pulls them one at a time.
+    pub(crate) queued: Vec<QueuedMessage>,
     /// Attempts whose calls a worker stopped running.
     pub(crate) finished: Vec<u64>,
+    /// Main-thread redraw waker invoked when results transition from empty to non-empty.
+    pub(crate) waker: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 pub type ReceivedType = RefCell<Received>;
 
 pub struct PassingAsyncProcedureCall {
     workers: Vec<Worker>,
+    listeners: Vec<recycle::WorkerMessageClosure>,
+    next_worker: Cell<usize>,
 
-    buffer: RefCell<Vec<Message>>,
+    buffer: RefCell<Vec<QueuedMessage>>,
+    batch_open: Cell<bool>,
 
-    received: Rc<ReceivedType>, // FIXME: Is RefCell fine?
+    received: Rc<ReceivedType>,
 
     /// The worker each running call was sent to, so a cancel reaches it.
     assignments: RefCell<Assignments>,
@@ -342,42 +69,41 @@ impl PassingAsyncProcedureCall {
         config: OffscreenKernelConfig,
     ) -> Result<Self, WebError> {
         let received = Rc::new(RefCell::new(Received::default()));
-
-        let create_new_worker = || {
-            new_worker
-                .call1(
-                    &JsValue::undefined(),
-                    &JsValue::from(Rc::into_raw(received.clone())),
-                )
-                .map_err(WebError::from)?
-                .dyn_into::<Worker>()
-                .map_err(|_e| WebError::TypeError("Unable to cast to Worker".into()))
-        };
-
-        let mut workers = Vec::with_capacity(initial_workers);
-        let config = serde_json::to_string(&config).map_err(WebError::KernelConfigEncoding)?;
-        let init = worker_message("wasm_init", &[("module", &wasm_bindgen::module())])?;
-        let configure = worker_message("kernel_config", &[("config", &JsValue::from(config))])?;
-
-        for _ in 0..initial_workers {
-            let worker: Worker = create_new_worker()?;
-            worker.post_message(&init).map_err(WebError::from)?;
-            worker.post_message(&configure).map_err(WebError::from)?;
-            workers.push(worker);
-        }
+        let config_json = serde_json::to_string(&config).map_err(WebError::KernelConfigEncoding)?;
+        let (workers, listeners) =
+            recycle::acquire_workers(&new_worker, initial_workers, &config_json, &received)?;
 
         Ok(Self {
             workers,
+            listeners,
+            next_worker: Cell::new(0),
             buffer: RefCell::new(Vec::default()),
+            batch_open: Cell::new(true),
             received,
             assignments: RefCell::default(),
             styles: RefCell::default(),
         })
     }
+
+    fn post_style_to_workers(&self, revision: u64, style: &str) -> Result<(), WebError> {
+        let message = worker_message(
+            "style",
+            &[
+                ("revision", &JsValue::from(revision)),
+                ("style", &JsValue::from(style)),
+            ],
+        )?;
+        self.workers
+            .iter()
+            .try_for_each(|worker| worker.post_message(&message).map_err(WebError::from))
+    }
 }
 
 /// Builds a worker message `{ type: kind, <key>: value, ... }`.
-fn worker_message(kind: &str, fields: &[(&str, &JsValue)]) -> Result<js_sys::Object, WebError> {
+pub(super) fn worker_message(
+    kind: &str,
+    fields: &[(&str, &JsValue)],
+) -> Result<js_sys::Object, WebError> {
     let entries = js_sys::Array::of1(&js_sys::Array::of2(
         &JsValue::from("type"),
         &JsValue::from(kind),
@@ -390,33 +116,77 @@ fn worker_message(kind: &str, fields: &[(&str, &JsValue)]) -> Result<js_sys::Obj
 
 impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
     type Context = UsedContext;
-    type ReceiveIterator<F: FnMut(&Message) -> bool> = IntoIter<Message>;
+    type ReceiveIterator<F: FnMut(&Message) -> bool> = PassingReceiveIter;
 
     fn receive<F: FnMut(&Message) -> bool>(&self, mut filter: F) -> Self::ReceiveIterator<F> {
+        const MAX_RAW_BYTES_PER_BATCH: usize = 1024 * 1024;
         let mut buffer = self.buffer.borrow_mut();
+        let mut admitted_bytes: usize = buffer.iter().map(QueuedMessage::raw_byte_len).sum();
+        let mut admitted_attempts: std::collections::HashSet<u64> =
+            buffer.iter().filter_map(QueuedMessage::attempt).collect();
         // Partial and final tile completions must retain the worker's delivery order.
-        let mut ret: Vec<_> = buffer.extract_if(.., |message| filter(message)).collect();
+        let mut ret: Vec<QueuedMessage> = buffer
+            .extract_if(.., |item| item.matches(&mut filter))
+            .collect();
 
-        // TODO: (optimize) Using while instead of if means that we are processing all that is
-        // TODO available this might cause frame drops.
         let Ok(mut received) = self.received.try_borrow_mut() else {
-            return ret.into_iter();
+            return PassingReceiveIter::new(ret);
         };
         let mut assignments = self.assignments.borrow_mut();
         for attempt in received.finished.drain(..) {
             assignments.finished(attempt);
         }
         for message in received.messages.drain(..) {
-            log::debug!("Data reached main thread: {message:?}");
-
             if filter(&message) {
-                ret.push(message);
+                ret.push(QueuedMessage::Decoded(message));
             } else {
-                buffer.push(message)
+                buffer.push(QueuedMessage::Decoded(message));
             }
         }
+        if !self.batch_open.get() {
+            return PassingReceiveIter::new(ret);
+        }
+        let mut attempt_totals: std::collections::HashMap<u64, usize> =
+            std::collections::HashMap::new();
+        for item in &received.queued {
+            if let Some(id) = item.attempt() {
+                let entry = attempt_totals.entry(id).or_insert(0);
+                *entry = entry.saturating_add(item.raw_byte_len());
+            }
+        }
+        let mut deferred = Vec::new();
+        for item in received.queued.drain(..) {
+            let attempt = item.attempt();
+            let admit = match attempt {
+                None => admitted_bytes < MAX_RAW_BYTES_PER_BATCH || admitted_attempts.is_empty(),
+                Some(id) => {
+                    admitted_attempts.contains(&id)
+                        || admitted_attempts.is_empty()
+                        || admitted_bytes
+                            .saturating_add(attempt_totals.get(&id).copied().unwrap_or(0))
+                            <= MAX_RAW_BYTES_PER_BATCH
+                }
+            };
+            if !admit {
+                deferred.push(item);
+                continue;
+            }
+            if let Some(id) = attempt {
+                admitted_attempts.insert(id);
+            }
+            admitted_bytes = admitted_bytes.saturating_add(item.raw_byte_len());
+            if item.matches(&mut filter) {
+                ret.push(item);
+            } else {
+                buffer.push(item);
+            }
+        }
+        if !deferred.is_empty() {
+            self.batch_open.set(false);
+        }
+        received.queued = deferred;
 
-        ret.into_iter()
+        PassingReceiveIter::new(ret)
     }
 
     fn call(
@@ -424,7 +194,7 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
         input: Input,
         procedure: AsyncProcedure<K, UsedContext>,
     ) -> Result<(), CallError> {
-        let procedure_ptr = procedure as *mut AsyncProcedure<K, UsedContext>; // TODO: Verify how these pointer are converted to pointers
+        let procedure_ptr = procedure as *mut AsyncProcedure<K, UsedContext>;
         let attempt = input.attempt;
         if self.workers.is_empty() {
             return Err(CallError::Schedule(ScheduleError::NoWorkers));
@@ -434,16 +204,7 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
             .styles
             .borrow_mut()
             .revision(&input.style, |revision, style| {
-                let message = worker_message(
-                    "style",
-                    &[
-                        ("revision", &JsValue::from(revision)),
-                        ("style", &JsValue::from(style)),
-                    ],
-                )?;
-                self.workers
-                    .iter()
-                    .try_for_each(|worker| worker.post_message(&message).map_err(WebError::from))
+                self.post_style_to_workers(revision, style)
             })
             .map_err(|error| CallError::Serialize(Box::new(error)))?;
         let input = serde_json::to_string(&input).map_err(|e| CallError::Serialize(Box::new(e)))?;
@@ -461,7 +222,9 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
         )
         .map_err(|error| CallError::Serialize(Box::new(error)))?;
 
-        let index = rng().random_range(0..self.workers.len());
+        let turn = self.next_worker.get();
+        self.next_worker.set(turn.wrapping_add(1));
+        let index = turn % self.workers.len();
         let worker = self
             .workers
             .get(index)
@@ -490,13 +253,60 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
     }
 
     fn has_arrivals(&self) -> bool {
+        self.batch_open.set(true);
         self.received
             .try_borrow()
-            .is_ok_and(|received| !received.messages.is_empty())
+            .is_ok_and(|received| !received.messages.is_empty() || !received.queued.is_empty())
+    }
+
+    fn supports_waker(&self) -> bool {
+        true
+    }
+
+    fn set_waker(&self, wake: Arc<dyn Fn() + Send + Sync>) {
+        if let Ok(mut received) = self.received.try_borrow_mut() {
+            received.waker = Some(wake);
+        }
+    }
+
+    fn warm_style(&self, style: &maplibre::style::Style) {
+        if self.workers.is_empty() {
+            return;
+        }
+        if let Err(error) = self.styles.borrow_mut().warm(style, |revision, json| {
+            self.post_style_to_workers(revision, json)
+        }) {
+            tracing::warn!(%error, "pre-warming worker style failed");
+        }
+    }
+}
+
+impl Drop for PassingAsyncProcedureCall {
+    fn drop(&mut self) {
+        let mut busy = vec![false; self.workers.len()];
+        for (_, idx) in self.assignments.get_mut().drain() {
+            if let Some(slot) = busy.get_mut(idx) {
+                *slot = true;
+            }
+        }
+        let workers = std::mem::take(&mut self.workers);
+        let listeners = std::mem::take(&mut self.listeners);
+        recycle::release_workers(workers, listeners, &busy);
+        self.buffer.get_mut().clear();
+        if let Ok(mut received) = self.received.try_borrow_mut() {
+            received.messages.clear();
+            received.queued.clear();
+            received.finished.clear();
+            received.waker = None;
+        }
     }
 }
 
 mod assignments;
+mod raw_queue;
+mod recycle;
 mod style_revisions;
+mod tag;
 #[cfg(test)]
 mod tests;
+pub(crate) mod wire;

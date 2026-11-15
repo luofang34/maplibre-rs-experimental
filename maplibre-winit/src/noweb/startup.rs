@@ -201,13 +201,16 @@ fn create_kernel(
 ) -> Result<Kernel<NativeEnvironment>, KernelBuildError> {
     // Tile workers fetch through the map thread's client and share its connection pool.
     let loader = SharedLoader::new(ReqwestHttpClient::new(cache_path));
+    let asset_cache = maplibre::sdf::assets::AssetCache::default();
     KernelBuilder::new()
         .with_map_window_config(window_config)
         .with_http_client(loader.clone())
+        .with_asset_cache(asset_cache.clone())
         .with_apc(SchedulerAsyncProcedureCall::new(
             TokioScheduler::new(),
             OffscreenKernelConfig {
                 cache_directory,
+                asset_cache,
                 loader: Some(loader),
                 ..Default::default()
             },

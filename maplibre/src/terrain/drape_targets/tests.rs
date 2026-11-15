@@ -189,3 +189,77 @@ fn an_eyes_partial_children_without_an_ancestor_wait_for_complete_coverage() {
     )
     .is_empty());
 }
+
+#[test]
+fn missing_children_wait_for_sparse_fallback_ancestor_before_settling() {
+    let ancestor = WorldTileCoords::from((75, 96, 8_u8.into()));
+    let target = WorldTileCoords::from((300, 384, 10_u8.into()));
+    let children = target.get_children();
+
+    let mut world = World::default();
+    let mut sources = ViewTileSources::default();
+    sources.add_resource_query::<&LoadedTiles>(TileKind::Raster);
+    world.resources.insert(sources);
+    world.resources.insert(LoadedTiles(HashSet::new()));
+
+    let src = RasterSourceId::from("vfr_sectional");
+    for child in &children {
+        let mut comp = crate::raster::RasterLayersDataComponent::default();
+        comp.record(crate::raster::RasterLayerData::Missing(
+            crate::raster::MissingRasterLayerData {
+                coords: *child,
+                source: src.clone(),
+            },
+        ));
+        world.tiles.spawn_mut(*child).expect("spawn").insert(comp);
+    }
+
+    // While z10 / z9 fallback ancestors have neither loaded nor returned 404 yet, the drape must
+    // NOT prematurely declare the source absent.
+    let pending_shapes: Vec<_> = select_targets(
+        std::iter::once(target),
+        &world,
+        &[(src.clone(), children.to_vec())],
+    )
+    .pop()
+    .expect("target")
+    .1
+    .into_iter()
+    .filter(|shape| shape.raster_source.is_some())
+    .collect();
+    assert!(
+        pending_shapes.is_empty(),
+        "must wait for fallback walk, got {pending_shapes:?}"
+    );
+
+    // Once z10 and z9 return 404 and z8 loads, the drape settles onto z8 with view_complete = true.
+    for z9_or_z10 in [target, target.get_parent().expect("z9")] {
+        let mut comp = crate::raster::RasterLayersDataComponent::default();
+        comp.record(crate::raster::RasterLayerData::Missing(
+            crate::raster::MissingRasterLayerData {
+                coords: z9_or_z10,
+                source: src.clone(),
+            },
+        ));
+        world
+            .tiles
+            .spawn_mut(z9_or_z10)
+            .expect("spawn")
+            .insert(comp);
+    }
+    world
+        .resources
+        .insert(LoadedTiles([ancestor].into_iter().collect()));
+    let settled_shapes: Vec<_> =
+        select_targets(std::iter::once(target), &world, &[(src, children.to_vec())])
+            .pop()
+            .expect("target")
+            .1
+            .into_iter()
+            .filter(|shape| shape.raster_source.is_some())
+            .collect();
+    assert_eq!(settled_shapes.len(), 1);
+    assert_eq!(settled_shapes[0].coords, ancestor);
+    assert!(settled_shapes[0].view_complete);
+    assert!(!settled_shapes[0].absent);
+}

@@ -7,6 +7,7 @@ use std::ops::{Deref, DerefMut};
 pub use fps_meter::FPSMeter;
 
 mod fps_meter;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod grid;
 pub mod label;
 pub mod math;

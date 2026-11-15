@@ -282,7 +282,7 @@ impl Renderer {
             settings,
             resources: RenderResources::new(surface),
             render_graph: Default::default(),
-            shared_pipelines: None,
+            shared_pipelines: Some(resource::SharedPipelines::new()),
         })
     }
 
@@ -336,7 +336,7 @@ impl Renderer {
             settings,
             resources: RenderResources::new(surface),
             render_graph: Default::default(),
-            shared_pipelines: None,
+            shared_pipelines: Some(resource::SharedPipelines::new()),
         })
     }
 
@@ -353,9 +353,15 @@ impl Renderer {
     ) -> Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue), RenderError> {
         let adapter = instance.request_adapter(request_adapter_options).await?;
 
+        #[cfg(feature = "trace")]
         let trace = if settings.record_trace {
             wgpu::Trace::Directory("wgpu_trace".into())
         } else {
+            wgpu::Trace::Off
+        };
+        #[cfg(not(feature = "trace"))]
+        let trace = {
+            let _ = settings.record_trace;
             wgpu::Trace::Off
         };
 

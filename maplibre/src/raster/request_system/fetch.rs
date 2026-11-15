@@ -2,6 +2,8 @@
 
 use futures::{stream::FuturesUnordered, StreamExt};
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::raster::process_raster::process_raster_tile;
 use crate::{
     coords::WorldTileCoords,
     environment::OffscreenKernel,
@@ -14,9 +16,7 @@ use crate::{
         tile_sources::{source_layer_groups, SourceLayerGroup, TileKind},
     },
     raster::{
-        process_raster::{
-            process_raster_tile, ProcessRasterContext, ProcessRasterError, RasterTileRequest,
-        },
+        process_raster::{ProcessRasterContext, ProcessRasterError, RasterTileRequest},
         transferables::{LayerRasterMissing, RasterTransferables},
         RasterSourceId,
     },
@@ -235,6 +235,7 @@ async fn fetch_source<T: RasterTransferables, HC: HttpClient, C: Context + Clone
         coords,
         source: RasterSourceId::new(group.source_name.clone()),
     };
+    #[cfg(not(target_arch = "wasm32"))]
     let processed = run_cpu_bound_replying(context.clone(), move |context| {
         let mut process_context = ProcessRasterContext::<T, _>::new(context);
         process_raster_tile(&data, request, &mut process_context)
@@ -242,6 +243,25 @@ async fn fetch_source<T: RasterTransferables, HC: HttpClient, C: Context + Clone
     .await
     .map_err(ProcessRasterError::CpuWork)
     .and_then(|processed| processed);
+    #[cfg(target_arch = "wasm32")]
+    let processed = match crate::platform::decode_rgba_bytes(&data).await {
+        Ok(rgba) => run_cpu_bound_replying(context.clone(), move |context| {
+            ProcessRasterContext::<T, _>::new(context).finish_decoded(
+                &request.coords,
+                request.source,
+                rgba,
+            )
+        })
+        .await
+        .map_err(ProcessRasterError::CpuWork)
+        .and_then(|processed| processed),
+        Err(reason) => Err(ProcessRasterError::Decoding {
+            source: image::ImageError::Decoding(image::error::DecodingError::new(
+                image::error::ImageFormatHint::Unknown,
+                reason,
+            )),
+        }),
+    };
     match processed {
         Ok(()) => {}
         Err(ProcessRasterError::Send(source)) => return Err(ProcedureError::Send(source)),

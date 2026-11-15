@@ -1,6 +1,6 @@
 //! Bringing a running map's tiles and GPU buffers up to date with style and `feature-state` changes.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use serde_json::{Map, Value};
 
@@ -26,7 +26,9 @@ impl MapContext {
     ) -> Result<StyleChange, StyleMutationError> {
         #[cfg(feature = "geojson")]
         let geojson = crate::geojson::update::GeoJsonVersions::of(&self.style);
+        let old_zooms = snapshot_layer_zooms(&self.style);
         let change = apply(&mut self.style)?;
+        let widened = zoom_bounds_widened(&old_zooms, &self.style);
         crate::render::frame_signals::mark_dirty(&mut self.world);
         if self.style.has_active_transitions() {
             crate::render::frame_signals::keep_animating(&mut self.world);
@@ -37,7 +39,7 @@ impl MapContext {
         if !change.layers.is_empty() || !change.removed_layers.is_empty() {
             DirtyVectorStyle::mark_style_edit(&mut self.world, change.layers.iter().cloned());
         }
-        if change.redraw_tiles {
+        if change.redraw_tiles || widened {
             tile_retry::refresh(&mut self.world, RequestKind::Vector);
         } else {
             #[cfg(feature = "geojson")]
@@ -60,7 +62,11 @@ impl MapContext {
     pub fn set_style(&mut self, next: Style) -> crate::style::diff::StyleReplacementDiff {
         #[cfg(feature = "geojson")]
         let geojson = crate::geojson::update::GeoJsonVersions::of(&self.style);
+        let old_zooms = snapshot_layer_zooms(&self.style);
+        let had_dem = crate::terrain::source::dem_source(&self.style).is_some();
         let diff = self.style.diff_and_replace(next);
+        let widened = zoom_bounds_widened(&old_zooms, &self.style);
+        let enabled_dem = !had_dem && crate::terrain::source::dem_source(&self.style).is_some();
         crate::render::frame_signals::mark_dirty(&mut self.world);
         if self.style.has_active_transitions() {
             crate::render::frame_signals::keep_animating(&mut self.world);
@@ -72,7 +78,7 @@ impl MapContext {
         if !affected.is_empty() || !diff.removed_layers.is_empty() || diff.global_state_changed {
             DirtyVectorStyle::mark_style_edit(&mut self.world, affected);
         }
-        if diff.redraw_tiles {
+        if diff.redraw_tiles || widened || (cfg!(target_arch = "wasm32") && enabled_dem) {
             tile_retry::refresh(&mut self.world, RequestKind::Vector);
         } else {
             #[cfg(feature = "geojson")]
@@ -179,4 +185,38 @@ impl MapContext {
         DirtyVectorStyle::mark_feature_state(&mut self.world, target.source.clone());
         crate::render::frame_signals::mark_dirty(&mut self.world);
     }
+}
+
+fn snapshot_layer_zooms(style: &Style) -> HashMap<String, (Option<f64>, Option<f64>)> {
+    style
+        .layers
+        .iter()
+        .filter(|layer| super::from_vector_tiles(layer) && !layer.is_hidden())
+        .map(|layer| (layer.id.clone(), (layer.minzoom, layer.maxzoom)))
+        .collect()
+}
+
+fn zoom_bounds_widened(
+    old_zooms: &HashMap<String, (Option<f64>, Option<f64>)>,
+    style: &Style,
+) -> bool {
+    style.layers.iter().any(|layer| {
+        if !super::from_vector_tiles(layer) || layer.is_hidden() {
+            return false;
+        }
+        let Some(&(old_min, old_max)) = old_zooms.get(&layer.id) else {
+            return false;
+        };
+        let min_widened = match (old_min, layer.minzoom) {
+            (Some(old), None) => old.floor() > 0.0,
+            (Some(old), Some(new)) => new.floor() < old.floor(),
+            _ => false,
+        };
+        let max_widened = match (old_max, layer.maxzoom) {
+            (Some(_), None) => true,
+            (Some(old), Some(new)) => new.ceil() > old.ceil(),
+            _ => false,
+        };
+        min_widened || max_widened
+    })
 }

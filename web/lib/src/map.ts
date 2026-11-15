@@ -62,6 +62,37 @@ export interface GeoJsonSourceDiff {
     update?: unknown[]
 }
 
+/** Per-frame telemetry emitted only when built with `--arena-telemetry`. */
+export interface ArenaFrameTelemetry {
+    frame: number
+    hostFrame: number
+    cpuMs: number
+    gpuMs?: number | null
+    uploadBytes: number
+    draws: number
+    drapeRedraws: number
+    prefetchDrapes: number
+    loaded: boolean
+    settled: boolean
+    wasmMemoryBytes: number
+    camera: CameraState
+    redrawReasons: {
+        changed: boolean
+        loading: boolean
+        awaitingImages: boolean
+        cameraMoved: boolean
+        workerResults: boolean
+    }
+    stages: Array<{ name: string; ms: number }>
+}
+
+interface ArenaControllerExt {
+    setArenaCameraListener?: (callback: ((camera: CameraState) => void) | null) => void
+    setArenaTelemetryListener?: (callback: ((telemetry: ArenaFrameTelemetry) => void) | null) => void
+    waitArenaLoaded?: () => Promise<CameraState>
+    waitArenaIdle?: () => Promise<CameraState>
+}
+
 /** A pointer event on the map. */
 export interface MapMouseEvent {
     type: MapMouseEventType
@@ -152,6 +183,11 @@ export class MapLibreMap {
         return this.controller.getCamera()
     }
 
+    /** Replaces the active style with a style JSON string, URL, or style specification object, as GL JS `setStyle`. */
+    setStyle(style: string | object): Promise<void> {
+        return this.controller.setStyle(style)
+    }
+
     setPaintProperty(layerId: string, name: string, value: unknown): Promise<void> {
         return this.controller.setPaintProperty(layerId, name, value)
     }
@@ -197,5 +233,48 @@ export class MapLibreMap {
      */
     queryRenderedFeatures(geometry?: PointLike | [PointLike, PointLike], options?: QueryRenderedFeaturesOptions): Promise<MapFeature[]> {
         return this.controller.queryRenderedFeatures(geometry, options)
+    }
+
+    /** Subscribes to post-frame camera updates (no-op unless built with `--arena-telemetry`). */
+    setArenaCameraListener(listener: ((camera: CameraState) => void) | null): void {
+        if (ARENA_TELEMETRY) {
+            (this.controller as unknown as ArenaControllerExt).setArenaCameraListener?.(listener)
+        }
+    }
+
+    /** Subscribes to per-frame stats and stage breakdown (no-op unless built with `--arena-telemetry`). */
+    setArenaTelemetryListener(listener: ((telemetry: ArenaFrameTelemetry) => void) | null): void {
+        if (ARENA_TELEMETRY) {
+            (this.controller as unknown as ArenaControllerExt).setArenaTelemetryListener?.(listener)
+        }
+    }
+
+    /** Resolves once initial tile/glyph/sprite loading has finished (without waiting for fade animations). */
+    waitArenaLoaded(): Promise<CameraState> {
+        if (ARENA_TELEMETRY) {
+            const fn = (this.controller as unknown as ArenaControllerExt).waitArenaLoaded
+            if (fn) return fn.call(this.controller)
+        }
+        return this.waitArenaIdle()
+    }
+
+    /** Resolves once the map has settled after loading/animating (falls back to `getCamera` without `--arena-telemetry`). */
+    waitArenaIdle(): Promise<CameraState> {
+        if (ARENA_TELEMETRY) {
+            const fn = (this.controller as unknown as ArenaControllerExt).waitArenaIdle
+            if (fn) return fn.call(this.controller)
+        }
+        return this.getCamera()
+    }
+
+    /** Tears down the running map event loop, workers, and GPU resources, as GL JS `remove`. */
+    remove(): void {
+        this.listeners.clear()
+        this.controller.remove()
+    }
+
+    /** Alias for `remove()`. */
+    destroy(): void {
+        this.remove()
     }
 }

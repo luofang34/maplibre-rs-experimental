@@ -10,7 +10,7 @@ use std::{
     any::Any,
     collections::HashMap,
     future::{poll_fn, Future},
-    sync::{atomic::AtomicUsize, Arc, Mutex, MutexGuard, PoisonError},
+    sync::{atomic::AtomicUsize, Arc, Mutex, MutexGuard},
     task::{Poll, Waker},
 };
 
@@ -23,7 +23,10 @@ use crate::{
 };
 
 /// Decoded assets are evicted least recently used once they exceed this many bytes.
-const DEFAULT_BUDGET_BYTES: usize = 64 * 1024 * 1024;
+#[cfg(target_arch = "wasm32")]
+const DEFAULT_BUDGET_BYTES: usize = 1024 * 1024;
+#[cfg(not(target_arch = "wasm32"))]
+const DEFAULT_BUDGET_BYTES: usize = 24 * 1024 * 1024;
 
 /// A missing or undecodable asset is not requested again for this long.
 const NEGATIVE_TTL: Duration = Duration::from_secs(30);
@@ -58,7 +61,7 @@ impl AssetFailure {
 
 /// A sprite sheet decoded once for every icon later cut from it.
 pub(super) struct SpriteSheet {
-    pub(super) document: HashMap<String, serde_json::Value>,
+    pub(super) document: HashMap<String, super::sprite::SpriteEntry>,
     pub(super) image: image::RgbaImage,
 }
 
@@ -116,15 +119,7 @@ enum Claim<T> {
     Ready(Arc<T>),
     Failed(AssetFailure),
     Wait(u64),
-    Lead(Flight),
-}
-
-/// The task chosen to fetch an asset; dropping it unfinished lets a waiter take over.
-struct Flight {
-    cache: AssetCache,
-    key: String,
-    flight: u64,
-    finished: bool,
+    Lead(flight::Flight),
 }
 
 impl Default for AssetCache {
@@ -188,19 +183,34 @@ impl AssetCache {
         png_url: &str,
     ) -> Result<Arc<SpriteSheet>, AssetFailure> {
         self.load(format!("sprites:{json_url}|{png_url}"), || async {
-            let json = fetch(client, json_url, "symbol sprite metadata").await?;
-            let png = fetch(client, png_url, "symbol sprite image").await?;
-            let document = serde_json::from_slice(&json).map_err(|error| {
+            let (json, png) = futures::future::try_join(
+                fetch(client, json_url, "symbol sprite metadata"),
+                fetch(client, png_url, "symbol sprite image"),
+            )
+            .await?;
+            let document = super::sprite::parse_sprite_document(&json).map_err(|error| {
                 tracing::warn!(%json_url, %error, "invalid sprite metadata");
                 AssetFailure::Terminal(format!("invalid sprite metadata {json_url}: {error}"))
             })?;
+            drop(json);
+            #[cfg(not(target_arch = "wasm32"))]
             let image = image::load_from_memory(&png)
                 .map_err(|error| {
                     tracing::warn!(%png_url, %error, "invalid sprite image");
                     AssetFailure::Terminal(format!("invalid sprite image {png_url}: {error}"))
                 })?
                 .to_rgba8();
-            let bytes = image.as_raw().len() + json.len() * 4;
+            #[cfg(target_arch = "wasm32")]
+            let image = crate::platform::decode_rgba_bytes(&png)
+                .await
+                .map_err(|error| {
+                    tracing::warn!(%png_url, %error, "invalid sprite image");
+                    AssetFailure::Terminal(format!("invalid sprite image {png_url}: {error}"))
+                })?;
+            let bytes = image.as_raw().len()
+                + document.capacity()
+                    * (std::mem::size_of::<String>()
+                        + std::mem::size_of::<super::sprite::SpriteEntry>());
             Ok((SpriteSheet { document, image }, bytes))
         })
         .await
@@ -274,7 +284,7 @@ impl AssetCache {
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
-        self.0.state.lock().unwrap_or_else(PoisonError::into_inner)
+        crate::platform::lock_unpoisoned(&self.0.state)
     }
 
     fn claim<T: Any + Send + Sync>(&self, key: &str) -> Claim<T> {
@@ -318,7 +328,7 @@ impl AssetCache {
                 last_used: tick,
             },
         );
-        Claim::Lead(Flight {
+        Claim::Lead(flight::Flight {
             cache: self.clone(),
             key: key.to_owned(),
             flight,
@@ -353,7 +363,7 @@ impl AssetCache {
     fn evict_to_budget(state: &mut State, budget_bytes: usize, negative_ttl: Duration, keep: &str) {
         if state.entries.len() > 256 {
             state.entries.retain(|key, entry| {
-                key.as_str() == keep || !is_stale_failure(&entry.slot, negative_ttl)
+                key.as_str() == keep || !flight::is_stale_failure(&entry.slot, negative_ttl)
             });
         }
         while state.bytes > budget_bytes {
@@ -379,93 +389,7 @@ impl AssetCache {
     }
 }
 
-impl Flight {
-    fn finish(mut self, result: Result<(Arc<dyn Any + Send + Sync>, usize), AssetFailure>) {
-        self.finished = true;
-        let waiters = {
-            let mut state = self.cache.lock();
-            let waiters = take_waiters(&mut state, &self.key, self.flight);
-            let Some(waiters) = waiters else {
-                return;
-            };
-            match result {
-                Ok((value, bytes)) => {
-                    state.tick = state.tick.wrapping_add(1);
-                    let tick = state.tick;
-                    state.bytes += bytes;
-                    state.entries.insert(
-                        self.key.clone(),
-                        Entry {
-                            slot: Slot::Ready { value, bytes },
-                            last_used: tick,
-                        },
-                    );
-                    AssetCache::evict_to_budget(
-                        &mut state,
-                        self.cache.0.budget_bytes,
-                        self.cache.0.negative_ttl,
-                        &self.key,
-                    );
-                }
-                Err(failure) if waiters.is_empty() && failure.is_retryable() => {
-                    state.entries.remove(&self.key);
-                }
-                Err(failure) => {
-                    let tick = state.tick;
-                    state.entries.insert(
-                        self.key.clone(),
-                        Entry {
-                            slot: Slot::Failed {
-                                failure,
-                                at: Instant::now(),
-                                flight: self.flight,
-                            },
-                            last_used: tick,
-                        },
-                    );
-                }
-            }
-            waiters
-        };
-        wake(waiters);
-    }
-}
-
-impl Drop for Flight {
-    fn drop(&mut self) {
-        if self.finished {
-            return;
-        }
-        let waiters = {
-            let mut state = self.cache.lock();
-            let waiters = take_waiters(&mut state, &self.key, self.flight);
-            if waiters.is_some() {
-                state.entries.remove(&self.key);
-            }
-            waiters
-        };
-        wake(waiters.unwrap_or_default());
-    }
-}
-
-/// The waiters of `flight` when `key` is still loading under that flight.
-fn take_waiters(state: &mut State, key: &str, flight: u64) -> Option<Vec<Waker>> {
-    match state.entries.get_mut(key).map(|entry| &mut entry.slot) {
-        Some(Slot::Loading {
-            flight: id,
-            waiters,
-        }) if *id == flight => Some(std::mem::take(waiters)),
-        _ => None,
-    }
-}
-
-fn is_stale_failure(slot: &Slot, negative_ttl: Duration) -> bool {
-    matches!(slot, Slot::Failed { failure, at, .. } if failure.is_retryable() || at.elapsed() >= negative_ttl)
-}
-
-fn wake(waiters: Vec<Waker>) {
-    waiters.into_iter().for_each(Waker::wake);
-}
+mod flight;
 
 pub(crate) async fn fetch<HC: HttpClient>(
     client: &SourceClient<HC>,

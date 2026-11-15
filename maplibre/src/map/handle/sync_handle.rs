@@ -41,10 +41,7 @@ struct SyncShared<T> {
 }
 
 fn lock<S>(mutex: &Mutex<S>) -> MutexGuard<'_, S> {
-    match mutex.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    }
+    crate::platform::lock_unpoisoned(mutex)
 }
 
 /// The owner's side of a thread-safe command and watcher queue over any target `T`.

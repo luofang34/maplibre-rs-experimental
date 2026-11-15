@@ -50,6 +50,15 @@ struct AllocatedBuffers {
     sky_metadata_buffer: wgpu::Buffer,
 }
 
+impl Drop for AllocatedBuffers {
+    fn drop(&mut self) {
+        self.metadata_buffer.destroy();
+        self.tile_metadata_buffer.destroy();
+        self.atmosphere_metadata_buffer.destroy();
+        self.sky_metadata_buffer.destroy();
+    }
+}
+
 impl AllocatedBuffers {
     fn new(device: &wgpu::Device) -> Self {
         let metadata_capacity = BackgroundGpuBuffers::INITIAL_METADATA_CAPACITY;
@@ -126,6 +135,7 @@ impl BackgroundGpuBuffers {
         let needed_capacity = metadatas.len().max(1);
         if needed_capacity > inner.metadata_capacity {
             let new_capacity = (inner.metadata_capacity * 2).max(needed_capacity);
+            inner.metadata_buffer.destroy();
             inner.metadata_buffer = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Background Metadata Buffer"),
                 size: (new_capacity * std::mem::size_of::<BackgroundLayerMetadata>())
@@ -152,6 +162,7 @@ impl BackgroundGpuBuffers {
         let needed_capacity = tile_metadata.len().max(1);
         if needed_capacity > inner.tile_metadata_capacity {
             let new_capacity = (inner.tile_metadata_capacity * 2).max(needed_capacity);
+            inner.tile_metadata_buffer.destroy();
             inner.tile_metadata_buffer = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Globe Background Tile Metadata Buffer"),
                 size: (new_capacity * std::mem::size_of::<ShaderTileMetadata>())

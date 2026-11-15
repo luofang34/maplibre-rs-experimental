@@ -4,7 +4,7 @@ use std::{
     fmt,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc, Mutex, PoisonError,
+        Arc, Mutex,
     },
 };
 
@@ -121,12 +121,8 @@ impl NetworkState {
             } else {
                 NetworkStatus::Offline
             };
-            let callbacks: Vec<StatusListener> = self
-                .0
-                .listeners
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .clone();
+            let callbacks: Vec<StatusListener> =
+                crate::platform::lock_unpoisoned(&self.0.listeners).clone();
             for callback in callbacks {
                 callback(status);
             }
@@ -141,10 +137,6 @@ impl NetworkState {
     /// Registers a listener invoked whenever connectivity changes between [`NetworkStatus::Online`]
     /// and [`NetworkStatus::Offline`].
     pub fn on_change(&self, listener: impl Fn(NetworkStatus) + Send + Sync + 'static) {
-        self.0
-            .listeners
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(Arc::new(listener));
+        crate::platform::lock_unpoisoned(&self.0.listeners).push(Arc::new(listener));
     }
 }

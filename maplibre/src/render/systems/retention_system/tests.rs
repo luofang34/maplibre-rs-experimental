@@ -212,13 +212,11 @@ fn the_cache_is_bounded_in_bytes_as_well_as_tiles() {
                         coords,
                         source_layer: "water".to_string(),
                         style_layer_id: "water".to_string(),
-                        buffer: OverAlignedVertexBuffer {
-                            buffer: lyon::tessellation::VertexBuffers {
-                                vertices: vec![ShaderVertex::new([0.0, 0.0], [0.0, 0.0]); 1000],
-                                indices: Vec::new(),
-                            },
-                            usable_indices: 0,
-                        },
+                        buffer: OverAlignedVertexBuffer::from_iters(
+                            vec![ShaderVertex::new([0.0, 0.0], [0.0, 0.0]); 1000],
+                            Vec::new(),
+                            0,
+                        ),
                         feature_indices: Vec::new(),
                         feature_colors: Vec::new(),
                         feature_sort_keys: Vec::new(),

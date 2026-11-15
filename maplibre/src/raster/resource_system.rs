@@ -34,6 +34,17 @@ pub fn resource_system(
     )>() else {
         return Err(SystemError::Dependencies);
     };
+    #[cfg(target_arch = "wasm32")]
+    if matches!(raster_resources, Eventually::Uninitialized)
+        && !style.layers.iter().any(|layer| {
+            matches!(
+                layer.type_.as_str(),
+                "raster" | "hillshade" | "color-relief"
+            )
+        })
+    {
+        return Ok(());
+    }
 
     raster_resources.initialize(|| {
         let shader = shaders::RasterShader {

@@ -111,11 +111,7 @@ fn upload_symbol_layer(
             .into_iter()
             .map(str::to_owned)
             .collect();
-        for style_layer in style
-            .layers
-            .iter()
-            .filter(|layer| layer.is_visible_at(f64::from(zoom)))
-        {
+        for style_layer in style.layers.iter().filter(|layer| !layer.is_hidden()) {
             if let Some(committed) = layers
                 .layers
                 .iter()
@@ -139,7 +135,7 @@ fn upload_symbol_layer(
             let Some(layer) = layer else {
                 continue;
             };
-            if upload.is_some() {
+            let did_upload = if upload.is_some() {
                 let buffer = &layer.buffer;
                 let size = buffer.buffer.vertices.len()
                     * (size_of::<crate::render::shaders::ShaderSymbolVertex>()
@@ -151,10 +147,26 @@ fn upload_symbol_layer(
                 if !upload_geometry(symbol_buffer_pool, gpu, coords, style_layer, buffer) {
                     continue;
                 }
-            }
+                true
+            } else {
+                false
+            };
             prepare_atlas(textures, gpu, layer, style_layer, zoom);
             if let Some(index) = replacement {
-                crate::vector::content::commit_symbols(layers, pending.symbols.remove(index));
+                #[allow(unused_mut)]
+                let mut committed = pending.symbols.remove(index);
+                #[cfg(target_arch = "wasm32")]
+                committed.buffer.release_uploaded_symbol_vertices();
+                crate::vector::content::commit_symbols(layers, committed);
+            } else if did_upload {
+                #[cfg(target_arch = "wasm32")]
+                if let Some(committed) = layers
+                    .layers
+                    .iter_mut()
+                    .find(|item| item.style_layer_id == style_layer.id)
+                {
+                    committed.buffer.release_uploaded_symbol_vertices();
+                }
             }
         }
     }
@@ -208,22 +220,21 @@ fn upload_geometry(
         u32,
     >,
 ) -> bool {
-    // Collision placement supplies elevation before a new label can become visible.
-    let feature_metadata = vec![SDFShaderFeatureMetadata::default(); buffer.buffer.vertices.len()];
-
     if buffer.buffer.indices.is_empty() {
         symbol_buffer_pool.remove_layer(coords, &style_layer.id);
         return true;
     }
-
+    // Collision placement supplies elevation before a new label can become visible.
     tracing::debug!(%coords, "allocating symbol geometry");
-    if let Err(error) = symbol_buffer_pool.replace_layer_geometry(
+    if let Err(error) = symbol_buffer_pool.replace_layer_geometry_uniform_unless(
         gpu.queue,
         coords,
         style_layer.clone(),
         buffer,
         ShaderLayerMetadata::new(style_layer.index as f32, 0.0, [0.0; 2]),
-        &feature_metadata,
+        SDFShaderFeatureMetadata::default(),
+        buffer.buffer.vertices.len(),
+        |_| false,
     ) {
         tracing::error!(%coords, %error, "tile geometry upload failed");
         return false;

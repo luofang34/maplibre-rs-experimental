@@ -4,33 +4,35 @@ use std::sync::Arc;
 
 use geozero::{
     error::Result as GeoResult,
-    mvt::{process_geom, tile, MvtError},
+    mvt::{process_geom, tile, Message, MvtError},
     ColumnValue, FeatureProcessor, GeozeroGeometry, ProcessorSink,
 };
+use rustc_hash::FxHashMap;
 
 use super::feature_properties;
 use crate::{
     style::{
-        expression::{FeatureProperties, Value},
+        expression::{empty_feature_properties, FeatureProperties, Value},
         filter::{FeatureContext, Filter, GeometryType},
     },
     vector::tessellation::feature_paint::FeatureStateSyncContext,
 };
 
 /// Pre-decodes every feature's typed properties in `layer` once into `Arc<FeatureProperties>`
-/// (including active `feature-state` entries), returning `None` if any feature's tag table is
+/// (including active `feature-state` entries), memoizing identical MVT tag slices so repeated
+/// attribute combinations share a single heap map. Returns `None` if any feature's tag table is
 /// malformed so callers can fall back to `geozero::mvt::process` error reporting.
 pub(super) fn decode_layer_properties(
     layer: &tile::Layer,
     state_ctx: Option<&FeatureStateSyncContext>,
 ) -> Option<Vec<Arc<FeatureProperties>>> {
     let mut out = Vec::with_capacity(layer.features.len());
-    for feature in &layer.features {
-        if !tags_are_valid(layer, &feature.tags) {
-            return None;
-        }
-        let mut properties = feature_properties(layer, feature);
-        if let Some(ctx) = state_ctx {
+    if let Some(ctx) = state_ctx {
+        for feature in &layer.features {
+            if !tags_are_valid(layer, &feature.tags) {
+                return None;
+            }
+            let mut properties = feature_properties(layer, feature);
             crate::style::feature_state::sync_properties_feature_state(
                 &mut properties,
                 feature.id,
@@ -38,8 +40,37 @@ pub(super) fn decode_layer_properties(
                 ctx.source_state.as_deref(),
                 ctx.source_layer.as_deref(),
             );
+            if properties.is_empty() {
+                out.push(Arc::clone(empty_feature_properties()));
+            } else {
+                out.push(Arc::new(properties));
+            }
         }
-        out.push(Arc::new(properties));
+        return Some(out);
+    }
+
+    let empty = empty_feature_properties();
+    let mut memo: FxHashMap<&[u32], Arc<FeatureProperties>> = FxHashMap::default();
+    for feature in &layer.features {
+        if feature.tags.is_empty() {
+            out.push(Arc::clone(empty));
+            continue;
+        }
+        if let Some(existing) = memo.get(feature.tags.as_slice()) {
+            out.push(Arc::clone(existing));
+            continue;
+        }
+        if !tags_are_valid(layer, &feature.tags) {
+            return None;
+        }
+        let properties = feature_properties(layer, feature);
+        let arc = if properties.is_empty() {
+            Arc::clone(empty)
+        } else {
+            Arc::new(properties)
+        };
+        memo.insert(feature.tags.as_slice(), Arc::clone(&arc));
+        out.push(arc);
     }
     Some(out)
 }
@@ -265,5 +296,142 @@ pub(super) fn layer_header(layer: &tile::Layer) -> tile::Layer {
         name: layer.name.clone(),
         extent: layer.extent,
         ..Default::default()
+    }
+}
+
+/// Decodes raw MVT bytes on demand into tile-local [`crate::io::geometry_index::IndexedGeometry`]
+/// entries for point and box feature queries.
+pub(crate) fn index_mvt_bytes(
+    mvt_bytes: &[u8],
+    promote_id: Option<&crate::style::source::PromoteId>,
+    feature_state: Option<&Arc<crate::style::feature_state::SourceFeatureState>>,
+) -> Vec<crate::io::geometry_index::IndexedGeometry<f64>> {
+    let Ok(tile) = super::decode_tile(mvt_bytes) else {
+        return Vec::new();
+    };
+    let mut index = crate::io::geometry_index::IndexProcessor::new();
+    for layer in &tile.layers {
+        index.set_coordinate_scale(super::extent_scale(layer));
+        let state_ctx =
+            (promote_id.is_some() || feature_state.is_some()).then(|| FeatureStateSyncContext {
+                promote_property: promote_id
+                    .and_then(|p| p.property_for(Some(&layer.name)))
+                    .map(str::to_owned),
+                source_state: feature_state.cloned(),
+                source_layer: Some(layer.name.clone()),
+            });
+        let shared = decode_layer_properties(layer, state_ctx.as_ref());
+        index.set_feature_state_context(state_ctx);
+        index.begin_layer(
+            &layer.name,
+            layer.features.iter().map(|feature| feature.id).collect(),
+        );
+        let skip_props = shared.is_some();
+        if let Some(props) = shared {
+            index.set_shared_properties(props);
+        }
+        let _ = process_mvt_slice(layer, None, skip_props, &mut index);
+    }
+    index.get_geometries()
+}
+
+/// Scans raw MVT protobuf wire tags (`Tile.layers = 3`, `Layer.name = 1`) and decodes only layers
+/// matching `keep`, avoiding `prost` allocations for unused source layers. Returns `None` when
+/// `data` is not a multi-layer or non-empty MVT wire stream so `decode_tile` can handle empty,
+/// malformed, or MapLibre Tile (`MLT`) payloads identically.
+pub(super) fn try_decode_mvt_filtered(
+    data: &[u8],
+    keep: impl Fn(&str) -> bool,
+) -> Option<geozero::mvt::Tile> {
+    let end = data
+        .iter()
+        .rposition(|byte| *byte != 0)
+        .map_or(0, |idx| idx + 1);
+    let bytes = &data[..end];
+    if bytes.is_empty() {
+        return None;
+    }
+    let mut pos = 0;
+    let mut saw_mvt_layer = false;
+    let mut layers = Vec::new();
+    while pos < bytes.len() {
+        let tag = read_varint(bytes, &mut pos)?;
+        let field_num = tag >> 3;
+        let wire_type = tag & 0x07;
+        if field_num == 3 && wire_type == 2 {
+            let len = usize::try_from(read_varint(bytes, &mut pos)?).ok()?;
+            let slice_end = pos.checked_add(len)?;
+            let layer_bytes = bytes.get(pos..slice_end)?;
+            pos = slice_end;
+            let name = scan_mvt_layer_name(layer_bytes)?;
+            saw_mvt_layer = true;
+            if keep(name) {
+                let layer = tile::Layer::decode(layer_bytes).ok()?;
+                layers.push(layer);
+            }
+        } else if field_num >= 16 {
+            skip_wire_value(bytes, &mut pos, wire_type)?;
+        } else {
+            return None;
+        }
+    }
+    saw_mvt_layer.then_some(geozero::mvt::Tile { layers })
+}
+
+fn scan_mvt_layer_name(layer_bytes: &[u8]) -> Option<&str> {
+    let mut pos = 0;
+    while pos < layer_bytes.len() {
+        let tag = read_varint(layer_bytes, &mut pos)?;
+        let field_num = tag >> 3;
+        let wire_type = tag & 0x07;
+        if field_num == 0 {
+            return None;
+        }
+        if field_num == 1 && wire_type == 2 {
+            let len = usize::try_from(read_varint(layer_bytes, &mut pos)?).ok()?;
+            let end = pos.checked_add(len)?;
+            let name_bytes = layer_bytes.get(pos..end)?;
+            return std::str::from_utf8(name_bytes).ok();
+        }
+        skip_wire_value(layer_bytes, &mut pos, wire_type)?;
+    }
+    None
+}
+
+fn read_varint(bytes: &[u8], pos: &mut usize) -> Option<u64> {
+    let mut value = 0_u64;
+    let mut shift = 0_u32;
+    while shift < 64 {
+        let &byte = bytes.get(*pos)?;
+        *pos += 1;
+        value |= u64::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 {
+            return Some(value);
+        }
+        shift += 7;
+    }
+    None
+}
+
+fn skip_wire_value(bytes: &[u8], pos: &mut usize, wire_type: u64) -> Option<()> {
+    match wire_type {
+        0 => {
+            read_varint(bytes, pos)?;
+            Some(())
+        }
+        1 => {
+            *pos = pos.checked_add(8)?;
+            (*pos <= bytes.len()).then_some(())
+        }
+        2 => {
+            let len = usize::try_from(read_varint(bytes, pos)?).ok()?;
+            *pos = pos.checked_add(len)?;
+            (*pos <= bytes.len()).then_some(())
+        }
+        5 => {
+            *pos = pos.checked_add(4)?;
+            (*pos <= bytes.len()).then_some(())
+        }
+        _ => None,
     }
 }

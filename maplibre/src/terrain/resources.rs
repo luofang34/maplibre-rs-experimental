@@ -29,8 +29,8 @@ mod tests;
 
 use elevation_textures::DemTexture;
 
-/// Edge length in pixels of one drape texture; twice the tile size, as GL JS `qualityFactor`.
-pub const DRAPE_SIZE: u32 = 2048;
+/// Edge length in pixels of one drape texture; twice a 512 px tile (`1024 × 1024`).
+pub const DRAPE_SIZE: u32 = 1024;
 /// Smallest drape edge accepted; below it the ground is too coarse to read.
 pub const MIN_DRAPE_SIZE: u32 = 256;
 /// Byte stride between per-tile uniform blocks, the WebGPU dynamic offset alignment.

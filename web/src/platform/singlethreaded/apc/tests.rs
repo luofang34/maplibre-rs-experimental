@@ -2,9 +2,16 @@
 
 use std::{any::TypeId, error::Error};
 
+use js_sys::{ArrayBuffer, Uint8Array};
+use maplibre::io::{
+    apc::{Context, IntoMessage, SendError},
+    source_client::SourceClient,
+    tile_retry::{RequestKind, TileRequestOutcome},
+};
 use wasm_bindgen_test::*;
 
 use super::*;
+use crate::platform::singlethreaded::transferables::FlatBufferTransferable;
 
 #[wasm_bindgen_test]
 fn every_wire_tag_preserves_payload_bytes() {
@@ -47,11 +54,9 @@ fn foreign_tags_and_wrong_payloads_are_typed_errors() {
 fn dem_reply_outside_a_worker_returns_a_transport_error() {
     use maplibre::io::source_client::HttpSourceClient;
 
-    let context = PassingContext {
-        source_client: SourceClient::new(HttpSourceClient::new(
-            crate::platform::http_client::web_http_client(),
-        )),
-    };
+    let context = PassingContext::new(SourceClient::new(HttpSourceClient::new(
+        crate::platform::http_client::web_http_client(),
+    )));
     let payload = FlatBufferTransferable::from_array_buffer(
         WebMessageTag::LayerDemMissing,
         ArrayBuffer::new(0),
@@ -203,7 +208,10 @@ fn passing_apc_reports_arrivals_until_receive_offers_them() {
     let received = Rc::new(RefCell::new(Received::default()));
     let apc = PassingAsyncProcedureCall {
         workers: Vec::new(),
+        listeners: Vec::new(),
+        next_worker: Cell::new(0),
         buffer: RefCell::new(Vec::new()),
+        batch_open: Cell::new(true),
         received: received.clone(),
         assignments: RefCell::default(),
         styles: RefCell::default(),

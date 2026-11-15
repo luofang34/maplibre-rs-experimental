@@ -44,6 +44,7 @@ pub struct RasterTileRequest {
 
 /// Decodes source bytes into RGBA8 pixels and sends them through the reply context.
 /// Decoder and transport failures retain their original causes.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn process_raster_tile<T: RasterTransferables, C: Context>(
     data: &[u8],
     tile_request: RasterTileRequest,

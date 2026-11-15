@@ -69,11 +69,7 @@ impl LayerIndexed for FlatBufferTransferable {
         let root = builder.finish();
         inner_builder.finish(root, None);
         let (data, start) = inner_builder.collapse();
-        FlatBufferTransferable {
-            tag: WebMessageTag::LayerIndexed,
-            data,
-            start,
-        }
+        FlatBufferTransferable::from_vec(WebMessageTag::LayerIndexed, data, start)
     }
 
     fn coords(&self) -> WorldTileCoords {

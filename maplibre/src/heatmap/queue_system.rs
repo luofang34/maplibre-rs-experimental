@@ -43,23 +43,23 @@ pub fn queue_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
-    let Some((
-        Initialized(tile_view_pattern),
-        Initialized(buffer_pool),
-        Initialized(resources),
-        density_phase,
-        layer_item_phase,
-    )) = world.resources.query_mut::<(
-        &mut Eventually<WgpuTileViewPattern>,
-        &mut Eventually<VectorBufferPool>,
-        &mut Eventually<HeatmapResources>,
-        &mut HeatmapDensityPhase,
-        &mut RenderPhase<LayerItem>,
-    )>()
+    let Some((tile_view_pattern, buffer_pool, resources, density_phase, layer_item_phase)) =
+        world.resources.query_mut::<(
+            &mut Eventually<WgpuTileViewPattern>,
+            &mut Eventually<VectorBufferPool>,
+            &mut Eventually<HeatmapResources>,
+            &mut HeatmapDensityPhase,
+            &mut RenderPhase<LayerItem>,
+        )>()
     else {
         return Err(SystemError::Dependencies);
     };
     density_phase.layers.clear();
+    let (Initialized(tile_view_pattern), Initialized(buffer_pool), Initialized(resources)) =
+        (tile_view_pattern, buffer_pool, resources)
+    else {
+        return Ok(());
+    };
     let zoom = view_state.style_zoom().value();
     let layers: Vec<_> = style
         .layers

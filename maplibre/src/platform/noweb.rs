@@ -39,6 +39,8 @@ pub fn native_http_client<P: Into<std::path::PathBuf>>(cache_path: Option<P>) ->
 #[allow(clippy::expect_used)]
 pub fn run_multithreaded<F: Future>(future: F) -> F::Output {
     tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .max_blocking_threads(4)
         .enable_io()
         .enable_time()
         .thread_name_fn(|| {
@@ -59,6 +61,7 @@ pub fn run_multithreaded<F: Future>(future: F) -> F::Output {
 
 /// Drives `future` to completion on a current-thread Tokio runtime with I/O and timers enabled.
 #[cfg(test)]
+#[cfg(feature = "headless")]
 pub(crate) fn run_current_thread<F: Future>(future: F) -> F::Output {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()

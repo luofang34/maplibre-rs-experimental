@@ -3,3 +3,4 @@
 #![deny(missing_docs)]
 
 pub mod http_client;
+pub(crate) mod image_decode;

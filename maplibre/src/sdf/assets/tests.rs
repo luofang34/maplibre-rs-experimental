@@ -46,11 +46,13 @@ fn worker_wire_roundtrip_preserves_exact_collision_ranges_and_anchor() {
     let feature = crate::sdf::Feature {
         data: crate::sdf::SymbolFeatureData {
             id: Some(42),
-            properties: [(
-                "name".into(),
-                crate::style::expression::Value::String("Zürich".into()),
-            )]
-            .into(),
+            properties: std::sync::Arc::new(
+                [(
+                    "name".into(),
+                    crate::style::expression::Value::String("Zürich".into()),
+                )]
+                .into(),
+            ),
             sort_key: 3.5,
             geometry_type: crate::style::filter::GeometryType::Polygon,
         },

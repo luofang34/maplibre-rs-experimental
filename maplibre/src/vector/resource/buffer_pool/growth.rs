@@ -102,7 +102,22 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         let total_i_elems = elem_div(self.max_capacities.indices, strides.index);
         let total_lm_elems = elem_div(self.max_capacities.layer_metadata, strides.layer_metadata);
 
-        let page_v_elems = DEFAULT_PAGE_VERTICES
+        #[cfg(target_arch = "wasm32")]
+        let target_page_v = match self.page_count() {
+            0 => 16 * 1024,
+            1 => 32 * 1024,
+            2 => 64 * 1024,
+            3 => 128 * 1024,
+            _ => DEFAULT_PAGE_VERTICES,
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let target_page_v = match self.page_count() {
+            0 => 32 * 1024,
+            1 => 64 * 1024,
+            2 => 128 * 1024,
+            _ => DEFAULT_PAGE_VERTICES,
+        };
+        let page_v_elems = target_page_v
             .min(max_v_page)
             .max(req_v_elems.next_power_of_two().min(max_v_page))
             .min(rem_v_elems)
@@ -114,8 +129,9 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             .max(req_i_elems.next_power_of_two().min(max_i_page))
             .min(rem_i_elems)
             .max(req_i_elems);
-        let prop_lm = (u128::from(total_lm_elems) * u128::from(page_v_elems))
-            .div_ceil(u128::from(total_v_elems)) as u64;
+        let prop_lm = ((u128::from(total_lm_elems) * u128::from(page_v_elems))
+            .div_ceil(u128::from(total_v_elems)) as u64)
+            .max(2048.min(total_lm_elems / 4));
         let page_lm_elems = prop_lm
             .min(max_lm_page)
             .max(req_lm_elems.next_power_of_two().min(max_lm_page))

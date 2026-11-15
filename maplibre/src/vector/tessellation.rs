@@ -108,6 +108,8 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     pub zoom: f64,
     /// Encoded-sRGB colors with straight alpha for completed features, including feature opacity.
     pub feature_colors: Vec<[f32; 4]>,
+    /// Skips per-feature `feature_colors` evaluation/storage when layer paint is uniform on web.
+    pub(crate) omit_feature_colors: bool,
     /// Color used when no color property is supplied or its evaluation fails.
     pub fallback_color: [f32; 4],
     /// Color expression evaluated against each feature's attributes at `zoom`.
@@ -159,6 +161,7 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             feature_properties: FeatureProperties::new(),
             zoom: 0.0,
             feature_colors: Vec::new(),
+            omit_feature_colors: false,
             fallback_color: [0.0, 0.0, 0.0, 1.0],
             style_property: None,
             is_line_layer: false,

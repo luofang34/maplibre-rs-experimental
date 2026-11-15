@@ -24,17 +24,17 @@ pub fn queue_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
-    let Some((
-        Initialized(tile_view_pattern),
-        Initialized(raster_resources),
-        Initialized(resources),
-    )) = world.resources.query::<(
+    let Some((tile_view_pattern, raster_resources, resources)) = world.resources.query::<(
         &Eventually<WgpuTileViewPattern>,
         &Eventually<RasterResources>,
         &Eventually<HillshadeResources>,
-    )>()
-    else {
+    )>() else {
         return Err(SystemError::Dependencies);
+    };
+    let (Initialized(tile_view_pattern), Initialized(raster_resources), Initialized(resources)) =
+        (tile_view_pattern, raster_resources, resources)
+    else {
+        return Ok(());
     };
     let zoom = view_state.zoom().value();
     let uses_globe = style

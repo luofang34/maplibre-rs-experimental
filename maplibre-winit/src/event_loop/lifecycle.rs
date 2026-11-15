@@ -10,6 +10,7 @@ use std::{
 
 use maplibre::{
     environment::Environment,
+    io::apc::AsyncProcedureCall,
     map::{
         handle::{MapCommands, MapHandle, WakeHost},
         Map,
@@ -90,13 +91,34 @@ where
         self.commands.handle(wake)
     }
     /// Applies the host's commands between frames, then draws only if they changed the map.
-    fn apply_commands(&mut self) {
+    fn apply_commands(&mut self, active: Option<&ActiveEventLoop>) -> bool {
+        if self.commands.is_closed() {
+            if let State::Ready(dispatch) = &mut self.state {
+                dispatch.clear_wake_timer();
+            }
+            self.state = State::Dormant;
+            drop(self.recovery.borrow_mut().take());
+            if let Some(active) = active {
+                active.exit();
+            }
+            return false;
+        }
         if let State::Ready(dispatch) = &mut self.state {
             self.commands.apply(&mut dispatch.map);
-            if dispatch.map.needs_redraw() {
+            if self.commands.is_closed() {
+                dispatch.clear_wake_timer();
+                self.state = State::Dormant;
+                drop(self.recovery.borrow_mut().take());
+                if let Some(active) = active {
+                    active.exit();
+                }
+                return false;
+            }
+            if dispatch.map.needs_redraw() || dispatch.map.kernel().apc().has_arrivals() {
                 dispatch.map.window().request_redraw();
             }
         }
+        true
     }
     /// Returns any initialization or frame error after the host event loop exits.
     pub fn finish(mut self) -> Result<(), WinitApplicationError<C>> {
@@ -137,8 +159,11 @@ where
         let initialization =
             super::initialization::Initialization::new(dispatch, self.recovery.clone());
         self.state = State::Initializing(Box::pin(initialization.run()));
-        if let Some(window) = self.window.upgrade() {
-            window.request_redraw();
+        self.poll_initialization(active);
+        if matches!(self.state, State::Initializing(_) | State::Ready(_)) {
+            if let Some(window) = self.window.upgrade() {
+                window.request_redraw();
+            }
         }
         Ok(())
     }
@@ -164,7 +189,7 @@ where
             completion(Ok(()));
         }
         // Commands sent while the map was not ready got no wake that finds it ready.
-        self.apply_commands();
+        let _ = self.apply_commands(Some(active));
     }
 }
 
@@ -220,13 +245,23 @@ where
         }
         if matches!(event, WindowEvent::RedrawRequested) {
             self.poll_initialization(active);
+            if !self.apply_commands(Some(active)) {
+                return;
+            }
             let size = window.inner_size();
             if size.width == 0 || size.height == 0 {
                 return;
             }
             if let State::Ready(dispatch) = &mut self.state {
                 match dispatch.redraw(active) {
-                    Ok(()) => self.commands.observe(&mut dispatch.map),
+                    Ok(()) => {
+                        self.commands.observe(&mut dispatch.map);
+                        if dispatch.map.has_ready_work()
+                            || dispatch.map.kernel().apc().has_arrivals()
+                        {
+                            dispatch.map.window().request_redraw();
+                        }
+                    }
                     Err(error) => self.fail(active, WinitApplicationError::Frame(error)),
                 }
             }
@@ -234,8 +269,8 @@ where
             dispatch.window_event(&event, active);
         }
     }
-    fn user_event(&mut self, _active: &ActiveEventLoop, _event: ET) {
-        self.apply_commands();
+    fn user_event(&mut self, active: &ActiveEventLoop, _event: ET) {
+        let _ = self.apply_commands(Some(active));
     }
     fn device_event(&mut self, _active: &ActiveEventLoop, _id: DeviceId, event: DeviceEvent) {
         if self.active {

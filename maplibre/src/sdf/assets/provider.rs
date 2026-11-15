@@ -15,7 +15,7 @@ use std::{
     pin::Pin,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex, MutexGuard, PoisonError,
+        Arc, Mutex, MutexGuard,
     },
 };
 
@@ -248,39 +248,28 @@ impl ImageProviders {
     /// images, nor any registered provider supplied.
     pub(crate) fn record_missing(&self, name: &str) {
         if !name.is_empty() {
-            self.0
-                .missing
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .insert(name.to_owned());
+            crate::platform::lock_unpoisoned(&self.0.missing).insert(name.to_owned());
         }
     }
 
     /// Drains missing image identifiers recorded since the last call.
     pub(crate) fn take_missing(&self) -> Vec<String> {
-        let mut guard = self
-            .0
-            .missing
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut guard = crate::platform::lock_unpoisoned(&self.0.missing);
         std::mem::take(&mut *guard).into_iter().collect()
     }
 
     fn namespaces(&self) -> MutexGuard<'_, Vec<Namespace>> {
-        self.0
-            .namespaces
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+        crate::platform::lock_unpoisoned(&self.0.namespaces)
     }
 
     fn limits(&self) -> ProviderLimits {
-        *self.0.limits.lock().unwrap_or_else(PoisonError::into_inner)
+        *crate::platform::lock_unpoisoned(&self.0.limits)
     }
 
     /// Changes how many generators run and wait from now on; the cache keeps the budget it
     /// was made with.
     pub fn set_limits(&self, limits: ProviderLimits) {
-        *self.0.limits.lock().unwrap_or_else(PoisonError::into_inner) = limits;
+        *crate::platform::lock_unpoisoned(&self.0.limits) = limits;
     }
 
     /// Counts a source whose labels were laid out again with arrived images.

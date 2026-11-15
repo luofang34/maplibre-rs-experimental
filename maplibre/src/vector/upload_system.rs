@@ -8,7 +8,7 @@ use crate::{
         shaders::{FillShaderFeatureMetadata, Vec4f32},
         Renderer,
     },
-    style::{layer::LayerPaint, Style},
+    style::Style,
     tcs::{
         system::{SystemError, SystemResult},
         tiles::Tiles,
@@ -23,7 +23,10 @@ pub(crate) mod paint;
 mod sources;
 pub(crate) mod style_refresh;
 
-use metadata::{feature_metadata, metadata_for_layer};
+use metadata::{
+    feature_metadata_into, metadata_for_layer, paint_depends_on_bearing, same_quantized_rgba,
+    sort_runs, upload_size,
+};
 
 pub(crate) fn drape_paint_zoom(zoom: f64) -> f64 {
     (zoom * 8.0).round() / 8.0
@@ -84,6 +87,8 @@ pub fn upload_system(
     if changed {
         super::structures::refresh_gpu(buffer_pool, queue, &spatial, &world.tiles);
     }
+    let allow_cpu_release =
+        cfg!(target_arch = "wasm32") && settings.buffer_pools.vertices >= 1_000_000;
     let deferred = upload_tessellated_layer(
         buffer_pool,
         queue,
@@ -91,7 +96,7 @@ pub fn upload_system(
         style,
         source_tiles,
         (&spatial, paint_frame),
-        budget,
+        (budget, allow_cpu_release),
     );
     if deferred {
         crate::render::frame_signals::keep_animating(world);
@@ -134,6 +139,7 @@ fn refresh_layer_paint(
     previous: Option<VectorPaintFrame>,
 ) {
     let VectorPaintFrame { zoom, .. } = frame;
+    let zoom_unchanged = previous.is_some_and(|prev| prev.zoom == zoom);
     for coords in source_tiles {
         for entry in buffer_pool
             .index()
@@ -141,6 +147,9 @@ fn refresh_layer_paint(
             .into_iter()
             .flatten()
         {
+            if zoom_unchanged && !paint_depends_on_bearing(entry.style_layer.paint.as_ref()) {
+                continue;
+            }
             let metadata = metadata_for_layer(&entry.style_layer, *coords, frame);
             let unchanged = previous.is_some_and(|previous| {
                 bytemuck::bytes_of(&metadata_for_layer(&entry.style_layer, *coords, previous))
@@ -149,25 +158,27 @@ fn refresh_layer_paint(
             if !unchanged {
                 buffer_pool.update_layer_metadata(queue, entry, metadata);
             }
+            if zoom_unchanged {
+                continue;
+            }
             if let Some(color) = paint::uniform_color(&entry.style_layer, f64::from(zoom)) {
                 if previous
-                    .map(|frame| frame.zoom)
-                    .and_then(|zoom| paint::uniform_color(&entry.style_layer, f64::from(zoom)))
-                    == Some(color)
+                    .and_then(|prev| paint::uniform_color(&entry.style_layer, f64::from(prev.zoom)))
+                    .is_some_and(|prev_color| same_quantized_rgba(prev_color, color))
                 {
                     continue;
                 }
-                let count = (entry.feature_metadata_buffer_range().end
-                    - entry.feature_metadata_buffer_range().start)
-                    as usize
-                    / std::mem::size_of::<FillShaderFeatureMetadata>();
-                let colors = vec![FillShaderFeatureMetadata { color }; count];
-                buffer_pool.update_feature_metadata(queue, entry, &colors);
+                buffer_pool.fill_feature_metadata(
+                    queue,
+                    entry,
+                    FillShaderFeatureMetadata { color },
+                );
             }
         }
     }
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
 fn upload_tessellated_layer(
     buffer_pool: &mut VectorBufferPool,
     queue: &crate::render::upload_queue::UploadQueue,
@@ -175,8 +186,11 @@ fn upload_tessellated_layer(
     style: &Style,
     source_tiles: Vec<crate::coords::WorldTileCoords>,
     (spatial, paint): (&[super::structures::SpatialBuffer], VectorPaintFrame),
-    budget: &mut FrameUploads,
+    (budget, allow_cpu_release): (&mut FrameUploads, bool),
 ) -> bool {
+    #[cfg(target_arch = "wasm32")]
+    let has_dem_source = crate::terrain::source::dem_source(style).is_some();
+    let mut feature_meta_scratch = Vec::new();
     let mut protected = std::collections::HashSet::with_capacity(source_tiles.len());
     for coords in source_tiles {
         protected.insert(coords);
@@ -200,6 +214,8 @@ fn upload_tessellated_layer(
                 Commit {
                     replacement: Option<usize>,
                     did_upload: bool,
+                    #[cfg(target_arch = "wasm32")]
+                    release_cpu: bool,
                 },
             }
             let step = {
@@ -229,17 +245,24 @@ fn upload_tessellated_layer(
                 if replacement.is_none() && buffer_pool.has_layer(coords, &style_layer.id) {
                     continue;
                 }
-                if bucket.buffer.buffer.indices.is_empty() {
+                if bucket.buffer.usable_indices == 0 && bucket.buffer.buffer.indices.is_empty() {
                     buffer_pool.remove_layer(coords, &style_layer.id);
                     Step::Commit {
                         replacement,
                         did_upload: false,
+                        #[cfg(target_arch = "wasm32")]
+                        release_cpu: false,
                     }
+                } else if bucket.buffer.buffer.indices.is_empty() {
+                    continue;
                 } else if budget.geometry_tiles_exhausted()
                     || !budget.take(UploadKind::Geometry, upload_size(bucket))
                 {
                     Step::Exhausted
                 } else {
+                    #[cfg(target_arch = "wasm32")]
+                    let release_cpu = allow_cpu_release
+                        && metadata::can_release_cpu_geometry(style_layer, bucket, has_dem_source);
                     let paint_store =
                         tiles.query::<&super::feature_paint::TileFeaturePaintComponent>(coords);
                     let paint_entries = if replacement.is_some() {
@@ -258,11 +281,13 @@ fn upload_tessellated_layer(
                         bucket,
                         (paint_entries, layers.overscaled_zoom),
                         (spatial, paint),
-                        &protected,
+                        (&protected, &mut feature_meta_scratch),
                     ) {
                         UploadOutcome::Uploaded => Step::Commit {
                             replacement,
                             did_upload: true,
+                            #[cfg(target_arch = "wasm32")]
+                            release_cpu,
                         },
                         UploadOutcome::PoolSaturated => Step::Saturated,
                         UploadOutcome::Failed => Step::Skip,
@@ -279,10 +304,25 @@ fn upload_tessellated_layer(
                 Step::Commit {
                     replacement,
                     did_upload,
+                    #[cfg(target_arch = "wasm32")]
+                    release_cpu,
                 } => {
                     uploaded |= did_upload;
                     if let Some(index) = replacement {
                         super::content::commit_pending_vector(tiles, coords, index);
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    if release_cpu {
+                        let release_colors =
+                            !crate::style::feature_state::layer_paint_reads_feature_state(
+                                style_layer,
+                            );
+                        super::content::release_committed_cpu_geometry(
+                            tiles,
+                            coords,
+                            &style_layer.id,
+                            release_colors,
+                        );
                     }
                 }
             }
@@ -303,17 +343,6 @@ enum UploadOutcome {
     Failed,
 }
 
-fn upload_size(bucket: &AvailableVectorLayerBucket) -> usize {
-    bucket.buffer.buffer.vertices.len() * size_of::<crate::render::ShaderVertex>()
-        + bucket.buffer.buffer.indices.len() * size_of::<u32>()
-        + bucket
-            .feature_indices
-            .iter()
-            .map(|count| *count as usize)
-            .sum::<usize>()
-            * size_of::<FillShaderFeatureMetadata>()
-}
-
 fn upload_bucket(
     buffer_pool: &mut VectorBufferPool,
     queue: &crate::render::upload_queue::UploadQueue,
@@ -321,7 +350,10 @@ fn upload_bucket(
     bucket: &AvailableVectorLayerBucket,
     (paint_entries, overscaled_zoom): (Option<&[super::feature_paint::BucketFeatureEntry]>, u8),
     (spatial, paint): (&[super::structures::SpatialBuffer], VectorPaintFrame),
-    protected: &std::collections::HashSet<crate::coords::WorldTileCoords>,
+    (protected, feature_metadata): (
+        &std::collections::HashSet<crate::coords::WorldTileCoords>,
+        &mut Vec<FillShaderFeatureMetadata>,
+    ),
 ) -> UploadOutcome {
     let VectorPaintFrame { zoom, .. } = paint;
     let AvailableVectorLayerBucket {
@@ -355,11 +387,15 @@ fn upload_bucket(
         _ => feature_colors,
     };
 
-    let feature_metadata = if let Some(color) = paint::uniform_color(style_layer, f64::from(zoom)) {
-        feature_metadata(feature_indices, &[], color)
-    } else {
-        feature_metadata(feature_indices, active_colors, fallback_color)
-    };
+    let uniform = paint::uniform_color(style_layer, f64::from(zoom));
+    if uniform.is_none() {
+        feature_metadata_into(
+            feature_metadata,
+            feature_indices,
+            active_colors,
+            fallback_color,
+        );
+    }
 
     let buffer = spatial
         .iter()
@@ -376,15 +412,30 @@ fn upload_bucket(
         .then(|| sort_runs(feature_indices, feature_sort_keys, &buffer.buffer.indices));
 
     tracing::debug!(%coords, "allocating vector geometry");
-    if let Err(error) = buffer_pool.replace_layer_geometry_unless(
-        queue,
-        coords,
-        style_layer.clone(),
-        buffer,
-        layer_metadata,
-        &feature_metadata,
-        |candidate| protected.contains(&candidate),
-    ) {
+    let upload_res = if let Some(color) = uniform {
+        let records = feature_indices.iter().map(|&c| c as usize).sum();
+        buffer_pool.replace_layer_geometry_uniform_unless(
+            queue,
+            coords,
+            style_layer.clone(),
+            buffer,
+            layer_metadata,
+            FillShaderFeatureMetadata { color },
+            records,
+            |candidate| protected.contains(&candidate),
+        )
+    } else {
+        buffer_pool.replace_layer_geometry_unless(
+            queue,
+            coords,
+            style_layer.clone(),
+            buffer,
+            layer_metadata,
+            feature_metadata,
+            |candidate| protected.contains(&candidate),
+        )
+    };
+    if let Err(error) = upload_res {
         if matches!(
             error,
             crate::vector::resource::AllocationError::Capacity { .. }
@@ -402,35 +453,6 @@ fn upload_bucket(
     buffer_pool.set_pattern_runs(coords, &style_layer.id, runs);
     buffer_pool.set_sort_runs(coords, &style_layer.id, sort_runs);
     UploadOutcome::Uploaded
-}
-
-/// The index range of each run of consecutive features that share a sort key.
-fn sort_runs(
-    feature_indices: &[u32],
-    feature_sort_keys: &[f32],
-    indices: &[u32],
-) -> Vec<(f32, std::ops::Range<u32>)> {
-    let mut runs: Vec<(f32, std::ops::Range<u32>)> = Vec::new();
-    let (mut vertex_end, mut position) = (0_u32, 0_u32);
-    for (feature, count) in feature_indices.iter().enumerate() {
-        vertex_end = vertex_end.wrapping_add(*count);
-        let first = position;
-        while indices
-            .get(position as usize)
-            .is_some_and(|index| *index < vertex_end)
-        {
-            position = position.wrapping_add(1);
-        }
-        if position == first {
-            continue;
-        }
-        let key = feature_sort_keys.get(feature).copied().unwrap_or(0.0);
-        match runs.last_mut() {
-            Some((last, range)) if *last == key && range.end == first => range.end = position,
-            _ => runs.push((key, first..position)),
-        }
-    }
-    runs
 }
 
 /// The index range of each run of consecutive features that share a pattern key.
@@ -462,25 +484,6 @@ pub(super) fn pattern_runs(
         }
     }
     runs
-}
-
-fn layer_translate_tile_units(
-    paint: Option<&LayerPaint>,
-    tile_zoom: crate::coords::ZoomLevel,
-    view_zoom: f32,
-    bearing: f32,
-) -> [f32; 2] {
-    let translated = crate::style::translation::layer_translate_pixels(
-        paint,
-        f64::from(view_zoom),
-        f64::from(bearing),
-    )
-    .map(|pixels| pixels as f32);
-    let pixels_to_tile_units = 8.0 * 2.0_f32.powf(f32::from(u8::from(tile_zoom)) - view_zoom);
-    [
-        translated[0] * pixels_to_tile_units,
-        translated[1] * pixels_to_tile_units,
-    ]
 }
 
 #[cfg(test)]

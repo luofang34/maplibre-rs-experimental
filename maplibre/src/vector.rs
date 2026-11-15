@@ -73,12 +73,12 @@ struct LinePipeline {
     /// On the map plane, or draped into the terrain textures.
     flat: wgpu::RenderPipeline,
     /// At heights of its own, as a bridge deck or tunnel is, tested against the terrain depth.
-    structure: wgpu::RenderPipeline,
+    structure: Option<wgpu::RenderPipeline>,
     /// Elevated 3D paths (`line-elevation`) clipped to `[0, 4096]`, depth-tested without 2D
     /// ground stencil clipping so high-altitude rims project freely under pitch.
-    elevated: wgpu::RenderPipeline,
+    elevated: Option<wgpu::RenderPipeline>,
     /// On the terrain surface at its width in screen pixels, with a terrain tile bound third.
-    terrain: wgpu::RenderPipeline,
+    terrain: Option<wgpu::RenderPipeline>,
 }
 
 /// The passes of extruded polygons: depth, colour once per pixel, stencil reset, and translucent shells.
@@ -172,7 +172,9 @@ pub fn geometry_uploaded(coords: WorldTileCoords, world: &World) -> bool {
         return false;
     }
     let has_geometry = buckets.layers.iter().any(|layer| match layer {
-        VectorLayerBucket::AvailableLayer(bucket) => !bucket.buffer.buffer.indices.is_empty(),
+        VectorLayerBucket::AvailableLayer(bucket) => {
+            bucket.buffer.usable_indices > 0 || !bucket.buffer.buffer.indices.is_empty()
+        }
         VectorLayerBucket::Missing(_) => false,
     });
     if !has_geometry {
@@ -185,7 +187,7 @@ pub fn geometry_uploaded(coords: WorldTileCoords, world: &World) -> bool {
             }
             buckets.layers.iter().all(|layer| match layer {
                 VectorLayerBucket::AvailableLayer(bucket) => {
-                    bucket.buffer.buffer.indices.is_empty()
+                    (bucket.buffer.usable_indices == 0 && bucket.buffer.buffer.indices.is_empty())
                         || pool.has_layer(coords, &bucket.style_layer_id)
                 }
                 VectorLayerBucket::Missing(_) => true,

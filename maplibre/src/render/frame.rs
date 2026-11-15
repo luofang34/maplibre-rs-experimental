@@ -38,5 +38,9 @@ pub(crate) fn run_stages(
         .resources
         .get_or_init_mut::<FrameTimings>()
         .end_frame();
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Err(error) = context.renderer.device.poll(wgpu::PollType::Poll) {
+        tracing::debug!(%error, "device poll failed");
+    }
     result
 }

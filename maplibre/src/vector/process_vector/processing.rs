@@ -17,7 +17,10 @@ pub(super) fn process_layer<T: VectorTransferables, C: Context>(
     style: &StyleLayer,
     request: &VectorTileRequest,
     context: &mut ProcessVectorContext<T, C>,
-    atlas: std::sync::Arc<crate::sdf::assets::SymbolAtlas>,
+    atlases: (
+        &std::sync::Arc<crate::sdf::assets::SymbolAtlas>,
+        &std::sync::Arc<crate::sdf::assets::SymbolAtlas>,
+    ),
 ) -> Result<(), ProcessVectorError> {
     let empty_layer;
     let mut layer: Cow<'_, tile::Layer> = match source_layer {
@@ -41,7 +44,7 @@ pub(super) fn process_layer<T: VectorTransferables, C: Context>(
     if matches!(style.paint, Some(LayerPaint::FillExtrusion(_)))
         && layer.keys.iter().any(|key| key == "hide_3d")
     {
-        unhide_unreplaced_building_bases(layer.to_mut());
+        unhide_unreplaced_building_bases(&mut layer);
     }
     let shared_props = matches!(layer, Cow::Borrowed(_))
         .then_some(predecoded_props)
@@ -86,11 +89,12 @@ pub(super) fn process_layer<T: VectorTransferables, C: Context>(
         Some(LayerPaint::Symbol(paint)) => symbol_layer(
             layer.as_ref(),
             selected.as_deref(),
+            shared_props,
             style,
             paint,
             request,
             context,
-            atlas,
+            atlases,
         ),
         _ => {
             tracing::warn!(layer = %style.id,"unhandled vector style layer type");
@@ -206,6 +210,11 @@ fn vector_layer<T: VectorTransferables, C: Context>(
     context: &mut ProcessVectorContext<T, C>,
 ) -> Result<(), ProcessVectorError> {
     let state_ctx = context.state_context_for_layer(&layer.name);
+    #[cfg(target_arch = "wasm32")]
+    let uniform_paint =
+        crate::vector::upload_system::paint::uniform_color(style, request.style_zoom()).is_some()
+            && style.type_ != "circle"
+            && !crate::style::feature_state::layer_paint_reads_feature_state(style);
     let build = |slice: Option<&[usize]>| {
         let mut tessellator = tessellator(paint, request);
         tessellator.set_layer_strokes(style);
@@ -218,6 +227,14 @@ fn vector_layer<T: VectorTransferables, C: Context>(
         tessellator.sort_key = crate::vector::tessellation::SortKeys::by(
             crate::vector::tessellation::sort_key_of(style),
         );
+        #[cfg(target_arch = "wasm32")]
+        if uniform_paint
+            && tessellator.pattern_property.is_none()
+            && tessellator.outline_property.is_none()
+            && !tessellator.line_gradient
+        {
+            tessellator.omit_feature_colors = true;
+        }
         process_mvt_slice(layer, slice, shared_props.is_some(), &mut tessellator)?;
         Ok(tessellator)
     };
@@ -225,7 +242,17 @@ fn vector_layer<T: VectorTransferables, C: Context>(
         return context.layer_missing(&request.coords, &layer.name);
     };
     tessellator.apply_sort_keys();
-    let sort_keys = tessellator.sort_key_values();
+    let mut sort_keys = tessellator.sort_key_values();
+    #[cfg(target_arch = "wasm32")]
+    if uniform_paint && tessellator.pattern_property.is_none() && !tessellator.line_gradient {
+        tessellator.feature_colors = Vec::new();
+    }
+    tessellator.buffer.vertices.shrink_to_fit();
+    tessellator.buffer.indices.shrink_to_fit();
+    tessellator.feature_indices.shrink_to_fit();
+    tessellator.feature_colors.shrink_to_fit();
+    sort_keys.shrink_to_fit();
+    tessellator.feature_paint.shrink_to_fit();
     context.layer_tessellation_finished(
         &request.coords,
         tessellator.buffer.into(),
@@ -268,37 +295,47 @@ fn tessellate_readable<Tessellator>(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn symbol_layer<T: VectorTransferables, C: Context>(
     layer: &tile::Layer,
     selected: Option<&[usize]>,
+    shared_props: Option<&[Arc<FeatureProperties>]>,
     style: &StyleLayer,
     paint: &crate::style::layer::SymbolPaint,
     request: &VectorTileRequest,
     context: &mut ProcessVectorContext<T, C>,
-    atlas: std::sync::Arc<crate::sdf::assets::SymbolAtlas>,
+    (layout_atlas, gpu_atlas): (
+        &std::sync::Arc<crate::sdf::assets::SymbolAtlas>,
+        &std::sync::Arc<crate::sdf::assets::SymbolAtlas>,
+    ),
 ) -> Result<(), ProcessVectorError> {
     let zoom = request.style_zoom();
     let state_ctx = context.state_context_for_layer(&layer.name);
     let build = |slice: Option<&[usize]>| {
-        let mut tessellator = TextTessellator::with_assets(paint.clone(), zoom, atlas.clone());
+        let mut tessellator =
+            TextTessellator::with_assets(paint.clone(), zoom, layout_atlas.clone());
         tessellator.coordinate_scale = extent_scale(layer);
         tessellator.overscaling = request.overscaling();
         tessellator.source_ids = source_ids_for_slice(layer, slice);
+        tessellator.shared_properties = shared_props_for_slice(shared_props, slice);
         tessellator.feature_state_ctx = state_ctx.clone();
-        process_mvt_slice(layer, slice, false, &mut tessellator)?;
+        process_mvt_slice(layer, slice, shared_props.is_some(), &mut tessellator)?;
         Ok(tessellator)
     };
     let Some(mut tessellator) = tessellate_readable(layer, selected, request.coords, build) else {
         return context.layer_missing(&request.coords, &layer.name);
     };
     tessellator.finish();
+    tessellator.quad_buffer.vertices.shrink_to_fit();
+    tessellator.quad_buffer.indices.shrink_to_fit();
+    tessellator.features.shrink_to_fit();
     let has_geometry = !tessellator.quad_buffer.indices.is_empty();
     context.symbol_layer_tessellation_finished(
         crate::vector::transferables::DefaultSymbolLayerTessellated {
             coords: request.coords,
             buffer: tessellator.quad_buffer.into(),
             features: tessellator.features,
-            atlas: has_geometry.then_some(atlas),
+            atlas: has_geometry.then(|| gpu_atlas.clone()),
             layer_data: layer_header(layer),
             style_layer_id: style.id.clone(),
         },

@@ -259,10 +259,19 @@ impl AssetCache {
 
 /// Decodes PNG/JPEG/WebP bytes into RGBA8 pixels off the threads that drive fetches.
 async fn decode_rgba(data: Vec<u8>) -> Result<RgbaImage, CachedTileFailure> {
-    run_cpu_bound(move || image::load_from_memory(&data).map(|image| image.to_rgba8()))
-        .await
-        .map_err(|error| CachedTileFailure::Decode(error.to_string()))?
-        .map_err(|error| CachedTileFailure::Decode(error.to_string()))
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        run_cpu_bound(move || image::load_from_memory(&data).map(|image| image.to_rgba8()))
+            .await
+            .map_err(|error| CachedTileFailure::Decode(error.to_string()))?
+            .map_err(|error| CachedTileFailure::Decode(error.to_string()))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        crate::platform::decode_rgba_bytes(&data)
+            .await
+            .map_err(CachedTileFailure::Decode)
+    }
 }
 
 /// Unpacks and despikes elevation samples off the threads that drive fetches.

@@ -14,7 +14,8 @@ use crate::{
         Feature,
     },
     style::{
-        expression::FeatureProperties,
+        expression::{empty_feature_properties, FeatureProperties},
+        filter::GeometryType,
         layer::{FormattedText, StyleProperty, SymbolPaint},
     },
     vector::tessellation::{property_value, IndexDataType},
@@ -32,7 +33,6 @@ mod text_layout;
 mod text_offset;
 use layout::CollectedSymbol;
 
-use crate::style::filter::GeometryType;
 type GeoResult<T> = geozero::error::Result<T>;
 
 /// Worker-side geometry for screen-sized symbols anchored to map features.
@@ -47,6 +47,8 @@ pub struct TextTessellator {
     /// Where each text already has a label along a line, so a repeat of it keeps its distance.
     line_anchors_by_text: std::collections::HashMap<String, Vec<[f64; 2]>>,
     properties: FeatureProperties,
+    /// Pre-decoded shared properties indexed by feature order when supplied by MVT processing.
+    pub(crate) shared_properties: Vec<Arc<FeatureProperties>>,
     /// Symbol triangles.
     pub quad_buffer: VertexBuffers<ShaderSymbolVertex, IndexDataType>,
     /// Collision bounds and exact triangle ranges per symbol.
@@ -88,6 +90,7 @@ impl TextTessellator {
             pending_lines: Vec::new(),
             line_anchors_by_text: std::collections::HashMap::new(),
             properties: FeatureProperties::new(),
+            shared_properties: Vec::new(),
             quad_buffer: VertexBuffers::new(),
             features: Vec::new(),
             coordinate_scale: 1.0,
@@ -99,7 +102,6 @@ impl TextTessellator {
 
     /// Sets the style and the assets used by this tile's symbols.
     pub fn configure(&mut self, mut paint: SymbolPaint, atlas: Arc<SymbolAtlas>) {
-        // Layout that follows the zoom is laid out at the tile's, as GL JS lays out a bucket.
         paint.resolve_zoom_enums(self.zoom);
         self.paint = paint;
         self.atlas = atlas;
@@ -109,8 +111,12 @@ impl TextTessellator {
     pub fn finish(&mut self) {
         let pending = std::mem::take(&mut self.pending_lines);
         for line in line_merge::merge_lines(pending) {
-            self.properties = line.properties;
-            self.collect_along_lines(vec![line.line], LinePlacement::Line, line.source);
+            self.collect_along_lines(
+                vec![line.line],
+                LinePlacement::Line,
+                line.source,
+                &line.properties,
+            );
         }
         self.properties.clear();
         self.collected.sort_by(|a, b| {
@@ -193,12 +199,9 @@ impl PropertyProcessor for TextTessellator {
     }
 }
 
-/// How a symbol follows a line, from `symbol-placement`.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LinePlacement {
-    /// Repeated along the line.
     Line,
-    /// Once, at the middle of the line.
     Center,
 }
 
@@ -219,27 +222,51 @@ pub(crate) fn is_line_placed(paint: &SymbolPaint) -> bool {
     line_placement(paint).is_some()
 }
 
-/// Tile units in one pixel of a tile drawn at its own zoom: 4096 units span 512 pixels.
 const TILE_UNITS_PER_PIXEL: f64 = 8.0;
 
 impl TextTessellator {
+    fn take_feature_properties(
+        &mut self,
+        idx: Option<usize>,
+        id: Option<u64>,
+    ) -> Arc<FeatureProperties> {
+        if let Some(shared) = idx.and_then(|i| self.shared_properties.get(i)) {
+            self.properties.clear();
+            return Arc::clone(shared);
+        }
+        let mut props = std::mem::take(&mut self.properties);
+        if let Some(ctx) = &self.feature_state_ctx {
+            crate::style::feature_state::sync_properties_feature_state(
+                &mut props,
+                id,
+                ctx.promote_property.as_deref(),
+                ctx.source_state.as_deref(),
+                ctx.source_layer.as_deref(),
+            );
+        }
+        if props.is_empty() {
+            Arc::clone(empty_feature_properties())
+        } else {
+            Arc::new(props)
+        }
+    }
+
     fn collect(
         &mut self,
         anchor: Point<f64>,
         angle: f32,
         source: layout::SourceFeature,
+        props: &Arc<FeatureProperties>,
         (line, repeat_key): (Option<layout::LineContext>, Option<&Arc<str>>),
     ) {
         let ways = line
             .is_none()
             .then(|| {
                 self.paint
-                    .label_among(&self.properties, self.zoom, Some(&self.atlas.icons))
+                    .label_among(props, self.zoom, Some(&self.atlas.icons))
             })
             .flatten()
             .and_then(|text| text_layout::both_orientations(&self.paint, &text));
-        // A text that may be written both ways is laid out twice; the second shows when the
-        // first has no place.
         for (index, vertical) in ways
             .map_or_else(
                 || vec![None],
@@ -253,7 +280,7 @@ impl TextTessellator {
                 line: line.clone(),
                 anchor,
                 angle,
-                properties: self.properties.clone(),
+                properties: Arc::clone(props),
                 vertical,
                 fallback: index == 1,
                 repeat_key: repeat_key.cloned(),
@@ -261,8 +288,6 @@ impl TextTessellator {
         }
     }
 
-    /// Whether a label with the same repeat key already sits within `repeat_distance` of `point`; a
-    /// label that does not is remembered.
     fn anchor_is_too_close(
         &mut self,
         key: Option<&str>,
@@ -285,19 +310,19 @@ impl TextTessellator {
         too_close
     }
 
-    /// Anchors along the lines of a feature, as many as the spacing allows.
     fn collect_along_lines(
         &mut self,
         lines: Vec<Vec<[f64; 2]>>,
         placement: LinePlacement,
         source: layout::SourceFeature,
+        props: &Arc<FeatureProperties>,
     ) {
         let probe = CollectedSymbol {
             source,
             line: None,
             anchor: Point::new(0.0, 0.0),
             angle: 0.0,
-            properties: self.properties.clone(),
+            properties: Arc::clone(props),
             vertical: None,
             fallback: false,
             repeat_key: None,
@@ -306,7 +331,6 @@ impl TextTessellator {
             .paint
             .text_size
             .as_ref()
-            // GL JS lays a label out at the size of the zoom above the tile's, which the shader then scales down.
             .and_then(|value| value.evaluate_at_zoom(self.zoom + 1.0))
             .map_or(16.0, f64::from);
         let text_width = f64::from(text_layout::unwrapped_width(
@@ -315,26 +339,17 @@ impl TextTessellator {
             self.zoom,
             &self.atlas,
         ));
-        // GL JS spaces labels by the longer of the text and the icon, and scales both by the
-        // text size; an icon-only label has no text to bend, so its bends are not checked.
         let icon_width = self
             .paint
-            .text_among_images("icon-image", &self.properties, self.zoom, &self.atlas.icons)
+            .text_among_images("icon-image", props, self.zoom, &self.atlas.icons)
             .and_then(|name| self.atlas.icons.get(&name))
             .map_or(0.0, |icon| {
                 f64::from(icon.rect[2]) / f64::from(icon.metrics[3])
-                    * f64::from(
-                        self.paint
-                            .number("icon-size", &self.properties, self.zoom, 1.0),
-                    )
+                    * f64::from(self.paint.number("icon-size", props, self.zoom, 1.0))
             });
         let label_pixels = text_width.max(icon_width) * text_size / 24.0;
-        let number = |name, fallback| {
-            self.paint
-                .number(name, &self.properties, self.zoom, fallback)
-        };
+        let number = |name, fallback| self.paint.number(name, props, self.zoom, fallback);
         let overscaling = self.overscaling.max(1.0);
-        // A magnified tile has fewer tile units under a pixel.
         let units_per_pixel = TILE_UNITS_PER_PIXEL / overscaling;
         let params = line_anchors::AnchorSpacing {
             spacing: f64::from(number("symbol-spacing", 250.0)) * units_per_pixel,
@@ -350,8 +365,7 @@ impl TextTessellator {
         };
         let repeat_key: Option<Arc<str>> = match placement {
             LinePlacement::Line => {
-                layout::repeat_key(&self.paint, &self.properties, self.zoom, &self.atlas)
-                    .map(Arc::from)
+                layout::repeat_key(&self.paint, props, self.zoom, &self.atlas).map(Arc::from)
             }
             LinePlacement::Center => None,
         };
@@ -382,6 +396,7 @@ impl TextTessellator {
                     Point::new(anchor.point[0], anchor.point[1]),
                     anchor.angle as f32,
                     source,
+                    props,
                     (
                         Some((polyline.clone(), distance as f32)),
                         repeat_key.as_ref(),
@@ -402,7 +417,6 @@ fn polygon_rings(polygon: &geo_types::Polygon<f64>) -> Vec<Vec<[f64; 2]>> {
             .zip(points.iter().cycle().skip(1))
             .map(|(a, b)| a[0] * b[1] - b[0] * a[1])
             .sum();
-        // Tile coordinates grow downwards, so positive area is clockwise on screen.
         if (area > 0.0) != outer {
             points.reverse();
         }
@@ -416,19 +430,11 @@ fn polygon_rings(polygon: &geo_types::Polygon<f64>) -> Vec<Vec<[f64; 2]>> {
 impl FeatureProcessor for TextTessellator {
     fn feature_end(&mut self, idx: u64) -> GeoResult<()> {
         if let Some(geometry) = self.geo_writer.take_geometry() {
-            let id = usize::try_from(idx)
-                .ok()
-                .and_then(|idx| self.source_ids.get(idx).copied())
+            let slice_idx = usize::try_from(idx).ok();
+            let id = slice_idx
+                .and_then(|i| self.source_ids.get(i).copied())
                 .flatten();
-            if let Some(ctx) = &self.feature_state_ctx {
-                crate::style::feature_state::sync_properties_feature_state(
-                    &mut self.properties,
-                    id,
-                    ctx.promote_property.as_deref(),
-                    ctx.source_state.as_deref(),
-                    ctx.source_layer.as_deref(),
-                );
-            }
+            let props = self.take_feature_properties(slice_idx, id);
             let kind = match &geometry {
                 Geometry::Point(_) | Geometry::MultiPoint(_) => GeometryType::Point,
                 Geometry::LineString(_) | Geometry::MultiLineString(_) => GeometryType::LineString,
@@ -446,7 +452,6 @@ impl FeatureProcessor for TextTessellator {
                         .map(|line| line.coords().map(|c| [c.x, c.y]).collect())
                         .collect(),
                 ),
-                // The rings of a polygon are lines to follow, as in GL JS.
                 Geometry::Polygon(polygon) => Some(polygon_rings(polygon)),
                 Geometry::MultiPolygon(polygons) => {
                     Some(polygons.iter().flat_map(polygon_rings).collect())
@@ -454,41 +459,36 @@ impl FeatureProcessor for TextTessellator {
                 _ => None,
             };
             match (line_placement(&self.paint), lines) {
-                // Lines that continue one another are merged once all of them are known.
                 (Some(LinePlacement::Line), Some(lines)) => {
-                    let text = self.paint.label_among(
-                        &self.properties,
-                        self.zoom,
-                        Some(&self.atlas.icons),
-                    );
+                    let text = self
+                        .paint
+                        .label_among(&props, self.zoom, Some(&self.atlas.icons));
                     for line in lines.into_iter().filter(|line| line.len() > 1) {
                         self.pending_lines.push(line_merge::PendingLine {
                             text: text.clone(),
                             line,
                             source,
-                            properties: self.properties.clone(),
+                            properties: Arc::clone(&props),
                         });
                     }
                 }
                 (Some(placement), Some(lines)) => {
-                    self.collect_along_lines(lines, placement, source)
+                    self.collect_along_lines(lines, placement, source, &props)
                 }
-                // A point has no line to follow.
                 (Some(_), None) => {}
                 (None, _) => {
-                    // The buffer around a tile repeats the labels of its neighbours, which draw
-                    // them from their own tiles.
                     let tile = 0.0..crate::coords::EXTENT;
                     for anchor in layout::anchors(&geometry)
                         .into_iter()
                         .filter(|anchor| tile.contains(&anchor.x()) && tile.contains(&anchor.y()))
                     {
-                        self.collect(anchor, 0.0, source, (None, None));
+                        self.collect(anchor, 0.0, source, &props, (None, None));
                     }
                 }
             }
+        } else {
+            self.properties.clear();
         }
-        self.properties.clear();
         Ok(())
     }
 }

@@ -106,10 +106,18 @@ pub struct ProjectionGpuResources {
     bind_group_layout: wgpu::BindGroupLayout,
     bind_group: wgpu::BindGroup,
     buffer: wgpu::Buffer,
+    flat_buffer: wgpu::Buffer,
     /// Never-updated default projection for draws into drape textures.
     flat_bind_group: wgpu::BindGroup,
     /// Latest uploaded `ShaderProjectionData::transition` (`f32::to_bits`) for pipeline selection.
     transition_bits: std::sync::atomic::AtomicU32,
+}
+
+impl Drop for ProjectionGpuResources {
+    fn drop(&mut self) {
+        self.buffer.destroy();
+        self.flat_buffer.destroy();
+    }
 }
 
 impl ProjectionGpuResources {
@@ -168,6 +176,7 @@ impl ProjectionGpuResources {
             bind_group_layout,
             bind_group,
             buffer,
+            flat_buffer,
             flat_bind_group,
             transition_bits: std::sync::atomic::AtomicU32::new(initial_data.transition.to_bits()),
         }

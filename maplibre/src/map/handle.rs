@@ -256,6 +256,11 @@ where
     pub fn close(&self) {
         self.queue.close();
     }
+
+    /// Whether [`Self::close`] has been called on this queue or its handles.
+    pub fn is_closed(&self) -> bool {
+        self.queue.0.borrow().closed
+    }
 }
 
 /// Sends commands to a running map from its owner's thread.
@@ -299,6 +304,24 @@ where
     /// Whether the owner has closed the queue, so commands are refused.
     pub fn is_closed(&self) -> bool {
         self.sender.is_closed()
+    }
+
+    /// Closes the command queue from a handle, refusing later commands and waking the owner so
+    /// it can exit its event loop cleanly.
+    pub fn close(&self) {
+        self.sender.shared.borrow_mut().wake_pending = true;
+        let wake = self.sender.wake.clone();
+        let (commands, watchers) = {
+            let mut shared = self.sender.shared.borrow_mut();
+            shared.closed = true;
+            (
+                std::mem::take(&mut shared.commands),
+                std::mem::take(&mut shared.watchers),
+            )
+        };
+        drop(commands);
+        drop(watchers);
+        wake.wake();
     }
 }
 

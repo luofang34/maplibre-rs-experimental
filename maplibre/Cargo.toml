@@ -16,7 +16,7 @@ authors.workspace = true
 workspace = true
 
 [features]
-default = ["native-io", "raster", "geojson", "mlt"]
+default = ["native-io", "raster", "geojson", "mlt", "font-shaping"]
 # Enables the default native Tokio task scheduler and Reqwest HTTP transport.
 # Disable (`default-features = false`) to embed `maplibre` in pure-Rust apps with a custom runtime/loader.
 native-io = [
@@ -30,7 +30,7 @@ native-io = [
 ]
 web-webgl = ["wgpu/webgl"]
 # Enable tracing using tracy on desktop/mobile and the chrome profiler on web
-trace = ["tracing-subscriber", "tracing-tracy"]
+trace = ["tracing-subscriber", "tracing-tracy", "wgpu/trace"]
 thread-safe-futures = []
 embed-static-tiles = ["maplibre-build-tools/sqlite"]
 headless = ["png"]
@@ -39,6 +39,17 @@ geojson = ["geozero/with-geojson"]
 # Reads MapLibre Tile (MLT) vector tiles. Its encoder dependencies reach `getrandom` 0.1,
 # which has no visionOS support, so a visionOS build turns it off.
 mlt = ["dep:mlt-core"]
+# Full in-process OpenType GSUB/GPOS complex text shaping (`harfrust`), outline SDF rasterization
+# (`skrifa` + `ab_glyph_rasterizer`), and WOFF2 Brotli decompression. On `wasm32` without this
+# feature, local CJK/fallback SDF glyphs are rasterized zero-download via browser `OffscreenCanvas`.
+font-shaping = [
+    "dep:harfrust",
+    "dep:skrifa",
+    "dep:read-fonts",
+    "dep:ab_glyph_rasterizer",
+    "dep:brotli-decompressor",
+    "dep:fontdb",
+]
 experimental = []
 
 
@@ -53,13 +64,25 @@ rusqlite = { workspace = true, optional = true }
 tracing-tracy = { workspace = true, optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-fontdb.workspace = true
+fontdb = { workspace = true, optional = true }
+image = { workspace = true, features = ["jpeg", "webp", "png", "gif"] }
+tile-grid.workspace = true
+moxcms = "0.9.1"
+fixed_decimal = { version = "0.7", features = ["ryu"] }
+icu_collator = "2.4"
+icu_decimal = { version = "2.4", features = ["alloc", "ryu"] }
+icu_locale_core = "2.4"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+image.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 js-sys.workspace = true
-web-sys = { workspace = true, features = ["Cache", "CacheStorage", "Request", "RequestCache", "RequestInit", "Response", "ResponseInit", "Headers", "Window", "WorkerGlobalScope", "WorkerLocation"] }
+web-sys = { workspace = true, features = [
+    "Blob", "Cache", "CacheStorage", "ImageBitmap", "Request", "RequestCache", "RequestInit",
+    "Response", "ResponseInit", "Headers", "Window", "WorkerGlobalScope", "WorkerLocation",
+    "OffscreenCanvas", "OffscreenCanvasRenderingContext2d", "TextMetrics", "ImageData",
+] }
 
 [dependencies]
 unicode-bidi = "0.3"
@@ -80,7 +103,6 @@ geo.workspace = true
 geo-types.workspace = true
 rstar.workspace = true
 geozero.workspace = true
-tile-grid.workspace = true
 mlt-core = { workspace = true, optional = true }
 unicode-normalization.workspace = true
 
@@ -118,20 +140,14 @@ rustc-hash.workspace = true
 
 # Headless / Image decoding
 png = { workspace = true, optional = true }
-image.workspace = true
-moxcms = "0.9.1"
 
-# Text/glyphs, OpenType shaping, and locale-aware collation / number formatting
+# Text/glyphs and optional OpenType shaping
 prost = "0.14.4"
-fixed_decimal = { version = "0.7", features = ["ryu"] }
-icu_collator = "2.4"
-icu_decimal = { version = "2.4", features = ["alloc", "ryu"] }
-icu_locale_core = "2.4"
-harfrust.workspace = true
-skrifa.workspace = true
-read-fonts.workspace = true
-ab_glyph_rasterizer.workspace = true
-brotli-decompressor.workspace = true
+harfrust = { workspace = true, optional = true }
+skrifa = { workspace = true, optional = true }
+read-fonts = { workspace = true, optional = true }
+ab_glyph_rasterizer = { workspace = true, optional = true }
+brotli-decompressor = { workspace = true, optional = true }
 
 [dev-dependencies]
 geozero = { workspace = true, features = ["with-geojson"] }
@@ -142,6 +158,7 @@ naga = { workspace = true, features = ["msl-out", "spv-out"] }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+image = { workspace = true, features = ["png"] }
 wasm-bindgen-test.workspace = true
 web-sys = { workspace = true, features = ["Window"] }
 

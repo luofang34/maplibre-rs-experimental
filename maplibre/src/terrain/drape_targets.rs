@@ -2,7 +2,7 @@
 
 use crate::{
     coords::WorldTileCoords,
-    io::tile_sources::{RasterSourceId, TileKind},
+    io::tile_sources::{missing_tile_fallback, RasterSourceId, TileKind},
     render::{
         eventually::{Eventually, Eventually::Initialized},
         tile_view_pattern::{
@@ -206,7 +206,7 @@ fn raster_shapes<H: HasTile>(
     let all_loaded = loaded.len() == wanted.len();
     let settled = wanted
         .iter()
-        .all(|tile| loaded.contains(tile) || source_tile_missing(source_id, *tile, world));
+        .all(|tile| tile_settled(source_id, *tile, &raster_sources, world));
     let complete = coverage::complete_cover(coords, loaded.clone());
     let (under, over, view_complete) = match complete {
         Some(complete) => (Vec::new(), complete, false),
@@ -226,11 +226,37 @@ fn raster_shapes<H: HasTile>(
     if settled && !all_loaded && under.is_empty() && over.is_empty() {
         return absent();
     }
+    let under_complete = if over.is_empty() {
+        view_complete
+    } else {
+        false
+    };
     under
         .into_iter()
-        .map(|source| shape(source, false))
+        .map(|source| shape(source, under_complete))
         .chain(over.into_iter().map(|source| shape(source, view_complete)))
         .collect()
+}
+
+/// Whether `tile` has either loaded or exhausted its missing-tile ancestor fallback chain.
+fn tile_settled(
+    source_id: &RasterSourceId,
+    tile: WorldTileCoords,
+    raster_sources: &impl HasTile,
+    world: &World,
+) -> bool {
+    if raster_sources.has_tile(tile, world) {
+        return true;
+    }
+    if !source_tile_missing(source_id, tile, world) {
+        return false;
+    }
+    match missing_tile_fallback(tile, 0, |coords| {
+        source_tile_missing(source_id, coords, world)
+    }) {
+        Some(fallback) => raster_sources.has_tile(fallback, world),
+        None => true,
+    }
 }
 
 /// `tiles` without those the stand-in already holds.

@@ -15,7 +15,11 @@ use crate::{
 };
 
 /// Tiles that may be fetched or processed at the same time across every source.
-pub const MAX_TILES_IN_FLIGHT: usize = 12;
+#[cfg(target_arch = "wasm32")]
+pub const MAX_TILES_IN_FLIGHT: usize = 16;
+/// Tiles that may be fetched or processed at the same time across every source.
+#[cfg(not(target_arch = "wasm32"))]
+pub const MAX_TILES_IN_FLIGHT: usize = 32;
 
 /// Whether every request for the tile has produced its outcome or was given up.
 pub(crate) fn is_settled(tiles: &Tiles, coords: WorldTileCoords) -> bool {
@@ -44,6 +48,18 @@ pub(crate) fn vector_request_budget(world: &World, has_terrain: bool) -> usize {
     let available = request_budget(world);
     let reserved = if has_terrain {
         (available / 2).min(4)
+    } else {
+        0
+    };
+    available - reserved
+}
+
+/// Shares available requests with the raster pass so slow remote DEM fetches never starve
+/// local or draped raster tiles.
+pub(crate) fn dem_request_budget(world: &World, has_raster: bool) -> usize {
+    let available = request_budget(world);
+    let reserved = if has_raster {
+        (available / 3).min(8)
     } else {
         0
     };

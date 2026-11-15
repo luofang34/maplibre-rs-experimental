@@ -32,11 +32,14 @@ pub fn prepare_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
-    let Some(Initialized(resources)) = world
+    let Some(heatmap_resources) = world
         .resources
         .query_mut::<&mut Eventually<HeatmapResources>>()
     else {
         return Err(SystemError::Dependencies);
+    };
+    let Initialized(resources) = heatmap_resources else {
+        return Ok(());
     };
     let zoom = view_state.zoom().value();
     let size = density_target_size(view_state.width(), view_state.height());

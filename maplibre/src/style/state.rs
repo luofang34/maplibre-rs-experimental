@@ -82,6 +82,7 @@ impl Style {
         let present: HashSet<String> = self.layers.iter().map(|layer| layer.id.clone()).collect();
         self.state_templates.retain(|id, _| present.contains(id));
         let mut changed = Vec::new();
+        let mut scratch = Vec::with_capacity(4096);
         for position in 0..self.layers.len() {
             let id = self.layers[position].id.clone();
             if duplicated.contains(&id) {
@@ -89,15 +90,30 @@ impl Style {
                 self.state_templates.remove(&id);
                 continue;
             }
-            let Ok(current) = serde_json::to_value(&self.layers[position]) else {
+            scratch.clear();
+            if serde_json::to_writer(&mut scratch, &self.layers[position]).is_err() {
+                continue;
+            }
+            let has_template = self.state_templates.contains_key(&id);
+            if !has_template
+                && !scratch
+                    .windows(b"\"global-state\"".len())
+                    .any(|w| w == b"\"global-state\"")
+            {
+                continue;
+            }
+            let Ok(current) = serde_json::from_slice::<Value>(&scratch) else {
                 continue;
             };
-            let declared = match self.state_templates.get(&id) {
-                Some(template) if template.resolved == current => template.declared.clone(),
-                _ => self.layers[position].clone(),
-            };
-            let Ok(document) = serde_json::to_value(&declared) else {
-                continue;
+            let (declared, document) = match self.state_templates.get(&id) {
+                Some(template) if template.resolved == current => {
+                    let declared = template.declared.clone();
+                    let Ok(document) = serde_json::to_value(&declared) else {
+                        continue;
+                    };
+                    (declared, document)
+                }
+                _ => (self.layers[position].clone(), current.clone()),
             };
             if !reads_global_state(&document) {
                 self.state_templates.remove(&id);

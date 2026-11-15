@@ -50,11 +50,17 @@ pub fn unpack_font_container(bytes: &[u8]) -> Result<Cow<'_, [u8]>, FontError> {
             Ok(Cow::Borrowed(bytes))
         }
         FontContainerFormat::Woff => super::woff1::unpack_woff1(bytes).map(Cow::Owned),
+        #[cfg(feature = "font-shaping")]
         FontContainerFormat::Woff2 => super::woff2::unpack_woff2(bytes).map(Cow::Owned),
+        #[cfg(not(feature = "font-shaping"))]
+        FontContainerFormat::Woff2 => Err(FontError::InvalidContainer(
+            "WOFF2 requires the font-shaping feature",
+        )),
     }
 }
 
 /// One decoded OpenType table ready to be written into a reconstructed `sfnt` buffer.
+#[cfg_attr(not(feature = "font-shaping"), allow(dead_code))]
 pub(super) struct SfntTable {
     pub tag: [u8; 4],
     pub data: Vec<u8>,

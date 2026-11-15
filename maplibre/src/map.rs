@@ -11,7 +11,9 @@ use crate::geojson::{query::SourceQueryError, update::SourceUpdateError};
 use crate::{
     context::MapContext,
     environment::Environment,
-    io::{tile_json::resolve_tile_json_sources, tile_retry::RequestAttempts},
+    io::{
+        apc::AsyncProcedureCall, tile_json::resolve_tile_json_sources, tile_retry::RequestAttempts,
+    },
     kernel::Kernel,
     plugin::Plugin,
     render::{
@@ -193,14 +195,19 @@ where
                     view_state: retained_view,
                     jump,
                 } = pending.as_mut();
-                let mut renderer = renderer_builder
+                let renderer_fut = renderer_builder
                     .clone()
                     .build()
-                    .initialize_renderer::<E::MapWindowConfig>(&self.window)
-                    .await
-                    .map_err(MapError::DeviceInit)?;
-
-                resolve_tile_json_sources(style, self.kernel.source_client()).await;
+                    .initialize_renderer::<E::MapWindowConfig>(&self.window);
+                let source_client = self.kernel.source_client();
+                let apc = self.kernel.apc();
+                let init_io_fut = async {
+                    resolve_tile_json_sources(style, source_client).await;
+                    crate::sdf::assets::spawn_style_symbol_prefetch(source_client.clone(), style);
+                    apc.warm_style(style);
+                };
+                let (renderer_res, _) = futures::future::join(renderer_fut, init_io_fut).await;
+                let mut renderer = renderer_res.map_err(MapError::DeviceInit)?;
 
                 let window_size = self.window.size();
                 renderer.resize_surface(window_size);
@@ -247,12 +254,13 @@ where
                     crate::context::style_transition_system,
                 );
 
-                self.map_context = CurrentMapContext::Ready(Box::new(MapContext {
+                let context = Box::new(MapContext {
                     world,
                     view_state,
                     style: std::mem::take(style),
                     renderer,
-                }));
+                });
+                self.map_context = CurrentMapContext::Ready(context);
                 Ok(())
             }
         }

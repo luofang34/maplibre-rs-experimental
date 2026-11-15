@@ -264,7 +264,7 @@ pub(crate) fn finish_frame(context: &mut MapContext) {
         .world
         .resources
         .get::<crate::render::tracked_pass::RenderStats>()
-        .map_or(0, |stats| stats.peek().draws);
+        .map_or(0, |stats| stats.take_frame_draws());
     let drawn = camera(context);
     let eye = eye_index(&context.world);
     let host_frame = host_frame_in_progress(&context.world);

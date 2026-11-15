@@ -11,6 +11,8 @@ pub struct OverAlignedVertexBuffer<V, I> {
     pub buffer: VertexBuffers<V, I>,
     /// Number of leading indices to draw, excluding padding.
     pub usable_indices: u32,
+    uploaded_vertices: usize,
+    icon_bits: Vec<u64>,
 }
 
 impl<V, I> OverAlignedVertexBuffer<V, I> {
@@ -19,6 +21,18 @@ impl<V, I> OverAlignedVertexBuffer<V, I> {
         Self {
             buffer: VertexBuffers::with_capacity(0, 0),
             usable_indices: 0,
+            uploaded_vertices: 0,
+            icon_bits: Vec::new(),
+        }
+    }
+
+    /// Wraps pre-allocated, copy-aligned vertex and index vectors without copying.
+    pub fn from_vecs(vertices: Vec<V>, indices: Vec<I>, usable_indices: u32) -> Self {
+        Self {
+            buffer: VertexBuffers { vertices, indices },
+            usable_indices,
+            uploaded_vertices: 0,
+            icon_bits: Vec::new(),
         }
     }
 
@@ -39,7 +53,53 @@ impl<V, I> OverAlignedVertexBuffer<V, I> {
         Self {
             buffer: buffers,
             usable_indices,
+            uploaded_vertices: 0,
+            icon_bits: Vec::new(),
         }
+    }
+
+    /// Total GPU vertex count, preserved even after CPU vertex storage is released post-upload.
+    pub fn vertex_count(&self) -> usize {
+        if self.buffer.vertices.is_empty() {
+            self.uploaded_vertices
+        } else {
+            self.buffer.vertices.len()
+        }
+    }
+
+    pub(crate) fn icon_bits_bytes(&self) -> usize {
+        self.icon_bits.capacity() * std::mem::size_of::<u64>()
+    }
+}
+
+impl<I> OverAlignedVertexBuffer<crate::render::shaders::ShaderSymbolVertex, I> {
+    pub(crate) fn is_icon_vertex(&self, index: usize) -> bool {
+        if let Some(vertex) = self.buffer.vertices.get(index) {
+            matches!(vertex.a_data[2], 1 | 2)
+        } else {
+            self.icon_bits
+                .get(index / 64)
+                .is_some_and(|word| ((word >> (index % 64)) & 1) != 0)
+        }
+    }
+
+    /// Compacts per-vertex icon/text kind flags into 1 bit per vertex and frees CPU vertex storage
+    /// once `SymbolBufferPool` holds the GPU copy.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn release_uploaded_symbol_vertices(&mut self) {
+        if self.buffer.vertices.is_empty() {
+            return;
+        }
+        let count = self.buffer.vertices.len();
+        let mut bits = vec![0_u64; count.div_ceil(64)];
+        for (i, vertex) in self.buffer.vertices.iter().enumerate() {
+            if matches!(vertex.a_data[2], 1 | 2) {
+                bits[i / 64] |= 1_u64 << (i % 64);
+            }
+        }
+        self.uploaded_vertices = count;
+        self.icon_bits = bits;
+        self.buffer.vertices = Vec::new();
     }
 }
 
@@ -51,6 +111,8 @@ impl<V: Pod, I: Pod> From<VertexBuffers<V, I>> for OverAlignedVertexBuffer<V, I>
         Self {
             buffer,
             usable_indices,
+            uploaded_vertices: 0,
+            icon_bits: Vec::new(),
         }
     }
 }

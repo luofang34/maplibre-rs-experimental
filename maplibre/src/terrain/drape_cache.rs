@@ -14,7 +14,7 @@ use std::{
 use crate::{coords::WorldTileCoords, terrain::drape_targets::TargetSpec};
 
 /// Largest number of released textures kept for reuse.
-const MAX_FREE_TEXTURES: usize = 8;
+const MAX_FREE_TEXTURES: usize = 4;
 /// Hard ceiling on total drape textures (`entries + parked + free`) held in [`DrapeCache`].
 pub const HARD_MAX_DRAPE_TEXTURES: usize = crate::render::memory_budget::DRAPE_TEXTURE_LIMIT;
 
@@ -95,7 +95,7 @@ impl<T> Entry<T> {
 
 /// Released textures kept with their content, newest first, so a tile that leaves the view
 /// and returns, as tiles do when the head turns, is not drawn again.
-const PARKED_TEXTURES: usize = 8;
+const PARKED_TEXTURES: usize = 4;
 
 /// Drape textures by key, a view tile or a view tile of one of several views, with the
 /// textures of tiles that left their view parked with their content and a free list of blank

@@ -2,6 +2,7 @@ use std::{
     fs::File,
     io::BufWriter,
     path::Path,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -9,15 +10,22 @@ use cgmath::{Deg, Matrix3, Matrix4, Rad, SquareMatrix, Vector3};
 use maplibre::{
     coords::LatLon,
     headless::{
-        create_headless_renderer,
+        create_headless_renderer_with_loader,
         map::{
             readback::{FrameReadback, PixelLayout},
             resolve_tile_json_sources, HeadlessMap,
         },
     },
+    io::{
+        apc::AsyncProcedureCall,
+        resource_loader::SharedLoader,
+        source_client::{HttpSourceClient, SourceClient},
+    },
+    platform::native_http_client,
     plugin::Plugin,
     render::{
         camera::EyeFrustum,
+        settings::{BufferPoolSizes, Msaa, RendererSettings},
         view_state::{CameraOptions, ExternalAnchor, NavigationMode},
         xr::{EyeTarget, ScenePlacement, XrEye, XrFrame},
         RenderPlugin,
@@ -45,14 +53,6 @@ pub struct SnapshotOptions<'a> {
 pub async fn render_snapshot(
     mut opts: SnapshotOptions<'_>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let cache_dir = std::env::temp_dir()
-        .join("maplibre-rs-snapshot-cache")
-        .to_string_lossy()
-        .into_owned();
-    let (kernel, renderer) =
-        create_headless_renderer(opts.width, opts.height, Some(cache_dir)).await?;
-    resolve_tile_json_sources(&mut opts.style, kernel.source_client()).await;
-
     let has_vector = opts.style.sources.is_empty()
         || opts
             .style
@@ -69,6 +69,35 @@ pub async fn render_snapshot(
                 | Source::Canvas(_)
         )
     });
+
+    let cache_dir = std::env::temp_dir()
+        .join("maplibre-rs-snapshot-cache")
+        .to_string_lossy()
+        .into_owned();
+    let loader = SharedLoader::new(native_http_client(Some(cache_dir)));
+    let source_client = SourceClient::new(HttpSourceClient::new(loader.clone()));
+
+    let mut settings = RendererSettings {
+        msaa: Msaa { samples: 1 },
+        ..RendererSettings::default()
+    };
+    if !has_vector {
+        settings.buffer_pools = BufferPoolSizes::EMPTY;
+        settings.symbol_pools = BufferPoolSizes::EMPTY;
+        settings.terrain_drape_size = 512;
+    }
+
+    let (renderer_res, ()) = tokio::join!(
+        create_headless_renderer_with_loader(opts.width, opts.height, settings, loader),
+        resolve_tile_json_sources(&mut opts.style, &source_client),
+    );
+    let (kernel, renderer) = renderer_res?;
+
+    let notify = Arc::new(tokio::sync::Notify::new());
+    let wake_notify = notify.clone();
+    kernel.apc().set_waker(Arc::new(move || {
+        wake_notify.notify_one();
+    }));
 
     let mut plugins: Vec<Box<dyn Plugin<_>>> = vec![
         Box::new(RenderPlugin),
@@ -139,30 +168,45 @@ pub async fn render_snapshot(
 
     let deadline = Instant::now() + Duration::from_secs(opts.timeout_secs);
     let mut idle_streak = 0_u32;
+    let mut sim_time = Duration::ZERO;
     for frame in 0..opts.max_frames {
-        let elapsed = Duration::from_millis((frame as u64) * 16);
-        step_snapshot_frame(&mut map, &fp_camera, elapsed)?;
+        step_snapshot_frame(&mut map, &fp_camera, sim_time)?;
+        let reasons = map.redraw_reasons();
+        let step_ms = if reasons.loading { 16 } else { 350 };
+        sim_time += Duration::from_millis(step_ms);
 
-        if !map.needs_redraw() && !map.context().has_scheduled_retries() {
+        if !reasons.any() && map.pending_drapes() == 0 && !map.context().has_scheduled_retries() {
             idle_streak += 1;
-            if idle_streak >= 10 && frame >= 25 {
+            if idle_streak >= 2 && frame >= 2 {
                 break;
             }
         } else {
             idle_streak = 0;
         }
-        if Instant::now() >= deadline {
+        let now = Instant::now();
+        if now >= deadline {
             break;
         }
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        if map.has_ready_work() {
+            tokio::task::yield_now().await;
+            continue;
+        }
+        let notified = notify.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        if !map.has_ready_work() {
+            let max_wait = map
+                .context()
+                .next_retry_delay()
+                .unwrap_or(Duration::from_millis(50))
+                .min(deadline.saturating_duration_since(now));
+            let _ = tokio::time::timeout(max_wait, notified).await;
+        }
     }
 
-    // Final settle frame after terrain + vector + raster buffers have landed.
-    step_snapshot_frame(
-        &mut map,
-        &fp_camera,
-        Duration::from_millis((opts.max_frames as u64) * 16),
-    )?;
+    if idle_streak < 2 {
+        step_snapshot_frame(&mut map, &fp_camera, sim_time)?;
+    }
 
     let texture = map
         .head_texture()
@@ -238,5 +282,6 @@ fn step_snapshot_frame(
         map.frame_input_mut().timestamp = timestamp;
         map.run_frame()?;
     }
+    map.poll_device_idle();
     Ok(())
 }

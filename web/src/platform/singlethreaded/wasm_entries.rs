@@ -5,7 +5,7 @@
 // Worker FFI entrypoints accept raw pointer handles marshalled across `postMessage`.
 #![allow(unsafe_code)]
 
-use std::{cell::RefCell, mem, rc::Rc, sync::OnceLock};
+use std::{cell::RefCell, mem, rc::Rc};
 
 use futures::future::{Abortable, Aborted};
 use maplibre::{
@@ -25,7 +25,10 @@ use crate::{
     platform::{
         http_client::web_http_client,
         singlethreaded::{
-            apc::{decode_call_finished, post_call_finished, ReceivedType, WebMessageTag},
+            apc::{
+                decode_call_finished, post_call_finished, QueuedMessage, ReceivedType,
+                WebMessageTag,
+            },
             PassingContext, UsedContext,
         },
         UsedOffscreenKernelEnvironment,
@@ -35,11 +38,16 @@ use crate::{
 mod running_calls;
 mod worker_styles;
 
-/// Parsed once so every call this worker serves shares the configuration's asset cache.
-static CONFIG: OnceLock<OffscreenKernelConfig> = OnceLock::new();
+thread_local! {
+    /// Kept per worker so every call this worker serves shares the active map's asset cache,
+    /// while recycled workers cleanly adopt a new map's configuration on reuse.
+    static CONFIG: RefCell<Option<OffscreenKernelConfig>> = const { RefCell::new(None) };
+}
 
 fn kernel_config() -> OffscreenKernelConfig {
-    let mut config = CONFIG.get().cloned().unwrap_or_default();
+    let mut config = CONFIG
+        .with(|slot| slot.borrow().clone())
+        .unwrap_or_default();
     // The serialized configuration carries no providers; this worker's own registry does.
     config.image_providers = crate::platform::image_providers().clone();
     config
@@ -48,9 +56,9 @@ fn kernel_config() -> OffscreenKernelConfig {
 #[wasm_bindgen]
 pub fn set_kernel_config(config: String) -> Result<(), JSError> {
     let config = serde_json::from_str(&config).map_err(WebError::KernelConfigDecoding)?;
-    CONFIG
-        .set(config)
-        .map_err(|_| WebError::KernelConfigAlreadySet)?;
+    CONFIG.with(|slot| {
+        *slot.borrow_mut() = Some(config);
+    });
     Ok(())
 }
 
@@ -71,7 +79,12 @@ impl TileWorkerCalls {
 
     /// Keeps the style the main thread sent as `revision` for the calls that name it.
     pub fn set_style(&mut self, revision: u64, style: String) -> Result<(), JSError> {
-        let style = serde_json::from_str(&style).map_err(WebError::StyleDecoding)?;
+        let style: maplibre::style::Style =
+            serde_json::from_str(&style).map_err(WebError::StyleDecoding)?;
+        maplibre::sdf::assets::spawn_worker_symbol_prefetch(
+            UsedOffscreenKernelEnvironment::create(kernel_config()).source_client(),
+            &style,
+        );
         self.styles.insert(revision, style);
         Ok(())
     }
@@ -94,9 +107,8 @@ impl TileWorkerCalls {
             CallError::DeserializeInput(Box::new(e))
         })?;
         let attempt = input.attempt;
-        let context = PassingContext {
-            source_client: SourceClient::new(HttpSourceClient::new(web_http_client())),
-        };
+        let context =
+            PassingContext::new(SourceClient::new(HttpSourceClient::new(web_http_client())));
         let Some(style) = self.styles.get(style_revision) else {
             for kind in [
                 maplibre::io::tile_retry::RequestKind::Vector,
@@ -120,7 +132,7 @@ impl TileWorkerCalls {
 
         if let Ok(global) = js_sys::global().dyn_into::<DedicatedWorkerGlobalScope>() {
             let name = global.name();
-            log::info!(
+            log::debug!(
                 "Processing on web worker: {}",
                 if name.is_empty() {
                     "name not set"
@@ -132,6 +144,7 @@ impl TileWorkerCalls {
 
         let registration = self.running.borrow_mut().start(attempt);
         let running = self.running.clone();
+        let flush_context = context.clone();
         let call = procedure(
             input,
             context,
@@ -139,6 +152,9 @@ impl TileWorkerCalls {
         );
         Ok(wasm_bindgen_futures::future_to_promise(async move {
             let result = Abortable::new(call, registration).await;
+            if matches!(result, Ok(Ok(()))) {
+                let _ = flush_context.flush();
+            }
             running.borrow_mut().finish(attempt);
             if let Err(error) = post_call_finished(attempt) {
                 tracing::warn!(attempt, %error, "reporting a finished call failed");
@@ -166,11 +182,9 @@ impl TileWorkerCalls {
     }
 }
 
-/// Entry point invoked by the main thread. Receives data on the main thread and makes it available
-/// to the renderer.
-#[wasm_bindgen]
-pub fn singlethreaded_receive_data(
-    received_ptr: *const ReceivedType,
+/// Delivers a `[tag, ArrayBuffer]` message to `received` without leaking raw `Rc` pointers.
+pub(crate) fn deliver_received_data(
+    received: &ReceivedType,
     tag: u32,
     buffer: js_sys::ArrayBuffer,
 ) -> Result<(), JSError> {
@@ -181,23 +195,41 @@ pub fn singlethreaded_receive_data(
         buffer.byte_length()
     );
 
-    // SAFETY: the pointer comes from `Rc::into_raw` in `PassingAsyncProcedureCall::new`, whose
-    // count is never released, so the value outlives every worker message. Borrowing it leaves
-    // that count alone.
-    let received: &ReceivedType = unsafe { &*received_ptr };
-    let mut received = received
-        .try_borrow_mut()
-        .map_err(|_| WebError::ReceivedBusy)?;
+    let waker = {
+        let mut received = received
+            .try_borrow_mut()
+            .map_err(|_| WebError::ReceivedBusy)?;
 
-    if tag == WebMessageTag::CallFinished {
-        received.finished.push(decode_call_finished(&buffer)?);
-    } else {
-        received
-            .messages
-            .push(super::apc::decode_message(tag, buffer)?);
+        if tag == WebMessageTag::CallFinished {
+            received.finished.push(decode_call_finished(&buffer)?);
+            None
+        } else {
+            let was_empty = received.messages.is_empty() && received.queued.is_empty();
+            QueuedMessage::push_from_wire(&mut received.queued, tag, buffer)?;
+            if was_empty && !received.queued.is_empty() {
+                received.waker.clone()
+            } else {
+                None
+            }
+        }
+    };
+    if let Some(wake) = waker {
+        wake();
     }
 
     Ok(())
+}
+
+/// Entry point invoked by the main thread. Receives data on the main thread and makes it available
+/// to the renderer.
+#[wasm_bindgen]
+pub fn singlethreaded_receive_data(
+    received_ptr: *const ReceivedType,
+    tag: u32,
+    buffer: js_sys::ArrayBuffer,
+) -> Result<(), JSError> {
+    let received: &ReceivedType = unsafe { &*received_ptr };
+    deliver_received_data(received, tag, buffer)
 }
 
 #[cfg(test)]

@@ -32,6 +32,9 @@ pub fn upload_system(
         return Ok(());
     };
     if !matches!(raster_state, Initialized(_)) {
+        #[cfg(target_arch = "wasm32")]
+        return Ok(());
+        #[cfg(not(target_arch = "wasm32"))]
         return Err(SystemError::Dependencies);
     }
     if crate::render::eye_covering::EyeInFrame::reuses_content(world) {

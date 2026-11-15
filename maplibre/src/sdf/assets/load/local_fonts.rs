@@ -29,19 +29,18 @@ pub(super) async fn load_fonts_and_shaping<HC: HttpClient>(
     for (font, characters) in fonts {
         let mut remote_chars = BTreeSet::new();
         let mut local_cjk = Vec::new();
-        let has_registered = {
+        let has_registered = global_font_system().has_registered_stack(&font);
+
+        if has_registered {
             let mut fs = global_font_system();
-            let registered = fs.has_registered_stack(&font);
             for &code in &characters {
                 let Some(ch) = char::from_u32(code) else {
                     continue;
                 };
-                if registered {
-                    if let Some((_, face)) = fs.resolve_face_for_char(&font, ch, false) {
-                        if let Some(glyph) = face.rasterize_char(ch) {
-                            builder.pack_rasterized_codepoint(&font, code, &glyph);
-                            continue;
-                        }
+                if let Some((_, face)) = fs.resolve_face_for_char(&font, ch, false) {
+                    if let Some(glyph) = face.rasterize_char(ch) {
+                        builder.pack_rasterized_codepoint(&font, code, &glyph);
+                        continue;
                     }
                 }
                 if ideograph_family.is_some() && is_local_cjk_codepoint(ch) {
@@ -50,23 +49,62 @@ pub(super) async fn load_fonts_and_shaping<HC: HttpClient>(
                     remote_chars.insert(code);
                 }
             }
+        } else {
+            for &code in &characters {
+                let Some(ch) = char::from_u32(code) else {
+                    continue;
+                };
+                if ideograph_family.is_some() && is_local_cjk_codepoint(ch) {
+                    local_cjk.push((code, ch));
+                } else {
+                    remote_chars.insert(code);
+                }
+            }
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        if !local_cjk.is_empty() {
+            if has_registered {
+                let mut fs = global_font_system();
+                for &(code, ch) in &local_cjk {
+                    if let Some(glyph) = fs.rasterize_local_char(ideograph_family, &font, ch) {
+                        builder.pack_rasterized_codepoint(&font, code, &glyph);
+                    }
+                }
+            } else {
+                for (code, glyph) in
+                    crate::font::rasterize_canvas2d_chars_sdf(ideograph_family, &font, &local_cjk)
+                {
+                    builder.pack_rasterized_codepoint(&font, code, &glyph);
+                }
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if !local_cjk.is_empty() {
+            let mut fs = global_font_system();
             for &(code, ch) in &local_cjk {
                 if let Some(glyph) = fs.rasterize_local_char(ideograph_family, &font, ch) {
                     builder.pack_rasterized_codepoint(&font, code, &glyph);
                 }
             }
-            registered
-        };
+        }
 
         let ranges: BTreeSet<u32> = remote_chars.iter().map(|code| (code / 256) * 256).collect();
-        for range in ranges {
-            if let Some(glyphs) = super::glyph_range(client, config.glyphs, &font, range).await? {
-                builder.glyph_subset(&font, &glyphs, Some(&remote_chars));
-            }
+        let fetched_ranges = futures::future::try_join_all(
+            ranges
+                .into_iter()
+                .map(|range| super::glyph_range(client, config.glyphs, &font, range)),
+        )
+        .await?;
+        for glyphs in fetched_ranges.into_iter().flatten() {
+            builder.glyph_subset(&font, &glyphs, Some(&remote_chars));
         }
 
         let mut fallback_used = false;
-        if ideograph_family.is_some() && !remote_chars.is_empty() {
+        if (has_registered || cfg!(not(target_arch = "wasm32")))
+            && ideograph_family.is_some()
+            && !remote_chars.is_empty()
+        {
             let mut fs = global_font_system();
             for &code in &remote_chars {
                 let already_packed = builder

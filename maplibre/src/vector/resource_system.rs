@@ -58,6 +58,10 @@ pub fn resource_system(
         .resources
         .get::<super::pattern::PatternResources>()
         .is_none_or(|patterns| patterns.pipeline().is_none());
+    let terrain_active = world
+        .resources
+        .get::<crate::terrain::TerrainFrame>()
+        .is_some_and(|frame| frame.active);
     let Some((
         buffer_pool,
         vector_pipeline,
@@ -91,14 +95,42 @@ pub fn resource_system(
             &super::pattern::layout_entries(),
         ),
     };
+    let needs_terrain_lines =
+        !cfg!(target_arch = "wasm32") || style.terrain.is_some() || terrain_active;
+    let needs_elevated_lines = !cfg!(target_arch = "wasm32")
+        || style.layers.iter().any(|layer| {
+            matches!(
+                super::structures::kind(layer),
+                Some(super::structures::StructureKind::ElevatedLine)
+            )
+        });
+    let needs_circle =
+        !cfg!(target_arch = "wasm32") || style.layers.iter().any(|layer| layer.type_ == "circle");
     setup.initialize(
         vector_pipeline,
         line_pipeline,
         circle_pipeline,
         &dashes_layout,
+        (needs_terrain_lines, needs_elevated_lines, needs_circle),
     );
-    setup.initialize_extrusion(extrusion_pipeline);
-    let pattern_pipeline = missing_pattern_pipeline.then(|| setup.create_pattern());
+    let style_zoom = view_state.style_zoom().value();
+    let needs_extrusion = !cfg!(target_arch = "wasm32")
+        || style
+            .layers
+            .iter()
+            .any(|layer| layer.type_ == "fill-extrusion");
+    if needs_extrusion {
+        setup.initialize_extrusion(extrusion_pipeline);
+    }
+    let needs_pattern = !cfg!(target_arch = "wasm32")
+        || style.layers.iter().any(|layer| {
+            layer.paint.as_ref().is_some_and(|paint| {
+                super::pattern::pattern_name(paint, style_zoom).is_some()
+                    || super::pattern::per_feature_pattern(paint).is_some()
+            })
+        });
+    let pattern_pipeline =
+        (missing_pattern_pipeline && needs_pattern).then(|| setup.create_pattern());
     let pattern_layout = setup.pattern.clone();
     if world
         .resources
@@ -325,6 +357,7 @@ impl PipelineSetup<'_> {
         line: &mut Eventually<LinePipeline>,
         circle: &mut Eventually<CirclePipeline>,
         dashes: &wgpu::BindGroupLayout,
+        (needs_terrain_lines, needs_elevated_lines, needs_circle): (bool, bool, bool),
     ) {
         vector.initialize(|| {
             VectorPipeline(self.create(
@@ -336,39 +369,56 @@ impl PipelineSetup<'_> {
                 false,
             ))
         });
-        line.initialize(|| {
-            let shader = shaders::LineShader {
-                format: self.format,
-            };
-            LinePipeline {
-                flat: self.create("line_pipeline", &shader, &[self.projection, dashes], false),
-                structure: self.create(
+        let line_shader = shaders::LineShader {
+            format: self.format,
+        };
+        let line = line.initialize(|| LinePipeline {
+            flat: self.create(
+                "line_pipeline",
+                &line_shader,
+                &[self.projection, dashes],
+                false,
+            ),
+            structure: None,
+            elevated: None,
+            terrain: None,
+        });
+        if needs_terrain_lines {
+            line.structure.get_or_insert_with(|| {
+                self.create(
                     "spatial_line_pipeline",
-                    &shader,
+                    &line_shader,
                     &[self.projection, dashes],
                     true,
-                ),
-                elevated: self.create_with_clipping(
+                )
+            });
+            line.terrain
+                .get_or_insert_with(|| self.create_terrain_line(dashes));
+        }
+        if needs_elevated_lines {
+            line.elevated.get_or_insert_with(|| {
+                self.create_with_clipping(
                     "elevated_line_pipeline",
-                    &shader,
+                    &line_shader,
                     &[self.projection, dashes],
                     true,
                     false,
-                ),
-                terrain: self.create_terrain_line(dashes),
-            }
-        });
-        circle.initialize(|| {
-            // Circles cross tile boundaries, as in GL JS, where each point belongs to one tile.
-            CirclePipeline(self.create_with_clipping(
-                "circle_pipeline",
-                &shaders::CircleShader {
-                    format: self.format,
-                },
-                &[self.projection],
-                false,
-                false,
-            ))
-        });
+                )
+            });
+        }
+        if needs_circle {
+            circle.initialize(|| {
+                // Circles cross tile boundaries, as in GL JS, where each point belongs to one tile.
+                CirclePipeline(self.create_with_clipping(
+                    "circle_pipeline",
+                    &shaders::CircleShader {
+                        format: self.format,
+                    },
+                    &[self.projection],
+                    false,
+                    false,
+                ))
+            });
+        }
     }
 }

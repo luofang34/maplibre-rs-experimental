@@ -34,7 +34,6 @@ expect_used = "deny"
 collapsible_if = "allow"
 
 [workspace.dependencies]
-rand = { version = "0.10.3" }
 reqwest-middleware = "0.4.2"
 winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
 async-trait = "0.1.73"
@@ -45,7 +44,7 @@ cgmath = "0.18.0"
 cint = "0.3.1"
 clap = { version = "4.3.24", features = ["derive"] }
 console_error_panic_hook = "0.1.7"
-console_log = { version = "1.0.0", features = ["color"] }
+console_log = { version = "1.0.0", default-features = false }
 criterion = { version = "0.8.2", features = ["async_tokio"] }
 csscolorparser = { version = "0.9.0", features = ["serde", "cint"] }
 downcast-rs = "2.0.2"
@@ -54,15 +53,15 @@ env_logger = "0.11.3"
 flatbuffers = "25.12.19"
 flatc-rust = "0.2.0"
 flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
-geo = "0.33.1"
+geo = { version = "0.33.1", default-features = false }
 geo-types = { version = "0.7.20", features = ["rstar_0_12"] }
 geozero = { version = "0.15.1", default-features = false, features = ["with-mvt", "with-geo"] }
-image = { version = "0.25.2", default-features = false, features = ["jpeg", "webp", "png", "gif"] }
+image = { version = "0.25.2", default-features = false }
 include_dir = "0.7.3"
 instant = { version = "0.1.12", features = ["wasm-bindgen"] }  # TODO: Untrusted dependency
 jni = "0.22.4"
 js-sys = "0.3"
-log = "0.4.20"
+log = { version = "0.4.20", features = ["release_max_level_warn"] }
 lyon = { version = "1.0.1", features = [] }
 unicode-normalization = { version = "0.1.24", default-features = false }
 # Keep this dependency compatible with the workspace MSRV.
@@ -80,7 +79,7 @@ thiserror = "2.0.21"
 tile-grid = "0.6.1"
 tokio = "1.32.0"  # Individual features are customized in each crate
 tokio-util = { version = "0.7.9", features = ["rt"] }
-tracing = "0.1.37"
+tracing = { version = "0.1.37", features = ["release_max_level_warn"] }
 tracing-subscriber = "0.3.17"
 tracing-tracy = "=0.12.0"
 tracing-wasm = "0.2.1"  # TODO: Low quality dependency (remove in a separate PR!)
@@ -89,7 +88,7 @@ wasm-bindgen = "=0.2.130" # Also change in flake.nix and CI scripts
 wasm-bindgen-futures = "0.4"
 wasm-bindgen-test = "0.3"
 web-sys = "0.3"  # Individual features are customized in each crate
-wgpu = { version = "30.0.1", features = ["trace"] }
+wgpu = { version = "30.0.1" }
 http-cache-reqwest = "0.16.0"
 rustc-hash = "2.1"
 harfrust = "0.14.0"

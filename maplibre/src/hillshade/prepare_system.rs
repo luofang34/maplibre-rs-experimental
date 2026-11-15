@@ -29,11 +29,14 @@ pub fn prepare_system(
         .resources
         .get::<crate::terrain::PolarPoleElevations>()
         .copied();
-    let Some(Initialized(resources)) = world
+    let Some(hillshade_resources) = world
         .resources
         .query_mut::<&mut Eventually<HillshadeResources>>()
     else {
         return Err(SystemError::Dependencies);
+    };
+    let Initialized(resources) = hillshade_resources else {
+        return Ok(());
     };
     let zoom = view_state.zoom().value();
     let bearing = view_state.camera().get_bearing().0;

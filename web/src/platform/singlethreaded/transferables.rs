@@ -69,17 +69,6 @@ pub mod layer_indexed_generated {
     )]
     include!(concat!(env!("OUT_DIR"), "/layer_indexed_generated.rs"));
 }
-pub mod layer_tessellated_generated {
-    #![allow(
-        unused,
-        unused_imports,
-        unsafe_code,
-        clippy::all,
-        clippy::unwrap_used,
-        clippy::expect_used
-    )]
-    include!(concat!(env!("OUT_DIR"), "/layer_tessellated_generated.rs"));
-}
 pub mod layer_missing_generated {
     #![allow(
         unused,
@@ -157,6 +146,10 @@ pub struct FlatBufferTransferable {
     tag: WebMessageTag,
     data: Vec<u8>,
     start: usize,
+    pub(crate) unpacked_vector: Option<(
+        Box<maplibre::vector::AvailableVectorLayerBucket>,
+        Option<Vec<maplibre::vector::feature_paint::BucketFeatureEntry>>,
+    )>,
 }
 
 impl FlatBufferTransferable {
@@ -168,11 +161,31 @@ impl FlatBufferTransferable {
             tag,
             data: buffer.to_vec(),
             start: 0,
+            unpacked_vector: None,
         }
     }
 
     pub fn from_vec(tag: WebMessageTag, data: Vec<u8>, start: usize) -> Self {
-        FlatBufferTransferable { tag, data, start }
+        FlatBufferTransferable {
+            tag,
+            data,
+            start,
+            unpacked_vector: None,
+        }
+    }
+
+    pub(crate) fn from_js_layer_tessellated(
+        buffer: &js_sys::ArrayBuffer,
+        offset: u32,
+        len: u32,
+    ) -> Option<Self> {
+        let (bucket, paint) = tessellated::js_wire::decode_from_js_slice(buffer, offset, len)?;
+        Some(FlatBufferTransferable {
+            tag: WebMessageTag::LayerTessellated,
+            data: Vec::new(),
+            start: 0,
+            unpacked_vector: Some((bucket, paint)),
+        })
     }
 
     pub fn data(&self) -> &[u8] {
@@ -233,11 +246,7 @@ impl LayerMissing for FlatBufferTransferable {
 
         inner_builder.finish(root, None);
         let (data, start) = inner_builder.collapse();
-        FlatBufferTransferable {
-            tag: WebMessageTag::LayerMissing,
-            data,
-            start,
-        }
+        FlatBufferTransferable::from_vec(WebMessageTag::LayerMissing, data, start)
     }
 
     fn coords(&self) -> WorldTileCoords {

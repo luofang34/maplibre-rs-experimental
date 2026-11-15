@@ -29,7 +29,7 @@ pub(super) struct CollectedSymbol {
     pub source: SourceFeature,
     pub line: Option<LineContext>,
     pub anchor: Point<f64>,
-    pub properties: FeatureProperties,
+    pub properties: std::sync::Arc<FeatureProperties>,
     pub angle: f32,
     /// How the text is written when the style leaves it open: `Some(true)` vertically.
     pub vertical: Option<bool>,

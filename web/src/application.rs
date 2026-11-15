@@ -68,7 +68,7 @@ impl WebMapHost {
     }
 }
 
-fn parse_style(style_json: &str) -> Result<Style, JSError> {
+pub(crate) fn parse_style(style_json: &str) -> Result<Style, JSError> {
     let mut style: Style = serde_json::from_str(style_json).map_err(JSError::InvalidStyle)?;
     // Layer order becomes render order; index 0 is reserved for the depth clear.
     for (index, layer) in style.layers.iter_mut().enumerate() {
@@ -85,13 +85,29 @@ fn parse_style(style_json: &str) -> Result<Style, JSError> {
 #[wasm_bindgen]
 pub async fn run_maplibre(
     new_worker: js_sys::Function,
-    style_json: Option<String>,
+    mut style_json: Option<String>,
 ) -> Result<MapController, JSError> {
-    let style = match style_json.as_deref() {
+    let style = match style_json.take().as_deref() {
         Some(style_json) => parse_style(style_json)?,
         None => Style::default(),
     };
     let handle = run_map(new_worker, style, WebMapHost::default()).await?;
+    Ok(MapController::new(handle))
+}
+
+/// Starts a map bound to a custom `canvas_id` for comparison/benchmark harnesses.
+#[cfg(feature = "arena-telemetry")]
+#[wasm_bindgen]
+pub async fn run_maplibre_on_canvas(
+    canvas_id: String,
+    new_worker: js_sys::Function,
+    mut style_json: Option<String>,
+) -> Result<MapController, JSError> {
+    let style = match style_json.take().as_deref() {
+        Some(style_json) => parse_style(style_json)?,
+        None => Style::default(),
+    };
+    let handle = run_map_on_canvas(canvas_id, new_worker, style, WebMapHost::default()).await?;
     Ok(MapController::new(handle))
 }
 
@@ -102,9 +118,18 @@ pub async fn run_maplibre(
 pub async fn run_map(
     new_worker: js_sys::Function,
     style: Style,
+    host: WebMapHost,
+) -> Result<MapHandle<CurrentEnvironment>, JSError> {
+    run_map_on_canvas("maplibre".into(), new_worker, style, host).await
+}
+
+async fn run_map_on_canvas(
+    canvas_id: String,
+    new_worker: js_sys::Function,
+    style: Style,
     mut host: WebMapHost,
 ) -> Result<MapHandle<CurrentEnvironment>, JSError> {
-    let config = WinitMapWindowConfig::new("maplibre".into());
+    let config = WinitMapWindowConfig::new(canvas_id);
     WinitEventLoop::new(&config)?
         .spawn_map(
             config,
@@ -146,15 +171,15 @@ pub fn create_kernel(
     new_worker: js_sys::Function,
     window_config: WinitMapWindowConfig<()>,
 ) -> Result<Kernel<CurrentEnvironment>, JSError> {
-    let mut kernel_builder = KernelBuilder::new()
-        .with_map_window_config(window_config)
-        .with_http_client(web_http_client());
-
     let offscreen_kernel_config = OffscreenKernelConfig {
         cache_directory: None,
         image_providers: crate::platform::image_providers().clone(),
         ..Default::default()
     };
+    let mut kernel_builder = KernelBuilder::new()
+        .with_map_window_config(window_config)
+        .with_http_client(web_http_client())
+        .with_asset_cache(offscreen_kernel_config.asset_cache.clone());
 
     #[cfg(target_feature = "atomics")]
     {
@@ -179,48 +204,26 @@ pub fn create_kernel(
     Ok(kernel_builder.build()?)
 }
 
-/// The plugins a browser map needs for `style`: rendering, the background, vector tiles with
-/// their symbols and heatmaps, and the raster and terrain plugins when the style draws them.
-pub fn default_plugins(style: &Style) -> Vec<MapPlugin> {
-    let has_raster_sources = style.layers.iter().any(|layer| {
-        matches!(
-            layer.type_.as_str(),
-            "raster" | "hillshade" | "color-relief"
-        ) || layer
-            .source
-            .as_ref()
-            .and_then(|name| style.sources.get(name))
-            .is_some_and(|source| {
-                matches!(
-                    source,
-                    maplibre::style::source::Source::Raster(_)
-                        | maplibre::style::source::Source::RasterDem(_)
-                        | maplibre::style::source::Source::Image(_)
-                        | maplibre::style::source::Source::Video(_)
-                        | maplibre::style::source::Source::Canvas(_)
-                )
-            })
-    });
-    let has_terrain = style.terrain.is_some();
+/// The plugins a browser map needs: rendering, background, vector tiles with symbols and
+/// heatmaps, plus raster, hillshade, and terrain plugins (which no-op when inactive so runtime
+/// `setStyle` can transition between 2D vector, satellite raster, and 3D terrain seamlessly).
+pub fn default_plugins(_style: &Style) -> Vec<MapPlugin> {
+    #[cfg_attr(not(debug_assertions), allow(unused_mut))]
     let mut plugins: Vec<MapPlugin> = vec![
         Box::<maplibre::render::RenderPlugin>::default(),
         Box::<maplibre::background::BackgroundPlugin>::default(),
         Box::<maplibre::vector::VectorPlugin<platform::UsedVectorTransferables>>::default(),
         Box::new(maplibre::sdf::SdfPlugin::<platform::UsedVectorTransferables>::default()),
         Box::new(maplibre::heatmap::HeatmapPlugin),
-    ];
-    if has_raster_sources {
-        plugins.push(Box::new(maplibre::raster::RasterPlugin::<
+        Box::new(maplibre::raster::RasterPlugin::<
             platform::UsedRasterTransferables,
-        >::default()));
-        plugins.push(Box::new(maplibre::hillshade::HillshadePlugin));
-    }
-    if has_terrain {
-        plugins.push(Box::new(maplibre::terrain::TerrainPlugin::<
+        >::default()),
+        Box::new(maplibre::hillshade::HillshadePlugin),
+        Box::new(maplibre::terrain::TerrainPlugin::<
             platform::UsedDemTransferables,
-        >::default()));
-    }
-    plugins.push(Box::new(maplibre::hud::NavigationHudPlugin));
+        >::default()),
+        Box::new(maplibre::hud::NavigationHudPlugin),
+    ];
     #[cfg(debug_assertions)]
     plugins.push(Box::<maplibre::debug::DebugPlugin>::default());
     plugins

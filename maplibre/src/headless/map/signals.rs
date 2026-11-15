@@ -91,6 +91,18 @@ impl HeadlessMap {
             .get_mut::<FrameTraceSlot>()
             .and_then(|slot| slot.0.as_mut())
     }
+
+    /// Waits for submitted GPU command buffers to complete and reclaims driver transient lists.
+    pub fn poll_device_idle(&self) {
+        if let Err(error) = self
+            .map_context
+            .renderer
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+        {
+            tracing::debug!(%error, "headless device idle poll failed");
+        }
+    }
 }
 
 // Its tiles reach the map only through a scheduler that runs worker futures.

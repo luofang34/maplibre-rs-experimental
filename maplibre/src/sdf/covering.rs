@@ -21,6 +21,12 @@ pub(crate) struct SymbolCovering {
     pub buffer: wgpu::Buffer,
 }
 
+impl Drop for SymbolCovering {
+    fn drop(&mut self) {
+        self.buffer.destroy();
+    }
+}
+
 pub(super) fn targets(world: &World) -> Vec<WorldTileCoords> {
     let mut seen = HashSet::new();
     let mut targets = Vec::new();
@@ -82,6 +88,7 @@ fn ready(world: &World, style: &Style, zoom: f64, coords: WorldTileCoords) -> bo
             .iter()
             .any(|style| style.id == layer.style_layer_id && style.is_visible_at(zoom));
         !visible
+            || layer.buffer.usable_indices == 0
             || layer.buffer.buffer.indices.is_empty()
             || loaded.contains(layer.style_layer_id.as_str())
     })
@@ -138,6 +145,9 @@ pub(super) fn update(
         .get::<SymbolCovering>()
         .is_none_or(|covering| covering.buffer.size() < required);
     if grow {
+        if let Some(old) = world.resources.remove::<SymbolCovering>() {
+            old.buffer.destroy();
+        }
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("symbol tile transforms"),
             size: required.next_power_of_two(),

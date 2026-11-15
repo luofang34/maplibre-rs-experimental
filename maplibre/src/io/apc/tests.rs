@@ -10,12 +10,13 @@ mod retry;
 mod systems;
 
 #[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
-pub(crate) fn reply_context<K: super::OffscreenKernel, S: super::Scheduler>(
+pub(crate) fn reply_context<K: super::OffscreenKernel, S: crate::io::scheduler::Scheduler>(
     apc: &super::SchedulerAsyncProcedureCall<K, S>,
 ) -> super::SchedulerContext {
-    super::SchedulerContext {
-        sender: apc.channel.0.clone(),
-    }
+    super::SchedulerContext::new(
+        apc.channel.0.clone(),
+        crate::platform::lock_unpoisoned(&apc.waker).clone(),
+    )
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -40,6 +41,7 @@ fn buffered_completion_messages_keep_fifo_order_and_drain_in_one_receive() {
     );
     let sender = SchedulerContext {
         sender: apc.channel.0.clone(),
+        waker: crate::platform::lock_unpoisoned(&apc.waker).clone(),
     };
     let coords = Default::default();
     sender

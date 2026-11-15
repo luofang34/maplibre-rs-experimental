@@ -13,8 +13,10 @@ pub struct WebWorkerPoolScheduler {
 
 impl WebWorkerPoolScheduler {
     pub fn new(new_worker: js_sys::Function) -> Result<Self, WebError> {
+        // Two shared-memory workers overlap network/DEM fetches and symbol layout while
+        // `limiter.rs` serializes heavy MVT expansion to avoid `dlmalloc` spinlock contention.
         let pool = WorkerPool::new(
-            1,
+            2,
             Box::new(move || {
                 new_worker
                     .call0(&JsValue::undefined())
@@ -38,5 +40,16 @@ impl Scheduler for WebWorkerPoolScheduler {
         self.pool
             .execute(move || Box::pin(future_factory()))
             .map_err(|e| ScheduleError::Scheduling(Box::new(e)))
+    }
+
+    fn set_main_thread_waker(&self, wake: std::sync::Arc<dyn Fn() + Send + Sync>) {
+        self.pool.set_main_thread_waker(wake);
+    }
+
+    fn wrap_worker_waker(
+        &self,
+        _wake: std::sync::Arc<dyn Fn() + Send + Sync>,
+    ) -> std::sync::Arc<dyn Fn() + Send + Sync> {
+        self.pool.worker_waker()
     }
 }

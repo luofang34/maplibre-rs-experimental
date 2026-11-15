@@ -103,9 +103,14 @@ pub(super) fn symbol_requests_from_tile<'l>(
     zoom: f64,
     style: Option<&crate::style::Style>,
 ) -> SymbolRequests {
-    let mut fonts = GlyphRequests::new();
-    let mut labels: HashMap<String, BTreeSet<String>> = HashMap::new();
-    let mut icons = HashSet::new();
+    struct CompiledSymbolLayer<'a> {
+        paint: &'a crate::style::layer::SymbolPaint,
+        filter: Option<crate::style::filter::Filter>,
+        promote_prop: Option<&'a str>,
+        source_state: Option<&'a crate::style::feature_state::SourceFeatureState>,
+    }
+
+    let mut by_source_layer: HashMap<&str, Vec<CompiledSymbolLayer<'_>>> = HashMap::new();
     for layer in layers {
         if layer.is_hidden() {
             continue;
@@ -113,11 +118,7 @@ pub(super) fn symbol_requests_from_tile<'l>(
         let Some(LayerPaint::Symbol(paint)) = &layer.paint else {
             continue;
         };
-        let Some(source) = tile
-            .layers
-            .iter()
-            .find(|source| Some(&source.name) == layer.source_layer.as_ref())
-        else {
+        let Some(source_name) = layer.source_layer.as_deref() else {
             continue;
         };
         let filter = match layer
@@ -133,50 +134,107 @@ pub(super) fn symbol_requests_from_tile<'l>(
             (Some(style), Some(src_name)) => (
                 style
                     .source_promote_id(src_name)
-                    .and_then(|p| p.property_for(Some(&source.name))),
+                    .and_then(|p| p.property_for(Some(source_name))),
                 style.feature_state.source(src_name),
             ),
             _ => (None, None),
         };
-        for feature in &source.features {
-            let mut properties = feature_properties(source, feature);
-            crate::style::feature_state::sync_properties_feature_state(
-                &mut properties,
-                feature.id,
+        by_source_layer
+            .entry(source_name)
+            .or_default()
+            .push(CompiledSymbolLayer {
+                paint,
+                filter,
                 promote_prop,
                 source_state,
-                Some(&source.name),
-            );
-            if let Some(filter) = &filter {
-                if !filter.evaluate(&crate::style::filter::FeatureContext {
-                    properties: &properties,
-                    geometry_type: crate::style::filter::GeometryType::from_mvt(
-                        feature.r#type.unwrap_or_default(),
-                    ),
-                    id: feature
-                        .id
-                        .map(|id| crate::style::expression::Value::Number(id as f64)),
-                    zoom,
-                }) {
-                    continue;
+            });
+    }
+
+    let mut fonts = GlyphRequests::new();
+    let mut labels: HashMap<String, BTreeSet<String>> = HashMap::new();
+    let mut icons = HashSet::new();
+    if by_source_layer.is_empty() {
+        return SymbolRequests {
+            fonts,
+            labels,
+            icons,
+        };
+    }
+
+    let empty_props = crate::style::expression::empty_feature_properties();
+    for source in &tile.layers {
+        let Some(compiled_layers) = by_source_layer.get(source.name.as_str()) else {
+            continue;
+        };
+        let mut tag_memo: rustc_hash::FxHashMap<
+            &[u32],
+            crate::style::expression::FeatureProperties,
+        > = rustc_hash::FxHashMap::default();
+        for feature in &source.features {
+            let base_properties: &crate::style::expression::FeatureProperties =
+                if feature.tags.is_empty() {
+                    empty_props
+                } else {
+                    tag_memo
+                        .entry(feature.tags.as_slice())
+                        .or_insert_with(|| feature_properties(source, feature))
+                };
+            let geometry_type =
+                crate::style::filter::GeometryType::from_mvt(feature.r#type.unwrap_or_default());
+            let feature_id = feature
+                .id
+                .map(|id| crate::style::expression::Value::Number(id as f64));
+            let mut state_scratch: Option<crate::style::expression::FeatureProperties> = None;
+
+            for compiled in compiled_layers {
+                let props = if compiled.source_state.is_some() || compiled.promote_prop.is_some() {
+                    let scratch = state_scratch.insert(base_properties.clone());
+                    crate::style::feature_state::sync_properties_feature_state(
+                        scratch,
+                        feature.id,
+                        compiled.promote_prop,
+                        compiled.source_state,
+                        Some(&source.name),
+                    );
+                    &*scratch
+                } else {
+                    base_properties
+                };
+                if let Some(filter) = &compiled.filter {
+                    if !filter.evaluate(&crate::style::filter::FeatureContext {
+                        properties: props,
+                        geometry_type,
+                        id: feature_id.clone(),
+                        zoom,
+                    }) {
+                        continue;
+                    }
                 }
+                // Every image the label or icon can reach is asked about, so each is requested.
+                let asked = NamesAsked::default();
+                glyphs(
+                    &mut fonts,
+                    &mut labels,
+                    compiled.paint,
+                    (props, zoom),
+                    &asked,
+                );
+                if let Some(icon) = compiled
+                    .paint
+                    .text_among_images("icon-image", props, zoom, &asked)
+                    .filter(|icon| !icon.is_empty())
+                {
+                    icons.insert(icon);
+                }
+                icons.extend(
+                    compiled
+                        .paint
+                        .label_sections_among(props, zoom, Some(&asked))
+                        .into_iter()
+                        .filter_map(|section| section.image),
+                );
+                icons.extend(asked.0.into_inner());
             }
-            // Every image the label or icon can reach is asked about, so each is requested.
-            let asked = NamesAsked::default();
-            glyphs(&mut fonts, &mut labels, paint, (&properties, zoom), &asked);
-            if let Some(icon) = paint
-                .text_among_images("icon-image", &properties, zoom, &asked)
-                .filter(|icon| !icon.is_empty())
-            {
-                icons.insert(icon);
-            }
-            icons.extend(
-                paint
-                    .label_sections_among(&properties, zoom, Some(&asked))
-                    .into_iter()
-                    .filter_map(|section| section.image),
-            );
-            icons.extend(asked.0.into_inner());
         }
     }
     SymbolRequests {

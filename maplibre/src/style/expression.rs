@@ -22,6 +22,13 @@ pub use ast::{
     MathFunction, StringFunction,
 };
 pub use evaluate::{EvaluationContext, EvaluationError, FeatureProperties, ImageSet};
+
+/// Shared empty [`FeatureProperties`] map so features without tags do not allocate on the heap.
+pub fn empty_feature_properties() -> &'static std::sync::Arc<FeatureProperties> {
+    static EMPTY: std::sync::LazyLock<std::sync::Arc<FeatureProperties>> =
+        std::sync::LazyLock::new(|| std::sync::Arc::new(FeatureProperties::new()));
+    &EMPTY
+}
 pub use feature_identity::{
     is_internal_property, reads_identity, GEOMETRY_TYPE_PROPERTY, ID_PROPERTY,
 };

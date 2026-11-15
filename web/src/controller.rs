@@ -4,9 +4,10 @@
 
 use std::{cell::Cell, future::Future, rc::Rc};
 
+use futures::channel::oneshot;
 use maplibre::{
     context::FlightOutcome,
-    map::handle::{MapHandle, Reply},
+    map::handle::{MapClosed, MapHandle, Reply},
     render::view_state::{CameraOptions, FlightCurve},
     sdf::query::QueryGeometry,
     style::{mutation::StyleChange, source::GeoJsonData},
@@ -20,14 +21,21 @@ use crate::{
     error::{ArgumentError, JSError},
 };
 
-mod options;
-use options::{Animation, Camera, CameraState, Feature, Query, ScreenGeometry};
+mod coalesce;
+pub(crate) mod options;
+use coalesce::{apply_style_swap, enqueue_geojson, enqueue_jump, CoalescedCommands};
+use options::{
+    try_read_camera_fast, Animation, Camera, CameraState, Feature, Query, ScreenGeometry,
+};
 
 /// A running map, as `startMapLibre` resolves it.
 #[wasm_bindgen]
 #[derive(Clone)]
 pub struct MapController {
     handle: MapHandle<CurrentEnvironment>,
+    coalesced: Rc<CoalescedCommands>,
+    #[cfg(feature = "arena-telemetry")]
+    pub(crate) watchers: crate::arena_telemetry::TelemetryWatchers,
 }
 
 impl std::fmt::Debug for MapController {
@@ -41,7 +49,12 @@ impl std::fmt::Debug for MapController {
 impl MapController {
     /// Controls the map `handle` sends commands to.
     pub fn new(handle: MapHandle<CurrentEnvironment>) -> Self {
-        Self { handle }
+        Self {
+            handle,
+            coalesced: Rc::default(),
+            #[cfg(feature = "arena-telemetry")]
+            watchers: Default::default(),
+        }
     }
 
     /// The handle underneath, for a Rust host that reads or changes what JavaScript cannot.
@@ -54,6 +67,9 @@ impl MapController {
         &self,
         command: impl FnOnce(&mut MapType) -> Result<R, JSError> + 'static,
     ) -> js_sys::Promise {
+        if self.handle.is_closed() {
+            return js_sys::Promise::resolve(&JsValue::UNDEFINED);
+        }
         settle(flatten(self.handle.call(command)))
     }
 
@@ -67,6 +83,9 @@ impl MapController {
 
     /// Starts a move along `curve` and returns a promise of whether it arrived.
     fn fly(&self, (camera, curve): (CameraOptions, FlightCurve)) -> js_sys::Promise {
+        if self.handle.is_closed() {
+            return js_sys::Promise::resolve(&JsValue::FALSE);
+        }
         let flight = Rc::new(Cell::new(None));
         let started = {
             let flight = flight.clone();
@@ -93,13 +112,28 @@ impl MapController {
 
 #[wasm_bindgen]
 impl MapController {
-    /// Moves the camera at once, as GL JS `jumpTo`.
+    /// Moves the camera at once, as GL JS `jumpTo`, coalescing multiple calls within the same frame.
     #[wasm_bindgen(js_name = jumpTo)]
     pub fn jump_to(&self, options: JsValue) -> js_sys::Promise {
-        match read::<Camera>(&options, "camera options") {
-            Ok(camera) => self.call(move |map| map.jump_to(camera.into()).map_err(JSError::from)),
-            Err(error) => rejected(error),
+        if self.handle.is_closed() {
+            return js_sys::Promise::resolve(&JsValue::UNDEFINED);
         }
+        let parsed = match try_read_camera_fast(&options) {
+            Some(cam) => Ok(cam),
+            None => read::<Camera>(&options, "camera options").map(CameraOptions::from),
+        };
+        let camera = match parsed {
+            Ok(camera) => camera,
+            Err(error) => return rejected(error),
+        };
+
+        let rx = enqueue_jump(&self.handle, &self.coalesced, camera);
+        settle(async move {
+            match rx.await {
+                Ok(result) => result,
+                Err(oneshot::Canceled) => Err(JSError::from(MapClosed)),
+            }
+        })
     }
 
     /// Eases the camera to `options`, as GL JS `easeTo`; resolves to whether it arrived.
@@ -132,6 +166,16 @@ impl MapController {
     #[wasm_bindgen(js_name = getCamera)]
     pub fn get_camera(&self) -> js_sys::Promise {
         self.call(|map| Ok(CameraState::of(map.context()?)))
+    }
+
+    /// Replaces the entire style with a style JSON string, URL, or style object, diffing against
+    /// the current style so unchanged sources keep their loaded tiles, as GL JS `setStyle`.
+    #[wasm_bindgen(js_name = setStyle)]
+    pub fn set_style(&self, style: JsValue) -> js_sys::Promise {
+        if self.handle.is_closed() {
+            return js_sys::Promise::resolve(&JsValue::UNDEFINED);
+        }
+        settle(apply_style_swap(self.handle.clone(), style))
     }
 
     /// Sets a paint property, as GL JS `setPaintProperty`; `null` restores its default.
@@ -206,13 +250,40 @@ impl MapController {
     }
 
     /// Replaces a GeoJSON source's data with a document or a URL, as GL JS
-    /// `GeoJSONSource.setData`.
+    /// `GeoJSONSource.setData`, coalescing rapid updates per source within the same frame.
     #[wasm_bindgen(js_name = setGeoJsonData)]
     pub fn set_geojson_data(&self, source: String, data: JsValue) -> js_sys::Promise {
-        match read::<GeoJsonData>(&data, "GeoJSON data") {
-            Ok(data) => self.call(move |map| Ok(map.set_geojson_data(&source, data)?)),
-            Err(error) => rejected(error),
+        if self.handle.is_closed() {
+            return js_sys::Promise::resolve(&JsValue::UNDEFINED);
         }
+        let parsed = match data.as_string() {
+            Some(s) => {
+                let trimmed = s.trim_start();
+                if trimmed.starts_with('{') || trimmed.starts_with('[') {
+                    serde_json::from_str::<GeoJsonData>(&s).map_err(|err| {
+                        JSError::from(ArgumentError::Invalid {
+                            what: "GeoJSON data",
+                            source: err,
+                        })
+                    })
+                } else {
+                    Ok(GeoJsonData::Url(s))
+                }
+            }
+            None => read::<GeoJsonData>(&data, "GeoJSON data"),
+        };
+        let geojson = match parsed {
+            Ok(d) => d,
+            Err(error) => return rejected(error),
+        };
+
+        let rx = enqueue_geojson(&self.handle, &self.coalesced, source, geojson);
+        settle(async move {
+            match rx.await {
+                Ok(result) => result,
+                Err(oneshot::Canceled) => Err(JSError::from(MapClosed)),
+            }
+        })
     }
 
     /// Adds, changes and removes features of an inline GeoJSON source, as GL JS
@@ -254,6 +325,19 @@ impl MapController {
             Ok(features.into_iter().map(Feature::from).collect::<Vec<_>>())
         })
     }
+
+    /// Shuts down the running map event loop, worker pool and GPU resources cleanly, as GL JS `remove`.
+    pub fn remove(&self) {
+        #[cfg(feature = "arena-telemetry")]
+        self.watchers.detach();
+        self.coalesced.drain_waiters();
+        self.handle.close();
+    }
+
+    /// Alias for [`Self::remove`] used by host lifecycle managers.
+    pub fn destroy(&self) {
+        self.remove();
+    }
 }
 
 /// Reads a JavaScript argument through JSON, which every argument of the map's API is.
@@ -277,6 +361,12 @@ fn read_optional<T: DeserializeOwned>(
 }
 
 /// Encodes a command's result for JavaScript through JSON.
+#[cfg(feature = "arena-telemetry")]
+pub(crate) fn write_js<R: Serialize>(value: &R) -> Result<JsValue, JSError> {
+    write(value)
+}
+
+/// Encodes a command's result for JavaScript through JSON.
 fn write<R: Serialize>(value: &R) -> Result<JsValue, JSError> {
     let json = serde_json::to_string(value).map_err(ArgumentError::Unencodable)?;
     js_sys::JSON::parse(&json).map_err(|_| ArgumentError::NotJson { what: "result" }.into())
@@ -289,7 +379,13 @@ async fn flatten<R>(reply: Reply<Result<R, JSError>>) -> Result<R, JSError> {
 fn settle<R: Serialize>(
     future: impl Future<Output = Result<R, JSError>> + 'static,
 ) -> js_sys::Promise {
-    wasm_bindgen_futures::future_to_promise(async move { Ok(write(&future.await?)?) })
+    wasm_bindgen_futures::future_to_promise(async move {
+        match future.await {
+            Ok(val) => Ok(write(&val)?),
+            Err(JSError::Closed(_)) => Ok(JsValue::UNDEFINED),
+            Err(err) => Err(err.into()),
+        }
+    })
 }
 
 fn rejected(error: JSError) -> js_sys::Promise {

@@ -263,8 +263,9 @@ fn a_smaller_drape_paints_the_same_ground_in_less_memory() {
             drapes >= one && drapes % one == 0,
             "{drapes} bytes of drapes"
         );
-        // A sixteenth of the default drape's texels.
-        assert!(one * 15 < (DRAPE_SIZE as usize).pow(2) * 4 * 4 / 3);
+        // A quarter of the default 1024px drape's texels.
+        let ratio = ((DRAPE_SIZE / 512) as usize).pow(2);
+        assert!(one * (ratio - 1) < (DRAPE_SIZE as usize).pow(2) * 4 * 4 / 3);
         assert_color(
             &read_stencil_blocking(&map, "stencil-small-drape"),
             [0, 0, 255, 255],

@@ -1,6 +1,10 @@
-//! Native OS font discovery and lazy materialization backed by `fontdb`.
+//! Native OS font discovery and lazy 3-tier materialization backed by `fontdb`.
 
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use harfrust::Font as HbFont;
 use read_fonts::FontRef;
@@ -10,6 +14,7 @@ use super::{inspect_face_metadata, parse_font_stack_entry, FontStyle, FontSystem
 
 pub(in crate::font) struct NativeFontDb {
     db: fontdb::Database,
+    tier: u8,
     loaded_by_db_id: HashMap<fontdb::ID, u64>,
     shared_files: HashMap<PathBuf, Arc<Vec<u8>>>,
     codepoint_cache: HashMap<(String, u32), Option<u64>>,
@@ -21,19 +26,42 @@ impl FontSystem {
             return;
         }
         let mut db = fontdb::Database::new();
-        db.load_system_fonts();
-        #[cfg(target_os = "macos")]
-        load_macos_mobile_asset_fonts(&mut db);
-        #[cfg(target_os = "visionos")]
-        db.load_fonts_dir("/System/Library/Fonts");
-        #[cfg(target_os = "android")]
-        db.load_fonts_dir("/system/fonts");
+        load_tier1_system_fonts(&mut db);
+        if db.is_empty() {
+            db.load_system_fonts();
+        }
         self.native = Some(NativeFontDb {
             db,
+            tier: 1,
             loaded_by_db_id: HashMap::new(),
             shared_files: HashMap::new(),
             codepoint_cache: HashMap::new(),
         });
+    }
+
+    fn escalate_native_db_tier(&mut self, target_tier: u8) -> bool {
+        let Some(native) = self.native.as_mut() else {
+            return false;
+        };
+        if native.tier >= target_tier {
+            return false;
+        }
+        if native.tier < 2 && target_tier >= 2 {
+            load_tier2_cjk_system_fonts(&mut native.db);
+            native.tier = 2;
+        }
+        if native.tier < 3 && target_tier >= 3 {
+            native.db.load_system_fonts();
+            #[cfg(target_os = "macos")]
+            load_macos_mobile_asset_fonts(&mut native.db);
+            #[cfg(target_os = "visionos")]
+            native.db.load_fonts_dir("/System/Library/Fonts");
+            #[cfg(target_os = "android")]
+            native.db.load_fonts_dir("/system/fonts");
+            native.tier = 3;
+        }
+        native.codepoint_cache.retain(|_, v| v.is_some());
+        true
     }
 
     pub(super) fn resolve_native_face(
@@ -42,6 +70,9 @@ impl FontSystem {
         ch: char,
     ) -> Option<(u64, Arc<LoadedFace>)> {
         self.ensure_native_db();
+        if is_cjk_or_hangul_or_kana(ch) {
+            let _ = self.escalate_native_db_tier(2);
+        }
         let cache_key = (font_stack.to_owned(), u32::from(ch));
         if let Some(&cached) = self
             .native
@@ -52,7 +83,15 @@ impl FontSystem {
             return self.faces.get(&id).map(|f| (id, Arc::clone(f)));
         }
 
-        let found_db_id = self.find_matching_db_face(font_stack, ch);
+        let mut found_db_id = self.find_matching_db_face(font_stack, ch);
+        if found_db_id.is_none() && !ch.is_control() {
+            if self.escalate_native_db_tier(2) {
+                found_db_id = self.find_matching_db_face(font_stack, ch);
+            }
+            if found_db_id.is_none() && self.escalate_native_db_tier(3) {
+                found_db_id = self.find_matching_db_face(font_stack, ch);
+            }
+        }
         let loaded_id = found_db_id.and_then(|db_id| self.materialize_db_face(db_id));
         if let Some(native) = self.native.as_mut() {
             native.codepoint_cache.insert(cache_key, loaded_id);
@@ -204,6 +243,94 @@ impl FontSystem {
     }
 }
 
+fn is_cjk_or_hangul_or_kana(ch: char) -> bool {
+    let cp = u32::from(ch);
+    matches!(
+        cp,
+        0x1100..=0x11FF
+            | 0x3040..=0x31FF
+            | 0xA960..=0xA97F
+            | 0xAC00..=0xD7FF
+            | 0xFF65..=0xFF9F
+            | 0x1B000..=0x1B16F
+    ) || super::super::cjk::is_local_cjk_codepoint(ch)
+}
+
+fn load_existing_font_files(db: &mut fontdb::Database, paths: &[&str]) {
+    for raw in paths {
+        let p = Path::new(raw);
+        if p.is_file() {
+            let _ = db.load_font_file(p);
+        }
+    }
+}
+
+fn load_tier1_system_fonts(db: &mut fontdb::Database) {
+    #[cfg(target_os = "macos")]
+    {
+        load_existing_font_files(
+            db,
+            &[
+                "/System/Library/Fonts/Supplemental/Arial.ttf",
+                "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+                "/System/Library/Fonts/Supplemental/Arial Italic.ttf",
+                "/System/Library/Fonts/Supplemental/Arial Bold Italic.ttf",
+                "/System/Library/Fonts/GeezaPro.ttc",
+                "/System/Library/Fonts/Kohinoor.ttc",
+                "/System/Library/Fonts/Thonburi.ttc",
+                "/System/Library/Fonts/Supplemental/NotoSansGeorgian.ttc",
+                "/System/Library/Fonts/Supplemental/NotoSansArmenian.ttc",
+            ],
+        );
+        db.set_sans_serif_family("Arial");
+        db.set_serif_family("Times New Roman");
+        db.set_monospace_family("Menlo");
+    }
+    #[cfg(target_os = "linux")]
+    {
+        load_existing_font_files(
+            db,
+            &[
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+                "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+                "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
+                "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
+                "/usr/share/fonts/truetype/noto/NotoSansGeorgian-Regular.ttf",
+            ],
+        );
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = db;
+    }
+}
+
+fn load_tier2_cjk_system_fonts(db: &mut fontdb::Database) {
+    #[cfg(target_os = "macos")]
+    load_existing_font_files(
+        db,
+        &[
+            "/System/Library/Fonts/PingFang.ttc",
+            "/System/Library/Fonts/Hiragino Sans GB.ttc",
+            "/System/Library/Fonts/AquaKana.ttc",
+            "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+            "/System/Library/Fonts/STHeiti Light.ttc",
+        ],
+    );
+    #[cfg(target_os = "linux")]
+    load_existing_font_files(
+        db,
+        &[
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        ],
+    );
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    let _ = db;
+}
+
 fn preferred_system_fallbacks(ch: char) -> &'static [&'static str] {
     let cp = u32::from(ch);
     if matches!(cp, 0x3040..=0x30FF | 0x31F0..=0x31FF | 0xFF65..=0xFF9F | 0x1B000..=0x1B16F) {
@@ -245,9 +372,9 @@ fn preferred_system_fallbacks(ch: char) -> &'static [&'static str] {
         ]
     } else {
         &[
-            "SF Pro",
-            "Helvetica Neue",
             "Arial",
+            "Helvetica Neue",
+            "SF Pro",
             "Kohinoor Devanagari",
             "Devanagari Sangam MN",
             "Geeza Pro",

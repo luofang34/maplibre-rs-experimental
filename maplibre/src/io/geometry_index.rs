@@ -3,6 +3,7 @@
 #![deny(missing_docs)]
 
 mod clip;
+mod lazy_mvt;
 mod processor;
 pub mod wire;
 use std::{collections::BTreeMap, sync::Arc};
@@ -10,6 +11,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use cgmath::{num_traits::Signed, Bounded};
 use geo::{prelude::*, Distance, Euclidean};
 use geo_types::{Coord, CoordFloat, LineString, Point, Polygon};
+pub use lazy_mvt::LazyMvtIndex;
 pub use processor::IndexProcessor;
 use rstar::{Envelope, PointDistance, RTree, RTreeObject, AABB};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -122,6 +124,12 @@ impl GeometryIndex {
             match &stored.index {
                 TileIndex::Spatial { tree } => tree.iter().for_each(&mut record),
                 TileIndex::Linear { list } => list.iter().for_each(&mut record),
+                TileIndex::LazyMvt(lazy) => {
+                    lazy.materialized_slice()
+                        .into_iter()
+                        .flatten()
+                        .for_each(&mut record);
+                }
             }
         }
     }
@@ -140,6 +148,12 @@ impl GeometryIndex {
             match &stored.index {
                 TileIndex::Spatial { tree } => tree.iter().for_each(&mut visit),
                 TileIndex::Linear { list } => list.iter().for_each(&mut visit),
+                TileIndex::LazyMvt(lazy) => {
+                    lazy.materialized_slice()
+                        .into_iter()
+                        .flatten()
+                        .for_each(&mut visit);
+                }
             }
         }
     }
@@ -173,6 +187,16 @@ impl GeometryIndex {
             match &mut stored.index {
                 TileIndex::Spatial { tree } => tree.iter_mut().for_each(&mut sync_one),
                 TileIndex::Linear { list } => list.iter_mut().for_each(&mut sync_one),
+                TileIndex::LazyMvt(lazy) => {
+                    if let Some(list) = lazy.materialized_mut() {
+                        list.iter_mut().for_each(&mut sync_one);
+                    } else {
+                        lazy.update_unmaterialized_state(
+                            promote_id.cloned(),
+                            source_state.cloned().map(Arc::new),
+                        );
+                    }
+                }
             }
             if any_changed {
                 let new_bytes = stored.index.approximate_bytes();
@@ -239,11 +263,16 @@ pub enum TileIndex {
         /// Geometries in the order to return matching entries.
         list: Vec<IndexedGeometry<f64>>,
     },
+    /// Deferred raw-MVT storage materialized on first query.
+    LazyMvt(LazyMvtIndex),
 }
 
 impl TileIndex {
     /// Memory the tile's index holds, estimated from its geometries and properties.
     pub fn approximate_bytes(&self) -> usize {
+        if let TileIndex::LazyMvt(lazy) = self {
+            return lazy.approximate_bytes();
+        }
         let mut shared = FxHashSet::default();
         let mut total = 0;
         let mut count = |geometry: &IndexedGeometry<f64>| {
@@ -255,6 +284,7 @@ impl TileIndex {
         match self {
             TileIndex::Spatial { tree } => tree.iter().for_each(&mut count),
             TileIndex::Linear { list } => list.iter().for_each(&mut count),
+            TileIndex::LazyMvt(_) => {}
         }
         total
     }
@@ -267,24 +297,18 @@ impl TileIndex {
     pub fn point_query(&self, inner_coords: InnerCoords) -> Vec<&IndexedGeometry<f64>> {
         let point = Point::new(inner_coords.x, inner_coords.y);
         let coordinate: Coord<_> = point.into();
+        let matches = |geometry: &&IndexedGeometry<f64>| match &geometry.exact {
+            ExactGeometry::Polygon(exact) => exact.contains(&coordinate),
+            ExactGeometry::LineString(exact) => exact.distance_2(&point) <= 64.0,
+            ExactGeometry::Point(_) => false,
+        };
 
         match self {
-            TileIndex::Spatial { tree } => tree
-                .nearest_neighbor_iter(&point)
-                .filter(|geometry| match &geometry.exact {
-                    ExactGeometry::Polygon(exact) => exact.contains(&coordinate),
-                    ExactGeometry::LineString(exact) => exact.distance_2(&point) <= 64.0,
-                    ExactGeometry::Point(_) => false,
-                })
-                .collect::<Vec<_>>(),
-            TileIndex::Linear { list } => list
-                .iter()
-                .filter(|geometry| match &geometry.exact {
-                    ExactGeometry::Polygon(exact) => exact.contains(&coordinate),
-                    ExactGeometry::LineString(exact) => exact.distance_2(&point) <= 64.0,
-                    ExactGeometry::Point(_) => false,
-                })
-                .collect::<Vec<_>>(),
+            TileIndex::Spatial { tree } => {
+                tree.nearest_neighbor_iter(&point).filter(matches).collect()
+            }
+            TileIndex::Linear { list } => list.iter().filter(matches).collect(),
+            TileIndex::LazyMvt(lazy) => lazy.geometries().iter().filter(matches).collect(),
         }
     }
 }
@@ -352,7 +376,7 @@ where
     }
 
     /// Memory of the geometry alone.
-    fn geometry_bytes(&self) -> usize {
+    pub(super) fn geometry_bytes(&self) -> usize {
         const TREE_OVERHEAD: usize = 32;
         let coordinates = match &self.exact {
             ExactGeometry::Polygon(polygon) => {

@@ -298,45 +298,62 @@ fn refresh_vector_pool(
                     }
                     _ => None,
                 }) {
-                    handled = true;
-                    let (ok, colors_changed) = recolor_cpu_bucket(
-                        style_layer,
-                        bucket,
-                        committed_entries.as_deref(),
-                        uniform,
-                        style_zoom,
-                        needs_worker_refresh,
-                    );
-                    if !ok || !is_uploaded || (!colors_changed && !is_paint_changed) {
-                        continue;
-                    }
-                    let metadata = if let Some(color) = uniform {
-                        feature_metadata(&bucket.feature_indices, &[], color)
+                    if bucket.feature_indices.is_empty() && bucket.buffer.usable_indices > 0 {
+                        if uniform.is_none() {
+                            *needs_worker_refresh = true;
+                        }
                     } else {
-                        feature_metadata(
-                            &bucket.feature_indices,
-                            &bucket.feature_colors,
-                            fallback_color,
-                        )
-                    };
-                    let runs = style_layer
-                        .paint
-                        .as_ref()
-                        .and_then(per_feature_pattern)
-                        .map(|_| {
-                            pattern_runs(
+                        handled = true;
+                        let (ok, colors_changed) = recolor_cpu_bucket(
+                            style_layer,
+                            bucket,
+                            committed_entries.as_deref(),
+                            uniform,
+                            style_zoom,
+                            needs_worker_refresh,
+                        );
+                        if !ok || !is_uploaded || (!colors_changed && !is_paint_changed) {
+                            continue;
+                        }
+                        let metadata = if let Some(color) = uniform {
+                            feature_metadata(&bucket.feature_indices, &[], color)
+                        } else {
+                            feature_metadata(
                                 &bucket.feature_indices,
                                 &bucket.feature_colors,
-                                &bucket.buffer.buffer.indices,
+                                fallback_color,
                             )
+                        };
+                        if style_layer
+                            .paint
+                            .as_ref()
+                            .and_then(per_feature_pattern)
+                            .is_some()
+                            && bucket.buffer.usable_indices > 0
+                            && bucket.buffer.buffer.indices.is_empty()
+                        {
+                            *needs_worker_refresh = true;
+                            continue;
+                        }
+                        let runs = style_layer
+                            .paint
+                            .as_ref()
+                            .and_then(per_feature_pattern)
+                            .map(|_| {
+                                pattern_runs(
+                                    &bucket.feature_indices,
+                                    &bucket.feature_colors,
+                                    &bucket.buffer.buffer.indices,
+                                )
+                            });
+                        gpu_updates.push(GpuPaintUpdate {
+                            coords,
+                            layer_id: style_layer.id.clone(),
+                            feature_meta: metadata,
+                            runs,
+                            bump_revision: !is_layer_touched,
                         });
-                    gpu_updates.push(GpuPaintUpdate {
-                        coords,
-                        layer_id: style_layer.id.clone(),
-                        feature_meta: metadata,
-                        runs,
-                        bump_revision: !is_layer_touched,
-                    });
+                    }
                 }
             }
             if !handled && is_uploaded && is_paint_changed {
@@ -435,7 +452,7 @@ fn recolor_cpu_bucket(
         bucket.feature_colors = new_colors;
         (true, changed)
     } else {
-        if !bucket.buffer.buffer.indices.is_empty() {
+        if bucket.buffer.usable_indices > 0 || !bucket.buffer.buffer.indices.is_empty() {
             *needs_worker_refresh = true;
         }
         (false, false)

@@ -1,14 +1,19 @@
-//! `number-format`: locale-aware decimal and currency formatting via ICU4X.
+//! `number-format`: locale-aware decimal and currency formatting via ICU4X natively and
+//! `Intl.NumberFormat` on `wasm32`.
 
+#[cfg(not(target_arch = "wasm32"))]
 use fixed_decimal::{
     Decimal, FloatPrecision, Sign, SignDisplay, SignedRoundingMode, UnsignedRoundingMode,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use icu_decimal::{options::DecimalFormatterOptions, DecimalFormatter};
+#[cfg(not(target_arch = "wasm32"))]
 use icu_locale_core::{locale, Locale};
 
-/// Formats `number` using ICU4X locale conventions (`locale`, defaulting to `"en-US"`), digit
+/// Formats `number` using locale conventions (`locale`, defaulting to `"en-US"`), digit
 /// grouping, between `min` and `max` fraction digits, and currency placement when `currency` names
 /// an ISO 4217 code.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn format(
     number: f64,
     locale_tag: Option<&str>,
@@ -60,6 +65,105 @@ pub(super) fn format(
     format_currency(decimal, code, &locale, formatter.as_ref().ok())
 }
 
+#[cfg(target_arch = "wasm32")]
+pub(super) fn format(
+    number: f64,
+    locale_tag: Option<&str>,
+    currency: Option<&str>,
+    min: Option<usize>,
+    max: Option<usize>,
+) -> String {
+    use wasm_bindgen::JsValue;
+    if !number.is_finite() {
+        return if number.is_nan() {
+            "NaN"
+        } else if number > 0.0 {
+            "∞"
+        } else {
+            "-∞"
+        }
+        .to_owned();
+    }
+
+    let value = if number == 0.0 { 0.0 } else { number };
+    let currency_code = currency
+        .map(str::trim)
+        .filter(|code| !code.is_empty())
+        .map(str::to_ascii_uppercase);
+    let currency_digits = currency_code.as_deref().map(default_currency_digits);
+    let min_digits = min.or(currency_digits).unwrap_or(0).min(20);
+    let max_digits = max.or(currency_digits).unwrap_or(3).max(min_digits).min(20);
+
+    let resolved_loc = locale_tag
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .and_then(|raw| {
+            use wasm_bindgen::JsCast;
+            let intl = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("Intl")).ok()?;
+            let func = js_sys::Reflect::get(&intl, &JsValue::from_str("getCanonicalLocales"))
+                .ok()?
+                .dyn_into::<js_sys::Function>()
+                .ok()?;
+            let arr = func
+                .call1(&intl, &JsValue::from_str(raw))
+                .ok()?
+                .dyn_into::<js_sys::Array>()
+                .ok()?;
+            arr.get(0).as_string()
+        })
+        .filter(|s| !s.starts_with("und"))
+        .unwrap_or_else(|| "en-US".to_owned());
+
+    let opts = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(
+        &opts,
+        &JsValue::from_str("minimumFractionDigits"),
+        &JsValue::from_f64(min_digits as f64),
+    );
+    let _ = js_sys::Reflect::set(
+        &opts,
+        &JsValue::from_str("maximumFractionDigits"),
+        &JsValue::from_f64(max_digits as f64),
+    );
+    if let Some(code) = currency_code.as_deref() {
+        let _ = js_sys::Reflect::set(
+            &opts,
+            &JsValue::from_str("style"),
+            &JsValue::from_str("currency"),
+        );
+        let _ = js_sys::Reflect::set(
+            &opts,
+            &JsValue::from_str("currency"),
+            &JsValue::from_str(code),
+        );
+    } else {
+        let _ = js_sys::Reflect::set(
+            &opts,
+            &JsValue::from_str("style"),
+            &JsValue::from_str("decimal"),
+        );
+    }
+
+    let locales = js_sys::Array::of1(&JsValue::from_str(&resolved_loc));
+    let fmt_res = {
+        use wasm_bindgen::JsCast;
+        js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("Intl"))
+            .and_then(|intl| js_sys::Reflect::get(&intl, &JsValue::from_str("NumberFormat")))
+            .and_then(|ctor| ctor.dyn_into::<js_sys::Function>())
+            .and_then(|ctor| {
+                js_sys::Reflect::construct(&ctor, &js_sys::Array::of2(&locales, &opts))
+            })
+            .and_then(|nf| js_sys::Reflect::get(&nf, &JsValue::from_str("format")))
+            .and_then(|fmt| fmt.dyn_into::<js_sys::Function>())
+            .and_then(|fmt| fmt.call1(&JsValue::NULL, &JsValue::from_f64(value)))
+    };
+    fmt_res
+        .ok()
+        .and_then(|v| v.as_string())
+        .unwrap_or_else(|| format!("{value:.max_digits$}"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn parse_locale(tag: Option<&str>) -> Locale {
     tag.and_then(|raw| Locale::try_from_str(raw.trim()).ok())
         .filter(|loc| !loc.id.language.is_unknown())
@@ -75,11 +179,13 @@ fn default_currency_digits(code: &str) -> usize {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 struct CurrencyUnit<'a> {
     text: &'a str,
     is_iso_code: bool,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn currency_unit<'a>(code: &'a str, locale: &Locale) -> CurrencyUnit<'a> {
     let lang = locale.id.language.as_str();
     let region = locale.id.region.as_ref().map(|r| r.as_str());
@@ -117,6 +223,7 @@ fn currency_unit<'a>(code: &'a str, locale: &Locale) -> CurrencyUnit<'a> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn uses_currency_suffix(locale: &Locale) -> bool {
     let lang = locale.id.language.as_str();
     let region = locale.id.region.as_ref().map(|r| r.as_str());
@@ -128,6 +235,7 @@ fn uses_currency_suffix(locale: &Locale) -> bool {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn format_currency(
     decimal: Decimal,
     code: &str,

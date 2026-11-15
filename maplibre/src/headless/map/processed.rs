@@ -118,7 +118,8 @@ impl ProcessedLayers {
         for layer in self.symbols {
             let coords = layer.coords();
             let mut bucket = (*layer).to_bucket();
-            let _ = sync_arriving_symbol_bucket(style, &mut bucket);
+            let _ = sync_arriving_symbol_bucket(style, &mut bucket, &mut memo);
+            interner.intern_symbol_bucket(tiles, &mut bucket);
             symbols_by_tile
                 .entry(coords)
                 .or_insert_with(Vec::new)

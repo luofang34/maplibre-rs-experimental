@@ -24,8 +24,11 @@ use crate::{
 };
 
 mod group_tile;
+mod limiter;
 pub mod rescale;
 mod worker;
+#[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+pub(crate) use limiter::SharedTilePermit;
 pub use worker::fetch_vector_apc;
 
 pub struct RequestSystem<E: Environment, T> {
@@ -72,12 +75,20 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
             Some((multi.vector_tiles.clone(), multi.max_view_level))
         } else {
             let visible_level = view_state.zoom().zoom_level(DEFAULT_TILE_SIZE);
+            let request_padding = if cfg!(target_arch = "wasm32")
+                && style.terrain.is_none()
+                && !view_state.has_external_view()
+            {
+                ViewStatePadding::Tight
+            } else {
+                ViewStatePadding::Loose
+            };
             let computed = view_region_for_projection(
                 style,
                 view_state,
                 world,
                 visible_level,
-                ViewStatePadding::Loose,
+                request_padding,
             )?
             .map(|region| (region.iter().collect::<Vec<_>>(), u8::from(visible_level)));
             let host_frame = crate::render::frame_signals::host_frame_in_progress(world);

@@ -7,7 +7,7 @@ use std::{
 
 use tokio::sync::Semaphore;
 
-pub(super) const MEMORY_CACHE_CAP_BYTES: usize = 64 * 1024 * 1024;
+pub(super) const MEMORY_CACHE_CAP_BYTES: usize = 8 * 1024 * 1024;
 const MEMORY_CACHE_MAX_ITEM_BYTES: usize = 1024 * 1024;
 const DISK_CACHE_IO_CONCURRENCY: usize = 6;
 

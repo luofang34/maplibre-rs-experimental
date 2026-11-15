@@ -7,7 +7,7 @@ use std::{
     future::Future,
     path::PathBuf,
     pin::Pin,
-    sync::{Arc, RwLock},
+    sync::{Arc, LazyLock, RwLock},
 };
 
 use async_trait::async_trait;
@@ -122,14 +122,35 @@ impl InProcessRoutes {
     }
 }
 
+static SHARED_DIRECT_CLIENT: LazyLock<Client> = LazyLock::new(|| {
+    // Public tile servers such as OpenStreetMap reject requests without a User-Agent.
+    match Client::builder().user_agent(USER_AGENT).build() {
+        Ok(client) => client,
+        Err(error) => {
+            tracing::warn!(%error, "cannot build the HTTP client with a user agent");
+            Client::new()
+        }
+    }
+});
+
+static SHARED_RANGE_CLIENT: LazyLock<Client> = LazyLock::new(|| {
+    // Byte-range requests (e.g. PMTiles archives) must read exact uncompressed byte offsets
+    // (`Accept-Encoding: identity` with automatic gunzip disabled) and bypass `http-cache`.
+    match Client::builder().user_agent(USER_AGENT).no_gzip().build() {
+        Ok(client) => client,
+        Err(error) => {
+            tracing::warn!(%error, "cannot build the range HTTP client with no_gzip");
+            Client::new()
+        }
+    }
+});
+
 /// Cloneable HTTP transport that fetches complete bodies and preserves HTTP or network causes.
 /// A configured cache directory enables the HTTP cache middleware; clones share the client.
 #[derive(Clone)]
 pub struct ReqwestHttpClient {
     client: ClientWithMiddleware,
     offline_cache_client: Option<ClientWithMiddleware>,
-    direct_client: Client,
-    range_client: Client,
     frontend: Option<Arc<SharedCacheFrontend>>,
     in_process: Option<InProcessRoutes>,
 }
@@ -174,28 +195,10 @@ impl ReqwestHttpClient {
         frontend: Option<Arc<SharedCacheFrontend>>,
         in_process: Option<InProcessRoutes>,
     ) -> Self {
-        // Public tile servers such as OpenStreetMap reject requests without a User-Agent.
-        let direct_client = match Client::builder().user_agent(USER_AGENT).build() {
-            Ok(client) => client,
-            Err(error) => {
-                tracing::warn!(%error, "cannot build the HTTP client with a user agent");
-                Client::new()
-            }
-        };
-        // Byte-range requests (e.g. PMTiles archives) must read exact uncompressed byte offsets
-        // (`Accept-Encoding: identity` with automatic gunzip disabled) and bypass `http-cache`,
-        // whose cache key ignores `Range` headers and would otherwise serve the 127-byte header
-        // slice for subsequent directory/tile ranges on the same URL.
-        let range_client = match Client::builder().user_agent(USER_AGENT).no_gzip().build() {
-            Ok(client) => client,
-            Err(error) => {
-                tracing::warn!(%error, "cannot build the range HTTP client with no_gzip");
-                Client::new()
-            }
-        };
+        let direct_client = SHARED_DIRECT_CLIENT.clone();
         let mut builder = reqwest_middleware::ClientBuilder::new(direct_client.clone());
         let offline_cache_client = cache_path.as_ref().map(|path| {
-            reqwest_middleware::ClientBuilder::new(direct_client.clone())
+            reqwest_middleware::ClientBuilder::new(direct_client)
                 .with(Cache(HttpCache {
                     mode: CacheMode::OnlyIfCached,
                     manager: CACacheManager::new(path.clone(), false),
@@ -205,7 +208,7 @@ impl ReqwestHttpClient {
         });
         if let Some(path) = cache_path {
             builder = builder.with(Cache(HttpCache {
-                mode: CacheMode::Default,
+                mode: CacheMode::ForceCache,
                 manager: CACacheManager::new(path, false),
                 options: HttpCacheOptions::default(),
             }));
@@ -213,8 +216,6 @@ impl ReqwestHttpClient {
         Self {
             client: builder.build(),
             offline_cache_client,
-            direct_client,
-            range_client,
             frontend,
             in_process,
         }
@@ -253,8 +254,7 @@ impl ReqwestHttpClient {
 
         let response = match (range, volatile) {
             (Some(range), _) => {
-                let request_builder = self
-                    .range_client
+                let request_builder = SHARED_RANGE_CLIENT
                     .get(url)
                     .headers(header_map)
                     .header(reqwest::header::RANGE, range.header())
@@ -269,7 +269,12 @@ impl ReqwestHttpClient {
             }
             (None, true) => {
                 // Volatile sources bypass `CACacheManager` and `SharedCacheFrontend` completely.
-                match self.direct_client.get(url).headers(header_map).send().await {
+                match SHARED_DIRECT_CLIENT
+                    .get(url)
+                    .headers(header_map)
+                    .send()
+                    .await
+                {
                     Ok(response) => response,
                     Err(err) => match self.lookup_in_process_handler(url) {
                         Some(handler) => return handler(url, None).await,

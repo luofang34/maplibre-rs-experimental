@@ -110,5 +110,13 @@ pub(super) fn candidates_in(index: &TileIndex, local: [f64; 4]) -> Vec<&IndexedG
                 geometry.bounds.intersects(&window)
             })
             .collect(),
+        TileIndex::LazyMvt(lazy) => lazy
+            .geometries()
+            .iter()
+            .filter(|geometry| {
+                use rstar::Envelope;
+                geometry.bounds.intersects(&window)
+            })
+            .collect(),
     }
 }

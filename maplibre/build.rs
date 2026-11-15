@@ -191,7 +191,11 @@ fn emit_property_meta(
         Some(val) => format!("Some({:?})", serde_json::to_string(val)?),
         None => "None".to_owned(),
     };
-    let doc = prop.get("doc").and_then(Value::as_str).unwrap_or("");
+    let doc = if env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("wasm32") {
+        ""
+    } else {
+        prop.get("doc").and_then(Value::as_str).unwrap_or("")
+    };
 
     writeln!(
         out,

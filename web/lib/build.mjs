@@ -4,7 +4,7 @@ import inlineWorker from 'esbuild-plugin-inline-worker';
 import yargs from "yargs";
 import process from "process";
 import {spawnSync} from "child_process"
-import {readFileSync} from "fs";
+import {closeSync, openSync, readFileSync, renameSync, rmSync, writeFileSync} from "fs";
 import {dirname} from "path";
 import {fileURLToPath} from "url";
 
@@ -21,6 +21,10 @@ let argv = yargs(process.argv.slice(2))
     .option('multithreaded', {
         type: 'boolean',
         description: 'Enable multithreaded support'
+    })
+    .option('arena-telemetry', {
+        type: 'boolean',
+        description: 'Enable compile-time arena telemetry hooks'
     })
     .option('esm', {
         type: 'boolean',
@@ -41,6 +45,7 @@ let iife = argv.iife;
 let cjs = argv.cjs;
 let release = argv.release;
 let multithreaded = argv.multithreaded;
+let arenaTelemetry = Boolean(argv.arenaTelemetry);
 
 if (!esm && !iife && !cjs) {
     console.warn("Enabling ESM bundling as no other bundle is enabled.")
@@ -64,7 +69,8 @@ let baseConfig = {
     assetNames: "assets/[name]",
     define: {
         WEBGL: `${webgl}`,
-        MULTITHREADED: `${multithreaded}`
+        MULTITHREADED: `${multithreaded}`,
+        ARENA_TELEMETRY: `${arenaTelemetry}`
     },
 }
 
@@ -146,13 +152,20 @@ const wasmPack = () => {
     let profile = release ? "wasm-release" : "wasm-dev"
 
     // language=toml
+    let singlethreaded_config = `target.wasm32-unknown-unknown.rustflags = [
+        "--cfg=web_sys_unstable_apis",
+        "-C", "link-arg=-zstack-size=262144",
+    ]`
+
+    // language=toml
     let multithreaded_config = `target.wasm32-unknown-unknown.rustflags = [
+        "--cfg=web_sys_unstable_apis",
         # Enables features which are required for shared-memory
         "-C", "target-feature=+atomics,+bulk-memory,+mutable-globals",
         # Enables the possibility to import memory into wasm.
         # Without --shared-memory it is not possible to use shared WebAssembly.Memory.
-        # Set maximum memory to 200MB
-        "-C", "link-args=--shared-memory --import-memory --max-memory=209715200",
+        # Set maximum memory ceiling to 1 GiB (initial linear memory stays ~1.25 MiB and grows on demand)
+        "-C", "link-args=--shared-memory --import-memory --max-memory=1073741824 -zstack-size=262144",
         # Exports are needed for "error: failed to prepare module for threading" / "failed to find" errors
         "-C", "link-args=--export=__heap_base --export=__wasm_init_tls --export=__tls_size --export=__tls_align --export=__tls_base"
     ]`
@@ -161,14 +174,21 @@ const wasmPack = () => {
 
     spawnTool('cargo', ["--version"])
 
+    const enabledFeatures = [
+        ...(webgl ? ["web-webgl"] : []),
+        ...(arenaTelemetry ? ["arena-telemetry"] : []),
+    ].join(",");
+
     let cargo = spawnTool('cargo', [
-        ...(multithreaded ? ["--config", multithreaded_config] : []),
+        "--config", multithreaded ? multithreaded_config : singlethreaded_config,
         "build",
         "-p", "web", "--lib",
         "--target", "wasm32-unknown-unknown",
         "--profile", profile,
-        "--features", `${webgl ? "web-webgl," : ""}`,
-        ...(multithreaded ? ["-Z", "build-std=std,panic_abort"] : []),
+        "--features", enabledFeatures,
+        ...(release || multithreaded
+            ? ["-Z", "build-std=std,panic_abort", "-Z", "build-std-features=optimize_for_size"]
+            : []),
     ]);
 
     if (cargo.status !== 0) {
@@ -199,15 +219,55 @@ const wasmPack = () => {
 
     if (release) {
         console.log("Running wasm-opt")
+        const tmpWasm = `${outDirectory}/maplibre_bg.wasm.${process.pid}.tmp`;
         let wasmOpt = spawnTool('npm', ["exec",
             "wasm-opt", "--",
             `${outDirectory}/maplibre_bg.wasm`,
-            "-o", `${outDirectory}/maplibre_bg.wasm`,
-            "-O"
+            "-o", tmpWasm,
+            "-Oz",
+            "--strip-debug",
+            "--strip-producers",
+            "--enable-bulk-memory",
+            "--enable-mutable-globals",
+            "--enable-nontrapping-float-to-int",
+            "--enable-sign-ext",
+            ...(multithreaded ? ["--enable-threads"] : []),
         ]);
 
         if (wasmOpt.status !== 0) {
+            rmSync(tmpWasm, {force: true});
             throw new Error("Failed to execute wasm-opt")
+        }
+        renameSync(tmpWasm, `${outDirectory}/maplibre_bg.wasm`);
+
+        const postOptTests = spawnTool('node', [
+            '--test',
+            'test/wasm-instance.test.mjs',
+            'test/webgpu-compat.test.mjs',
+        ]);
+        if (postOptTests.status !== 0) {
+            throw new Error('Post-wasm-opt initialization tests failed');
+        }
+    }
+}
+
+const acquireBuildLock = async () => {
+    const lockPath = `${getLibDirectory()}/.build.lock`;
+    for (;;) {
+        try {
+            const fd = openSync(lockPath, 'wx');
+            writeFileSync(fd, String(process.pid));
+            closeSync(fd);
+            return () => rmSync(lockPath, {force: true});
+        } catch {
+            try {
+                const holder = Number(readFileSync(lockPath, 'utf8').trim());
+                if (holder > 0) process.kill(holder, 0);
+            } catch {
+                rmSync(lockPath, {force: true});
+                continue;
+            }
+            await new Promise(resolve => setTimeout(resolve, 250));
         }
     }
 }
@@ -218,6 +278,7 @@ const esbuild = async (name, globalName = undefined) => {
 }
 
 const start = async () => {
+    const releaseLock = await acquireBuildLock();
     try {
         console.log("Creating WASM...")
         wasmPack();
@@ -241,7 +302,9 @@ const start = async () => {
         emitTypeScript();
     } catch (e) {
         console.error("Failed to start building: " + e.message)
-        process.exit(1)
+        process.exitCode = 1;
+    } finally {
+        releaseLock();
     }
 }
 

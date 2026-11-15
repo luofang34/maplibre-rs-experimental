@@ -43,12 +43,18 @@ pub fn queue_system(
                 .collect()
         })
         .unwrap_or_default();
-    let Some((Initialized(tile_view_pattern), Initialized(raster_resources))) =
-        world.resources.query_mut::<(
-            &mut Eventually<WgpuTileViewPattern>,
-            &mut Eventually<RasterResources>,
-        )>()
+    let Some((tile_view_pattern, raster_resources)) = world.resources.query_mut::<(
+        &mut Eventually<WgpuTileViewPattern>,
+        &mut Eventually<RasterResources>,
+    )>() else {
+        return Err(SystemError::Dependencies);
+    };
+    let (Initialized(tile_view_pattern), Initialized(raster_resources)) =
+        (tile_view_pattern, raster_resources)
     else {
+        #[cfg(target_arch = "wasm32")]
+        return Ok(());
+        #[cfg(not(target_arch = "wasm32"))]
         return Err(SystemError::Dependencies);
     };
     let style_zoom = view_state.style_zoom().value();

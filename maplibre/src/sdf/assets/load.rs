@@ -7,7 +7,7 @@ use std::{
 use super::{
     cache::{AssetFailure, SpriteSheet},
     provider::{ImageProviders, Resolved},
-    AtlasBuilder, AtlasEntry, IconStretch, SymbolAtlas, TextFit,
+    AtlasBuilder, AtlasEntry, SymbolAtlas,
 };
 use crate::{
     io::source_client::{HttpClient, SourceClient},
@@ -16,7 +16,13 @@ use crate::{
 };
 
 mod local_fonts;
+mod prefetch;
 mod requests;
+pub(crate) use prefetch::spawn_style_symbol_prefetch;
+#[doc(hidden)]
+pub use prefetch::spawn_worker_symbol_prefetch;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use prefetch::warm_style_symbol_assets;
 #[cfg(test)]
 use requests::requests;
 use requests::{symbol_requests, symbol_requests_from_tile};
@@ -127,13 +133,23 @@ async fn load_symbol_assets_for_requests<HC: HttpClient>(
     req: requests::SymbolRequests,
 ) -> Result<LoadedSymbolAssets, SymbolAssetError> {
     let mut builder = AtlasBuilder::new();
-    local_fonts::load_fonts_and_shaping(client, config, req.fonts, req.labels, &mut builder)
-        .await?;
     let icons = req.icons;
-    if !icons.is_empty() {
-        for (prefix, url) in sprite_sources(config.sprite) {
-            load_sprites(client, &mut builder, &prefix, &url, &icons).await?;
-        }
+    let sources = if icons.is_empty() {
+        Vec::new()
+    } else {
+        sprite_sources(config.sprite)
+    };
+    let ((), fetched_sheets) = futures::future::try_join(
+        local_fonts::load_fonts_and_shaping(client, config, req.fonts, req.labels, &mut builder),
+        futures::future::try_join_all(
+            sources
+                .iter()
+                .map(|(prefix, url)| fetch_sprite_sheet(client, prefix, url)),
+        ),
+    )
+    .await?;
+    for (prefix, sheet) in fetched_sheets.into_iter().flatten() {
+        pack_sprites(&mut builder, prefix, &icons, &sheet);
     }
     for (name, image) in config.images {
         if icons.contains(name) {
@@ -234,7 +250,7 @@ fn pack_style_image(
 }
 
 /// The range from the style's glyph server, or the bundled Latin range when that is all there is.
-async fn glyph_range<HC: HttpClient>(
+pub(super) async fn glyph_range<HC: HttpClient>(
     client: &SourceClient<HC>,
     template: Option<&str>,
     font: &str,
@@ -257,7 +273,8 @@ async fn glyph_range<HC: HttpClient>(
     }
 }
 
-fn glyph_url(template: &str, font: &str, range: u32) -> String {
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub(super) fn glyph_url(template: &str, font: &str, range: u32) -> String {
     let encoded: String = font
         .bytes()
         .map(|byte| {
@@ -293,26 +310,21 @@ pub(super) fn sprite_sources(sprite: Option<&serde_json::Value>) -> Vec<(String,
     }
 }
 
-async fn load_sprites<HC: HttpClient>(
+pub(super) async fn fetch_sprite_sheet<'a, HC: HttpClient>(
     client: &SourceClient<HC>,
-    builder: &mut AtlasBuilder,
-    prefix: &str,
+    prefix: &'a str,
     url: &str,
-    wanted: &HashSet<String>,
-) -> Result<(), SymbolAssetError> {
+) -> Result<Option<(&'a str, std::sync::Arc<SpriteSheet>)>, SymbolAssetError> {
     let json_url = sprite_url(url, "json");
     let png_url = sprite_url(url, "png");
     match client.assets().sprites(client, &json_url, &png_url).await {
-        Ok(sheet) => pack_sprites(builder, prefix, wanted, &sheet),
-        Err(AssetFailure::Retryable(reason)) => {
-            return Err(SymbolAssetError {
-                url: json_url,
-                reason,
-            })
-        }
-        Err(_) => {}
+        Ok(sheet) => Ok(Some((prefix, sheet))),
+        Err(AssetFailure::Retryable(reason)) => Err(SymbolAssetError {
+            url: json_url,
+            reason,
+        }),
+        Err(_) => Ok(None),
     }
-    Ok(())
 }
 
 fn pack_sprites(
@@ -322,22 +334,14 @@ fn pack_sprites(
     sheet: &SpriteSheet,
 ) {
     let image = &sheet.image;
-    for (name, value) in &sheet.document {
-        let name = format!("{prefix}{name}");
-        if !wanted.contains(&name) {
-            continue;
-        }
-        let read = |key: &str| {
-            value
-                .get(key)
-                .and_then(|value| value.as_u64())
-                .and_then(|value| u32::try_from(value).ok())
-        };
-        let (Some(x), Some(y), Some(width), Some(height)) =
-            (read("x"), read("y"), read("width"), read("height"))
-        else {
+    for wanted_name in wanted {
+        let Some(local_name) = wanted_name.strip_prefix(prefix) else {
             continue;
         };
+        let Some(entry) = sheet.document.get(local_name) else {
+            continue;
+        };
+        let (x, y, width, height) = (entry.x, entry.y, entry.width, entry.height);
         if width == 0
             || height == 0
             || x.saturating_add(width) > image.width()
@@ -346,10 +350,9 @@ fn pack_sprites(
             continue;
         }
         let pixels = image::imageops::crop_imm(image, x, y, width, height).to_image();
-        let sdf = value.get("sdf").and_then(|v| v.as_bool()).unwrap_or(false);
         // Colour icons are stored premultiplied, so filtering them never darkens an edge with
         // the colour of the clear texels around it.
-        let packed = if sdf {
+        let packed = if entry.sdf {
             pixels.into_raw()
         } else {
             premultiply(pixels.as_raw())
@@ -357,69 +360,19 @@ fn pack_sprites(
         let Some(rect) = builder.pack(width, height, &packed) else {
             continue;
         };
-        let ratio = value
-            .get("pixelRatio")
-            .and_then(|value| value.as_f64())
-            .unwrap_or(1.0)
-            .max(0.01) as f32;
         builder.atlas.icons.insert(
-            name,
+            wanted_name.clone(),
             AtlasEntry {
                 rect,
-                metrics: [0.0, 0.0, 0.0, ratio],
-                kind: if value.get("sdf").and_then(|v| v.as_bool()).unwrap_or(false) {
-                    2
-                } else {
-                    1
-                },
-                stretch: icon_stretch(value),
+                metrics: [0.0, 0.0, 0.0, entry.pixel_ratio],
+                kind: if entry.sdf { 2 } else { 1 },
+                stretch: entry.stretch.clone(),
             },
         );
     }
 }
 
-fn ranges(value: &serde_json::Value, key: &str) -> Vec<[f32; 2]> {
-    value
-        .get(key)
-        .and_then(|ranges| ranges.as_array())
-        .into_iter()
-        .flatten()
-        .filter_map(|range| {
-            let range = range.as_array()?;
-            Some([
-                range.first()?.as_f64()? as f32,
-                range.get(1)?.as_f64()? as f32,
-            ])
-        })
-        .collect()
-}
-
-fn text_fit(value: &serde_json::Value, key: &str) -> Option<TextFit> {
-    match value.get(key)?.as_str()? {
-        "stretchOrShrink" => Some(TextFit::StretchOrShrink),
-        "stretchOnly" => Some(TextFit::StretchOnly),
-        "proportional" => Some(TextFit::Proportional),
-        _ => None,
-    }
-}
-
-/// The stretch fields of a sprite entry, or `None` when it has none.
-fn icon_stretch(value: &serde_json::Value) -> Option<Box<IconStretch>> {
-    let stretch = IconStretch {
-        stretch_x: ranges(value, "stretchX"),
-        stretch_y: ranges(value, "stretchY"),
-        content: value.get("content").and_then(|content| {
-            let content = content.as_array()?;
-            let read = |index: usize| content.get(index)?.as_f64().map(|edge| edge as f32);
-            Some([read(0)?, read(1)?, read(2)?, read(3)?])
-        }),
-        text_fit_width: text_fit(value, "textFitWidth"),
-        text_fit_height: text_fit(value, "textFitHeight"),
-    };
-    (stretch != IconStretch::default()).then(|| Box::new(stretch))
-}
-
-fn sprite_url(url: &str, extension: &str) -> String {
+pub(super) fn sprite_url(url: &str, extension: &str) -> String {
     let (path, query) = url
         .split_once('?')
         .map_or((url, None), |(path, query)| (path, Some(query)));

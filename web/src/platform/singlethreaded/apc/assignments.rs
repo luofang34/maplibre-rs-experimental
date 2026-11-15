@@ -22,6 +22,11 @@ impl Assignments {
         self.0.remove(&attempt)
     }
 
+    /// Drains all `(attempt, worker)` assignments still in flight when the map shuts down.
+    pub(crate) fn drain(&mut self) -> impl Iterator<Item = (u64, usize)> + '_ {
+        self.0.drain()
+    }
+
     /// Calls that may still be running.
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {

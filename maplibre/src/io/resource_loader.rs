@@ -9,7 +9,7 @@
 use std::{
     collections::HashMap,
     fmt,
-    sync::{Arc, Mutex, PoisonError},
+    sync::{Arc, Mutex},
 };
 
 use async_trait::async_trait;
@@ -94,6 +94,8 @@ struct Inner {
     pmtiles: PmtilesReader,
     #[cfg(all(not(target_arch = "wasm32"), feature = "native-io"))]
     mbtiles: MbtilesReader,
+    #[cfg(not(target_arch = "wasm32"))]
+    local_files: Mutex<HashMap<std::path::PathBuf, (Arc<std::fs::File>, u64)>>,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -180,9 +182,7 @@ impl Drop for Leader<'_> {
 
 impl Inner {
     fn table(&self) -> std::sync::MutexGuard<'_, HashMap<Key, Vec<oneshot::Sender<Outcome>>>> {
-        self.in_flight
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+        crate::platform::lock_unpoisoned(&self.in_flight)
     }
 
     fn take(&self, key: &Key) -> Vec<oneshot::Sender<Outcome>> {
@@ -230,7 +230,7 @@ impl Inner {
                     };
                     #[cfg(not(target_arch = "wasm32"))]
                     if let Some(raw_path) = req.url.strip_prefix("file://") {
-                        let result = load_local_file(&req.url, raw_path, req.range);
+                        let result = self.load_local_file(&req.url, raw_path, req.range);
                         leader.finish(Outcome::new(&result));
                         return result;
                     }
@@ -252,6 +252,8 @@ impl SharedLoader {
             pmtiles: PmtilesReader::default(),
             #[cfg(all(not(target_arch = "wasm32"), feature = "native-io"))]
             mbtiles: MbtilesReader::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            local_files: Mutex::default(),
         }))
     }
 }
@@ -309,61 +311,102 @@ impl HttpClient for SharedLoader {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn load_local_file(
-    url: &str,
-    raw_path: &str,
-    range: Option<ByteRange>,
-) -> Result<Vec<u8>, SourceFetchError> {
-    use std::io::{ErrorKind, Read, Seek, SeekFrom};
+impl Inner {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn open_cached_file(
+        &self,
+        url: &str,
+        decoded: &std::path::Path,
+    ) -> Result<(Arc<std::fs::File>, u64), SourceFetchError> {
+        use std::io::ErrorKind;
 
-    use crate::io::source_client::RangeOutOfBounds;
-
-    let stripped = raw_path.strip_prefix("localhost").unwrap_or(raw_path);
-    #[cfg(windows)]
-    let stripped = if stripped.as_bytes().get(2) == Some(&b':') && stripped.starts_with('/') {
-        &stripped[1..]
-    } else {
-        stripped
-    };
-    let decoded = percent_decode_path(stripped);
-    let mut file = std::fs::File::open(&decoded).map_err(|err| {
-        if err.kind() == ErrorKind::NotFound {
-            SourceFetchError::not_found(url)
-        } else {
-            SourceFetchError(Box::new(err))
-        }
-    })?;
-
-    match range {
-        None => {
-            let mut body = Vec::new();
-            file.read_to_end(&mut body)
-                .map_err(|err| SourceFetchError(Box::new(err)))?;
-            Ok(body)
-        }
-        Some(range) => {
-            let size_u64 = file
-                .metadata()
-                .map_err(|err| SourceFetchError(Box::new(err)))?
-                .len();
-            let end = range.offset.saturating_add(range.length);
-            if end > size_u64 {
-                return Err(SourceFetchError(Box::new(RangeOutOfBounds {
-                    url: url.to_owned(),
-                    offset: range.offset,
-                    end,
-                    size: usize::try_from(size_u64).unwrap_or(usize::MAX),
-                })));
+        {
+            let guard = crate::platform::lock_unpoisoned(&self.local_files);
+            if let Some(entry) = guard.get(decoded) {
+                return Ok(entry.clone());
             }
-            let len =
-                usize::try_from(range.length).map_err(|err| SourceFetchError(Box::new(err)))?;
-            file.seek(SeekFrom::Start(range.offset))
-                .map_err(|err| SourceFetchError(Box::new(err)))?;
-            let mut buf = vec![0_u8; len];
-            file.read_exact(&mut buf)
-                .map_err(|err| SourceFetchError(Box::new(err)))?;
-            Ok(buf)
+        }
+        let file = std::fs::File::open(decoded).map_err(|err| {
+            if err.kind() == ErrorKind::NotFound {
+                SourceFetchError::not_found(url)
+            } else {
+                SourceFetchError(Box::new(err))
+            }
+        })?;
+        let size_u64 = file
+            .metadata()
+            .map_err(|err| SourceFetchError(Box::new(err)))?
+            .len();
+        let handle = Arc::new(file);
+        let mut guard = crate::platform::lock_unpoisoned(&self.local_files);
+        guard.insert(decoded.to_path_buf(), (Arc::clone(&handle), size_u64));
+        Ok((handle, size_u64))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn load_local_file(
+        &self,
+        url: &str,
+        raw_path: &str,
+        range: Option<ByteRange>,
+    ) -> Result<Vec<u8>, SourceFetchError> {
+        use std::io::ErrorKind;
+
+        use crate::io::source_client::RangeOutOfBounds;
+
+        let stripped = raw_path.strip_prefix("localhost").unwrap_or(raw_path);
+        #[cfg(windows)]
+        let stripped = if stripped.as_bytes().get(2) == Some(&b':') && stripped.starts_with('/') {
+            &stripped[1..]
+        } else {
+            stripped
+        };
+        let decoded = percent_decode_path(stripped);
+
+        match range {
+            None => std::fs::read(&decoded).map_err(|err| {
+                if err.kind() == ErrorKind::NotFound {
+                    SourceFetchError::not_found(url)
+                } else {
+                    SourceFetchError(Box::new(err))
+                }
+            }),
+            Some(range) => {
+                let (file, size_u64) = self.open_cached_file(url, &decoded)?;
+                let end = range.offset.saturating_add(range.length);
+                if end > size_u64 {
+                    return Err(SourceFetchError(Box::new(RangeOutOfBounds {
+                        url: url.to_owned(),
+                        offset: range.offset,
+                        end,
+                        size: usize::try_from(size_u64).unwrap_or(usize::MAX),
+                    })));
+                }
+                let len =
+                    usize::try_from(range.length).map_err(|err| SourceFetchError(Box::new(err)))?;
+                let mut buf = vec![0_u8; len];
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::FileExt;
+                    if let Err(err) = file.read_exact_at(&mut buf, range.offset) {
+                        crate::platform::lock_unpoisoned(&self.local_files).remove(&decoded);
+                        return Err(SourceFetchError(Box::new(err)));
+                    }
+                }
+                #[cfg(not(unix))]
+                {
+                    use std::io::{Read, Seek, SeekFrom};
+                    let mut fresh = std::fs::File::open(&decoded)
+                        .map_err(|err| SourceFetchError(Box::new(err)))?;
+                    fresh
+                        .seek(SeekFrom::Start(range.offset))
+                        .map_err(|err| SourceFetchError(Box::new(err)))?;
+                    fresh
+                        .read_exact(&mut buf)
+                        .map_err(|err| SourceFetchError(Box::new(err)))?;
+                }
+                Ok(buf)
+            }
         }
     }
 }

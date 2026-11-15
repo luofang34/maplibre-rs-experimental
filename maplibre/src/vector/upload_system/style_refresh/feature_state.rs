@@ -8,8 +8,7 @@ use crate::{
     sdf::{SymbolBufferPool, SymbolLayersDataComponent},
     style::{
         feature_state::{
-            layer_paint_reads_feature_state, sync_arc_properties_feature_state,
-            sync_properties_feature_state, FeatureStateArcMemo,
+            layer_paint_reads_feature_state, sync_arc_properties_feature_state, FeatureStateArcMemo,
         },
         layer::StyleLayer,
         Style,
@@ -56,12 +55,13 @@ pub(super) fn sync_tile_feature_states(
                 let source_state = style.feature_state.source(source);
                 let mut any_changed = false;
                 for feature in &mut bucket.features {
-                    any_changed |= sync_properties_feature_state(
+                    any_changed |= sync_arc_properties_feature_state(
                         &mut feature.data.properties,
                         feature.data.id,
                         promote_prop,
                         source_state,
                         Some(&bucket.source_layer),
+                        memo,
                     );
                 }
                 if any_changed && layer_paint_reads_feature_state(style_layer) {
@@ -86,12 +86,13 @@ pub(super) fn sync_tile_feature_states(
                     .and_then(|p| p.property_for(Some(&bucket.source_layer)));
                 let source_state = style.feature_state.source(source);
                 for feature in &mut bucket.features {
-                    sync_properties_feature_state(
+                    sync_arc_properties_feature_state(
                         &mut feature.data.properties,
                         feature.data.id,
                         promote_prop,
                         source_state,
                         Some(&bucket.source_layer),
+                        memo,
                     );
                 }
             }
@@ -136,7 +137,8 @@ pub(super) fn sync_tile_feature_states(
                             memo,
                         );
                     }
-                } else if !avail.buffer.buffer.indices.is_empty()
+                } else if (avail.buffer.usable_indices > 0
+                    || !avail.buffer.buffer.indices.is_empty())
                     && layer_paint_reads_feature_state(style_layer)
                 {
                     *needs_worker_refresh = true;
@@ -160,7 +162,7 @@ pub(super) fn sync_tile_feature_states(
                     let VectorLayerBucket::AvailableLayer(avail) = bucket else {
                         continue;
                     };
-                    if avail.buffer.buffer.indices.is_empty() {
+                    if avail.buffer.usable_indices == 0 && avail.buffer.buffer.indices.is_empty() {
                         continue;
                     }
                     if let Some(style_layer) = layer_by_id.get(avail.style_layer_id.as_str()) {

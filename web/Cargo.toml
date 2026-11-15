@@ -15,6 +15,9 @@ authors.workspace = true
 [features]
 web-webgl = ["maplibre/web-webgl"]
 trace = ["maplibre/trace", "tracing-wasm"]
+font-shaping = ["maplibre/font-shaping"]
+mlt = ["maplibre/mlt"]
+arena-telemetry = []
 default = []
 
 [package.metadata.wasm-pack.profile.release]
@@ -29,13 +32,12 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 tracing.workspace = true
 async-trait.workspace = true
-maplibre = { path = "../maplibre" }
+maplibre = { path = "../maplibre", default-features = false, features = ["raster", "geojson"] }
 maplibre-winit = { path = "../maplibre-winit", version = "0.1.0" }
 
 getrandom = { version = "0.4.3", features = ["wasm_js"] }
 
 log.workspace = true
-rand.workspace = true
 
 thiserror.workspace = true
 
@@ -56,10 +58,10 @@ tracing-wasm = { workspace = true, optional = true } # TODO: Low quality depende
 serde_json.workspace = true
 serde.workspace = true
 cgmath.workspace = true
+bytemuck.workspace = true
 flatbuffers.workspace = true
 
 image.workspace = true # FIXME: Remove image, use browser capabilities
-reqwest = { workspace = true, features = ["json"] }
 
 [build-dependencies]
 flatc-rust.workspace = true

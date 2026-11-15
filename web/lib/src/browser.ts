@@ -52,26 +52,30 @@ export const isWebGLSupported = () => {
     }
 }
 
-export const checkWasmFeatures = async () => {
-    const checkFeature = async function (featureName: string, feature: () => Promise<boolean>) {
-        let result = await feature();
-        let msg = `The feature ${featureName} returned: ${result}`;
-        if (result) {
-            console.log(msg);
-        } else {
-            console.warn(msg);
-        }
-    }
+let checkedFeatures: Promise<void> | null = null;
 
-    await checkFeature("bulkMemory", bulkMemory);
-    await checkFeature("exceptions", exceptions);
-    await checkFeature("multiValue", multiValue);
-    await checkFeature("mutableGlobals", mutableGlobals);
-    await checkFeature("referenceTypes", referenceTypes);
-    await checkFeature("saturatedFloatToInt", saturatedFloatToInt);
-    await checkFeature("signExtensions", signExtensions);
-    await checkFeature("simd", simd);
-    await checkFeature("tailCall", tailCall);
-    await checkFeature("threads", threads);
-    await checkFeature("bigInt", bigInt);
+export const checkWasmFeatures = (): Promise<void> => {
+    if (!checkedFeatures) {
+        checkedFeatures = (async () => {
+            const entries: Array<[string, () => Promise<boolean>]> = [
+                ["bulkMemory", bulkMemory],
+                ["exceptions", exceptions],
+                ["multiValue", multiValue],
+                ["mutableGlobals", mutableGlobals],
+                ["referenceTypes", referenceTypes],
+                ["saturatedFloatToInt", saturatedFloatToInt],
+                ["signExtensions", signExtensions],
+                ["simd", simd],
+                ["tailCall", tailCall],
+                ["threads", threads],
+                ["bigInt", bigInt],
+            ];
+            await Promise.all(entries.map(async ([name, detect]) => {
+                if (!(await detect())) {
+                    console.warn(`WASM feature ${name} is unsupported in this browser.`);
+                }
+            }));
+        })();
+    }
+    return checkedFeatures;
 }

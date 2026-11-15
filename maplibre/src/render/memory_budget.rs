@@ -26,6 +26,11 @@ pub const DRAPE_TEXTURES_WHEN_CRITICAL: usize = 12;
 pub const TILES_IN_FLIGHT_WHEN_LOW: usize = 4;
 /// Tiles whose geometry is uploaded in one frame; the rest wait for the next, so a burst of
 /// arrivals does not stage a hundred tiles' geometry at once.
+#[cfg(target_arch = "wasm32")]
+pub const UPLOADS_PER_FRAME: usize = 24;
+/// Tiles whose geometry is uploaded in one frame; the rest wait for the next, so a burst of
+/// arrivals does not stage a hundred tiles' geometry at once.
+#[cfg(not(target_arch = "wasm32"))]
 pub const UPLOADS_PER_FRAME: usize = 8;
 /// Bytes of tile geometry, labels and textures one frame uploads; the rest wait for the next
 /// frame, so a burst of arrivals is spread over frames instead of stalling one.

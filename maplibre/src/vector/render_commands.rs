@@ -207,12 +207,16 @@ impl RenderCommand<LayerItem> for SetLineTilePipeline {
             return RenderCommandResult::Failure;
         };
 
-        pass.set_pipeline(match line_mode(world, item) {
-            LineMode::Flat => &pipeline.flat,
-            LineMode::Structure => &pipeline.structure,
-            LineMode::Elevated => &pipeline.elevated,
-            LineMode::Terrain => &pipeline.terrain,
-        });
+        let chosen = match line_mode(world, item) {
+            LineMode::Flat => Some(&pipeline.flat),
+            LineMode::Structure => pipeline.structure.as_ref(),
+            LineMode::Elevated => pipeline.elevated.as_ref(),
+            LineMode::Terrain => pipeline.terrain.as_ref(),
+        };
+        let Some(chosen) = chosen else {
+            return RenderCommandResult::Failure;
+        };
+        pass.set_pipeline(chosen);
         pass.set_bind_group(
             0,
             projection_resources.bind_group_for(item.projection_binding()),

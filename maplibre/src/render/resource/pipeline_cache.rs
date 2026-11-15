@@ -7,7 +7,7 @@ use std::{
     collections::HashMap,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc, Mutex, PoisonError,
+        Arc, Mutex,
     },
 };
 
@@ -163,7 +163,7 @@ impl SharedPipelines {
         entries: &[wgpu::BindGroupLayoutEntry],
     ) -> wgpu::BindGroupLayout {
         let key = (device.clone(), entries.to_vec());
-        let mut state = self.0.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = crate::platform::lock_unpoisoned(&self.0.state);
         if let Some(existing) = state.layouts.get(&key) {
             return existing.clone();
         }
@@ -181,7 +181,7 @@ impl SharedPipelines {
         source: &'static str,
     ) -> wgpu::ShaderModule {
         let key = (device.clone(), source);
-        let mut state = self.0.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = crate::platform::lock_unpoisoned(&self.0.state);
         if let Some(existing) = state.shaders.get(&key) {
             self.0.shader_hits.fetch_add(1, Ordering::Relaxed);
             return existing.clone();
@@ -217,7 +217,7 @@ impl SharedPipelines {
             multisample: descriptor.multisample,
         };
         {
-            let state = self.0.state.lock().unwrap_or_else(PoisonError::into_inner);
+            let state = crate::platform::lock_unpoisoned(&self.0.state);
             if let Some(existing) = state.pipelines.get(&key) {
                 self.0.pipeline_hits.fetch_add(1, Ordering::Relaxed);
                 return existing.clone();
@@ -279,7 +279,7 @@ impl SharedPipelines {
             cache: None,
         });
         self.0.pipeline_compiles.fetch_add(1, Ordering::Relaxed);
-        let mut state = self.0.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = crate::platform::lock_unpoisoned(&self.0.state);
         state.pipelines.insert(key, pipeline.clone());
         pipeline
     }

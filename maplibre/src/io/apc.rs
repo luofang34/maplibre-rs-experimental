@@ -2,34 +2,24 @@
 
 use std::{
     any::{type_name, Any, TypeId},
-    cell::{Cell, RefCell},
-    collections::HashMap,
     fmt::Debug,
     future::Future,
-    marker::PhantomData,
     pin::Pin,
-    sync::{
-        mpsc,
-        mpsc::{Receiver, Sender},
-        Arc, Mutex, PoisonError,
-    },
-    vec::IntoIter,
+    sync::Arc,
 };
 
-use futures::future::{AbortHandle, Abortable, Aborted};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    coords::WorldTileCoords,
-    define_label,
-    environment::{OffscreenKernel, OffscreenKernelConfig},
-    io::scheduler::{ScheduleError, Scheduler},
-    style::Style,
+    coords::WorldTileCoords, define_label, environment::OffscreenKernel,
+    io::scheduler::ScheduleError, style::Style,
 };
 
 mod attempt;
+mod scheduler;
 pub(crate) use attempt::AttemptContext;
+pub use scheduler::{SchedulerAsyncProcedureCall, SchedulerContext};
 
 define_label!(MessageTag);
 
@@ -59,6 +49,8 @@ pub struct Message {
     tag: &'static dyn MessageTag,
     transferable: Box<dyn Any + Send>,
     attempt: Option<u64>,
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+    permit: Option<crate::vector::request_system::SharedTilePermit>,
 }
 
 impl Message {
@@ -68,12 +60,24 @@ impl Message {
             tag,
             transferable,
             attempt: None,
+            #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+            permit: None,
         }
     }
 
     /// Associates this result with the request that produced it, including partial payloads.
     pub fn with_attempt(mut self, attempt: u64) -> Self {
         self.attempt = Some(attempt);
+        self
+    }
+
+    /// Attaches an unconsumed shared-memory tile permit released when the message is consumed.
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+    pub(crate) fn with_shared_permit(
+        mut self,
+        permit: crate::vector::request_system::SharedTilePermit,
+    ) -> Self {
+        self.permit = Some(permit);
         self
     }
 
@@ -86,8 +90,9 @@ impl Message {
     /// A mismatch drops the payload and returns its tag and type context.
     pub fn into_transferable<T: 'static>(self) -> Result<Box<T>, MessageError> {
         let actual = self.transferable.as_ref().type_id();
+        let tag = self.tag;
         self.transferable.downcast::<T>().map_err(|_| MessageError {
-            tag: self.tag,
+            tag,
             expected: type_name::<T>(),
             actual,
         })
@@ -276,139 +281,18 @@ pub trait AsyncProcedureCall<K: OffscreenKernel>: 'static {
     fn image_providers(&self) -> Option<&crate::sdf::assets::ImageProviders> {
         None
     }
-}
 
-/// Reply sender whose clones share the scheduler-backed APC's receiving channel.
-#[derive(Clone)]
-pub struct SchedulerContext {
-    sender: Sender<Message>,
-}
-
-impl Context for SchedulerContext {
-    fn send_back<T: IntoMessage>(&self, message: T) -> Result<(), SendError> {
-        self.sender
-            .send(message.into())
-            .map_err(|source| SendError::Transmission {
-                operation: "sending a result to the caller",
-                source: Box::new(source),
-            })
-    }
-}
-
-/// An APC using a scheduler for execution and an in-process channel for replies.
-///
-/// Receiving drains available matches in delivery order. Procedure failures are logged;
-/// only preparation and admission failures are returned by [`AsyncProcedureCall::call`].
-pub struct SchedulerAsyncProcedureCall<K: OffscreenKernel, S: Scheduler> {
-    channel: (Sender<Message>, Receiver<Message>),
-    buffer: RefCell<Vec<Message>>,
-    /// Messages [`AsyncProcedureCall::has_arrivals`] moved into `buffer` that no receive has
-    /// offered to a consumer since.
-    unoffered: Cell<bool>,
-    scheduler: S,
-    phantom_k: PhantomData<K>,
-    offscreen_kernel_config: OffscreenKernelConfig,
-    /// Tracked calls still running, by attempt, so a cancelled one can be stopped.
-    running: Arc<Mutex<HashMap<u64, AbortHandle>>>,
-}
-
-impl<K: OffscreenKernel, S: Scheduler> SchedulerAsyncProcedureCall<K, S> {
-    /// Creates an empty reply channel and keeps the worker kernel configuration for future calls.
-    pub fn new(scheduler: S, offscreen_kernel_config: OffscreenKernelConfig) -> Self {
-        Self {
-            channel: mpsc::channel(),
-            buffer: RefCell::new(Vec::new()),
-            unoffered: Cell::new(false),
-            phantom_k: PhantomData,
-            scheduler,
-            offscreen_kernel_config,
-            running: Arc::default(),
-        }
+    /// Whether this transport notifies a registered waker when worker results arrive.
+    fn supports_waker(&self) -> bool {
+        false
     }
 
-    fn running(&self) -> std::sync::MutexGuard<'_, HashMap<u64, AbortHandle>> {
-        self.running.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-}
+    /// Registers a callback invoked when a worker delivers results to this transport.
+    fn set_waker(&self, _wake: Arc<dyn Fn() + Send + Sync>) {}
 
-impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncProcedureCall<K, S> {
-    type Context = SchedulerContext;
-    type ReceiveIterator<F: FnMut(&Message) -> bool> = IntoIter<Message>;
-
-    fn receive<F: FnMut(&Message) -> bool>(&self, mut filter: F) -> Self::ReceiveIterator<F> {
-        self.unoffered.set(false);
-        let mut buffer = self.buffer.borrow_mut();
-        // Partial and final tile completions must retain the worker's delivery order.
-        let mut ret: Vec<_> = buffer.extract_if(.., |message| filter(message)).collect();
-
-        while let Ok(message) = self.channel.1.try_recv() {
-            tracing::debug!("Data reached main thread: {message:?}");
-
-            if filter(&message) {
-                ret.push(message);
-            } else {
-                buffer.push(message)
-            }
-        }
-
-        ret.into_iter()
-    }
-
-    fn call(
-        &self,
-        input: Input,
-        procedure: AsyncProcedure<K, Self::Context>,
-    ) -> Result<(), CallError> {
-        let sender = self.channel.0.clone();
-        let offscreen_kernel_config = self.offscreen_kernel_config.clone();
-        let attempt = input.attempt;
-        let (abort, registration) = AbortHandle::new_pair();
-        self.running().insert(attempt, abort);
-        let running = self.running.clone();
-
-        let scheduled = self.scheduler.schedule(move || async move {
-            tracing::debug!(thread = ?std::thread::current().name(), "processing worker call");
-
-            let kernel = K::create(offscreen_kernel_config);
-            // A result that cannot be delivered, because the map already shut down, must
-            // not take the worker thread down with it.
-            let call = procedure(input, SchedulerContext { sender }, kernel);
-            match Abortable::new(call, registration).await {
-                Ok(Err(error)) => tracing::warn!(?error, "procedure failed"),
-                Ok(Ok(())) => {}
-                Err(Aborted) => tracing::debug!(attempt, "cancelled worker call stopped"),
-            }
-            running
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .remove(&attempt);
-        });
-        if scheduled.is_err() {
-            // A rejected factory never runs, so nothing else removes its entry.
-            self.running().remove(&attempt);
-        }
-        scheduled.map_err(CallError::Schedule)
-    }
-
-    fn has_arrivals(&self) -> bool {
-        // The receiver cannot be peeked; buffered messages keep their order ahead of the channel.
-        let mut buffer = self.buffer.borrow_mut();
-        while let Ok(message) = self.channel.1.try_recv() {
-            buffer.push(message);
-            self.unoffered.set(true);
-        }
-        self.unoffered.get()
-    }
-
-    fn cancel(&self, attempt: u64) {
-        if let Some(abort) = self.running().remove(&attempt) {
-            abort.abort();
-        }
-    }
-
-    fn image_providers(&self) -> Option<&crate::sdf::assets::ImageProviders> {
-        Some(&self.offscreen_kernel_config.image_providers)
-    }
+    /// Pre-delivers `style` to offscreen workers while GPU initialization is still in flight so
+    /// workers can parse the style and warm symbol assets concurrently.
+    fn warm_style(&self, _style: &Style) {}
 }
 
 /// Applies valid results in the entire drained batch before reporting its first type error.

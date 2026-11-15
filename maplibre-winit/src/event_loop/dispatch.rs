@@ -46,12 +46,16 @@ where
     pub(super) fn new(
         map: Map<E>,
         max_frames: Option<u64>,
-        #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))] window: std::sync::Weak<
-            crate::RawWinitWindow,
-        >,
+        window: std::sync::Weak<crate::RawWinitWindow>,
     ) -> Self {
         let now = Instant::now();
         let scale_factor = map.window().scale_factor();
+        let wake_window = window.clone();
+        map.kernel().apc().set_waker(std::sync::Arc::new(move || {
+            if let Some(window) = wake_window.upgrade() {
+                window.request_redraw();
+            }
+        }));
         Self {
             map,
             input: InputController::new(0.2, 100.0, 1.0),
@@ -177,7 +181,11 @@ where
         }
         let after = Instant::now();
         let next = NextFrame {
-            map: self.map.needs_redraw(),
+            map: if self.map.kernel().apc().supports_waker() {
+                self.map.has_ready_work()
+            } else {
+                self.map.needs_redraw()
+            },
             retry: self.map.next_retry_delay(),
             arrivals: self.map.kernel().apc().has_arrivals(),
             input: self.input.moved_view(),

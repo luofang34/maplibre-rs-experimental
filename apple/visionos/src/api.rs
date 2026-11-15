@@ -342,6 +342,88 @@ pub unsafe extern "C" fn maplibre_visionos_set_geojson_source(
     }
 }
 
+/// Updates a named `image` source URL and optional four-corner coordinates (`[NW, NE, SE, SW]` as
+/// 8 `f64` values `[nw_lon, nw_lat, ne_lon, ne_lat, se_lon, se_lat, sw_lon, sw_lat]`) in-place.
+///
+/// # Safety
+///
+/// `map` must come from [`maplibre_visionos_create`] and not have been destroyed; `source_name`
+/// and `url` must be valid NUL-terminated UTF-8 strings; `corners_lon_lat` must either be NULL
+/// or point to 8 contiguous `f64` values.
+#[no_mangle]
+pub unsafe extern "C" fn maplibre_visionos_set_image_source(
+    map: *mut MaplibreVisionOSMap,
+    source_name: *const c_char,
+    url: *const c_char,
+    corners_lon_lat: *const f64,
+) -> bool {
+    let (Some(handle), Some(source_name), Some(url)) = (
+        unsafe { map.as_mut() },
+        unsafe { c_str(source_name) },
+        unsafe { c_str(url) },
+    ) else {
+        return false;
+    };
+    let coords = if corners_lon_lat.is_null() {
+        None
+    } else {
+        // SAFETY: caller guarantees `corners_lon_lat` points to 8 contiguous `f64` values.
+        let raw = unsafe { std::slice::from_raw_parts(corners_lon_lat, 8) };
+        if raw.iter().any(|v| !v.is_finite()) {
+            return false;
+        }
+        Some([
+            [raw[0], raw[1]],
+            [raw[2], raw[3]],
+            [raw[4], raw[5]],
+            [raw[6], raw[7]],
+        ])
+    };
+    let _runtime = handle.runtime.enter();
+    match handle
+        .map
+        .mutate_style(|style| style.update_image_source(source_name, url.to_owned(), coords))
+    {
+        Ok(_) => true,
+        Err(error) => {
+            tracing::warn!(source = %source_name, %error, "cannot update image source");
+            false
+        }
+    }
+}
+
+/// Updates `raster-opacity` on a named raster layer in-place without recreating the map.
+///
+/// # Safety
+///
+/// `map` must come from [`maplibre_visionos_create`] and not have been destroyed; `layer_id`
+/// must be a valid NUL-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn maplibre_visionos_set_layer_opacity(
+    map: *mut MaplibreVisionOSMap,
+    layer_id: *const c_char,
+    opacity: f64,
+) -> bool {
+    let (Some(handle), Some(layer_id)) = (unsafe { map.as_mut() }, unsafe { c_str(layer_id) })
+    else {
+        return false;
+    };
+    if !opacity.is_finite() {
+        return false;
+    }
+    let clamped = opacity.clamp(0.0, 1.0);
+    let _runtime = handle.runtime.enter();
+    match handle.map.mutate_style(|style| {
+        style.set_paint_property(layer_id, "raster-opacity", serde_json::json!(clamped))
+    }) {
+        Ok(_) => true,
+        Err(error) => {
+            tracing::warn!(layer = %layer_id, %error, "cannot update layer raster-opacity");
+            false
+        }
+    }
+}
+
 /// Frees a map made by [`maplibre_visionos_create`]; null is ignored.
 ///
 /// # Safety

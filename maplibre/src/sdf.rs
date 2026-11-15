@@ -110,16 +110,27 @@ impl<E: Environment, T: VectorTransferables> Plugin<E> for SdfPlugin<T> {
 }
 
 /// Source attributes retained for feature queries and placement ordering.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct SymbolFeatureData {
     /// Source feature ID, when the data provides one.
     pub id: Option<u64>,
-    /// Typed source attributes.
-    pub properties: crate::style::expression::FeatureProperties,
+    /// Typed source attributes, shared across repeated labels and identical MVT tag slices.
+    pub properties: std::sync::Arc<crate::style::expression::FeatureProperties>,
     /// Evaluated symbol-sort-key; smaller keys have collision priority.
     pub sort_key: f32,
     /// The kind of the source feature's geometry, which a query reports and filters by.
     pub geometry_type: crate::style::filter::GeometryType,
+}
+
+impl Default for SymbolFeatureData {
+    fn default() -> Self {
+        Self {
+            id: None,
+            properties: std::sync::Arc::clone(crate::style::expression::empty_feature_properties()),
+            sort_key: 0.0,
+            geometry_type: crate::style::filter::GeometryType::default(),
+        }
+    }
 }
 
 /// The line a label follows, and where its glyphs sit along the text.

@@ -20,11 +20,9 @@ pub(in crate::sdf::collision_system) fn write_feature_metadata(
     if opacity == [0.0, 0.0] {
         return;
     }
-    if metadata.is_empty() && !layer.buffer.buffer.vertices.is_empty() {
-        metadata.resize(
-            layer.buffer.buffer.vertices.len(),
-            SDFShaderFeatureMetadata::default(),
-        );
+    let vertex_count = layer.buffer.vertex_count();
+    if metadata.is_empty() && vertex_count > 0 {
+        metadata.resize(vertex_count, SDFShaderFeatureMetadata::default());
     }
     let properties = &feature.data.properties;
     let styles = ["text", "icon"].map(|prefix| feature_style(paint, prefix, properties, zoom));
@@ -44,20 +42,12 @@ pub(in crate::sdf::collision_system) fn write_feature_metadata(
         .get(anchor)
         .and_then(|set| feature.text_sets.get(usize::from(*set)));
     for index in feature.indices.clone() {
-        let kind = layer
-            .buffer
-            .buffer
-            .indices
-            .get(index)
-            .and_then(|index| layer.buffer.buffer.vertices.get(*index as usize))
-            .map_or(0, |vertex| usize::from(matches!(vertex.a_data[2], 1 | 2)));
-        if let Some(vertex) = layer
-            .buffer
-            .buffer
-            .indices
-            .get(index)
-            .and_then(|index| metadata.get_mut(*index as usize))
-        {
+        let Some(&v_idx) = layer.buffer.buffer.indices.get(index) else {
+            continue;
+        };
+        let v_idx = v_idx as usize;
+        let kind = usize::from(layer.buffer.is_icon_vertex(v_idx));
+        if let Some(vertex) = metadata.get_mut(v_idx) {
             *vertex = SDFShaderFeatureMetadata {
                 opacity: if kind == 0 && shown_set.is_some_and(|set| !set.contains(&index)) {
                     0.0
@@ -83,14 +73,31 @@ pub(in crate::sdf::collision_system) fn write_feature_metadata(
         }
     }
     if let (Some(line), Some(poses)) = (&feature.line, poses) {
-        write_glyph_poses(layer, line, poses, metadata);
+        write_glyph_poses_with_anchor(
+            layer,
+            line,
+            [feature.text_anchor.x.round(), feature.text_anchor.y.round()],
+            poses,
+            metadata,
+        );
     }
 }
 
 /// Puts each glyph's six indices' vertices at its pose along the line.
+#[cfg(test)]
 pub(super) fn write_glyph_poses(
     layer: &crate::sdf::SymbolLayerData,
     line: &crate::sdf::LineLabel,
+    poses: &[GlyphPose],
+    metadata: &mut [SDFShaderFeatureMetadata],
+) {
+    write_glyph_poses_with_anchor(layer, line, [0.0, 0.0], poses, metadata);
+}
+
+fn write_glyph_poses_with_anchor(
+    layer: &crate::sdf::SymbolLayerData,
+    line: &crate::sdf::LineLabel,
+    fallback_anchor: [f32; 2],
     poses: &[GlyphPose],
     metadata: &mut [SDFShaderFeatureMetadata],
 ) {
@@ -101,16 +108,19 @@ pub(super) fn write_glyph_poses(
             let Some(vertex_index) = buffer.indices.get(index).map(|index| *index as usize) else {
                 continue;
             };
-            let (Some(vertex), Some(entry)) = (
-                buffer.vertices.get(vertex_index),
-                metadata.get_mut(vertex_index),
-            ) else {
+            let Some(entry) = metadata.get_mut(vertex_index) else {
                 continue;
             };
+            let anchor_xy = buffer
+                .vertices
+                .get(vertex_index)
+                .map_or(fallback_anchor, |vertex| {
+                    [vertex.a_pos_offset[0] as f32, vertex.a_pos_offset[1] as f32]
+                });
             // The vertex anchor is the label anchor rounded to whole tile units.
             entry.pose = [
-                pose.point[0] - vertex.a_pos_offset[0] as f32,
-                pose.point[1] - vertex.a_pos_offset[1] as f32,
+                pose.point[0] - anchor_xy[0],
+                pose.point[1] - anchor_xy[1],
                 pose.angle,
                 POSED_GLYPH + pose.rise,
             ];

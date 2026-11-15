@@ -1,6 +1,6 @@
 //! Outgoing HTTP request metadata, cache policies, and embedder transform hooks.
 
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::{Arc, RwLock};
 
 use super::{ByteRange, SourceFetchError};
 
@@ -152,19 +152,15 @@ pub(crate) struct TransformSlot(Arc<RwLock<Option<RequestTransform>>>);
 
 impl TransformSlot {
     pub(crate) fn set(&self, transform: RequestTransform) {
-        *self.0.write().unwrap_or_else(PoisonError::into_inner) = Some(transform);
+        *crate::platform::write_unpoisoned(&self.0) = Some(transform);
     }
 
     pub(crate) fn clear(&self) {
-        *self.0.write().unwrap_or_else(PoisonError::into_inner) = None;
+        *crate::platform::write_unpoisoned(&self.0) = None;
     }
 
     pub(crate) fn apply(&self, req: HttpRequest) -> HttpRequest {
-        let hook = self
-            .0
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
+        let hook = crate::platform::read_unpoisoned(&self.0).clone();
         match hook {
             Some(transform) => transform(req),
             None => req,

@@ -33,9 +33,11 @@ pub(super) fn mercator_view_region(
             variable_zoom: true,
             rounding: request.rounding,
             zoom_range: request.zoom_range,
-            padding: match padding {
-                ViewStatePadding::Loose => 1,
-                ViewStatePadding::Tight => 0,
+            padding: if matches!(padding, ViewStatePadding::Loose) && view_state.has_external_view()
+            {
+                1
+            } else {
+                0
             },
             world_copies: if !view_state.has_external_view() {
                 3

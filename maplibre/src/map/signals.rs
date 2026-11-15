@@ -19,6 +19,17 @@ where
         }
     }
 
+    /// Whether the map has immediately actionable frame work without spinning while worker HTTP
+    /// requests are merely in flight on the wire.
+    pub fn has_ready_work(&self) -> bool {
+        match &self.map_context {
+            CurrentMapContext::Ready(context) => {
+                context.has_ready_work() || crate::sdf::provided::awaiting(&context.world)
+            }
+            CurrentMapContext::Pending(_) => true,
+        }
+    }
+
     /// Whether a failed tile request waits to be retried; see
     /// [`crate::context::MapContext::has_scheduled_retries`].
     pub fn has_scheduled_retries(&self) -> bool {

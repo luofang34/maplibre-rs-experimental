@@ -51,6 +51,65 @@ impl From<Camera> for CameraOptions {
     }
 }
 
+pub(crate) fn merge_camera(base: CameraOptions, next: CameraOptions) -> CameraOptions {
+    CameraOptions {
+        center: next.center.or(base.center),
+        zoom: next.zoom.or(base.zoom),
+        bearing: next.bearing.or(base.bearing),
+        pitch: next.pitch.or(base.pitch),
+        roll: next.roll.or(base.roll),
+        elevation: next.elevation.or(base.elevation),
+    }
+}
+
+/// Fast-path reader for plain JS camera objects (`{center, zoom, bearing, pitch, roll, elevation}`),
+/// avoiding `JSON.stringify` + `serde_json` allocations on 60–120 Hz `jumpTo` calls.
+pub(crate) fn try_read_camera_fast(value: &wasm_bindgen::JsValue) -> Option<CameraOptions> {
+    use wasm_bindgen::JsValue;
+    if !value.is_object() || value.is_null() || js_sys::Array::is_array(value) {
+        return None;
+    }
+    let prop = |key: &str| js_sys::Reflect::get(value, &JsValue::from_str(key)).ok();
+    let num = |key: &str| -> Option<Option<f64>> {
+        let v = prop(key)?;
+        if v.is_undefined() || v.is_null() {
+            Some(None)
+        } else {
+            v.as_f64().map(Some)
+        }
+    };
+
+    let center_val = prop("center")?;
+    let center = if center_val.is_undefined() || center_val.is_null() {
+        None
+    } else if js_sys::Array::is_array(&center_val) {
+        let arr = js_sys::Array::from(&center_val);
+        if arr.length() != 2 {
+            return None;
+        }
+        Some(LatLon::new(arr.get(1).as_f64()?, arr.get(0).as_f64()?))
+    } else if center_val.is_object() {
+        let lng = js_sys::Reflect::get(&center_val, &JsValue::from_str("lng"))
+            .ok()?
+            .as_f64()?;
+        let lat = js_sys::Reflect::get(&center_val, &JsValue::from_str("lat"))
+            .ok()?
+            .as_f64()?;
+        Some(LatLon::new(lat, lng))
+    } else {
+        return None;
+    };
+
+    Some(CameraOptions {
+        center,
+        zoom: num("zoom")?,
+        bearing: num("bearing")?.map(cgmath::Deg),
+        pitch: num("pitch")?.map(cgmath::Deg),
+        roll: num("roll")?.map(cgmath::Deg),
+        elevation: num("elevation")?,
+    })
+}
+
 /// GL JS `EaseToOptions` and `FlyToOptions`: a camera with how to move to it.
 #[derive(Deserialize, Debug, Default, Clone, Copy)]
 #[serde(rename_all = "camelCase")]

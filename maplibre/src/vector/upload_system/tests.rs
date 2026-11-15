@@ -1,6 +1,6 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use super::layer_translate_tile_units;
+use super::metadata::layer_translate_tile_units;
 use crate::{
     coords::ZoomLevel,
     style::layer::{FillPaint, LayerPaint, TranslateAnchor},
@@ -103,7 +103,10 @@ async fn empty_tiles_do_not_starve_later_geometry_uploads() {
                 light: Default::default(),
             },
         ),
-        &mut crate::render::memory_budget::FrameUploads::default(),
+        (
+            &mut crate::render::memory_budget::FrameUploads::default(),
+            false,
+        ),
     );
     assert!(!deferred);
     assert!(
@@ -203,7 +206,10 @@ async fn deferred_uploads_keep_parent_stand_in_and_flag_animation() {
         &style,
         vec![parent],
         (&[], paint),
-        &mut crate::render::memory_budget::FrameUploads::default(),
+        (
+            &mut crate::render::memory_budget::FrameUploads::default(),
+            false
+        ),
     ));
 
     // Zooming in finishes more children than UPLOADS_PER_FRAME allows in one frame.
@@ -214,7 +220,10 @@ async fn deferred_uploads_keep_parent_stand_in_and_flag_animation() {
         &style,
         children.clone(),
         (&[], paint),
-        &mut crate::render::memory_budget::FrameUploads::default(),
+        (
+            &mut crate::render::memory_budget::FrameUploads::default(),
+            false,
+        ),
     );
     assert!(deferred, "remaining children must request another frame");
 
@@ -409,7 +418,10 @@ async fn peripheral_tiles_never_evict_focus_tile_or_thrash_saturated_pool() {
             &style,
             source_tiles.clone(),
             (&[], paint),
-            &mut crate::render::memory_budget::FrameUploads::default(),
+            (
+                &mut crate::render::memory_budget::FrameUploads::default(),
+                false,
+            ),
         );
         assert!(
             !deferred,
@@ -436,7 +448,10 @@ async fn peripheral_tiles_never_evict_focus_tile_or_thrash_saturated_pool() {
         &style,
         panned.clone(),
         (&[], paint),
-        &mut crate::render::memory_budget::FrameUploads::default(),
+        (
+            &mut crate::render::memory_budget::FrameUploads::default(),
+            false,
+        ),
     );
     assert!(!deferred);
     assert!(pool.get_loaded_style_layers_at(panned[0]).is_some());

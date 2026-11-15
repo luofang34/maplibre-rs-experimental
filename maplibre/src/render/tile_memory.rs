@@ -112,6 +112,18 @@ fn feature_paint_bytes(tiles: &Tiles, coords: WorldTileCoords) -> usize {
 
 fn symbols(tiles: &Tiles, coords: WorldTileCoords) -> usize {
     let mut atlases = HashSet::new();
+    let mut seen_props: FxHashSet<*const FeatureProperties> = FxHashSet::default();
+    tiles
+        .geometry_index
+        .record_tile_property_ptrs(coords, &mut seen_props);
+    if let Some(paint) = tiles.query::<&TileFeaturePaintComponent>(coords) {
+        for entries in paint.committed.values().chain(paint.pending.values()) {
+            for entry in entries {
+                seen_props.insert(Arc::as_ptr(&entry.properties));
+            }
+        }
+    }
+    const ENTRY_OVERHEAD: usize = 2 * size_of::<String>() + 16;
     tiles
         .query::<&SymbolLayersDataComponent>(coords)
         .into_iter()
@@ -125,20 +137,28 @@ fn symbols(tiles: &Tiles, coords: WorldTileCoords) -> usize {
         .map(|layer| {
             let geometry = capacity(&layer.buffer.buffer.vertices)
                 + capacity(&layer.buffer.buffer.indices)
+                + layer.buffer.icon_bits_bytes()
                 + capacity(&layer.features)
                 + layer
                     .features
                     .iter()
                     .map(|feature| {
-                        feature.str.capacity()
-                            + feature.data.properties.capacity()
-                                * size_of::<(String, crate::style::expression::Value)>()
-                            + feature
-                                .data
-                                .properties
-                                .iter()
-                                .map(|(key, value)| key.capacity() + value_bytes(value))
-                                .sum::<usize>()
+                        let props = if !feature.data.properties.is_empty()
+                            && seen_props.insert(Arc::as_ptr(&feature.data.properties))
+                        {
+                            size_of::<FeatureProperties>()
+                                + feature
+                                    .data
+                                    .properties
+                                    .iter()
+                                    .map(|(key, value)| {
+                                        key.capacity() + value_bytes(value) + ENTRY_OVERHEAD
+                                    })
+                                    .sum::<usize>()
+                        } else {
+                            0
+                        };
+                        feature.str.capacity() + props
                     })
                     .sum::<usize>();
             let atlas = layer

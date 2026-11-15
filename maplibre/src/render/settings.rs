@@ -151,9 +151,9 @@ impl Default for BufferPoolSizes {
     fn default() -> Self {
         Self {
             vertices: 10 * 1_000_000,
-            indices: 10 * 1_000_000,
+            indices: 30 * 1_000_000,
             feature_metadata: 10 * 1024 * 1000,
-            layer_metadata: 10 * 1024,
+            layer_metadata: 64 * 1024,
         }
     }
 }
@@ -246,7 +246,7 @@ pub struct RendererSettings {
     pub present_mode: PresentMode,
     /// Edge, in pixels, of the texture each terrain tile's map is drawn into. Each texture
     /// costs four bytes a texel and a third more for mipmaps, so the default of
-    /// [`DRAPE_SIZE`](crate::terrain::resources::DRAPE_SIZE) holds about 21 MiB a tile; a
+    /// [`DRAPE_SIZE`](crate::terrain::resources::DRAPE_SIZE) holds about 5.6 MiB a tile; a
     /// phone, which shares its memory with the GPU, keeps more tiles in less.
     pub terrain_drape_size: u32,
     /// Whether terrain bakes 2D style drapes (`DRAPE_PASS`) or shades procedural DEM relief

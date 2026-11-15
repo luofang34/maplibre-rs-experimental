@@ -32,10 +32,27 @@ pub fn resource_system(
         ..
     }: &mut MapContext,
 ) -> crate::tcs::system::SystemResult {
-    if world
-        .resources
-        .get::<super::pattern::BackgroundPatternGpu>()
-        .is_none()
+    let style_zoom = view_state.style_zoom().value();
+    let needs_bg_pattern = !cfg!(target_arch = "wasm32")
+        || style.layers.iter().any(|layer| {
+            layer.type_ == "background"
+                && layer
+                    .paint
+                    .as_ref()
+                    .is_some_and(|p| crate::vector::pattern::pattern_name(p, style_zoom).is_some())
+        });
+    let needs_globe = !cfg!(target_arch = "wasm32")
+        || style.projection.as_ref().is_some_and(|spec| {
+            spec.projection_type
+                .globe_transition(view_state.zoom().value())
+                > 0.0
+        });
+    let needs_sky = !cfg!(target_arch = "wasm32") || style.sky.is_some();
+    if needs_bg_pattern
+        && world
+            .resources
+            .get::<super::pattern::BackgroundPatternGpu>()
+            .is_none()
     {
         let shader = BackgroundPatternShader {
             format: surface.surface_format(),
@@ -84,10 +101,11 @@ pub fn resource_system(
     {
         patterns.update(device, queue, style, view_state.style_zoom().value());
     }
-    if world
-        .resources
-        .get::<super::pattern::BackgroundPatternGpu>()
-        .is_some_and(|gpu| !gpu.has_globe())
+    if needs_globe
+        && world
+            .resources
+            .get::<super::pattern::BackgroundPatternGpu>()
+            .is_some_and(|gpu| !gpu.has_globe())
     {
         let projection_layout = match world.resources.get::<Eventually<ProjectionGpuResources>>() {
             Some(Initialized(resources)) => Some(resources.bind_group_layout().clone()),
@@ -169,80 +187,84 @@ pub fn resource_system(
         BackgroundRenderPipeline(pipeline)
     });
 
-    globe_background_pipeline.initialize(|| {
-        let shader = GlobeBackgroundShader {
-            format: surface.surface_format(),
-        };
-        let pipeline = TilePipeline::new(
-            "globe_background_pipeline".into(),
-            *settings,
-            shader.describe_vertex(),
-            shader.describe_fragment(),
-            crate::render::resource::TilePipelineOptions {
-                depth_stencil_enabled: true,
-                update_stencil: false,
-                debug_stencil: true,
-                wireframe: false,
-                multisampling: surface.is_multisampling_supported(settings.msaa),
-                textured: false,
-            },
-        )
-        .with_depth_write()
-        .describe_render_pipeline()
-        .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
-        GlobeBackgroundRenderPipeline(pipeline)
-    });
+    if needs_globe {
+        globe_background_pipeline.initialize(|| {
+            let shader = GlobeBackgroundShader {
+                format: surface.surface_format(),
+            };
+            let pipeline = TilePipeline::new(
+                "globe_background_pipeline".into(),
+                *settings,
+                shader.describe_vertex(),
+                shader.describe_fragment(),
+                crate::render::resource::TilePipelineOptions {
+                    depth_stencil_enabled: true,
+                    update_stencil: false,
+                    debug_stencil: true,
+                    wireframe: false,
+                    multisampling: surface.is_multisampling_supported(settings.msaa),
+                    textured: false,
+                },
+            )
+            .with_depth_write()
+            .describe_render_pipeline()
+            .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
+            GlobeBackgroundRenderPipeline(pipeline)
+        });
 
-    atmosphere_pipeline.initialize(|| {
-        let shader = AtmosphereShader {
-            format: surface.surface_format(),
-        };
-        let pipeline = TilePipeline::new(
-            "atmosphere_pipeline".into(),
-            *settings,
-            shader.describe_vertex(),
-            shader.describe_fragment(),
-            crate::render::resource::TilePipelineOptions {
-                depth_stencil_enabled: true,
-                update_stencil: false,
-                debug_stencil: true,
-                wireframe: false,
-                multisampling: surface.is_multisampling_supported(settings.msaa),
-                textured: false,
-            },
-        )
-        // The scattering lies behind the globe, its terrain and everything else that writes
-        // depth, as GL JS draws it with a read-only depth test.
-        .with_depth_test()
-        .describe_render_pipeline()
-        .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
-        AtmosphereRenderPipeline(pipeline)
-    });
+        atmosphere_pipeline.initialize(|| {
+            let shader = AtmosphereShader {
+                format: surface.surface_format(),
+            };
+            let pipeline = TilePipeline::new(
+                "atmosphere_pipeline".into(),
+                *settings,
+                shader.describe_vertex(),
+                shader.describe_fragment(),
+                crate::render::resource::TilePipelineOptions {
+                    depth_stencil_enabled: true,
+                    update_stencil: false,
+                    debug_stencil: true,
+                    wireframe: false,
+                    multisampling: surface.is_multisampling_supported(settings.msaa),
+                    textured: false,
+                },
+            )
+            // The scattering lies behind the globe, its terrain and everything else that writes
+            // depth, as GL JS draws it with a read-only depth test.
+            .with_depth_test()
+            .describe_render_pipeline()
+            .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
+            AtmosphereRenderPipeline(pipeline)
+        });
+    }
 
-    sky_pipeline.initialize(|| {
-        let shader = SkyShader {
-            format: surface.surface_format(),
-        };
-        // The host compositor needs depth for the opaque sky as well as terrain.
-        let pipeline = TilePipeline::new(
-            "sky_pipeline".into(),
-            *settings,
-            shader.describe_vertex(),
-            shader.describe_fragment(),
-            crate::render::resource::TilePipelineOptions {
-                depth_stencil_enabled: true,
-                update_stencil: false,
-                debug_stencil: true,
-                wireframe: false,
-                multisampling: surface.is_multisampling_supported(settings.msaa),
-                textured: false,
-            },
-        )
-        .with_depth_write()
-        .describe_render_pipeline()
-        .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
-        SkyRenderPipeline(pipeline)
-    });
+    if needs_sky {
+        sky_pipeline.initialize(|| {
+            let shader = SkyShader {
+                format: surface.surface_format(),
+            };
+            // The host compositor needs depth for the opaque sky as well as terrain.
+            let pipeline = TilePipeline::new(
+                "sky_pipeline".into(),
+                *settings,
+                shader.describe_vertex(),
+                shader.describe_fragment(),
+                crate::render::resource::TilePipelineOptions {
+                    depth_stencil_enabled: true,
+                    update_stencil: false,
+                    debug_stencil: true,
+                    wireframe: false,
+                    multisampling: surface.is_multisampling_supported(settings.msaa),
+                    textured: false,
+                },
+            )
+            .with_depth_write()
+            .describe_render_pipeline()
+            .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
+            SkyRenderPipeline(pipeline)
+        });
+    }
 
     Ok(())
 }

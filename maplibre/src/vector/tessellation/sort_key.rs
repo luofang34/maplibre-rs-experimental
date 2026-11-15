@@ -85,6 +85,12 @@ where
     /// of equal keys.
     pub fn apply_sort_keys(&mut self) {
         let mut spans = std::mem::take(&mut self.sort_key.spans);
+        if spans.is_empty() {
+            if self.sort_key.is_keyed() {
+                self.entry_sort_keys = vec![0.0; self.feature_indices.len()];
+            }
+            return;
+        }
         self.entry_sort_keys = vec![0.0; self.feature_indices.len()];
         if spans.windows(2).all(|pair| pair[0].key <= pair[1].key) {
             for span in &spans {

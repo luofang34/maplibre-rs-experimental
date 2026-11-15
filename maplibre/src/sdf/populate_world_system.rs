@@ -47,6 +47,9 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
         if renderer.settings.symbol_pools.is_empty() {
             return Ok(());
         }
+        let mut prop_interner =
+            crate::vector::feature_paint::intern::TilePropertyInterner::default();
+        let mut state_memo = crate::style::feature_state::FeatureStateArcMemo::default();
         apply_worker_messages(messages, |message| {
             if message.has_tag(super::provided::ProvidedImagesReport::message_tag()) {
                 let report =
@@ -63,9 +66,11 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
                         .iter()
                         .any(|layer| layer.id == bucket.style_layer_id)
                 {
+                    prop_interner.intern_symbol_bucket(&world.tiles, &mut bucket);
                     let retessellate = crate::vector::arrival_sync::sync_arriving_symbol_bucket(
                         style,
                         &mut bucket,
+                        &mut state_memo,
                     );
                     crate::vector::content::accept_symbols(world, bucket);
                     if retessellate {

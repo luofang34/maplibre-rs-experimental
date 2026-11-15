@@ -1,11 +1,16 @@
 //! Unhides stepped `building` podium bases whose `building:part` pieces all start above ground.
 
+use std::borrow::Cow;
+
 use geozero::mvt::tile;
 
 /// Clears `hide_3d` on building footprints whose interior `building:part` pieces all start
 /// above ground (`render_min_height > 0`), so stepped skyscrapers modeled with a `building`
 /// base podium and elevated `building:part` tiers do not float in mid-air.
-pub(super) fn unhide_unreplaced_building_bases(layer: &mut tile::Layer) {
+///
+/// Operates on `&mut Cow<'_, tile::Layer>` so tiles without elevated stepped podiums avoid
+/// cloning tens of thousands of `building` features.
+pub(super) fn unhide_unreplaced_building_bases(layer: &mut Cow<'_, tile::Layer>) {
     let Some(hide_3d_key) = layer
         .keys
         .iter()
@@ -28,6 +33,44 @@ pub(super) fn unhide_unreplaced_building_bases(layer: &mut tile::Layer) {
         .position(|key| key == "render_height")
         .and_then(|idx| u32::try_from(idx).ok());
 
+    struct BaseCandidate {
+        feature_index: usize,
+        bbox: [i32; 4],
+        rings: Vec<Vec<[i32; 2]>>,
+    }
+
+    let mut candidates: Vec<BaseCandidate> = Vec::new();
+    let mut union_bbox: Option<[i32; 4]> = None;
+    for (feature_index, feature) in layer.features.iter().enumerate() {
+        if feature.r#type != Some(3)
+            || feature_bool_tag(feature, hide_3d_key, &layer.values) != Some(true)
+            || feature_number_tag(feature, min_height_key, &layer.values).unwrap_or(0.0) > 0.0
+        {
+            continue;
+        }
+        let rings = decode_mvt_rings(&feature.geometry);
+        let Some(bbox) = rings_bbox(&rings) else {
+            continue;
+        };
+        union_bbox = Some(match union_bbox {
+            None => bbox,
+            Some(u) => [
+                u[0].min(bbox[0]),
+                u[1].min(bbox[1]),
+                u[2].max(bbox[2]),
+                u[3].max(bbox[3]),
+            ],
+        });
+        candidates.push(BaseCandidate {
+            feature_index,
+            bbox,
+            rings,
+        });
+    }
+    let Some(union_bbox) = union_bbox else {
+        return;
+    };
+
     struct PartInfo {
         bbox: [i32; 4],
         centroids: Vec<[f32; 2]>,
@@ -35,19 +78,23 @@ pub(super) fn unhide_unreplaced_building_bases(layer: &mut tile::Layer) {
     }
 
     let mut parts = Vec::new();
-    let mut has_hide_3d = false;
     for feature in &layer.features {
-        if feature.r#type != Some(3) {
+        if feature.r#type != Some(3)
+            || feature_bool_tag(feature, hide_3d_key, &layer.values) == Some(true)
+        {
             continue;
         }
-        if feature_bool_tag(feature, hide_3d_key, &layer.values) == Some(true) {
-            has_hide_3d = true;
+        let Some(bbox) = geometry_bbox(&feature.geometry) else {
+            continue;
+        };
+        if bbox[2] < union_bbox[0]
+            || bbox[0] > union_bbox[2]
+            || bbox[3] < union_bbox[1]
+            || bbox[1] > union_bbox[3]
+        {
             continue;
         }
         let rings = decode_mvt_rings(&feature.geometry);
-        let Some(bbox) = rings_bbox(&rings) else {
-            continue;
-        };
         let centroids: Vec<[f32; 2]> = rings
             .iter()
             .filter_map(|ring| {
@@ -68,22 +115,13 @@ pub(super) fn unhide_unreplaced_building_bases(layer: &mut tile::Layer) {
             min_height,
         });
     }
-    if !has_hide_3d || parts.is_empty() {
+    if parts.is_empty() {
         return;
     }
 
-    for feature_index in 0..layer.features.len() {
-        let feature = &layer.features[feature_index];
-        if feature.r#type != Some(3)
-            || feature_bool_tag(feature, hide_3d_key, &layer.values) != Some(true)
-            || feature_number_tag(feature, min_height_key, &layer.values).unwrap_or(0.0) > 0.0
-        {
-            continue;
-        }
-        let rings = decode_mvt_rings(&feature.geometry);
-        let Some(bbox) = rings_bbox(&rings) else {
-            continue;
-        };
+    for candidate in &candidates {
+        let bbox = candidate.bbox;
+        let rings = &candidate.rings;
         let mut min_part_base: Option<f64> = None;
         for part in &parts {
             if part.bbox[2] < bbox[0]
@@ -109,18 +147,20 @@ pub(super) fn unhide_unreplaced_building_bases(layer: &mut tile::Layer) {
         let Some(min_base) = min_part_base.filter(|&base| base > 0.0) else {
             continue;
         };
-        remove_feature_tag(&mut layer.features[feature_index].tags, hide_3d_key);
+        let owned = layer.to_mut();
+        let feature_index = candidate.feature_index;
+        remove_feature_tag(&mut owned.features[feature_index].tags, hide_3d_key);
         if let Some(height_key) = height_key {
             if let Some(height) =
-                feature_number_tag(&layer.features[feature_index], height_key, &layer.values)
+                feature_number_tag(&owned.features[feature_index], height_key, &owned.values)
             {
                 if height > min_base {
-                    let val_idx = u32::try_from(layer.values.len()).unwrap_or(u32::MAX);
-                    layer.values.push(tile::Value {
+                    let val_idx = u32::try_from(owned.values.len()).unwrap_or(u32::MAX);
+                    owned.values.push(tile::Value {
                         double_value: Some(min_base),
                         ..Default::default()
                     });
-                    set_feature_tag(&mut layer.features[feature_index].tags, height_key, val_idx);
+                    set_feature_tag(&mut owned.features[feature_index].tags, height_key, val_idx);
                 }
             }
         }
@@ -168,6 +208,42 @@ fn set_feature_tag(tags: &mut [u32], key: u32, value_index: u32) {
             return;
         }
     }
+}
+
+fn geometry_bbox(geometry: &[u32]) -> Option<[i32; 4]> {
+    let (mut cx, mut cy) = (0_i32, 0_i32);
+    let mut idx = 0;
+    let mut has_ring = false;
+    let mut bbox: Option<[i32; 4]> = None;
+    while idx < geometry.len() {
+        let cmd_int = geometry[idx];
+        idx += 1;
+        let (cmd, count) = (cmd_int & 7, (cmd_int >> 3) as usize);
+        if cmd == 1 || cmd == 2 {
+            for _ in 0..count {
+                if idx + 1 >= geometry.len() {
+                    return bbox;
+                }
+                let raw_dx = geometry[idx];
+                let raw_dy = geometry[idx + 1];
+                idx += 2;
+                let dx = ((raw_dx >> 1) as i32) ^ -((raw_dx & 1) as i32);
+                let dy = ((raw_dy >> 1) as i32) ^ -((raw_dy & 1) as i32);
+                cx = cx.saturating_add(dx);
+                cy = cy.saturating_add(dy);
+                if cmd == 1 {
+                    has_ring = true;
+                }
+                if has_ring {
+                    bbox = Some(match bbox {
+                        None => [cx, cy, cx, cy],
+                        Some(b) => [b[0].min(cx), b[1].min(cy), b[2].max(cx), b[3].max(cy)],
+                    });
+                }
+            }
+        }
+    }
+    bbox
 }
 
 fn decode_mvt_rings(geometry: &[u32]) -> Vec<Vec<[i32; 2]>> {

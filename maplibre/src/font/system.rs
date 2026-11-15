@@ -1,21 +1,26 @@
 //! In-memory font registry, `Style::font_faces` rule binding, and lazy native system fallback.
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+#[cfg(feature = "font-shaping")]
+use std::collections::HashSet;
+use std::{collections::HashMap, sync::Arc};
 
+#[cfg(feature = "font-shaping")]
 use harfrust::Font as HbFont;
+#[cfg(feature = "font-shaping")]
 use read_fonts::{tables::os2::SelectionFlags, FileRef, FontRef, TableProvider};
+#[cfg(feature = "font-shaping")]
 use skrifa::MetadataProvider;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "font-shaping"))]
 mod native;
 
+#[cfg(feature = "font-shaping")]
+use super::container::unpack_font_container;
+#[cfg(feature = "font-shaping")]
+use super::shaper::shape_text_runs;
 use super::{
-    container::unpack_font_container,
     sdf::{rasterize_char_sdf, rasterize_glyph_sdf, RasterizedGlyph},
-    shaper::{shape_text_runs, ShapedGlyph},
+    shaper::ShapedGlyph,
     spec::{parse_font_stack_entry, FontFaceRule, FontStyle, FontWeight, UnicodeRange},
     FontError,
 };
@@ -30,6 +35,7 @@ pub struct LoadedFace {
     /// Collection index (`0` for single-face fonts).
     pub face_index: u32,
     /// Cached `harfrust::Font` handle sharing `bytes`.
+    #[cfg(feature = "font-shaping")]
     pub hb_font: HbFont,
     /// Normalized lowercase family names matched by `"text-font"` entries.
     pub families: Vec<String>,
@@ -56,10 +62,18 @@ impl std::fmt::Debug for LoadedFace {
 impl LoadedFace {
     /// Returns `true` when `ch` passes `unicode_ranges` and maps to a non-`.notdef` glyph in `cmap`.
     pub fn covers_char(&self, ch: char) -> bool {
-        let cp = u32::from(ch);
-        let in_range = self.unicode_ranges.is_empty()
-            || self.unicode_ranges.iter().any(|range| range.contains(cp));
-        in_range && self.hb_font.charmap().map_unicode(ch).is_some()
+        #[cfg(feature = "font-shaping")]
+        {
+            let cp = u32::from(ch);
+            let in_range = self.unicode_ranges.is_empty()
+                || self.unicode_ranges.iter().any(|range| range.contains(cp));
+            in_range && self.hb_font.charmap().map_unicode(ch).is_some()
+        }
+        #[cfg(not(feature = "font-shaping"))]
+        {
+            let _ = ch;
+            false
+        }
     }
 
     /// Rasterises the nominal `cmap` glyph for `ch` into a 24px SDF bitmap.
@@ -77,11 +91,12 @@ impl LoadedFace {
 /// fallback fonts.
 #[derive(Default)]
 pub struct FontSystem {
+    #[cfg_attr(not(feature = "font-shaping"), allow(dead_code))]
     pub(super) next_id: u64,
     pub(super) faces: HashMap<u64, Arc<LoadedFace>>,
     registered_order: Vec<u64>,
     rule_keys: HashMap<String, Vec<u64>>,
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), feature = "font-shaping"))]
     pub(super) native: Option<native::NativeFontDb>,
 }
 
@@ -111,21 +126,31 @@ impl FontSystem {
     }
 
     /// Unpacks a `TTF`, `OTF`, `TTC`, `WOFF`, or `WOFF2` font buffer and registers every face in
-    /// memory across all targets (including `wasm32`).
+    /// memory across all targets (including `wasm32` when `font-shaping` is enabled).
     pub fn register_font_bytes(
         &mut self,
         family_override: Option<&str>,
         data: Vec<u8>,
     ) -> Result<Vec<u64>, FontError> {
-        let unpacked = unpack_font_container(&data)?.into_owned();
-        self.insert_sfnt_faces(
-            Arc::new(unpacked),
-            family_override,
-            None,
-            None,
-            Vec::new(),
-            true,
-        )
+        #[cfg(feature = "font-shaping")]
+        {
+            let unpacked = unpack_font_container(&data)?.into_owned();
+            self.insert_sfnt_faces(
+                Arc::new(unpacked),
+                family_override,
+                None,
+                None,
+                Vec::new(),
+                true,
+            )
+        }
+        #[cfg(not(feature = "font-shaping"))]
+        {
+            let _ = (family_override, data);
+            Err(FontError::InvalidContainer(
+                "in-process OpenType registration requires the `font-shaping` feature",
+            ))
+        }
     }
 
     /// Returns `true` when `rule` at `url` has already been unpacked and registered.
@@ -160,17 +185,27 @@ impl FontSystem {
         if let Some(existing) = self.rule_keys.get(&dedup_key) {
             return Ok(existing.clone());
         }
-        let unpacked = unpack_font_container(&data)?.into_owned();
-        let ids = self.insert_sfnt_faces(
-            Arc::new(unpacked),
-            Some(&rule.family),
-            Some(rule.weight),
-            Some(rule.style),
-            rule.unicode_ranges.clone(),
-            true,
-        )?;
-        self.rule_keys.insert(dedup_key, ids.clone());
-        Ok(ids)
+        #[cfg(feature = "font-shaping")]
+        {
+            let unpacked = unpack_font_container(&data)?.into_owned();
+            let ids = self.insert_sfnt_faces(
+                Arc::new(unpacked),
+                Some(&rule.family),
+                Some(rule.weight),
+                Some(rule.style),
+                rule.unicode_ranges.clone(),
+                true,
+            )?;
+            self.rule_keys.insert(dedup_key, ids.clone());
+            Ok(ids)
+        }
+        #[cfg(not(feature = "font-shaping"))]
+        {
+            let _ = data;
+            Err(FontError::InvalidContainer(
+                "in-process OpenType registration requires the `font-shaping` feature",
+            ))
+        }
     }
 
     /// Returns `true` when at least one in-memory / `font-faces` face matches `font_stack`.
@@ -212,7 +247,7 @@ impl FontSystem {
         }
 
         if allow_system_fallback {
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(all(not(target_arch = "wasm32"), feature = "font-shaping"))]
             if let Some(hit) = self.resolve_native_face(font_stack, ch) {
                 return Some(hit);
             }
@@ -236,6 +271,9 @@ impl FontSystem {
         font_stack: &str,
         ch: char,
     ) -> Option<RasterizedGlyph> {
+        if ch.is_control() || matches!(ch, '\u{200B}'..='\u{200D}' | '\u{FEFF}') {
+            return None;
+        }
         if let Some((_, face)) = self.resolve_face_for_char(font_stack, ch, false) {
             if let Some(glyph) = face.rasterize_char(ch) {
                 return Some(glyph);
@@ -256,8 +294,19 @@ impl FontSystem {
             }
             _ => font_stack.to_owned(),
         };
-        let (_, face) = self.resolve_face_for_char(&combined, ch, true)?;
-        face.rasterize_char(ch)
+        if let Some((_, face)) = self.resolve_face_for_char(&combined, ch, true) {
+            if let Some(glyph) = face.rasterize_char(ch) {
+                return Some(glyph);
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            super::sdf::canvas2d::rasterize_canvas2d_char_sdf(ideograph_family, font_stack, ch)
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            None
+        }
     }
 
     /// Shapes `text` with `harfrust` using OpenType faces resolved from `font_stack`.
@@ -267,19 +316,27 @@ impl FontSystem {
         text: &str,
         allow_system_fallback: bool,
     ) -> Option<Vec<ShapedGlyph>> {
-        shape_text_runs(text, |ch| {
-            if ch.is_whitespace() {
-                if let Some((id, face)) =
-                    self.resolve_face_for_char(font_stack, ' ', allow_system_fallback)
-                {
-                    if ch == ' ' || face.covers_char(ch) {
-                        return Some((id, face.hb_font.clone()));
+        #[cfg(feature = "font-shaping")]
+        {
+            shape_text_runs(text, |ch| {
+                if ch.is_whitespace() {
+                    if let Some((id, face)) =
+                        self.resolve_face_for_char(font_stack, ' ', allow_system_fallback)
+                    {
+                        if ch == ' ' || face.covers_char(ch) {
+                            return Some((id, face.hb_font.clone()));
+                        }
                     }
                 }
-            }
-            self.resolve_face_for_char(font_stack, ch, allow_system_fallback)
-                .map(|(id, face)| (id, face.hb_font.clone()))
-        })
+                self.resolve_face_for_char(font_stack, ch, allow_system_fallback)
+                    .map(|(id, face)| (id, face.hb_font.clone()))
+            })
+        }
+        #[cfg(not(feature = "font-shaping"))]
+        {
+            let _ = (font_stack, text, allow_system_fallback);
+            None
+        }
     }
 
     fn best_registered_face(
@@ -321,6 +378,7 @@ impl FontSystem {
         best.map(|(_, id, face)| (id, face))
     }
 
+    #[cfg(feature = "font-shaping")]
     fn insert_sfnt_faces(
         &mut self,
         bytes: Arc<Vec<u8>>,
@@ -386,6 +444,7 @@ impl FontSystem {
     }
 }
 
+#[cfg(feature = "font-shaping")]
 pub(super) fn inspect_face_metadata(font: &FontRef<'_>) -> (Vec<String>, FontWeight, FontStyle) {
     let mut seen = HashSet::new();
     let mut families = Vec::new();

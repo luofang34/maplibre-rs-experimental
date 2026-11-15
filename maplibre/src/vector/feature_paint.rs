@@ -21,17 +21,25 @@ use crate::{
 /// Returns `true` when `layer` is a non-symbol vector layer whose GPU feature paint depends on
 /// per-feature properties or runtime `feature-state`, requiring retained [`BucketFeatureEntry`]s.
 pub(crate) fn layer_retains_feature_paint(layer: &StyleLayer) -> bool {
-    if layer_paint_reads_feature_state(layer) {
-        return true;
+    #[cfg(target_arch = "wasm32")]
+    {
+        layer_paint_reads_feature_state(layer)
     }
-    let Some(paint) = layer.paint.as_ref() else {
-        return false;
-    };
-    layer_paint_varies_by_feature(paint)
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if layer_paint_reads_feature_state(layer) {
+            return true;
+        }
+        let Some(paint) = layer.paint.as_ref() else {
+            return false;
+        };
+        layer_paint_varies_by_feature(paint)
+    }
 }
 
 /// How much of each feature a layer's retained [`BucketFeatureEntry`]s keep.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub(crate) enum FeaturePaintRetention {
     /// Every slot of a bucket shares one colour, so nothing is kept.
     #[default]
@@ -48,6 +56,11 @@ pub(crate) fn feature_paint_retention(layer: &StyleLayer) -> FeaturePaintRetenti
     if layer_retains_feature_paint(layer) {
         return FeaturePaintRetention::Full;
     }
+    #[cfg(target_arch = "wasm32")]
+    {
+        FeaturePaintRetention::None
+    }
+    #[cfg(not(target_arch = "wasm32"))]
     match layer.paint.as_ref() {
         Some(LayerPaint::Fill(fill)) if fill.outline_color().is_some() => {
             FeaturePaintRetention::SlotKinds
@@ -60,6 +73,7 @@ pub(crate) fn feature_paint_retention(layer: &StyleLayer) -> FeaturePaintRetenti
 }
 
 /// Returns `true` when any GPU-evaluated paint property in `paint` varies by feature.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub(crate) fn layer_paint_varies_by_feature(paint: &LayerPaint) -> bool {
     if paint
         .opacity()

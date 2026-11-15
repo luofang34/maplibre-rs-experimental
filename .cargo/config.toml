@@ -16,6 +16,11 @@ panic = 'abort'
 
 [profile.wasm-release]
 inherits = "release"
-opt-level = 's'
+opt-level = 'z'
 lto = true
+codegen-units = 1
+strip = false
 panic = 'abort'
+
+[profile.wasm-release.package.lyon_tessellation]
+opt-level = 2

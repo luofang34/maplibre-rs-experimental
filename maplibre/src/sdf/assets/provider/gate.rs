@@ -2,7 +2,7 @@
 
 use std::{
     future::poll_fn,
-    sync::{Arc, Mutex, MutexGuard, PoisonError},
+    sync::{Arc, Mutex, MutexGuard},
     task::{Poll, Waker},
 };
 
@@ -36,7 +36,7 @@ struct Waiting {
 
 impl Gate {
     fn lock(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        crate::platform::lock_unpoisoned(&self.state)
     }
 
     /// How many generators run and how many requests wait for one.

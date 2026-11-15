@@ -127,3 +127,54 @@ fn multiple_style_layers_and_query_index_share_one_feature_properties_allocation
         "query index and per-layer feature paint must share the same FeatureProperties allocation"
     );
 }
+
+#[test]
+fn decode_tile_for_layers_skips_unrequested_mvt_layers_and_tolerates_padding() {
+    let mut bytes = Tile {
+        layers: vec![
+            tile::Layer {
+                version: 2,
+                name: "housenumber".to_string(),
+                features: vec![tile::Feature {
+                    id: Some(1),
+                    r#type: Some(tile::GeomType::Point as i32),
+                    geometry: vec![9, 10, 10],
+                    ..Default::default()
+                }],
+                extent: Some(4096),
+                ..Default::default()
+            },
+            tile::Layer {
+                version: 2,
+                name: "building".to_string(),
+                features: vec![tile::Feature {
+                    id: Some(2),
+                    r#type: Some(tile::GeomType::Point as i32),
+                    geometry: vec![9, 20, 20],
+                    ..Default::default()
+                }],
+                extent: Some(4096),
+                ..Default::default()
+            },
+        ],
+    }
+    .encode_to_vec();
+    bytes.extend([0_u8; 32]);
+
+    let filtered =
+        crate::vector::process_vector::decode_tile_for_layers(&bytes, |name| name == "building")
+            .expect("filtered decode succeeds");
+    assert_eq!(filtered.layers.len(), 1);
+    assert_eq!(filtered.layers[0].name, "building");
+    assert_eq!(filtered.layers[0].features.len(), 1);
+    assert_eq!(filtered.layers[0].features[0].id, Some(2));
+
+    let empty =
+        crate::vector::process_vector::decode_tile_for_layers(&bytes, |name| name == "water")
+            .expect("empty layer filter succeeds");
+    assert!(empty.layers.is_empty());
+
+    assert!(
+        crate::vector::process_vector::decode_tile_for_layers(&[0x0a, 0xff], |_| true).is_err()
+    );
+}

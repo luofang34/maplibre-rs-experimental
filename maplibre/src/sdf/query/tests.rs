@@ -253,14 +253,10 @@ fn only_the_second_rectangle_of_a_symbol_can_be_the_one_hit() {
 #[test]
 fn a_filter_selects_by_property_and_id_and_an_empty_layer_list_selects_nothing() {
     let mut rank_two = label(2, 0.0, [0.0, 0.0]);
-    rank_two
-        .data
-        .properties
+    std::sync::Arc::make_mut(&mut rank_two.data.properties)
         .insert("rank".into(), crate::style::expression::Value::Number(2.0));
     let mut rank_nine = label(9, 0.0, [0.0, 0.0]);
-    rank_nine
-        .data
-        .properties
+    std::sync::Arc::make_mut(&mut rank_nine.data.properties)
         .insert("rank".into(), crate::style::expression::Value::Number(9.0));
     let world = placed(vec![bucket(
         coords(0, 0, 0),

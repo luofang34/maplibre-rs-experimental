@@ -4,12 +4,16 @@
 //! Tamil/Thai/Khmer/Myanmar reordering, Latin `fi`/`fl` ligatures, Arabic contextual forms),
 //! `GPOS` kerning, cursive attachment, and combining-mark positioning (`mark`/`mkmk`).
 
+#[cfg(feature = "font-shaping")]
 use std::ops::Range;
 
+#[cfg(feature = "font-shaping")]
 use harfrust::{Buffer, BufferFlags, Direction, Font as HbFont, ShapeOptions, ShaperFont};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "font-shaping")]
 use unicode_bidi::BidiInfo;
 
+#[cfg(feature = "font-shaping")]
 use super::sdf::SDF_EM_SIZE;
 
 /// Atlas lookup key for either a nominal Unicode scalar or an OpenType glyph index.
@@ -64,6 +68,7 @@ impl ShapedGlyph {
 ///
 /// Cluster offsets in the returned [`ShapedGlyph`]s are UTF-8 byte indices into `full_text` plus
 /// `cluster_base`.
+#[cfg(feature = "font-shaping")]
 pub fn shape_slice_with_font(
     face_id: u64,
     font: &HbFont,
@@ -136,6 +141,7 @@ pub fn shape_slice_with_font(
 ///
 /// Returns `None` if `text` has no renderable characters or if any non-ignorable character fails
 /// to resolve an OpenType [`HbFont`], allowing callers to fall back to `.pbf` glyph layout.
+#[cfg(feature = "font-shaping")]
 pub fn shape_text_runs<F>(text: &str, mut resolve_face: F) -> Option<Vec<ShapedGlyph>>
 where
     F: FnMut(char) -> Option<(u64, HbFont)>,
@@ -157,6 +163,7 @@ where
     (!all_glyphs.is_empty()).then_some(all_glyphs)
 }
 
+#[cfg(feature = "font-shaping")]
 fn shape_single_line<F>(
     line: &str,
     cluster_base: usize,
@@ -197,6 +204,7 @@ where
 /// Partitions `line[run]` into contiguous `(byte_range, face_id, HbFont)` spans while keeping
 /// combining marks, joiners (`ZWJ`/`ZWNJ`), and variation selectors attached to the preceding
 /// base character's font face so grapheme clusters never split mid-syllable.
+#[cfg(feature = "font-shaping")]
 fn split_by_face<F>(
     line: &str,
     run: Range<usize>,
@@ -236,6 +244,7 @@ where
 
 /// Returns `true` for Unicode combining marks, joiners, and variation selectors that must stay in
 /// the same shaping run as their preceding base character.
+#[cfg(feature = "font-shaping")]
 fn is_cluster_continuation(ch: char) -> bool {
     matches!(
         u32::from(ch),
@@ -332,6 +341,7 @@ fn is_cluster_continuation(ch: char) -> bool {
     )
 }
 
+#[cfg(feature = "font-shaping")]
 fn is_bidi_isolate_or_override(ch: char) -> bool {
     matches!(ch, '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
 }

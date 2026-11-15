@@ -11,20 +11,23 @@ mod shaper;
 mod spec;
 mod system;
 mod woff1;
+#[cfg(feature = "font-shaping")]
 mod woff2;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "font-shaping"))]
 pub(crate) mod tests;
 
 pub use cjk::{is_complex_shaping_codepoint, is_local_cjk_codepoint};
 pub use container::{detect_container_format, unpack_font_container, FontContainerFormat};
+#[cfg(target_arch = "wasm32")]
+pub(crate) use sdf::rasterize_canvas2d_chars_sdf;
 pub use sdf::{
     rasterize_char_sdf, rasterize_glyph_sdf, RasterizedGlyph, SDF_BUFFER, SDF_CUTOFF, SDF_EM_SIZE,
     SDF_RADIUS,
 };
-pub use shaper::{
-    face_glyph_atlas_key, shape_slice_with_font, shape_text_runs, GlyphKey, ShapedGlyph,
-};
+pub use shaper::{face_glyph_atlas_key, GlyphKey, ShapedGlyph};
+#[cfg(feature = "font-shaping")]
+pub use shaper::{shape_slice_with_font, shape_text_runs};
 pub use spec::{
     default_local_ideograph_font_family, deserialize_local_ideograph_font_family,
     is_default_local_ideograph_font_family, parse_font_stack_entry, FontFaceRule, FontFaces,
@@ -48,9 +51,7 @@ static GLOBAL_FONT_SYSTEM: LazyLock<Mutex<FontSystem>> =
 
 /// Acquires the shared process-wide [`FontSystem`] used by symbol asset loading.
 pub fn global_font_system() -> MutexGuard<'static, FontSystem> {
-    GLOBAL_FONT_SYSTEM
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+    crate::platform::lock_unpoisoned(&GLOBAL_FONT_SYSTEM)
 }
 
 /// Registers an in-memory `TTF`, `OTF`, `TTC`, `WOFF`, or `WOFF2` font into the shared

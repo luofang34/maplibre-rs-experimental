@@ -33,6 +33,16 @@ where
     }
 
     pub(super) fn begin_feature(&mut self, idx: u64) {
+        if self.buffer.vertices.capacity() >= 32_768
+            && self.buffer.vertices.capacity() - self.buffer.vertices.len() < 4096
+        {
+            self.buffer.vertices.reserve_exact(32_768);
+        }
+        if self.buffer.indices.capacity() >= 65_536
+            && self.buffer.indices.capacity() - self.buffer.indices.len() < 8192
+        {
+            self.buffer.indices.reserve_exact(65_536);
+        }
         let index = usize::try_from(idx).ok();
         self.current_raw_id = index
             .and_then(|i| self.source_ids.get(i).copied())
@@ -65,49 +75,96 @@ where
             self.update_feature_indices();
         }
         let line_length = self.line_length;
-        let mut color = if let Some(style) = &self.style_property {
-            if let Some(c) = style.evaluate_for(self.props(), self.zoom) {
-                [c.r, c.g, c.b, c.a]
-            } else {
-                tracing::debug!(
-                    "Style evaluation failed for feature properties: {:?}, style: {:?}",
-                    self.props(),
-                    style
-                );
-                self.fallback_color
-            }
-        } else {
-            self.fallback_color
-        };
-        if self.line_gradient {
-            color = [line_length, 0.0, 0.0, 1.0];
-            self.line_length = 0.0;
-        }
-        if let Some((opacity, zoom)) = &self.feature_opacity {
-            color[3] *= opacity
-                .evaluate_for(self.props(), *zoom)
-                .unwrap_or(1.0)
-                .clamp(0.0, 1.0);
-        }
-
-        // Features sharing a pattern end up side by side, so one draw can bind its image.
-        let pattern = self.pattern_property.as_ref().map(|property| {
-            crate::style::pattern_key::pattern_value(
-                property
-                    .evaluate_for(self.props(), self.zoom)
-                    .as_ref()
-                    .map(|name| name.0.as_str()),
-            )
-        });
-        if let Some(value) = pattern {
-            color[0] = value;
-        }
-        let color = self.circle_feature_color(color);
         let main_count = polygons.max(1);
-        for _ in 0..main_count {
-            self.feature_colors.push(color);
-        }
+        let pattern = if self.omit_feature_colors {
+            self.line_length = 0.0;
+            None
+        } else {
+            let mut color = if let Some(style) = &self.style_property {
+                if let Some(c) = style.evaluate_for(self.props(), self.zoom) {
+                    [c.r, c.g, c.b, c.a]
+                } else {
+                    tracing::debug!(
+                        "Style evaluation failed for feature properties: {:?}, style: {:?}",
+                        self.props(),
+                        style
+                    );
+                    self.fallback_color
+                }
+            } else {
+                self.fallback_color
+            };
+            if self.line_gradient {
+                color = [line_length, 0.0, 0.0, 1.0];
+                self.line_length = 0.0;
+            }
+            if let Some((opacity, zoom)) = &self.feature_opacity {
+                color[3] *= opacity
+                    .evaluate_for(self.props(), *zoom)
+                    .unwrap_or(1.0)
+                    .clamp(0.0, 1.0);
+            }
+
+            // Features sharing a pattern end up side by side, so one draw can bind its image.
+            let pattern = self.pattern_property.as_ref().map(|property| {
+                crate::style::pattern_key::pattern_value(
+                    property
+                        .evaluate_for(self.props(), self.zoom)
+                        .as_ref()
+                        .map(|name| name.0.as_str()),
+                )
+            });
+            if let Some(value) = pattern {
+                color[0] = value;
+            }
+            let color = self.circle_feature_color(color);
+            for _ in 0..main_count {
+                self.feature_colors.push(color);
+            }
+            pattern
+        };
         let outline_added = self.append_outline();
+        let retention = self.feature_paint_retention;
+        if retention != FeaturePaintRetention::Full {
+            let props_ref = self
+                .current_shared_props
+                .as_deref()
+                .unwrap_or(&self.feature_properties);
+            self.sort_key.record(
+                props_ref,
+                self.zoom,
+                first_entry..self.feature_indices.len(),
+                (self.buffer.indices.len(), pattern),
+            );
+            self.current_shared_props = None;
+            self.feature_properties.clear();
+            if retention == FeaturePaintRetention::SlotKinds {
+                let main_kind = if self.is_line_layer {
+                    BucketEntryKind::Line {
+                        length: line_length,
+                    }
+                } else {
+                    BucketEntryKind::Feature
+                };
+                for _ in 0..main_count {
+                    self.feature_paint.push(BucketFeatureEntry {
+                        raw_id: None,
+                        properties: Arc::clone(&self.slot_kind_properties),
+                        kind: main_kind,
+                    });
+                }
+                if outline_added {
+                    self.feature_paint.push(BucketFeatureEntry {
+                        raw_id: None,
+                        properties: Arc::clone(&self.slot_kind_properties),
+                        kind: BucketEntryKind::FillOutline,
+                    });
+                }
+            }
+            self.current_raw_id = None;
+            self.state_synced = false;
+            return;
+        }
         let props = self
             .current_shared_props
             .take()
@@ -118,35 +175,27 @@ where
             first_entry..self.feature_indices.len(),
             (self.buffer.indices.len(), pattern),
         );
-        let retention = self.feature_paint_retention;
-        if retention != FeaturePaintRetention::None {
-            // Slot-kind entries name no feature: one shared empty map stands in for them all.
-            let (raw_id, props) = if retention == FeaturePaintRetention::Full {
-                (self.current_raw_id, props)
-            } else {
-                (None, Arc::clone(&self.slot_kind_properties))
-            };
-            let main_kind = if self.is_line_layer {
-                BucketEntryKind::Line {
-                    length: line_length,
-                }
-            } else {
-                BucketEntryKind::Feature
-            };
-            for _ in 0..main_count {
-                self.feature_paint.push(BucketFeatureEntry {
-                    raw_id,
-                    properties: props.clone(),
-                    kind: main_kind,
-                });
+        let raw_id = self.current_raw_id;
+        let main_kind = if self.is_line_layer {
+            BucketEntryKind::Line {
+                length: line_length,
             }
-            if outline_added {
-                self.feature_paint.push(BucketFeatureEntry {
-                    raw_id,
-                    properties: props,
-                    kind: BucketEntryKind::FillOutline,
-                });
-            }
+        } else {
+            BucketEntryKind::Feature
+        };
+        for _ in 0..main_count {
+            self.feature_paint.push(BucketFeatureEntry {
+                raw_id,
+                properties: props.clone(),
+                kind: main_kind,
+            });
+        }
+        if outline_added {
+            self.feature_paint.push(BucketFeatureEntry {
+                raw_id,
+                properties: props,
+                kind: BucketEntryKind::FillOutline,
+            });
         }
         self.current_raw_id = None;
         self.state_synced = false;

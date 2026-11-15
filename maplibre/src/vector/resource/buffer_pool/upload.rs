@@ -127,6 +127,139 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         Ok(())
     }
 
+    /// Writes `count` copies of `value` into `buffer` starting at `offset` using fixed stack chunks.
+    pub(super) fn write_repeated_feature_metadata(
+        queue: &Q,
+        buffer: &B,
+        mut offset: wgpu::BufferAddress,
+        value: FM,
+        mut count: usize,
+    ) {
+        let stride = size_of::<FM>() as wgpu::BufferAddress;
+        if stride == 0 || count == 0 {
+            return;
+        }
+        let chunk = [value; 1024];
+        while count > 0 {
+            let n = count.min(chunk.len());
+            queue.write_buffer(buffer, offset, bytemuck::cast_slice(&chunk[..n]));
+            offset += (n as wgpu::BufferAddress) * stride;
+            count -= n;
+        }
+    }
+
+    /// Replaces only this style layer with uniform per-vertex feature metadata without heap scratch.
+    #[allow(clippy::too_many_arguments)]
+    pub fn replace_layer_geometry_uniform_unless(
+        &mut self,
+        queue: &Q,
+        coords: WorldTileCoords,
+        style_layer: StyleLayer,
+        geometry: &OverAlignedVertexBuffer<V, I>,
+        layer_metadata: TM,
+        uniform_feature: FM,
+        records: usize,
+        mut protect: impl FnMut(WorldTileCoords) -> bool,
+    ) -> Result<(), AllocationError> {
+        if coords.build_quad_key().is_none() {
+            return Err(AllocationError::Coordinates { coords });
+        }
+        let strides = ElementStrides::of::<V, I, TM, FM>();
+        let (vertices, records_u64) = (geometry.buffer.vertices.len() as u64, records as u64);
+        if records_u64 > vertices {
+            return Err(AllocationError::FeatureMetadata {
+                vertices,
+                records: records_u64,
+            });
+        }
+        let sizes = [
+            vertices * strides.vertex,
+            geometry.buffer.indices.len() as u64 * strides.index,
+            strides.layer_metadata,
+            records_u64 * strides.feature_metadata,
+        ];
+        self.validate_sizes(sizes, strides)?;
+        let alloc = self.reserve_page_allocation(sizes, strides, &mut protect)?;
+        let first_vertex = alloc
+            .vertices
+            .start
+            .checked_div(strides.vertex)
+            .unwrap_or(0);
+        let first_index = alloc.indices.start.checked_div(strides.index).unwrap_or(0);
+        let (first_vertex_u32, first_index_u32) =
+            match (element_index(first_vertex), element_index(first_index)) {
+                (Ok(fv), Ok(fi)) => (fv, fi),
+                (Err(err), _) | (_, Err(err)) => {
+                    if let Some(page) = self
+                        .pages
+                        .get_mut(usize::from(alloc.page))
+                        .and_then(Option::as_mut)
+                    {
+                        page.free(alloc.vertices, alloc.indices, alloc.layer_metadata);
+                    }
+                    return Err(err);
+                }
+            };
+        let id = style_layer.id.clone();
+        let allocation_id = self.revision.wrapping_add(1);
+        let entry = IndexEntry {
+            allocation_id,
+            paint_revision: 0,
+            page: alloc.page,
+            coords,
+            style_layer,
+            usable_indices: geometry.usable_indices,
+            first_vertex: first_vertex_u32,
+            first_index: first_index_u32,
+            buffer_vertices: alloc.vertices,
+            buffer_indices: alloc.indices,
+            buffer_layer_metadata: alloc.layer_metadata,
+            buffer_feature_metadata: first_vertex * strides.feature_metadata
+                ..first_vertex * strides.feature_metadata + sizes[3],
+        };
+        let page = self.page_of(&entry);
+        if sizes[0] > 0 {
+            queue.write_buffer(
+                &page.vertices.inner,
+                entry.buffer_vertices.start,
+                bytemuck::cast_slice(&geometry.buffer.vertices),
+            );
+        }
+        if sizes[1] > 0 {
+            queue.write_buffer(
+                &page.indices.inner,
+                entry.buffer_indices.start,
+                bytemuck::cast_slice(&geometry.buffer.indices),
+            );
+        }
+        if sizes[2] > 0 {
+            queue.write_buffer(
+                &page.layer_metadata.inner,
+                entry.buffer_layer_metadata.start,
+                bytemuck::bytes_of(&layer_metadata),
+            );
+        }
+        if sizes[3] > 0 {
+            Self::write_repeated_feature_metadata(
+                queue,
+                &page.feature_metadata.inner,
+                entry.buffer_feature_metadata.start,
+                uniform_feature,
+                records,
+            );
+        }
+        self.index.push_back(entry);
+        self.revision = allocation_id;
+        let removed = self.index.remove_layer(coords, &id, Some(self.revision));
+        for old in &removed {
+            self.free_entry_ranges(old);
+        }
+        if !removed.is_empty() {
+            self.reclaim_empty_pages(1);
+        }
+        Ok(())
+    }
+
     /// Replaces only this style layer once the new geometry has been validated and uploaded.
     pub fn replace_layer_geometry(
         &mut self,

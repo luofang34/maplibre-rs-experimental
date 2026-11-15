@@ -194,6 +194,31 @@ pub(crate) fn commit_pending_vector(tiles: &mut Tiles, coords: WorldTileCoords, 
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn release_committed_cpu_geometry(
+    tiles: &mut Tiles,
+    coords: WorldTileCoords,
+    style_layer_id: &str,
+    release_colors: bool,
+) {
+    let Some(layers) = tiles.query_mut::<&mut VectorLayerBucketComponent>(coords) else {
+        return;
+    };
+    for layer in &mut layers.layers {
+        if let VectorLayerBucket::AvailableLayer(avail) = layer {
+            if avail.style_layer_id == style_layer_id && avail.buffer.usable_indices > 0 {
+                avail.buffer.buffer.vertices = Vec::new();
+                avail.buffer.buffer.indices = Vec::new();
+                if release_colors {
+                    avail.feature_indices = Vec::new();
+                    avail.feature_colors = Vec::new();
+                    avail.feature_sort_keys = Vec::new();
+                }
+            }
+        }
+    }
+}
+
 pub(crate) fn accept_symbols(world: &mut World, bucket: SymbolLayerData) {
     let coords = bucket.coords;
     if world

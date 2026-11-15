@@ -1,8 +1,9 @@
 //! Two-tier browser tile cache: bounded in-memory LRU cache plus persistent Cache Storage API.
 
 use std::{
+    cell::RefCell,
     collections::{HashMap, VecDeque},
-    sync::{Arc, Mutex, PoisonError},
+    sync::{Arc, LazyLock, Mutex},
 };
 
 use js_sys::{ArrayBuffer, Reflect, Uint8Array};
@@ -15,9 +16,9 @@ use crate::io::source_client::{ByteRange, CachePolicy};
 /// Persistent browser Cache Storage bucket name for cached tiles and metadata.
 pub const BROWSER_TILE_CACHE_NAME: &str = "maplibre-rs-tiles-v1";
 
-/// Default 32 MiB cap for the shared in-memory browser LRU byte cache.
-pub const BROWSER_MEMORY_CACHE_CAP_BYTES: usize = 32 * 1024 * 1024;
-const BROWSER_MEMORY_CACHE_MAX_ITEM_BYTES: usize = 2 * 1024 * 1024;
+/// Default 1 MiB cap for the shared in-memory browser LRU byte cache (backed by persistent Cache Storage).
+pub const BROWSER_MEMORY_CACHE_CAP_BYTES: usize = 1024 * 1024;
+const BROWSER_MEMORY_CACHE_MAX_ITEM_BYTES: usize = 512 * 1024;
 
 struct LruState {
     entries: HashMap<Arc<str>, (Arc<[u8]>, u64)>,
@@ -101,13 +102,20 @@ impl LruState {
     }
 }
 
+static SHARED_MEMORY_CACHE: LazyLock<BrowserMemoryCache> =
+    LazyLock::new(|| BrowserMemoryCache::new(BROWSER_MEMORY_CACHE_CAP_BYTES));
+
+thread_local! {
+    static OPENED_CACHE: RefCell<Option<Cache>> = const { RefCell::new(None) };
+}
+
 /// Cloneable, bounded in-memory LRU byte cache shared across clones of [`super::WHATWGFetchHttpClient`].
 #[derive(Clone)]
 pub struct BrowserMemoryCache(Arc<Mutex<LruState>>);
 
 impl Default for BrowserMemoryCache {
     fn default() -> Self {
-        Self::new(BROWSER_MEMORY_CACHE_CAP_BYTES)
+        SHARED_MEMORY_CACHE.clone()
     }
 }
 
@@ -119,23 +127,17 @@ impl BrowserMemoryCache {
 
     /// Looks up `key` and updates its LRU recency stamp on hit.
     pub fn get(&self, key: &str) -> Option<Arc<[u8]>> {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(key)
+        crate::platform::lock_unpoisoned(&self.0).get(key)
     }
 
     /// Inserts `body` under `key`, evicting least-recently-used entries to stay under budget.
     pub fn insert(&self, key: &str, body: &[u8]) {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(key, body);
+        crate::platform::lock_unpoisoned(&self.0).insert(key, body);
     }
 
     /// Current byte footprint held in the in-memory cache.
     pub fn len_bytes(&self) -> usize {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner).bytes
+        crate::platform::lock_unpoisoned(&self.0).bytes
     }
 }
 
@@ -187,6 +189,9 @@ fn has_disallowed_cache_control(cache_control: Option<&str>) -> bool {
 }
 
 async fn open_tile_cache() -> Option<Cache> {
+    if let Some(cached) = OPENED_CACHE.with(|slot| slot.borrow().clone()) {
+        return Some(cached);
+    }
     let global = js_sys::global();
     let caches_val = Reflect::get(&global, &JsValue::from_str("caches")).ok()?;
     if caches_val.is_undefined() || caches_val.is_null() {
@@ -196,7 +201,9 @@ async fn open_tile_cache() -> Option<Cache> {
     let opened = JsFuture::from(storage.open(BROWSER_TILE_CACHE_NAME))
         .await
         .ok()?;
-    opened.dyn_into::<Cache>().ok()
+    let cache = opened.dyn_into::<Cache>().ok()?;
+    OPENED_CACHE.with(|slot| *slot.borrow_mut() = Some(cache.clone()));
+    Some(cache)
 }
 
 /// Queries the persistent browser `CacheStorage` bucket (`"maplibre-rs-tiles-v1"`) for `url`.

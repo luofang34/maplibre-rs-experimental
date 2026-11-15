@@ -99,6 +99,26 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         );
     }
 
+    /// Rewrites all feature metadata slots of `entry` with a single uniform `value` without heap scratch.
+    pub fn fill_feature_metadata(&self, queue: &Q, entry: &IndexEntry, value: FM) {
+        let stride = size_of::<FM>() as wgpu::BufferAddress;
+        if stride == 0 {
+            return;
+        }
+        let allocated = entry.buffer_feature_metadata.end - entry.buffer_feature_metadata.start;
+        let count = (allocated / stride) as usize;
+        if count == 0 {
+            return;
+        }
+        Self::write_repeated_feature_metadata(
+            queue,
+            &self.page_of(entry).feature_metadata.inner,
+            entry.buffer_feature_metadata.start,
+            value,
+            count,
+        );
+    }
+
     /// Rewrites a layer's indices in place, as when its labels are drawn in a new order; the
     /// count must be the one it was uploaded with.
     pub fn update_indices(&self, queue: &Q, entry: &IndexEntry, indices: &[I]) {

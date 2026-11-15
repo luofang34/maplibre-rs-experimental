@@ -150,6 +150,7 @@ pub fn process_vector_tile<T: VectorTransferables, C: Context>(
 mod geometry_tags;
 mod mvt_slice;
 mod processing;
+pub(crate) use mvt_slice::index_mvt_bytes;
 
 /// Decodes a tile, tolerating the zero padding some tile servers append: a zero tag is not a
 /// field, so a strict decoder rejects a tile that GL JS reads.
@@ -180,13 +181,37 @@ fn decode_mvt(data: &[u8]) -> Result<geozero::mvt::Tile, Box<dyn std::error::Err
     })
 }
 
+/// Decodes only the layers of `data` whose names satisfy `keep`, falling back to [`decode_tile`]
+/// when `data` uses non-MVT framing (such as MapLibre Tiles) or needs full wire error reporting.
+pub(crate) fn decode_tile_for_layers(
+    data: &[u8],
+    keep: impl Fn(&str) -> bool,
+) -> Result<geozero::mvt::Tile, Box<dyn std::error::Error + Send + Sync>> {
+    if let Some(tile) = mvt_slice::try_decode_mvt_filtered(data, &keep) {
+        return Ok(tile);
+    }
+    let mut tile = decode_tile(data)?;
+    tile.layers.retain(|mvt| keep(mvt.name.as_str()));
+    Ok(tile)
+}
+
 pub(crate) fn process_vector_tile_with_assets<T: VectorTransferables, C: Context>(
     data: &[u8],
     tile_request: VectorTileRequest,
     context: &mut ProcessVectorContext<T, C>,
     atlas: std::sync::Arc<crate::sdf::assets::SymbolAtlas>,
 ) -> Result<(), ProcessVectorError> {
-    let tile = decode_tile(data).map_err(|source| ProcessVectorError::Decoding {
+    let decode_res = if context.index_geometry && T::LayerIndexed::requires_geometry_index() {
+        decode_tile(data)
+    } else {
+        decode_tile_for_layers(data, |name| {
+            tile_request
+                .layers
+                .iter()
+                .any(|sl| sl.source_layer.as_deref() == Some(name))
+        })
+    };
+    let tile = decode_res.map_err(|source| ProcessVectorError::Decoding {
         coords: tile_request.coords,
         source,
     })?;
@@ -199,15 +224,43 @@ pub(crate) fn process_decoded_vector_tile_with_assets<T: VectorTransferables, C:
     context: &mut ProcessVectorContext<T, C>,
     atlas: std::sync::Arc<crate::sdf::assets::SymbolAtlas>,
 ) -> Result<(), ProcessVectorError> {
+    let gpu_atlas = atlas.gpu_upload_handle();
+    let index_uses_props = context.index_geometry && T::LayerIndexed::requires_geometry_index();
+    let mut ordered_layers: Vec<&StyleLayer> = tile_request.layers.iter().collect();
+    ordered_layers.sort_by(|a, b| {
+        a.source_layer
+            .as_deref()
+            .unwrap_or("")
+            .cmp(b.source_layer.as_deref().unwrap_or(""))
+            .then_with(|| a.index.cmp(&b.index))
+    });
+    let mut remaining_uses: rustc_hash::FxHashMap<&str, usize> = rustc_hash::FxHashMap::default();
+    if index_uses_props {
+        for layer in &tile.layers {
+            *remaining_uses.entry(layer.name.as_str()).or_insert(0) += 1;
+        }
+    }
+    for style in &ordered_layers {
+        if let (Some(_), Some(name)) = (&style.paint, &style.source_layer) {
+            *remaining_uses.entry(name.as_str()).or_insert(0) += 1;
+        }
+    }
     let mut shared_layer_props: rustc_hash::FxHashMap<
         &str,
         Option<Vec<std::sync::Arc<FeatureProperties>>>,
     > = rustc_hash::FxHashMap::default();
-    for style in &tile_request.layers {
+    for style in ordered_layers {
         let (Some(_), Some(name)) = (&style.paint, &style.source_layer) else {
             tracing::error!(layer = %style.id, "vector style layer misses a required attribute");
             continue;
         };
+        let uses_before = remaining_uses.get(name.as_str()).copied().unwrap_or(0);
+        let uses_after = uses_before.saturating_sub(1);
+        if uses_after == 0 {
+            remaining_uses.remove(name.as_str());
+        } else {
+            remaining_uses.insert(name.as_str(), uses_after);
+        }
         // Omitted source layers still emit an empty layer result to clear stale replacements.
         let source_layer = tile.layers.iter().find(|layer| &layer.name == name);
         let shared_props = source_layer.and_then(|layer| {
@@ -219,15 +272,19 @@ pub(crate) fn process_decoded_vector_tile_with_assets<T: VectorTransferables, C:
                 })
                 .as_deref()
         });
-        processing::process_layer(
+        let res = processing::process_layer(
             source_layer,
             name,
             shared_props,
             style,
             &tile_request,
             context,
-            atlas.clone(),
-        )?;
+            (&atlas, &gpu_atlas),
+        );
+        if uses_after == 0 {
+            shared_layer_props.remove(name.as_str());
+        }
+        res?;
     }
     if context.index_geometry {
         let geometries = if T::LayerIndexed::requires_geometry_index() {

@@ -78,9 +78,27 @@ impl WireTileIndex {
     /// Packs `index` into contiguous flat arrays while preserving shared `Arc<FeatureProperties>`
     /// groups and interned `source_layer` names.
     pub fn from_tile_index(index: &TileIndex) -> Self {
+        if let TileIndex::LazyMvt(lazy) = index {
+            if lazy.materialized_slice().is_none() {
+                let (bytes, compressed) = lazy.wire_bytes();
+                let marker = if compressed { "\u{0}mvtz" } else { "\u{0}mvt" };
+                return Self {
+                    is_spatial: false,
+                    strings: vec![marker.to_owned()],
+                    prop_blobs: bytes.to_vec(),
+                    prop_offsets: Vec::new(),
+                    geometries: Vec::new(),
+                    ring_ends: Vec::new(),
+                    xy: Vec::new(),
+                };
+            }
+        }
         let count = match index {
             TileIndex::Spatial { tree } => tree.size(),
             TileIndex::Linear { list } => list.len(),
+            TileIndex::LazyMvt(lazy) => lazy
+                .materialized_slice()
+                .map_or(0, <[IndexedGeometry<f64>]>::len),
         };
         let mut wire = Self {
             is_spatial: matches!(index, TileIndex::Spatial { .. }),
@@ -163,6 +181,12 @@ impl WireTileIndex {
         match index {
             TileIndex::Spatial { tree } => tree.iter().for_each(&mut push),
             TileIndex::Linear { list } => list.iter().for_each(&mut push),
+            TileIndex::LazyMvt(lazy) => {
+                lazy.materialized_slice()
+                    .into_iter()
+                    .flatten()
+                    .for_each(&mut push);
+            }
         }
         wire
     }
@@ -170,6 +194,22 @@ impl WireTileIndex {
     /// Reconstructs a [`TileIndex`] from flat wire arrays, bulk-loading an [`RTree`] when
     /// `is_spatial` is true.
     pub fn into_tile_index(self) -> TileIndex {
+        if self.prop_offsets.is_empty() {
+            match self.strings.first().map(String::as_str) {
+                Some("\u{0}mvtz") => {
+                    return TileIndex::LazyMvt(super::LazyMvtIndex::from_packed(
+                        Arc::from(self.prop_blobs),
+                        true,
+                    ));
+                }
+                Some("\u{0}mvt") => {
+                    return TileIndex::LazyMvt(super::LazyMvtIndex::new(Arc::from(
+                        self.prop_blobs,
+                    )));
+                }
+                _ => {}
+            }
+        }
         let layers: Vec<Arc<str>> = self.strings.into_iter().map(Arc::from).collect();
         let mut props: Vec<Arc<FeatureProperties>> =
             Vec::with_capacity(self.prop_offsets.len().saturating_sub(1));
@@ -281,7 +321,7 @@ pub(crate) fn encode_properties(props: &FeatureProperties, out: &mut Vec<u8>) {
     }
 }
 
-fn encode_str(s: &str, out: &mut Vec<u8>) {
+pub(crate) fn encode_str(s: &str, out: &mut Vec<u8>) {
     let bytes = s.as_bytes();
     out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
     out.extend_from_slice(bytes);
@@ -340,7 +380,7 @@ fn decode_properties(mut buf: &[u8]) -> Option<FeatureProperties> {
 
 pub(crate) fn decode_properties_from(buf: &mut &[u8]) -> Option<FeatureProperties> {
     let count = read_u32(buf)? as usize;
-    let mut props = FeatureProperties::new();
+    let mut props = FeatureProperties::with_capacity(count.min(256));
     for _ in 0..count {
         let key = read_string(buf)?;
         let val = decode_value(buf)?;
@@ -364,7 +404,16 @@ pub(crate) fn read_u32(buf: &mut &[u8]) -> Option<u32> {
     Some(u32::from_le_bytes(head.try_into().ok()?))
 }
 
-fn read_f64(buf: &mut &[u8]) -> Option<f64> {
+pub(crate) fn read_f32(buf: &mut &[u8]) -> Option<f32> {
+    if buf.len() < 4 {
+        return None;
+    }
+    let (head, rest) = buf.split_at(4);
+    *buf = rest;
+    Some(f32::from_le_bytes(head.try_into().ok()?))
+}
+
+pub(crate) fn read_f64(buf: &mut &[u8]) -> Option<f64> {
     if buf.len() < 8 {
         return None;
     }
@@ -373,7 +422,16 @@ fn read_f64(buf: &mut &[u8]) -> Option<f64> {
     Some(f64::from_le_bytes(head.try_into().ok()?))
 }
 
-fn read_string(buf: &mut &[u8]) -> Option<String> {
+pub(crate) fn read_u64(buf: &mut &[u8]) -> Option<u64> {
+    if buf.len() < 8 {
+        return None;
+    }
+    let (head, rest) = buf.split_at(8);
+    *buf = rest;
+    Some(u64::from_le_bytes(head.try_into().ok()?))
+}
+
+pub(crate) fn read_string(buf: &mut &[u8]) -> Option<String> {
     let len = read_u32(buf)? as usize;
     if buf.len() < len {
         return None;

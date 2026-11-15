@@ -35,6 +35,9 @@ struct CoordsPropertyTable {
 
 impl CoordsPropertyTable {
     fn seed_existing(&mut self, props: &Arc<FeatureProperties>) {
+        if props.is_empty() {
+            return;
+        }
         let ptr = Arc::as_ptr(props) as usize;
         if self.by_ptr.contains_key(&ptr) {
             return;
@@ -52,6 +55,10 @@ impl CoordsPropertyTable {
     }
 
     fn intern(&mut self, props: &mut Arc<FeatureProperties>) {
+        if props.is_empty() {
+            *props = Arc::clone(crate::style::expression::empty_feature_properties());
+            return;
+        }
         let ptr = Arc::as_ptr(props) as usize;
         if let Some((_, canonical)) = self.by_ptr.get(&ptr) {
             *props = Arc::clone(canonical);
@@ -87,6 +94,21 @@ impl TilePropertyInterner {
                     }
                 }
             }
+            if let Some(symbols) = tiles.query::<&crate::sdf::SymbolLayersDataComponent>(coords) {
+                for layer in &symbols.layers {
+                    for feature in &layer.features {
+                        table.seed_existing(&feature.data.properties);
+                    }
+                }
+            }
+            if let Some(pending) = tiles.query::<&crate::vector::content::LayerReplacements>(coords)
+            {
+                for layer in &pending.symbols {
+                    for feature in &layer.features {
+                        table.seed_existing(&feature.data.properties);
+                    }
+                }
+            }
         }
         table
     }
@@ -104,6 +126,18 @@ impl TilePropertyInterner {
         }
     }
 
+    /// Deduplicates symbol feature property maps against resident and batch-peer `Arc`s at `coords`.
+    pub fn intern_symbol_bucket(
+        &mut self,
+        tiles: &Tiles,
+        bucket: &mut crate::sdf::SymbolLayerData,
+    ) {
+        let table = self.table_for(tiles, bucket.coords);
+        for feature in &mut bucket.features {
+            table.intern(&mut feature.data.properties);
+        }
+    }
+
     /// Deduplicates `index` geometries against resident and earlier-batch `Arc<FeatureProperties>` at `coords`.
     pub fn intern_tile_index(
         &mut self,
@@ -116,6 +150,11 @@ impl TilePropertyInterner {
         match index {
             TileIndex::Spatial { tree } => tree.iter_mut().for_each(&mut visit),
             TileIndex::Linear { list } => list.iter_mut().for_each(&mut visit),
+            TileIndex::LazyMvt(lazy) => {
+                if let Some(list) = lazy.materialized_mut() {
+                    list.iter_mut().for_each(&mut visit);
+                }
+            }
         }
     }
 }

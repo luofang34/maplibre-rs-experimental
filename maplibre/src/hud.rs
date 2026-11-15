@@ -268,12 +268,21 @@ fn resource_system(
         world, renderer, ..
     }: &mut MapContext,
 ) -> SystemResult {
+    #[cfg(target_arch = "wasm32")]
+    let hud_inactive = world
+        .resources
+        .get::<NavigationHudState>()
+        .is_none_or(|state| !state.visible && state.selection_box.is_none());
     let Some(pipeline) = world
         .resources
         .get_mut::<Eventually<NavigationHudPipeline>>()
     else {
         return Err(SystemError::Dependencies);
     };
+    #[cfg(target_arch = "wasm32")]
+    if matches!(pipeline, Eventually::Uninitialized) && hud_inactive {
+        return Ok(());
+    }
     let device = &renderer.device;
     let settings = renderer.settings;
     let surface = &renderer.resources.surface;

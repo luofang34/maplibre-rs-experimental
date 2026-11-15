@@ -2,15 +2,22 @@
 
 use std::{collections::HashSet, sync::Arc};
 
-use super::group_tile::fetch_group_tile;
+use super::{
+    group_tile::{decode_group_tile, fetch_raw_group_tile, GroupTile},
+    limiter::acquire_heavy_tile_slot,
+};
 
 mod provided;
 use crate::{
     coords::WorldTileCoords,
     environment::OffscreenKernel,
     io::{
-        apc::{AsyncProcedureFuture, AttemptContext, Context, Input, ProcedureError, SendError},
+        apc::{
+            AsyncProcedureFuture, AttemptContext, Context, Input, IntoMessage, ProcedureError,
+            SendError,
+        },
         cpu_work::run_cpu_bound_replying,
+        geometry_index::{LazyMvtIndex, TileIndex},
         source_client::{HttpClient, SourceClient},
         tile_retry::{RequestDisposition, RequestKind, TileRequestOutcome},
         tile_sources::{source_layer_groups, SourceLayerGroup, TileKind},
@@ -19,7 +26,7 @@ use crate::{
     style::{layer::StyleLayer, Style},
     vector::{
         process_vector::process_decoded_vector_tile_with_assets,
-        transferables::{LayerMissing, TileTessellated, VectorTransferables},
+        transferables::{LayerIndexed, LayerMissing, TileTessellated, VectorTransferables},
         ProcessVectorContext, ProcessVectorError, VectorTileRequest,
     },
 };
@@ -43,15 +50,23 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
         let client = kernel.source_client();
         // A request for a change to some sources' data leaves the tile's other sources as the
         // tile shows them.
+        let has_terrain = style.terrain.is_some();
         let mut groups = source_layer_groups(&style, TileKind::Vector)
             .into_iter()
-            .filter(|group| {
-                only_sources.as_ref().is_none_or(|only| {
+            .filter_map(|mut group| {
+                let included = only_sources.as_ref().is_none_or(|only| {
                     group
                         .source_name
                         .as_ref()
                         .is_some_and(|name| only.contains(name))
-                })
+                });
+                if !included {
+                    return None;
+                }
+                group
+                    .layers
+                    .retain(|layer| layer.needed_for_tile(has_terrain, coords, overscaled_zoom));
+                (!group.layers.is_empty()).then_some(group)
             })
             .peekable();
         let mut failed = false;
@@ -63,17 +78,65 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
                     .map_err(ProcedureError::Send)?;
                 continue;
             }
-            let tile = match fetch_group_tile(&client, coords, &group, refetch).await {
-                Ok(tile) => tile,
+            let has_symbols = group.layers.iter().any(|layer| layer.type_ == "symbol");
+            enum FetchStep {
+                Ready(super::group_tile::RawGroupTile),
+                NotFound,
+                Failed { retryable: bool },
+            }
+            let fetch_step = {
+                #[cfg(target_arch = "wasm32")]
+                let raw_res = if has_symbols {
+                    let (raw_res, ()) = futures::future::join(
+                        fetch_raw_group_tile(&client, coords, &group, refetch),
+                        crate::sdf::assets::warm_style_symbol_assets(&client, &style),
+                    )
+                    .await;
+                    raw_res
+                } else {
+                    fetch_raw_group_tile(&client, coords, &group, refetch).await
+                };
+                #[cfg(not(target_arch = "wasm32"))]
+                let raw_res = {
+                    let _ = has_symbols;
+                    fetch_raw_group_tile(&client, coords, &group, refetch).await
+                };
+                match raw_res {
+                    Ok(raw_tile) => FetchStep::Ready(raw_tile),
+                    Err(error) if error.is_not_found() => {
+                        tracing::debug!(%coords, source = ?group.source_name, "no vector tile at the source; its layers are empty");
+                        FetchStep::NotFound
+                    }
+                    Err(error) => {
+                        tracing::warn!(%coords, source = ?group.source_name, error = %error.describe(), "vector tile unavailable");
+                        FetchStep::Failed {
+                            retryable: error.is_retryable(),
+                        }
+                    }
+                }
+            };
+            let raw_tile = match fetch_step {
+                FetchStep::Ready(raw_tile) => raw_tile,
                 // A source without a tile there has nothing to draw, as GL JS loads a vector
                 // tile that answered 404 empty: its layers are empty, and the tile's other
                 // sources are drawn as usual.
-                Err(error) if error.is_not_found() => {
-                    tracing::debug!(%coords, source = ?group.source_name, "no vector tile at the source; its layers are empty");
+                FetchStep::NotFound => {
                     source_empty::<T, _>(coords, &group.layers, &context)
                         .map_err(ProcedureError::Send)?;
                     continue;
                 }
+                FetchStep::Failed { retryable } => {
+                    failed = true;
+                    retry |= retryable;
+                    source_failed::<T, _>(coords, &group.layers, &context)
+                        .map_err(ProcedureError::Send)?;
+                    continue;
+                }
+            };
+            super::limiter::wait_for_shared_tile_slot().await;
+            let mut heavy_slot = Some(acquire_heavy_tile_slot().await);
+            let tile = match decode_group_tile(&client, raw_tile, coords, &group.layers) {
+                Ok(tile) => tile,
                 Err(error) => {
                     tracing::warn!(%coords, source = ?group.source_name, error = %error.describe(), "vector tile unavailable");
                     failed = true;
@@ -90,11 +153,14 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
                 &client,
                 &group,
                 context.clone(),
-                SourcePass {
-                    last_source: groups.peek().is_none() && !failed,
-                    overscaled_zoom,
-                    pixel_ratio,
-                },
+                (
+                    &mut heavy_slot,
+                    SourcePass {
+                        last_source: groups.peek().is_none() && !failed,
+                        overscaled_zoom,
+                        pixel_ratio,
+                    },
+                ),
             )
             .await
             {
@@ -165,14 +231,19 @@ fn source_failed<T: VectorTransferables, C: Context>(
 }
 
 async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: HttpClient>(
-    tile: Arc<geozero::mvt::Tile>,
+    group_tile: GroupTile,
     coords: WorldTileCoords,
     style: &Style,
     client: &SourceClient<H>,
     group: &SourceLayerGroup,
     context: C,
-    pass: SourcePass,
+    (heavy_slot, pass): (&mut Option<super::limiter::HeavyTileSlot>, SourcePass),
 ) -> Result<Option<provided::Symbols>, ProcessVectorError> {
+    let GroupTile {
+        mut tile,
+        mvt_bytes,
+        mvt_compressed,
+    } = group_tile;
     let SourcePass {
         last_source,
         overscaled_zoom,
@@ -195,38 +266,59 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
             style.feature_state.source(name).cloned(),
         )
     });
-    let base_indexed = !base.is_empty();
+    if T::LayerIndexed::requires_geometry_index() && (!base.is_empty() || !symbols.is_empty()) {
+        let lazy = LazyMvtIndex::from_packed_with_state(
+            mvt_bytes,
+            mvt_compressed,
+            source_state.0.clone(),
+            source_state.1.clone(),
+        );
+        context
+            .send_back(T::LayerIndexed::build_from(
+                coords,
+                group.source_name.clone(),
+                TileIndex::LazyMvt(lazy),
+            ))
+            .map_err(ProcessVectorError::SendError)?;
+    }
     let request = VectorTileRequest {
         coords,
         layers: base,
         projection: projection.clone(),
         overscaled_zoom,
     };
-    tessellate::<T, C>(
-        context.clone(),
-        (last_source, true),
-        (tile.clone(), request),
-        source_state.clone(),
-        Arc::new(SymbolAtlas::default()),
-    )
-    .await?;
     if symbols.is_empty() {
+        tessellate::<T, C>(
+            context,
+            (last_source, false),
+            (tile, request),
+            source_state,
+            Arc::new(SymbolAtlas::default()),
+        )
+        .await?;
         return Ok(None);
     }
-    // The assets are asked for by the very layers the symbols are laid out with: this source's,
-    // as its tile is cut.
-    let assets = load_symbol_assets_awaiting_from_tile(
-        client,
-        SymbolAssetConfig {
-            pixel_ratio,
-            ..SymbolAssetConfig::of(style)
-        },
-        &symbols,
-        &tile,
-        f64::from(overscaled_zoom.max(u8::from(coords.z))),
-    )
-    .await
-    .map_err(ProcessVectorError::SymbolAssets)?;
+    // Poll symbol asset fetches before base-layer CPU tessellation so remote glyph/sprite
+    // requests fly on the network concurrently with road/building tessellation.
+    let asset_config = SymbolAssetConfig {
+        pixel_ratio,
+        ..SymbolAssetConfig::of(style)
+    };
+    let zoom = f64::from(overscaled_zoom.max(u8::from(coords.z)));
+    let (assets_res, base_res) = {
+        let assets_fut =
+            load_symbol_assets_awaiting_from_tile(client, asset_config, &symbols, &tile, zoom);
+        let base_fut = tessellate::<T, C>(
+            context.clone(),
+            (last_source, false),
+            (tile.clone(), request),
+            source_state.clone(),
+            Arc::new(SymbolAtlas::default()),
+        );
+        futures::future::join(assets_fut, base_fut).await
+    };
+    base_res?;
+    let assets = assets_res.map_err(ProcessVectorError::SymbolAssets)?;
     let request = VectorTileRequest {
         coords,
         layers: symbols,
@@ -235,9 +327,20 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
     };
     // Only a source still waiting for images keeps its tile and layers to lay out again.
     let again = (!assets.awaiting.is_empty()).then(|| (tile.clone(), request.clone()));
+    if again.is_none() {
+        if let Some(inner) = Arc::get_mut(&mut tile) {
+            inner.layers.retain(|mvt| {
+                request
+                    .layers
+                    .iter()
+                    .any(|sl| sl.source_layer.as_deref() == Some(mvt.name.as_str()))
+            });
+        }
+        let _ = heavy_slot.take();
+    }
     tessellate::<T, C>(
         context,
-        (last_source, !base_indexed),
+        (last_source, false),
         (tile, request),
         source_state,
         assets.atlas,
@@ -303,16 +406,17 @@ fn finish<T: VectorTransferables, C: Context>(
     context
         .send_back(completion)
         .map_err(ProcedureError::Send)?;
-    context
-        .send_back(TileRequestOutcome {
-            coords,
-            kind: RequestKind::Vector,
-            attempt,
-            disposition: if retry {
-                RequestDisposition::Retry
-            } else {
-                RequestDisposition::Complete
-            },
-        })
-        .map_err(ProcedureError::Send)
+    let outcome = IntoMessage::into(TileRequestOutcome {
+        coords,
+        kind: RequestKind::Vector,
+        attempt,
+        disposition: if retry {
+            RequestDisposition::Retry
+        } else {
+            RequestDisposition::Complete
+        },
+    });
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+    let outcome = outcome.with_shared_permit(super::limiter::issue_shared_tile_permit());
+    context.send_back(outcome).map_err(ProcedureError::Send)
 }

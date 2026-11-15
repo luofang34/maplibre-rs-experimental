@@ -5,6 +5,8 @@
 compile_error!("web works only on wasm32.");
 
 mod application;
+#[cfg(feature = "arena-telemetry")]
+mod arena_telemetry;
 mod controller;
 mod environment;
 mod error;

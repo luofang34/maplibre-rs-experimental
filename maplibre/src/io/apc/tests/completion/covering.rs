@@ -83,9 +83,7 @@ async fn selected_source(path: &str) -> (WorldTileCoords, WorldTileCoords) {
     let (kernel, mut context, child, attempt) = setup_covering().await;
     crate::vector::request_system::fetch_vector_apc::<_, DefaultVectorTransferables, _>(
         Input::new(child, style(false, &[path]), attempt),
-        SchedulerContext {
-            sender: kernel.apc().channel.0.clone(),
-        },
+        SchedulerContext::new(kernel.apc().channel.0.clone(), None),
         TileKernel::default(),
     )
     .await
@@ -131,9 +129,7 @@ async fn coverage_while_a_later_source_loads(first: &str, expected: WorldTileCoo
     };
     let worker = crate::vector::request_system::fetch_vector_apc::<_, DefaultVectorTransferables, _>(
         Input::new(child, style(false, &[first, "blocked"]), attempt),
-        SchedulerContext {
-            sender: kernel.apc().channel.0.clone(),
-        },
+        SchedulerContext::new(kernel.apc().channel.0.clone(), None),
         TileKernel(client),
     );
     let intermediate = async {

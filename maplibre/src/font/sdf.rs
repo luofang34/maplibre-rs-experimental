@@ -5,12 +5,19 @@
 //! subpixel boundary seeding) with `buffer = 3`, `radius = 8.0`, and `cutoff = 0.25` (`0.75`
 //! inside-edge threshold in `sdf.fragment.wgsl`).
 
+#[cfg(feature = "font-shaping")]
 use ab_glyph_rasterizer::{point, Point, Rasterizer};
+#[cfg(feature = "font-shaping")]
 use skrifa::{
     instance::{LocationRef, Size},
     outline::{DrawSettings, OutlinePen},
     FontRef, GlyphId, MetadataProvider,
 };
+
+#[cfg(target_arch = "wasm32")]
+pub(super) mod canvas2d;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use canvas2d::rasterize_canvas2d_chars_sdf;
 
 /// Nominal em size in pixels used by MapLibre SDF glyph atlases.
 pub const SDF_EM_SIZE: f32 = 24.0;
@@ -21,10 +28,13 @@ pub const SDF_RADIUS: f32 = 8.0;
 /// Fraction of [`SDF_RADIUS`] reserved inside the glyph contour (`1.0 - 0.25 = 0.75` edge).
 pub const SDF_CUTOFF: f32 = 0.25;
 /// Baseline reference offset matching MapLibre GL JS `BASELINE_OFFSET = -27` (`top = -27 - min_y`).
-const PBF_BASELINE_TOP: i32 = -27;
+#[cfg(any(feature = "font-shaping", target_arch = "wasm32"))]
+pub(super) const PBF_BASELINE_TOP: i32 = -27;
 /// Maximum unpadded glyph dimension rasterised to guard against degenerate outlines.
-const MAX_GLYPH_DIM: i32 = 512;
+#[cfg(any(feature = "font-shaping", target_arch = "wasm32"))]
+pub(super) const MAX_GLYPH_DIM: i32 = 512;
 /// Sentinel squared distance for the Felzenszwalb & Huttenlocher distance transform (`f64` exact).
+#[cfg(any(feature = "font-shaping", target_arch = "wasm32"))]
 const EDT_INF: f64 = 1.0e12;
 
 /// One glyph rasterised at 24px nominal em-size in MapLibre's SDF conventions.
@@ -64,12 +74,20 @@ impl RasterizedGlyph {
 /// Returns `None` if `font_bytes` cannot be parsed or the font lacks a mapping for `ch`
 /// (`.notdef` glyph `0` is rejected).
 pub fn rasterize_char_sdf(font_bytes: &[u8], face_index: u32, ch: char) -> Option<RasterizedGlyph> {
-    let font = FontRef::from_index(font_bytes, face_index).ok()?;
-    let glyph_id = font.charmap().map(ch)?;
-    if glyph_id == GlyphId::NOTDEF {
-        return None;
+    #[cfg(feature = "font-shaping")]
+    {
+        let font = FontRef::from_index(font_bytes, face_index).ok()?;
+        let glyph_id = font.charmap().map(ch)?;
+        if glyph_id == GlyphId::NOTDEF {
+            return None;
+        }
+        rasterize_glyph_from_ref(&font, glyph_id)
     }
-    rasterize_glyph_from_ref(&font, glyph_id)
+    #[cfg(not(feature = "font-shaping"))]
+    {
+        let _ = (font_bytes, face_index, ch);
+        None
+    }
 }
 
 /// Rasterises `glyph_id` (including unencoded `GSUB` ligature/conjunct glyphs) from `font_bytes`.
@@ -78,10 +96,19 @@ pub fn rasterize_glyph_sdf(
     face_index: u32,
     glyph_id: u32,
 ) -> Option<RasterizedGlyph> {
-    let font = FontRef::from_index(font_bytes, face_index).ok()?;
-    rasterize_glyph_from_ref(&font, GlyphId::new(glyph_id))
+    #[cfg(feature = "font-shaping")]
+    {
+        let font = FontRef::from_index(font_bytes, face_index).ok()?;
+        rasterize_glyph_from_ref(&font, GlyphId::new(glyph_id))
+    }
+    #[cfg(not(feature = "font-shaping"))]
+    {
+        let _ = (font_bytes, face_index, glyph_id);
+        None
+    }
 }
 
+#[cfg(feature = "font-shaping")]
 pub(crate) fn rasterize_glyph_from_ref(
     font: &FontRef<'_>,
     glyph_id: GlyphId,
@@ -173,6 +200,7 @@ pub(crate) fn rasterize_glyph_from_ref(
     })
 }
 
+#[cfg(feature = "font-shaping")]
 #[derive(Clone, Copy)]
 enum Segment {
     Line(Point, Point),
@@ -180,6 +208,7 @@ enum Segment {
     Cubic(Point, Point, Point, Point),
 }
 
+#[cfg(feature = "font-shaping")]
 struct RecordingPen {
     commands: Vec<Segment>,
     start: Point,
@@ -191,6 +220,7 @@ struct RecordingPen {
     max_y: f32,
 }
 
+#[cfg(feature = "font-shaping")]
 impl Default for RecordingPen {
     fn default() -> Self {
         Self {
@@ -206,6 +236,7 @@ impl Default for RecordingPen {
     }
 }
 
+#[cfg(feature = "font-shaping")]
 impl RecordingPen {
     fn include(&mut self, p: Point) {
         self.min_x = self.min_x.min(p.x);
@@ -227,6 +258,7 @@ impl RecordingPen {
     }
 }
 
+#[cfg(feature = "font-shaping")]
 impl OutlinePen for RecordingPen {
     fn move_to(&mut self, x: f32, y: f32) {
         self.finish_open_subpath();
@@ -272,7 +304,8 @@ impl OutlinePen for RecordingPen {
 }
 
 /// Converts subpixel `[0, 1]` coverage values into an 8-bit TinySDF bitmap.
-fn coverage_to_sdf(coverage: &[f32], width: usize, height: usize) -> Vec<u8> {
+#[cfg(any(feature = "font-shaping", target_arch = "wasm32"))]
+pub(super) fn coverage_to_sdf(coverage: &[f32], width: usize, height: usize) -> Vec<u8> {
     let total = width * height;
     let mut grid_outer = vec![EDT_INF; total];
     let mut grid_inner = vec![0.0_f64; total];
@@ -310,6 +343,7 @@ fn coverage_to_sdf(coverage: &[f32], width: usize, height: usize) -> Vec<u8> {
 }
 
 /// In-place 2D squared Euclidean distance transform (Felzenszwalb & Huttenlocher 2012).
+#[cfg(any(feature = "font-shaping", target_arch = "wasm32"))]
 fn edt_2d(grid: &mut [f64], width: usize, height: usize) {
     let max_len = width.max(height);
     if max_len == 0 {
@@ -347,6 +381,7 @@ fn edt_2d(grid: &mut [f64], width: usize, height: usize) {
     }
 }
 
+#[cfg(any(feature = "font-shaping", target_arch = "wasm32"))]
 fn edt_1d(f: &[f64], d: &mut [f64], v: &mut [usize], z: &mut [f64]) {
     let n = f.len();
     if n == 0 {

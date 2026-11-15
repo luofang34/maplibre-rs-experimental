@@ -12,7 +12,7 @@ pub(super) struct PendingLine {
     pub text: Option<String>,
     pub line: Vec<[f64; 2]>,
     pub source: super::layout::SourceFeature,
-    pub properties: FeatureProperties,
+    pub properties: std::sync::Arc<FeatureProperties>,
 }
 
 struct Chunk {

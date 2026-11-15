@@ -12,9 +12,9 @@ use crate::{
             ProcedureError,
         },
         frame_style::FrameStyle,
-        tile_backpressure::request_budget,
+        tile_backpressure::dem_request_budget,
         tile_retry::{self, RequestDisposition, RequestKind, TileRequestOutcome},
-        tile_sources::missing_tile_fallback,
+        tile_sources::{missing_tile_fallback, RASTER_LAYER_TYPES},
     },
     kernel::Kernel,
     render::view_state::ViewStatePadding,
@@ -142,7 +142,11 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
         };
 
         let mut requested = HashSet::new();
-        let mut budget = request_budget(world);
+        let has_raster = style
+            .layers
+            .iter()
+            .any(|layer| RASTER_LAYER_TYPES.contains(&layer.type_.as_str()) && !layer.is_hidden());
+        let mut budget = dem_request_budget(world, has_raster);
         let drapes = world
             .resources
             .get::<DrapeRequests>()

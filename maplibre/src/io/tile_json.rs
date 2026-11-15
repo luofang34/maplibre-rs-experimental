@@ -137,11 +137,27 @@ pub async fn resolve_tile_json_sources<HC: HttpClient>(
     style: &mut Style,
     client: &SourceClient<HC>,
 ) {
-    for (name, source) in &mut style.sources {
-        let Some(url) = pending_tile_json_url(source) else {
+    let pending: Vec<(String, String, bool)> = style
+        .sources
+        .iter()
+        .filter_map(|(name, source)| {
+            pending_tile_json_url(source).map(|url| (name.clone(), url, source.is_volatile()))
+        })
+        .collect();
+    if pending.is_empty() {
+        return;
+    }
+    let results = futures::future::join_all(
+        pending
+            .iter()
+            .map(|(_, url, volatile)| client.fetch_source_url(url, *volatile)),
+    )
+    .await;
+    for ((name, url, _), fetched) in pending.into_iter().zip(results) {
+        let Some(source) = style.sources.get_mut(&name) else {
             continue;
         };
-        match client.fetch_source_url(&url, source.is_volatile()).await {
+        match fetched {
             Ok(bytes) => match serde_json::from_slice::<TileJson>(&bytes) {
                 Ok(tile_json) => {
                     tracing::info!(source = %name, %url, "resolved TileJSON source");

@@ -40,6 +40,18 @@ pub trait Scheduler: 'static {
     ) -> Result<(), ScheduleError>
     where
         T: Future<Output = ()> + 'static;
+
+    /// Installs a host wake callback on the calling thread for worker pools whose tasks run in
+    /// isolated JS realms (`DedicatedWorkerGlobalScope`) and wake the main thread via messages.
+    fn set_main_thread_waker(&self, _wake: std::sync::Arc<dyn Fn() + Send + Sync>) {}
+
+    /// Wraps a host wake callback into a closure safe to invoke from scheduled worker tasks.
+    fn wrap_worker_waker(
+        &self,
+        wake: std::sync::Arc<dyn Fn() + Send + Sync>,
+    ) -> std::sync::Arc<dyn Fn() + Send + Sync> {
+        wake
+    }
 }
 
 /// Rejects every task without invoking its factory.

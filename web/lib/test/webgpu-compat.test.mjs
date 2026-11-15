@@ -42,3 +42,113 @@ test('preserves defined numeric subgroup sizes', () => {
     assert.equal(info.subgroupMaxSize, 32);
     assert.equal(info.isFallbackAdapter, true);
 });
+
+test('unshares SharedArrayBuffer views in setBindGroup and writeBuffer', () => {
+    if (typeof SharedArrayBuffer === 'undefined') {
+        return;
+    }
+    const calls = [];
+    class MockQueue {
+        writeBuffer(buf, offset, data, dataOffset, size) {
+            assert.equal(data.buffer instanceof SharedArrayBuffer, false);
+            calls.push({op: 'writeBuffer', bytes: Array.from(new Uint8Array(data.buffer, data.byteOffset, size))});
+        }
+    }
+    class MockRenderPass {
+        setBindGroup(index, group, offsets, start, length) {
+            if (ArrayBuffer.isView(offsets)) {
+                assert.equal(offsets.buffer instanceof SharedArrayBuffer, false);
+                calls.push({op: 'setBindGroup', index, vals: Array.from(offsets.subarray(start, start + length))});
+            }
+        }
+    }
+
+    ensureWebGpuCompatibility({
+        SharedArrayBuffer,
+        GPUQueue: MockQueue,
+        GPURenderPassEncoder: MockRenderPass,
+    });
+
+    const sab = new SharedArrayBuffer(32);
+    const u32 = new Uint32Array(sab);
+    u32.set([256, 512, 1024], 1);
+
+    const pass = new MockRenderPass();
+    pass.setBindGroup(0, {}, u32, 1, 2);
+
+    const u8 = new Uint8Array(sab);
+    u8.set([10, 20, 30, 40], 4);
+    const queue = new MockQueue();
+    queue.writeBuffer({}, 0, u8, 4, 4);
+
+    assert.deepEqual(calls, [
+        {op: 'setBindGroup', index: 0, vals: [256, 512]},
+        {op: 'writeBuffer', bytes: [10, 20, 30, 40]},
+    ]);
+});
+
+test('forwards 2-argument setBindGroup without passing undefined dynamicOffsets', () => {
+    const argCounts = [];
+    class MockRenderPass2Arg {
+        setBindGroup() {
+            argCounts.push(arguments.length);
+            if (arguments.length === 3 && arguments[2] === undefined) {
+                throw new TypeError('The provided value cannot be converted to a sequence.');
+            }
+        }
+    }
+
+    ensureWebGpuCompatibility({
+        GPURenderPassEncoder: MockRenderPass2Arg,
+    });
+
+    const pass = new MockRenderPass2Arg();
+    pass.setBindGroup(0, {});
+    pass.setBindGroup(1, {}, undefined);
+    pass.setBindGroup(2, {}, [0]);
+
+    assert.deepEqual(argCounts, [2, 2, 3]);
+});
+
+test('bounds writeTexture SharedArrayBuffer copy to required texture slice', () => {
+    if (typeof SharedArrayBuffer === 'undefined') {
+        return;
+    }
+    const calls = [];
+    class MockTextureQueue {
+        writeTexture(destination, data, dataLayout, size) {
+            assert.equal(data.buffer instanceof SharedArrayBuffer, false);
+            calls.push({
+                byteLength: data.byteLength,
+                firstByte: data[0],
+                lastByte: data[data.byteLength - 1],
+                offset: dataLayout?.offset ?? 0,
+                size,
+            });
+        }
+    }
+
+    ensureWebGpuCompatibility({
+        SharedArrayBuffer,
+        GPUQueue: MockTextureQueue,
+    });
+
+    const sab = new SharedArrayBuffer(16 * 1024 * 1024);
+    const view = new Uint8Array(sab);
+    view[4096] = 0xab;
+    view[4096 + 4095] = 0xcd;
+
+    const queue = new MockTextureQueue();
+    queue.writeTexture(
+        {},
+        sab,
+        {offset: 4096, bytesPerRow: 256},
+        {width: 32, height: 16, depthOrArrayLayers: 1},
+    );
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].byteLength, 4096);
+    assert.equal(calls[0].firstByte, 0xab);
+    assert.equal(calls[0].lastByte, 0xcd);
+    assert.equal(calls[0].offset, 0);
+});

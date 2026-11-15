@@ -23,7 +23,7 @@ use crate::{
     window::{LogicalSize, PhysicalSize},
 };
 
-const VIEW_REGION_PADDING: i32 = 1;
+const VIEW_REGION_PADDING: i32 = 0;
 const MAX_N_TILES: usize = 512;
 
 /// Authoritative source of camera pose and frustum geometry for [`ViewState`].

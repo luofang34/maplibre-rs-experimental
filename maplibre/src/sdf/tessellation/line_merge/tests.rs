@@ -6,7 +6,7 @@ fn road(text: Option<&str>, points: &[[f64; 2]]) -> PendingLine {
         text: text.map(str::to_owned),
         line: points.to_vec(),
         source: Default::default(),
-        properties: FeatureProperties::new(),
+        properties: FeatureProperties::new().into(),
     }
 }
 

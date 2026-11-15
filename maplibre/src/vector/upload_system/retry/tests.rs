@@ -52,7 +52,10 @@ fn upload(
                 light: Default::default(),
             },
         ),
-        &mut crate::render::memory_budget::FrameUploads::default(),
+        (
+            &mut crate::render::memory_budget::FrameUploads::default(),
+            false,
+        ),
     );
 }
 

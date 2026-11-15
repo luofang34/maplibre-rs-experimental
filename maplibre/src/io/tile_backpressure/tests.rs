@@ -1,6 +1,8 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use super::{request_budget, tiles_in_flight, vector_request_budget, MAX_TILES_IN_FLIGHT};
+use super::{
+    dem_request_budget, request_budget, tiles_in_flight, vector_request_budget, MAX_TILES_IN_FLIGHT,
+};
 use crate::{
     coords::{WorldTileCoords, ZoomLevel},
     io::tile_retry::{
@@ -109,4 +111,11 @@ fn terrain_and_vectors_both_make_progress_under_low_memory() {
         available_bytes: Some(CRITICAL_MEMORY_BYTES - 1),
     });
     assert_eq!(vector_request_budget(&world, true), 0);
+}
+
+#[test]
+fn dem_budget_leaves_headroom_for_raster_requests() {
+    let world = World::default();
+    assert_eq!(dem_request_budget(&world, false), MAX_TILES_IN_FLIGHT);
+    assert_eq!(dem_request_budget(&world, true), MAX_TILES_IN_FLIGHT - 8);
 }

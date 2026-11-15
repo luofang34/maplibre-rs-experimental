@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use geozero::mvt::Tile;
+use geozero::mvt::{Message, Tile};
 
 use crate::{
     coords::WorldTileCoords,
@@ -14,15 +14,31 @@ use crate::{
         tile_sources::SourceLayerGroup,
     },
     sdf::assets::AssetFailure,
-    vector::process_vector::decode_tile,
+    vector::process_vector::{decode_tile, decode_tile_for_layers},
 };
 
-pub(super) async fn fetch_group_tile<H: HttpClient>(
+pub(super) struct GroupTile {
+    pub tile: Arc<Tile>,
+    pub mvt_bytes: Arc<[u8]>,
+    pub mvt_compressed: bool,
+}
+
+enum RawPayload {
+    Owned { bytes: Vec<u8>, label: String },
+    Cached { bytes: Arc<Vec<u8>>, url: String },
+}
+
+pub(super) struct RawGroupTile {
+    source_tile: WorldTileCoords,
+    payload: RawPayload,
+}
+
+pub(super) async fn fetch_raw_group_tile<H: HttpClient>(
     client: &SourceClient<H>,
     coords: WorldTileCoords,
     group: &SourceLayerGroup,
     refetch: bool,
-) -> Result<Arc<Tile>, SourceFetchError> {
+) -> Result<RawGroupTile, SourceFetchError> {
     let source_tile = group.source_tile(coords);
     #[cfg(feature = "geojson")]
     if let SourceType::GeoJson(geojson) = &group.source {
@@ -32,19 +48,13 @@ pub(super) async fn fetch_group_tile<H: HttpClient>(
             .await
             .map_err(|failure| fetch_failure(failure, &geojson.name))?;
         let data = index.tile(source_tile);
-        let mut tile = decode_tile(&data).map_err(|error| {
-            fetch_failure(
-                AssetFailure::Terminal(format!(
-                    "geojson tile {} cannot be decoded: {error}",
-                    geojson.name
-                )),
-                &geojson.name,
-            )
-        })?;
-        if source_tile != coords {
-            super::rescale::into_descendant(&mut tile, source_tile, coords);
-        }
-        return Ok(Arc::new(tile));
+        return Ok(RawGroupTile {
+            source_tile,
+            payload: RawPayload::Owned {
+                bytes: data,
+                label: format!("geojson tile {}", geojson.name),
+            },
+        });
     }
     #[cfg(not(feature = "geojson"))]
     if let SourceType::GeoJson(geojson) = &group.source {
@@ -58,27 +68,31 @@ pub(super) async fn fetch_group_tile<H: HttpClient>(
     }
     let Some(url) = group.source.format(&source_tile) else {
         let bytes = client.fetch(&source_tile, &group.source).await?;
-        let mut tile = decode_tile(&bytes).map_err(|error| {
-            fetch_failure(
-                AssetFailure::Terminal(format!(
-                    "vector tile {source_tile} cannot be decoded: {error}"
-                )),
-                "vector tile",
-            )
-        })?;
-        if source_tile != coords {
-            super::rescale::into_descendant(&mut tile, source_tile, coords);
-        }
-        return Ok(Arc::new(tile));
+        return Ok(RawGroupTile {
+            source_tile,
+            payload: RawPayload::Owned {
+                bytes,
+                label: format!("vector tile {source_tile}"),
+            },
+        });
     };
-    // Every request for the same source tile (including duplicate sources sharing a URL,
-    // overscaled zoom relayouts, and descendants cutting from an ancestor) fetches and decodes
-    // the protobuf once and keeps the decoded `Tile` in the asset cache until the budget evicts it.
+    // On wasm32, non-overscaled tiles (`source_tile == coords`) are already deduplicated per
+    // viewport by `RequestSystem` and cached by the browser's HTTP cache outside WASM linear
+    // memory, so fetching owned `Vec<u8>` avoids retaining compressed MVT copies in `AssetCache`
+    // and moves zero-copy into `Arc<[u8]>` for `LazyMvtIndex`.
+    #[cfg(target_arch = "wasm32")]
+    if source_tile == coords {
+        let bytes = client.fetch(&source_tile, &group.source).await?;
+        return Ok(RawGroupTile {
+            source_tile,
+            payload: RawPayload::Owned { bytes, label: url },
+        });
+    }
     let key = format!("tile:{url}");
     if refetch {
         client.assets().forget(&key);
     }
-    let cached = client
+    let cached_bytes: Arc<Vec<u8>> = client
         .assets()
         .load(key, || async {
             let bytes = client
@@ -94,21 +108,92 @@ pub(super) async fn fetch_group_tile<H: HttpClient>(
                         AssetFailure::Terminal(error.describe())
                     }
                 })?;
-            let tile = decode_tile(&bytes).map_err(|error| {
-                AssetFailure::Terminal(format!("vector tile {url} cannot be decoded: {error}"))
-            })?;
-            Ok((tile, bytes.len().saturating_mul(2)))
+            let len = bytes.len();
+            Ok((bytes, len))
         })
         .await
         .map_err(|failure| fetch_failure(failure, &url))?;
-    if source_tile == coords {
-        return Ok(cached);
-    }
-    Ok(Arc::new(super::rescale::slice_descendant(
-        &cached,
+    Ok(RawGroupTile {
         source_tile,
-        coords,
-    )))
+        payload: RawPayload::Cached {
+            bytes: cached_bytes,
+            url,
+        },
+    })
+}
+
+pub(super) fn decode_group_tile<H: HttpClient>(
+    client: &SourceClient<H>,
+    raw: RawGroupTile,
+    coords: WorldTileCoords,
+    layers: &[crate::style::layer::StyleLayer],
+) -> Result<GroupTile, SourceFetchError> {
+    let RawGroupTile {
+        source_tile,
+        payload,
+    } = raw;
+    let keep_layer = |name: &str| {
+        layers
+            .iter()
+            .any(|sl| sl.source_layer.as_deref() == Some(name))
+    };
+    match payload {
+        RawPayload::Owned { bytes, label } => {
+            let decode_res = if source_tile == coords {
+                decode_tile_for_layers(&bytes, keep_layer)
+            } else {
+                decode_tile(&bytes)
+            };
+            let mut tile = decode_res.map_err(|error| {
+                fetch_failure(
+                    AssetFailure::Terminal(format!("{label} cannot be decoded: {error}")),
+                    &label,
+                )
+            })?;
+            let (mvt_bytes, mvt_compressed) = if source_tile != coords {
+                super::rescale::into_descendant(&mut tile, source_tile, coords);
+                let packed =
+                    crate::io::geometry_index::LazyMvtIndex::pack_vec(tile.encode_to_vec());
+                tile.layers.retain(|mvt| keep_layer(mvt.name.as_str()));
+                packed
+            } else {
+                crate::io::geometry_index::LazyMvtIndex::pack_vec(bytes)
+            };
+            Ok(GroupTile {
+                tile: Arc::new(tile),
+                mvt_bytes,
+                mvt_compressed,
+            })
+        }
+        RawPayload::Cached { bytes, url } => {
+            let decode_res = if source_tile == coords {
+                decode_tile_for_layers(&bytes, keep_layer)
+            } else {
+                decode_tile(&bytes)
+            };
+            let mut tile = decode_res.map_err(|error| {
+                client.assets().forget(&format!("tile:{url}"));
+                fetch_failure(
+                    AssetFailure::Terminal(format!("vector tile {url} cannot be decoded: {error}")),
+                    &url,
+                )
+            })?;
+            let (mvt_bytes, mvt_compressed) = if source_tile != coords {
+                super::rescale::into_descendant(&mut tile, source_tile, coords);
+                let packed =
+                    crate::io::geometry_index::LazyMvtIndex::pack_vec(tile.encode_to_vec());
+                tile.layers.retain(|mvt| keep_layer(mvt.name.as_str()));
+                packed
+            } else {
+                crate::io::geometry_index::LazyMvtIndex::pack_slice(bytes.as_slice())
+            };
+            Ok(GroupTile {
+                tile: Arc::new(tile),
+                mvt_bytes,
+                mvt_compressed,
+            })
+        }
+    }
 }
 
 /// The fetch error a failure to load `what` through the asset cache stands for.

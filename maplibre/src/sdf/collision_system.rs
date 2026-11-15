@@ -336,9 +336,9 @@ impl CollisionSystem {
                 };
                 let fingerprint = opacity_fingerprint(&metadata);
                 if self.uploaded.get(&key) != Some(&(generation, fingerprint)) {
-                    if metadata.is_empty() && !layer.buffer.buffer.vertices.is_empty() {
+                    if metadata.is_empty() && layer.buffer.vertex_count() > 0 {
                         metadata.resize(
-                            layer.buffer.buffer.vertices.len(),
+                            layer.buffer.vertex_count(),
                             SDFShaderFeatureMetadata::default(),
                         );
                     }

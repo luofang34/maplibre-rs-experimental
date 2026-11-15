@@ -175,6 +175,31 @@ impl StyleLayer {
             && self.maxzoom.is_none_or(|maxzoom| zoom < maxzoom)
     }
 
+    /// Returns whether this layer can appear at any continuous zoom `[tile_zoom, tile_zoom + 1)`
+    /// covered by a tile built for `tile_zoom` (`minzoom.floor() <= tile_zoom < maxzoom.ceil()`).
+    pub fn is_visible_at_tile_zoom(&self, tile_zoom: u8) -> bool {
+        !self.is_hidden()
+            && self
+                .minzoom
+                .is_none_or(|minzoom| minzoom <= 0.0 || f64::from(tile_zoom) >= minzoom.floor())
+            && self
+                .maxzoom
+                .is_none_or(|maxzoom| f64::from(tile_zoom) < maxzoom.ceil())
+    }
+
+    /// Whether a vector worker request for `coords` at `overscaled_zoom` needs to build this layer.
+    pub(crate) fn needed_for_tile(
+        &self,
+        terrain: bool,
+        coords: crate::coords::WorldTileCoords,
+        overscaled_zoom: u8,
+    ) -> bool {
+        if terrain && u8::from(coords.z) == 0 {
+            return !self.is_hidden() && self.maxzoom.is_none_or(|maxzoom| 0.0 < maxzoom.ceil());
+        }
+        self.is_visible_at_tile_zoom(overscaled_zoom.max(u8::from(coords.z)))
+    }
+
     /// Whether both layers carry identical typed, transition and unrecognized paint properties.
     pub(crate) fn same_paint(&self, other: &Self) -> bool {
         serde_json::to_value(&self.paint).ok() == serde_json::to_value(&other.paint).ok()

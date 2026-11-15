@@ -32,11 +32,7 @@ impl LayerRaster for FlatBufferTransferable {
         let root = builder.finish();
         inner_builder.finish(root, None);
         let (data, start) = inner_builder.collapse();
-        FlatBufferTransferable {
-            tag: WebMessageTag::LayerRaster,
-            data,
-            start,
-        }
+        FlatBufferTransferable::from_vec(WebMessageTag::LayerRaster, data, start)
     }
 
     fn coords(&self) -> WorldTileCoords {
@@ -90,11 +86,7 @@ impl LayerRasterMissing for FlatBufferTransferable {
         let root = builder.finish();
         inner_builder.finish(root, None);
         let (data, start) = inner_builder.collapse();
-        FlatBufferTransferable {
-            tag: WebMessageTag::LayerRasterMissing,
-            data,
-            start,
-        }
+        FlatBufferTransferable::from_vec(WebMessageTag::LayerRasterMissing, data, start)
     }
 
     fn coords(&self) -> WorldTileCoords {

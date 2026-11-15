@@ -154,6 +154,7 @@ pub enum PictureError {
     #[error("the picture cannot be decoded")]
     Decode(#[source] image::ImageError),
     /// The picture's embedded colour profile cannot be converted to sRGB.
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("the picture's colour profile cannot be converted to sRGB")]
     Profile(#[source] moxcms::CmsError),
 }
@@ -161,34 +162,44 @@ pub enum PictureError {
 /// Decodes an image source's picture into sRGB, converting it from the colour profile it embeds,
 /// as GL JS shows it once the browser has decoded it.
 pub fn decode(bytes: &[u8]) -> Result<RgbaImage, PictureError> {
-    use image::ImageDecoder;
-    let mut decoder = image::ImageReader::new(std::io::Cursor::new(bytes))
-        .with_guessed_format()
-        .map_err(|error| PictureError::Decode(image::ImageError::IoError(error)))?
-        .into_decoder()
-        .map_err(PictureError::Decode)?;
-    let profile = decoder.icc_profile().map_err(PictureError::Decode)?;
-    let picture = image::DynamicImage::from_decoder(decoder)
-        .map_err(PictureError::Decode)?
-        .to_rgba8();
-    // A profile the converter does not understand leaves the stored values as they are.
-    let Some(Ok(source)) = profile.map(|bytes| moxcms::ColorProfile::new_from_slice(&bytes)) else {
-        return Ok(picture);
-    };
-    let transform = source
-        .create_transform_8bit(
-            moxcms::Layout::Rgba,
-            &moxcms::ColorProfile::new_srgb(),
-            moxcms::Layout::Rgba,
-            moxcms::TransformOptions::default(),
-        )
-        .map_err(PictureError::Profile)?;
-    let (width, height) = picture.dimensions();
-    let mut converted = vec![0_u8; picture.as_raw().len()];
-    transform
-        .transform(picture.as_raw(), &mut converted)
-        .map_err(PictureError::Profile)?;
-    Ok(RgbaImage::from_raw(width, height, converted).unwrap_or(picture))
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use image::ImageDecoder;
+        let mut decoder = image::ImageReader::new(std::io::Cursor::new(bytes))
+            .with_guessed_format()
+            .map_err(|error| PictureError::Decode(image::ImageError::IoError(error)))?
+            .into_decoder()
+            .map_err(PictureError::Decode)?;
+        let profile = decoder.icc_profile().map_err(PictureError::Decode)?;
+        let picture = image::DynamicImage::from_decoder(decoder)
+            .map_err(PictureError::Decode)?
+            .to_rgba8();
+        // A profile the converter does not understand leaves the stored values as they are.
+        let Some(Ok(source)) = profile.map(|bytes| moxcms::ColorProfile::new_from_slice(&bytes))
+        else {
+            return Ok(picture);
+        };
+        let transform = source
+            .create_transform_8bit(
+                moxcms::Layout::Rgba,
+                &moxcms::ColorProfile::new_srgb(),
+                moxcms::Layout::Rgba,
+                moxcms::TransformOptions::default(),
+            )
+            .map_err(PictureError::Profile)?;
+        let (width, height) = picture.dimensions();
+        let mut converted = vec![0_u8; picture.as_raw().len()];
+        transform
+            .transform(picture.as_raw(), &mut converted)
+            .map_err(PictureError::Profile)?;
+        Ok(RgbaImage::from_raw(width, height, converted).unwrap_or(picture))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        image::load_from_memory(bytes)
+            .map(|img| img.to_rgba8())
+            .map_err(PictureError::Decode)
+    }
 }
 
 /// Makes an image source's tiles again after its picture or corners changed. A tile the
@@ -272,6 +283,7 @@ pub(crate) async fn load_tile<HC: crate::io::source_client::HttpClient>(
             format!("image-source:{url}#{}", source.generation),
             || async {
                 let bytes = crate::sdf::assets::fetch(client, url, "image source").await?;
+                #[cfg(not(target_arch = "wasm32"))]
                 let picture = run_cpu_bound(move || decode(&bytes))
                     .await
                     .map_err(|error| AssetFailure::Terminal(format!("decoding {url}: {error}")))?
@@ -279,6 +291,14 @@ pub(crate) async fn load_tile<HC: crate::io::source_client::HttpClient>(
                         tracing::warn!(%url, %error, "invalid image source picture");
                         AssetFailure::Terminal(format!("invalid image {url}: {error}"))
                     })?;
+                #[cfg(target_arch = "wasm32")]
+                let picture =
+                    crate::platform::decode_rgba_bytes(&bytes)
+                        .await
+                        .map_err(|error| {
+                            tracing::warn!(%url, %error, "invalid image source picture");
+                            AssetFailure::Terminal(format!("invalid image {url}: {error}"))
+                        })?;
                 let bytes = picture.as_raw().len();
                 Ok((picture, bytes))
             },
