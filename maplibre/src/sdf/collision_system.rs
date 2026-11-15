@@ -1,21 +1,17 @@
 //! Places elevated text and icons on discrete placement epochs, interpolating fades on the GPU.
-use std::{
-    borrow::Cow,
-    collections::{HashMap, HashSet},
-};
+use std::borrow::Cow;
 
 pub use controller::PlacementConfig;
 use controller::{PlacementController, PlacementTriggers};
-use layer_pass::place_layer;
 use rustc_hash::{FxHashMap, FxHashSet};
+#[cfg(test)]
+use signatures::obstructed_grid;
 use signatures::{
-    content_signature, has_symbol_depth_occluders, obstructed_grid, terrain_signature,
-    visible_layers, VisibleLayer,
+    content_signature, has_symbol_depth_occluders, terrain_signature, visible_layers, VisibleLayer,
 };
 
 #[cfg(test)]
 use super::placement::canonical_tile;
-use super::query::PlacedSymbols;
 use crate::{
     context::MapContext,
     coords::WorldTileCoords,
@@ -34,6 +30,7 @@ mod layer_pass;
 mod repeat_spacing;
 mod rules;
 mod signatures;
+mod sliced;
 mod temporal;
 mod upload_diff;
 
@@ -47,6 +44,7 @@ type ViewSignature = (cgmath::Matrix4<f64>, (f64, f64));
 pub struct CollisionSystem {
     runs: u32,
     controller: PlacementController,
+    active_epoch: Option<sliced::ActiveEpoch>,
     /// View the last committed placement epoch ran for.
     placed_view: Option<ViewSignature>,
     /// View seen on the immediately preceding frame, used to detect single-step XR movement.
@@ -176,6 +174,81 @@ impl System for CollisionSystem {
                 std::time::Duration::ZERO,
                 crate::tcs::system::timings::FrameTimings::elapsed_this_frame,
             );
+        if self.active_epoch.is_some() {
+            if triggers.obstructed || config.fade_duration.is_zero() || !view_valid {
+                if let Some(epoch) = self.active_epoch.take() {
+                    epoch.abort(&mut self.scratch);
+                }
+            } else {
+                self.controller.advance_clock(now);
+                self.controller.note_background_dirty(zoom, triggers);
+                let Some(mut epoch) = self.active_epoch.take() else {
+                    return Ok(());
+                };
+                if triggers.new_content || triggers.environment_changed {
+                    epoch.saw_background_change = true;
+                }
+                if epoch.step(
+                    world,
+                    style,
+                    &renderer.queue,
+                    &mut self.history,
+                    &mut self.uploaded,
+                    &mut self.scratch,
+                    true,
+                ) {
+                    let followup =
+                        self.history.repeats.yielded_to_previous() || epoch.saw_background_change;
+                    self.controller
+                        .record_commit(epoch.zoom, epoch.has_symbols, followup);
+                    if !moving_this_frame
+                        && self.draw_sort.needs_bearing_sort(
+                            world,
+                            (view_state.camera().get_bearing().0, zoom),
+                            &layers,
+                        )
+                    {
+                        self.draw_sort.follow_bearing(
+                            world,
+                            &renderer.queue,
+                            (view_state.camera().get_bearing().0, zoom),
+                            &layers,
+                        );
+                    }
+                    world.resources.insert(epoch.take_placed());
+                    world
+                        .resources
+                        .insert(super::query::PlacementBearing(epoch.bearing));
+                } else {
+                    self.active_epoch = Some(epoch);
+                }
+                sync_symbol_depth_fade(
+                    world,
+                    &renderer.queue,
+                    &renderer.render_graph,
+                    &self.history,
+                );
+                self.prune_inactive_symbol_draws(world);
+                if self.active_epoch.is_some()
+                    || self.history.is_fading()
+                    || self.controller.is_pending()
+                {
+                    crate::render::frame_signals::keep_animating(world);
+                }
+                return Ok(());
+            }
+        }
+
+        let bearing = view_state.camera().get_bearing().0;
+        if !moving_this_frame
+            && self
+                .draw_sort
+                .needs_bearing_sort(world, (bearing, zoom), &layers)
+        {
+            self.draw_sort
+                .follow_bearing(world, &renderer.queue, (bearing, zoom), &layers);
+        }
+
         if !self.controller.should_place(now, zoom, config, triggers)
             || (moving_this_frame
                 && !config.fade_duration.is_zero()
@@ -203,12 +276,14 @@ impl System for CollisionSystem {
         self.last_terrain_signature = Some(terrain_sig);
         self.last_external_view = Some(external_view);
 
-        self.draw_sort.follow_bearing(
-            world,
-            &renderer.queue,
-            (view_state.camera().get_bearing().0, zoom),
-            &layers,
-        );
+        let use_slicing = self.controller.is_initialized()
+            && self.controller.last_dt_non_zero()
+            && !config.fade_duration.is_zero()
+            && !triggers.obstructed;
+        if !moving_this_frame || !use_slicing {
+            self.draw_sort
+                .follow_bearing(world, &renderer.queue, (bearing, zoom), &layers);
+        }
         layers.sort_by_key(|(index, layer, _)| {
             (
                 std::cmp::Reverse(*index),
@@ -230,22 +305,26 @@ impl System for CollisionSystem {
             }
             keep
         });
-        let placed = self.place_layers(
+        let mut epoch = sliced::ActiveEpoch::begin(world, style, view_state, projection, layers);
+        if epoch.step(
             world,
             style,
-            view_state,
-            &projection,
             &renderer.queue,
-            layers,
-        );
-        let followup_needed = self.history.repeats.yielded_to_previous();
-        self.controller
-            .record_commit(zoom, has_symbols, followup_needed);
-
-        world.resources.insert(placed);
-        world.resources.insert(super::query::PlacementBearing(
-            view_state.camera().get_bearing().0,
-        ));
+            &mut self.history,
+            &mut self.uploaded,
+            &mut self.scratch,
+            use_slicing,
+        ) {
+            let followup_needed = self.history.repeats.yielded_to_previous();
+            self.controller
+                .record_commit(zoom, has_symbols, followup_needed);
+            world.resources.insert(epoch.take_placed());
+            world
+                .resources
+                .insert(super::query::PlacementBearing(bearing));
+        } else {
+            self.active_epoch = Some(epoch);
+        }
         sync_symbol_depth_fade(
             world,
             &renderer.queue,
@@ -253,7 +332,7 @@ impl System for CollisionSystem {
             &self.history,
         );
         self.prune_inactive_symbol_draws(world);
-        if self.history.is_fading() || self.controller.is_pending() {
+        if self.active_epoch.is_some() || self.history.is_fading() || self.controller.is_pending() {
             crate::render::frame_signals::keep_animating(world);
         }
         Ok(())
@@ -278,123 +357,6 @@ fn sync_symbol_depth_fade(
 }
 
 impl CollisionSystem {
-    fn place_layers(
-        &mut self,
-        world: &crate::tcs::world::World,
-        style: &crate::style::Style,
-        view_state: &crate::render::view_state::ViewState,
-        projection: &crate::render::projection::ShaderProjectionData,
-        queue: &crate::render::upload_queue::UploadQueue,
-        layers: Vec<VisibleLayer<'_>>,
-    ) -> PlacedSymbols {
-        let mut boxes = obstructed_grid(
-            view_state.width(),
-            view_state.height(),
-            world.resources.get::<super::obstacles::LabelObstacles>(),
-        );
-        let mut placed = PlacedSymbols::default();
-        let mut groups: Vec<(
-            u32,
-            &crate::style::layer::SymbolPaint,
-            Vec<&crate::sdf::SymbolLayerData>,
-        )> = Vec::new();
-        for (index, layer, paint) in layers {
-            match groups.last_mut() {
-                Some((last, _, members))
-                    if *last == index && members[0].style_layer_id == layer.style_layer_id =>
-                {
-                    members.push(layer);
-                }
-                _ => groups.push((index, paint, vec![layer])),
-            }
-        }
-        // A layer GL JS would group with a lower one is placed by it, after the pass.
-        let leaders = family::leaders(style);
-        let present: HashSet<&str> = groups
-            .iter()
-            .map(|(_, _, members)| members[0].style_layer_id.as_str())
-            .collect();
-        let mut outcomes = HashMap::new();
-        let mut mirrored = Vec::new();
-        let mut placed_layers = Vec::new();
-        for (_, paint, members) in groups {
-            let id = members[0].style_layer_id.clone();
-            if let Some(leader) = leaders
-                .get(&id)
-                .filter(|leader| **leader != id && present.contains(leader.as_str()))
-            {
-                mirrored.push((leader.clone(), paint, members));
-                continue;
-            }
-            let limits = style
-                .layers
-                .iter()
-                .find(|style| style.id == id)
-                .map(|layer| [layer.minzoom.unwrap_or(0.0), layer.maxzoom.unwrap_or(24.0)])
-                .unwrap_or([0.0, 24.0]);
-            let (metadata, outcome) = place_layer(
-                world,
-                view_state,
-                projection,
-                &members,
-                paint,
-                limits,
-                (
-                    &mut boxes,
-                    &mut placed,
-                    &mut self.history,
-                    &mut self.scratch,
-                ),
-            );
-            if leaders.get(&id) == Some(&id) {
-                outcomes.insert(id, (members.clone(), outcome));
-            }
-            placed_layers.push((members, metadata));
-        }
-        for (leader, paint, members) in mirrored {
-            let Some((leader_members, outcome)) = outcomes.get(&leader) else {
-                continue;
-            };
-            let metadata = family::mirror(
-                (leader_members, outcome),
-                &members,
-                (paint, view_state.style_zoom().value()),
-                &mut placed,
-            );
-            placed_layers.push((members, metadata));
-        }
-        if let Some(Initialized(pool)) = world.resources.get::<Eventually<SymbolBufferPool>>() {
-            for (members, metadata) in placed_layers {
-                for (layer, metadata) in members.into_iter().zip(metadata) {
-                    let layer_id = crate::style::StyleLayerId::intern(&layer.style_layer_id);
-                    let Some(entry) = pool.index().get_layers(layer.coords).and_then(|entries| {
-                        entries
-                            .iter()
-                            .find(|entry| entry.style_layer_id == layer_id)
-                    }) else {
-                        self.scratch.recycle(metadata);
-                        continue;
-                    };
-                    let key = (layer.coords, layer_id);
-                    let prev = self.uploaded.remove(&key);
-                    let next_cached = upload_diff::diff_and_upload_bucket_with_scratch(
-                        pool,
-                        queue,
-                        entry,
-                        prev.as_ref(),
-                        metadata,
-                        &mut self.scratch,
-                    );
-                    if let Some(prev) = prev {
-                        self.scratch.recycle(prev.vertices);
-                    }
-                    self.uploaded.insert(key, next_cached);
-                }
-            }
-        }
-        placed
-    }
-
     fn prune_inactive_symbol_draws(&self, world: &mut crate::tcs::world::World) {
         use crate::{
             render::render_phase::{Draw, DrawState, RenderPhase, TranslucentItem},

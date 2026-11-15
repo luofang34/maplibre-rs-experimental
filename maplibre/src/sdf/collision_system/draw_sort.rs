@@ -41,6 +41,41 @@ pub(super) struct DrawSort {
 }
 
 impl DrawSort {
+    /// Returns `true` when any height-sorted symbol bucket in `layers` has not yet been ordered
+    /// for `bearing`'s discrete angular bucket.
+    pub(super) fn needs_bearing_sort(
+        &self,
+        world: &crate::tcs::world::World,
+        (bearing, zoom): (f64, f64),
+        layers: &[(u32, &SymbolLayerData, &SymbolPaint)],
+    ) -> bool {
+        let Some(Initialized(pool)) = world.resources.get::<Eventually<SymbolBufferPool>>() else {
+            return false;
+        };
+        let bucket = bearing_bucket(bearing);
+        for (_, layer, paint) in layers {
+            if !sorts_by_height(paint, zoom) {
+                continue;
+            }
+            let Some(entry) = pool.index().get_layers(layer.coords).and_then(|entries| {
+                entries
+                    .iter()
+                    .find(|entry| entry.style_layer.id == layer.style_layer_id)
+            }) else {
+                continue;
+            };
+            let sorted_for = self
+                .sorted
+                .get(&(layer.coords, layer.style_layer_id.clone()))
+                .filter(|(allocation, _)| *allocation == entry.allocation_id())
+                .map_or(0_u16, |(_, b)| *b);
+            if sorted_for != bucket {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Rewrites the indices of the `layers` that sort by height and were sorted for another
     /// bearing bucket; an upload that has not been sorted yet holds the unrotated (`0`) order.
     pub(super) fn follow_bearing(

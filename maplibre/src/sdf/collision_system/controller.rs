@@ -80,6 +80,39 @@ impl PlacementController {
         self.stale
     }
 
+    /// Whether at least one non-empty placement epoch has already committed.
+    pub(super) fn is_initialized(&self) -> bool {
+        self.initialized
+    }
+
+    /// Whether the most recent frame advanced `FrameInput.timestamp` (`dt > 0`).
+    pub(super) fn last_dt_non_zero(&self) -> bool {
+        self.last_dt_non_zero
+    }
+
+    /// Advances the internal monotonic clock while an in-progress time-sliced epoch continues.
+    pub(super) fn advance_clock(&mut self, now: Duration) {
+        let dt = match self.prev_raw_now {
+            Some(prev) if now > prev => now - prev,
+            _ => Duration::ZERO,
+        };
+        self.prev_raw_now = Some(now);
+        self.last_dt_non_zero = !dt.is_zero();
+        self.clock = self.clock.saturating_add(dt);
+    }
+
+    /// Remembers content, environment, or zoom changes that arrived while a multi-frame slice was
+    /// already in progress so the next debounce check runs once the current epoch commits.
+    pub(super) fn note_background_dirty(&mut self, zoom: f64, triggers: PlacementTriggers) {
+        let integer_zoom_crossed = (zoom.floor() as i32) != (self.last_commit_zoom.floor() as i32);
+        let fast_change =
+            triggers.new_content || triggers.environment_changed || integer_zoom_crossed;
+        if fast_change || triggers.moved || triggers.external_moved {
+            self.stale = true;
+            self.fast_followup |= fast_change;
+        }
+    }
+
     /// Whether a moving frame whose earlier stages already consumed most of a 16.6 ms budget may
     /// defer a non-initial symbol placement pass by one frame without starving placement.
     /// Single-step headless callers (`dt == 0`) never defer.
@@ -132,13 +165,15 @@ impl PlacementController {
         }
 
         let integer_zoom_crossed = (zoom.floor() as i32) != (self.last_commit_zoom.floor() as i32);
-        let settle_fast =
-            triggers.new_content || triggers.environment_changed || self.fast_followup;
-        // During active continuous camera motion (`moving_this_frame`), streaming tile arrivals and
-        // repeat-spacing followups must NOT collapse the 250 ms (`4 Hz`) cadence down to 30 ms
-        // (`33 Hz`). Record `fast_followup` so once camera motion stops, a crisp 30 ms settle pass
-        // still fires immediately.
-        let fast = integer_zoom_crossed || (!triggers.moving_this_frame && settle_fast);
+        let settle_fast = triggers.new_content
+            || triggers.environment_changed
+            || integer_zoom_crossed
+            || self.fast_followup;
+        // During active continuous camera motion (`moving_this_frame`), streaming tile arrivals,
+        // integer zoom crossings, and repeat-spacing followups must NOT collapse the 250 ms
+        // (`4 Hz`) cadence down to 30 ms (`33 Hz`). Record `fast_followup` so once camera motion
+        // stops, a crisp 30 ms settle pass still fires immediately.
+        let fast = !triggers.moving_this_frame && settle_fast;
         let dirty = self.stale || settle_fast || fast || triggers.moved || triggers.external_view;
         if !dirty {
             return false;
@@ -153,7 +188,7 @@ impl PlacementController {
             true
         } else {
             self.stale = true;
-            self.fast_followup |= settle_fast || integer_zoom_crossed;
+            self.fast_followup |= settle_fast;
             false
         }
     }
@@ -401,6 +436,49 @@ mod tests {
         assert!(ctrl.should_place(
             Duration::from_millis(290),
             14.35,
+            cfg,
+            PlacementTriggers {
+                moved: true,
+                moving_this_frame: false,
+                ..Default::default()
+            }
+        ));
+    }
+
+    #[test]
+    fn integer_zoom_crossings_during_continuous_zoom_flight_keep_250ms_then_settle_at_30ms() {
+        let mut ctrl = PlacementController::default();
+        let cfg = PlacementConfig::default();
+
+        assert!(ctrl.should_place(
+            Duration::ZERO,
+            4.8,
+            cfg,
+            PlacementTriggers {
+                moved: true,
+                moving_this_frame: true,
+                ..Default::default()
+            }
+        ));
+        ctrl.record_commit(4.8, true, false);
+
+        // Crossing z4 -> z5 -> z6 while `moving_this_frame` is true stays on 250 ms cadence.
+        for (ms, zoom) in [(32_u64, 5.1), (80, 5.6), (144, 6.05), (224, 6.4)] {
+            assert!(!ctrl.should_place(
+                Duration::from_millis(ms),
+                zoom,
+                cfg,
+                PlacementTriggers {
+                    moved: true,
+                    moving_this_frame: true,
+                    ..Default::default()
+                }
+            ));
+        }
+        // Motion pauses at 240 ms (>= 30 ms after 0 ms): recorded zoom-crossing followup settles immediately.
+        assert!(ctrl.should_place(
+            Duration::from_millis(240),
+            6.4,
             cfg,
             PlacementTriggers {
                 moved: true,
