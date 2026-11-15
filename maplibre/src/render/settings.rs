@@ -147,14 +147,18 @@ impl BufferPoolSizes {
     }
 
     /// Right-sized capacity ceiling for the SDF symbol/icon buffer pool.
+    ///
+    /// Backing slab pages allocate lazily on demand and reclaim empty pages immediately, so
+    /// raising this ceiling costs zero upfront GPU memory while avoiding premature pool saturation
+    /// on dense high-DPR urban label views.
     pub const fn default_symbols() -> Self {
         #[cfg(target_arch = "wasm32")]
         {
             Self {
-                vertices: 229_376,
-                indices: 344_064,
-                feature_metadata: 229_376,
-                layer_metadata: 4_096,
+                vertices: 524_288,
+                indices: 786_432,
+                feature_metadata: 524_288,
+                layer_metadata: 8_192,
             }
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -174,19 +178,19 @@ impl Default for BufferPoolSizes {
         #[cfg(target_arch = "wasm32")]
         {
             Self {
-                vertices: 1_250_000,
-                indices: 3_750_000,
-                feature_metadata: 131_072,
-                layer_metadata: 8_192,
+                vertices: 6_000_000,
+                indices: 18_000_000,
+                feature_metadata: 5_000_000,
+                layer_metadata: 32_768,
             }
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
             Self {
-                vertices: 4_000_000,
-                indices: 12_000_000,
-                feature_metadata: 512_000,
-                layer_metadata: 32_768,
+                vertices: 8_000_000,
+                indices: 24_000_000,
+                feature_metadata: 6_500_000,
+                layer_metadata: 65_536,
             }
         }
     }

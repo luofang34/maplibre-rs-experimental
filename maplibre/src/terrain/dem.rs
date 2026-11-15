@@ -323,6 +323,29 @@ impl DemTile {
         &self.pixels
     }
 
+    /// Reconstructs the `dim × dim` interior RGBA8 image (excluding the two-pixel border).
+    pub fn to_rgba_image(&self) -> RgbaImage {
+        let row_bytes = (self.dim * 4) as usize;
+        let mut raw = vec![0_u8; row_bytes * self.dim as usize];
+        for y in 0..self.dim {
+            let src_row = self.byte_index(0, i64::from(y));
+            let dst_row = y as usize * row_bytes;
+            raw[dst_row..dst_row + row_bytes]
+                .copy_from_slice(&self.pixels[src_row..src_row + row_bytes]);
+        }
+        RgbaImage::from_raw(self.dim, self.dim, raw).unwrap_or_else(|| RgbaImage::new(0, 0))
+    }
+
+    /// Returns `fallback` cloned when non-empty, or reconstructs the interior RGBA8 image from
+    /// `self` when `fallback` is a zero-sized placeholder.
+    pub fn resolve_fallback_image(&self, fallback: &RgbaImage) -> RgbaImage {
+        if fallback.width() == 0 || fallback.height() == 0 {
+            self.to_rgba_image()
+        } else {
+            fallback.clone()
+        }
+    }
+
     /// Channel factors and base shift used to decode the pixels.
     pub fn unpack(&self) -> [f64; 4] {
         self.unpack

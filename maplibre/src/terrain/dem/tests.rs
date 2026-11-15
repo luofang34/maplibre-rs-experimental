@@ -242,3 +242,109 @@ fn a_single_pixel_tile_can_fill_both_border_pixels() {
     assert_eq!(dem.get(2, 0), 200.0);
     assert_eq!(dem.elevation_at_tile_coords(EXTENT, EXTENT / 2.0), 150.0);
 }
+
+#[test]
+fn to_rgba_image_and_serialized_transferables_roundtrip_interior_samples() {
+    use std::sync::Arc;
+
+    use crate::{
+        coords::WorldTileCoords,
+        io::apc::{IntoMessage, Message, MessageTag},
+        raster::{
+            AvailableRasterLayerData, DefaultRasterTransferables, LayerRaster, RasterSourceId,
+            RasterTransferables,
+        },
+        render::settings::BufferPoolSizes,
+        terrain::transferables::{DemMessageTag, LayerDem},
+    };
+
+    #[derive(Debug)]
+    struct SerializedDem(WorldTileCoords, RgbaImage);
+    impl IntoMessage for SerializedDem {
+        fn into(self) -> Message {
+            Message::new(Self::message_tag(), Box::new(self))
+        }
+    }
+    impl LayerDem for SerializedDem {
+        fn message_tag() -> &'static dyn MessageTag {
+            &DemMessageTag::LayerDem
+        }
+        fn build_from(coords: WorldTileCoords, image: RgbaImage) -> Self {
+            Self(coords, image)
+        }
+        fn coords(&self) -> WorldTileCoords {
+            self.0
+        }
+        fn into_image(self) -> RgbaImage {
+            self.1
+        }
+    }
+
+    #[derive(Debug)]
+    struct SerializedRaster(WorldTileCoords, RasterSourceId, RgbaImage);
+    impl IntoMessage for SerializedRaster {
+        fn into(self) -> Message {
+            Message::new(Self::message_tag(), Box::new(self))
+        }
+    }
+    impl LayerRaster for SerializedRaster {
+        fn message_tag() -> &'static dyn MessageTag {
+            <DefaultRasterTransferables as RasterTransferables>::LayerRaster::message_tag()
+        }
+        fn build_from(coords: WorldTileCoords, source: RasterSourceId, image: RgbaImage) -> Self {
+            Self(coords, source, image)
+        }
+        fn coords(&self) -> WorldTileCoords {
+            self.0
+        }
+        fn to_layer(self) -> AvailableRasterLayerData {
+            AvailableRasterLayerData {
+                coords: self.0,
+                source: self.1,
+                image: self.2,
+            }
+        }
+    }
+
+    let mut source_image = RgbaImage::new(4, 4);
+    for y in 0..4 {
+        for x in 0..4 {
+            source_image.put_pixel(
+                x,
+                y,
+                terrarium_pixel(250.0 + 75.0 * f64::from(x) + 12.5 * f64::from(y)),
+            );
+        }
+    }
+    let mut dem = DemTile::from_image(&source_image, TERRARIUM).expect("DEM");
+    let neighbour = gradient_tile(4000.0);
+    dem.backfill_border(&neighbour, 1, 0).expect("border");
+
+    let reconstructed = dem.to_rgba_image();
+    assert_eq!(reconstructed, source_image);
+
+    let shared = Arc::new(dem);
+    let empty_fallback = Arc::new(RgbaImage::new(0, 0));
+    let coords = WorldTileCoords::from((132, 91, 8_u8.into()));
+
+    let dem_msg = SerializedDem::build_from_cached_dem(
+        coords,
+        Arc::clone(&shared),
+        40_075_016.686,
+        Arc::clone(&empty_fallback),
+    );
+    assert_eq!(dem_msg.into_image(), source_image);
+
+    let raster_msg = SerializedRaster::build_from_dem(
+        coords,
+        RasterSourceId::from("terrain-dem"),
+        shared,
+        40_075_016.686,
+        empty_fallback,
+    );
+    assert_eq!(raster_msg.to_layer().image, source_image);
+
+    let defaults = BufferPoolSizes::default();
+    assert!(defaults.feature_metadata >= 3_000_000);
+    assert!(defaults.feature_metadata < defaults.vertices);
+}

@@ -54,7 +54,8 @@ pub trait LayerRaster: IntoMessage + Debug + Send {
     fn build_from(coords: WorldTileCoords, source: RasterSourceId, image: RgbaImage) -> Self;
 
     /// Wraps a worker-decoded [`DemTile`] for `raster-dem` sources when supported by the transport,
-    /// falling back to `fallback` for serialized cross-worker transports.
+    /// falling back to `fallback` (or reconstructing the interior image from `tile` when `fallback`
+    /// is an empty placeholder) for serialized cross-worker transports.
     fn build_from_dem(
         coords: WorldTileCoords,
         source: RasterSourceId,
@@ -65,8 +66,8 @@ pub trait LayerRaster: IntoMessage + Debug + Send {
     where
         Self: Sized,
     {
-        let _ = (tile, circumference_meters);
-        Self::build_from(coords, source, (*fallback).clone())
+        let _ = circumference_meters;
+        Self::build_from(coords, source, tile.resolve_fallback_image(&fallback))
     }
 
     /// Tile-grid coordinates covered by the image.
@@ -167,8 +168,12 @@ impl LayerRaster for DefaultLayerRaster {
     fn to_layer(self) -> AvailableRasterLayerData {
         let image = match self.payload {
             DefaultRasterPayload::Image(image) => image,
-            DefaultRasterPayload::Dem { fallback, .. } => {
-                Arc::try_unwrap(fallback).unwrap_or_else(|shared| (*shared).clone())
+            DefaultRasterPayload::Dem { tile, fallback, .. } => {
+                if fallback.width() == 0 || fallback.height() == 0 {
+                    tile.to_rgba_image()
+                } else {
+                    Arc::try_unwrap(fallback).unwrap_or_else(|shared| (*shared).clone())
+                }
             }
         };
         AvailableRasterLayerData {

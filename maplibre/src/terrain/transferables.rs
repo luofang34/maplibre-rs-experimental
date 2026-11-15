@@ -37,7 +37,8 @@ pub trait LayerDem: IntoMessage + Debug + Send {
     fn build_from(coords: WorldTileCoords, image: RgbaImage) -> Self;
 
     /// Wraps a pre-decoded shared [`DemTile`] when the transport runs in-process, falling back
-    /// to `fallback_image` for cross-worker transports.
+    /// to `fallback_image` (or reconstructing the interior image from `tile` when `fallback_image`
+    /// is an empty placeholder) for cross-worker transports.
     fn build_from_shared_dem(
         coords: WorldTileCoords,
         tile: Arc<DemTile>,
@@ -46,8 +47,7 @@ pub trait LayerDem: IntoMessage + Debug + Send {
     where
         Self: Sized,
     {
-        let _ = tile;
-        Self::build_from(coords, fallback_image.clone())
+        Self::build_from(coords, tile.resolve_fallback_image(fallback_image))
     }
 
     /// Coordinates of the DEM tile.
@@ -155,8 +155,12 @@ impl LayerDem for DefaultLayerDem {
     fn into_image(self) -> RgbaImage {
         match self.payload {
             DefaultDemPayload::Image(image) => image,
-            DefaultDemPayload::Shared { fallback, .. } => {
-                Arc::try_unwrap(fallback).unwrap_or_else(|shared| (*shared).clone())
+            DefaultDemPayload::Shared { tile, fallback, .. } => {
+                if fallback.width() == 0 || fallback.height() == 0 {
+                    tile.to_rgba_image()
+                } else {
+                    Arc::try_unwrap(fallback).unwrap_or_else(|shared| (*shared).clone())
+                }
             }
         }
     }

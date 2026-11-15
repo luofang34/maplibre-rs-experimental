@@ -87,7 +87,13 @@ impl<E: Environment, T: DemTransferables> System for PopulateWorldSystem<E, T> {
                     {
                         DemTileComponent::Loaded(LoadedDem::from_shared(tile))
                     }
-                    Ok((_, _, fallback)) => decode_fallback(&fallback),
+                    Ok((tile, _, fallback)) => {
+                        if fallback.width() == 0 || fallback.height() == 0 {
+                            decode_fallback(&tile.to_rgba_image())
+                        } else {
+                            decode_fallback(&fallback)
+                        }
+                    }
                     Err(image) => decode_fallback(&image),
                 };
                 (coords, state)

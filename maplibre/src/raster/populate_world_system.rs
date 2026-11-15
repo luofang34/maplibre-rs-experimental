@@ -125,7 +125,8 @@ pub(crate) fn apply_raster_message_with_style<T: RasterTransferables>(
                     Some(LoadedDem::from_shared(shared.tile))
                 }
                 Ok(shared) => {
-                    decode_image_to_dem(coords, &shared.fallback, unpack, circumference_meters)
+                    let fallback = shared.tile.resolve_fallback_image(&shared.fallback);
+                    decode_image_to_dem(coords, &fallback, unpack, circumference_meters)
                 }
                 Err(layer) => {
                     decode_image_to_dem(coords, &layer.image, unpack, circumference_meters)
@@ -157,11 +158,18 @@ pub(crate) fn apply_raster_message_with_style<T: RasterTransferables>(
         } else {
             let available = match payload {
                 Err(layer) => layer,
-                Ok(shared) => AvailableRasterLayerData {
-                    coords: shared.coords,
-                    source: shared.source,
-                    image: Arc::try_unwrap(shared.fallback).unwrap_or_else(|arc| (*arc).clone()),
-                },
+                Ok(shared) => {
+                    let image = if shared.fallback.width() == 0 || shared.fallback.height() == 0 {
+                        shared.tile.to_rgba_image()
+                    } else {
+                        Arc::try_unwrap(shared.fallback).unwrap_or_else(|arc| (*arc).clone())
+                    };
+                    AvailableRasterLayerData {
+                        coords: shared.coords,
+                        source: shared.source,
+                        image,
+                    }
+                }
             };
             (coords, RasterLayerData::Available(available))
         }
