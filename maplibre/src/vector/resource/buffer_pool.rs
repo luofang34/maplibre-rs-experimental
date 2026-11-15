@@ -46,8 +46,10 @@ pub struct BufferPool<Q, B, V, I, TM, FM> {
     max_page_bytes: wgpu::BufferAddress,
     page_factory: Option<PageFactory<B>>,
     page_destroyer: Option<PageDestroyer<B>>,
+    decoupled_feature_metadata: bool,
 
     index: RingIndex,
+    shared_vertices: rustc_hash::FxHashMap<(WorldTileCoords, u16, u64), shared::SharedVertexAlloc>,
     /// For layers whose pattern varies by feature: the pattern key and index range of each run
     /// of features sharing one image, relative to the layer's first index.
     pattern_runs: rustc_hash::FxHashMap<(WorldTileCoords, crate::style::StyleLayerId), PatternRuns>,
@@ -113,7 +115,14 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         feature_metadata: BackingBufferDescriptor<B>,
     ) -> Self {
         let strides = ElementStrides::of::<V, I, TM, FM>();
-        let page = BufferPage::new(vertices, indices, layer_metadata, feature_metadata, strides);
+        let page = BufferPage::new(
+            vertices,
+            indices,
+            layer_metadata,
+            feature_metadata,
+            strides,
+            false,
+        );
         let max_capacities = page.capacities();
         Self {
             pages: vec![Some(page)],
@@ -121,7 +130,9 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             max_page_bytes: u64::MAX,
             page_factory: None,
             page_destroyer: None,
+            decoupled_feature_metadata: false,
             index: RingIndex::new(),
+            shared_vertices: Default::default(),
             pattern_runs: Default::default(),
             sort_runs: Default::default(),
             revision: 0,
@@ -154,7 +165,9 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             max_page_bytes,
             page_factory: (!max_capacities.is_empty()).then(|| PageFactory(Box::new(factory))),
             page_destroyer: None,
+            decoupled_feature_metadata: sizes.feature_metadata < sizes.vertices,
             index: RingIndex::new(),
+            shared_vertices: Default::default(),
             pattern_runs: Default::default(),
             sort_runs: Default::default(),
             revision: 0,
@@ -169,6 +182,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
     /// Clears all resident geometry allocations and reclaims excess empty pages.
     pub fn clear(&mut self) {
         self.index.clear();
+        self.shared_vertices.clear();
         self.pattern_runs.clear();
         self.sort_runs.clear();
         for page in self.pages.iter_mut().flatten() {
@@ -186,7 +200,8 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         self.reclaim_empty_pages_with_queue(keep_spare, None);
     }
 
-    pub(super) fn reclaim_empty_pages_with_queue(&mut self, keep_spare: usize, queue: Option<&Q>) {
+    /// Drops empty pages beyond `keep_spare`, cancelling any staged writes on `queue` first.
+    pub fn reclaim_empty_pages_with_queue(&mut self, keep_spare: usize, queue: Option<&Q>) {
         if self.page_factory.is_none() {
             return;
         }
@@ -226,6 +241,11 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
 
     /// Releases GPU geometry when the tile data and its glyph atlas leave the CPU cache.
     pub fn remove_tile(&mut self, coords: WorldTileCoords) {
+        self.remove_tile_with_queue(coords, None);
+    }
+
+    /// Releases GPU geometry for `coords`, cancelling staged writes on reclaimed empty pages.
+    pub fn remove_tile_with_queue(&mut self, coords: WorldTileCoords, queue: Option<&Q>) {
         self.pattern_runs.retain(|(tile, _), _| *tile != coords);
         self.sort_runs.retain(|(tile, _), _| *tile != coords);
         let removed = self.index.remove_tile(coords);
@@ -233,7 +253,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             for entry in &removed {
                 self.free_entry_ranges(entry);
             }
-            self.reclaim_empty_pages(1);
+            self.reclaim_empty_pages_with_queue(1, queue);
             self.revision = self.revision.wrapping_add(1);
         }
     }
@@ -320,13 +340,17 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
                 BackingBufferType::Indices => page.index_alloc.largest_free_block(),
                 BackingBufferType::Metadata => page.layer_alloc.largest_free_block(),
                 BackingBufferType::FeatureMetadata => {
-                    let v_stride = size_of::<V>() as u64;
-                    let fm_stride = size_of::<FM>() as u64;
-                    page.vertex_alloc
-                        .largest_free_block()
-                        .checked_div(v_stride)
-                        .unwrap_or(0)
-                        * fm_stride
+                    if page.decoupled_feature_metadata {
+                        page.feature_alloc.largest_free_block()
+                    } else {
+                        let v_stride = size_of::<V>() as u64;
+                        let fm_stride = size_of::<FM>() as u64;
+                        page.vertex_alloc
+                            .largest_free_block()
+                            .checked_div(v_stride)
+                            .unwrap_or(0)
+                            * fm_stride
+                    }
                 }
             })
             .max()
@@ -456,6 +480,7 @@ mod device;
 mod growth;
 mod index;
 mod page;
+mod shared;
 mod updates;
 mod upload;
 pub use allocation_error::AllocationError;

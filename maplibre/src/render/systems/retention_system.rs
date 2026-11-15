@@ -87,7 +87,6 @@ pub fn retention_system(
         world,
         style,
         view_state,
-        #[cfg(not(target_arch = "wasm32"))]
         renderer,
         ..
     }: &mut MapContext,
@@ -123,13 +122,13 @@ pub fn retention_system(
         single
     };
     let _ = &mut in_use;
-    drop_cancelled(world, &in_use);
+    drop_cancelled(world, &in_use, Some(&renderer.queue));
     let evicted = evict_stale_tiles(world, &in_use, drawn);
     if !evicted.is_empty() {
         tracing::debug!(count = evicted.len(), "evicted tiles that left the view");
-        drop_gpu_data(world, &evicted);
+        drop_gpu_data_with_queue(world, &evicted, Some(&renderer.queue));
     }
-    reclaim_pool_pages(world);
+    reclaim_pool_pages(world, Some(&renderer.queue));
     if view_state.has_external_view() {
         summary::summarize_residency(world, drawn, in_use.len(), view_state.eye_settled());
         #[cfg(not(target_arch = "wasm32"))]
@@ -339,7 +338,11 @@ pub(crate) fn evict_beyond<S: BuildHasher>(
 }
 
 /// Drops the tiles whose requests no one wants any more, freeing their slots for tiles in view.
-fn drop_cancelled<S: BuildHasher>(world: &mut World, in_use: &HashSet<WorldTileCoords, S>) {
+fn drop_cancelled<S: BuildHasher>(
+    world: &mut World,
+    in_use: &HashSet<WorldTileCoords, S>,
+    queue: Option<&crate::render::upload_queue::UploadQueue>,
+) {
     let cancelled = crate::io::tile_retry::cancel_unwanted(world, in_use);
     if cancelled.is_empty() {
         return;
@@ -355,13 +358,22 @@ fn drop_cancelled<S: BuildHasher>(world: &mut World, in_use: &HashSet<WorldTileC
     for coords in &cancelled {
         world.tiles.remove(*coords);
     }
-    drop_gpu_data(world, &cancelled);
+    drop_gpu_data_with_queue(world, &cancelled, queue);
 }
 
+#[cfg(all(test, feature = "headless"))]
 fn drop_gpu_data(world: &mut World, evicted: &[WorldTileCoords]) {
+    drop_gpu_data_with_queue(world, evicted, None);
+}
+
+fn drop_gpu_data_with_queue(
+    world: &mut World,
+    evicted: &[WorldTileCoords],
+    queue: Option<&crate::render::upload_queue::UploadQueue>,
+) {
     if let Some(Initialized(pool)) = world.resources.get_mut::<Eventually<VectorBufferPool>>() {
         for coords in evicted {
-            pool.remove_tile(*coords);
+            pool.remove_tile_with_queue(*coords, queue);
         }
     }
     if let Some(Initialized(pool)) = world
@@ -369,7 +381,7 @@ fn drop_gpu_data(world: &mut World, evicted: &[WorldTileCoords]) {
         .get_mut::<Eventually<crate::sdf::SymbolBufferPool>>()
     {
         for coords in evicted {
-            pool.remove_tile(*coords);
+            pool.remove_tile_with_queue(*coords, queue);
         }
     }
     #[cfg(feature = "raster")]
@@ -390,7 +402,7 @@ fn drop_gpu_data(world: &mut World, evicted: &[WorldTileCoords]) {
     }
 }
 
-fn reclaim_pool_pages(world: &mut World) {
+fn reclaim_pool_pages(world: &mut World, queue: Option<&crate::render::upload_queue::UploadQueue>) {
     #[cfg(target_arch = "wasm32")]
     let keep_spare = 0;
     #[cfg(not(target_arch = "wasm32"))]
@@ -401,13 +413,13 @@ fn reclaim_pool_pages(world: &mut World) {
             .is_some_and(MemoryBudget::is_tight),
     );
     if let Some(Initialized(pool)) = world.resources.get_mut::<Eventually<VectorBufferPool>>() {
-        pool.reclaim_empty_pages(keep_spare);
+        pool.reclaim_empty_pages_with_queue(keep_spare, queue);
     }
     if let Some(Initialized(pool)) = world
         .resources
         .get_mut::<Eventually<crate::sdf::SymbolBufferPool>>()
     {
-        pool.reclaim_empty_pages(keep_spare);
+        pool.reclaim_empty_pages_with_queue(keep_spare, queue);
     }
 }
 

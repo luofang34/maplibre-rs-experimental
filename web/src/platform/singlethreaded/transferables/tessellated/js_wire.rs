@@ -18,7 +18,7 @@ use maplibre::{
 };
 
 const LAYER_TESSELLATED_MAGIC: u32 = 0x4D4C_5654;
-const HEADER_BYTES: usize = 52;
+const HEADER_BYTES: usize = 60;
 
 struct WireHeader {
     coords: WorldTileCoords,
@@ -31,12 +31,19 @@ struct WireHeader {
     feature_color_count: usize,
     feature_sort_key_count: usize,
     paint_bytes_len: usize,
+    shared_geometry_key: Option<u64>,
 }
 
 fn read_u32_le(hdr: &[u8; HEADER_BYTES], offset: usize) -> u32 {
     let mut buf = [0_u8; 4];
     buf.copy_from_slice(&hdr[offset..offset + 4]);
     u32::from_le_bytes(buf)
+}
+
+fn read_u64_le(hdr: &[u8; HEADER_BYTES], offset: usize) -> u64 {
+    let mut buf = [0_u8; 8];
+    buf.copy_from_slice(&hdr[offset..offset + 8]);
+    u64::from_le_bytes(buf)
 }
 
 fn read_i32_le(hdr: &[u8; HEADER_BYTES], offset: usize) -> i32 {
@@ -61,6 +68,7 @@ fn parse_header(hdr: &[u8; HEADER_BYTES], total_len: usize) -> Option<WireHeader
     let feature_color_count = read_u32_le(hdr, 40) as usize;
     let feature_sort_key_count = read_u32_le(hdr, 44) as usize;
     let paint_bytes_len = read_u32_le(hdr, 48) as usize;
+    let raw_shared_key = read_u64_le(hdr, 52);
 
     let body_bytes = layer_name_len
         .checked_add(style_layer_id_len)?
@@ -89,6 +97,7 @@ fn parse_header(hdr: &[u8; HEADER_BYTES], total_len: usize) -> Option<WireHeader
         feature_color_count,
         feature_sort_key_count,
         paint_bytes_len,
+        shared_geometry_key: (raw_shared_key != 0).then_some(raw_shared_key),
     })
 }
 
@@ -103,6 +112,7 @@ pub(super) fn encode_layer_tessellated(
     style_layer_id: &str,
     paint_bytes: Option<&[u8]>,
 ) -> Vec<u8> {
+    let shared_key = buffer.shared_geometry_key().unwrap_or(0);
     let usable_indices = buffer.usable_indices;
     let raw_vertices = buffer.buffer.vertices;
     let raw_indices = buffer.buffer.indices;
@@ -132,6 +142,7 @@ pub(super) fn encode_layer_tessellated(
     out.extend_from_slice(&(feature_colors.len() as u32).to_le_bytes());
     out.extend_from_slice(&(feature_sort_keys.len() as u32).to_le_bytes());
     out.extend_from_slice(&(paint_slice.len() as u32).to_le_bytes());
+    out.extend_from_slice(&shared_key.to_le_bytes());
 
     out.extend_from_slice(layer_name_str.as_bytes());
     out.extend_from_slice(style_layer_id.as_bytes());
@@ -230,7 +241,8 @@ pub(super) fn decode_bucket_from_bytes(bytes: &[u8]) -> Option<AvailableVectorLa
         coords: h.coords,
         source_layer,
         style_layer_id,
-        buffer: OverAlignedVertexBuffer::from_vecs(vertices, indices, h.usable_indices),
+        buffer: OverAlignedVertexBuffer::from_vecs(vertices, indices, h.usable_indices)
+            .with_shared_geometry_key(h.shared_geometry_key),
         feature_indices,
         feature_colors,
         feature_sort_keys,
@@ -299,7 +311,8 @@ pub(crate) fn decode_from_js_slice(
             coords: h.coords,
             source_layer,
             style_layer_id,
-            buffer: OverAlignedVertexBuffer::from_vecs(vertices, indices, h.usable_indices),
+            buffer: OverAlignedVertexBuffer::from_vecs(vertices, indices, h.usable_indices)
+                .with_shared_geometry_key(h.shared_geometry_key),
             feature_indices,
             feature_colors,
             feature_sort_keys,

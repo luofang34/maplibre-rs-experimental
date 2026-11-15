@@ -2,19 +2,29 @@ use super::*;
 
 impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM, FM> {
     pub(super) fn single_layer_limits(&self, strides: ElementStrides) -> [u64; 4] {
-        let max_v_elems = capped_elem_limit(
+        let max_v_base = capped_elem_limit(
             self.max_capacities.vertices,
             self.max_page_bytes,
             strides.vertex,
         );
-        let max_v_elems = match self
-            .max_capacities
-            .feature_metadata
-            .checked_div(strides.feature_metadata)
-            .zip(self.max_page_bytes.checked_div(strides.feature_metadata))
-        {
-            Some((fm_cap, fm_page)) => max_v_elems.min(fm_cap).min(fm_page),
-            None => max_v_elems,
+        let (max_v_elems, max_fm_elems) = if self.decoupled_feature_metadata {
+            let max_fm = capped_elem_limit(
+                self.max_capacities.feature_metadata,
+                self.max_page_bytes,
+                strides.feature_metadata,
+            );
+            (max_v_base, max_fm)
+        } else {
+            let clamped = match self
+                .max_capacities
+                .feature_metadata
+                .checked_div(strides.feature_metadata)
+                .zip(self.max_page_bytes.checked_div(strides.feature_metadata))
+            {
+                Some((fm_cap, fm_page)) => max_v_base.min(fm_cap).min(fm_page),
+                None => max_v_base,
+            };
+            (clamped, clamped)
         };
         let max_i_elems = capped_elem_limit(
             self.max_capacities.indices,
@@ -30,7 +40,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             max_v_elems * strides.vertex,
             max_i_elems * strides.index,
             max_lm_elems * strides.layer_metadata,
-            max_v_elems * strides.feature_metadata,
+            max_fm_elems * strides.feature_metadata,
         ]
     }
 
@@ -78,30 +88,49 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         let req_v_elems = elem_div(sizes[0], strides.vertex);
         let req_i_elems = elem_div(sizes[1], strides.index);
         let req_lm_elems = elem_div(sizes[2], strides.layer_metadata);
+        let req_fm_elems = elem_div(sizes[3], strides.feature_metadata);
 
         let rem_v_base = elem_div(rem.vertices, strides.vertex);
-        let rem_v_elems = match rem.feature_metadata.checked_div(strides.feature_metadata) {
-            Some(rem_fm) => rem_v_base.min(rem_fm),
-            None => rem_v_base,
+        let rem_fm_opt = rem.feature_metadata.checked_div(strides.feature_metadata);
+        let rem_v_elems = if self.decoupled_feature_metadata {
+            rem_v_base
+        } else {
+            match rem_fm_opt {
+                Some(rem_fm) => rem_v_base.min(rem_fm),
+                None => rem_v_base,
+            }
         };
         let rem_i_elems = elem_div(rem.indices, strides.index);
         let rem_lm_elems = elem_div(rem.layer_metadata, strides.layer_metadata);
 
-        if req_v_elems > rem_v_elems || req_i_elems > rem_i_elems || req_lm_elems > rem_lm_elems {
+        if req_v_elems > rem_v_elems
+            || req_i_elems > rem_i_elems
+            || req_lm_elems > rem_lm_elems
+            || rem_fm_opt.is_some_and(|rem_fm| req_fm_elems > rem_fm)
+        {
             return None;
         }
 
         let max_v_base = page_elem_limit(self.max_page_bytes, strides.vertex);
-        let max_v_page = match self.max_page_bytes.checked_div(strides.feature_metadata) {
-            Some(fm_page) => max_v_base.min(fm_page),
-            None => max_v_base,
+        let max_v_page = if self.decoupled_feature_metadata {
+            max_v_base
+        } else {
+            match self.max_page_bytes.checked_div(strides.feature_metadata) {
+                Some(fm_page) => max_v_base.min(fm_page),
+                None => max_v_base,
+            }
         };
         let max_i_page = page_elem_limit(self.max_page_bytes, strides.index);
         let max_lm_page = page_elem_limit(self.max_page_bytes, strides.layer_metadata);
+        let max_fm_page = page_elem_limit(self.max_page_bytes, strides.feature_metadata);
 
         let total_v_elems = elem_div(self.max_capacities.vertices, strides.vertex).max(1);
         let total_i_elems = elem_div(self.max_capacities.indices, strides.index);
         let total_lm_elems = elem_div(self.max_capacities.layer_metadata, strides.layer_metadata);
+        let total_fm_elems = elem_div(
+            self.max_capacities.feature_metadata,
+            strides.feature_metadata,
+        );
 
         #[cfg(target_arch = "wasm32")]
         let target_page_v = match self.page_count() {
@@ -138,6 +167,19 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             .max(req_lm_elems.next_power_of_two().min(max_lm_page))
             .min(rem_lm_elems)
             .max(req_lm_elems);
+        let page_fm_elems = if self.decoupled_feature_metadata && strides.feature_metadata > 0 {
+            let rem_fm = rem_fm_opt.unwrap_or(0);
+            let prop_fm = ((u128::from(total_fm_elems) * u128::from(page_v_elems))
+                .div_ceil(u128::from(total_v_elems)) as u64)
+                .max(4096.min(total_fm_elems / 4));
+            prop_fm
+                .min(max_fm_page)
+                .max(req_fm_elems.next_power_of_two().min(max_fm_page))
+                .min(rem_fm)
+                .max(req_fm_elems)
+        } else {
+            page_v_elems
+        };
 
         let v_bytes =
             fitting_buffer_size(strides.vertex as usize, page_v_elems, self.max_page_bytes);
@@ -150,7 +192,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         );
         let fm_bytes = fitting_buffer_size(
             strides.feature_metadata as usize,
-            page_v_elems,
+            page_fm_elems,
             self.max_page_bytes,
         );
 
@@ -173,6 +215,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             BackingBufferDescriptor::new(lm_buf, lm_bytes),
             BackingBufferDescriptor::new(fm_buf, fm_bytes),
             strides,
+            self.decoupled_feature_metadata,
         );
         let alloc = page.try_allocate(page_id, sizes, strides)?;
         if slot_idx == self.pages.len() {
@@ -197,16 +240,24 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         ];
         for ((typ, requested), capacity) in types.into_iter().zip(sizes).zip(limits) {
             let fits_somewhere = self.pages.iter().flatten().any(|page| match typ {
-                BackingBufferType::Vertices => page
-                    .vertex_alloc
-                    .can_allocate(requested, strides.vertex_align),
+                BackingBufferType::Vertices => page.vertex_alloc.can_allocate(
+                    requested,
+                    strides.effective_vertex_align(page.decoupled_feature_metadata),
+                ),
                 BackingBufferType::Indices => page
                     .index_alloc
                     .can_allocate(requested, strides.index_align),
                 BackingBufferType::Metadata => page
                     .layer_alloc
                     .can_allocate(requested, strides.layer_align),
-                BackingBufferType::FeatureMetadata => requested <= page.feature_metadata.inner_size,
+                BackingBufferType::FeatureMetadata => {
+                    if page.decoupled_feature_metadata {
+                        page.feature_alloc
+                            .can_allocate(requested, strides.feature_align)
+                    } else {
+                        requested <= page.feature_metadata.inner_size
+                    }
+                }
             });
             if !fits_somewhere {
                 return AllocationError::Capacity {

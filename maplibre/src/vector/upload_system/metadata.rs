@@ -173,15 +173,23 @@ pub(super) fn same_quantized_rgba(a: [f32; 4], b: [f32; 4]) -> bool {
         && q10(a[3]) == q10(b[3])
 }
 
-pub(super) fn upload_size(bucket: &crate::vector::AvailableVectorLayerBucket) -> usize {
-    bucket.buffer.buffer.vertices.len() * std::mem::size_of::<crate::render::ShaderVertex>()
-        + bucket.buffer.buffer.indices.len() * std::mem::size_of::<u32>()
-        + bucket
+pub(super) fn upload_size(
+    bucket: &crate::vector::AvailableVectorLayerBucket,
+    is_uniform: bool,
+) -> usize {
+    let fm_bytes = if is_uniform {
+        std::mem::size_of::<FillShaderFeatureMetadata>()
+    } else {
+        bucket
             .feature_indices
             .iter()
             .map(|count| *count as usize)
             .sum::<usize>()
             * std::mem::size_of::<FillShaderFeatureMetadata>()
+    };
+    bucket.buffer.buffer.vertices.len() * std::mem::size_of::<crate::render::ShaderVertex>()
+        + bucket.buffer.buffer.indices.len() * std::mem::size_of::<u32>()
+        + fm_bytes
 }
 
 pub(super) fn layer_translate_tile_units(
@@ -248,4 +256,73 @@ pub(super) fn can_release_cpu_geometry(
             .and_then(crate::vector::pattern::per_feature_pattern)
             .is_none()
         && !(style_layer.type_ == "circle" && !bucket.feature_sort_keys.is_empty())
+}
+
+pub(super) fn find_shared_fallback_vertices<'a>(
+    bucket: &crate::vector::AvailableVectorLayerBucket,
+    layers: &'a crate::vector::VectorLayerBucketComponent,
+    pending: &'a crate::vector::content::LayerReplacements,
+) -> Option<&'a [crate::render::ShaderVertex]> {
+    let shared_key = bucket
+        .buffer
+        .shared_geometry_key()
+        .filter(|_| bucket.buffer.buffer.vertices.is_empty())?;
+    pending
+        .vector
+        .iter()
+        .find(|sib| {
+            sib.buffer.shared_geometry_key() == Some(shared_key)
+                && !sib.buffer.buffer.vertices.is_empty()
+        })
+        .or_else(|| {
+            layers.layers.iter().find_map(|sib| match sib {
+                crate::vector::VectorLayerBucket::AvailableLayer(sib)
+                    if sib.buffer.shared_geometry_key() == Some(shared_key)
+                        && !sib.buffer.buffer.vertices.is_empty() =>
+                {
+                    Some(sib)
+                }
+                _ => None,
+            })
+        })
+        .map(|sib| sib.buffer.buffer.vertices.as_slice())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(super) fn flush_safe_cpu_releases(
+    tiles: &mut crate::tcs::tiles::Tiles,
+    buffer_pool: &crate::vector::VectorBufferPool,
+    coords: WorldTileCoords,
+    releases: &[(String, Option<u64>, bool)],
+) {
+    for (layer_id, shared_key, release_colors) in releases {
+        let sibling_pending = shared_key.is_some_and(|key| {
+            tiles
+                .query::<(
+                    &crate::vector::VectorLayerBucketComponent,
+                    &crate::vector::content::LayerReplacements,
+                )>(coords)
+                .is_some_and(|(layers, pending)| {
+                    pending.vector.iter().any(|sib| {
+                        sib.buffer.shared_geometry_key() == Some(key)
+                            && !sib.buffer.buffer.indices.is_empty()
+                    }) || layers.layers.iter().any(|sib| match sib {
+                        crate::vector::VectorLayerBucket::AvailableLayer(sib) => {
+                            sib.buffer.shared_geometry_key() == Some(key)
+                                && !sib.buffer.buffer.indices.is_empty()
+                                && !buffer_pool.has_layer(coords, &sib.style_layer_id)
+                        }
+                        _ => false,
+                    })
+                })
+        });
+        if !sibling_pending {
+            crate::vector::content::release_committed_cpu_geometry(
+                tiles,
+                coords,
+                layer_id,
+                *release_colors,
+            );
+        }
+    }
 }

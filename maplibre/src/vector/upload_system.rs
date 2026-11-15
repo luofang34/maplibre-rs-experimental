@@ -156,6 +156,8 @@ fn upload_tessellated_layer(
         }
         let mut uploaded = false;
         let mut saturated = false;
+        #[cfg(target_arch = "wasm32")]
+        let mut pending_cpu_releases: Vec<(String, Option<u64>, bool)> = Vec::new();
         for style_layer in &style.layers {
             enum Step {
                 Skip,
@@ -165,7 +167,7 @@ fn upload_tessellated_layer(
                     replacement: Option<usize>,
                     did_upload: bool,
                     #[cfg(target_arch = "wasm32")]
-                    release_cpu: bool,
+                    release_cpu: Option<Option<u64>>,
                 },
             }
             let step = {
@@ -195,24 +197,28 @@ fn upload_tessellated_layer(
                 if replacement.is_none() && buffer_pool.has_layer(coords, &style_layer.id) {
                     continue;
                 }
+                let is_uniform = paint::uniform_color(style_layer, f64::from(paint.zoom)).is_some();
                 if bucket.buffer.usable_indices == 0 && bucket.buffer.buffer.indices.is_empty() {
                     buffer_pool.remove_layer(coords, &style_layer.id);
                     Step::Commit {
                         replacement,
                         did_upload: false,
                         #[cfg(target_arch = "wasm32")]
-                        release_cpu: false,
+                        release_cpu: None,
                     }
                 } else if bucket.buffer.buffer.indices.is_empty() {
                     continue;
                 } else if budget.geometry_tiles_exhausted()
-                    || !budget.take(UploadKind::Geometry, upload_size(bucket))
+                    || !budget.take(UploadKind::Geometry, upload_size(bucket, is_uniform))
                 {
                     Step::Exhausted
                 } else {
                     #[cfg(target_arch = "wasm32")]
-                    let release_cpu = allow_cpu_release
-                        && metadata::can_release_cpu_geometry(style_layer, bucket, has_dem_source);
+                    let release_cpu = (allow_cpu_release
+                        && metadata::can_release_cpu_geometry(style_layer, bucket, has_dem_source))
+                    .then(|| bucket.buffer.shared_geometry_key());
+                    let fallback_vertices =
+                        metadata::find_shared_fallback_vertices(bucket, layers, pending);
                     let paint_store =
                         tiles.query::<&super::feature_paint::TileFeaturePaintComponent>(coords);
                     let paint_entries = if replacement.is_some() {
@@ -229,6 +235,7 @@ fn upload_tessellated_layer(
                         queue,
                         style_layer,
                         bucket,
+                        fallback_vertices,
                         (paint_entries, layers.overscaled_zoom),
                         (spatial, paint),
                         (&protected, &mut feature_meta_scratch),
@@ -246,7 +253,16 @@ fn upload_tessellated_layer(
             };
             match step {
                 Step::Skip => continue,
-                Step::Exhausted => return true,
+                Step::Exhausted => {
+                    #[cfg(target_arch = "wasm32")]
+                    metadata::flush_safe_cpu_releases(
+                        tiles,
+                        buffer_pool,
+                        coords,
+                        &pending_cpu_releases,
+                    );
+                    return true;
+                }
                 Step::Saturated => {
                     saturated = true;
                     break;
@@ -262,21 +278,22 @@ fn upload_tessellated_layer(
                         super::content::commit_pending_vector(tiles, coords, index);
                     }
                     #[cfg(target_arch = "wasm32")]
-                    if release_cpu {
+                    if let Some(shared_key) = release_cpu {
                         let release_colors =
                             !crate::style::feature_state::layer_paint_reads_feature_state(
                                 style_layer,
                             );
-                        super::content::release_committed_cpu_geometry(
-                            tiles,
-                            coords,
-                            &style_layer.id,
+                        pending_cpu_releases.push((
+                            style_layer.id.clone(),
+                            shared_key,
                             release_colors,
-                        );
+                        ));
                     }
                 }
             }
         }
+        #[cfg(target_arch = "wasm32")]
+        metadata::flush_safe_cpu_releases(tiles, buffer_pool, coords, &pending_cpu_releases);
         if uploaded {
             budget.count_geometry_tile();
         }
@@ -293,11 +310,13 @@ enum UploadOutcome {
     Failed,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn upload_bucket(
     buffer_pool: &mut VectorBufferPool,
     queue: &crate::render::upload_queue::UploadQueue,
     style_layer: &crate::style::layer::StyleLayer,
     bucket: &AvailableVectorLayerBucket,
+    fallback_vertices: Option<&[crate::render::ShaderVertex]>,
     (paint_entries, overscaled_zoom): (Option<&[super::feature_paint::BucketFeatureEntry]>, u8),
     (spatial, paint): (&[super::structures::SpatialBuffer], VectorPaintFrame),
     (protected, feature_metadata): (
@@ -364,11 +383,12 @@ fn upload_bucket(
     tracing::debug!(%coords, "allocating vector geometry");
     let upload_res = if let Some(color) = uniform {
         let records = feature_indices.iter().map(|&c| c as usize).sum();
-        buffer_pool.replace_layer_geometry_uniform_unless(
+        buffer_pool.replace_layer_geometry_uniform_shared_unless(
             queue,
             coords,
             style_layer.clone(),
             buffer,
+            fallback_vertices,
             layer_metadata,
             FillShaderFeatureMetadata { color },
             records,

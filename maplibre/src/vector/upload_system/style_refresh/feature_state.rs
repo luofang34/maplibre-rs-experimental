@@ -191,3 +191,64 @@ pub(super) fn sync_tile_feature_states(
         }
     }
 }
+
+pub(super) fn recolor_cpu_bucket(
+    style_layer: &crate::style::layer::StyleLayer,
+    bucket: &mut crate::vector::AvailableVectorLayerBucket,
+    entries: Option<&[crate::vector::feature_paint::BucketFeatureEntry]>,
+    uniform: Option<[f32; 4]>,
+    style_zoom: f64,
+    needs_worker_refresh: &mut bool,
+) -> (bool, bool) {
+    use crate::vector::feature_paint::{
+        evaluate_bucket_colors, BucketEntryKind, BucketFeatureEntry,
+    };
+    if let Some(entries) = entries {
+        let new_colors = evaluate_bucket_colors(style_layer, entries, style_zoom);
+        let changed = new_colors != bucket.feature_colors;
+        bucket.feature_colors = new_colors;
+        (true, changed)
+    } else if uniform.is_some() {
+        (true, false)
+    } else if layer_is_feature_constant(style_layer) {
+        let single = [BucketFeatureEntry {
+            raw_id: None,
+            properties: std::sync::Arc::default(),
+            kind: BucketEntryKind::Feature,
+        }];
+        let const_color = evaluate_bucket_colors(style_layer, &single, style_zoom)[0];
+        let new_colors = vec![const_color; bucket.feature_indices.len()];
+        let changed = new_colors != bucket.feature_colors;
+        bucket.feature_colors = new_colors;
+        (true, changed)
+    } else {
+        if bucket.buffer.usable_indices > 0 || !bucket.buffer.buffer.indices.is_empty() {
+            *needs_worker_refresh = true;
+        }
+        (false, false)
+    }
+}
+
+fn layer_is_feature_constant(layer: &crate::style::layer::StyleLayer) -> bool {
+    use crate::style::layer::LayerPaint;
+    match layer.paint.as_ref() {
+        Some(LayerPaint::Circle(c)) => {
+            c.circle_color
+                .as_ref()
+                .is_none_or(|p| p.is_feature_constant())
+                && c.circle_opacity
+                    .as_ref()
+                    .is_none_or(|p| p.is_feature_constant())
+                && c.stroke_color_per_feature().is_none()
+        }
+        Some(LayerPaint::FillExtrusion(e)) => {
+            e.fill_extrusion_color
+                .as_ref()
+                .is_none_or(|p| p.is_feature_constant())
+                && e.fill_extrusion_opacity
+                    .as_ref()
+                    .is_none_or(|p| p.is_feature_constant())
+        }
+        _ => false,
+    }
+}

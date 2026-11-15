@@ -110,7 +110,7 @@ impl SymbolTextures {
         std::mem::take(&mut self.bound)
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "headless"))]
     pub fn binding(&self, coords: WorldTileCoords, layer: &str) -> Option<&DrawBinding> {
         self.binding_by_id(coords, crate::style::StyleLayerId::intern(layer))
     }

@@ -13,6 +13,7 @@ pub struct OverAlignedVertexBuffer<V, I> {
     pub usable_indices: u32,
     uploaded_vertices: usize,
     icon_bits: Vec<u64>,
+    shared_geometry_key: Option<u64>,
 }
 
 impl<V, I> OverAlignedVertexBuffer<V, I> {
@@ -23,6 +24,7 @@ impl<V, I> OverAlignedVertexBuffer<V, I> {
             usable_indices: 0,
             uploaded_vertices: 0,
             icon_bits: Vec::new(),
+            shared_geometry_key: None,
         }
     }
 
@@ -33,6 +35,7 @@ impl<V, I> OverAlignedVertexBuffer<V, I> {
             usable_indices,
             uploaded_vertices: 0,
             icon_bits: Vec::new(),
+            shared_geometry_key: None,
         }
     }
 
@@ -55,7 +58,22 @@ impl<V, I> OverAlignedVertexBuffer<V, I> {
             usable_indices,
             uploaded_vertices: 0,
             icon_bits: Vec::new(),
+            shared_geometry_key: None,
         }
+    }
+
+    /// Attaches a batch-scoped shared vertex-allocation key so sibling style layers on the same
+    /// source layer reuse a single uploaded GPU vertex buffer.
+    #[inline]
+    pub fn with_shared_geometry_key(mut self, key: Option<u64>) -> Self {
+        self.shared_geometry_key = key;
+        self
+    }
+
+    /// Shared vertex-allocation key when multiple style layers reference one source-layer vertex slab.
+    #[inline]
+    pub fn shared_geometry_key(&self) -> Option<u64> {
+        self.shared_geometry_key
     }
 
     /// Total GPU vertex count, preserved even after CPU vertex storage is released post-upload.
@@ -113,6 +131,7 @@ impl<V: Pod, I: Pod> From<VertexBuffers<V, I>> for OverAlignedVertexBuffer<V, I>
             usable_indices,
             uploaded_vertices: 0,
             icon_bits: Vec::new(),
+            shared_geometry_key: None,
         }
     }
 }

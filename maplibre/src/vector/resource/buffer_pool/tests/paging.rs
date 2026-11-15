@@ -172,3 +172,102 @@ async fn default_gpu_pool_starts_at_zero_bytes_and_allocates_one_page_on_demand(
         "expected single ~10 MiB on-demand page instead of ~347 MiB monolith, got {one_page_bytes} B"
     );
 }
+
+#[test]
+fn decoupled_pool_shares_vertex_allocation_and_uses_single_uniform_metadata_record() {
+    #[repr(C)]
+    #[derive(Default, Copy, Clone, bytemuck_derive::Pod, bytemuck_derive::Zeroable)]
+    struct UniformMeta {
+        rgba: [f32; 4],
+    }
+
+    let mut pool: BufferPool<TestQueue, TestBuffer, TestVertex, u32, u32, UniformMeta> =
+        BufferPool::new(
+            BackingBufferDescriptor::new(TestBuffer { size: 256 }, 256),
+            BackingBufferDescriptor::new(TestBuffer { size: 256 }, 256),
+            BackingBufferDescriptor::new(TestBuffer { size: 256 }, 256),
+            BackingBufferDescriptor::new(TestBuffer { size: 256 }, 256),
+        )
+        .with_decoupled_feature_metadata();
+    assert!(pool.is_decoupled_feature_metadata());
+
+    let coords = WorldTileCoords::from((1, 1, 2_u8.into()));
+    let primary_geom = geometry(6).with_shared_geometry_key(Some(7));
+    let mut secondary_buf = VertexBuffers::new();
+    secondary_buf.indices = vec![0, 1, 2];
+    let secondary_geom =
+        OverAlignedVertexBuffer::from(secondary_buf).with_shared_geometry_key(Some(7));
+
+    pool.replace_layer_geometry_uniform_shared_unless(
+        &TestQueue,
+        coords,
+        style_layer("road-casing"),
+        &primary_geom,
+        None,
+        1_u32,
+        UniformMeta {
+            rgba: [0.1, 0.2, 0.3, 1.0],
+        },
+        6,
+        |_| false,
+    )
+    .expect("primary shared upload");
+
+    let free_after_primary = pool.available_space(BackingBufferType::Vertices);
+    assert_eq!(free_after_primary, (256 / 24) * 24 - 6 * 24);
+
+    pool.replace_layer_geometry_uniform_shared_unless(
+        &TestQueue,
+        coords,
+        style_layer("road-core"),
+        &secondary_geom,
+        Some(&primary_geom.buffer.vertices),
+        2_u32,
+        UniformMeta {
+            rgba: [0.9, 0.8, 0.1, 1.0],
+        },
+        6,
+        |_| false,
+    )
+    .expect("secondary shared upload");
+
+    assert_eq!(
+        pool.available_space(BackingBufferType::Vertices),
+        free_after_primary,
+        "second sibling must consume 0 additional vertex bytes"
+    );
+
+    let entries = pool.index().get_layers(coords).expect("entries");
+    assert_eq!(entries.len(), 2);
+    let casing = entries
+        .iter()
+        .find(|e| e.style_layer.id == "road-casing")
+        .expect("casing");
+    let core = entries
+        .iter()
+        .find(|e| e.style_layer.id == "road-core")
+        .expect("core");
+    assert!(casing.is_uniform_feature_metadata());
+    assert!(core.is_uniform_feature_metadata());
+    let casing_fm = casing.feature_metadata_buffer_range();
+    let core_fm = core.feature_metadata_buffer_range();
+    assert_eq!(casing_fm.end - casing_fm.start, 16);
+    assert_eq!(core_fm.end - core_fm.start, 16);
+    assert_ne!(casing_fm, core_fm);
+    assert_eq!(casing.vertices_buffer_range(), core.vertices_buffer_range());
+    assert_eq!(casing.base_vertex(), core.base_vertex());
+
+    // Removing the first sibling retains the shared vertex slab for the remaining sibling.
+    pool.remove_layer(coords, "road-casing");
+    assert_eq!(
+        pool.available_space(BackingBufferType::Vertices),
+        free_after_primary
+    );
+
+    // Removing the last sibling releases the shared vertex slab back to the page allocator.
+    pool.remove_layer(coords, "road-core");
+    assert_eq!(
+        pool.available_space(BackingBufferType::Vertices),
+        (256 / 24) * 24
+    );
+}

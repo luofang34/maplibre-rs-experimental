@@ -59,9 +59,9 @@ pub(crate) mod upload_system;
 pub(crate) mod pattern;
 pub mod tessellation;
 
-struct VectorPipeline(wgpu::RenderPipeline);
+struct VectorPipeline(crate::render::resource::FeaturePipelinePair);
 impl Deref for VectorPipeline {
-    type Target = wgpu::RenderPipeline;
+    type Target = crate::render::resource::FeaturePipelinePair;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -71,32 +71,32 @@ impl Deref for VectorPipeline {
 /// The pipelines of stroked lines, by where a line lies.
 struct LinePipeline {
     /// On the map plane, or draped into the terrain textures.
-    flat: wgpu::RenderPipeline,
+    flat: crate::render::resource::FeaturePipelinePair,
     /// At heights of its own, as a bridge deck or tunnel is, tested against the terrain depth.
-    structure: Option<wgpu::RenderPipeline>,
+    structure: Option<crate::render::resource::FeaturePipelinePair>,
     /// Elevated 3D paths (`line-elevation`) clipped to `[0, 4096]`, depth-tested without 2D
     /// ground stencil clipping so high-altitude rims project freely under pitch.
-    elevated: Option<wgpu::RenderPipeline>,
+    elevated: Option<crate::render::resource::FeaturePipelinePair>,
     /// On the terrain surface at its width in screen pixels, with a terrain tile bound third.
-    terrain: Option<wgpu::RenderPipeline>,
+    terrain: Option<crate::render::resource::FeaturePipelinePair>,
 }
 
 /// The passes of extruded polygons: depth, colour once per pixel, stencil reset, and translucent shells.
 struct ExtrusionPipeline {
-    depth: wgpu::RenderPipeline,
-    color: wgpu::RenderPipeline,
-    clear: wgpu::RenderPipeline,
+    depth: crate::render::resource::FeaturePipelinePair,
+    color: crate::render::resource::FeaturePipelinePair,
+    clear: crate::render::resource::FeaturePipelinePair,
     /// The colour pass with an image in place of the colour.
-    pattern: wgpu::RenderPipeline,
+    pattern: crate::render::resource::FeaturePipelinePair,
     /// Back-facing shell of a closed translucent 3D volume (`depth_write = false`).
-    translucent_back: wgpu::RenderPipeline,
+    translucent_back: crate::render::resource::FeaturePipelinePair,
     /// Front-facing shell of a closed translucent 3D volume (`depth_write = false`).
-    translucent_front: wgpu::RenderPipeline,
+    translucent_front: crate::render::resource::FeaturePipelinePair,
 }
 
-struct CirclePipeline(wgpu::RenderPipeline);
+struct CirclePipeline(crate::render::resource::FeaturePipelinePair);
 impl Deref for CirclePipeline {
-    type Target = wgpu::RenderPipeline;
+    type Target = crate::render::resource::FeaturePipelinePair;
 
     fn deref(&self) -> &Self::Target {
         &self.0

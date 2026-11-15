@@ -17,8 +17,8 @@ use wgpu::util::DeviceExt;
 /// Maximum single `write_buffer` payload (exclusive) staged into the per-frame coalescing belt.
 const MAX_STAGED_WRITE_BYTES: usize = 65_536;
 
-/// Minimum persistent GPU staging buffer capacity (`256 KiB`).
-const MIN_STAGING_BUFFER_CAPACITY: u64 = 256 * 1024;
+/// Minimum persistent GPU staging buffer capacity (`512 KiB`).
+const MIN_STAGING_BUFFER_CAPACITY: u64 = 512 * 1024;
 
 #[derive(Debug)]
 struct StagedCopy {

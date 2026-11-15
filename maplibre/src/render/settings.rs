@@ -145,15 +145,49 @@ impl BufferPoolSizes {
             && self.feature_metadata == 0
             && self.layer_metadata == 0
     }
+
+    /// Right-sized capacity ceiling for the SDF symbol/icon buffer pool.
+    pub const fn default_symbols() -> Self {
+        #[cfg(target_arch = "wasm32")]
+        {
+            Self {
+                vertices: 229_376,
+                indices: 344_064,
+                feature_metadata: 229_376,
+                layer_metadata: 4_096,
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Self {
+                vertices: 1_048_576,
+                indices: 1_572_864,
+                feature_metadata: 1_048_576,
+                layer_metadata: 16_384,
+            }
+        }
+    }
 }
 
 impl Default for BufferPoolSizes {
     fn default() -> Self {
-        Self {
-            vertices: 10 * 1_000_000,
-            indices: 30 * 1_000_000,
-            feature_metadata: 10 * 1024 * 1000,
-            layer_metadata: 64 * 1024,
+        #[cfg(target_arch = "wasm32")]
+        {
+            Self {
+                vertices: 1_250_000,
+                indices: 3_750_000,
+                feature_metadata: 131_072,
+                layer_metadata: 8_192,
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Self {
+                vertices: 4_000_000,
+                indices: 12_000_000,
+                feature_metadata: 512_000,
+                layer_metadata: 32_768,
+            }
         }
     }
 }
@@ -310,7 +344,7 @@ impl Default for RendererSettings {
         Self {
             msaa: Msaa::default(),
             buffer_pools: BufferPoolSizes::default(),
-            symbol_pools: BufferPoolSizes::default(),
+            symbol_pools: BufferPoolSizes::default_symbols(),
             terrain_drape_size: crate::terrain::resources::DRAPE_SIZE,
             terrain_drape_mode: TerrainDrapeMode::default(),
             texture_format: None,

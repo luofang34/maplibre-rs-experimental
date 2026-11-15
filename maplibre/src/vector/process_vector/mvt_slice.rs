@@ -216,7 +216,7 @@ pub(super) fn process_mvt_slice(
     }
 }
 
-fn process_feature_properties(
+pub(super) fn process_feature_properties(
     layer: &tile::Layer,
     feature: &tile::Feature,
     processor: &mut impl FeatureProcessor,

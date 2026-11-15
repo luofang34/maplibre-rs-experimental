@@ -178,3 +178,72 @@ fn decode_tile_for_layers_skips_unrequested_mvt_layers_and_tolerates_padding() {
         crate::vector::process_vector::decode_tile_for_layers(&[0x0a, 0xff], |_| true).is_err()
     );
 }
+
+#[test]
+fn sibling_uniform_line_layers_share_one_tessellated_vertex_buffer() {
+    let bytes = super::diagonal_line_tile(4096);
+    let mut casing: StyleLayer = serde_json::from_value(serde_json::json!({
+        "id": "airways-casing",
+        "type": "line",
+        "source": "chart",
+        "source-layer": "airways",
+        "paint": {"line-color": "#112233", "line-width": 4}
+    }))
+    .expect("casing layer");
+    casing.index = 0;
+    let mut core: StyleLayer = serde_json::from_value(serde_json::json!({
+        "id": "airways-core",
+        "type": "line",
+        "source": "chart",
+        "source-layer": "airways",
+        "filter": ["==", ["get", "level"], "low"],
+        "paint": {"line-color": "#ffaa00", "line-width": 2}
+    }))
+    .expect("core layer");
+    core.index = 1;
+
+    let mut processor = ProcessVectorContext::<DefaultVectorTransferables, CollectingContext>::new(
+        CollectingContext::default(),
+    );
+    process_vector_tile(
+        &bytes,
+        VectorTileRequest {
+            coords: WorldTileCoords::from((1, 1, 2_u8.into())),
+            layers: [casing, core].into_iter().collect(),
+            projection: ProjectionType::Mercator,
+            overscaled_zoom: 0,
+        },
+        &mut processor,
+    )
+    .expect("tile processes");
+
+    let layers = super::tessellated(processor.take_context().0.take());
+    assert_eq!(layers.len(), 2);
+    let primary = layers
+        .iter()
+        .find(|l| l.style_layer_id() == "airways-casing")
+        .expect("primary layer");
+    let secondary = layers
+        .iter()
+        .find(|l| l.style_layer_id() == "airways-core")
+        .expect("secondary layer");
+
+    let key = primary
+        .buffer
+        .shared_geometry_key()
+        .expect("shared geometry key assigned");
+    assert_eq!(secondary.buffer.shared_geometry_key(), Some(key));
+    assert!(
+        !primary.buffer.buffer.vertices.is_empty(),
+        "primary sibling carries the shared tessellated vertices"
+    );
+    assert!(
+        secondary.buffer.buffer.vertices.is_empty(),
+        "secondary sibling omits duplicate vertices across worker wire"
+    );
+    assert_eq!(
+        primary.buffer.buffer.indices,
+        secondary.buffer.buffer.indices
+    );
+    assert!(secondary.buffer.usable_indices > 0);
+}

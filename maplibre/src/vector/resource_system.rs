@@ -81,7 +81,10 @@ pub fn resource_system(
         return Err(SystemError::Dependencies);
     };
 
-    buffer_pool.initialize(|| BufferPool::from_device_with_sizes(device, settings.buffer_pools));
+    buffer_pool.initialize(|| {
+        BufferPool::from_device_with_sizes(device, settings.buffer_pools)
+            .with_decoupled_feature_metadata()
+    });
 
     let setup = PipelineSetup {
         device,
@@ -178,7 +181,7 @@ impl PipelineSetup<'_> {
         shader: &impl Shader,
         layouts: &[&wgpu::BindGroupLayout],
         depth: bool,
-    ) -> wgpu::RenderPipeline {
+    ) -> crate::render::resource::FeaturePipelinePair {
         self.create_with_clipping(name, shader, layouts, depth, true)
     }
 
@@ -190,16 +193,19 @@ impl PipelineSetup<'_> {
         layouts: &[&wgpu::BindGroupLayout],
         depth: bool,
         clipped: bool,
-    ) -> wgpu::RenderPipeline {
+    ) -> crate::render::resource::FeaturePipelinePair {
         self.describe(name, shader, depth, clipped)
-            .initialize_with_prefix_layouts(self.device, layouts)
+            .initialize_pair_with_prefix_layouts(self.device, layouts, 3)
     }
 
     /// The pipeline of a line on the terrain surface: tested against the terrain depth as a
     /// structure is, with the terrain tile it lies on bound after the dash atlas. The stencil
     /// masks lie on the map plane, below a line lifted onto hills, so the line clips itself to
     /// its tiles instead.
-    fn create_terrain_line(&self, dashes: &wgpu::BindGroupLayout) -> wgpu::RenderPipeline {
+    fn create_terrain_line(
+        &self,
+        dashes: &wgpu::BindGroupLayout,
+    ) -> crate::render::resource::FeaturePipelinePair {
         let shader = shaders::TerrainLineShader {
             format: self.format,
         };
@@ -207,7 +213,7 @@ impl PipelineSetup<'_> {
         descriptor.layout = Some(vec![
             crate::terrain::resources::TerrainResources::bind_group_layout_entries(),
         ]);
-        descriptor.initialize_with_prefix_layouts(self.device, &[self.projection, dashes])
+        descriptor.initialize_pair_with_prefix_layouts(self.device, &[self.projection, dashes], 3)
     }
 
     fn describe(
@@ -247,7 +253,7 @@ impl PipelineSetup<'_> {
         descriptor
     }
 
-    fn create_pattern(&self) -> wgpu::RenderPipeline {
+    fn create_pattern(&self) -> crate::render::resource::FeaturePipelinePair {
         self.create(
             "fill_pattern_pipeline",
             &shaders::FillPatternShader {
@@ -258,7 +264,10 @@ impl PipelineSetup<'_> {
         )
     }
 
-    fn create_extrusion(&self, pass: shaders::ExtrusionPass) -> wgpu::RenderPipeline {
+    fn create_extrusion(
+        &self,
+        pass: shaders::ExtrusionPass,
+    ) -> crate::render::resource::FeaturePipelinePair {
         use shaders::ExtrusionPass::{
             Clear, Color, Depth, PatternColor, TranslucentBack, TranslucentFront,
         };
@@ -337,7 +346,7 @@ impl PipelineSetup<'_> {
         } else {
             &[self.projection]
         };
-        descriptor.initialize_with_prefix_layouts(self.device, layouts)
+        descriptor.initialize_pair_with_prefix_layouts(self.device, layouts, 3)
     }
 
     fn initialize_extrusion(&self, extrusion: &mut Eventually<ExtrusionPipeline>) {

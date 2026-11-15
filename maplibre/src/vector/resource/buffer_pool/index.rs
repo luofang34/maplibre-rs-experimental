@@ -28,9 +28,25 @@ pub struct IndexEntry {
     // Amount of actually usable indices. Each index has the size/format `IndexDataType`.
     // Can be lower than size(buffer_indices) / indices_stride because of alignment.
     pub(super) usable_indices: u32,
+    // True when `buffer_feature_metadata` holds a single instance-stepped record for the layer.
+    pub(super) uniform_feature_metadata: bool,
+    // Shared source-layer vertex slab key when sibling layers share `buffer_vertices`.
+    pub(super) shared_geometry_key: Option<u64>,
 }
 
 impl IndexEntry {
+    /// Whether this entry stores one `VertexStepMode::Instance` feature metadata record instead of
+    /// one record per vertex.
+    #[inline]
+    pub fn is_uniform_feature_metadata(&self) -> bool {
+        self.uniform_feature_metadata
+    }
+
+    /// Batch-scoped shared vertex-slab identifier when sibling style layers share `buffer_vertices`.
+    #[inline]
+    pub fn shared_geometry_key(&self) -> Option<u64> {
+        self.shared_geometry_key
+    }
     /// Identifies this upload, even when an evicted layer reuses the same buffer range.
     pub fn allocation_id(&self) -> u64 {
         self.allocation_id

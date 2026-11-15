@@ -69,7 +69,13 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
                         .get_mut(usize::from(alloc.page))
                         .and_then(Option::as_mut)
                     {
-                        page.free(alloc.vertices, alloc.indices, alloc.layer_metadata);
+                        page.free(
+                            alloc.vertices,
+                            alloc.indices,
+                            alloc.layer_metadata,
+                            alloc.feature_metadata,
+                            true,
+                        );
                     }
                     return Err(err);
                 }
@@ -90,8 +96,9 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             buffer_vertices: alloc.vertices,
             buffer_indices: alloc.indices,
             buffer_layer_metadata: alloc.layer_metadata,
-            buffer_feature_metadata: first_vertex * strides.feature_metadata
-                ..first_vertex * strides.feature_metadata + sizes[3],
+            buffer_feature_metadata: alloc.feature_metadata,
+            uniform_feature_metadata: false,
+            shared_geometry_key: None,
         };
 
         let page = self.page_of(&entry);
@@ -150,7 +157,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         }
     }
 
-    /// Replaces only this style layer with uniform per-vertex feature metadata without heap scratch.
+    /// Replaces only this style layer with uniform feature metadata without heap scratch.
     #[allow(clippy::too_many_arguments)]
     pub fn replace_layer_geometry_uniform_unless(
         &mut self,
@@ -161,108 +168,19 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
         layer_metadata: TM,
         uniform_feature: FM,
         records: usize,
-        mut protect: impl FnMut(WorldTileCoords) -> bool,
+        protect: impl FnMut(WorldTileCoords) -> bool,
     ) -> Result<(), AllocationError> {
-        if coords.build_quad_key().is_none() {
-            return Err(AllocationError::Coordinates { coords });
-        }
-        let strides = ElementStrides::of::<V, I, TM, FM>();
-        let (vertices, records_u64) = (geometry.buffer.vertices.len() as u64, records as u64);
-        if records_u64 > vertices {
-            return Err(AllocationError::FeatureMetadata {
-                vertices,
-                records: records_u64,
-            });
-        }
-        let sizes = [
-            vertices * strides.vertex,
-            geometry.buffer.indices.len() as u64 * strides.index,
-            strides.layer_metadata,
-            records_u64 * strides.feature_metadata,
-        ];
-        self.validate_sizes(sizes, strides)?;
-        let alloc = self.reserve_page_allocation(Some(queue), sizes, strides, &mut protect)?;
-        let first_vertex = alloc
-            .vertices
-            .start
-            .checked_div(strides.vertex)
-            .unwrap_or(0);
-        let first_index = alloc.indices.start.checked_div(strides.index).unwrap_or(0);
-        let (first_vertex_u32, first_index_u32) =
-            match (element_index(first_vertex), element_index(first_index)) {
-                (Ok(fv), Ok(fi)) => (fv, fi),
-                (Err(err), _) | (_, Err(err)) => {
-                    if let Some(page) = self
-                        .pages
-                        .get_mut(usize::from(alloc.page))
-                        .and_then(Option::as_mut)
-                    {
-                        page.free(alloc.vertices, alloc.indices, alloc.layer_metadata);
-                    }
-                    return Err(err);
-                }
-            };
-        let style_layer_id = style_layer.layer_id();
-        let allocation_id = self.revision.wrapping_add(1);
-        let entry = IndexEntry {
-            allocation_id,
-            paint_revision: 0,
-            page: alloc.page,
+        self.replace_layer_geometry_uniform_shared_unless(
+            queue,
             coords,
-            style_layer_id,
             style_layer,
-            usable_indices: geometry.usable_indices,
-            first_vertex: first_vertex_u32,
-            first_index: first_index_u32,
-            buffer_vertices: alloc.vertices,
-            buffer_indices: alloc.indices,
-            buffer_layer_metadata: alloc.layer_metadata,
-            buffer_feature_metadata: first_vertex * strides.feature_metadata
-                ..first_vertex * strides.feature_metadata + sizes[3],
-        };
-        let page = self.page_of(&entry);
-        if sizes[0] > 0 {
-            queue.write_buffer(
-                &page.vertices.inner,
-                entry.buffer_vertices.start,
-                bytemuck::cast_slice(&geometry.buffer.vertices),
-            );
-        }
-        if sizes[1] > 0 {
-            queue.write_buffer(
-                &page.indices.inner,
-                entry.buffer_indices.start,
-                bytemuck::cast_slice(&geometry.buffer.indices),
-            );
-        }
-        if sizes[2] > 0 {
-            queue.write_buffer(
-                &page.layer_metadata.inner,
-                entry.buffer_layer_metadata.start,
-                bytemuck::bytes_of(&layer_metadata),
-            );
-        }
-        if sizes[3] > 0 {
-            Self::write_repeated_feature_metadata(
-                queue,
-                &page.feature_metadata.inner,
-                entry.buffer_feature_metadata.start,
-                uniform_feature,
-                records,
-            );
-        }
-        self.index.push_back(entry);
-        self.revision = allocation_id;
-        let removed = self
-            .index
-            .remove_layer(coords, style_layer_id, Some(self.revision));
-        for old in &removed {
-            self.free_entry_ranges(old);
-        }
-        if !removed.is_empty() {
-            self.reclaim_empty_pages_with_queue(1, Some(queue));
-        }
-        Ok(())
+            geometry,
+            None,
+            layer_metadata,
+            uniform_feature,
+            records,
+            protect,
+        )
     }
 
     /// Replaces only this style layer once the new geometry has been validated and uploaded.
@@ -321,6 +239,8 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
     }
 
     pub(super) fn free_entry_ranges(&mut self, entry: &IndexEntry) {
+        let release_vertices =
+            self.release_shared_vertex_ref(entry.coords, entry.page, entry.shared_geometry_key);
         if let Some(page) = self
             .pages
             .get_mut(usize::from(entry.page))
@@ -330,6 +250,8 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
                 entry.buffer_vertices.clone(),
                 entry.buffer_indices.clone(),
                 entry.buffer_layer_metadata.clone(),
+                entry.buffer_feature_metadata.clone(),
+                release_vertices,
             );
         }
     }
@@ -343,7 +265,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
             })
     }
 
-    fn reserve_page_allocation(
+    pub(super) fn reserve_page_allocation(
         &mut self,
         queue: Option<&Q>,
         sizes: [u64; 4],
@@ -400,7 +322,7 @@ impl<Q: Queue<B>, B, V: Pod, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM
 }
 
 /// An element index as the 32 bits a draw call takes; a page beyond them is not drawable.
-fn element_index(index: u64) -> Result<u32, AllocationError> {
+pub(super) fn element_index(index: u64) -> Result<u32, AllocationError> {
     u32::try_from(index).map_err(|_| AllocationError::Capacity {
         buffer: BackingBufferType::Vertices,
         requested: index,

@@ -7,7 +7,7 @@ use crate::style::layer::{StyleLayer, StyleProperty};
 pub const DEFAULT_ROUND_LIMIT: f32 = 1.05;
 
 /// How the ends of a line are drawn.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum LineCap {
     /// Flush with the end point.
     #[default]
@@ -19,7 +19,7 @@ pub enum LineCap {
 }
 
 /// How two segments of a line meet.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum LineJoin {
     /// The outer edges are extended to a point, up to the miter limit.
     #[default]

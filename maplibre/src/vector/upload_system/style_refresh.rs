@@ -2,10 +2,9 @@
 
 mod feature_state;
 
-use std::{
-    collections::{BTreeSet, HashMap, HashSet},
-    sync::Arc,
-};
+use std::collections::{BTreeSet, HashMap, HashSet};
+
+use feature_state::recolor_cpu_bucket;
 
 use super::{
     metadata::{feature_metadata, metadata_for_layer},
@@ -25,17 +24,13 @@ use crate::{
             layer_geometry_reads_feature_state, layer_paint_reads_feature_state,
             FeatureStateArcMemo,
         },
-        layer::{LayerPaint, StyleLayer},
+        layer::LayerPaint,
         Style,
     },
     tcs::world::World,
     vector::{
-        content::LayerReplacements,
-        feature_paint::{
-            evaluate_bucket_colors, BucketEntryKind, BucketFeatureEntry, TileFeaturePaintComponent,
-        },
-        pattern::per_feature_pattern,
-        AvailableVectorLayerBucket, VectorBufferPool, VectorLayerBucket,
+        content::LayerReplacements, feature_paint::TileFeaturePaintComponent,
+        pattern::per_feature_pattern, VectorBufferPool, VectorLayerBucket,
         VectorLayerBucketComponent,
     },
 };
@@ -315,8 +310,34 @@ fn refresh_vector_pool(
                         if !ok || !is_uploaded || (!colors_changed && !is_paint_changed) {
                             continue;
                         }
+                        let entry_uniform_info = world
+                            .resources
+                            .get::<Eventually<VectorBufferPool>>()
+                            .and_then(|p| match p {
+                                Initialized(pool) => pool
+                                    .index()
+                                    .get_layers(coords)
+                                    .and_then(|l| {
+                                        l.iter().find(|e| e.style_layer.id == style_layer.id)
+                                    })
+                                    .map(|e| {
+                                        let count = (e.feature_metadata_buffer_range().end
+                                            - e.feature_metadata_buffer_range().start)
+                                            as usize
+                                            / size_of::<FillShaderFeatureMetadata>();
+                                        (e.is_uniform_feature_metadata(), count)
+                                    }),
+                                _ => None,
+                            });
+                        let Some((entry_is_uniform, allocated_count)) = entry_uniform_info else {
+                            continue;
+                        };
+                        if entry_is_uniform && uniform.is_none() {
+                            *needs_worker_refresh = true;
+                            continue;
+                        }
                         let metadata = if let Some(color) = uniform {
-                            feature_metadata(&bucket.feature_indices, &[], color)
+                            vec![FillShaderFeatureMetadata { color }; allocated_count]
                         } else {
                             feature_metadata(
                                 &bucket.feature_indices,
@@ -422,62 +443,5 @@ fn refresh_vector_pool(
         if bump_revision {
             vector_pool.bump_layer_paint_revision(coords, &layer_id);
         }
-    }
-}
-
-fn recolor_cpu_bucket(
-    style_layer: &StyleLayer,
-    bucket: &mut AvailableVectorLayerBucket,
-    entries: Option<&[BucketFeatureEntry]>,
-    uniform: Option<[f32; 4]>,
-    style_zoom: f64,
-    needs_worker_refresh: &mut bool,
-) -> (bool, bool) {
-    if let Some(entries) = entries {
-        let new_colors = evaluate_bucket_colors(style_layer, entries, style_zoom);
-        let changed = new_colors != bucket.feature_colors;
-        bucket.feature_colors = new_colors;
-        (true, changed)
-    } else if uniform.is_some() {
-        (true, false)
-    } else if layer_is_feature_constant(style_layer) {
-        let single = [BucketFeatureEntry {
-            raw_id: None,
-            properties: Arc::default(),
-            kind: BucketEntryKind::Feature,
-        }];
-        let const_color = evaluate_bucket_colors(style_layer, &single, style_zoom)[0];
-        let new_colors = vec![const_color; bucket.feature_indices.len()];
-        let changed = new_colors != bucket.feature_colors;
-        bucket.feature_colors = new_colors;
-        (true, changed)
-    } else {
-        if bucket.buffer.usable_indices > 0 || !bucket.buffer.buffer.indices.is_empty() {
-            *needs_worker_refresh = true;
-        }
-        (false, false)
-    }
-}
-
-fn layer_is_feature_constant(layer: &StyleLayer) -> bool {
-    match layer.paint.as_ref() {
-        Some(LayerPaint::Circle(c)) => {
-            c.circle_color
-                .as_ref()
-                .is_none_or(|p| p.is_feature_constant())
-                && c.circle_opacity
-                    .as_ref()
-                    .is_none_or(|p| p.is_feature_constant())
-                && c.stroke_color_per_feature().is_none()
-        }
-        Some(LayerPaint::FillExtrusion(e)) => {
-            e.fill_extrusion_color
-                .as_ref()
-                .is_none_or(|p| p.is_feature_constant())
-                && e.fill_extrusion_opacity
-                    .as_ref()
-                    .is_none_or(|p| p.is_feature_constant())
-        }
-        _ => false,
     }
 }

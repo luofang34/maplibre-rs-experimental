@@ -11,12 +11,22 @@ use crate::{
     vector::{CirclePipeline, ExtrusionPipeline, LinePipeline, VectorBufferPool, VectorPipeline},
 };
 
+#[inline]
+fn is_uniform_entry(world: &World, item: &LayerItem) -> bool {
+    let Some(Initialized(pool)) = world.resources.get::<Eventually<VectorBufferPool>>() else {
+        return false;
+    };
+    pool.index()
+        .resolve_entry(item.tile.coords, item.style_layer, item.entry_slot)
+        .is_some_and(crate::vector::resource::IndexEntry::is_uniform_feature_metadata)
+}
+
 /// Binds the polygon-fill pipeline and the item's view or flat projection.
 pub struct SetVectorTilePipeline;
-impl<P: PhaseItem> RenderCommand<P> for SetVectorTilePipeline {
+impl RenderCommand<LayerItem> for SetVectorTilePipeline {
     fn render<'w>(
         world: &'w World,
-        item: &P,
+        item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((Initialized(pipeline), Initialized(projection_resources))) =
@@ -28,7 +38,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetVectorTilePipeline {
             return RenderCommandResult::Failure;
         };
 
-        pass.set_pipeline(pipeline);
+        pass.set_pipeline(pipeline.select(is_uniform_entry(world, item)));
         pass.set_bind_group(
             0,
             projection_resources.bind_group_for(item.projection_binding()),
@@ -207,7 +217,7 @@ impl RenderCommand<LayerItem> for SetLineTilePipeline {
         let Some(chosen) = chosen else {
             return RenderCommandResult::Failure;
         };
-        pass.set_pipeline(chosen);
+        pass.set_pipeline(chosen.select(is_uniform_entry(world, item)));
         pass.set_bind_group(
             0,
             projection_resources.bind_group_for(item.projection_binding()),
@@ -223,10 +233,10 @@ impl RenderCommand<LayerItem> for SetLineTilePipeline {
 
 /// Binds the circle pipeline and the item's view or flat projection.
 pub struct SetCircleTilePipeline;
-impl<P: PhaseItem> RenderCommand<P> for SetCircleTilePipeline {
+impl RenderCommand<LayerItem> for SetCircleTilePipeline {
     fn render<'w>(
         world: &'w World,
-        item: &P,
+        item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((Initialized(pipeline), Initialized(projection_resources))) =
@@ -238,7 +248,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetCircleTilePipeline {
             return RenderCommandResult::Failure;
         };
 
-        pass.set_pipeline(pipeline);
+        pass.set_pipeline(pipeline.select(is_uniform_entry(world, item)));
         pass.set_bind_group(
             0,
             projection_resources.bind_group_for(item.projection_binding()),
@@ -269,7 +279,7 @@ impl RenderCommand<LayerItem> for SetPatternTilePipeline {
         let Some(pipeline) = patterns.pipeline() else {
             return RenderCommandResult::Failure;
         };
-        pass.set_pipeline(pipeline);
+        pass.set_pipeline(pipeline.select(is_uniform_entry(world, item)));
         pass.set_bind_group(
             0,
             projection_resources.bind_group_for(item.projection_binding()),
@@ -300,10 +310,10 @@ pub mod extrusion_pass {
     pub const TRANSLUCENT_FRONT: u8 = 5;
 }
 
-impl<P: PhaseItem, const PASS: u8> RenderCommand<P> for SetExtrusionPipeline<PASS> {
+impl<const PASS: u8> RenderCommand<LayerItem> for SetExtrusionPipeline<PASS> {
     fn render<'w>(
         world: &'w World,
-        item: &P,
+        item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some((Initialized(pipeline), Initialized(projection_resources))) =
@@ -315,14 +325,15 @@ impl<P: PhaseItem, const PASS: u8> RenderCommand<P> for SetExtrusionPipeline<PAS
             return RenderCommandResult::Failure;
         };
 
-        pass.set_pipeline(match PASS {
+        let pair = match PASS {
             extrusion_pass::DEPTH => &pipeline.depth,
             extrusion_pass::COLOR => &pipeline.color,
             extrusion_pass::PATTERN => &pipeline.pattern,
             extrusion_pass::TRANSLUCENT_BACK => &pipeline.translucent_back,
             extrusion_pass::TRANSLUCENT_FRONT => &pipeline.translucent_front,
             _ => &pipeline.clear,
-        });
+        };
+        pass.set_pipeline(pair.select(is_uniform_entry(world, item)));
         pass.set_bind_group(
             0,
             projection_resources.bind_group_for(item.projection_binding()),

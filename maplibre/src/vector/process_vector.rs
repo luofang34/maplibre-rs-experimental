@@ -150,6 +150,7 @@ pub fn process_vector_tile<T: VectorTransferables, C: Context>(
 mod geometry_tags;
 mod mvt_slice;
 mod processing;
+mod shared_geometry;
 pub(crate) use mvt_slice::index_mvt_bytes;
 
 /// Decodes a tile, tolerating the zero padding some tile servers append: a zero tag is not a
@@ -234,58 +235,19 @@ pub(crate) fn process_decoded_vector_tile_with_assets<T: VectorTransferables, C:
             .cmp(b.source_layer.as_deref().unwrap_or(""))
             .then_with(|| a.index.cmp(&b.index))
     });
-    let mut remaining_uses: rustc_hash::FxHashMap<&str, usize> = rustc_hash::FxHashMap::default();
-    if index_uses_props {
-        for layer in &tile.layers {
-            *remaining_uses.entry(layer.name.as_str()).or_insert(0) += 1;
-        }
-    }
-    for style in &ordered_layers {
-        if let (Some(_), Some(name)) = (&style.paint, &style.source_layer) {
-            *remaining_uses.entry(name.as_str()).or_insert(0) += 1;
-        }
-    }
     let mut shared_layer_props: rustc_hash::FxHashMap<
         &str,
         Option<Vec<std::sync::Arc<FeatureProperties>>>,
     > = rustc_hash::FxHashMap::default();
-    for style in ordered_layers {
-        let (Some(_), Some(name)) = (&style.paint, &style.source_layer) else {
-            tracing::error!(layer = %style.id, "vector style layer misses a required attribute");
-            continue;
-        };
-        let uses_before = remaining_uses.get(name.as_str()).copied().unwrap_or(0);
-        let uses_after = uses_before.saturating_sub(1);
-        if uses_after == 0 {
-            remaining_uses.remove(name.as_str());
-        } else {
-            remaining_uses.insert(name.as_str(), uses_after);
-        }
-        // Omitted source layers still emit an empty layer result to clear stale replacements.
-        let source_layer = tile.layers.iter().find(|layer| &layer.name == name);
-        let shared_props = source_layer.and_then(|layer| {
-            shared_layer_props
-                .entry(layer.name.as_str())
-                .or_insert_with(|| {
-                    let state_ctx = context.state_context_for_layer(&layer.name);
-                    mvt_slice::decode_layer_properties(layer, state_ctx.as_ref())
-                })
-                .as_deref()
-        });
-        let res = processing::process_layer(
-            source_layer,
-            name,
-            shared_props,
-            style,
-            &tile_request,
-            context,
-            (&atlas, &gpu_atlas),
-        );
-        if uses_after == 0 {
-            shared_layer_props.remove(name.as_str());
-        }
-        res?;
-    }
+    shared_geometry::process_ordered_layers(
+        tile,
+        &ordered_layers,
+        index_uses_props,
+        &tile_request,
+        context,
+        (&atlas, &gpu_atlas),
+        &mut shared_layer_props,
+    )?;
     if context.index_geometry {
         let geometries = if T::LayerIndexed::requires_geometry_index() {
             let mut index = IndexProcessor::new();

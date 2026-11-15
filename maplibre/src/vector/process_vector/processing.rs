@@ -103,7 +103,10 @@ pub(super) fn process_layer<T: VectorTransferables, C: Context>(
     }
 }
 
-fn tessellator(paint: &LayerPaint, request: &VectorTileRequest) -> ZeroTessellator<IndexDataType> {
+pub(super) fn tessellator(
+    paint: &LayerPaint,
+    request: &VectorTileRequest,
+) -> ZeroTessellator<IndexDataType> {
     let zoom = u8::from(request.coords.z);
     let style_zoom = request.style_zoom();
     let granularity = match paint {

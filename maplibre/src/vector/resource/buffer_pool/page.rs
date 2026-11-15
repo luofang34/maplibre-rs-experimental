@@ -73,8 +73,10 @@ pub(super) struct ElementStrides {
     pub layer_metadata: u64,
     pub feature_metadata: u64,
     pub vertex_align: u64,
+    pub decoupled_vertex_align: u64,
     pub index_align: u64,
     pub layer_align: u64,
+    pub feature_align: u64,
 }
 
 impl ElementStrides {
@@ -89,8 +91,35 @@ impl ElementStrides {
             layer_metadata,
             feature_metadata,
             vertex_align: lockstep_vertex_alignment(vertex, feature_metadata),
-            index_align: lcm_u64(index, wgpu::COPY_BUFFER_ALIGNMENT),
-            layer_align: lcm_u64(layer_metadata, wgpu::COPY_BUFFER_ALIGNMENT),
+            decoupled_vertex_align: if vertex == 0 {
+                wgpu::COPY_BUFFER_ALIGNMENT
+            } else {
+                lcm_u64(vertex, wgpu::COPY_BUFFER_ALIGNMENT)
+            },
+            index_align: if index == 0 {
+                wgpu::COPY_BUFFER_ALIGNMENT
+            } else {
+                lcm_u64(index, wgpu::COPY_BUFFER_ALIGNMENT)
+            },
+            layer_align: if layer_metadata == 0 {
+                wgpu::COPY_BUFFER_ALIGNMENT
+            } else {
+                lcm_u64(layer_metadata, wgpu::COPY_BUFFER_ALIGNMENT)
+            },
+            feature_align: if feature_metadata == 0 {
+                wgpu::COPY_BUFFER_ALIGNMENT
+            } else {
+                lcm_u64(feature_metadata, wgpu::COPY_BUFFER_ALIGNMENT)
+            },
+        }
+    }
+
+    #[inline]
+    pub const fn effective_vertex_align(self, decoupled: bool) -> u64 {
+        if decoupled {
+            self.decoupled_vertex_align
+        } else {
+            self.vertex_align
         }
     }
 }
@@ -125,6 +154,8 @@ pub(super) struct BufferPage<B> {
     pub vertex_alloc: RangeAllocator,
     pub index_alloc: RangeAllocator,
     pub layer_alloc: RangeAllocator,
+    pub feature_alloc: RangeAllocator,
+    pub decoupled_feature_metadata: bool,
     pub live_entries: u32,
 }
 
@@ -135,6 +166,7 @@ pub(super) struct PageAllocation {
     pub vertices: Range<u64>,
     pub indices: Range<u64>,
     pub layer_metadata: Range<u64>,
+    pub feature_metadata: Range<u64>,
 }
 
 impl<B> BufferPage<B> {
@@ -144,14 +176,19 @@ impl<B> BufferPage<B> {
         layer_metadata: BackingBufferDescriptor<B>,
         feature_metadata: BackingBufferDescriptor<B>,
         strides: ElementStrides,
+        decoupled_feature_metadata: bool,
     ) -> Self {
         let v_cap = vertices.inner_size.checked_div(strides.vertex).unwrap_or(0);
-        let vertex_elements = match feature_metadata
-            .inner_size
-            .checked_div(strides.feature_metadata)
-        {
-            Some(fm_cap) => v_cap.min(fm_cap),
-            None => v_cap,
+        let vertex_elements = if decoupled_feature_metadata {
+            v_cap
+        } else {
+            match feature_metadata
+                .inner_size
+                .checked_div(strides.feature_metadata)
+            {
+                Some(fm_cap) => v_cap.min(fm_cap),
+                None => v_cap,
+            }
         };
         let usable_vertex_bytes = vertex_elements * strides.vertex;
         let usable_index_bytes =
@@ -161,6 +198,11 @@ impl<B> BufferPage<B> {
             .checked_div(strides.layer_metadata)
             .unwrap_or(0)
             * strides.layer_metadata;
+        let usable_feature_bytes = feature_metadata
+            .inner_size
+            .checked_div(strides.feature_metadata)
+            .unwrap_or(0)
+            * strides.feature_metadata;
 
         Self {
             vertices: BackingBuffer::new(vertices.buffer, vertices.inner_size),
@@ -173,6 +215,8 @@ impl<B> BufferPage<B> {
             vertex_alloc: RangeAllocator::new(usable_vertex_bytes),
             index_alloc: RangeAllocator::new(usable_index_bytes),
             layer_alloc: RangeAllocator::new(usable_layer_bytes),
+            feature_alloc: RangeAllocator::new(usable_feature_bytes),
+            decoupled_feature_metadata,
             live_entries: 0,
         }
     }
@@ -196,6 +240,7 @@ impl<B> BufferPage<B> {
         self.vertex_alloc.clear();
         self.index_alloc.clear();
         self.layer_alloc.clear();
+        self.feature_alloc.clear();
         self.live_entries = 0;
     }
 
@@ -205,18 +250,24 @@ impl<B> BufferPage<B> {
         sizes: [u64; 4],
         strides: ElementStrides,
     ) -> Option<PageAllocation> {
-        if sizes[3] > self.feature_metadata.inner_size {
+        let v_align = strides.effective_vertex_align(self.decoupled_feature_metadata);
+        if self.decoupled_feature_metadata {
+            if !self
+                .feature_alloc
+                .can_allocate(sizes[3], strides.feature_align)
+            {
+                return None;
+            }
+        } else if sizes[3] > self.feature_metadata.inner_size {
             return None;
         }
-        if !self
-            .vertex_alloc
-            .can_allocate(sizes[0], strides.vertex_align)
+        if !self.vertex_alloc.can_allocate(sizes[0], v_align)
             || !self.index_alloc.can_allocate(sizes[1], strides.index_align)
             || !self.layer_alloc.can_allocate(sizes[2], strides.layer_align)
         {
             return None;
         }
-        let vertices = self.vertex_alloc.allocate(sizes[0], strides.vertex_align)?;
+        let vertices = self.vertex_alloc.allocate(sizes[0], v_align)?;
         let Some(indices) = self.index_alloc.allocate(sizes[1], strides.index_align) else {
             self.vertex_alloc.free(vertices);
             return None;
@@ -226,12 +277,26 @@ impl<B> BufferPage<B> {
             self.index_alloc.free(indices);
             return None;
         };
+        let feature_metadata = if self.decoupled_feature_metadata {
+            let Some(fm) = self.feature_alloc.allocate(sizes[3], strides.feature_align) else {
+                self.vertex_alloc.free(vertices);
+                self.index_alloc.free(indices);
+                self.layer_alloc.free(layer_metadata);
+                return None;
+            };
+            fm
+        } else {
+            let first_vertex = vertices.start.checked_div(strides.vertex).unwrap_or(0);
+            let fm_start = first_vertex * strides.feature_metadata;
+            fm_start..fm_start + sizes[3]
+        };
         self.live_entries += 1;
         Some(PageAllocation {
             page: page_id,
             vertices,
             indices,
             layer_metadata,
+            feature_metadata,
         })
     }
 
@@ -240,10 +305,17 @@ impl<B> BufferPage<B> {
         vertices: Range<u64>,
         indices: Range<u64>,
         layer_metadata: Range<u64>,
+        feature_metadata: Range<u64>,
+        release_vertices: bool,
     ) {
-        self.vertex_alloc.free(vertices);
+        if release_vertices {
+            self.vertex_alloc.free(vertices);
+        }
         self.index_alloc.free(indices);
         self.layer_alloc.free(layer_metadata);
+        if self.decoupled_feature_metadata {
+            self.feature_alloc.free(feature_metadata);
+        }
         self.live_entries = self.live_entries.saturating_sub(1);
     }
 }

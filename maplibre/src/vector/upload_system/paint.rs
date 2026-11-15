@@ -106,6 +106,24 @@ pub(crate) fn uniform_color(layer: &StyleLayer, zoom: f64) -> Option<[f32; 4]> {
             (&paint.line_color, &paint.line_opacity)
         }
         LayerPaint::Line(paint) => (&paint.line_color, &paint.line_opacity),
+        LayerPaint::FillExtrusion(paint) if paint.fill_extrusion_pattern.is_some() => {
+            if super::super::pattern::per_feature_pattern(layer.paint.as_ref()?).is_some() {
+                return None;
+            }
+            return if paint.fill_extrusion_translucent == Some(true) {
+                pattern_color(paint.fill_extrusion_opacity.as_ref(), zoom)
+            } else {
+                Some([1.0, 1.0, 1.0, 1.0])
+            };
+        }
+        LayerPaint::FillExtrusion(paint) => {
+            let opacity = if paint.fill_extrusion_translucent == Some(true) {
+                &paint.fill_extrusion_opacity
+            } else {
+                &None
+            };
+            (&paint.fill_extrusion_color, opacity)
+        }
         _ => return None,
     };
     if color.as_ref().is_some_and(|v| !v.is_feature_constant())

@@ -30,8 +30,8 @@ impl Drop for PatternBinding {
 
 /// The pipeline and the per-layer bindings of layers that fill with a repeating image.
 pub(crate) struct PatternResources {
-    /// The fill pipeline, once a vector plugin has built it; backgrounds need only the images.
-    pipeline: Option<wgpu::RenderPipeline>,
+    /// The fill pipeline pair, once a vector plugin has built it; backgrounds need only the images.
+    pipeline: Option<crate::render::resource::FeaturePipelinePair>,
     layout: wgpu::BindGroupLayout,
     layers: FxHashMap<StyleLayerId, PatternBinding>,
     /// Layers whose pattern varies by feature, and so bind an image per run of features.
@@ -370,12 +370,12 @@ impl PatternResources {
         })
     }
 
-    /// Sets the pipeline that draws fills with these images.
-    pub(crate) fn set_pipeline(&mut self, pipeline: wgpu::RenderPipeline) {
+    /// Sets the pipeline pair that draws fills with these images.
+    pub(crate) fn set_pipeline(&mut self, pipeline: crate::render::resource::FeaturePipelinePair) {
         self.pipeline = Some(pipeline);
     }
 
-    pub(crate) fn pipeline(&self) -> Option<&wgpu::RenderPipeline> {
+    pub(crate) fn pipeline(&self) -> Option<&crate::render::resource::FeaturePipelinePair> {
         self.pipeline.as_ref()
     }
 
