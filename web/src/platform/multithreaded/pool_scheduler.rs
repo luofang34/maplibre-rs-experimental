@@ -7,10 +7,21 @@ use web_sys::{MessagePort, Worker};
 use super::pool::WorkerPool;
 use crate::error::WebError;
 
-const MAX_MT_WORKERS: usize = 2;
+const MAX_MT_WORKERS: usize = 4;
 
 fn hardware_mt_worker_count() -> usize {
-    MAX_MT_WORKERS
+    let cores = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("navigator"))
+        .ok()
+        .and_then(|nav| js_sys::Reflect::get(&nav, &JsValue::from_str("hardwareConcurrency")).ok())
+        .and_then(|val| val.as_f64())
+        .map_or(4, |n| {
+            if n.is_finite() && n >= 1.0 {
+                n as usize
+            } else {
+                4
+            }
+        });
+    (cores / 2).clamp(2, MAX_MT_WORKERS)
 }
 
 pub struct WebWorkerPoolScheduler {

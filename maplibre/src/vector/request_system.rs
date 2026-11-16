@@ -23,6 +23,7 @@ use crate::{
     vector::{transferables::VectorTransferables, VectorLayerBucketComponent},
 };
 
+mod fallback;
 mod group_tile;
 mod limiter;
 pub mod rescale;
@@ -148,6 +149,14 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
             // draw from `view_tiles` (which carry vertical headroom) rather than terrain drapes.
             let needs_view_tiles = !draped || derived.elevated_headroom_meters > 0.0;
             let magnifies = derived.depends_on_overscaling;
+            let extra_fallbacks = fallback::plan_non_terrain_fallbacks(
+                style,
+                view_state,
+                world,
+                (renderer.settings.tight_tile_requests, multi.is_some()),
+                &view_tiles,
+                (level, magnifies),
+            );
             let mut deferred = false;
             let mut frame_style = FrameStyle::new(style);
             for coords in overview
@@ -155,6 +164,7 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                 .chain(drapes)
                 .chain(view_tiles.into_iter().filter(|_| needs_view_tiles))
                 .chain(prefetch)
+                .chain(extra_fallbacks)
             {
                 // Past the deepest source zoom the ancestor tile is fetched once and the view
                 // pattern scales it into every descendant in view; a source that ends sooner

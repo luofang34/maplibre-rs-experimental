@@ -21,7 +21,7 @@ pub(super) type GlyphRequests = HashMap<String, BTreeSet<u32>>;
 /// Glyph ranges, plain label strings (for OpenType shaping), and sprite names requested by one
 /// tile's visible symbol features.
 #[derive(Default)]
-pub(super) struct SymbolRequests {
+pub(crate) struct SymbolRequests {
     pub(super) fonts: GlyphRequests,
     pub(super) labels: HashMap<String, BTreeSet<String>>,
     pub(super) icons: HashSet<String>,
@@ -101,7 +101,7 @@ pub(super) fn symbol_requests<'l>(
     symbol_requests_from_mvt(layers, &tile, zoom, style)
 }
 
-pub(super) fn symbol_requests_from_tile<'l>(
+pub(crate) fn symbol_requests_from_tile<'l>(
     layers: impl IntoIterator<Item = &'l StyleLayer>,
     tile: &crate::vector::DecodedVectorTile,
     zoom: f64,

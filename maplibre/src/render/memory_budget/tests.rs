@@ -121,5 +121,37 @@ fn can_take_probes_allowance_without_burning_budget_on_saturated_uploads() {
     assert!(frame.can_take(Geometry, 4));
 }
 
+#[test]
+fn uncovered_tiles_get_emergency_moving_upload_headroom_past_soft_cap() {
+    use super::{
+        FrameUploads, MOVING_GEOMETRY_UPLOAD_BYTES, MOVING_UNCOVERED_UPLOADS_PER_FRAME,
+        MOVING_UPLOADS_PER_FRAME,
+    };
+    let mut frame = FrameUploads::default();
+    frame.set_moving(true);
+    for _ in 0..MOVING_UPLOADS_PER_FRAME {
+        frame.count_geometry_tile();
+    }
+    assert!(
+        frame.geometry_tiles_exhausted_for(false),
+        "covered refinement tiles stop at soft moving cap"
+    );
+    assert!(
+        !frame.geometry_tiles_exhausted_for(true),
+        "uncovered hole-filling tiles continue up to emergency moving cap"
+    );
+    assert!(frame.take_geometry(MOVING_GEOMETRY_UPLOAD_BYTES, false));
+    assert!(!frame.can_take_geometry(1024, false));
+    assert!(
+        frame.can_take_geometry(1024, true),
+        "uncovered tiles retain byte headroom past covered moving cap"
+    );
+    while !frame.geometry_tiles_exhausted_for(true) {
+        frame.count_geometry_tile();
+    }
+    assert!(frame.geometry_tiles_exhausted_for(true));
+    assert_eq!(frame.geometry_tiles, MOVING_UNCOVERED_UPLOADS_PER_FRAME);
+}
+
 #[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 mod uploads;

@@ -37,13 +37,23 @@ pub const UPLOADS_PER_FRAME: usize = 8;
 #[cfg(target_arch = "wasm32")]
 const MOVING_UPLOADS_PER_FRAME: usize = 2;
 #[cfg(not(target_arch = "wasm32"))]
-const MOVING_UPLOADS_PER_FRAME: usize = UPLOADS_PER_FRAME;
-/// Geometry bytes uploaded per frame while the camera is actively moving on `wasm32` (the first
-/// geometry upload of a frame is always admitted even when larger).
+const MOVING_UPLOADS_PER_FRAME: usize = 4;
+/// Uncovered viewport tiles (with no loaded ancestor stand-in on the GPU) admitted per moving
+/// frame so visible pan holes fill immediately on arrival.
+#[cfg(target_arch = "wasm32")]
+const MOVING_UNCOVERED_UPLOADS_PER_FRAME: usize = 6;
+#[cfg(not(target_arch = "wasm32"))]
+const MOVING_UNCOVERED_UPLOADS_PER_FRAME: usize = UPLOADS_PER_FRAME;
+/// Geometry bytes uploaded per frame while the camera is actively moving (the first geometry
+/// upload of a frame is always admitted even when larger).
 #[cfg(target_arch = "wasm32")]
 const MOVING_GEOMETRY_UPLOAD_BYTES: usize = 768 << 10;
 #[cfg(not(target_arch = "wasm32"))]
-const MOVING_GEOMETRY_UPLOAD_BYTES: usize = FRAME_UPLOAD_BYTES - IMAGE_UPLOAD_FLOOR_BYTES;
+const MOVING_GEOMETRY_UPLOAD_BYTES: usize = 4 << 20;
+#[cfg(target_arch = "wasm32")]
+const MOVING_UNCOVERED_GEOMETRY_UPLOAD_BYTES: usize = 4 << 20;
+#[cfg(not(target_arch = "wasm32"))]
+const MOVING_UNCOVERED_GEOMETRY_UPLOAD_BYTES: usize = FRAME_UPLOAD_BYTES - IMAGE_UPLOAD_FLOOR_BYTES;
 /// Bytes of tile geometry, labels and textures one frame uploads; the rest wait for the next
 /// frame, so a burst of arrivals is spread over frames instead of stalling one.
 pub const FRAME_UPLOAD_BYTES: usize = 32 << 20;
@@ -180,54 +190,74 @@ impl FrameUploads {
         self.moving = moving;
     }
 
-    /// Returns `true` if `bytes` of `kind` fits in this frame's remaining upload allowance without
-    /// consuming it yet, so a saturated or skipped upload does not burn the frame budget.
-    pub(crate) fn can_take(&self, kind: UploadKind, bytes: usize) -> bool {
+    /// Returns `true` if `bytes` of geometry fits in this frame's remaining allowance, granting
+    /// uncovered hole-filling tiles a higher ceiling while moving.
+    pub(crate) fn can_take_geometry(&self, bytes: usize, uncovered: bool) -> bool {
         if bytes == 0 {
             return true;
         }
         let used = self.geometry_bytes + self.image_bytes;
-        let (allowed, started) = match kind {
-            UploadKind::Geometry => {
-                let stationary_cap = FRAME_UPLOAD_BYTES
-                    .saturating_sub(IMAGE_UPLOAD_FLOOR_BYTES.saturating_sub(self.image_bytes))
-                    .saturating_sub(used);
-                let cap = if self.moving {
-                    stationary_cap
-                        .min(MOVING_GEOMETRY_UPLOAD_BYTES.saturating_sub(self.geometry_bytes))
-                } else {
-                    stationary_cap
-                };
-                (cap, self.geometry_started)
-            }
-            UploadKind::Image => (
-                FRAME_UPLOAD_BYTES
-                    .saturating_sub(used)
-                    .max(IMAGE_UPLOAD_FLOOR_BYTES.saturating_sub(self.image_bytes)),
-                self.image_started,
-            ),
+        let stationary_cap = FRAME_UPLOAD_BYTES
+            .saturating_sub(IMAGE_UPLOAD_FLOOR_BYTES.saturating_sub(self.image_bytes))
+            .saturating_sub(used);
+        let cap = if self.moving {
+            let moving_limit = if uncovered {
+                MOVING_UNCOVERED_GEOMETRY_UPLOAD_BYTES
+            } else {
+                MOVING_GEOMETRY_UPLOAD_BYTES
+            };
+            stationary_cap.min(moving_limit.saturating_sub(self.geometry_bytes))
+        } else {
+            stationary_cap
         };
-        !started || bytes <= allowed
+        !self.geometry_started || bytes <= cap
+    }
+
+    /// Returns `true` if `bytes` of `kind` fits in this frame's remaining upload allowance without
+    /// consuming it yet, so a saturated or skipped upload does not burn the frame budget.
+    pub(crate) fn can_take(&self, kind: UploadKind, bytes: usize) -> bool {
+        match kind {
+            UploadKind::Geometry => self.can_take_geometry(bytes, false),
+            UploadKind::Image => {
+                if bytes == 0 {
+                    return true;
+                }
+                let used = self.geometry_bytes + self.image_bytes;
+                let allowed = FRAME_UPLOAD_BYTES
+                    .saturating_sub(used)
+                    .max(IMAGE_UPLOAD_FLOOR_BYTES.saturating_sub(self.image_bytes));
+                !self.image_started || bytes <= allowed
+            }
+        }
+    }
+
+    /// Admits a geometry upload of `bytes`, granting `uncovered` tiles emergency moving headroom.
+    pub(crate) fn take_geometry(&mut self, bytes: usize, uncovered: bool) -> bool {
+        if !self.can_take_geometry(bytes, uncovered) {
+            return false;
+        }
+        if bytes > 0 {
+            self.geometry_started = true;
+            self.geometry_bytes += bytes;
+        }
+        true
     }
 
     /// Admits an upload of `bytes` of `kind`, counting it, or refuses it for a later frame.
     pub(crate) fn take(&mut self, kind: UploadKind, bytes: usize) -> bool {
-        if !self.can_take(kind, bytes) {
-            return false;
-        }
-        if bytes > 0 {
-            match kind {
-                UploadKind::Geometry => {
-                    self.geometry_started = true;
-                    self.geometry_bytes += bytes;
+        match kind {
+            UploadKind::Geometry => self.take_geometry(bytes, false),
+            UploadKind::Image => {
+                if !self.can_take(UploadKind::Image, bytes) {
+                    return false;
                 }
-                UploadKind::Image => {
+                if bytes > 0 {
                     self.image_started = true;
                     self.image_bytes += bytes;
                 }
+                true
             }
         }
-        true
     }
 
     /// Counts a tile whose geometry this frame uploaded, of [`UPLOADS_PER_FRAME`].
@@ -235,10 +265,15 @@ impl FrameUploads {
         self.geometry_tiles += 1;
     }
 
-    /// Whether this frame's geometry tile allowance is used up.
-    pub(crate) fn geometry_tiles_exhausted(&self) -> bool {
+    /// Whether this frame's geometry tile allowance is used up for a tile (`uncovered` tiles have
+    /// higher moving headroom so visible holes never stall behind covered refinements).
+    pub(crate) fn geometry_tiles_exhausted_for(&self, uncovered: bool) -> bool {
         let limit = if self.moving {
-            MOVING_UPLOADS_PER_FRAME
+            if uncovered {
+                MOVING_UNCOVERED_UPLOADS_PER_FRAME
+            } else {
+                MOVING_UPLOADS_PER_FRAME
+            }
         } else {
             UPLOADS_PER_FRAME
         };

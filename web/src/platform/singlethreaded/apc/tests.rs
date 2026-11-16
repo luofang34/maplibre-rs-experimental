@@ -209,7 +209,6 @@ fn passing_apc_reports_arrivals_until_receive_offers_them() {
     let apc = PassingAsyncProcedureCall {
         workers: Vec::new(),
         listeners: Vec::new(),
-        next_worker: Cell::new(0),
         buffer: RefCell::new(Vec::new()),
         batch_open: Cell::new(true),
         received: received.clone(),

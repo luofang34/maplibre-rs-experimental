@@ -421,6 +421,8 @@ pub async fn run_maplibre_offscreen(
     });
     let controller = MapController::new_offscreen(handle);
 
-    RunnerInner::schedule_raf(&inner);
+    // Run the initial frame immediately so GPU pipelines warm and viewport tile HTTP requests
+    // launch at t=0 without waiting up to one VSync for the first worker animation frame.
+    RunnerInner::run_frame(&inner);
     Ok(OffscreenMapRunner { inner, controller })
 }

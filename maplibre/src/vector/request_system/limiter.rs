@@ -10,10 +10,10 @@ use std::{
 };
 
 #[cfg(target_arch = "wasm32")]
-const MAX_HEAVY_TILES: usize = 1;
+const MAX_HEAVY_TILES: usize = 2;
 
 #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
-const MAX_UNCONSUMED_SHARED_TILES: usize = 2;
+const MAX_UNCONSUMED_SHARED_TILES: usize = 6;
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Default)]

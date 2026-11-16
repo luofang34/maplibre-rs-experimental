@@ -1,13 +1,14 @@
-//! Web worker pool for shared-memory (`wasm32 + atomics`) execution with deterministic
-//! round-robin dispatch and per-worker coalesced cross-realm wake notifications.
+//! Web worker pool for shared-memory (`wasm32 + atomics`) execution with a shared work-stealing
+//! queue (`Arc<SharedWorkQueue>`) and coalesced cross-realm wake notifications.
 #![allow(unsafe_code)]
 
 use std::{
-    cell::{Cell, RefCell},
+    cell::RefCell,
+    collections::VecDeque,
     rc::Rc,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, Mutex, MutexGuard,
     },
 };
 
@@ -23,10 +24,113 @@ type NewPort = Box<dyn Fn() -> Result<MessagePort, WebError>>;
 type Execute = Box<dyn (FnOnce() -> PinnedFuture) + Send>;
 
 const MAX_RECYCLED_WORKERS: usize = 8;
+/// Concurrent async tasks claimed per worker so network `fetch` I/O overlaps while excess jobs
+/// stay in [`SharedWorkQueue`] for whichever worker finishes its CPU work first to steal.
+const PER_WORKER_CONCURRENCY: usize = 3;
 
 thread_local! {
     static RECYCLED_WORKERS: RefCell<Vec<Worker>> = const { RefCell::new(Vec::new()) };
     static CURRENT_WORKER_WAKE: RefCell<Option<Arc<AtomicBool>>> = const { RefCell::new(None) };
+}
+
+fn lock_queue<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+#[derive(Default)]
+struct QueueInner {
+    jobs: VecDeque<Execute>,
+    in_flight: Vec<usize>,
+    next_turn: usize,
+    closed: bool,
+}
+
+pub(crate) struct SharedWorkQueue {
+    inner: Mutex<QueueInner>,
+}
+
+impl SharedWorkQueue {
+    fn new() -> Self {
+        Self {
+            inner: Mutex::new(QueueInner::default()),
+        }
+    }
+
+    /// Appends `job` to the shared queue and claims a dispatch slot on the least-loaded worker
+    /// below [`PER_WORKER_CONCURRENCY`], or returns `None` when all workers are already active
+    /// and will steal `job` directly in [`Self::pop_or_release`] without another `postMessage`.
+    fn push_and_claim(&self, job: Execute, worker_count: usize) -> Option<usize> {
+        let mut inner = lock_queue(&self.inner);
+        inner.jobs.push_back(job);
+        if worker_count == 0 {
+            return None;
+        }
+        if inner.in_flight.len() < worker_count {
+            inner.in_flight.resize(worker_count, 0);
+        }
+        let start = inner.next_turn % worker_count;
+        inner.next_turn = inner.next_turn.wrapping_add(1);
+
+        let mut best: Option<(usize, usize)> = None;
+        for offset in 0..worker_count {
+            let idx = (start + offset) % worker_count;
+            let load = inner.in_flight.get(idx).copied().unwrap_or(0);
+            if load >= PER_WORKER_CONCURRENCY {
+                continue;
+            }
+            if best.is_none_or(|(_, best_load)| load < best_load) {
+                best = Some((idx, load));
+                if load == 0 {
+                    break;
+                }
+            }
+        }
+        if let Some((idx, _)) = best {
+            if let Some(slot) = inner.in_flight.get_mut(idx) {
+                *slot = slot.saturating_add(1);
+            }
+            Some(idx)
+        } else {
+            None
+        }
+    }
+
+    fn rollback_claim(&self, worker_index: usize) {
+        let mut inner = lock_queue(&self.inner);
+        if let Some(slot) = inner.in_flight.get_mut(worker_index) {
+            *slot = slot.saturating_sub(1);
+        }
+    }
+
+    fn pop_or_release(&self, worker_index: usize) -> Option<Execute> {
+        let mut inner = lock_queue(&self.inner);
+        if inner.closed {
+            if let Some(slot) = inner.in_flight.get_mut(worker_index) {
+                *slot = slot.saturating_sub(1);
+            }
+            return None;
+        }
+        if let Some(job) = inner.jobs.pop_front() {
+            Some(job)
+        } else {
+            if let Some(slot) = inner.in_flight.get_mut(worker_index) {
+                *slot = slot.saturating_sub(1);
+            }
+            None
+        }
+    }
+
+    fn close_and_clear(&self) {
+        let drained = {
+            let mut inner = lock_queue(&self.inner);
+            inner.closed = true;
+            std::mem::take(&mut inner.jobs)
+        };
+        drop(drained);
+    }
 }
 
 #[derive(Clone)]
@@ -77,7 +181,7 @@ type WorkerListener = Closure<dyn FnMut(MessageEvent)>;
 
 struct PoolState {
     workers: RefCell<Vec<(WorkerEndpoint, Arc<AtomicBool>)>>,
-    next_worker: Cell<usize>,
+    queue: Arc<SharedWorkQueue>,
     waker: RefCell<Option<Arc<dyn Fn() + Send + Sync>>>,
     listeners: RefCell<Vec<WorkerListener>>,
 }
@@ -90,8 +194,11 @@ impl PoolState {
         onmessage: WorkerListener,
     ) {
         let mut workers = self.workers.borrow_mut();
-        for (existing, _) in workers.iter() {
-            assert_ne!(existing.as_js_value(), endpoint.as_js_value());
+        if workers
+            .iter()
+            .any(|(existing, _)| existing.as_js_value() == endpoint.as_js_value())
+        {
+            return;
         }
         endpoint.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
         workers.push((endpoint, wake_pending));
@@ -101,6 +208,7 @@ impl PoolState {
 
 impl Drop for PoolState {
     fn drop(&mut self) {
+        self.queue.close_and_clear();
         let drained = std::mem::take(self.workers.get_mut());
         self.listeners.get_mut().clear();
         RECYCLED_WORKERS.with(|bin| {
@@ -125,16 +233,22 @@ impl Drop for PoolState {
 }
 
 pub struct Work {
-    func: Execute,
+    queue: Arc<SharedWorkQueue>,
+    worker_index: usize,
     wake_pending: Arc<AtomicBool>,
 }
 
 impl Work {
-    pub fn execute(self) -> PinnedFuture {
-        CURRENT_WORKER_WAKE.with(|slot| {
-            *slot.borrow_mut() = Some(self.wake_pending);
-        });
-        (self.func)()
+    pub async fn run(self) {
+        loop {
+            let Some(func) = self.queue.pop_or_release(self.worker_index) else {
+                break;
+            };
+            CURRENT_WORKER_WAKE.with(|slot| {
+                *slot.borrow_mut() = Some(self.wake_pending.clone());
+            });
+            func().await;
+        }
     }
 }
 
@@ -164,7 +278,7 @@ impl WorkerPool {
             factory,
             state: Rc::new(PoolState {
                 workers: RefCell::new(Vec::with_capacity(initial)),
-                next_worker: Cell::new(0),
+                queue: Arc::new(SharedWorkQueue::new()),
                 waker: RefCell::new(None),
                 listeners: RefCell::new(Vec::with_capacity(initial)),
             }),
@@ -239,7 +353,10 @@ impl WorkerPool {
         Ok(())
     }
 
-    fn worker(&self) -> Result<(WorkerEndpoint, Arc<AtomicBool>), WebError> {
+    pub fn execute(
+        &self,
+        f: impl (FnOnce() -> PinnedFuture) + Send + 'static,
+    ) -> Result<(), WebError> {
         if self.state.workers.borrow().is_empty() {
             self.spawn()?;
         }
@@ -247,21 +364,21 @@ impl WorkerPool {
         if workers.is_empty() {
             return Err(WebError::TypeError("Worker pool has no workers".into()));
         }
-        let turn = self.state.next_worker.get();
-        self.state.next_worker.set(turn.wrapping_add(1));
-        Ok(workers[turn % workers.len()].clone())
-    }
+        let Some(worker_index) = self.state.queue.push_and_claim(Box::new(f), workers.len()) else {
+            return Ok(());
+        };
+        let Some((worker, wake_pending)) = workers.get(worker_index).cloned() else {
+            self.state.queue.rollback_claim(worker_index);
+            return Err(WebError::TypeError("Invalid worker index".into()));
+        };
+        drop(workers);
 
-    pub fn execute(
-        &self,
-        f: impl (FnOnce() -> PinnedFuture) + Send + 'static,
-    ) -> Result<(), WebError> {
-        let (worker, wake_pending) = self.worker()?;
-        let work = Work {
-            func: Box::new(f),
+        let ticket = Work {
+            queue: Arc::clone(&self.state.queue),
+            worker_index,
             wake_pending,
         };
-        let work_ptr = Box::into_raw(Box::new(work));
+        let work_ptr = Box::into_raw(Box::new(ticket));
         let call_msg = js_sys::Object::from_entries(&js_sys::Array::of2(
             &js_sys::Array::of2(&JsValue::from("type"), &js_sys::JsString::from("pool_call")),
             &js_sys::Array::of2(&JsValue::from("work_ptr"), &JsValue::from(work_ptr as u32)),
@@ -272,6 +389,7 @@ impl WorkerPool {
                 unsafe {
                     drop(Box::from_raw(work_ptr));
                 }
+                self.state.queue.rollback_claim(worker_index);
                 Err(e.into())
             }
         }

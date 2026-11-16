@@ -21,7 +21,9 @@ pub(crate) use load::warm_style_symbol_assets;
 pub use load::{load_symbol_assets, SymbolAssetConfig, SymbolAssetError};
 #[allow(unused_imports)]
 pub(crate) use load::{
-    load_symbol_assets_awaiting, load_symbol_assets_awaiting_from_tile, spawn_style_symbol_prefetch,
+    load_symbol_assets_awaiting, load_symbol_assets_awaiting_from_tile,
+    load_symbol_assets_for_requests, spawn_style_symbol_prefetch, symbol_requests_from_tile,
+    SymbolRequests,
 };
 pub(crate) use provider::Resolved;
 pub use provider::{

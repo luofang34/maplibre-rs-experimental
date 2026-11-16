@@ -50,7 +50,6 @@ pub type ReceivedType = RefCell<Received>;
 pub struct PassingAsyncProcedureCall {
     workers: Vec<recycle::WorkerEndpoint>,
     listeners: Vec<recycle::WorkerMessageClosure>,
-    next_worker: Cell<usize>,
 
     buffer: RefCell<Vec<QueuedMessage>>,
     batch_open: Cell<bool>,
@@ -78,7 +77,6 @@ impl PassingAsyncProcedureCall {
         Ok(Self {
             workers,
             listeners,
-            next_worker: Cell::new(0),
             buffer: RefCell::new(Vec::default()),
             batch_open: Cell::new(true),
             received,
@@ -121,7 +119,7 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
     type ReceiveIterator<F: FnMut(&Message) -> bool> = PassingReceiveIter;
 
     fn receive<F: FnMut(&Message) -> bool>(&self, mut filter: F) -> Self::ReceiveIterator<F> {
-        const MAX_RAW_BYTES_PER_BATCH: usize = 1024 * 1024;
+        const MAX_RAW_BYTES_PER_BATCH: usize = 4 * 1024 * 1024;
         let mut buffer = self.buffer.borrow_mut();
         let mut admitted_bytes: usize = buffer.iter().map(QueuedMessage::raw_byte_len).sum();
         let mut admitted_attempts: std::collections::HashSet<u64> =
@@ -224,9 +222,16 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
         )
         .map_err(|error| CallError::Serialize(Box::new(error)))?;
 
-        let turn = self.next_worker.get();
-        self.next_worker.set(turn.wrapping_add(1));
-        let index = turn % self.workers.len();
+        if let Ok(mut received) = self.received.try_borrow_mut() {
+            let mut assignments = self.assignments.borrow_mut();
+            for finished_attempt in received.finished.drain(..) {
+                assignments.finished(finished_attempt);
+            }
+        }
+        let index = self
+            .assignments
+            .borrow_mut()
+            .least_loaded_worker(self.workers.len());
         let worker = self
             .workers
             .get(index)

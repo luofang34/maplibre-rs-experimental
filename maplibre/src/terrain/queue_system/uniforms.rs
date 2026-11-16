@@ -98,7 +98,7 @@ fn dem_matrix(coords: WorldTileCoords, dem: WorldTileCoords) -> Matrix4<f64> {
 }
 
 /// The ancestors of a tile, nearest first, that hold a drape texture.
-pub(super) fn present_ancestors(
+pub(crate) fn present_ancestors(
     coords: WorldTileCoords,
     terrain: &TerrainResources,
 ) -> Vec<WorldTileCoords> {

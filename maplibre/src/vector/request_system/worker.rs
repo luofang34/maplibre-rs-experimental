@@ -22,7 +22,9 @@ use crate::{
         tile_retry::{RequestDisposition, RequestKind, TileRequestOutcome},
         tile_sources::{source_layer_groups, SourceLayerGroup, TileKind},
     },
-    sdf::assets::{load_symbol_assets_awaiting_from_tile, SymbolAssetConfig, SymbolAtlas},
+    sdf::assets::{
+        load_symbol_assets_for_requests, symbol_requests_from_tile, SymbolAssetConfig, SymbolAtlas,
+    },
     style::{layer::StyleLayer, Style},
     vector::{
         process_vector::process_decoded_vector_tile_with_assets,
@@ -78,40 +80,21 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
                     .map_err(ProcedureError::Send)?;
                 continue;
             }
-            let has_symbols = group.layers.iter().any(|layer| layer.type_ == "symbol");
             enum FetchStep {
                 Ready(super::group_tile::RawGroupTile),
                 NotFound,
                 Failed { retryable: bool },
             }
-            let fetch_step = {
-                #[cfg(target_arch = "wasm32")]
-                let raw_res = if has_symbols {
-                    let (raw_res, ()) = futures::future::join(
-                        fetch_raw_group_tile(&client, coords, &group, refetch),
-                        crate::sdf::assets::warm_style_symbol_assets(&client, &style),
-                    )
-                    .await;
-                    raw_res
-                } else {
-                    fetch_raw_group_tile(&client, coords, &group, refetch).await
-                };
-                #[cfg(not(target_arch = "wasm32"))]
-                let raw_res = {
-                    let _ = has_symbols;
-                    fetch_raw_group_tile(&client, coords, &group, refetch).await
-                };
-                match raw_res {
-                    Ok(raw_tile) => FetchStep::Ready(raw_tile),
-                    Err(error) if error.is_not_found() => {
-                        tracing::debug!(%coords, source = ?group.source_name, "no vector tile at the source; its layers are empty");
-                        FetchStep::NotFound
-                    }
-                    Err(error) => {
-                        tracing::warn!(%coords, source = ?group.source_name, error = %error.describe(), "vector tile unavailable");
-                        FetchStep::Failed {
-                            retryable: error.is_retryable(),
-                        }
+            let fetch_step = match fetch_raw_group_tile(&client, coords, &group, refetch).await {
+                Ok(raw_tile) => FetchStep::Ready(raw_tile),
+                Err(error) if error.is_not_found() => {
+                    tracing::debug!(%coords, source = ?group.source_name, "no vector tile at the source; its layers are empty");
+                    FetchStep::NotFound
+                }
+                Err(error) => {
+                    tracing::warn!(%coords, source = ?group.source_name, error = %error.describe(), "vector tile unavailable");
+                    FetchStep::Failed {
+                        retryable: error.is_retryable(),
                     }
                 }
             };
@@ -296,54 +279,63 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
             Arc::new(SymbolAtlas::default()),
         )
         .await?;
+        let _ = heavy_slot.take();
         return Ok(None);
     }
-    // Poll symbol asset fetches before base-layer CPU tessellation so remote glyph/sprite
-    // requests fly on the network concurrently with road/building tessellation.
-    let asset_config = SymbolAssetConfig {
-        pixel_ratio,
-        ..SymbolAssetConfig::of(style)
-    };
     let zoom = f64::from(overscaled_zoom.max(u8::from(coords.z)));
-    let (assets_res, base_res) = {
-        let assets_fut =
-            load_symbol_assets_awaiting_from_tile(client, asset_config, &symbols, &tile, zoom);
-        let base_fut = tessellate::<T, C>(
-            context.clone(),
-            (last_source, false),
-            (tile.clone(), request),
-            source_state.clone(),
-            Arc::new(SymbolAtlas::default()),
-        );
-        futures::future::join(assets_fut, base_fut).await
-    };
-    base_res?;
-    let assets = assets_res.map_err(ProcessVectorError::SymbolAssets)?;
-    let request = VectorTileRequest {
+    let sym_requests = symbol_requests_from_tile(&symbols, &tile, zoom, Some(style));
+    tessellate::<T, C>(
+        context.clone(),
+        (last_source, false),
+        (tile.clone(), request),
+        source_state.clone(),
+        Arc::new(SymbolAtlas::default()),
+    )
+    .await?;
+
+    let sym_request = VectorTileRequest {
         coords,
         layers: symbols,
         projection,
         overscaled_zoom,
     };
-    // Only a source still waiting for images keeps its tile and layers to lay out again.
-    let again = (!assets.awaiting.is_empty()).then(|| (tile.clone(), request.clone()));
-    if again.is_none() {
-        if let Some(crate::vector::process_vector::DecodedVectorTile::Mvt(inner)) =
-            Arc::get_mut(&mut tile)
-        {
-            inner.layers.retain(|mvt| {
-                request
-                    .layers
-                    .iter()
-                    .any(|sl| sl.source_layer.as_deref() == Some(mvt.name.as_str()))
-            });
-        }
-        let _ = heavy_slot.take();
+    if let Some(crate::vector::process_vector::DecodedVectorTile::Mvt(inner)) =
+        Arc::get_mut(&mut tile)
+    {
+        inner.layers.retain(|mvt| {
+            sym_request
+                .layers
+                .iter()
+                .any(|sl| sl.source_layer.as_deref() == Some(mvt.name.as_str()))
+        });
     }
+    // Release HeavyTileSlot strictly BEFORE awaiting remote glyph/sprite HTTP I/O.
+    let _ = heavy_slot.take();
+
+    let asset_config = SymbolAssetConfig {
+        pixel_ratio,
+        ..SymbolAssetConfig::of(style)
+    };
+    #[cfg(target_arch = "wasm32")]
+    let assets_res = {
+        let ((), res) = futures::future::join(
+            crate::sdf::assets::warm_style_symbol_assets(client, style),
+            load_symbol_assets_for_requests(client, asset_config, sym_requests),
+        )
+        .await;
+        res
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    let assets_res = load_symbol_assets_for_requests(client, asset_config, sym_requests).await;
+
+    let assets = assets_res.map_err(ProcessVectorError::SymbolAssets)?;
+    // Only a source still waiting for images keeps its tile and layers to lay out again.
+    let again = (!assets.awaiting.is_empty()).then(|| (tile.clone(), sym_request.clone()));
+    let _sym_slot = acquire_heavy_tile_slot().await;
     tessellate::<T, C>(
         context,
         (last_source, false),
-        (tile, request),
+        (tile, sym_request),
         source_state,
         assets.atlas,
     )

@@ -4,7 +4,7 @@ use crate::{
     context::MapContext,
     render::{
         eventually::{Eventually, Eventually::Initialized},
-        memory_budget::{FrameUploads, UploadKind},
+        memory_budget::FrameUploads,
         Renderer,
     },
     style::Style,
@@ -18,7 +18,7 @@ use crate::{
 mod bucket;
 mod metadata;
 pub(crate) mod paint;
-mod sources;
+pub(crate) mod sources;
 pub(crate) mod style_refresh;
 
 use bucket::{upload_bucket, UploadOutcome};
@@ -81,7 +81,7 @@ pub fn upload_system(
     }
     let (paint_frame, previous_paint) = frame_paint(world, style, view_state);
     let refresh_paint = previous_paint != Some(paint_frame);
-    let (source_tiles, painted_tiles) =
+    let (source_tiles, painted_tiles, uncovered_sources) =
         sources::frame_sources_and_painted(world, style, view_state)?;
     let (spatial, changed) = super::structures::for_frame(world, style, &painted_tiles);
     world.resources.get_or_init_mut::<FrameUploads>();
@@ -110,12 +110,12 @@ pub fn upload_system(
     }
     let allow_cpu_release =
         cfg!(target_arch = "wasm32") && settings.buffer_pools.vertices >= 1_000_000;
-    let (deferred, needs_refetch) = upload_tessellated_layer(
+    let (deferred, needs_refetch) = upload_tessellated_layer_with_uncovered(
         buffer_pool,
         queue,
         &mut world.tiles,
         style,
-        source_tiles,
+        (source_tiles, &uncovered_sources),
         (&spatial, paint_frame),
         (budget, allow_cpu_release, dyn_points),
     );
@@ -162,7 +162,8 @@ fn frame_paint(
     (paint_frame, previous_paint)
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
+#[cfg(test)]
+#[allow(dead_code)]
 fn upload_tessellated_layer(
     buffer_pool: &mut VectorBufferPool,
     queue: &crate::render::upload_queue::UploadQueue,
@@ -172,12 +173,39 @@ fn upload_tessellated_layer(
     (spatial, paint): (&[super::structures::SpatialBuffer], VectorPaintFrame),
     (budget, allow_cpu_release, dyn_points): (&mut FrameUploads, bool, &mut DynPoints),
 ) -> (bool, bool) {
+    let empty = rustc_hash::FxHashSet::default();
+    upload_tessellated_layer_with_uncovered(
+        buffer_pool,
+        queue,
+        tiles,
+        style,
+        (source_tiles, &empty),
+        (spatial, paint),
+        (budget, allow_cpu_release, dyn_points),
+    )
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
+fn upload_tessellated_layer_with_uncovered(
+    buffer_pool: &mut VectorBufferPool,
+    queue: &crate::render::upload_queue::UploadQueue,
+    tiles: &mut Tiles,
+    style: &Style,
+    (source_tiles, uncovered_sources): (
+        Vec<crate::coords::WorldTileCoords>,
+        &rustc_hash::FxHashSet<crate::coords::WorldTileCoords>,
+    ),
+    (spatial, paint): (&[super::structures::SpatialBuffer], VectorPaintFrame),
+    (budget, allow_cpu_release, dyn_points): (&mut FrameUploads, bool, &mut DynPoints),
+) -> (bool, bool) {
     #[cfg(target_arch = "wasm32")]
     let has_dem_source = crate::terrain::source::dem_source(style).is_some();
     let mut feature_meta_scratch = Vec::new();
     let mut needs_refetch = false;
+    let mut any_deferred = false;
     let protected: std::collections::HashSet<_> = source_tiles.iter().copied().collect();
     for coords in source_tiles {
+        let is_uncovered = uncovered_sources.contains(&coords);
         super::content::ensure(tiles, coords);
         if tiles
             .query::<(
@@ -248,8 +276,8 @@ fn upload_tessellated_layer(
                     continue;
                 } else {
                     let bytes = upload_size(style_layer, bucket, is_uniform, is_dynamic_circle);
-                    if budget.geometry_tiles_exhausted()
-                        || !budget.can_take(UploadKind::Geometry, bytes)
+                    if budget.geometry_tiles_exhausted_for(is_uncovered)
+                        || !budget.can_take_geometry(bytes, is_uncovered)
                     {
                         Step::Exhausted
                     } else {
@@ -285,7 +313,7 @@ fn upload_tessellated_layer(
                             (&protected, &mut feature_meta_scratch, dyn_points),
                         ) {
                             UploadOutcome::Uploaded => {
-                                budget.take(UploadKind::Geometry, bytes);
+                                budget.take_geometry(bytes, is_uncovered);
                                 Step::Commit {
                                     replacement,
                                     did_upload: true,
@@ -309,7 +337,8 @@ fn upload_tessellated_layer(
                         coords,
                         &pending_cpu_releases,
                     );
-                    return (true, needs_refetch);
+                    any_deferred = true;
+                    break;
                 }
                 Step::Commit {
                     replacement,
@@ -342,7 +371,7 @@ fn upload_tessellated_layer(
             budget.count_geometry_tile();
         }
     }
-    (false, needs_refetch)
+    (any_deferred, needs_refetch)
 }
 
 #[cfg(test)]

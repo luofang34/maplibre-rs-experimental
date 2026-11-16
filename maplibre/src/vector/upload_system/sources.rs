@@ -1,26 +1,42 @@
-//! Geometry uploads follow the actual sources selected for the view or terrain textures.
+//! Geometry uploads follow the actual sources selected for the view or terrain textures,
+//! prioritizing uncovered visible tiles first and retaining coarse overview / 1-ring stand-ins.
 use rustc_hash::FxHashSet;
 
 use crate::{
     coords::WorldTileCoords,
     io::tile_sources::{clamp_to_max_zoom, source_max_zoom, TileKind},
     render::{
+        eventually::{Eventually, Eventually::Initialized},
         projection::view_region_for_projection,
         tile_view_pattern::{coverage::loaded_cover, HasTile, ViewTileSources, DEFAULT_TILE_SIZE},
         view_state::{ViewState, ViewStatePadding},
     },
     style::Style,
     tcs::{system::SystemError, world::World},
-    terrain::{drape_targets::select_targets, request_system::DrapeRequests},
+    terrain::{
+        drape_targets::select_targets, queue_system::uniforms::present_ancestors,
+        request_system::DrapeRequests, resources::TerrainResources,
+    },
 };
 
 const CHILDREN_SEARCH_DEPTH: usize = 4;
+
+/// Coarse overview and settled 1-ring prefetch tiles requested by `vector_request` so
+/// `upload_system` uploads and retains them in `VectorBufferPool` against pan holes.
+#[derive(Clone, Default)]
+pub(crate) struct VectorFallbackTiles(pub Vec<WorldTileCoords>);
+
+pub(super) type FrameSourcesAndPainted = (
+    Vec<WorldTileCoords>,
+    Vec<WorldTileCoords>,
+    FxHashSet<WorldTileCoords>,
+);
 
 pub(super) fn frame_sources_and_painted(
     world: &World,
     style: &Style,
     view_state: &ViewState,
-) -> Result<(Vec<WorldTileCoords>, Vec<WorldTileCoords>), SystemError> {
+) -> Result<FrameSourcesAndPainted, SystemError> {
     let view_region = view_region_for_projection(
         style,
         view_state,
@@ -40,18 +56,30 @@ pub(super) fn frame_sources_and_painted(
         view_tile_sources.of_kind(TileKind::Vector),
         crate::vector::UploadedVectorGeometry::for_world(world),
     );
-    let source_tiles = if style.terrain.is_some() {
+    let (source_tiles, uncovered) = if style.terrain.is_some() {
         terrain_sources(world, style)
     } else {
-        let mut sources = Vec::new();
+        let mut uncovered_list = Vec::new();
+        let mut covered_list = Vec::new();
+        let mut uncovered_set = FxHashSet::default();
         let mut seen = FxHashSet::default();
-        let mut targets = Vec::new();
+        let mut uncovered_targets = Vec::new();
+        let mut covered_targets = Vec::new();
+
         if let Some(region) = &view_region {
             for copy in region.copies() {
                 let Some((coords, _)) = copy.wrapped() else {
                     continue;
                 };
-                targets.push(coords);
+                let has_gpu_stand_in = loaded_cover(&gpu_vector, coords, world).is_some()
+                    || gpu_vector
+                        .get_available_children(coords, world, CHILDREN_SEARCH_DEPTH)
+                        .is_some();
+                if has_gpu_stand_in {
+                    covered_targets.push(coords);
+                } else {
+                    uncovered_targets.push(coords);
+                }
                 for ready in loaded_cover(&cpu_vector, coords, world)
                     .or_else(|| {
                         cpu_vector.get_available_children(coords, world, CHILDREN_SEARCH_DEPTH)
@@ -59,18 +87,39 @@ pub(super) fn frame_sources_and_painted(
                     .into_iter()
                     .flatten()
                 {
+                    if !has_gpu_stand_in {
+                        uncovered_set.insert(ready);
+                    }
                     if seen.insert(ready) {
-                        sources.push(ready);
+                        if has_gpu_stand_in {
+                            covered_list.push(ready);
+                        } else {
+                            uncovered_list.push(ready);
+                        }
                     }
                 }
             }
         }
-        for coords in targets {
+        for coords in uncovered_targets {
+            uncovered_set.insert(coords);
             if seen.insert(coords) {
-                sources.push(coords);
+                uncovered_list.push(coords);
             }
         }
-        sources
+        for coords in covered_targets {
+            if seen.insert(coords) {
+                covered_list.push(coords);
+            }
+        }
+        if let Some(fallbacks) = world.resources.get::<VectorFallbackTiles>() {
+            for &coords in &fallbacks.0 {
+                if seen.insert(coords) {
+                    covered_list.push(coords);
+                }
+            }
+        }
+        uncovered_list.extend(covered_list);
+        (uncovered_list, uncovered_set)
     };
     let mut painted_tiles = source_tiles.clone();
     let mut seen_painted: FxHashSet<_> = painted_tiles.iter().copied().collect();
@@ -90,11 +139,18 @@ pub(super) fn frame_sources_and_painted(
             }
         }
     }
-    Ok((source_tiles, painted_tiles))
+    Ok((source_tiles, painted_tiles, uncovered))
 }
 
-pub(super) fn terrain_sources(world: &World, style: &Style) -> Vec<WorldTileCoords> {
+pub(super) fn terrain_sources(
+    world: &World,
+    style: &Style,
+) -> (Vec<WorldTileCoords>, FxHashSet<WorldTileCoords>) {
     let max_zoom = source_max_zoom(style, TileKind::Vector);
+    let terrain = match world.resources.get::<Eventually<TerrainResources>>() {
+        Some(Initialized(t)) => Some(t),
+        _ => None,
+    };
     let targets = std::iter::once(WorldTileCoords::default())
         .chain(
             world
@@ -112,20 +168,31 @@ pub(super) fn terrain_sources(world: &World, style: &Style) -> Vec<WorldTileCoor
         );
     let selected = select_targets(targets, world, &[]);
     let mut seen = FxHashSet::default();
-    let mut sources = Vec::new();
+    let mut uncovered_list = Vec::new();
+    let mut covered_list = Vec::new();
+    let mut uncovered_set = FxHashSet::default();
     for (target, shapes) in selected {
-        // A CPU-ready ancestor or complete child cover must reach the GPU even when
-        // the requested tile exceeds maxzoom or has not arrived yet.
+        let is_uncovered = terrain.is_some_and(|t| {
+            t.drape_texture(target).is_none() && present_ancestors(target, t).is_empty()
+        });
         for source in shapes
             .into_iter()
             .filter(|shape| shape.raster_source.is_none())
             .map(|shape| shape.coords)
             .chain(std::iter::once(clamp_to_max_zoom(target, max_zoom)))
         {
+            if is_uncovered {
+                uncovered_set.insert(source);
+            }
             if seen.insert(source) {
-                sources.push(source);
+                if is_uncovered {
+                    uncovered_list.push(source);
+                } else {
+                    covered_list.push(source);
+                }
             }
         }
     }
-    sources
+    uncovered_list.extend(covered_list);
+    (uncovered_list, uncovered_set)
 }

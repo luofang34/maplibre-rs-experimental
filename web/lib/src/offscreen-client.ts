@@ -50,9 +50,8 @@ interface OffscreenStartArgs {
 const ST_TILE_WORKER_COUNT = 4;
 
 export const computeMtTileWorkerCount = (): number => {
-    // Shared-memory WASM workers share one linear-memory dlmalloc mutex with the render worker;
-    // two workers overlap network/image fetches while avoiding multi-worker allocator contention.
-    return 2;
+    const cores = Number(globalThis.navigator?.hardwareConcurrency) || 4;
+    return Math.min(4, Math.max(2, Math.floor(cores / 2)));
 };
 
 export const startOffscreenController = async ({

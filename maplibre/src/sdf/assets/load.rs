@@ -25,7 +25,8 @@ pub use prefetch::spawn_worker_symbol_prefetch;
 pub(crate) use prefetch::warm_style_symbol_assets;
 #[cfg(test)]
 use requests::requests;
-use requests::{symbol_requests, symbol_requests_from_tile};
+use requests::symbol_requests;
+pub(crate) use requests::{symbol_requests_from_tile, SymbolRequests};
 
 const BUNDLED_LATIN: &[u8] = include_bytes!("../../../../data/0-255.pbf");
 
@@ -128,10 +129,10 @@ pub(crate) async fn load_symbol_assets_awaiting_from_tile<'l, HC: HttpClient>(
     load_symbol_assets_for_requests(client, config, req).await
 }
 
-async fn load_symbol_assets_for_requests<HC: HttpClient>(
+pub(crate) async fn load_symbol_assets_for_requests<HC: HttpClient>(
     client: &SourceClient<HC>,
     config: SymbolAssetConfig<'_>,
-    req: requests::SymbolRequests,
+    req: SymbolRequests,
 ) -> Result<LoadedSymbolAssets, SymbolAssetError> {
     let mut builder = AtlasBuilder::new();
     let icons = req.icons;
