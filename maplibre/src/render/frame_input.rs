@@ -117,7 +117,7 @@ pub fn frame_input_system(
             uploads.reset();
         }
     }
-    let Some(input) = world.resources.get::<FrameInput>() else {
+    let Some(input) = world.resources.get::<FrameInput>().copied() else {
         return Ok(());
     };
     let projection = style
@@ -126,8 +126,17 @@ pub fn frame_input_system(
         .map_or_else(ProjectionType::default, |specification| {
             specification.projection_type.clone()
         });
-    if let Err(error) = apply_frame_input(input, view_state, &projection) {
+    if let Err(error) = apply_frame_input(&input, view_state, &projection) {
         tracing::error!(%error, "host view rejected; preserving the last valid view");
+    }
+    if !super::eye_covering::EyeInFrame::reuses_content(world) {
+        let moving = !input.timestamp.is_zero()
+            && matches!(input.view, ViewSource::MapView)
+            && super::frame_signals::camera_moved(world, view_state);
+        world
+            .resources
+            .get_or_init_mut::<super::memory_budget::FrameUploads>()
+            .set_moving(moving);
     }
     Ok(())
 }

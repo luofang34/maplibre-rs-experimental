@@ -28,7 +28,7 @@ pub(crate) fn is_valid_mlt(data: &[u8]) -> bool {
 
 /// Decodes an MLT payload into a `geozero::mvt::Tile` using an O(1) value dictionary (used for
 /// parent-tile rescaling and external MVT-model callers; native tile rendering streams columnar
-/// `ParsedLayer01` directly into tessellators via [`process_mlt_tile_with_assets`]).
+/// `ParsedLayer01` directly into tessellators via `process_mlt_tile_with_assets`).
 pub fn decode(data: &[u8]) -> Result<geozero::mvt::Tile, Box<dyn std::error::Error>> {
     let layers = Parser::default().parse_layers(data)?;
     let mut decoder = Decoder::default();

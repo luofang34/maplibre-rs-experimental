@@ -32,6 +32,18 @@ pub const UPLOADS_PER_FRAME: usize = 24;
 /// arrivals does not stage a hundred tiles' geometry at once.
 #[cfg(not(target_arch = "wasm32"))]
 pub const UPLOADS_PER_FRAME: usize = 8;
+/// Geometry tiles uploaded per frame while the camera is actively moving on `wasm32`, pacing
+/// multi-tile bursts across consecutive vsyncs to keep p95/p99 frame CPU flat.
+#[cfg(target_arch = "wasm32")]
+const MOVING_UPLOADS_PER_FRAME: usize = 2;
+#[cfg(not(target_arch = "wasm32"))]
+const MOVING_UPLOADS_PER_FRAME: usize = UPLOADS_PER_FRAME;
+/// Geometry bytes uploaded per frame while the camera is actively moving on `wasm32` (the first
+/// geometry upload of a frame is always admitted even when larger).
+#[cfg(target_arch = "wasm32")]
+const MOVING_GEOMETRY_UPLOAD_BYTES: usize = 768 << 10;
+#[cfg(not(target_arch = "wasm32"))]
+const MOVING_GEOMETRY_UPLOAD_BYTES: usize = FRAME_UPLOAD_BYTES - IMAGE_UPLOAD_FLOOR_BYTES;
 /// Bytes of tile geometry, labels and textures one frame uploads; the rest wait for the next
 /// frame, so a burst of arrivals is spread over frames instead of stalling one.
 pub const FRAME_UPLOAD_BYTES: usize = 32 << 20;
@@ -159,9 +171,15 @@ pub(crate) struct FrameUploads {
     geometry_started: bool,
     image_started: bool,
     geometry_tiles: usize,
+    moving: bool,
 }
 
 impl FrameUploads {
+    /// Marks whether this frame is part of active continuous camera movement.
+    pub(crate) fn set_moving(&mut self, moving: bool) {
+        self.moving = moving;
+    }
+
     /// Returns `true` if `bytes` of `kind` fits in this frame's remaining upload allowance without
     /// consuming it yet, so a saturated or skipped upload does not burn the frame budget.
     pub(crate) fn can_take(&self, kind: UploadKind, bytes: usize) -> bool {
@@ -170,12 +188,18 @@ impl FrameUploads {
         }
         let used = self.geometry_bytes + self.image_bytes;
         let (allowed, started) = match kind {
-            UploadKind::Geometry => (
-                FRAME_UPLOAD_BYTES
+            UploadKind::Geometry => {
+                let stationary_cap = FRAME_UPLOAD_BYTES
                     .saturating_sub(IMAGE_UPLOAD_FLOOR_BYTES.saturating_sub(self.image_bytes))
-                    .saturating_sub(used),
-                self.geometry_started,
-            ),
+                    .saturating_sub(used);
+                let cap = if self.moving {
+                    stationary_cap
+                        .min(MOVING_GEOMETRY_UPLOAD_BYTES.saturating_sub(self.geometry_bytes))
+                } else {
+                    stationary_cap
+                };
+                (cap, self.geometry_started)
+            }
             UploadKind::Image => (
                 FRAME_UPLOAD_BYTES
                     .saturating_sub(used)
@@ -213,7 +237,12 @@ impl FrameUploads {
 
     /// Whether this frame's geometry tile allowance is used up.
     pub(crate) fn geometry_tiles_exhausted(&self) -> bool {
-        self.geometry_tiles >= UPLOADS_PER_FRAME
+        let limit = if self.moving {
+            MOVING_UPLOADS_PER_FRAME
+        } else {
+            UPLOADS_PER_FRAME
+        };
+        self.geometry_tiles >= limit
     }
 
     /// Bytes admitted this frame.

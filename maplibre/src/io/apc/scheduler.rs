@@ -23,7 +23,7 @@ use crate::{
 };
 
 #[cfg(target_arch = "wasm32")]
-const MAX_ADMITTED_ATTEMPTS_PER_BATCH: usize = 12;
+const MAX_ADMITTED_ATTEMPTS_PER_BATCH: usize = 6;
 
 #[cfg(target_arch = "wasm32")]
 fn is_intermediate_vector_layer(message: &Message) -> bool {
