@@ -52,9 +52,39 @@ impl<I: PhaseItem> RenderPhase<I> {
         self.items.push(item);
     }
 
+    /// Appends pre-built items in bulk, reusing the destination vector's capacity.
+    pub fn extend_from_slice(&mut self, items: &[I])
+    where
+        I: Clone,
+    {
+        self.items.extend_from_slice(items);
+    }
+
+    /// Borrows the underlying slice of queued items.
+    pub fn items(&self) -> &[I] {
+        &self.items
+    }
+
+    /// Sorts the suffix starting at `start` in place; used by cached phase builders.
+    pub fn sort_tail(&mut self, start: usize) {
+        if start < self.items.len() {
+            let tail = &mut self.items[start..];
+            if !tail.is_sorted_by_key(|d| d.sort_key()) {
+                tail.sort_by_key(|d| d.sort_key());
+            }
+        }
+    }
+
+    /// Returns `true` when items are already ordered by ascending [`PhaseItem::sort_key`].
+    pub fn is_sorted(&self) -> bool {
+        self.items.is_sorted_by_key(|d| d.sort_key())
+    }
+
     /// Sorts by ascending key while preserving insertion order for equal keys.
     pub fn sort(&mut self) {
-        self.items.sort_by_key(|d| d.sort_key());
+        if !self.is_sorted() {
+            self.items.sort_by_key(|d| d.sort_key());
+        }
     }
 
     /// Drops queued items while retaining the vector allocation for the next frame.

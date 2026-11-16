@@ -40,6 +40,7 @@ pub enum BenchScenario {
     All,
     S1,
     S3,
+    S4,
     S5,
 }
 
@@ -62,6 +63,7 @@ struct ScenarioSpec {
     pitch: f64,
     bearing: f64,
     terrain: bool,
+    globe: bool,
 }
 
 pub struct PhaseMetrics {
@@ -95,6 +97,7 @@ impl PhaseMetrics {
 pub struct ScenarioReport {
     pub id: String,
     pub name: String,
+    pub cold_first_frame_ms: f64,
     pub warmup_frames: usize,
     pub idle_redraws: usize,
     pub rss_mib: f64,
@@ -108,6 +111,7 @@ impl ScenarioReport {
         serde_json::json!({
             "id": self.id,
             "name": self.name,
+            "cold_first_frame_ms": self.cold_first_frame_ms,
             "warmup_frames": self.warmup_frames,
             "idle_redraws": self.idle_redraws,
             "rss_mib": self.rss_mib,
@@ -129,6 +133,7 @@ fn scenarios_for(choice: BenchScenario) -> Vec<ScenarioSpec> {
             pitch: 0.0,
             bearing: 0.0,
             terrain: false,
+            globe: false,
         },
         ScenarioSpec {
             id: "S3",
@@ -139,6 +144,18 @@ fn scenarios_for(choice: BenchScenario) -> Vec<ScenarioSpec> {
             pitch: 0.0,
             bearing: 0.0,
             terrain: false,
+            globe: false,
+        },
+        ScenarioSpec {
+            id: "S4",
+            name: "Globe Polar Overview",
+            lat: 38.5000,
+            lon: 11.2500,
+            zoom: 2.1,
+            pitch: 18.0,
+            bearing: 0.0,
+            terrain: false,
+            globe: true,
         },
         ScenarioSpec {
             id: "S5",
@@ -149,12 +166,14 @@ fn scenarios_for(choice: BenchScenario) -> Vec<ScenarioSpec> {
             pitch: 62.0,
             bearing: 35.0,
             terrain: true,
+            globe: false,
         },
     ];
     match choice {
         BenchScenario::All => all,
         BenchScenario::S1 => all.into_iter().filter(|s| s.id == "S1").collect(),
         BenchScenario::S3 => all.into_iter().filter(|s| s.id == "S3").collect(),
+        BenchScenario::S4 => all.into_iter().filter(|s| s.id == "S4").collect(),
         BenchScenario::S5 => all.into_iter().filter(|s| s.id == "S5").collect(),
     }
 }
@@ -166,6 +185,8 @@ pub fn run_bench(opts: &BenchOptions) -> Result<(), Box<dyn std::error::Error>> 
             load_style(Some(custom), BundledStyle::Default, None, &[])?
         } else if spec.terrain {
             load_style(None, BundledStyle::Terrain, None, &[])?
+        } else if spec.globe {
+            load_style(None, BundledStyle::Globe, None, &[])?
         } else {
             load_style(Some(LIBERTY_STYLE_URL), BundledStyle::Default, None, &[])?
         };
@@ -189,8 +210,8 @@ pub fn run_bench(opts: &BenchOptions) -> Result<(), Box<dyn std::error::Error>> 
     } else {
         for r in &reports {
             println!(
-                "=== {} ({}) | warmup={}f | idle_redraws={} | rss={:.1} MiB ===",
-                r.id, r.name, r.warmup_frames, r.idle_redraws, r.rss_mib
+                "=== {} ({}) | cold={:.1}ms warmup={}f | idle_redraws={} | rss={:.1} MiB ===",
+                r.id, r.name, r.cold_first_frame_ms, r.warmup_frames, r.idle_redraws, r.rss_mib
             );
             for (label, m) in [
                 ("Still", &r.still),
@@ -249,6 +270,7 @@ async fn run_single_scenario(
         settings.terrain_drape_size = 512;
     }
 
+    let cold_t0 = Instant::now();
     let timeout_budget = Duration::from_secs(timeout_secs);
     let deadline = Instant::now() + timeout_budget;
     let (renderer_res, _) = tokio::join!(
@@ -336,6 +358,7 @@ async fn run_single_scenario(
         let _ = tokio::time::timeout(wait, notify.notified()).await;
     }
 
+    let cold_first_frame_ms = cold_t0.elapsed().as_secs_f64() * 1000.0;
     let mut idle_redraws = 0_usize;
     for _ in 0..60 {
         if map.needs_redraw() {
@@ -368,6 +391,7 @@ async fn run_single_scenario(
     Ok(ScenarioReport {
         id: spec.id.to_owned(),
         name: spec.name.to_owned(),
+        cold_first_frame_ms,
         warmup_frames,
         idle_redraws,
         rss_mib: current_rss_mib(),

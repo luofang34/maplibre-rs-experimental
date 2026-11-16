@@ -2,6 +2,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    hash::{Hash, Hasher},
     marker::PhantomData,
 };
 
@@ -49,6 +50,10 @@ pub struct TileViewPattern<Q, B> {
     buffer_destroyer: Option<fn(&B)>,
     /// Occupied entries, including appended metadata; a view-pattern upload starts a new frame.
     uploaded: u64,
+    /// Hash of the latest uploaded shape topology, buffer ranges, and stencil assignments.
+    last_topology_hash: u64,
+    /// Monotonic counter incremented when tile shapes, buffer ranges, or stencil refs change.
+    topology_generation: u64,
     phantom_q: PhantomData<Q>,
 }
 
@@ -81,8 +86,16 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
             ),
             buffer_destroyer: None,
             uploaded: 0,
+            last_topology_hash: 0,
+            topology_generation: 0,
             phantom_q: Default::default(),
         }
+    }
+
+    /// Monotonic generation incremented whenever tile shapes, buffer ranges, or stencil refs change.
+    #[inline]
+    pub fn topology_generation(&self) -> u64 {
+        self.topology_generation
     }
 
     /// Registers a destructor invoked on the backing metadata buffer when dropped.
@@ -297,11 +310,33 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
             });
         };
 
+        let mut topo_hasher = rustc_hash::FxHasher::default();
+        self.view_tiles.len().hash(&mut topo_hasher);
         for view_tile in &mut self.view_tiles {
-            view_tile.vector.for_each_mut(&mut add_to_buffer);
-            for (_, shapes) in &mut view_tile.raster {
-                shapes.for_each_mut(&mut add_to_buffer);
+            view_tile.target.hash(&mut topo_hasher);
+            let mut v_count = 0usize;
+            view_tile.vector.for_each_mut(&mut |shape| {
+                add_to_buffer(shape);
+                v_count += 1;
+                hash_shape_topology(shape, &mut topo_hasher);
+            });
+            v_count.hash(&mut topo_hasher);
+            view_tile.raster.len().hash(&mut topo_hasher);
+            for (source_id, shapes) in &mut view_tile.raster {
+                source_id.hash(&mut topo_hasher);
+                let mut r_count = 0usize;
+                shapes.for_each_mut(&mut |shape| {
+                    add_to_buffer(shape);
+                    r_count += 1;
+                    hash_shape_topology(shape, &mut topo_hasher);
+                });
+                r_count.hash(&mut topo_hasher);
             }
+        }
+        let topology_hash = topo_hasher.finish();
+        if self.topology_generation == 0 || topology_hash != self.last_topology_hash {
+            self.last_topology_hash = topology_hash;
+            self.topology_generation = self.topology_generation.wrapping_add(1);
         }
 
         if skipped > 0 {
@@ -315,6 +350,14 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
         let raw_buffer = bytemuck::cast_slice(buffer.as_slice());
         queue.write_buffer(&self.view_tiles_buffer.inner, 0, raw_buffer);
     }
+}
+
+fn hash_shape_topology(shape: &TileShape, hasher: &mut rustc_hash::FxHasher) {
+    shape.coords().hash(hasher);
+    shape.wrap.hash(hasher);
+    shape.is_drawn_within_another().hash(hasher);
+    shape.stencil_reference().hash(hasher);
+    shape.buffer_range().hash(hasher);
 }
 
 /// The shown tiles with the loaded descendants their source is fading out drawn over each of

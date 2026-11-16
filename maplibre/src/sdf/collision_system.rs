@@ -57,6 +57,8 @@ pub struct CollisionSystem {
         FxHashMap<(WorldTileCoords, crate::style::StyleLayerId), upload_diff::CachedBucketMetadata>,
     scratch: upload_diff::MetadataScratchPool,
     draw_sort: draw_sort::DrawSort,
+    /// Persistent scratch set of currently visible covering tile coordinates.
+    seen: FxHashSet<WorldTileCoords>,
     /// Revision of the host's label obstacles the last placement kept clear.
     obstacles: u64,
 }
@@ -125,13 +127,12 @@ impl System for CollisionSystem {
         let stats = world.resources.get_or_init_mut::<CollisionStats>();
         stats.runs = stats.runs.wrapping_add(1);
 
-        let seen: FxHashSet<_> = world
-            .resources
-            .get::<super::covering::SymbolCovering>()
-            .map(|covering| covering.tiles.iter().copied().collect())
-            .unwrap_or_default();
+        self.seen.clear();
+        if let Some(covering) = world.resources.get::<super::covering::SymbolCovering>() {
+            self.seen.extend(covering.tiles.iter().copied());
+        }
         let zoom = view_state.style_zoom().value();
-        let mut layers = visible_layers(world, style, zoom, &seen);
+        let mut layers = visible_layers(world, style, zoom, &self.seen);
 
         let content_sig = content_signature(world, &layers);
         let terrain_sig = terrain_signature(world);
@@ -214,6 +215,7 @@ impl System for CollisionSystem {
                     &mut self.uploaded,
                     &mut self.scratch,
                     true,
+                    moving_this_frame,
                 ) {
                     let followup =
                         self.history.repeats.yielded_to_previous() || epoch.saw_background_change;
@@ -317,7 +319,7 @@ impl System for CollisionSystem {
         let has_symbols = !layers.is_empty();
         self.history.begin_with_duration(now, config.fade_duration);
         self.uploaded.retain(|(coords, _), cached| {
-            let keep = seen.contains(coords);
+            let keep = self.seen.contains(coords);
             if !keep {
                 self.scratch.recycle(std::mem::take(&mut cached.vertices));
             }
@@ -332,6 +334,7 @@ impl System for CollisionSystem {
             &mut self.uploaded,
             &mut self.scratch,
             use_slicing,
+            moving_this_frame,
         ) {
             let followup_needed = self.history.repeats.yielded_to_previous();
             self.controller

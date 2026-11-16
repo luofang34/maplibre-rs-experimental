@@ -1,4 +1,5 @@
 //! Queues [PhaseItems](crate::render::render_phase::PhaseItem) for rendering.
+use phase_cache::{CachedVectorPhases, VectorPhaseCacheKey, VectorQueueScratch};
 use rustc_hash::FxHashSet;
 
 use crate::{
@@ -13,7 +14,6 @@ use crate::{
         },
         tile_view_pattern::WgpuTileViewPattern,
     },
-    style::StyleLayerId,
     tcs::{
         system::{SystemError, SystemResult},
         tiles::Tile,
@@ -28,62 +28,7 @@ use crate::{
     },
 };
 
-#[derive(Default)]
-struct VectorQueueScratch {
-    cached_style_key: Option<(u64, u64)>,
-    pattern_layers: FxHashSet<StyleLayerId>,
-    translucent_extrusion_layers: FxHashSet<StyleLayerId>,
-    unclipped_3d_layers: FxHashSet<StyleLayerId>,
-    zero_opacity_layers: FxHashSet<StyleLayerId>,
-    active_unclipped_3d_shapes: FxHashSet<(i32, crate::coords::WorldTileCoords, u32)>,
-    queued_unclipped_3d: FxHashSet<(i32, crate::coords::WorldTileCoords, u32)>,
-    extrusion_colors: Vec<LayerItem>,
-    extrusion_clears: Vec<LayerItem>,
-    translucent_fronts: Vec<LayerItem>,
-}
-
-impl VectorQueueScratch {
-    fn sync_style_sets(&mut self, style: &crate::style::Style, style_zoom: f64) {
-        let key = (style.revision(), style_zoom.to_bits());
-        if self.cached_style_key == Some(key) {
-            return;
-        }
-        self.cached_style_key = Some(key);
-        self.pattern_layers.clear();
-        self.translucent_extrusion_layers.clear();
-        self.unclipped_3d_layers.clear();
-        self.zero_opacity_layers.clear();
-
-        for layer in &style.layers {
-            let id = layer.layer_id();
-            if layer.paint.as_ref().is_some_and(|paint| {
-                super::pattern::pattern_name(paint, style_zoom).is_some()
-                    || super::pattern::per_feature_pattern(paint).is_some()
-            }) {
-                self.pattern_layers.insert(id);
-            }
-            let is_translucent_extrusion = matches!(
-                &layer.paint,
-                Some(crate::style::layer::LayerPaint::FillExtrusion(paint))
-                    if paint.fill_extrusion_translucent == Some(true)
-            );
-            if is_translucent_extrusion {
-                self.translucent_extrusion_layers.insert(id);
-            }
-            if is_translucent_extrusion
-                || matches!(
-                    super::structures::kind(layer),
-                    Some(super::structures::StructureKind::ElevatedLine)
-                )
-            {
-                self.unclipped_3d_layers.insert(id);
-            }
-            if is_zero_opacity_vector_layer(layer, style_zoom) {
-                self.zero_opacity_layers.insert(id);
-            }
-        }
-    }
-}
+mod phase_cache;
 
 pub fn queue_system(
     MapContext {
@@ -115,7 +60,6 @@ pub fn queue_system(
         return Err(SystemError::Dependencies);
     };
 
-    let buffer_pool_index = buffer_pool.index();
     let zoom = view_state.zoom().value();
     let style_zoom = view_state.style_zoom().value();
     let uses_globe = style
@@ -123,9 +67,28 @@ pub fn queue_system(
         .as_ref()
         .is_some_and(|specification| specification.projection_type.uses_globe_rendering(zoom));
 
-    scratch.sync_style_sets(style, style_zoom);
+    let layer_state_digest = scratch.sync_style_sets(style, style_zoom);
+    let cache_key = VectorPhaseCacheKey {
+        topology_gen: tile_view_pattern.topology_generation(),
+        buffer_pool_rev: buffer_pool.revision(),
+        style_rev: style.revision(),
+        layer_state_digest,
+        uses_globe,
+    };
+    if let Some(cached) = &scratch.cached_phases {
+        if cached.key == cache_key {
+            mask_phase.extend_from_slice(&cached.masks);
+            layer_item_phase.extend_from_slice(&cached.layers);
+            return Ok(());
+        }
+    }
+
+    let mask_start = mask_phase.size();
+    let layer_start = layer_item_phase.size();
+    let buffer_pool_index = buffer_pool.index();
     let VectorQueueScratch {
         pattern_layers,
+        missing_image_layers,
         translucent_extrusion_layers,
         unclipped_3d_layers,
         zero_opacity_layers,
@@ -188,15 +151,9 @@ pub fn queue_system(
             if let Some(layer_entries) = buffer_pool_index.get_layers(source_shape.coords()) {
                 for (slot_idx, layer_entry) in layer_entries.iter().enumerate() {
                     if zero_opacity_layers.contains(&layer_entry.style_layer_id)
+                        || missing_image_layers.contains(&layer_entry.style_layer_id)
                         || !layer_entry.style_layer.is_visible_at(style_zoom)
                     {
-                        continue;
-                    }
-                    if super::pattern::names_missing_image(
-                        layer_entry.style_layer.paint.as_ref(),
-                        style,
-                        view_state.style_zoom().value(),
-                    ) {
                         continue;
                     }
                     let layer_id = layer_entry.style_layer_id;
@@ -349,28 +306,15 @@ pub fn queue_system(
         layer_item_phase.add(item);
     }
 
-    Ok(())
-}
+    mask_phase.sort_tail(mask_start);
+    layer_item_phase.sort_tail(layer_start);
+    scratch.cached_phases = Some(CachedVectorPhases {
+        key: cache_key,
+        masks: mask_phase.items()[mask_start..].to_vec(),
+        layers: layer_item_phase.items()[layer_start..].to_vec(),
+    });
 
-fn is_zero_opacity_vector_layer(layer: &crate::style::layer::StyleLayer, style_zoom: f64) -> bool {
-    if !layer.transitions.is_empty() {
-        return false;
-    }
-    let is_zero = |prop: &Option<crate::style::property::StyleProperty<f32>>| {
-        prop.as_ref().is_some_and(|p| {
-            p.is_feature_constant() && p.evaluate_at_zoom(style_zoom).is_some_and(|v| v <= 0.0)
-        })
-    };
-    match &layer.paint {
-        Some(crate::style::layer::LayerPaint::Fill(paint)) => is_zero(&paint.fill_opacity),
-        Some(crate::style::layer::LayerPaint::Line(paint)) => {
-            is_zero(&paint.line_opacity) || is_zero(&paint.line_width)
-        }
-        Some(crate::style::layer::LayerPaint::FillExtrusion(paint)) => {
-            is_zero(&paint.fill_extrusion_opacity)
-        }
-        _ => false,
-    }
+    Ok(())
 }
 
 fn has_active_ancestor(
@@ -451,7 +395,28 @@ mod tests {
 
         // Bumping style revision refreshes the cached sets in a single pass.
         style.bump_revision();
-        scratch.sync_style_sets(&style, 12.0);
+        let d_after = scratch.sync_style_sets(&style, 12.0);
         assert!(!scratch.zero_opacity_layers.contains(&"hidden".into()));
+        assert_ne!(d_after, 0);
+    }
+
+    #[test]
+    fn digest_stays_constant_within_zoom_band_and_changes_on_transition() {
+        let style: crate::style::Style = serde_json::from_str(
+            r#"{
+                "version": 8,
+                "sources": { "v": { "type": "vector", "tiles": ["https://example.invalid/{z}/{x}/{y}.pbf"] } },
+                "layers": [
+                    { "id": "roads", "type": "line", "source": "v", "source-layer": "road", "minzoom": 10, "maxzoom": 16 }
+                ]
+            }"#,
+        )
+        .expect("valid style");
+        let mut scratch = super::VectorQueueScratch::default();
+        let d1 = scratch.sync_style_sets(&style, 12.15);
+        let d2 = scratch.sync_style_sets(&style, 13.75);
+        let d3 = scratch.sync_style_sets(&style, 9.5);
+        assert_eq!(d1, d2);
+        assert_ne!(d1, d3);
     }
 }

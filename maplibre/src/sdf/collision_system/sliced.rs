@@ -37,7 +37,11 @@ use crate::{
     tcs::world::World,
 };
 
-const SLICE_BUDGET: Duration = Duration::from_micros(1800);
+const SLICE_BUDGET_SETTLED: Duration = Duration::from_micros(1800);
+#[cfg(target_arch = "wasm32")]
+const SLICE_BUDGET_MOVING: Duration = Duration::from_micros(650);
+#[cfg(not(target_arch = "wasm32"))]
+const SLICE_BUDGET_MOVING: Duration = Duration::from_micros(1800);
 
 type BucketMetadataList = Vec<(WorldTileCoords, Vec<SDFShaderFeatureMetadata>)>;
 
@@ -136,9 +140,9 @@ impl ActiveEpoch {
         }
     }
 
-    /// Steps this epoch within `SLICE_BUDGET` (`1.8 ms`) when `sliced` is `true` (or runs all
-    /// groups in one pass when `sliced` is `false`), returning `true` once all groups have been
-    /// placed and uploaded into `pool`.
+    /// Steps this epoch within `SLICE_BUDGET_MOVING` (`650 µs` on `wasm32` while panning) or
+    /// `SLICE_BUDGET_SETTLED` (`1.8 ms`) when `sliced` is `true` (or runs all groups in one pass
+    /// when `sliced` is `false`), returning `true` once all groups have been placed and uploaded.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn step(
         &mut self,
@@ -152,16 +156,18 @@ impl ActiveEpoch {
         >,
         scratch: &mut upload_diff::MetadataScratchPool,
         sliced: bool,
+        moving_this_frame: bool,
     ) -> bool {
+        let budget = if moving_this_frame {
+            SLICE_BUDGET_MOVING
+        } else {
+            SLICE_BUDGET_SETTLED
+        };
         let started = instant::Instant::now();
         let mut did_work = false;
 
         while self.group_idx < self.groups.len() {
-            if sliced
-                && self.active_group.is_none()
-                && did_work
-                && started.elapsed() >= SLICE_BUDGET
-            {
+            if sliced && self.active_group.is_none() && did_work && started.elapsed() >= budget {
                 return false;
             }
             let group = &mut self.groups[self.group_idx];
@@ -218,7 +224,7 @@ impl ActiveEpoch {
                 paint,
                 group.zoom_limits,
                 (&mut self.boxes, &mut self.placed, history, scratch),
-                || sliced && started.elapsed() >= SLICE_BUDGET,
+                || sliced && started.elapsed() >= budget,
             );
             if !finished {
                 self.active_group = Some(progress);
