@@ -108,8 +108,7 @@ pub fn upload_system(
     if changed {
         super::structures::refresh_gpu(buffer_pool, queue, &spatial, &world.tiles);
     }
-    let allow_cpu_release =
-        cfg!(target_arch = "wasm32") && settings.buffer_pools.vertices >= 1_000_000;
+    let allow_cpu_release = style.terrain.is_none() && settings.buffer_pools.vertices >= 1_000_000;
     let (deferred, needs_refetch) = upload_tessellated_layer_with_uncovered(
         buffer_pool,
         queue,
@@ -185,7 +184,6 @@ fn upload_tessellated_layer(
     )
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
 fn upload_tessellated_layer_with_uncovered(
     buffer_pool: &mut VectorBufferPool,
     queue: &crate::render::upload_queue::UploadQueue,
@@ -198,7 +196,6 @@ fn upload_tessellated_layer_with_uncovered(
     (spatial, paint): (&[super::structures::SpatialBuffer], VectorPaintFrame),
     (budget, allow_cpu_release, dyn_points): (&mut FrameUploads, bool, &mut DynPoints),
 ) -> (bool, bool) {
-    #[cfg(target_arch = "wasm32")]
     let has_dem_source = crate::terrain::source::dem_source(style).is_some();
     let mut feature_meta_scratch = Vec::new();
     let mut needs_refetch = false;
@@ -217,7 +214,6 @@ fn upload_tessellated_layer_with_uncovered(
             continue;
         }
         let mut uploaded = false;
-        #[cfg(target_arch = "wasm32")]
         let mut pending_cpu_releases: Vec<(String, Option<u64>, bool)> = Vec::new();
         for style_layer in &style.layers {
             enum Step {
@@ -227,7 +223,6 @@ fn upload_tessellated_layer_with_uncovered(
                 Commit {
                     replacement: Option<usize>,
                     did_upload: bool,
-                    #[cfg(target_arch = "wasm32")]
                     release_cpu: Option<Option<u64>>,
                 },
             }
@@ -266,7 +261,6 @@ fn upload_tessellated_layer_with_uncovered(
                     Step::Commit {
                         replacement,
                         did_upload: false,
-                        #[cfg(target_arch = "wasm32")]
                         release_cpu: None,
                     }
                 } else if bucket.buffer.buffer.indices.is_empty() {
@@ -281,7 +275,6 @@ fn upload_tessellated_layer_with_uncovered(
                     {
                         Step::Exhausted
                     } else {
-                        #[cfg(target_arch = "wasm32")]
                         let release_cpu = (allow_cpu_release
                             && metadata::can_release_cpu_geometry(
                                 style_layer,
@@ -317,7 +310,6 @@ fn upload_tessellated_layer_with_uncovered(
                                 Step::Commit {
                                     replacement,
                                     did_upload: true,
-                                    #[cfg(target_arch = "wasm32")]
                                     release_cpu,
                                 }
                             }
@@ -330,7 +322,6 @@ fn upload_tessellated_layer_with_uncovered(
             match step {
                 Step::Skip | Step::Saturated => continue,
                 Step::Exhausted => {
-                    #[cfg(target_arch = "wasm32")]
                     metadata::flush_safe_cpu_releases(
                         tiles,
                         buffer_pool,
@@ -343,14 +334,12 @@ fn upload_tessellated_layer_with_uncovered(
                 Step::Commit {
                     replacement,
                     did_upload,
-                    #[cfg(target_arch = "wasm32")]
                     release_cpu,
                 } => {
                     uploaded |= did_upload;
                     if let Some(index) = replacement {
                         super::content::commit_pending_vector(tiles, coords, index);
                     }
-                    #[cfg(target_arch = "wasm32")]
                     if let Some(shared_key) = release_cpu {
                         let release_colors =
                             !crate::style::feature_state::layer_paint_reads_feature_state(
@@ -365,7 +354,6 @@ fn upload_tessellated_layer_with_uncovered(
                 }
             }
         }
-        #[cfg(target_arch = "wasm32")]
         metadata::flush_safe_cpu_releases(tiles, buffer_pool, coords, &pending_cpu_releases);
         if uploaded {
             budget.count_geometry_tile();

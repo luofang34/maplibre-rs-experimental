@@ -194,7 +194,6 @@ pub(crate) fn commit_pending_vector(tiles: &mut Tiles, coords: WorldTileCoords, 
     }
 }
 
-#[cfg(target_arch = "wasm32")]
 pub(crate) fn release_committed_cpu_geometry(
     tiles: &mut Tiles,
     coords: WorldTileCoords,

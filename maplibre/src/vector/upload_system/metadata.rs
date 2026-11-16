@@ -406,7 +406,6 @@ pub(super) fn pattern_runs(
     runs
 }
 
-#[cfg(target_arch = "wasm32")]
 pub(super) fn can_release_cpu_geometry(
     style_layer: &crate::style::layer::StyleLayer,
     bucket: &crate::vector::AvailableVectorLayerBucket,
@@ -454,7 +453,6 @@ pub(super) fn find_shared_fallback_vertices<'a>(
         .map(|sib| sib.buffer.buffer.vertices.as_slice())
 }
 
-#[cfg(target_arch = "wasm32")]
 pub(super) fn flush_safe_cpu_releases(
     tiles: &mut crate::tcs::tiles::Tiles,
     buffer_pool: &crate::vector::VectorBufferPool,

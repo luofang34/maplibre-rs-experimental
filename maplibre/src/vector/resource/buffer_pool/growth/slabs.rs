@@ -59,16 +59,25 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         if req_elems > max_v_page {
             return None;
         }
+        let family_pages = self
+            .vertex_slabs
+            .iter()
+            .filter(|slot| {
+                slot.as_ref()
+                    .is_some_and(|slab| slab.paired_fm.is_some() == needs_paired_fm)
+            })
+            .count();
         #[cfg(target_arch = "wasm32")]
-        let target_v = match self.page_count() {
-            0 => 16 * 1024,
-            1 => 32 * 1024,
-            2 => 64 * 1024,
-            3 => 128 * 1024,
+        let target_v = match family_pages {
+            0 => 8 * 1024,
+            1 => 16 * 1024,
+            2 => 32 * 1024,
+            3 => 64 * 1024,
+            4 => 128 * 1024,
             _ => DEFAULT_PAGE_VERTICES,
         };
         #[cfg(not(target_arch = "wasm32"))]
-        let target_v = match self.page_count() {
+        let target_v = match family_pages {
             0 => 32 * 1024,
             1 => 64 * 1024,
             2 => 128 * 1024,
@@ -159,6 +168,15 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         } else {
             self.index_native_slabs.iter().flatten().count()
         };
+        #[cfg(target_arch = "wasm32")]
+        let target_i = match existing_count {
+            0 => 16 * 1024,
+            1 => 32 * 1024,
+            2 => 64 * 1024,
+            3 => 128 * 1024,
+            _ => DEFAULT_PAGE_INDICES,
+        };
+        #[cfg(not(target_arch = "wasm32"))]
         let target_i = match existing_count {
             0 => 64 * 1024,
             1 => 128 * 1024,

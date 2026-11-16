@@ -37,6 +37,11 @@ pub(crate) struct DrapeRequests(pub(crate) Vec<WorldTileCoords>);
 #[derive(Default)]
 pub(crate) struct DrapePrefetchRequests(pub(crate) Vec<WorldTileCoords>);
 
+/// Exact DEM tile coordinates requested by 3D terrain (`dem_tile_coords` + coarse ancestors),
+/// excluding higher-zoom hillshade/color-relief tiles that share `GpuDemPool`.
+#[derive(Default)]
+pub(crate) struct TerrainWantedDems(pub(crate) HashSet<WorldTileCoords>);
+
 /// Zoom levels between a draped tile and the DEM tile it samples, as in GL JS `deltaZoom`.
 const DELTA_ZOOM: u8 = 1;
 /// Zoom of the coarse ancestor loaded alongside every DEM tile so tile culling knows the
@@ -205,6 +210,7 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
             requested.extend(multi.skipped_wanted_dem.iter().copied());
         }
         tile_retry::want(world, RequestKind::Dem, &requested);
+        world.resources.insert(TerrainWantedDems(requested));
 
         Ok(())
     }

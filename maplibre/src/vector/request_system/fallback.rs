@@ -9,7 +9,7 @@ use crate::{
     render::{
         memory_budget::MemoryBudget,
         projection::view_region_for_projection,
-        tile_view_pattern::{HasTile, DEFAULT_TILE_SIZE},
+        tile_view_pattern::DEFAULT_TILE_SIZE,
         view_state::{ViewState, ViewStatePadding},
     },
     style::Style,
@@ -17,16 +17,14 @@ use crate::{
     vector::upload_system::sources::VectorFallbackTiles,
 };
 
-/// Maximum coarse `z - 3` ancestor cover tiles requested alongside the tight viewport.
-const MAX_COARSE_ANCESTORS: usize = 2;
+/// Maximum coarse `z - 3` ancestor cover tiles requested alongside the tight viewport during motion.
+const MAX_COARSE_ANCESTORS: usize = 1;
 /// Maximum `PrefetchView` pan lookahead tiles requested on `wasm32` during camera motion.
 const MAX_PAN_LOOKAHEAD_TILES: usize = 6;
-/// Maximum 1-ring edge tiles prefetched on `wasm32` after tight viewport tiles are uploaded.
-const MAX_SETTLED_RING_TILES: usize = 8;
 
-/// Computes extra non-terrain fallback/prefetch tiles (`wasm32` coarse cover, pan lookahead, and
-/// post-upload 1-ring edge tiles) and records all non-tight retained canonical coordinates into
-/// [`VectorFallbackTiles`] so `upload_system` uploads and keeps them in `VectorBufferPool`.
+/// Computes extra non-terrain fallback/prefetch tiles (`wasm32` coarse cover and pan lookahead)
+/// and records all non-tight retained canonical coordinates into [`VectorFallbackTiles`] so
+/// `upload_system` uploads and keeps them in `VectorBufferPool`.
 pub(super) fn plan_non_terrain_fallbacks(
     style: &Style,
     view_state: &ViewState,
@@ -34,6 +32,26 @@ pub(super) fn plan_non_terrain_fallbacks(
     (tight_requests, is_multiview): (bool, bool),
     view_tiles: &[WorldTileCoords],
     (level, magnifies): (u8, bool),
+) -> Vec<WorldTileCoords> {
+    plan_non_terrain_fallbacks_for_platform(
+        style,
+        view_state,
+        world,
+        (tight_requests, is_multiview),
+        view_tiles,
+        (level, magnifies),
+        cfg!(target_arch = "wasm32"),
+    )
+}
+
+fn plan_non_terrain_fallbacks_for_platform(
+    style: &Style,
+    view_state: &ViewState,
+    world: &mut World,
+    (tight_requests, is_multiview): (bool, bool),
+    view_tiles: &[WorldTileCoords],
+    (level, magnifies): (u8, bool),
+    is_web: bool,
 ) -> Vec<WorldTileCoords> {
     if style.terrain.is_some() || tight_requests || is_multiview || view_tiles.is_empty() {
         world.resources.insert(VectorFallbackTiles::default());
@@ -54,20 +72,21 @@ pub(super) fn plan_non_terrain_fallbacks(
     let mut extra_requests = Vec::new();
     let mut seen_extra = view_set.clone();
 
-    if cfg!(target_arch = "wasm32") && !view_state.has_external_view() {
+    if is_web && !view_state.has_external_view() {
         let max_zoom = source_max_zoom(style, TileKind::Vector);
         let source_z = max_zoom.map_or(level, |m| level.min(m));
         let moving = crate::render::frame_signals::camera_moved(world, view_state);
-        let in_flight = crate::io::tile_backpressure::tiles_in_flight(world);
-        let tight_ready = !moving
-            && in_flight == 0
-            && all_tight_tiles_uploaded(world, style, view_tiles, level, magnifies);
+        let ahead_view = world
+            .resources
+            .get::<crate::render::xr::PrefetchView>()
+            .and_then(|pv| pv.view_state.clone());
 
-        // 1. Coarse `z - 3` ancestor cover (1..=2 tiles covering 8x8 source tiles each): request
-        // new coarse tiles only after tight viewport boot settles (so cold load never contends for
-        // worker slots), while retaining any coarse ancestor already spawned in `world.tiles`.
+        // 1. Single coarse `z - 3` ancestor cover (covers an 8x8 tile block): never requested on
+        // stationary cold boot (keeping initial boot single-wave with minimal WASM/GPU memory),
+        // requested once motion or lookahead starts, and retained once spawned in `world.tiles`.
         if source_z >= 3 {
             let coarse_z = source_z - 3;
+            let allow_new_coarse = moving || ahead_view.is_some();
             let mut coarse_count = 0;
             for &coords in view_tiles {
                 let Some((wrapped, _)) = coords.wrapped() else {
@@ -83,7 +102,7 @@ pub(super) fn plan_non_terrain_fallbacks(
                     y: wrapped.y >> shift,
                     z: ZoomLevel::new(coarse_z),
                 };
-                if !tight_ready && !tile_spawned(world, ancestor) {
+                if !allow_new_coarse && !tile_spawned(world, ancestor) {
                     continue;
                 }
                 if seen_extra.insert(ancestor) {
@@ -97,10 +116,8 @@ pub(super) fn plan_non_terrain_fallbacks(
         }
 
         // 2. Active pan lookahead (`PrefetchView`) while the camera is moving.
-        let ahead_view = world
-            .resources
-            .get::<crate::render::xr::PrefetchView>()
-            .and_then(|pv| pv.view_state.clone());
+        // Settled 1-ring edge tiles (`MAX_SETTLED_RING_TILES = 0`) are intentionally omitted on web
+        // to eliminate second-wave boot fetches and save +25-80 MiB of off-screen urban tiles.
         if let Some(ahead) = ahead_view {
             if let Ok(Some(region)) = view_region_for_projection(
                 style,
@@ -118,31 +135,6 @@ pub(super) fn plan_non_terrain_fallbacks(
                             break;
                         }
                     }
-                }
-            }
-        }
-
-        // 3. Settled 1-ring edge prefetch once every tight viewport tile is already uploaded in
-        // `VectorBufferPool` (and keep any ring tile already spawned in `world.tiles` retained).
-        if let Ok(Some(loose_region)) = view_region_for_projection(
-            style,
-            view_state,
-            world,
-            visible_level,
-            ViewStatePadding::Loose,
-        ) {
-            let center = viewport_tile_centroid(view_tiles);
-            let mut ring_candidates: Vec<WorldTileCoords> = loose_region
-                .iter()
-                .filter(|coords| {
-                    !seen_extra.contains(coords) && (tight_ready || tile_spawned(world, *coords))
-                })
-                .collect();
-            ring_candidates
-                .sort_by(|a, b| tile_dist_sq(*a, center).total_cmp(&tile_dist_sq(*b, center)));
-            for coords in ring_candidates.into_iter().take(MAX_SETTLED_RING_TILES) {
-                if seen_extra.insert(coords) {
-                    extra_requests.push(coords);
                 }
             }
         }
@@ -194,49 +186,84 @@ pub(super) fn plan_non_terrain_fallbacks(
     extra_requests
 }
 
-fn all_tight_tiles_uploaded(
-    world: &World,
-    style: &Style,
-    view_tiles: &[WorldTileCoords],
-    level: u8,
-    magnifies: bool,
-) -> bool {
-    let max_zoom = source_max_zoom(style, TileKind::Vector);
-    let min_zoom = source_min_zoom(style, TileKind::Vector);
-    let gpu = crate::vector::UploadedVectorGeometry::for_world(world);
-    for &coords in view_tiles {
-        if min_zoom.is_some_and(|m| u8::from(coords.z) < m) {
-            continue;
-        }
-        let Some(target) = OverscaledTileId::for_source(coords, level, max_zoom, magnifies) else {
-            continue;
-        };
-        let canonical = target.canonical;
-        if outside_source_bounds(style, TileKind::Vector, canonical) {
-            continue;
-        }
-        if !gpu.has_tile(canonical, world) {
-            return false;
-        }
-    }
-    true
-}
-
-fn viewport_tile_centroid(tiles: &[WorldTileCoords]) -> (f64, f64) {
-    let count = tiles.len().max(1) as f64;
-    let sum_x: f64 = tiles.iter().map(|t| f64::from(t.x)).sum();
-    let sum_y: f64 = tiles.iter().map(|t| f64::from(t.y)).sum();
-    (sum_x / count, sum_y / count)
-}
-
 fn tile_spawned(world: &World, coords: WorldTileCoords) -> bool {
     coords
         .build_quad_key()
         .is_some_and(|qk| world.tiles.tiles.contains_key(&qk))
 }
 
-fn tile_dist_sq(coords: WorldTileCoords, center: (f64, f64)) -> f64 {
-    let dx = f64::from(coords.x) - center.0;
-    let dy = f64::from(coords.y) - center.1;
-    dx * dx + dy * dy
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        coords::{LatLon, WorldCoords, Zoom},
+        window::PhysicalSize,
+    };
+
+    #[test]
+    fn stationary_web_cold_boot_requests_zero_extra_tiles_and_pan_requests_coarse_cover() {
+        let style: Style = serde_json::from_str(
+            r#"{
+                "version": 8,
+                "sources": { "v": { "type": "vector", "tiles": ["https://example.invalid/{z}/{x}/{y}.pbf"], "maxzoom": 14 } },
+                "layers": []
+            }"#,
+        )
+        .expect("valid style");
+        let mut world = World::default();
+        let size = PhysicalSize::new(800, 600).expect("valid");
+        let zoom = Zoom::new(14.0);
+        let view_state = ViewState::new(
+            size,
+            WorldCoords::from_lat_lon(LatLon::new(52.3702, 4.8952), zoom),
+            zoom,
+            cgmath::Deg(0.0),
+            cgmath::Deg(45.0),
+        );
+        let tile = WorldTileCoords {
+            x: 8411,
+            y: 5386,
+            z: ZoomLevel::new(14),
+        };
+        assert!(!crate::render::frame_signals::camera_moved(
+            &world,
+            &view_state
+        ));
+        let stationary = plan_non_terrain_fallbacks_for_platform(
+            &style,
+            &view_state,
+            &mut world,
+            (false, false),
+            &[tile],
+            (14, false),
+            true,
+        );
+        assert!(stationary.is_empty());
+
+        let ahead = ViewState::new(
+            size,
+            WorldCoords::from_lat_lon(LatLon::new(52.3712, 4.8962), zoom),
+            zoom,
+            cgmath::Deg(0.0),
+            cgmath::Deg(45.0),
+        );
+        world.resources.insert(crate::render::xr::PrefetchView {
+            view_state: Some(ahead),
+            placement: None,
+        });
+        let moving = plan_non_terrain_fallbacks_for_platform(
+            &style,
+            &view_state,
+            &mut world,
+            (false, false),
+            &[tile],
+            (14, false),
+            true,
+        );
+        assert!(moving.contains(&WorldTileCoords {
+            x: 8411 >> 3,
+            y: 5386 >> 3,
+            z: ZoomLevel::new(11),
+        }));
+    }
 }

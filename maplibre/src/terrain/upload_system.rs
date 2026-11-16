@@ -34,31 +34,9 @@ pub fn upload_system(
     );
     world.resources.get_or_init_mut::<FrameUploads>();
     world.resources.get_or_init_mut::<GpuDemPool>();
-    let max_terrain_dem_z = world
+    let wanted_dems = world
         .resources
-        .get::<crate::terrain::TerrainCoverageIndex>()
-        .and_then(|idx| idx.max_rendered_zoom())
-        .map(|surface_z| {
-            let drape_max = world
-                .resources
-                .get::<crate::terrain::request_system::DrapeRequests>()
-                .into_iter()
-                .flat_map(|r| r.0.iter())
-                .chain(
-                    world
-                        .resources
-                        .get::<crate::terrain::request_system::DrapePrefetchRequests>()
-                        .into_iter()
-                        .flat_map(|r| r.0.iter()),
-                )
-                .map(|c| u8::from(c.z))
-                .max()
-                .unwrap_or(surface_z);
-            surface_z
-                .max(drape_max)
-                .saturating_sub(1)
-                .min(dem_spec.maxzoom)
-        });
+        .get::<crate::terrain::request_system::TerrainWantedDems>();
     let Some(Initialized(terrain_resources)) =
         world.resources.get::<Eventually<TerrainResources>>()
     else {
@@ -69,7 +47,7 @@ pub fn upload_system(
         .pyramid_of::<DemTileComponent>()
         .coords_coarse_to_fine()
         .filter_map(|coords| {
-            if max_terrain_dem_z.is_some_and(|max_z| u8::from(coords.z) > max_z) {
+            if wanted_dems.is_some_and(|wanted| !wanted.0.contains(&coords)) {
                 return None;
             }
             let Some(DemTileComponent::Loaded(dem)) =

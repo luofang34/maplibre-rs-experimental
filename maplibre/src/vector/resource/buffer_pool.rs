@@ -240,7 +240,8 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             for entry in &removed {
                 self.free_entry_ranges(entry);
             }
-            self.reclaim_empty_pages_with_queue(1, queue);
+            let keep_spare = usize::from(!cfg!(target_arch = "wasm32"));
+            self.reclaim_empty_pages_with_queue(keep_spare, queue);
             self.revision = self.revision.wrapping_add(1);
         }
     }
@@ -255,7 +256,8 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             for entry in &removed {
                 self.free_entry_ranges(entry);
             }
-            self.reclaim_empty_pages(1);
+            let keep_spare = usize::from(!cfg!(target_arch = "wasm32"));
+            self.reclaim_empty_pages(keep_spare);
             self.revision = self.revision.wrapping_add(1);
         }
     }

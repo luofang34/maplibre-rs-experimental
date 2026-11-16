@@ -171,13 +171,10 @@ fn upload_symbol_layer(
             };
             prepare_atlas(textures, gpu, layer, style_layer, zoom);
             if let Some(index) = replacement {
-                #[allow(unused_mut)]
                 let mut committed = pending.symbols.remove(index);
-                #[cfg(target_arch = "wasm32")]
                 committed.buffer.release_uploaded_symbol_vertices();
                 crate::vector::content::commit_symbols(layers, committed);
             } else if did_upload {
-                #[cfg(target_arch = "wasm32")]
                 if let Some(committed) = layers
                     .layers
                     .iter_mut()

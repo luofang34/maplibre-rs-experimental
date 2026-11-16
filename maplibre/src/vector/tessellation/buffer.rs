@@ -103,7 +103,6 @@ impl<I> OverAlignedVertexBuffer<crate::render::shaders::ShaderSymbolVertex, I> {
 
     /// Compacts per-vertex icon/text kind flags into 1 bit per vertex and frees CPU vertex storage
     /// once `SymbolBufferPool` holds the GPU copy.
-    #[cfg(any(target_arch = "wasm32", all(test, feature = "headless")))]
     pub(crate) fn release_uploaded_symbol_vertices(&mut self) {
         if self.buffer.vertices.is_empty() {
             return;
