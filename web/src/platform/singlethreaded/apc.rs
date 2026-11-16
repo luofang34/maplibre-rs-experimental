@@ -3,35 +3,42 @@
 // A failure here must reach the map as a typed error: a panic on the render thread stops it.
 #![deny(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
+#[cfg(any(test, feature = "renderer"))]
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
     sync::Arc,
 };
 
+#[cfg(any(test, feature = "renderer"))]
 use maplibre::{
     environment::{OffscreenKernel, OffscreenKernelConfig},
     io::{
-        apc::{AsyncProcedure, AsyncProcedureCall, CallError, Input, Message},
+        apc::{AsyncProcedure, AsyncProcedureCall, CallError, Input, Message, ProcedureTag},
         scheduler::ScheduleError,
     },
 };
+#[cfg(any(test, feature = "renderer"))]
 use wasm_bindgen::JsValue;
 
+#[cfg(any(test, feature = "renderer"))]
+pub use self::raw_queue::PassingReceiveIter;
+pub use self::tag::WebMessageTag;
 #[cfg(test)]
 pub(crate) use self::wire::{encode_call_finished, prepare_message};
+pub(crate) use self::wire::{post_call_finished, set_worker_reply_port};
+#[cfg(any(test, feature = "renderer"))]
 use self::{assignments::Assignments, style_revisions::StyleRevisions};
-pub use self::{raw_queue::PassingReceiveIter, tag::WebMessageTag, wire::PassingContext};
+#[cfg(any(test, feature = "renderer"))]
 pub(crate) use self::{
     raw_queue::QueuedMessage,
-    wire::{
-        decode_call_finished, decode_message, post_call_finished, set_worker_reply_port,
-        TrackedPayloadError,
-    },
+    wire::{decode_call_finished, decode_message, TrackedPayloadError},
 };
+#[cfg(any(test, feature = "renderer"))]
 use crate::{error::WebError, platform::singlethreaded::UsedContext};
 
 /// What the workers sent since the last receive.
+#[cfg(any(test, feature = "renderer"))]
 #[derive(Default)]
 pub struct Received {
     /// Pre-decoded results (used by unit tests), in delivery order.
@@ -45,8 +52,10 @@ pub struct Received {
     pub(crate) waker: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
+#[cfg(any(test, feature = "renderer"))]
 pub type ReceivedType = RefCell<Received>;
 
+#[cfg(any(test, feature = "renderer"))]
 pub struct PassingAsyncProcedureCall {
     workers: Vec<recycle::WorkerEndpoint>,
     listeners: Vec<recycle::WorkerMessageClosure>,
@@ -63,6 +72,7 @@ pub struct PassingAsyncProcedureCall {
     styles: RefCell<StyleRevisions>,
 }
 
+#[cfg(any(test, feature = "renderer"))]
 impl PassingAsyncProcedureCall {
     pub fn new(
         new_worker: js_sys::Function,
@@ -97,9 +107,60 @@ impl PassingAsyncProcedureCall {
             .iter()
             .try_for_each(|worker| worker.post_message(&message).map_err(WebError::from))
     }
+
+    fn dispatch_tagged(&self, tag: ProcedureTag, input: Input) -> Result<(), CallError> {
+        let attempt = input.attempt;
+        if self.workers.is_empty() {
+            return Err(CallError::Schedule(ScheduleError::NoWorkers));
+        }
+        // The input leaves its style out; the workers hold it, sent once per revision.
+        let style_revision = self
+            .styles
+            .borrow_mut()
+            .revision(&input.style, |revision, style| {
+                self.post_style_to_workers(revision, style)
+            })
+            .map_err(|error| CallError::Serialize(Box::new(error)))?;
+        let input = serde_json::to_string(&input).map_err(|e| CallError::Serialize(Box::new(e)))?;
+
+        // The worker reads the attempt without decoding the input, so a cancel can overtake
+        // a call that waits for the worker to start.
+        let message = worker_message(
+            "call",
+            &[
+                ("procedure_tag", &JsValue::from(tag.as_u8())),
+                ("attempt", &JsValue::from(attempt)),
+                ("style_revision", &JsValue::from(style_revision)),
+                ("input", &JsValue::from(input)),
+            ],
+        )
+        .map_err(|error| CallError::Serialize(Box::new(error)))?;
+
+        if let Ok(mut received) = self.received.try_borrow_mut() {
+            let mut assignments = self.assignments.borrow_mut();
+            for finished_attempt in received.finished.drain(..) {
+                assignments.finished(finished_attempt);
+            }
+        }
+        let index = self
+            .assignments
+            .borrow_mut()
+            .least_loaded_worker(self.workers.len());
+        let worker = self
+            .workers
+            .get(index)
+            .ok_or(CallError::Schedule(ScheduleError::NoWorkers))?;
+
+        worker.post_message(&message).map_err(|error| {
+            CallError::Schedule(ScheduleError::Scheduling(Box::new(WebError::from(error))))
+        })?;
+        self.assignments.borrow_mut().assign(attempt, index);
+        Ok(())
+    }
 }
 
 /// Builds a worker message `{ type: kind, <key>: value, ... }`.
+#[cfg(any(test, feature = "renderer"))]
 pub(super) fn worker_message(
     kind: &str,
     fields: &[(&str, &JsValue)],
@@ -114,6 +175,7 @@ pub(super) fn worker_message(
     js_sys::Object::from_entries(&entries).map_err(WebError::from)
 }
 
+#[cfg(any(test, feature = "renderer"))]
 impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
     type Context = UsedContext;
     type ReceiveIterator<F: FnMut(&Message) -> bool> = PassingReceiveIter;
@@ -191,57 +253,29 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
 
     fn call(
         &self,
-        input: Input,
-        procedure: AsyncProcedure<K, UsedContext>,
+        _input: Input,
+        _procedure: AsyncProcedure<K, UsedContext>,
     ) -> Result<(), CallError> {
-        let procedure_ptr = procedure as *mut AsyncProcedure<K, UsedContext>;
-        let attempt = input.attempt;
-        if self.workers.is_empty() {
-            return Err(CallError::Schedule(ScheduleError::NoWorkers));
-        }
-        // The input leaves its style out; the workers hold it, sent once per revision.
-        let style_revision = self
-            .styles
-            .borrow_mut()
-            .revision(&input.style, |revision, style| {
-                self.post_style_to_workers(revision, style)
-            })
-            .map_err(|error| CallError::Serialize(Box::new(error)))?;
-        let input = serde_json::to_string(&input).map_err(|e| CallError::Serialize(Box::new(e)))?;
+        Err(CallError::Schedule(ScheduleError::Scheduling(Box::new(
+            WebError::InvalidMessage,
+        ))))
+    }
 
-        // The worker reads the attempt without decoding the input, so a cancel can overtake
-        // a call that waits for the worker to start.
-        let message = worker_message(
-            "call",
-            &[
-                ("procedure_ptr", &JsValue::from(procedure_ptr)),
-                ("attempt", &JsValue::from(attempt)),
-                ("style_revision", &JsValue::from(style_revision)),
-                ("input", &JsValue::from(input)),
-            ],
-        )
-        .map_err(|error| CallError::Serialize(Box::new(error)))?;
+    fn call_tagged(
+        &self,
+        tag: ProcedureTag,
+        input: Input,
+        _procedure: AsyncProcedure<K, UsedContext>,
+    ) -> Result<(), CallError> {
+        self.dispatch_tagged(tag, input)
+    }
 
-        if let Ok(mut received) = self.received.try_borrow_mut() {
-            let mut assignments = self.assignments.borrow_mut();
-            for finished_attempt in received.finished.drain(..) {
-                assignments.finished(finished_attempt);
-            }
-        }
-        let index = self
-            .assignments
-            .borrow_mut()
-            .least_loaded_worker(self.workers.len());
-        let worker = self
-            .workers
-            .get(index)
-            .ok_or(CallError::Schedule(ScheduleError::NoWorkers))?;
+    fn supports_prewarm(&self) -> bool {
+        true
+    }
 
-        worker.post_message(&message).map_err(|error| {
-            CallError::Schedule(ScheduleError::Scheduling(Box::new(WebError::from(error))))
-        })?;
-        self.assignments.borrow_mut().assign(attempt, index);
-        Ok(())
+    fn prewarm_call(&self, tag: ProcedureTag, input: Input) -> Result<(), CallError> {
+        self.dispatch_tagged(tag, input)
     }
 
     fn cancel(&self, attempt: u64) {
@@ -288,6 +322,7 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
     }
 }
 
+#[cfg(any(test, feature = "renderer"))]
 impl Drop for PassingAsyncProcedureCall {
     fn drop(&mut self) {
         let mut busy = vec![false; self.workers.len()];
@@ -309,11 +344,15 @@ impl Drop for PassingAsyncProcedureCall {
     }
 }
 
+#[cfg(any(test, feature = "renderer"))]
 mod assignments;
+#[cfg(any(test, feature = "renderer"))]
 mod raw_queue;
+#[cfg(any(test, feature = "renderer"))]
 mod recycle;
+#[cfg(any(test, feature = "renderer"))]
 mod style_revisions;
-mod tag;
+pub mod tag;
 #[cfg(test)]
 mod tests;
 pub(crate) mod wire;

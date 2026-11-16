@@ -41,6 +41,9 @@ pub enum WebError {
     /// A call names a style revision the tile worker no longer keeps.
     #[error("the tile worker has no style revision {0}")]
     StyleRevisionMissing(u64),
+    /// The worker's `procedure_tag` byte was unrecognized.
+    #[error("unknown worker procedure tag {0}")]
+    UnknownProcedureTag(u8),
     /// A worker message arrived while the map was reading earlier ones.
     #[error("worker results are being received; the message cannot be stored")]
     ReceivedBusy,
@@ -77,23 +80,30 @@ pub enum JSError {
     Call(#[from] CallError),
     #[error(transparent)]
     Web(#[from] WebError),
+    #[cfg(feature = "renderer")]
     #[error("invalid map style: {0}")]
     InvalidStyle(#[source] serde_json::Error),
+    #[cfg(feature = "renderer")]
     #[error(transparent)]
     Map(#[from] maplibre::map::MapError),
+    #[cfg(feature = "renderer")]
     #[error(transparent)]
     Host(#[from] maplibre_winit::WinitHostError),
+    #[cfg(feature = "renderer")]
     #[error("event loop closed before map initialization completed")]
     ClosedBeforeReady,
     /// The map stopped before it applied a command.
+    #[cfg(feature = "renderer")]
     #[error(transparent)]
     Closed(#[from] maplibre::map::handle::MapClosed),
     /// A method of the map was called with an argument it cannot read.
+    #[cfg(feature = "renderer")]
     #[error(transparent)]
     Argument(#[from] ArgumentError),
 }
 
 /// Why an argument passed from JavaScript, or a result returned to it, could not cross.
+#[cfg(feature = "renderer")]
 #[derive(Error, Debug)]
 pub enum ArgumentError {
     /// The value has no JSON form, such as a function or a cyclic object.

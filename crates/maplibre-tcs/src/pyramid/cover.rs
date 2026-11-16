@@ -1,9 +1,8 @@
 //! Ancestor bit-jumping and contiguous Morton subtree cover queries on [`TilePyramid`].
 
-use crate::{
-    coords::{WorldTileCoords, ZoomLevel, MAX_ZOOM},
-    tcs::pyramid::{canonical_key, morton_xy, TilePyramid},
-};
+use maplibre_coords::{WorldTileCoords, ZoomLevel, MAX_ZOOM};
+
+use crate::pyramid::{canonical_key, morton_xy, TilePyramid};
 
 /// Covering tiles resolved from a [`TilePyramid`] for a target coordinate.
 #[derive(Clone, Debug, PartialEq, Eq)]

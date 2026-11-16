@@ -115,6 +115,14 @@ impl TileComponent for TileRequestRetries {}
 #[derive(Clone, Default)]
 pub(crate) struct RequestAttempts(Rc<Cell<u64>>);
 
+impl RequestAttempts {
+    pub(crate) fn next(&self) -> u64 {
+        let next = self.0.get().wrapping_add(1);
+        self.0.set(next);
+        next
+    }
+}
+
 /// Whether a frame has request work: a request in flight, whose result the next frame applies,
 /// or a retry whose deadline has passed, which the next frame issues.
 pub(crate) fn needs_frame(world: &World) -> bool {

@@ -5,22 +5,13 @@
 use std::ops::{Deref, DerefMut};
 
 pub use fps_meter::FPSMeter;
+pub use maplibre_coords::SignificantlyDifferent;
 
 mod fps_meter;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod grid;
 pub mod label;
 pub mod math;
-
-/// Compares values using a caller-supplied tolerance rather than exact equality.
-pub trait SignificantlyDifferent<Rhs: ?Sized = Self> {
-    /// Tolerance type; its units and comparison semantics are defined by the implementation.
-    type Epsilon;
-
-    /// Whether the difference between these values exceeds the supplied tolerance.
-    #[must_use]
-    fn ne(&self, other: &Rhs, epsilon: Self::Epsilon) -> bool;
-}
 
 /// Tracks a mutable value against an explicitly saved reference snapshot.
 /// Mutating through `DerefMut` does not update the reference; before the first snapshot,
@@ -80,5 +71,27 @@ impl<T> Deref for ChangeObserver<T> {
 impl<T> DerefMut for ChangeObserver<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.inner
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ChangeObserver;
+    use crate::coords::Zoom;
+
+    #[test]
+    fn zoom_observer_tracks_changes_since_its_reference() {
+        let mut zoom = ChangeObserver::new(Zoom::new(4.0));
+        assert!(zoom.did_change(0.05));
+        zoom.update_reference();
+        assert!(!zoom.did_change(0.05));
+        *zoom = Zoom::new(4.025);
+        assert!(!zoom.did_change(0.05));
+        *zoom = Zoom::new(4.125);
+        assert!(zoom.did_change(0.05));
+        zoom.update_reference();
+        assert!(!zoom.did_change(0.05));
+        *zoom = Zoom::new(4.0);
+        assert!(zoom.did_change(0.05));
     }
 }

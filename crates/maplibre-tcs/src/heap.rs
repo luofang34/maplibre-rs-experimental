@@ -1,7 +1,7 @@
 //! Per-world heap byte sampler so frame memory growth can be charged to individual systems
-//! without global mutable state in `maplibre`.
+//! without global mutable state.
 
-use crate::tcs::resources::Resources;
+use crate::resources::Resources;
 
 /// Resource backed by a host-supplied function returning the process's current live heap bytes.
 ///
@@ -33,7 +33,7 @@ pub fn live_bytes(resources: &Resources) -> isize {
 #[cfg(test)]
 mod tests {
     use super::{live_bytes, HeapSampler};
-    use crate::tcs::resources::Resources;
+    use crate::resources::Resources;
 
     #[test]
     fn live_bytes_defaults_to_zero_until_a_sampler_resource_is_installed() {

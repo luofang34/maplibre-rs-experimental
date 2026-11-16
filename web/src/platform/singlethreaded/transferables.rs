@@ -174,6 +174,7 @@ impl FlatBufferTransferable {
         }
     }
 
+    #[cfg(any(test, feature = "renderer"))]
     pub(crate) fn from_js_layer_tessellated(
         buffer: &js_sys::ArrayBuffer,
         offset: u32,

@@ -85,6 +85,8 @@ web-sys = { workspace = true, features = [
 ] }
 
 [dependencies]
+maplibre-coords = { path = "../crates/maplibre-coords", version = "0.1.0" }
+maplibre-tcs = { path = "../crates/maplibre-tcs", version = "0.1.0" }
 unicode-bidi = "0.3"
 async-trait.workspace = true
 futures.workspace = true

@@ -2,33 +2,33 @@
 
 // A panic in a worker entry takes the worker's module down with it; return typed errors.
 #![deny(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-// Worker FFI entrypoints accept raw pointer handles marshalled across `postMessage`.
-#![allow(unsafe_code)]
 
-use std::{cell::RefCell, mem, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
 use futures::future::{Abortable, Aborted};
 use maplibre::{
     benchmarking::io::{
-        apc::{AsyncProcedure, Input},
+        apc::{AsyncProcedure, Input, ProcedureTag},
         source_client::{HttpSourceClient, SourceClient},
     },
     environment::{OffscreenKernel, OffscreenKernelConfig},
     io::apc::CallError,
 };
-use wasm_bindgen::prelude::*;
+#[cfg(feature = "renderer")]
+use wasm_bindgen::prelude::wasm_bindgen;
+use wasm_bindgen::{JsCast, JsValue};
 use web_sys::DedicatedWorkerGlobalScope;
 
 use self::{running_calls::RunningCalls, worker_styles::WorkerStyles};
+#[cfg(any(test, feature = "renderer"))]
+use crate::platform::singlethreaded::apc::{decode_call_finished, ReceivedType, WebMessageTag};
 use crate::{
     error::{JSError, WebError},
     platform::{
+        self,
         http_client::web_http_client,
         singlethreaded::{
-            apc::{
-                decode_call_finished, post_call_finished, set_worker_reply_port, QueuedMessage,
-                ReceivedType, WebMessageTag,
-            },
+            apc::{post_call_finished, set_worker_reply_port},
             PassingContext, UsedContext,
         },
         UsedOffscreenKernelEnvironment,
@@ -53,7 +53,7 @@ fn kernel_config() -> OffscreenKernelConfig {
     config
 }
 
-#[wasm_bindgen]
+/// Applies the map's serialized [`OffscreenKernelConfig`] inside a tile worker.
 pub fn set_kernel_config(config: String) -> Result<(), JSError> {
     let config = serde_json::from_str(&config).map_err(WebError::KernelConfigDecoding)?;
     CONFIG.with(|slot| {
@@ -64,27 +64,53 @@ pub fn set_kernel_config(config: String) -> Result<(), JSError> {
 
 /// Binds a direct `MessagePort` so this tile worker posts replies straight to an `OffscreenCanvas`
 /// render worker instead of the UI main thread.
-#[wasm_bindgen]
 pub fn bind_worker_reply_port(port: Option<web_sys::MessagePort>) {
     set_worker_reply_port(port);
 }
 
-/// The tile calls one worker runs, so the main thread can stop a call it gave up on.
-#[wasm_bindgen]
+fn resolve_procedure(
+    procedure_tag: u8,
+) -> Result<AsyncProcedure<UsedOffscreenKernelEnvironment, UsedContext>, WebError> {
+    match ProcedureTag::from_u8(procedure_tag) {
+        Some(ProcedureTag::FetchVector) => Ok(maplibre::vector::fetch_vector_apc::<
+            UsedOffscreenKernelEnvironment,
+            platform::UsedVectorTransferables,
+            _,
+        >),
+        Some(ProcedureTag::FetchRaster) => Ok(maplibre::raster::fetch_raster_apc::<
+            UsedOffscreenKernelEnvironment,
+            platform::UsedRasterTransferables,
+            _,
+        >),
+        Some(ProcedureTag::FetchDem) => Ok(maplibre::terrain::fetch_dem_apc::<
+            UsedOffscreenKernelEnvironment,
+            platform::UsedDemTransferables,
+            _,
+        >),
+        None => {
+            #[cfg(test)]
+            if procedure_tag == 255 {
+                return Ok(tests::never_finishes);
+            }
+            Err(WebError::UnknownProcedureTag(procedure_tag))
+        }
+    }
+}
+
+/// The tile calls one worker runs, so the host can stop a call it gave up on.
 #[derive(Default)]
 pub struct TileWorkerCalls {
     running: Rc<RefCell<RunningCalls>>,
     styles: WorkerStyles,
 }
 
-#[wasm_bindgen]
 impl TileWorkerCalls {
-    #[wasm_bindgen(constructor)]
+    /// Creates an empty call tracker for a single-threaded tile worker.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Keeps the style the main thread sent as `revision` for the calls that name it.
+    /// Keeps the style sent by the host as `revision` for subsequent tile calls naming it.
     pub fn set_style(&mut self, revision: u64, style: String) -> Result<(), JSError> {
         let style: maplibre::style::Style =
             serde_json::from_str(&style).map_err(WebError::StyleDecoding)?;
@@ -96,18 +122,15 @@ impl TileWorkerCalls {
         Ok(())
     }
 
-    /// Starts a call with the style kept as `style_revision` and sends its results back to the
-    /// main thread. The call is registered before this returns, so a cancel that arrives later
-    /// stops it; the promise settles when the call ends, whether it finished or was stopped.
+    /// Starts a call by wire [`ProcedureTag`] with the style kept as `style_revision` and sends
+    /// its results back to the host.
     pub fn process(
         &self,
-        procedure_ptr: u32,
+        procedure_tag: u8,
         style_revision: u64,
         input: String,
     ) -> Result<js_sys::Promise, JSError> {
-        // SAFETY: the main thread sends the address of an `AsyncProcedure` of this same module.
-        let procedure: AsyncProcedure<UsedOffscreenKernelEnvironment, UsedContext> =
-            unsafe { mem::transmute(procedure_ptr) };
+        let procedure = resolve_procedure(procedure_tag)?;
 
         let mut input = serde_json::from_str::<Input>(&input).map_err(|e| {
             log::error!("DeserializeInput error: {e}");
@@ -182,7 +205,7 @@ impl TileWorkerCalls {
         self.running.borrow_mut().cancel(attempt)
     }
 
-    /// Releases main-thread assignment tracking when a call failed before starting its future.
+    /// Releases host assignment tracking when a call failed before starting its future.
     pub fn finish_failed(&self, attempt: u64) {
         self.running.borrow_mut().finish(attempt);
         let _ = post_call_finished(attempt);
@@ -190,6 +213,7 @@ impl TileWorkerCalls {
 }
 
 /// Delivers a `[tag, ArrayBuffer]` message to `received` without leaking raw `Rc` pointers.
+#[cfg(any(test, feature = "renderer"))]
 pub(crate) fn deliver_received_data(
     received: &ReceivedType,
     tag: u32,
@@ -212,7 +236,11 @@ pub(crate) fn deliver_received_data(
             None
         } else {
             let was_empty = received.messages.is_empty() && received.queued.is_empty();
-            QueuedMessage::push_from_wire(&mut received.queued, tag, buffer)?;
+            crate::platform::singlethreaded::apc::QueuedMessage::push_from_wire(
+                &mut received.queued,
+                tag,
+                buffer,
+            )?;
             if was_empty && !received.queued.is_empty() {
                 received.waker.clone()
             } else {
@@ -229,7 +257,9 @@ pub(crate) fn deliver_received_data(
 
 /// Entry point invoked by the main thread. Receives data on the main thread and makes it available
 /// to the renderer.
+#[cfg(feature = "renderer")]
 #[wasm_bindgen]
+#[allow(unsafe_code)]
 pub fn singlethreaded_receive_data(
     received_ptr: *const ReceivedType,
     tag: u32,

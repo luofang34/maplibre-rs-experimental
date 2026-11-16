@@ -9,7 +9,7 @@ use crate::{
     coords::WorldTileCoords,
     environment::Environment,
     io::{
-        apc::{AsyncProcedureCall, Input},
+        apc::{AsyncProcedureCall, Input, ProcedureTag},
         frame_style::FrameStyle,
         tile_backpressure::request_budget,
         tile_retry::{self, RequestKind},
@@ -173,7 +173,8 @@ impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
         input.only_sources = only_sources;
         self.kernel
             .apc()
-            .call(
+            .call_tagged(
+                ProcedureTag::FetchRaster,
                 input,
                 fetch_raster_apc::<E::OffscreenKernelEnvironment, T, _>,
             )

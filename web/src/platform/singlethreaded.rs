@@ -1,4 +1,4 @@
-use crate::platform::{http_client::WebHttpClient, singlethreaded::apc::PassingContext};
+use crate::platform::{http_client::WebHttpClient, singlethreaded::apc::wire::PassingContext};
 
 pub mod apc;
 pub mod image_provider;

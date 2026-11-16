@@ -101,9 +101,9 @@ jobs:
       - name: Sync freshly built WASM demo into book
         shell: bash
         run: |
-          rm -f artifacts/docs/book/examples/demo/maplibre_bg-*.wasm
-          cp artifacts/demo-assets/index-*.js artifacts/docs/book/examples/demo/index.js
-          cp artifacts/demo-assets/maplibre_bg-*.wasm artifacts/docs/book/examples/demo/
+          rm -f artifacts/docs/book/examples/demo/*.wasm artifacts/docs/book/examples/demo/*.js
+          cp artifacts/demo-assets/* artifacts/docs/book/examples/demo/
+          mv artifacts/docs/book/examples/demo/index-*.js artifacts/docs/book/examples/demo/index.js
           rm -rf artifacts/demo-assets
       - name: Prepare root redirect and docs aliases
         shell: bash

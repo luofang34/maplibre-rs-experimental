@@ -135,3 +135,10 @@ async fn unsupported_device_limits_return_a_device_request_error() {
     .await;
     assert!(matches!(result, Err(super::RenderError::RequestDevice(_))));
 }
+
+#[test]
+fn stencil_constants_match_coord_range() {
+    assert_eq!(super::EMPTY_STENCIL_REFERENCE, 0x7f);
+    assert_eq!(super::STENCIL_MARK, 0x80);
+    assert_eq!(super::EMPTY_STENCIL_REFERENCE & super::STENCIL_MARK, 0);
+}

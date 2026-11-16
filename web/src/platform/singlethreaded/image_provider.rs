@@ -13,7 +13,7 @@ use maplibre::{
     },
     style::StyleImage,
 };
-use wasm_bindgen::{prelude::*, JsCast};
+use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
 /// A JavaScript function `(id, pixelRatio) => image | Promise<image>`.
@@ -138,7 +138,6 @@ fn image(value: &JsValue, pixel_ratio: f32) -> Result<ImageResolution, ImageProv
 /// Makes `draw` the provider of the images named `namespace:…` in this copy of the module:
 /// in a tile worker of a single-threaded build, the one that lays labels out. `generation`
 /// names the resources the images come from; images made under another are not reused.
-#[wasm_bindgen]
 pub fn register_image_provider(namespace: &str, generation: &str, draw: Function) {
     crate::platform::image_providers().register(
         namespace,

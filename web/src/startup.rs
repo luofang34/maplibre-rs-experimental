@@ -1,3 +1,4 @@
+#[cfg(feature = "renderer")]
 use wasm_bindgen::prelude::*;
 
 #[cfg(feature = "trace")]
@@ -14,7 +15,7 @@ fn enable_tracing() {
     .ok();
 }
 
-#[wasm_bindgen(start)]
+#[cfg_attr(feature = "renderer", wasm_bindgen(start))]
 /// Installs logging and panic reporting for each wasm instance.
 pub fn wasm_bindgen_start() {
     #[cfg(debug_assertions)]

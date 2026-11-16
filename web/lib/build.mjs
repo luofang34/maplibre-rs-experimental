@@ -4,7 +4,7 @@ import inlineWorker from 'esbuild-plugin-inline-worker';
 import yargs from "yargs";
 import process from "process";
 import {spawnSync} from "child_process"
-import {closeSync, openSync, readFileSync, renameSync, rmSync, writeFileSync} from "fs";
+import {existsSync, closeSync, openSync, readFileSync, renameSync, rmSync, writeFileSync} from "fs";
 import {dirname} from "path";
 import {fileURLToPath} from "url";
 
@@ -208,11 +208,61 @@ const wasmPack = () => {
         throw new Error("Failed to execute wasm-bindgen")
     }
 
+    if (!multithreaded) {
+        let workerCargo = spawnTool('cargo', [
+            "--config", singlethreaded_config,
+            "build",
+            "-p", "web-tile-worker", "--lib",
+            "--target", "wasm32-unknown-unknown",
+            "--profile", profile,
+            ...(release
+                ? ["-Z", "build-std=std,panic_abort", "-Z", "build-std-features=optimize_for_size"]
+                : []),
+        ]);
+        if (workerCargo.status !== 0) {
+            throw new Error("Failed to execute cargo build for web-tile-worker")
+        }
+
+        let workerBindgen = spawnTool('wasm-bindgen', [
+            `${getProjectDirectory()}/target/wasm32-unknown-unknown/${profile}/web_tile_worker.wasm`,
+            "--out-name", "maplibre_tile_worker",
+            "--out-dir", outDirectory,
+            "--typescript",
+            "--target", "web",
+            ...(release ? [] : ["--debug"]),
+        ]);
+        if (workerBindgen.status !== 0) {
+            throw new Error("Failed to execute wasm-bindgen for web-tile-worker")
+        }
+
+        const workerJs = readFileSync(`${outDirectory}/maplibre_tile_worker.js`, 'utf8');
+        if (workerJs.includes('GPUDevice') || workerJs.includes('GPURenderPassEncoder')) {
+            throw new Error('Render-free web-tile-worker pulled WebGPU symbols into maplibre_tile_worker.js');
+        }
+        const mainJs = readFileSync(`${outDirectory}/maplibre.js`, 'utf8');
+        if (mainJs.includes('TileWorkerCalls')) {
+            throw new Error('Single-threaded main maplibre.js unexpectedly exports TileWorkerCalls');
+        }
+    } else if (!existsSync(`${outDirectory}/maplibre_tile_worker.js`)) {
+        writeFileSync(
+            `${outDirectory}/maplibre_tile_worker.js`,
+            'export default async function init() { return {}; }\nexport function register_image_provider() {}\nexport function bind_worker_reply_port() {}\nexport function set_kernel_config() {}\nexport class TileWorkerCalls {}\n',
+        );
+        writeFileSync(
+            `${outDirectory}/maplibre_tile_worker.d.ts`,
+            'export type InitOutput = {};\nexport default function init(input?: unknown): Promise<InitOutput>;\nexport function register_image_provider(...args: unknown[]): void;\nexport function bind_worker_reply_port(...args: unknown[]): void;\nexport function set_kernel_config(...args: unknown[]): void;\nexport class TileWorkerCalls {}\n',
+        );
+        if (!existsSync(`${outDirectory}/maplibre_tile_worker_bg.wasm`)) {
+            writeFileSync(`${outDirectory}/maplibre_tile_worker_bg.wasm`, Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]));
+        }
+    }
+
     const memoryTests = spawnTool('node', [
         '--test',
         'test/wasm-instance.test.mjs',
         'test/webgpu-compat.test.mjs',
         'test/offscreen-coalesce.test.mjs',
+        'test/webgl-fallback.test.mjs',
     ]);
     if (memoryTests.status !== 0) {
         throw new Error('Wasm instance initialization tests failed');
@@ -220,11 +270,11 @@ const wasmPack = () => {
 
     if (release) {
         console.log("Running wasm-opt")
-        const tmpWasm = `${outDirectory}/maplibre_bg.wasm.${process.pid}.tmp`;
-        let wasmOpt = spawnTool('npm', ["exec",
+        const optArgs = (inputPath, tmpPath) => [
+            "exec",
             "wasm-opt", "--",
-            `${outDirectory}/maplibre_bg.wasm`,
-            "-o", tmpWasm,
+            inputPath,
+            "-o", tmpPath,
             "-Oz",
             "--strip-debug",
             "--strip-producers",
@@ -233,19 +283,35 @@ const wasmPack = () => {
             "--enable-nontrapping-float-to-int",
             "--enable-sign-ext",
             ...(multithreaded ? ["--enable-threads"] : []),
-        ]);
+        ];
 
+        const tmpWasm = `${outDirectory}/maplibre_bg.wasm.${process.pid}.tmp`;
+        let wasmOpt = spawnTool('npm', optArgs(`${outDirectory}/maplibre_bg.wasm`, tmpWasm));
         if (wasmOpt.status !== 0) {
             rmSync(tmpWasm, {force: true});
             throw new Error("Failed to execute wasm-opt")
         }
         renameSync(tmpWasm, `${outDirectory}/maplibre_bg.wasm`);
 
+        if (!multithreaded) {
+            const tmpWorkerWasm = `${outDirectory}/maplibre_tile_worker_bg.wasm.${process.pid}.tmp`;
+            let workerOpt = spawnTool(
+                'npm',
+                optArgs(`${outDirectory}/maplibre_tile_worker_bg.wasm`, tmpWorkerWasm),
+            );
+            if (workerOpt.status !== 0) {
+                rmSync(tmpWorkerWasm, {force: true});
+                throw new Error("Failed to execute wasm-opt for maplibre_tile_worker_bg.wasm")
+            }
+            renameSync(tmpWorkerWasm, `${outDirectory}/maplibre_tile_worker_bg.wasm`);
+        }
+
         const postOptTests = spawnTool('node', [
             '--test',
             'test/wasm-instance.test.mjs',
             'test/webgpu-compat.test.mjs',
             'test/offscreen-coalesce.test.mjs',
+            'test/webgl-fallback.test.mjs',
         ]);
         if (postOptTests.status !== 0) {
             throw new Error('Post-wasm-opt initialization tests failed');

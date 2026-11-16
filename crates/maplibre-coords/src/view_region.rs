@@ -2,10 +2,7 @@
 
 use std::collections::HashSet;
 
-use crate::{
-    coords::{WorldCoords, WorldTileCoords, Zoom, ZoomLevel},
-    util::math::Aabb2,
-};
+use crate::{bounds::Aabb2, WorldCoords, WorldTileCoords, Zoom, ZoomLevel};
 
 /// Defines a bounding box on a tiled map with a [`ZoomLevel`] and a padding.
 #[derive(Clone, Debug)]

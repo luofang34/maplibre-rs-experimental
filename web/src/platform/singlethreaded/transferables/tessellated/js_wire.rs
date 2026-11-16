@@ -6,15 +6,15 @@
 #![deny(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
 use bytemuck::Zeroable;
+#[cfg(any(test, feature = "renderer"))]
 use js_sys::{ArrayBuffer, Uint8Array};
+#[cfg(any(test, feature = "renderer"))]
+use maplibre::vector::feature_paint::{wire::decode_feature_paint, BucketFeatureEntry};
 use maplibre::{
     benchmarking::tessellation::{IndexDataType, OverAlignedVertexBuffer},
     coords::{WorldTileCoords, ZoomLevel},
     render::ShaderVertex,
-    vector::{
-        feature_paint::{wire::decode_feature_paint, BucketFeatureEntry},
-        AvailableVectorLayerBucket,
-    },
+    vector::AvailableVectorLayerBucket,
 };
 
 const LAYER_TESSELLATED_MAGIC: u32 = 0x4D4C_5654;
@@ -249,6 +249,7 @@ pub(super) fn decode_bucket_from_bytes(bytes: &[u8]) -> Option<AvailableVectorLa
     })
 }
 
+#[cfg(any(test, feature = "renderer"))]
 pub(crate) fn decode_from_js_slice(
     buffer: &ArrayBuffer,
     base_offset: u32,

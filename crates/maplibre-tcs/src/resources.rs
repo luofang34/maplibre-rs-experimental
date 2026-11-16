@@ -4,7 +4,7 @@ use std::{any::TypeId, collections::HashMap};
 
 use downcast_rs::{impl_downcast, Downcast};
 
-use crate::tcs::disjoint::DisjointSliceBorrow;
+use crate::disjoint::DisjointSliceBorrow;
 
 /// A map-wide value that can be recovered by its concrete type.
 /// Every `'static` type implements this trait; resources need not be `Send` or `Sync`.

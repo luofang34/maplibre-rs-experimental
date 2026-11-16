@@ -1,5 +1,6 @@
+use maplibre_coords::{WorldTileCoords, ZoomLevel};
+
 use super::{morton_xy, unmorton_xy, PyramidCover, TilePyramid};
-use crate::coords::{WorldTileCoords, ZoomLevel};
 
 fn tile(x: i32, y: i32, z: u8) -> WorldTileCoords {
     WorldTileCoords {

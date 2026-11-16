@@ -1,9 +1,9 @@
-import * as maplibre from "../wasm/maplibre"
-import {initializeWasm} from "../wasm-instance.mjs";
+import * as maplibre from "../wasm/maplibre_tile_worker"
+import {initializeWorkerWasm} from "../wasm-worker-instance.mjs";
 
 type MessageData = { type: 'wasm_init', module: WebAssembly.Module, port?: MessagePort }
     | { type: 'kernel_config', config: string }
-    | { type: 'call', procedure_ptr: number, attempt: bigint, style_revision: bigint, input: string }
+    | { type: 'call', procedure_tag: number, attempt: bigint, style_revision: bigint, input: string }
     | { type: 'style', revision: bigint, style: string }
     | { type: 'cancel', attempt: bigint }
     | { type: 'image_provider_modules', urls: string[] }
@@ -19,7 +19,7 @@ let providersRegistered: Promise<void> = Promise.resolve()
 
 interface TileWorkerCalls {
     set_style(revision: bigint, style: string): void
-    process(procedure_ptr: number, style_revision: bigint, input: string): Promise<void>
+    process(procedure_tag: number, style_revision: bigint, input: string): Promise<void>
     cancel(attempt: bigint): boolean
     finish_failed(attempt: bigint): void
 }
@@ -86,7 +86,7 @@ const handleMessage = async (message: MessageEvent<MessageData>) => {
         const data = message.data;
         const port = data.port;
         let module = data.module;
-        initialised = initializeWasm(module, undefined).then(out => {
+        initialised = initializeWorkerWasm(module, undefined).then(out => {
             if (port) {
                 (maplibre as any).bind_worker_reply_port?.(port);
             }
@@ -111,11 +111,11 @@ const handleMessage = async (message: MessageEvent<MessageData>) => {
             return
         }
         // WARNING: Do not modify data passed from Rust!
-        const procedure_ptr = data.procedure_ptr;
+        const procedure_tag = data.procedure_tag;
         const input = data.input;
 
         try {
-            await workerCalls().process(procedure_ptr, data.style_revision, input);
+            await workerCalls().process(procedure_tag, data.style_revision, input);
         } catch (err) {
             workerCalls().finish_failed(data.attempt);
             throw err;

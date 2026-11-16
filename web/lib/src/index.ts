@@ -1,15 +1,36 @@
 import * as maplibre from "./wasm/maplibre"
 import {initializeWasm} from "./wasm-instance.mjs";
-import {checkRequirements, checkWasmFeatures, ensureWebGpuCompatibility} from "./browser";
+import {
+    checkRequirements,
+    checkWasmFeatures,
+    ensureWebGpuCompatibility,
+    isWebGLSupported,
+    probeWebGpuAvailable,
+    selectGraphicsBackend,
+} from "./browser";
 import {preventDefaultTouchActions} from "./canvas";
 import {MapLibreMap} from "./map";
-import {computeMtTileWorkerCount, startOffscreenController} from "./offscreen-client";
+import {
+    compileWasmModule,
+    computeMtTileWorkerCount,
+    startOffscreenController,
+    type WasmModuleSource,
+} from "./offscreen-client";
 // @ts-ignore esbuild plugin is handling this
 import MultithreadedPoolWorker from './multithreaded/multithreaded-pool.worker.js';
 // @ts-ignore esbuild plugin is handling this
 import PoolWorker from './singlethreaded/pool.worker.js';
 // @ts-ignore esbuild plugin is handling this
 import RenderWorker from './singlethreaded/render.worker.js';
+
+export interface StartMapOptions {
+    /** Optional URL, `WebAssembly.Module`, or pending promise for `maplibre_tile_worker_bg.wasm`. */
+    workerWasmPath?: WasmModuleSource;
+    /** Optional fallback WebGL2 `module.js` URL when WebGPU is unavailable at runtime. */
+    webglModulePath?: string;
+    /** Optional fallback WebGL2 `.wasm` source paired with `webglModulePath`. */
+    webglWasmPath?: WasmModuleSource;
+}
 
 let mtWasmPrimed = false;
 const prewarmedMtWorkers: Worker[] = [];
@@ -27,7 +48,14 @@ const prewarmedMtWorkers: Worker[] = [];
  * Resolves to the running map on the page's `maplibre` canvas, or to `undefined` when the
  * browser lacks what the map needs, which is reported to the user instead.
  */
-export const startMapLibre = async (wasmPath: string | WebAssembly.Module | undefined, workerPath: string | undefined, styleJson?: string, imageProviderModules: string[] = [], canvasId?: string): Promise<MapLibreMap | undefined> => {
+export const startMapLibre = async (
+    wasmPath: WasmModuleSource,
+    workerPath: string | undefined,
+    styleJson?: string,
+    imageProviderModules: string[] = [],
+    canvasId?: string,
+    options?: StartMapOptions,
+): Promise<MapLibreMap | undefined> => {
     await checkWasmFeatures()
 
     let message = checkRequirements();
@@ -41,9 +69,41 @@ export const startMapLibre = async (wasmPath: string | WebAssembly.Module | unde
         const {Spector} = await import("spectorjs")
         let spector = new Spector()
         spector.displayUI()
-    }
-
-    if (!WEBGL) {
+    } else {
+        const hasWebGpu = await probeWebGpuAvailable();
+        const decision = selectGraphicsBackend({
+            webgl: false,
+            hasWebGpu,
+            hasWebGl: isWebGLSupported(),
+            hasWebglFallbackModule: true,
+        });
+        if (decision.backend === "fallback-webgl2") {
+            const relFallback = ["webgl", "module.js"].join("/");
+            const webglUrl = options?.webglModulePath ?? new URL(relFallback, import.meta.url).href;
+            try {
+                const webglMod = await import(/* @vite-ignore */ webglUrl);
+                if (typeof webglMod?.startMapLibre === "function") {
+                    console.warn("WebGPU unavailable in this browser; falling back automatically to WebGL2.");
+                    return webglMod.startMapLibre(
+                        options?.webglWasmPath,
+                        workerPath,
+                        styleJson,
+                        imageProviderModules,
+                        canvasId,
+                        {workerWasmPath: options?.workerWasmPath},
+                    );
+                }
+            } catch (err) {
+                console.warn("WebGL2 fallback module failed to load:", err);
+            }
+            console.error("WebGPU is unavailable and WebGL2 fallback could not be loaded.");
+            return undefined;
+        }
+        if (decision.backend === "error") {
+            console.error(decision.message);
+            alert(decision.message);
+            return undefined;
+        }
         ensureWebGpuCompatibility();
     }
 
@@ -61,6 +121,7 @@ export const startMapLibre = async (wasmPath: string | WebAssembly.Module | unde
             const controller = await startOffscreenController({
                 canvas,
                 wasmPath,
+                workerWasmPath: options?.workerWasmPath,
                 workerPath,
                 styleJson,
                 imageProviderModules: MULTITHREADED ? [] : imageProviderModules,
@@ -89,7 +150,18 @@ export const startMapLibre = async (wasmPath: string | WebAssembly.Module | unde
         }
     }
 
-    await initializeWasm(wasmPath, undefined);
+    const workerModulePromise = (!MULTITHREADED)
+        ? compileWasmModule(
+            options?.workerWasmPath ?? new URL("./wasm/maplibre_tile_worker_bg.wasm", import.meta.url).href,
+        )
+        : null;
+    const resolvedWasm = wasmPath && typeof (wasmPath as Promise<WebAssembly.Module>).then === "function"
+        ? await wasmPath
+        : (wasmPath as string | WebAssembly.Module | undefined);
+    const [workerModule] = await Promise.all([
+        workerModulePromise,
+        initializeWasm(resolvedWasm, undefined),
+    ]);
 
     const invokeRun = (workerFactory: any) => {
         if (ARENA_TELEMETRY && canvasId) {
@@ -105,35 +177,50 @@ export const startMapLibre = async (wasmPath: string | WebAssembly.Module | unde
         const controller = await invokeRun(() => prewarmedMtWorkers.pop() ?? createMtWorker());
         return new MapLibreMap(controller, canvas)
     } else {
-        const controller = await invokeRun((received_ptr: number) => {
-            let worker: Worker = workerPath ? new Worker(workerPath, {
+        const spawnedWorkers: Worker[] = [];
+        const controller = await invokeRun(() => {
+            const worker: Worker = workerPath ? new Worker(workerPath, {
                 type: 'module',
-            }) : PoolWorker();  // Setting a "name" for this webworker is not yet supported, because it needs support from esbuild-plugin-inline-worker
+            }) : PoolWorker();
+            spawnedWorkers.push(worker);
 
             if (imageProviderModules.length > 0) {
                 // Workers do not share the page's base URL, so they get absolute ones.
                 worker.postMessage({
                     type: 'image_provider_modules',
                     urls: imageProviderModules.map(url => new URL(url, location.href).href),
-                })
+                });
             }
 
-            // Handle messages coming back from the Worker
-            worker.onmessage = (message: MessageEvent<[tag: number, buffer: ArrayBuffer]>) => {
-                // WARNING: Do not modify data passed from Rust!
-                let data = message.data;
-
-                const receive_data: (received_ptr: number, tag: number, buffer: ArrayBuffer) => void = maplibre["singlethreaded_receive_data"];
-
-                if (!receive_data) {
-                    throw Error("singlethreaded_main_entry is not defined. Maybe the Rust build used the wrong build configuration.")
-                }
-
-                receive_data(received_ptr, data[0], data[1])
-            }
-
-            return worker;
+            const channel = new MessageChannel();
+            worker.postMessage({type: 'wasm_init', module: workerModule, port: channel.port2}, [channel.port2]);
+            return channel.port1;
         });
+        const terminateWorkers = () => {
+            for (const worker of spawnedWorkers.splice(0)) {
+                worker.terminate();
+            }
+        };
+        const origDestroy = controller.destroy?.bind(controller);
+        if (origDestroy) {
+            controller.destroy = () => {
+                try {
+                    return origDestroy();
+                } finally {
+                    terminateWorkers();
+                }
+            };
+        }
+        const origRemove = controller.remove?.bind(controller);
+        if (origRemove) {
+            controller.remove = () => {
+                try {
+                    return origRemove();
+                } finally {
+                    terminateWorkers();
+                }
+            };
+        }
         return new MapLibreMap(controller, canvas)
     }
 }

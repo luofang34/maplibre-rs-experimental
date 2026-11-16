@@ -11,9 +11,7 @@ use crate::geojson::{query::SourceQueryError, update::SourceUpdateError};
 use crate::{
     context::MapContext,
     environment::Environment,
-    io::{
-        apc::AsyncProcedureCall, tile_json::resolve_tile_json_sources, tile_retry::RequestAttempts,
-    },
+    io::tile_retry::RequestAttempts,
     kernel::Kernel,
     plugin::Plugin,
     render::{
@@ -195,31 +193,35 @@ where
                     view_state: retained_view,
                     jump,
                 } = pending.as_mut();
-                let renderer_fut = renderer_builder
-                    .clone()
-                    .build()
-                    .initialize_renderer::<E::MapWindowConfig>(&self.window);
-                let source_client = self.kernel.source_client();
-                let apc = self.kernel.apc();
-                let init_io_fut = async {
-                    resolve_tile_json_sources(style, source_client).await;
-                    crate::sdf::assets::spawn_style_symbol_prefetch(source_client.clone(), style);
-                    apc.warm_style(style);
-                };
-                let (renderer_res, _) = futures::future::join(renderer_fut, init_io_fut).await;
-                let mut renderer = renderer_res.map_err(MapError::DeviceInit)?;
-
                 let window_size = self.window.size();
-                renderer.resize_surface(window_size);
+                let scale_factor = self.window.scale_factor();
                 let mut view_state = starting_view(
                     style,
                     retained_view.as_ref(),
                     window_size,
                     self.max_pitch,
                     self.camera_bounds,
-                    jump.take(),
+                    *jump,
                 )?;
-                view_state.resize(window_size.to_logical(self.window.scale_factor()));
+                view_state.resize(window_size.to_logical(scale_factor));
+
+                let renderer_fut = renderer_builder
+                    .clone()
+                    .build()
+                    .initialize_renderer::<E::MapWindowConfig>(&self.window);
+                let init_io_fut = prewarm::prepare_io_and_prewarm(
+                    style,
+                    &view_state,
+                    scale_factor,
+                    &self.request_attempts,
+                    self.kernel.source_client(),
+                    self.kernel.apc(),
+                );
+                let (renderer_res, prewarmed) =
+                    futures::future::join(renderer_fut, init_io_fut).await;
+                let mut renderer = renderer_res.map_err(MapError::DeviceInit)?;
+                *jump = None;
+                renderer.resize_surface(window_size);
 
                 let mut world = World::default();
                 world.resources.insert(self.request_attempts.clone());
@@ -227,7 +229,7 @@ where
                 world
                     .resources
                     .insert(std::mem::take(&mut self.custom_layers));
-                crate::sdf::provided::set_pixel_ratio(&mut world, self.window.scale_factor());
+                crate::sdf::provided::set_pixel_ratio(&mut world, scale_factor);
                 #[cfg(feature = "experimental")]
                 crate::celestial::set_sun_direction(&mut world, self.sun);
 
@@ -249,6 +251,7 @@ where
                         return Err(MapError::Plugin(error));
                     }
                 }
+                prewarmed.commit_into(&mut world);
                 let _ = self.schedule.add_system_to_stage(
                     crate::render::RenderStageLabel::Input,
                     crate::context::style_transition_system,
@@ -478,6 +481,7 @@ mod custom_layers;
 mod events;
 mod frame;
 pub mod handle;
+mod prewarm;
 mod provided_images;
 mod signals;
 mod sources;

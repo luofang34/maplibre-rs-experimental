@@ -251,6 +251,12 @@ impl Default for GeometryIndex {
     }
 }
 
+impl maplibre_tcs::tiles::TileGeometryStore for GeometryIndex {
+    fn remove_tile(&mut self, coords: &WorldTileCoords) {
+        self.remove(coords);
+    }
+}
+
 /// Geometries for one tile, stored either in input order or in a spatial tree.
 pub enum TileIndex {
     /// Spatial storage; query hits are ordered by distance, with unspecified tie order.

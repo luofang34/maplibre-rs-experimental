@@ -8,7 +8,7 @@ use crate::{
     context::MapContext,
     environment::Environment,
     io::{
-        apc::{AsyncProcedureCall, Input},
+        apc::{AsyncProcedureCall, Input, ProcedureTag},
         frame_style::FrameStyle,
         tile_backpressure::vector_request_budget,
         tile_retry::{self, RequestKind},
@@ -361,7 +361,8 @@ impl<E: Environment, T: VectorTransferables> RequestSystem<E, T> {
         };
         self.kernel
             .apc()
-            .call(
+            .call_tagged(
+                ProcedureTag::FetchVector,
                 Input {
                     coords,
                     style: worker_style,

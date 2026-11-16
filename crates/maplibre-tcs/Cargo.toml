@@ -1,0 +1,20 @@
+[package]
+name = "maplibre-tcs"
+version = "0.1.0"
+description = "Typed resources, hierarchical tile pyramids, and disjoint tile component storage for maplibre."
+
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+downcast-rs.workspace = true
+maplibre-coords = { path = "../maplibre-coords", version = "0.1.0" }
+rustc-hash.workspace = true
+smallvec.workspace = true

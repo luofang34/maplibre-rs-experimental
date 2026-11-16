@@ -72,6 +72,7 @@ pub mod resource;
 mod resource_system;
 mod source;
 mod transferables;
+pub use request_system::fetch_raster_apc;
 pub use source::RasterSourceId;
 pub(crate) mod upload_system;
 

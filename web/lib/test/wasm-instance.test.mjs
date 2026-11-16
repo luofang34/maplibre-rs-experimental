@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import {once} from 'node:events';
+import {existsSync} from 'node:fs';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import {isMainThread, parentPort, workerData, Worker} from 'node:worker_threads';
 import {initializeWasm} from '../src/wasm-instance.mjs';
+import {initializeWorkerWasm} from '../src/wasm-worker-instance.mjs';
 
 if (!isMainThread) {
     const instance = await initializeWasm(workerData.module, workerData.memory);
@@ -40,4 +42,18 @@ if (!isMainThread) {
             if (shared) instance.__wbindgen_free(pointer, 4, 4);
         }
     });
+
+    const workerWasmPath = new URL('../src/wasm/maplibre_tile_worker_bg.wasm', import.meta.url);
+    if (!shared && existsSync(workerWasmPath)) {
+        const workerBytes = await readFile(workerWasmPath);
+        if (workerBytes.byteLength > 1024) {
+            const workerModule = await WebAssembly.compile(workerBytes);
+            const workerInstance = await initializeWorkerWasm(workerModule, undefined);
+            test('render-free tile worker wasm initializes with independent linear memory', () => {
+                assert.ok(workerInstance.memory instanceof WebAssembly.Memory);
+                assert.ok(!(workerInstance.memory.buffer instanceof SharedArrayBuffer));
+                assert.ok(workerInstance.memory.buffer.byteLength > 0);
+            });
+        }
+    }
 }

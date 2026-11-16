@@ -3,6 +3,9 @@
 resolver = "2"
 
 members = [
+    "crates/maplibre-coords",
+    "crates/maplibre-tcs",
+    "crates/web-tile-worker",
     "maplibre",
     "maplibre-winit",
     "maplibre-build-tools",

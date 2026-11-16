@@ -2,12 +2,12 @@
 
 use std::borrow::Cow;
 
+pub use maplibre_tcs::heap;
 use thiserror::Error;
 
 use crate::{context::MapContext, tcs::system::function::IntoSystem};
 
 mod function;
-pub mod heap;
 pub mod stage;
 pub mod timings;
 

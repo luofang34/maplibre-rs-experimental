@@ -2,13 +2,12 @@ use maplibre::{
     environment::{OffscreenKernel, OffscreenKernelConfig},
     io::source_client::{HttpSourceClient, SourceClient},
 };
+#[cfg(feature = "renderer")]
 use maplibre_winit::WinitEnvironment;
 
-use crate::platform::{
-    self,
-    http_client::{web_http_client, WebHttpClient},
-    UsedOffscreenKernelEnvironment,
-};
+use crate::platform::http_client::{web_http_client, WebHttpClient};
+#[cfg(feature = "renderer")]
+use crate::platform::{self, UsedOffscreenKernelEnvironment};
 
 /// Offscreen workers fetch map sources with the browser HTTP API.
 pub struct WHATWGOffscreenKernelEnvironment(OffscreenKernelConfig);
@@ -29,7 +28,7 @@ impl OffscreenKernel for WHATWGOffscreenKernelEnvironment {
 
 /// The environment of a browser map, which a host's plugins are written for: workers reached
 /// by message passing in a single-threaded build, or a shared-memory pool with atomics.
-#[cfg(not(target_feature = "atomics"))]
+#[cfg(all(feature = "renderer", not(target_feature = "atomics")))]
 pub type CurrentEnvironment = WinitEnvironment<
     WebHttpClient,
     UsedOffscreenKernelEnvironment,
@@ -39,7 +38,7 @@ pub type CurrentEnvironment = WinitEnvironment<
 
 /// The environment of a browser map, which a host's plugins are written for: workers reached
 /// by message passing in a single-threaded build, or a shared-memory pool with atomics.
-#[cfg(target_feature = "atomics")]
+#[cfg(all(feature = "renderer", target_feature = "atomics"))]
 pub type CurrentEnvironment = WinitEnvironment<
     WebHttpClient,
     UsedOffscreenKernelEnvironment,

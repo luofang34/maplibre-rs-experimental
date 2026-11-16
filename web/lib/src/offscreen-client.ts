@@ -4,21 +4,25 @@ import {createOffscreenCoalescer} from "./offscreen-coalesce.mjs";
 
 type Waiter = { resolve: (v: any) => void, reject: (e: any) => void };
 
-let cachedModuleKey: string | null = null;
-let cachedModulePromise: Promise<WebAssembly.Module> | null = null;
+export type WasmModuleSource = string | WebAssembly.Module | Promise<WebAssembly.Module> | undefined;
+
+const compiledModuleCache = new Map<string, Promise<WebAssembly.Module>>();
 
 export const compileWasmModule = (
-    wasmPath: string | WebAssembly.Module | undefined,
+    wasmPath: WasmModuleSource,
 ): Promise<WebAssembly.Module> => {
     if (wasmPath instanceof WebAssembly.Module) {
         return Promise.resolve(wasmPath);
     }
-    const url = wasmPath ?? new URL("./wasm/maplibre_bg.wasm", import.meta.url).href;
-    if (cachedModuleKey === url && cachedModulePromise) {
-        return cachedModulePromise;
+    if (wasmPath && typeof (wasmPath as Promise<WebAssembly.Module>).then === "function") {
+        return wasmPath as Promise<WebAssembly.Module>;
     }
-    cachedModuleKey = url;
-    cachedModulePromise = (async () => {
+    const url = (wasmPath as string | undefined) ?? new URL("./wasm/maplibre_bg.wasm", import.meta.url).href;
+    const cached = compiledModuleCache.get(url);
+    if (cached) {
+        return cached;
+    }
+    const promise = (async () => {
         const responsePromise = fetch(url);
         if (typeof WebAssembly.compileStreaming === "function") {
             try {
@@ -31,15 +35,17 @@ export const compileWasmModule = (
         const resolved = await responsePromise;
         return WebAssembly.compile(await resolved.arrayBuffer());
     })().catch(err => {
-        cachedModulePromise = null;
+        compiledModuleCache.delete(url);
         throw err;
     });
-    return cachedModulePromise;
+    compiledModuleCache.set(url, promise);
+    return promise;
 };
 
 interface OffscreenStartArgs {
     canvas: HTMLCanvasElement
-    wasmPath: string | WebAssembly.Module | undefined
+    wasmPath: WasmModuleSource
+    workerWasmPath?: WasmModuleSource
     workerPath: string | undefined
     styleJson?: string
     imageProviderModules: string[]
@@ -59,6 +65,7 @@ export const computeMtTileWorkerCount = (): number => {
 export const startOffscreenController = async ({
     canvas,
     wasmPath,
+    workerWasmPath,
     workerPath,
     styleJson,
     imageProviderModules,
@@ -176,14 +183,23 @@ export const startOffscreenController = async ({
     };
 
     try {
-        const module = await compileWasmModule(wasmPath);
-
+        const mainModulePromise = compileWasmModule(wasmPath);
+        let workerReadyPromise: Promise<void> = Promise.resolve();
         if (!MULTITHREADED) {
-            for (let i = 0; i < workerCount; i++) {
-                const port2 = channels[i].port2;
-                tileWorkers[i].postMessage({type: "wasm_init", module, port: port2}, [port2]);
-            }
+            const resolvedWorkerWasm =
+                workerWasmPath ?? new URL("./wasm/maplibre_tile_worker_bg.wasm", import.meta.url).href;
+            workerReadyPromise = compileWasmModule(resolvedWorkerWasm).then(workerModule => {
+                if (closed) return;
+                for (let i = 0; i < workerCount; i++) {
+                    const port2 = channels[i].port2;
+                    tileWorkers[i].postMessage(
+                        {type: "wasm_init", module: workerModule, port: port2},
+                        [port2],
+                    );
+                }
+            });
         }
+        const [module] = await Promise.all([mainModulePromise, workerReadyPromise]);
 
         const measure = () => {
             const dpr = window.devicePixelRatio || 1;

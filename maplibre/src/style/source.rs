@@ -14,17 +14,7 @@ pub type TileUrl = String;
 /// URL of a TileJSON metadata document, distinct from an individual tile URL.
 pub type TileJSONUrl = String;
 
-/// Tiles can be positioned using either the xyz coordinates or the TMS (Tile Map Service) protocol.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum TileAddressingScheme {
-    /// Rows start at the north edge of the world.
-    #[serde(rename = "xyz")]
-    #[default]
-    XYZ,
-    /// Rows start at the south edge; the tile loader flips the Y coordinate.
-    #[serde(rename = "tms")]
-    TMS,
-}
+pub use maplibre_coords::TileAddressingScheme;
 
 /// GeoJSON data — either an inline JSON value or a URL pointing to a GeoJSON file.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]

@@ -1,0 +1,21 @@
+[package]
+name = "maplibre-coords"
+version = "0.1.0"
+description = "Coordinate spaces, tile grids, map zoom, and visible tile regions for maplibre."
+
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bytemuck.workspace = true
+bytemuck_derive.workspace = true
+cgmath.workspace = true
+serde.workspace = true
+tracing.workspace = true

@@ -90,6 +90,7 @@ def check_workspace_wasm_trees(
     checks: list[tuple[str, list[str], frozenset[str]]] = [
         ("web", [], FORBIDDEN_WASM_CRATES),
         ("web", ["web-webgl"], FORBIDDEN_WASM_CRATES),
+        ("web-tile-worker", [], FORBIDDEN_CORE_CRATES | {"winit"}),
         ("maplibre", [], FORBIDDEN_CORE_CRATES),
         ("maplibre", ["web-webgl"], FORBIDDEN_CORE_CRATES),
     ]

@@ -8,14 +8,17 @@ use std::{
 };
 
 use js_sys::{ArrayBuffer, Uint8Array};
+#[cfg(any(test, feature = "renderer"))]
+use maplibre::io::apc::CallError;
 use maplibre::{
     io::{
-        apc::{CallError, Context, IntoMessage, Message, SendError},
+        apc::{Context, IntoMessage, Message, SendError},
         source_client::SourceClient,
         tile_retry::{RequestKind, TileRequestOutcome},
     },
     sdf::provided::ProvidedImagesReport,
 };
+#[cfg(any(test, feature = "renderer"))]
 use thiserror::Error;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{DedicatedWorkerGlobalScope, MessagePort};
@@ -48,6 +51,7 @@ struct BufferedItem {
 
 #[derive(Clone)]
 pub struct PassingContext {
+    #[allow(dead_code)]
     pub source_client: SourceClient<UsedHttpClient>,
     pending: Arc<Mutex<Vec<BufferedItem>>>,
 }
@@ -253,6 +257,7 @@ fn prepare_payload_bytes(message: Message) -> Result<(WebMessageTag, PayloadByte
     Ok((tag, PayloadBytes::Transferable(transferable)))
 }
 
+#[cfg(any(test, feature = "renderer"))]
 pub(crate) fn decode_message(
     tag: WebMessageTag,
     buffer: ArrayBuffer,
@@ -261,6 +266,7 @@ pub(crate) fn decode_message(
     decode_message_bytes(tag, bytes, 0)
 }
 
+#[cfg(any(test, feature = "renderer"))]
 pub(crate) fn decode_message_bytes(
     tag: WebMessageTag,
     bytes: Vec<u8>,
@@ -312,6 +318,7 @@ pub(crate) fn encode_call_finished(attempt: u64) -> ArrayBuffer {
 }
 
 /// Reads the attempt from the payload of a [`WebMessageTag::CallFinished`] message.
+#[cfg(any(test, feature = "renderer"))]
 pub(crate) fn decode_call_finished(buffer: &ArrayBuffer) -> Result<u64, CallError> {
     let bytes = Uint8Array::new(buffer).to_vec();
     let attempt = <[u8; 8]>::try_from(bytes.as_slice()).map_err(|_| {
@@ -328,6 +335,7 @@ pub(crate) fn post_call_finished(attempt: u64) -> Result<(), SendError> {
     post_wire_message(WebMessageTag::CallFinished, &buffer)
 }
 
+#[cfg(any(test, feature = "renderer"))]
 #[derive(Debug, Error)]
 pub(crate) enum TrackedPayloadError {
     #[error("tracked worker payload has {bytes} bytes; its header requires 12")]

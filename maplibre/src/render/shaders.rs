@@ -41,10 +41,7 @@ pub use vertex::{
     ShaderVertex, POSED_GLYPH, WHOLE_TILE,
 };
 
-use crate::{
-    coords::WorldCoords,
-    render::resource::{FragmentState, VertexBufferLayout, VertexState},
-};
+use crate::render::resource::{FragmentState, VertexBufferLayout, VertexState};
 
 /// Two-component GPU vector in tightly packed scalar order.
 pub type Vec2f32 = [f32; 2];
@@ -54,12 +51,6 @@ pub type Vec3f32 = [f32; 3];
 pub type Vec4f32 = [f32; 4];
 /// Column-major GPU matrix, with one four-component vector per column.
 pub type Mat4x4f32 = [Vec4f32; 4];
-
-impl From<WorldCoords> for Vec3f32 {
-    fn from(world_coords: WorldCoords) -> Self {
-        [world_coords.x as f32, world_coords.y as f32, 0.0]
-    }
-}
 
 /// Describes WGSL stages and their vertex, attachment and blend interfaces for pipeline creation.
 /// Descriptors must match the data uploaded by the corresponding rendering path.

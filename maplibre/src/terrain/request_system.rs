@@ -9,7 +9,7 @@ use crate::{
     io::{
         apc::{
             AsyncProcedureCall, AsyncProcedureFuture, AttemptContext, Context, Input,
-            ProcedureError,
+            ProcedureError, ProcedureTag,
         },
         frame_style::FrameStyle,
         tile_backpressure::dem_request_budget,
@@ -230,7 +230,8 @@ impl<E: Environment, T: DemTransferables> RequestSystem<E, T> {
         };
         self.kernel
             .apc()
-            .call(
+            .call_tagged(
+                ProcedureTag::FetchDem,
                 Input::new(coords, style.worker_snapshot(), attempt),
                 fetch_dem_apc::<E::OffscreenKernelEnvironment, T, _>,
             )

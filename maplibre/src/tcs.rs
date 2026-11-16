@@ -2,9 +2,8 @@
 
 #![deny(missing_docs)]
 
-pub mod disjoint;
-pub mod pyramid;
-pub mod resources;
+pub use maplibre_tcs::{disjoint, pyramid, resources};
+
 pub mod system;
 pub mod tiles;
 pub mod world;

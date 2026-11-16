@@ -1,13 +1,8 @@
 use cgmath::Point2;
 
 use crate::{
-    coords::{
-        LatLon, Quadkey, TileCoords, ViewRegion, WorldCoords, WorldTileCoords, Zoom, ZoomLevel,
-        TOP_LEFT_EXTENT,
-    },
-    render::tile_view_pattern::DEFAULT_TILE_SIZE,
-    style::source::TileAddressingScheme,
-    util::math::Aabb2,
+    Aabb2, LatLon, Quadkey, TileAddressingScheme, TileCoords, ViewRegion, WorldCoords,
+    WorldTileCoords, Zoom, ZoomLevel, TILE_SIZE, TOP_LEFT_EXTENT,
 };
 
 fn to_from_world(tile: (i32, i32, ZoomLevel), zoom: Zoom) {
@@ -15,7 +10,7 @@ fn to_from_world(tile: (i32, i32, ZoomLevel), zoom: Zoom) {
     let p1 = tile.transform_for_zoom(zoom) * TOP_LEFT_EXTENT;
 
     assert_eq!(
-        WorldCoords::from((p1.x, p1.y)).into_world_tile(zoom.zoom_level(DEFAULT_TILE_SIZE), zoom),
+        WorldCoords::from((p1.x, p1.y)).into_world_tile(zoom.zoom_level(TILE_SIZE), zoom),
         tile
     );
 }
@@ -99,24 +94,6 @@ fn explicit_view_region_preserves_projection_selection() {
     assert_eq!(region.iter().collect::<Vec<_>>(), tiles);
     assert!(region.is_in_view(&(3, 3, zoom).into()));
     assert!(!region.is_in_view(&(3, 4, zoom).into()));
-}
-
-#[test]
-fn zoom_observer_tracks_changes_since_its_reference() {
-    use crate::util::ChangeObserver;
-
-    let mut zoom = ChangeObserver::new(Zoom::new(4.0));
-    assert!(zoom.did_change(0.05));
-    zoom.update_reference();
-    assert!(!zoom.did_change(0.05));
-    *zoom = Zoom::new(4.025);
-    assert!(!zoom.did_change(0.05));
-    *zoom = Zoom::new(4.125);
-    assert!(zoom.did_change(0.05));
-    zoom.update_reference();
-    assert!(!zoom.did_change(0.05));
-    *zoom = Zoom::new(4.0);
-    assert!(zoom.did_change(0.05));
 }
 
 #[test]
@@ -239,9 +216,9 @@ fn lat_lon_mercator_roundtrip() {
 
 #[test]
 fn stencil_references_keep_mark_bit_clear_and_never_collide_with_empty_clear_value() {
-    use crate::render::{EMPTY_STENCIL_REFERENCE, STENCIL_MARK};
+    const EMPTY_STENCIL_REFERENCE: u32 = 0x7f;
+    const STENCIL_MARK: u32 = 0x80;
 
-    assert_eq!(EMPTY_STENCIL_REFERENCE, 0x7f);
     assert_eq!(EMPTY_STENCIL_REFERENCE & STENCIL_MARK, 0);
 
     for z in (0..=32).chain(std::iter::once(u8::MAX)) {

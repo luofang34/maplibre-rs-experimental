@@ -12,8 +12,7 @@ mod cover;
 use std::collections::BTreeMap;
 
 pub use cover::PyramidCover;
-
-use crate::coords::{WorldTileCoords, MAX_ZOOM, ZOOM_BOUNDS};
+use maplibre_coords::{WorldTileCoords, MAX_ZOOM, ZOOM_BOUNDS};
 
 /// Interleaves 32-bit `x` (even bits) and `y` (odd bits) MSB-first into a 64-bit Morton key.
 #[inline]

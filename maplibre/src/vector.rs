@@ -46,7 +46,7 @@ mod queue_system;
 pub mod render_commands;
 pub(crate) mod request_system;
 pub use request_system::{
-    depends_on_overscaling,
+    depends_on_overscaling, fetch_vector_apc,
     rescale::{into_descendant as rescale_into_descendant, slice_descendant},
 };
 pub(crate) mod resource;

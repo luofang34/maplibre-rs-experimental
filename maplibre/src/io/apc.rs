@@ -243,6 +243,35 @@ pub enum CallError {
 /// Function pointers allow worker transports to identify procedures without serializing closures.
 pub type AsyncProcedure<K, C> = fn(input: Input, context: C, kernel: K) -> AsyncProcedureFuture;
 
+/// Wire-safe identifier for offscreen tile procedures across split WASM modules.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ProcedureTag {
+    /// Vector tile fetch, decode, tessellation, and symbol layout.
+    FetchVector = 1,
+    /// Raster image tile fetch and decode.
+    FetchRaster = 2,
+    /// Terrain / hillshade DEM tile fetch and elevation decode.
+    FetchDem = 3,
+}
+
+impl ProcedureTag {
+    /// Wire byte representation for single-threaded browser worker dispatch.
+    pub const fn as_u8(self) -> u8 {
+        self as u8
+    }
+
+    /// Decodes a wire byte into its [`ProcedureTag`], or `None` when unrecognized.
+    pub const fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            1 => Some(Self::FetchVector),
+            2 => Some(Self::FetchRaster),
+            3 => Some(Self::FetchDem),
+            _ => None,
+        }
+    }
+}
+
 /// Schedules tile work and receives its tagged results without blocking the render loop.
 /// Native implementations can transfer owned Rust values; browser workers can serialize them.
 pub trait AsyncProcedureCall<K: OffscreenKernel>: 'static {
@@ -262,6 +291,28 @@ pub trait AsyncProcedureCall<K: OffscreenKernel>: 'static {
         input: Input,
         procedure: AsyncProcedure<K, Self::Context>,
     ) -> Result<(), CallError>;
+
+    /// Admits a call identified by [`ProcedureTag`] so split single-threaded WASM workers can
+    /// dispatch without sharing function-table indices with the renderer module.
+    fn call_tagged(
+        &self,
+        _tag: ProcedureTag,
+        input: Input,
+        procedure: AsyncProcedure<K, Self::Context>,
+    ) -> Result<(), CallError> {
+        self.call(input, procedure)
+    }
+
+    /// Whether this transport supports dispatching initial tile fetches before Frame 1 while GPU
+    /// initialization is still in flight.
+    fn supports_prewarm(&self) -> bool {
+        false
+    }
+
+    /// Dispatches a prewarm tile call by [`ProcedureTag`] while the renderer is initializing.
+    fn prewarm_call(&self, _tag: ProcedureTag, _input: Input) -> Result<(), CallError> {
+        Ok(())
+    }
 
     /// Stops the tracked call with `attempt` if it is still running. A transport that cannot
     /// reach its worker lets the call finish; the map ignores a result it gave up on.

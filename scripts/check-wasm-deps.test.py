@@ -66,7 +66,7 @@ class CheckWasmDepsTests(unittest.TestCase):
 
         def fake_runner(_root: Path, package: str, features: list[str]) -> str:
             calls.append((package, tuple(features)))
-            return tree_with_reqwest if package == "maplibre" else CLEAN_WEB_TREE
+            return tree_with_reqwest if package in ("maplibre", "web-tile-worker") else CLEAN_WEB_TREE
 
         errors = MODULE.check_workspace_wasm_trees(Path("/workspace"), runner=fake_runner)
         self.assertEqual(
@@ -74,13 +74,15 @@ class CheckWasmDepsTests(unittest.TestCase):
             [
                 ("web", ()),
                 ("web", ("web-webgl",)),
+                ("web-tile-worker", ()),
                 ("maplibre", ()),
                 ("maplibre", ("web-webgl",)),
             ],
         )
-        self.assertEqual(len(errors), 2)
-        self.assertIn("maplibre (default) pulls forbidden wasm32 crates: reqwest", errors[0])
-        self.assertIn("maplibre (web-webgl) pulls forbidden wasm32 crates: reqwest", errors[1])
+        self.assertEqual(len(errors), 3)
+        self.assertIn("web-tile-worker (default) pulls forbidden wasm32 crates: reqwest", errors[0])
+        self.assertIn("maplibre (default) pulls forbidden wasm32 crates: reqwest", errors[1])
+        self.assertIn("maplibre (web-webgl) pulls forbidden wasm32 crates: reqwest", errors[2])
 
 
 if __name__ == "__main__":

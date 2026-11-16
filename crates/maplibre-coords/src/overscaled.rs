@@ -5,7 +5,7 @@ use std::fmt::{self, Display, Formatter};
 
 use serde::{Deserialize, Serialize};
 
-use crate::coords::{WorldTileCoords, ZoomLevel, MAX_ZOOM, ZOOM_BOUNDS};
+use crate::{WorldTileCoords, ZoomLevel, MAX_ZOOM, ZOOM_BOUNDS};
 
 /// Tile identifier combining canonical source coordinates, horizontal world wrap, and
 /// effective overscaled zoom (`overscaled_z >= canonical.z`).

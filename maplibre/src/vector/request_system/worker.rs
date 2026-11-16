@@ -33,6 +33,7 @@ use crate::{
     },
 };
 
+/// Fetches, decodes, tessellates, and shapes symbols for one vector tile on a worker.
 pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context + Clone + Send>(
     input: Input,
     context: C,
