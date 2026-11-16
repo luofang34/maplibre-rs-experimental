@@ -198,6 +198,7 @@ export const createOffscreenCoalescer = (post, rawRpc, isClosed) => {
 
     const flushQueuedGeoJson = () => {
         geoJsonFlushScheduled = false;
+        geoJsonChannel?.port1.unref?.();
         if (isClosed() || queuedGeoJson.size === 0) return;
         for (const source of Array.from(queuedGeoJson.keys())) {
             dispatchQueuedGeoJson(source);
@@ -211,8 +212,8 @@ export const createOffscreenCoalescer = (post, rawRpc, isClosed) => {
             if (!geoJsonChannel) {
                 geoJsonChannel = new MessageChannel();
                 geoJsonChannel.port1.onmessage = flushQueuedGeoJson;
-                geoJsonChannel.port1.unref?.();
             }
+            geoJsonChannel.port1.ref?.();
             geoJsonChannel.port2.postMessage(0);
         } else {
             setTimeout(flushQueuedGeoJson, 0);
