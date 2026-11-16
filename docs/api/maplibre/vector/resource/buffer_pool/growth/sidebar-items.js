@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["capped_elem_limit","elem_div","page_elem_limit","proportional_rem"]};
+window.SIDEBAR_ITEMS = {"fn":["page_elem_limit"],"mod":["slabs"]};

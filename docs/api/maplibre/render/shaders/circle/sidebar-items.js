@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["circle_layer_layout"],"struct":["CircleShader"]};
+window.SIDEBAR_ITEMS = {"fn":["circle_layer_layout","pack_dynamic_circle_radii"],"struct":["CircleDynamicRadiusShader","CircleFeatureStrokeShader","CircleShader"]};

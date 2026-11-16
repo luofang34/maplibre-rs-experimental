@@ -10,7 +10,7 @@
 <a href=#10 id=10 data-nosnippet>10</a>    <span class="kw-2">*</span>,
 <a href=#11 id=11 data-nosnippet>11</a>};
 <a href=#12 id=12 data-nosnippet>12</a>
-<a href=#13 id=13 data-nosnippet>13</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>process_layer&lt;T: VectorTransferables, C: Context&gt;(
+<a href=#13 id=13 data-nosnippet>13</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>process_layer&lt;T: VectorTransferables, C: Context&gt;(
 <a href=#14 id=14 data-nosnippet>14</a>    source_layer: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>tile::Layer&gt;,
 <a href=#15 id=15 data-nosnippet>15</a>    layer_name: <span class="kw-2">&amp;</span>str,
 <a href=#16 id=16 data-nosnippet>16</a>    predecoded_props: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[Arc&lt;FeatureProperties&gt;]&gt;,
@@ -103,7 +103,7 @@
 <a href=#103 id=103 data-nosnippet>103</a>    }
 <a href=#104 id=104 data-nosnippet>104</a>}
 <a href=#105 id=105 data-nosnippet>105</a>
-<a href=#106 id=106 data-nosnippet>106</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>tessellator(
+<a href=#106 id=106 data-nosnippet>106</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>tessellator(
 <a href=#107 id=107 data-nosnippet>107</a>    paint: <span class="kw-2">&amp;</span>LayerPaint,
 <a href=#108 id=108 data-nosnippet>108</a>    request: <span class="kw-2">&amp;</span>VectorTileRequest,
 <a href=#109 id=109 data-nosnippet>109</a>) -&gt; ZeroTessellator&lt;IndexDataType&gt; {

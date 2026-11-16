@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["has_work"],"struct":["TranslucentPassNode"]};
+window.SIDEBAR_ITEMS = {"fn":["draw_contents","has_work","needs_symbol_depth_copy"],"struct":["TranslucentPassNode"]};

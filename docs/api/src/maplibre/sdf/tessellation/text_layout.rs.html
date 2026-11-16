@@ -308,7 +308,7 @@
 <a href=#308 id=308 data-nosnippet>308</a>            <span class="comment">// The vertex carries where the centre lies in the straight layout, in 1/32 pixel.
 <a href=#309 id=309 data-nosnippet>309</a>            </span><span class="kw">let </span>first = <span class="self">self</span>.buffer.vertices.len() - <span class="number">4</span>;
 <a href=#310 id=310 data-nosnippet>310</a>            <span class="kw">for </span>vertex <span class="kw">in </span><span class="kw-2">&amp;mut </span><span class="self">self</span>.buffer.vertices[first..] {
-<a href=#311 id=311 data-nosnippet>311</a>                vertex.a_pixeloffset[<span class="number">0</span>] = (centre * <span class="number">32.0</span>).round() <span class="kw">as </span>i32;
+<a href=#311 id=311 data-nosnippet>311</a>                vertex.set_line_centre_q5((centre * <span class="number">32.0</span>).round() <span class="kw">as </span>i32);
 <a href=#312 id=312 data-nosnippet>312</a>            }
 <a href=#313 id=313 data-nosnippet>313</a>            <span class="self">self</span>.centres.push(centre);
 <a href=#314 id=314 data-nosnippet>314</a>            <span class="comment">// An image in the text collides by its own size; a glyph by the text size.

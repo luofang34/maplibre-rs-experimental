@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["SourceUpdateError"],"fn":["apply","feature_id","feature_list","geojson_source_mut","promoted_property"],"mod":["refresh"],"struct":["FeatureUpdate","GeoJsonDiff","PropertyValue"]};
+window.SIDEBAR_ITEMS = {"enum":["SourceUpdateError"],"fn":["apply","feature_id","feature_list","geojson_source_mut","parse_geojson_bytes_payload","promoted_property","trim_ascii_start"],"mod":["dynamic_points","refresh"],"struct":["FeatureUpdate","GeoJsonDiff","PropertyValue"]};

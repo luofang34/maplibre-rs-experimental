@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["glyphs","symbol_requests","symbol_requests_from_tile"],"struct":["NamesAsked","SymbolRequests"],"type":["GlyphRequests"]};
+window.SIDEBAR_ITEMS = {"fn":["compile_symbol_layers","glyphs","record_feature_symbol_requests","symbol_requests","symbol_requests_from_mlt","symbol_requests_from_mvt","symbol_requests_from_tile"],"struct":["CompiledSymbolLayer","NamesAsked","SymbolRequests"],"type":["GlyphRequests"]};

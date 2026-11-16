@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["encode_extrusion_vertex","encode_fill_vertex","encode_line_vertex","encode_point_vertex","f16_bits_to_f32","f32_to_f16_bits","pack_f16_pair","pack_tile_pos_q2"],"struct":["EmptyLayerMetadata","GpuShaderVertex"],"trait":["PoolVertex"]};

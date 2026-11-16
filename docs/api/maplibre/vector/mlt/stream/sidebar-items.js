@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["PropAtom"],"fn":["collect_i32","decode_columnar_layer","geometry_type_of","lonlat_i32","prop_ref_to_value","props_for_style","stream_layer_slice","stream_linestring","stream_mlt_geometry","stream_polygon","stream_ring"],"struct":["ColumnarLayer"]};

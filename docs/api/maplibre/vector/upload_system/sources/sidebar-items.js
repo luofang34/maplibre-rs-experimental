@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["CHILDREN_SEARCH_DEPTH"],"fn":["frame_sources_and_painted","terrain_sources"]};
+window.SIDEBAR_ITEMS = {"constant":["CHILDREN_SEARCH_DEPTH"],"fn":["frame_sources_and_painted","terrain_sources"],"struct":["VectorFallbackTiles"],"type":["FrameSourcesAndPainted"]};

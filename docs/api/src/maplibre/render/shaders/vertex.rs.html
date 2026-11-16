@@ -48,167 +48,310 @@
 <a href=#48 id=48 data-nosnippet>48</a>    }
 <a href=#49 id=49 data-nosnippet>49</a>}
 <a href=#50 id=50 data-nosnippet>50</a>
-<a href=#51 id=51 data-nosnippet>51</a><span class="doccomment">/// Per-vertex feature color for vector geometry.
+<a href=#51 id=51 data-nosnippet>51</a><span class="doccomment">/// Per-vertex feature color (`Unorm8x4`, 4 bytes) for vector geometry.
 <a href=#52 id=52 data-nosnippet>52</a></span><span class="attr">#[repr(C)]
-<a href=#53 id=53 data-nosnippet>53</a>#[derive(Debug, Copy, Clone, Pod, Zeroable)]
+<a href=#53 id=53 data-nosnippet>53</a>#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, Pod, Zeroable)]
 <a href=#54 id=54 data-nosnippet>54</a></span><span class="kw">pub struct </span>FillShaderFeatureMetadata {
-<a href=#55 id=55 data-nosnippet>55</a>    <span class="doccomment">/// Encoded-sRGB color with straight alpha; feature opacity is folded into alpha.
-<a href=#56 id=56 data-nosnippet>56</a>    </span><span class="kw">pub </span>color: Vec4f32,
+<a href=#55 id=55 data-nosnippet>55</a>    <span class="doccomment">/// Quantized RGBA8 color (or 24-bit fixed-point `line-gradient` length + opacity in `a`).
+<a href=#56 id=56 data-nosnippet>56</a>    </span><span class="kw">pub </span>color: [u8; <span class="number">4</span>],
 <a href=#57 id=57 data-nosnippet>57</a>}
 <a href=#58 id=58 data-nosnippet>58</a>
-<a href=#59 id=59 data-nosnippet>59</a><span class="doccomment">/// What the fourth lane of [`SDFShaderFeatureMetadata::pose`] holds for a glyph with a pose,
-<a href=#60 id=60 data-nosnippet>60</a>/// before the glyph's rise in metres is added; a vertex without a pose holds 0. At this
-<a href=#61 id=61 data-nosnippet>61</a>/// magnitude an `f32` keeps any rise on Earth to within a centimetre.
-<a href=#62 id=62 data-nosnippet>62</a></span><span class="kw">pub const </span>POSED_GLYPH: f32 = <span class="number">65536.0</span>;
-<a href=#63 id=63 data-nosnippet>63</a>
-<a href=#64 id=64 data-nosnippet>64</a><span class="doccomment">/// Per-vertex collision visibility, GPU fade ramp, and sampled terrain height for symbols.
-<a href=#65 id=65 data-nosnippet>65</a></span><span class="attr">#[repr(C)]
-<a href=#66 id=66 data-nosnippet>66</a>#[derive(Debug, Copy, Clone, Pod, Zeroable, Default)]
-<a href=#67 id=67 data-nosnippet>67</a></span><span class="kw">pub struct </span>SDFShaderFeatureMetadata {
-<a href=#68 id=68 data-nosnippet>68</a>    <span class="doccomment">/// Target collision opacity in 0..=1 after fade completes (`@location(12).x`).
-<a href=#69 id=69 data-nosnippet>69</a>    </span><span class="kw">pub </span>opacity: f32,
-<a href=#70 id=70 data-nosnippet>70</a>    <span class="doccomment">/// Sampled ground elevation in meters; symbol height offsets are carried in the geometry.
-<a href=#71 id=71 data-nosnippet>71</a>    </span><span class="kw">pub </span>elevation: f32,
-<a href=#72 id=72 data-nosnippet>72</a>    <span class="doccomment">/// Starting collision opacity in 0..=1 when the current fade began (`@location(12).z`).
-<a href=#73 id=73 data-nosnippet>73</a>    </span><span class="kw">pub </span>start_opacity: f32,
-<a href=#74 id=74 data-nosnippet>74</a>    <span class="doccomment">/// Monotonic fade clock timestamp in milliseconds when the current fade began (`@location(12).w`).
-<a href=#75 id=75 data-nosnippet>75</a>    </span><span class="kw">pub </span>start_time_ms: f32,
-<a href=#76 id=76 data-nosnippet>76</a>    <span class="doccomment">/// Where a glyph placed along a line sits: the offset of its centre from the vertex anchor
-<a href=#77 id=77 data-nosnippet>77</a>    /// in tile units, its direction in radians, and [`POSED_GLYPH`] plus how far the ground
-<a href=#78 id=78 data-nosnippet>78</a>    /// under the glyph rises above the ground under the label's anchor, in metres, when the
-<a href=#79 id=79 data-nosnippet>79</a>    /// glyph has such a pose.
-<a href=#80 id=80 data-nosnippet>80</a>    </span><span class="kw">pub </span>pose: [f32; <span class="number">4</span>],
-<a href=#81 id=81 data-nosnippet>81</a>    <span class="doccomment">/// Fill colour of the symbol's text or icon, straight alpha, evaluated for its feature.
-<a href=#82 id=82 data-nosnippet>82</a>    </span><span class="kw">pub </span>color: [f32; <span class="number">4</span>],
-<a href=#83 id=83 data-nosnippet>83</a>    <span class="doccomment">/// Halo colour of the text or icon.
-<a href=#84 id=84 data-nosnippet>84</a>    </span><span class="kw">pub </span>halo: [f32; <span class="number">4</span>],
-<a href=#85 id=85 data-nosnippet>85</a>    <span class="doccomment">/// Size, halo width, halo blur and opacity of the text or icon.
-<a href=#86 id=86 data-nosnippet>86</a>    </span><span class="kw">pub </span>params: [f32; <span class="number">4</span>],
-<a href=#87 id=87 data-nosnippet>87</a>}
-<a href=#88 id=88 data-nosnippet>88</a>
-<a href=#89 id=89 data-nosnippet>89</a><span class="doccomment">/// Per-layer instance record shared across tile pipelines.
-<a href=#90 id=90 data-nosnippet>90</a></span><span class="attr">#[repr(C)]
-<a href=#91 id=91 data-nosnippet>91</a>#[derive(Copy, Clone, Pod, Zeroable)]
-<a href=#92 id=92 data-nosnippet>92</a></span><span class="kw">pub struct </span>ShaderLayerMetadata {
-<a href=#93 id=93 data-nosnippet>93</a>    <span class="doccomment">/// Style painter-order index carried by the shared instance layout.
-<a href=#94 id=94 data-nosnippet>94</a>    </span><span class="kw">pub </span>z_index: f32,
-<a href=#95 id=95 data-nosnippet>95</a>    <span class="doccomment">/// Evaluated line width in style pixels, before per-tile drape scaling.
-<a href=#96 id=96 data-nosnippet>96</a>    </span><span class="kw">pub </span>line_width: f32,
-<a href=#97 id=97 data-nosnippet>97</a>    <span class="doccomment">/// Layer translation converted to tile units in map axes.
-<a href=#98 id=98 data-nosnippet>98</a>    </span><span class="kw">pub </span>translate: Vec2f32,
-<a href=#99 id=99 data-nosnippet>99</a>    <span class="doccomment">/// Circle stroke colour, extrusion light colour, or uniform fill colour override (`x &lt; 0.0`
-<a href=#100 id=100 data-nosnippet>100</a>    /// selects per-vertex feature colours).
-<a href=#101 id=101 data-nosnippet>101</a>    </span><span class="kw">pub </span>stroke_color: Vec4f32,
-<a href=#102 id=102 data-nosnippet>102</a>    <span class="doccomment">/// Circle opacity, stroke opacity and blur ratio; the last slot is padding.
-<a href=#103 id=103 data-nosnippet>103</a>    </span><span class="kw">pub </span>circle_params: Vec4f32,
-<a href=#104 id=104 data-nosnippet>104</a>    <span class="doccomment">/// Circle pitch-scale (x) and pitch-alignment (y), 1.0 for `map`; the rest is padding.
-<a href=#105 id=105 data-nosnippet>105</a>    </span><span class="kw">pub </span>circle_flags: Vec4f32,
-<a href=#106 id=106 data-nosnippet>106</a>}
-<a href=#107 id=107 data-nosnippet>107</a>
-<a href=#108 id=108 data-nosnippet>108</a><span class="kw">impl </span>ShaderLayerMetadata {
-<a href=#109 id=109 data-nosnippet>109</a>    <span class="doccomment">/// Metadata for a layer without circle paint or uniform fill colour override.
-<a href=#110 id=110 data-nosnippet>110</a>    </span><span class="kw">pub fn </span>new(z_index: f32, line_width: f32, translate: Vec2f32) -&gt; <span class="self">Self </span>{
-<a href=#111 id=111 data-nosnippet>111</a>        <span class="self">Self </span>{
-<a href=#112 id=112 data-nosnippet>112</a>            z_index,
-<a href=#113 id=113 data-nosnippet>113</a>            line_width,
-<a href=#114 id=114 data-nosnippet>114</a>            translate,
-<a href=#115 id=115 data-nosnippet>115</a>            stroke_color: [-<span class="number">1.0</span>, <span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1.0</span>],
-<a href=#116 id=116 data-nosnippet>116</a>            circle_params: [<span class="number">1.0</span>, <span class="number">1.0</span>, <span class="number">0.0</span>, <span class="number">0.0</span>],
-<a href=#117 id=117 data-nosnippet>117</a>            circle_flags: [<span class="number">0.0</span>; <span class="number">4</span>],
-<a href=#118 id=118 data-nosnippet>118</a>        }
-<a href=#119 id=119 data-nosnippet>119</a>    }
-<a href=#120 id=120 data-nosnippet>120</a>}
-<a href=#121 id=121 data-nosnippet>121</a>
-<a href=#122 id=122 data-nosnippet>122</a><span class="doccomment">/// Per-tile instance record with projection, viewport and line scaling inputs.
-<a href=#123 id=123 data-nosnippet>123</a>///
-<a href=#124 id=124 data-nosnippet>124</a>/// Every `Vec4f32` field sits on a 16-byte boundary, `Float32x2` scalar pairs sit on 8-byte
-<a href=#125 id=125 data-nosnippet>125</a>/// boundaries, and explicit tail padding rounds the record to 128 bytes so per-tile buffer slices
-<a href=#126 id=126 data-nosnippet>126</a>/// preserve 16-byte vector attribute alignment on mobile Vulkan drivers.
-<a href=#127 id=127 data-nosnippet>127</a></span><span class="attr">#[repr(C)]
-<a href=#128 id=128 data-nosnippet>128</a>#[derive(Copy, Clone, Pod, Zeroable)]
-<a href=#129 id=129 data-nosnippet>129</a></span><span class="kw">pub struct </span>ShaderTileMetadata {
-<a href=#130 id=130 data-nosnippet>130</a>    <span class="doccomment">/// Column-major tile-to-clip transform used by the flat projection path.
-<a href=#131 id=131 data-nosnippet>131</a>    </span><span class="kw">pub </span>transform: Mat4x4f32,
-<a href=#132 id=132 data-nosnippet>132</a>    <span class="doccomment">/// Mercator world origin in XY and per-tile-unit scales in ZW.
-<a href=#133 id=133 data-nosnippet>133</a>    </span><span class="kw">pub </span>tile_mercator_coords: Vec4f32,
-<a href=#134 id=134 data-nosnippet>134</a>    <span class="doccomment">/// The part of the tile the shape draws, as minimum and maximum tile coordinates: a tile
-<a href=#135 id=135 data-nosnippet>135</a>    /// drawn over a finer view tile covers only that tile's square of it. A line on the
-<a href=#136 id=136 data-nosnippet>136</a>    /// terrain clips itself to it, where a flat shape takes it from the stencil mask.
-<a href=#137 id=137 data-nosnippet>137</a>    </span><span class="kw">pub </span>clip_region: Vec4f32,
-<a href=#138 id=138 data-nosnippet>138</a>    <span class="doccomment">/// Render viewport width in pixels.
-<a href=#139 id=139 data-nosnippet>139</a>    </span><span class="kw">pub </span>viewport_width: f32,
-<a href=#140 id=140 data-nosnippet>140</a>    <span class="doccomment">/// Render viewport height in pixels.
-<a href=#141 id=141 data-nosnippet>141</a>    </span><span class="kw">pub </span>viewport_height: f32,
-<a href=#142 id=142 data-nosnippet>142</a>    <span class="doccomment">/// Converts style pixels to pixels in an offscreen drape texture.
-<a href=#143 id=143 data-nosnippet>143</a>    </span><span class="kw">pub </span>line_width_scale: f32,
-<a href=#144 id=144 data-nosnippet>144</a>    <span class="doccomment">/// Tile units per texture or viewport pixel for line dash lengths.
-<a href=#145 id=145 data-nosnippet>145</a>    </span><span class="kw">pub </span>line_units_per_pixel: f32,
-<a href=#146 id=146 data-nosnippet>146</a>    <span class="doccomment">/// Scale from view zoom to tile zoom, normally `2^(tile_zoom - view_zoom)`.
-<a href=#147 id=147 data-nosnippet>147</a>    </span><span class="kw">pub </span>zoom_factor: f32,
-<a href=#148 id=148 data-nosnippet>148</a>    <span class="doccomment">/// One clips geometry outside the root tile at the antimeridian; zero disables clipping.
-<a href=#149 id=149 data-nosnippet>149</a>    </span><span class="kw">pub </span>clip_antimeridian: u32,
-<a href=#150 id=150 data-nosnippet>150</a>    <span class="doccomment">/// Explicit tail padding keeping `size_of::&lt;ShaderTileMetadata&gt;() == 128`.
-<a href=#151 id=151 data-nosnippet>151</a>    </span><span class="attr">#[doc(hidden)]
-<a href=#152 id=152 data-nosnippet>152</a>    </span><span class="kw">pub </span>_pad: [u32; <span class="number">2</span>],
-<a href=#153 id=153 data-nosnippet>153</a>}
-<a href=#154 id=154 data-nosnippet>154</a>
-<a href=#155 id=155 data-nosnippet>155</a><span class="doccomment">/// The [`ShaderTileMetadata::clip_region`] of a shape that draws its whole tile.
-<a href=#156 id=156 data-nosnippet>156</a></span><span class="kw">pub const </span>WHOLE_TILE: Vec4f32 = [<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">4096.0</span>, <span class="number">4096.0</span>];
-<a href=#157 id=157 data-nosnippet>157</a>
-<a href=#158 id=158 data-nosnippet>158</a><span class="kw">impl </span>ShaderTileMetadata {
-<a href=#159 id=159 data-nosnippet>159</a>    <span class="doccomment">/// Creates root-tile metadata for a 512-pixel viewport without antimeridian clipping.
-<a href=#160 id=160 data-nosnippet>160</a>    /// Callers drawing another tile or viewport must replace those fields before upload.
-<a href=#161 id=161 data-nosnippet>161</a>    </span><span class="kw">pub fn </span>new(transform: Mat4x4f32, zoom_factor: f32) -&gt; <span class="self">Self </span>{
-<a href=#162 id=162 data-nosnippet>162</a>        <span class="self">Self </span>{
-<a href=#163 id=163 data-nosnippet>163</a>            transform,
-<a href=#164 id=164 data-nosnippet>164</a>            tile_mercator_coords: [<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1.0 </span>/ <span class="number">4096.0</span>, <span class="number">1.0 </span>/ <span class="number">4096.0</span>],
-<a href=#165 id=165 data-nosnippet>165</a>            clip_region: WHOLE_TILE,
-<a href=#166 id=166 data-nosnippet>166</a>            viewport_width: <span class="number">512.0</span>,
-<a href=#167 id=167 data-nosnippet>167</a>            viewport_height: <span class="number">512.0</span>,
-<a href=#168 id=168 data-nosnippet>168</a>            line_width_scale: <span class="number">1.0</span>,
-<a href=#169 id=169 data-nosnippet>169</a>            line_units_per_pixel: <span class="number">8.0 </span>* zoom_factor,
-<a href=#170 id=170 data-nosnippet>170</a>            zoom_factor,
-<a href=#171 id=171 data-nosnippet>171</a>            clip_antimeridian: <span class="number">0</span>,
-<a href=#172 id=172 data-nosnippet>172</a>            _pad: [<span class="number">0</span>; <span class="number">2</span>],
-<a href=#173 id=173 data-nosnippet>173</a>        }
-<a href=#174 id=174 data-nosnippet>174</a>    }
-<a href=#175 id=175 data-nosnippet>175</a>
-<a href=#176 id=176 data-nosnippet>176</a>    <span class="doccomment">/// Builds an instance-stepped [`VertexBufferLayout`] over `ShaderTileMetadata` with `attributes`.
-<a href=#177 id=177 data-nosnippet>177</a>    </span><span class="kw">pub fn </span>instance_layout(attributes: Vec&lt;wgpu::VertexAttribute&gt;) -&gt; VertexBufferLayout {
-<a href=#178 id=178 data-nosnippet>178</a>        VertexBufferLayout {
-<a href=#179 id=179 data-nosnippet>179</a>            array_stride: std::mem::size_of::&lt;<span class="self">Self</span>&gt;() <span class="kw">as </span>u64,
-<a href=#180 id=180 data-nosnippet>180</a>            step_mode: wgpu::VertexStepMode::Instance,
-<a href=#181 id=181 data-nosnippet>181</a>            attributes,
-<a href=#182 id=182 data-nosnippet>182</a>        }
+<a href=#59 id=59 data-nosnippet>59</a><span class="kw">impl </span>FillShaderFeatureMetadata {
+<a href=#60 id=60 data-nosnippet>60</a>    <span class="doccomment">/// Quantizes floating-point `[r, g, b, a]` in `0.0..=1.0` into `Unorm8x4`.
+<a href=#61 id=61 data-nosnippet>61</a>    </span><span class="attr">#[inline]
+<a href=#62 id=62 data-nosnippet>62</a>    </span><span class="kw">pub fn </span>from_rgba(color: [f32; <span class="number">4</span>]) -&gt; <span class="self">Self </span>{
+<a href=#63 id=63 data-nosnippet>63</a>        <span class="self">Self </span>{
+<a href=#64 id=64 data-nosnippet>64</a>            color: color.map(|c| (c.clamp(<span class="number">0.0</span>, <span class="number">1.0</span>) * <span class="number">255.0</span>).round() <span class="kw">as </span>u8),
+<a href=#65 id=65 data-nosnippet>65</a>        }
+<a href=#66 id=66 data-nosnippet>66</a>    }
+<a href=#67 id=67 data-nosnippet>67</a>
+<a href=#68 id=68 data-nosnippet>68</a>    <span class="doccomment">/// Packs a `line-gradient` feature length in `1/16` tile units (`24-bit` unsigned fixed-point
+<a href=#69 id=69 data-nosnippet>69</a>    /// in `rgb`, up to `1,048,575.9375` tile units) and straight opacity in `a`.
+<a href=#70 id=70 data-nosnippet>70</a>    </span><span class="attr">#[inline]
+<a href=#71 id=71 data-nosnippet>71</a>    </span><span class="kw">pub fn </span>from_line_gradient(length: f32, opacity: f32) -&gt; <span class="self">Self </span>{
+<a href=#72 id=72 data-nosnippet>72</a>        <span class="kw">let </span>len_q4 = (length.max(<span class="number">0.0</span>) * <span class="number">16.0</span>).round().min(<span class="number">16_777_215.0</span>) <span class="kw">as </span>u32;
+<a href=#73 id=73 data-nosnippet>73</a>        <span class="self">Self </span>{
+<a href=#74 id=74 data-nosnippet>74</a>            color: [
+<a href=#75 id=75 data-nosnippet>75</a>                (len_q4 &amp; <span class="number">0xFF</span>) <span class="kw">as </span>u8,
+<a href=#76 id=76 data-nosnippet>76</a>                ((len_q4 &gt;&gt; <span class="number">8</span>) &amp; <span class="number">0xFF</span>) <span class="kw">as </span>u8,
+<a href=#77 id=77 data-nosnippet>77</a>                ((len_q4 &gt;&gt; <span class="number">16</span>) &amp; <span class="number">0xFF</span>) <span class="kw">as </span>u8,
+<a href=#78 id=78 data-nosnippet>78</a>                (opacity.clamp(<span class="number">0.0</span>, <span class="number">1.0</span>) * <span class="number">255.0</span>).round() <span class="kw">as </span>u8,
+<a href=#79 id=79 data-nosnippet>79</a>            ],
+<a href=#80 id=80 data-nosnippet>80</a>        }
+<a href=#81 id=81 data-nosnippet>81</a>    }
+<a href=#82 id=82 data-nosnippet>82</a>
+<a href=#83 id=83 data-nosnippet>83</a>    <span class="doccomment">/// Unpacks a `pack_circle_colors` negative-lane `[f32; 4]` pair into `[fill, stroke]`.
+<a href=#84 id=84 data-nosnippet>84</a>    </span><span class="attr">#[inline]
+<a href=#85 id=85 data-nosnippet>85</a>    </span><span class="kw">pub fn </span>unpack_circle_pair(packed: [f32; <span class="number">4</span>]) -&gt; [<span class="self">Self</span>; <span class="number">2</span>] {
+<a href=#86 id=86 data-nosnippet>86</a>        <span class="kw">let </span>pair = |lane: f32| -&gt; [u8; <span class="number">2</span>] {
+<a href=#87 id=87 data-nosnippet>87</a>            <span class="kw">let </span>v = (-lane - <span class="number">1.0</span>).max(<span class="number">0.0</span>).round() <span class="kw">as </span>u32;
+<a href=#88 id=88 data-nosnippet>88</a>            [((v &gt;&gt; <span class="number">8</span>) &amp; <span class="number">0xFF</span>) <span class="kw">as </span>u8, (v &amp; <span class="number">0xFF</span>) <span class="kw">as </span>u8]
+<a href=#89 id=89 data-nosnippet>89</a>        };
+<a href=#90 id=90 data-nosnippet>90</a>        <span class="kw">let </span>[fr, fg] = pair(packed[<span class="number">0</span>]);
+<a href=#91 id=91 data-nosnippet>91</a>        <span class="kw">let </span>[fb, fa] = pair(packed[<span class="number">1</span>]);
+<a href=#92 id=92 data-nosnippet>92</a>        <span class="kw">let </span>[sr, sg] = pair(packed[<span class="number">2</span>]);
+<a href=#93 id=93 data-nosnippet>93</a>        <span class="kw">let </span>[sb, sa] = pair(packed[<span class="number">3</span>]);
+<a href=#94 id=94 data-nosnippet>94</a>        [
+<a href=#95 id=95 data-nosnippet>95</a>            <span class="self">Self </span>{
+<a href=#96 id=96 data-nosnippet>96</a>                color: [fr, fg, fb, fa],
+<a href=#97 id=97 data-nosnippet>97</a>            },
+<a href=#98 id=98 data-nosnippet>98</a>            <span class="self">Self </span>{
+<a href=#99 id=99 data-nosnippet>99</a>                color: [sr, sg, sb, sa],
+<a href=#100 id=100 data-nosnippet>100</a>            },
+<a href=#101 id=101 data-nosnippet>101</a>        ]
+<a href=#102 id=102 data-nosnippet>102</a>    }
+<a href=#103 id=103 data-nosnippet>103</a>}
+<a href=#104 id=104 data-nosnippet>104</a>
+<a href=#105 id=105 data-nosnippet>105</a><span class="doccomment">/// What the fourth lane of [`SDFShaderFeatureMetadata::decoded_pose`] holds for a glyph with a pose,
+<a href=#106 id=106 data-nosnippet>106</a>/// before the glyph's rise in metres is added; a vertex without a pose holds 0. At this
+<a href=#107 id=107 data-nosnippet>107</a>/// magnitude an `f32` keeps any rise on Earth to within a centimetre.
+<a href=#108 id=108 data-nosnippet>108</a></span><span class="kw">pub const </span>POSED_GLYPH: f32 = <span class="number">65536.0</span>;
+<a href=#109 id=109 data-nosnippet>109</a>
+<a href=#110 id=110 data-nosnippet>110</a><span class="doccomment">/// Per-vertex collision visibility, GPU fade ramp, and sampled terrain height for symbols (`32 B`).
+<a href=#111 id=111 data-nosnippet>111</a>///
+<a href=#112 id=112 data-nosnippet>112</a>/// Field offsets (`16 B`, `8 B`, `4 B`, `4 B`) preserve natural hardware alignment across
+<a href=#113 id=113 data-nosnippet>113</a>/// WebGPU, Metal, and mobile Vulkan drivers while using only 4 vertex attribute locations.
+<a href=#114 id=114 data-nosnippet>114</a></span><span class="attr">#[repr(C)]
+<a href=#115 id=115 data-nosnippet>115</a>#[derive(Debug, Copy, Clone, PartialEq, Pod, Zeroable, Default)]
+<a href=#116 id=116 data-nosnippet>116</a></span><span class="kw">pub struct </span>SDFShaderFeatureMetadata {
+<a href=#117 id=117 data-nosnippet>117</a>    <span class="doccomment">/// Bit-packed symbol metrics, elevation, fade timestamp, and along-line angle/rise (`@location(15)`):
+<a href=#118 id=118 data-nosnippet>118</a>    /// - `packed[0]`: `(elev_q4_i20 &amp; 0x000f_ffff) | (halo_w_q4 &lt;&lt; 20) | (has_pose &lt;&lt; 28) | (start_hi3 &lt;&lt; 29)`
+<a href=#119 id=119 data-nosnippet>119</a>    /// - `packed[1]`: `size_f16 | (rise_f16 &lt;&lt; 16)`
+<a href=#120 id=120 data-nosnippet>120</a>    /// - `packed[2]`: `angle_u16 | (start_lo16 &lt;&lt; 16)`
+<a href=#121 id=121 data-nosnippet>121</a>    /// - `packed[3]`: `target_u8 | (start_u8 &lt;&lt; 8) | (style_u8 &lt;&lt; 16) | (halo_b_q4 &lt;&lt; 24)`
+<a href=#122 id=122 data-nosnippet>122</a>    </span><span class="kw">pub </span>packed: [u32; <span class="number">4</span>],
+<a href=#123 id=123 data-nosnippet>123</a>    <span class="doccomment">/// Full-precision `[shift_x, shift_y]` in layout px when `!has_pose`, or `[dx, dy]` in tile
+<a href=#124 id=124 data-nosnippet>124</a>    /// units relative to the label's integer anchor when `has_pose` (`@location(12)`).
+<a href=#125 id=125 data-nosnippet>125</a>    </span><span class="kw">pub </span>pose_xy: [f32; <span class="number">2</span>],
+<a href=#126 id=126 data-nosnippet>126</a>    <span class="doccomment">/// Fill colour of the symbol's text or icon (`Unorm8x4`, `@location(10)`).
+<a href=#127 id=127 data-nosnippet>127</a>    </span><span class="kw">pub </span>color: [u8; <span class="number">4</span>],
+<a href=#128 id=128 data-nosnippet>128</a>    <span class="doccomment">/// Halo colour of the text or icon (`Unorm8x4`, `@location(13)`).
+<a href=#129 id=129 data-nosnippet>129</a>    </span><span class="kw">pub </span>halo: [u8; <span class="number">4</span>],
+<a href=#130 id=130 data-nosnippet>130</a>}
+<a href=#131 id=131 data-nosnippet>131</a>
+<a href=#132 id=132 data-nosnippet>132</a><span class="kw">impl </span>SDFShaderFeatureMetadata {
+<a href=#133 id=133 data-nosnippet>133</a>    <span class="doccomment">/// Packs placement visibility, fade ramp, anchor shift, and paint style into 32 bytes.
+<a href=#134 id=134 data-nosnippet>134</a>    </span><span class="attr">#[inline]
+<a href=#135 id=135 data-nosnippet>135</a>    #[allow(clippy::too_many_arguments)]
+<a href=#136 id=136 data-nosnippet>136</a>    </span><span class="kw">pub fn </span>from_placement(
+<a href=#137 id=137 data-nosnippet>137</a>        target_opacity: f32,
+<a href=#138 id=138 data-nosnippet>138</a>        elevation: f32,
+<a href=#139 id=139 data-nosnippet>139</a>        start_opacity: f32,
+<a href=#140 id=140 data-nosnippet>140</a>        start_time_ms: f32,
+<a href=#141 id=141 data-nosnippet>141</a>        shift: [f32; <span class="number">2</span>],
+<a href=#142 id=142 data-nosnippet>142</a>        color: [f32; <span class="number">4</span>],
+<a href=#143 id=143 data-nosnippet>143</a>        halo: [f32; <span class="number">4</span>],
+<a href=#144 id=144 data-nosnippet>144</a>        params: [f32; <span class="number">4</span>],
+<a href=#145 id=145 data-nosnippet>145</a>    ) -&gt; <span class="self">Self </span>{
+<a href=#146 id=146 data-nosnippet>146</a>        <span class="kw">let </span>u8_norm = |v: f32| (v.clamp(<span class="number">0.0</span>, <span class="number">1.0</span>) * <span class="number">255.0</span>).round() <span class="kw">as </span>u32;
+<a href=#147 id=147 data-nosnippet>147</a>        <span class="kw">let </span>target_u8 = u8_norm(target_opacity);
+<a href=#148 id=148 data-nosnippet>148</a>        <span class="kw">let </span>start_u8 = u8_norm(start_opacity);
+<a href=#149 id=149 data-nosnippet>149</a>        <span class="kw">let </span>style_op_u8 = u8_norm(params[<span class="number">3</span>]);
+<a href=#150 id=150 data-nosnippet>150</a>        <span class="kw">let </span>size_f16 = u32::from(<span class="kw">super</span>::f32_to_f16_bits(params[<span class="number">0</span>].max(<span class="number">0.0</span>)));
+<a href=#151 id=151 data-nosnippet>151</a>        <span class="kw">let </span>halo_w_q4 = (params[<span class="number">1</span>].max(<span class="number">0.0</span>) * <span class="number">16.0</span>).round().min(<span class="number">255.0</span>) <span class="kw">as </span>u32;
+<a href=#152 id=152 data-nosnippet>152</a>        <span class="kw">let </span>halo_b_q4 = (params[<span class="number">2</span>].max(<span class="number">0.0</span>) * <span class="number">16.0</span>).round().min(<span class="number">255.0</span>) <span class="kw">as </span>u32;
+<a href=#153 id=153 data-nosnippet>153</a>        <span class="kw">let </span>elev_i20 = (elevation * <span class="number">16.0</span>).round().clamp(-<span class="number">524_288.0</span>, <span class="number">524_287.0</span>) <span class="kw">as </span>i32;
+<a href=#154 id=154 data-nosnippet>154</a>        <span class="kw">let </span>elev_bits = (elev_i20 <span class="kw">as </span>u32) &amp; <span class="number">0x000f_ffff</span>;
+<a href=#155 id=155 data-nosnippet>155</a>        <span class="kw">let </span>start_ticks = (start_time_ms.max(<span class="number">0.0</span>) * <span class="number">0.25</span>).round().min(<span class="number">524_287.0</span>) <span class="kw">as </span>u32;
+<a href=#156 id=156 data-nosnippet>156</a>        <span class="self">Self </span>{
+<a href=#157 id=157 data-nosnippet>157</a>            packed: [
+<a href=#158 id=158 data-nosnippet>158</a>                elev_bits | (halo_w_q4 &lt;&lt; <span class="number">20</span>) | (((start_ticks &gt;&gt; <span class="number">16</span>) &amp; <span class="number">0x7</span>) &lt;&lt; <span class="number">29</span>),
+<a href=#159 id=159 data-nosnippet>159</a>                size_f16,
+<a href=#160 id=160 data-nosnippet>160</a>                (start_ticks &amp; <span class="number">0xffff</span>) &lt;&lt; <span class="number">16</span>,
+<a href=#161 id=161 data-nosnippet>161</a>                target_u8 | (start_u8 &lt;&lt; <span class="number">8</span>) | (style_op_u8 &lt;&lt; <span class="number">16</span>) | (halo_b_q4 &lt;&lt; <span class="number">24</span>),
+<a href=#162 id=162 data-nosnippet>162</a>            ],
+<a href=#163 id=163 data-nosnippet>163</a>            pose_xy: shift,
+<a href=#164 id=164 data-nosnippet>164</a>            color: color.map(|c| (c.clamp(<span class="number">0.0</span>, <span class="number">1.0</span>) * <span class="number">255.0</span>).round() <span class="kw">as </span>u8),
+<a href=#165 id=165 data-nosnippet>165</a>            halo: halo.map(|c| (c.clamp(<span class="number">0.0</span>, <span class="number">1.0</span>) * <span class="number">255.0</span>).round() <span class="kw">as </span>u8),
+<a href=#166 id=166 data-nosnippet>166</a>        }
+<a href=#167 id=167 data-nosnippet>167</a>    }
+<a href=#168 id=168 data-nosnippet>168</a>
+<a href=#169 id=169 data-nosnippet>169</a>    <span class="doccomment">/// Encodes a glyph's curved-line pose (`dx, dy` in tile units, `angle` in radians, `rise` in metres).
+<a href=#170 id=170 data-nosnippet>170</a>    </span><span class="attr">#[inline]
+<a href=#171 id=171 data-nosnippet>171</a>    </span><span class="kw">pub fn </span>set_glyph_pose(<span class="kw-2">&amp;mut </span><span class="self">self</span>, dx: f32, dy: f32, angle: f32, rise: f32) {
+<a href=#172 id=172 data-nosnippet>172</a>        <span class="kw">let </span>tau = std::f32::consts::TAU;
+<a href=#173 id=173 data-nosnippet>173</a>        <span class="kw">let </span>angle_u16 = <span class="kw">if </span>angle.is_finite() {
+<a href=#174 id=174 data-nosnippet>174</a>            (angle.rem_euclid(tau) * (<span class="number">65536.0 </span>/ tau)).round() <span class="kw">as </span>u32 &amp; <span class="number">0xffff
+<a href=#175 id=175 data-nosnippet>175</a>        </span>} <span class="kw">else </span>{
+<a href=#176 id=176 data-nosnippet>176</a>            <span class="number">0
+<a href=#177 id=177 data-nosnippet>177</a>        </span>};
+<a href=#178 id=178 data-nosnippet>178</a>        <span class="kw">let </span>rise_f16 = u32::from(<span class="kw">super</span>::f32_to_f16_bits(rise));
+<a href=#179 id=179 data-nosnippet>179</a>        <span class="self">self</span>.packed[<span class="number">0</span>] |= <span class="number">1_u32 </span>&lt;&lt; <span class="number">28</span>;
+<a href=#180 id=180 data-nosnippet>180</a>        <span class="self">self</span>.packed[<span class="number">1</span>] = (<span class="self">self</span>.packed[<span class="number">1</span>] &amp; <span class="number">0xffff</span>) | (rise_f16 &lt;&lt; <span class="number">16</span>);
+<a href=#181 id=181 data-nosnippet>181</a>        <span class="self">self</span>.packed[<span class="number">2</span>] = (<span class="self">self</span>.packed[<span class="number">2</span>] &amp; <span class="number">0xffff_0000</span>) | angle_u16;
+<a href=#182 id=182 data-nosnippet>182</a>        <span class="self">self</span>.pose_xy = [dx, dy];
 <a href=#183 id=183 data-nosnippet>183</a>    }
 <a href=#184 id=184 data-nosnippet>184</a>
-<a href=#185 id=185 data-nosnippet>185</a>    <span class="doccomment">/// Column attributes (`@location(4..=7)`) for [`Self::transform`].
-<a href=#186 id=186 data-nosnippet>186</a>    </span><span class="kw">pub fn </span>transform_attributes() -&gt; [wgpu::VertexAttribute; <span class="number">4</span>] {
-<a href=#187 id=187 data-nosnippet>187</a>        <span class="kw">let </span>base = <span class="macro">std::mem::offset_of!</span>(<span class="self">Self</span>, transform) <span class="kw">as </span>u64;
-<a href=#188 id=188 data-nosnippet>188</a>        <span class="kw">let </span>col = wgpu::VertexFormat::Float32x4.size();
-<a href=#189 id=189 data-nosnippet>189</a>        [
-<a href=#190 id=190 data-nosnippet>190</a>            attribute(base, wgpu::VertexFormat::Float32x4, <span class="number">4</span>),
-<a href=#191 id=191 data-nosnippet>191</a>            attribute(base + col, wgpu::VertexFormat::Float32x4, <span class="number">5</span>),
-<a href=#192 id=192 data-nosnippet>192</a>            attribute(base + <span class="number">2 </span>* col, wgpu::VertexFormat::Float32x4, <span class="number">6</span>),
-<a href=#193 id=193 data-nosnippet>193</a>            attribute(base + <span class="number">3 </span>* col, wgpu::VertexFormat::Float32x4, <span class="number">7</span>),
-<a href=#194 id=194 data-nosnippet>194</a>        ]
-<a href=#195 id=195 data-nosnippet>195</a>    }
+<a href=#185 id=185 data-nosnippet>185</a>    <span class="doccomment">/// Whether target collision opacity is greater than zero.
+<a href=#186 id=186 data-nosnippet>186</a>    </span><span class="attr">#[inline]
+<a href=#187 id=187 data-nosnippet>187</a>    </span><span class="kw">pub const fn </span>has_target_opacity(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+<a href=#188 id=188 data-nosnippet>188</a>        (<span class="self">self</span>.packed[<span class="number">3</span>] &amp; <span class="number">0xff</span>) != <span class="number">0
+<a href=#189 id=189 data-nosnippet>189</a>    </span>}
+<a href=#190 id=190 data-nosnippet>190</a>
+<a href=#191 id=191 data-nosnippet>191</a>    <span class="doccomment">/// Whether starting fade opacity is greater than zero.
+<a href=#192 id=192 data-nosnippet>192</a>    </span><span class="attr">#[inline]
+<a href=#193 id=193 data-nosnippet>193</a>    </span><span class="kw">pub const fn </span>has_start_opacity(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+<a href=#194 id=194 data-nosnippet>194</a>        ((<span class="self">self</span>.packed[<span class="number">3</span>] &gt;&gt; <span class="number">8</span>) &amp; <span class="number">0xff</span>) != <span class="number">0
+<a href=#195 id=195 data-nosnippet>195</a>    </span>}
 <a href=#196 id=196 data-nosnippet>196</a>
-<a href=#197 id=197 data-nosnippet>197</a>    <span class="doccomment">/// Shared instance layout binding `transform` (`4..=7`), `tile_mercator_coords` (`2`), and
-<a href=#198 id=198 data-nosnippet>198</a>    /// `zoom_factor` (`9`), used by fill, fill-extrusion, heatmap, and tile-mask shaders.
-<a href=#199 id=199 data-nosnippet>199</a>    </span><span class="kw">pub fn </span>basic_layout() -&gt; VertexBufferLayout {
-<a href=#200 id=200 data-nosnippet>200</a>        <span class="kw">let </span><span class="kw-2">mut </span>attrs = <span class="self">Self</span>::transform_attributes().to_vec();
-<a href=#201 id=201 data-nosnippet>201</a>        attrs.push(attribute(
-<a href=#202 id=202 data-nosnippet>202</a>            <span class="macro">std::mem::offset_of!</span>(<span class="self">Self</span>, zoom_factor) <span class="kw">as </span>u64,
-<a href=#203 id=203 data-nosnippet>203</a>            wgpu::VertexFormat::Float32,
-<a href=#204 id=204 data-nosnippet>204</a>            <span class="number">9</span>,
-<a href=#205 id=205 data-nosnippet>205</a>        ));
-<a href=#206 id=206 data-nosnippet>206</a>        attrs.push(attribute(
-<a href=#207 id=207 data-nosnippet>207</a>            <span class="macro">std::mem::offset_of!</span>(<span class="self">Self</span>, tile_mercator_coords) <span class="kw">as </span>u64,
-<a href=#208 id=208 data-nosnippet>208</a>            wgpu::VertexFormat::Float32x4,
-<a href=#209 id=209 data-nosnippet>209</a>            <span class="number">2</span>,
-<a href=#210 id=210 data-nosnippet>210</a>        ));
-<a href=#211 id=211 data-nosnippet>211</a>        <span class="self">Self</span>::instance_layout(attrs)
-<a href=#212 id=212 data-nosnippet>212</a>    }
-<a href=#213 id=213 data-nosnippet>213</a>}
+<a href=#197 id=197 data-nosnippet>197</a>    <span class="doccomment">/// Decodes the quantized fade start timestamp in milliseconds.
+<a href=#198 id=198 data-nosnippet>198</a>    </span><span class="attr">#[inline]
+<a href=#199 id=199 data-nosnippet>199</a>    </span><span class="kw">pub fn </span>start_time_ms(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; f32 {
+<a href=#200 id=200 data-nosnippet>200</a>        <span class="kw">let </span>ticks = (<span class="self">self</span>.packed[<span class="number">2</span>] &gt;&gt; <span class="number">16</span>) | (((<span class="self">self</span>.packed[<span class="number">0</span>] &gt;&gt; <span class="number">29</span>) &amp; <span class="number">0x7</span>) &lt;&lt; <span class="number">16</span>);
+<a href=#201 id=201 data-nosnippet>201</a>        (ticks <span class="kw">as </span>f32) * <span class="number">4.0
+<a href=#202 id=202 data-nosnippet>202</a>    </span>}
+<a href=#203 id=203 data-nosnippet>203</a>
+<a href=#204 id=204 data-nosnippet>204</a>    <span class="doccomment">/// Sets quantized target collision opacity (`0.0..=1.0`), used by unit tests.
+<a href=#205 id=205 data-nosnippet>205</a>    </span><span class="attr">#[inline]
+<a href=#206 id=206 data-nosnippet>206</a>    </span><span class="kw">pub fn </span>set_target_opacity(<span class="kw-2">&amp;mut </span><span class="self">self</span>, opacity: f32) {
+<a href=#207 id=207 data-nosnippet>207</a>        <span class="kw">let </span>u = (opacity.clamp(<span class="number">0.0</span>, <span class="number">1.0</span>) * <span class="number">255.0</span>).round() <span class="kw">as </span>u32;
+<a href=#208 id=208 data-nosnippet>208</a>        <span class="self">self</span>.packed[<span class="number">3</span>] = (<span class="self">self</span>.packed[<span class="number">3</span>] &amp; !<span class="number">0xff</span>) | u;
+<a href=#209 id=209 data-nosnippet>209</a>    }
+<a href=#210 id=210 data-nosnippet>210</a>
+<a href=#211 id=211 data-nosnippet>211</a>    <span class="doccomment">/// Whether this vertex carries an along-line glyph pose (`true`) rather than an anchor shift.
+<a href=#212 id=212 data-nosnippet>212</a>    </span><span class="attr">#[inline]
+<a href=#213 id=213 data-nosnippet>213</a>    </span><span class="kw">pub const fn </span>has_pose(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+<a href=#214 id=214 data-nosnippet>214</a>        ((<span class="self">self</span>.packed[<span class="number">0</span>] &gt;&gt; <span class="number">28</span>) &amp; <span class="number">1</span>) != <span class="number">0
+<a href=#215 id=215 data-nosnippet>215</a>    </span>}
+<a href=#216 id=216 data-nosnippet>216</a>
+<a href=#217 id=217 data-nosnippet>217</a>    <span class="doccomment">/// Decodes `[dx, dy, angle, POSED_GLYPH + rise]` (or `[shift_x, shift_y, 0.0, 0.0]` when unposed).
+<a href=#218 id=218 data-nosnippet>218</a>    </span><span class="attr">#[inline]
+<a href=#219 id=219 data-nosnippet>219</a>    </span><span class="kw">pub fn </span>decoded_pose(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; [f32; <span class="number">4</span>] {
+<a href=#220 id=220 data-nosnippet>220</a>        <span class="kw">if </span><span class="self">self</span>.has_pose() {
+<a href=#221 id=221 data-nosnippet>221</a>            <span class="kw">let </span>rise = <span class="kw">super</span>::f16_bits_to_f32((<span class="self">self</span>.packed[<span class="number">1</span>] &gt;&gt; <span class="number">16</span>) <span class="kw">as </span>u16);
+<a href=#222 id=222 data-nosnippet>222</a>            <span class="kw">let </span>angle = (<span class="self">self</span>.packed[<span class="number">2</span>] &amp; <span class="number">0xffff</span>) <span class="kw">as </span>f32 * (std::f32::consts::TAU / <span class="number">65536.0</span>);
+<a href=#223 id=223 data-nosnippet>223</a>            [<span class="self">self</span>.pose_xy[<span class="number">0</span>], <span class="self">self</span>.pose_xy[<span class="number">1</span>], angle, POSED_GLYPH + rise]
+<a href=#224 id=224 data-nosnippet>224</a>        } <span class="kw">else </span>{
+<a href=#225 id=225 data-nosnippet>225</a>            [<span class="self">self</span>.pose_xy[<span class="number">0</span>], <span class="self">self</span>.pose_xy[<span class="number">1</span>], <span class="number">0.0</span>, <span class="number">0.0</span>]
+<a href=#226 id=226 data-nosnippet>226</a>        }
+<a href=#227 id=227 data-nosnippet>227</a>    }
+<a href=#228 id=228 data-nosnippet>228</a>}
+<a href=#229 id=229 data-nosnippet>229</a>
+<a href=#230 id=230 data-nosnippet>230</a><span class="doccomment">/// Per-layer instance record shared across tile pipelines.
+<a href=#231 id=231 data-nosnippet>231</a></span><span class="attr">#[repr(C)]
+<a href=#232 id=232 data-nosnippet>232</a>#[derive(Copy, Clone, Pod, Zeroable)]
+<a href=#233 id=233 data-nosnippet>233</a></span><span class="kw">pub struct </span>ShaderLayerMetadata {
+<a href=#234 id=234 data-nosnippet>234</a>    <span class="doccomment">/// Style painter-order index carried by the shared instance layout.
+<a href=#235 id=235 data-nosnippet>235</a>    </span><span class="kw">pub </span>z_index: f32,
+<a href=#236 id=236 data-nosnippet>236</a>    <span class="doccomment">/// Evaluated line width in style pixels, before per-tile drape scaling.
+<a href=#237 id=237 data-nosnippet>237</a>    </span><span class="kw">pub </span>line_width: f32,
+<a href=#238 id=238 data-nosnippet>238</a>    <span class="doccomment">/// Layer translation converted to tile units in map axes.
+<a href=#239 id=239 data-nosnippet>239</a>    </span><span class="kw">pub </span>translate: Vec2f32,
+<a href=#240 id=240 data-nosnippet>240</a>    <span class="doccomment">/// Circle stroke colour or extrusion light colour.
+<a href=#241 id=241 data-nosnippet>241</a>    </span><span class="kw">pub </span>stroke_color: Vec4f32,
+<a href=#242 id=242 data-nosnippet>242</a>    <span class="doccomment">/// Circle opacity, stroke opacity and blur ratio; the last slot is padding.
+<a href=#243 id=243 data-nosnippet>243</a>    </span><span class="kw">pub </span>circle_params: Vec4f32,
+<a href=#244 id=244 data-nosnippet>244</a>    <span class="doccomment">/// Circle pitch-scale (x) and pitch-alignment (y), 1.0 for `map`; the rest is padding.
+<a href=#245 id=245 data-nosnippet>245</a>    </span><span class="kw">pub </span>circle_flags: Vec4f32,
+<a href=#246 id=246 data-nosnippet>246</a>    <span class="doccomment">/// Uniform fill/line/extrusion/circle colour (`@location(8)` on `uniform` pipelines).
+<a href=#247 id=247 data-nosnippet>247</a>    </span><span class="kw">pub </span>uniform_color: Vec4f32,
+<a href=#248 id=248 data-nosnippet>248</a>}
+<a href=#249 id=249 data-nosnippet>249</a>
+<a href=#250 id=250 data-nosnippet>250</a><span class="kw">impl </span>ShaderLayerMetadata {
+<a href=#251 id=251 data-nosnippet>251</a>    <span class="doccomment">/// Metadata for a layer without circle paint or uniform fill colour override.
+<a href=#252 id=252 data-nosnippet>252</a>    </span><span class="kw">pub fn </span>new(z_index: f32, line_width: f32, translate: Vec2f32) -&gt; <span class="self">Self </span>{
+<a href=#253 id=253 data-nosnippet>253</a>        <span class="self">Self </span>{
+<a href=#254 id=254 data-nosnippet>254</a>            z_index,
+<a href=#255 id=255 data-nosnippet>255</a>            line_width,
+<a href=#256 id=256 data-nosnippet>256</a>            translate,
+<a href=#257 id=257 data-nosnippet>257</a>            stroke_color: [-<span class="number">1.0</span>, <span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1.0</span>],
+<a href=#258 id=258 data-nosnippet>258</a>            circle_params: [<span class="number">1.0</span>, <span class="number">1.0</span>, <span class="number">0.0</span>, <span class="number">0.0</span>],
+<a href=#259 id=259 data-nosnippet>259</a>            circle_flags: [<span class="number">0.0</span>; <span class="number">4</span>],
+<a href=#260 id=260 data-nosnippet>260</a>            uniform_color: [<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1.0</span>],
+<a href=#261 id=261 data-nosnippet>261</a>        }
+<a href=#262 id=262 data-nosnippet>262</a>    }
+<a href=#263 id=263 data-nosnippet>263</a>}
+<a href=#264 id=264 data-nosnippet>264</a>
+<a href=#265 id=265 data-nosnippet>265</a><span class="doccomment">/// Per-tile instance record with projection, viewport and line scaling inputs.
+<a href=#266 id=266 data-nosnippet>266</a>///
+<a href=#267 id=267 data-nosnippet>267</a>/// Every `Vec4f32` field sits on a 16-byte boundary, `Float32x2` scalar pairs sit on 8-byte
+<a href=#268 id=268 data-nosnippet>268</a>/// boundaries, and explicit tail padding rounds the record to 128 bytes so per-tile buffer slices
+<a href=#269 id=269 data-nosnippet>269</a>/// preserve 16-byte vector attribute alignment on mobile Vulkan drivers.
+<a href=#270 id=270 data-nosnippet>270</a></span><span class="attr">#[repr(C)]
+<a href=#271 id=271 data-nosnippet>271</a>#[derive(Copy, Clone, Pod, Zeroable)]
+<a href=#272 id=272 data-nosnippet>272</a></span><span class="kw">pub struct </span>ShaderTileMetadata {
+<a href=#273 id=273 data-nosnippet>273</a>    <span class="doccomment">/// Column-major tile-to-clip transform used by the flat projection path.
+<a href=#274 id=274 data-nosnippet>274</a>    </span><span class="kw">pub </span>transform: Mat4x4f32,
+<a href=#275 id=275 data-nosnippet>275</a>    <span class="doccomment">/// Mercator world origin in XY and per-tile-unit scales in ZW.
+<a href=#276 id=276 data-nosnippet>276</a>    </span><span class="kw">pub </span>tile_mercator_coords: Vec4f32,
+<a href=#277 id=277 data-nosnippet>277</a>    <span class="doccomment">/// The part of the tile the shape draws, as minimum and maximum tile coordinates: a tile
+<a href=#278 id=278 data-nosnippet>278</a>    /// drawn over a finer view tile covers only that tile's square of it. A line on the
+<a href=#279 id=279 data-nosnippet>279</a>    /// terrain clips itself to it, where a flat shape takes it from the stencil mask.
+<a href=#280 id=280 data-nosnippet>280</a>    </span><span class="kw">pub </span>clip_region: Vec4f32,
+<a href=#281 id=281 data-nosnippet>281</a>    <span class="doccomment">/// Render viewport width in pixels.
+<a href=#282 id=282 data-nosnippet>282</a>    </span><span class="kw">pub </span>viewport_width: f32,
+<a href=#283 id=283 data-nosnippet>283</a>    <span class="doccomment">/// Render viewport height in pixels.
+<a href=#284 id=284 data-nosnippet>284</a>    </span><span class="kw">pub </span>viewport_height: f32,
+<a href=#285 id=285 data-nosnippet>285</a>    <span class="doccomment">/// Converts style pixels to pixels in an offscreen drape texture.
+<a href=#286 id=286 data-nosnippet>286</a>    </span><span class="kw">pub </span>line_width_scale: f32,
+<a href=#287 id=287 data-nosnippet>287</a>    <span class="doccomment">/// Tile units per texture or viewport pixel for line dash lengths.
+<a href=#288 id=288 data-nosnippet>288</a>    </span><span class="kw">pub </span>line_units_per_pixel: f32,
+<a href=#289 id=289 data-nosnippet>289</a>    <span class="doccomment">/// Scale from view zoom to tile zoom, normally `2^(tile_zoom - view_zoom)`.
+<a href=#290 id=290 data-nosnippet>290</a>    </span><span class="kw">pub </span>zoom_factor: f32,
+<a href=#291 id=291 data-nosnippet>291</a>    <span class="doccomment">/// One clips geometry outside the root tile at the antimeridian; zero disables clipping.
+<a href=#292 id=292 data-nosnippet>292</a>    </span><span class="kw">pub </span>clip_antimeridian: u32,
+<a href=#293 id=293 data-nosnippet>293</a>    <span class="doccomment">/// Explicit tail padding keeping `size_of::&lt;ShaderTileMetadata&gt;() == 128`.
+<a href=#294 id=294 data-nosnippet>294</a>    </span><span class="attr">#[doc(hidden)]
+<a href=#295 id=295 data-nosnippet>295</a>    </span><span class="kw">pub </span>_pad: [u32; <span class="number">2</span>],
+<a href=#296 id=296 data-nosnippet>296</a>}
+<a href=#297 id=297 data-nosnippet>297</a>
+<a href=#298 id=298 data-nosnippet>298</a><span class="doccomment">/// The [`ShaderTileMetadata::clip_region`] of a shape that draws its whole tile.
+<a href=#299 id=299 data-nosnippet>299</a></span><span class="kw">pub const </span>WHOLE_TILE: Vec4f32 = [<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">4096.0</span>, <span class="number">4096.0</span>];
+<a href=#300 id=300 data-nosnippet>300</a>
+<a href=#301 id=301 data-nosnippet>301</a><span class="kw">impl </span>ShaderTileMetadata {
+<a href=#302 id=302 data-nosnippet>302</a>    <span class="doccomment">/// Creates root-tile metadata for a 512-pixel viewport without antimeridian clipping.
+<a href=#303 id=303 data-nosnippet>303</a>    /// Callers drawing another tile or viewport must replace those fields before upload.
+<a href=#304 id=304 data-nosnippet>304</a>    </span><span class="kw">pub fn </span>new(transform: Mat4x4f32, zoom_factor: f32) -&gt; <span class="self">Self </span>{
+<a href=#305 id=305 data-nosnippet>305</a>        <span class="self">Self </span>{
+<a href=#306 id=306 data-nosnippet>306</a>            transform,
+<a href=#307 id=307 data-nosnippet>307</a>            tile_mercator_coords: [<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1.0 </span>/ <span class="number">4096.0</span>, <span class="number">1.0 </span>/ <span class="number">4096.0</span>],
+<a href=#308 id=308 data-nosnippet>308</a>            clip_region: WHOLE_TILE,
+<a href=#309 id=309 data-nosnippet>309</a>            viewport_width: <span class="number">512.0</span>,
+<a href=#310 id=310 data-nosnippet>310</a>            viewport_height: <span class="number">512.0</span>,
+<a href=#311 id=311 data-nosnippet>311</a>            line_width_scale: <span class="number">1.0</span>,
+<a href=#312 id=312 data-nosnippet>312</a>            line_units_per_pixel: <span class="number">8.0 </span>* zoom_factor,
+<a href=#313 id=313 data-nosnippet>313</a>            zoom_factor,
+<a href=#314 id=314 data-nosnippet>314</a>            clip_antimeridian: <span class="number">0</span>,
+<a href=#315 id=315 data-nosnippet>315</a>            _pad: [<span class="number">0</span>; <span class="number">2</span>],
+<a href=#316 id=316 data-nosnippet>316</a>        }
+<a href=#317 id=317 data-nosnippet>317</a>    }
+<a href=#318 id=318 data-nosnippet>318</a>
+<a href=#319 id=319 data-nosnippet>319</a>    <span class="doccomment">/// Builds an instance-stepped [`VertexBufferLayout`] over `ShaderTileMetadata` with `attributes`.
+<a href=#320 id=320 data-nosnippet>320</a>    </span><span class="kw">pub fn </span>instance_layout(attributes: Vec&lt;wgpu::VertexAttribute&gt;) -&gt; VertexBufferLayout {
+<a href=#321 id=321 data-nosnippet>321</a>        VertexBufferLayout {
+<a href=#322 id=322 data-nosnippet>322</a>            array_stride: std::mem::size_of::&lt;<span class="self">Self</span>&gt;() <span class="kw">as </span>u64,
+<a href=#323 id=323 data-nosnippet>323</a>            step_mode: wgpu::VertexStepMode::Instance,
+<a href=#324 id=324 data-nosnippet>324</a>            attributes,
+<a href=#325 id=325 data-nosnippet>325</a>        }
+<a href=#326 id=326 data-nosnippet>326</a>    }
+<a href=#327 id=327 data-nosnippet>327</a>
+<a href=#328 id=328 data-nosnippet>328</a>    <span class="doccomment">/// Column attributes (`@location(4..=7)`) for [`Self::transform`].
+<a href=#329 id=329 data-nosnippet>329</a>    </span><span class="kw">pub fn </span>transform_attributes() -&gt; [wgpu::VertexAttribute; <span class="number">4</span>] {
+<a href=#330 id=330 data-nosnippet>330</a>        <span class="kw">let </span>base = <span class="macro">std::mem::offset_of!</span>(<span class="self">Self</span>, transform) <span class="kw">as </span>u64;
+<a href=#331 id=331 data-nosnippet>331</a>        <span class="kw">let </span>col = wgpu::VertexFormat::Float32x4.size();
+<a href=#332 id=332 data-nosnippet>332</a>        [
+<a href=#333 id=333 data-nosnippet>333</a>            attribute(base, wgpu::VertexFormat::Float32x4, <span class="number">4</span>),
+<a href=#334 id=334 data-nosnippet>334</a>            attribute(base + col, wgpu::VertexFormat::Float32x4, <span class="number">5</span>),
+<a href=#335 id=335 data-nosnippet>335</a>            attribute(base + <span class="number">2 </span>* col, wgpu::VertexFormat::Float32x4, <span class="number">6</span>),
+<a href=#336 id=336 data-nosnippet>336</a>            attribute(base + <span class="number">3 </span>* col, wgpu::VertexFormat::Float32x4, <span class="number">7</span>),
+<a href=#337 id=337 data-nosnippet>337</a>        ]
+<a href=#338 id=338 data-nosnippet>338</a>    }
+<a href=#339 id=339 data-nosnippet>339</a>
+<a href=#340 id=340 data-nosnippet>340</a>    <span class="doccomment">/// Shared instance layout binding `transform` (`4..=7`), `tile_mercator_coords` (`2`), and
+<a href=#341 id=341 data-nosnippet>341</a>    /// `zoom_factor` (`9`), used by fill, fill-extrusion, heatmap, and tile-mask shaders.
+<a href=#342 id=342 data-nosnippet>342</a>    </span><span class="kw">pub fn </span>basic_layout() -&gt; VertexBufferLayout {
+<a href=#343 id=343 data-nosnippet>343</a>        <span class="kw">let </span><span class="kw-2">mut </span>attrs = <span class="self">Self</span>::transform_attributes().to_vec();
+<a href=#344 id=344 data-nosnippet>344</a>        attrs.push(attribute(
+<a href=#345 id=345 data-nosnippet>345</a>            <span class="macro">std::mem::offset_of!</span>(<span class="self">Self</span>, zoom_factor) <span class="kw">as </span>u64,
+<a href=#346 id=346 data-nosnippet>346</a>            wgpu::VertexFormat::Float32,
+<a href=#347 id=347 data-nosnippet>347</a>            <span class="number">9</span>,
+<a href=#348 id=348 data-nosnippet>348</a>        ));
+<a href=#349 id=349 data-nosnippet>349</a>        attrs.push(attribute(
+<a href=#350 id=350 data-nosnippet>350</a>            <span class="macro">std::mem::offset_of!</span>(<span class="self">Self</span>, tile_mercator_coords) <span class="kw">as </span>u64,
+<a href=#351 id=351 data-nosnippet>351</a>            wgpu::VertexFormat::Float32x4,
+<a href=#352 id=352 data-nosnippet>352</a>            <span class="number">2</span>,
+<a href=#353 id=353 data-nosnippet>353</a>        ));
+<a href=#354 id=354 data-nosnippet>354</a>        <span class="self">Self</span>::instance_layout(attrs)
+<a href=#355 id=355 data-nosnippet>355</a>    }
+<a href=#356 id=356 data-nosnippet>356</a>}
 </code></pre></div></section></main></body></html>

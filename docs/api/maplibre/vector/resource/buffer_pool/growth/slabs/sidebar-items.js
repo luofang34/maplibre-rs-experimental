@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["elem_div","first_free_slot","place_slot"]};

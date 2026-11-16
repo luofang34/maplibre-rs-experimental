@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["PassHookPoint"],"struct":["PassDrawHooks"],"trait":["PassDrawHook"]};
+window.SIDEBAR_ITEMS = {"enum":["PassHookPoint"],"struct":["ConditionalHook","PassDrawHooks"],"trait":["PassDrawHook"]};

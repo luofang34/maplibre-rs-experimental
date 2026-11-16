@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["center_elevation_system","center_ground","center_target_system","globe_orbits_center","ground_at_mercator","ground_center","ground_under","past_mercator_rows"]};
+window.SIDEBAR_ITEMS = {"fn":["center_elevation_system","center_ground","center_ground_with_dem_zoom","center_target_system","globe_orbits_center","ground_and_clear_terrain","ground_at_mercator","ground_at_mercator_with_dem_zoom","ground_center","ground_center_smoothed","ground_under","past_mercator_rows"],"struct":["CenterDemSmoothing"]};

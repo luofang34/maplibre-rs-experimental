@@ -127,57 +127,62 @@
 <a href=#127 id=127 data-nosnippet>127</a>    };
 <a href=#128 id=128 data-nosnippet>128</a>    <span class="kw">let </span><span class="kw-2">mut </span>redraw = budget_redraws(<span class="kw-2">&amp;</span>only(<span class="bool-val">false</span>), budget);
 <a href=#129 id=129 data-nosnippet>129</a>    <span class="kw">let </span><span class="kw-2">mut </span>drawn = redraw.iter().filter(|drawn| <span class="kw-2">**</span>drawn).count();
-<a href=#130 id=130 data-nosnippet>130</a>    <span class="kw">for </span>(index, (spec, state)) <span class="kw">in </span>specs.iter().zip(states).enumerate() {
-<a href=#131 id=131 data-nosnippet>131</a>        <span class="kw">if </span>drawn &gt;= limit {
-<a href=#132 id=132 data-nosnippet>132</a>            <span class="kw">break</span>;
-<a href=#133 id=133 data-nosnippet>133</a>        }
-<a href=#134 id=134 data-nosnippet>134</a>        <span class="kw">if </span>!prefetch[index]
-<a href=#135 id=135 data-nosnippet>135</a>            &amp;&amp; <span class="kw-2">*</span>state == DrapeState::New
-<a href=#136 id=136 data-nosnippet>136</a>            &amp;&amp; !redraw[index]
-<a href=#137 id=137 data-nosnippet>137</a>            &amp;&amp; present_ancestors(spec.coords, terrain).is_empty()
-<a href=#138 id=138 data-nosnippet>138</a>        {
-<a href=#139 id=139 data-nosnippet>139</a>            redraw[index] = <span class="bool-val">true</span>;
-<a href=#140 id=140 data-nosnippet>140</a>            drawn += <span class="number">1</span>;
-<a href=#141 id=141 data-nosnippet>141</a>        }
-<a href=#142 id=142 data-nosnippet>142</a>    }
-<a href=#143 id=143 data-nosnippet>143</a>    <span class="kw">let </span>spare = budget.saturating_sub(drawn);
-<a href=#144 id=144 data-nosnippet>144</a>    <span class="kw">for </span>(index, draw) <span class="kw">in </span>budget_redraws(<span class="kw-2">&amp;</span>only(<span class="bool-val">true</span>), spare).into_iter().enumerate() {
-<a href=#145 id=145 data-nosnippet>145</a>        redraw[index] |= draw;
-<a href=#146 id=146 data-nosnippet>146</a>    }
-<a href=#147 id=147 data-nosnippet>147</a>    redraw
-<a href=#148 id=148 data-nosnippet>148</a>}
-<a href=#149 id=149 data-nosnippet>149</a>
-<a href=#150 id=150 data-nosnippet>150</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>drape_sources(
-<a href=#151 id=151 data-nosnippet>151</a>    specs: <span class="kw-2">&amp;</span>[TargetSpec],
-<a href=#152 id=152 data-nosnippet>152</a>    states: <span class="kw-2">&amp;</span>[DrapeState],
-<a href=#153 id=153 data-nosnippet>153</a>    redraw: <span class="kw-2">&amp;</span>[bool],
-<a href=#154 id=154 data-nosnippet>154</a>    ready: <span class="kw-2">&amp;</span>[bool],
-<a href=#155 id=155 data-nosnippet>155</a>    terrain: <span class="kw-2">&amp;</span>TerrainResources,
-<a href=#156 id=156 data-nosnippet>156</a>) -&gt; Vec&lt;<span class="prelude-ty">Option</span>&lt;WorldTileCoords&gt;&gt; {
-<a href=#157 id=157 data-nosnippet>157</a>    <span class="kw">let </span>hidden: Vec&lt;bool&gt; = awaiting_first_draw(states, redraw)
-<a href=#158 id=158 data-nosnippet>158</a>        .into_iter()
-<a href=#159 id=159 data-nosnippet>159</a>        .zip(ready)
-<a href=#160 id=160 data-nosnippet>160</a>        .zip(states)
-<a href=#161 id=161 data-nosnippet>161</a>        .map(|((hidden, ready), state)| hidden || !ready || <span class="kw-2">*</span>state == DrapeState::Withheld)
-<a href=#162 id=162 data-nosnippet>162</a>        .collect();
-<a href=#163 id=163 data-nosnippet>163</a>    <span class="kw">let </span>undrawn: HashSet&lt;WorldTileCoords&gt; = specs
-<a href=#164 id=164 data-nosnippet>164</a>        .iter()
-<a href=#165 id=165 data-nosnippet>165</a>        .zip(<span class="kw-2">&amp;</span>hidden)
-<a href=#166 id=166 data-nosnippet>166</a>        .filter(|(<span class="kw">_</span>, hidden)| <span class="kw-2">**</span>hidden)
-<a href=#167 id=167 data-nosnippet>167</a>        .map(|(spec, <span class="kw">_</span>)| spec.coords)
-<a href=#168 id=168 data-nosnippet>168</a>        .collect();
-<a href=#169 id=169 data-nosnippet>169</a>    specs
-<a href=#170 id=170 data-nosnippet>170</a>        .iter()
-<a href=#171 id=171 data-nosnippet>171</a>        .zip(<span class="kw-2">&amp;</span>hidden)
-<a href=#172 id=172 data-nosnippet>172</a>        .map(|(spec, hidden)| {
-<a href=#173 id=173 data-nosnippet>173</a>            <span class="kw">if </span><span class="kw-2">*</span>hidden &amp;&amp; terrain.drape_texture(spec.coords).is_none() {
-<a href=#174 id=174 data-nosnippet>174</a>                present_ancestors(spec.coords, terrain)
-<a href=#175 id=175 data-nosnippet>175</a>                    .into_iter()
-<a href=#176 id=176 data-nosnippet>176</a>                    .find(|ancestor| !undrawn.contains(ancestor))
-<a href=#177 id=177 data-nosnippet>177</a>            } <span class="kw">else </span>{
-<a href=#178 id=178 data-nosnippet>178</a>                <span class="prelude-val">Some</span>(spec.coords)
-<a href=#179 id=179 data-nosnippet>179</a>            }
-<a href=#180 id=180 data-nosnippet>180</a>        })
-<a href=#181 id=181 data-nosnippet>181</a>        .collect()
-<a href=#182 id=182 data-nosnippet>182</a>}
+<a href=#130 id=130 data-nosnippet>130</a>    <span class="kw">let </span>emergency_limit = <span class="kw">if </span><span class="macro">cfg!</span>(target_arch = <span class="string">"wasm32"</span>) {
+<a href=#131 id=131 data-nosnippet>131</a>        budget.max(<span class="number">4</span>).min(limit)
+<a href=#132 id=132 data-nosnippet>132</a>    } <span class="kw">else </span>{
+<a href=#133 id=133 data-nosnippet>133</a>        limit
+<a href=#134 id=134 data-nosnippet>134</a>    };
+<a href=#135 id=135 data-nosnippet>135</a>    <span class="kw">for </span>(index, (spec, state)) <span class="kw">in </span>specs.iter().zip(states).enumerate() {
+<a href=#136 id=136 data-nosnippet>136</a>        <span class="kw">if </span>drawn &gt;= emergency_limit {
+<a href=#137 id=137 data-nosnippet>137</a>            <span class="kw">break</span>;
+<a href=#138 id=138 data-nosnippet>138</a>        }
+<a href=#139 id=139 data-nosnippet>139</a>        <span class="kw">if </span>!prefetch[index]
+<a href=#140 id=140 data-nosnippet>140</a>            &amp;&amp; <span class="kw-2">*</span>state == DrapeState::New
+<a href=#141 id=141 data-nosnippet>141</a>            &amp;&amp; !redraw[index]
+<a href=#142 id=142 data-nosnippet>142</a>            &amp;&amp; present_ancestors(spec.coords, terrain).is_empty()
+<a href=#143 id=143 data-nosnippet>143</a>        {
+<a href=#144 id=144 data-nosnippet>144</a>            redraw[index] = <span class="bool-val">true</span>;
+<a href=#145 id=145 data-nosnippet>145</a>            drawn += <span class="number">1</span>;
+<a href=#146 id=146 data-nosnippet>146</a>        }
+<a href=#147 id=147 data-nosnippet>147</a>    }
+<a href=#148 id=148 data-nosnippet>148</a>    <span class="kw">let </span>spare = budget.saturating_sub(drawn);
+<a href=#149 id=149 data-nosnippet>149</a>    <span class="kw">for </span>(index, draw) <span class="kw">in </span>budget_redraws(<span class="kw-2">&amp;</span>only(<span class="bool-val">true</span>), spare).into_iter().enumerate() {
+<a href=#150 id=150 data-nosnippet>150</a>        redraw[index] |= draw;
+<a href=#151 id=151 data-nosnippet>151</a>    }
+<a href=#152 id=152 data-nosnippet>152</a>    redraw
+<a href=#153 id=153 data-nosnippet>153</a>}
+<a href=#154 id=154 data-nosnippet>154</a>
+<a href=#155 id=155 data-nosnippet>155</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>drape_sources(
+<a href=#156 id=156 data-nosnippet>156</a>    specs: <span class="kw-2">&amp;</span>[TargetSpec],
+<a href=#157 id=157 data-nosnippet>157</a>    states: <span class="kw-2">&amp;</span>[DrapeState],
+<a href=#158 id=158 data-nosnippet>158</a>    redraw: <span class="kw-2">&amp;</span>[bool],
+<a href=#159 id=159 data-nosnippet>159</a>    ready: <span class="kw-2">&amp;</span>[bool],
+<a href=#160 id=160 data-nosnippet>160</a>    terrain: <span class="kw-2">&amp;</span>TerrainResources,
+<a href=#161 id=161 data-nosnippet>161</a>) -&gt; Vec&lt;<span class="prelude-ty">Option</span>&lt;WorldTileCoords&gt;&gt; {
+<a href=#162 id=162 data-nosnippet>162</a>    <span class="kw">let </span>hidden: Vec&lt;bool&gt; = awaiting_first_draw(states, redraw)
+<a href=#163 id=163 data-nosnippet>163</a>        .into_iter()
+<a href=#164 id=164 data-nosnippet>164</a>        .zip(ready)
+<a href=#165 id=165 data-nosnippet>165</a>        .zip(states)
+<a href=#166 id=166 data-nosnippet>166</a>        .map(|((hidden, ready), state)| hidden || !ready || <span class="kw-2">*</span>state == DrapeState::Withheld)
+<a href=#167 id=167 data-nosnippet>167</a>        .collect();
+<a href=#168 id=168 data-nosnippet>168</a>    <span class="kw">let </span>undrawn: HashSet&lt;WorldTileCoords&gt; = specs
+<a href=#169 id=169 data-nosnippet>169</a>        .iter()
+<a href=#170 id=170 data-nosnippet>170</a>        .zip(<span class="kw-2">&amp;</span>hidden)
+<a href=#171 id=171 data-nosnippet>171</a>        .filter(|(<span class="kw">_</span>, hidden)| <span class="kw-2">**</span>hidden)
+<a href=#172 id=172 data-nosnippet>172</a>        .map(|(spec, <span class="kw">_</span>)| spec.coords)
+<a href=#173 id=173 data-nosnippet>173</a>        .collect();
+<a href=#174 id=174 data-nosnippet>174</a>    specs
+<a href=#175 id=175 data-nosnippet>175</a>        .iter()
+<a href=#176 id=176 data-nosnippet>176</a>        .zip(<span class="kw-2">&amp;</span>hidden)
+<a href=#177 id=177 data-nosnippet>177</a>        .map(|(spec, hidden)| {
+<a href=#178 id=178 data-nosnippet>178</a>            <span class="kw">if </span><span class="kw-2">*</span>hidden &amp;&amp; terrain.drape_texture(spec.coords).is_none() {
+<a href=#179 id=179 data-nosnippet>179</a>                present_ancestors(spec.coords, terrain)
+<a href=#180 id=180 data-nosnippet>180</a>                    .into_iter()
+<a href=#181 id=181 data-nosnippet>181</a>                    .find(|ancestor| !undrawn.contains(ancestor))
+<a href=#182 id=182 data-nosnippet>182</a>            } <span class="kw">else </span>{
+<a href=#183 id=183 data-nosnippet>183</a>                <span class="prelude-val">Some</span>(spec.coords)
+<a href=#184 id=184 data-nosnippet>184</a>            }
+<a href=#185 id=185 data-nosnippet>185</a>        })
+<a href=#186 id=186 data-nosnippet>186</a>        .collect()
+<a href=#187 id=187 data-nosnippet>187</a>}
 </code></pre></div></section></main></body></html>

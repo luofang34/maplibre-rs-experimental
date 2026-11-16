@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["convert_feature","convert_layer","decode","encode_geometry","encode_linestring","encode_point","encode_polygon","encode_ring","prop_to_value","zigzag"]};
+window.SIDEBAR_ITEMS = {"enum":["DictKey"],"fn":["convert_feature","convert_layer","decode","encode_geometry","encode_linestring","encode_point","encode_polygon","encode_ring","is_valid_mlt","prop_to_dict_value","validate_layers","zigzag"],"mod":["stream","tessellate"]};

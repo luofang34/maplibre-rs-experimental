@@ -218,12 +218,12 @@
 <a href=#218 id=218 data-nosnippet>218</a>    <span class="kw">if </span>parts[<span class="number">0</span>].is_none() {
 <a href=#219 id=219 data-nosnippet>219</a>        <span class="kw">let </span>image = buffer.vertices[first_vertex..]
 <a href=#220 id=220 data-nosnippet>220</a>            .iter()
-<a href=#221 id=221 data-nosnippet>221</a>            .find(|vertex| vertex.a_data[<span class="number">2</span>] == <span class="number">3</span>);
+<a href=#221 id=221 data-nosnippet>221</a>            .find(|vertex| vertex.kind() == <span class="number">3</span>);
 <a href=#222 id=222 data-nosnippet>222</a>        <span class="kw">if let </span>(<span class="prelude-val">Some</span>(vertex), <span class="prelude-val">Some</span>(extent)) = (image, block_extent) {
 <a href=#223 id=223 data-nosnippet>223</a>            parts[<span class="number">0</span>] = <span class="prelude-val">Some</span>(<span class="kw">crate</span>::sdf::placement_geometry::SymbolBounds {
 <a href=#224 id=224 data-nosnippet>224</a>                bounds: extent.map(f64::from),
-<a href=#225 id=225 data-nosnippet>225</a>                height: f64::from(f32::from_bits(vertex.a_pixeloffset[<span class="number">2</span>] <span class="kw">as </span>u32)),
-<a href=#226 id=226 data-nosnippet>226</a>                angle: f64::from(f32::from_bits(vertex.a_pixeloffset[<span class="number">3</span>] <span class="kw">as </span>u32)),
+<a href=#225 id=225 data-nosnippet>225</a>                height: f64::from(vertex.height()),
+<a href=#226 id=226 data-nosnippet>226</a>                angle: f64::from(vertex.angle()),
 <a href=#227 id=227 data-nosnippet>227</a>                text: <span class="bool-val">true</span>,
 <a href=#228 id=228 data-nosnippet>228</a>            });
 <a href=#229 id=229 data-nosnippet>229</a>        }
@@ -402,55 +402,53 @@
 <a href=#402 id=402 data-nosnippet>402</a>        <span class="kw">let </span>py = <span class="kw">if </span>index &lt; <span class="number">2 </span>{ bounds[<span class="number">1</span>] } <span class="kw">else </span>{ bounds[<span class="number">3</span>] };
 <a href=#403 id=403 data-nosnippet>403</a>        <span class="comment">// The quad turns about the anchor, offsets included, as GL JS rotates its corners.
 <a href=#404 id=404 data-nosnippet>404</a>        </span><span class="kw">let </span>(px, py) = (px * cos - py * sin, px * sin + py * cos);
-<a href=#405 id=405 data-nosnippet>405</a>        buffer.vertices.push(ShaderSymbolVertex {
-<a href=#406 id=406 data-nosnippet>406</a>            a_pos_offset: [
-<a href=#407 id=407 data-nosnippet>407</a>                anchor.x().round() <span class="kw">as </span>i32,
-<a href=#408 id=408 data-nosnippet>408</a>                anchor.y().round() <span class="kw">as </span>i32,
-<a href=#409 id=409 data-nosnippet>409</a>                (px * <span class="number">32.0</span>).round() <span class="kw">as </span>i32,
-<a href=#410 id=410 data-nosnippet>410</a>                (py * <span class="number">32.0</span>).round() <span class="kw">as </span>i32,
-<a href=#411 id=411 data-nosnippet>411</a>            ],
-<a href=#412 id=412 data-nosnippet>412</a>            a_data: [u, v, image.kind, <span class="number">0</span>],
-<a href=#413 id=413 data-nosnippet>413</a>            a_pixeloffset: [<span class="number">0</span>, <span class="number">0</span>, height.to_bits() <span class="kw">as </span>i32, angle.to_bits() <span class="kw">as </span>i32],
-<a href=#414 id=414 data-nosnippet>414</a>        });
-<a href=#415 id=415 data-nosnippet>415</a>    }
-<a href=#416 id=416 data-nosnippet>416</a>    buffer
-<a href=#417 id=417 data-nosnippet>417</a>        .indices
-<a href=#418 id=418 data-nosnippet>418</a>        .extend([base, base + <span class="number">1</span>, base + <span class="number">2</span>, base, base + <span class="number">2</span>, base + <span class="number">3</span>]);
-<a href=#419 id=419 data-nosnippet>419</a>}
-<a href=#420 id=420 data-nosnippet>420</a>
-<a href=#421 id=421 data-nosnippet>421</a><span class="kw">fn </span>bounds(
-<a href=#422 id=422 data-nosnippet>422</a>    vertices: <span class="kw-2">&amp;</span>[ShaderSymbolVertex],
-<a href=#423 id=423 data-nosnippet>423</a>    indices: <span class="kw-2">&amp;</span>[u32],
-<a href=#424 id=424 data-nosnippet>424</a>    paint: <span class="kw-2">&amp;</span>SymbolPaint,
-<a href=#425 id=425 data-nosnippet>425</a>    properties: <span class="kw-2">&amp;</span>FeatureProperties,
-<a href=#426 id=426 data-nosnippet>426</a>    zoom: f64,
-<a href=#427 id=427 data-nosnippet>427</a>) -&gt; Box2D&lt;f32, <span class="kw">crate</span>::sdf::TileSpace&gt; {
-<a href=#428 id=428 data-nosnippet>428</a>    <span class="kw">let </span>text_size = paint
-<a href=#429 id=429 data-nosnippet>429</a>        .text_size
-<a href=#430 id=430 data-nosnippet>430</a>        .as_ref()
-<a href=#431 id=431 data-nosnippet>431</a>        .and_then(|value| value.evaluate_for(properties, zoom))
-<a href=#432 id=432 data-nosnippet>432</a>        .unwrap_or(<span class="number">16.0</span>);
-<a href=#433 id=433 data-nosnippet>433</a>    <span class="kw">let </span>icon_size = paint.number(<span class="string">"icon-size"</span>, properties, zoom, <span class="number">1.0</span>);
-<a href=#434 id=434 data-nosnippet>434</a>    <span class="kw">let </span><span class="kw-2">mut </span>bounds = Box2D::new(
-<a href=#435 id=435 data-nosnippet>435</a>        Point2D::new(f32::INFINITY, f32::INFINITY),
-<a href=#436 id=436 data-nosnippet>436</a>        Point2D::new(f32::NEG_INFINITY, f32::NEG_INFINITY),
-<a href=#437 id=437 data-nosnippet>437</a>    );
-<a href=#438 id=438 data-nosnippet>438</a>    <span class="kw">for </span>index <span class="kw">in </span>indices {
-<a href=#439 id=439 data-nosnippet>439</a>        <span class="kw">let </span>vertex = <span class="kw-2">&amp;</span>vertices[<span class="kw-2">*</span>index <span class="kw">as </span>usize];
-<a href=#440 id=440 data-nosnippet>440</a>        <span class="kw">let </span>scale = <span class="kw">if </span><span class="macro">matches!</span>(vertex.a_data[<span class="number">2</span>], <span class="number">0 </span>| <span class="number">3</span>) {
-<a href=#441 id=441 data-nosnippet>441</a>            text_size / <span class="number">24.0
-<a href=#442 id=442 data-nosnippet>442</a>        </span>} <span class="kw">else </span>{
-<a href=#443 id=443 data-nosnippet>443</a>            icon_size
-<a href=#444 id=444 data-nosnippet>444</a>        };
-<a href=#445 id=445 data-nosnippet>445</a>        <span class="kw">let </span>point: Point2D&lt;f32, <span class="kw">crate</span>::sdf::TileSpace&gt; = Point2D::new(
-<a href=#446 id=446 data-nosnippet>446</a>            vertex.a_pos_offset[<span class="number">2</span>] <span class="kw">as </span>f32 / <span class="number">32.0 </span>* scale,
-<a href=#447 id=447 data-nosnippet>447</a>            vertex.a_pos_offset[<span class="number">3</span>] <span class="kw">as </span>f32 / <span class="number">32.0 </span>* scale,
-<a href=#448 id=448 data-nosnippet>448</a>        );
-<a href=#449 id=449 data-nosnippet>449</a>        bounds.min.x = bounds.min.x.min(point.x);
-<a href=#450 id=450 data-nosnippet>450</a>        bounds.min.y = bounds.min.y.min(point.y);
-<a href=#451 id=451 data-nosnippet>451</a>        bounds.max.x = bounds.max.x.max(point.x);
-<a href=#452 id=452 data-nosnippet>452</a>        bounds.max.y = bounds.max.y.max(point.y);
-<a href=#453 id=453 data-nosnippet>453</a>    }
-<a href=#454 id=454 data-nosnippet>454</a>    bounds
-<a href=#455 id=455 data-nosnippet>455</a>}
+<a href=#405 id=405 data-nosnippet>405</a>        buffer.vertices.push(ShaderSymbolVertex::new(
+<a href=#406 id=406 data-nosnippet>406</a>            [anchor.x().round() <span class="kw">as </span>i32, anchor.y().round() <span class="kw">as </span>i32],
+<a href=#407 id=407 data-nosnippet>407</a>            [(px * <span class="number">32.0</span>).round() <span class="kw">as </span>i32, (py * <span class="number">32.0</span>).round() <span class="kw">as </span>i32],
+<a href=#408 id=408 data-nosnippet>408</a>            [u, v],
+<a href=#409 id=409 data-nosnippet>409</a>            image.kind,
+<a href=#410 id=410 data-nosnippet>410</a>            height,
+<a href=#411 id=411 data-nosnippet>411</a>            angle,
+<a href=#412 id=412 data-nosnippet>412</a>        ));
+<a href=#413 id=413 data-nosnippet>413</a>    }
+<a href=#414 id=414 data-nosnippet>414</a>    buffer
+<a href=#415 id=415 data-nosnippet>415</a>        .indices
+<a href=#416 id=416 data-nosnippet>416</a>        .extend([base, base + <span class="number">1</span>, base + <span class="number">2</span>, base, base + <span class="number">2</span>, base + <span class="number">3</span>]);
+<a href=#417 id=417 data-nosnippet>417</a>}
+<a href=#418 id=418 data-nosnippet>418</a>
+<a href=#419 id=419 data-nosnippet>419</a><span class="kw">fn </span>bounds(
+<a href=#420 id=420 data-nosnippet>420</a>    vertices: <span class="kw-2">&amp;</span>[ShaderSymbolVertex],
+<a href=#421 id=421 data-nosnippet>421</a>    indices: <span class="kw-2">&amp;</span>[u32],
+<a href=#422 id=422 data-nosnippet>422</a>    paint: <span class="kw-2">&amp;</span>SymbolPaint,
+<a href=#423 id=423 data-nosnippet>423</a>    properties: <span class="kw-2">&amp;</span>FeatureProperties,
+<a href=#424 id=424 data-nosnippet>424</a>    zoom: f64,
+<a href=#425 id=425 data-nosnippet>425</a>) -&gt; Box2D&lt;f32, <span class="kw">crate</span>::sdf::TileSpace&gt; {
+<a href=#426 id=426 data-nosnippet>426</a>    <span class="kw">let </span>text_size = paint
+<a href=#427 id=427 data-nosnippet>427</a>        .text_size
+<a href=#428 id=428 data-nosnippet>428</a>        .as_ref()
+<a href=#429 id=429 data-nosnippet>429</a>        .and_then(|value| value.evaluate_for(properties, zoom))
+<a href=#430 id=430 data-nosnippet>430</a>        .unwrap_or(<span class="number">16.0</span>);
+<a href=#431 id=431 data-nosnippet>431</a>    <span class="kw">let </span>icon_size = paint.number(<span class="string">"icon-size"</span>, properties, zoom, <span class="number">1.0</span>);
+<a href=#432 id=432 data-nosnippet>432</a>    <span class="kw">let </span><span class="kw-2">mut </span>bounds = Box2D::new(
+<a href=#433 id=433 data-nosnippet>433</a>        Point2D::new(f32::INFINITY, f32::INFINITY),
+<a href=#434 id=434 data-nosnippet>434</a>        Point2D::new(f32::NEG_INFINITY, f32::NEG_INFINITY),
+<a href=#435 id=435 data-nosnippet>435</a>    );
+<a href=#436 id=436 data-nosnippet>436</a>    <span class="kw">for </span>index <span class="kw">in </span>indices {
+<a href=#437 id=437 data-nosnippet>437</a>        <span class="kw">let </span>vertex = <span class="kw-2">&amp;</span>vertices[<span class="kw-2">*</span>index <span class="kw">as </span>usize];
+<a href=#438 id=438 data-nosnippet>438</a>        <span class="kw">let </span>scale = <span class="kw">if </span><span class="macro">matches!</span>(vertex.kind(), <span class="number">0 </span>| <span class="number">3</span>) {
+<a href=#439 id=439 data-nosnippet>439</a>            text_size / <span class="number">24.0
+<a href=#440 id=440 data-nosnippet>440</a>        </span>} <span class="kw">else </span>{
+<a href=#441 id=441 data-nosnippet>441</a>            icon_size
+<a href=#442 id=442 data-nosnippet>442</a>        };
+<a href=#443 id=443 data-nosnippet>443</a>        <span class="kw">let </span>point: Point2D&lt;f32, <span class="kw">crate</span>::sdf::TileSpace&gt; = Point2D::new(
+<a href=#444 id=444 data-nosnippet>444</a>            vertex.a_pos_offset[<span class="number">2</span>] <span class="kw">as </span>f32 / <span class="number">32.0 </span>* scale,
+<a href=#445 id=445 data-nosnippet>445</a>            vertex.a_pos_offset[<span class="number">3</span>] <span class="kw">as </span>f32 / <span class="number">32.0 </span>* scale,
+<a href=#446 id=446 data-nosnippet>446</a>        );
+<a href=#447 id=447 data-nosnippet>447</a>        bounds.min.x = bounds.min.x.min(point.x);
+<a href=#448 id=448 data-nosnippet>448</a>        bounds.min.y = bounds.min.y.min(point.y);
+<a href=#449 id=449 data-nosnippet>449</a>        bounds.max.x = bounds.max.x.max(point.x);
+<a href=#450 id=450 data-nosnippet>450</a>        bounds.max.y = bounds.max.y.max(point.y);
+<a href=#451 id=451 data-nosnippet>451</a>    }
+<a href=#452 id=452 data-nosnippet>452</a>    bounds
+<a href=#453 id=453 data-nosnippet>453</a>}
 </code></pre></div></section></main></body></html>

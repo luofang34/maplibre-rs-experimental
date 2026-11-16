@@ -169,7 +169,7 @@
 <a href=#169 id=169 data-nosnippet>169</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(<span class="kw-2">mut </span>tile) = world.tiles.spawn_mut(coords) <span class="kw">else </span>{
 <a href=#170 id=170 data-nosnippet>170</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(SystemError::InvalidTile { coords });
 <a href=#171 id=171 data-nosnippet>171</a>        };
-<a href=#172 id=172 data-nosnippet>172</a>        <span class="kw">let </span><span class="kw-2">mut </span>input = Input::new(coords, style.share(Style::clone), attempt);
+<a href=#172 id=172 data-nosnippet>172</a>        <span class="kw">let </span><span class="kw-2">mut </span>input = Input::new(coords, style.worker_snapshot(), attempt);
 <a href=#173 id=173 data-nosnippet>173</a>        input.only_sources = only_sources;
 <a href=#174 id=174 data-nosnippet>174</a>        <span class="self">self</span>.kernel
 <a href=#175 id=175 data-nosnippet>175</a>            .apc()

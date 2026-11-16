@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_LATITUDE"],"enum":["RawFeatureId"],"fn":["apply_identity_tags","fill_properties_from_json","integer_id_expr","integer_id_json","json_member_to_expr_value","project_lon_lat","resolve_numeric_id","set_or_insert"],"struct":["PropValueSeed","PropertiesMapVisitor","PropertiesSeed","RawIdSeed","ScalarOrNestedVisitor"]};

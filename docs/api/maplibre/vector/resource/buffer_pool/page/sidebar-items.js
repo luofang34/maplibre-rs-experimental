@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["DEFAULT_PAGE_VERTICES"],"struct":["BufferPage","ByteCapacities","ElementStrides","PageAllocation","PageDestroyer","PageFactory"]};
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_PAGE_FEATURE_META","DEFAULT_PAGE_INDICES","DEFAULT_PAGE_LAYER_META","DEFAULT_PAGE_VERTICES","NO_SLAB"],"enum":["FmStorageKind"],"struct":["BufferSlab","ElementStrides","PageFactory","SlabAllocation","SlabDestroyer","SlabRequest","VertexSlab"]};

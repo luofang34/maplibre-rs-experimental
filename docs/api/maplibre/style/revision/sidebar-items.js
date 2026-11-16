@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["next_style_revision"],"static":["NEXT_STYLE_REVISION"],"struct":["DerivedStyleFacts","StyleRevisionState","WorkerSnapshots"]};

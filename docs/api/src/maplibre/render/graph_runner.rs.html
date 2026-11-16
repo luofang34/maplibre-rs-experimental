@@ -19,10 +19,10 @@
 <a href=#19 id=19 data-nosnippet>19</a>    state: <span class="kw-2">&amp;</span>RenderResources,
 <a href=#20 id=20 data-nosnippet>20</a>    world: <span class="kw-2">&amp;</span>World,
 <a href=#21 id=21 data-nosnippet>21</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), RenderGraphError&gt; {
-<a href=#22 id=22 data-nosnippet>22</a>    <span class="kw">let </span><span class="kw-2">mut </span>render_context = RenderContext {
+<a href=#22 id=22 data-nosnippet>22</a>    <span class="kw">let </span><span class="kw-2">mut </span>render_context = RenderContext::new(
 <a href=#23 id=23 data-nosnippet>23</a>        device,
-<a href=#24 id=24 data-nosnippet>24</a>        command_encoder: device.create_command_encoder(<span class="kw-2">&amp;</span>wgpu::CommandEncoderDescriptor::default()),
-<a href=#25 id=25 data-nosnippet>25</a>    };
+<a href=#24 id=24 data-nosnippet>24</a>        device.create_command_encoder(<span class="kw-2">&amp;</span>wgpu::CommandEncoderDescriptor::default()),
+<a href=#25 id=25 data-nosnippet>25</a>    );
 <a href=#26 id=26 data-nosnippet>26</a>    graph.run(<span class="kw-2">&amp;mut </span>render_context, state, world)<span class="question-mark">?</span>;
 <a href=#27 id=27 data-nosnippet>27</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(hooks) = world.resources.get::&lt;BeforeSubmitHooks&gt;() {
 <a href=#28 id=28 data-nosnippet>28</a>        hooks.run(world, <span class="kw-2">&amp;mut </span>render_context.command_encoder);

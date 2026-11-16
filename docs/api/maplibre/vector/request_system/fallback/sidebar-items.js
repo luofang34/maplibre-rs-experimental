@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_COARSE_ANCESTORS","MAX_PAN_LOOKAHEAD_TILES","MAX_SETTLED_RING_TILES"],"fn":["all_tight_tiles_uploaded","plan_non_terrain_fallbacks","tile_dist_sq","tile_spawned","viewport_tile_centroid"]};
