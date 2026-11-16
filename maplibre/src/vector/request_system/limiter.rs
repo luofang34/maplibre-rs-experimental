@@ -9,11 +9,13 @@ use std::{
     task::{Poll, Waker},
 };
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+const MAX_HEAVY_TILES: usize = 1;
+#[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
 const MAX_HEAVY_TILES: usize = 2;
 
 #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
-const MAX_UNCONSUMED_SHARED_TILES: usize = 6;
+const MAX_UNCONSUMED_SHARED_TILES: usize = 4;
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Default)]

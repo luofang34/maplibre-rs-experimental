@@ -8,13 +8,15 @@ use crate::{
         tile_backpressure::is_settled,
         tile_sources::{RasterSourceId, TileKind},
     },
+    render::eventually::{Eventually, Eventually::Initialized},
     style::Style,
     tcs::{tiles::Tiles, world::World},
-    terrain::{dem_tile_coords, source::dem_source},
+    terrain::{dem_tile_coords, resources::TerrainResources, source::dem_source},
 };
 
-/// Appends active drape requests, drape prefetch requests, and only the raster/DEM fallback
-/// ancestors actually needed by tiles whose own source data has not yet loaded.
+/// Appends active drape requests, drape prefetch requests, non-terrain vector fallback tiles,
+/// and only the raster/DEM fallback ancestors actually needed by tiles whose own source data
+/// (and GPU DEM upload) has not yet settled.
 pub(crate) fn finish_tiles_in_use(
     world: &World,
     style: &Style,
@@ -32,11 +34,21 @@ pub(crate) fn finish_tiles_in_use(
     {
         in_use.extend(prefetch.0.iter().copied());
     }
+    if let Some(fallbacks) = world
+        .resources
+        .get::<crate::vector::upload_system::sources::VectorFallbackTiles>()
+    {
+        in_use.extend(fallbacks.0.iter().copied());
+    }
     let dem = dem_source(style);
     let raster_sources = active_raster_sources(style);
     if dem.is_none() && raster_sources.is_empty() {
         return in_use;
     }
+    let terrain_gpu = match world.resources.get::<Eventually<TerrainResources>>() {
+        Some(Initialized(terrain)) => Some(terrain),
+        _ => None,
+    };
     let view: Vec<WorldTileCoords> = in_use.iter().copied().collect();
     for coords in view {
         for (source_id, minzoom) in &raster_sources {
@@ -50,7 +62,7 @@ pub(crate) fn finish_tiles_in_use(
             );
         }
         if let Some(dem) = &dem {
-            retain_dem_fallback_ancestors(&world.tiles, &mut in_use, coords, dem);
+            retain_dem_fallback_ancestors(&world.tiles, terrain_gpu, &mut in_use, coords, dem);
         }
     }
     in_use
@@ -154,6 +166,7 @@ fn retain_raster_fallback_ancestors(
 
 fn retain_dem_fallback_ancestors(
     tiles: &Tiles,
+    terrain_gpu: Option<&TerrainResources>,
     in_use: &mut FxHashSet<WorldTileCoords>,
     coords: WorldTileCoords,
     dem: &crate::terrain::source::DemSource,
@@ -163,7 +176,9 @@ fn retain_dem_fallback_ancestors(
     };
     in_use.insert(dem_coords);
     let own_state = tiles.query::<&crate::terrain::DemTileComponent>(dem_coords);
-    if matches!(own_state, Some(crate::terrain::DemTileComponent::Loaded(_))) {
+    if matches!(own_state, Some(crate::terrain::DemTileComponent::Loaded(_)))
+        && terrain_gpu.is_none_or(|t| t.has_dem_texture(dem_coords))
+    {
         return;
     }
     if !matches!(own_state, Some(crate::terrain::DemTileComponent::Missing)) {
@@ -181,7 +196,9 @@ fn retain_dem_fallback_ancestors(
         match tiles.query::<&crate::terrain::DemTileComponent>(parent) {
             Some(crate::terrain::DemTileComponent::Loaded(_)) => {
                 in_use.insert(parent);
-                break;
+                if terrain_gpu.is_none_or(|t| t.has_dem_texture(parent)) {
+                    break;
+                }
             }
             Some(crate::terrain::DemTileComponent::Pending) => {
                 in_use.insert(parent);

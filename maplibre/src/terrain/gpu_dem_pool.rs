@@ -13,7 +13,11 @@ use crate::{
 };
 
 /// Default hard LRU cap on GPU DEM textures held in [`GpuDemPool`].
-pub const MAX_GPU_DEM_TEXTURES: usize = 64;
+///
+/// Sized above the combined resident footprint of 3D terrain (`z - 1` + coarse `z5` ancestors)
+/// plus a co-hosted `hillshade` or `color-relief` layer (`z` + loose margin, ~90–130 tiles total)
+/// so the two systems never thrash each other's DEM textures within the same frame.
+pub const MAX_GPU_DEM_TEXTURES: usize = 256;
 
 /// One resident GPU elevation texture in [`GpuDemPool`].
 pub struct GpuDemEntry {

@@ -138,7 +138,14 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
             else {
                 return Ok(());
             };
-            view_region.iter().collect()
+            let order_key = crate::terrain::queue_system::draw_order_key(
+                style,
+                view_state,
+                f64::from(dem.tile_size),
+            );
+            let mut ordered: Vec<WorldTileCoords> = view_region.iter().collect();
+            ordered.sort_by(|left, right| order_key(left).total_cmp(&order_key(right)));
+            ordered
         };
 
         let mut requested = HashSet::new();
@@ -347,8 +354,9 @@ fn request_order(
             }
         }
     }
-    // One coarse tile brackets the local terrain while fine tiles arrive.
-    let remaining = result.split_off(result.len().min(1));
+    // Up to four coarse `z5` tiles bracket viewports straddling continental tile boundaries
+    // (e.g. Innsbruck near `11.25° E`) before fine DEM tiles stream in.
+    let remaining = result.split_off(result.len().min(4));
     result.extend(fine.iter().copied());
     result.extend(remaining);
     result.extend(

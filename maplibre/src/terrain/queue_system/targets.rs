@@ -197,7 +197,7 @@ pub(crate) fn procedural_specs(
 /// under Globe rendering, and GL JS's planar `(dx, dy)` squared distance at the nominal level
 /// under explicit 2D Mercator rendering. With translucent drapes the order decides which skirts
 /// show through.
-pub(super) fn draw_order_key(
+pub(crate) fn draw_order_key(
     style: &Style,
     view_state: &ViewState,
     dem_tile_size: f64,

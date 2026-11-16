@@ -128,6 +128,11 @@ impl TerrainCoverageIndex {
         self.rendered.is_empty()
     }
 
+    /// Finest zoom level among the rendered terrain surface tiles, if any.
+    pub(crate) fn max_rendered_zoom(&self) -> Option<u8> {
+        self.zooms.first().copied()
+    }
+
     /// Lowest exaggerated elevation among the rendered tiles, minus the bracket padding.
     pub fn min_elevation(&self) -> f64 {
         self.min_elevation

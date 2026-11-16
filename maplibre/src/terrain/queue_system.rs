@@ -39,7 +39,7 @@ pub(crate) mod edges;
 mod prefetch;
 mod readiness;
 mod targets;
-pub(crate) use targets::{procedural_specs, target_specs};
+pub(crate) use targets::{draw_order_key, procedural_specs, target_specs};
 mod drape_phase;
 mod frame;
 pub(crate) mod surface_covering;
