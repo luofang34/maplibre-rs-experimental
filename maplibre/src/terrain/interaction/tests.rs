@@ -6,7 +6,7 @@ use image::{Rgba, RgbaImage};
 use super::{
     camera_ground_position, finish_gesture, keep_camera_above_terrain, pan_mercator_by_pixels,
     recalculate_zoom_and_center, resolve_gesture_anchor, screen_point_to_terrain,
-    zoom_mercator_around, GestureAnchor,
+    terrain_eye_clearance_meters, zoom_mercator_around, GestureAnchor,
 };
 use crate::{
     coords::{LatLon, WorldCoords, Zoom, TILE_SIZE},
@@ -331,14 +331,46 @@ fn a_camera_inside_the_terrain_is_lifted_above_it() {
     assert!(keep_camera_above_terrain(&style, &mut view, &world));
 
     let (_, altitude_after) = camera_ground_position(&view);
+    let clearance = terrain_eye_clearance_meters(&view);
     let center_after =
         view.camera().position().to_vec() / TILE_SIZE / 2_f64.powf(view.zoom().value());
-    assert_close(altitude_after, 3000.0, 1e-6, "camera altitude");
+    assert!(
+        altitude_after >= 3000.0 + clearance,
+        "camera altitude {altitude_after} clears plateau + near-plane clearance {}",
+        3000.0 + clearance
+    );
+    assert_close(altitude_after, 3000.0 + clearance, 1.0, "camera altitude");
     assert_close(center_after.x, center_before.x, 1e-9, "center x");
     assert_close(center_after.y, center_before.y, 1e-9, "center y");
     assert!(
         view.zoom().value() < 14.0,
         "the camera backs off by zooming out"
+    );
+    assert!(!keep_camera_above_terrain(&style, &mut view, &world));
+}
+
+#[test]
+fn min_zoom_trapped_camera_tilts_up_to_clear_high_cliff() {
+    let style = style(false);
+    let mut view = view(13.2, 68.0);
+    view.set_min_zoom(Some(13.0));
+    view.set_center_elevation(575.0);
+    let world = plateau(&style, &view, 3400.0);
+    let (_, altitude_before) = camera_ground_position(&view);
+    let required_before = 3400.0 + terrain_eye_clearance_meters(&view);
+    assert!(altitude_before < required_before);
+
+    assert!(keep_camera_above_terrain(&style, &mut view, &world));
+
+    let (_, altitude_after) = camera_ground_position(&view);
+    let required_after = 3400.0 + terrain_eye_clearance_meters(&view);
+    assert!(
+        altitude_after >= required_after,
+        "camera clears cliff ({altitude_after} >= {required_after}) even when min_zoom clamps zoom"
+    );
+    assert!(
+        view.camera().get_pitch().0.to_degrees() < 68.0,
+        "pitch reduced to lift eye along orbit sphere"
     );
     assert!(!keep_camera_above_terrain(&style, &mut view, &world));
 }

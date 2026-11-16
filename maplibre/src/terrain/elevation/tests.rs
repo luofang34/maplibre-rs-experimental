@@ -174,3 +174,127 @@ fn polar_pole_elevations_configure_north_and_south_cap_ground_datums() {
     let center = super::center_ground(&view_state, &world).expect("south pole center ground");
     assert!((center - 4_252.5).abs() < 1e-6);
 }
+
+#[test]
+fn coarse_to_fine_dem_refinement_damps_center_drop_without_camera_motion() {
+    use std::time::Duration;
+
+    use crate::{
+        coords::{LatLon, WorldCoords, Zoom},
+        render::view_state::ViewState,
+        tcs::world::World,
+        window::PhysicalSize,
+    };
+
+    let zoom = Zoom::new(12.7);
+    let pos = WorldCoords::from_lat_lon(LatLon::new(47.269, 11.392), zoom);
+    let view_tile = pos.into_world_tile(ZoomLevel::new(12), zoom);
+    let fine = crate::terrain::request_system::dem_tile_coords(view_tile, 0, 12).expect("fine dem");
+    let coarse = fine
+        .get_parent()
+        .and_then(|p| p.get_parent())
+        .expect("coarse dem");
+    let mut view = ViewState::new(
+        PhysicalSize::new(1280, 800).expect("viewport"),
+        pos,
+        zoom,
+        cgmath::Deg(66.0),
+        cgmath::Deg(36.87),
+    );
+    view.set_center_over_terrain(true);
+
+    let mut world = World::default();
+    world
+        .tiles
+        .spawn_mut(coarse)
+        .expect("coarse")
+        .insert(DemTileComponent::Loaded(LoadedDem::new(flat_tile(1600.0))));
+    world
+        .resources
+        .insert(TerrainCoverageIndex::build([], &world.tiles, &source(1.0)));
+
+    super::ground_center_smoothed(&mut view, &mut world, Some(Duration::from_millis(16)));
+    assert!((view.center_elevation() - 1600.0).abs() < 1e-6);
+
+    // Finer valley DEM arrives at 575 m while the user has not panned or zoomed.
+    world
+        .tiles
+        .spawn_mut(fine)
+        .expect("fine")
+        .insert(DemTileComponent::Loaded(LoadedDem::new(flat_tile(575.0))));
+    world
+        .resources
+        .insert(TerrainCoverageIndex::build([], &world.tiles, &source(1.0)));
+
+    super::ground_center_smoothed(&mut view, &mut world, Some(Duration::from_millis(32)));
+    let after_one_frame = view.center_elevation();
+    assert!(
+        after_one_frame < 1550.0 && after_one_frame > 900.0,
+        "first refined frame damps smoothly instead of snapping 1025 m: {after_one_frame}"
+    );
+
+    // Subsequent frames converge cleanly to the exact 575 m valley floor.
+    for step in 3..=40 {
+        super::ground_center_smoothed(
+            &mut view,
+            &mut world,
+            Some(Duration::from_millis(step * 16)),
+        );
+    }
+    assert!((view.center_elevation() - 575.0).abs() < 1e-6);
+}
+
+#[test]
+fn eye_dem_arriving_before_center_dem_does_not_zoom_camera_into_space() {
+    use crate::{
+        coords::{LatLon, WorldCoords, Zoom},
+        render::view_state::ViewState,
+        style::{terrain::TerrainSpecification, Style},
+        tcs::world::World,
+        window::PhysicalSize,
+    };
+
+    let zoom = Zoom::new(15.0);
+    let pos = WorldCoords::from_lat_lon(LatLon::new(0.010986328, 0.010986328125), zoom);
+    let mut view = ViewState::new(
+        PhysicalSize::new(512, 512).expect("viewport"),
+        pos,
+        zoom,
+        cgmath::Deg(60.0),
+        cgmath::Deg(36.87),
+    );
+    view.camera_mut().set_bearing(cgmath::Deg(25.0));
+    view.set_center_over_terrain(true);
+
+    let style = Style {
+        terrain: Some(TerrainSpecification {
+            source: "dem".into(),
+            exaggeration: 1.0,
+        }),
+        ..Style::default()
+    };
+
+    // Only the western eye DEM tile (2047, 2047, z12) at 1,050 m has arrived; center tile (2048, 2047)
+    // has not arrived yet.
+    let mut world = World::default();
+    let eye_tile = WorldTileCoords {
+        x: 2047,
+        y: 2047,
+        z: ZoomLevel::new(12),
+    };
+    world
+        .tiles
+        .spawn_mut(eye_tile)
+        .expect("eye dem")
+        .insert(DemTileComponent::Loaded(LoadedDem::new(flat_tile(1050.0))));
+    world
+        .resources
+        .insert(TerrainCoverageIndex::build([], &world.tiles, &source(1.0)));
+
+    super::ground_and_clear_terrain(&style, &mut view, &world);
+    assert!(
+        (view.zoom().value() - 15.0).abs() < 1e-9,
+        "camera zoom must not lift prematurely while center DEM is unloaded: {}",
+        view.zoom().value()
+    );
+}

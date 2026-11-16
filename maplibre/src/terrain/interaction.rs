@@ -5,7 +5,7 @@
 //! elevation still while they run and reconcile it when they end, and the camera is lifted
 //! out of the ground after every change.
 
-use cgmath::{EuclideanSpace, InnerSpace, Point2, Vector2, Vector3};
+use cgmath::{EuclideanSpace, InnerSpace, Point2, Vector2};
 
 use crate::{
     coords::{LatLon, Zoom, TILE_SIZE},
@@ -285,8 +285,12 @@ pub fn resolve_gesture_anchor(
     }
 }
 
+mod clearance;
 mod flat_gestures;
 pub mod globe;
+pub use clearance::{
+    clamp_pitch_above_terrain_keeping_zoom, keep_camera_above_terrain, terrain_eye_clearance_meters,
+};
 pub use flat_gestures::{pan_mercator_by_pixels, set_location_at_pixel, zoom_mercator_around};
 
 /// Holds the center elevation still for the duration of a gesture.
@@ -388,135 +392,8 @@ pub fn recalculate_zoom_and_center(view_state: &mut ViewState, elevation: f64) {
     view_state.camera_mut().move_to(Point2::from_vec(position));
 }
 
-/// Lowers camera pitch along the constant-zoom orbit sphere when the current pitch places the
-/// camera below the loaded terrain under it, keeping `zoom` and `center` unchanged.
-/// Returns whether the pitch was adjusted.
-pub fn clamp_pitch_above_terrain_keeping_zoom(
-    style: &Style,
-    view_state: &mut ViewState,
-    world: &World,
-) -> bool {
-    if style.terrain.is_none() || globe::globe_pose(view_state).is_some() {
-        return false;
-    }
-    let Some(index) = world.resources.get::<TerrainCoverageIndex>() else {
-        return false;
-    };
-    let world_size = TILE_SIZE * 2_f64.powf(view_state.zoom().value());
-    let zoom = u8::from(view_state.zoom().zoom_level(TILE_SIZE));
-    let current_pitch = view_state.camera().get_pitch().0;
-    if current_pitch <= 1e-4 {
-        return false;
-    }
-    let is_clear = |view: &ViewState, clearance: f64| -> Option<bool> {
-        let (camera, altitude) = camera_ground_position(view);
-        let min_altitude = index.loaded_ground_cached(
-            &world.tiles,
-            camera.x / world_size,
-            camera.y / world_size,
-            crate::terrain::DemDetail::Tile(zoom),
-        )?;
-        Some(altitude >= min_altitude + clearance)
-    };
-    let Some(false) = is_clear(view_state, 0.0) else {
-        return false;
-    };
-    // Verify that tilting toward nadir (pitch = 0) clears the terrain at this zoom.
-    view_state.camera_mut().set_pitch(cgmath::Rad(0.0));
-    if is_clear(view_state, 0.5) != Some(true) {
-        view_state
-            .camera_mut()
-            .set_pitch(cgmath::Rad(current_pitch));
-        return false;
-    }
-    let mut lo = 0.0_f64;
-    let mut hi = current_pitch;
-    for _ in 0..12 {
-        let mid = 0.5 * (lo + hi);
-        view_state.camera_mut().set_pitch(cgmath::Rad(mid));
-        if is_clear(view_state, 0.5).unwrap_or(true) {
-            lo = mid;
-        } else {
-            hi = mid;
-        }
-    }
-    view_state.camera_mut().set_pitch(cgmath::Rad(lo));
-    true
-}
-
-/// Lifts the camera above the terrain under it by raising the pitch and zooming out, keeping the
-/// center in place, as GL JS `_elevateCameraIfInsideTerrain` does. Returns whether it moved.
-pub fn keep_camera_above_terrain(style: &Style, view_state: &mut ViewState, world: &World) -> bool {
-    if style.terrain.is_none() {
-        return false;
-    }
-    // The globe that orbits the terrain has an eye of its own, not the flat camera's altitude.
-    if globe::globe_pose(view_state).is_some() {
-        return globe::keep_globe_camera_above_terrain(view_state, world);
-    }
-    let Some(index) = world.resources.get::<TerrainCoverageIndex>() else {
-        return false;
-    };
-    let world_size = TILE_SIZE * 2_f64.powf(view_state.zoom().value());
-    let (camera, altitude) = camera_ground_position(view_state);
-    let zoom = u8::from(view_state.zoom().zoom_level(TILE_SIZE));
-    let Some(min_altitude) = index.loaded_ground_cached(
-        &world.tiles,
-        camera.x / world_size,
-        camera.y / world_size,
-        crate::terrain::DemDetail::Tile(zoom),
-    ) else {
-        return false;
-    };
-    if altitude >= min_altitude {
-        return false;
-    }
-    tracing::debug!(
-        altitude,
-        min_altitude,
-        zoom = view_state.zoom().value(),
-        pitch = view_state.camera().get_pitch().0.to_degrees(),
-        center_elevation = view_state.center_elevation(),
-        "camera inside terrain; lifting it"
-    );
-    let center = view_state.camera().position().to_vec();
-    let center_elevation = view_state.center_elevation();
-    // Both altitudes use the Mercator scale at the center, the scale the camera altitude is
-    // measured with, so the lifted camera lands on the surface rather than a few metres off.
-    let circumference = circumference_at_latitude(
-        view_state.body(),
-        mercator_world_to_lat_lon(center.x, center.y, world_size).latitude,
-    );
-    let from = Vector3::new(
-        camera.x / world_size,
-        camera.y / world_size,
-        min_altitude / circumference,
-    );
-    let to = Vector3::new(
-        center.x / world_size,
-        center.y / world_size,
-        center_elevation / circumference,
-    );
-    let delta = to - from;
-    let distance_3d = delta.magnitude();
-    if distance_3d <= f64::EPSILON {
-        return false;
-    }
-    let ground = delta.x.hypot(delta.y);
-    let zoom = (view_state.camera_to_center_distance() / distance_3d / TILE_SIZE).log2();
-    let mut pitch = (ground / distance_3d).clamp(-1.0, 1.0).acos();
-    pitch = if delta.z < 0.0 {
-        std::f64::consts::FRAC_PI_2 - pitch
-    } else {
-        std::f64::consts::FRAC_PI_2 + pitch
-    };
-    view_state.camera_mut().set_pitch(cgmath::Rad(pitch));
-    view_state.zoom_to(Zoom::new(zoom));
-    true
-}
-
 /// Metres around the parallel at a latitude, the length one Mercator unit covers there.
-fn circumference_at_latitude(body: Body, latitude_degrees: f64) -> f64 {
+pub(super) fn circumference_at_latitude(body: Body, latitude_degrees: f64) -> f64 {
     body.circumference_at_latitude(latitude_degrees)
 }
 

@@ -175,7 +175,11 @@ impl MapContext {
         options: crate::render::view_state::CameraOptions,
     ) -> Result<(), crate::render::view_state::NavigationError> {
         self.view_state.jump_to(options)?;
-        crate::terrain::elevation::ground_center(&mut self.view_state, &self.world);
+        crate::terrain::elevation::ground_and_clear_terrain(
+            &self.style,
+            &mut self.view_state,
+            &self.world,
+        );
         Ok(())
     }
 
@@ -187,7 +191,11 @@ impl MapContext {
     /// Replaces the zoom and geographic center bounds and clamps the camera if needed.
     pub fn set_camera_bounds(&mut self, bounds: crate::render::view_state::CameraBounds) {
         self.view_state.set_camera_bounds(bounds);
-        crate::terrain::elevation::ground_center(&mut self.view_state, &self.world);
+        crate::terrain::elevation::ground_and_clear_terrain(
+            &self.style,
+            &mut self.view_state,
+            &self.world,
+        );
         crate::render::frame_signals::mark_dirty(&mut self.world);
     }
 
@@ -206,7 +214,11 @@ impl MapContext {
     /// Sets or clears the geographic bounding box restricting the camera's center.
     pub fn set_max_bounds(&mut self, max_bounds: Option<crate::render::view_state::LatLonBounds>) {
         self.view_state.set_max_bounds(max_bounds);
-        crate::terrain::elevation::ground_center(&mut self.view_state, &self.world);
+        crate::terrain::elevation::ground_and_clear_terrain(
+            &self.style,
+            &mut self.view_state,
+            &self.world,
+        );
         crate::render::frame_signals::mark_dirty(&mut self.world);
     }
 
@@ -230,7 +242,11 @@ impl MapContext {
     ) -> Result<crate::render::view_state::CameraFit, crate::render::view_state::NavigationError>
     {
         let fit = self.view_state.fit_bounds(bounds, padding)?;
-        crate::terrain::elevation::ground_center(&mut self.view_state, &self.world);
+        crate::terrain::elevation::ground_and_clear_terrain(
+            &self.style,
+            &mut self.view_state,
+            &self.world,
+        );
         crate::render::frame_signals::mark_dirty(&mut self.world);
         Ok(fit)
     }
