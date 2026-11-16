@@ -34,6 +34,7 @@ struct LayerFrame<'a> {
     has_icon_text_fit: bool,
     constant_rules: Option<rules::PlacementRules>,
     visibility_policy: Option<&'a crate::sdf::visibility::SymbolVisibility>,
+    repeat_distance: f64,
 }
 
 /// The GPU-visible outcome of placing one feature.
@@ -208,7 +209,7 @@ impl LayerFrame<'_> {
                 } else {
                     (rectangles, [0.0; 2], 0)
                 };
-            let repeat = Repeat::of(layer, feature, &rectangles, viewport);
+            let repeat = Repeat::of(layer, feature, &rectangles, viewport, self.repeat_distance);
             // A repeat too close to one already placed takes no room from labels after it.
             let edge_clipped = self.paint.avoid_edges()
                 && !avoid_edges::stays_within_tile(

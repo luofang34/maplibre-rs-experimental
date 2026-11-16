@@ -33,6 +33,7 @@ pub(super) struct Repeat<'a> {
     layer: &'a str,
     key: &'a Arc<str>,
     at: [f64; 2],
+    min_distance: f64,
 }
 
 impl<'a> Repeat<'a> {
@@ -47,6 +48,7 @@ impl<'a> Repeat<'a> {
         feature: &'a Feature,
         rectangles: &[Option<[f64; 4]>; 2],
         viewport: [f64; 2],
+        min_distance: f64,
     ) -> Option<Self> {
         let key = feature.repeat_key.as_ref()?;
         let [left, top, right, bottom] = rectangles[0].or(rectangles[1])?;
@@ -56,6 +58,7 @@ impl<'a> Repeat<'a> {
             layer: &layer.style_layer_id,
             key,
             at,
+            min_distance,
         })
     }
 }
@@ -88,7 +91,7 @@ impl RepeatSpacing {
                 .is_some_and(|placed| {
                     placed.iter().any(|other| {
                         (other[0] - repeat.at[0]).hypot(other[1] - repeat.at[1])
-                            < MIN_REPEAT_DISTANCE
+                            < repeat.min_distance
                     })
                 })
         };

@@ -41,11 +41,9 @@ pub(super) fn build_tessellator(
         }
         LayerPaint::FillExtrusion(extrusion) => {
             let defaults = ExtrusionOptions::for_paint(extrusion, overscaling);
-            let clip_buffer = defaults.clip_buffer.or_else(|| {
-                buffer
-                    .filter(|_| extrusion.fill_extrusion_pattern.is_some())
-                    .map(|buf| buf as f32 * EXTENT as f32 / 512.0)
-            });
+            let clip_buffer = defaults
+                .clip_buffer
+                .or_else(|| Some(buffer.unwrap_or(128) as f32 * EXTENT as f32 / 512.0));
             let tessellator =
                 ZeroTessellator::<IndexDataType>::default().with_extrusion(ExtrusionOptions {
                     clip_buffer,

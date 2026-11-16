@@ -158,6 +158,19 @@ pub trait LayerTessellated: IntoMessage + Debug + Send {
         None
     }
 
+    /// Marks the tile magnification zoom used when tessellating this layer.
+    fn with_overscaled_zoom(self, _overscaled_zoom: u8) -> Self
+    where
+        Self: Sized,
+    {
+        self
+    }
+
+    /// Tile magnification zoom recorded when this layer was tessellated (`0` if not overscaled).
+    fn overscaled_zoom(&self) -> u8 {
+        0
+    }
+
     /// Tile-grid coordinates whose local space contains the geometry.
     fn coords(&self) -> WorldTileCoords;
 

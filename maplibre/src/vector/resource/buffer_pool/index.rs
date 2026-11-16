@@ -40,6 +40,8 @@ pub struct IndexEntry {
     pub(super) dynamic_circle_metadata: bool,
     // Shared source-layer vertex slab key when sibling layers share `buffer_vertices`.
     pub(super) shared_geometry_key: Option<u64>,
+    // View zoom at which `feature_metadata` was last evaluated.
+    pub(super) evaluated_zoom: Option<f32>,
 }
 
 impl IndexEntry {
@@ -77,6 +79,12 @@ impl IndexEntry {
     #[inline]
     pub fn shared_geometry_key(&self) -> Option<u64> {
         self.shared_geometry_key
+    }
+
+    /// View zoom at which this entry's per-feature paint metadata was last evaluated.
+    #[inline]
+    pub fn evaluated_zoom(&self) -> Option<f32> {
+        self.evaluated_zoom
     }
 
     /// Identifies this upload, even when an evicted layer reuses the same buffer range.

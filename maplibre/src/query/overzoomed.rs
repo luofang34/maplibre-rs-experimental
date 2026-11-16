@@ -3,8 +3,9 @@
 
 use crate::{coords::EXTENT, io::geometry_index::IndexedGeometry};
 
-/// The buffer GL JS keeps around an overzoomed tile, in the units of its 8192-unit extent.
-const GL_BUFFER: f64 = 128.0;
+/// The buffer GL JS keeps around an overzoomed tile, in the units of its 8192-unit extent
+/// (`1024 / 8192 = 1/8` tile, matching `geojson-vt`'s default 128-of-1024 / MapLibre 512-of-4096 buffer).
+const GL_BUFFER: f64 = 1024.0;
 
 /// The parts of a coarser tile's geometry within a finer tile `scale` times smaller whose top
 /// left corner lies at `offset` of the finer tile's units: moved into its units, cut to it and its

@@ -185,6 +185,20 @@ pub(super) fn apply(
             ("setFeatureState", _) => feature_state(style, &value(1), &value(2), false),
             ("removeFeatureState", _) => feature_state(style, &value(1), &value(2), true),
             ("getFeatureState", _) => Ok(()),
+            ("querySourceFeatures", _) => {
+                let source = text(1).or_else(|| {
+                    items
+                        .get(1)
+                        .and_then(Value::as_array)
+                        .and_then(|arr| arr.first())
+                        .and_then(Value::as_str)
+                });
+                match source {
+                    Some(source) if style.sources.contains_key(source) => Ok(()),
+                    Some(source) => Err(format!("unknown source `{source}`")),
+                    None => Err("needs a source".to_owned()),
+                }
+            }
             ("setGlobalStateProperty", Some(key)) => {
                 style.set_global_state(key, value(2));
                 Ok(())

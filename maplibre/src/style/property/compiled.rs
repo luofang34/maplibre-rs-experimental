@@ -63,7 +63,7 @@ impl<T: PropertyValue> CompiledProperty<T> {
                 let expr = prop.expression();
                 let is_feature_const = expr.is_feature_constant();
                 let is_zoom_const = expr.is_zoom_constant();
-                if is_feature_const && is_zoom_const {
+                if is_feature_const && is_zoom_const && expr.is_constant() {
                     let ctx = EvaluationContext::at_zoom(0.0);
                     if let Ok(val) = expr.evaluate(&ctx) {
                         if let Some(t) = T::from_value(&val) {
@@ -176,5 +176,27 @@ mod tests {
         assert!(!prop.is_feature_constant() && !prop.is_zoom_constant());
         let feat: FeatureProperties = [("val".to_string(), Value::Number(10.0))].into();
         assert_eq!(prop.evaluate_for(&feat, 5.0), Some(20.0));
+    }
+
+    #[test]
+    fn resolved_image_coalesce_is_not_folded_before_draw_time() {
+        let expr_json = serde_json::json!(["coalesce", ["image", "missing"], ["image", "present"]]);
+        let prop = CompiledProperty::<crate::style::layer::PatternName>::parse(&expr_json)
+            .expect("parses");
+        let CompiledProperty::CameraFunction(curve) = prop else {
+            panic!("image coalesce must not fold at parse time without available_images");
+        };
+        let available = std::collections::HashMap::from([("present".to_string(), ())]);
+        let mut ctx = EvaluationContext::at_zoom(0.0);
+        ctx.available_images = Some(&available);
+        let evaluated = curve
+            .expression()
+            .evaluate(&ctx)
+            .ok()
+            .and_then(|val| crate::style::layer::PatternName::from_value(&val));
+        assert_eq!(
+            evaluated,
+            Some(crate::style::layer::PatternName("present".to_string()))
+        );
     }
 }

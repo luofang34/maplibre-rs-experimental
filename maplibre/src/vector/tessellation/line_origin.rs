@@ -72,8 +72,14 @@ fn entry_parameter(from: lyon::math::Point, to: lyon::math::Point) -> Option<f32
 pub struct StrokeOrigins {
     /// Entry distance of each path endpoint's sub-path, from [`entry_distances`].
     pub origins: Vec<f32>,
+    /// Starting distance for each guardband-clipped sub-path endpoint when present.
+    pub base_distances: Option<Vec<f32>>,
     /// Starting distance along the full unclipped line when `lineMetrics` clipped this segment.
     pub gradient_offset: f32,
+    /// Scale applied to `line-gradient` distances when length exceeds `24`-bit fixed-point range.
+    pub gradient_scale: f32,
+    /// Whether this stroke belongs to a `line-gradient` layer (`true` preserves fractional units).
+    pub is_gradient: bool,
     /// What the feature's line style adds to each vertex.
     pub packed: PackedLine,
 }
@@ -88,18 +94,28 @@ impl StrokeVertexConstructor<ShaderVertex> for StrokeOrigins {
             VertexSource::Endpoint { id } => id,
             VertexSource::Edge { from, .. } => from,
         };
-        let origin = self
-            .origins
-            .get(endpoint.to_usize())
-            .copied()
-            .unwrap_or(0.0);
-        let distance = vertex.advancement() - origin;
         // GL JS stores a vertex's distance in whole tile units, so the phase of a dash or pattern
         // drifts from one line to the next by up to one unit; a gradient keeps its fraction.
-        output.distance = if self.origins.is_empty() {
-            self.gradient_offset + distance
+        output.distance = if let Some(bases) = &self.base_distances {
+            let base = bases.get(endpoint.to_usize()).copied().unwrap_or(0.0);
+            let raw = base + vertex.advancement();
+            if self.is_gradient {
+                raw * self.gradient_scale
+            } else {
+                raw.floor()
+            }
         } else {
-            distance.floor()
+            let origin = self
+                .origins
+                .get(endpoint.to_usize())
+                .copied()
+                .unwrap_or(0.0);
+            let distance = vertex.advancement() - origin;
+            if self.is_gradient {
+                (self.gradient_offset + distance) * self.gradient_scale
+            } else {
+                distance.floor()
+            }
         };
         // A stroke has no elevation; the slot instead says which side of the line the vertex is
         // on, which a pattern needs to draw the image across the line the right way up, and

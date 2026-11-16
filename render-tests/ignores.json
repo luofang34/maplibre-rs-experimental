@@ -1,12 +1,12 @@
 {
   "baseline": {
     "total": 1701,
-    "passed": 1620,
-    "ignored": 81,
+    "passed": 1629,
+    "ignored": 72,
     "render_total": 1564,
-    "render_passed": 1490,
+    "render_passed": 1493,
     "query_total": 137,
-    "query_passed": 130
+    "query_passed": 136
   },
   "ignores": {
     "background-color/colorSpace-hcl": "HCL color-space interpolation curve on `background-color` differs from the GL JS reference",
@@ -18,7 +18,6 @@
     "custom-layer-js/null-island": "Style-level JS `addCustomLayer` operation is not supported; custom passes use Rust `Plugin` / host GPU hooks",
     "custom-layer-js/tent-3d": "Style-level JS `addCustomLayer` operation is not supported; custom passes use Rust `Plugin` / host GPU hooks",
     "debug/collision-lines": "Debug `showCollisionBoxes` line-symbol box inspector styling differs from GL JS",
-    "debug/collision-lines-pitched": "Debug `showCollisionBoxes` pitched line-symbol box inspector styling differs from GL JS",
     "debug/collision-pitched-wrapped": "Debug `showCollisionBoxes` wrapped pitched collision overlay differs from GL JS",
     "fill-extrusion-pattern/function-2": "Data-driven `fill-extrusion-pattern` wall UV/cross-fade shading differs from GL JS",
     "high-pitch/terrain-pitch95": "Above-horizon 95-degree terrain pitch near-plane clipping differs from GL JS",
@@ -61,13 +60,7 @@
     "projection/globe/terrain/line-gradient": "Draped `line-gradient` UV progression on globe terrain differs from GL JS",
     "projection/globe/terrain/line-spiral": "High-curvature draped line join tessellation on globe terrain differs from GL JS",
     "projection/globe/terrain/line-translate": "Draped `line-translate` offset direction on globe terrain differs from GL JS",
-    "query/fill-features-in/rotated": "`queryRenderedFeatures` box hit-testing on rotated fill polygons differs from GL JS",
-    "query/fill-translate-anchor/viewport": "`queryRenderedFeatures` hit-testing with `fill-translate-anchor: viewport` differs from GL JS",
-    "query/line-width-features-in/tilt-inside": "`queryRenderedFeatures` tilted thick-line screen-space hit width differs from GL JS",
-    "query/regressions/mapbox-gl-js#6555": "`querySourceFeatures` harness operation is not implemented",
-    "query/regressions/maplibre-gl-js#5255-2": "`queryRenderedFeatures` geometry clipping across wrapped tile boundaries differs from GL JS",
-    "query/symbol/filtered": "`queryRenderedFeatures` runtime filter application on placed symbols differs from GL JS",
-    "query/symbol/rotated-inside": "`queryRenderedFeatures` rotated symbol bounding-box intersection differs from GL JS",
+    "query/line-width-features-in/tilt-inside": "Vendored counties-7-37-48.mvt quantizes both Ocean (49) and Burlington (33) onto x=563 (dist=37.1 < 40, matching mln-rs), whereas stale GL JS expected.json was recorded against x=562.5 (dist=45.1 > 40)",
     "real-world/bangkok": "External `local://styles/bangkok.json` basemap asset is not vendored in `render-tests/src/assets/styles/`",
     "real-world/chicago": "External `local://styles/chicago.json` basemap asset is not vendored in `render-tests/src/assets/styles/`",
     "real-world/nepal": "External `local://styles/nepal.json` basemap asset is not vendored in `render-tests/src/assets/styles/`",
@@ -76,8 +69,6 @@
     "real-world/uruguay": "External `local://styles/uruguay.json` basemap asset is not vendored in `render-tests/src/assets/styles/`",
     "regressions/mapbox-gl-js#7302": "Canvas source (`type: \"canvas\"`) is not implemented (GAPS.md)",
     "regressions/mapbox-gl-js#7708": "Style-level JS `addCustomLayer` operation is not supported",
-    "regressions/mapbox-gl-js#8817": "`pauseTiles` + `setZoom` composite zoom/feature `fill-opacity` re-evaluation on overzoomed cached GeoJSON tile differs from GL JS",
-    "runtime-styling/image-add-coalesce": "Runtime `addImage` re-evaluation of `coalesce` missing-image fallback differs from GL JS",
     "runtime-styling/set-style-glyphs": "Whole-style `glyphs` URL replacement (`setStyle`) relayout differs from GL JS (GAPS.md)",
     "satellite-v9/z0": "Remote `mapbox://mapbox.satellite` TileJSON source is not vendored offline",
     "terrain/fog-sky-blend-globe": "GL JS terrain `fog` / `sky` horizon blend differs from `maplibre-rs` physical atmosphere",

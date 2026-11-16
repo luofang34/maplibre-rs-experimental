@@ -79,12 +79,24 @@ impl ProcessedLayers {
         }
 
         let mut layers_by_tile = BTreeMap::new();
+        let mut overscaled_by_tile: BTreeMap<WorldTileCoords, u8> = BTreeMap::new();
         let mut paint_by_tile: BTreeMap<_, TileFeaturePaintComponent> = BTreeMap::new();
         for mut layer in self.vector {
             let coords = layer.coords;
+            let overscaled_zoom = layer.overscaled_zoom();
+            overscaled_by_tile
+                .entry(coords)
+                .and_modify(|zoom| *zoom = (*zoom).max(overscaled_zoom))
+                .or_insert(overscaled_zoom);
             let mut entries = layer.take_feature_paint();
             let mut bucket = (*layer).to_bucket();
-            let _ = sync_arriving_vector_bucket(style, 0, &mut bucket, &mut entries, &mut memo);
+            let _ = sync_arriving_vector_bucket(
+                style,
+                overscaled_zoom,
+                &mut bucket,
+                &mut entries,
+                &mut memo,
+            );
             if let Some(mut entries) = entries.filter(|e| !e.is_empty()) {
                 interner.intern_entries(tiles, coords, &mut entries);
                 paint_by_tile
@@ -100,6 +112,7 @@ impl ProcessedLayers {
         }
 
         for (coords, layers) in layers_by_tile {
+            let overscaled_zoom = overscaled_by_tile.get(&coords).copied().unwrap_or(0);
             let mut tile = tiles
                 .spawn_mut(coords)
                 .ok_or(HeadlessMapOperationError::InvalidTile { coords })?;
@@ -107,7 +120,7 @@ impl ProcessedLayers {
                 done: true,
                 failed: false,
                 layers,
-                overscaled_zoom: 0,
+                overscaled_zoom,
             });
             if let Some(paint) = paint_by_tile.remove(&coords) {
                 tile.insert(paint);
@@ -128,6 +141,7 @@ impl ProcessedLayers {
         // A tile whose only layers are symbols is still a delivered tile, as when a worker
         // reports it finished, or its labels would never be covered.
         for (coords, layers) in symbols_by_tile {
+            let overscaled_zoom = overscaled_by_tile.get(&coords).copied().unwrap_or(0);
             let need_vector = tiles.query::<&VectorLayerBucketComponent>(coords).is_none();
             let mut tile = tiles
                 .spawn_mut(coords)
@@ -137,7 +151,7 @@ impl ProcessedLayers {
                     done: true,
                     failed: false,
                     layers: Vec::new(),
-                    overscaled_zoom: 0,
+                    overscaled_zoom,
                 });
             }
             tile.insert(SymbolLayersDataComponent {

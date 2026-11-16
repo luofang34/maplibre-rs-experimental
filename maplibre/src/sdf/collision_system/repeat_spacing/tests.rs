@@ -56,11 +56,19 @@ fn place(
     spacing: &mut RepeatSpacing,
     shields: &[(&SymbolLayerData, &Feature, [f64; 2], bool)],
 ) -> Vec<bool> {
+    place_with_distance(spacing, shields, MIN_REPEAT_DISTANCE)
+}
+
+fn place_with_distance(
+    spacing: &mut RepeatSpacing,
+    shields: &[(&SymbolLayerData, &Feature, [f64; 2], bool)],
+    min_distance: f64,
+) -> Vec<bool> {
     shields
         .iter()
         .map(|(layer, feature, at, was_visible)| {
             let rectangles = boxes(*at);
-            match Repeat::of(layer, feature, &rectangles, VIEWPORT) {
+            match Repeat::of(layer, feature, &rectangles, VIEWPORT, min_distance) {
                 Some(repeat) if spacing.too_close(&repeat, *was_visible) => false,
                 Some(repeat) => {
                     spacing.remember(repeat);
@@ -70,6 +78,24 @@ fn place(
             }
         })
         .collect()
+}
+
+#[test]
+fn custom_symbol_spacing_allows_closer_repeats_within_configured_distance() {
+    let tile = layer("counties", 0);
+    let route = shield(Some("Burlington County"));
+    let mut spacing = RepeatSpacing::default();
+    spacing.begin();
+    let placed = place_with_distance(
+        &mut spacing,
+        &[
+            (&tile, &route, [400.0, 300.0], false),
+            (&tile, &route, [440.0, 300.0], false),
+            (&tile, &route, [485.0, 300.0], false),
+        ],
+        60.0,
+    );
+    assert_eq!(placed, [true, false, true]);
 }
 
 #[test]

@@ -74,7 +74,7 @@ fn main(
 ) -> VertexOutput {
     let position = vec2<f32>(v_pos_q2) * 0.25 + vec2<f32>(2048.0);
     let normal = unpack2x16float(v_norm_packed);
-    let path_dist = f32(v_meta.x & 0xffffffu) * 0.125;
+    let path_dist = f32(bitcast<i32>(v_meta.x << 8u) >> 8u) * 0.125;
     let w3 = v_meta.y;
     let style_flags = u32(line_style.w + 0.5);
     let is_gradient = (style_flags & 1u) != 0u;

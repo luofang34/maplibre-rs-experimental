@@ -252,4 +252,16 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         }
         bumped
     }
+
+    /// Records the view zoom at which a layer's per-feature metadata was last evaluated.
+    pub fn set_layer_evaluated_zoom(&mut self, coords: WorldTileCoords, id: &str, zoom: f32) {
+        let target_id = crate::style::StyleLayerId::intern(id);
+        if let Some(layers) = self.index.get_layers_mut(coords) {
+            for entry in layers {
+                if entry.style_layer_id == target_id {
+                    entry.evaluated_zoom = Some(zoom);
+                }
+            }
+        }
+    }
 }

@@ -63,11 +63,10 @@ pub(super) fn upload_bucket(
     let evaluated_colors;
     let active_colors: &[[f32; 4]] = match (uniform, paint_entries) {
         (None, Some(entries)) => {
-            let style_zoom = f64::from(overscaled_zoom.max(u8::from(coords.z)));
             evaluated_colors = crate::vector::feature_paint::evaluate_bucket_colors(
                 style_layer,
                 entries,
-                style_zoom,
+                f64::from(zoom),
             );
             &evaluated_colors
         }
@@ -173,6 +172,7 @@ pub(super) fn upload_bucket(
     }
     buffer_pool.set_pattern_runs(coords, &style_layer.id, runs);
     buffer_pool.set_sort_runs(coords, &style_layer.id, sort_runs);
+    buffer_pool.set_layer_evaluated_zoom(coords, &style_layer.id, zoom);
     #[cfg(feature = "geojson")]
     if is_dynamic_circle {
         crate::geojson::update::dynamic_points::record_uploaded_dynamic_circle(

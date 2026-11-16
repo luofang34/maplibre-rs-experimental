@@ -88,7 +88,13 @@ impl Expression {
     pub fn is_constant(&self) -> bool {
         match self {
             // Whether an image exists is known only where it is drawn.
-            Self::Global(_) | Self::GlobalState(_) | Self::Image(_) => false,
+            Self::Global(_)
+            | Self::GlobalState(_)
+            | Self::Image(_)
+            | Self::Coerce {
+                coercion: Coercion::ResolvedImage,
+                ..
+            } => false,
             _ => self.is_feature_constant() && self.children_all(Self::is_constant),
         }
     }

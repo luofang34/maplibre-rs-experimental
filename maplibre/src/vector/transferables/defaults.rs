@@ -146,6 +146,8 @@ pub struct DefaultLayerTessellated {
     pub layer_data: Layer,
     /// Style entry whose paint and layout produced this bucket.
     pub style_layer_id: String,
+    /// Tile magnification zoom used when tessellating this layer.
+    pub overscaled_zoom: u8,
     /// Retained per-entry feature attributes for in-place paint and `feature-state` refresh.
     pub feature_paint: Option<Vec<BucketFeatureEntry>>,
 }
@@ -184,8 +186,18 @@ impl LayerTessellated for DefaultLayerTessellated {
             feature_sort_keys,
             layer_data,
             style_layer_id,
+            overscaled_zoom: u8::from(coords.z),
             feature_paint: None,
         }
+    }
+
+    fn with_overscaled_zoom(mut self, overscaled_zoom: u8) -> Self {
+        self.overscaled_zoom = overscaled_zoom;
+        self
+    }
+
+    fn overscaled_zoom(&self) -> u8 {
+        self.overscaled_zoom
     }
 
     fn with_feature_paint(mut self, entries: Vec<BucketFeatureEntry>) -> Self {

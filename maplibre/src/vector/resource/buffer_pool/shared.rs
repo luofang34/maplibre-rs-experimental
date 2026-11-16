@@ -368,6 +368,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             dual_feature_metadata: false,
             dynamic_circle_metadata: false,
             shared_geometry_key: shared_key,
+            evaluated_zoom: None,
         };
 
         if uploaded_vertices {

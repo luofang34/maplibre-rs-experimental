@@ -11,6 +11,8 @@ use super::{
     concave_join, line_elevation, line_origin, line_style::PackedLine, sharp_corners, GeoResult,
     ZeroTessellator, DEFAULT_TOLERANCE,
 };
+
+mod clip;
 use crate::style::{
     expression::{FeatureProperties, Value},
     line_stroke::{LineCap, LineJoin},
@@ -157,13 +159,40 @@ where
             self.line_length = self.line_length.max(seg_len);
         }
 
+        let origins = if self.line_gradient {
+            Vec::new()
+        } else {
+            line_origin::entry_distances(&path)
+        };
+        let (path, base_distances) = if clip::needs_guardband_clip(&path) {
+            let (clipped, bases) =
+                clip::clip_to_guardband(&path, &origins, self.line_gradient, gradient_offset);
+            if bases.is_empty() {
+                return Ok(());
+            }
+            (clipped, Some(bases))
+        } else {
+            (path, None)
+        };
+        let gradient_scale =
+            if self.line_gradient && self.line_length > clip::MAX_LINE_METRIC_LENGTH {
+                let scale = clip::MAX_LINE_METRIC_LENGTH / self.line_length;
+                self.line_length = clip::MAX_LINE_METRIC_LENGTH;
+                scale
+            } else {
+                1.0
+            };
+
         let constructor = line_origin::StrokeOrigins {
-            origins: if self.line_gradient {
+            origins: if base_distances.is_some() {
                 Vec::new()
             } else {
-                line_origin::entry_distances(&path)
+                origins
             },
+            base_distances,
             gradient_offset,
+            gradient_scale,
+            is_gradient: self.line_gradient,
             packed: self
                 .line_feature_style
                 .as_ref()

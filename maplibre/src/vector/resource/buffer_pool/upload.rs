@@ -196,6 +196,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             dual_feature_metadata: dual_fm,
             dynamic_circle_metadata: dynamic_circle_fm,
             shared_geometry_key: None,
+            evaluated_zoom: None,
         };
 
         if req.vertex_bytes > 0 {

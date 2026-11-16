@@ -100,6 +100,7 @@ pub fn upload_system(
         paint::refresh_layer_paint(
             buffer_pool,
             queue,
+            &world.tiles,
             &painted_tiles,
             paint_frame,
             previous_paint,
@@ -344,7 +345,7 @@ fn upload_tessellated_layer_with_uncovered(
                         let release_colors =
                             !crate::style::feature_state::layer_paint_reads_feature_state(
                                 style_layer,
-                            );
+                            ) && !paint::feature_paint_depends_on_zoom(style_layer);
                         pending_cpu_releases.push((
                             style_layer.id.clone(),
                             shared_key,

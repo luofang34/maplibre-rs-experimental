@@ -442,13 +442,20 @@ fn refresh_vector_pool(
         bump_revision,
     } in gpu_updates
     {
-        if let Some(entry) = vector_pool
-            .index()
-            .get_layers(coords)
-            .and_then(|layers| layers.iter().find(|e| e.style_layer.id == layer_id))
-        {
+        if let Some(entry) = vector_pool.index().get_layers(coords).and_then(|layers| {
+            layers
+                .iter()
+                .find(|layers_entry| layers_entry.style_layer.id == layer_id)
+        }) {
             vector_pool.update_feature_metadata(queue, entry, &feature_meta);
         }
+        let evaluated_zoom = world
+            .tiles
+            .query::<&VectorLayerBucketComponent>(coords)
+            .map_or(u8::from(coords.z), |b| {
+                b.overscaled_zoom.max(u8::from(coords.z))
+            });
+        vector_pool.set_layer_evaluated_zoom(coords, &layer_id, f32::from(evaluated_zoom));
         vector_pool.set_pattern_runs(coords, &layer_id, runs);
         if bump_revision {
             vector_pool.bump_layer_paint_revision(coords, &layer_id);

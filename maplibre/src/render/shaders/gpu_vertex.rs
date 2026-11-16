@@ -122,7 +122,8 @@ fn pack_tile_pos_q2(pos: [f32; 2]) -> u32 {
 fn encode_line_vertex(v: &ShaderVertex) -> GpuShaderVertex {
     let w0 = pack_tile_pos_q2(v.position);
     let w1 = pack_f16_pair(v.normal[0], v.normal[1]);
-    let dist_q3 = (v.distance.max(0.0) * 8.0).round().min(16_777_215.0) as u32;
+    let dist_i24 = (v.distance * 8.0).round().clamp(-8_388_608.0, 8_388_607.0) as i32;
+    let dist_u24 = (dist_i24 as u32) & 0x00ff_ffff;
     let spatial = v.elevation > -1e20;
     let style_bits = v.edge_distance.to_bits() & 0x7f_ffff;
     let per_feature = style_bits != 0;
@@ -144,7 +145,7 @@ fn encode_line_vertex(v: &ShaderVertex) -> GpuShaderVertex {
         } else {
             blur_raw.min(0xfe)
         };
-        let w2 = dist_q3 | (blur_u8 << 24);
+        let w2 = dist_u24 | (blur_u8 << 24);
         let w3 = gap_u8
             | (offset_q3 << 8)
             | (width_q4 << 18)
@@ -154,7 +155,7 @@ fn encode_line_vertex(v: &ShaderVertex) -> GpuShaderVertex {
     } else {
         let neg_side = (v.corner_code - v.corner_code.floor()) > 0.25;
         let elev_u16 = ((v.elevation + 1000.0).clamp(0.0, 16383.75) * 4.0).round() as u32 & 0xffff;
-        let w2 = dist_q3 | (((elev_u16 >> 8) & 0xff) << 24);
+        let w2 = dist_u24 | (((elev_u16 >> 8) & 0xff) << 24);
         let w3 = (elev_u16 & 0xff)
             | (offset_q3 << 8)
             | (width_q4 << 18)

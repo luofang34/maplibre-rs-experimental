@@ -3,21 +3,79 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{
     metadata::{
-        metadata_for_layer, paint_depends_on_bearing, paint_metadata_depends_on_zoom,
-        same_quantized_rgba, uniform_color_depends_on_zoom, uses_layer_metadata_uniform_color,
+        feature_metadata_into, metadata_for_layer, paint_depends_on_bearing,
+        paint_metadata_depends_on_zoom, pattern_runs, same_quantized_rgba,
+        uniform_color_depends_on_zoom, uses_layer_metadata_uniform_color,
     },
     VectorPaintFrame,
 };
 use crate::{
+    coords::WorldTileCoords,
     render::shaders::{FillShaderFeatureMetadata, ShaderLayerMetadata},
     style::layer::{LayerPaint, StyleLayer, StyleProperty},
-    vector::VectorBufferPool,
+    tcs::tiles::Tiles,
+    vector::{
+        feature_paint::{evaluate_bucket_colors, TileFeaturePaintComponent},
+        resource::PatternRuns,
+        VectorBufferPool, VectorLayerBucket, VectorLayerBucketComponent,
+    },
 };
 
+/// Whether `layer`'s per-feature GPU metadata depends on zoom (meaning zooming changes
+/// already-uploaded vertex colors or per-feature patterns/outlines).
+#[inline]
+pub(super) fn feature_paint_depends_on_zoom(layer: &StyleLayer) -> bool {
+    let Some(paint) = layer.paint.as_ref() else {
+        return false;
+    };
+    if paint
+        .opacity()
+        .as_ref()
+        .is_some_and(|p| !p.is_zoom_constant())
+        || crate::vector::pattern::per_feature_pattern(paint).is_some_and(|p| !p.is_zoom_constant())
+    {
+        return true;
+    }
+    match paint {
+        LayerPaint::Fill(fill) => {
+            fill.fill_color
+                .as_ref()
+                .is_some_and(|p| !p.is_zoom_constant())
+                || fill
+                    .outline_color()
+                    .as_ref()
+                    .is_some_and(|p| !p.is_zoom_constant())
+        }
+        LayerPaint::FillExtrusion(ext) => ext
+            .fill_extrusion_color
+            .as_ref()
+            .is_some_and(|p| !p.is_zoom_constant()),
+        LayerPaint::Circle(circle) => {
+            circle
+                .circle_color
+                .as_ref()
+                .is_some_and(|p| !p.is_zoom_constant())
+                || circle
+                    .stroke_color_per_feature()
+                    .is_some_and(|p| !p.is_zoom_constant())
+        }
+        LayerPaint::Line(line) => line
+            .line_color
+            .as_ref()
+            .is_some_and(|p| !p.is_zoom_constant()),
+        LayerPaint::Background(bg) => bg
+            .background_color
+            .as_ref()
+            .is_some_and(|p| !p.is_zoom_constant()),
+        _ => false,
+    }
+}
+
 pub(super) fn refresh_layer_paint(
-    buffer_pool: &VectorBufferPool,
+    buffer_pool: &mut VectorBufferPool,
     queue: &crate::render::upload_queue::UploadQueue,
-    source_tiles: &[crate::coords::WorldTileCoords],
+    tiles: &Tiles,
+    source_tiles: &[WorldTileCoords],
     frame: VectorPaintFrame,
     previous: Option<VectorPaintFrame>,
 ) {
@@ -28,6 +86,8 @@ pub(super) fn refresh_layer_paint(
     let mut meta_memo: FxHashMap<(u32, u8), (ShaderLayerMetadata, bool)> = FxHashMap::default();
     let mut updated_layer_slots: FxHashSet<(u16, u64)> = FxHashSet::default();
     let mut color_memo: FxHashMap<u32, Option<[f32; 4]>> = FxHashMap::default();
+    let mut feature_meta_scratch = Vec::new();
+    let mut feature_zoom_updates: Vec<(WorldTileCoords, String, Option<PatternRuns>)> = Vec::new();
 
     for coords in source_tiles {
         let tile_z = u8::from(coords.z);
@@ -62,6 +122,80 @@ pub(super) fn refresh_layer_paint(
                     buffer_pool.update_layer_metadata(queue, entry, metadata);
                 }
             }
+            if zoom_changed
+                && !entry.is_uniform_feature_metadata()
+                && !entry.is_dynamic_circle_metadata()
+                && entry
+                    .evaluated_zoom()
+                    .is_none_or(|evaluated| (zoom - evaluated).abs() > 1e-4)
+                && feature_paint_depends_on_zoom(&entry.style_layer)
+            {
+                if let Some((paint_store, buckets)) = tiles
+                    .query::<(&TileFeaturePaintComponent, &VectorLayerBucketComponent)>(*coords)
+                {
+                    let entries = paint_store.committed.get(&entry.style_layer.id);
+                    let bucket = buckets.layers.iter().find_map(|layer| match layer {
+                        VectorLayerBucket::AvailableLayer(avail)
+                            if avail.style_layer_id == entry.style_layer.id =>
+                        {
+                            Some(avail)
+                        }
+                        _ => None,
+                    });
+                    if let (Some(entries), Some(bucket)) = (entries, bucket) {
+                        if !bucket.feature_indices.is_empty() {
+                            let allocated_count = (entry.feature_metadata_buffer_range().end
+                                - entry.feature_metadata_buffer_range().start)
+                                as usize
+                                / size_of::<FillShaderFeatureMetadata>();
+                            let colors = evaluate_bucket_colors(
+                                &entry.style_layer,
+                                entries,
+                                f64::from(zoom),
+                            );
+                            let fallback_color: [f32; 4] = entry
+                                .style_layer
+                                .paint
+                                .as_ref()
+                                .and_then(LayerPaint::get_color)
+                                .map(Into::into)
+                                .unwrap_or([0.0, 0.0, 0.0, 1.0]);
+                            feature_metadata_into(
+                                &mut feature_meta_scratch,
+                                &entry.style_layer,
+                                &bucket.feature_indices,
+                                &colors,
+                                fallback_color,
+                            );
+                            if feature_meta_scratch.len() == allocated_count {
+                                buffer_pool.update_feature_metadata(
+                                    queue,
+                                    entry,
+                                    &feature_meta_scratch,
+                                );
+                                let runs = entry
+                                    .style_layer
+                                    .paint
+                                    .as_ref()
+                                    .and_then(crate::vector::pattern::per_feature_pattern)
+                                    .filter(|_| !bucket.buffer.buffer.indices.is_empty())
+                                    .map(|_| {
+                                        pattern_runs(
+                                            &bucket.feature_indices,
+                                            &colors,
+                                            &bucket.buffer.buffer.indices,
+                                        )
+                                    });
+                                feature_zoom_updates.push((
+                                    *coords,
+                                    entry.style_layer.id.clone(),
+                                    runs,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
             // Uniform fill and line colours already ride in `ShaderLayerMetadata::stroke_color`.
             if !zoom_changed
                 || uses_layer_metadata_uniform_color(&entry.style_layer)
@@ -86,6 +220,14 @@ pub(super) fn refresh_layer_paint(
                 );
             }
         }
+    }
+
+    for (coords, layer_id, runs) in feature_zoom_updates {
+        buffer_pool.set_layer_evaluated_zoom(coords, &layer_id, zoom);
+        if runs.is_some() {
+            buffer_pool.set_pattern_runs(coords, &layer_id, runs);
+        }
+        buffer_pool.bump_layer_paint_revision(coords, &layer_id);
     }
 }
 

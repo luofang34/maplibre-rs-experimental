@@ -38,6 +38,7 @@ pub(crate) fn process_mlt_tile_with_assets<T: VectorTransferables, C: Context>(
     context: &mut ProcessVectorContext<T, C>,
     atlas: Arc<SymbolAtlas>,
 ) -> Result<(), ProcessVectorError> {
+    context.set_overscaled_zoom(tile_request.overscaled_zoom);
     let raw_layers =
         Parser::default()
             .parse_layers(data)

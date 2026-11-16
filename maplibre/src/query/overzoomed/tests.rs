@@ -42,8 +42,8 @@ fn a_line_across_the_coarse_tile_is_cut_to_each_fine_tile_and_its_buffer() {
 
 #[test]
 fn a_feature_only_in_the_buffer_of_a_fine_tile_is_left_to_its_neighbour() {
-    // Ends just past the left child's right edge, inside its neighbour's buffer.
-    let short = line(line_string![(x: 1000.0, y: 1000.0), (x: 2040.0, y: 1000.0)]);
+    // Ends past the neighbour's 1/8-tile buffer (`2048 - 512 = 1536` in parent 4096-units).
+    let short = line(line_string![(x: 1000.0, y: 1000.0), (x: 1500.0, y: 1000.0)]);
 
     assert_eq!(slice(&short, 2.0, [0.0, 0.0]).len(), 1);
     assert!(slice(&short, 2.0, [EXTENT, 0.0]).is_empty());

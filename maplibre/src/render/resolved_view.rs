@@ -4,6 +4,9 @@
 
 use cgmath::{InnerSpace, Matrix4, Vector3, Vector4};
 
+mod key;
+use key::ViewSnapshotKey;
+
 use crate::{
     context::MapContext,
     coords::{Zoom, TILE_SIZE},
@@ -28,100 +31,6 @@ use crate::{
 
 /// Transition threshold at which globe horizon clipping begins (`GLOBE_Z_CLIPPING_START` in WGSL).
 const GLOBE_Z_CLIPPING_START: f64 = 0.2;
-
-/// Exact bitwise key identifying all style and [`ViewState`] inputs that determine a
-/// [`ResolvedFrameView`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ViewSnapshotKey {
-    width_bits: u64,
-    height_bits: u64,
-    insets_bits: [u64; 4],
-    fovy_bits: u64,
-    zoom_bits: u64,
-    style_zoom_bits: u64,
-    cam_pos_bits: [u64; 2],
-    cam_angles_bits: [u64; 3],
-    center_elev_bits: u64,
-    min_elev_bits: u64,
-    body_radius_bits: u64,
-    globe_orbits_center: bool,
-    terrain_enabled: bool,
-    transition_bits: u32,
-    authority: CameraAuthority,
-    pose_bits: Option<[u64; 9]>,
-    external_proj_bits: Option<[u64; 16]>,
-    external_cam_bits: Option<[u64; 16]>,
-}
-
-fn matrix_bits(m: Matrix4<f64>) -> [u64; 16] {
-    [
-        m.x.x.to_bits(),
-        m.x.y.to_bits(),
-        m.x.z.to_bits(),
-        m.x.w.to_bits(),
-        m.y.x.to_bits(),
-        m.y.y.to_bits(),
-        m.y.z.to_bits(),
-        m.y.w.to_bits(),
-        m.z.x.to_bits(),
-        m.z.y.to_bits(),
-        m.z.z.to_bits(),
-        m.z.w.to_bits(),
-        m.w.x.to_bits(),
-        m.w.y.to_bits(),
-        m.w.z.to_bits(),
-        m.w.w.to_bits(),
-    ]
-}
-
-impl ViewSnapshotKey {
-    fn capture(style: &Style, view_state: &ViewState, transition: f32) -> Self {
-        let insets = view_state.edge_insets();
-        let pos = view_state.camera().position();
-        let pose_bits = view_state.globe_pose().map(|pose| {
-            [
-                pose.target[0].to_bits(),
-                pose.target[1].to_bits(),
-                pose.target[2].to_bits(),
-                pose.target_elevation_meters.to_bits(),
-                pose.orientation[0].to_bits(),
-                pose.orientation[1].to_bits(),
-                pose.orientation[2].to_bits(),
-                pose.orientation[3].to_bits(),
-                pose.distance_meters.to_bits(),
-            ]
-        });
-        Self {
-            width_bits: view_state.width().to_bits(),
-            height_bits: view_state.height().to_bits(),
-            insets_bits: [
-                insets.top.to_bits(),
-                insets.bottom.to_bits(),
-                insets.left.to_bits(),
-                insets.right.to_bits(),
-            ],
-            fovy_bits: view_state.field_of_view().0.to_bits(),
-            zoom_bits: view_state.zoom().value().to_bits(),
-            style_zoom_bits: view_state.style_zoom().value().to_bits(),
-            cam_pos_bits: [pos.x.to_bits(), pos.y.to_bits()],
-            cam_angles_bits: [
-                view_state.camera().get_bearing().0.to_bits(),
-                view_state.camera().get_pitch().0.to_bits(),
-                view_state.camera().get_roll().0.to_bits(),
-            ],
-            center_elev_bits: view_state.center_elevation().to_bits(),
-            min_elev_bits: view_state.min_elevation().to_bits(),
-            body_radius_bits: view_state.body().radius_meters.to_bits(),
-            globe_orbits_center: view_state.globe_orbits_center(),
-            terrain_enabled: style.terrain.is_some(),
-            transition_bits: transition.to_bits(),
-            authority: view_state.camera_authority(),
-            pose_bits,
-            external_proj_bits: view_state.external_projection().map(matrix_bits),
-            external_cam_bits: view_state.external_camera_matrix().map(matrix_bits),
-        }
-    }
-}
 
 /// Active geometric projection mode of a [`ResolvedFrameView`].
 #[derive(Clone, Debug)]
@@ -288,10 +197,27 @@ impl ResolvedFrameView {
         }
     }
 
-    /// Clip-space `w` of the view center, blended across Mercator-to-globe transitions.
+    /// Clip-space `w` of the view center in `f64`, blended across Mercator-to-globe transitions.
     #[inline]
     pub fn center_clip_w(&self) -> f64 {
-        f64::from(self.shader_projection.center_clip_w)
+        if self.authority != CameraAuthority::ConstrainedMap {
+            return f64::from(self.shader_projection.center_clip_w);
+        }
+        match &self.projection {
+            ProjectionMode::FlatMercator => self.camera_to_center_distance,
+            ProjectionMode::Globe { transition, camera } => {
+                let globe_w = (OPENGL_TO_WGPU_MATRIX
+                    * camera.view_projection()
+                    * camera.target().extend(1.0))
+                .w;
+                if *transition >= 1.0 {
+                    globe_w
+                } else {
+                    let t = f64::from(*transition);
+                    self.camera_to_center_distance * (1.0 - t) + globe_w * t
+                }
+            }
+        }
     }
 
     /// Tile-unit scale factor for map-aligned widths/radii at normalized Mercator `y` (`0..=1`),

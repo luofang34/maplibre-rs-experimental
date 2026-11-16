@@ -4,7 +4,7 @@
 
 use std::{collections::HashSet, marker::PhantomData};
 
-use geozero::mvt::{tile, Message};
+use geozero::mvt::tile;
 use thiserror::Error;
 
 use crate::{
@@ -147,10 +147,12 @@ pub fn process_vector_tile<T: VectorTransferables, C: Context>(
     )
 }
 
+mod decode;
 mod geometry_tags;
 mod mvt_slice;
 mod processing;
 mod shared_geometry;
+pub(crate) use decode::{decode_tile, decode_tile_for_layers};
 pub(crate) use mvt_slice::index_mvt_bytes;
 #[cfg(feature = "mlt")]
 pub(crate) use mvt_slice::looks_like_mvt;
@@ -167,49 +169,6 @@ pub(crate) enum DecodedVectorTile {
     Mlt(std::sync::Arc<[u8]>),
 }
 
-/// Decodes a tile, tolerating the zero padding some tile servers append: a zero tag is not a
-/// field, so a strict decoder rejects a tile that GL JS reads.
-pub(crate) fn decode_tile(
-    data: &[u8],
-) -> Result<geozero::mvt::Tile, Box<dyn std::error::Error + Send + Sync>> {
-    // A payload that is not a protobuf tile with layers is tried as a MapLibre Tile.
-    #[cfg(feature = "mlt")]
-    match decode_mvt(data) {
-        Ok(tile) if !tile.layers.is_empty() => Ok(tile),
-        Ok(tile) => Ok(super::mlt::decode(data).unwrap_or(tile)),
-        Err(error) => super::mlt::decode(data).map_err(|_| error),
-    }
-    #[cfg(not(feature = "mlt"))]
-    decode_mvt(data)
-}
-
-fn decode_mvt(data: &[u8]) -> Result<geozero::mvt::Tile, Box<dyn std::error::Error + Send + Sync>> {
-    geozero::mvt::Tile::decode(data).or_else(|error| {
-        let end = data
-            .iter()
-            .rposition(|byte| *byte != 0)
-            .map_or(0, |i| i + 1);
-        if end == data.len() {
-            return Err(error.into());
-        }
-        geozero::mvt::Tile::decode(&data[..end]).map_err(|_| error.into())
-    })
-}
-
-/// Decodes only the layers of `data` whose names satisfy `keep`, falling back to [`decode_tile`]
-/// when `data` uses non-MVT framing (such as MapLibre Tiles) or needs full wire error reporting.
-pub(crate) fn decode_tile_for_layers(
-    data: &[u8],
-    keep: impl Fn(&str) -> bool,
-) -> Result<geozero::mvt::Tile, Box<dyn std::error::Error + Send + Sync>> {
-    if let Some(tile) = mvt_slice::try_decode_mvt_filtered(data, &keep) {
-        return Ok(tile);
-    }
-    let mut tile = decode_tile(data)?;
-    tile.layers.retain(|mvt| keep(mvt.name.as_str()));
-    Ok(tile)
-}
-
 pub(crate) fn process_vector_tile_with_assets<T: VectorTransferables, C: Context>(
     data: &[u8],
     tile_request: VectorTileRequest,
@@ -223,12 +182,13 @@ pub(crate) fn process_vector_tile_with_assets<T: VectorTransferables, C: Context
     let decode_res = if context.index_geometry && T::LayerIndexed::requires_geometry_index() {
         decode_tile(data)
     } else {
-        decode_tile_for_layers(data, |name| {
+        let keep = |name: &str| {
             tile_request
                 .layers
                 .iter()
                 .any(|sl| sl.source_layer.as_deref() == Some(name))
-        })
+        };
+        decode_tile_for_layers(data, keep)
     };
     let tile = decode_res.map_err(|source| ProcessVectorError::Decoding {
         coords: tile_request.coords,
@@ -260,6 +220,7 @@ fn process_mvt_tile_with_assets<T: VectorTransferables, C: Context>(
     context: &mut ProcessVectorContext<T, C>,
     atlas: std::sync::Arc<crate::sdf::assets::SymbolAtlas>,
 ) -> Result<(), ProcessVectorError> {
+    context.set_overscaled_zoom(tile_request.overscaled_zoom);
     let gpu_atlas = atlas.gpu_upload_handle();
     let index_uses_props = context.index_geometry && T::LayerIndexed::requires_geometry_index();
     let mut ordered_layers: Vec<&StyleLayer> = tile_request.layers.iter().collect();
@@ -334,6 +295,7 @@ pub struct ProcessVectorContext<T: VectorTransferables, C: Context> {
     context: C,
     completion: Completion,
     index_geometry: bool,
+    overscaled_zoom: u8,
     promote_id: Option<crate::style::source::PromoteId>,
     feature_state: Option<std::sync::Arc<crate::style::feature_state::SourceFeatureState>>,
     phantom_t: PhantomData<T>,
@@ -346,10 +308,15 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
             context,
             completion: Completion::Finished,
             index_geometry: true,
+            overscaled_zoom: 0,
             promote_id: None,
             feature_state: None,
             phantom_t: Default::default(),
         }
+    }
+
+    pub(crate) fn set_overscaled_zoom(&mut self, overscaled_zoom: u8) {
+        self.overscaled_zoom = overscaled_zoom;
     }
 
     /// Configures `promoteId` and active runtime `feature-state` for the tile's source.
@@ -447,17 +414,20 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
         layer_data: tile::Layer,
         style_layer_id: String,
     ) -> Result<(), ProcessVectorError> {
+        let overscaled = self.overscaled_zoom.max(u8::from(coords.z));
+        let msg = T::LayerTessellated::build_from_with_paint(
+            *coords,
+            buffer,
+            feature_indices,
+            feature_colors,
+            feature_sort_keys,
+            layer_data,
+            style_layer_id,
+            feature_paint,
+        )
+        .with_overscaled_zoom(overscaled);
         self.context
-            .send_back(T::LayerTessellated::build_from_with_paint(
-                *coords,
-                buffer,
-                feature_indices,
-                feature_colors,
-                feature_sort_keys,
-                layer_data,
-                style_layer_id,
-                feature_paint,
-            ))
+            .send_back(msg)
             .map_err(ProcessVectorError::SendError)
     }
 

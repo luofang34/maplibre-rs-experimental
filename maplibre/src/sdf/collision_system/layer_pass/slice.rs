@@ -111,6 +111,13 @@ impl LayerSliceProgress {
             .get::<crate::terrain::coverage::TerrainCoverageIndex>()
             .is_some()
             || paint.uses_shared_height();
+        let repeat_distance = f64::from(paint.number(
+            "symbol-spacing",
+            &crate::style::expression::FeatureProperties::default(),
+            zoom,
+            super::super::repeat_spacing::MIN_REPEAT_DISTANCE as f32,
+        ))
+        .clamp(1.0, super::super::repeat_spacing::MIN_REPEAT_DISTANCE);
         let frame = LayerFrame {
             world,
             view_state,
@@ -126,6 +133,7 @@ impl LayerSliceProgress {
             visibility_policy: world
                 .resources
                 .get::<crate::sdf::visibility::SymbolVisibility>(),
+            repeat_distance,
         };
 
         let mut processed_in_step = 0_usize;
