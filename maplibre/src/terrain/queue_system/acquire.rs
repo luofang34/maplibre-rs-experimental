@@ -127,8 +127,13 @@ fn choose_redraws(
     };
     let mut redraw = budget_redraws(&only(false), budget);
     let mut drawn = redraw.iter().filter(|drawn| **drawn).count();
+    let emergency_limit = if cfg!(target_arch = "wasm32") {
+        budget.max(4).min(limit)
+    } else {
+        limit
+    };
     for (index, (spec, state)) in specs.iter().zip(states).enumerate() {
-        if drawn >= limit {
+        if drawn >= emergency_limit {
             break;
         }
         if !prefetch[index]

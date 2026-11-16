@@ -47,10 +47,14 @@ impl Node for DrapePassNode {
                 Some((target, texture, top_level, scratch))
             })
             .collect();
+        if drawn.is_empty() {
+            return;
+        }
         // The drape passes are timed together: the first writes the start, the last the end.
         let timer = world
             .resources
             .get::<crate::terrain::drape_timing::DrapeTimerSlot>();
+        let pass_started = instant::Instant::now();
         for (index, (target, texture, top_level, scratch)) in drawn.iter().enumerate() {
             let timestamp_writes = timer.and_then(|slot| {
                 let writes = slot
@@ -95,6 +99,9 @@ impl Node for DrapePassNode {
                 &mut render_context.command_encoder,
                 texture,
             );
+        }
+        if let Some(slot) = timer {
+            slot.record_pass_cpu(pass_started.elapsed(), drawn.len());
         }
     }
 }

@@ -10,32 +10,33 @@ const isSharedBuffer = (buf, sabCtor) =>
     Boolean(sabCtor && buf instanceof sabCtor) ||
     Object.prototype.toString.call(buf) === "[object SharedArrayBuffer]";
 
-const copySharedSlice = (srcBuffer, startByte, byteLen, getScratch) => {
+const copySharedBytes = (srcBuffer, startByte, byteLen, getSabView, getScratch) => {
     const safeLen = Math.max(0, byteLen);
     const scratch = getScratch(safeLen);
     if (safeLen > 0) {
-        scratch.set(new Uint8Array(srcBuffer, startByte, safeLen), 0);
+        const srcView = getSabView(srcBuffer);
+        scratch.set(srcView.subarray(startByte, startByte + safeLen), 0);
     }
-    return { scratch, byteLength: safeLen };
+    return safeLen;
 };
 
-const unshareByteSource = (data, dataOffset, size, sabCtor, getScratch) => {
-    if (!data) return null;
+const unshareByteSource = (data, dataOffset, size, sabCtor, getSabView, getScratch) => {
+    if (!data) return -1;
     if (ArrayBuffer.isView(data)) {
-        if (!isSharedBuffer(data.buffer, sabCtor)) return null;
+        if (!isSharedBuffer(data.buffer, sabCtor)) return -1;
         const bpe = data.BYTES_PER_ELEMENT || 1;
         const elemOffset = dataOffset ?? 0;
         const elemLength = size ?? (data.byteLength / bpe - elemOffset);
         const startByte = data.byteOffset + elemOffset * bpe;
         const byteLen = Math.max(0, elemLength * bpe);
-        return copySharedSlice(data.buffer, startByte, byteLen, getScratch);
+        return copySharedBytes(data.buffer, startByte, byteLen, getSabView, getScratch);
     }
     if (isSharedBuffer(data, sabCtor)) {
         const startByte = dataOffset ?? 0;
         const byteLen = size ?? (data.byteLength - startByte);
-        return copySharedSlice(data, startByte, byteLen, getScratch);
+        return copySharedBytes(data, startByte, byteLen, getSabView, getScratch);
     }
-    return null;
+    return -1;
 };
 
 export const ensureWebGpuCompatibility = (scope = globalThis) => {
@@ -89,6 +90,17 @@ export const ensureWebGpuCompatibility = (scope = globalThis) => {
     }
 
     const sabCtor = scope?.SharedArrayBuffer;
+    let cachedSab = null;
+    let cachedSabLen = -1;
+    let cachedSabView = null;
+    const getSabView = (srcBuffer) => {
+        if (srcBuffer !== cachedSab || srcBuffer.byteLength !== cachedSabLen || !cachedSabView) {
+            cachedSab = srcBuffer;
+            cachedSabLen = srcBuffer.byteLength;
+            cachedSabView = new Uint8Array(srcBuffer);
+        }
+        return cachedSabView;
+    };
     let byteScratch = new Uint8Array(65536);
     const getByteScratch = (minBytes) => {
         if (byteScratch.byteLength < minBytes) {
@@ -100,6 +112,7 @@ export const ensureWebGpuCompatibility = (scope = globalThis) => {
         }
         return byteScratch;
     };
+    const texLayoutScratch = { offset: 0, bytesPerRow: undefined, rowsPerImage: undefined };
     let curPasses = 0;
     let curSetVertexBuffers = 0;
     let curWriteBufferCalls = 0;
@@ -120,16 +133,23 @@ export const ensureWebGpuCompatibility = (scope = globalThis) => {
             const origWriteBuffer = queueProto.writeBuffer;
             queueProto.writeBuffer = function (buffer, bufferOffset, data, dataOffset, size) {
                 curWriteBufferCalls++;
-                const copy = unshareByteSource(data, dataOffset, size, sabCtor, getByteScratch);
-                if (copy) {
-                    curWriteBufferBytes += copy.byteLength;
+                const copiedLen = unshareByteSource(
+                    data,
+                    dataOffset,
+                    size,
+                    sabCtor,
+                    getSabView,
+                    getByteScratch,
+                );
+                if (copiedLen >= 0) {
+                    curWriteBufferBytes += copiedLen;
                     return origWriteBuffer.call(
                         this,
                         buffer,
                         bufferOffset,
-                        copy.scratch,
+                        byteScratch,
                         0,
-                        copy.byteLength,
+                        copiedLen,
                     );
                 }
                 if (data) {
@@ -185,14 +205,24 @@ export const ensureWebGpuCompatibility = (scope = globalThis) => {
                     } else if (h === 1 && d === 1) {
                         byteLen = Math.min(avail, w * 16);
                     }
-                    const { scratch, byteLength } = copySharedSlice(
+                    const byteLength = copySharedBytes(
                         srcBuffer,
                         baseByteOffset + rawOffset,
                         byteLen,
+                        getSabView,
                         getByteScratch,
                     );
-                    const view = scratch.subarray(0, byteLength);
-                    const patchedLayout = rawOffset ? { ...dataLayout, offset: 0 } : dataLayout;
+                    const view =
+                        byteScratch.byteLength === byteLength
+                            ? byteScratch
+                            : byteScratch.subarray(0, byteLength);
+                    let patchedLayout = dataLayout;
+                    if (rawOffset) {
+                        texLayoutScratch.offset = 0;
+                        texLayoutScratch.bytesPerRow = dataLayout.bytesPerRow;
+                        texLayoutScratch.rowsPerImage = dataLayout.rowsPerImage;
+                        patchedLayout = texLayoutScratch;
+                    }
                     return origWriteTexture.call(this, destination, view, patchedLayout, size);
                 }
                 return origWriteTexture.call(this, destination, data, dataLayout, size);

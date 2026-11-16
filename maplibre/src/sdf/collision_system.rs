@@ -188,6 +188,24 @@ impl System for CollisionSystem {
                 if triggers.new_content || triggers.environment_changed {
                     epoch.saw_background_change = true;
                 }
+                // If earlier upload/drape stages already spent >2 ms while the camera is actively
+                // moving, defer this symbol collision slice to the next frame to prevent combined
+                // upload + placement spikes.
+                if moving_this_frame
+                    && !config.fade_duration.is_zero()
+                    && earlier_stage_spent > std::time::Duration::from_micros(2_000)
+                {
+                    self.active_epoch = Some(epoch);
+                    sync_symbol_depth_fade(
+                        world,
+                        &renderer.queue,
+                        &renderer.render_graph,
+                        &self.history,
+                    );
+                    self.prune_inactive_symbol_draws(world);
+                    crate::render::frame_signals::keep_animating(world);
+                    return Ok(());
+                }
                 if epoch.step(
                     world,
                     style,
@@ -252,7 +270,7 @@ impl System for CollisionSystem {
         if !self.controller.should_place(now, zoom, config, triggers)
             || (moving_this_frame
                 && !config.fade_duration.is_zero()
-                && earlier_stage_spent > std::time::Duration::from_millis(4)
+                && earlier_stage_spent > std::time::Duration::from_micros(2_200)
                 && self.controller.defer_for_frame_budget(triggers))
         {
             sync_symbol_depth_fade(

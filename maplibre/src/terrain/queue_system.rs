@@ -53,12 +53,17 @@ pub(crate) use uniforms::TerrainEyeFrame;
 /// Divisor of the tile circumference giving the skirt drop, as in GL JS `getSkirtLength`.
 const SKIRT_DIVISOR: f64 = 5.0;
 /// Drape textures drawn in one frame. Every level of a drape's mip chain is a render pass,
-/// and the Metal backend closes a command buffer per pass that stays open until the frame is
-/// submitted, so a burst of arriving tiles must not open more than the queue holds; it also
-/// keeps the frame's GPU time bounded while the rest wait a frame.
+/// and WebGPU / Metal close a pass per target + mip level; keeping `wasm32` tightly bounded
+/// avoids 300–500 ms browser render-pass storms while remaining tiles use ancestors or wait 1–2 frames.
+#[cfg(target_arch = "wasm32")]
+const MAX_DRAPES_PER_FRAME: usize = 5;
+#[cfg(not(target_arch = "wasm32"))]
 const MAX_DRAPES_PER_FRAME: usize = 24;
 /// Drape textures drawn per frame while a host's eye drives the map. A flight lands hundreds
 /// of tiles within a few frames, and a display's frame budget holds only a few drapes.
+#[cfg(target_arch = "wasm32")]
+const EYE_DRAPES_PER_FRAME: usize = 3;
+#[cfg(not(target_arch = "wasm32"))]
 const EYE_DRAPES_PER_FRAME: usize = 8;
 
 /// How many drapes a frame draws, the rest waiting for later frames.
@@ -75,12 +80,35 @@ pub struct DrapeBudget {
 
 impl Default for DrapeBudget {
     fn default() -> Self {
+        #[cfg(target_arch = "wasm32")]
+        let moving_time = std::time::Duration::from_millis(2);
+        #[cfg(not(target_arch = "wasm32"))]
+        let moving_time = std::time::Duration::from_millis(4);
         Self {
             per_frame: MAX_DRAPES_PER_FRAME,
             per_eye_frame: EYE_DRAPES_PER_FRAME,
-            moving_time: std::time::Duration::from_millis(4),
+            moving_time,
         }
     }
+}
+
+#[derive(Default)]
+struct DrapeFingerprintZoom(Option<f64>);
+
+/// Quantizes drape zoom invalidation to integer zoom crossings with `0.15`-level hysteresis so
+/// fractional `0.125` `paint_zoom` steps or DEM camera-reconciliation nudges do not invalidate
+/// every cached `1024²` drape texture simultaneously.
+pub(crate) fn next_drape_fingerprint_zoom(previous: Option<f64>, requested: f64) -> f64 {
+    previous
+        .filter(|&prev| requested >= prev - 0.15 && requested <= prev + 1.15)
+        .unwrap_or_else(|| requested.floor())
+}
+
+fn stabilize_drape_fingerprint_zoom(world: &mut World, requested: f64) -> f64 {
+    let state = world.resources.get_or_init_mut::<DrapeFingerprintZoom>();
+    let zoom = next_drape_fingerprint_zoom(state.0, requested);
+    state.0 = Some(zoom);
+    zoom
 }
 
 pub fn queue_system(
@@ -136,23 +164,29 @@ pub fn queue_system(
         (DrapePhase::default(), specs, sources)
     } else {
         let specs = target_specs(style, view_state, world)?;
+        let drape_zoom = stabilize_drape_fingerprint_zoom(world, view_state.style_zoom().value());
         let PreparedDrapes {
             redraw,
             sources,
             clear_color,
-        } = prepare_drapes(&specs, style, view_state, world, device)?;
-        let paint_zoom = crate::vector::upload_system::paint::current_zoom(
-            world,
-            view_state.style_zoom().value(),
-        );
+        } = prepare_drapes(&specs, style, view_state, world, device, drape_zoom)?;
+        let encode_started = instant::Instant::now();
         let phase = encode_drapes(
             &specs,
             &redraw,
             clear_color,
             world,
-            crate::coords::Zoom::new(paint_zoom),
+            crate::coords::Zoom::new(drape_zoom),
             queue,
         )?;
+        if !phase.targets.is_empty() {
+            if let Some(slot) = world
+                .resources
+                .get::<crate::terrain::drape_timing::DrapeTimerSlot>()
+            {
+                slot.record_encode_cpu(encode_started.elapsed());
+            }
+        }
         let (surface_specs, surface_sources) = surface_covering::for_frame(world, &specs, &sources);
         (phase, surface_specs, surface_sources)
     };
@@ -321,6 +355,7 @@ fn prepare_drapes(
     view_state: &ViewState,
     world: &mut World,
     device: &wgpu::Device,
+    drape_zoom: f64,
 ) -> Result<PreparedDrapes, SystemError> {
     let memory = world
         .resources
@@ -328,13 +363,11 @@ fn prepare_drapes(
         .copied()
         .unwrap_or_default();
     let clear_color = background_clear_color(style);
-    let paint_zoom =
-        crate::vector::upload_system::paint::current_zoom(world, view_state.style_zoom().value());
     let prints: Vec<u64> = {
         let content = loaded_content(world);
         specs
             .iter()
-            .map(|spec| fingerprint(spec, &content, clear_color, paint_zoom))
+            .map(|spec| fingerprint(spec, &content, clear_color, drape_zoom))
             .collect()
     };
     // A tile whose vector sources are finished but not yet in the buffer pool would drape
@@ -421,7 +454,7 @@ fn prepare_drapes(
             redraw: &redraw,
             sources: &drape_sources,
             budget: (budget, limit),
-            paint_zoom,
+            paint_zoom: drape_zoom,
         },
     );
     // A drape left for a later frame's budget needs that frame.

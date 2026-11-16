@@ -107,3 +107,27 @@ fn a_level_eyes_drapes_fit_the_texture_budget_its_horizon_would_exceed() {
         "{drapes} drapes for {surfaces} surface tiles, {allowed} allowed"
     );
 }
+
+#[test]
+fn drape_fingerprint_zoom_ignores_eighth_steps_and_steps_with_integer_hysteresis() {
+    use super::next_drape_fingerprint_zoom;
+    let mut current = None;
+    for requested in [12.0, 12.125, 12.5, 12.875, 13.0, 13.14, 11.86] {
+        current = Some(next_drape_fingerprint_zoom(current, requested));
+        assert_eq!(
+            current,
+            Some(12.0),
+            "fractional zoom {requested} must not invalidate drapes"
+        );
+    }
+    current = Some(next_drape_fingerprint_zoom(current, 13.16));
+    assert_eq!(current, Some(13.0));
+    current = Some(next_drape_fingerprint_zoom(current, 12.90));
+    assert_eq!(
+        current,
+        Some(13.0),
+        "hysteresis holds across 13.0 boundary jitter"
+    );
+    current = Some(next_drape_fingerprint_zoom(current, 12.80));
+    assert_eq!(current, Some(12.0));
+}

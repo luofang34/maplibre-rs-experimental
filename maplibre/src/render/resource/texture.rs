@@ -141,15 +141,30 @@ impl Texture {
         height: u32,
         usage: wgpu::TextureUsages,
     ) -> Texture {
+        Self::new_mipmapped_capped(label, device, format, width, height, u32::MAX, usage)
+    }
+
+    /// Like [`new_mipmapped`](Self::new_mipmapped), capping the mip chain depth to at most
+    /// `max_mip_levels` (`>= 1`) to bound per-texture mipmap render-pass count.
+    pub fn new_mipmapped_capped(
+        label: wgpu::Label,
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+        max_mip_levels: u32,
+        usage: wgpu::TextureUsages,
+    ) -> Texture {
         let size = wgpu::Extent3d {
             width,
             height,
             depth_or_array_layers: 1,
         };
+        let mip_level_count = super::mip_level_count(width, height).min(max_mip_levels.max(1));
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label,
             size,
-            mip_level_count: super::mip_level_count(width, height),
+            mip_level_count,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format,

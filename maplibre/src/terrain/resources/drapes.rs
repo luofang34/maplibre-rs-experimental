@@ -38,6 +38,18 @@ impl DrapeTexture {
     }
 }
 
+/// Caps drape mip chain depth to the levels terrain sampling actually needs (`64×64` floor),
+/// cutting per-drape render-pass count from `9–11` down to `3–5`.
+fn drape_mip_levels(size: u32) -> u32 {
+    if size >= 1024 {
+        5
+    } else if size >= 512 {
+        4
+    } else {
+        3
+    }
+}
+
 impl TerrainResources {
     /// Chooses the view whose drapes the tile lookups answer with from here on.
     pub(crate) fn show_drapes_of(&mut self, view: Option<ViewSlotId>) {
@@ -100,12 +112,13 @@ impl TerrainResources {
             |drape| drape.texture.size.width >= size,
             |drape| drape.texture.size.width == size,
             || {
-                DrapeTexture::new(Texture::new_mipmapped(
+                DrapeTexture::new(Texture::new_mipmapped_capped(
                     Some("drape texture"),
                     device,
                     format,
                     size,
                     size,
+                    drape_mip_levels(size),
                     wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
                 ))
             },
@@ -130,12 +143,13 @@ impl TerrainResources {
             |drape| drape.texture.size.width >= size,
             |drape| drape.texture.size.width == size,
             || {
-                DrapeTexture::new(Texture::new_mipmapped(
+                DrapeTexture::new(Texture::new_mipmapped_capped(
                     Some("drape texture"),
                     device,
                     format,
                     size,
                     size,
+                    drape_mip_levels(size),
                     wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
                 ))
             },

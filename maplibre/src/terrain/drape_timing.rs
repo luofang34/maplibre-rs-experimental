@@ -8,38 +8,59 @@
 //! drawn once the view settles.
 
 use std::{
-    sync::atomic::{AtomicU32, Ordering},
+    sync::atomic::{AtomicU32, AtomicU64, Ordering},
     time::Duration,
 };
 
 use crate::render::gpu_timer::GpuTimer;
 
-/// What a drape is assumed to cost before one has been measured, or on a device without
-/// timestamps: a 2048² texture with its mip chain on a mobile GPU.
+/// What a drape is assumed to cost before one has been measured, or as a per-drape floor when
+/// the device lacks GPU timestamp queries.
 pub const ASSUMED_DRAPE_COST: Duration = Duration::from_millis(2);
 
 /// Weight of the newest measurement in the running average.
 const SMOOTHING: f64 = 0.25;
 
-/// The timer around a frame's drape passes and how many drapes it timed.
+/// The timer around a frame's drape passes and how many drapes it timed, with a wall-clock CPU
+/// encode + pass submission fallback for WebGPU devices lacking `TIMESTAMP_QUERY`.
 #[derive(Default)]
 pub struct DrapeTimerSlot {
     pub(crate) timer: Option<GpuTimer>,
     drapes: AtomicU32,
+    encode_cpu_ns: AtomicU64,
+    pass_cpu_ns: AtomicU64,
+    cpu_drapes: AtomicU32,
 }
 
 impl DrapeTimerSlot {
-    /// A slot timing drapes on `device`, which times nothing without timestamp queries.
+    /// A slot timing drapes on `device`, falling back to CPU wall-clock timing without timestamp queries.
     pub fn new(device: &wgpu::Device) -> Self {
         Self {
             timer: GpuTimer::new(device),
             drapes: AtomicU32::new(0),
+            encode_cpu_ns: AtomicU64::new(0),
+            pass_cpu_ns: AtomicU64::new(0),
+            cpu_drapes: AtomicU32::new(0),
         }
     }
 
-    /// Records how many drapes the timed passes draw.
+    /// Records how many drapes the timed GPU passes draw.
     pub(crate) fn timing(&self, drapes: usize) {
         self.drapes
+            .store(u32::try_from(drapes).unwrap_or(u32::MAX), Ordering::Release);
+    }
+
+    /// Records wall-clock CPU time spent building `DrapePhase` draw lists in `encode_drapes`.
+    pub(crate) fn record_encode_cpu(&self, elapsed: Duration) {
+        let ns = u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX);
+        self.encode_cpu_ns.store(ns, Ordering::Release);
+    }
+
+    /// Records wall-clock CPU time spent recording render passes and mipmaps in `DrapePassNode`.
+    pub(crate) fn record_pass_cpu(&self, elapsed: Duration, drapes: usize) {
+        let ns = u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX);
+        self.pass_cpu_ns.store(ns, Ordering::Release);
+        self.cpu_drapes
             .store(u32::try_from(drapes).unwrap_or(u32::MAX), Ordering::Release);
     }
 
@@ -49,6 +70,20 @@ impl DrapeTimerSlot {
         let spent = self.timer.as_ref()?.take(device, period)?;
         let drapes = self.drapes.load(Ordering::Acquire);
         (drapes > 0).then_some((spent, drapes))
+    }
+
+    /// Wall-clock CPU fallback estimate `(spent, drapes)` for devices without GPU timestamps,
+    /// floored by `ASSUMED_DRAPE_COST * drapes` and scaled `2x` to account for GPU/IPC execution.
+    pub(crate) fn take_cpu_fallback(&self) -> Option<(Duration, u32)> {
+        let drapes = self.cpu_drapes.swap(0, Ordering::AcqRel);
+        let encode_ns = self.encode_cpu_ns.swap(0, Ordering::AcqRel);
+        let pass_ns = self.pass_cpu_ns.swap(0, Ordering::AcqRel);
+        if drapes == 0 {
+            return None;
+        }
+        let cpu_total = Duration::from_nanos(encode_ns.saturating_add(pass_ns));
+        let floor = ASSUMED_DRAPE_COST.saturating_mul(drapes);
+        Some((cpu_total.saturating_mul(2).max(floor), drapes))
     }
 }
 
@@ -110,10 +145,13 @@ pub(crate) fn drape_timer_system(
     if world.resources.get::<DrapeTimerSlot>().is_none() {
         world.resources.insert(DrapeTimerSlot::new(device));
     }
-    let measured = world
-        .resources
-        .get::<DrapeTimerSlot>()
-        .and_then(|slot| slot.take(device, queue.get_timestamp_period()));
+    let measured = world.resources.get::<DrapeTimerSlot>().and_then(|slot| {
+        if slot.timer.is_some() {
+            slot.take(device, queue.get_timestamp_period())
+        } else {
+            slot.take_cpu_fallback()
+        }
+    });
     if let Some((spent, drapes)) = measured {
         world
             .resources
