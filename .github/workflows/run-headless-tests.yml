@@ -5,13 +5,13 @@ on:
 
 # Headless maps are what hosts embed, and their tests draw real frames on lavapipe: about half
 # an hour of one runner's CPU, most of it in a few tests. The test binary is built once and its
-# tests are spread over six runners, two at a time on each, which measured fastest. nextest
+# tests are spread over twelve runners, two at a time on each, which measured fastest. nextest
 # runs each test in its own process, so no process creates devices on several threads at once,
 # which lavapipe does not survive.
 jobs:
   build:
     name: Build
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Setup
@@ -47,7 +47,7 @@ jobs:
   test:
     name: Test ${{ matrix.shard }}/12
     needs: build
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -57,13 +57,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Dependencies
         uses: ./.github/actions/install-system-dependencies
-      - name: Install GPU Drivers & Vulkan Validation Layers
+      - name: Install Lavapipe Vulkan Driver
         uses: ./.github/actions/install-driver
         with:
           wgpu-info: false
-      - name: Install Vulkan Validation Layers package
-        shell: bash
-        run: sudo apt-get update -y -qq && sudo apt-get install -y vulkan-validationlayers
       - name: Install nextest
         uses: ./.github/actions/cargo-install
         with:
@@ -75,7 +72,7 @@ jobs:
         shell: bash
         env:
           WGPU_BACKEND: vulkan
-          VK_INSTANCE_LAYERS: VK_LAYER_KHRONOS_validation
+          LP_NUM_THREADS: "2"
         run: |
           cargo nextest run --archive-file headless-tests.tar.zst \
             --workspace-remap . --partition hash:${{ matrix.shard }}/12 -j 2 --no-fail-fast
