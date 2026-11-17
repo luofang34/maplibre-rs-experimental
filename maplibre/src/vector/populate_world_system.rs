@@ -85,6 +85,7 @@ pub fn apply_vector_worker_batch<T: VectorTransferables>(
                 }
                 VectorLayerBucket::Missing(layer) => layer.source_layer == message.layer_name(),
             }) {
+                component.uploaded_stamp = None;
                 component
                     .layers
                     .push(VectorLayerBucket::Missing(message.to_bucket()));
@@ -162,12 +163,15 @@ fn finish_tile<T: TileTessellated>(world: &mut crate::tcs::world::World, message
         let usable = component.done && !component.failed;
         component.done = true;
         component.failed = message.failed() && !retained.0 && !usable;
+        component.uploaded_stamp = None;
     }
     if let Some(component) = world
         .tiles
         .query_mut::<&mut crate::sdf::SymbolLayersDataComponent>(message.coords())
     {
         component.pending_assets = message.pending_symbols() && !retained.1;
+        component.uploaded_stamp = None;
+        component.atlas_zoom_q32 = None;
     }
     // A request that could not read its data says nothing about which layers are empty.
     if !message.failed() {

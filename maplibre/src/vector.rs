@@ -189,9 +189,7 @@ pub fn geometry_uploaded(coords: WorldTileCoords, world: &World) -> bool {
         return false;
     }
     let has_geometry = buckets.layers.iter().any(|layer| match layer {
-        VectorLayerBucket::AvailableLayer(bucket) => {
-            bucket.buffer.usable_indices > 0 || !bucket.buffer.buffer.indices.is_empty()
-        }
+        VectorLayerBucket::AvailableLayer(bucket) => bucket.buffer.has_drawable_geometry(),
         VectorLayerBucket::Missing(_) => false,
     });
     if !has_geometry {
@@ -204,7 +202,7 @@ pub fn geometry_uploaded(coords: WorldTileCoords, world: &World) -> bool {
             }
             buckets.layers.iter().all(|layer| match layer {
                 VectorLayerBucket::AvailableLayer(bucket) => {
-                    (bucket.buffer.usable_indices == 0 && bucket.buffer.buffer.indices.is_empty())
+                    !bucket.buffer.has_drawable_geometry()
                         || pool.has_layer(coords, &bucket.style_layer_id)
                 }
                 VectorLayerBucket::Missing(_) => true,
@@ -328,6 +326,8 @@ pub struct VectorLayerBucketComponent {
     pub layers: Vec<VectorLayerBucket>,
     /// The zoom the tile was last requested to be magnified to, zero when it was not.
     pub overscaled_zoom: u8,
+    /// Cached `(style.revision(), pool.eviction_generation())` when all layers uploaded cleanly.
+    pub uploaded_stamp: Option<(u64, u64)>,
 }
 
 impl TileComponent for VectorLayerBucketComponent {}

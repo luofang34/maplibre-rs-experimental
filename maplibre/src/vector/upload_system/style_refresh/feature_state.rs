@@ -137,8 +137,7 @@ pub(super) fn sync_tile_feature_states(
                             memo,
                         );
                     }
-                } else if (avail.buffer.usable_indices > 0
-                    || !avail.buffer.buffer.indices.is_empty())
+                } else if avail.buffer.has_drawable_geometry()
                     && layer_paint_reads_feature_state(style_layer)
                 {
                     *needs_worker_refresh = true;
@@ -162,7 +161,7 @@ pub(super) fn sync_tile_feature_states(
                     let VectorLayerBucket::AvailableLayer(avail) = bucket else {
                         continue;
                     };
-                    if avail.buffer.usable_indices == 0 && avail.buffer.buffer.indices.is_empty() {
+                    if !avail.buffer.has_drawable_geometry() {
                         continue;
                     }
                     if let Some(style_layer) = layer_by_id.get(avail.style_layer_id.as_str()) {
@@ -222,7 +221,7 @@ pub(super) fn recolor_cpu_bucket(
         bucket.feature_colors = new_colors;
         (true, changed)
     } else {
-        if bucket.buffer.usable_indices > 0 || !bucket.buffer.buffer.indices.is_empty() {
+        if bucket.buffer.has_drawable_geometry() {
             *needs_worker_refresh = true;
         }
         (false, false)

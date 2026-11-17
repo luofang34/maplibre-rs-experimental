@@ -2,7 +2,7 @@
 
 use std::{cell::RefCell, sync::Arc};
 
-pub use buffer::OverAlignedVertexBuffer;
+pub use buffer::{OverAlignedVertexBuffer, PrepackedGpuGeometry};
 pub use circle::{pack_circle_colors as circle_pack_colors, CircleOptions, CIRCLE_QUAD_INDICES};
 use geozero::{error::GeozeroError, ColumnValue, FeatureProcessor, PropertyProcessor};
 use lyon::{

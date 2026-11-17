@@ -5,7 +5,6 @@
 
 #![deny(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
-use bytemuck::Zeroable;
 #[cfg(any(test, feature = "renderer"))]
 use js_sys::{ArrayBuffer, Uint8Array};
 #[cfg(any(test, feature = "renderer"))]
@@ -17,10 +16,15 @@ use maplibre::{
     vector::AvailableVectorLayerBucket,
 };
 
-const LAYER_TESSELLATED_MAGIC: u32 = 0x4D4C_5654;
+use super::prepacked_wire::{
+    assemble_bucket, build_decoded_buffer, encode_prepacked_layer_tessellated, format_for_magic,
+    WireFormat, LAYER_TESSELLATED_RAW_MAGIC,
+};
+
 const HEADER_BYTES: usize = 60;
 
 struct WireHeader {
+    format: WireFormat,
     coords: WorldTileCoords,
     usable_indices: u32,
     layer_name_len: usize,
@@ -53,9 +57,7 @@ fn read_i32_le(hdr: &[u8; HEADER_BYTES], offset: usize) -> i32 {
 }
 
 fn parse_header(hdr: &[u8; HEADER_BYTES], total_len: usize) -> Option<WireHeader> {
-    if read_u32_le(hdr, 0) != LAYER_TESSELLATED_MAGIC {
-        return None;
-    }
+    let format = format_for_magic(read_u32_le(hdr, 0))?;
     let x = read_i32_le(hdr, 4);
     let y = read_i32_le(hdr, 8);
     let z = u8::try_from(read_u32_le(hdr, 12)).ok()?;
@@ -72,8 +74,8 @@ fn parse_header(hdr: &[u8; HEADER_BYTES], total_len: usize) -> Option<WireHeader
 
     let body_bytes = layer_name_len
         .checked_add(style_layer_id_len)?
-        .checked_add(vertex_count.checked_mul(std::mem::size_of::<ShaderVertex>())?)?
-        .checked_add(index_count.checked_mul(4)?)?
+        .checked_add(vertex_count.checked_mul(format.vertex_stride())?)?
+        .checked_add(index_count.checked_mul(format.index_stride())?)?
         .checked_add(feature_index_count.checked_mul(4)?)?
         .checked_add(feature_color_count.checked_mul(16)?)?
         .checked_add(feature_sort_key_count.checked_mul(4)?)?
@@ -83,6 +85,7 @@ fn parse_header(hdr: &[u8; HEADER_BYTES], total_len: usize) -> Option<WireHeader
     }
 
     Some(WireHeader {
+        format,
         coords: WorldTileCoords {
             x,
             y,
@@ -111,7 +114,25 @@ pub(super) fn encode_layer_tessellated(
     layer_name_str: &str,
     style_layer_id: &str,
     paint_bytes: Option<&[u8]>,
+    style_type: &str,
+    allow_prepack: bool,
 ) -> Vec<u8> {
+    if (allow_prepack && !style_type.is_empty() && !buffer.buffer.vertices.is_empty())
+        || buffer.prepacked_gpu().is_some()
+    {
+        return encode_prepacked_layer_tessellated(
+            HEADER_BYTES,
+            coords,
+            buffer,
+            feature_indices,
+            feature_colors,
+            feature_sort_keys,
+            layer_name_str,
+            style_layer_id,
+            paint_bytes,
+            style_type,
+        );
+    }
     let shared_key = buffer.shared_geometry_key().unwrap_or(0);
     let usable_indices = buffer.usable_indices;
     let raw_vertices = buffer.buffer.vertices;
@@ -129,7 +150,7 @@ pub(super) fn encode_layer_tessellated(
         + paint_slice.len();
 
     let mut out = Vec::with_capacity(total_len);
-    out.extend_from_slice(&LAYER_TESSELLATED_MAGIC.to_le_bytes());
+    out.extend_from_slice(&LAYER_TESSELLATED_RAW_MAGIC.to_le_bytes());
     out.extend_from_slice(&coords.x.to_le_bytes());
     out.extend_from_slice(&coords.y.to_le_bytes());
     out.extend_from_slice(&u32::from(u8::from(coords.z)).to_le_bytes());
@@ -192,8 +213,8 @@ pub(super) fn peek_paint_bytes(bytes: &[u8]) -> Option<&[u8]> {
     let paint_start = HEADER_BYTES
         + parsed.layer_name_len
         + parsed.style_layer_id_len
-        + parsed.vertex_count * std::mem::size_of::<ShaderVertex>()
-        + parsed.index_count * 4
+        + parsed.vertex_count * parsed.format.vertex_stride()
+        + parsed.index_count * parsed.format.index_stride()
         + parsed.feature_index_count * 4
         + parsed.feature_color_count * 16
         + parsed.feature_sort_key_count * 4;
@@ -220,13 +241,18 @@ pub(super) fn decode_bucket_from_bytes(bytes: &[u8]) -> Option<AvailableVectorLa
         style_raw.to_owned()
     };
 
-    let mut vertices = vec![ShaderVertex::zeroed(); h.vertex_count];
-    bytemuck::cast_slice_mut(&mut vertices).copy_from_slice(take(
-        &mut cur,
-        h.vertex_count * std::mem::size_of::<ShaderVertex>(),
-    )?);
-    let mut indices = vec![0_u32; h.index_count];
-    bytemuck::cast_slice_mut(&mut indices).copy_from_slice(take(&mut cur, h.index_count * 4)?);
+    let buffer = build_decoded_buffer(
+        h.format,
+        h.usable_indices,
+        h.shared_geometry_key,
+        h.vertex_count,
+        h.index_count,
+        |v_dst, i_dst| {
+            v_dst.copy_from_slice(take(&mut cur, v_dst.len())?);
+            i_dst.copy_from_slice(take(&mut cur, i_dst.len())?);
+            Some(())
+        },
+    )?;
     let mut feature_indices = vec![0_u32; h.feature_index_count];
     bytemuck::cast_slice_mut(&mut feature_indices)
         .copy_from_slice(take(&mut cur, h.feature_index_count * 4)?);
@@ -237,16 +263,15 @@ pub(super) fn decode_bucket_from_bytes(bytes: &[u8]) -> Option<AvailableVectorLa
     bytemuck::cast_slice_mut(&mut feature_sort_keys)
         .copy_from_slice(take(&mut cur, h.feature_sort_key_count * 4)?);
 
-    Some(AvailableVectorLayerBucket {
-        coords: h.coords,
+    Some(assemble_bucket(
+        h.coords,
         source_layer,
         style_layer_id,
-        buffer: OverAlignedVertexBuffer::from_vecs(vertices, indices, h.usable_indices)
-            .with_shared_geometry_key(h.shared_geometry_key),
+        buffer,
         feature_indices,
         feature_colors,
         feature_sort_keys,
-    })
+    ))
 }
 
 #[cfg(any(test, feature = "renderer"))]
@@ -288,10 +313,18 @@ pub(crate) fn decode_from_js_slice(
         style_raw
     };
 
-    let mut vertices = vec![ShaderVertex::zeroed(); h.vertex_count];
-    copy_js(&mut cur, bytemuck::cast_slice_mut(&mut vertices));
-    let mut indices = vec![0_u32; h.index_count];
-    copy_js(&mut cur, bytemuck::cast_slice_mut(&mut indices));
+    let buffer = build_decoded_buffer(
+        h.format,
+        h.usable_indices,
+        h.shared_geometry_key,
+        h.vertex_count,
+        h.index_count,
+        |v_dst, i_dst| {
+            copy_js(&mut cur, v_dst);
+            copy_js(&mut cur, i_dst);
+            Some(())
+        },
+    )?;
     let mut feature_indices = vec![0_u32; h.feature_index_count];
     copy_js(&mut cur, bytemuck::cast_slice_mut(&mut feature_indices));
     let mut feature_colors = vec![[0.0_f32; 4]; h.feature_color_count];
@@ -308,16 +341,15 @@ pub(crate) fn decode_from_js_slice(
     };
 
     Some((
-        Box::new(AvailableVectorLayerBucket {
-            coords: h.coords,
+        Box::new(assemble_bucket(
+            h.coords,
             source_layer,
             style_layer_id,
-            buffer: OverAlignedVertexBuffer::from_vecs(vertices, indices, h.usable_indices)
-                .with_shared_geometry_key(h.shared_geometry_key),
+            buffer,
             feature_indices,
             feature_colors,
             feature_sort_keys,
-        }),
+        )),
         paint,
     ))
 }

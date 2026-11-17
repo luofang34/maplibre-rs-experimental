@@ -68,13 +68,27 @@ pub fn upload_system(
                     SystemError::Setup
                 })?;
         }
-    }
-
-    let mut visible_tiles = Vec::new();
-    for view_tile in tile_view_pattern.iter() {
-        view_tile.render(|shape| visible_tiles.push(shape.coords()));
-    }
-    for coords in visible_tiles {
+        let mut visible_tiles = Vec::new();
+        for view_tile in tile_view_pattern.iter() {
+            view_tile.render(|shape| visible_tiles.push(shape.coords()));
+        }
+        for coords in visible_tiles {
+            for (usage, generate_borders) in [
+                (TileMeshUsage::Stencil, true),
+                (TileMeshUsage::Stencil, false),
+                (TileMeshUsage::Raster, true),
+                (TileMeshUsage::Raster, false),
+            ] {
+                tile_mesh_cache
+                    .prepare(device, queue, coords, usage, generate_borders)
+                    .map_err(|error| {
+                        tracing::error!(%error, %coords, "unable to prepare globe tile mesh");
+                        SystemError::Setup
+                    })?;
+            }
+        }
+    } else {
+        let coords = crate::coords::WorldTileCoords::default();
         for (usage, generate_borders) in [
             (TileMeshUsage::Stencil, true),
             (TileMeshUsage::Stencil, false),

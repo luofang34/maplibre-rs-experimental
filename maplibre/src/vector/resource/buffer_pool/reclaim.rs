@@ -25,6 +25,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         }
         self.reclaim_empty_pages(1);
         self.revision = self.revision.wrapping_add(1);
+        self.eviction_generation = self.eviction_generation.wrapping_add(1);
     }
 
     /// Drops empty slabs beyond `keep_spare` per slab class when the pool owns a page factory.

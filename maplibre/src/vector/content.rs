@@ -114,6 +114,7 @@ pub(crate) fn accept_vector_with_paint(
         .tiles
         .query_mut::<(&mut VectorLayerBucketComponent, &mut LayerReplacements)>(coords)
     {
+        layers.uploaded_stamp = None;
         pending.revision = revision;
         if !pending.delivered.contains(&layer_id) {
             pending.delivered.push(layer_id.clone());
@@ -163,6 +164,7 @@ pub(crate) fn commit_vector(
     layers: &mut VectorLayerBucketComponent,
     bucket: AvailableVectorLayerBucket,
 ) {
+    layers.uploaded_stamp = None;
     layers.layers.retain(|layer| match layer {
         VectorLayerBucket::AvailableLayer(layer) => layer.style_layer_id != bucket.style_layer_id,
         VectorLayerBucket::Missing(layer) => layer.source_layer != bucket.source_layer,
@@ -206,8 +208,7 @@ pub(crate) fn release_committed_cpu_geometry(
     for layer in &mut layers.layers {
         if let VectorLayerBucket::AvailableLayer(avail) = layer {
             if avail.style_layer_id == style_layer_id && avail.buffer.usable_indices > 0 {
-                avail.buffer.buffer.vertices = Vec::new();
-                avail.buffer.buffer.indices = Vec::new();
+                avail.buffer.release_cpu_geometry();
                 if release_colors {
                     avail.feature_indices = Vec::new();
                     avail.feature_colors = Vec::new();
@@ -234,6 +235,8 @@ pub(crate) fn accept_symbols(world: &mut World, bucket: SymbolLayerData) {
         .tiles
         .query_mut::<(&mut SymbolLayersDataComponent, &mut LayerReplacements)>(coords)
     {
+        layers.uploaded_stamp = None;
+        layers.atlas_zoom_q32 = None;
         pending
             .symbols
             .retain(|layer| layer.style_layer_id != bucket.style_layer_id);
@@ -246,6 +249,8 @@ pub(crate) fn accept_symbols(world: &mut World, bucket: SymbolLayerData) {
 }
 
 pub(crate) fn commit_symbols(layers: &mut SymbolLayersDataComponent, bucket: SymbolLayerData) {
+    layers.uploaded_stamp = None;
+    layers.atlas_zoom_q32 = None;
     layers
         .layers
         .retain(|layer| layer.style_layer_id != bucket.style_layer_id);
@@ -295,7 +300,7 @@ pub(crate) fn has_evicted_cpu_released_vector_layers(
     layers.layers.iter().any(|layer| match layer {
         VectorLayerBucket::AvailableLayer(bucket) => {
             bucket.buffer.usable_indices > 0
-                && bucket.buffer.buffer.indices.is_empty()
+                && !bucket.buffer.has_cpu_indices()
                 && !pool.has_layer(coords, &bucket.style_layer_id)
                 && !pending.is_some_and(|p| {
                     p.vector
@@ -325,7 +330,7 @@ pub(crate) fn has_evicted_gpu_geometry(
                     let evicted_vector = layers.layers.iter().any(|layer| match layer {
                         VectorLayerBucket::AvailableLayer(bucket) => {
                             bucket.buffer.usable_indices > 0
-                                && bucket.buffer.buffer.indices.is_empty()
+                                && !bucket.buffer.has_cpu_indices()
                                 && !pool.has_layer(coords, &bucket.style_layer_id)
                                 && !pending.is_some_and(|p| {
                                     p.vector
@@ -384,6 +389,8 @@ pub(crate) fn purge_layers(world: &mut World, removed: &[String]) {
     for at in &coords {
         purge_vector_layers(world, *at, removed);
         if let Some(component) = world.tiles.query_mut::<&mut SymbolLayersDataComponent>(*at) {
+            component.uploaded_stamp = None;
+            component.atlas_zoom_q32 = None;
             component
                 .layers
                 .retain(|layer| !removed.contains(&layer.style_layer_id));
@@ -408,6 +415,7 @@ pub(crate) fn purge_layers(world: &mut World, removed: &[String]) {
 /// Drops the buckets, pending replacements and GPU buffers of the non-symbol `layers` in one tile.
 fn purge_vector_layers(world: &mut World, at: WorldTileCoords, layers: &[String]) {
     if let Some(component) = world.tiles.query_mut::<&mut VectorLayerBucketComponent>(at) {
+        component.uploaded_stamp = None;
         component.layers.retain(|layer| match layer {
             VectorLayerBucket::AvailableLayer(bucket) => !layers.contains(&bucket.style_layer_id),
             VectorLayerBucket::Missing(_) => true,

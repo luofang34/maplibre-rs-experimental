@@ -1,8 +1,9 @@
 //! GPU feature-metadata evaluation, bucket population, and per-frame visible-tile refresh.
 
 use super::{
-    flush_deferred_geojson_bytes, seed_from_inline, source_supports_dynamic_points,
-    DynamicPointGeoJson,
+    flush_deferred_geojson_bytes,
+    ramp::{ColorRamp, ScalarRamp},
+    seed_from_inline, source_supports_dynamic_points, DynamicPointGeoJson, EvalCache,
 };
 use crate::{
     coords::WorldTileCoords,
@@ -98,6 +99,7 @@ pub(crate) fn populate_dynamic_circle_bucket(
                 .tile_hits
                 .entry(coords)
                 .or_insert_with(|| super::compute_tile_hits(&src_state.world_points, coords));
+            let layer_id = style_layer.layer_id();
             if !hits.is_empty()
                 && (vertex_count == hits.len() * 4 || vertex_count == hits.len() * 16)
             {
@@ -110,6 +112,7 @@ pub(crate) fn populate_dynamic_circle_bucket(
                     hits,
                     verts_per_circle,
                     tile_zoom,
+                    (seq, layer_id, &mut src_state.eval_cache),
                 );
                 return Some(seq);
             }
@@ -264,6 +267,7 @@ pub(crate) fn refresh_dynamic_point_layers(
                     hits,
                     verts_per_circle,
                     f64::from(overscaled_z),
+                    (seq, style_layer_id, &mut src_state.eval_cache),
                 );
                 if let Some(entry) = buffer_pool.index().get_layers(coords).and_then(|layers| {
                     layers.iter().find(|e| {
@@ -314,11 +318,21 @@ fn evaluate_circle_metadata_into(
     hits: &[u32],
     verts_per_circle: usize,
     tile_zoom: f64,
+    (seq, style_layer_id, cache): (u64, crate::style::StyleLayerId, &mut EvalCache),
 ) {
     out.clear();
     let needed = hits.len() * verts_per_circle * 2;
     if out.capacity() < needed {
         out.reserve(needed - out.len());
+    }
+
+    let cache_key = (seq, style_layer_id, tile_zoom.to_bits());
+    if cache.key != Some(cache_key) {
+        cache.slots.clear();
+        cache.slots.resize(all_props.len(), None);
+        cache.key = Some(cache_key);
+    } else if cache.slots.len() != all_props.len() {
+        cache.slots.resize(all_props.len(), None);
     }
 
     let radius_prop = circle_paint.radius();
@@ -328,6 +342,7 @@ fn evaluate_circle_metadata_into(
             .unwrap_or(CirclePaint::DEFAULT_RADIUS)
             .max(0.0)
     });
+    let radius_ramp = ScalarRamp::compile(&radius_prop);
     let radius_zoom_const = radius_prop.is_zoom_constant();
 
     let color_prop = circle_paint.circle_color.as_ref();
@@ -339,6 +354,7 @@ fn evaluate_circle_metadata_into(
         ),
         Some(_) => None,
     };
+    let color_ramp = color_prop.and_then(ColorRamp::compile);
 
     let opacity_prop = circle_paint.circle_opacity.as_ref();
     let opacity_const = match opacity_prop {
@@ -350,19 +366,35 @@ fn evaluate_circle_metadata_into(
         ),
         Some(_) => None,
     };
+    let opacity_ramp = opacity_prop.and_then(ScalarRamp::compile);
 
     for &feat_idx in hits {
-        let Some(props) = all_props.get(feat_idx as usize) else {
+        let idx = feat_idx as usize;
+        if let Some(pair) = cache.slots.get(idx).and_then(Option::as_ref) {
+            for _ in 0..verts_per_circle {
+                out.extend_from_slice(pair);
+            }
+            continue;
+        }
+        let Some(props) = all_props.get(idx) else {
             continue;
         };
         let mut rgba = color_const.unwrap_or_else(|| {
-            color_prop
-                .and_then(|p| p.evaluate_for(props, tile_zoom))
-                .map_or([0.0, 0.0, 0.0, 1.0], |c| c.to_array())
+            color_ramp
+                .as_ref()
+                .and_then(|r| r.eval(props))
+                .or_else(|| {
+                    color_prop
+                        .and_then(|p| p.evaluate_for(props, tile_zoom))
+                        .map(|c| c.to_array())
+                })
+                .unwrap_or([0.0, 0.0, 0.0, 1.0])
         });
         let opacity = opacity_const.unwrap_or_else(|| {
-            opacity_prop
-                .and_then(|p| p.evaluate_for(props, tile_zoom))
+            opacity_ramp
+                .as_ref()
+                .and_then(|r| r.eval(props))
+                .or_else(|| opacity_prop.and_then(|p| p.evaluate_for(props, tile_zoom)))
                 .unwrap_or(1.0)
                 .clamp(0.0, 1.0)
         });
@@ -371,8 +403,10 @@ fn evaluate_circle_metadata_into(
         let (radius, radius_next) = if let Some(r) = radius_const {
             (r, r)
         } else {
-            let r0 = radius_prop
-                .evaluate_for(props, tile_zoom)
+            let r0 = radius_ramp
+                .as_ref()
+                .and_then(|r| r.eval(props))
+                .or_else(|| radius_prop.evaluate_for(props, tile_zoom))
                 .unwrap_or(CirclePaint::DEFAULT_RADIUS)
                 .max(0.0);
             let r1 = if radius_zoom_const {
@@ -390,6 +424,9 @@ fn evaluate_circle_metadata_into(
             FillShaderFeatureMetadata::from_rgba(rgba),
             pack_dynamic_circle_radii(radius, radius_next),
         ];
+        if let Some(slot) = cache.slots.get_mut(idx) {
+            *slot = Some(pair);
+        }
         for _ in 0..verts_per_circle {
             out.extend_from_slice(&pair);
         }

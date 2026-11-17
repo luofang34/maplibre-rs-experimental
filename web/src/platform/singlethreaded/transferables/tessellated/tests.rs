@@ -253,3 +253,100 @@ fn batch_of_two_flatbuffer_messages_prevents_aba_and_shares_decoded_maps_across_
         "decoded FlatBuffer messages must share one FeatureProperties map per feature across style layers"
     );
 }
+
+#[wasm_bindgen_test]
+fn prepacked_wire_round_trips_u16_odd_even_and_u32_dense_fallback() {
+    use maplibre::render::shaders::{GpuShaderVertex, PoolVertex};
+
+    let coords = WorldTileCoords {
+        x: 7,
+        y: 9,
+        z: ZoomLevel::new(4),
+    };
+    let input = ShaderVertex {
+        position: [120.25, 340.5],
+        normal: [0.5, -0.5],
+        distance: 12.0,
+        elevation: -1e30,
+        edge_distance: 0.0,
+        corner_code: 0.0,
+    };
+    let mut expected_gpu = Vec::new();
+    let expected_slice =
+        ShaderVertex::encode_vertices("line", &[input, input, input], &mut expected_gpu);
+
+    // 1) Prepacked u16 path with odd usable_indices = 3 (pads wire to 4 u16 elements = 8 bytes)
+    let odd_buf = OverAlignedVertexBuffer::from_iters([input, input, input], [0_u32, 1, 2], 3);
+    let odd_layer = Layer {
+        version: 2,
+        name: "road".into(),
+        ..Default::default()
+    };
+    let mut odd_msg = <FlatBufferTransferable as LayerTessellated>::build_from_with_paint_typed(
+        coords,
+        odd_buf,
+        vec![3],
+        vec![[0.25, 0.5, 0.75, 1.0]],
+        Vec::new(),
+        odd_layer,
+        "road-primary".into(),
+        vec![BucketFeatureEntry {
+            kind: BucketEntryKind::FillColor,
+            properties: Default::default(),
+            paint: None,
+        }],
+        "line",
+        true,
+    );
+    assert!(odd_msg.take_feature_paint().is_some());
+    assert_eq!(odd_msg.style_layer_id(), "road-primary");
+    let odd_bucket = odd_msg.to_bucket();
+    assert!(odd_bucket.buffer.buffer.vertices.is_empty());
+    assert!(odd_bucket.buffer.buffer.indices.is_empty());
+    assert_eq!(odd_bucket.buffer.usable_indices, 3);
+    assert_eq!(odd_bucket.buffer.vertex_count(), 3);
+    assert_eq!(odd_bucket.buffer.cpu_index_len(), 4);
+    let pre_odd = odd_bucket
+        .buffer
+        .prepacked_gpu()
+        .expect("prepacked u16 geometry");
+    assert_eq!(pre_odd.vertices, expected_slice);
+    assert_eq!(pre_odd.indices_u16.as_deref(), Some(&[0_u16, 1, 2, 0][..]));
+
+    // 2) Prepacked u32 fallback when vertex_count > 65_536
+    let dense_verts = vec![input; 65_537];
+    let mut fill_gpu = Vec::new();
+    let fill_expected =
+        <ShaderVertex as PoolVertex>::encode_vertices("fill", &dense_verts[..2], &mut fill_gpu);
+    let dense_buf = OverAlignedVertexBuffer::from_iters(dense_verts, [0_u32, 65_536, 1, 2], 4);
+    let dense_layer = Layer {
+        version: 2,
+        name: "land".into(),
+        ..Default::default()
+    };
+    let dense_msg = <FlatBufferTransferable as LayerTessellated>::build_from_with_paint_typed(
+        coords,
+        dense_buf,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        dense_layer,
+        "land-fill".into(),
+        Vec::new(),
+        "fill",
+        true,
+    );
+    let dense_bucket = dense_msg.to_bucket();
+    let pre_dense = dense_bucket
+        .buffer
+        .prepacked_gpu()
+        .expect("prepacked dense geometry");
+    assert!(pre_dense.indices_u16.is_none());
+    assert_eq!(dense_bucket.buffer.vertex_count(), 65_537);
+    assert_eq!(&pre_dense.vertices[..2], fill_expected);
+    assert_eq!(
+        dense_bucket.buffer.buffer.indices,
+        vec![0_u32, 65_536, 1, 2]
+    );
+    let _: GpuShaderVertex = pre_dense.vertices[0];
+}

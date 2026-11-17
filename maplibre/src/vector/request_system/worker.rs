@@ -271,10 +271,11 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
         projection: projection.clone(),
         overscaled_zoom,
     };
+    let has_dem_source = crate::terrain::source::dem_source(style).is_some();
     if symbols.is_empty() {
         tessellate::<T, C>(
             context,
-            (last_source, false),
+            (last_source, false, has_dem_source),
             (tile, request),
             source_state,
             Arc::new(SymbolAtlas::default()),
@@ -287,7 +288,7 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
     let sym_requests = symbol_requests_from_tile(&symbols, &tile, zoom, Some(style));
     tessellate::<T, C>(
         context.clone(),
-        (last_source, false),
+        (last_source, false, has_dem_source),
         (tile.clone(), request),
         source_state.clone(),
         Arc::new(SymbolAtlas::default()),
@@ -317,25 +318,15 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
         pixel_ratio,
         ..SymbolAssetConfig::of(style)
     };
-    #[cfg(target_arch = "wasm32")]
-    let assets_res = {
-        let ((), res) = futures::future::join(
-            crate::sdf::assets::warm_style_symbol_assets(client, style),
-            load_symbol_assets_for_requests(client, asset_config, sym_requests),
-        )
-        .await;
-        res
-    };
-    #[cfg(not(target_arch = "wasm32"))]
-    let assets_res = load_symbol_assets_for_requests(client, asset_config, sym_requests).await;
-
-    let assets = assets_res.map_err(ProcessVectorError::SymbolAssets)?;
+    let assets = load_symbol_assets_for_requests(client, asset_config, sym_requests)
+        .await
+        .map_err(ProcessVectorError::SymbolAssets)?;
     // Only a source still waiting for images keeps its tile and layers to lay out again.
     let again = (!assets.awaiting.is_empty()).then(|| (tile.clone(), sym_request.clone()));
     let _sym_slot = acquire_heavy_tile_slot().await;
     tessellate::<T, C>(
         context,
-        (last_source, false),
+        (last_source, false, has_dem_source),
         (tile, sym_request),
         source_state,
         assets.atlas,
@@ -353,7 +344,7 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
 /// replying with their geometry as it is made.
 async fn tessellate<T: VectorTransferables, C: Context + Send>(
     context: C,
-    (last_source, index_geometry): (bool, bool),
+    (last_source, index_geometry, has_dem_source): (bool, bool, bool),
     (tile, request): (
         Arc<crate::vector::process_vector::DecodedVectorTile>,
         VectorTileRequest,
@@ -366,6 +357,7 @@ async fn tessellate<T: VectorTransferables, C: Context + Send>(
 ) -> Result<(), ProcessVectorError> {
     run_cpu_bound_replying(context, move |context| {
         let mut processor = source_processor::<T, _>(context, last_source)
+            .with_has_dem_source(has_dem_source)
             .with_source_feature_state(promote_id, feature_state);
         if !index_geometry {
             processor = processor.without_indexing();

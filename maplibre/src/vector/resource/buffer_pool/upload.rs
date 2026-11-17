@@ -99,9 +99,10 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         if coords.build_quad_key().is_none() {
             return Err(AllocationError::Coordinates { coords });
         }
+        let prepacked_verts = Self::prepacked_vertices(geometry);
         let strides = ElementStrides::of::<V::Gpu, I, TM, FM>();
         let (vertices, records) = (
-            geometry.buffer.vertices.len() as u64,
+            prepacked_verts.map_or(geometry.buffer.vertices.len(), |v| v.len()) as u64,
             feature_metadata.len() as u64,
         );
         let dual_fm = self.decoupled_feature_metadata && vertices > 0 && records == 2 * vertices;
@@ -121,12 +122,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             FmStorageKind::Paired
         };
 
-        let (index_u16, index_bytes) = self.plan_index_upload(
-            &geometry.buffer.indices,
-            geometry.usable_indices,
-            vertices,
-            strides,
-        );
+        let (index_u16, index_bytes) = self.plan_geometry_index_upload(geometry, vertices, strides);
         let req = SlabRequest {
             vertex_bytes: vertices * strides.vertex,
             vertex_elem_align: V::vertex_element_alignment(&style_layer.type_),
@@ -200,26 +196,9 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         };
 
         if req.vertex_bytes > 0 {
-            let mut scratch = std::mem::take(&mut self.vertex_scratch);
-            let gpu_verts = V::encode_vertices(
-                &entry.style_layer.type_,
-                &geometry.buffer.vertices,
-                &mut scratch,
-            );
-            queue.write_buffer(
-                &self.vertex_slab_of(entry.vertex_page).vertices.inner,
-                entry.buffer_vertices.start,
-                bytemuck::cast_slice(gpu_verts),
-            );
-            self.vertex_scratch = scratch;
+            self.write_geometry_vertices(queue, &entry, prepacked_verts, &geometry.buffer.vertices);
         }
-        self.write_uploaded_indices(
-            queue,
-            &entry,
-            &geometry.buffer.indices,
-            geometry.usable_indices,
-            req.index_bytes,
-        );
+        self.write_geometry_indices(queue, &entry, geometry, req.index_bytes);
         if req.layer_bytes > 0 && entry.layer_page != NO_SLAB {
             queue.write_buffer(
                 self.metadata_for(&entry),
@@ -441,6 +420,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             self.sort_runs
                 .remove(&(evicted.coords, evicted.style_layer_id));
             self.free_entry_ranges(&evicted);
+            self.eviction_generation = self.eviction_generation.wrapping_add(1);
 
             if let Some(alloc) = self.try_reserve_slabs(
                 queue,

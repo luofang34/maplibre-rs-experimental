@@ -145,6 +145,36 @@ pub trait LayerTessellated: IntoMessage + Debug + Send {
         .with_feature_paint(entries)
     }
 
+    /// Builds a tessellated layer payload with optional worker pre-packing using `style_type`
+    /// (`"fill"`, `"line"`, `"fill-extrusion"`, etc.) when `allow_prepack` is enabled.
+    #[allow(clippy::too_many_arguments)]
+    fn build_from_with_paint_typed(
+        coords: WorldTileCoords,
+        buffer: OverAlignedVertexBuffer<ShaderVertex, IndexDataType>,
+        feature_indices: Vec<u32>,
+        feature_colors: Vec<[f32; 4]>,
+        feature_sort_keys: Vec<f32>,
+        layer_data: Layer,
+        style_layer_id: String,
+        entries: Vec<BucketFeatureEntry>,
+        _style_type: &str,
+        _allow_prepack: bool,
+    ) -> Self
+    where
+        Self: Sized,
+    {
+        Self::build_from_with_paint(
+            coords,
+            buffer,
+            feature_indices,
+            feature_colors,
+            feature_sort_keys,
+            layer_data,
+            style_layer_id,
+            entries,
+        )
+    }
+
     /// Attaches per-entry feature attributes for in-place GPU paint and `feature-state` refresh.
     fn with_feature_paint(self, _entries: Vec<BucketFeatureEntry>) -> Self
     where

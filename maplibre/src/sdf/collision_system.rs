@@ -100,6 +100,14 @@ impl System for CollisionSystem {
         if renderer.settings.symbol_pools.is_empty() {
             return Ok(());
         }
+        if !super::style_has_symbol_layers(style)
+            && super::symbol_pool_empty(world)
+            && self.uploaded.is_empty()
+            && self.active_epoch.is_none()
+            && !self.history.is_fading()
+        {
+            return Ok(());
+        }
         let config = world
             .resources
             .get::<PlacementConfig>()

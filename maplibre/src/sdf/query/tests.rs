@@ -98,6 +98,7 @@ fn placed(buckets: Vec<SymbolLayerData>) -> World {
             .insert(SymbolLayersDataComponent {
                 pending_assets: false,
                 layers,
+                ..Default::default()
             });
     }
     world.resources.insert(placed);

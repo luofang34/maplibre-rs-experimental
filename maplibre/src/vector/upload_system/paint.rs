@@ -21,19 +21,14 @@ use crate::{
     },
 };
 
-/// Whether `layer`'s per-feature GPU metadata depends on zoom (meaning zooming changes
-/// already-uploaded vertex colors or per-feature patterns/outlines).
+/// Whether `layer`'s feature colors/patterns/outlines (excluding uniform layer opacity) depend
+/// on view zoom.
 #[inline]
-pub(super) fn feature_paint_depends_on_zoom(layer: &StyleLayer) -> bool {
+fn feature_colors_depend_on_zoom(layer: &StyleLayer) -> bool {
     let Some(paint) = layer.paint.as_ref() else {
         return false;
     };
-    if paint
-        .opacity()
-        .as_ref()
-        .is_some_and(|p| !p.is_zoom_constant())
-        || crate::vector::pattern::per_feature_pattern(paint).is_some_and(|p| !p.is_zoom_constant())
-    {
+    if crate::vector::pattern::per_feature_pattern(paint).is_some_and(|p| !p.is_zoom_constant()) {
         return true;
     }
     match paint {
@@ -71,6 +66,31 @@ pub(super) fn feature_paint_depends_on_zoom(layer: &StyleLayer) -> bool {
     }
 }
 
+#[inline]
+fn quantized_layer_opacity(layer: &StyleLayer, zoom: f32) -> Option<u8> {
+    let opacity = layer
+        .paint
+        .as_ref()?
+        .opacity()?
+        .evaluate_at_zoom(f64::from(zoom))?
+        .clamp(0.0, 1.0);
+    Some((opacity * 255.0).round() as u8)
+}
+
+/// Whether `layer`'s per-feature GPU metadata depends on zoom (meaning zooming changes
+/// already-uploaded vertex colors or per-feature patterns/outlines).
+#[inline]
+pub(super) fn feature_paint_depends_on_zoom(layer: &StyleLayer) -> bool {
+    let Some(paint) = layer.paint.as_ref() else {
+        return false;
+    };
+    paint
+        .opacity()
+        .as_ref()
+        .is_some_and(|p| !p.is_zoom_constant())
+        || feature_colors_depend_on_zoom(layer)
+}
+
 pub(super) fn refresh_layer_paint(
     buffer_pool: &mut VectorBufferPool,
     queue: &crate::render::upload_queue::UploadQueue,
@@ -88,6 +108,7 @@ pub(super) fn refresh_layer_paint(
     let mut color_memo: FxHashMap<u32, Option<[f32; 4]>> = FxHashMap::default();
     let mut feature_meta_scratch = Vec::new();
     let mut feature_zoom_updates: Vec<(WorldTileCoords, String, Option<PatternRuns>)> = Vec::new();
+    let mut feature_zoom_only_updates: Vec<(WorldTileCoords, String)> = Vec::new();
 
     for coords in source_tiles {
         let tile_z = u8::from(coords.z);
@@ -127,9 +148,19 @@ pub(super) fn refresh_layer_paint(
                 && !entry.is_dynamic_circle_metadata()
                 && entry
                     .evaluated_zoom()
-                    .is_none_or(|evaluated| (zoom - evaluated).abs() > 1e-4)
+                    .is_none_or(|evaluated| (zoom - evaluated).abs() >= (1.0 / 32.0))
                 && feature_paint_depends_on_zoom(&entry.style_layer)
             {
+                if let Some(evaluated) = entry.evaluated_zoom() {
+                    if !feature_colors_depend_on_zoom(&entry.style_layer)
+                        && quantized_layer_opacity(&entry.style_layer, zoom)
+                            .zip(quantized_layer_opacity(&entry.style_layer, evaluated))
+                            .is_some_and(|(a, b)| a == b)
+                    {
+                        feature_zoom_only_updates.push((*coords, entry.style_layer.id.clone()));
+                        continue;
+                    }
+                }
                 if let Some((paint_store, buckets)) = tiles
                     .query::<(&TileFeaturePaintComponent, &VectorLayerBucketComponent)>(*coords)
                 {
@@ -228,6 +259,9 @@ pub(super) fn refresh_layer_paint(
             buffer_pool.set_pattern_runs(coords, &layer_id, runs);
         }
         buffer_pool.bump_layer_paint_revision(coords, &layer_id);
+    }
+    for (coords, layer_id) in feature_zoom_only_updates {
+        buffer_pool.set_layer_evaluated_zoom(coords, &layer_id, zoom);
     }
 }
 

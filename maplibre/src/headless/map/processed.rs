@@ -121,6 +121,7 @@ impl ProcessedLayers {
                 failed: false,
                 layers,
                 overscaled_zoom,
+                uploaded_stamp: None,
             });
             if let Some(paint) = paint_by_tile.remove(&coords) {
                 tile.insert(paint);
@@ -152,11 +153,13 @@ impl ProcessedLayers {
                     failed: false,
                     layers: Vec::new(),
                     overscaled_zoom,
+                    uploaded_stamp: None,
                 });
             }
             tile.insert(SymbolLayersDataComponent {
                 layers,
                 pending_assets: false,
+                ..Default::default()
             });
         }
         Ok(())

@@ -176,6 +176,12 @@ impl RingIndex {
         self.order.clear();
     }
 
+    /// Returns `true` when zero geometry allocations reside in the pool.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.order.is_empty()
+    }
+
     /// Oldest resident allocation in FIFO upload order.
     pub fn front(&self) -> Option<&IndexEntry> {
         let (&alloc_id, &coords) = self.order.first_key_value()?;

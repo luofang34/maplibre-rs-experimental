@@ -43,6 +43,9 @@ pub fn upload_system(
     {
         return Ok(());
     }
+    if !super::style_has_symbol_layers(style) && super::symbol_pool_empty(world) {
+        return Ok(());
+    }
     let visible = super::covering::upload_tiles(world);
     world.resources.get_or_init_mut::<FrameUploads>();
     let Some((Initialized(symbol_buffer_pool), textures, Initialized(pipeline), budget)) =
@@ -98,6 +101,24 @@ fn upload_symbol_layer(
     (style, visible, zoom): (&Style, &[crate::coords::WorldTileCoords], f32),
     budget: &mut FrameUploads,
 ) -> (bool, bool) {
+    let stamp = (style.revision(), symbol_buffer_pool.eviction_generation());
+    let zoom_q32 = (zoom * 32.0).round() as i32;
+    if visible.iter().all(|&coords| {
+        tiles
+            .query::<(
+                &SymbolLayersDataComponent,
+                &crate::vector::content::LayerReplacements,
+            )>(coords)
+            .is_some_and(|(layers, pending)| {
+                !layers.pending_assets
+                    && pending.symbols.is_empty()
+                    && layers.uploaded_stamp == Some(stamp)
+                    && layers.atlas_zoom_q32 == Some(zoom_q32)
+            })
+    }) {
+        return (false, false);
+    }
+
     let visible_set: rustc_hash::FxHashSet<_> = visible.iter().copied().collect();
     let mut needs_refetch = false;
     for &coords in visible {
@@ -108,6 +129,26 @@ fn upload_symbol_layer(
         )>(coords) else {
             continue;
         };
+        if !layers.pending_assets
+            && pending.symbols.is_empty()
+            && layers.uploaded_stamp == Some(stamp)
+        {
+            if layers.atlas_zoom_q32 == Some(zoom_q32) {
+                continue;
+            }
+            for style_layer in style.layers.iter().filter(|layer| !layer.is_hidden()) {
+                if let Some(committed) = layers
+                    .layers
+                    .iter()
+                    .find(|layer| layer.style_layer_id == style_layer.id)
+                {
+                    prepare_atlas(textures, gpu, committed, style_layer, zoom);
+                }
+            }
+            layers.atlas_zoom_q32 = Some(zoom_q32);
+            continue;
+        }
+        let mut tile_incomplete = false;
         let loaded = symbol_buffer_pool.loaded_style_layer_ids_at(coords);
         for style_layer in style.layers.iter().filter(|layer| !layer.is_hidden()) {
             if let Some(committed) = layers
@@ -140,6 +181,7 @@ fn upload_symbol_layer(
                     && buffer.buffer.vertices.is_empty()
                 {
                     needs_refetch = true;
+                    tile_incomplete = true;
                     continue;
                 }
                 let index_stride = if buffer.buffer.vertices.len() <= 65_536 {
@@ -162,6 +204,7 @@ fn upload_symbol_layer(
                     buffer,
                     &visible_set,
                 ) {
+                    tile_incomplete = true;
                     continue;
                 }
                 budget.take(UploadKind::Geometry, size);
@@ -183,6 +226,11 @@ fn upload_symbol_layer(
                     committed.buffer.release_uploaded_symbol_vertices();
                 }
             }
+        }
+        if !tile_incomplete && !layers.pending_assets && pending.symbols.is_empty() {
+            layers.uploaded_stamp =
+                Some((style.revision(), symbol_buffer_pool.eviction_generation()));
+            layers.atlas_zoom_q32 = Some(zoom_q32);
         }
     }
     (false, needs_refetch)

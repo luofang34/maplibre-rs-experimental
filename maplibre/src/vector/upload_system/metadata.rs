@@ -300,8 +300,9 @@ pub(super) fn upload_size(
     is_uniform: bool,
     is_dynamic_circle: bool,
 ) -> usize {
+    let vtx_count = bucket.buffer.vertex_count();
     let fm_bytes = if is_dynamic_circle {
-        bucket.buffer.buffer.vertices.len() * 2 * std::mem::size_of::<FillShaderFeatureMetadata>()
+        vtx_count * 2 * std::mem::size_of::<FillShaderFeatureMetadata>()
     } else if is_uniform {
         if uses_layer_metadata_uniform_color(style_layer) {
             0
@@ -316,14 +317,13 @@ pub(super) fn upload_size(
             .sum::<usize>()
             * std::mem::size_of::<FillShaderFeatureMetadata>()
     };
-    let index_stride = if bucket.buffer.buffer.vertices.len() <= 65_536 {
+    let index_stride = if vtx_count <= 65_536 {
         std::mem::size_of::<u16>()
     } else {
         std::mem::size_of::<u32>()
     };
-    bucket.buffer.buffer.vertices.len()
-        * std::mem::size_of::<crate::render::shaders::GpuShaderVertex>()
-        + bucket.buffer.buffer.indices.len() * index_stride
+    vtx_count * std::mem::size_of::<crate::render::shaders::GpuShaderVertex>()
+        + bucket.buffer.cpu_index_len() * index_stride
         + fm_bytes
 }
 

@@ -199,7 +199,6 @@ export const startOffscreenController = async ({
                 }
             });
         }
-        const [module] = await Promise.all([mainModulePromise, workerReadyPromise]);
 
         const measure = () => {
             const dpr = window.devicePixelRatio || 1;
@@ -214,25 +213,29 @@ export const startOffscreenController = async ({
         };
 
         const initial = measure();
-        const initId = nextRpcId++;
-        const ports = channels.map(ch => ch.port1);
-        await new Promise<void>((resolve, reject) => {
-            pending.set(initId, {resolve, reject});
-            renderWorker.postMessage(
-                {
-                    type: "init",
-                    id: initId,
-                    module,
-                    canvas: offscreen,
-                    width: initial.width,
-                    height: initial.height,
-                    scaleFactor: initial.scaleFactor,
-                    ports,
-                    styleJson,
-                },
-                [offscreen, ...ports],
-            );
+        const renderInitPromise = mainModulePromise.then(module => {
+            if (closed) return;
+            const initId = nextRpcId++;
+            const ports = channels.map(ch => ch.port1);
+            return new Promise<void>((resolve, reject) => {
+                pending.set(initId, {resolve, reject});
+                renderWorker.postMessage(
+                    {
+                        type: "init",
+                        id: initId,
+                        module,
+                        canvas: offscreen,
+                        width: initial.width,
+                        height: initial.height,
+                        scaleFactor: initial.scaleFactor,
+                        ports,
+                        styleJson,
+                    },
+                    [offscreen, ...ports],
+                );
+            });
         });
+        await Promise.all([renderInitPromise, workerReadyPromise]);
 
         // Attach DOM resize + DPR + input forwarding listeners.
         if (canvas.tabIndex < 0) {

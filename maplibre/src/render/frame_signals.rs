@@ -319,6 +319,14 @@ impl MapContext {
         self.redraw_reasons().any()
     }
 
+    /// Whether any visible terrain drape tile still awaits its initial or updated render pass.
+    pub fn has_pending_drapes(&self) -> bool {
+        self.world
+            .resources
+            .get::<crate::terrain::queue_system::PendingDrapes>()
+            .is_some_and(|pending| pending.of(None) > 0)
+    }
+
     /// What [`Self::needs_redraw`] asks for a frame for.
     pub fn redraw_reasons(&self) -> RedrawReasons {
         let signals = self.world.resources.get::<FrameSignals>();

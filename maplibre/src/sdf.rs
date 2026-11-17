@@ -55,6 +55,19 @@ struct SymbolPipeline {
     fill: wgpu::RenderPipeline,
 }
 
+/// Checks whether `style` declares any `"symbol"` layer.
+pub(crate) fn style_has_symbol_layers(style: &crate::style::Style) -> bool {
+    style.layers.iter().any(|layer| layer.type_ == "symbol")
+}
+
+/// Checks whether the GPU symbol pool is either uninitialized or holds zero uploaded layers.
+pub(crate) fn symbol_pool_empty(world: &World) -> bool {
+    match world.resources.get::<Eventually<SymbolBufferPool>>() {
+        Some(Eventually::Initialized(pool)) => pool.index().is_empty(),
+        _ => true,
+    }
+}
+
 /// GPU symbol geometry and paint, with collision opacity and sampled ground height per vertex.
 pub type SymbolBufferPool = BufferPool<
     crate::render::upload_queue::UploadQueue,
@@ -211,6 +224,10 @@ pub struct SymbolLayersDataComponent {
     pub pending_assets: bool,
     /// Worker-produced buckets available for atlas upload and collision placement.
     pub layers: Vec<SymbolLayerData>,
+    /// Cached `(style.revision(), symbol_pool.eviction_generation())` when all layers uploaded cleanly.
+    pub uploaded_stamp: Option<(u64, u64)>,
+    /// Quantized view zoom (`(zoom * 32.0).round() as i32`) last applied to symbol atlas uniforms.
+    pub atlas_zoom_q32: Option<i32>,
 }
 
 impl TileComponent for SymbolLayersDataComponent {}

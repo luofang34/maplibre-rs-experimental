@@ -181,7 +181,7 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
     type ReceiveIterator<F: FnMut(&Message) -> bool> = PassingReceiveIter;
 
     fn receive<F: FnMut(&Message) -> bool>(&self, mut filter: F) -> Self::ReceiveIterator<F> {
-        const MAX_RAW_BYTES_PER_BATCH: usize = 4 * 1024 * 1024;
+        const MAX_RAW_BYTES_PER_BATCH: usize = 2 * 1024 * 1024;
         let mut buffer = self.buffer.borrow_mut();
         let mut admitted_bytes: usize = buffer.iter().map(QueuedMessage::raw_byte_len).sum();
         let mut admitted_attempts: std::collections::HashSet<u64> =

@@ -296,6 +296,7 @@ pub struct ProcessVectorContext<T: VectorTransferables, C: Context> {
     completion: Completion,
     index_geometry: bool,
     overscaled_zoom: u8,
+    has_dem_source: bool,
     promote_id: Option<crate::style::source::PromoteId>,
     feature_state: Option<std::sync::Arc<crate::style::feature_state::SourceFeatureState>>,
     phantom_t: PhantomData<T>,
@@ -309,6 +310,7 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
             completion: Completion::Finished,
             index_geometry: true,
             overscaled_zoom: 0,
+            has_dem_source: false,
             promote_id: None,
             feature_state: None,
             phantom_t: Default::default(),
@@ -317,6 +319,11 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
 
     pub(crate) fn set_overscaled_zoom(&mut self, overscaled_zoom: u8) {
         self.overscaled_zoom = overscaled_zoom;
+    }
+
+    pub(crate) fn with_has_dem_source(mut self, has_dem_source: bool) -> Self {
+        self.has_dem_source = has_dem_source;
+        self
     }
 
     /// Configures `promoteId` and active runtime `feature-state` for the tile's source.
@@ -412,18 +419,36 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
             Vec<crate::vector::feature_paint::BucketFeatureEntry>,
         ),
         layer_data: tile::Layer,
-        style_layer_id: String,
+        style: &crate::style::layer::StyleLayer,
     ) -> Result<(), ProcessVectorError> {
         let overscaled = self.overscaled_zoom.max(u8::from(coords.z));
-        let msg = T::LayerTessellated::build_from_with_paint(
+        let edge_y = (1_i32 << u8::from(coords.z).min(30)) - 1;
+        let is_polar_row = coords.y <= 0 || coords.y >= edge_y;
+        let per_feature_pattern = style
+            .paint
+            .as_ref()
+            .and_then(crate::vector::pattern::per_feature_pattern)
+            .is_some();
+        let allow_prepack = cfg!(all(target_arch = "wasm32", not(target_feature = "atomics")))
+            && !self.has_dem_source
+            && !is_polar_row
+            && !per_feature_pattern
+            && feature_sort_keys.is_empty()
+            && style.type_ != "circle"
+            && crate::vector::structures::kind(style)
+                .is_none_or(|k| matches!(k, crate::vector::structures::StructureKind::Extrusion))
+            && buffer.shared_geometry_key().is_none();
+        let msg = T::LayerTessellated::build_from_with_paint_typed(
             *coords,
             buffer,
             feature_indices,
             feature_colors,
             feature_sort_keys,
             layer_data,
-            style_layer_id,
+            style.id.clone(),
             feature_paint,
+            style.type_.as_str(),
+            allow_prepack,
         )
         .with_overscaled_zoom(overscaled);
         self.context

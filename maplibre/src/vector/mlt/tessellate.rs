@@ -282,7 +282,7 @@ fn process_columnar_style_layer<T: VectorTransferables, C: Context>(
                     tessellator.feature_paint,
                 ),
                 col.header.clone(),
-                style.id.clone(),
+                style,
             )
         }
         Some(LayerPaint::Symbol(paint)) => {

@@ -123,6 +123,19 @@ impl WHATWGFetchHttpClient {
         if req.cache_policy.is_volatile() {
             opts.set_cache(RequestCache::NoStore);
         }
+        struct AbortOnDrop(Option<web_sys::AbortController>);
+        impl Drop for AbortOnDrop {
+            fn drop(&mut self) {
+                if let Some(ctrl) = self.0.take() {
+                    ctrl.abort();
+                }
+            }
+        }
+        let abort_controller = web_sys::AbortController::new().ok();
+        if let Some(ctrl) = &abort_controller {
+            opts.set_signal(Some(&ctrl.signal()));
+        }
+        let mut abort_guard = AbortOnDrop(abort_controller);
         let global = js_sys::global();
         let worker = global.dyn_into::<WorkerGlobalScope>().ok();
         if let Some(scope) = &worker {
@@ -181,6 +194,7 @@ impl WHATWGFetchHttpClient {
         let body = JsFuture::from(buffer)
             .await
             .map_err(|error| SourceFetchError::temporary(FetchError::from(error)))?;
+        abort_guard.0 = None;
         let array_buffer: ArrayBuffer = body
             .dyn_into()
             .map_err(|_| invalid_response("not an ArrayBuffer"))?;

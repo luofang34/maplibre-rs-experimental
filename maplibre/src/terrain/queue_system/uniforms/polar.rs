@@ -246,6 +246,7 @@ mod tests {
                 failed: false,
                 overscaled_zoom: 0,
                 layers: vec![VectorLayerBucket::AvailableLayer(bucket)],
+                uploaded_stamp: None,
             });
 
         let undraped = cap_colors(root, None, &style, &tiles, 0.0);

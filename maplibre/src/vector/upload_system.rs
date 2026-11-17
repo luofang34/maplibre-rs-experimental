@@ -197,6 +197,19 @@ fn upload_tessellated_layer_with_uncovered(
     (spatial, paint): (&[super::structures::SpatialBuffer], VectorPaintFrame),
     (budget, allow_cpu_release, dyn_points): (&mut FrameUploads, bool, &mut DynPoints),
 ) -> (bool, bool) {
+    let stamp = (style.revision(), buffer_pool.eviction_generation());
+    if source_tiles.iter().all(|&coords| {
+        tiles
+            .query::<(
+                &VectorLayerBucketComponent,
+                &super::content::LayerReplacements,
+            )>(coords)
+            .is_some_and(|(layers, pending)| {
+                layers.done && pending.vector.is_empty() && layers.uploaded_stamp == Some(stamp)
+            })
+    }) {
+        return (false, false);
+    }
     let has_dem_source = crate::terrain::source::dem_source(style).is_some();
     let mut feature_meta_scratch = Vec::new();
     let mut needs_refetch = false;
@@ -205,15 +218,16 @@ fn upload_tessellated_layer_with_uncovered(
     for coords in source_tiles {
         let is_uncovered = uncovered_sources.contains(&coords);
         super::content::ensure(tiles, coords);
-        if tiles
-            .query::<(
-                &VectorLayerBucketComponent,
-                &super::content::LayerReplacements,
-            )>(coords)
-            .is_none()
-        {
+        let Some((layers, pending)) = tiles.query::<(
+            &VectorLayerBucketComponent,
+            &super::content::LayerReplacements,
+        )>(coords) else {
+            continue;
+        };
+        if layers.done && pending.vector.is_empty() && layers.uploaded_stamp == Some(stamp) {
             continue;
         }
+        let mut tile_incomplete = false;
         let mut uploaded = false;
         let mut pending_cpu_releases: Vec<(String, Option<u64>, bool)> = Vec::new();
         for style_layer in &style.layers {
@@ -257,17 +271,18 @@ fn upload_tessellated_layer_with_uncovered(
                 let is_dynamic_circle = layer_is_dynamic_circle(style, style_layer);
                 let is_uniform = !is_dynamic_circle
                     && paint::uniform_color(style_layer, f64::from(paint.zoom)).is_some();
-                if bucket.buffer.usable_indices == 0 && bucket.buffer.buffer.indices.is_empty() {
+                if !bucket.buffer.has_drawable_geometry() {
                     buffer_pool.remove_layer(coords, &style_layer.id);
                     Step::Commit {
                         replacement,
                         did_upload: false,
                         release_cpu: None,
                     }
-                } else if bucket.buffer.buffer.indices.is_empty() {
+                } else if !bucket.buffer.has_cpu_indices() {
                     if !style_layer.is_hidden() {
                         needs_refetch = true;
                     }
+                    tile_incomplete = true;
                     continue;
                 } else {
                     let bytes = upload_size(style_layer, bucket, is_uniform, is_dynamic_circle);
@@ -321,7 +336,10 @@ fn upload_tessellated_layer_with_uncovered(
                 }
             };
             match step {
-                Step::Skip | Step::Saturated => continue,
+                Step::Skip | Step::Saturated => {
+                    tile_incomplete = true;
+                    continue;
+                }
                 Step::Exhausted => {
                     metadata::flush_safe_cpu_releases(
                         tiles,
@@ -330,6 +348,7 @@ fn upload_tessellated_layer_with_uncovered(
                         &pending_cpu_releases,
                     );
                     any_deferred = true;
+                    tile_incomplete = true;
                     break;
                 }
                 Step::Commit {
@@ -356,6 +375,18 @@ fn upload_tessellated_layer_with_uncovered(
             }
         }
         metadata::flush_safe_cpu_releases(tiles, buffer_pool, coords, &pending_cpu_releases);
+        if !tile_incomplete {
+            let end_stamp = (style.revision(), buffer_pool.eviction_generation());
+            if let Some((layers, pending)) = tiles.query_mut::<(
+                &mut VectorLayerBucketComponent,
+                &super::content::LayerReplacements,
+            )>(coords)
+            {
+                if layers.done && pending.vector.is_empty() {
+                    layers.uploaded_stamp = Some(end_stamp);
+                }
+            }
+        }
         if uploaded {
             budget.count_geometry_tile();
         }

@@ -66,6 +66,7 @@ pub struct BufferPool<Q, B, V: PoolVertex, I, TM, FM> {
     vertex_scratch: Vec<V::Gpu>,
     u16_index_scratch: Vec<u16>,
     revision: u64,
+    eviction_generation: u64,
     phantom_i: PhantomData<I>,
     phantom_q: PhantomData<Q>,
     phantom_m: PhantomData<TM>,
@@ -166,6 +167,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             vertex_scratch: Vec::new(),
             u16_index_scratch: Vec::new(),
             revision: 0,
+            eviction_generation: 0,
             phantom_i: Default::default(),
             phantom_q: Default::default(),
             phantom_m: Default::default(),
@@ -203,6 +205,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             vertex_scratch: Vec::new(),
             u16_index_scratch: Vec::new(),
             revision: 0,
+            eviction_generation: 0,
             phantom_i: Default::default(),
             phantom_q: Default::default(),
             phantom_m: Default::default(),
@@ -243,6 +246,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             let keep_spare = usize::from(!cfg!(target_arch = "wasm32"));
             self.reclaim_empty_pages_with_queue(keep_spare, queue);
             self.revision = self.revision.wrapping_add(1);
+            self.eviction_generation = self.eviction_generation.wrapping_add(1);
         }
     }
 
@@ -259,6 +263,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             let keep_spare = usize::from(!cfg!(target_arch = "wasm32"));
             self.reclaim_empty_pages(keep_spare);
             self.revision = self.revision.wrapping_add(1);
+            self.eviction_generation = self.eviction_generation.wrapping_add(1);
         }
     }
 
@@ -271,8 +276,15 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
     ) {
         let layer_id = crate::style::StyleLayerId::intern(id);
         match runs {
-            Some(runs) => self.pattern_runs.insert((coords, layer_id), runs),
-            None => self.pattern_runs.remove(&(coords, layer_id)),
+            Some(runs) => {
+                if self.pattern_runs.get(&(coords, layer_id)) == Some(&runs) {
+                    return;
+                }
+                self.pattern_runs.insert((coords, layer_id), runs);
+            }
+            None => {
+                self.pattern_runs.remove(&(coords, layer_id));
+            }
         };
     }
 
@@ -280,8 +292,15 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
     pub fn set_sort_runs(&mut self, coords: WorldTileCoords, id: &str, runs: Option<SortRuns>) {
         let layer_id = crate::style::StyleLayerId::intern(id);
         match runs {
-            Some(runs) => self.sort_runs.insert((coords, layer_id), runs),
-            None => self.sort_runs.remove(&(coords, layer_id)),
+            Some(runs) => {
+                if self.sort_runs.get(&(coords, layer_id)) == Some(&runs) {
+                    return;
+                }
+                self.sort_runs.insert((coords, layer_id), runs);
+            }
+            None => {
+                self.sort_runs.remove(&(coords, layer_id));
+            }
         };
     }
 
@@ -321,6 +340,11 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
     /// Number of allocations so far; changes whenever the geometry held changes.
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// Monotonic counter incremented whenever resident GPU layers are evicted or removed.
+    pub fn eviction_generation(&self) -> u64 {
+        self.eviction_generation
     }
 
     /// Returns `true` when all backing sub-allocation capacities are zero.
@@ -427,6 +451,7 @@ mod device;
 mod growth;
 mod index;
 mod page;
+mod prepacked;
 mod reclaim;
 mod shared;
 mod updates;

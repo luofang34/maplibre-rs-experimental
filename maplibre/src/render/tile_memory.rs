@@ -190,6 +190,7 @@ fn value_bytes(value: &crate::style::expression::Value) -> usize {
 fn vector_bytes(layer: &AvailableVectorLayerBucket) -> usize {
     capacity(&layer.buffer.buffer.vertices)
         + capacity(&layer.buffer.buffer.indices)
+        + layer.buffer.prepacked_bytes()
         + capacity(&layer.feature_indices)
         + capacity(&layer.feature_colors)
         + capacity(&layer.feature_sort_keys)

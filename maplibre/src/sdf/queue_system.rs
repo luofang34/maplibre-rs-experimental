@@ -26,6 +26,9 @@ pub fn queue_system(
     if renderer.settings.symbol_pools.is_empty() {
         return Ok(());
     }
+    if !super::style_has_symbol_layers(style) && super::symbol_pool_empty(world) {
+        return Ok(());
+    }
     super::covering::update(world, style, view_state, &renderer.device, &renderer.queue);
     let Some((covering, phase, Initialized(pool))) = world.resources.query_mut::<(
         &SymbolCovering,

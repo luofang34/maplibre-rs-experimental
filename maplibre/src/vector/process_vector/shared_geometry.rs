@@ -280,7 +280,7 @@ fn process_shared_group<T: VectorTransferables, C: crate::io::apc::Context>(
                 Vec::new(),
                 (Vec::new(), Vec::new(), Vec::new()),
                 layer_header(layer),
-                style.id.clone(),
+                style,
             )?;
         }
         return Ok(());
@@ -370,7 +370,7 @@ fn process_shared_group<T: VectorTransferables, C: crate::io::apc::Context>(
             feature_indices,
             (Vec::new(), Vec::new(), Vec::new()),
             layer_header(layer),
-            style.id.clone(),
+            style,
         )?;
     }
     Ok(())

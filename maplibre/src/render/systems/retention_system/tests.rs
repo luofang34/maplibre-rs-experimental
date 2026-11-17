@@ -43,6 +43,7 @@ fn spawn_vector(world: &mut World, coords: WorldTileCoords, done: bool) {
             done,
             layers: Vec::new(),
             overscaled_zoom: 0,
+            uploaded_stamp: None,
         });
 }
 
@@ -222,6 +223,7 @@ fn the_cache_is_bounded_in_bytes_as_well_as_tiles() {
                         feature_sort_keys: Vec::new(),
                     },
                 )],
+                uploaded_stamp: None,
             });
     }
 

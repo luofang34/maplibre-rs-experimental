@@ -19,10 +19,6 @@ mod local_fonts;
 mod prefetch;
 mod requests;
 pub(crate) use prefetch::spawn_style_symbol_prefetch;
-#[doc(hidden)]
-pub use prefetch::spawn_worker_symbol_prefetch;
-#[cfg(target_arch = "wasm32")]
-pub(crate) use prefetch::warm_style_symbol_assets;
 #[cfg(test)]
 use requests::requests;
 use requests::symbol_requests;

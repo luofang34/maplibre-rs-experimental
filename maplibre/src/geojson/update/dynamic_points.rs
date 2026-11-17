@@ -7,6 +7,7 @@
 //! tiles' `[fill_rgba8, packed_radius_f16x2]` GPU feature metadata in-place.
 
 mod gpu;
+mod ramp;
 mod wire;
 
 use std::sync::Arc;
@@ -42,6 +43,12 @@ pub(crate) struct DynamicPointGeoJson {
     gpu_scratch: Vec<FillShaderFeatureMetadata>,
 }
 
+#[derive(Default)]
+pub(super) struct EvalCache {
+    pub key: Option<(u64, StyleLayerId, u64)>,
+    pub slots: Vec<Option<[FillShaderFeatureMetadata; 2]>>,
+}
+
 struct DynamicPointSource {
     keys: Vec<(RawFeatureId, [u64; 2])>,
     world_points: Vec<[f64; 2]>,
@@ -54,6 +61,7 @@ struct DynamicPointSource {
     tile_hits: FxHashMap<WorldTileCoords, Vec<u32>>,
     applied_seq: FxHashMap<(WorldTileCoords, StyleLayerId), (u64, u64)>,
     deferred_bytes: Option<Arc<[u8]>>,
+    eval_cache: EvalCache,
 }
 
 fn compute_tile_hits(world_points: &[[f64; 2]], coords: WorldTileCoords) -> Vec<u32> {
@@ -328,6 +336,7 @@ fn build_source_from_value(
         tile_hits: FxHashMap::default(),
         applied_seq: FxHashMap::default(),
         deferred_bytes: None,
+        eval_cache: EvalCache::default(),
     })
 }
 

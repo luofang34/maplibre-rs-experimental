@@ -86,6 +86,7 @@ async fn empty_tiles_do_not_starve_later_geometry_uploads() {
                         feature_sort_keys: Vec::new(),
                     },
                 )],
+                uploaded_stamp: None,
             });
     }
     let wanted = *coords.last().expect("geometry tile");
@@ -165,6 +166,7 @@ async fn deferred_uploads_keep_parent_stand_in_and_flag_animation() {
                 feature_sort_keys: Vec::new(),
             },
         )],
+        uploaded_stamp: None,
     };
 
     let parent = WorldTileCoords {
@@ -409,6 +411,7 @@ async fn peripheral_tiles_never_evict_focus_tile_or_thrash_saturated_pool() {
                         feature_sort_keys: Vec::new(),
                     },
                 )],
+                uploaded_stamp: None,
             });
     }
     let paint = super::VectorPaintFrame {

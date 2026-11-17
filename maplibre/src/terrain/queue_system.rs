@@ -31,7 +31,6 @@ use crate::{
 };
 mod acquire;
 mod activity;
-#[cfg(feature = "headless")]
 pub(crate) use activity::PendingDrapes;
 mod cohort;
 mod covering;

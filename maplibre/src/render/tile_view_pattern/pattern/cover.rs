@@ -1,6 +1,6 @@
 //! Source shape selection, covering overlap pairing, and sub-tile clip rectangles.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use super::{CHILDREN_SEARCH_DEPTH, COMPLETE_CHILDREN_SEARCH_DEPTH};
 use crate::{
@@ -17,7 +17,7 @@ pub(super) fn source_shapes<T: HasTile>(
     coords: WorldTileCoords,
     zoom: Zoom,
     world: &World,
-    used_parents: &mut HashSet<WorldTileCoords>,
+    used_parents: &mut FxHashSet<WorldTileCoords>,
 ) -> SourceShapes {
     source_shapes_bounded(container, coords, zoom, world, used_parents, None)
 }
@@ -27,7 +27,7 @@ pub(super) fn source_shapes_bounded<T: HasTile>(
     coords: WorldTileCoords,
     zoom: Zoom,
     world: &World,
-    used_parents: &mut HashSet<WorldTileCoords>,
+    used_parents: &mut FxHashSet<WorldTileCoords>,
     max_zoom: Option<u8>,
 ) -> SourceShapes {
     let max_child_depth = max_zoom.map_or(usize::MAX, |max_z| {
@@ -60,7 +60,7 @@ pub(super) fn selected_shapes(
     coords: WorldTileCoords,
     tiles: Vec<WorldTileCoords>,
     zoom: Zoom,
-    used_parents: &mut HashSet<WorldTileCoords>,
+    used_parents: &mut FxHashSet<WorldTileCoords>,
 ) -> SourceShapes {
     if let [parent] = tiles.as_slice() {
         // Adjacent view tiles sharing an ancestor must not blend that ancestor repeatedly.

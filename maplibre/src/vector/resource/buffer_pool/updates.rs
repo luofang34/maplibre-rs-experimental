@@ -247,9 +247,6 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
                 }
             }
         }
-        if bumped {
-            self.revision = self.revision.wrapping_add(1);
-        }
         bumped
     }
 

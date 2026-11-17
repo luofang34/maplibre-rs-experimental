@@ -1,10 +1,12 @@
 //! Selects loaded source shapes and owns the tile metadata allocation.
 
 use std::{
-    collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
     marker::PhantomData,
+    sync::Mutex,
 };
+
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
     coords::{ViewRegion, WorldTileCoords, Zoom},
@@ -43,6 +45,12 @@ impl<B> BackingBuffer<B> {
     }
 }
 
+#[derive(Default)]
+struct PatternScratch {
+    vector_parents: FxHashMap<i32, FxHashSet<WorldTileCoords>>,
+    raster_parents: FxHashMap<(RasterSourceId, i32), FxHashSet<WorldTileCoords>>,
+}
+
 /// The tile mask pattern assigns each tile a value which can be used for stencil testing.
 pub struct TileViewPattern<Q, B> {
     view_tiles: Vec<ViewTile>,
@@ -54,6 +62,9 @@ pub struct TileViewPattern<Q, B> {
     last_topology_hash: u64,
     /// Monotonic counter incremented when tile shapes, buffer ranges, or stencil refs change.
     topology_generation: u64,
+    stencil_ids: FxHashMap<(i32, WorldTileCoords), u8>,
+    metadata_scratch: Vec<ShaderTileMetadata>,
+    scratch: Mutex<PatternScratch>,
     phantom_q: PhantomData<Q>,
 }
 
@@ -88,6 +99,9 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
             uploaded: 0,
             last_topology_hash: 0,
             topology_generation: 0,
+            stencil_ids: FxHashMap::default(),
+            metadata_scratch: Vec::with_capacity(64),
+            scratch: Mutex::new(PatternScratch::default()),
             phantom_q: Default::default(),
         }
     }
@@ -158,14 +172,19 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
     ) -> Vec<ViewTile> {
         let mut view_tiles = Vec::with_capacity(self.view_tiles.len());
         // A parent stands in once for each copy of the world it is seen in.
-        let mut vector_parents: HashMap<i32, HashSet<WorldTileCoords>> = HashMap::new();
-        let mut raster_parents: HashMap<(RasterSourceId, i32), HashSet<WorldTileCoords>> =
-            HashMap::new();
-        let covering: Vec<_> = if raster_coverings.is_empty() {
-            vec![(RasterSourceId::default(), Vec::new())]
-        } else {
-            raster_coverings.to_vec()
-        };
+        let mut scratch = self.scratch.lock().unwrap_or_else(|e| e.into_inner());
+        for set in scratch.vector_parents.values_mut() {
+            set.clear();
+        }
+        if !raster_coverings.is_empty() {
+            for set in scratch.raster_parents.values_mut() {
+                set.clear();
+            }
+        }
+        let PatternScratch {
+            vector_parents,
+            raster_parents,
+        } = &mut *scratch;
 
         let vector_availability = (
             sources.of_kind(TileKind::Vector),
@@ -186,34 +205,38 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
                 vector_max_zoom,
             );
             vector.for_each_mut(&mut |shape| shape.wrapped(wrap, zoom));
-            let raster = covering
-                .iter()
-                .map(|(source, covering)| {
-                    let availability = super::SourceTiles {
-                        source,
-                        availability: sources.of_kind(TileKind::Raster),
-                    };
-                    let covered = covering_shapes_for(coords, covering)
-                        .into_iter()
-                        .filter(|tile| availability.has_tile(*tile, world))
-                        .collect();
-                    let mut shapes = raster_shapes(
-                        &availability,
-                        coords,
-                        covered,
-                        zoom,
-                        world,
-                        raster_parents.entry((source.clone(), wrap)).or_default(),
-                    );
-                    if let Some(faded) =
-                        with_departing((&availability, source, &shapes), zoom, world)
-                    {
-                        shapes = faded;
-                    }
-                    shapes.for_each_mut(&mut |shape| shape.wrapped(wrap, zoom));
-                    (source.clone(), shapes)
-                })
-                .collect();
+            let raster = if raster_coverings.is_empty() {
+                Vec::new()
+            } else {
+                raster_coverings
+                    .iter()
+                    .map(|(source, covering)| {
+                        let availability = super::SourceTiles {
+                            source,
+                            availability: sources.of_kind(TileKind::Raster),
+                        };
+                        let covered = covering_shapes_for(coords, covering)
+                            .into_iter()
+                            .filter(|tile| availability.has_tile(*tile, world))
+                            .collect();
+                        let mut shapes = raster_shapes(
+                            &availability,
+                            coords,
+                            covered,
+                            zoom,
+                            world,
+                            raster_parents.entry((source.clone(), wrap)).or_default(),
+                        );
+                        if let Some(faded) =
+                            with_departing((&availability, source, &shapes), zoom, world)
+                        {
+                            shapes = faded;
+                        }
+                        shapes.for_each_mut(&mut |shape| shape.wrapped(wrap, zoom));
+                        (source.clone(), shapes)
+                    })
+                    .collect()
+            };
             view_tiles.push(ViewTile {
                 target: coords,
                 vector,
@@ -255,10 +278,11 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
         let capacity = (self.view_tiles_buffer.inner_size
             / std::mem::size_of::<ShaderTileMetadata>() as wgpu::BufferAddress)
             as usize;
-        let mut buffer = Vec::with_capacity(self.view_tiles.len());
+        let mut buffer = std::mem::take(&mut self.metadata_scratch);
+        buffer.clear();
         let mut skipped = 0_usize;
-        let mut stencil_ids: HashMap<(i32, WorldTileCoords), u8> =
-            HashMap::with_capacity(self.view_tiles.len());
+        let mut stencil_ids = std::mem::take(&mut self.stencil_ids);
+        stencil_ids.clear();
         let mut next_stencil = 0_u8;
 
         let mut add_to_buffer = |shape: &mut TileShape| {
@@ -333,6 +357,7 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
                 r_count.hash(&mut topo_hasher);
             }
         }
+        drop(add_to_buffer);
         let topology_hash = topo_hasher.finish();
         if self.topology_generation == 0 || topology_hash != self.last_topology_hash {
             self.last_topology_hash = topology_hash;
@@ -349,6 +374,8 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
         self.uploaded = buffer.len() as u64;
         let raw_buffer = bytemuck::cast_slice(buffer.as_slice());
         queue.write_buffer(&self.view_tiles_buffer.inner, 0, raw_buffer);
+        self.stencil_ids = stencil_ids;
+        self.metadata_scratch = buffer;
     }
 }
 
@@ -418,7 +445,7 @@ fn raster_shapes<T: HasTile>(
     covered: Vec<WorldTileCoords>,
     zoom: Zoom,
     world: &World,
-    used_parents: &mut HashSet<WorldTileCoords>,
+    used_parents: &mut FxHashSet<WorldTileCoords>,
 ) -> SourceShapes {
     let covered = super::coverage::disjoint_tiles(coords, covered);
     let complete = super::coverage::covers_target(coords, &covered).then(|| covered.clone());

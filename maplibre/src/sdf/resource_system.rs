@@ -14,7 +14,10 @@ use crate::{
 
 pub fn resource_system(
     MapContext {
-        world, renderer, ..
+        world,
+        style,
+        renderer,
+        ..
     }: &mut MapContext,
 ) -> SystemResult {
     let Some((pool, pipeline, Initialized(projection))) = world.resources.query_mut::<(
@@ -30,6 +33,12 @@ pub fn resource_system(
     if renderer.settings.symbol_pools.is_empty() {
         return Ok(());
     }
+    #[cfg(target_arch = "wasm32")]
+    if matches!(pipeline, Eventually::Uninitialized) && !super::style_has_symbol_layers(style) {
+        return Ok(());
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = style;
     pipeline.initialize(|| create_pipeline(renderer, projection));
     let Some((depth, Initialized(pipeline))) = world.resources.query_mut::<(
         &mut Eventually<super::depth::SymbolDepth>,

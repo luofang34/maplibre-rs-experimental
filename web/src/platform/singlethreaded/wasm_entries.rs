@@ -114,10 +114,6 @@ impl TileWorkerCalls {
     pub fn set_style(&mut self, revision: u64, style: String) -> Result<(), JSError> {
         let style: maplibre::style::Style =
             serde_json::from_str(&style).map_err(WebError::StyleDecoding)?;
-        maplibre::sdf::assets::spawn_worker_symbol_prefetch(
-            UsedOffscreenKernelEnvironment::create(kernel_config()).source_client(),
-            &style,
-        );
         self.styles.insert(revision, style);
         Ok(())
     }

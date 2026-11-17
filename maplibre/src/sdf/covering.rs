@@ -137,6 +137,12 @@ pub(super) fn update(
             ready(world, style, view.style_zoom().value(), coords)
         })
     };
+    if tiles.is_empty() {
+        if let Some(covering) = world.resources.get_mut::<SymbolCovering>() {
+            covering.tiles.clear();
+            return;
+        }
+    }
     let entries: Vec<_> = tiles.iter().map(|coords| metadata(*coords, view)).collect();
     let bytes = bytemuck::cast_slice(&entries);
     let required = (bytes.len() as u64).max(256);
@@ -161,7 +167,9 @@ pub(super) fn update(
         });
     }
     if let Some(covering) = world.resources.get_mut::<SymbolCovering>() {
-        queue.write_buffer(&covering.buffer, 0, bytes);
+        if !bytes.is_empty() {
+            queue.write_buffer(&covering.buffer, 0, bytes);
+        }
         covering.tiles = tiles;
     }
 }

@@ -45,6 +45,7 @@ fn symbol_atlas_bytes_evict_tiles_and_shared_layers_are_charged_once() {
             .insert(SymbolLayersDataComponent {
                 pending_assets: false,
                 layers: vec![layer(coords, atlas.clone()), layer(coords, atlas)],
+                ..Default::default()
             });
         assert_eq!(tile_bytes(&world.tiles, coords), 256 * 256 * 4);
     }
@@ -87,6 +88,7 @@ fn pending_and_committed_layers_share_one_atlas_charge() {
         .insert(SymbolLayersDataComponent {
             pending_assets: false,
             layers: vec![layer(coords, atlas.clone())],
+            ..Default::default()
         })
         .insert(LayerReplacements {
             symbols: vec![layer(coords, atlas)],
@@ -140,6 +142,7 @@ fn symbol_geometry_cache_budget_counts_each_cpu_allocation_once() {
                 buffer,
                 features: Vec::new(),
             }],
+            ..Default::default()
         });
     let mut budget = CacheBudget {
         tiles: 1,

@@ -35,23 +35,23 @@ pub const UPLOADS_PER_FRAME: usize = 8;
 /// Geometry tiles uploaded per frame while the camera is actively moving on `wasm32`, pacing
 /// multi-tile bursts across consecutive vsyncs to keep p95/p99 frame CPU flat.
 #[cfg(target_arch = "wasm32")]
-const MOVING_UPLOADS_PER_FRAME: usize = 2;
+const MOVING_UPLOADS_PER_FRAME: usize = 1;
 #[cfg(not(target_arch = "wasm32"))]
 const MOVING_UPLOADS_PER_FRAME: usize = 4;
 /// Uncovered viewport tiles (with no loaded ancestor stand-in on the GPU) admitted per moving
 /// frame so visible pan holes fill immediately on arrival.
 #[cfg(target_arch = "wasm32")]
-const MOVING_UNCOVERED_UPLOADS_PER_FRAME: usize = 6;
+const MOVING_UNCOVERED_UPLOADS_PER_FRAME: usize = 2;
 #[cfg(not(target_arch = "wasm32"))]
 const MOVING_UNCOVERED_UPLOADS_PER_FRAME: usize = UPLOADS_PER_FRAME;
 /// Geometry bytes uploaded per frame while the camera is actively moving (the first geometry
 /// upload of a frame is always admitted even when larger).
 #[cfg(target_arch = "wasm32")]
-const MOVING_GEOMETRY_UPLOAD_BYTES: usize = 768 << 10;
+const MOVING_GEOMETRY_UPLOAD_BYTES: usize = 512 << 10;
 #[cfg(not(target_arch = "wasm32"))]
 const MOVING_GEOMETRY_UPLOAD_BYTES: usize = 4 << 20;
 #[cfg(target_arch = "wasm32")]
-const MOVING_UNCOVERED_GEOMETRY_UPLOAD_BYTES: usize = 4 << 20;
+const MOVING_UNCOVERED_GEOMETRY_UPLOAD_BYTES: usize = 1536 << 10;
 #[cfg(not(target_arch = "wasm32"))]
 const MOVING_UNCOVERED_GEOMETRY_UPLOAD_BYTES: usize = FRAME_UPLOAD_BYTES - IMAGE_UPLOAD_FLOOR_BYTES;
 /// Bytes of tile geometry, labels and textures one frame uploads; the rest wait for the next

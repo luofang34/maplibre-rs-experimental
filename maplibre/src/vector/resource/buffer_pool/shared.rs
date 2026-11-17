@@ -205,12 +205,16 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         let family = V::encoding_family(&style_layer.type_);
         let vertex_elem_align = V::vertex_element_alignment(&style_layer.type_);
         let layer_meta_key = self.layer_meta_share_key(style_layer_id, coords);
+        let prepacked_verts = Self::prepacked_vertices(geometry);
         let strides = ElementStrides::of::<V::Gpu, I, TM, FM>();
-        let source_vertices: &[V] = if !geometry.buffer.vertices.is_empty() {
-            &geometry.buffer.vertices
-        } else {
-            fallback_vertices.unwrap_or(&[])
-        };
+        let source_vertices: &[V] =
+            if prepacked_verts.is_none() && !geometry.buffer.vertices.is_empty() {
+                &geometry.buffer.vertices
+            } else if prepacked_verts.is_none() {
+                fallback_vertices.unwrap_or(&[])
+            } else {
+                &[]
+            };
         let shared_key = geometry
             .shared_geometry_key()
             .filter(|_| self.decoupled_feature_metadata);
@@ -218,8 +222,10 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         let existing_shared =
             shared_key.and_then(|key| self.find_shared_vertex_slot(coords, key, family));
         let vertices = match &existing_shared {
-            Some((_, s)) if source_vertices.is_empty() => s.vertex_count,
-            _ => source_vertices.len() as u64,
+            Some((_, s)) if prepacked_verts.is_none() && source_vertices.is_empty() => {
+                s.vertex_count
+            }
+            _ => prepacked_verts.map_or(source_vertices.len(), |v| v.len()) as u64,
         };
         let records_u64 = records as u64;
         if !self.decoupled_feature_metadata && records_u64 > vertices {
@@ -251,12 +257,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             FmStorageKind::None
         };
 
-        let (index_u16, index_bytes) = self.plan_index_upload(
-            &geometry.buffer.indices,
-            geometry.usable_indices,
-            vertices,
-            strides,
-        );
+        let (index_u16, index_bytes) = self.plan_geometry_index_upload(geometry, vertices, strides);
 
         let (alloc, first_vertex_u32, first_index_u32, uploaded_vertices) =
             if let Some((vp, shared_info)) = existing_shared {
@@ -372,23 +373,9 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         };
 
         if uploaded_vertices {
-            let mut scratch = std::mem::take(&mut self.vertex_scratch);
-            let gpu_verts =
-                V::encode_vertices(&entry.style_layer.type_, source_vertices, &mut scratch);
-            queue.write_buffer(
-                &self.vertex_slab_of(entry.vertex_page).vertices.inner,
-                entry.buffer_vertices.start,
-                bytemuck::cast_slice(gpu_verts),
-            );
-            self.vertex_scratch = scratch;
+            self.write_geometry_vertices(queue, &entry, prepacked_verts, source_vertices);
         }
-        self.write_uploaded_indices(
-            queue,
-            &entry,
-            &geometry.buffer.indices,
-            geometry.usable_indices,
-            index_bytes,
-        );
+        self.write_geometry_indices(queue, &entry, geometry, index_bytes);
         if strides.layer_metadata > 0 && entry.layer_page != NO_SLAB {
             queue.write_buffer(
                 self.metadata_for(&entry),

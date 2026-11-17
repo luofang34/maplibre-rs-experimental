@@ -266,7 +266,7 @@ fn vector_layer<T: VectorTransferables, C: Context>(
             tessellator.feature_paint,
         ),
         layer_header(layer),
-        style.id.clone(),
+        style,
     )
 }
 

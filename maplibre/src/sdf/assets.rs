@@ -14,10 +14,6 @@ pub mod wire;
 #[allow(unused_imports)]
 pub(crate) use cache::{fetch, tiles};
 pub use cache::{AssetCache, AssetFailure};
-#[doc(hidden)]
-pub use load::spawn_worker_symbol_prefetch;
-#[cfg(target_arch = "wasm32")]
-pub(crate) use load::warm_style_symbol_assets;
 pub use load::{load_symbol_assets, SymbolAssetConfig, SymbolAssetError};
 #[allow(unused_imports)]
 pub(crate) use load::{

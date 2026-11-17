@@ -266,7 +266,11 @@ impl MapController {
                     );
                 let context = map.context().ok()?;
                 let stats = context.last_frame_stats();
-                if stats.frame > 0 && !context.needs_redraw() && !has_arrivals {
+                if stats.frame > 0
+                    && !context.needs_redraw()
+                    && !context.has_pending_drapes()
+                    && !has_arrivals
+                {
                     Some(CameraState::of(context))
                 } else {
                     None
