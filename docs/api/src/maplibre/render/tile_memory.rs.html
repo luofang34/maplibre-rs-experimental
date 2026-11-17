@@ -190,8 +190,9 @@
 <a href=#190 id=190 data-nosnippet>190</a><span class="kw">fn </span>vector_bytes(layer: <span class="kw-2">&amp;</span>AvailableVectorLayerBucket) -&gt; usize {
 <a href=#191 id=191 data-nosnippet>191</a>    capacity(<span class="kw-2">&amp;</span>layer.buffer.buffer.vertices)
 <a href=#192 id=192 data-nosnippet>192</a>        + capacity(<span class="kw-2">&amp;</span>layer.buffer.buffer.indices)
-<a href=#193 id=193 data-nosnippet>193</a>        + capacity(<span class="kw-2">&amp;</span>layer.feature_indices)
-<a href=#194 id=194 data-nosnippet>194</a>        + capacity(<span class="kw-2">&amp;</span>layer.feature_colors)
-<a href=#195 id=195 data-nosnippet>195</a>        + capacity(<span class="kw-2">&amp;</span>layer.feature_sort_keys)
-<a href=#196 id=196 data-nosnippet>196</a>}
+<a href=#193 id=193 data-nosnippet>193</a>        + layer.buffer.prepacked_bytes()
+<a href=#194 id=194 data-nosnippet>194</a>        + capacity(<span class="kw-2">&amp;</span>layer.feature_indices)
+<a href=#195 id=195 data-nosnippet>195</a>        + capacity(<span class="kw-2">&amp;</span>layer.feature_colors)
+<a href=#196 id=196 data-nosnippet>196</a>        + capacity(<span class="kw-2">&amp;</span>layer.feature_sort_keys)
+<a href=#197 id=197 data-nosnippet>197</a>}
 </code></pre></div></section></main></body></html>

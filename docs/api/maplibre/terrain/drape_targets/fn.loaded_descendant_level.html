@@ -2,7 +2,7 @@
     coords: <a class="struct" href="../../coords/struct.WorldTileCoords.html" title="struct maplibre::coords::WorldTileCoords">WorldTileCoords</a>,
     wanted: &amp;[<a class="struct" href="../../coords/struct.WorldTileCoords.html" title="struct maplibre::coords::WorldTileCoords">WorldTileCoords</a>],
     sources: &amp;impl <a class="trait" href="../../render/tile_view_pattern/trait.HasTile.html" title="trait maplibre::render::tile_view_pattern::HasTile">HasTile</a>,
-    world: &amp;<a class="struct" href="../../tcs/world/struct.World.html" title="struct maplibre::tcs::world::World">World</a>,
+    world: &amp;<a class="type" href="../../tcs/world/type.World.html" title="type maplibre::tcs::world::World">World</a>,
 ) -&gt; <a class="enum" href="https://doc.rust-lang.org/1.100.0/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="struct" href="https://doc.rust-lang.org/1.100.0/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="struct" href="../../coords/struct.WorldTileCoords.html" title="struct maplibre::coords::WorldTileCoords">WorldTileCoords</a>&gt;&gt;</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Every tile of the wanted level below a terrain tile, when all of them have loaded.</p>
 <p>A view that sees only part of the terrain tile wants only the source tiles in sight, and
 that subset changes as the view moves across it, which would redraw the drape each time.

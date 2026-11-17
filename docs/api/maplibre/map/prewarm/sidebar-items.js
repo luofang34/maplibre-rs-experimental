@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_PREWARM_DEM_TILES","MAX_PREWARM_RASTER_TILES","MAX_PREWARM_VECTOR_TILES"],"fn":["prepare_io_and_prewarm","prewarm_initial_tiles"],"struct":["PrewarmedRequests","PrewarmedVector"]};

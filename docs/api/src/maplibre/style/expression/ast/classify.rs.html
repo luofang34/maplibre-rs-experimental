@@ -88,19 +88,25 @@
 <a href=#88 id=88 data-nosnippet>88</a>    </span><span class="kw">pub fn </span>is_constant(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
 <a href=#89 id=89 data-nosnippet>89</a>        <span class="kw">match </span><span class="self">self </span>{
 <a href=#90 id=90 data-nosnippet>90</a>            <span class="comment">// Whether an image exists is known only where it is drawn.
-<a href=#91 id=91 data-nosnippet>91</a>            </span><span class="self">Self</span>::Global(<span class="kw">_</span>) | <span class="self">Self</span>::GlobalState(<span class="kw">_</span>) | <span class="self">Self</span>::Image(<span class="kw">_</span>) =&gt; <span class="bool-val">false</span>,
-<a href=#92 id=92 data-nosnippet>92</a>            <span class="kw">_ </span>=&gt; <span class="self">self</span>.is_feature_constant() &amp;&amp; <span class="self">self</span>.children_all(<span class="self">Self</span>::is_constant),
-<a href=#93 id=93 data-nosnippet>93</a>        }
-<a href=#94 id=94 data-nosnippet>94</a>    }
-<a href=#95 id=95 data-nosnippet>95</a>
-<a href=#96 id=96 data-nosnippet>96</a>    <span class="kw">fn </span>children_all(<span class="kw-2">&amp;</span><span class="self">self</span>, predicate: <span class="kw">fn</span>(<span class="kw-2">&amp;</span>Expression) -&gt; bool) -&gt; bool {
-<a href=#97 id=97 data-nosnippet>97</a>        <span class="kw">let </span><span class="kw-2">mut </span>all = <span class="bool-val">true</span>;
-<a href=#98 id=98 data-nosnippet>98</a>        <span class="self">self</span>.for_each_child(<span class="kw-2">&amp;mut </span>|child| {
-<a href=#99 id=99 data-nosnippet>99</a>            <span class="kw">if </span>all &amp;&amp; !predicate(child) {
-<a href=#100 id=100 data-nosnippet>100</a>                all = <span class="bool-val">false</span>;
-<a href=#101 id=101 data-nosnippet>101</a>            }
-<a href=#102 id=102 data-nosnippet>102</a>        });
-<a href=#103 id=103 data-nosnippet>103</a>        all
-<a href=#104 id=104 data-nosnippet>104</a>    }
-<a href=#105 id=105 data-nosnippet>105</a>}
+<a href=#91 id=91 data-nosnippet>91</a>            </span><span class="self">Self</span>::Global(<span class="kw">_</span>)
+<a href=#92 id=92 data-nosnippet>92</a>            | <span class="self">Self</span>::GlobalState(<span class="kw">_</span>)
+<a href=#93 id=93 data-nosnippet>93</a>            | <span class="self">Self</span>::Image(<span class="kw">_</span>)
+<a href=#94 id=94 data-nosnippet>94</a>            | <span class="self">Self</span>::Coerce {
+<a href=#95 id=95 data-nosnippet>95</a>                coercion: Coercion::ResolvedImage,
+<a href=#96 id=96 data-nosnippet>96</a>                ..
+<a href=#97 id=97 data-nosnippet>97</a>            } =&gt; <span class="bool-val">false</span>,
+<a href=#98 id=98 data-nosnippet>98</a>            <span class="kw">_ </span>=&gt; <span class="self">self</span>.is_feature_constant() &amp;&amp; <span class="self">self</span>.children_all(<span class="self">Self</span>::is_constant),
+<a href=#99 id=99 data-nosnippet>99</a>        }
+<a href=#100 id=100 data-nosnippet>100</a>    }
+<a href=#101 id=101 data-nosnippet>101</a>
+<a href=#102 id=102 data-nosnippet>102</a>    <span class="kw">fn </span>children_all(<span class="kw-2">&amp;</span><span class="self">self</span>, predicate: <span class="kw">fn</span>(<span class="kw-2">&amp;</span>Expression) -&gt; bool) -&gt; bool {
+<a href=#103 id=103 data-nosnippet>103</a>        <span class="kw">let </span><span class="kw-2">mut </span>all = <span class="bool-val">true</span>;
+<a href=#104 id=104 data-nosnippet>104</a>        <span class="self">self</span>.for_each_child(<span class="kw-2">&amp;mut </span>|child| {
+<a href=#105 id=105 data-nosnippet>105</a>            <span class="kw">if </span>all &amp;&amp; !predicate(child) {
+<a href=#106 id=106 data-nosnippet>106</a>                all = <span class="bool-val">false</span>;
+<a href=#107 id=107 data-nosnippet>107</a>            }
+<a href=#108 id=108 data-nosnippet>108</a>        });
+<a href=#109 id=109 data-nosnippet>109</a>        all
+<a href=#110 id=110 data-nosnippet>110</a>    }
+<a href=#111 id=111 data-nosnippet>111</a>}
 </code></pre></div></section></main></body></html>

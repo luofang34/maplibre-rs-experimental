@@ -1,6 +1,6 @@
 <!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `maplibre/src/render/tile_view_pattern/pattern/cover.rs`."><title>cover.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="maplibre" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">maplibre/render/tile_view_pattern/pattern/</div>cover.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Source shape selection, covering overlap pairing, and sub-tile clip rectangles.
 <a href=#2 id=2 data-nosnippet>2</a>
-<a href=#3 id=3 data-nosnippet>3</a></span><span class="kw">use </span>std::collections::HashSet;
+<a href=#3 id=3 data-nosnippet>3</a></span><span class="kw">use </span>rustc_hash::FxHashSet;
 <a href=#4 id=4 data-nosnippet>4</a>
 <a href=#5 id=5 data-nosnippet>5</a><span class="kw">use super</span>::{CHILDREN_SEARCH_DEPTH, COMPLETE_CHILDREN_SEARCH_DEPTH};
 <a href=#6 id=6 data-nosnippet>6</a><span class="kw">use crate</span>::{
@@ -17,7 +17,7 @@
 <a href=#17 id=17 data-nosnippet>17</a>    coords: WorldTileCoords,
 <a href=#18 id=18 data-nosnippet>18</a>    zoom: Zoom,
 <a href=#19 id=19 data-nosnippet>19</a>    world: <span class="kw-2">&amp;</span>World,
-<a href=#20 id=20 data-nosnippet>20</a>    used_parents: <span class="kw-2">&amp;mut </span>HashSet&lt;WorldTileCoords&gt;,
+<a href=#20 id=20 data-nosnippet>20</a>    used_parents: <span class="kw-2">&amp;mut </span>FxHashSet&lt;WorldTileCoords&gt;,
 <a href=#21 id=21 data-nosnippet>21</a>) -&gt; SourceShapes {
 <a href=#22 id=22 data-nosnippet>22</a>    source_shapes_bounded(container, coords, zoom, world, used_parents, <span class="prelude-val">None</span>)
 <a href=#23 id=23 data-nosnippet>23</a>}
@@ -27,7 +27,7 @@
 <a href=#27 id=27 data-nosnippet>27</a>    coords: WorldTileCoords,
 <a href=#28 id=28 data-nosnippet>28</a>    zoom: Zoom,
 <a href=#29 id=29 data-nosnippet>29</a>    world: <span class="kw-2">&amp;</span>World,
-<a href=#30 id=30 data-nosnippet>30</a>    used_parents: <span class="kw-2">&amp;mut </span>HashSet&lt;WorldTileCoords&gt;,
+<a href=#30 id=30 data-nosnippet>30</a>    used_parents: <span class="kw-2">&amp;mut </span>FxHashSet&lt;WorldTileCoords&gt;,
 <a href=#31 id=31 data-nosnippet>31</a>    max_zoom: <span class="prelude-ty">Option</span>&lt;u8&gt;,
 <a href=#32 id=32 data-nosnippet>32</a>) -&gt; SourceShapes {
 <a href=#33 id=33 data-nosnippet>33</a>    <span class="kw">let </span>max_child_depth = max_zoom.map_or(usize::MAX, |max_z| {
@@ -60,7 +60,7 @@
 <a href=#60 id=60 data-nosnippet>60</a>    coords: WorldTileCoords,
 <a href=#61 id=61 data-nosnippet>61</a>    tiles: Vec&lt;WorldTileCoords&gt;,
 <a href=#62 id=62 data-nosnippet>62</a>    zoom: Zoom,
-<a href=#63 id=63 data-nosnippet>63</a>    used_parents: <span class="kw-2">&amp;mut </span>HashSet&lt;WorldTileCoords&gt;,
+<a href=#63 id=63 data-nosnippet>63</a>    used_parents: <span class="kw-2">&amp;mut </span>FxHashSet&lt;WorldTileCoords&gt;,
 <a href=#64 id=64 data-nosnippet>64</a>) -&gt; SourceShapes {
 <a href=#65 id=65 data-nosnippet>65</a>    <span class="kw">if let </span>[parent] = tiles.as_slice() {
 <a href=#66 id=66 data-nosnippet>66</a>        <span class="comment">// Adjacent view tiles sharing an ancestor must not blend that ancestor repeatedly.

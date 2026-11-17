@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"macro":[["impl_resource_query",1]],"struct":["Resources"],"trait":["Resource","ResourceQuery","ResourceQueryMut"]};
+window.SIDEBAR_ITEMS = {"struct":["Resources"],"trait":["Resource","ResourceQuery","ResourceQueryMut"]};

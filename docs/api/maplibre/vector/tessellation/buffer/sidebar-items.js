@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["OverAlignedVertexBuffer"],"trait":["Align"]};
+window.SIDEBAR_ITEMS = {"struct":["OverAlignedVertexBuffer","PrepackedGpuGeometry"],"trait":["Align"]};

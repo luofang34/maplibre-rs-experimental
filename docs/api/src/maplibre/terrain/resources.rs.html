@@ -39,8 +39,8 @@
 <a href=#39 id=39 data-nosnippet>39</a>// multiple of the 256-byte offset alignment every backend accepts.
 <a href=#40 id=40 data-nosnippet>40</a></span><span class="kw">const _</span>: () = <span class="macro">assert!</span>(std::mem::size_of::&lt;TerrainTileUniforms&gt;() <span class="kw">as </span>u64 &lt;= UNIFORM_STRIDE);
 <a href=#41 id=41 data-nosnippet>41</a><span class="kw">const _</span>: () = <span class="macro">assert!</span>(std::mem::size_of::&lt;TerrainTileUniforms&gt;() == <span class="number">512</span>);
-<a href=#42 id=42 data-nosnippet>42</a><span class="doccomment">/// Largest number of terrain tiles drawn in one frame.
-<a href=#43 id=43 data-nosnippet>43</a></span><span class="kw">const </span>UNIFORM_CAPACITY: u64 = <span class="number">256</span>;
+<a href=#42 id=42 data-nosnippet>42</a><span class="doccomment">/// Largest number of terrain tiles drawn in one frame, matching `globe_view_region` / `MAX_N_TILES`.
+<a href=#43 id=43 data-nosnippet>43</a></span><span class="kw">const </span>UNIFORM_CAPACITY: u64 = <span class="number">512</span>;
 <a href=#44 id=44 data-nosnippet>44</a>
 <a href=#45 id=45 data-nosnippet>45</a><span class="doccomment">/// Per-tile inputs of the terrain shaders, one block per drawn tile.
 <a href=#46 id=46 data-nosnippet>46</a></span><span class="attr">#[repr(C)]

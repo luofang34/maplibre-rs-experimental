@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["has_active_ancestor","is_zero_opacity_vector_layer","queue_system"],"struct":["VectorQueueScratch"]};
+window.SIDEBAR_ITEMS = {"fn":["has_active_ancestor","queue_system"],"mod":["phase_cache"]};

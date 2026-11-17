@@ -2,8 +2,8 @@
     container: <a class="primitive" href="https://doc.rust-lang.org/1.100.0/std/primitive.reference.html">&amp;T</a>,
     coords: <a class="struct" href="../../../../coords/struct.WorldTileCoords.html" title="struct maplibre::coords::WorldTileCoords">WorldTileCoords</a>,
     zoom: <a class="struct" href="../../../../coords/struct.Zoom.html" title="struct maplibre::coords::Zoom">Zoom</a>,
-    world: &amp;<a class="struct" href="../../../../tcs/world/struct.World.html" title="struct maplibre::tcs::world::World">World</a>,
-    used_parents: &amp;mut <a class="struct" href="https://doc.rust-lang.org/1.100.0/std/collections/hash/set/struct.HashSet.html" title="struct std::collections::hash::set::HashSet">HashSet</a>&lt;<a class="struct" href="../../../../coords/struct.WorldTileCoords.html" title="struct maplibre::coords::WorldTileCoords">WorldTileCoords</a>&gt;,
+    world: &amp;<a class="type" href="../../../../tcs/world/type.World.html" title="type maplibre::tcs::world::World">World</a>,
+    used_parents: &amp;mut FxHashSet&lt;<a class="struct" href="../../../../coords/struct.WorldTileCoords.html" title="struct maplibre::coords::WorldTileCoords">WorldTileCoords</a>&gt;,
 ) -&gt; <a class="enum" href="../../enum.SourceShapes.html" title="enum maplibre::render::tile_view_pattern::SourceShapes">SourceShapes</a></code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>The loaded shapes nearest to <code>coords</code> in the pyramid: the tile itself, complete children,
 a parent, or whatever children exist. A parent already standing in for another view tile
 is not drawn twice.</p>

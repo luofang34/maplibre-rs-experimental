@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["GUARDBAND_HIGH","GUARDBAND_LOW","MAX_LINE_METRIC_LENGTH"],"fn":["clip_segment","clip_to_guardband","in_guardband","needs_guardband_clip"],"struct":["ClipState"]};

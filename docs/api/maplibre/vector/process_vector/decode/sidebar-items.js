@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["decode_mvt","decode_tile","decode_tile_for_layers"]};

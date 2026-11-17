@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"macro":[["impl_component_query",1]],"static":["EMPTY_PYRAMID"],"struct":["Tile","TileSpawnResult","Tiles"],"trait":["ComponentQuery","ComponentQueryMut","TileComponent"]};
+window.SIDEBAR_ITEMS = {"struct":["Tile","TileSpawnResult"],"trait":["ComponentQuery","ComponentQueryMut","TileComponent","TileGeometryStore"],"type":["Tiles"]};

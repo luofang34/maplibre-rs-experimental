@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["compile_input","eval_input","literal_str","stop_color","stop_number"],"struct":["ColorRamp","PropertyInput","ScalarRamp"]};

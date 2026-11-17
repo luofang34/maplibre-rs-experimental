@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"enum":["PyramidCover"],"fn":["subtree_morton_range"]};

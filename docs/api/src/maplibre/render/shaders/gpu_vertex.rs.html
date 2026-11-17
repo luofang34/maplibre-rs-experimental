@@ -122,173 +122,174 @@
 <a href=#122 id=122 data-nosnippet>122</a></span><span class="kw">fn </span>encode_line_vertex(v: <span class="kw-2">&amp;</span>ShaderVertex) -&gt; GpuShaderVertex {
 <a href=#123 id=123 data-nosnippet>123</a>    <span class="kw">let </span>w0 = pack_tile_pos_q2(v.position);
 <a href=#124 id=124 data-nosnippet>124</a>    <span class="kw">let </span>w1 = pack_f16_pair(v.normal[<span class="number">0</span>], v.normal[<span class="number">1</span>]);
-<a href=#125 id=125 data-nosnippet>125</a>    <span class="kw">let </span>dist_q3 = (v.distance.max(<span class="number">0.0</span>) * <span class="number">8.0</span>).round().min(<span class="number">16_777_215.0</span>) <span class="kw">as </span>u32;
-<a href=#126 id=126 data-nosnippet>126</a>    <span class="kw">let </span>spatial = v.elevation &gt; -<span class="number">1e20</span>;
-<a href=#127 id=127 data-nosnippet>127</a>    <span class="kw">let </span>style_bits = v.edge_distance.to_bits() &amp; <span class="number">0x7f_ffff</span>;
-<a href=#128 id=128 data-nosnippet>128</a>    <span class="kw">let </span>per_feature = style_bits != <span class="number">0</span>;
-<a href=#129 id=129 data-nosnippet>129</a>    <span class="kw">let </span>width_q4 = ((style_bits &gt;&gt; <span class="number">11</span>) &amp; <span class="number">0xfff</span>).min(<span class="number">0x7ff</span>);
-<a href=#130 id=130 data-nosnippet>130</a>    <span class="kw">let </span>offset_q3 = (((style_bits &amp; <span class="number">0x7ff</span>) <span class="kw">as </span>i32 - <span class="number">1024 </span>+ <span class="number">512</span>).clamp(<span class="number">0</span>, <span class="number">1023</span>)) <span class="kw">as </span>u32;
-<a href=#131 id=131 data-nosnippet>131</a>
-<a href=#132 id=132 data-nosnippet>132</a>    <span class="kw">if </span>!spatial {
-<a href=#133 id=133 data-nosnippet>133</a>        <span class="kw">let </span>stroke_bits = v.elevation.to_bits() &amp; <span class="number">0x7f_ffff</span>;
-<a href=#134 id=134 data-nosnippet>134</a>        <span class="kw">let </span>neg_side = ((stroke_bits &gt;&gt; <span class="number">22</span>) &amp; <span class="number">1</span>) != <span class="number">0</span>;
-<a href=#135 id=135 data-nosnippet>135</a>        <span class="kw">let </span>gap_raw = (stroke_bits &gt;&gt; <span class="number">11</span>) &amp; <span class="number">0x7ff</span>;
-<a href=#136 id=136 data-nosnippet>136</a>        <span class="kw">let </span>blur_raw = stroke_bits &amp; <span class="number">0x7ff</span>;
-<a href=#137 id=137 data-nosnippet>137</a>        <span class="kw">let </span>gap_u8 = <span class="kw">if </span>gap_raw == <span class="number">0x7ff </span>{
-<a href=#138 id=138 data-nosnippet>138</a>            <span class="number">0xff
-<a href=#139 id=139 data-nosnippet>139</a>        </span>} <span class="kw">else </span>{
-<a href=#140 id=140 data-nosnippet>140</a>            gap_raw.min(<span class="number">0xfe</span>)
-<a href=#141 id=141 data-nosnippet>141</a>        };
-<a href=#142 id=142 data-nosnippet>142</a>        <span class="kw">let </span>blur_u8 = <span class="kw">if </span>blur_raw == <span class="number">0x7ff </span>{
-<a href=#143 id=143 data-nosnippet>143</a>            <span class="number">0xff
-<a href=#144 id=144 data-nosnippet>144</a>        </span>} <span class="kw">else </span>{
-<a href=#145 id=145 data-nosnippet>145</a>            blur_raw.min(<span class="number">0xfe</span>)
-<a href=#146 id=146 data-nosnippet>146</a>        };
-<a href=#147 id=147 data-nosnippet>147</a>        <span class="kw">let </span>w2 = dist_q3 | (blur_u8 &lt;&lt; <span class="number">24</span>);
-<a href=#148 id=148 data-nosnippet>148</a>        <span class="kw">let </span>w3 = gap_u8
-<a href=#149 id=149 data-nosnippet>149</a>            | (offset_q3 &lt;&lt; <span class="number">8</span>)
-<a href=#150 id=150 data-nosnippet>150</a>            | (width_q4 &lt;&lt; <span class="number">18</span>)
-<a href=#151 id=151 data-nosnippet>151</a>            | (u32::from(per_feature) &lt;&lt; <span class="number">29</span>)
-<a href=#152 id=152 data-nosnippet>152</a>            | (u32::from(neg_side) &lt;&lt; <span class="number">30</span>);
-<a href=#153 id=153 data-nosnippet>153</a>        GpuShaderVertex([w0, w1, w2, w3])
-<a href=#154 id=154 data-nosnippet>154</a>    } <span class="kw">else </span>{
-<a href=#155 id=155 data-nosnippet>155</a>        <span class="kw">let </span>neg_side = (v.corner_code - v.corner_code.floor()) &gt; <span class="number">0.25</span>;
-<a href=#156 id=156 data-nosnippet>156</a>        <span class="kw">let </span>elev_u16 = ((v.elevation + <span class="number">1000.0</span>).clamp(<span class="number">0.0</span>, <span class="number">16383.75</span>) * <span class="number">4.0</span>).round() <span class="kw">as </span>u32 &amp; <span class="number">0xffff</span>;
-<a href=#157 id=157 data-nosnippet>157</a>        <span class="kw">let </span>w2 = dist_q3 | (((elev_u16 &gt;&gt; <span class="number">8</span>) &amp; <span class="number">0xff</span>) &lt;&lt; <span class="number">24</span>);
-<a href=#158 id=158 data-nosnippet>158</a>        <span class="kw">let </span>w3 = (elev_u16 &amp; <span class="number">0xff</span>)
-<a href=#159 id=159 data-nosnippet>159</a>            | (offset_q3 &lt;&lt; <span class="number">8</span>)
-<a href=#160 id=160 data-nosnippet>160</a>            | (width_q4 &lt;&lt; <span class="number">18</span>)
-<a href=#161 id=161 data-nosnippet>161</a>            | (u32::from(per_feature) &lt;&lt; <span class="number">29</span>)
-<a href=#162 id=162 data-nosnippet>162</a>            | (u32::from(neg_side) &lt;&lt; <span class="number">30</span>)
-<a href=#163 id=163 data-nosnippet>163</a>            | (<span class="number">1_u32 </span>&lt;&lt; <span class="number">31</span>);
-<a href=#164 id=164 data-nosnippet>164</a>        GpuShaderVertex([w0, w1, w2, w3])
-<a href=#165 id=165 data-nosnippet>165</a>    }
-<a href=#166 id=166 data-nosnippet>166</a>}
-<a href=#167 id=167 data-nosnippet>167</a>
-<a href=#168 id=168 data-nosnippet>168</a><span class="attr">#[inline]
-<a href=#169 id=169 data-nosnippet>169</a></span><span class="kw">fn </span>encode_extrusion_vertex(v: <span class="kw-2">&amp;</span>ShaderVertex) -&gt; GpuShaderVertex {
-<a href=#170 id=170 data-nosnippet>170</a>    <span class="kw">let </span>w0 = pack_tile_pos_q2(v.position);
-<a href=#171 id=171 data-nosnippet>171</a>    <span class="kw">let </span>len = v.normal[<span class="number">0</span>].hypot(v.normal[<span class="number">1</span>]);
-<a href=#172 id=172 data-nosnippet>172</a>    <span class="kw">let </span>kind = <span class="kw">if </span>len &lt;= <span class="number">0.1 </span>{
-<a href=#173 id=173 data-nosnippet>173</a>        <span class="number">0_u32
-<a href=#174 id=174 data-nosnippet>174</a>    </span>} <span class="kw">else if </span>len &lt;= <span class="number">0.5 </span>{
-<a href=#175 id=175 data-nosnippet>175</a>        <span class="number">1_u32
-<a href=#176 id=176 data-nosnippet>176</a>    </span>} <span class="kw">else if </span>len &lt;= <span class="number">1.5 </span>{
-<a href=#177 id=177 data-nosnippet>177</a>        <span class="number">2_u32
-<a href=#178 id=178 data-nosnippet>178</a>    </span>} <span class="kw">else </span>{
-<a href=#179 id=179 data-nosnippet>179</a>        <span class="number">3_u32
-<a href=#180 id=180 data-nosnippet>180</a>    </span>};
-<a href=#181 id=181 data-nosnippet>181</a>    <span class="kw">let </span>angle_u14 = <span class="kw">if </span>kind &gt;= <span class="number">2 </span>{
-<a href=#182 id=182 data-nosnippet>182</a>        (v.normal[<span class="number">1</span>].atan2(v.normal[<span class="number">0</span>]).rem_euclid(TAU) * (<span class="number">16384.0 </span>/ TAU)).round() <span class="kw">as </span>u32 &amp; <span class="number">0x3fff
-<a href=#183 id=183 data-nosnippet>183</a>    </span>} <span class="kw">else </span>{
-<a href=#184 id=184 data-nosnippet>184</a>        <span class="number">0
-<a href=#185 id=185 data-nosnippet>185</a>    </span>};
-<a href=#186 id=186 data-nosnippet>186</a>    <span class="kw">let </span>datum_code = (v.corner_code / <span class="number">1_048_576.0</span>).floor();
-<a href=#187 id=187 data-nosnippet>187</a>    <span class="kw">let </span>zoom_code = v.corner_code - datum_code * <span class="number">1_048_576.0</span>;
-<a href=#188 id=188 data-nosnippet>188</a>    <span class="kw">let </span>overscale_f = (zoom_code / <span class="number">65536.0</span>).floor();
-<a href=#189 id=189 data-nosnippet>189</a>    <span class="kw">let </span>overscale = overscale_f.clamp(<span class="number">0.0</span>, <span class="number">7.0</span>) <span class="kw">as </span>u32;
-<a href=#190 id=190 data-nosnippet>190</a>    <span class="kw">let </span>rise = zoom_code - overscale_f * <span class="number">65536.0 </span>- <span class="number">32768.0</span>;
-<a href=#191 id=191 data-nosnippet>191</a>    <span class="kw">let </span>edge_u13 = (v.edge_distance.clamp(<span class="number">0.0</span>, <span class="number">16382.0</span>) * <span class="number">0.5</span>).round() <span class="kw">as </span>u32 &amp; <span class="number">0x1fff</span>;
-<a href=#192 id=192 data-nosnippet>192</a>    <span class="kw">let </span>w1 = kind | (angle_u14 &lt;&lt; <span class="number">2</span>) | (overscale &lt;&lt; <span class="number">16</span>) | (edge_u13 &lt;&lt; <span class="number">19</span>);
-<a href=#193 id=193 data-nosnippet>193</a>
-<a href=#194 id=194 data-nosnippet>194</a>    <span class="kw">let </span>base_i24 = (v.distance * <span class="number">16.0</span>).round().clamp(-<span class="number">8_388_608.0</span>, <span class="number">8_388_607.0</span>) <span class="kw">as </span>i32;
-<a href=#195 id=195 data-nosnippet>195</a>    <span class="kw">let </span>height_i24 = (v.elevation * <span class="number">16.0</span>)
-<a href=#196 id=196 data-nosnippet>196</a>        .round()
-<a href=#197 id=197 data-nosnippet>197</a>        .clamp(-<span class="number">8_388_608.0</span>, <span class="number">8_388_607.0</span>) <span class="kw">as </span>i32;
-<a href=#198 id=198 data-nosnippet>198</a>    <span class="kw">let </span>rise_f16 = u32::from(f32_to_f16_bits(rise));
-<a href=#199 id=199 data-nosnippet>199</a>    <span class="kw">let </span>w2 = ((base_i24 <span class="kw">as </span>u32) &amp; <span class="number">0x00ff_ffff</span>) | ((rise_f16 &amp; <span class="number">0xff</span>) &lt;&lt; <span class="number">24</span>);
-<a href=#200 id=200 data-nosnippet>200</a>    <span class="kw">let </span>w3 = ((height_i24 <span class="kw">as </span>u32) &amp; <span class="number">0x00ff_ffff</span>) | (((rise_f16 &gt;&gt; <span class="number">8</span>) &amp; <span class="number">0xff</span>) &lt;&lt; <span class="number">24</span>);
-<a href=#201 id=201 data-nosnippet>201</a>    GpuShaderVertex([w0, w1, w2, w3])
-<a href=#202 id=202 data-nosnippet>202</a>}
-<a href=#203 id=203 data-nosnippet>203</a>
-<a href=#204 id=204 data-nosnippet>204</a><span class="attr">#[inline]
-<a href=#205 id=205 data-nosnippet>205</a></span><span class="kw">fn </span>encode_point_vertex(v: <span class="kw-2">&amp;</span>ShaderVertex) -&gt; GpuShaderVertex {
-<a href=#206 id=206 data-nosnippet>206</a>    <span class="kw">let </span>w0 = pack_tile_pos_q2(v.position);
-<a href=#207 id=207 data-nosnippet>207</a>    <span class="kw">let </span>w1 = pack_f16_pair(v.normal[<span class="number">0</span>], v.normal[<span class="number">1</span>]);
-<a href=#208 id=208 data-nosnippet>208</a>    <span class="kw">let </span>w2 = pack_f16_pair(v.distance, v.edge_distance);
-<a href=#209 id=209 data-nosnippet>209</a>    <span class="kw">let </span>elev_f16 = <span class="kw">if </span>v.elevation &gt; -<span class="number">1e20 </span>{
-<a href=#210 id=210 data-nosnippet>210</a>        f32_to_f16_bits(v.elevation.clamp(-<span class="number">30000.0</span>, <span class="number">65504.0</span>))
-<a href=#211 id=211 data-nosnippet>211</a>    } <span class="kw">else </span>{
-<a href=#212 id=212 data-nosnippet>212</a>        f32_to_f16_bits(-<span class="number">65504.0</span>)
-<a href=#213 id=213 data-nosnippet>213</a>    };
-<a href=#214 id=214 data-nosnippet>214</a>    <span class="kw">let </span>corner_floor = v.corner_code.floor();
-<a href=#215 id=215 data-nosnippet>215</a>    <span class="kw">let </span>cell = corner_floor.clamp(<span class="number">0.0</span>, <span class="number">64.0</span>) <span class="kw">as </span>u32;
-<a href=#216 id=216 data-nosnippet>216</a>    <span class="kw">let </span>frac = v.corner_code - corner_floor;
-<a href=#217 id=217 data-nosnippet>217</a>    <span class="kw">let </span>has_stroke_op = frac &gt; <span class="number">0.125</span>;
-<a href=#218 id=218 data-nosnippet>218</a>    <span class="kw">let </span>stroke_op_u8 = <span class="kw">if </span>has_stroke_op {
-<a href=#219 id=219 data-nosnippet>219</a>        (((frac - <span class="number">0.25</span>) * <span class="number">2.0</span>).clamp(<span class="number">0.0</span>, <span class="number">1.0</span>) * <span class="number">255.0</span>).round() <span class="kw">as </span>u32
-<a href=#220 id=220 data-nosnippet>220</a>    } <span class="kw">else </span>{
-<a href=#221 id=221 data-nosnippet>221</a>        <span class="number">0
-<a href=#222 id=222 data-nosnippet>222</a>    </span>};
-<a href=#223 id=223 data-nosnippet>223</a>    <span class="kw">let </span>w3 = u32::from(elev_f16)
-<a href=#224 id=224 data-nosnippet>224</a>        | ((cell | (u32::from(has_stroke_op) &lt;&lt; <span class="number">7</span>)) &lt;&lt; <span class="number">16</span>)
-<a href=#225 id=225 data-nosnippet>225</a>        | (stroke_op_u8 &lt;&lt; <span class="number">24</span>);
-<a href=#226 id=226 data-nosnippet>226</a>    GpuShaderVertex([w0, w1, w2, w3])
-<a href=#227 id=227 data-nosnippet>227</a>}
-<a href=#228 id=228 data-nosnippet>228</a>
-<a href=#229 id=229 data-nosnippet>229</a><span class="doccomment">/// Packs two finite `f32` values into IEEE-754 binary16 lanes matching WGSL `unpack2x16float`.
-<a href=#230 id=230 data-nosnippet>230</a></span><span class="attr">#[inline]
-<a href=#231 id=231 data-nosnippet>231</a></span><span class="kw">pub fn </span>pack_f16_pair(low: f32, high: f32) -&gt; u32 {
-<a href=#232 id=232 data-nosnippet>232</a>    u32::from(f32_to_f16_bits(low)) | (u32::from(f32_to_f16_bits(high)) &lt;&lt; <span class="number">16</span>)
-<a href=#233 id=233 data-nosnippet>233</a>}
-<a href=#234 id=234 data-nosnippet>234</a>
-<a href=#235 id=235 data-nosnippet>235</a><span class="doccomment">/// Converts a finite `f32` (clamped to `[-65504.0, 65504.0]`) into IEEE-754 `binary16` bits.
-<a href=#236 id=236 data-nosnippet>236</a></span><span class="attr">#[inline]
-<a href=#237 id=237 data-nosnippet>237</a></span><span class="kw">pub fn </span>f32_to_f16_bits(val: f32) -&gt; u16 {
-<a href=#238 id=238 data-nosnippet>238</a>    <span class="kw">if </span>!val.is_finite() {
-<a href=#239 id=239 data-nosnippet>239</a>        <span class="kw">return if </span>val.is_nan() {
-<a href=#240 id=240 data-nosnippet>240</a>            <span class="number">0
-<a href=#241 id=241 data-nosnippet>241</a>        </span>} <span class="kw">else if </span>val.is_sign_negative() {
-<a href=#242 id=242 data-nosnippet>242</a>            <span class="number">0xfbff
-<a href=#243 id=243 data-nosnippet>243</a>        </span>} <span class="kw">else </span>{
-<a href=#244 id=244 data-nosnippet>244</a>            <span class="number">0x7bff
-<a href=#245 id=245 data-nosnippet>245</a>        </span>};
-<a href=#246 id=246 data-nosnippet>246</a>    }
-<a href=#247 id=247 data-nosnippet>247</a>    <span class="kw">let </span>clamped = val.clamp(-<span class="number">65504.0</span>, <span class="number">65504.0</span>);
-<a href=#248 id=248 data-nosnippet>248</a>    <span class="kw">let </span>bits = clamped.to_bits();
-<a href=#249 id=249 data-nosnippet>249</a>    <span class="kw">let </span>sign = ((bits &gt;&gt; <span class="number">16</span>) &amp; <span class="number">0x8000</span>) <span class="kw">as </span>u16;
-<a href=#250 id=250 data-nosnippet>250</a>    <span class="kw">let </span>abs_bits = bits &amp; <span class="number">0x7fff_ffff</span>;
-<a href=#251 id=251 data-nosnippet>251</a>    <span class="kw">if </span>abs_bits &lt; <span class="number">0x3300_0000 </span>{
-<a href=#252 id=252 data-nosnippet>252</a>        <span class="kw">return </span>sign;
-<a href=#253 id=253 data-nosnippet>253</a>    }
-<a href=#254 id=254 data-nosnippet>254</a>    <span class="kw">if </span>abs_bits &lt; <span class="number">0x3880_0000 </span>{
-<a href=#255 id=255 data-nosnippet>255</a>        <span class="comment">// Subnormal f16
-<a href=#256 id=256 data-nosnippet>256</a>        </span><span class="kw">let </span>exp = (abs_bits &gt;&gt; <span class="number">23</span>) <span class="kw">as </span>i32 - <span class="number">127</span>;
-<a href=#257 id=257 data-nosnippet>257</a>        <span class="kw">let </span>mant = (abs_bits &amp; <span class="number">0x7f_ffff</span>) | <span class="number">0x80_0000</span>;
-<a href=#258 id=258 data-nosnippet>258</a>        <span class="kw">let </span>shift = (<span class="number">14 </span>- exp) <span class="kw">as </span>u32 + <span class="number">13</span>;
-<a href=#259 id=259 data-nosnippet>259</a>        <span class="kw">let </span>rounded = (mant + (<span class="number">1 </span>&lt;&lt; (shift - <span class="number">1</span>)) - <span class="number">1 </span>+ ((mant &gt;&gt; shift) &amp; <span class="number">1</span>)) &gt;&gt; shift;
-<a href=#260 id=260 data-nosnippet>260</a>        <span class="kw">return </span>sign | (rounded <span class="kw">as </span>u16);
-<a href=#261 id=261 data-nosnippet>261</a>    }
-<a href=#262 id=262 data-nosnippet>262</a>    <span class="kw">let </span>exp16 = (((abs_bits &gt;&gt; <span class="number">23</span>) <span class="kw">as </span>i32 - <span class="number">127 </span>+ <span class="number">15</span>) <span class="kw">as </span>u32) &lt;&lt; <span class="number">10</span>;
-<a href=#263 id=263 data-nosnippet>263</a>    <span class="kw">let </span>mant = abs_bits &amp; <span class="number">0x7f_ffff</span>;
-<a href=#264 id=264 data-nosnippet>264</a>    <span class="kw">let </span>round_add = <span class="number">0x0fff </span>+ ((mant &gt;&gt; <span class="number">13</span>) &amp; <span class="number">1</span>);
-<a href=#265 id=265 data-nosnippet>265</a>    <span class="kw">let </span>half = exp16 + ((mant + round_add) &gt;&gt; <span class="number">13</span>);
-<a href=#266 id=266 data-nosnippet>266</a>    sign | (half.min(<span class="number">0x7bff</span>) <span class="kw">as </span>u16)
-<a href=#267 id=267 data-nosnippet>267</a>}
-<a href=#268 id=268 data-nosnippet>268</a>
-<a href=#269 id=269 data-nosnippet>269</a><span class="doccomment">/// Converts IEEE-754 `binary16` bits back to `f32`.
-<a href=#270 id=270 data-nosnippet>270</a></span><span class="attr">#[inline]
-<a href=#271 id=271 data-nosnippet>271</a></span><span class="kw">pub fn </span>f16_bits_to_f32(bits: u16) -&gt; f32 {
-<a href=#272 id=272 data-nosnippet>272</a>    <span class="kw">let </span>sign = u32::from(bits &amp; <span class="number">0x8000</span>) &lt;&lt; <span class="number">16</span>;
-<a href=#273 id=273 data-nosnippet>273</a>    <span class="kw">let </span>exp = u32::from((bits &gt;&gt; <span class="number">10</span>) &amp; <span class="number">0x1f</span>);
-<a href=#274 id=274 data-nosnippet>274</a>    <span class="kw">let </span>mant = u32::from(bits &amp; <span class="number">0x03ff</span>);
-<a href=#275 id=275 data-nosnippet>275</a>    <span class="kw">let </span>f32_bits = <span class="kw">if </span>exp == <span class="number">0 </span>{
-<a href=#276 id=276 data-nosnippet>276</a>        <span class="kw">if </span>mant == <span class="number">0 </span>{
-<a href=#277 id=277 data-nosnippet>277</a>            sign
-<a href=#278 id=278 data-nosnippet>278</a>        } <span class="kw">else </span>{
-<a href=#279 id=279 data-nosnippet>279</a>            <span class="kw">let </span><span class="kw-2">mut </span>m = mant;
-<a href=#280 id=280 data-nosnippet>280</a>            <span class="kw">let </span><span class="kw-2">mut </span>e = <span class="number">127_u32 </span>- <span class="number">14</span>;
-<a href=#281 id=281 data-nosnippet>281</a>            <span class="kw">while </span>(m &amp; <span class="number">0x0400</span>) == <span class="number">0 </span>{
-<a href=#282 id=282 data-nosnippet>282</a>                m &lt;&lt;= <span class="number">1</span>;
-<a href=#283 id=283 data-nosnippet>283</a>                e -= <span class="number">1</span>;
-<a href=#284 id=284 data-nosnippet>284</a>            }
-<a href=#285 id=285 data-nosnippet>285</a>            sign | (e &lt;&lt; <span class="number">23</span>) | ((m &amp; <span class="number">0x03ff</span>) &lt;&lt; <span class="number">13</span>)
-<a href=#286 id=286 data-nosnippet>286</a>        }
-<a href=#287 id=287 data-nosnippet>287</a>    } <span class="kw">else if </span>exp == <span class="number">0x1f </span>{
-<a href=#288 id=288 data-nosnippet>288</a>        sign | <span class="number">0x7f80_0000 </span>| (mant &lt;&lt; <span class="number">13</span>)
-<a href=#289 id=289 data-nosnippet>289</a>    } <span class="kw">else </span>{
-<a href=#290 id=290 data-nosnippet>290</a>        sign | ((exp + <span class="number">127 </span>- <span class="number">15</span>) &lt;&lt; <span class="number">23</span>) | (mant &lt;&lt; <span class="number">13</span>)
-<a href=#291 id=291 data-nosnippet>291</a>    };
-<a href=#292 id=292 data-nosnippet>292</a>    f32::from_bits(f32_bits)
-<a href=#293 id=293 data-nosnippet>293</a>}
+<a href=#125 id=125 data-nosnippet>125</a>    <span class="kw">let </span>dist_i24 = (v.distance * <span class="number">8.0</span>).round().clamp(-<span class="number">8_388_608.0</span>, <span class="number">8_388_607.0</span>) <span class="kw">as </span>i32;
+<a href=#126 id=126 data-nosnippet>126</a>    <span class="kw">let </span>dist_u24 = (dist_i24 <span class="kw">as </span>u32) &amp; <span class="number">0x00ff_ffff</span>;
+<a href=#127 id=127 data-nosnippet>127</a>    <span class="kw">let </span>spatial = v.elevation &gt; -<span class="number">1e20</span>;
+<a href=#128 id=128 data-nosnippet>128</a>    <span class="kw">let </span>style_bits = v.edge_distance.to_bits() &amp; <span class="number">0x7f_ffff</span>;
+<a href=#129 id=129 data-nosnippet>129</a>    <span class="kw">let </span>per_feature = style_bits != <span class="number">0</span>;
+<a href=#130 id=130 data-nosnippet>130</a>    <span class="kw">let </span>width_q4 = ((style_bits &gt;&gt; <span class="number">11</span>) &amp; <span class="number">0xfff</span>).min(<span class="number">0x7ff</span>);
+<a href=#131 id=131 data-nosnippet>131</a>    <span class="kw">let </span>offset_q3 = (((style_bits &amp; <span class="number">0x7ff</span>) <span class="kw">as </span>i32 - <span class="number">1024 </span>+ <span class="number">512</span>).clamp(<span class="number">0</span>, <span class="number">1023</span>)) <span class="kw">as </span>u32;
+<a href=#132 id=132 data-nosnippet>132</a>
+<a href=#133 id=133 data-nosnippet>133</a>    <span class="kw">if </span>!spatial {
+<a href=#134 id=134 data-nosnippet>134</a>        <span class="kw">let </span>stroke_bits = v.elevation.to_bits() &amp; <span class="number">0x7f_ffff</span>;
+<a href=#135 id=135 data-nosnippet>135</a>        <span class="kw">let </span>neg_side = ((stroke_bits &gt;&gt; <span class="number">22</span>) &amp; <span class="number">1</span>) != <span class="number">0</span>;
+<a href=#136 id=136 data-nosnippet>136</a>        <span class="kw">let </span>gap_raw = (stroke_bits &gt;&gt; <span class="number">11</span>) &amp; <span class="number">0x7ff</span>;
+<a href=#137 id=137 data-nosnippet>137</a>        <span class="kw">let </span>blur_raw = stroke_bits &amp; <span class="number">0x7ff</span>;
+<a href=#138 id=138 data-nosnippet>138</a>        <span class="kw">let </span>gap_u8 = <span class="kw">if </span>gap_raw == <span class="number">0x7ff </span>{
+<a href=#139 id=139 data-nosnippet>139</a>            <span class="number">0xff
+<a href=#140 id=140 data-nosnippet>140</a>        </span>} <span class="kw">else </span>{
+<a href=#141 id=141 data-nosnippet>141</a>            gap_raw.min(<span class="number">0xfe</span>)
+<a href=#142 id=142 data-nosnippet>142</a>        };
+<a href=#143 id=143 data-nosnippet>143</a>        <span class="kw">let </span>blur_u8 = <span class="kw">if </span>blur_raw == <span class="number">0x7ff </span>{
+<a href=#144 id=144 data-nosnippet>144</a>            <span class="number">0xff
+<a href=#145 id=145 data-nosnippet>145</a>        </span>} <span class="kw">else </span>{
+<a href=#146 id=146 data-nosnippet>146</a>            blur_raw.min(<span class="number">0xfe</span>)
+<a href=#147 id=147 data-nosnippet>147</a>        };
+<a href=#148 id=148 data-nosnippet>148</a>        <span class="kw">let </span>w2 = dist_u24 | (blur_u8 &lt;&lt; <span class="number">24</span>);
+<a href=#149 id=149 data-nosnippet>149</a>        <span class="kw">let </span>w3 = gap_u8
+<a href=#150 id=150 data-nosnippet>150</a>            | (offset_q3 &lt;&lt; <span class="number">8</span>)
+<a href=#151 id=151 data-nosnippet>151</a>            | (width_q4 &lt;&lt; <span class="number">18</span>)
+<a href=#152 id=152 data-nosnippet>152</a>            | (u32::from(per_feature) &lt;&lt; <span class="number">29</span>)
+<a href=#153 id=153 data-nosnippet>153</a>            | (u32::from(neg_side) &lt;&lt; <span class="number">30</span>);
+<a href=#154 id=154 data-nosnippet>154</a>        GpuShaderVertex([w0, w1, w2, w3])
+<a href=#155 id=155 data-nosnippet>155</a>    } <span class="kw">else </span>{
+<a href=#156 id=156 data-nosnippet>156</a>        <span class="kw">let </span>neg_side = (v.corner_code - v.corner_code.floor()) &gt; <span class="number">0.25</span>;
+<a href=#157 id=157 data-nosnippet>157</a>        <span class="kw">let </span>elev_u16 = ((v.elevation + <span class="number">1000.0</span>).clamp(<span class="number">0.0</span>, <span class="number">16383.75</span>) * <span class="number">4.0</span>).round() <span class="kw">as </span>u32 &amp; <span class="number">0xffff</span>;
+<a href=#158 id=158 data-nosnippet>158</a>        <span class="kw">let </span>w2 = dist_u24 | (((elev_u16 &gt;&gt; <span class="number">8</span>) &amp; <span class="number">0xff</span>) &lt;&lt; <span class="number">24</span>);
+<a href=#159 id=159 data-nosnippet>159</a>        <span class="kw">let </span>w3 = (elev_u16 &amp; <span class="number">0xff</span>)
+<a href=#160 id=160 data-nosnippet>160</a>            | (offset_q3 &lt;&lt; <span class="number">8</span>)
+<a href=#161 id=161 data-nosnippet>161</a>            | (width_q4 &lt;&lt; <span class="number">18</span>)
+<a href=#162 id=162 data-nosnippet>162</a>            | (u32::from(per_feature) &lt;&lt; <span class="number">29</span>)
+<a href=#163 id=163 data-nosnippet>163</a>            | (u32::from(neg_side) &lt;&lt; <span class="number">30</span>)
+<a href=#164 id=164 data-nosnippet>164</a>            | (<span class="number">1_u32 </span>&lt;&lt; <span class="number">31</span>);
+<a href=#165 id=165 data-nosnippet>165</a>        GpuShaderVertex([w0, w1, w2, w3])
+<a href=#166 id=166 data-nosnippet>166</a>    }
+<a href=#167 id=167 data-nosnippet>167</a>}
+<a href=#168 id=168 data-nosnippet>168</a>
+<a href=#169 id=169 data-nosnippet>169</a><span class="attr">#[inline]
+<a href=#170 id=170 data-nosnippet>170</a></span><span class="kw">fn </span>encode_extrusion_vertex(v: <span class="kw-2">&amp;</span>ShaderVertex) -&gt; GpuShaderVertex {
+<a href=#171 id=171 data-nosnippet>171</a>    <span class="kw">let </span>w0 = pack_tile_pos_q2(v.position);
+<a href=#172 id=172 data-nosnippet>172</a>    <span class="kw">let </span>len = v.normal[<span class="number">0</span>].hypot(v.normal[<span class="number">1</span>]);
+<a href=#173 id=173 data-nosnippet>173</a>    <span class="kw">let </span>kind = <span class="kw">if </span>len &lt;= <span class="number">0.1 </span>{
+<a href=#174 id=174 data-nosnippet>174</a>        <span class="number">0_u32
+<a href=#175 id=175 data-nosnippet>175</a>    </span>} <span class="kw">else if </span>len &lt;= <span class="number">0.5 </span>{
+<a href=#176 id=176 data-nosnippet>176</a>        <span class="number">1_u32
+<a href=#177 id=177 data-nosnippet>177</a>    </span>} <span class="kw">else if </span>len &lt;= <span class="number">1.5 </span>{
+<a href=#178 id=178 data-nosnippet>178</a>        <span class="number">2_u32
+<a href=#179 id=179 data-nosnippet>179</a>    </span>} <span class="kw">else </span>{
+<a href=#180 id=180 data-nosnippet>180</a>        <span class="number">3_u32
+<a href=#181 id=181 data-nosnippet>181</a>    </span>};
+<a href=#182 id=182 data-nosnippet>182</a>    <span class="kw">let </span>angle_u14 = <span class="kw">if </span>kind &gt;= <span class="number">2 </span>{
+<a href=#183 id=183 data-nosnippet>183</a>        (v.normal[<span class="number">1</span>].atan2(v.normal[<span class="number">0</span>]).rem_euclid(TAU) * (<span class="number">16384.0 </span>/ TAU)).round() <span class="kw">as </span>u32 &amp; <span class="number">0x3fff
+<a href=#184 id=184 data-nosnippet>184</a>    </span>} <span class="kw">else </span>{
+<a href=#185 id=185 data-nosnippet>185</a>        <span class="number">0
+<a href=#186 id=186 data-nosnippet>186</a>    </span>};
+<a href=#187 id=187 data-nosnippet>187</a>    <span class="kw">let </span>datum_code = (v.corner_code / <span class="number">1_048_576.0</span>).floor();
+<a href=#188 id=188 data-nosnippet>188</a>    <span class="kw">let </span>zoom_code = v.corner_code - datum_code * <span class="number">1_048_576.0</span>;
+<a href=#189 id=189 data-nosnippet>189</a>    <span class="kw">let </span>overscale_f = (zoom_code / <span class="number">65536.0</span>).floor();
+<a href=#190 id=190 data-nosnippet>190</a>    <span class="kw">let </span>overscale = overscale_f.clamp(<span class="number">0.0</span>, <span class="number">7.0</span>) <span class="kw">as </span>u32;
+<a href=#191 id=191 data-nosnippet>191</a>    <span class="kw">let </span>rise = zoom_code - overscale_f * <span class="number">65536.0 </span>- <span class="number">32768.0</span>;
+<a href=#192 id=192 data-nosnippet>192</a>    <span class="kw">let </span>edge_u13 = (v.edge_distance.clamp(<span class="number">0.0</span>, <span class="number">16382.0</span>) * <span class="number">0.5</span>).round() <span class="kw">as </span>u32 &amp; <span class="number">0x1fff</span>;
+<a href=#193 id=193 data-nosnippet>193</a>    <span class="kw">let </span>w1 = kind | (angle_u14 &lt;&lt; <span class="number">2</span>) | (overscale &lt;&lt; <span class="number">16</span>) | (edge_u13 &lt;&lt; <span class="number">19</span>);
+<a href=#194 id=194 data-nosnippet>194</a>
+<a href=#195 id=195 data-nosnippet>195</a>    <span class="kw">let </span>base_i24 = (v.distance * <span class="number">16.0</span>).round().clamp(-<span class="number">8_388_608.0</span>, <span class="number">8_388_607.0</span>) <span class="kw">as </span>i32;
+<a href=#196 id=196 data-nosnippet>196</a>    <span class="kw">let </span>height_i24 = (v.elevation * <span class="number">16.0</span>)
+<a href=#197 id=197 data-nosnippet>197</a>        .round()
+<a href=#198 id=198 data-nosnippet>198</a>        .clamp(-<span class="number">8_388_608.0</span>, <span class="number">8_388_607.0</span>) <span class="kw">as </span>i32;
+<a href=#199 id=199 data-nosnippet>199</a>    <span class="kw">let </span>rise_f16 = u32::from(f32_to_f16_bits(rise));
+<a href=#200 id=200 data-nosnippet>200</a>    <span class="kw">let </span>w2 = ((base_i24 <span class="kw">as </span>u32) &amp; <span class="number">0x00ff_ffff</span>) | ((rise_f16 &amp; <span class="number">0xff</span>) &lt;&lt; <span class="number">24</span>);
+<a href=#201 id=201 data-nosnippet>201</a>    <span class="kw">let </span>w3 = ((height_i24 <span class="kw">as </span>u32) &amp; <span class="number">0x00ff_ffff</span>) | (((rise_f16 &gt;&gt; <span class="number">8</span>) &amp; <span class="number">0xff</span>) &lt;&lt; <span class="number">24</span>);
+<a href=#202 id=202 data-nosnippet>202</a>    GpuShaderVertex([w0, w1, w2, w3])
+<a href=#203 id=203 data-nosnippet>203</a>}
+<a href=#204 id=204 data-nosnippet>204</a>
+<a href=#205 id=205 data-nosnippet>205</a><span class="attr">#[inline]
+<a href=#206 id=206 data-nosnippet>206</a></span><span class="kw">fn </span>encode_point_vertex(v: <span class="kw-2">&amp;</span>ShaderVertex) -&gt; GpuShaderVertex {
+<a href=#207 id=207 data-nosnippet>207</a>    <span class="kw">let </span>w0 = pack_tile_pos_q2(v.position);
+<a href=#208 id=208 data-nosnippet>208</a>    <span class="kw">let </span>w1 = pack_f16_pair(v.normal[<span class="number">0</span>], v.normal[<span class="number">1</span>]);
+<a href=#209 id=209 data-nosnippet>209</a>    <span class="kw">let </span>w2 = pack_f16_pair(v.distance, v.edge_distance);
+<a href=#210 id=210 data-nosnippet>210</a>    <span class="kw">let </span>elev_f16 = <span class="kw">if </span>v.elevation &gt; -<span class="number">1e20 </span>{
+<a href=#211 id=211 data-nosnippet>211</a>        f32_to_f16_bits(v.elevation.clamp(-<span class="number">30000.0</span>, <span class="number">65504.0</span>))
+<a href=#212 id=212 data-nosnippet>212</a>    } <span class="kw">else </span>{
+<a href=#213 id=213 data-nosnippet>213</a>        f32_to_f16_bits(-<span class="number">65504.0</span>)
+<a href=#214 id=214 data-nosnippet>214</a>    };
+<a href=#215 id=215 data-nosnippet>215</a>    <span class="kw">let </span>corner_floor = v.corner_code.floor();
+<a href=#216 id=216 data-nosnippet>216</a>    <span class="kw">let </span>cell = corner_floor.clamp(<span class="number">0.0</span>, <span class="number">64.0</span>) <span class="kw">as </span>u32;
+<a href=#217 id=217 data-nosnippet>217</a>    <span class="kw">let </span>frac = v.corner_code - corner_floor;
+<a href=#218 id=218 data-nosnippet>218</a>    <span class="kw">let </span>has_stroke_op = frac &gt; <span class="number">0.125</span>;
+<a href=#219 id=219 data-nosnippet>219</a>    <span class="kw">let </span>stroke_op_u8 = <span class="kw">if </span>has_stroke_op {
+<a href=#220 id=220 data-nosnippet>220</a>        (((frac - <span class="number">0.25</span>) * <span class="number">2.0</span>).clamp(<span class="number">0.0</span>, <span class="number">1.0</span>) * <span class="number">255.0</span>).round() <span class="kw">as </span>u32
+<a href=#221 id=221 data-nosnippet>221</a>    } <span class="kw">else </span>{
+<a href=#222 id=222 data-nosnippet>222</a>        <span class="number">0
+<a href=#223 id=223 data-nosnippet>223</a>    </span>};
+<a href=#224 id=224 data-nosnippet>224</a>    <span class="kw">let </span>w3 = u32::from(elev_f16)
+<a href=#225 id=225 data-nosnippet>225</a>        | ((cell | (u32::from(has_stroke_op) &lt;&lt; <span class="number">7</span>)) &lt;&lt; <span class="number">16</span>)
+<a href=#226 id=226 data-nosnippet>226</a>        | (stroke_op_u8 &lt;&lt; <span class="number">24</span>);
+<a href=#227 id=227 data-nosnippet>227</a>    GpuShaderVertex([w0, w1, w2, w3])
+<a href=#228 id=228 data-nosnippet>228</a>}
+<a href=#229 id=229 data-nosnippet>229</a>
+<a href=#230 id=230 data-nosnippet>230</a><span class="doccomment">/// Packs two finite `f32` values into IEEE-754 binary16 lanes matching WGSL `unpack2x16float`.
+<a href=#231 id=231 data-nosnippet>231</a></span><span class="attr">#[inline]
+<a href=#232 id=232 data-nosnippet>232</a></span><span class="kw">pub fn </span>pack_f16_pair(low: f32, high: f32) -&gt; u32 {
+<a href=#233 id=233 data-nosnippet>233</a>    u32::from(f32_to_f16_bits(low)) | (u32::from(f32_to_f16_bits(high)) &lt;&lt; <span class="number">16</span>)
+<a href=#234 id=234 data-nosnippet>234</a>}
+<a href=#235 id=235 data-nosnippet>235</a>
+<a href=#236 id=236 data-nosnippet>236</a><span class="doccomment">/// Converts a finite `f32` (clamped to `[-65504.0, 65504.0]`) into IEEE-754 `binary16` bits.
+<a href=#237 id=237 data-nosnippet>237</a></span><span class="attr">#[inline]
+<a href=#238 id=238 data-nosnippet>238</a></span><span class="kw">pub fn </span>f32_to_f16_bits(val: f32) -&gt; u16 {
+<a href=#239 id=239 data-nosnippet>239</a>    <span class="kw">if </span>!val.is_finite() {
+<a href=#240 id=240 data-nosnippet>240</a>        <span class="kw">return if </span>val.is_nan() {
+<a href=#241 id=241 data-nosnippet>241</a>            <span class="number">0
+<a href=#242 id=242 data-nosnippet>242</a>        </span>} <span class="kw">else if </span>val.is_sign_negative() {
+<a href=#243 id=243 data-nosnippet>243</a>            <span class="number">0xfbff
+<a href=#244 id=244 data-nosnippet>244</a>        </span>} <span class="kw">else </span>{
+<a href=#245 id=245 data-nosnippet>245</a>            <span class="number">0x7bff
+<a href=#246 id=246 data-nosnippet>246</a>        </span>};
+<a href=#247 id=247 data-nosnippet>247</a>    }
+<a href=#248 id=248 data-nosnippet>248</a>    <span class="kw">let </span>clamped = val.clamp(-<span class="number">65504.0</span>, <span class="number">65504.0</span>);
+<a href=#249 id=249 data-nosnippet>249</a>    <span class="kw">let </span>bits = clamped.to_bits();
+<a href=#250 id=250 data-nosnippet>250</a>    <span class="kw">let </span>sign = ((bits &gt;&gt; <span class="number">16</span>) &amp; <span class="number">0x8000</span>) <span class="kw">as </span>u16;
+<a href=#251 id=251 data-nosnippet>251</a>    <span class="kw">let </span>abs_bits = bits &amp; <span class="number">0x7fff_ffff</span>;
+<a href=#252 id=252 data-nosnippet>252</a>    <span class="kw">if </span>abs_bits &lt; <span class="number">0x3300_0000 </span>{
+<a href=#253 id=253 data-nosnippet>253</a>        <span class="kw">return </span>sign;
+<a href=#254 id=254 data-nosnippet>254</a>    }
+<a href=#255 id=255 data-nosnippet>255</a>    <span class="kw">if </span>abs_bits &lt; <span class="number">0x3880_0000 </span>{
+<a href=#256 id=256 data-nosnippet>256</a>        <span class="comment">// Subnormal f16
+<a href=#257 id=257 data-nosnippet>257</a>        </span><span class="kw">let </span>exp = (abs_bits &gt;&gt; <span class="number">23</span>) <span class="kw">as </span>i32 - <span class="number">127</span>;
+<a href=#258 id=258 data-nosnippet>258</a>        <span class="kw">let </span>mant = (abs_bits &amp; <span class="number">0x7f_ffff</span>) | <span class="number">0x80_0000</span>;
+<a href=#259 id=259 data-nosnippet>259</a>        <span class="kw">let </span>shift = (<span class="number">14 </span>- exp) <span class="kw">as </span>u32 + <span class="number">13</span>;
+<a href=#260 id=260 data-nosnippet>260</a>        <span class="kw">let </span>rounded = (mant + (<span class="number">1 </span>&lt;&lt; (shift - <span class="number">1</span>)) - <span class="number">1 </span>+ ((mant &gt;&gt; shift) &amp; <span class="number">1</span>)) &gt;&gt; shift;
+<a href=#261 id=261 data-nosnippet>261</a>        <span class="kw">return </span>sign | (rounded <span class="kw">as </span>u16);
+<a href=#262 id=262 data-nosnippet>262</a>    }
+<a href=#263 id=263 data-nosnippet>263</a>    <span class="kw">let </span>exp16 = (((abs_bits &gt;&gt; <span class="number">23</span>) <span class="kw">as </span>i32 - <span class="number">127 </span>+ <span class="number">15</span>) <span class="kw">as </span>u32) &lt;&lt; <span class="number">10</span>;
+<a href=#264 id=264 data-nosnippet>264</a>    <span class="kw">let </span>mant = abs_bits &amp; <span class="number">0x7f_ffff</span>;
+<a href=#265 id=265 data-nosnippet>265</a>    <span class="kw">let </span>round_add = <span class="number">0x0fff </span>+ ((mant &gt;&gt; <span class="number">13</span>) &amp; <span class="number">1</span>);
+<a href=#266 id=266 data-nosnippet>266</a>    <span class="kw">let </span>half = exp16 + ((mant + round_add) &gt;&gt; <span class="number">13</span>);
+<a href=#267 id=267 data-nosnippet>267</a>    sign | (half.min(<span class="number">0x7bff</span>) <span class="kw">as </span>u16)
+<a href=#268 id=268 data-nosnippet>268</a>}
+<a href=#269 id=269 data-nosnippet>269</a>
+<a href=#270 id=270 data-nosnippet>270</a><span class="doccomment">/// Converts IEEE-754 `binary16` bits back to `f32`.
+<a href=#271 id=271 data-nosnippet>271</a></span><span class="attr">#[inline]
+<a href=#272 id=272 data-nosnippet>272</a></span><span class="kw">pub fn </span>f16_bits_to_f32(bits: u16) -&gt; f32 {
+<a href=#273 id=273 data-nosnippet>273</a>    <span class="kw">let </span>sign = u32::from(bits &amp; <span class="number">0x8000</span>) &lt;&lt; <span class="number">16</span>;
+<a href=#274 id=274 data-nosnippet>274</a>    <span class="kw">let </span>exp = u32::from((bits &gt;&gt; <span class="number">10</span>) &amp; <span class="number">0x1f</span>);
+<a href=#275 id=275 data-nosnippet>275</a>    <span class="kw">let </span>mant = u32::from(bits &amp; <span class="number">0x03ff</span>);
+<a href=#276 id=276 data-nosnippet>276</a>    <span class="kw">let </span>f32_bits = <span class="kw">if </span>exp == <span class="number">0 </span>{
+<a href=#277 id=277 data-nosnippet>277</a>        <span class="kw">if </span>mant == <span class="number">0 </span>{
+<a href=#278 id=278 data-nosnippet>278</a>            sign
+<a href=#279 id=279 data-nosnippet>279</a>        } <span class="kw">else </span>{
+<a href=#280 id=280 data-nosnippet>280</a>            <span class="kw">let </span><span class="kw-2">mut </span>m = mant;
+<a href=#281 id=281 data-nosnippet>281</a>            <span class="kw">let </span><span class="kw-2">mut </span>e = <span class="number">127_u32 </span>- <span class="number">14</span>;
+<a href=#282 id=282 data-nosnippet>282</a>            <span class="kw">while </span>(m &amp; <span class="number">0x0400</span>) == <span class="number">0 </span>{
+<a href=#283 id=283 data-nosnippet>283</a>                m &lt;&lt;= <span class="number">1</span>;
+<a href=#284 id=284 data-nosnippet>284</a>                e -= <span class="number">1</span>;
+<a href=#285 id=285 data-nosnippet>285</a>            }
+<a href=#286 id=286 data-nosnippet>286</a>            sign | (e &lt;&lt; <span class="number">23</span>) | ((m &amp; <span class="number">0x03ff</span>) &lt;&lt; <span class="number">13</span>)
+<a href=#287 id=287 data-nosnippet>287</a>        }
+<a href=#288 id=288 data-nosnippet>288</a>    } <span class="kw">else if </span>exp == <span class="number">0x1f </span>{
+<a href=#289 id=289 data-nosnippet>289</a>        sign | <span class="number">0x7f80_0000 </span>| (mant &lt;&lt; <span class="number">13</span>)
+<a href=#290 id=290 data-nosnippet>290</a>    } <span class="kw">else </span>{
+<a href=#291 id=291 data-nosnippet>291</a>        sign | ((exp + <span class="number">127 </span>- <span class="number">15</span>) &lt;&lt; <span class="number">23</span>) | (mant &lt;&lt; <span class="number">13</span>)
+<a href=#292 id=292 data-nosnippet>292</a>    };
+<a href=#293 id=293 data-nosnippet>293</a>    f32::from_bits(f32_bits)
+<a href=#294 id=294 data-nosnippet>294</a>}
 </code></pre></div></section></main></body></html>

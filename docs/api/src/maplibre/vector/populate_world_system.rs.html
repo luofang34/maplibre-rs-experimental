@@ -85,96 +85,100 @@
 <a href=#85 id=85 data-nosnippet>85</a>                }
 <a href=#86 id=86 data-nosnippet>86</a>                VectorLayerBucket::Missing(layer) =&gt; layer.source_layer == message.layer_name(),
 <a href=#87 id=87 data-nosnippet>87</a>            }) {
-<a href=#88 id=88 data-nosnippet>88</a>                component
-<a href=#89 id=89 data-nosnippet>89</a>                    .layers
-<a href=#90 id=90 data-nosnippet>90</a>                    .push(VectorLayerBucket::Missing(message.to_bucket()));
-<a href=#91 id=91 data-nosnippet>91</a>            }
-<a href=#92 id=92 data-nosnippet>92</a>        } <span class="kw">else if </span>message.has_tag(T::LayerTessellated::message_tag()) {
-<a href=#93 id=93 data-nosnippet>93</a>            <span class="kw">let </span><span class="kw-2">mut </span>message = message.into_transferable::&lt;T::LayerTessellated&gt;()<span class="question-mark">?</span>;
-<a href=#94 id=94 data-nosnippet>94</a>            <span class="comment">// A layer removed while its tile was in flight must not come back with the reply.
-<a href=#95 id=95 data-nosnippet>95</a>            </span><span class="kw">let </span>coords = message.coords();
-<a href=#96 id=96 data-nosnippet>96</a>            <span class="kw">let </span><span class="kw-2">mut </span>feature_paint = message.take_feature_paint();
-<a href=#97 id=97 data-nosnippet>97</a>            <span class="kw">let </span><span class="kw-2">mut </span>bucket = message.to_bucket();
-<a href=#98 id=98 data-nosnippet>98</a>            <span class="kw">if </span>tile_retry::accepts(world, coords, RequestKind::Vector, attempt)
-<a href=#99 id=99 data-nosnippet>99</a>                &amp;&amp; style
-<a href=#100 id=100 data-nosnippet>100</a>                    .layers
-<a href=#101 id=101 data-nosnippet>101</a>                    .iter()
-<a href=#102 id=102 data-nosnippet>102</a>                    .any(|layer| layer.id == bucket.style_layer_id)
-<a href=#103 id=103 data-nosnippet>103</a>            {
-<a href=#104 id=104 data-nosnippet>104</a>                <span class="kw">let </span>overscaled_zoom = world
-<a href=#105 id=105 data-nosnippet>105</a>                    .tiles
-<a href=#106 id=106 data-nosnippet>106</a>                    .query::&lt;<span class="kw-2">&amp;</span>VectorLayerBucketComponent&gt;(coords)
-<a href=#107 id=107 data-nosnippet>107</a>                    .map_or(<span class="number">0</span>, |b| b.overscaled_zoom);
-<a href=#108 id=108 data-nosnippet>108</a>                <span class="kw">let </span>retessellate = <span class="kw">super</span>::arrival_sync::sync_arriving_vector_bucket(
-<a href=#109 id=109 data-nosnippet>109</a>                    style,
-<a href=#110 id=110 data-nosnippet>110</a>                    overscaled_zoom,
-<a href=#111 id=111 data-nosnippet>111</a>                    <span class="kw-2">&amp;mut </span>bucket,
-<a href=#112 id=112 data-nosnippet>112</a>                    <span class="kw-2">&amp;mut </span>feature_paint,
-<a href=#113 id=113 data-nosnippet>113</a>                    <span class="kw-2">&amp;mut </span>memo,
-<a href=#114 id=114 data-nosnippet>114</a>                );
-<a href=#115 id=115 data-nosnippet>115</a>                <span class="kw">if let </span><span class="prelude-val">Some</span>(entries) = feature_paint.as_mut() {
-<a href=#116 id=116 data-nosnippet>116</a>                    interner.intern_entries(<span class="kw-2">&amp;</span>world.tiles, coords, entries);
-<a href=#117 id=117 data-nosnippet>117</a>                }
-<a href=#118 id=118 data-nosnippet>118</a>                <span class="kw">super</span>::content::accept_vector_with_paint(world, bucket, feature_paint);
-<a href=#119 id=119 data-nosnippet>119</a>                <span class="kw">if </span>retessellate {
-<a href=#120 id=120 data-nosnippet>120</a>                    tile_retry::refresh_tiles(world, RequestKind::Vector, <span class="kw-2">&amp;</span>[coords]);
-<a href=#121 id=121 data-nosnippet>121</a>                }
-<a href=#122 id=122 data-nosnippet>122</a>            }
-<a href=#123 id=123 data-nosnippet>123</a>        } <span class="kw">else if </span>message.has_tag(T::LayerIndexed::message_tag()) {
-<a href=#124 id=124 data-nosnippet>124</a>            <span class="kw">let </span>message = message.into_transferable::&lt;T::LayerIndexed&gt;()<span class="question-mark">?</span>;
-<a href=#125 id=125 data-nosnippet>125</a>            <span class="kw">if </span>!tile_retry::accepts(world, message.coords(), RequestKind::Vector, attempt)
-<a href=#126 id=126 data-nosnippet>126</a>                || world
-<a href=#127 id=127 data-nosnippet>127</a>                    .tiles
-<a href=#128 id=128 data-nosnippet>128</a>                    .query::&lt;<span class="kw-2">&amp;</span>VectorLayerBucketComponent&gt;(message.coords())
-<a href=#129 id=129 data-nosnippet>129</a>                    .is_none()
-<a href=#130 id=130 data-nosnippet>130</a>            {
-<a href=#131 id=131 data-nosnippet>131</a>                <span class="kw">return </span><span class="prelude-val">Ok</span>(());
-<a href=#132 id=132 data-nosnippet>132</a>            }
-<a href=#133 id=133 data-nosnippet>133</a>            <span class="kw">let </span>coords = message.coords();
-<a href=#134 id=134 data-nosnippet>134</a>            <span class="kw">let </span>source = message.source();
-<a href=#135 id=135 data-nosnippet>135</a>            <span class="kw">let </span><span class="kw-2">mut </span>index = message.to_tile_index();
-<a href=#136 id=136 data-nosnippet>136</a>            <span class="kw">super</span>::arrival_sync::sync_arriving_tile_index(
-<a href=#137 id=137 data-nosnippet>137</a>                style,
-<a href=#138 id=138 data-nosnippet>138</a>                source.as_deref(),
-<a href=#139 id=139 data-nosnippet>139</a>                <span class="kw-2">&amp;mut </span>index,
-<a href=#140 id=140 data-nosnippet>140</a>                <span class="kw-2">&amp;mut </span>memo,
-<a href=#141 id=141 data-nosnippet>141</a>            );
-<a href=#142 id=142 data-nosnippet>142</a>            interner.intern_tile_index(<span class="kw-2">&amp;</span>world.tiles, coords, <span class="kw-2">&amp;mut </span>index);
-<a href=#143 id=143 data-nosnippet>143</a>            world
-<a href=#144 id=144 data-nosnippet>144</a>                .tiles
-<a href=#145 id=145 data-nosnippet>145</a>                .geometry_index
-<a href=#146 id=146 data-nosnippet>146</a>                .index_tile(<span class="kw-2">&amp;</span>coords, source, index);
-<a href=#147 id=147 data-nosnippet>147</a>        }
-<a href=#148 id=148 data-nosnippet>148</a>        <span class="prelude-val">Ok</span>(())
-<a href=#149 id=149 data-nosnippet>149</a>    })
-<a href=#150 id=150 data-nosnippet>150</a>}
-<a href=#151 id=151 data-nosnippet>151</a>
-<a href=#152 id=152 data-nosnippet>152</a><span class="kw">fn </span>finish_tile&lt;T: TileTessellated&gt;(world: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::tcs::world::World, message: <span class="kw-2">&amp;</span>T) {
-<a href=#153 id=153 data-nosnippet>153</a>    <span class="kw">let </span>retained = world
-<a href=#154 id=154 data-nosnippet>154</a>        .tiles
-<a href=#155 id=155 data-nosnippet>155</a>        .query::&lt;<span class="kw-2">&amp;</span><span class="kw">super</span>::content::LayerReplacements&gt;(message.coords())
-<a href=#156 id=156 data-nosnippet>156</a>        .map(|pending| (pending.keep_vector, pending.keep_symbols))
-<a href=#157 id=157 data-nosnippet>157</a>        .unwrap_or_default();
-<a href=#158 id=158 data-nosnippet>158</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(component) = world
-<a href=#159 id=159 data-nosnippet>159</a>        .tiles
-<a href=#160 id=160 data-nosnippet>160</a>        .query_mut::&lt;<span class="kw-2">&amp;mut </span>VectorLayerBucketComponent&gt;(message.coords())
-<a href=#161 id=161 data-nosnippet>161</a>    {
-<a href=#162 id=162 data-nosnippet>162</a>        <span class="kw">let </span>usable = component.done &amp;&amp; !component.failed;
-<a href=#163 id=163 data-nosnippet>163</a>        component.done = <span class="bool-val">true</span>;
-<a href=#164 id=164 data-nosnippet>164</a>        component.failed = message.failed() &amp;&amp; !retained.<span class="number">0 </span>&amp;&amp; !usable;
-<a href=#165 id=165 data-nosnippet>165</a>    }
-<a href=#166 id=166 data-nosnippet>166</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(component) = world
-<a href=#167 id=167 data-nosnippet>167</a>        .tiles
-<a href=#168 id=168 data-nosnippet>168</a>        .query_mut::&lt;<span class="kw-2">&amp;mut </span><span class="kw">crate</span>::sdf::SymbolLayersDataComponent&gt;(message.coords())
-<a href=#169 id=169 data-nosnippet>169</a>    {
-<a href=#170 id=170 data-nosnippet>170</a>        component.pending_assets = message.pending_symbols() &amp;&amp; !retained.<span class="number">1</span>;
-<a href=#171 id=171 data-nosnippet>171</a>    }
-<a href=#172 id=172 data-nosnippet>172</a>    <span class="comment">// A request that could not read its data says nothing about which layers are empty.
-<a href=#173 id=173 data-nosnippet>173</a>    </span><span class="kw">if </span>!message.failed() {
-<a href=#174 id=174 data-nosnippet>174</a>        <span class="kw">super</span>::content::drop_undelivered(world, message.coords());
+<a href=#88 id=88 data-nosnippet>88</a>                component.uploaded_stamp = <span class="prelude-val">None</span>;
+<a href=#89 id=89 data-nosnippet>89</a>                component
+<a href=#90 id=90 data-nosnippet>90</a>                    .layers
+<a href=#91 id=91 data-nosnippet>91</a>                    .push(VectorLayerBucket::Missing(message.to_bucket()));
+<a href=#92 id=92 data-nosnippet>92</a>            }
+<a href=#93 id=93 data-nosnippet>93</a>        } <span class="kw">else if </span>message.has_tag(T::LayerTessellated::message_tag()) {
+<a href=#94 id=94 data-nosnippet>94</a>            <span class="kw">let </span><span class="kw-2">mut </span>message = message.into_transferable::&lt;T::LayerTessellated&gt;()<span class="question-mark">?</span>;
+<a href=#95 id=95 data-nosnippet>95</a>            <span class="comment">// A layer removed while its tile was in flight must not come back with the reply.
+<a href=#96 id=96 data-nosnippet>96</a>            </span><span class="kw">let </span>coords = message.coords();
+<a href=#97 id=97 data-nosnippet>97</a>            <span class="kw">let </span><span class="kw-2">mut </span>feature_paint = message.take_feature_paint();
+<a href=#98 id=98 data-nosnippet>98</a>            <span class="kw">let </span><span class="kw-2">mut </span>bucket = message.to_bucket();
+<a href=#99 id=99 data-nosnippet>99</a>            <span class="kw">if </span>tile_retry::accepts(world, coords, RequestKind::Vector, attempt)
+<a href=#100 id=100 data-nosnippet>100</a>                &amp;&amp; style
+<a href=#101 id=101 data-nosnippet>101</a>                    .layers
+<a href=#102 id=102 data-nosnippet>102</a>                    .iter()
+<a href=#103 id=103 data-nosnippet>103</a>                    .any(|layer| layer.id == bucket.style_layer_id)
+<a href=#104 id=104 data-nosnippet>104</a>            {
+<a href=#105 id=105 data-nosnippet>105</a>                <span class="kw">let </span>overscaled_zoom = world
+<a href=#106 id=106 data-nosnippet>106</a>                    .tiles
+<a href=#107 id=107 data-nosnippet>107</a>                    .query::&lt;<span class="kw-2">&amp;</span>VectorLayerBucketComponent&gt;(coords)
+<a href=#108 id=108 data-nosnippet>108</a>                    .map_or(<span class="number">0</span>, |b| b.overscaled_zoom);
+<a href=#109 id=109 data-nosnippet>109</a>                <span class="kw">let </span>retessellate = <span class="kw">super</span>::arrival_sync::sync_arriving_vector_bucket(
+<a href=#110 id=110 data-nosnippet>110</a>                    style,
+<a href=#111 id=111 data-nosnippet>111</a>                    overscaled_zoom,
+<a href=#112 id=112 data-nosnippet>112</a>                    <span class="kw-2">&amp;mut </span>bucket,
+<a href=#113 id=113 data-nosnippet>113</a>                    <span class="kw-2">&amp;mut </span>feature_paint,
+<a href=#114 id=114 data-nosnippet>114</a>                    <span class="kw-2">&amp;mut </span>memo,
+<a href=#115 id=115 data-nosnippet>115</a>                );
+<a href=#116 id=116 data-nosnippet>116</a>                <span class="kw">if let </span><span class="prelude-val">Some</span>(entries) = feature_paint.as_mut() {
+<a href=#117 id=117 data-nosnippet>117</a>                    interner.intern_entries(<span class="kw-2">&amp;</span>world.tiles, coords, entries);
+<a href=#118 id=118 data-nosnippet>118</a>                }
+<a href=#119 id=119 data-nosnippet>119</a>                <span class="kw">super</span>::content::accept_vector_with_paint(world, bucket, feature_paint);
+<a href=#120 id=120 data-nosnippet>120</a>                <span class="kw">if </span>retessellate {
+<a href=#121 id=121 data-nosnippet>121</a>                    tile_retry::refresh_tiles(world, RequestKind::Vector, <span class="kw-2">&amp;</span>[coords]);
+<a href=#122 id=122 data-nosnippet>122</a>                }
+<a href=#123 id=123 data-nosnippet>123</a>            }
+<a href=#124 id=124 data-nosnippet>124</a>        } <span class="kw">else if </span>message.has_tag(T::LayerIndexed::message_tag()) {
+<a href=#125 id=125 data-nosnippet>125</a>            <span class="kw">let </span>message = message.into_transferable::&lt;T::LayerIndexed&gt;()<span class="question-mark">?</span>;
+<a href=#126 id=126 data-nosnippet>126</a>            <span class="kw">if </span>!tile_retry::accepts(world, message.coords(), RequestKind::Vector, attempt)
+<a href=#127 id=127 data-nosnippet>127</a>                || world
+<a href=#128 id=128 data-nosnippet>128</a>                    .tiles
+<a href=#129 id=129 data-nosnippet>129</a>                    .query::&lt;<span class="kw-2">&amp;</span>VectorLayerBucketComponent&gt;(message.coords())
+<a href=#130 id=130 data-nosnippet>130</a>                    .is_none()
+<a href=#131 id=131 data-nosnippet>131</a>            {
+<a href=#132 id=132 data-nosnippet>132</a>                <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+<a href=#133 id=133 data-nosnippet>133</a>            }
+<a href=#134 id=134 data-nosnippet>134</a>            <span class="kw">let </span>coords = message.coords();
+<a href=#135 id=135 data-nosnippet>135</a>            <span class="kw">let </span>source = message.source();
+<a href=#136 id=136 data-nosnippet>136</a>            <span class="kw">let </span><span class="kw-2">mut </span>index = message.to_tile_index();
+<a href=#137 id=137 data-nosnippet>137</a>            <span class="kw">super</span>::arrival_sync::sync_arriving_tile_index(
+<a href=#138 id=138 data-nosnippet>138</a>                style,
+<a href=#139 id=139 data-nosnippet>139</a>                source.as_deref(),
+<a href=#140 id=140 data-nosnippet>140</a>                <span class="kw-2">&amp;mut </span>index,
+<a href=#141 id=141 data-nosnippet>141</a>                <span class="kw-2">&amp;mut </span>memo,
+<a href=#142 id=142 data-nosnippet>142</a>            );
+<a href=#143 id=143 data-nosnippet>143</a>            interner.intern_tile_index(<span class="kw-2">&amp;</span>world.tiles, coords, <span class="kw-2">&amp;mut </span>index);
+<a href=#144 id=144 data-nosnippet>144</a>            world
+<a href=#145 id=145 data-nosnippet>145</a>                .tiles
+<a href=#146 id=146 data-nosnippet>146</a>                .geometry_index
+<a href=#147 id=147 data-nosnippet>147</a>                .index_tile(<span class="kw-2">&amp;</span>coords, source, index);
+<a href=#148 id=148 data-nosnippet>148</a>        }
+<a href=#149 id=149 data-nosnippet>149</a>        <span class="prelude-val">Ok</span>(())
+<a href=#150 id=150 data-nosnippet>150</a>    })
+<a href=#151 id=151 data-nosnippet>151</a>}
+<a href=#152 id=152 data-nosnippet>152</a>
+<a href=#153 id=153 data-nosnippet>153</a><span class="kw">fn </span>finish_tile&lt;T: TileTessellated&gt;(world: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::tcs::world::World, message: <span class="kw-2">&amp;</span>T) {
+<a href=#154 id=154 data-nosnippet>154</a>    <span class="kw">let </span>retained = world
+<a href=#155 id=155 data-nosnippet>155</a>        .tiles
+<a href=#156 id=156 data-nosnippet>156</a>        .query::&lt;<span class="kw-2">&amp;</span><span class="kw">super</span>::content::LayerReplacements&gt;(message.coords())
+<a href=#157 id=157 data-nosnippet>157</a>        .map(|pending| (pending.keep_vector, pending.keep_symbols))
+<a href=#158 id=158 data-nosnippet>158</a>        .unwrap_or_default();
+<a href=#159 id=159 data-nosnippet>159</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(component) = world
+<a href=#160 id=160 data-nosnippet>160</a>        .tiles
+<a href=#161 id=161 data-nosnippet>161</a>        .query_mut::&lt;<span class="kw-2">&amp;mut </span>VectorLayerBucketComponent&gt;(message.coords())
+<a href=#162 id=162 data-nosnippet>162</a>    {
+<a href=#163 id=163 data-nosnippet>163</a>        <span class="kw">let </span>usable = component.done &amp;&amp; !component.failed;
+<a href=#164 id=164 data-nosnippet>164</a>        component.done = <span class="bool-val">true</span>;
+<a href=#165 id=165 data-nosnippet>165</a>        component.failed = message.failed() &amp;&amp; !retained.<span class="number">0 </span>&amp;&amp; !usable;
+<a href=#166 id=166 data-nosnippet>166</a>        component.uploaded_stamp = <span class="prelude-val">None</span>;
+<a href=#167 id=167 data-nosnippet>167</a>    }
+<a href=#168 id=168 data-nosnippet>168</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(component) = world
+<a href=#169 id=169 data-nosnippet>169</a>        .tiles
+<a href=#170 id=170 data-nosnippet>170</a>        .query_mut::&lt;<span class="kw-2">&amp;mut </span><span class="kw">crate</span>::sdf::SymbolLayersDataComponent&gt;(message.coords())
+<a href=#171 id=171 data-nosnippet>171</a>    {
+<a href=#172 id=172 data-nosnippet>172</a>        component.pending_assets = message.pending_symbols() &amp;&amp; !retained.<span class="number">1</span>;
+<a href=#173 id=173 data-nosnippet>173</a>        component.uploaded_stamp = <span class="prelude-val">None</span>;
+<a href=#174 id=174 data-nosnippet>174</a>        component.atlas_zoom_q32 = <span class="prelude-val">None</span>;
 <a href=#175 id=175 data-nosnippet>175</a>    }
-<a href=#176 id=176 data-nosnippet>176</a>}
-<a href=#177 id=177 data-nosnippet>177</a>
-<a href=#178 id=178 data-nosnippet>178</a><span class="attr">#[cfg(test)]
-<a href=#179 id=179 data-nosnippet>179</a></span><span class="kw">mod </span>tests;
+<a href=#176 id=176 data-nosnippet>176</a>    <span class="comment">// A request that could not read its data says nothing about which layers are empty.
+<a href=#177 id=177 data-nosnippet>177</a>    </span><span class="kw">if </span>!message.failed() {
+<a href=#178 id=178 data-nosnippet>178</a>        <span class="kw">super</span>::content::drop_undelivered(world, message.coords());
+<a href=#179 id=179 data-nosnippet>179</a>    }
+<a href=#180 id=180 data-nosnippet>180</a>}
+<a href=#181 id=181 data-nosnippet>181</a>
+<a href=#182 id=182 data-nosnippet>182</a><span class="attr">#[cfg(test)]
+<a href=#183 id=183 data-nosnippet>183</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

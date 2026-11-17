@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["PyramidCover"],"fn":["canonical_key","compact_bits_32","morton_xy","spread_bits_32","unmorton_xy"],"mod":["cover"],"struct":["PopulatedLevels","PyramidEntry","TilePyramid"]};
+window.SIDEBAR_ITEMS = {"enum":["PyramidCover"],"fn":["morton_xy","unmorton_xy"],"struct":["TilePyramid"]};
