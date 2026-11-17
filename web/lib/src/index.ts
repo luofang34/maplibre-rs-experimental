@@ -13,6 +13,7 @@ import {MapLibreMap} from "./map";
 import {
     compileWasmModule,
     computeMtTileWorkerCount,
+    ST_TILE_WORKER_COUNT,
     startOffscreenController,
     type WasmModuleSource,
 } from "./offscreen-client";
@@ -51,13 +52,11 @@ const prewarmedMtWorkers: Worker[] = [];
 export const startMapLibre = async (
     wasmPath: WasmModuleSource,
     workerPath: string | undefined,
-    styleJson?: string,
+    styleJson?: string | Promise<string | undefined>,
     imageProviderModules: string[] = [],
     canvasId?: string,
     options?: StartMapOptions,
 ): Promise<MapLibreMap | undefined> => {
-    await checkWasmFeatures()
-
     let message = checkRequirements();
     if (message) {
         console.error(message)
@@ -65,11 +64,38 @@ export const startMapLibre = async (
         return
     }
 
+    const mainModulePrefetch = !WEBGL ? compileWasmModule(wasmPath) : undefined;
+    const workerModulePrefetch =
+        !WEBGL && !MULTITHREADED
+            ? compileWasmModule(
+                  options?.workerWasmPath ??
+                      new URL("./wasm/maplibre_tile_worker_bg.wasm", import.meta.url).href,
+              )
+            : undefined;
+    const preRenderWorker =
+        !WEBGL && !workerPath && typeof navigator !== "undefined" && "gpu" in navigator
+            ? RenderWorker()
+            : undefined;
+    const prePoolWorkers: Worker[] = preRenderWorker
+        ? Array.from(
+              {length: MULTITHREADED ? computeMtTileWorkerCount() : ST_TILE_WORKER_COUNT},
+              () => MULTITHREADED ? MultithreadedPoolWorker() : PoolWorker(),
+          )
+        : [];
+    const terminatePrewarmedWorkers = () => {
+        preRenderWorker?.terminate();
+        while (prePoolWorkers.length > 0) {
+            prePoolWorkers.pop()?.terminate();
+        }
+    };
+
     if (WEBGL) {
+        await checkWasmFeatures();
         const {Spector} = await import("spectorjs")
         let spector = new Spector()
         spector.displayUI()
     } else {
+        void checkWasmFeatures();
         const hasWebGpu = await probeWebGpuAvailable();
         const decision = selectGraphicsBackend({
             webgl: false,
@@ -78,8 +104,10 @@ export const startMapLibre = async (
             hasWebglFallbackModule: true,
         });
         if (decision.backend === "fallback-webgl2") {
+            terminatePrewarmedWorkers();
             const relFallback = ["webgl", "module.js"].join("/");
             const webglUrl = options?.webglModulePath ?? new URL(relFallback, import.meta.url).href;
+            const resolvedStyle = await styleJson;
             try {
                 const webglMod = await import(/* @vite-ignore */ webglUrl);
                 if (typeof webglMod?.startMapLibre === "function") {
@@ -87,7 +115,7 @@ export const startMapLibre = async (
                     return webglMod.startMapLibre(
                         options?.webglWasmPath,
                         workerPath,
-                        styleJson,
+                        resolvedStyle,
                         imageProviderModules,
                         canvasId,
                         {workerWasmPath: options?.workerWasmPath},
@@ -100,6 +128,7 @@ export const startMapLibre = async (
             return undefined;
         }
         if (decision.backend === "error") {
+            terminatePrewarmedWorkers();
             console.error(decision.message);
             alert(decision.message);
             return undefined;
@@ -120,22 +149,27 @@ export const startMapLibre = async (
         try {
             const controller = await startOffscreenController({
                 canvas,
-                wasmPath,
-                workerWasmPath: options?.workerWasmPath,
+                wasmPath: mainModulePrefetch ?? wasmPath,
+                workerWasmPath: workerModulePrefetch ?? options?.workerWasmPath,
                 workerPath,
                 styleJson,
                 imageProviderModules: MULTITHREADED ? [] : imageProviderModules,
                 createRenderWorker: () => RenderWorker(),
                 createPoolWorker: () => MULTITHREADED ? MultithreadedPoolWorker() : PoolWorker(),
+                prewarmedRenderWorker: preRenderWorker,
+                prewarmedPoolWorkers: prePoolWorkers,
             });
             return new MapLibreMap(controller, canvas);
         } catch (err) {
+            terminatePrewarmedWorkers();
             // Fall back to main-thread winit only if canvas control was not already transferred.
             if (!(err instanceof DOMException && err.name === "InvalidStateError")) {
                 throw err;
             }
             console.warn("OffscreenCanvas unavailable on canvas, falling back to main-thread surface:", err);
         }
+    } else {
+        terminatePrewarmedWorkers();
     }
 
     const createMtWorker = (): Worker => workerPath ? new Worker(workerPath, {
@@ -151,23 +185,25 @@ export const startMapLibre = async (
     }
 
     const workerModulePromise = (!MULTITHREADED)
-        ? compileWasmModule(
+        ? (workerModulePrefetch ?? compileWasmModule(
             options?.workerWasmPath ?? new URL("./wasm/maplibre_tile_worker_bg.wasm", import.meta.url).href,
-        )
+        ))
         : null;
-    const resolvedWasm = wasmPath && typeof (wasmPath as Promise<WebAssembly.Module>).then === "function"
-        ? await wasmPath
-        : (wasmPath as string | WebAssembly.Module | undefined);
-    const [workerModule] = await Promise.all([
+    const wasmSource = mainModulePrefetch ?? wasmPath;
+    const resolvedWasm = wasmSource && typeof (wasmSource as Promise<WebAssembly.Module>).then === "function"
+        ? await wasmSource
+        : (wasmSource as string | WebAssembly.Module | undefined);
+    const [workerModule, resolvedStyleJson] = await Promise.all([
         workerModulePromise,
+        Promise.resolve(styleJson),
         initializeWasm(resolvedWasm, undefined),
     ]);
 
     const invokeRun = (workerFactory: any) => {
         if (ARENA_TELEMETRY && canvasId) {
-            return (maplibre as any).run_maplibre_on_canvas(canvasId, workerFactory, styleJson);
+            return (maplibre as any).run_maplibre_on_canvas(canvasId, workerFactory, resolvedStyleJson);
         }
-        return maplibre.run_maplibre(workerFactory, styleJson);
+        return maplibre.run_maplibre(workerFactory, resolvedStyleJson);
     };
 
     if (MULTITHREADED) {

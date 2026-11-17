@@ -105,11 +105,11 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                     raster_tiles: None,
                 };
             }
-            cache.view_tiles = Some(
-                computed
-                    .as_ref()
-                    .map_or_else(Vec::new, |(tiles, _)| tiles.clone()),
-            );
+            cache.view_tiles = Some((
+                computed.as_ref().map(|(tiles, _)| tiles.clone()),
+                request_padding,
+                visible_level,
+            ));
             computed
         };
 

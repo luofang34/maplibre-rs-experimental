@@ -88,7 +88,7 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
                     raster_tiles: None,
                 };
             }
-            cache.raster_tiles = Some(flat);
+            cache.raster_tiles = Some((flat, request_padding));
             computed
         };
         regions.retain(|(source, _)| {

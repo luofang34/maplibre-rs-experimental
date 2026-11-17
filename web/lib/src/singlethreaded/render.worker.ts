@@ -2,6 +2,22 @@ import * as maplibre from "../wasm/maplibre";
 import {initializeWasm} from "../wasm-instance.mjs";
 import {ensureWebGpuCompatibility} from "../webgpu-compat.mjs";
 
+type PreinitMessage = {
+    type: "preinit"
+    module: WebAssembly.Module
+    canvas: OffscreenCanvas
+    width: number
+    height: number
+    scaleFactor: number
+    ports: MessagePort[]
+}
+
+type FinishInitMessage = {
+    type: "finish_init"
+    id: number
+    styleJson?: string
+}
+
 type InitMessage = {
     type: "init"
     id: number
@@ -15,6 +31,8 @@ type InitMessage = {
 }
 
 type RenderWorkerMessage =
+    | PreinitMessage
+    | FinishInitMessage
     | InitMessage
     | { type: "resize", width: number, height: number, scaleFactor: number }
     | { type: "pmove", x: number, y: number }
@@ -34,9 +52,19 @@ if (!WEBGL) {
 let runner: any = null;
 let controller: any = null;
 let ready: Promise<void> | null = null;
+let preinitPromise: Promise<any> | null = null;
 
 const postReply = (id: number, ok: boolean, value: unknown) => {
     postMessage(ok ? {type: "rpc_ok", id, result: value} : {type: "rpc_err", id, error: String(value)});
+};
+
+const instantiateAndStartPorts = async (module: WebAssembly.Module, ports: MessagePort[]) => {
+    const wasm = await initializeWasm(module, undefined);
+    if (MULTITHREADED) {
+        for (const port of ports) {
+            port.postMessage({type: "wasm_init", module, memory: wasm.memory});
+        }
+    }
 };
 
 if (!WEBGL) {
@@ -44,14 +72,48 @@ onmessage = async (event: MessageEvent<RenderWorkerMessage>) => {
     const msg = event.data;
     if (!msg) return;
 
+    if (msg.type === "preinit") {
+        preinitPromise = (async () => {
+            await instantiateAndStartPorts(msg.module, msg.ports);
+            let nextPort = 0;
+            return (maplibre as any).preinit_maplibre_offscreen(
+                msg.canvas,
+                msg.width,
+                msg.height,
+                msg.scaleFactor,
+                () => msg.ports[nextPort++],
+            );
+        })();
+        preinitPromise.catch(() => {});
+        return;
+    }
+
+    if (msg.type === "finish_init") {
+        const initPromise = (async () => {
+            const activePreinit = preinitPromise;
+            preinitPromise = null;
+            if (!activePreinit) {
+                throw new Error("Missing preinit state for finish_init");
+            }
+            const pre = await activePreinit;
+            runner = await (maplibre as any).finish_maplibre_offscreen(pre, msg.styleJson);
+            controller = runner.controller();
+        })();
+        ready = initPromise;
+        try {
+            await initPromise;
+            ready = null;
+            postReply(msg.id, true, undefined);
+        } catch (err) {
+            ready = null;
+            postReply(msg.id, false, err);
+        }
+        return;
+    }
+
     if (msg.type === "init") {
         const initPromise = (async () => {
-            const wasm = await initializeWasm(msg.module, undefined);
-            if (MULTITHREADED) {
-                for (const port of msg.ports) {
-                    port.postMessage({type: "wasm_init", module: msg.module, memory: wasm.memory});
-                }
-            }
+            await instantiateAndStartPorts(msg.module, msg.ports);
             let nextPort = 0;
             runner = await (maplibre as any).run_maplibre_offscreen(
                 msg.canvas,

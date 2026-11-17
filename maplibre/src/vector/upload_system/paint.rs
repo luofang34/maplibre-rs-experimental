@@ -91,6 +91,27 @@ pub(super) fn feature_paint_depends_on_zoom(layer: &StyleLayer) -> bool {
         || feature_colors_depend_on_zoom(layer)
 }
 
+#[derive(Default)]
+pub(super) struct PaintRefreshScratch {
+    meta_memo: FxHashMap<(u32, u8), (ShaderLayerMetadata, bool)>,
+    updated_layer_slots: FxHashSet<(u16, u64)>,
+    color_memo: FxHashMap<u32, Option<[f32; 4]>>,
+    feature_meta_scratch: Vec<FillShaderFeatureMetadata>,
+    feature_zoom_updates: Vec<(WorldTileCoords, String, Option<PatternRuns>)>,
+    feature_zoom_only_updates: Vec<(WorldTileCoords, String)>,
+}
+
+impl PaintRefreshScratch {
+    fn clear(&mut self) {
+        self.meta_memo.clear();
+        self.updated_layer_slots.clear();
+        self.color_memo.clear();
+        self.feature_meta_scratch.clear();
+        self.feature_zoom_updates.clear();
+        self.feature_zoom_only_updates.clear();
+    }
+}
+
 pub(super) fn refresh_layer_paint(
     buffer_pool: &mut VectorBufferPool,
     queue: &crate::render::upload_queue::UploadQueue,
@@ -98,17 +119,24 @@ pub(super) fn refresh_layer_paint(
     source_tiles: &[WorldTileCoords],
     frame: VectorPaintFrame,
     previous: Option<VectorPaintFrame>,
+    scratch: &mut PaintRefreshScratch,
 ) {
     let VectorPaintFrame { zoom, .. } = frame;
     let zoom_changed = previous.is_none_or(|prev| prev.zoom != zoom);
     let bearing_changed = previous.is_none_or(|prev| prev.bearing != frame.bearing);
     let light_changed = previous.is_none_or(|prev| prev.light != frame.light);
-    let mut meta_memo: FxHashMap<(u32, u8), (ShaderLayerMetadata, bool)> = FxHashMap::default();
-    let mut updated_layer_slots: FxHashSet<(u16, u64)> = FxHashSet::default();
-    let mut color_memo: FxHashMap<u32, Option<[f32; 4]>> = FxHashMap::default();
-    let mut feature_meta_scratch = Vec::new();
-    let mut feature_zoom_updates: Vec<(WorldTileCoords, String, Option<PatternRuns>)> = Vec::new();
-    let mut feature_zoom_only_updates: Vec<(WorldTileCoords, String)> = Vec::new();
+    let continuous_zoom =
+        previous.is_some_and(|prev| prev.zoom != zoom && (zoom - prev.zoom).abs() < 0.05);
+    let feature_zoom_threshold = if continuous_zoom { 0.125 } else { 1.0 / 32.0 };
+    scratch.clear();
+    let PaintRefreshScratch {
+        meta_memo,
+        updated_layer_slots,
+        color_memo,
+        feature_meta_scratch,
+        feature_zoom_updates,
+        feature_zoom_only_updates,
+    } = scratch;
 
     for coords in source_tiles {
         let tile_z = u8::from(coords.z);
@@ -148,7 +176,7 @@ pub(super) fn refresh_layer_paint(
                 && !entry.is_dynamic_circle_metadata()
                 && entry
                     .evaluated_zoom()
-                    .is_none_or(|evaluated| (zoom - evaluated).abs() >= (1.0 / 32.0))
+                    .is_none_or(|evaluated| (zoom - evaluated).abs() >= feature_zoom_threshold)
                 && feature_paint_depends_on_zoom(&entry.style_layer)
             {
                 if let Some(evaluated) = entry.evaluated_zoom() {
@@ -192,7 +220,7 @@ pub(super) fn refresh_layer_paint(
                                 .map(Into::into)
                                 .unwrap_or([0.0, 0.0, 0.0, 1.0]);
                             feature_metadata_into(
-                                &mut feature_meta_scratch,
+                                feature_meta_scratch,
                                 &entry.style_layer,
                                 &bucket.feature_indices,
                                 &colors,
@@ -202,7 +230,7 @@ pub(super) fn refresh_layer_paint(
                                 buffer_pool.update_feature_metadata(
                                     queue,
                                     entry,
-                                    &feature_meta_scratch,
+                                    feature_meta_scratch,
                                 );
                                 let runs = entry
                                     .style_layer
@@ -253,14 +281,14 @@ pub(super) fn refresh_layer_paint(
         }
     }
 
-    for (coords, layer_id, runs) in feature_zoom_updates {
+    for (coords, layer_id, runs) in feature_zoom_updates.drain(..) {
         buffer_pool.set_layer_evaluated_zoom(coords, &layer_id, zoom);
         if runs.is_some() {
             buffer_pool.set_pattern_runs(coords, &layer_id, runs);
         }
         buffer_pool.bump_layer_paint_revision(coords, &layer_id);
     }
-    for (coords, layer_id) in feature_zoom_only_updates {
+    for (coords, layer_id) in feature_zoom_only_updates.drain(..) {
         buffer_pool.set_layer_evaluated_zoom(coords, &layer_id, zoom);
     }
 }

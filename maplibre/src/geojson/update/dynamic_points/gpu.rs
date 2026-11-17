@@ -248,6 +248,13 @@ pub(crate) fn refresh_dynamic_point_layers(
                     || hits.is_empty()
                     || !(verts == hits.len() * 4 || verts == hits.len() * 16)
                 {
+                    if tile_retry::is_waiting_or_pending(tiles, coords, RequestKind::Vector)
+                        || tiles
+                            .query::<&crate::vector::content::LayerReplacements>(coords)
+                            .is_some()
+                    {
+                        continue;
+                    }
                     if !mismatch_sources.iter().any(|s| s == source_name) {
                         mismatch_sources.push(source_name.to_owned());
                     }
@@ -276,7 +283,9 @@ pub(crate) fn refresh_dynamic_point_layers(
                 }) {
                     buffer_pool.update_feature_metadata(queue, entry, gpu_scratch);
                 }
-                buffer_pool.bump_layer_paint_revision(coords, &style_layer.id);
+                if style.terrain.is_some() {
+                    buffer_pool.bump_layer_paint_revision(coords, &style_layer.id);
+                }
                 src_state
                     .applied_seq
                     .insert((coords, style_layer_id), (seq, alloc_id));

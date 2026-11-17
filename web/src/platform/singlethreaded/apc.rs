@@ -182,10 +182,13 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
 
     fn receive<F: FnMut(&Message) -> bool>(&self, mut filter: F) -> Self::ReceiveIterator<F> {
         const MAX_RAW_BYTES_PER_BATCH: usize = 2 * 1024 * 1024;
+        const MAX_RAW_MESSAGES_PER_BATCH: usize = 24;
+        const MAX_RAW_ATTEMPTS_PER_BATCH: usize = 6;
         let mut buffer = self.buffer.borrow_mut();
         let mut admitted_bytes: usize = buffer.iter().map(QueuedMessage::raw_byte_len).sum();
         let mut admitted_attempts: std::collections::HashSet<u64> =
             buffer.iter().filter_map(QueuedMessage::attempt).collect();
+        let mut admitted_msgs: usize = buffer.len();
         // Partial and final tile completions must retain the worker's delivery order.
         let mut ret: Vec<QueuedMessage> = buffer
             .extract_if(.., |item| item.matches(&mut filter))
@@ -220,13 +223,19 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
         for item in received.queued.drain(..) {
             let attempt = item.attempt();
             let admit = match attempt {
-                None => admitted_bytes < MAX_RAW_BYTES_PER_BATCH || admitted_attempts.is_empty(),
+                None => {
+                    admitted_attempts.is_empty()
+                        || (admitted_msgs < MAX_RAW_MESSAGES_PER_BATCH
+                            && admitted_bytes < MAX_RAW_BYTES_PER_BATCH)
+                }
                 Some(id) => {
                     admitted_attempts.contains(&id)
                         || admitted_attempts.is_empty()
-                        || admitted_bytes
-                            .saturating_add(attempt_totals.get(&id).copied().unwrap_or(0))
-                            <= MAX_RAW_BYTES_PER_BATCH
+                        || (admitted_attempts.len() < MAX_RAW_ATTEMPTS_PER_BATCH
+                            && admitted_msgs < MAX_RAW_MESSAGES_PER_BATCH
+                            && admitted_bytes
+                                .saturating_add(attempt_totals.get(&id).copied().unwrap_or(0))
+                                <= MAX_RAW_BYTES_PER_BATCH)
                 }
             };
             if !admit {
@@ -236,6 +245,7 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
             if let Some(id) = attempt {
                 admitted_attempts.insert(id);
             }
+            admitted_msgs = admitted_msgs.saturating_add(1);
             admitted_bytes = admitted_bytes.saturating_add(item.raw_byte_len());
             if item.matches(&mut filter) {
                 ret.push(item);

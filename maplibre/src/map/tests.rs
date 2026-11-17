@@ -3,7 +3,10 @@
 use std::error::Error;
 
 use super::*;
-use crate::render::{graph::RenderGraphError, view_state::CameraBounds};
+use crate::{
+    map::camera::starting_view,
+    render::{graph::RenderGraphError, view_state::CameraBounds},
+};
 
 #[test]
 fn plugin_error_exposes_its_original_cause() {

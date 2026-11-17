@@ -67,13 +67,13 @@ pub(crate) struct MultiViewExtractCovering {
     pub(crate) skipped_wanted_dem: FxHashSet<WorldTileCoords>,
 }
 
-/// Per-frame `Loose` request coverings recorded during single-view `Request` systems so
-/// `retention_system` in `Cleanup` reuses them without re-walking the globe quadtree.
+/// Per-frame request coverings recorded during single-view `Request` systems so
+/// `retention_system` and `drawn_covering` reuse them without re-walking the globe quadtree.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct FrameLooseCovering {
     pub(crate) host_frame: u64,
-    pub(crate) view_tiles: Option<Vec<WorldTileCoords>>,
-    pub(crate) raster_tiles: Option<Vec<WorldTileCoords>>,
+    pub(crate) view_tiles: Option<(Option<Vec<WorldTileCoords>>, ViewStatePadding, ZoomLevel)>,
+    pub(crate) raster_tiles: Option<(Vec<WorldTileCoords>, ViewStatePadding)>,
 }
 
 /// Total number of eye passes executing in the current [`XrFrame`](crate::render::xr::XrFrame).
@@ -199,8 +199,34 @@ pub(crate) fn drawn_covering(
             return Ok((shared.region(), shared.raster.clone()));
         }
     }
-    let region =
-        view_region_for_projection(style, view_state, world, level, ViewStatePadding::Tight)?;
+    let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
+    let multi_active = world
+        .resources
+        .get::<MultiViewExtractCovering>()
+        .is_some_and(|m| m.active);
+    let cached_tight_region = if !multi_active && eye.is_none_or(|eye| eye.index == 0) {
+        world
+            .resources
+            .get::<FrameLooseCovering>()
+            .filter(|cache| cache.host_frame == host_frame)
+            .and_then(|cache| cache.view_tiles.as_ref())
+            .filter(|(_, padding, cached_level)| {
+                *padding == ViewStatePadding::Tight && *cached_level == level
+            })
+            .map(|(tiles, _, _)| {
+                tiles
+                    .as_ref()
+                    .map(|tiles| ViewRegion::from_tiles(tiles.clone(), level, tiles.len().max(1)))
+            })
+    } else {
+        None
+    };
+    let region = match cached_tight_region {
+        Some(cached) => cached,
+        None => {
+            view_region_for_projection(style, view_state, world, level, ViewStatePadding::Tight)?
+        }
+    };
     let raster = raster_source_regions(style, view_state, world, ViewStatePadding::Tight)?;
     if eye.is_none_or(|eye| eye.index == 0) {
         world.resources.insert(SharedCovering {

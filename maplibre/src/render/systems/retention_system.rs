@@ -46,20 +46,20 @@ pub(crate) use ancestors::finish_tiles_in_use;
 const CACHE_TILES_PER_VIEW_TILE: usize = 2;
 /// Smallest cache, so a tiny viewport still keeps some history for panning back.
 #[cfg(target_arch = "wasm32")]
-const MIN_CACHE_TILES: usize = 4;
+const MIN_CACHE_TILES: usize = 2;
 #[cfg(not(target_arch = "wasm32"))]
-const MIN_CACHE_TILES: usize = 16;
+const MIN_CACHE_TILES: usize = 8;
 /// Hard ceiling on out-of-view cached tiles so wide oblique/globe coverings cannot accumulate
 /// hundreds of multi-megabyte raster/DEM tiles along a corridor.
 #[cfg(target_arch = "wasm32")]
-const MAX_CACHE_TILES: usize = 8;
+const MAX_CACHE_TILES: usize = 4;
 #[cfg(not(target_arch = "wasm32"))]
-const MAX_CACHE_TILES: usize = 64;
+const MAX_CACHE_TILES: usize = 24;
 /// Tessellated geometry the out-of-view cache may hold.
 #[cfg(target_arch = "wasm32")]
-const CACHE_BYTES: usize = 4 << 20;
+const CACHE_BYTES: usize = 2 << 20;
 #[cfg(not(target_arch = "wasm32"))]
-const CACHE_BYTES: usize = 32 << 20;
+const CACHE_BYTES: usize = 12 << 20;
 /// Frames between resident-memory summaries for hosts driving the map from an eye, which
 /// run on devices with a memory limit.
 const SUMMARY_EVERY_FRAMES: u64 = 90;
@@ -215,8 +215,11 @@ pub(crate) fn tiles_in_use(
         ViewStatePadding::Loose
     };
     let max_zoom = source_max_zoom(style, TileKind::Vector);
-    if let Some(cached_view) = loose_cache.and_then(|c| c.view_tiles.as_ref()) {
-        for &coords in cached_view {
+    if let Some((cached_view, _, _)) = loose_cache
+        .and_then(|c| c.view_tiles.as_ref())
+        .filter(|(_, padding, _)| *padding == request_padding)
+    {
+        for &coords in cached_view.iter().flatten() {
             retain_loose_vector_tile(&mut in_use, coords, max_zoom);
         }
     } else {
@@ -239,7 +242,10 @@ pub(crate) fn tiles_in_use(
         }
     }
 
-    if let Some(cached_raster) = loose_cache.and_then(|c| c.raster_tiles.as_ref()) {
+    if let Some((cached_raster, _)) = loose_cache
+        .and_then(|c| c.raster_tiles.as_ref())
+        .filter(|(_, padding)| *padding == request_padding)
+    {
         in_use.extend(cached_raster.iter().copied());
     } else if let Ok(regions) =
         crate::render::projection::raster_source_regions(style, view_state, world, request_padding)

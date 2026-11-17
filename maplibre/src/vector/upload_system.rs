@@ -86,14 +86,20 @@ pub fn upload_system(
     let (spatial, changed) = super::structures::for_frame(world, style, &painted_tiles);
     world.resources.get_or_init_mut::<FrameUploads>();
     world.resources.get_or_init_mut::<DynPoints>();
+    world
+        .resources
+        .get_or_init_mut::<paint::PaintRefreshScratch>();
     #[cfg(feature = "geojson")]
     crate::geojson::update::dynamic_points::ensure_seeded_for_style(world, style);
     style_refresh::apply_dirty_style(world, style, queue, paint_frame);
-    let Some((Initialized(buffer_pool), budget, dyn_points)) = world.resources.query_mut::<(
-        &mut Eventually<VectorBufferPool>,
-        &mut FrameUploads,
-        &mut DynPoints,
-    )>() else {
+    let Some((Initialized(buffer_pool), budget, dyn_points, paint_scratch)) =
+        world.resources.query_mut::<(
+            &mut Eventually<VectorBufferPool>,
+            &mut FrameUploads,
+            &mut DynPoints,
+            &mut paint::PaintRefreshScratch,
+        )>()
+    else {
         return Err(SystemError::Dependencies);
     };
     if refresh_paint {
@@ -104,6 +110,7 @@ pub fn upload_system(
             &painted_tiles,
             paint_frame,
             previous_paint,
+            paint_scratch,
         );
     }
     if changed {
@@ -143,9 +150,10 @@ fn frame_paint(
     let zoom = if style.terrain.is_some() {
         paint::stabilize_zoom(world, view_state.style_zoom().value()) as f32
     } else {
-        view_state.style_zoom().level()
+        (view_state.style_zoom().level() * 256.0).round() / 256.0
     };
-    let bearing = view_state.camera().get_bearing().0 as f32;
+    let bearing = ((view_state.camera().get_bearing().0.to_degrees() * 4.0).round() * 0.25)
+        .to_radians() as f32;
     let light = style
         .light
         .clone()

@@ -45,14 +45,14 @@ jobs:
           path: headless-tests.tar.zst
           retention-days: 1
   test:
-    name: Test ${{ matrix.shard }}/6
+    name: Test ${{ matrix.shard }}/12
     needs: build
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
         # The count is also in the partition below.
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Dependencies
@@ -78,4 +78,4 @@ jobs:
           VK_INSTANCE_LAYERS: VK_LAYER_KHRONOS_validation
         run: |
           cargo nextest run --archive-file headless-tests.tar.zst \
-            --workspace-remap . --partition hash:${{ matrix.shard }}/6 -j 2 --no-fail-fast
+            --workspace-remap . --partition hash:${{ matrix.shard }}/12 -j 2 --no-fail-fast

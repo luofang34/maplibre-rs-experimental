@@ -1,4 +1,7 @@
 //! Prepares GPU-owned resources by initializing them if they are uninitialized or out-of-date.
+mod prepared_state;
+
+use self::prepared_state::VectorPreparedState;
 use crate::{
     context::MapContext,
     render::{
@@ -32,6 +35,25 @@ pub fn resource_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
+    let style_zoom = view_state.style_zoom().value();
+    let terrain_active = world
+        .resources
+        .get::<crate::terrain::TerrainFrame>()
+        .is_some_and(|frame| frame.active);
+    let mut prepared = world
+        .resources
+        .remove::<VectorPreparedState>()
+        .unwrap_or_default();
+    prepared.sync_style(style, terrain_active);
+    let update_dashes = prepared.should_update_dashes(style);
+    let update_patterns = prepared.should_update_patterns(style);
+    let needs_terrain_lines = prepared.needs_terrain_lines;
+    let needs_elevated_lines = prepared.needs_elevated_lines;
+    let needs_circle = prepared.needs_circle;
+    let needs_extrusion = prepared.needs_extrusion;
+    let has_pattern_paint = prepared.has_pattern_paint;
+    world.resources.insert(prepared);
+
     if world
         .resources
         .get::<super::line_dash::LineDashResources>()
@@ -41,11 +63,13 @@ pub fn resource_system(
             .resources
             .insert(super::line_dash::LineDashResources::new(device, queue));
     }
-    if let Some(dashes) = world
-        .resources
-        .get_mut::<super::line_dash::LineDashResources>()
-    {
-        dashes.update(device, queue, style, view_state.style_zoom().value());
+    if update_dashes {
+        if let Some(dashes) = world
+            .resources
+            .get_mut::<super::line_dash::LineDashResources>()
+        {
+            dashes.update(device, queue, style, style_zoom);
+        }
     }
     let Some(dashes_layout) = world
         .resources
@@ -54,14 +78,9 @@ pub fn resource_system(
     else {
         return Err(SystemError::Dependencies);
     };
-    let missing_pattern_pipeline = world
-        .resources
-        .get::<super::pattern::PatternResources>()
-        .is_none_or(|patterns| patterns.pipeline().is_none());
-    let terrain_active = world
-        .resources
-        .get::<crate::terrain::TerrainFrame>()
-        .is_some_and(|frame| frame.active);
+    let pattern_res = world.resources.get::<super::pattern::PatternResources>();
+    let missing_pattern_resources = pattern_res.is_none();
+    let missing_pattern_pipeline = pattern_res.is_none_or(|patterns| patterns.pipeline().is_none());
     let Some((
         buffer_pool,
         vector_pipeline,
@@ -87,67 +106,65 @@ pub fn resource_system(
             .with_shared_layer_metadata()
     });
 
-    let setup = PipelineSetup {
-        device,
-        settings: *settings,
-        format: surface.surface_format(),
-        multisampling: surface.is_multisampling_supported(settings.msaa),
-        projection: projection_resources.bind_group_layout(),
-        pattern: crate::render::resource::create_bind_group_layout_cached(
-            device,
-            Some("pattern layout"),
-            &super::pattern::layout_entries(),
-        ),
-    };
-    let needs_terrain_lines =
-        !cfg!(target_arch = "wasm32") || style.terrain.is_some() || terrain_active;
-    let needs_elevated_lines = !cfg!(target_arch = "wasm32")
-        || style.layers.iter().any(|layer| {
-            matches!(
-                super::structures::kind(layer),
-                Some(super::structures::StructureKind::ElevatedLine)
-            )
-        });
-    let needs_circle =
-        !cfg!(target_arch = "wasm32") || style.layers.iter().any(|layer| layer.type_ == "circle");
-    setup.initialize(
-        vector_pipeline,
-        line_pipeline,
-        circle_pipeline,
-        &dashes_layout,
-        (needs_terrain_lines, needs_elevated_lines, needs_circle),
-    );
-    let style_zoom = view_state.style_zoom().value();
-    let needs_extrusion = !cfg!(target_arch = "wasm32")
-        || style
-            .layers
-            .iter()
-            .any(|layer| layer.type_ == "fill-extrusion");
-    if needs_extrusion {
-        setup.initialize_extrusion(extrusion_pipeline);
-    }
-    let needs_pattern = !cfg!(target_arch = "wasm32")
-        || style.layers.iter().any(|layer| {
+    let need_base_pipelines = !matches!(vector_pipeline, Initialized(_))
+        || !matches!(line_pipeline, Initialized(lp) if
+            (!needs_terrain_lines || (lp.structure.is_some() && lp.terrain.is_some()))
+            && (!needs_elevated_lines || lp.elevated.is_some()));
+    let need_circle_pipeline = needs_circle && !matches!(circle_pipeline, Initialized(_));
+    let need_extrusion_pipeline = needs_extrusion && !matches!(extrusion_pipeline, Initialized(_));
+    let needs_pattern = missing_pattern_pipeline
+        && has_pattern_paint
+        && style.layers.iter().any(|layer| {
             layer.paint.as_ref().is_some_and(|paint| {
                 super::pattern::pattern_name(paint, style_zoom).is_some()
                     || super::pattern::per_feature_pattern(paint).is_some()
             })
         });
-    let pattern_pipeline =
-        (missing_pattern_pipeline && needs_pattern).then(|| setup.create_pattern());
-    let pattern_layout = setup.pattern.clone();
-    if world
-        .resources
-        .get::<super::pattern::PatternResources>()
-        .is_none()
+
+    let pattern_pipeline = if need_base_pipelines
+        || need_circle_pipeline
+        || need_extrusion_pipeline
+        || needs_pattern
+        || missing_pattern_resources
     {
-        world
-            .resources
-            .insert(super::pattern::PatternResources::new(
+        let setup = PipelineSetup {
+            device,
+            settings: *settings,
+            format: surface.surface_format(),
+            multisampling: surface.is_multisampling_supported(settings.msaa),
+            projection: projection_resources.bind_group_layout(),
+            pattern: crate::render::resource::create_bind_group_layout_cached(
                 device,
-                pattern_layout,
-            ));
-    }
+                Some("pattern layout"),
+                &super::pattern::layout_entries(),
+            ),
+        };
+        if need_base_pipelines || need_circle_pipeline {
+            setup.initialize(
+                vector_pipeline,
+                line_pipeline,
+                circle_pipeline,
+                &dashes_layout,
+                (needs_terrain_lines, needs_elevated_lines, needs_circle),
+            );
+        }
+        if need_extrusion_pipeline {
+            setup.initialize_extrusion(extrusion_pipeline);
+        }
+        let created_pattern = needs_pattern.then(|| setup.create_pattern());
+        let pattern_layout = setup.pattern;
+        if missing_pattern_resources {
+            world
+                .resources
+                .insert(super::pattern::PatternResources::new(
+                    device,
+                    pattern_layout,
+                ));
+        }
+        created_pattern
+    } else {
+        None
+    };
     if let (Some(pipeline), Some(patterns)) = (
         pattern_pipeline,
         world
@@ -156,11 +173,13 @@ pub fn resource_system(
     ) {
         patterns.set_pipeline(pipeline);
     }
-    if let Some(patterns) = world
-        .resources
-        .get_mut::<super::pattern::PatternResources>()
-    {
-        patterns.update(device, queue, style, view_state.style_zoom().value());
+    if update_patterns {
+        if let Some(patterns) = world
+            .resources
+            .get_mut::<super::pattern::PatternResources>()
+        {
+            patterns.update(device, queue, style, style_zoom);
+        }
     }
     Ok(())
 }

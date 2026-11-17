@@ -4,6 +4,7 @@
 #![deny(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
 mod input;
+mod preinit;
 mod window;
 
 use std::{
@@ -14,30 +15,17 @@ use std::{
 
 use instant::Instant;
 use maplibre::{
-    environment::OffscreenKernelConfig,
     input::{InputController, UpdateState},
     io::apc::AsyncProcedureCall,
-    kernel::KernelBuilder,
     map::{handle::MapCommands, Map},
-    render::{builder::RendererBuilder, frame_input::FrameInput},
-    style::Style,
-    window::PhysicalSize,
+    render::frame_input::FrameInput,
 };
 use wasm_bindgen::{closure::Closure, prelude::*, JsCast};
-use web_sys::{DedicatedWorkerGlobalScope, OffscreenCanvas};
+use web_sys::DedicatedWorkerGlobalScope;
 
-use self::window::{
-    next_runner_id, register_runner_waker, unregister_runner_waker, SharedWindowState, WorkerApc,
-};
-pub use self::window::{
-    OffscreenCanvasHandle, OffscreenEnvironment, OffscreenMapWindow, OffscreenMapWindowConfig,
-};
-use crate::{
-    application::{default_plugins_for, parse_style},
-    controller::MapController,
-    error::{JSError, WebError},
-    platform::{self, http_client::web_http_client, UsedOffscreenKernelEnvironment},
-};
+pub(crate) use self::window::OffscreenEnvironment;
+use self::window::{register_runner_waker, unregister_runner_waker, SharedWindowState, WorkerApc};
+use crate::{controller::MapController, platform::UsedOffscreenKernelEnvironment};
 
 const MAX_INPUT_DT: Duration = Duration::from_millis(50);
 
@@ -299,85 +287,12 @@ pub struct OffscreenMapRunner {
     controller: MapController,
 }
 
-/// Initializes and starts a map inside a dedicated Web Worker owning `canvas`.
-#[wasm_bindgen]
-pub async fn run_maplibre_offscreen(
-    canvas: OffscreenCanvas,
-    width: u32,
-    height: u32,
-    scale_factor: f64,
-    new_worker: js_sys::Function,
-    mut style_json: Option<String>,
-) -> Result<OffscreenMapRunner, JSError> {
-    let scope: DedicatedWorkerGlobalScope = js_sys::global().dyn_into().map_err(|_| {
-        WebError::TypeError("run_maplibre_offscreen requires DedicatedWorkerGlobalScope".into())
-    })?;
-    let style = match style_json.take().as_deref() {
-        Some(raw) => parse_style(raw)?,
-        None => Style::default(),
-    };
-    let size = PhysicalSize::new(width.max(1), height.max(1)).unwrap_or(PhysicalSize::MIN);
-    let scale = if scale_factor.is_finite() && scale_factor > 0.0 {
-        scale_factor
-    } else {
-        1.0
-    };
-    canvas.set_width(size.width());
-    canvas.set_height(size.height());
-
-    let runner_id = next_runner_id();
-    let window_state = Rc::new(SharedWindowState {
-        id: runner_id,
-        handle: OffscreenCanvasHandle(canvas),
-        size: Cell::new(size),
-        scale_factor: Cell::new(scale),
-        redraw: RefCell::new(None),
-    });
-    let window_config = OffscreenMapWindowConfig {
-        window: OffscreenMapWindow {
-            state: window_state.clone(),
-        },
-    };
-
-    let offscreen_kernel_config = OffscreenKernelConfig {
-        cache_directory: None,
-        image_providers: platform::image_providers().clone(),
-        ..Default::default()
-    };
-    #[cfg(not(target_feature = "atomics"))]
-    let apc = platform::singlethreaded::apc::PassingAsyncProcedureCall::new(
-        new_worker,
-        4,
-        offscreen_kernel_config.clone(),
-    )?;
-    #[cfg(target_feature = "atomics")]
-    let apc = maplibre::io::apc::SchedulerAsyncProcedureCall::new(
-        platform::multithreaded::pool_scheduler::WebWorkerPoolScheduler::from_ports(new_worker)?,
-        offscreen_kernel_config.clone(),
-    );
-    let kernel = KernelBuilder::new()
-        .with_map_window_config(window_config)
-        .with_http_client(web_http_client())
-        .with_asset_cache(offscreen_kernel_config.asset_cache)
-        .with_apc(apc)
-        .build()?;
-
-    let plugins = default_plugins_for::<OffscreenEnvironment>(&style);
-    let mut map = Map::new(style.clone(), kernel, RendererBuilder::new(), plugins)?;
-    if style.terrain.is_some()
-        || style.pitch.is_some_and(|pitch| pitch > 60.0)
-        || style
-            .projection
-            .as_ref()
-            .is_some_and(|p| p.projection_type != maplibre::projection::ProjectionType::Mercator)
-    {
-        map.set_max_pitch_degrees(style.pitch.unwrap_or(0.0).max(70.0));
-    }
-    map.initialize_renderer().await?;
-    if let Ok(context) = map.context_mut() {
-        context.resize(size, scale);
-    }
-
+fn start_runner(
+    runner_id: u64,
+    scope: DedicatedWorkerGlobalScope,
+    window_state: Rc<SharedWindowState>,
+    map: Map<OffscreenEnvironment>,
+) -> OffscreenMapRunner {
     let now = Instant::now();
     let commands = MapCommands::<OffscreenEnvironment>::default();
     let inner = Rc::new(RefCell::new(RunnerInner {
@@ -424,5 +339,5 @@ pub async fn run_maplibre_offscreen(
     // Run the initial frame immediately so GPU pipelines warm and viewport tile HTTP requests
     // launch at t=0 without waiting up to one VSync for the first worker animation frame.
     RunnerInner::run_frame(&inner);
-    Ok(OffscreenMapRunner { inner, controller })
+    OffscreenMapRunner { inner, controller }
 }

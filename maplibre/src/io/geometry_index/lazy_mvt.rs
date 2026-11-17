@@ -75,7 +75,7 @@ impl LazyMvtIndex {
     }
 
     /// Reconstructs an unmaterialized index from wire bytes and their compression flag.
-    pub(crate) fn from_packed(mvt_bytes: Arc<[u8]>, compressed: bool) -> Self {
+    pub fn from_packed(mvt_bytes: Arc<[u8]>, compressed: bool) -> Self {
         Self {
             mvt_bytes,
             compressed,
@@ -102,7 +102,7 @@ impl LazyMvtIndex {
     }
 
     /// Underlying stored MVT byte slice and whether it is deflate-compressed.
-    pub(crate) fn wire_bytes(&self) -> (&Arc<[u8]>, bool) {
+    pub fn wire_bytes(&self) -> (&Arc<[u8]>, bool) {
         (&self.mvt_bytes, self.compressed)
     }
 

@@ -47,13 +47,15 @@ interface OffscreenStartArgs {
     wasmPath: WasmModuleSource
     workerWasmPath?: WasmModuleSource
     workerPath: string | undefined
-    styleJson?: string
+    styleJson?: string | Promise<string | undefined>
     imageProviderModules: string[]
     createRenderWorker: () => Worker
     createPoolWorker: () => Worker
+    prewarmedRenderWorker?: Worker
+    prewarmedPoolWorkers?: Worker[]
 }
 
-const ST_TILE_WORKER_COUNT = 4;
+export const ST_TILE_WORKER_COUNT = 4;
 
 export const computeMtTileWorkerCount = (): number => {
     // Shared-memory WASM workers share one global dlmalloc spinlock with the OffscreenCanvas
@@ -71,18 +73,22 @@ export const startOffscreenController = async ({
     imageProviderModules,
     createRenderWorker,
     createPoolWorker,
+    prewarmedRenderWorker,
+    prewarmedPoolWorkers,
 }: OffscreenStartArgs): Promise<MapController> => {
     const offscreen = canvas.transferControlToOffscreen();
 
     // Spawn render worker + tile workers immediately at t=0 in parallel with WASM compilation.
     const workerCount = MULTITHREADED ? computeMtTileWorkerCount() : ST_TILE_WORKER_COUNT;
-    const renderWorker = createRenderWorker();
+    const renderWorker = prewarmedRenderWorker ?? createRenderWorker();
     const tileWorkers: Worker[] = [];
     const channels: MessageChannel[] = [];
     const providerUrls = imageProviderModules.map(url => new URL(url, location.href).href);
 
     for (let i = 0; i < workerCount; i++) {
-        const worker = workerPath ? new Worker(workerPath, {type: "module"}) : createPoolWorker();
+        const worker = !workerPath && prewarmedPoolWorkers?.length
+            ? prewarmedPoolWorkers.pop()!
+            : (workerPath ? new Worker(workerPath, {type: "module"}) : createPoolWorker());
         if (!MULTITHREADED && providerUrls.length > 0) {
             worker.postMessage({type: "image_provider_modules", urls: providerUrls});
         }
@@ -213,26 +219,64 @@ export const startOffscreenController = async ({
         };
 
         const initial = measure();
+        const isThenable =
+            styleJson != null && typeof (styleJson as Promise<string | undefined>).then === "function";
+        let styleResolved = !isThenable;
+        let resolvedStyleValue: string | undefined = isThenable ? undefined : (styleJson as string | undefined);
+        const stylePromise = isThenable
+            ? Promise.resolve(styleJson).then(value => {
+                  resolvedStyleValue = value;
+                  styleResolved = true;
+                  return value;
+              })
+            : Promise.resolve(resolvedStyleValue);
+
         const renderInitPromise = mainModulePromise.then(module => {
             if (closed) return;
-            const initId = nextRpcId++;
             const ports = channels.map(ch => ch.port1);
-            return new Promise<void>((resolve, reject) => {
-                pending.set(initId, {resolve, reject});
-                renderWorker.postMessage(
-                    {
-                        type: "init",
+            if (styleResolved) {
+                const initId = nextRpcId++;
+                return new Promise<void>((resolve, reject) => {
+                    pending.set(initId, {resolve, reject});
+                    renderWorker.postMessage(
+                        {
+                            type: "init",
+                            id: initId,
+                            module,
+                            canvas: offscreen,
+                            width: initial.width,
+                            height: initial.height,
+                            scaleFactor: initial.scaleFactor,
+                            ports,
+                            styleJson: resolvedStyleValue,
+                        },
+                        [offscreen, ...ports],
+                    );
+                });
+            }
+            renderWorker.postMessage(
+                {
+                    type: "preinit",
+                    module,
+                    canvas: offscreen,
+                    width: initial.width,
+                    height: initial.height,
+                    scaleFactor: initial.scaleFactor,
+                    ports,
+                },
+                [offscreen, ...ports],
+            );
+            return stylePromise.then(resolvedStyleJson => {
+                if (closed) return;
+                const initId = nextRpcId++;
+                return new Promise<void>((resolve, reject) => {
+                    pending.set(initId, {resolve, reject});
+                    renderWorker.postMessage({
+                        type: "finish_init",
                         id: initId,
-                        module,
-                        canvas: offscreen,
-                        width: initial.width,
-                        height: initial.height,
-                        scaleFactor: initial.scaleFactor,
-                        ports,
-                        styleJson,
-                    },
-                    [offscreen, ...ports],
-                );
+                        styleJson: resolvedStyleJson,
+                    });
+                });
             });
         });
         await Promise.all([renderInitPromise, workerReadyPromise]);

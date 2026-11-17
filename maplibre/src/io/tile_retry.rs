@@ -324,6 +324,20 @@ pub(crate) fn waiting(world: &World, coords: WorldTileCoords, kind: RequestKind)
         })
 }
 
+#[cfg(any(test, feature = "geojson"))]
+pub(crate) fn is_waiting_or_pending(
+    tiles: &crate::tcs::tiles::Tiles,
+    coords: WorldTileCoords,
+    kind: RequestKind,
+) -> bool {
+    tiles
+        .query::<&TileRequestRetries>(coords)
+        .is_some_and(|retries| {
+            let state = &retries.0[kind.index()];
+            state.pending || state.deadline.is_some()
+        })
+}
+
 pub(crate) fn next_attempt(world: &mut World) -> u64 {
     let attempts = world.resources.get_or_init_mut::<RequestAttempts>();
     let next = attempts.0.get().wrapping_add(1);

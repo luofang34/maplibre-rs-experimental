@@ -26,8 +26,7 @@ use crate::{
         mutation::{StyleChange, StyleMutationError},
         Style,
     },
-    tcs::world::World,
-    window::{HeadedMapWindow, MapWindow, MapWindowConfig, WindowCreateError},
+    window::{HeadedMapWindow, MapWindowConfig, WindowCreateError},
 };
 
 /// A window, renderer or scheduled update failed, or the map is in the wrong lifecycle state.
@@ -80,11 +79,11 @@ pub enum CurrentMapContext {
 
 /// Style, camera and GPU configuration retained until renderer initialization succeeds.
 pub struct PendingMapContext {
-    style: Style,
-    renderer_builder: RendererBuilder,
-    view_state: Option<ViewState>,
+    pub(super) style: Style,
+    pub(super) renderer_builder: RendererBuilder,
+    pub(super) view_state: Option<ViewState>,
     /// The jump made while the renderer is not ready, for the view it starts with.
-    jump: Option<CameraOptions>,
+    pub(super) jump: Option<CameraOptions>,
 }
 
 /// Owns a host window and the plugin schedule that updates and renders its map.
@@ -177,96 +176,6 @@ where
             }
         }
         Ok(())
-    }
-
-    /// Creates GPU state, resolves source metadata and builds plugins in their supplied order.
-    /// Uses current logical window dimensions and restores any retained orbit camera.
-    /// Returns [`MapError::RendererAlreadySet`] if ready, or a renderer failure while keeping
-    /// the map pending. TileJSON resolution failures are logged and do not abort initialization.
-    pub async fn initialize_renderer(&mut self) -> Result<(), MapError> {
-        match &mut self.map_context {
-            CurrentMapContext::Ready(_) => Err(MapError::RendererAlreadySet),
-            CurrentMapContext::Pending(pending) => {
-                let PendingMapContext {
-                    style,
-                    renderer_builder,
-                    view_state: retained_view,
-                    jump,
-                } = pending.as_mut();
-                let window_size = self.window.size();
-                let scale_factor = self.window.scale_factor();
-                let mut view_state = starting_view(
-                    style,
-                    retained_view.as_ref(),
-                    window_size,
-                    self.max_pitch,
-                    self.camera_bounds,
-                    *jump,
-                )?;
-                view_state.resize(window_size.to_logical(scale_factor));
-
-                let renderer_fut = renderer_builder
-                    .clone()
-                    .build()
-                    .initialize_renderer::<E::MapWindowConfig>(&self.window);
-                let init_io_fut = prewarm::prepare_io_and_prewarm(
-                    style,
-                    &view_state,
-                    scale_factor,
-                    &self.request_attempts,
-                    self.kernel.source_client(),
-                    self.kernel.apc(),
-                );
-                let (renderer_res, prewarmed) =
-                    futures::future::join(renderer_fut, init_io_fut).await;
-                let mut renderer = renderer_res.map_err(MapError::DeviceInit)?;
-                *jump = None;
-                renderer.resize_surface(window_size);
-
-                let mut world = World::default();
-                world.resources.insert(self.request_attempts.clone());
-                world.resources.insert(self.event_bus.clone());
-                world
-                    .resources
-                    .insert(std::mem::take(&mut self.custom_layers));
-                crate::sdf::provided::set_pixel_ratio(&mut world, scale_factor);
-                #[cfg(feature = "experimental")]
-                crate::celestial::set_sun_direction(&mut world, self.sun);
-
-                for plugin in &self.plugins {
-                    if let Err(error) = plugin.build(
-                        &mut self.schedule,
-                        self.kernel.clone(),
-                        &mut world,
-                        &mut renderer,
-                    ) {
-                        if let Some(reg) = world
-                            .resources
-                            .remove::<crate::custom_layer::CustomLayerRegistry>()
-                        {
-                            self.custom_layers = reg;
-                        }
-                        // A later attempt starts from an empty schedule.
-                        self.schedule.clear();
-                        return Err(MapError::Plugin(error));
-                    }
-                }
-                prewarmed.commit_into(&mut world);
-                let _ = self.schedule.add_system_to_stage(
-                    crate::render::RenderStageLabel::Input,
-                    crate::context::style_transition_system,
-                );
-
-                let context = Box::new(MapContext {
-                    world,
-                    view_state,
-                    style: std::mem::take(style),
-                    renderer,
-                });
-                self.map_context = CurrentMapContext::Ready(context);
-                Ok(())
-            }
-        }
     }
 
     /// Borrows the host window for platform-specific event-loop or window operations.
@@ -481,11 +390,12 @@ mod custom_layers;
 mod events;
 mod frame;
 pub mod handle;
+mod init;
 mod prewarm;
 mod provided_images;
 mod signals;
 mod sources;
-use camera::{merged, starting_view};
+use camera::merged;
 
 #[cfg(test)]
 mod tests;
