@@ -273,7 +273,7 @@ fn prepacked_wire_round_trips_u16_odd_even_and_u32_dense_fallback() {
     };
     let mut expected_gpu = Vec::new();
     let expected_slice =
-        ShaderVertex::encode_vertices("line", &[input, input, input], &mut expected_gpu);
+        ShaderVertex::encode_vertices("line", &[input, input, input], &mut expected_gpu).to_vec();
 
     // 1) Prepacked u16 path with odd usable_indices = 3 (pads wire to 4 u16 elements = 8 bytes)
     let odd_buf = OverAlignedVertexBuffer::from_iters([input, input, input], [0_u32, 1, 2], 3);
@@ -291,9 +291,9 @@ fn prepacked_wire_round_trips_u16_odd_even_and_u32_dense_fallback() {
         odd_layer,
         "road-primary".into(),
         vec![BucketFeatureEntry {
-            kind: BucketEntryKind::FillColor,
+            raw_id: Some(7),
             properties: Default::default(),
-            paint: None,
+            kind: BucketEntryKind::Feature,
         }],
         "line",
         true,
@@ -317,7 +317,8 @@ fn prepacked_wire_round_trips_u16_odd_even_and_u32_dense_fallback() {
     let dense_verts = vec![input; 65_537];
     let mut fill_gpu = Vec::new();
     let fill_expected =
-        <ShaderVertex as PoolVertex>::encode_vertices("fill", &dense_verts[..2], &mut fill_gpu);
+        <ShaderVertex as PoolVertex>::encode_vertices("fill", &dense_verts[..2], &mut fill_gpu)
+            .to_vec();
     let dense_buf = OverAlignedVertexBuffer::from_iters(dense_verts, [0_u32, 65_536, 1, 2], 4);
     let dense_layer = Layer {
         version: 2,
@@ -343,7 +344,7 @@ fn prepacked_wire_round_trips_u16_odd_even_and_u32_dense_fallback() {
         .expect("prepacked dense geometry");
     assert!(pre_dense.indices_u16.is_none());
     assert_eq!(dense_bucket.buffer.vertex_count(), 65_537);
-    assert_eq!(&pre_dense.vertices[..2], fill_expected);
+    assert_eq!(&pre_dense.vertices[..2], fill_expected.as_slice());
     assert_eq!(
         dense_bucket.buffer.buffer.indices,
         vec![0_u32, 65_536, 1, 2]

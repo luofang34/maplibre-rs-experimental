@@ -246,11 +246,11 @@ const wasmPack = () => {
     } else if (!existsSync(`${outDirectory}/maplibre_tile_worker.js`)) {
         writeFileSync(
             `${outDirectory}/maplibre_tile_worker.js`,
-            'export default async function init() { return {}; }\nexport function register_image_provider() {}\nexport function bind_worker_reply_port() {}\nexport function set_kernel_config() {}\nexport class TileWorkerCalls {}\n',
+            'export default async function init() { return {}; }\nexport function register_image_provider() {}\nexport function bind_worker_reply_port() {}\nexport function set_kernel_config() {}\nexport class TileWorkerCalls { set_style() {} async process() {} cancel() { return false; } finish_failed() {} }\n',
         );
         writeFileSync(
             `${outDirectory}/maplibre_tile_worker.d.ts`,
-            'export type InitOutput = {};\nexport default function init(input?: unknown): Promise<InitOutput>;\nexport function register_image_provider(...args: unknown[]): void;\nexport function bind_worker_reply_port(...args: unknown[]): void;\nexport function set_kernel_config(...args: unknown[]): void;\nexport class TileWorkerCalls {}\n',
+            'export type InitOutput = {};\nexport default function init(input?: unknown): Promise<InitOutput>;\nexport function register_image_provider(...args: unknown[]): void;\nexport function bind_worker_reply_port(...args: unknown[]): void;\nexport function set_kernel_config(...args: unknown[]): void;\nexport class TileWorkerCalls { set_style(revision: bigint, style: string): void; process(procedure_tag: number, style_revision: bigint, input: string): Promise<void>; cancel(attempt: bigint): boolean; finish_failed(attempt: bigint): void; }\n',
         );
         if (!existsSync(`${outDirectory}/maplibre_tile_worker_bg.wasm`)) {
             writeFileSync(`${outDirectory}/maplibre_tile_worker_bg.wasm`, Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]));

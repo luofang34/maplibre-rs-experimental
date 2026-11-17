@@ -38,9 +38,9 @@ jobs:
           HEAD_SHA="$(git rev-parse HEAD)"
           git fetch origin "$BASE_REF" --depth=1
           git checkout --detach FETCH_HEAD
-          cargo bench -p benchmarks --target x86_64-unknown-linux-gnu -- $CRITERION_ARGS --save-baseline base
+          cargo bench -p benchmarks --benches --target x86_64-unknown-linux-gnu -- $CRITERION_ARGS --save-baseline base
           git checkout --detach "$HEAD_SHA"
-          cargo bench -p benchmarks --target x86_64-unknown-linux-gnu -- $CRITERION_ARGS --baseline base
+          cargo bench -p benchmarks --benches --target x86_64-unknown-linux-gnu -- $CRITERION_ARGS --baseline base
           critcmp base new | tee benchmark-comparison.txt
           {
             echo "## Criterion Benchmark Comparison (\`base\` vs \`HEAD\`)"
@@ -62,5 +62,5 @@ jobs:
         env:
           WGPU_BACKEND: vulkan
         run: |
-          cargo bench -p benchmarks --target x86_64-unknown-linux-gnu -- \
+          cargo bench -p benchmarks --benches --target x86_64-unknown-linux-gnu -- \
             --warm-up-time 1 --measurement-time 2 --sample-size 10

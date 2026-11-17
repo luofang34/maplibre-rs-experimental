@@ -54,7 +54,7 @@ fn foreign_tags_and_wrong_payloads_are_typed_errors() {
 fn dem_reply_outside_a_worker_returns_a_transport_error() {
     use maplibre::io::source_client::HttpSourceClient;
 
-    let context = PassingContext::new(SourceClient::new(HttpSourceClient::new(
+    let context = wire::PassingContext::new(SourceClient::new(HttpSourceClient::new(
         crate::platform::http_client::web_http_client(),
     )));
     let payload = FlatBufferTransferable::from_array_buffer(
