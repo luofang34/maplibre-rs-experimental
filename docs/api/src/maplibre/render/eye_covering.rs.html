@@ -67,13 +67,13 @@
 <a href=#67 id=67 data-nosnippet>67</a>    <span class="kw">pub</span>(<span class="kw">crate</span>) skipped_wanted_dem: FxHashSet&lt;WorldTileCoords&gt;,
 <a href=#68 id=68 data-nosnippet>68</a>}
 <a href=#69 id=69 data-nosnippet>69</a>
-<a href=#70 id=70 data-nosnippet>70</a><span class="doccomment">/// Per-frame `Loose` request coverings recorded during single-view `Request` systems so
-<a href=#71 id=71 data-nosnippet>71</a>/// `retention_system` in `Cleanup` reuses them without re-walking the globe quadtree.
+<a href=#70 id=70 data-nosnippet>70</a><span class="doccomment">/// Per-frame request coverings recorded during single-view `Request` systems so
+<a href=#71 id=71 data-nosnippet>71</a>/// `retention_system` and `drawn_covering` reuse them without re-walking the globe quadtree.
 <a href=#72 id=72 data-nosnippet>72</a></span><span class="attr">#[derive(Clone, Debug, Default)]
 <a href=#73 id=73 data-nosnippet>73</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>FrameLooseCovering {
 <a href=#74 id=74 data-nosnippet>74</a>    <span class="kw">pub</span>(<span class="kw">crate</span>) host_frame: u64,
-<a href=#75 id=75 data-nosnippet>75</a>    <span class="kw">pub</span>(<span class="kw">crate</span>) view_tiles: <span class="prelude-ty">Option</span>&lt;Vec&lt;WorldTileCoords&gt;&gt;,
-<a href=#76 id=76 data-nosnippet>76</a>    <span class="kw">pub</span>(<span class="kw">crate</span>) raster_tiles: <span class="prelude-ty">Option</span>&lt;Vec&lt;WorldTileCoords&gt;&gt;,
+<a href=#75 id=75 data-nosnippet>75</a>    <span class="kw">pub</span>(<span class="kw">crate</span>) view_tiles: <span class="prelude-ty">Option</span>&lt;(<span class="prelude-ty">Option</span>&lt;Vec&lt;WorldTileCoords&gt;&gt;, ViewStatePadding, ZoomLevel)&gt;,
+<a href=#76 id=76 data-nosnippet>76</a>    <span class="kw">pub</span>(<span class="kw">crate</span>) raster_tiles: <span class="prelude-ty">Option</span>&lt;(Vec&lt;WorldTileCoords&gt;, ViewStatePadding)&gt;,
 <a href=#77 id=77 data-nosnippet>77</a>}
 <a href=#78 id=78 data-nosnippet>78</a>
 <a href=#79 id=79 data-nosnippet>79</a><span class="doccomment">/// Total number of eye passes executing in the current [`XrFrame`](crate::render::xr::XrFrame).
@@ -199,21 +199,47 @@
 <a href=#199 id=199 data-nosnippet>199</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>((shared.region(), shared.raster.clone()));
 <a href=#200 id=200 data-nosnippet>200</a>        }
 <a href=#201 id=201 data-nosnippet>201</a>    }
-<a href=#202 id=202 data-nosnippet>202</a>    <span class="kw">let </span>region =
-<a href=#203 id=203 data-nosnippet>203</a>        view_region_for_projection(style, view_state, world, level, ViewStatePadding::Tight)<span class="question-mark">?</span>;
-<a href=#204 id=204 data-nosnippet>204</a>    <span class="kw">let </span>raster = raster_source_regions(style, view_state, world, ViewStatePadding::Tight)<span class="question-mark">?</span>;
-<a href=#205 id=205 data-nosnippet>205</a>    <span class="kw">if </span>eye.is_none_or(|eye| eye.index == <span class="number">0</span>) {
-<a href=#206 id=206 data-nosnippet>206</a>        world.resources.insert(SharedCovering {
-<a href=#207 id=207 data-nosnippet>207</a>            frame: eye.map(|eye| eye.frame),
-<a href=#208 id=208 data-nosnippet>208</a>            tiles: region
-<a href=#209 id=209 data-nosnippet>209</a>                .as_ref()
-<a href=#210 id=210 data-nosnippet>210</a>                .map(|region| (region.iter().collect(), region.zoom_level())),
-<a href=#211 id=211 data-nosnippet>211</a>            raster: raster.clone(),
-<a href=#212 id=212 data-nosnippet>212</a>        });
-<a href=#213 id=213 data-nosnippet>213</a>    }
-<a href=#214 id=214 data-nosnippet>214</a>    <span class="prelude-val">Ok</span>((region, raster))
-<a href=#215 id=215 data-nosnippet>215</a>}
-<a href=#216 id=216 data-nosnippet>216</a>
-<a href=#217 id=217 data-nosnippet>217</a><span class="attr">#[cfg(test)]
-<a href=#218 id=218 data-nosnippet>218</a></span><span class="kw">mod </span>tests;
+<a href=#202 id=202 data-nosnippet>202</a>    <span class="kw">let </span>host_frame = <span class="kw">crate</span>::render::frame_signals::host_frame_in_progress(world);
+<a href=#203 id=203 data-nosnippet>203</a>    <span class="kw">let </span>multi_active = world
+<a href=#204 id=204 data-nosnippet>204</a>        .resources
+<a href=#205 id=205 data-nosnippet>205</a>        .get::&lt;MultiViewExtractCovering&gt;()
+<a href=#206 id=206 data-nosnippet>206</a>        .is_some_and(|m| m.active);
+<a href=#207 id=207 data-nosnippet>207</a>    <span class="kw">let </span>cached_tight_region = <span class="kw">if </span>!multi_active &amp;&amp; eye.is_none_or(|eye| eye.index == <span class="number">0</span>) {
+<a href=#208 id=208 data-nosnippet>208</a>        world
+<a href=#209 id=209 data-nosnippet>209</a>            .resources
+<a href=#210 id=210 data-nosnippet>210</a>            .get::&lt;FrameLooseCovering&gt;()
+<a href=#211 id=211 data-nosnippet>211</a>            .filter(|cache| cache.host_frame == host_frame)
+<a href=#212 id=212 data-nosnippet>212</a>            .and_then(|cache| cache.view_tiles.as_ref())
+<a href=#213 id=213 data-nosnippet>213</a>            .filter(|(<span class="kw">_</span>, padding, cached_level)| {
+<a href=#214 id=214 data-nosnippet>214</a>                <span class="kw-2">*</span>padding == ViewStatePadding::Tight &amp;&amp; <span class="kw-2">*</span>cached_level == level
+<a href=#215 id=215 data-nosnippet>215</a>            })
+<a href=#216 id=216 data-nosnippet>216</a>            .map(|(tiles, <span class="kw">_</span>, <span class="kw">_</span>)| {
+<a href=#217 id=217 data-nosnippet>217</a>                tiles
+<a href=#218 id=218 data-nosnippet>218</a>                    .as_ref()
+<a href=#219 id=219 data-nosnippet>219</a>                    .map(|tiles| ViewRegion::from_tiles(tiles.clone(), level, tiles.len().max(<span class="number">1</span>)))
+<a href=#220 id=220 data-nosnippet>220</a>            })
+<a href=#221 id=221 data-nosnippet>221</a>    } <span class="kw">else </span>{
+<a href=#222 id=222 data-nosnippet>222</a>        <span class="prelude-val">None
+<a href=#223 id=223 data-nosnippet>223</a>    </span>};
+<a href=#224 id=224 data-nosnippet>224</a>    <span class="kw">let </span>region = <span class="kw">match </span>cached_tight_region {
+<a href=#225 id=225 data-nosnippet>225</a>        <span class="prelude-val">Some</span>(cached) =&gt; cached,
+<a href=#226 id=226 data-nosnippet>226</a>        <span class="prelude-val">None </span>=&gt; {
+<a href=#227 id=227 data-nosnippet>227</a>            view_region_for_projection(style, view_state, world, level, ViewStatePadding::Tight)<span class="question-mark">?
+<a href=#228 id=228 data-nosnippet>228</a>        </span>}
+<a href=#229 id=229 data-nosnippet>229</a>    };
+<a href=#230 id=230 data-nosnippet>230</a>    <span class="kw">let </span>raster = raster_source_regions(style, view_state, world, ViewStatePadding::Tight)<span class="question-mark">?</span>;
+<a href=#231 id=231 data-nosnippet>231</a>    <span class="kw">if </span>eye.is_none_or(|eye| eye.index == <span class="number">0</span>) {
+<a href=#232 id=232 data-nosnippet>232</a>        world.resources.insert(SharedCovering {
+<a href=#233 id=233 data-nosnippet>233</a>            frame: eye.map(|eye| eye.frame),
+<a href=#234 id=234 data-nosnippet>234</a>            tiles: region
+<a href=#235 id=235 data-nosnippet>235</a>                .as_ref()
+<a href=#236 id=236 data-nosnippet>236</a>                .map(|region| (region.iter().collect(), region.zoom_level())),
+<a href=#237 id=237 data-nosnippet>237</a>            raster: raster.clone(),
+<a href=#238 id=238 data-nosnippet>238</a>        });
+<a href=#239 id=239 data-nosnippet>239</a>    }
+<a href=#240 id=240 data-nosnippet>240</a>    <span class="prelude-val">Ok</span>((region, raster))
+<a href=#241 id=241 data-nosnippet>241</a>}
+<a href=#242 id=242 data-nosnippet>242</a>
+<a href=#243 id=243 data-nosnippet>243</a><span class="attr">#[cfg(test)]
+<a href=#244 id=244 data-nosnippet>244</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

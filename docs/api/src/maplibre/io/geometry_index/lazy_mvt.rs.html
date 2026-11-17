@@ -75,7 +75,7 @@
 <a href=#75 id=75 data-nosnippet>75</a>    }
 <a href=#76 id=76 data-nosnippet>76</a>
 <a href=#77 id=77 data-nosnippet>77</a>    <span class="doccomment">/// Reconstructs an unmaterialized index from wire bytes and their compression flag.
-<a href=#78 id=78 data-nosnippet>78</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>from_packed(mvt_bytes: Arc&lt;[u8]&gt;, compressed: bool) -&gt; <span class="self">Self </span>{
+<a href=#78 id=78 data-nosnippet>78</a>    </span><span class="kw">pub fn </span>from_packed(mvt_bytes: Arc&lt;[u8]&gt;, compressed: bool) -&gt; <span class="self">Self </span>{
 <a href=#79 id=79 data-nosnippet>79</a>        <span class="self">Self </span>{
 <a href=#80 id=80 data-nosnippet>80</a>            mvt_bytes,
 <a href=#81 id=81 data-nosnippet>81</a>            compressed,
@@ -102,7 +102,7 @@
 <a href=#102 id=102 data-nosnippet>102</a>    }
 <a href=#103 id=103 data-nosnippet>103</a>
 <a href=#104 id=104 data-nosnippet>104</a>    <span class="doccomment">/// Underlying stored MVT byte slice and whether it is deflate-compressed.
-<a href=#105 id=105 data-nosnippet>105</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>wire_bytes(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; (<span class="kw-2">&amp;</span>Arc&lt;[u8]&gt;, bool) {
+<a href=#105 id=105 data-nosnippet>105</a>    </span><span class="kw">pub fn </span>wire_bytes(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; (<span class="kw-2">&amp;</span>Arc&lt;[u8]&gt;, bool) {
 <a href=#106 id=106 data-nosnippet>106</a>        (<span class="kw-2">&amp;</span><span class="self">self</span>.mvt_bytes, <span class="self">self</span>.compressed)
 <a href=#107 id=107 data-nosnippet>107</a>    }
 <a href=#108 id=108 data-nosnippet>108</a>

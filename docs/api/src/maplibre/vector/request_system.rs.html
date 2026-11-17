@@ -105,11 +105,11 @@
 <a href=#105 id=105 data-nosnippet>105</a>                    raster_tiles: <span class="prelude-val">None</span>,
 <a href=#106 id=106 data-nosnippet>106</a>                };
 <a href=#107 id=107 data-nosnippet>107</a>            }
-<a href=#108 id=108 data-nosnippet>108</a>            cache.view_tiles = <span class="prelude-val">Some</span>(
-<a href=#109 id=109 data-nosnippet>109</a>                computed
-<a href=#110 id=110 data-nosnippet>110</a>                    .as_ref()
-<a href=#111 id=111 data-nosnippet>111</a>                    .map_or_else(Vec::new, |(tiles, <span class="kw">_</span>)| tiles.clone()),
-<a href=#112 id=112 data-nosnippet>112</a>            );
+<a href=#108 id=108 data-nosnippet>108</a>            cache.view_tiles = <span class="prelude-val">Some</span>((
+<a href=#109 id=109 data-nosnippet>109</a>                computed.as_ref().map(|(tiles, <span class="kw">_</span>)| tiles.clone()),
+<a href=#110 id=110 data-nosnippet>110</a>                request_padding,
+<a href=#111 id=111 data-nosnippet>111</a>                visible_level,
+<a href=#112 id=112 data-nosnippet>112</a>            ));
 <a href=#113 id=113 data-nosnippet>113</a>            computed
 <a href=#114 id=114 data-nosnippet>114</a>        };
 <a href=#115 id=115 data-nosnippet>115</a>
