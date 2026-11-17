@@ -39,8 +39,8 @@ pub const UNIFORM_STRIDE: u64 = 512;
 // multiple of the 256-byte offset alignment every backend accepts.
 const _: () = assert!(std::mem::size_of::<TerrainTileUniforms>() as u64 <= UNIFORM_STRIDE);
 const _: () = assert!(std::mem::size_of::<TerrainTileUniforms>() == 512);
-/// Largest number of terrain tiles drawn in one frame.
-const UNIFORM_CAPACITY: u64 = 256;
+/// Largest number of terrain tiles drawn in one frame, matching `globe_view_region` / `MAX_N_TILES`.
+const UNIFORM_CAPACITY: u64 = 512;
 
 /// Per-tile inputs of the terrain shaders, one block per drawn tile.
 #[repr(C)]

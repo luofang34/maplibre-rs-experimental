@@ -22,6 +22,9 @@ pub struct RenderContext<'d> {
     /// Whether `main_pass` should inline `translucent_pass` draws directly into its own render pass
     /// because no intermediate pass or symbol depth copy runs between them this frame.
     pub(crate) inline_translucent_pass: bool,
+    /// Whether any pass scheduled between `main_pass` and `translucent_pass` has active work and
+    /// therefore reads the main pass's multisampled colour or depth/stencil attachments.
+    pub(crate) between_main_and_translucent_has_work: bool,
 }
 
 impl<'d> RenderContext<'d> {
@@ -31,6 +34,7 @@ impl<'d> RenderContext<'d> {
             device,
             command_encoder,
             inline_translucent_pass: false,
+            between_main_and_translucent_has_work: false,
         }
     }
 }
@@ -181,16 +185,16 @@ impl RenderGraph {
         let trans_pos = order.iter().position(|&idx| {
             self.passes[idx].name.as_ref() == crate::render::draw_graph::node::TRANSLUCENT_PASS
         });
-        render_context.inline_translucent_pass = match (main_pos, trans_pos) {
-            (Some(m), Some(t))
-                if m < t && !crate::render::translucent_pass::needs_symbol_depth_copy(world) =>
-            {
-                order[m + 1..t]
-                    .iter()
-                    .all(|&idx| !self.passes[idx].node.has_active_work(resources, world))
-            }
+        let between_has_work = match (main_pos, trans_pos) {
+            (Some(m), Some(t)) if m < t => order[m + 1..t]
+                .iter()
+                .any(|&idx| self.passes[idx].node.has_active_work(resources, world)),
             _ => false,
         };
+        render_context.between_main_and_translucent_has_work = between_has_work;
+        render_context.inline_translucent_pass = matches!((main_pos, trans_pos), (Some(m), Some(t)) if m < t)
+            && !between_has_work
+            && !crate::render::translucent_pass::needs_symbol_depth_copy(world);
         for &index in order.iter() {
             let pass = &self.passes[index];
             #[cfg(feature = "trace")]

@@ -275,10 +275,12 @@ impl Node for GlobeDaylightNode {
             load: wgpu::LoadOp::Load,
             store: wgpu::StoreOp::Store,
         };
-        // The translucent pass resolves the multisampled colour after it.
-        let view = multisampling
-            .as_ref()
-            .map_or(&**render_target, |texture| &texture.view);
+        // Keep MSAA stored for downstream passes while resolving to `render_target` in case
+        // no subsequent translucent/overlay pass runs this frame.
+        let (view, resolve_target) = match multisampling {
+            Some(texture) => (&*texture.view, Some(&**render_target)),
+            None => (&**render_target, None),
+        };
         let mut pass =
             render_context
                 .command_encoder
@@ -287,7 +289,7 @@ impl Node for GlobeDaylightNode {
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view,
                         depth_slice: None,
-                        resolve_target: None,
+                        resolve_target,
                         ops: load,
                     })],
                     depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {

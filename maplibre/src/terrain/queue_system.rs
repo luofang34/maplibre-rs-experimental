@@ -332,7 +332,10 @@ fn queue_tiles(
             .resources
             .get_mut::<crate::terrain::TerrainCoverageIndex>()
         {
-            index.set_surface_edges(&sources, std::sync::Arc::clone(&edge_cache.samples));
+            index.set_surface_edges(
+                &sources[..written],
+                std::sync::Arc::clone(&edge_cache.samples),
+            );
         }
         let kept = placed.into_iter().zip(uniforms).take(written).collect();
         world.resources.insert(TerrainEyeFrame(kept));

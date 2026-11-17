@@ -55,7 +55,9 @@ impl Node for MainPassNode {
         let translucent_has_work = super::translucent_pass::has_work(world);
         let inline_translucent = render_context.inline_translucent_pass;
         let translucent_runs_separately = !inline_translucent && translucent_has_work;
-        let keep_depth_stencil = translucent_runs_separately
+        let downstream_loads_attachments =
+            translucent_runs_separately || render_context.between_main_and_translucent_has_work;
+        let keep_depth_stencil = downstream_loads_attachments
             || state.eye_depth_target.is_some()
             || matches!(state.depth_readout_texture, Initialized(_));
         let depth_stencil_store = if keep_depth_stencil {
@@ -66,7 +68,7 @@ impl Node for MainPassNode {
         let color = color_attachment(
             render_target.deref(),
             multisampling_texture.as_ref(),
-            translucent_runs_separately,
+            downstream_loads_attachments,
         );
         let pass = render_context
             .command_encoder
