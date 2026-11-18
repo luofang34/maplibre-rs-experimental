@@ -13,7 +13,10 @@ use crate::{
     window::PhysicalSize,
 };
 
-const SHADER: &str = include_str!("../render/shaders/overlay.wgsl");
+const SHADER: &str = include_str!(concat!(
+    env!("OUT_DIR"),
+    "/wgsl/render/shaders/overlay.wgsl"
+));
 
 /// Share by which a vertex's or probe's reversed-Z depth is raised before it is tested against
 /// the frame's depth. That brings it nearer by about `DEPTH_BIAS * (1 - distance / far)` of
@@ -100,10 +103,11 @@ impl OverlayGpu {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("overlay"),
-            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
-        });
+        let module = crate::render::resource::shader_module::create_shader_module_from_wgsl(
+            device,
+            Some("overlay"),
+            SHADER,
+        );
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("overlay"),
             layout: Some(&pipeline_layout),

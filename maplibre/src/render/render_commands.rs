@@ -30,7 +30,10 @@ impl<P: PhaseItem> RenderCommand<P> for SetMaskPipeline {
             return RenderCommandResult::Failure;
         };
         let binding = item.projection_binding();
-        pass.set_pipeline(pipeline.for_globe(projection_resources.is_globe_active(binding)));
+        let Some(mask) = pipeline.for_globe(projection_resources.is_globe_active(binding)) else {
+            return RenderCommandResult::Failure;
+        };
+        pass.set_pipeline(mask);
         pass.set_bind_group(0, projection_resources.bind_group_for(binding), &[]);
         RenderCommandResult::Success
     }

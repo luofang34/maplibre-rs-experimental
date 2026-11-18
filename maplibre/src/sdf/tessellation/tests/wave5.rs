@@ -125,7 +125,7 @@ fn shaped_opentype_runs_emit_single_ligature_and_indic_conjunct_quads() {
             ..Default::default()
         },
     );
-    let mut runs = std::collections::HashMap::new();
+    let mut runs = rustc_hash::FxHashMap::default();
     runs.insert(
         "fi".to_owned(),
         vec![crate::font::ShapedGlyph {

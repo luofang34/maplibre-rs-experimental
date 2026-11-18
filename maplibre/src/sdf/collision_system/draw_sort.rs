@@ -5,7 +5,7 @@
 //! overlapping labels covers the other however the map is turned; the index buffer of each such
 //! layer is rewritten here when the bearing it was sorted for changes.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 use crate::{
     coords::WorldTileCoords,

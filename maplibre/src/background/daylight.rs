@@ -64,7 +64,10 @@ impl Shader for GlobeDaylightShader {
             shader_location,
         };
         VertexState {
-            source: include_str!("../render/shaders/globe_daylight.vertex.wgsl"),
+            source: include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/globe_daylight.vertex.wgsl"
+            )),
             entry_point: "main",
             buffers: vec![crate::render::resource::VertexBufferLayout {
                 array_stride: std::mem::size_of::<GlobeDaylightFrame>() as u64,
@@ -77,8 +80,14 @@ impl Shader for GlobeDaylightShader {
     fn describe_fragment(&self) -> FragmentState {
         FragmentState {
             source: concat!(
-                include_str!("../render/shaders/daylight.wgsl.part"),
-                include_str!("../render/shaders/globe_daylight.fragment.wgsl")
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/daylight.wgsl.part"
+                )),
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/globe_daylight.fragment.wgsl"
+                ))
             ),
             entry_point: "main",
             targets: vec![Some(wgpu::ColorTargetState {

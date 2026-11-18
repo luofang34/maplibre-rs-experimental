@@ -16,7 +16,7 @@ fn labels_preserve_unicode_and_apply_transform_before_trimming() {
         }))
         .expect("paint");
         assert_eq!(
-            paint.label(&FeatureProperties::new(), 0.0).as_deref(),
+            paint.label(&FeatureProperties::default(), 0.0).as_deref(),
             expected
         );
     }
@@ -35,7 +35,8 @@ fn shared_symbol_height_evaluates_features_and_overrides_component_aliases() {
         "altitude".into(),
         crate::style::expression::Value::Number(1200.0),
     )]
-    .into();
+    .into_iter()
+    .collect();
     for component in ["text", "icon"] {
         assert_eq!(paint.height_offset(component, &properties, 12.0), 1250.0);
         assert!(!paint.height_follows_ground(component));
@@ -49,7 +50,7 @@ fn shared_symbol_height_interpolates_zoom_and_defaults_to_ground() {
     }))
     .expect("paint");
     assert_eq!(
-        paint.height_offset("text", &FeatureProperties::new(), 12.0),
+        paint.height_offset("text", &FeatureProperties::default(), 12.0),
         200.0
     );
     assert!(paint.height_follows_ground("icon"));
@@ -62,11 +63,11 @@ fn component_height_aliases_remain_usable_without_shared_properties() {
     }))
     .expect("paint");
     assert_eq!(
-        paint.height_offset("text", &FeatureProperties::new(), 12.0),
+        paint.height_offset("text", &FeatureProperties::default(), 12.0),
         12.0
     );
     assert_eq!(
-        paint.height_offset("icon", &FeatureProperties::new(), 12.0),
+        paint.height_offset("icon", &FeatureProperties::default(), 12.0),
         34.0
     );
     assert!(!paint.height_follows_ground("text"));
@@ -79,7 +80,8 @@ fn a_format_expression_gives_its_sections_their_own_size_and_colour() {
         "text-field": ["format", "Big", {"font-scale": 1.5, "text-color": "#ff0000"}, "\n", {}, ["get", "name"], {}]
     }))
     .expect("paint");
-    let properties = FeatureProperties::from([("name".to_string(), "small".into())]);
+    let properties: FeatureProperties =
+        [("name".to_string(), "small".into())].into_iter().collect();
     let sections = paint.label_sections(&properties, 0.0);
     assert_eq!(paint.label(&properties, 0.0).as_deref(), Some("Big\nsmall"));
     assert_eq!(sections.len(), 3);
@@ -95,7 +97,7 @@ fn a_format_inside_a_match_keeps_its_sections() {
             ["format", "Green", {"text-color": "green"}, "Two", {}], "default"]
     }))
     .expect("paint");
-    let properties = FeatureProperties::from([("case".to_string(), "one".into())]);
+    let properties: FeatureProperties = [("case".to_string(), "one".into())].into_iter().collect();
     assert_eq!(paint.label(&properties, 0.0).as_deref(), Some("GreenTwo"));
     assert_eq!(paint.label_sections(&properties, 0.0).len(), 2);
 }
@@ -106,7 +108,7 @@ fn an_image_in_a_format_is_a_placeholder_character_with_its_own_section() {
         "text-field": ["format", "Stop ", {}, ["image", "bus"], {"font-scale": 2.0}]
     }))
     .expect("paint");
-    let properties = FeatureProperties::new();
+    let properties = FeatureProperties::default();
     let sections = paint.label_sections(&properties, 0.0);
 
     assert_eq!(
@@ -154,7 +156,7 @@ fn each_section_of_a_formatted_label_is_shaped_on_its_own() {
         "text-field": ["format", "لا", {"font-scale": 1.5}, " ab", {}]
     }))
     .expect("paint");
-    let properties = FeatureProperties::new();
+    let properties = FeatureProperties::default();
     let label = paint.label(&properties, 0.0).expect("label");
     let arabic = crate::style::arabic_shaping::shape("لا");
     assert_eq!(label, format!("{arabic} ab"));

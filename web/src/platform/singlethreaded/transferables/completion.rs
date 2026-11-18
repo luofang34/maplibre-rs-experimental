@@ -1,31 +1,21 @@
 //! Completion flags shared between Web worker replies and tile coverage selection.
 
-use flatbuffers::FlatBufferBuilder;
 use maplibre::coords::WorldTileCoords;
 
-use super::{
-    FlatBufferTransferable, FlatTileTessellatedBuilder, FlatWorldTileCoords, WebMessageTag,
-};
+use super::{FlatBufferTransferable, WebMessageTag};
 
 pub(super) fn tile_completion(
     coords: WorldTileCoords,
     pending: bool,
     failed: bool,
 ) -> FlatBufferTransferable {
-    let mut inner_builder = FlatBufferBuilder::with_capacity(1024);
-    let mut builder = FlatTileTessellatedBuilder::new(&mut inner_builder);
-
-    builder.add_coords(&FlatWorldTileCoords::new(
-        coords.x,
-        coords.y,
-        coords.z.into(),
-    ));
-    builder.add_pending_symbols(pending);
-    builder.add_failed(failed);
-    let root = builder.finish();
-    inner_builder.finish(root, None);
-    let (data, start) = inner_builder.collapse();
-    FlatBufferTransferable::from_vec(WebMessageTag::TileTessellated, data, start)
+    let mut data = Vec::with_capacity(11);
+    data.extend_from_slice(&coords.x.to_le_bytes());
+    data.extend_from_slice(&coords.y.to_le_bytes());
+    data.push(u8::from(coords.z));
+    data.push(u8::from(pending));
+    data.push(u8::from(failed));
+    FlatBufferTransferable::from_vec(WebMessageTag::TileTessellated, data, 0)
 }
 
 #[cfg(test)]

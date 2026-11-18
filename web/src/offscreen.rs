@@ -54,6 +54,8 @@ struct RunnerInner {
     raf_handle: Cell<Option<i32>>,
     wake_timer: WakeTimerSlot,
     raf_closure: RafClosureSlot,
+    initial_load_settled: Cell<bool>,
+    initial_pumps: Cell<u8>,
     closed: Cell<bool>,
 }
 
@@ -155,17 +157,42 @@ impl RunnerInner {
                     || s.input.moved_view())
         };
         if needs_frame {
+            Self::schedule_wakeup(rc);
+        }
+    }
+
+    fn schedule_wakeup(rc: &Rc<RefCell<Self>>) {
+        let immediate = {
+            let Ok(inner) = rc.try_borrow() else {
+                return;
+            };
+            if inner.closed.get() || inner.raf_pending.get() {
+                return;
+            }
+            if !inner.initial_load_settled.get() && inner.initial_pumps.get() < 32 {
+                inner
+                    .initial_pumps
+                    .set(inner.initial_pumps.get().saturating_add(1));
+                true
+            } else {
+                false
+            }
+        };
+        if immediate {
+            Self::schedule_immediate_pump(rc);
+        } else {
             Self::schedule_raf(rc);
         }
     }
 
     fn run_frame(rc: &Rc<RefCell<Self>>) {
-        let next_delay = {
+        let (next_delay, use_immediate_pump) = {
             let Ok(mut inner) = rc.try_borrow_mut() else {
                 return;
             };
             inner.raf_pending.set(false);
             inner.raf_handle.set(None);
+            inner.clear_wake_timer();
             if inner.closed.get() || inner.commands.is_closed() {
                 inner.shutdown();
                 return;
@@ -209,17 +236,34 @@ impl RunnerInner {
                 (None, None) => None,
             };
 
-            if map_ready || arrivals || input_moved || wait == Some(Duration::ZERO) {
+            if !s.initial_load_settled.get()
+                && !s.map.needs_redraw()
+                && !arrivals
+                && !input_moved
+                && wait.is_none()
+            {
+                s.initial_load_settled.set(true);
+            }
+            let next_delay = if map_ready || arrivals || input_moved || wait == Some(Duration::ZERO)
+            {
                 Some(Duration::ZERO)
             } else {
                 wait
+            };
+            let use_immediate_pump = next_delay == Some(Duration::ZERO)
+                && !s.initial_load_settled.get()
+                && s.initial_pumps.get() < 32;
+            if use_immediate_pump {
+                s.initial_pumps.set(s.initial_pumps.get().saturating_add(1));
             }
+            (next_delay, use_immediate_pump)
         };
 
-        match next_delay {
-            Some(Duration::ZERO) => Self::schedule_raf(rc),
-            Some(delay) => Self::schedule_wake(rc, delay),
-            None => {
+        match (next_delay, use_immediate_pump) {
+            (Some(Duration::ZERO), true) => Self::schedule_immediate_pump(rc),
+            (Some(Duration::ZERO), false) => Self::schedule_raf(rc),
+            (Some(delay), _) => Self::schedule_wake(rc, delay),
+            (None, _) => {
                 if let Ok(inner) = rc.try_borrow() {
                     inner.clear_wake_timer();
                 }
@@ -228,6 +272,18 @@ impl RunnerInner {
     }
 
     fn schedule_wake(rc: &Rc<RefCell<Self>>, delay: Duration) {
+        Self::schedule_timer(rc, delay, Self::schedule_raf);
+    }
+
+    fn schedule_immediate_pump(rc: &Rc<RefCell<Self>>) {
+        Self::schedule_timer(rc, Duration::ZERO, Self::run_frame);
+    }
+
+    fn schedule_timer(
+        rc: &Rc<RefCell<Self>>,
+        delay: Duration,
+        callback_fn: fn(&Rc<RefCell<Self>>),
+    ) {
         let Ok(inner) = rc.try_borrow() else {
             return;
         };
@@ -238,7 +294,7 @@ impl RunnerInner {
         let weak = Rc::downgrade(rc);
         let callback = Closure::wrap(Box::new(move || {
             if let Some(strong) = weak.upgrade() {
-                Self::schedule_raf(&strong);
+                callback_fn(&strong);
             }
         }) as Box<dyn FnMut()>);
         let millis = i32::try_from(delay.as_millis()).unwrap_or(i32::MAX);
@@ -309,13 +365,15 @@ fn start_runner(
         raf_handle: Cell::new(None),
         wake_timer: RefCell::new(None),
         raf_closure: RefCell::new(None),
+        initial_load_settled: Cell::new(false),
+        initial_pumps: Cell::new(0),
         closed: Cell::new(false),
     }));
 
     let weak_for_redraw = Rc::downgrade(&inner);
     let redraw_rc: Rc<dyn Fn()> = Rc::new(move || {
         if let Some(strong) = weak_for_redraw.upgrade() {
-            RunnerInner::schedule_raf(&strong);
+            RunnerInner::schedule_wakeup(&strong);
         }
     });
     *window_state.redraw.borrow_mut() = Some(redraw_rc.clone());

@@ -115,6 +115,86 @@ pub struct GeoJsonDiff {
     pub update: Vec<FeatureUpdate>,
 }
 
+impl GeoJsonDiff {
+    /// Parses a GL JS `GeoJSONSourceDiff` directly from a [`Value`].
+    pub fn from_json_value(value: &Value) -> Result<Self, serde_json::Error> {
+        use crate::util::json::extract::{
+            field_err, json_bool_or, json_req_string, missing_field_err,
+        };
+        let Some(map) = value.as_object() else {
+            return Err(field_err("diff", "expected object"));
+        };
+        let opt_values = |key: &str| -> Result<Vec<Value>, serde_json::Error> {
+            match map.get(key) {
+                None => Ok(Vec::new()),
+                Some(v) => v
+                    .as_array()
+                    .cloned()
+                    .ok_or_else(|| field_err(key, "expected array")),
+            }
+        };
+        let update = match map.get("update") {
+            None => Vec::new(),
+            Some(v) => {
+                let items = v
+                    .as_array()
+                    .ok_or_else(|| field_err("update", "expected array"))?;
+                let mut out = Vec::with_capacity(items.len());
+                for item in items {
+                    let obj = item
+                        .as_object()
+                        .ok_or_else(|| field_err("update", "expected object"))?;
+                    let id = obj
+                        .get("id")
+                        .cloned()
+                        .ok_or_else(|| missing_field_err("id"))?;
+                    let new_geometry = obj.get("newGeometry").filter(|g| !g.is_null()).cloned();
+                    let add_or_update_properties = match obj.get("addOrUpdateProperties") {
+                        None => Vec::new(),
+                        Some(props) => {
+                            let arr = props.as_array().ok_or_else(|| {
+                                field_err("addOrUpdateProperties", "expected array")
+                            })?;
+                            let mut pairs = Vec::with_capacity(arr.len());
+                            for entry in arr {
+                                let eobj = entry.as_object().ok_or_else(|| {
+                                    field_err("addOrUpdateProperties", "expected object")
+                                })?;
+                                let key = json_req_string(eobj, "key")?;
+                                let val = eobj
+                                    .get("value")
+                                    .cloned()
+                                    .ok_or_else(|| missing_field_err("value"))?;
+                                pairs.push(PropertyValue { key, value: val });
+                            }
+                            pairs
+                        }
+                    };
+                    let remove_properties = crate::util::json::extract::json_string_vec_or_empty(
+                        obj,
+                        "removeProperties",
+                    )?;
+                    let remove_all_properties = json_bool_or(obj, "removeAllProperties", false)?;
+                    out.push(FeatureUpdate {
+                        id,
+                        new_geometry,
+                        add_or_update_properties,
+                        remove_properties,
+                        remove_all_properties,
+                    });
+                }
+                out
+            }
+        };
+        Ok(Self {
+            remove_all: json_bool_or(map, "removeAll", false)?,
+            remove: opt_values("remove")?,
+            add: opt_values("add")?,
+            update,
+        })
+    }
+}
+
 impl Style {
     /// Replaces the data of a GeoJSON source, as GL JS `setData`. Inside
     /// [`MapContext::mutate_style`] this needs no `redraw_tiles`: the map fetches again only the

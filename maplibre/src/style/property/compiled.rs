@@ -54,31 +54,54 @@ pub enum CompiledProperty<T> {
     Composite(Arc<Expression>),
 }
 
+enum CompiledExprKind {
+    Constant(Option<crate::style::expression::Value>),
+    Camera(Arc<Expression>),
+    DataDriven(Arc<Expression>),
+    Composite(Arc<Expression>),
+}
+
+#[inline(never)]
+fn compile_expression(expr: &Expression) -> CompiledExprKind {
+    let is_feature_const = expr.is_feature_constant();
+    let is_zoom_const = expr.is_zoom_constant();
+    if is_feature_const && is_zoom_const && expr.is_constant() {
+        let ctx = EvaluationContext::at_zoom(0.0);
+        if let Ok(val) = expr.evaluate(&ctx) {
+            return CompiledExprKind::Constant(Some(val));
+        }
+        CompiledExprKind::Camera(Arc::new(expr.clone()))
+    } else if is_feature_const {
+        CompiledExprKind::Camera(Arc::new(expr.clone()))
+    } else if is_zoom_const {
+        CompiledExprKind::DataDriven(Arc::new(expr.clone()))
+    } else {
+        CompiledExprKind::Composite(Arc::new(expr.clone()))
+    }
+}
+
 impl<T: PropertyValue> CompiledProperty<T> {
     /// Compiles a [`StyleProperty<T>`] into a [`CompiledProperty<T>`].
     pub fn compile(property: &StyleProperty<T>) -> Option<Self> {
         match property {
             StyleProperty::Constant(value) => Some(Self::Constant(value.clone())),
-            StyleProperty::Expression(prop) => {
-                let expr = prop.expression();
-                let is_feature_const = expr.is_feature_constant();
-                let is_zoom_const = expr.is_zoom_constant();
-                if is_feature_const && is_zoom_const && expr.is_constant() {
-                    let ctx = EvaluationContext::at_zoom(0.0);
-                    if let Ok(val) = expr.evaluate(&ctx) {
-                        if let Some(t) = T::from_value(&val) {
-                            return Some(Self::Constant(t));
-                        }
+            StyleProperty::Expression(prop) => match compile_expression(prop.expression()) {
+                CompiledExprKind::Constant(Some(val)) => {
+                    if let Some(t) = T::from_value(&val) {
+                        Some(Self::Constant(t))
+                    } else {
+                        Some(Self::CameraFunction(ZoomCurve::new(Arc::new(
+                            prop.expression().clone(),
+                        ))))
                     }
-                    Some(Self::CameraFunction(ZoomCurve::new(Arc::new(expr.clone()))))
-                } else if is_feature_const {
-                    Some(Self::CameraFunction(ZoomCurve::new(Arc::new(expr.clone()))))
-                } else if is_zoom_const {
-                    Some(Self::DataDriven(Arc::new(expr.clone())))
-                } else {
-                    Some(Self::Composite(Arc::new(expr.clone())))
                 }
-            }
+                CompiledExprKind::Constant(None) => Some(Self::CameraFunction(ZoomCurve::new(
+                    Arc::new(prop.expression().clone()),
+                ))),
+                CompiledExprKind::Camera(expr) => Some(Self::CameraFunction(ZoomCurve::new(expr))),
+                CompiledExprKind::DataDriven(expr) => Some(Self::DataDriven(expr)),
+                CompiledExprKind::Composite(expr) => Some(Self::Composite(expr)),
+            },
             StyleProperty::Unsupported(_) => None,
         }
     }
@@ -158,7 +181,9 @@ mod tests {
         let prop = CompiledProperty::<f32>::parse(&data_json).expect("parses");
         assert!(matches!(prop, CompiledProperty::DataDriven(_)));
         assert!(!prop.is_feature_constant() && prop.is_zoom_constant());
-        let feat: FeatureProperties = [("population".to_string(), Value::Number(100.0))].into();
+        let feat: FeatureProperties = [("population".to_string(), Value::Number(100.0))]
+            .into_iter()
+            .collect();
         assert_eq!(prop.evaluate_for(&feat, 5.0), Some(100.0));
 
         // Composite (both zoom and feature dependent)
@@ -174,7 +199,9 @@ mod tests {
         let prop = CompiledProperty::<f32>::parse(&comp_json).expect("parses");
         assert!(matches!(prop, CompiledProperty::Composite(_)));
         assert!(!prop.is_feature_constant() && !prop.is_zoom_constant());
-        let feat: FeatureProperties = [("val".to_string(), Value::Number(10.0))].into();
+        let feat: FeatureProperties = [("val".to_string(), Value::Number(10.0))]
+            .into_iter()
+            .collect();
         assert_eq!(prop.evaluate_for(&feat, 5.0), Some(20.0));
     }
 

@@ -1,8 +1,9 @@
 //! One owned map-wide value per concrete Rust type, with checked tuple borrowing.
 
-use std::{any::TypeId, collections::HashMap};
+use std::any::TypeId;
 
 use downcast_rs::{impl_downcast, Downcast};
+use rustc_hash::FxHashMap;
 
 use crate::disjoint::DisjointSliceBorrow;
 
@@ -19,44 +20,40 @@ impl<T> Resource for T where T: 'static {}
 pub struct Resources {
     resources: Vec<Box<dyn Resource>>,
     types: Vec<TypeId>,
-    index: HashMap<TypeId, usize>,
+    index: FxHashMap<TypeId, usize>,
+}
+
+#[inline(never)]
+fn lookup_slot(index: &FxHashMap<TypeId, usize>, type_id: TypeId) -> Option<usize> {
+    index.get(&type_id).copied()
 }
 
 impl Resources {
-    /// Installs a default value, replacing and dropping any existing value of the same type.
-    pub fn init<R: Resource + Default>(&mut self) {
-        self.insert(R::default());
-    }
-
-    /// Borrows the existing value, installing its default only when the type is absent.
-    pub fn get_or_init_mut<R: Resource + Default>(&mut self) -> &mut R {
-        let type_id = TypeId::of::<R>();
+    #[inline(never)]
+    fn get_or_init_boxed(
+        &mut self,
+        type_id: TypeId,
+        make: fn() -> Box<dyn Resource>,
+    ) -> &mut Box<dyn Resource> {
         let index = match self.index.get(&type_id).copied() {
             Some(index) if index < self.resources.len() => index,
             _ => {
                 let index = self.resources.len();
-                self.resources.push(Box::new(R::default()));
+                self.resources.push(make());
                 self.types.push(type_id);
                 self.index.insert(type_id, index);
                 index
             }
         };
-        if !self.resources[index].is::<R>() {
-            self.resources[index] = Box::new(R::default());
+        if self.types[index] != type_id {
+            self.resources[index] = make();
             self.types[index] = type_id;
         }
-        let Some(value) = self.resources[index].downcast_mut::<R>() else {
-            unreachable!("slot initialized with R")
-        };
-        value
+        &mut self.resources[index]
     }
 
-    /// Stores a resource, dropping the one of the same type stored before. Systems store
-    /// per-frame resources this way, so appending instead of replacing would keep every
-    /// frame's value, and its GPU buffers, for the life of the map.
-    pub fn insert<R: Resource>(&mut self, resource: R) {
-        let type_id = TypeId::of::<R>();
-        let boxed: Box<dyn Resource> = Box::new(resource);
+    #[inline(never)]
+    fn insert_boxed(&mut self, type_id: TypeId, boxed: Box<dyn Resource>) {
         match self.index.get(&type_id).copied() {
             Some(index) => {
                 self.resources[index] = boxed;
@@ -71,32 +68,77 @@ impl Resources {
         }
     }
 
-    /// Removes and returns the stored value of this concrete type, or `None` when absent.
-    pub fn remove<R: Resource>(&mut self) -> Option<R> {
-        let index = self.index.remove(&TypeId::of::<R>())?;
+    #[inline(never)]
+    fn remove_boxed(&mut self, type_id: TypeId) -> Option<Box<dyn Resource>> {
+        let index = self.index.remove(&type_id)?;
         let removed = self.resources.swap_remove(index);
         self.types.swap_remove(index);
         if let Some(&moved_type_id) = self.types.get(index) {
             self.index.insert(moved_type_id, index);
         }
+        Some(removed)
+    }
+
+    #[inline(never)]
+    fn exists_id(&self, type_id: TypeId) -> bool {
+        self.index.contains_key(&type_id)
+    }
+
+    #[inline(never)]
+    fn get_boxed(&self, type_id: TypeId) -> Option<&dyn Resource> {
+        let index = *self.index.get(&type_id)?;
+        self.resources.get(index).map(Box::as_ref)
+    }
+
+    #[inline(never)]
+    fn get_boxed_mut(&mut self, type_id: TypeId) -> Option<&mut dyn Resource> {
+        let index = *self.index.get(&type_id)?;
+        self.resources.get_mut(index).map(Box::as_mut)
+    }
+
+    /// Installs a default value, replacing and dropping any existing value of the same type.
+    pub fn init<R: Resource + Default>(&mut self) {
+        self.insert(R::default());
+    }
+
+    /// Borrows the existing value, installing its default only when the type is absent.
+    pub fn get_or_init_mut<R: Resource + Default>(&mut self) -> &mut R {
+        fn make_default<R: Resource + Default>() -> Box<dyn Resource> {
+            Box::new(R::default())
+        }
+        let slot = self.get_or_init_boxed(TypeId::of::<R>(), make_default::<R>);
+        let Some(value) = slot.downcast_mut::<R>() else {
+            unreachable!("slot initialized with R")
+        };
+        value
+    }
+
+    /// Stores a resource, dropping the one of the same type stored before. Systems store
+    /// per-frame resources this way, so appending instead of replacing would keep every
+    /// frame's value, and its GPU buffers, for the life of the map.
+    pub fn insert<R: Resource>(&mut self, resource: R) {
+        self.insert_boxed(TypeId::of::<R>(), Box::new(resource));
+    }
+
+    /// Removes and returns the stored value of this concrete type, or `None` when absent.
+    pub fn remove<R: Resource>(&mut self) -> Option<R> {
+        let removed = self.remove_boxed(TypeId::of::<R>())?;
         removed.downcast::<R>().ok().map(|boxed| *boxed)
     }
 
     /// Whether a value of exactly this concrete type is stored.
     pub fn exists<R: Resource>(&self) -> bool {
-        self.index.contains_key(&TypeId::of::<R>())
+        self.exists_id(TypeId::of::<R>())
     }
 
     /// Borrows a value by concrete type, or returns `None` when absent.
     pub fn get<R: Resource>(&self) -> Option<&R> {
-        let index = *self.index.get(&TypeId::of::<R>())?;
-        self.resources.get(index)?.downcast_ref()
+        self.get_boxed(TypeId::of::<R>())?.downcast_ref()
     }
 
     /// Exclusively borrows a value by concrete type, or returns `None` when absent.
     pub fn get_mut<R: Resource>(&mut self) -> Option<&mut R> {
-        let index = *self.index.get(&TypeId::of::<R>())?;
-        self.resources.get_mut(index)?.downcast_mut()
+        self.get_boxed_mut(TypeId::of::<R>())?.downcast_mut()
     }
 
     /// Borrows `&R` or tuples of one through six shared resource references.
@@ -137,7 +179,7 @@ pub trait ResourceQueryMut {
 
     /// Borrows this query's item(s) from the store's index and disjoint slice borrow.
     fn borrow<'r>(
-        index: &HashMap<TypeId, usize>,
+        index: &FxHashMap<TypeId, usize>,
         slice: &mut DisjointSliceBorrow<'r, Box<dyn Resource>>,
     ) -> Option<Self::MutItem<'r>>;
 
@@ -152,10 +194,10 @@ impl<R: Resource> ResourceQueryMut for &R {
     type MutItem<'r> = &'r R;
 
     fn borrow<'r>(
-        index: &HashMap<TypeId, usize>,
+        index: &FxHashMap<TypeId, usize>,
         slice: &mut DisjointSliceBorrow<'r, Box<dyn Resource>>,
     ) -> Option<Self::MutItem<'r>> {
-        let slot = *index.get(&TypeId::of::<R>())?;
+        let slot = lookup_slot(index, TypeId::of::<R>())?;
         slice.borrow_shared(slot)?.downcast_ref()
     }
 
@@ -168,10 +210,10 @@ impl<R: Resource> ResourceQueryMut for &mut R {
     type MutItem<'r> = &'r mut R;
 
     fn borrow<'r>(
-        index: &HashMap<TypeId, usize>,
+        index: &FxHashMap<TypeId, usize>,
         slice: &mut DisjointSliceBorrow<'r, Box<dyn Resource>>,
     ) -> Option<Self::MutItem<'r>> {
-        let slot = *index.get(&TypeId::of::<R>())?;
+        let slot = lookup_slot(index, TypeId::of::<R>())?;
         slice.borrow_mut(slot)?.downcast_mut()
     }
 
@@ -194,7 +236,7 @@ macro_rules! impl_resource_query {
             type MutItem<'r> = ($($param::MutItem<'r>,)*);
 
             fn borrow<'r>(
-                index: &HashMap<TypeId, usize>,
+                index: &FxHashMap<TypeId, usize>,
                 slice: &mut DisjointSliceBorrow<'r, Box<dyn Resource>>,
             ) -> Option<Self::MutItem<'r>> {
                 Some(($($param::borrow(index, slice)?,)*))

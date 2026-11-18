@@ -413,7 +413,11 @@ pub(super) fn can_release_cpu_geometry(
 ) -> bool {
     let edge_y = (1_i32 << u8::from(bucket.coords.z).min(30)) - 1;
     let is_polar_row = bucket.coords.y <= 0 || bucket.coords.y >= edge_y;
-    !is_polar_row
+    #[cfg(target_arch = "wasm32")]
+    let allow_row = !(has_dem_source && is_polar_row && style_layer.type_ == "fill");
+    #[cfg(not(target_arch = "wasm32"))]
+    let allow_row = !is_polar_row;
+    allow_row
         && (!has_dem_source || crate::vector::structures::kind(style_layer).is_none())
         && style_layer
             .paint

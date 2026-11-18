@@ -301,23 +301,38 @@ pub(crate) fn evict_beyond<S: BuildHasher>(
     budget: CacheBudget,
 ) -> Vec<WorldTileCoords> {
     let World { resources, tiles } = world;
-    let retention = resources.get_or_init_mut::<TileRetention>();
-    retention.frame = retention.frame.wrapping_add(1);
-    let frame = retention.frame;
-    for coords in in_use {
-        retention.last_used.insert(*coords, frame);
+    {
+        let retention = resources.get_or_init_mut::<TileRetention>();
+        retention.frame = retention.frame.wrapping_add(1);
+        let frame = retention.frame;
+        for coords in in_use {
+            retention.last_used.insert(*coords, frame);
+        }
     }
 
+    let last_used = resources.get::<TileRetention>();
+    let vector_pool = match resources.get::<Eventually<VectorBufferPool>>() {
+        Some(Initialized(pool)) => Some(pool),
+        _ => None,
+    };
+    let symbol_pool = match resources.get::<Eventually<crate::sdf::SymbolBufferPool>>() {
+        Some(Initialized(pool)) => Some(pool),
+        _ => None,
+    };
     let mut candidates: Vec<(u64, WorldTileCoords, usize)> = tiles
         .tiles
         .values()
         .map(|tile| tile.coords)
         .filter(|coords| !in_use.contains(coords) && is_settled(tiles, *coords))
         .map(|coords| {
+            let gpu_bytes = vector_pool.map_or(0, |p| p.index().tile_gpu_bytes(coords))
+                + symbol_pool.map_or(0, |p| p.index().tile_gpu_bytes(coords));
             (
-                retention.last_used.get(&coords).copied().unwrap_or(0),
+                last_used
+                    .and_then(|r| r.last_used.get(&coords).copied())
+                    .unwrap_or(0),
                 coords,
-                tile_bytes(tiles, coords),
+                tile_bytes(tiles, coords).saturating_add(gpu_bytes),
             )
         })
         .collect();
@@ -336,9 +351,12 @@ pub(crate) fn evict_beyond<S: BuildHasher>(
         kept_bytes -= bytes;
         evicted.push(coords);
     }
-    for coords in &evicted {
-        tiles.remove(*coords);
-        retention.last_used.remove(coords);
+    if !evicted.is_empty() {
+        let retention = resources.get_or_init_mut::<TileRetention>();
+        for coords in &evicted {
+            tiles.remove(*coords);
+            retention.last_used.remove(coords);
+        }
     }
     evicted
 }

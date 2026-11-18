@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::path::PathBuf;
 
 use maplibre::{
     projection::{ProjectionSpecification, ProjectionType},
@@ -17,7 +17,7 @@ use maplibre_winit::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
 pub fn style() -> Style {
     Style {
         version: 8,
-        sources: HashMap::from([
+        sources: [
             (
                 "osm".to_string(),
                 Source::Raster(VectorSource {
@@ -44,7 +44,9 @@ pub fn style() -> Style {
                     ..Default::default()
                 }),
             ),
-        ]),
+        ]
+        .into_iter()
+        .collect(),
         layers: vec![
             StyleLayer {
                 index: 1,

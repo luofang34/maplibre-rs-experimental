@@ -1,8 +1,9 @@
 //! Zero-download browser `OffscreenCanvas` 2D local CJK / fallback SDF glyph rasteriser (`wasm32`)
 //! with per-realm glyph caching and grid-batched `getImageData` readbacks.
 
-use std::{cell::RefCell, collections::HashMap, sync::Arc};
+use std::{cell::RefCell, sync::Arc};
 
+use rustc_hash::FxHashMap as HashMap;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{OffscreenCanvas, OffscreenCanvasRenderingContext2d};
 
@@ -25,7 +26,7 @@ type GlyphCacheMap = HashMap<(String, char), Option<Arc<RasterizedGlyph>>>;
 
 thread_local! {
     static CANVAS_SCRATCH: RefCell<Option<CanvasScratch>> = const { RefCell::new(None) };
-    static GLYPH_CACHE: RefCell<GlyphCacheMap> = RefCell::new(HashMap::new());
+    static GLYPH_CACHE: RefCell<GlyphCacheMap> = RefCell::new(HashMap::default());
 }
 
 fn lookup_cached(css_font: &str, ch: char) -> Option<Option<Arc<RasterizedGlyph>>> {

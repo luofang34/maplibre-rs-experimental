@@ -1,6 +1,8 @@
 //! Source fetching and completion of vector worker requests.
 
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
+
+use rustc_hash::FxHashSet as HashSet;
 
 use super::{
     group_tile::{decode_group_tile, fetch_raw_group_tile, GroupTile},
@@ -286,6 +288,23 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
     }
     let zoom = f64::from(overscaled_zoom.max(u8::from(coords.z)));
     let sym_requests = symbol_requests_from_tile(&symbols, &tile, zoom, Some(style));
+    let asset_config = SymbolAssetConfig {
+        pixel_ratio,
+        ..SymbolAssetConfig::of(style)
+    };
+    let mut assets_fut = std::pin::pin!(load_symbol_assets_for_requests(
+        client,
+        asset_config,
+        sym_requests
+    ));
+    let mut pre_assets = None;
+    let _ = std::future::poll_fn(|cx| {
+        if let std::task::Poll::Ready(res) = std::future::Future::poll(assets_fut.as_mut(), cx) {
+            pre_assets = Some(res);
+        }
+        std::task::Poll::Ready(())
+    })
+    .await;
     tessellate::<T, C>(
         context.clone(),
         (last_source, false, has_dem_source),
@@ -314,13 +333,11 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
     // Release HeavyTileSlot strictly BEFORE awaiting remote glyph/sprite HTTP I/O.
     let _ = heavy_slot.take();
 
-    let asset_config = SymbolAssetConfig {
-        pixel_ratio,
-        ..SymbolAssetConfig::of(style)
-    };
-    let assets = load_symbol_assets_for_requests(client, asset_config, sym_requests)
-        .await
-        .map_err(ProcessVectorError::SymbolAssets)?;
+    let assets = match pre_assets {
+        Some(res) => res,
+        None => assets_fut.await,
+    }
+    .map_err(ProcessVectorError::SymbolAssets)?;
     // Only a source still waiting for images keeps its tile and layers to lay out again.
     let again = (!assets.awaiting.is_empty()).then(|| (tile.clone(), sym_request.clone()));
     let _sym_slot = acquire_heavy_tile_slot().await;

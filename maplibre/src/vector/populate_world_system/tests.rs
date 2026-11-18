@@ -163,7 +163,7 @@ fn id_bearing_mvt_arrivals_without_feature_state_avoid_cloning_and_deduplicate_w
 
     // 1. Defect 2 check: arriving id-bearing feature with no feature-state preserves exact worker Arc.
     let (mut world, _) = loaded(&[]);
-    let mut props = FeatureProperties::new();
+    let mut props = FeatureProperties::default();
     props.insert("class".into(), ExprValue::String("park".into()));
     let worker_arc = Arc::new(props);
     let worker_ptr = Arc::as_ptr(&worker_arc) as usize;
@@ -217,10 +217,10 @@ fn id_bearing_mvt_arrivals_without_feature_state_avoid_cloning_and_deduplicate_w
     );
 
     let (mut wire_world, _) = loaded(&[]);
-    let mut props_a = FeatureProperties::new();
+    let mut props_a = FeatureProperties::default();
     props_a.insert("class".into(), ExprValue::String("park".into()));
     props_a.insert("label".into(), ExprValue::String("alpha".into()));
-    let mut props_b = FeatureProperties::new();
+    let mut props_b = FeatureProperties::default();
     props_b.insert("class".into(), ExprValue::String("wood".into()));
     props_b.insert("label".into(), ExprValue::String("beta".into()));
 

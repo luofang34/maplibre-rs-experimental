@@ -5,7 +5,7 @@
 
 use std::{borrow::Cow, f64::consts::PI};
 
-use geozero::{FeatureProcessor, GeomProcessor, GeozeroDatasource, PropertyProcessor};
+use geozero::{FeatureProcessor, GeomProcessor, PropertyProcessor};
 use thiserror::Error;
 
 use crate::{
@@ -27,6 +27,7 @@ use crate::{
 mod cluster;
 mod geometry_property;
 mod tessellator;
+mod value_reader;
 
 /// Failure reported while preparing or delivering GeoJSON tile geometry.
 #[derive(Error, Debug)]
@@ -149,6 +150,14 @@ impl<T: GeomProcessor> GeomProcessor for ProjectingTessellator<T> {
 
     fn multipolygon_end(&mut self, idx: usize) -> geozero::error::Result<()> {
         self.inner.multipolygon_end(idx)
+    }
+
+    fn geometrycollection_begin(&mut self, size: usize, idx: usize) -> geozero::error::Result<()> {
+        self.inner.geometrycollection_begin(size, idx)
+    }
+
+    fn geometrycollection_end(&mut self, idx: usize) -> geozero::error::Result<()> {
+        self.inner.geometrycollection_end(idx)
     }
 }
 
@@ -291,7 +300,6 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
     context: &C,
 ) -> Result<(), ProcessGeoJsonError> {
     let coords = request.coords;
-    let unfiltered = geojson_value.to_string();
     let with_geometry = request
         .layers
         .iter()
@@ -316,9 +324,9 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
             Some(annotated) if geometry_property::reads_feature_inputs(style_layer) => annotated,
             _ => geojson_value,
         };
-        let json_str = match &style_layer.filter {
+        let filtered: Cow<'_, serde_json::Value> = match &style_layer.filter {
             Some(filter) => match Filter::parse(filter) {
-                Ok(filter) => geometry_property::streamable_geojson(&filter_geojson(
+                Ok(filter) => Cow::Owned(filter_geojson(
                     source_value,
                     &filter,
                     f64::from(u8::from(coords.z)),
@@ -335,7 +343,7 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                     continue;
                 }
             },
-            None => geometry_property::streamable_geojson(source_value),
+            None => Cow::Borrowed(source_value),
         };
 
         match paint {
@@ -352,13 +360,10 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                     &request.projection,
                     (request.style_zoom(), request.overscaling(), request.buffer),
                 );
-                tessellator.source_ids = serde_json::from_str(&json_str)
-                    .map(|filtered| index::feature_ids(&filtered))
-                    .unwrap_or_default();
+                tessellator.source_ids = index::feature_ids(&filtered);
                 let mut projecting = ProjectingTessellator::new(coords, tessellator);
 
-                let mut geojson_src = geozero::geojson::GeoJson(json_str.as_str());
-                if let Err(e) = geojson_src.process(&mut projecting) {
+                if let Err(e) = value_reader::process_geojson_value(&filtered, &mut projecting) {
                     log::warn!(
                         "GeoJSON tessellation for layer {} failed: {e:?}",
                         style_layer.id
@@ -371,7 +376,7 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
 
                 let mut inner = projecting.into_inner();
                 // For bare GeoJSON geometries (Polygon, LineString, etc. — not a
-                // FeatureCollection), geozero never calls `feature_end`, so
+                // FeatureCollection), value_reader never calls `feature_end`, so
                 // `feature_indices` stays empty while `buffer.indices` is not.
                 // Manually commit the remaining geometry as a single feature.
                 if inner.feature_indices.is_empty() && !inner.buffer.indices.is_empty() {
@@ -411,13 +416,10 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                 let mut tessellator =
                     TextTessellator::with_assets(symbol_paint.clone(), zoom, atlas.clone());
                 tessellator.overscaling = request.overscaling();
-                tessellator.source_ids = serde_json::from_str(&json_str)
-                    .map(|filtered| index::feature_ids(&filtered))
-                    .unwrap_or_default();
+                tessellator.source_ids = index::feature_ids(&filtered);
                 let mut projecting = ProjectingTessellator::new(coords, tessellator);
 
-                let mut geojson_src = geozero::geojson::GeoJson(json_str.as_str());
-                if let Err(e) = geojson_src.process(&mut projecting) {
+                if let Err(e) = value_reader::process_geojson_value(&filtered, &mut projecting) {
                     log::warn!(
                         "GeoJSON text tessellation for layer {} failed: {e:?}",
                         style_layer.id
@@ -463,7 +465,6 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
 
     query_index::send::<T, C>(
         geojson_value,
-        &unfiltered,
         (coords, &request.source_name, request.buffer),
         context,
     )?;

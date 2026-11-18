@@ -1,11 +1,11 @@
 //! Named vector, image, elevation and GeoJSON source definitions.
 
-use std::{
-    collections::{hash_map::RandomState, HashMap},
-    hash::{BuildHasher, Hasher},
-    sync::Arc,
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
 };
 
+use rustc_hash::FxHashMap as HashMap;
 use serde::{Deserialize, Serialize};
 
 /// Tile URL template, which may contain `{z}`, `{x}` and `{y}` placeholders.
@@ -17,8 +17,7 @@ pub type TileJSONUrl = String;
 pub use maplibre_coords::TileAddressingScheme;
 
 /// GeoJSON data — either an inline JSON value or a URL pointing to a GeoJSON file.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(untagged)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum GeoJsonData {
     /// Address of a GeoJSON document.
     Url(String),
@@ -26,14 +25,79 @@ pub enum GeoJsonData {
     Inline(Arc<serde_json::Value>),
 }
 
+impl GeoJsonData {
+    /// Converts a parsed JSON [`serde_json::Value`] directly into [`GeoJsonData`].
+    pub fn from_json_value(value: &serde_json::Value) -> Self {
+        match value {
+            serde_json::Value::String(url) => Self::Url(url.clone()),
+            other => Self::Inline(Arc::new(other.clone())),
+        }
+    }
+}
+
+impl Serialize for GeoJsonData {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Url(url) => serializer.serialize_str(url),
+            Self::Inline(value) => value.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for GeoJsonData {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Ok(Self::from_json_value(&value))
+    }
+}
+
 /// Feature property that replaces the feature id, as the style specification's `promoteId`.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[serde(untagged)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PromoteId {
     /// One property for every layer of the source.
     Property(String),
     /// A property for each source layer; GeoJSON has the single layer `_geojson`.
     PerLayer(HashMap<String, String>),
+}
+
+impl PromoteId {
+    /// Parses `promoteId` from a parsed JSON [`serde_json::Value`].
+    pub(crate) fn from_json_value(value: &serde_json::Value) -> Result<Self, serde_json::Error> {
+        match value {
+            serde_json::Value::String(prop) => Ok(Self::Property(prop.clone())),
+            serde_json::Value::Object(map) => {
+                let mut out = HashMap::with_capacity_and_hasher(map.len(), Default::default());
+                for (k, v) in map {
+                    let Some(s) = v.as_str() else {
+                        return Err(serde::de::Error::custom(
+                            "promoteId layer map values must be strings",
+                        ));
+                    };
+                    out.insert(k.clone(), s.to_owned());
+                }
+                Ok(Self::PerLayer(out))
+            }
+            _ => Err(serde::de::Error::custom(
+                "promoteId must be a string or an object",
+            )),
+        }
+    }
+}
+
+impl Serialize for PromoteId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Property(prop) => serializer.serialize_str(prop),
+            Self::PerLayer(map) => map.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for PromoteId {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Self::from_json_value(&value).map_err(serde::de::Error::custom)
+    }
 }
 
 impl PromoteId {
@@ -144,7 +208,8 @@ fn is_false(value: &bool) -> bool {
 
 /// A generation no other source version has, without any global counter.
 pub fn fresh_generation() -> u64 {
-    RandomState::new().build_hasher().finish()
+    static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
+    NEXT_GENERATION.fetch_add(1, Ordering::Relaxed)
 }
 
 /// The GL JS default for a GeoJSON source's `maxzoom`.
@@ -319,31 +384,25 @@ impl RasterDemSource {
 }
 
 /// Data source selected by the JSON `type` field.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(tag = "type")]
+#[derive(Debug, Clone)]
 pub enum Source {
     /// Vector tile geometry and feature properties.
-    #[serde(rename = "vector")]
     Vector(VectorSource),
     /// Raster image tiles, using the same URL and TileJSON fields as vector sources.
-    #[serde(rename = "raster")]
     Raster(VectorSource),
     /// Packed elevation images consumed by terrain, hillshade and relief rendering.
-    #[serde(rename = "raster-dem")]
     RasterDem(RasterDemSource),
     /// GeoJSON features declared inline or by document URL.
-    #[serde(rename = "geojson")]
     GeoJson(GeoJsonSource),
     /// One image stretched over four geographic corners.
-    #[serde(rename = "image")]
     Image(ImageSource),
     /// Host-decoded video frames stretched over four geographic corners.
-    #[serde(rename = "video")]
     Video(VideoSource),
     /// Host-drawn 2D/WebGL canvas frames stretched over four geographic corners.
-    #[serde(rename = "canvas")]
     Canvas(CanvasSource),
 }
+
+mod serde_impl;
 
 impl Source {
     /// Whether this source opts out of persistent HTTP caching (`"volatile": true`).

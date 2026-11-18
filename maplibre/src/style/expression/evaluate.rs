@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 
+use rustc_hash::FxHashMap;
+
 use super::{
     ast::{Expression, FeatureProperty, Global},
     collation::{is_supported_script, Collation},
@@ -20,10 +22,10 @@ pub use error::EvaluationError;
 use operations::*;
 
 /// The typed properties of a feature.
-pub type FeatureProperties = HashMap<String, Value>;
+pub type FeatureProperties = FxHashMap<String, Value>;
 
 /// What an expression can observe while it is evaluated.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Default)]
 pub struct EvaluationContext<'a> {
     /// Zoom the expression is evaluated at.
     pub zoom: f64,
@@ -48,13 +50,33 @@ pub struct EvaluationContext<'a> {
     pub available_images: Option<&'a dyn ImageSet>,
 }
 
+impl std::fmt::Debug for EvaluationContext<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EvaluationContext")
+            .field("zoom", &self.zoom)
+            .field("elevation", &self.elevation)
+            .field("heatmap_density", &self.heatmap_density)
+            .field("line_progress", &self.line_progress)
+            .field("properties", &self.properties)
+            .field("geometry_type", &self.geometry_type)
+            .field("id", &self.id)
+            .field("accumulated", &self.accumulated)
+            .field("global_state", &self.global_state)
+            .field(
+                "available_images",
+                &self.available_images.map(|_| "<images>"),
+            )
+            .finish()
+    }
+}
+
 /// A set of image names.
-pub trait ImageSet: std::fmt::Debug {
+pub trait ImageSet {
     /// Whether an image of that name exists.
     fn contains_image(&self, name: &str) -> bool;
 }
 
-impl<V: std::fmt::Debug> ImageSet for HashMap<String, V> {
+impl<V, S: std::hash::BuildHasher> ImageSet for HashMap<String, V, S> {
     fn contains_image(&self, name: &str) -> bool {
         self.contains_key(name)
     }
@@ -82,7 +104,7 @@ impl<'a> EvaluationContext<'a> {
 /// The geometry a feature carries in its properties, when it carries one.
 fn feature_geometry(context: &EvaluationContext<'_>) -> Option<Geometry> {
     let text = context.properties?.get(GEOMETRY_PROPERTY)?.as_str()?;
-    Geometry::from_geojson(&serde_json::from_str(text).ok()?)
+    Geometry::from_geojson(&serde_json::from_slice(text.as_bytes()).ok()?)
 }
 
 type Result<T> = std::result::Result<T, EvaluationError>;

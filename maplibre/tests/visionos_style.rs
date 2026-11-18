@@ -19,7 +19,8 @@ fn roads<'a>(style: &'a Style, class: &str, brunnel: &str, level: f64) -> Vec<&'
         ("brunnel".into(), Value::String(brunnel.into())),
         ("layer".into(), Value::Number(level)),
     ]
-    .into();
+    .into_iter()
+    .collect();
     let context = FeatureContext {
         properties: &properties,
         geometry_type: GeometryType::LineString,
@@ -169,7 +170,7 @@ fn labels_grow_continuously_and_keep_halos_subordinate_to_type() {
                 (size(zoom + 0.001) - size(zoom)).abs() < 0.02,
                 "size jumped"
             );
-            let halo = paint.number("text-halo-width", &FeatureProperties::new(), zoom, 0.0);
+            let halo = paint.number("text-halo-width", &FeatureProperties::default(), zoom, 0.0);
             assert!(
                 halo > 0.0 && halo < size(zoom) / 10.0,
                 "{} at zoom {zoom}: halo {halo} must stay below 10% of text size {}",

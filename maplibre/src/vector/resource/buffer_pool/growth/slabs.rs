@@ -68,21 +68,27 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             })
             .count();
         #[cfg(target_arch = "wasm32")]
-        let target_v = match family_pages {
-            0 => 8 * 1024,
-            1 => 16 * 1024,
-            2 => 32 * 1024,
-            _ => DEFAULT_PAGE_VERTICES,
-        };
+        let (target_v, req_align) = (
+            match family_pages {
+                0 => 4 * 1024,
+                1 => 8 * 1024,
+                2 => 16 * 1024,
+                _ => DEFAULT_PAGE_VERTICES,
+            },
+            4 * 1024,
+        );
         #[cfg(not(target_arch = "wasm32"))]
-        let target_v = match family_pages {
-            0 => 32 * 1024,
-            1 => 64 * 1024,
-            _ => DEFAULT_PAGE_VERTICES,
-        };
+        let (target_v, req_align) = (
+            match family_pages {
+                0 => 32 * 1024,
+                1 => 64 * 1024,
+                _ => DEFAULT_PAGE_VERTICES,
+            },
+            16 * 1024,
+        );
         let slab_elems = target_v
             .min(max_v_page)
-            .max(req_elems.next_multiple_of(16 * 1024).min(max_v_page))
+            .max(req_elems.next_multiple_of(req_align).min(max_v_page))
             .min(rem_elems)
             .max(req_elems);
         let v_bytes = fitting_buffer_size(strides.vertex as usize, slab_elems, self.max_page_bytes);
@@ -166,21 +172,27 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             self.index_native_slabs.iter().flatten().count()
         };
         #[cfg(target_arch = "wasm32")]
-        let target_i = match existing_count {
-            0 => 16 * 1024,
-            1 => 32 * 1024,
-            2 => 64 * 1024,
-            _ => DEFAULT_PAGE_INDICES,
-        };
+        let (target_i, req_align) = (
+            match existing_count {
+                0 => 8 * 1024,
+                1 => 16 * 1024,
+                2 => 32 * 1024,
+                _ => DEFAULT_PAGE_INDICES,
+            },
+            8 * 1024,
+        );
         #[cfg(not(target_arch = "wasm32"))]
-        let target_i = match existing_count {
-            0 => 64 * 1024,
-            1 => 128 * 1024,
-            _ => DEFAULT_PAGE_INDICES,
-        };
+        let (target_i, req_align) = (
+            match existing_count {
+                0 => 64 * 1024,
+                1 => 128 * 1024,
+                _ => DEFAULT_PAGE_INDICES,
+            },
+            32 * 1024,
+        );
         let slab_elems = target_i
             .min(max_i_page)
-            .max(req_elems.next_multiple_of(32 * 1024).min(max_i_page))
+            .max(req_elems.next_multiple_of(req_align).min(max_i_page))
             .min(rem_i)
             .max(req_elems);
         let i_bytes = fitting_buffer_size(elem_stride as usize, slab_elems, self.max_page_bytes);
@@ -331,9 +343,13 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             1 => 16 * 1024,
             _ => DEFAULT_PAGE_FEATURE_META,
         };
+        #[cfg(target_arch = "wasm32")]
+        let min_req = req_elems.next_multiple_of(4 * 1024).min(max_fm_page);
+        #[cfg(not(target_arch = "wasm32"))]
+        let min_req = req_elems.next_power_of_two().min(max_fm_page);
         let slab_elems = target_fm
             .min(max_fm_page)
-            .max(req_elems.next_power_of_two().min(max_fm_page))
+            .max(min_req)
             .min(rem_fm)
             .max(req_elems);
         let fm_bytes = fitting_buffer_size(

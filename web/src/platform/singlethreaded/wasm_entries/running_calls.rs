@@ -1,12 +1,11 @@
 //! The calls a worker runs, so the main thread can stop one it no longer wants.
 
-use std::collections::HashMap;
-
 use futures::future::{AbortHandle, AbortRegistration};
+use rustc_hash::FxHashMap;
 
 /// Abort handles of the calls this worker runs, by attempt.
 #[derive(Default)]
-pub(crate) struct RunningCalls(HashMap<u64, AbortHandle>);
+pub(crate) struct RunningCalls(FxHashMap<u64, AbortHandle>);
 
 impl RunningCalls {
     /// Registers the call for `attempt`; the call stops at its next await once cancelled.

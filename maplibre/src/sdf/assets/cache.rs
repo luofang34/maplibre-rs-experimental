@@ -8,7 +8,6 @@
 
 use std::{
     any::Any,
-    collections::HashMap,
     future::{poll_fn, Future},
     sync::{atomic::AtomicUsize, Arc, Mutex, MutexGuard},
     task::{Poll, Waker},
@@ -16,6 +15,7 @@ use std::{
 
 use instant::{Duration, Instant};
 use prost::Message;
+use rustc_hash::FxHashMap as HashMap;
 
 use crate::{
     io::source_client::{HttpClient, SourceClient, SourceFetchError},
@@ -165,6 +165,7 @@ impl AssetCache {
     }
 
     /// Decodes the glyph range compiled into the library, once.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) async fn bundled_glyphs(
         &self,
         bytes: &'static [u8],
@@ -183,30 +184,52 @@ impl AssetCache {
         png_url: &str,
     ) -> Result<Arc<SpriteSheet>, AssetFailure> {
         self.load(format!("sprites:{json_url}|{png_url}"), || async {
-            let (json, png) = futures::future::try_join(
+            #[cfg(target_arch = "wasm32")]
+            let (json, image) = crate::util::async_join::try_join2(
                 fetch(client, json_url, "symbol sprite metadata"),
-                fetch(client, png_url, "symbol sprite image"),
+                async {
+                    if let Some(cached) =
+                        crate::platform::http_client::cache::match_decoded_rgba_cache(png_url).await
+                    {
+                        return Ok(cached);
+                    }
+                    let png = fetch(client, png_url, "symbol sprite image").await?;
+                    let image =
+                        crate::platform::decode_rgba_bytes(&png)
+                            .await
+                            .map_err(|error| {
+                                tracing::warn!(%png_url, %error, "invalid sprite image");
+                                AssetFailure::Terminal(format!(
+                                    "invalid sprite image {png_url}: {error}"
+                                ))
+                            })?;
+                    crate::platform::http_client::cache::spawn_put_decoded_rgba_cache(
+                        png_url, &image,
+                    );
+                    Ok(image)
+                },
             )
             .await?;
+            #[cfg(not(target_arch = "wasm32"))]
+            let (json, image) = {
+                let (json, png) = crate::util::async_join::try_join2(
+                    fetch(client, json_url, "symbol sprite metadata"),
+                    fetch(client, png_url, "symbol sprite image"),
+                )
+                .await?;
+                let image = image::load_from_memory(&png)
+                    .map_err(|error| {
+                        tracing::warn!(%png_url, %error, "invalid sprite image");
+                        AssetFailure::Terminal(format!("invalid sprite image {png_url}: {error}"))
+                    })?
+                    .to_rgba8();
+                (json, image)
+            };
             let document = super::sprite::parse_sprite_document(&json).map_err(|error| {
                 tracing::warn!(%json_url, %error, "invalid sprite metadata");
                 AssetFailure::Terminal(format!("invalid sprite metadata {json_url}: {error}"))
             })?;
             drop(json);
-            #[cfg(not(target_arch = "wasm32"))]
-            let image = image::load_from_memory(&png)
-                .map_err(|error| {
-                    tracing::warn!(%png_url, %error, "invalid sprite image");
-                    AssetFailure::Terminal(format!("invalid sprite image {png_url}: {error}"))
-                })?
-                .to_rgba8();
-            #[cfg(target_arch = "wasm32")]
-            let image = crate::platform::decode_rgba_bytes(&png)
-                .await
-                .map_err(|error| {
-                    tracing::warn!(%png_url, %error, "invalid sprite image");
-                    AssetFailure::Terminal(format!("invalid sprite image {png_url}: {error}"))
-                })?;
             let bytes = image.as_raw().len()
                 + document.capacity()
                     * (std::mem::size_of::<String>()

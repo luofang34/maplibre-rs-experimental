@@ -13,9 +13,13 @@ pub(super) fn mercator_view_region(
     let visible_level = request.level;
     let pitch_degrees = view_state.camera().get_pitch().0.to_degrees().abs();
     let fov_degrees = view_state.field_of_view().0.to_degrees();
-    let needs_frustum = view_state.has_external_view()
+    let variable_zoom = view_state.has_external_view()
         || style.terrain.is_some()
         || pitch_degrees > max_constant_zoom_pitch(fov_degrees);
+    let has_tilt_or_rotation = pitch_degrees > 1e-3
+        || view_state.camera().get_bearing().0.abs() > 1e-4
+        || view_state.camera().get_roll().0.abs() > 1e-4;
+    let needs_frustum = variable_zoom || has_tilt_or_rotation;
     if !needs_frustum {
         return Ok(view_state.create_view_region(visible_level, padding));
     }
@@ -30,7 +34,7 @@ pub(super) fn mercator_view_region(
         MercatorCoveringOptions {
             zoom: visible_level,
             requested_zoom: request.requested_zoom,
-            variable_zoom: true,
+            variable_zoom,
             rounding: request.rounding,
             zoom_range: request.zoom_range,
             padding: match padding {
@@ -38,7 +42,7 @@ pub(super) fn mercator_view_region(
                 ViewStatePadding::Tight => 0,
             },
             world_copies: if !view_state.has_external_view() {
-                3
+                1
             } else {
                 0
             },

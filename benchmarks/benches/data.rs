@@ -1,14 +1,12 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::mutable_key_type)]
 
-use std::collections::HashSet;
-
 use criterion::{criterion_group, criterion_main, Criterion};
 use maplibre::{
     benchmarking::io::static_tile_fetcher::StaticTileFetcher,
     coords::{TileCoords, ZoomLevel},
     io::apc::{Context, IntoMessage, SendError},
     projection::ProjectionType,
-    style::{layer::StyleLayer, source::TileAddressingScheme, Style},
+    style::{source::TileAddressingScheme, Style},
     vector::{
         process_vector_tile, DefaultVectorTransferables, ProcessVectorContext, VectorTileRequest,
     },
@@ -50,7 +48,13 @@ fn bench_process_vector_tile(c: &mut Criterion) {
     let coords = MUNICH_COORDS
         .into_world_tile(TileAddressingScheme::XYZ)
         .unwrap();
-    let layers: HashSet<StyleLayer> = Style::default().layers.iter().cloned().collect();
+    let layers = VectorTileRequest {
+        coords,
+        layers: Style::default().layers.iter().cloned().collect(),
+        projection: ProjectionType::Mercator,
+        overscaled_zoom: 0,
+    }
+    .layers;
 
     let mut group = c.benchmark_group("process_vector_tile");
     group.bench_function("mvt", |b| {

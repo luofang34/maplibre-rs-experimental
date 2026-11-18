@@ -1,7 +1,6 @@
 //! Optional host relevance limits for symbols in externally driven 3D views.
-use std::collections::HashMap;
-
 use cgmath::InnerSpace;
+use rustc_hash::FxHashMap as HashMap;
 
 use crate::{
     render::view_state::ViewState,

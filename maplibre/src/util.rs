@@ -7,9 +7,12 @@ use std::ops::{Deref, DerefMut};
 pub use fps_meter::FPSMeter;
 pub use maplibre_coords::SignificantlyDifferent;
 
+pub(crate) mod async_join;
+pub(crate) mod css_color;
 mod fps_meter;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod grid;
+pub mod json;
 pub mod label;
 pub mod math;
 

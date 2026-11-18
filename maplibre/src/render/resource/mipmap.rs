@@ -46,16 +46,22 @@ impl MipmapGenerator {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let vertex = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("mipmap vertex"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/mipmap.vertex.wgsl").into()),
-        });
-        let fragment = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("mipmap fragment"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../shaders/mipmap.fragment.wgsl").into(),
-            ),
-        });
+        let vertex = crate::render::resource::shader_module::create_shader_module_from_wgsl(
+            device,
+            Some("mipmap vertex"),
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/mipmap.vertex.wgsl"
+            )),
+        );
+        let fragment = crate::render::resource::shader_module::create_shader_module_from_wgsl(
+            device,
+            Some("mipmap fragment"),
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/mipmap.fragment.wgsl"
+            )),
+        );
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("mipmap"),
             layout: Some(&pipeline_layout),

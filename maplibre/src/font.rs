@@ -10,6 +10,12 @@ mod sdf;
 mod shaper;
 mod spec;
 mod system;
+#[cfg(any(
+    test,
+    not(target_arch = "wasm32"),
+    feature = "font-shaping",
+    feature = "thread-safe-futures"
+))]
 mod woff1;
 #[cfg(feature = "font-shaping")]
 mod woff2;
@@ -30,8 +36,9 @@ pub use shaper::{face_glyph_atlas_key, GlyphKey, ShapedGlyph};
 pub use shaper::{shape_slice_with_font, shape_text_runs};
 pub use spec::{
     default_local_ideograph_font_family, deserialize_local_ideograph_font_family,
-    is_default_local_ideograph_font_family, parse_font_stack_entry, FontFaceRule, FontFaces,
-    FontStyle, FontWeight, UnicodeRange,
+    is_default_local_ideograph_font_family, parse_font_stack_entry,
+    parse_local_ideograph_font_family, FontFaceRule, FontFaces, FontStyle, FontWeight,
+    UnicodeRange,
 };
 pub use system::{FontSystem, LoadedFace};
 

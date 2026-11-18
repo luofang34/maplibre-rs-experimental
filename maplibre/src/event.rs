@@ -4,7 +4,7 @@
 
 use std::{
     cell::RefCell,
-    collections::{BTreeSet, VecDeque},
+    collections::VecDeque,
     pin::Pin,
     rc::Rc,
     task::{Context, Poll},
@@ -14,6 +14,7 @@ use futures::{
     channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender},
     Stream, StreamExt,
 };
+use rustc_hash::FxHashSet as HashSet;
 
 use crate::{
     context::MapContext,
@@ -122,7 +123,7 @@ struct MapEventBusInner {
     initial_style_emitted: bool,
     map_loaded_emitted: bool,
     was_idle: bool,
-    emitted_missing_images: BTreeSet<String>,
+    emitted_missing_images: HashSet<String>,
     buffered_ready_resources: VecDeque<ResourceReady>,
 }
 
@@ -375,7 +376,7 @@ impl MapContext {
 
         let ready = self.take_ready_resources();
         if !ready.is_empty() {
-            let mut loaded_sources = BTreeSet::new();
+            let mut loaded_sources = HashSet::default();
             for item in &ready {
                 if let ResourceReady::Tile {
                     kind, loaded: true, ..
@@ -407,7 +408,7 @@ impl MapContext {
             }
         }
 
-        let mut missing_ids = BTreeSet::new();
+        let mut missing_ids = HashSet::default();
         if let Some(providers) = image_providers {
             for id in providers.take_missing() {
                 missing_ids.insert(id);
@@ -434,7 +435,7 @@ fn collect_visible_missing_style_images(
     style: &Style,
     zoom: f64,
     providers: Option<&ImageProviders>,
-    out: &mut BTreeSet<String>,
+    out: &mut HashSet<String>,
 ) {
     let is_supplied = |name: &str| -> bool {
         style.images.contains_key(name) || providers.is_some_and(|p| p.provides(name))

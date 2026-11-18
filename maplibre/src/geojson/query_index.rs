@@ -1,9 +1,7 @@
 //! The index a GeoJSON tile sends back so rendered queries find its fills, lines and
 //! extrusions as they find a vector tile's.
 
-use geozero::GeozeroDatasource;
-
-use super::{ProcessGeoJsonError, ProjectingTessellator};
+use super::{value_reader, ProcessGeoJsonError, ProjectingTessellator};
 use crate::{
     coords::{WorldTileCoords, EXTENT},
     io::{
@@ -49,7 +47,6 @@ fn within_tile(
 /// fills, lines and extrusions as they find a vector tile's.
 pub(super) fn send<T: VectorTransferables, C: Context>(
     geojson_value: &serde_json::Value,
-    unfiltered: &str,
     (coords, source, buffer): (WorldTileCoords, &str, Option<u32>),
     context: &C,
 ) -> Result<(), ProcessGeoJsonError> {
@@ -58,7 +55,7 @@ pub(super) fn send<T: VectorTransferables, C: Context>(
     index.begin_layer(GEOJSON_LAYER, ids);
     let mut projecting = ProjectingTessellator::new(coords, index);
     // A tile whose features cannot be indexed still renders; queries then miss it.
-    if let Err(error) = geozero::geojson::GeoJson(unfiltered).process(&mut projecting) {
+    if let Err(error) = value_reader::process_geojson_value(geojson_value, &mut projecting) {
         tracing::warn!(%coords, ?error, "skipping query index for GeoJSON tile");
         return Ok(());
     }

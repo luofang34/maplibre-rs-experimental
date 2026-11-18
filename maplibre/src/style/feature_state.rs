@@ -10,9 +10,9 @@ use serde_json::{Map, Value};
 #[cfg(feature = "geojson")]
 pub(crate) use sync::resolve_geojson_state_id;
 pub(crate) use sync::{
-    extract_feature_state, extract_source_properties, layer_geometry_reads_feature_state,
-    layer_paint_reads_feature_state, sync_arc_properties_feature_state,
-    sync_properties_feature_state, FeatureStateArcMemo,
+    extract_feature_state, extract_source_properties, json_reads_feature_state,
+    layer_geometry_reads_feature_state, layer_paint_reads_feature_state,
+    sync_arc_properties_feature_state, sync_properties_feature_state, FeatureStateArcMemo,
 };
 
 use crate::style::{
@@ -253,6 +253,49 @@ pub struct FeatureStateStore {
 }
 
 impl FeatureStateStore {
+    /// Parses nested `{ source -> { sourceLayer -> { featureId -> { key -> val } } } }` maps directly.
+    pub(crate) fn from_json_value(value: &Value) -> Result<Self, serde_json::Error> {
+        let Some(root) = value.as_object() else {
+            return Err(serde::de::Error::custom("featureState must be an object"));
+        };
+        let mut sources = BTreeMap::new();
+        for (source, layers_val) in root {
+            let Some(layers_obj) = layers_val.as_object() else {
+                return Err(serde::de::Error::custom(
+                    "featureState source must be an object",
+                ));
+            };
+            let layers_src = layers_obj
+                .get("layers")
+                .and_then(Value::as_object)
+                .unwrap_or(layers_obj);
+            let mut layers = BTreeMap::new();
+            for (layer_name, feats_val) in layers_src {
+                let Some(feats_obj) = feats_val.as_object() else {
+                    return Err(serde::de::Error::custom(
+                        "featureState layer must be an object",
+                    ));
+                };
+                let mut feats = BTreeMap::new();
+                for (feat_id, props_val) in feats_obj {
+                    let Some(props_obj) = props_val.as_object() else {
+                        return Err(serde::de::Error::custom(
+                            "featureState feature must be an object",
+                        ));
+                    };
+                    let props: BTreeMap<String, Value> = props_obj
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect();
+                    feats.insert(feat_id.clone(), props);
+                }
+                layers.insert(layer_name.clone(), feats);
+            }
+            sources.insert(source.clone(), SourceFeatureState { layers });
+        }
+        Ok(Self { sources })
+    }
+
     /// Whether no feature state is stored for any source.
     pub fn is_empty(&self) -> bool {
         self.sources.values().all(SourceFeatureState::is_empty)

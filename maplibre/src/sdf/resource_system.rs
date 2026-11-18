@@ -27,14 +27,14 @@ pub fn resource_system(
     )>() else {
         return Err(SystemError::Dependencies);
     };
+    #[cfg(target_arch = "wasm32")]
+    if matches!(pipeline, Eventually::Uninitialized) && !super::style_has_symbol_layers(style) {
+        return Ok(());
+    }
     pool.initialize(|| {
         BufferPool::from_device_with_sizes(&renderer.device, renderer.settings.symbol_pools)
     });
     if renderer.settings.symbol_pools.is_empty() {
-        return Ok(());
-    }
-    #[cfg(target_arch = "wasm32")]
-    if matches!(pipeline, Eventually::Uninitialized) && !super::style_has_symbol_layers(style) {
         return Ok(());
     }
     #[cfg(not(target_arch = "wasm32"))]

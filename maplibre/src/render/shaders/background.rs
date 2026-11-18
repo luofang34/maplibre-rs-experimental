@@ -57,7 +57,10 @@ impl Shader for BackgroundPatternShader {
 
     fn describe_fragment(&self) -> FragmentState {
         FragmentState {
-            source: include_str!("background_pattern.fragment.wgsl"),
+            source: include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/background_pattern.fragment.wgsl"
+            )),
             ..BackgroundShader {
                 format: self.format,
             }
@@ -82,8 +85,14 @@ impl Shader for GlobeBackgroundPatternShader {
     fn describe_vertex(&self) -> VertexState {
         VertexState {
             source: concat!(
-                include_str!("projection.vertex.wgsl"),
-                include_str!("globe_background_pattern.vertex.wgsl")
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/projection.vertex.wgsl"
+                )),
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/globe_background_pattern.vertex.wgsl"
+                ))
             ),
             entry_point: "main",
             buffers: globe_background_buffers(),
@@ -92,7 +101,10 @@ impl Shader for GlobeBackgroundPatternShader {
 
     fn describe_fragment(&self) -> FragmentState {
         FragmentState {
-            source: include_str!("globe_background_pattern.fragment.wgsl"),
+            source: include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/globe_background_pattern.fragment.wgsl"
+            )),
             ..GlobeBackgroundShader {
                 format: self.format,
             }
@@ -242,7 +254,10 @@ pub struct SkyShader {
 impl Shader for SkyShader {
     fn describe_vertex(&self) -> VertexState {
         VertexState {
-            source: include_str!("sky.vertex.wgsl"),
+            source: include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/sky.vertex.wgsl"
+            )),
             entry_point: "main",
             buffers: vec![VertexBufferLayout {
                 array_stride: std::mem::size_of::<SkyLayerMetadata>() as u64,
@@ -264,7 +279,10 @@ impl Shader for SkyShader {
 
     fn describe_fragment(&self) -> FragmentState {
         FragmentState {
-            source: include_str!("sky.fragment.wgsl"),
+            source: include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/sky.fragment.wgsl"
+            )),
             entry_point: "main",
             targets: vec![Some(wgpu::ColorTargetState {
                 format: self.format,
@@ -287,7 +305,10 @@ mod tests;
 impl Shader for AtmosphereShader {
     fn describe_vertex(&self) -> VertexState {
         VertexState {
-            source: include_str!("atmosphere.vertex.wgsl"),
+            source: include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/atmosphere.vertex.wgsl"
+            )),
             entry_point: "main",
             buffers: atmosphere_buffers(),
         }
@@ -296,8 +317,14 @@ impl Shader for AtmosphereShader {
     fn describe_fragment(&self) -> FragmentState {
         FragmentState {
             source: concat!(
-                include_str!("atmosphere_scattering.wgsl.part"),
-                include_str!("atmosphere.fragment.wgsl")
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/atmosphere_scattering.wgsl.part"
+                )),
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/atmosphere.fragment.wgsl"
+                ))
             ),
             entry_point: "main",
             targets: vec![Some(wgpu::ColorTargetState {
@@ -351,8 +378,14 @@ impl Shader for GlobeBackgroundShader {
     fn describe_vertex(&self) -> VertexState {
         VertexState {
             source: concat!(
-                include_str!("projection.vertex.wgsl"),
-                include_str!("globe_background.vertex.wgsl")
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/projection.vertex.wgsl"
+                )),
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/globe_background.vertex.wgsl"
+                ))
             ),
             entry_point: "main",
             buffers: globe_background_buffers(),
@@ -361,7 +394,10 @@ impl Shader for GlobeBackgroundShader {
 
     fn describe_fragment(&self) -> FragmentState {
         FragmentState {
-            source: include_str!("globe_background.fragment.wgsl"),
+            source: include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/globe_background.fragment.wgsl"
+            )),
             entry_point: "main",
             targets: vec![Some(wgpu::ColorTargetState {
                 format: self.format,
@@ -408,43 +444,27 @@ fn globe_background_buffers() -> Vec<VertexBufferLayout> {
 
 impl Shader for BackgroundShader {
     fn describe_vertex(&self) -> VertexState {
+        let attr = |offset, format, shader_location| wgpu::VertexAttribute {
+            offset,
+            format,
+            shader_location,
+        };
         VertexState {
-            source: include_str!("background.vertex.wgsl"),
+            source: include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/background.vertex.wgsl"
+            )),
             entry_point: "main",
             buffers: vec![VertexBufferLayout {
                 array_stride: std::mem::size_of::<BackgroundLayerMetadata>() as u64,
                 step_mode: wgpu::VertexStepMode::Instance,
                 attributes: vec![
-                    wgpu::VertexAttribute {
-                        offset: 0,
-                        format: wgpu::VertexFormat::Float32x4,
-                        shader_location: 0,
-                    },
-                    wgpu::VertexAttribute {
-                        offset: 16,
-                        format: wgpu::VertexFormat::Float32,
-                        shader_location: 1,
-                    },
-                    wgpu::VertexAttribute {
-                        offset: 32,
-                        format: wgpu::VertexFormat::Float32x4,
-                        shader_location: 2,
-                    },
-                    wgpu::VertexAttribute {
-                        offset: 48,
-                        format: wgpu::VertexFormat::Float32x4,
-                        shader_location: 3,
-                    },
-                    wgpu::VertexAttribute {
-                        offset: 64,
-                        format: wgpu::VertexFormat::Float32x4,
-                        shader_location: 4,
-                    },
-                    wgpu::VertexAttribute {
-                        offset: 80,
-                        format: wgpu::VertexFormat::Float32x4,
-                        shader_location: 5,
-                    },
+                    attr(0, wgpu::VertexFormat::Float32x4, 0),
+                    attr(16, wgpu::VertexFormat::Float32, 1),
+                    attr(32, wgpu::VertexFormat::Float32x4, 2),
+                    attr(48, wgpu::VertexFormat::Float32x4, 3),
+                    attr(64, wgpu::VertexFormat::Float32x4, 4),
+                    attr(80, wgpu::VertexFormat::Float32x4, 5),
                 ],
             }],
         }
@@ -452,7 +472,10 @@ impl Shader for BackgroundShader {
 
     fn describe_fragment(&self) -> FragmentState {
         FragmentState {
-            source: include_str!("background.fragment.wgsl"),
+            source: include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/background.fragment.wgsl"
+            )),
             entry_point: "main",
             targets: vec![Some(wgpu::ColorTargetState {
                 format: self.format,

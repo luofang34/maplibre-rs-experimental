@@ -5,6 +5,15 @@ use std::borrow::Cow;
 use super::FontError;
 
 /// Maximum decompressed font size accepted when unpacking `WOFF` or `WOFF2` containers (128 MiB).
+#[cfg_attr(
+    not(any(
+        test,
+        not(target_arch = "wasm32"),
+        feature = "font-shaping",
+        feature = "thread-safe-futures"
+    )),
+    allow(dead_code)
+)]
 pub(super) const MAX_DECOMPRESSED_FONT_BYTES: usize = 128 * 1024 * 1024;
 
 /// Binary container format of a font file.
@@ -49,7 +58,22 @@ pub fn unpack_font_container(bytes: &[u8]) -> Result<Cow<'_, [u8]>, FontError> {
             }
             Ok(Cow::Borrowed(bytes))
         }
+        #[cfg(any(
+            test,
+            not(target_arch = "wasm32"),
+            feature = "font-shaping",
+            feature = "thread-safe-futures"
+        ))]
         FontContainerFormat::Woff => super::woff1::unpack_woff1(bytes).map(Cow::Owned),
+        #[cfg(not(any(
+            test,
+            not(target_arch = "wasm32"),
+            feature = "font-shaping",
+            feature = "thread-safe-futures"
+        )))]
+        FontContainerFormat::Woff => Err(FontError::InvalidContainer(
+            "WOFF1 unpacking on wasm32 requires the font-shaping feature",
+        )),
         #[cfg(feature = "font-shaping")]
         FontContainerFormat::Woff2 => super::woff2::unpack_woff2(bytes).map(Cow::Owned),
         #[cfg(not(feature = "font-shaping"))]
@@ -60,13 +84,30 @@ pub fn unpack_font_container(bytes: &[u8]) -> Result<Cow<'_, [u8]>, FontError> {
 }
 
 /// One decoded OpenType table ready to be written into a reconstructed `sfnt` buffer.
-#[cfg_attr(not(feature = "font-shaping"), allow(dead_code))]
+#[cfg_attr(
+    not(any(
+        test,
+        not(target_arch = "wasm32"),
+        feature = "font-shaping",
+        feature = "thread-safe-futures"
+    )),
+    allow(dead_code)
+)]
 pub(super) struct SfntTable {
     pub tag: [u8; 4],
     pub data: Vec<u8>,
 }
 
 /// Computes the OpenType 32-bit big-endian table checksum over `data` (zero-padded to 4 bytes).
+#[cfg_attr(
+    not(any(
+        test,
+        not(target_arch = "wasm32"),
+        feature = "font-shaping",
+        feature = "thread-safe-futures"
+    )),
+    allow(dead_code)
+)]
 pub(super) fn sfnt_checksum(data: &[u8]) -> u32 {
     let mut sum = 0_u32;
     let (chunks, rem) = data.as_chunks::<4>();
@@ -83,6 +124,15 @@ pub(super) fn sfnt_checksum(data: &[u8]) -> u32 {
 
 /// Assembles `tables` with `flavor` into a canonical OpenType `sfnt` byte vector, sorting the
 /// table directory by tag and updating `head.checkSumAdjustment` (`0xB1B0AFBA - total_checksum`).
+#[cfg_attr(
+    not(any(
+        test,
+        not(target_arch = "wasm32"),
+        feature = "font-shaping",
+        feature = "thread-safe-futures"
+    )),
+    allow(dead_code)
+)]
 pub(super) fn assemble_sfnt(flavor: u32, mut tables: Vec<SfntTable>) -> Result<Vec<u8>, FontError> {
     if tables.is_empty() || tables.len() > u16::MAX as usize {
         return Err(FontError::InvalidContainer("invalid sfnt table count"));

@@ -5,8 +5,9 @@
 //! and the layer is parsed again. Evaluation therefore needs no extra input, and a layer that
 //! reads no state is never touched.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
 
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -71,7 +72,7 @@ impl Style {
     /// layers that share an id are left alone, and templates of layers that are gone are dropped.
     pub fn resolve_global_state(&mut self) -> Vec<String> {
         self.resolve_light();
-        let mut counts: HashMap<&str, usize> = HashMap::new();
+        let mut counts: HashMap<&str, usize> = HashMap::default();
         for layer in &self.layers {
             *counts.entry(layer.id.as_str()).or_default() += 1;
         }
@@ -121,7 +122,7 @@ impl Style {
                 continue;
             }
             let resolved = substitute_layer(&document, &|key| self.global_state_value(key));
-            let Ok(mut layer) = serde_json::from_value::<StyleLayer>(resolved) else {
+            let Ok(mut layer) = StyleLayer::from_json_value(&resolved) else {
                 tracing::warn!(layer = %id, "layer is invalid once global state is applied");
                 continue;
             };
@@ -174,7 +175,7 @@ impl Style {
             .iter()
             .map(|(name, property)| (name.clone(), substitute(property, &lookup, true)))
             .collect();
-        match serde_json::from_value(Value::Object(resolved)) {
+        match crate::style::light::LightSpecification::from_json_value(&Value::Object(resolved)) {
             Ok(light) => self.light = Some(light),
             Err(error) => tracing::warn!(%error, "light is invalid once global state is applied"),
         }

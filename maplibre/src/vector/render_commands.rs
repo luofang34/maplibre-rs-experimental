@@ -137,6 +137,18 @@ impl<const RUNS: bool> RenderCommand<LayerItem> for DrawVectorTile<RUNS> {
             .then(|| buffer_pool.pattern_runs_by_id(item.tile.coords, item.style_layer))
             .flatten();
         let Some(runs) = runs else {
+            if whole {
+                if let Some(chunks) = entry.u16_chunks() {
+                    for (v_off, range) in chunks {
+                        pass.draw_indexed(
+                            first + range.start..first + range.end,
+                            base_vertex + (*v_off as i32),
+                            instances.clone(),
+                        );
+                    }
+                    return RenderCommandResult::Success;
+                }
+            }
             pass.draw_indexed(
                 first..first + entry.indices_range().len() as u32,
                 base_vertex,
@@ -229,7 +241,7 @@ impl RenderCommand<LayerItem> for SetLineTilePipeline {
         };
 
         let chosen = match line_mode(world, item) {
-            LineMode::Flat => Some(&pipeline.flat),
+            LineMode::Flat => pipeline.flat.as_ref(),
             LineMode::Structure => pipeline.structure.as_ref(),
             LineMode::Elevated => pipeline.elevated.as_ref(),
             LineMode::Terrain => pipeline.terrain.as_ref(),
@@ -268,7 +280,10 @@ impl RenderCommand<LayerItem> for SetCircleTilePipeline {
             return RenderCommandResult::Failure;
         };
 
-        pass.set_pipeline(pipeline.select_entry(resolve_vector_entry(world, item)));
+        let Some(selected) = pipeline.select_entry(resolve_vector_entry(world, item)) else {
+            return RenderCommandResult::Failure;
+        };
+        pass.set_pipeline(selected);
         pass.set_bind_group(
             0,
             projection_resources.bind_group_for(item.projection_binding()),
@@ -346,12 +361,15 @@ impl<const PASS: u8> RenderCommand<LayerItem> for SetExtrusionPipeline<PASS> {
         };
 
         let pair = match PASS {
-            extrusion_pass::DEPTH => &pipeline.depth,
-            extrusion_pass::COLOR => &pipeline.color,
-            extrusion_pass::PATTERN => &pipeline.pattern,
-            extrusion_pass::TRANSLUCENT_BACK => &pipeline.translucent_back,
-            extrusion_pass::TRANSLUCENT_FRONT => &pipeline.translucent_front,
-            _ => &pipeline.clear,
+            extrusion_pass::DEPTH => Some(&pipeline.depth),
+            extrusion_pass::COLOR => Some(&pipeline.color),
+            extrusion_pass::PATTERN => pipeline.pattern.as_ref(),
+            extrusion_pass::TRANSLUCENT_BACK => pipeline.translucent_back.as_ref(),
+            extrusion_pass::TRANSLUCENT_FRONT => pipeline.translucent_front.as_ref(),
+            _ => Some(&pipeline.clear),
+        };
+        let Some(pair) = pair else {
+            return RenderCommandResult::Failure;
         };
         pass.set_pipeline(pair.select(is_uniform_entry(world, item)));
         pass.set_bind_group(

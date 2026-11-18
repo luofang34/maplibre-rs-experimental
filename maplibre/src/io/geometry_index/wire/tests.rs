@@ -12,7 +12,7 @@ use crate::{
 
 #[test]
 fn spatial_and_linear_roundtrip_preserve_holes_and_shared_property_identity() {
-    let mut shared_props = FeatureProperties::new();
+    let mut shared_props = FeatureProperties::default();
     shared_props.insert("name".into(), Value::String("courtyard".into()));
     shared_props.insert("floors".into(), Value::Number(5.0));
     shared_props.insert("open".into(), Value::Bool(true));
@@ -59,7 +59,7 @@ fn spatial_and_linear_roundtrip_preserve_holes_and_shared_property_identity() {
     let pt = IndexedGeometry::from_point(
         Point::new(50.0, 50.0),
         FeatureMeta {
-            properties: Arc::new(FeatureProperties::new()),
+            properties: Arc::new(FeatureProperties::default()),
             source_layer: Arc::from("poi"),
             id: Some(42),
             feature_index: 1,
@@ -112,14 +112,14 @@ fn spatial_and_linear_roundtrip_preserve_holes_and_shared_property_identity() {
 
 #[test]
 fn wire_roundtrip_preserves_complex_values_and_feature_state_synchronization() {
-    let mut nested_obj = BTreeMap::new();
+    let mut nested_obj = rustc_hash::FxHashMap::default();
     nested_obj.insert("tier".to_string(), Value::Number(2.0));
     nested_obj.insert(
         "badges".to_string(),
         Value::Array(vec![Value::String("verified".into()), Value::Null]),
     );
 
-    let mut props = FeatureProperties::new();
+    let mut props = FeatureProperties::default();
     props.insert("osm_id".into(), Value::String("way/99".into()));
     props.insert(
         "tint".into(),

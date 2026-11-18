@@ -1,6 +1,6 @@
 //! Compact typed sprite-sheet metadata parsed once when a sprite JSON document loads.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 use super::{IconStretch, TextFit};
 
@@ -18,8 +18,12 @@ pub(super) struct SpriteEntry {
 pub(super) fn parse_sprite_document(
     bytes: &[u8],
 ) -> Result<HashMap<String, SpriteEntry>, serde_json::Error> {
-    let raw: HashMap<String, serde_json::Value> = serde_json::from_slice(bytes)?;
-    let mut out = HashMap::with_capacity(raw.len());
+    let serde_json::Value::Object(raw) = serde_json::from_slice::<serde_json::Value>(bytes)? else {
+        return Err(serde::de::Error::custom(
+            "sprite metadata must be a JSON object",
+        ));
+    };
+    let mut out = HashMap::with_capacity_and_hasher(raw.len(), Default::default());
     for (name, value) in raw {
         let read = |key: &str| {
             value

@@ -30,14 +30,17 @@ fn atlas() -> Arc<SymbolAtlas> {
                     ..Default::default()
                 },
             )]
-            .into(),
+            .into_iter()
+            .collect(),
         )]
-        .into(),
+        .into_iter()
+        .collect(),
         icons: [
             ("us-interstate".into(), icon.clone()),
             ("us-highway".into(), icon),
         ]
-        .into(),
+        .into_iter()
+        .collect(),
         ..Default::default()
     })
 }

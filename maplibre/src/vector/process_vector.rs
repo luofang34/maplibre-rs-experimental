@@ -2,9 +2,10 @@
 
 #![deny(missing_docs)]
 
-use std::{collections::HashSet, marker::PhantomData};
+use std::marker::PhantomData;
 
 use geozero::mvt::tile;
+use rustc_hash::FxHashSet as HashSet;
 use thiserror::Error;
 
 use crate::{
@@ -99,7 +100,7 @@ pub(crate) fn feature_properties(
     layer: &tile::Layer,
     feature: &tile::Feature,
 ) -> FeatureProperties {
-    let mut properties = FeatureProperties::new();
+    let mut properties = FeatureProperties::default();
     for pair in feature.tags.chunks(2) {
         let [key_index, value_index] = pair else {
             continue;
@@ -422,8 +423,6 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
         style: &crate::style::layer::StyleLayer,
     ) -> Result<(), ProcessVectorError> {
         let overscaled = self.overscaled_zoom.max(u8::from(coords.z));
-        let edge_y = (1_i32 << u8::from(coords.z).min(30)) - 1;
-        let is_polar_row = coords.y <= 0 || coords.y >= edge_y;
         let per_feature_pattern = style
             .paint
             .as_ref()
@@ -431,7 +430,6 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
             .is_some();
         let allow_prepack = cfg!(all(target_arch = "wasm32", not(target_feature = "atomics")))
             && !self.has_dem_source
-            && !is_polar_row
             && !per_feature_pattern
             && feature_sort_keys.is_empty()
             && style.type_ != "circle"

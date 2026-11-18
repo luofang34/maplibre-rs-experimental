@@ -2,9 +2,8 @@
 
 mod feature_state;
 
-use std::collections::{BTreeSet, HashMap, HashSet};
-
 use feature_state::recolor_cpu_bucket;
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use super::{
     metadata::{feature_metadata, metadata_for_layer, pattern_runs},
@@ -41,9 +40,9 @@ pub(crate) struct DirtyVectorStyle {
     /// Sync `StyleLayer` metadata (`index`, zoom range, visibility, uniforms) on GPU pools.
     pub sync_layers: bool,
     /// Style layer IDs whose per-feature colors/opacity/outline may have changed.
-    pub paint_layers: BTreeSet<String>,
+    pub paint_layers: HashSet<String>,
     /// Style source names whose runtime `feature-state` changed.
-    pub feature_state_sources: BTreeSet<String>,
+    pub feature_state_sources: HashSet<String>,
 }
 
 impl DirtyVectorStyle {
@@ -149,12 +148,12 @@ fn refresh_vector_pool(
     queue: &UploadQueue,
     frame: VectorPaintFrame,
     sync_all_layers: bool,
-    recolor_layers: &BTreeSet<String>,
+    recolor_layers: &HashSet<String>,
     needs_worker_refresh: &mut bool,
 ) {
-    let mut touched_by_layer: HashMap<String, HashSet<WorldTileCoords>> = HashMap::new();
-    let mut paint_changed_by_layer: HashMap<String, HashSet<WorldTileCoords>> = HashMap::new();
-    let mut uploaded_by_layer: HashMap<String, HashSet<WorldTileCoords>> = HashMap::new();
+    let mut touched_by_layer: HashMap<String, HashSet<WorldTileCoords>> = HashMap::default();
+    let mut paint_changed_by_layer: HashMap<String, HashSet<WorldTileCoords>> = HashMap::default();
+    let mut uploaded_by_layer: HashMap<String, HashSet<WorldTileCoords>> = HashMap::default();
     {
         let Some(Initialized(vector_pool)) =
             world.resources.get_mut::<Eventually<VectorBufferPool>>()
@@ -226,7 +225,7 @@ fn refresh_vector_pool(
             .and_then(LayerPaint::get_color)
             .map(Into::into)
             .unwrap_or([0.0, 0.0, 0.0, 1.0]);
-        let mut candidate_coords: BTreeSet<WorldTileCoords> =
+        let mut candidate_coords: HashSet<WorldTileCoords> =
             all_tile_coords.iter().copied().collect();
         if let Some(uploaded) = uploaded_by_layer.get(&style_layer.id) {
             candidate_coords.extend(uploaded.iter().copied());

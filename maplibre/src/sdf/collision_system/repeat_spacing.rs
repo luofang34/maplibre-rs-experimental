@@ -4,7 +4,9 @@
 //! or narrow view that shows a tile magnified near its far edge, or many tiles of one road,
 //! packs the same road shield every hundred pixels or so on screen. This rule measures the
 //! repeats where they are drawn instead.
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
+
+use rustc_hash::FxHashMap as HashMap;
 
 use crate::sdf::{Feature, SymbolLayerData};
 

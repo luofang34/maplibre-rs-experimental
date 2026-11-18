@@ -4,7 +4,7 @@
 //! that tile, by the share of `raster-fade-duration` that has passed. For opaque tiles this is
 //! the new tile drawn whole with the departing ones over it at the share still to go.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use crate::coords::WorldTileCoords;
 

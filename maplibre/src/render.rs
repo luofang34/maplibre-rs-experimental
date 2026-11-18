@@ -20,7 +20,7 @@
 
 #![forbid(unsafe_code)]
 
-use std::{ops::Deref, rc::Rc, sync::Arc};
+use std::{rc::Rc, sync::Arc};
 
 use crate::{
     environment::Environment,
@@ -145,6 +145,18 @@ pub enum RenderStageLabel {
 impl StageLabel for RenderStageLabel {
     fn dyn_clone(&self) -> Box<dyn StageLabel> {
         Box::new(self.clone())
+    }
+
+    fn label_name(&self) -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed(match self {
+            Self::Input => "Input",
+            Self::Request => "Request",
+            Self::Prepare => "Prepare",
+            Self::Queue => "Queue",
+            Self::PhaseSort => "PhaseSort",
+            Self::Render => "Render",
+            Self::Cleanup => "Cleanup",
+        })
     }
 }
 

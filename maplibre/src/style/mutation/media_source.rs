@@ -107,7 +107,7 @@ fn build_media_frame(
 }
 
 fn video_source_mut<'a>(
-    sources: &'a mut std::collections::HashMap<String, Source>,
+    sources: &'a mut rustc_hash::FxHashMap<String, Source>,
     name: &str,
 ) -> Result<&'a mut VideoSource, StyleMutationError> {
     match sources.get_mut(name) {
@@ -122,7 +122,7 @@ fn video_source_mut<'a>(
 }
 
 fn canvas_source_mut<'a>(
-    sources: &'a mut std::collections::HashMap<String, Source>,
+    sources: &'a mut rustc_hash::FxHashMap<String, Source>,
     name: &str,
 ) -> Result<&'a mut CanvasSource, StyleMutationError> {
     match sources.get_mut(name) {

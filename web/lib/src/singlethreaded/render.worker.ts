@@ -67,7 +67,6 @@ const instantiateAndStartPorts = async (module: WebAssembly.Module, ports: Messa
     }
 };
 
-if (!WEBGL) {
 onmessage = async (event: MessageEvent<RenderWorkerMessage>) => {
     const msg = event.data;
     if (!msg) return;
@@ -210,4 +209,3 @@ onmessage = async (event: MessageEvent<RenderWorkerMessage>) => {
         }
     }
 };
-}

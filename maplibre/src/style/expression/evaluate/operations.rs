@@ -43,7 +43,7 @@ pub(super) fn expect_color(value: Value) -> Result<Color> {
     }
 }
 
-pub(super) fn expect_object(value: Value) -> Result<std::collections::BTreeMap<String, Value>> {
+pub(super) fn expect_object(value: Value) -> Result<rustc_hash::FxHashMap<String, Value>> {
     match value {
         Value::Object(members) => Ok(members),
         other => Err(EvaluationError::Expected {

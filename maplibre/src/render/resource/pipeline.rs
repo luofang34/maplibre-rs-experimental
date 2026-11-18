@@ -138,14 +138,18 @@ impl RenderPipelineDescriptor {
             ..Default::default()
         });
 
-        let vertex_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: None,
-            source: wgpu::ShaderSource::Wgsl(self.vertex.source.into()),
-        });
-        let fragment_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: None,
-            source: wgpu::ShaderSource::Wgsl(self.fragment.source.into()),
-        });
+        let vertex_shader_module =
+            crate::render::resource::shader_module::create_shader_module_from_wgsl(
+                device,
+                None,
+                self.vertex.source,
+            );
+        let fragment_shader_module =
+            crate::render::resource::shader_module::create_shader_module_from_wgsl(
+                device,
+                None,
+                self.fragment.source,
+            );
 
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: self.label.as_ref().map(|label| label.as_ref()),
@@ -247,14 +251,18 @@ impl RenderPipelineDescriptor {
             ..Default::default()
         });
 
-        let vertex_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: None,
-            source: wgpu::ShaderSource::Wgsl(self.vertex.source.into()),
-        });
-        let fragment_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: None,
-            source: wgpu::ShaderSource::Wgsl(self.fragment.source.into()),
-        });
+        let vertex_shader_module =
+            crate::render::resource::shader_module::create_shader_module_from_wgsl(
+                device,
+                None,
+                self.vertex.source,
+            );
+        let fragment_shader_module =
+            crate::render::resource::shader_module::create_shader_module_from_wgsl(
+                device,
+                None,
+                self.fragment.source,
+            );
 
         let build = |desc: &Self, label: Option<&str>| {
             let buffers = desc

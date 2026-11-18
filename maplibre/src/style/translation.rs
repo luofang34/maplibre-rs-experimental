@@ -49,6 +49,11 @@ impl Pair {
 pub struct Translation(StyleProperty<Pair>);
 
 impl Translation {
+    /// Parses a translation property directly from a JSON [`serde_json::Value`].
+    pub(crate) fn from_json_value(value: &serde_json::Value) -> Self {
+        Self(StyleProperty::parse(value))
+    }
+
     /// The `[x, y]` translation at `zoom`; none is no translation.
     pub fn at_zoom(&self, zoom: f64) -> [f32; 2] {
         self.0

@@ -53,7 +53,7 @@ fn describe(error: &JsValue) -> String {
                 .ok()
                 .and_then(|message| message.as_string())
         })
-        .unwrap_or_else(|| format!("{error:?}"))
+        .unwrap_or_else(|| "js error".to_owned())
 }
 
 fn field(value: &JsValue, name: &str) -> JsValue {

@@ -59,6 +59,27 @@ pub fn upload_system(
     projection_resources.upload(queue, projection_data);
     tile_mesh_cache.set_globe_active(projection_data.transition > 0.0);
 
+    let needs_raster_mesh = style.layers.iter().any(|layer| {
+        !layer.is_hidden()
+            && matches!(
+                layer.type_.as_str(),
+                "raster" | "hillshade" | "color-relief"
+            )
+    });
+    let usages: &[(TileMeshUsage, bool)] = if needs_raster_mesh {
+        &[
+            (TileMeshUsage::Stencil, true),
+            (TileMeshUsage::Stencil, false),
+            (TileMeshUsage::Raster, true),
+            (TileMeshUsage::Raster, false),
+        ]
+    } else {
+        &[
+            (TileMeshUsage::Stencil, true),
+            (TileMeshUsage::Stencil, false),
+        ]
+    };
+
     if projection_data.transition > 0.0 {
         for coords in background_tiles {
             tile_mesh_cache
@@ -73,12 +94,7 @@ pub fn upload_system(
             view_tile.render(|shape| visible_tiles.push(shape.coords()));
         }
         for coords in visible_tiles {
-            for (usage, generate_borders) in [
-                (TileMeshUsage::Stencil, true),
-                (TileMeshUsage::Stencil, false),
-                (TileMeshUsage::Raster, true),
-                (TileMeshUsage::Raster, false),
-            ] {
+            for &(usage, generate_borders) in usages {
                 tile_mesh_cache
                     .prepare(device, queue, coords, usage, generate_borders)
                     .map_err(|error| {
@@ -89,12 +105,7 @@ pub fn upload_system(
         }
     } else {
         let coords = crate::coords::WorldTileCoords::default();
-        for (usage, generate_borders) in [
-            (TileMeshUsage::Stencil, true),
-            (TileMeshUsage::Stencil, false),
-            (TileMeshUsage::Raster, true),
-            (TileMeshUsage::Raster, false),
-        ] {
+        for &(usage, generate_borders) in usages {
             tile_mesh_cache
                 .prepare(device, queue, coords, usage, generate_borders)
                 .map_err(|error| {

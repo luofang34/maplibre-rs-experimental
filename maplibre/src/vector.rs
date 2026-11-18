@@ -71,7 +71,7 @@ impl Deref for VectorPipeline {
 /// The pipelines of stroked lines, by where a line lies.
 struct LinePipeline {
     /// On the map plane, or draped into the terrain textures.
-    flat: crate::render::resource::FeaturePipelinePair,
+    flat: Option<crate::render::resource::FeaturePipelinePair>,
     /// At heights of its own, as a bridge deck or tunnel is, tested against the terrain depth.
     structure: Option<crate::render::resource::FeaturePipelinePair>,
     /// Elevated 3D paths (`line-elevation`) clipped to `[0, 4096]`, depth-tested without 2D
@@ -87,27 +87,29 @@ struct ExtrusionPipeline {
     color: crate::render::resource::FeaturePipelinePair,
     clear: crate::render::resource::FeaturePipelinePair,
     /// The colour pass with an image in place of the colour.
-    pattern: crate::render::resource::FeaturePipelinePair,
+    pattern: Option<crate::render::resource::FeaturePipelinePair>,
     /// Back-facing shell of a closed translucent 3D volume (`depth_write = false`).
-    translucent_back: crate::render::resource::FeaturePipelinePair,
+    translucent_back: Option<crate::render::resource::FeaturePipelinePair>,
     /// Front-facing shell of a closed translucent 3D volume (`depth_write = false`).
-    translucent_front: crate::render::resource::FeaturePipelinePair,
+    translucent_front: Option<crate::render::resource::FeaturePipelinePair>,
 }
 
 struct CirclePipeline {
     pair: crate::render::resource::FeaturePipelinePair,
-    feature_stroke: wgpu::RenderPipeline,
-    dynamic_radius: wgpu::RenderPipeline,
+    feature_stroke: Option<wgpu::RenderPipeline>,
+    dynamic_radius: Option<wgpu::RenderPipeline>,
 }
 impl CirclePipeline {
-    fn select_entry(&self, entry: Option<&resource::IndexEntry>) -> &wgpu::RenderPipeline {
+    fn select_entry(&self, entry: Option<&resource::IndexEntry>) -> Option<&wgpu::RenderPipeline> {
         if entry.is_some_and(resource::IndexEntry::is_dynamic_circle_metadata) {
-            &self.dynamic_radius
+            self.dynamic_radius.as_ref()
         } else if entry.is_some_and(resource::IndexEntry::is_dual_feature_metadata) {
-            &self.feature_stroke
+            self.feature_stroke.as_ref()
         } else {
-            self.pair
-                .select(entry.is_some_and(resource::IndexEntry::is_uniform_feature_metadata))
+            Some(
+                self.pair
+                    .select(entry.is_some_and(resource::IndexEntry::is_uniform_feature_metadata)),
+            )
         }
     }
 }

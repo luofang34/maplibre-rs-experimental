@@ -1,31 +1,36 @@
+#[cfg(feature = "winit-window")]
 use maplibre::{
     environment::OffscreenKernelConfig,
     kernel::{Kernel, KernelBuilder},
     map::{handle::MapHandle, Map},
-    plugin::Plugin,
     render::builder::RendererBuilder,
-    style::Style,
 };
+use maplibre::{plugin::Plugin, style::Style};
+#[cfg(feature = "winit-window")]
 use maplibre_winit::{WinitApplicationError, WinitEventLoop, WinitMapWindowConfig};
+#[cfg(feature = "winit-window")]
 use wasm_bindgen::prelude::*;
 
-use crate::{
-    controller::MapController,
-    environment::CurrentEnvironment,
-    error::JSError,
-    platform::{self, http_client::web_http_client},
-};
+#[cfg(feature = "winit-window")]
+use crate::environment::CurrentEnvironment;
+#[cfg(feature = "winit-window")]
+use crate::platform::http_client::web_http_client;
+use crate::{error::JSError, platform};
 
 /// A browser map using the configured worker transport.
+#[cfg(feature = "winit-window")]
 pub type MapType = Map<CurrentEnvironment>;
 
 /// A plugin of a browser map.
+#[cfg(feature = "winit-window")]
 pub type MapPlugin = Box<dyn Plugin<CurrentEnvironment>>;
 
 /// Builds a host's plugins for a style.
+#[cfg(feature = "winit-window")]
 type MapPlugins = Box<dyn FnMut(&Style) -> Vec<MapPlugin>>;
 
 /// Sets a map up once it exists.
+#[cfg(feature = "winit-window")]
 type Configure = Box<dyn FnMut(&mut MapType)>;
 
 /// What a host adds to a browser map beyond its style: plugins of its own, whose systems run
@@ -33,12 +38,14 @@ type Configure = Box<dyn FnMut(&mut MapType)>;
 ///
 /// The event loop creates the map again when a suspension interrupts its initialization, so
 /// both are callbacks it can call again.
+#[cfg(feature = "winit-window")]
 #[derive(Default)]
 pub struct WebMapHost {
     plugins: Option<MapPlugins>,
     configure: Option<Configure>,
 }
 
+#[cfg(feature = "winit-window")]
 impl WebMapHost {
     /// Adds the plugins `plugins` returns for the style, after the ones the style needs.
     pub fn with_plugins(mut self, plugins: impl FnMut(&Style) -> Vec<MapPlugin> + 'static) -> Self {
@@ -69,7 +76,7 @@ impl WebMapHost {
 }
 
 pub(crate) fn parse_style(style_json: &str) -> Result<Style, JSError> {
-    let mut style: Style = serde_json::from_str(style_json).map_err(JSError::InvalidStyle)?;
+    let mut style = Style::from_json_str(style_json).map_err(JSError::InvalidStyle)?;
     // Layer order becomes render order; index 0 is reserved for the depth clear.
     for (index, layer) in style.layers.iter_mut().enumerate() {
         layer.index = index as u32 + 1;
@@ -77,11 +84,15 @@ pub(crate) fn parse_style(style_json: &str) -> Result<Style, JSError> {
     Ok(style)
 }
 
+#[cfg(feature = "winit-window")]
+use crate::controller::MapController;
+
 /// Starts a map with the supplied style, or the built-in style when omitted.
 ///
 /// Resolves once the renderer is initialized with the controller of the map, which goes on
 /// running on the browser's event loop. A host that adds plugins or sets the map up starts it
 /// with [`run_map`] instead.
+#[cfg(feature = "winit-window")]
 #[wasm_bindgen]
 pub async fn run_maplibre(
     new_worker: js_sys::Function,
@@ -96,7 +107,7 @@ pub async fn run_maplibre(
 }
 
 /// Starts a map bound to a custom `canvas_id` for comparison/benchmark harnesses.
-#[cfg(feature = "arena-telemetry")]
+#[cfg(all(feature = "winit-window", feature = "arena-telemetry"))]
 #[wasm_bindgen]
 pub async fn run_maplibre_on_canvas(
     canvas_id: String,
@@ -115,6 +126,7 @@ pub async fn run_maplibre_on_canvas(
 /// resolves once the renderer is initialized with a handle that sends the map commands; the
 /// map goes on running on the browser's event loop, where the host's plugins see it every
 /// frame.
+#[cfg(feature = "winit-window")]
 pub async fn run_map(
     new_worker: js_sys::Function,
     style: Style,
@@ -123,6 +135,7 @@ pub async fn run_map(
     run_map_on_canvas("maplibre".into(), new_worker, style, host).await
 }
 
+#[cfg(feature = "winit-window")]
 async fn run_map_on_canvas(
     canvas_id: String,
     new_worker: js_sys::Function,
@@ -167,6 +180,7 @@ async fn run_map_on_canvas(
 
 /// The kernel of a browser map: its window, the fetch transport, and the worker transport
 /// that `new_worker` creates workers for.
+#[cfg(feature = "winit-window")]
 pub fn create_kernel(
     new_worker: js_sys::Function,
     window_config: WinitMapWindowConfig<()>,
@@ -207,6 +221,7 @@ pub fn create_kernel(
 /// The plugins a browser map needs: rendering, background, vector tiles with symbols and
 /// heatmaps, plus raster, hillshade, and terrain plugins (which no-op when inactive so runtime
 /// `setStyle` can transition between 2D vector, satellite raster, and 3D terrain seamlessly).
+#[cfg(feature = "winit-window")]
 pub fn default_plugins(style: &Style) -> Vec<MapPlugin> {
     default_plugins_for::<CurrentEnvironment>(style)
 }

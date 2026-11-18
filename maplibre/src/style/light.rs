@@ -43,26 +43,48 @@ impl PropertyValue for LightAnchor {
 }
 
 /// Root light configuration relevant to globe rendering.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct LightSpecification {
     /// Coordinate frame for the light position.
-    #[serde(default = "default_anchor_property")]
     pub anchor: StyleProperty<LightAnchor>,
     /// Spherical position as radius, azimuth, and polar angle.
-    #[serde(default = "default_position_property")]
     pub position: StyleProperty<[f64; 3]>,
     /// Colour of the light; extruded polygons are lit with it, white by default.
-    #[serde(
-        default,
-        deserialize_with = "StyleProperty::<csscolorparser::Color>::deserialize_color_or_none"
-    )]
     pub color: Option<StyleProperty<csscolorparser::Color>>,
     /// Strength of the light in 0..=1; 0.5 by default.
-    #[serde(
-        default,
-        deserialize_with = "StyleProperty::<f32>::deserialize_f32_or_none"
-    )]
     pub intensity: Option<StyleProperty<f32>>,
+}
+
+impl LightSpecification {
+    /// Parses a `light` object directly from JSON.
+    pub(crate) fn from_json_value(value: &serde_json::Value) -> Result<Self, serde_json::Error> {
+        let Some(map) = value.as_object() else {
+            return Err(serde::de::Error::custom("light must be a JSON object"));
+        };
+        Ok(Self {
+            anchor: map
+                .get("anchor")
+                .map_or_else(default_anchor_property, StyleProperty::<LightAnchor>::parse),
+            position: map
+                .get("position")
+                .map_or_else(default_position_property, StyleProperty::<[f64; 3]>::parse),
+            color: map
+                .get("color")
+                .filter(|v| !v.is_null())
+                .map(StyleProperty::<csscolorparser::Color>::parse),
+            intensity: map
+                .get("intensity")
+                .filter(|v| !v.is_null())
+                .map(StyleProperty::<f32>::parse),
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for LightSpecification {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Self::from_json_value(&value).map_err(serde::de::Error::custom)
+    }
 }
 
 impl Default for LightSpecification {

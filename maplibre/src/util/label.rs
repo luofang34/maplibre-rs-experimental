@@ -70,6 +70,11 @@ macro_rules! define_label {
         {
             #[doc(hidden)]
             fn dyn_clone(&self) -> Box<dyn $label_trait_name>;
+
+            #[doc(hidden)]
+            fn label_name(&self) -> ::std::borrow::Cow<'static, str> {
+                ::std::borrow::Cow::Owned(format!("{self:?}"))
+            }
         }
 
         impl PartialEq for dyn $label_trait_name {
@@ -96,11 +101,19 @@ macro_rules! define_label {
             fn dyn_clone(&self) -> Box<dyn $label_trait_name> {
                 Box::new(self.clone())
             }
+
+            fn label_name(&self) -> ::std::borrow::Cow<'static, str> {
+                self.clone()
+            }
         }
 
         impl $label_trait_name for &'static str {
             fn dyn_clone(&self) -> Box<dyn $label_trait_name> {
                 Box::new(<&str>::clone(self))
+            }
+
+            fn label_name(&self) -> ::std::borrow::Cow<'static, str> {
+                ::std::borrow::Cow::Borrowed(*self)
             }
         }
     };

@@ -48,21 +48,29 @@ impl DepthCopyPipeline {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let vertex = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("depth copy vertex"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/depth_copy.vertex.wgsl").into()),
-        });
-        let fragment = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("depth copy fragment"),
-            source: wgpu::ShaderSource::Wgsl(
-                if multisampled {
-                    include_str!("shaders/depth_copy_multisampled.fragment.wgsl")
-                } else {
-                    include_str!("shaders/depth_copy.fragment.wgsl")
-                }
-                .into(),
-            ),
-        });
+        let vertex = crate::render::resource::shader_module::create_shader_module_from_wgsl(
+            device,
+            Some("depth copy vertex"),
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/depth_copy.vertex.wgsl"
+            )),
+        );
+        let fragment = crate::render::resource::shader_module::create_shader_module_from_wgsl(
+            device,
+            Some("depth copy fragment"),
+            if multisampled {
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/depth_copy_multisampled.fragment.wgsl"
+                ))
+            } else {
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/depth_copy.fragment.wgsl"
+                ))
+            },
+        );
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("depth copy"),
             layout: Some(&pipeline_layout),

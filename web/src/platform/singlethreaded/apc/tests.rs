@@ -117,7 +117,7 @@ fn malformed_outcome_payloads_retain_typed_errors() {
     let CallError::Deserialize(cause) = error else {
         panic!("decode error");
     };
-    assert!(cause.is::<serde_json::Error>());
+    assert!(cause.is::<TrackedPayloadError>());
 }
 
 #[wasm_bindgen_test]

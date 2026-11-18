@@ -47,7 +47,7 @@ fn layer_tessellated_preserves_all_shader_vertex_fields_and_feature_paint() {
         values: Vec::new(),
         extent: Some(4096),
     };
-    let mut props = FeatureProperties::new();
+    let mut props = FeatureProperties::default();
     props.insert("admin_level".into(), Value::Number(2.0));
     let entry = BucketFeatureEntry {
         raw_id: Some(7),
@@ -143,9 +143,9 @@ fn batch_of_two_flatbuffer_messages_prevents_aba_and_shares_decoded_maps_across_
         values: Vec::new(),
         extent: Some(4096),
     };
-    let mut props_alpha = FeatureProperties::new();
+    let mut props_alpha = FeatureProperties::default();
     props_alpha.insert("name".into(), Value::String("alpha".into()));
-    let mut props_beta = FeatureProperties::new();
+    let mut props_beta = FeatureProperties::default();
     props_beta.insert("name".into(), Value::String("beta".into()));
 
     let entries = vec![

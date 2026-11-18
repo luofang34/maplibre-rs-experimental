@@ -45,7 +45,7 @@ pub struct TextTessellator {
     /// Lines to be labelled along, held until they can be merged.
     pending_lines: Vec<line_merge::PendingLine>,
     /// Where each text already has a label along a line, so a repeat of it keeps its distance.
-    line_anchors_by_text: std::collections::HashMap<String, Vec<[f64; 2]>>,
+    line_anchors_by_text: rustc_hash::FxHashMap<String, Vec<[f64; 2]>>,
     properties: FeatureProperties,
     /// Pre-decoded shared properties indexed by feature order when supplied by MVT processing.
     pub(crate) shared_properties: Vec<Arc<FeatureProperties>>,
@@ -88,8 +88,8 @@ impl TextTessellator {
             atlas,
             collected: Vec::new(),
             pending_lines: Vec::new(),
-            line_anchors_by_text: std::collections::HashMap::new(),
-            properties: FeatureProperties::new(),
+            line_anchors_by_text: rustc_hash::FxHashMap::default(),
+            properties: FeatureProperties::default(),
             shared_properties: Vec::new(),
             quad_buffer: VertexBuffers::new(),
             features: Vec::new(),

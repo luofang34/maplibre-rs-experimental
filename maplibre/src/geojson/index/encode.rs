@@ -1,8 +1,7 @@
 //! Encodes indexed features as the `_geojson` layer of a vector tile.
 
-use std::collections::HashMap;
-
 use geozero::mvt::tile::{Feature, GeomType, Layer, Value as MvtValue};
+use rustc_hash::FxHashMap as HashMap;
 use serde_json::Value;
 
 use super::{Geometry, IndexedFeature, Point, EXTENT};

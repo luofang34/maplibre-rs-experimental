@@ -55,7 +55,7 @@ fn make_view(x: f64, y: f64, zoom: Zoom, pitch_deg: f64) -> ViewState {
 }
 
 fn meta(layer: &str, id: u64, name: &str) -> FeatureMeta {
-    let mut props = FeatureProperties::new();
+    let mut props = FeatureProperties::default();
     props.insert("name".into(), Value::String(name.into()));
     FeatureMeta {
         properties: Arc::new(props),

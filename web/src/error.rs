@@ -86,10 +86,10 @@ pub enum JSError {
     #[cfg(feature = "renderer")]
     #[error(transparent)]
     Map(#[from] maplibre::map::MapError),
-    #[cfg(feature = "renderer")]
+    #[cfg(feature = "winit-window")]
     #[error(transparent)]
     Host(#[from] maplibre_winit::WinitHostError),
-    #[cfg(feature = "renderer")]
+    #[cfg(feature = "winit-window")]
     #[error("event loop closed before map initialization completed")]
     ClosedBeforeReady,
     /// The map stopped before it applied a command.

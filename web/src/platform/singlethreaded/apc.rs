@@ -186,7 +186,7 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
         const MAX_RAW_ATTEMPTS_PER_BATCH: usize = 6;
         let mut buffer = self.buffer.borrow_mut();
         let mut admitted_bytes: usize = buffer.iter().map(QueuedMessage::raw_byte_len).sum();
-        let mut admitted_attempts: std::collections::HashSet<u64> =
+        let mut admitted_attempts: rustc_hash::FxHashSet<u64> =
             buffer.iter().filter_map(QueuedMessage::attempt).collect();
         let mut admitted_msgs: usize = buffer.len();
         // Partial and final tile completions must retain the worker's delivery order.
@@ -211,8 +211,8 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
         if !self.batch_open.get() {
             return PassingReceiveIter::new(ret);
         }
-        let mut attempt_totals: std::collections::HashMap<u64, usize> =
-            std::collections::HashMap::new();
+        let mut attempt_totals: rustc_hash::FxHashMap<u64, usize> =
+            rustc_hash::FxHashMap::default();
         for item in &received.queued {
             if let Some(id) = item.attempt() {
                 let entry = attempt_totals.entry(id).or_insert(0);

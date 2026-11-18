@@ -221,6 +221,14 @@ pub enum StyleProperty<T> {
     Unsupported(Arc<UnsupportedProperty>),
 }
 
+#[inline(never)]
+fn eval_expr_at(
+    property: &PropertyExpression,
+    context: &EvaluationContext<'_>,
+) -> Option<crate::style::expression::Value> {
+    property.expression.evaluate(context).ok()
+}
+
 impl<T: PropertyValue> StyleProperty<T> {
     /// Parses a property value: a constant, a legacy function object or an expression.
     pub fn parse(json: &serde_json::Value) -> Self {
@@ -233,7 +241,7 @@ impl<T: PropertyValue> StyleProperty<T> {
         match self {
             Self::Constant(value) => Some(value.clone()),
             Self::Expression(property) => {
-                let value = property.expression.evaluate(context).ok()?;
+                let value = eval_expr_at(property, context)?;
                 T::from_value(&value)
             }
             Self::Unsupported(_) => None,

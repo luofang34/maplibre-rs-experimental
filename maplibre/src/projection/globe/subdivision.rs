@@ -1,8 +1,7 @@
 //! Geometry subdivision needed to approximate curved globe features.
 
-use std::collections::HashMap;
-
 use lyon::tessellation::{VertexBuffers, VertexId};
+use rustc_hash::FxHashMap as HashMap;
 use thiserror::Error;
 
 use crate::{coords::EXTENT_UINT, render::ShaderVertex};
@@ -131,7 +130,7 @@ where
     }
     let input = buffer.indices[index_start..].to_vec();
     buffer.indices.truncate(index_start);
-    let mut vertices = HashMap::with_capacity(input.len());
+    let mut vertices = HashMap::with_capacity_and_hasher(input.len(), Default::default());
     for triangle in input.as_chunks::<3>().0 {
         let points = triangle_points(&buffer.vertices, triangle)?;
         subdivide_triangle(

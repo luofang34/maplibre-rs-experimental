@@ -1,9 +1,8 @@
 //! Lays a tile's labels out again once the provided images they name have answers.
 
-use std::{
-    collections::{BTreeSet, HashSet},
-    sync::Arc,
-};
+use std::sync::Arc;
+
+use rustc_hash::FxHashSet as HashSet;
 
 use crate::{
     coords::WorldTileCoords,
@@ -45,7 +44,7 @@ pub(super) struct TileImages {
     attempt: Option<u64>,
     pixel_ratio: f32,
     /// Every provided name the labels ask for.
-    provided: BTreeSet<String>,
+    provided: HashSet<String>,
     /// The sources whose labels lack some.
     waiting: Vec<Symbols>,
 }
@@ -56,7 +55,7 @@ impl TileImages {
             coords,
             attempt,
             pixel_ratio,
-            provided: BTreeSet::new(),
+            provided: HashSet::default(),
             waiting: Vec::new(),
         }
     }
@@ -73,10 +72,12 @@ impl TileImages {
     }
 
     fn report(&self, state: ProvidedImagesState) -> ProvidedImagesReport {
+        let mut names: Vec<String> = self.provided.iter().cloned().collect();
+        names.sort_unstable();
         ProvidedImagesReport {
             coords: self.coords,
             attempt: self.attempt,
-            names: self.provided.iter().cloned().collect(),
+            names,
             pixel_ratio: self.pixel_ratio,
             state,
         }
@@ -155,14 +156,14 @@ async fn lay_out_sources<T: VectorTransferables, C: Context + Clone + Send, H: H
     wanted.dedup_by(|a, b| a.0 == b.0);
     // The names of a tile are asked for together; the registry runs each once however many
     // tiles wait for it, and bounds how many run at all.
-    let answers = futures::future::join_all(
+    let answers = crate::util::async_join::join_all_concurrent(
         wanted
             .iter()
             .map(|(name, pixel_ratio)| providers.resolve(name, *pixel_ratio)),
     )
     .await;
     let mut unavailable = false;
-    let mut gained = HashSet::new();
+    let mut gained = HashSet::default();
     for ((name, _), answer) in wanted.iter().zip(answers) {
         match answer.as_deref() {
             Ok(Resolved::Image(_)) => {

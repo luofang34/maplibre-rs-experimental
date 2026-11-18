@@ -64,16 +64,18 @@ export const startMapLibre = async (
         return
     }
 
-    const mainModulePrefetch = !WEBGL ? compileWasmModule(wasmPath) : undefined;
+    const mainModulePrefetch = compileWasmModule(wasmPath);
     const workerModulePrefetch =
-        !WEBGL && !MULTITHREADED
+        !MULTITHREADED
             ? compileWasmModule(
                   options?.workerWasmPath ??
                       new URL("./wasm/maplibre_tile_worker_bg.wasm", import.meta.url).href,
               )
             : undefined;
     const preRenderWorker =
-        !WEBGL && !workerPath && typeof navigator !== "undefined" && "gpu" in navigator
+        !workerPath &&
+        typeof Worker !== "undefined" &&
+        (WEBGL ? isWebGLSupported() : (typeof navigator !== "undefined" && "gpu" in navigator))
             ? RenderWorker()
             : undefined;
     const prePoolWorkers: Worker[] = preRenderWorker
@@ -91,12 +93,11 @@ export const startMapLibre = async (
 
     if (WEBGL) {
         await checkWasmFeatures();
-        const {Spector} = await import("spectorjs")
-        let spector = new Spector()
-        spector.displayUI()
     } else {
         void checkWasmFeatures();
-        const hasWebGpu = await probeWebGpuAvailable();
+        const hasWebGpu = MULTITHREADED
+            ? Boolean(typeof navigator !== "undefined" && "gpu" in navigator)
+            : await probeWebGpuAvailable();
         const decision = selectGraphicsBackend({
             webgl: false,
             hasWebGpu,
@@ -140,9 +141,9 @@ export const startMapLibre = async (
     const targetCanvasId = ARENA_TELEMETRY && canvasId ? canvasId : "maplibre";
     const canvas = mapCanvas(targetCanvasId);
 
-    // Default WebGPU path (single-threaded and multithreaded): run Map + WebGPU surface inside a
-    // dedicated OffscreenCanvas Render Worker wired directly to Tile Workers over MessageChannel.
-    if (!WEBGL && canvas && typeof canvas.transferControlToOffscreen === "function") {
+    // Default path (WebGPU & WebGL2, single-threaded & multithreaded): run Map + GPU surface
+    // inside a dedicated OffscreenCanvas Render Worker wired directly to Tile Workers over MessageChannel.
+    if (canvas && typeof canvas.transferControlToOffscreen === "function") {
         if (MULTITHREADED && imageProviderModules.length > 0) {
             console.warn("JavaScript image providers need a single-threaded build; register Rust providers through image_providers() instead.");
         }
@@ -200,10 +201,13 @@ export const startMapLibre = async (
     ]);
 
     const invokeRun = (workerFactory: any) => {
-        if (ARENA_TELEMETRY && canvasId) {
+        if (ARENA_TELEMETRY && canvasId && typeof (maplibre as any).run_maplibre_on_canvas === "function") {
             return (maplibre as any).run_maplibre_on_canvas(canvasId, workerFactory, resolvedStyleJson);
         }
-        return maplibre.run_maplibre(workerFactory, resolvedStyleJson);
+        if (typeof (maplibre as any).run_maplibre !== "function") {
+            throw new Error("OffscreenCanvas is required for this build.");
+        }
+        return (maplibre as any).run_maplibre(workerFactory, resolvedStyleJson);
     };
 
     if (MULTITHREADED) {

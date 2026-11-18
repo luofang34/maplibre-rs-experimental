@@ -9,7 +9,6 @@
 //! provider lives in the runtime, beside the worker's other services.
 
 use std::{
-    collections::BTreeSet,
     fmt,
     future::Future,
     pin::Pin,
@@ -188,7 +187,7 @@ struct Registry {
     cache: AssetCache,
     gate: Arc<Gate>,
     counters: Counters,
-    missing: Mutex<BTreeSet<String>>,
+    missing: Mutex<rustc_hash::FxHashSet<String>>,
 }
 
 /// The providers a map's workers ask for images; clones share providers, answers and limits.

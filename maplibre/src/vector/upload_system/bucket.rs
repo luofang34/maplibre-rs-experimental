@@ -35,7 +35,7 @@ pub(super) fn upload_bucket(
         VectorPaintFrame,
     ),
     (protected, feature_metadata, dyn_points): (
-        &std::collections::HashSet<crate::coords::WorldTileCoords>,
+        &rustc_hash::FxHashSet<crate::coords::WorldTileCoords>,
         &mut Vec<FillShaderFeatureMetadata>,
         &mut DynPoints,
     ),

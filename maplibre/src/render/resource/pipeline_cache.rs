@@ -186,10 +186,9 @@ impl SharedPipelines {
             self.0.shader_hits.fetch_add(1, Ordering::Relaxed);
             return existing.clone();
         }
-        let created = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label,
-            source: wgpu::ShaderSource::Wgsl(source.into()),
-        });
+        let created = crate::render::resource::shader_module::create_shader_module_from_wgsl(
+            device, label, source,
+        );
         self.0.shader_compiles.fetch_add(1, Ordering::Relaxed);
         state.shaders.insert(key, created.clone());
         created

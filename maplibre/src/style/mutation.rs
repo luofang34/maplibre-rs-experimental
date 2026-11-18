@@ -66,11 +66,12 @@ impl Style {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_owned();
-        let parsed: StyleLayer =
-            serde_json::from_value(layer).map_err(|source| StyleMutationError::InvalidLayer {
+        let parsed = StyleLayer::from_json_value(&layer).map_err(|source| {
+            StyleMutationError::InvalidLayer {
                 layer: id.clone(),
                 source,
-            })?;
+            }
+        })?;
         if self.layers.iter().any(|existing| existing.id == parsed.id) {
             return Err(StyleMutationError::DuplicateLayer { layer: id });
         }
@@ -339,7 +340,7 @@ impl Style {
                 }
             })?;
         edit(&mut document);
-        let mut edited: StyleLayer = serde_json::from_value(document).map_err(|source| {
+        let mut edited = StyleLayer::from_json_value(&document).map_err(|source| {
             StyleMutationError::InvalidLayer {
                 layer: id.to_owned(),
                 source,

@@ -70,7 +70,8 @@ let baseConfig = {
     define: {
         WEBGL: `${webgl}`,
         MULTITHREADED: `${multithreaded}`,
-        ARENA_TELEMETRY: `${arenaTelemetry}`
+        ARENA_TELEMETRY: `${arenaTelemetry}`,
+        MT_INITIAL_MEMORY_PAGES: "32"
     },
 }
 
@@ -152,16 +153,24 @@ const wasmPack = () => {
     let profile = release ? "wasm-release" : "wasm-dev"
 
     // language=toml
+    let immediateAbortFlags = release
+        ? `"-Zunstable-options", "-Cpanic=immediate-abort", "-Zlocation-detail=none", "-Zfmt-debug=none",`
+        : ``;
+
+    // language=toml
     let singlethreaded_config = `target.wasm32-unknown-unknown.rustflags = [
         "--cfg=web_sys_unstable_apis",
+        ${immediateAbortFlags}
+        "-C", "target-feature=+bulk-memory,+mutable-globals,+nontrapping-fptoint,+sign-ext",
         "-C", "link-arg=-zstack-size=262144",
     ]`
 
     // language=toml
     let multithreaded_config = `target.wasm32-unknown-unknown.rustflags = [
         "--cfg=web_sys_unstable_apis",
+        ${immediateAbortFlags}
         # Enables features which are required for shared-memory
-        "-C", "target-feature=+atomics,+bulk-memory,+mutable-globals",
+        "-C", "target-feature=+atomics,+bulk-memory,+mutable-globals,+nontrapping-fptoint,+sign-ext",
         # Enables the possibility to import memory into wasm.
         # Without --shared-memory it is not possible to use shared WebAssembly.Memory.
         # Set maximum memory ceiling to 1 GiB (initial linear memory stays ~1.25 MiB and grows on demand)
@@ -175,7 +184,8 @@ const wasmPack = () => {
     spawnTool('cargo', ["--version"])
 
     const enabledFeatures = [
-        ...(webgl ? ["web-webgl"] : []),
+        "renderer",
+        webgl ? "web-webgl" : "webgpu",
         ...(arenaTelemetry ? ["arena-telemetry"] : []),
     ].join(",");
 
@@ -185,6 +195,7 @@ const wasmPack = () => {
         "-p", "web", "--lib",
         "--target", "wasm32-unknown-unknown",
         "--profile", profile,
+        "--no-default-features",
         "--features", enabledFeatures,
         ...(release || multithreaded
             ? ["-Z", "build-std=std,panic_abort", "-Z", "build-std-features=optimize_for_size"]
@@ -257,6 +268,14 @@ const wasmPack = () => {
         }
     }
 
+    if (multithreaded) {
+        const mainJs = readFileSync(`${outDirectory}/maplibre.js`, 'utf8');
+        const memMatch = mainJs.match(/new WebAssembly\.Memory\(\{\s*initial:\s*(\d+)/);
+        if (memMatch) {
+            baseConfig.define.MT_INITIAL_MEMORY_PAGES = memMatch[1];
+        }
+    }
+
     const memoryTests = spawnTool('node', [
         '--test',
         'test/wasm-instance.test.mjs',
@@ -276,13 +295,15 @@ const wasmPack = () => {
             inputPath,
             "-o", tmpPath,
             "-Oz",
+            "--converge",
+            "--one-caller-inline-max-function-size=20",
             "--strip-debug",
             "--strip-producers",
             "--enable-bulk-memory",
             "--enable-mutable-globals",
             "--enable-nontrapping-float-to-int",
             "--enable-sign-ext",
-            ...(multithreaded ? ["--enable-threads"] : []),
+            ...(multithreaded ? ["--enable-threads"] : ["--low-memory-unused", "--zero-filled-memory"]),
         ];
 
         const tmpWasm = `${outDirectory}/maplibre_bg.wasm.${process.pid}.tmp`;

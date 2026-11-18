@@ -110,14 +110,21 @@ impl ProbeGpu {
             immediate_size: 0,
         });
         let source = if multisampled {
-            include_str!("../render/shaders/depth_probe_multisampled.wgsl")
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/depth_probe_multisampled.wgsl"
+            ))
         } else {
-            include_str!("../render/shaders/depth_probe.wgsl")
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/depth_probe.wgsl"
+            ))
         };
-        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("depth probes"),
-            source: wgpu::ShaderSource::Wgsl(source.into()),
-        });
+        let module = crate::render::resource::shader_module::create_shader_module_from_wgsl(
+            device,
+            Some("depth probes"),
+            source,
+        );
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("depth probes"),
             layout: Some(&pipeline_layout),

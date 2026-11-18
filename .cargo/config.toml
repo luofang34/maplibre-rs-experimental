@@ -21,6 +21,3 @@ lto = true
 codegen-units = 1
 strip = false
 panic = 'abort'
-
-[profile.wasm-release.package.lyon_tessellation]
-opt-level = 2

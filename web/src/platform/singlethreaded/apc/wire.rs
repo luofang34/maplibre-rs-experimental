@@ -9,14 +9,16 @@ use std::{
 
 use js_sys::{ArrayBuffer, Uint8Array};
 #[cfg(any(test, feature = "renderer"))]
+use maplibre::coords::{WorldTileCoords, ZoomLevel};
+#[cfg(any(test, feature = "renderer"))]
 use maplibre::io::apc::CallError;
 use maplibre::{
     io::{
         apc::{Context, IntoMessage, Message, SendError},
         source_client::SourceClient,
-        tile_retry::{RequestKind, TileRequestOutcome},
+        tile_retry::{RequestDisposition, RequestKind, TileRequestOutcome},
     },
-    sdf::provided::ProvidedImagesReport,
+    sdf::provided::{ProvidedImagesReport, ProvidedImagesState},
 };
 #[cfg(any(test, feature = "renderer"))]
 use thiserror::Error;
@@ -228,19 +230,17 @@ fn prepare_payload_bytes(message: Message) -> Result<(WebMessageTag, PayloadByte
         || message.has_tag(RequestKind::Vector.message_tag())
     {
         let outcome = message.into_transferable::<TileRequestOutcome>()?;
-        let data = serde_json::to_vec(&*outcome).map_err(|source| SendError::Transmission {
-            operation: "encoding a tile request outcome",
-            source: Box::new(source),
-        })?;
-        return Ok((WebMessageTag::TileRequestOutcome, PayloadBytes::Vec(data)));
+        return Ok((
+            WebMessageTag::TileRequestOutcome,
+            PayloadBytes::Vec(encode_outcome(&outcome)),
+        ));
     }
     if message.has_tag(ProvidedImagesReport::message_tag()) {
         let report = message.into_transferable::<ProvidedImagesReport>()?;
-        let data = serde_json::to_vec(&*report).map_err(|source| SendError::Transmission {
-            operation: "encoding a provided images report",
-            source: Box::new(source),
-        })?;
-        return Ok((WebMessageTag::ProvidedImages, PayloadBytes::Vec(data)));
+        return Ok((
+            WebMessageTag::ProvidedImages,
+            PayloadBytes::Vec(encode_provided_report(&report)),
+        ));
     }
     let tag = message
         .tag()
@@ -297,13 +297,13 @@ pub(crate) fn decode_message_bytes(
             .map(|message| message.with_attempt(attempt));
     }
     if tag == WebMessageTag::TileRequestOutcome {
-        let outcome: TileRequestOutcome = serde_json::from_slice(slice)
-            .map_err(|source| CallError::Deserialize(Box::new(source)))?;
+        let outcome = decode_outcome(slice)
+            .ok_or_else(|| CallError::Deserialize(Box::new(TrackedPayloadError::WirePayload)))?;
         return Ok(IntoMessage::into(outcome));
     }
     if tag == WebMessageTag::ProvidedImages {
-        let report: ProvidedImagesReport = serde_json::from_slice(slice)
-            .map_err(|source| CallError::Deserialize(Box::new(source)))?;
+        let report = decode_provided_report(slice)
+            .ok_or_else(|| CallError::Deserialize(Box::new(TrackedPayloadError::WirePayload)))?;
         return Ok(IntoMessage::into(report));
     }
     Ok(Message::new(
@@ -346,4 +346,123 @@ pub(crate) enum TrackedPayloadError {
     Nested,
     #[error("finished call payload has {bytes} bytes; its attempt requires 8")]
     Finished { bytes: usize },
+    #[error("worker status payload could not be decoded")]
+    WirePayload,
+}
+
+fn encode_outcome(outcome: &TileRequestOutcome) -> Vec<u8> {
+    let mut out = Vec::with_capacity(20);
+    out.extend_from_slice(&outcome.coords.x.to_le_bytes());
+    out.extend_from_slice(&outcome.coords.y.to_le_bytes());
+    out.push(u8::from(outcome.coords.z));
+    out.push(match outcome.kind {
+        RequestKind::Raster => 0,
+        RequestKind::Dem => 1,
+        RequestKind::Vector => 2,
+    });
+    out.push(match outcome.disposition {
+        RequestDisposition::Complete => 0,
+        RequestDisposition::Retry => 1,
+    });
+    out.push(u8::from(outcome.attempt.is_some()));
+    out.extend_from_slice(&outcome.attempt.unwrap_or(0).to_le_bytes());
+    out
+}
+
+#[cfg(any(test, feature = "renderer"))]
+fn decode_outcome(slice: &[u8]) -> Option<TileRequestOutcome> {
+    if slice.len() != 20 {
+        return None;
+    }
+    let coords = WorldTileCoords {
+        x: i32::from_le_bytes(slice[0..4].try_into().ok()?),
+        y: i32::from_le_bytes(slice[4..8].try_into().ok()?),
+        z: ZoomLevel::new(slice[8]),
+    };
+    let kind = match slice[9] {
+        0 => RequestKind::Raster,
+        1 => RequestKind::Dem,
+        2 => RequestKind::Vector,
+        _ => return None,
+    };
+    let disposition = match slice[10] {
+        0 => RequestDisposition::Complete,
+        1 => RequestDisposition::Retry,
+        _ => return None,
+    };
+    let attempt = match slice[11] {
+        0 => None,
+        1 => Some(u64::from_le_bytes(slice[12..20].try_into().ok()?)),
+        _ => return None,
+    };
+    Some(TileRequestOutcome {
+        coords,
+        kind,
+        attempt,
+        disposition,
+    })
+}
+
+fn encode_provided_report(report: &ProvidedImagesReport) -> Vec<u8> {
+    let extra: usize = report.names.iter().map(|s| 4 + s.len()).sum();
+    let mut out = Vec::with_capacity(27 + extra);
+    out.extend_from_slice(&report.coords.x.to_le_bytes());
+    out.extend_from_slice(&report.coords.y.to_le_bytes());
+    out.push(u8::from(report.coords.z));
+    out.push(match report.state {
+        ProvidedImagesState::Awaiting => 0,
+        ProvidedImagesState::Settled => 1,
+        ProvidedImagesState::Retry => 2,
+    });
+    out.push(u8::from(report.attempt.is_some()));
+    out.extend_from_slice(&report.attempt.unwrap_or(0).to_le_bytes());
+    out.extend_from_slice(&report.pixel_ratio.to_le_bytes());
+    out.extend_from_slice(&(report.names.len() as u32).to_le_bytes());
+    for name in &report.names {
+        out.extend_from_slice(&(name.len() as u32).to_le_bytes());
+        out.extend_from_slice(name.as_bytes());
+    }
+    out
+}
+
+#[cfg(any(test, feature = "renderer"))]
+fn decode_provided_report(slice: &[u8]) -> Option<ProvidedImagesReport> {
+    if slice.len() < 27 {
+        return None;
+    }
+    let coords = WorldTileCoords {
+        x: i32::from_le_bytes(slice[0..4].try_into().ok()?),
+        y: i32::from_le_bytes(slice[4..8].try_into().ok()?),
+        z: ZoomLevel::new(slice[8]),
+    };
+    let state = match slice[9] {
+        0 => ProvidedImagesState::Awaiting,
+        1 => ProvidedImagesState::Settled,
+        2 => ProvidedImagesState::Retry,
+        _ => return None,
+    };
+    let attempt = match slice[10] {
+        0 => None,
+        1 => Some(u64::from_le_bytes(slice[11..19].try_into().ok()?)),
+        _ => return None,
+    };
+    let pixel_ratio = f32::from_le_bytes(slice[19..23].try_into().ok()?);
+    let count = u32::from_le_bytes(slice[23..27].try_into().ok()?) as usize;
+    let mut cursor = 27_usize;
+    let mut names = Vec::with_capacity(count.min(256));
+    for _ in 0..count {
+        let len_end = cursor.checked_add(4)?;
+        let len = u32::from_le_bytes(slice.get(cursor..len_end)?.try_into().ok()?) as usize;
+        let str_end = len_end.checked_add(len)?;
+        let name = std::str::from_utf8(slice.get(len_end..str_end)?).ok()?;
+        names.push(name.to_owned());
+        cursor = str_end;
+    }
+    (cursor == slice.len()).then_some(ProvidedImagesReport {
+        coords,
+        attempt,
+        names,
+        pixel_ratio,
+        state,
+    })
 }

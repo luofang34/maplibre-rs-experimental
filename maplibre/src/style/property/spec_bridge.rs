@@ -75,45 +75,94 @@ impl PropertyValue for VariableAnchorOffsetCollection {
     }
 }
 
+enum RawParsedProperty {
+    Value(Value),
+    Expression(Arc<PropertyExpression>),
+    Unsupported(Arc<UnsupportedProperty>),
+}
+
+#[inline(never)]
+fn parse_dynamic_property(
+    json: &serde_json::Value,
+    spec: &LegacyPropertySpec,
+) -> RawParsedProperty {
+    // A `{token}` string reads feature properties, as GL JS lowers it before parsing.
+    let lowered = match json.as_str() {
+        Some(text) if spec.tokens => convert_token_string(text),
+        _ => json.clone(),
+    };
+    match Expression::parse_property(&lowered, spec) {
+        Ok(Expression::Literal(value)) | Ok(Expression::Folded { value, .. }) => {
+            RawParsedProperty::Value(value)
+        }
+        Ok(expression) => {
+            #[cfg(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl"))]
+            let source = json.clone();
+            #[cfg(not(any(
+                not(target_arch = "wasm32"),
+                feature = "webgpu",
+                feature = "web-webgl"
+            )))]
+            let source = serde_json::Value::Null;
+            RawParsedProperty::Expression(Arc::new(PropertyExpression { source, expression }))
+        }
+        Err(error) => {
+            #[cfg(not(target_arch = "wasm32"))]
+            tracing::error!(source = %json, %error, "unsupported style property value");
+            #[cfg(target_arch = "wasm32")]
+            tracing::error!(%error, "unsupported style property value");
+            #[cfg(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl"))]
+            let source = json.clone();
+            #[cfg(not(any(
+                not(target_arch = "wasm32"),
+                feature = "webgpu",
+                feature = "web-webgl"
+            )))]
+            let source = serde_json::Value::Null;
+            RawParsedProperty::Unsupported(Arc::new(UnsupportedProperty { source, error }))
+        }
+    }
+}
+
+#[inline(never)]
+fn unsupported_type_mismatch(
+    json: &serde_json::Value,
+    spec: &LegacyPropertySpec,
+    value: &Value,
+) -> Arc<UnsupportedProperty> {
+    #[cfg(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl"))]
+    let source = json.clone();
+    #[cfg(not(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl")))]
+    let source = {
+        let _ = json;
+        serde_json::Value::Null
+    };
+    Arc::new(UnsupportedProperty {
+        source,
+        error: ParseError {
+            key: String::new(),
+            message: format!(
+                "expected {}, found {}",
+                spec.expected_type(),
+                value.type_of()
+            ),
+        },
+    })
+}
+
 impl<T: PropertyValue> StyleProperty<T> {
     /// Parses a property value against an explicit [`LegacyPropertySpec`].
     pub fn parse_with_spec(json: &serde_json::Value, spec: &LegacyPropertySpec) -> Self {
         if let Some(constant) = T::from_literal(json) {
             return Self::Constant(constant);
         }
-        // A `{token}` string reads feature properties, as GL JS lowers it before parsing.
-        let lowered = match json.as_str() {
-            Some(text) if spec.tokens => convert_token_string(text),
-            _ => json.clone(),
-        };
-        match Expression::parse_property(&lowered, spec) {
-            Ok(Expression::Literal(value)) | Ok(Expression::Folded { value, .. }) => {
-                match T::from_value(&value) {
-                    Some(constant) => Self::Constant(constant),
-                    None => Self::Unsupported(Arc::new(UnsupportedProperty {
-                        source: json.clone(),
-                        error: ParseError {
-                            key: String::new(),
-                            message: format!(
-                                "expected {}, found {}",
-                                spec.expected_type(),
-                                value.type_of()
-                            ),
-                        },
-                    })),
-                }
-            }
-            Ok(expression) => Self::Expression(Arc::new(PropertyExpression {
-                source: json.clone(),
-                expression,
-            })),
-            Err(error) => {
-                tracing::error!(source = %json, %error, "unsupported style property value");
-                Self::Unsupported(Arc::new(UnsupportedProperty {
-                    source: json.clone(),
-                    error,
-                }))
-            }
+        match parse_dynamic_property(json, spec) {
+            RawParsedProperty::Value(value) => match T::from_value(&value) {
+                Some(constant) => Self::Constant(constant),
+                None => Self::Unsupported(unsupported_type_mismatch(json, spec, &value)),
+            },
+            RawParsedProperty::Expression(expr) => Self::Expression(expr),
+            RawParsedProperty::Unsupported(err) => Self::Unsupported(err),
         }
     }
 

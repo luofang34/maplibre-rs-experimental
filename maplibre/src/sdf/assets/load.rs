@@ -1,8 +1,7 @@
 //! Loads the glyph ranges and sprite images referenced by visible tile features.
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::sync::Arc;
+
+use rustc_hash::FxHashSet as HashSet;
 
 use super::{
     cache::{AssetFailure, SpriteSheet},
@@ -24,6 +23,7 @@ use requests::requests;
 use requests::symbol_requests;
 pub(crate) use requests::{symbol_requests_from_tile, SymbolRequests};
 
+#[cfg(not(target_arch = "wasm32"))]
 const BUNDLED_LATIN: &[u8] = include_bytes!("../../../../data/0-255.pbf");
 
 /// A symbol asset could not be loaded, and a later attempt can succeed.
@@ -45,7 +45,7 @@ pub struct SymbolAssetConfig<'a> {
     /// The style's `sprite`, one URL or a list of `{id, url}`.
     pub sprite: Option<&'a serde_json::Value>,
     /// Images a host added to the style.
-    pub images: &'a HashMap<String, StyleImage>,
+    pub images: &'a rustc_hash::FxHashMap<String, StyleImage>,
     /// Device pixels per layout pixel of the display, which provided images are made for.
     pub pixel_ratio: f32,
     /// Full style used to resolve `promoteId` and `feature-state` while scanning symbol requests.
@@ -137,12 +137,13 @@ pub(crate) async fn load_symbol_assets_for_requests<HC: HttpClient>(
     } else {
         sprite_sources(config.sprite)
     };
-    let ((), fetched_sheets) = futures::future::try_join(
+    let ((), fetched_sheets) = crate::util::async_join::try_join2(
         local_fonts::load_fonts_and_shaping(client, config, req.fonts, req.labels, &mut builder),
-        futures::future::try_join_all(
+        crate::util::async_join::try_join_all_concurrent(
             sources
                 .iter()
-                .map(|(prefix, url)| fetch_sprite_sheet(client, prefix, url)),
+                .map(|(prefix, url)| fetch_sprite_sheet(client, prefix, url))
+                .collect(),
         ),
     )
     .await?;
@@ -254,18 +255,23 @@ pub(super) async fn glyph_range<HC: HttpClient>(
     font: &str,
     range: u32,
 ) -> Result<Option<Arc<Glyphs>>, SymbolAssetError> {
+    #[cfg(not(target_arch = "wasm32"))]
     let bundled = || client.assets().bundled_glyphs(BUNDLED_LATIN);
     let Some(template) = template else {
+        #[cfg(not(target_arch = "wasm32"))]
         return Ok(if range == 0 {
             bundled().await.ok()
         } else {
             None
         });
+        #[cfg(target_arch = "wasm32")]
+        return Ok(None);
     };
     let url = glyph_url(template, font, range);
     match client.assets().glyphs(client, &url).await {
         Ok(glyphs) => Ok(Some(glyphs)),
         Err(AssetFailure::Retryable(reason)) => Err(SymbolAssetError { url, reason }),
+        #[cfg(not(target_arch = "wasm32"))]
         Err(_) if range == 0 => Ok(bundled().await.ok()),
         Err(_) => Ok(None),
     }
@@ -340,22 +346,9 @@ fn pack_sprites(
             continue;
         };
         let (x, y, width, height) = (entry.x, entry.y, entry.width, entry.height);
-        if width == 0
-            || height == 0
-            || x.saturating_add(width) > image.width()
-            || y.saturating_add(height) > image.height()
-        {
-            continue;
-        }
-        let pixels = image::imageops::crop_imm(image, x, y, width, height).to_image();
         // Colour icons are stored premultiplied, so filtering them never darkens an edge with
         // the colour of the clear texels around it.
-        let packed = if entry.sdf {
-            pixels.into_raw()
-        } else {
-            premultiply(pixels.as_raw())
-        };
-        let Some(rect) = builder.pack(width, height, &packed) else {
+        let Some(rect) = builder.pack_cropped_rgba(image, [x, y, width, height], !entry.sdf) else {
             continue;
         };
         builder.atlas.icons.insert(

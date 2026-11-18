@@ -16,7 +16,7 @@ authors.workspace = true
 workspace = true
 
 [features]
-default = ["native-io", "raster", "geojson", "mlt", "font-shaping"]
+default = ["native-io", "raster", "geojson", "mlt", "font-shaping", "webgpu"]
 # Enables the default native Tokio task scheduler and Reqwest HTTP transport.
 # Disable (`default-features = false`) to embed `maplibre` in pure-Rust apps with a custom runtime/loader.
 native-io = [
@@ -28,14 +28,15 @@ native-io = [
     "dep:reqwest-middleware",
     "dep:rusqlite",
 ]
-web-webgl = ["wgpu/webgl"]
+webgpu = ["wgpu/webgpu", "wgpu/wgsl"]
+web-webgl = ["wgpu/webgl", "wgpu/wgsl"]
 # Enable tracing using tracy on desktop/mobile and the chrome profiler on web
 trace = ["tracing-subscriber", "tracing-tracy", "wgpu/trace"]
-thread-safe-futures = []
+thread-safe-futures = ["dep:flate2"]
 embed-static-tiles = ["maplibre-build-tools/sqlite"]
 headless = ["png"]
 raster = []
-geojson = ["geozero/with-geojson"]
+geojson = []
 # Reads MapLibre Tile (MLT) vector tiles. Its encoder dependencies reach `getrandom` 0.1,
 # which has no visionOS support, so a visionOS build turns it off.
 mlt = ["dep:mlt-core"]
@@ -43,6 +44,7 @@ mlt = ["dep:mlt-core"]
 # (`skrifa` + `ab_glyph_rasterizer`), and WOFF2 Brotli decompression. On `wasm32` without this
 # feature, local CJK/fallback SDF glyphs are rasterized zero-download via browser `OffscreenCanvas`.
 font-shaping = [
+    "dep:flate2",
     "dep:harfrust",
     "dep:skrifa",
     "dep:read-fonts",
@@ -64,6 +66,7 @@ rusqlite = { workspace = true, optional = true }
 tracing-tracy = { workspace = true, optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+flate2.workspace = true
 fontdb = { workspace = true, optional = true }
 image = { workspace = true, features = ["jpeg", "webp", "png", "gif"] }
 tile-grid.workspace = true
@@ -72,12 +75,16 @@ fixed_decimal = { version = "0.7", features = ["ryu"] }
 icu_collator = "2.4"
 icu_decimal = { version = "2.4", features = ["alloc", "ryu"] }
 icu_locale_core = "2.4"
+wgpu.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+flate2 = { workspace = true, optional = true }
 image.workspace = true
+tracing = { version = "0.1.37", features = ["release_max_level_off"] }
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 js-sys.workspace = true
+wgpu = { version = "30.0.1", default-features = false, features = ["std"] }
 web-sys = { workspace = true, features = [
     "AbortController", "AbortSignal",
     "Blob", "Cache", "CacheStorage", "ImageBitmap", "Request", "RequestCache", "RequestInit",
@@ -91,7 +98,6 @@ maplibre-tcs = { path = "../crates/maplibre-tcs", version = "0.1.0" }
 unicode-bidi = "0.3"
 async-trait.workspace = true
 futures.workspace = true
-flate2.workspace = true
 instant.workspace = true
 
 # Tracing
@@ -110,8 +116,6 @@ mlt-core = { workspace = true, optional = true }
 unicode-normalization.workspace = true
 
 # Rendering
-wgpu.workspace = true
-#wgpu = { git = "https://github.com/gfx-rs/wgpu.git", rev = "" }
 lyon.workspace = true
 earcut.workspace = true
 
@@ -153,10 +157,11 @@ ab_glyph_rasterizer = { workspace = true, optional = true }
 brotli-decompressor = { workspace = true, optional = true }
 
 [dev-dependencies]
+flate2.workspace = true
 futures = { workspace = true, features = ["executor", "async-await"] }
 geozero = { workspace = true, features = ["with-geojson"] }
 # Shaders stay WGSL; a native render node gets them through naga's own backends.
-naga = { workspace = true, features = ["msl-out", "spv-out"] }
+naga = { workspace = true, features = ["msl-out", "spv-out", "spv-in"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 env_logger.workspace = true

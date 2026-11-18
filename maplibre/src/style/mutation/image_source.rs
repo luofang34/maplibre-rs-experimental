@@ -43,7 +43,7 @@ impl Style {
 }
 
 fn image_source_mut<'a>(
-    sources: &'a mut std::collections::HashMap<String, Source>,
+    sources: &'a mut rustc_hash::FxHashMap<String, Source>,
     name: &str,
 ) -> Result<&'a mut ImageSource, StyleMutationError> {
     match sources.get_mut(name) {

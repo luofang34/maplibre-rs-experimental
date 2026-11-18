@@ -41,7 +41,7 @@ fn an_anchor_shifts_the_turned_box_to_the_side_it_names() {
 #[test]
 fn a_vertical_line_counts_an_em_for_an_upright_glyph() {
     use crate::sdf::assets::AtlasEntry;
-    let mut glyphs = std::collections::HashMap::new();
+    let mut glyphs = rustc_hash::FxHashMap::default();
     for c in ['ボ', 'ن'] {
         glyphs.insert(
             c as u32,

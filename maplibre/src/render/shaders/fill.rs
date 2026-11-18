@@ -11,8 +11,14 @@ impl Shader for FillPatternShader {
     fn describe_vertex(&self) -> VertexState {
         VertexState {
             source: concat!(
-                include_str!("projection.vertex.wgsl"),
-                include_str!("fill_pattern.vertex.wgsl")
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/projection.vertex.wgsl"
+                )),
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/fill_pattern.vertex.wgsl"
+                ))
             ),
             ..FillShader {
                 format: self.format,
@@ -23,7 +29,10 @@ impl Shader for FillPatternShader {
 
     fn describe_fragment(&self) -> FragmentState {
         FragmentState {
-            source: include_str!("fill_pattern.fragment.wgsl"),
+            source: include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/fill_pattern.fragment.wgsl"
+            )),
             ..FillShader {
                 format: self.format,
             }
@@ -42,8 +51,14 @@ impl Shader for FillShader {
     fn describe_vertex(&self) -> VertexState {
         VertexState {
             source: concat!(
-                include_str!("projection.vertex.wgsl"),
-                include_str!("fill.vertex.wgsl")
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/projection.vertex.wgsl"
+                )),
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/fill.vertex.wgsl"
+                ))
             ),
             entry_point: "main",
             buffers: vec![
@@ -87,7 +102,10 @@ impl Shader for FillShader {
 
     fn describe_fragment(&self) -> FragmentState {
         FragmentState {
-            source: include_str!("fill.fragment.wgsl"),
+            source: include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/fill.fragment.wgsl"
+            )),
             entry_point: "main",
             targets: vec![Some(wgpu::ColorTargetState {
                 format: self.format,

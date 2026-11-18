@@ -91,6 +91,7 @@ fn layer(id: &str, kind: &str, source_layer: Option<&str>, paint: LayerPaint) ->
         type_: kind.into(),
         source_layer: source_layer.map(str::to_owned),
         paint: Some(paint),
+        input_flags: Some(0),
         ..Default::default()
     }
 }

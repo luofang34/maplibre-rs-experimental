@@ -16,7 +16,7 @@ fn js_error_text(err: &JsValue) -> String {
                 .ok()
                 .and_then(|msg| msg.as_string())
         })
-        .unwrap_or_else(|| format!("{err:?}"))
+        .unwrap_or_else(|| "js error".to_owned())
 }
 
 /// Decodes encoded image bytes into straight-alpha RGBA8 pixels using the browser's image decoder.

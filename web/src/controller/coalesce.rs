@@ -1,6 +1,6 @@
 //! Per-frame command coalescing (`jumpTo`, `setGeoJsonData`) and async `setStyle` resolution.
 
-use std::{cell::RefCell, collections::HashMap};
+use std::cell::RefCell;
 
 use futures::channel::oneshot;
 use maplibre::{
@@ -12,6 +12,7 @@ use maplibre::{
     render::view_state::CameraOptions,
     style::source::GeoJsonData,
 };
+use rustc_hash::FxHashMap;
 use wasm_bindgen::JsValue;
 
 use super::options::merge_camera;
@@ -39,7 +40,7 @@ struct PendingGeoJson {
 #[derive(Default)]
 pub(super) struct CoalescedCommands {
     jump: RefCell<Option<PendingJump>>,
-    geojson: RefCell<HashMap<String, PendingGeoJson>>,
+    geojson: RefCell<FxHashMap<String, PendingGeoJson>>,
 }
 
 impl CoalescedCommands {

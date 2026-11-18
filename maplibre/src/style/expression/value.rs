@@ -1,7 +1,7 @@
 //! Typed values an expression consumes and produces, with the GL JS semantics of `typeof`,
 //! strict equality and string conversion.
 
-use std::collections::BTreeMap;
+use rustc_hash::FxHashMap;
 
 use super::collation::Collation;
 
@@ -39,12 +39,12 @@ impl Color {
 
     /// Parses any CSS colour string, as GL JS `Color.parse` does.
     pub fn parse(text: &str) -> Option<Self> {
-        let color = csscolorparser::parse(text).ok()?;
+        let [r, g, b, a] = crate::util::css_color::parse_css_color(text)?;
         Some(Self::new(
-            f64::from(color.r),
-            f64::from(color.g),
-            f64::from(color.b),
-            f64::from(color.a),
+            f64::from(r),
+            f64::from(g),
+            f64::from(b),
+            f64::from(a),
         ))
     }
 
@@ -109,7 +109,7 @@ pub enum Value {
     /// An array of values.
     Array(Vec<Value>),
     /// An object with string keys.
-    Object(BTreeMap<String, Value>),
+    Object(FxHashMap<String, Value>),
     /// How strings compare, made by `collator`.
     Collator(Collation),
     /// An image an `image` expression names.
@@ -289,7 +289,9 @@ impl Value {
             | Self::NumberArray(_)
             | Self::ColorArray(_)
             | Self::ProjectionDefinition(_)
-            | Self::VariableAnchorOffsetCollection(_) => self.to_json().to_string(),
+            | Self::VariableAnchorOffsetCollection(_) => {
+                crate::util::json::json_value_to_string(&self.to_json())
+            }
             Self::Collator(_) => String::new(),
             Self::Image(image) => image.name.clone(),
             Self::Formatted(formatted) => formatted.text(),

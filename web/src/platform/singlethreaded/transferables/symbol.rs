@@ -1,5 +1,58 @@
 //! Symbol geometry, collision ranges and assets crossing the worker boundary.
+
+use bytemuck::Zeroable;
+
 use super::*;
+
+const SYMBOL_HEADER_BYTES: usize = 40;
+
+struct SymbolHeader {
+    coords: WorldTileCoords,
+    has_atlas: bool,
+    usable_indices: u32,
+    vert_count: usize,
+    idx_count: usize,
+    layer_name_len: usize,
+    style_id_len: usize,
+    feat_len: usize,
+    atlas_len: usize,
+}
+
+fn parse_symbol_header(bytes: &[u8]) -> Option<SymbolHeader> {
+    if bytes.len() < SYMBOL_HEADER_BYTES {
+        return None;
+    }
+    let coords = read_coords_at(bytes, 0)?;
+    let has_atlas = bytes[9] != 0;
+    let usable_indices = read_u32_le(bytes, 12)?;
+    let vert_count = read_u32_le(bytes, 16)? as usize;
+    let idx_count = read_u32_le(bytes, 20)? as usize;
+    let layer_name_len = read_u32_le(bytes, 24)? as usize;
+    let style_id_len = read_u32_le(bytes, 28)? as usize;
+    let feat_len = read_u32_le(bytes, 32)? as usize;
+    let atlas_len = read_u32_le(bytes, 36)? as usize;
+    let body = vert_count
+        .checked_mul(std::mem::size_of::<ShaderSymbolVertex>())?
+        .checked_add(idx_count.checked_mul(4)?)?
+        .checked_add(layer_name_len)?
+        .checked_add(style_id_len)?
+        .checked_add(feat_len)?
+        .checked_add(atlas_len)?;
+    if SYMBOL_HEADER_BYTES.checked_add(body)? > bytes.len() {
+        return None;
+    }
+    Some(SymbolHeader {
+        coords,
+        has_atlas,
+        usable_indices,
+        vert_count,
+        idx_count,
+        layer_name_len,
+        style_id_len,
+        feat_len,
+        atlas_len,
+    })
+}
 
 impl SymbolLayerTessellated for FlatBufferTransferable {
     fn message_tag() -> &'static dyn MessageTag {
@@ -14,145 +67,127 @@ impl SymbolLayerTessellated for FlatBufferTransferable {
         layer_data: Layer,
         style_layer_id: String,
     ) -> Self {
-        let estimated_capacity = 1024
-            + buffer.buffer.vertices.len() * std::mem::size_of::<FlatSymbolVertex>()
-            + buffer.buffer.indices.len() * 4;
-        let mut inner_builder = FlatBufferBuilder::with_capacity(estimated_capacity);
-
         let usable_indices = buffer.usable_indices;
         let raw_vertices = buffer.buffer.vertices;
         let raw_indices = buffer.buffer.indices;
-        let flat_verts = flat_vertices(&raw_vertices);
-        drop(raw_vertices);
-        let vertices = inner_builder.create_vector(&flat_verts);
-        drop(flat_verts);
-        let indices = inner_builder.create_vector(&raw_indices);
-        drop(raw_indices);
-
-        let layer_name = inner_builder.create_string(&layer_data.name);
-        let style_layer_id_fb = inner_builder.create_string(&style_layer_id);
-
+        let vert_bytes = raw_vertices.len() * std::mem::size_of::<ShaderSymbolVertex>();
+        let idx_bytes = raw_indices.len() * 4;
+        let layer_bytes = layer_data.name.as_bytes();
+        let style_bytes = style_layer_id.as_bytes();
         let feature_bytes = maplibre::sdf::assets::wire::encode_symbol_features(&features);
         drop(features);
-        let atlas = atlas.map(|atlas| encode_symbol_atlas(coords, &atlas));
-        let features = Some(inner_builder.create_vector(&feature_bytes));
+        let atlas_bytes = atlas.as_ref().map(|a| encode_symbol_atlas(coords, a));
+        let atlas_len = atlas_bytes.as_ref().map_or(0, Vec::len);
+
+        let total = SYMBOL_HEADER_BYTES
+            + vert_bytes
+            + idx_bytes
+            + layer_bytes.len()
+            + style_bytes.len()
+            + feature_bytes.len()
+            + atlas_len;
+        let mut out = Vec::with_capacity(total);
+        out.extend_from_slice(&coords.x.to_le_bytes());
+        out.extend_from_slice(&coords.y.to_le_bytes());
+        out.push(u8::from(coords.z));
+        out.push(u8::from(atlas_bytes.is_some()));
+        out.extend_from_slice(&[0, 0]);
+        out.extend_from_slice(&usable_indices.to_le_bytes());
+        out.extend_from_slice(&(raw_vertices.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(raw_indices.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(layer_bytes.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(style_bytes.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(feature_bytes.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(atlas_len as u32).to_le_bytes());
+
+        out.extend_from_slice(bytemuck::cast_slice(&raw_vertices));
+        drop(raw_vertices);
+        out.extend_from_slice(bytemuck::cast_slice(&raw_indices));
+        drop(raw_indices);
+        out.extend_from_slice(layer_bytes);
+        out.extend_from_slice(style_bytes);
+        out.extend_from_slice(&feature_bytes);
         drop(feature_bytes);
-        let atlas = atlas
-            .as_ref()
-            .map(|bytes| inner_builder.create_vector(bytes));
-        let mut builder = FlatSymbolLayerTessellatedBuilder::new(&mut inner_builder);
-        if let Some(features) = features {
-            builder.add_symbol_features(features);
+        if let Some(atlas) = atlas_bytes {
+            out.extend_from_slice(&atlas);
         }
-        if let Some(atlas) = atlas {
-            builder.add_symbol_atlas(atlas);
-        }
-
-        builder.add_coords(&FlatWorldTileCoords::new(
-            coords.x,
-            coords.y,
-            coords.z.into(),
-        ));
-        builder.add_layer_name(layer_name);
-        builder.add_vertices(vertices);
-        builder.add_indices(indices);
-        builder.add_usable_indices(usable_indices);
-        builder.add_style_layer_id(style_layer_id_fb);
-        let root = builder.finish();
-
-        inner_builder.finish(root, None);
-        let (data, start) = inner_builder.collapse();
-        FlatBufferTransferable::from_vec(WebMessageTag::SymbolLayerTessellated, data, start)
+        FlatBufferTransferable::from_vec(WebMessageTag::SymbolLayerTessellated, out, 0)
     }
 
     fn coords(&self) -> WorldTileCoords {
-        root_as_flat_symbol_layer_tessellated(&self.data[self.start..])
-            .ok()
-            .and_then(|data| data.coords())
-            .map_or_else(WorldTileCoords::default, Into::into)
+        self.data()
+            .get(..SYMBOL_HEADER_BYTES)
+            .and_then(|bytes| read_coords_at(bytes, 0))
+            .unwrap_or_default()
     }
 
     fn is_empty(&self) -> bool {
-        root_as_flat_symbol_layer_tessellated(&self.data[self.start..])
-            .map(|data| data.usable_indices() == 0)
-            .unwrap_or(true)
+        self.data()
+            .get(..SYMBOL_HEADER_BYTES)
+            .and_then(|bytes| read_u32_le(bytes, 12))
+            .is_none_or(|usable| usable == 0)
     }
 
     fn to_bucket(self) -> SymbolLayerData {
-        let coords = SymbolLayerTessellated::coords(&self);
-        let (vertices, indices, usable_indices, layer_name, style_layer_id, features, atlas_span) = {
-            let Ok(data) = root_as_flat_symbol_layer_tessellated(&self.data[self.start..]) else {
-                return SymbolLayerData {
-                    coords,
-                    source_layer: String::new(),
-                    style_layer_id: String::new(),
-                    buffer: OverAlignedVertexBuffer::empty(),
-                    features: Vec::new(),
-                    atlas: None,
-                };
+        let bytes = self.data();
+        let Some(hdr) = parse_symbol_header(bytes) else {
+            return SymbolLayerData {
+                coords: SymbolLayerTessellated::coords(&self),
+                source_layer: String::new(),
+                style_layer_id: String::new(),
+                buffer: OverAlignedVertexBuffer::empty(),
+                features: Vec::new(),
+                atlas: None,
             };
-            let vertices = if let Some(v) = data.vertices() {
-                let mut out = Vec::with_capacity(v.len());
-                for vertex in v.iter() {
-                    out.push(ShaderSymbolVertex {
-                        a_pos_offset: vertex.a_pos_offset().into(),
-                        a_data: vertex.a_data().into(),
-                        a_pixel_and_height: vertex.a_pixel_and_height().into(),
-                    });
-                }
-                out
-            } else {
-                Vec::new()
-            };
-
-            let indices = if let Some(i) = data.indices() {
-                let mut out = Vec::with_capacity(i.len());
-                out.extend(i.iter());
-                out
-            } else {
-                Vec::new()
-            };
-            let usable_indices = data.usable_indices();
-
-            let layer_name = data.layer_name().unwrap_or_default().to_owned();
-            let style_layer_id = data
-                .style_layer_id()
-                .map(|s| s.to_owned())
-                .unwrap_or_else(|| layer_name.clone());
-            let features = data
-                .symbol_features()
-                .and_then(|bytes| {
-                    let decoded =
-                        maplibre::sdf::assets::wire::decode_symbol_features(bytes.bytes());
-                    if decoded.is_none() {
-                        tracing::error!("invalid symbol features");
-                    }
-                    decoded
-                })
-                .unwrap_or_default();
-            let base_addr = self.data.as_ptr() as usize;
-            let atlas_span = data.symbol_atlas().map(|vec| {
-                let slice = vec.bytes();
-                let offset = (slice.as_ptr() as usize).saturating_sub(base_addr);
-                (offset, slice.len())
-            });
-            (
-                vertices,
-                indices,
-                usable_indices,
-                layer_name,
-                style_layer_id,
-                features,
-                atlas_span,
-            )
         };
-        let atlas = atlas_span
-            .and_then(|(offset, len)| decode_symbol_atlas_owned(coords, self.data, offset, len));
+        let mut cursor = SYMBOL_HEADER_BYTES;
+        let vert_bytes_len = hdr.vert_count * std::mem::size_of::<ShaderSymbolVertex>();
+        let mut vertices = vec![ShaderSymbolVertex::zeroed(); hdr.vert_count];
+        bytemuck::cast_slice_mut(&mut vertices)
+            .copy_from_slice(&bytes[cursor..cursor + vert_bytes_len]);
+        cursor += vert_bytes_len;
+
+        let idx_bytes_len = hdr.idx_count * 4;
+        let mut indices = vec![0_u32; hdr.idx_count];
+        bytemuck::cast_slice_mut(&mut indices)
+            .copy_from_slice(&bytes[cursor..cursor + idx_bytes_len]);
+        cursor += idx_bytes_len;
+
+        let source_layer = std::str::from_utf8(&bytes[cursor..cursor + hdr.layer_name_len])
+            .unwrap_or_default()
+            .to_owned();
+        cursor += hdr.layer_name_len;
+
+        let style_layer_id = if hdr.style_id_len == 0 {
+            source_layer.clone()
+        } else {
+            std::str::from_utf8(&bytes[cursor..cursor + hdr.style_id_len])
+                .unwrap_or_default()
+                .to_owned()
+        };
+        cursor += hdr.style_id_len;
+
+        let features = maplibre::sdf::assets::wire::decode_symbol_features(
+            &bytes[cursor..cursor + hdr.feat_len],
+        )
+        .unwrap_or_else(|| {
+            tracing::error!("invalid symbol features");
+            Vec::new()
+        });
+        cursor += hdr.feat_len;
+
+        let atlas = hdr
+            .has_atlas
+            .then(|| {
+                decode_symbol_atlas_owned(hdr.coords, self.data, self.start + cursor, hdr.atlas_len)
+            })
+            .flatten();
+
         SymbolLayerData {
-            coords,
-            source_layer: layer_name,
+            coords: hdr.coords,
+            source_layer,
             style_layer_id,
-            buffer: OverAlignedVertexBuffer::from_vecs(vertices, indices, usable_indices),
+            buffer: OverAlignedVertexBuffer::from_vecs(vertices, indices, hdr.usable_indices),
             features,
             atlas,
         }
@@ -170,10 +205,10 @@ fn encode_symbol_atlas(
 ) -> Vec<u8> {
     type SentKey = (WorldTileCoords, usize);
     type SentMap =
-        std::collections::HashMap<SentKey, std::sync::Weak<maplibre::sdf::assets::SymbolAtlas>>;
+        rustc_hash::FxHashMap<SentKey, std::sync::Weak<maplibre::sdf::assets::SymbolAtlas>>;
     thread_local! {
         static SENT_ATLASES: std::cell::RefCell<SentMap> =
-            std::cell::RefCell::new(std::collections::HashMap::new());
+            std::cell::RefCell::new(rustc_hash::FxHashMap::default());
     }
     let ptr_usize = std::sync::Arc::as_ptr(atlas) as usize;
     let ptr_id = ptr_usize as u64;
@@ -223,11 +258,11 @@ fn decode_symbol_atlas_owned(
     let end = offset.checked_add(len)?;
     let bytes = owned_data.get(offset..end)?;
     if bytes.len() < 8 {
-        return serde_json::from_slice(bytes).ok().map(std::sync::Arc::new);
+        return None;
     }
     type AtlasCacheKey = (WorldTileCoords, u32, u32, u64);
     struct MainAtlasCache {
-        weak: std::collections::HashMap<
+        weak: rustc_hash::FxHashMap<
             AtlasCacheKey,
             std::sync::Weak<maplibre::sdf::assets::SymbolAtlas>,
         >,
@@ -239,7 +274,7 @@ fn decode_symbol_atlas_owned(
     thread_local! {
         static ATLAS_CACHE: std::cell::RefCell<MainAtlasCache> =
             std::cell::RefCell::new(MainAtlasCache {
-                weak: std::collections::HashMap::new(),
+                weak: rustc_hash::FxHashMap::default(),
                 recent: std::collections::VecDeque::with_capacity(RECENT_ATLAS_RING_CAP),
             });
     }
@@ -296,7 +331,7 @@ fn decode_symbol_atlas_owned(
             .saturating_mul(height as usize)
             .saturating_mul(4)
     {
-        return serde_json::from_slice(bytes).ok().map(std::sync::Arc::new);
+        return None;
     }
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -327,17 +362,4 @@ fn decode_symbol_atlas_owned(
         cache.weak.insert(key, std::sync::Arc::downgrade(&arc));
         Some(arc)
     })
-}
-
-fn flat_vertices(vertices: &[ShaderSymbolVertex]) -> Vec<FlatSymbolVertex> {
-    vertices
-        .iter()
-        .map(|vertex| {
-            FlatSymbolVertex::new(
-                &vertex.a_pos_offset,
-                &vertex.a_data,
-                &vertex.a_pixel_and_height,
-            )
-        })
-        .collect()
 }

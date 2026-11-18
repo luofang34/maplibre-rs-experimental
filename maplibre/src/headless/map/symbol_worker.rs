@@ -57,6 +57,7 @@ type Hold = Arc<Mutex<Option<(&'static str, Arc<super::test_async::PermitGate>)>
 pub(super) struct AssetServer {
     urls: Arc<Mutex<Vec<String>>>,
     tiles: Served,
+    dem: dem::DemStore,
     /// A glyph range that fails as a dropped connection would, until cleared.
     outage: Arc<Mutex<Option<&'static str>>>,
     /// A glyph range whose requests wait until the gate opens.
@@ -105,6 +106,7 @@ impl HttpClient for AssetServer {
                 .iter()
                 .find(|(prefix, _)| url.starts_with(prefix.as_str()))
                 .map(|(_, tile)| tile.clone())
+                .or_else(|| self.dem.fetch(url))
                 .ok_or_else(|| SourceFetchError::not_found(url)),
         }
     }
@@ -212,6 +214,12 @@ pub(super) struct SymbolMap {
     labels_ready: bool,
 }
 
+impl Drop for SymbolMap {
+    fn drop(&mut self) {
+        self.map.poll_device_idle();
+    }
+}
+
 impl SymbolMap {
     pub(super) async fn new(style: Style) -> Self {
         Self::serving(style, AssetServer::default()).await
@@ -261,7 +269,7 @@ impl SymbolMap {
     /// a request, a delivery or a fade, and returns the settled frame's RGBA pixels.
     pub(super) async fn settle(&mut self) -> Vec<u8> {
         let mut quiet = 0;
-        for _ in 0..600 {
+        for _ in 0..2_000 {
             let requests = self.server.requested().len();
             let ready = self.frame().await;
             let idle = ready.is_empty()
@@ -271,10 +279,27 @@ impl SymbolMap {
             if self.labels_ready && quiet >= 10 {
                 return self.read();
             }
+            for _ in 0..250 {
+                let reasons = self.map.redraw_reasons();
+                if reasons.worker_results
+                    || self.map.map_context.next_retry_delay() == Some(std::time::Duration::ZERO)
+                    || crate::io::tile_backpressure::has_ready_deferred_requests(
+                        &self.map.map_context.world,
+                    )
+                    || !(reasons.loading || reasons.awaiting_images)
+                {
+                    break;
+                }
+                crate::headless::map::test_async::yield_to_workers(
+                    std::time::Duration::from_millis(2),
+                )
+                .await;
+            }
         }
         panic!(
-            "the labels never settled: labels ready {}, requested {:?}",
+            "the labels never settled: labels ready {}, reasons {:?}, requested {:?}",
             self.labels_ready,
+            self.map.redraw_reasons(),
             self.server.requested()
         );
     }

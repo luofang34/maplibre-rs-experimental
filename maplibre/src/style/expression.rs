@@ -26,7 +26,7 @@ pub use evaluate::{EvaluationContext, EvaluationError, FeatureProperties, ImageS
 /// Shared empty [`FeatureProperties`] map so features without tags do not allocate on the heap.
 pub fn empty_feature_properties() -> &'static std::sync::Arc<FeatureProperties> {
     static EMPTY: std::sync::LazyLock<std::sync::Arc<FeatureProperties>> =
-        std::sync::LazyLock::new(|| std::sync::Arc::new(FeatureProperties::new()));
+        std::sync::LazyLock::new(|| std::sync::Arc::new(FeatureProperties::default()));
     &EMPTY
 }
 pub use feature_identity::{
@@ -155,13 +155,33 @@ fn find_zoom_curve(expression: &Expression) -> Result<Option<&Expression>, Parse
 
 /// Whether `layer`'s paint or layout reads the feature's id or geometry type.
 pub(crate) fn layer_reads_identity(layer: &super::layer::StyleLayer) -> bool {
-    serde_json::to_value(&layer.paint).is_ok_and(|paint| reads_identity(&paint))
+    if let Some(flags) = layer.input_flags {
+        return (flags & super::layer::FLAG_READS_IDENTITY) != 0;
+    }
+    #[cfg(any(test, not(target_arch = "wasm32")))]
+    {
+        serde_json::to_value(&layer.paint).is_ok_and(|paint| reads_identity(&paint))
+    }
+    #[cfg(not(any(test, not(target_arch = "wasm32"))))]
+    {
+        false
+    }
 }
 
 /// Whether `layer` has an expression that reads the feature's geometry.
 pub(crate) fn layer_reads_geometry(layer: &super::layer::StyleLayer) -> bool {
-    serde_json::to_string(layer)
-        .is_ok_and(|text| text.contains("\"within\"") || text.contains("\"distance\""))
+    if let Some(flags) = layer.input_flags {
+        return (flags & super::layer::FLAG_READS_GEOMETRY) != 0;
+    }
+    #[cfg(any(test, not(target_arch = "wasm32")))]
+    {
+        serde_json::to_string(layer)
+            .is_ok_and(|text| text.contains("\"within\"") || text.contains("\"distance\""))
+    }
+    #[cfg(not(any(test, not(target_arch = "wasm32"))))]
+    {
+        false
+    }
 }
 
 #[cfg(test)]

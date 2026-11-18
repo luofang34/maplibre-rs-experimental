@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use geo_types::{LineString, Point, Polygon};
 use rstar::{PointDistance, RTree};
 
@@ -17,10 +15,14 @@ fn line(points: &[(f64, f64)], name: &str) -> IndexedGeometry<f64> {
     IndexedGeometry::from_linestring(
         LineString::from(points.to_vec()),
         super::super::FeatureMeta {
-            properties: std::sync::Arc::new(HashMap::from([(
-                "name".to_owned(),
-                crate::style::expression::Value::String(name.to_owned()),
-            )])),
+            properties: std::sync::Arc::new(
+                [(
+                    "name".to_owned(),
+                    crate::style::expression::Value::String(name.to_owned()),
+                )]
+                .into_iter()
+                .collect(),
+            ),
             ..Default::default()
         },
     )

@@ -1,6 +1,6 @@
 //! Synchronizes runtime `feature-state` across resident tile symbol and vector buckets.
 
-use std::collections::{BTreeSet, HashMap};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use crate::{
     coords::WorldTileCoords,
@@ -23,7 +23,7 @@ use crate::{
 pub(super) fn sync_tile_feature_states(
     world: &mut World,
     style: &Style,
-    dirty_sources: &BTreeSet<String>,
+    dirty_sources: &HashSet<String>,
     memo: &mut FeatureStateArcMemo,
     needs_worker_refresh: &mut bool,
 ) {

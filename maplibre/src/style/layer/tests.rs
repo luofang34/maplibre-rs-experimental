@@ -16,6 +16,7 @@ fn zoom_range_is_min_inclusive_max_exclusive() {
         visibility: super::LayerVisibility::Visible,
         transitions: Default::default(),
         unrecognized: Default::default(),
+        input_flags: None,
     };
 
     assert!(!layer.is_visible_at(1.99));
@@ -78,7 +79,7 @@ fn test_evaluate_match_missing_property_returns_fallback() {
     let prop: StyleProperty<csscolorparser::Color> = StyleProperty::parse(&expr);
 
     // Feature that does NOT have the property → should return the JSON fallback color
-    let empty_props = FeatureProperties::new();
+    let empty_props = FeatureProperties::default();
     let color = prop.evaluate_for(&empty_props, 0.0).unwrap();
     assert_eq!(color.to_rgba8(), [9, 9, 9, 255]);
 }
@@ -126,7 +127,7 @@ fn test_evaluate_match() {
     let expr: serde_json::Value = serde_json::from_str(json).unwrap();
     let prop: StyleProperty<csscolorparser::Color> = StyleProperty::parse(&expr);
 
-    let mut feature_properties = FeatureProperties::new();
+    let mut feature_properties = FeatureProperties::default();
     feature_properties.insert("ADM0_A3".to_string(), Value::from("ARM"));
 
     let color = prop.evaluate_for(&feature_properties, 0.0).unwrap();
@@ -160,10 +161,12 @@ fn test_symbol_text_field_from_layout() {
 
 /// The text a symbol paint produces for a feature named `Berlin` and abbreviated `BER`.
 fn text_of(paint: &SymbolPaint, zoom: f64) -> Option<String> {
-    let properties = crate::style::expression::FeatureProperties::from([
+    let properties: crate::style::expression::FeatureProperties = [
         ("NAME".to_string(), Value::String("Berlin".to_string())),
         ("ABBREV".to_string(), Value::String("BER".to_string())),
-    ]);
+    ]
+    .into_iter()
+    .collect();
     paint
         .text_field
         .as_ref()?

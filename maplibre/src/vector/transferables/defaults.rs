@@ -191,6 +191,67 @@ impl LayerTessellated for DefaultLayerTessellated {
         }
     }
 
+    fn build_from_with_paint_typed(
+        coords: WorldTileCoords,
+        mut buffer: OverAlignedVertexBuffer<ShaderVertex, IndexDataType>,
+        feature_indices: Vec<u32>,
+        feature_colors: Vec<[f32; 4]>,
+        feature_sort_keys: Vec<f32>,
+        layer_data: Layer,
+        style_layer_id: String,
+        entries: Vec<BucketFeatureEntry>,
+        style_type: &str,
+        allow_prepack: bool,
+    ) -> Self {
+        if allow_prepack && buffer.prepacked_gpu().is_none() && !buffer.buffer.vertices.is_empty() {
+            let mut packed = Vec::with_capacity(buffer.buffer.vertices.len());
+            let _ = <ShaderVertex as crate::render::shaders::PoolVertex>::encode_vertices(
+                style_type,
+                &buffer.buffer.vertices,
+                &mut packed,
+            );
+            let shared_key = buffer.shared_geometry_key();
+            let usable = buffer.usable_indices;
+            let raw_indices = std::mem::take(&mut buffer.buffer.indices);
+            let usable_len = (usable as usize).min(raw_indices.len());
+            let can_u16 = packed.len() <= 65_536
+                && raw_indices[..usable_len]
+                    .iter()
+                    .all(|&idx| idx <= u32::from(u16::MAX));
+            buffer = if can_u16 {
+                let padded = usable_len.next_multiple_of(2);
+                let mut u16s = Vec::with_capacity(padded);
+                u16s.extend(raw_indices[..usable_len].iter().map(|&idx| idx as u16));
+                if u16s.len() < padded {
+                    u16s.push(0);
+                }
+                OverAlignedVertexBuffer::from_vecs(Vec::new(), Vec::new(), usable)
+                    .with_prepacked_gpu(crate::vector::tessellation::PrepackedGpuGeometry {
+                        vertices: packed,
+                        indices_u16: Some(u16s),
+                    })
+                    .with_shared_geometry_key(shared_key)
+            } else {
+                OverAlignedVertexBuffer::from_vecs(Vec::new(), raw_indices, usable)
+                    .with_prepacked_gpu(crate::vector::tessellation::PrepackedGpuGeometry {
+                        vertices: packed,
+                        indices_u16: None,
+                    })
+                    .with_shared_geometry_key(shared_key)
+            };
+        }
+        Self::build_from_with_paint(
+            coords,
+            buffer,
+            feature_indices,
+            feature_colors,
+            feature_sort_keys,
+            layer_data,
+            style_layer_id,
+            entries,
+        )
+    }
+
     fn with_overscaled_zoom(mut self, overscaled_zoom: u8) -> Self {
         self.overscaled_zoom = overscaled_zoom;
         self

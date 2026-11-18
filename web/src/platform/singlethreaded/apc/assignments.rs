@@ -1,11 +1,11 @@
 //! Which worker serves each tracked call, with least-in-flight dispatch and cancellation routing.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 /// Workers serving calls by attempt, from admission until the call finishes or is cancelled.
 #[derive(Default)]
 pub(crate) struct Assignments {
-    calls: HashMap<u64, usize>,
+    calls: FxHashMap<u64, usize>,
     in_flight: Vec<usize>,
     next_turn: usize,
 }

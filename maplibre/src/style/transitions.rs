@@ -5,9 +5,9 @@
 //! interpolate smoothly when the target property's layer `<prop>-transition` (or root
 //! [`Style::transition`]) specifies a positive `duration` or `delay`.
 
-use std::collections::BTreeMap;
-
-use serde::{Deserialize, Serialize};
+#[cfg(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl"))]
+use rustc_hash::FxHashMap;
+use serde::{de, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 use super::{
@@ -22,19 +22,36 @@ pub use interpolate::{interpolate_paint_value, is_transitionable_property};
 
 const DEFAULT_TRANSITION_DURATION_MS: f64 = 300.0;
 
-fn default_duration() -> f64 {
-    DEFAULT_TRANSITION_DURATION_MS
-}
-
 /// Duration and delay, in milliseconds, of a paint property transition.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+#[derive(Serialize, Debug, Clone, Copy, PartialEq)]
 pub struct TransitionSpec {
     /// Duration of the interpolation in milliseconds (`300.0` when omitted in JSON).
-    #[serde(default = "default_duration")]
     pub duration: f64,
     /// Delay before interpolation starts in milliseconds (`0.0` when omitted in JSON).
-    #[serde(default)]
     pub delay: f64,
+}
+
+impl TransitionSpec {
+    /// Parses a transition object directly from a JSON [`Value`].
+    pub(crate) fn from_json_value(value: &Value) -> Result<Self, serde_json::Error> {
+        let Some(map) = value.as_object() else {
+            return Err(de::Error::custom("expected transition object"));
+        };
+        let duration = crate::util::json::extract::json_f64_or(
+            map,
+            "duration",
+            DEFAULT_TRANSITION_DURATION_MS,
+        )?;
+        let delay = crate::util::json::extract::json_f64_or(map, "delay", 0.0)?;
+        Ok(Self { duration, delay })
+    }
+}
+
+impl<'de> Deserialize<'de> for TransitionSpec {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = Value::deserialize(deserializer)?;
+        Self::from_json_value(&value).map_err(de::Error::custom)
+    }
 }
 
 impl Default for TransitionSpec {
@@ -138,30 +155,23 @@ impl ActiveTransitions {
 }
 
 /// Extracts `<prop>-transition` entries from a raw layer `paint` JSON object.
-pub(crate) fn extract_layer_transitions(
+#[cfg(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl"))]
+pub(crate) fn extract_layer_transitions_ref(
     layer_id: &str,
-    paint: &mut Option<Value>,
-) -> Result<BTreeMap<String, TransitionSpec>, String> {
-    let mut extracted = BTreeMap::new();
-    let Some(Value::Object(map)) = paint.as_mut() else {
+    paint: Option<&serde_json::Map<String, Value>>,
+) -> Result<FxHashMap<String, TransitionSpec>, String> {
+    let mut extracted = FxHashMap::default();
+    let Some(map) = paint else {
         return Ok(extracted);
     };
-    let keys: Vec<String> = map
-        .keys()
-        .filter(|key| key.ends_with("-transition"))
-        .cloned()
-        .collect();
-    for key in keys {
-        let Some(raw) = map.remove(&key) else {
-            continue;
-        };
+    for (key, raw) in map {
         let Some(base) = key.strip_suffix("-transition") else {
             continue;
         };
         if raw.is_null() {
             continue;
         }
-        let spec: TransitionSpec = serde_json::from_value(raw)
+        let spec = TransitionSpec::from_json_value(raw)
             .map_err(|error| format!("layer `{layer_id}` paint.{key}: {error}"))?;
         if !spec.is_valid() {
             return Err(format!(
@@ -291,12 +301,13 @@ impl Style {
                     StyleChange::default()
                 });
             }
-            let spec: TransitionSpec = serde_json::from_value(value).map_err(|source| {
-                StyleMutationError::InvalidLayer {
-                    layer: layer.to_owned(),
-                    source,
-                }
-            })?;
+            let spec: TransitionSpec =
+                TransitionSpec::from_json_value(&value).map_err(|source| {
+                    StyleMutationError::InvalidLayer {
+                        layer: layer.to_owned(),
+                        source,
+                    }
+                })?;
             if !spec.is_valid() {
                 return Err(StyleMutationError::Unsupported {
                     layer: layer.to_owned(),

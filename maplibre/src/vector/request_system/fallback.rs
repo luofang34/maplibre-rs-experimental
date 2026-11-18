@@ -29,7 +29,7 @@ pub(super) fn plan_non_terrain_fallbacks(
     style: &Style,
     view_state: &ViewState,
     world: &mut World,
-    (tight_requests, is_multiview): (bool, bool),
+    (tight_requests, is_multiview, tight_covering): (bool, bool, bool),
     view_tiles: &[WorldTileCoords],
     (level, magnifies): (u8, bool),
 ) -> Vec<WorldTileCoords> {
@@ -37,7 +37,7 @@ pub(super) fn plan_non_terrain_fallbacks(
         style,
         view_state,
         world,
-        (tight_requests, is_multiview),
+        (tight_requests, is_multiview, tight_covering),
         view_tiles,
         (level, magnifies),
         cfg!(target_arch = "wasm32"),
@@ -48,7 +48,7 @@ fn plan_non_terrain_fallbacks_for_platform(
     style: &Style,
     view_state: &ViewState,
     world: &mut World,
-    (tight_requests, is_multiview): (bool, bool),
+    (tight_requests, is_multiview, tight_covering): (bool, bool, bool),
     view_tiles: &[WorldTileCoords],
     (level, magnifies): (u8, bool),
     is_web: bool,
@@ -143,27 +143,36 @@ fn plan_non_terrain_fallbacks_for_platform(
     // Record canonical source coordinates for all retained non-tight tiles (both native `Loose`
     // ring tiles already in `view_tiles` and `wasm32` `extra_requests`) so `upload_system`
     // uploads and retains them in `VectorBufferPool`.
+    if tight_covering && extra_requests.is_empty() {
+        world.resources.insert(VectorFallbackTiles::default());
+        return extra_requests;
+    }
     let max_zoom = source_max_zoom(style, TileKind::Vector);
     let min_zoom = source_min_zoom(style, TileKind::Vector);
-    let tight_set: FxHashSet<WorldTileCoords> = view_region_for_projection(
-        style,
-        view_state,
-        world,
-        view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
-        ViewStatePadding::Tight,
-    )
-    .ok()
-    .flatten()
-    .map(|r| r.iter().collect())
-    .unwrap_or_default();
+    let non_tight: Vec<WorldTileCoords> = if tight_covering {
+        Vec::new()
+    } else {
+        let tight_set: FxHashSet<WorldTileCoords> = view_region_for_projection(
+            style,
+            view_state,
+            world,
+            view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
+            ViewStatePadding::Tight,
+        )
+        .ok()
+        .flatten()
+        .map(|r| r.iter().collect())
+        .unwrap_or_default();
+        view_tiles
+            .iter()
+            .copied()
+            .filter(|c| !tight_set.contains(c))
+            .collect()
+    };
 
     let mut fallback_canonical = Vec::new();
     let mut seen_canonical = FxHashSet::default();
-    for &coords in view_tiles
-        .iter()
-        .filter(|c| !tight_set.contains(c))
-        .chain(extra_requests.iter())
-    {
+    for &coords in non_tight.iter().chain(extra_requests.iter()) {
         if min_zoom.is_some_and(|m| u8::from(coords.z) < m) {
             continue;
         }
@@ -233,7 +242,7 @@ mod tests {
             &style,
             &view_state,
             &mut world,
-            (false, false),
+            (false, false, true),
             &[tile],
             (14, false),
             true,
@@ -255,7 +264,7 @@ mod tests {
             &style,
             &view_state,
             &mut world,
-            (false, false),
+            (false, false, true),
             &[tile],
             (14, false),
             true,

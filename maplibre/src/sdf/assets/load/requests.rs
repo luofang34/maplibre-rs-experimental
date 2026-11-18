@@ -1,11 +1,9 @@
 //! The glyphs and images the features of one tile ask for under a source's symbol layers.
 
-use std::{
-    cell::RefCell,
-    collections::{BTreeSet, HashMap, HashSet},
-};
+use std::cell::RefCell;
 
 use geozero::mvt::Message;
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use crate::{
     style::{
@@ -16,14 +14,14 @@ use crate::{
 };
 
 /// Characters wanted from each font stack.
-pub(super) type GlyphRequests = HashMap<String, BTreeSet<u32>>;
+pub(super) type GlyphRequests = HashMap<String, HashSet<u32>>;
 
 /// Glyph ranges, plain label strings (for OpenType shaping), and sprite names requested by one
 /// tile's visible symbol features.
 #[derive(Default)]
 pub(crate) struct SymbolRequests {
     pub(super) fonts: GlyphRequests,
-    pub(super) labels: HashMap<String, BTreeSet<String>>,
+    pub(super) labels: HashMap<String, HashSet<String>>,
     pub(super) icons: HashSet<String>,
 }
 
@@ -44,7 +42,7 @@ impl ImageSet for NamesAsked {
 /// with `images` held.
 fn glyphs(
     fonts: &mut GlyphRequests,
-    labels: &mut HashMap<String, BTreeSet<String>>,
+    labels: &mut HashMap<String, HashSet<String>>,
     paint: &crate::style::layer::SymbolPaint,
     (properties, zoom): (&crate::style::expression::FeatureProperties, f64),
     images: &dyn ImageSet,
@@ -129,7 +127,7 @@ fn compile_symbol_layers<'l, 's>(
     layers: impl IntoIterator<Item = &'l StyleLayer>,
     style: Option<&'s crate::style::Style>,
 ) -> HashMap<&'l str, Vec<CompiledSymbolLayer<'l, 's>>> {
-    let mut by_source_layer: HashMap<&str, Vec<CompiledSymbolLayer<'_, '_>>> = HashMap::new();
+    let mut by_source_layer: HashMap<&str, Vec<CompiledSymbolLayer<'_, '_>>> = HashMap::default();
     for layer in layers {
         if layer.is_hidden() {
             continue;

@@ -10,7 +10,7 @@ use crate::style::{
     expression::{
         is_internal_property, FeatureProperties, Value as ExprValue, FEATURE_STATE_PREFIX,
     },
-    layer::{LayerPaint, StyleLayer},
+    layer::StyleLayer,
     source::Source,
     Style,
 };
@@ -286,85 +286,106 @@ fn properties_need_feature_state_sync(
 
 /// Returns `true` when any paint property on `layer` reads `["feature-state", ...]`.
 pub(crate) fn layer_paint_reads_feature_state(layer: &StyleLayer) -> bool {
-    if layer
-        .unrecognized
-        .paint
-        .values()
-        .any(json_reads_feature_state)
-    {
-        return true;
+    if let Some(flags) = layer.input_flags {
+        return (flags & crate::style::layer::FLAG_READS_FEATURE_STATE) != 0;
     }
-    layer
-        .paint
-        .as_ref()
-        .and_then(|paint| serde_json::to_value(paint).ok())
-        .is_some_and(|json| json_reads_feature_state(&json))
+    #[cfg(not(any(test, not(target_arch = "wasm32"))))]
+    {
+        false
+    }
+    #[cfg(any(test, not(target_arch = "wasm32")))]
+    {
+        if layer
+            .unrecognized
+            .paint
+            .values()
+            .any(json_reads_feature_state)
+        {
+            return true;
+        }
+        layer
+            .paint
+            .as_ref()
+            .and_then(|paint| serde_json::to_value(paint).ok())
+            .is_some_and(|json| json_reads_feature_state(&json))
+    }
 }
 
 /// Returns `true` when `layer` reads `["feature-state", ...]` in a property that affects
 /// tessellated geometry or layout rather than GPU-evaluated feature colors.
 pub(crate) fn layer_geometry_reads_feature_state(layer: &StyleLayer) -> bool {
-    if layer.filter.as_ref().is_some_and(json_reads_feature_state)
-        || layer
-            .unrecognized
-            .layout
-            .values()
-            .any(json_reads_feature_state)
+    if let Some(flags) = layer.input_flags {
+        return (flags & crate::style::layer::FLAG_GEOM_READS_FEATURE_STATE) != 0;
+    }
+    #[cfg(not(any(test, not(target_arch = "wasm32"))))]
     {
-        return true;
+        false
     }
-    let Some(paint) = &layer.paint else {
-        return false;
-    };
-    let Ok(Value::Object(mut fields)) = serde_json::to_value(paint) else {
-        return false;
-    };
-    if let Some(Value::Object(mut inner)) = fields.remove("paint") {
-        // Remove properties whose per-feature values are evaluated on the CPU/GPU metadata path
-        // without re-tessellating vertices.
-        match paint {
-            LayerPaint::Fill(_) => {
-                inner.remove("fill-color");
-                inner.remove("fill-opacity");
-                inner.remove("fill-outline-color");
-            }
-            LayerPaint::Line(_) => {
-                inner.remove("line-color");
-                inner.remove("line-opacity");
-            }
-            LayerPaint::Circle(_) => {
-                inner.remove("circle-color");
-                inner.remove("circle-opacity");
-                inner.remove("circle-stroke-color");
-            }
-            LayerPaint::FillExtrusion(_) => {
-                inner.remove("fill-extrusion-color");
-                inner.remove("fill-extrusion-opacity");
-            }
-            LayerPaint::Symbol(_) => {
-                for key in [
-                    "text-color",
-                    "text-halo-color",
-                    "text-halo-width",
-                    "text-halo-blur",
-                    "text-opacity",
-                    "icon-color",
-                    "icon-halo-color",
-                    "icon-halo-width",
-                    "icon-halo-blur",
-                    "icon-opacity",
-                ] {
-                    inner.remove(key);
-                }
-            }
-            _ => {}
+    #[cfg(any(test, not(target_arch = "wasm32")))]
+    {
+        use crate::style::layer::LayerPaint;
+        if layer.filter.as_ref().is_some_and(json_reads_feature_state)
+            || layer
+                .unrecognized
+                .layout
+                .values()
+                .any(json_reads_feature_state)
+        {
+            return true;
         }
-        return inner.values().any(json_reads_feature_state);
+        let Some(paint) = &layer.paint else {
+            return false;
+        };
+        let Ok(Value::Object(mut fields)) = serde_json::to_value(paint) else {
+            return false;
+        };
+        if let Some(Value::Object(mut inner)) = fields.remove("paint") {
+            // Remove properties whose per-feature values are evaluated on the CPU/GPU metadata path
+            // without re-tessellating vertices.
+            match paint {
+                LayerPaint::Fill(_) => {
+                    inner.remove("fill-color");
+                    inner.remove("fill-opacity");
+                    inner.remove("fill-outline-color");
+                }
+                LayerPaint::Line(_) => {
+                    inner.remove("line-color");
+                    inner.remove("line-opacity");
+                }
+                LayerPaint::Circle(_) => {
+                    inner.remove("circle-color");
+                    inner.remove("circle-opacity");
+                    inner.remove("circle-stroke-color");
+                }
+                LayerPaint::FillExtrusion(_) => {
+                    inner.remove("fill-extrusion-color");
+                    inner.remove("fill-extrusion-opacity");
+                }
+                LayerPaint::Symbol(_) => {
+                    for key in [
+                        "text-color",
+                        "text-halo-color",
+                        "text-halo-width",
+                        "text-halo-blur",
+                        "text-opacity",
+                        "icon-color",
+                        "icon-halo-color",
+                        "icon-halo-width",
+                        "icon-halo-blur",
+                        "icon-opacity",
+                    ] {
+                        inner.remove(key);
+                    }
+                }
+                _ => {}
+            }
+            return inner.values().any(json_reads_feature_state);
+        }
+        false
     }
-    false
 }
 
-fn json_reads_feature_state(value: &Value) -> bool {
+pub(crate) fn json_reads_feature_state(value: &Value) -> bool {
     match value {
         Value::Array(items) => {
             matches!(items.first(), Some(Value::String(op)) if op == "feature-state")

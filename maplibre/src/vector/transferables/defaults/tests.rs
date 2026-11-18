@@ -86,7 +86,7 @@ fn tessellated_symbol_and_indexed_messages_preserve_paint_entries_and_queries() 
     };
     let buffer = OverAlignedVertexBuffer::from_iters([v0, v0, v0], [0_u32, 1, 2], 3);
 
-    let mut props = FeatureProperties::new();
+    let mut props = FeatureProperties::default();
     props.insert("class".into(), Value::String("residential".into()));
     let paint_entry = BucketFeatureEntry {
         raw_id: Some(108),

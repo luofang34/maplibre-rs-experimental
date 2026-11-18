@@ -50,7 +50,7 @@ pub(crate) fn glyphs_stay_upright(paint: &SymbolPaint, zoom: f64) -> bool {
 
 impl SymbolUniforms {
     pub fn new(paint: &SymbolPaint, zoom: f64, size: [u32; 2]) -> Self {
-        let properties = FeatureProperties::new();
+        let properties = FeatureProperties::default();
         let number = |name, fallback| paint.number(name, &properties, zoom, fallback);
         Self {
             text_color: color(paint, "text-color", zoom, [0.0, 0.0, 0.0, 1.0]),

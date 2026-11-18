@@ -118,10 +118,12 @@ mod tests {
             3.0,
         )
         .expect("width varies");
-        let properties = FeatureProperties::from([(
+        let properties: FeatureProperties = [(
             "w".to_string(),
             crate::style::expression::Value::Number(6.25),
-        )]);
+        )]
+        .into_iter()
+        .collect();
         let packed = style.pack(&properties);
         let bits = packed.style.to_bits();
         let offset = (bits & ((1 << OFFSET_BITS) - 1)) as i32 - OFFSET_BIAS;

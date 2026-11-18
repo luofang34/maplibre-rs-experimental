@@ -18,6 +18,7 @@ mod mipmap;
 mod pipeline;
 mod pipeline_cache;
 mod shader;
+pub(crate) mod shader_module;
 mod shared;
 mod surface;
 mod texture;

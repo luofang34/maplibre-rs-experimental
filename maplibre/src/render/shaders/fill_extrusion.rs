@@ -35,8 +35,14 @@ impl Shader for FillExtrusionShader {
     fn describe_vertex(&self) -> VertexState {
         VertexState {
             source: concat!(
-                include_str!("projection.vertex.wgsl"),
-                include_str!("fill_extrusion.vertex.wgsl")
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/projection.vertex.wgsl"
+                )),
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/fill_extrusion.vertex.wgsl"
+                ))
             ),
             entry_point: match self.pass {
                 ExtrusionPass::TranslucentBack => "translucent_back_main",
@@ -92,7 +98,10 @@ impl Shader for FillExtrusionShader {
 
     fn describe_fragment(&self) -> FragmentState {
         FragmentState {
-            source: include_str!("fill_extrusion.fragment.wgsl"),
+            source: include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/fill_extrusion.fragment.wgsl"
+            )),
             entry_point: match self.pass {
                 ExtrusionPass::PatternColor => "pattern_main",
                 _ => "main",

@@ -46,8 +46,16 @@ impl<V: PoolVertex, I: Pod, TM: Pod, FM: Pod>
         });
         pool.slab_destroyer = Some(page::SlabDestroyer(|buf| buf.destroy()));
         pool.enable_u16_indices = size_of::<I>() == size_of::<u32>();
+        pool.enable_u16_chunks = false;
         pool.zero_initialized_slabs = true;
         pool
+    }
+
+    /// Enables or disables `u16` base-vertex index chunks (when `DownlevelFlags::BASE_VERTEX`
+    /// and `u16` indices are both supported).
+    pub fn with_u16_chunks(mut self, enabled: bool) -> Self {
+        self.enable_u16_chunks = enabled && self.enable_u16_indices;
+        self
     }
 
     /// Total GPU buffer bytes currently physically allocated on the device across all live slabs.

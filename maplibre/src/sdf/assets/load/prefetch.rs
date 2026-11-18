@@ -105,7 +105,10 @@ impl PrefetchPlan {
                     .map(move |stack| glyph_url(tpl, stack, 0))
             }))
             .collect();
-        let _ = futures::future::join_all(urls.iter().map(|url| client.fetch_url(url))).await;
+        let _ = crate::util::async_join::join_all_concurrent(
+            urls.iter().map(|url| client.fetch_url(url)),
+        )
+        .await;
     }
 }
 

@@ -13,8 +13,14 @@ impl Shader for HeatmapDensityShader {
     fn describe_vertex(&self) -> VertexState {
         VertexState {
             source: concat!(
-                include_str!("projection.vertex.wgsl"),
-                include_str!("heatmap_density.vertex.wgsl")
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/projection.vertex.wgsl"
+                )),
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/heatmap_density.vertex.wgsl"
+                ))
             ),
             entry_point: "main",
             buffers: vec![
@@ -51,7 +57,10 @@ impl Shader for HeatmapDensityShader {
 
     fn describe_fragment(&self) -> FragmentState {
         FragmentState {
-            source: include_str!("heatmap_density.fragment.wgsl"),
+            source: include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/heatmap_density.fragment.wgsl"
+            )),
             entry_point: "main",
             targets: vec![Some(wgpu::ColorTargetState {
                 format: DENSITY_FORMAT,
@@ -83,7 +92,10 @@ pub struct HeatmapCompositeShader {
 impl Shader for HeatmapCompositeShader {
     fn describe_vertex(&self) -> VertexState {
         VertexState {
-            source: include_str!("heatmap_composite.vertex.wgsl"),
+            source: include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/heatmap_composite.vertex.wgsl"
+            )),
             entry_point: "main",
             buffers: vec![],
         }
@@ -91,7 +103,10 @@ impl Shader for HeatmapCompositeShader {
 
     fn describe_fragment(&self) -> FragmentState {
         FragmentState {
-            source: include_str!("heatmap_composite.fragment.wgsl"),
+            source: include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/heatmap_composite.fragment.wgsl"
+            )),
             entry_point: "main",
             targets: vec![Some(wgpu::ColorTargetState {
                 format: self.format,

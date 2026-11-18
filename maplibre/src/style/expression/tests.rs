@@ -8,12 +8,14 @@ use super::{
 };
 
 fn properties() -> FeatureProperties {
-    FeatureProperties::from([
+    [
         ("width".to_string(), Value::Number(7.0)),
         ("kind".to_string(), Value::from("airport")),
         ("mag".to_string(), Value::Number(2.5)),
         ("name".to_string(), Value::from("Bern")),
-    ])
+    ]
+    .into_iter()
+    .collect()
 }
 
 fn eval(expression: serde_json::Value, zoom: f64) -> Result<Value, EvaluationError> {
@@ -395,10 +397,12 @@ fn an_image_expression_falls_through_to_the_first_image_that_exists() {
 
 #[test]
 fn within_and_distance_read_the_geometry_a_feature_carries() {
-    let properties = FeatureProperties::from([(
+    let properties: FeatureProperties = [(
         super::GEOMETRY_PROPERTY.to_string(),
         Value::from(r#"{"type":"Point","coordinates":[0.5,0.5]}"#),
-    )]);
+    )]
+    .into_iter()
+    .collect();
     let evaluate = |expression: serde_json::Value| {
         Expression::parse(&expression)
             .expect("expression parses")

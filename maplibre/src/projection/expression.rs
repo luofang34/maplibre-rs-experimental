@@ -5,7 +5,7 @@ use thiserror::Error;
 
 mod wire;
 
-pub(crate) use wire::ProjectionWire;
+pub(crate) use wire::{parse_projection, ProjectionWire};
 
 /// A named projection accepted by projection expressions.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

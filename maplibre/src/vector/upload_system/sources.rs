@@ -37,17 +37,50 @@ pub(super) fn frame_sources_and_painted(
     style: &Style,
     view_state: &ViewState,
 ) -> Result<FrameSourcesAndPainted, SystemError> {
-    let view_region = view_region_for_projection(
-        style,
-        view_state,
-        world,
-        view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
-        ViewStatePadding::Tight,
-    )
-    .map_err(|error| {
-        tracing::error!(%error, "unable to select tiles for vector upload");
-        SystemError::Setup
-    })?;
+    let visible_level = view_state.zoom().zoom_level(DEFAULT_TILE_SIZE);
+    let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
+    let multi_active = world
+        .resources
+        .get::<crate::render::eye_covering::MultiViewExtractCovering>()
+        .is_some_and(|m| m.active);
+    let cached_tiles = if !multi_active {
+        world
+            .resources
+            .get::<crate::render::eye_covering::FrameLooseCovering>()
+            .filter(|cache| cache.host_frame == host_frame)
+            .and_then(|cache| cache.view_tiles.as_ref())
+            .filter(|(_, padding, cached_level)| {
+                *padding == ViewStatePadding::Tight && *cached_level == visible_level
+            })
+            .map(|(tiles, _, _)| tiles.clone())
+    } else {
+        None
+    };
+    let view_tiles: Option<Vec<WorldTileCoords>> = match cached_tiles {
+        Some(tiles) => tiles.map(|tiles| {
+            tiles
+                .into_iter()
+                .filter_map(|coords| coords.wrapped().map(|(wrapped, _)| wrapped))
+                .collect()
+        }),
+        None => view_region_for_projection(
+            style,
+            view_state,
+            world,
+            visible_level,
+            ViewStatePadding::Tight,
+        )
+        .map_err(|error| {
+            tracing::error!(%error, "unable to select tiles for vector upload");
+            SystemError::Setup
+        })?
+        .map(|region| {
+            region
+                .copies()
+                .filter_map(|copy| copy.wrapped().map(|(coords, _)| coords))
+                .collect()
+        }),
+    };
     let Some(view_tile_sources) = world.resources.get::<ViewTileSources>() else {
         return Err(SystemError::Dependencies);
     };
@@ -66,12 +99,16 @@ pub(super) fn frame_sources_and_painted(
         let mut uncovered_targets = Vec::new();
         let mut covered_targets = Vec::new();
 
-        if let Some(region) = &view_region {
-            for copy in region.copies() {
-                let Some((coords, _)) = copy.wrapped() else {
+        if let Some(tiles) = &view_tiles {
+            for &coords in tiles {
+                if gpu_vector.has_tile(coords, world) && cpu_vector.has_tile(coords, world) {
+                    if seen.insert(coords) {
+                        covered_list.push(coords);
+                    }
                     continue;
-                };
-                let has_gpu_stand_in = loaded_cover(&gpu_vector, coords, world).is_some()
+                }
+                let has_gpu_stand_in = gpu_vector.has_tile(coords, world)
+                    || loaded_cover(&gpu_vector, coords, world).is_some()
                     || gpu_vector
                         .get_available_children(coords, world, CHILDREN_SEARCH_DEPTH)
                         .is_some();
@@ -123,11 +160,14 @@ pub(super) fn frame_sources_and_painted(
     };
     let mut painted_tiles = source_tiles.clone();
     let mut seen_painted: FxHashSet<_> = painted_tiles.iter().copied().collect();
-    if let Some(region) = &view_region {
-        for copy in region.copies() {
-            let Some((coords, _)) = copy.wrapped() else {
+    if let Some(tiles) = &view_tiles {
+        for &coords in tiles {
+            if gpu_vector.has_tile(coords, world) {
+                if seen_painted.insert(coords) {
+                    painted_tiles.push(coords);
+                }
                 continue;
-            };
+            }
             for stand_in in loaded_cover(&gpu_vector, coords, world)
                 .or_else(|| gpu_vector.get_available_children(coords, world, CHILDREN_SEARCH_DEPTH))
                 .into_iter()

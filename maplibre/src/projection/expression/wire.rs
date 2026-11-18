@@ -43,7 +43,7 @@ impl Serialize for ProjectionWire {
     }
 }
 
-fn parse_projection(value: &Value) -> Result<ProjectionType, ProjectionExpressionError> {
+pub(crate) fn parse_projection(value: &Value) -> Result<ProjectionType, ProjectionExpressionError> {
     if let Some(name) = value.as_str() {
         return parse_projection_type(name);
     }

@@ -1,8 +1,5 @@
 //! GPU atlases shared by layers and their evaluated draw uniforms.
-use std::{
-    collections::HashMap,
-    sync::{Arc, Weak},
-};
+use std::sync::{Arc, Weak};
 
 use wgpu::util::TextureDataOrder;
 
@@ -42,8 +39,8 @@ pub(super) struct TextureContext<'a> {
 
 #[derive(Default)]
 pub(super) struct SymbolTextures {
-    atlases: HashMap<usize, Weak<TileAtlas>>,
-    tile_atlases: HashMap<(WorldTileCoords, usize), Arc<TileAtlas>>,
+    atlases: rustc_hash::FxHashMap<usize, Weak<TileAtlas>>,
+    tile_atlases: rustc_hash::FxHashMap<(WorldTileCoords, usize), Arc<TileAtlas>>,
     bindings: rustc_hash::FxHashMap<(WorldTileCoords, crate::style::StyleLayerId), DrawBinding>,
     /// Tiles whose labels gained an atlas since the last drain.
     bound: Vec<WorldTileCoords>,

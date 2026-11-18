@@ -14,7 +14,7 @@ use crate::style::expression::{
 fn format_invalid_value(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
-        other => other.to_json().to_string(),
+        other => crate::util::json::json_value_to_string(&other.to_json()),
     }
 }
 
@@ -113,7 +113,7 @@ pub(super) fn coerce(
                 }
             }
             Err(EvaluationError::NotANumber {
-                value: last.to_json().to_string(),
+                value: crate::util::json::json_value_to_string(&last.to_json()),
             })
         }
         Coercion::Color => {
@@ -133,7 +133,7 @@ pub(super) fn coerce(
                         let numbers: Vec<f64> = items.iter().filter_map(Value::as_number).collect();
                         if numbers.len() != items.len() || !(3..=4).contains(&items.len()) {
                             error = Some(EvaluationError::InvalidRgba {
-                                value: last.to_json().to_string(),
+                                value: crate::util::json::json_value_to_string(&last.to_json()),
                                 reason: "expected an array containing either three or four numeric values"
                                     .to_string(),
                             });
@@ -158,15 +158,16 @@ pub(super) fn coerce(
 /// A colour from `0..=255` channels and an optional alpha, validated as GL JS does.
 pub(super) fn rgba(r: f64, g: f64, b: f64, a: Option<f64>) -> Result<Color> {
     let value = || {
-        Value::Array(
-            [Some(r), Some(g), Some(b), a]
-                .into_iter()
-                .flatten()
-                .map(Value::Number)
-                .collect(),
+        crate::util::json::json_value_to_string(
+            &Value::Array(
+                [Some(r), Some(g), Some(b), a]
+                    .into_iter()
+                    .flatten()
+                    .map(Value::Number)
+                    .collect(),
+            )
+            .to_json(),
         )
-        .to_json()
-        .to_string()
     };
     if ![r, g, b]
         .iter()

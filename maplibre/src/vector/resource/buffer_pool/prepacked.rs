@@ -20,13 +20,14 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         (!prepacked.vertices.is_empty()).then_some(prepacked.vertices.as_slice())
     }
 
-    /// Plans `(index_u16, copy_aligned_index_bytes)` honoring worker pre-narrowed `u16` indices.
+    /// Plans `(index_u16, copy_aligned_index_bytes, u16_chunks)` honoring worker pre-narrowed `u16` indices.
     pub(super) fn plan_geometry_index_upload(
         &self,
         geometry: &OverAlignedVertexBuffer<V, I>,
         vertex_count: u64,
         strides: ElementStrides,
-    ) -> (bool, u64) {
+        allow_chunks: bool,
+    ) -> u16_chunks::IndexPlan {
         if let Some(u16s) = geometry
             .prepacked_gpu()
             .and_then(|p| p.indices_u16.as_deref())
@@ -35,10 +36,10 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
                 if self.enable_u16_indices {
                     let usable = (geometry.usable_indices as usize).min(u16s.len());
                     let padded = usable.next_multiple_of(2);
-                    return (true, (padded as u64) * 2);
+                    return (true, (padded as u64) * 2, None);
                 }
                 let usable = (geometry.usable_indices as usize).min(u16s.len());
-                return (false, (usable as u64) * strides.index);
+                return (false, (usable as u64) * strides.index, None);
             }
         }
         self.plan_index_upload(
@@ -46,6 +47,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             geometry.usable_indices,
             vertex_count,
             strides,
+            allow_chunks,
         )
     }
 

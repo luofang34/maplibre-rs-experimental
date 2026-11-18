@@ -12,13 +12,12 @@ use maplibre::{
     sdf::query::QueryGeometry,
     style::{mutation::StyleChange, source::GeoJsonData},
 };
-use serde::{de::DeserializeOwned, Serialize};
+use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
-use crate::{
-    environment::CurrentEnvironment,
-    error::{ArgumentError, JSError},
-};
+#[cfg(feature = "winit-window")]
+use crate::environment::CurrentEnvironment;
+use crate::error::{ArgumentError, JSError};
 
 mod coalesce;
 pub(crate) mod options;
@@ -26,11 +25,13 @@ use coalesce::{
     apply_style_swap, enqueue_geojson, enqueue_jump, CoalescedCommands, PendingGeoJsonPayload,
 };
 use options::{
-    try_read_camera_fast, Animation, Camera, CameraState, Feature, Query, ScreenGeometry,
+    read, read_optional, try_read_camera_fast, Animation, Camera, CameraState, Feature, Query,
+    ScreenGeometry,
 };
 
 #[derive(Clone)]
 pub(crate) enum ControllerHandle {
+    #[cfg(feature = "winit-window")]
     Main(MapHandle<CurrentEnvironment>),
     Offscreen(MapHandle<crate::offscreen::OffscreenEnvironment>),
 }
@@ -38,6 +39,7 @@ pub(crate) enum ControllerHandle {
 impl ControllerHandle {
     pub(crate) fn is_closed(&self) -> bool {
         match self {
+            #[cfg(feature = "winit-window")]
             Self::Main(h) => h.is_closed(),
             Self::Offscreen(h) => h.is_closed(),
         }
@@ -45,16 +47,26 @@ impl ControllerHandle {
 
     pub(crate) fn close(&self) {
         match self {
+            #[cfg(feature = "winit-window")]
             Self::Main(h) => h.close(),
             Self::Offscreen(h) => h.close(),
         }
     }
 }
 
+#[cfg(feature = "winit-window")]
 macro_rules! with_controller_handle {
     ($handle:expr, |$h:ident| $body:expr) => {
         match $handle {
             $crate::controller::ControllerHandle::Main($h) => $body,
+            $crate::controller::ControllerHandle::Offscreen($h) => $body,
+        }
+    };
+}
+#[cfg(not(feature = "winit-window"))]
+macro_rules! with_controller_handle {
+    ($handle:expr, |$h:ident| $body:expr) => {
+        match $handle {
             $crate::controller::ControllerHandle::Offscreen($h) => $body,
         }
     };
@@ -82,6 +94,7 @@ impl std::fmt::Debug for MapController {
 
 impl MapController {
     /// Controls the map `handle` sends commands to.
+    #[cfg(feature = "winit-window")]
     pub fn new(handle: MapHandle<CurrentEnvironment>) -> Self {
         Self {
             handle: ControllerHandle::Main(handle),
@@ -103,6 +116,7 @@ impl MapController {
     /// The handle underneath, for a Rust host that reads or changes what JavaScript cannot.
     ///
     /// Returns `None` when the map runs inside a dedicated `OffscreenCanvas` worker.
+    #[cfg(feature = "winit-window")]
     pub fn try_handle(&self) -> Option<&MapHandle<CurrentEnvironment>> {
         match &self.handle {
             ControllerHandle::Main(handle) => Some(handle),
@@ -313,12 +327,14 @@ impl MapController {
             Some(s) => {
                 let trimmed = s.trim_start();
                 if trimmed.starts_with('{') || trimmed.starts_with('[') {
-                    serde_json::from_str::<GeoJsonData>(&s).map_err(|err| {
-                        JSError::from(ArgumentError::Invalid {
-                            what: "GeoJSON data",
-                            source: err,
+                    serde_json::from_slice::<serde_json::Value>(s.as_bytes())
+                        .map(|v| GeoJsonData::from_json_value(&v))
+                        .map_err(|err| {
+                            JSError::from(ArgumentError::Invalid {
+                                what: "GeoJSON data",
+                                source: err,
+                            })
                         })
-                    })
                 } else {
                     Ok(GeoJsonData::Url(s))
                 }
@@ -426,26 +442,6 @@ impl MapController {
     pub fn destroy(&self) {
         self.remove();
     }
-}
-
-/// Reads a JavaScript argument through JSON, which every argument of the map's API is.
-fn read<T: DeserializeOwned>(value: &JsValue, what: &'static str) -> Result<T, JSError> {
-    let json = js_sys::JSON::stringify(value)
-        .ok()
-        .and_then(|json| json.as_string())
-        .ok_or(ArgumentError::NotJson { what })?;
-    Ok(serde_json::from_str(&json).map_err(|source| ArgumentError::Invalid { what, source })?)
-}
-
-/// Reads an argument that may be `undefined` or `null`.
-fn read_optional<T: DeserializeOwned>(
-    value: &JsValue,
-    what: &'static str,
-) -> Result<Option<T>, JSError> {
-    if value.is_undefined() || value.is_null() {
-        return Ok(None);
-    }
-    read(value, what).map(Some)
 }
 
 /// Encodes a command's result for JavaScript through JSON.

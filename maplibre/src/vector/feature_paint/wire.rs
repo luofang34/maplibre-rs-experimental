@@ -115,12 +115,12 @@ mod tests {
 
     #[test]
     fn wire_round_trips_entries_and_preserves_shared_arcs() {
-        let mut props_a = FeatureProperties::new();
+        let mut props_a = FeatureProperties::default();
         props_a.insert("name".into(), Value::String("A".into()));
         props_a.insert("\u{1}state:hover".into(), Value::Bool(true));
         let shared = Arc::new(props_a);
 
-        let mut props_b = FeatureProperties::new();
+        let mut props_b = FeatureProperties::default();
         props_b.insert("rank".into(), Value::Number(3.5));
         let single = Arc::new(props_b);
 

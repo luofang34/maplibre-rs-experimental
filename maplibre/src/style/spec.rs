@@ -194,7 +194,7 @@ impl SpecPropertyMeta {
     /// Parses [`Self::default_json`] into a `serde_json::Value`, when the spec defines a default.
     pub fn default_value(&self) -> Option<serde_json::Value> {
         self.default_json
-            .and_then(|raw| serde_json::from_str(raw).ok())
+            .and_then(|raw| serde_json::from_slice(raw.as_bytes()).ok())
     }
 
     /// Converts [`Self::value_type`] and [`Self::enum_values`] into an expression [`PropertyKind`].

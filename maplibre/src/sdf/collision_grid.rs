@@ -1,5 +1,5 @@
 //! Screen-space collision lookup bounded by the viewport.
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 pub(super) struct CollisionGrid {
     cells: HashMap<(i32, i32), Vec<usize>>,
@@ -16,7 +16,7 @@ pub(super) fn intersects(a: [f64; 4], b: [f64; 4]) -> bool {
 impl CollisionGrid {
     pub fn new(width: f64, height: f64) -> Self {
         Self {
-            cells: HashMap::new(),
+            cells: HashMap::default(),
             boxes: Vec::new(),
             cooperative: Vec::new(),
             limit: [(width / 64.0).ceil() as i32, (height / 64.0).ceil() as i32],

@@ -400,7 +400,7 @@ pub(crate) fn visit_mlt_features(
     };
     let mut decoder = Decoder::default();
     let empty = empty_feature_properties();
-    let mut scratch = FeatureProperties::new();
+    let mut scratch = FeatureProperties::default();
     for layer in raw_layers {
         let Layer::Tag01(layer01) = layer else {
             continue;

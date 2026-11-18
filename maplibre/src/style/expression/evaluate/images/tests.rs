@@ -13,12 +13,14 @@ fn evaluate(json: serde_json::Value, available: &[&str]) -> Value {
         .iter()
         .map(|name| ((*name).to_owned(), ()))
         .collect();
-    let properties = FeatureProperties::from([
+    let properties: FeatureProperties = [
         ("route_1_network".to_owned(), Value::from("BAB")),
         ("route_1_ref".to_owned(), Value::from("A 115")),
         ("route_2_network".to_owned(), Value::from("e-road")),
         ("route_2_ref".to_owned(), Value::from("E 51")),
-    ]);
+    ]
+    .into_iter()
+    .collect();
     let expression = Expression::parse(&json).expect("parses");
     expression
         .evaluate(&EvaluationContext {

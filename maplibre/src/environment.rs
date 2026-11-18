@@ -51,6 +51,23 @@ pub struct OffscreenKernelConfig {
     pub loader: Option<crate::io::resource_loader::SharedLoader>,
 }
 
+impl OffscreenKernelConfig {
+    /// Decodes serialized worker config bytes without instantiating `serde::Deserialize` glue.
+    pub fn from_json_slice(bytes: &[u8]) -> Result<Self, serde_json::Error> {
+        let value: serde_json::Value = serde_json::from_slice(bytes)?;
+        let Some(map) = value.as_object() else {
+            return Err(crate::util::json::extract::field_err(
+                "config",
+                "expected object",
+            ));
+        };
+        Ok(Self {
+            cache_directory: crate::util::json::extract::json_opt_string(map, "cache_directory")?,
+            ..Self::default()
+        })
+    }
+}
+
 /// Worker-side services, independent of window and GPU ownership.
 pub trait OffscreenKernel: Send + Sync + 'static {
     /// HTTP implementation used by this environment's source loader.

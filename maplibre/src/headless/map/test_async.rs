@@ -2,19 +2,66 @@
 #![allow(dead_code)]
 
 use std::{
+    cell::Cell,
     future::{poll_fn, Future},
     pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Condvar, Mutex,
+        Arc, Condvar, LazyLock, Mutex,
     },
     task::{Context, Poll, Waker},
     time::Duration,
 };
 
+const MAX_CONCURRENT_GPU_TESTS: usize = 4;
+
+static GPU_TEST_SLOTS: LazyLock<(Mutex<usize>, Condvar)> =
+    LazyLock::new(|| (Mutex::new(0), Condvar::new()));
+
+thread_local! {
+    static GPU_TEST_DEPTH: Cell<usize> = const { Cell::new(0) };
+}
+
+struct GpuTestSlot {
+    acquired: bool,
+}
+
+impl GpuTestSlot {
+    fn enter() -> Self {
+        let depth = GPU_TEST_DEPTH.with(|d| {
+            let cur = d.get();
+            d.set(cur + 1);
+            cur
+        });
+        if depth > 0 {
+            return Self { acquired: false };
+        }
+        let (lock, cvar) = &*GPU_TEST_SLOTS;
+        let active = lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut active = cvar
+            .wait_while(active, |active| *active >= MAX_CONCURRENT_GPU_TESTS)
+            .unwrap_or_else(|e| e.into_inner());
+        *active += 1;
+        Self { acquired: true }
+    }
+}
+
+impl Drop for GpuTestSlot {
+    fn drop(&mut self) {
+        GPU_TEST_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
+        if self.acquired {
+            let (lock, cvar) = &*GPU_TEST_SLOTS;
+            let mut active = lock.lock().unwrap_or_else(|e| e.into_inner());
+            *active = active.saturating_sub(1);
+            cvar.notify_one();
+        }
+    }
+}
+
 /// Drives an async test body on a single-threaded executor without coupling test modules to an
 /// executor crate directly.
 pub(super) fn run_async<F: Future>(future: F) -> F::Output {
+    let _slot = GpuTestSlot::enter();
     #[cfg(all(not(target_arch = "wasm32"), feature = "native-io"))]
     {
         crate::platform::run_current_thread(future)
@@ -27,6 +74,7 @@ pub(super) fn run_async<F: Future>(future: F) -> F::Output {
 
 /// Drives an async test body on a multi-threaded executor when available.
 pub(super) fn run_async_multi_thread<F: Future>(future: F) -> F::Output {
+    let _slot = GpuTestSlot::enter();
     #[cfg(all(not(target_arch = "wasm32"), feature = "native-io"))]
     {
         crate::platform::run_multithreaded(future)
@@ -50,6 +98,20 @@ pub(super) async fn yield_once() {
         }
     })
     .await;
+}
+
+/// Yields execution to worker tasks and the reactor for `duration` without blocking the
+/// current-thread executor.
+pub(super) async fn yield_to_workers(duration: Duration) {
+    #[cfg(all(not(target_arch = "wasm32"), feature = "native-io"))]
+    {
+        tokio::time::sleep(duration).await;
+    }
+    #[cfg(not(all(not(target_arch = "wasm32"), feature = "native-io")))]
+    {
+        let _ = duration;
+        yield_once().await;
+    }
 }
 
 #[derive(Default)]

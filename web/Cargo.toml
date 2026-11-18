@@ -2,7 +2,6 @@
 name = "web"
 version = "0.1.0"
 publish = false
-build = "build.rs"
 
 description.workspace = true
 edition.workspace = true
@@ -13,13 +12,15 @@ categories.workspace = true
 authors.workspace = true
 
 [features]
-renderer = ["dep:wgpu", "dep:maplibre-winit"]
-web-webgl = ["maplibre/web-webgl"]
+renderer = ["dep:wgpu"]
+winit-window = ["renderer", "dep:maplibre-winit"]
+webgpu = ["renderer", "maplibre/webgpu", "wgpu?/webgpu", "wgpu?/wgsl"]
+web-webgl = ["renderer", "maplibre/web-webgl", "wgpu?/webgl", "wgpu?/wgsl"]
 trace = ["maplibre/trace", "tracing-wasm"]
 font-shaping = ["maplibre/font-shaping"]
 mlt = ["maplibre/mlt"]
 arena-telemetry = []
-default = ["renderer"]
+default = ["renderer", "winit-window", "webgpu"]
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = true
@@ -55,7 +56,7 @@ wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 futures.workspace = true
 instant.workspace = true
-wgpu = { workspace = true, optional = true }
+wgpu = { version = "30.0.1", default-features = false, optional = true, features = ["std"] }
 console_log.workspace = true
 tracing-wasm = { workspace = true, optional = true } # TODO: Low quality dependency (remove in a separate PR!)
 # For passing Inputs in AsyncProcedureCalls
@@ -63,14 +64,13 @@ serde_json.workspace = true
 serde.workspace = true
 cgmath.workspace = true
 bytemuck.workspace = true
-flatbuffers.workspace = true
+rustc-hash.workspace = true
 
-image.workspace = true # FIXME: Remove image, use browser capabilities
-
-[build-dependencies]
-flatc-rust.workspace = true
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tracing = { version = "0.1.37", features = ["release_max_level_off"] }
 
 [dev-dependencies]
+image.workspace = true
 winit.workspace = true
 wasm-bindgen-test.workspace = true
 wgpu.workspace = true

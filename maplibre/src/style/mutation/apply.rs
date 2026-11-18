@@ -1,7 +1,8 @@
 //! Bringing a running map's tiles and GPU buffers up to date with style and `feature-state` changes.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
+use rustc_hash::FxHashMap as HashMap;
 use serde_json::{Map, Value};
 
 use super::{StyleChange, StyleMutationError};

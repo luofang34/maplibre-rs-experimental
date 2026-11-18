@@ -46,7 +46,7 @@ fn equality_selects_the_same_features_in_both_forms() {
 
 #[test]
 fn a_missing_property_is_unequal_to_everything() {
-    let properties = FeatureProperties::new();
+    let properties = FeatureProperties::default();
     assert!(!passes(json!(["==", "level", "low"]), &properties));
     assert!(passes(json!(["!=", "level", "low"]), &properties));
     assert!(passes(json!(["!=", ["get", "level"], "low"]), &properties));

@@ -9,14 +9,68 @@ use maplibre::{
     render::view_state::{CameraOptions, FlightCurve, FlyOptions},
     sdf::query::{QueryGeometry, QueryOptions},
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+
+fn opt_f64(
+    map: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Result<Option<f64>, serde_json::Error> {
+    match map.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(value) => value
+            .as_f64()
+            .map(Some)
+            .ok_or_else(|| serde::de::Error::custom(format!("{key}: expected number"))),
+    }
+}
+
+fn opt_lng_lat(
+    map: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Option<LngLat>, serde_json::Error> {
+    match map.get("center") {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(value) => LngLat::from_json_value(value).map(Some),
+    }
+}
 
 /// A GL JS `LngLatLike`: `[lng, lat]` or `{lng, lat}`.
-#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq)]
-#[serde(untagged)]
+#[derive(Serialize, Debug, Clone, Copy, PartialEq)]
 pub(crate) enum LngLat {
     Array([f64; 2]),
     Object { lng: f64, lat: f64 },
+}
+
+impl LngLat {
+    pub(crate) fn from_json_value(value: &serde_json::Value) -> Result<Self, serde_json::Error> {
+        match value {
+            serde_json::Value::Array(items) => {
+                let [lng, lat] = items.as_slice() else {
+                    return Err(serde::de::Error::custom("expected [lng, lat]"));
+                };
+                let lng = lng
+                    .as_f64()
+                    .ok_or_else(|| serde::de::Error::custom("expected numeric longitude"))?;
+                let lat = lat
+                    .as_f64()
+                    .ok_or_else(|| serde::de::Error::custom("expected numeric latitude"))?;
+                Ok(Self::Array([lng, lat]))
+            }
+            serde_json::Value::Object(map) => {
+                let lng = map
+                    .get("lng")
+                    .and_then(|v| v.as_f64())
+                    .ok_or_else(|| serde::de::Error::custom("missing or invalid `lng`"))?;
+                let lat = map
+                    .get("lat")
+                    .and_then(|v| v.as_f64())
+                    .ok_or_else(|| serde::de::Error::custom("missing or invalid `lat`"))?;
+                Ok(Self::Object { lng, lat })
+            }
+            _ => Err(serde::de::Error::custom(
+                "expected [lng, lat] or {lng, lat}",
+            )),
+        }
+    }
 }
 
 impl From<LngLat> for LatLon {
@@ -28,7 +82,7 @@ impl From<LngLat> for LatLon {
 }
 
 /// GL JS `CameraOptions`, angles in degrees; what is left out keeps its value.
-#[derive(Deserialize, Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct Camera {
     center: Option<LngLat>,
     zoom: Option<f64>,
@@ -36,6 +90,22 @@ pub(crate) struct Camera {
     pitch: Option<f64>,
     roll: Option<f64>,
     elevation: Option<f64>,
+}
+
+impl Camera {
+    pub(crate) fn from_json_value(value: &serde_json::Value) -> Result<Self, serde_json::Error> {
+        let Some(map) = value.as_object() else {
+            return Err(serde::de::Error::custom("expected camera options object"));
+        };
+        Ok(Self {
+            center: opt_lng_lat(map)?,
+            zoom: opt_f64(map, "zoom")?,
+            bearing: opt_f64(map, "bearing")?,
+            pitch: opt_f64(map, "pitch")?,
+            roll: opt_f64(map, "roll")?,
+            elevation: opt_f64(map, "elevation")?,
+        })
+    }
 }
 
 impl From<Camera> for CameraOptions {
@@ -111,16 +181,41 @@ pub(crate) fn try_read_camera_fast(value: &wasm_bindgen::JsValue) -> Option<Came
 }
 
 /// GL JS `EaseToOptions` and `FlyToOptions`: a camera with how to move to it.
-#[derive(Deserialize, Debug, Default, Clone, Copy)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct Animation {
-    #[serde(flatten)]
-    camera: Camera,
+    center: Option<LngLat>,
+    zoom: Option<f64>,
+    bearing: Option<f64>,
+    pitch: Option<f64>,
+    roll: Option<f64>,
+    elevation: Option<f64>,
     /// Milliseconds the move takes.
     duration: Option<f64>,
     curve: Option<f64>,
     speed: Option<f64>,
     min_zoom: Option<f64>,
+}
+
+impl Animation {
+    pub(crate) fn from_json_value(value: &serde_json::Value) -> Result<Self, serde_json::Error> {
+        let Some(map) = value.as_object() else {
+            return Err(serde::de::Error::custom(
+                "expected animation options object",
+            ));
+        };
+        Ok(Self {
+            center: opt_lng_lat(map)?,
+            zoom: opt_f64(map, "zoom")?,
+            bearing: opt_f64(map, "bearing")?,
+            pitch: opt_f64(map, "pitch")?,
+            roll: opt_f64(map, "roll")?,
+            elevation: opt_f64(map, "elevation")?,
+            duration: opt_f64(map, "duration")?,
+            curve: opt_f64(map, "curve")?,
+            speed: opt_f64(map, "speed")?,
+            min_zoom: opt_f64(map, "minZoom")?,
+        })
+    }
 }
 
 /// GL JS `easeTo`'s default length.
@@ -131,10 +226,21 @@ fn millis(ms: f64) -> Duration {
 }
 
 impl Animation {
+    fn camera(&self) -> Camera {
+        Camera {
+            center: self.center,
+            zoom: self.zoom,
+            bearing: self.bearing,
+            pitch: self.pitch,
+            roll: self.roll,
+            elevation: self.elevation,
+        }
+    }
+
     /// The camera and an `easeTo` curve.
     pub(crate) fn ease(self) -> (CameraOptions, FlightCurve) {
         let duration = millis(self.duration.unwrap_or(EASE_DURATION_MS));
-        (self.camera.into(), FlightCurve::Ease { duration })
+        (self.camera().into(), FlightCurve::Ease { duration })
     }
 
     /// The camera and a `flyTo` curve, with GL JS's defaults for what is left out.
@@ -146,7 +252,7 @@ impl Animation {
             duration: self.duration.map(millis),
             min_zoom: self.min_zoom.unwrap_or(defaults.min_zoom),
         };
-        (self.camera.into(), FlightCurve::Fly(options))
+        (self.camera().into(), FlightCurve::Fly(options))
     }
 }
 
@@ -174,11 +280,36 @@ impl CameraState {
 }
 
 /// A GL JS `PointLike` or a pair of them for a box, in CSS pixels from the canvas's top left.
-#[derive(Deserialize, Debug, Clone, Copy, PartialEq)]
-#[serde(untagged)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum ScreenGeometry {
     Point([f64; 2]),
     Box([[f64; 2]; 2]),
+}
+
+impl ScreenGeometry {
+    pub(crate) fn from_json_value(value: &serde_json::Value) -> Result<Self, serde_json::Error> {
+        let Some([first, second]) = value.as_array().map(Vec::as_slice) else {
+            return Err(serde::de::Error::custom(
+                "expected [x, y] or [[x1, y1], [x2, y2]]",
+            ));
+        };
+        if let (Some(x), Some(y)) = (first.as_f64(), second.as_f64()) {
+            return Ok(Self::Point([x, y]));
+        }
+        let pair = |v: &serde_json::Value| -> Result<[f64; 2], serde_json::Error> {
+            let Some([a, b]) = v.as_array().map(Vec::as_slice) else {
+                return Err(serde::de::Error::custom("expected [x, y]"));
+            };
+            let a = a
+                .as_f64()
+                .ok_or_else(|| serde::de::Error::custom("expected numeric coordinate"))?;
+            let b = b
+                .as_f64()
+                .ok_or_else(|| serde::de::Error::custom("expected numeric coordinate"))?;
+            Ok([a, b])
+        };
+        Ok(Self::Box([pair(first)?, pair(second)?]))
+    }
 }
 
 impl From<ScreenGeometry> for QueryGeometry {
@@ -193,10 +324,36 @@ impl From<ScreenGeometry> for QueryGeometry {
 }
 
 /// The options of GL JS `queryRenderedFeatures`.
-#[derive(Deserialize, Debug, Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct Query {
     layers: Option<Vec<String>>,
     filter: Option<serde_json::Value>,
+}
+
+impl Query {
+    pub(crate) fn from_json_value(value: &serde_json::Value) -> Result<Self, serde_json::Error> {
+        let Some(map) = value.as_object() else {
+            return Err(serde::de::Error::custom("expected query options object"));
+        };
+        let layers = match map.get("layers") {
+            None | Some(serde_json::Value::Null) => None,
+            Some(v) => {
+                let items = v
+                    .as_array()
+                    .ok_or_else(|| serde::de::Error::custom("layers: expected array"))?;
+                let mut out = Vec::with_capacity(items.len());
+                for item in items {
+                    let s = item
+                        .as_str()
+                        .ok_or_else(|| serde::de::Error::custom("layers: expected string"))?;
+                    out.push(s.to_owned());
+                }
+                Some(out)
+            }
+        };
+        let filter = map.get("filter").filter(|v| !v.is_null()).cloned();
+        Ok(Self { layers, filter })
+    }
 }
 
 impl From<Query> for QueryOptions {
@@ -245,4 +402,92 @@ impl From<QueriedFeature> for Feature {
             text: feature.text,
         }
     }
+}
+
+pub(crate) trait FromJsJson: Sized {
+    fn from_json_value(value: &serde_json::Value) -> Result<Self, serde_json::Error>;
+}
+
+impl FromJsJson for serde_json::Value {
+    fn from_json_value(value: &serde_json::Value) -> Result<Self, serde_json::Error> {
+        Ok(value.clone())
+    }
+}
+
+impl FromJsJson for maplibre::style::layer::StyleLayer {
+    fn from_json_value(value: &serde_json::Value) -> Result<Self, serde_json::Error> {
+        Self::from_json_value(value)
+    }
+}
+
+impl FromJsJson for maplibre::style::source::GeoJsonData {
+    fn from_json_value(value: &serde_json::Value) -> Result<Self, serde_json::Error> {
+        Ok(Self::from_json_value(value))
+    }
+}
+
+impl FromJsJson for maplibre::geojson::update::GeoJsonDiff {
+    fn from_json_value(value: &serde_json::Value) -> Result<Self, serde_json::Error> {
+        Self::from_json_value(value)
+    }
+}
+
+impl FromJsJson for Camera {
+    fn from_json_value(value: &serde_json::Value) -> Result<Self, serde_json::Error> {
+        Self::from_json_value(value)
+    }
+}
+
+impl FromJsJson for Animation {
+    fn from_json_value(value: &serde_json::Value) -> Result<Self, serde_json::Error> {
+        Self::from_json_value(value)
+    }
+}
+
+impl FromJsJson for ScreenGeometry {
+    fn from_json_value(value: &serde_json::Value) -> Result<Self, serde_json::Error> {
+        Self::from_json_value(value)
+    }
+}
+
+impl FromJsJson for Query {
+    fn from_json_value(value: &serde_json::Value) -> Result<Self, serde_json::Error> {
+        Self::from_json_value(value)
+    }
+}
+
+#[inline(never)]
+fn parse_js_json_value(
+    value: &wasm_bindgen::JsValue,
+    what: &'static str,
+) -> Result<serde_json::Value, crate::error::JSError> {
+    let json = js_sys::JSON::stringify(value)
+        .ok()
+        .and_then(|json| json.as_string())
+        .ok_or(crate::error::ArgumentError::NotJson { what })?;
+    serde_json::from_slice(json.as_bytes()).map_err(|source| {
+        crate::error::JSError::from(crate::error::ArgumentError::Invalid { what, source })
+    })
+}
+
+/// Reads a JavaScript argument through JSON without `MapOnlyValueRef` monomorphizations.
+pub(crate) fn read<T: FromJsJson>(
+    value: &wasm_bindgen::JsValue,
+    what: &'static str,
+) -> Result<T, crate::error::JSError> {
+    let parsed = parse_js_json_value(value, what)?;
+    T::from_json_value(&parsed).map_err(|source| {
+        crate::error::JSError::from(crate::error::ArgumentError::Invalid { what, source })
+    })
+}
+
+/// Reads an argument that may be `undefined` or `null`.
+pub(crate) fn read_optional<T: FromJsJson>(
+    value: &wasm_bindgen::JsValue,
+    what: &'static str,
+) -> Result<Option<T>, crate::error::JSError> {
+    if value.is_undefined() || value.is_null() {
+        return Ok(None);
+    }
+    read(value, what).map(Some)
 }

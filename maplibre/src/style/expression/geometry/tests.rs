@@ -42,8 +42,10 @@ fn distance_is_in_metres_and_zero_inside_a_polygon() {
 
 /// Evaluates `["distance", other]` for a feature of geometry `feature`, as a style does.
 fn distance(feature: serde_json::Value, other: serde_json::Value) -> f64 {
-    let properties =
-        FeatureProperties::from([(GEOMETRY_PROPERTY.to_string(), feature.to_string().into())]);
+    let properties: FeatureProperties =
+        [(GEOMETRY_PROPERTY.to_string(), feature.to_string().into())]
+            .into_iter()
+            .collect();
     Expression::parse(&json!(["distance", other]))
         .expect("distance parses")
         .evaluate(&EvaluationContext::for_feature(0.0, &properties))

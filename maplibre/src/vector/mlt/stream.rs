@@ -106,7 +106,7 @@ pub(super) fn decode_columnar_layer<'a>(
                 base_props.push(Arc::clone(existing));
                 continue;
             }
-            let mut props = FeatureProperties::new();
+            let mut props = FeatureProperties::default();
             for &(col_idx, atom) in &key_scratch {
                 if let Some(name) = col_names.get(usize::from(col_idx)) {
                     props.insert(name.clone(), atom.to_value());
@@ -163,7 +163,7 @@ pub(super) fn props_for_style(
             let mut map = col
                 .base_props
                 .get(idx)
-                .map_or_else(FeatureProperties::new, |arc| (**arc).clone());
+                .map_or_else(FeatureProperties::default, |arc| (**arc).clone());
             if reads_id {
                 let gtype = col
                     .geom_types
@@ -203,7 +203,7 @@ pub(super) fn props_for_style(
         let mut map = col
             .base_props
             .get(idx)
-            .map_or_else(FeatureProperties::new, |arc| (**arc).clone());
+            .map_or_else(FeatureProperties::default, |arc| (**arc).clone());
         if reads_id {
             let gtype = col
                 .geom_types

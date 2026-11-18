@@ -350,7 +350,7 @@ impl<HC: HttpClient, S: OfflineStore> OfflineManager<HC, S> {
                     .await?;
                 *pre_stored += 1;
             }
-            return serde_json::from_str::<Style>(style_json).map_err(|source| {
+            return Style::from_json_str(style_json).map_err(|source| {
                 OfflineDownloadError::InvalidJson {
                     context: "inline style_json".to_owned(),
                     source,
@@ -429,7 +429,7 @@ impl<HC: HttpClient, S: OfflineStore> OfflineManager<HC, S> {
                 }
             };
             let _ = pre_stored; // TileJSON URL is also included in `enumerate_style_resources` via `link_existing_resource`.
-            let tile_json: TileJson = serde_json::from_slice(&bytes).map_err(|source| {
+            let tile_json = TileJson::from_json_slice(&bytes).map_err(|source| {
                 OfflineDownloadError::InvalidJson {
                     context: url,
                     source,

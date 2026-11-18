@@ -172,7 +172,7 @@ fn feature_paint_properties_count_toward_cache_budget_once_per_shared_arc() {
 
     let mut world = World::default();
     let coords = WorldTileCoords::default();
-    let mut raw_props = FeatureProperties::new();
+    let mut raw_props = FeatureProperties::default();
     raw_props.insert("description".to_string(), Value::String("x".repeat(4096)));
     let shared_props = Arc::new(raw_props);
 

@@ -15,19 +15,31 @@ use std::sync::{
 use wgpu::util::DeviceExt;
 
 /// Maximum single `write_buffer` payload (exclusive) staged into the per-frame coalescing belt.
+#[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+const MAX_STAGED_WRITE_BYTES: usize = 262_144;
+/// Maximum single `write_buffer` payload (exclusive) staged into the per-frame coalescing belt.
+#[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
 const MAX_STAGED_WRITE_BYTES: usize = 65_536;
 
 /// Minimum persistent GPU staging buffer capacity (`64 KiB`).
 const MIN_STAGING_BUFFER_CAPACITY: u64 = 64 * 1024;
 
-/// Steady-state post-burst staging buffer ceiling (`256 KiB`).
+/// Steady-state post-burst staging buffer ceiling (`64 KiB` on wasm32, `256 KiB` elsewhere).
+#[cfg(target_arch = "wasm32")]
+const SHRINK_STAGING_BUFFER_CAPACITY: u64 = 64 * 1024;
+/// Steady-state post-burst staging buffer ceiling (`64 KiB` on wasm32, `256 KiB` elsewhere).
+#[cfg(not(target_arch = "wasm32"))]
 const SHRINK_STAGING_BUFFER_CAPACITY: u64 = 256 * 1024;
 
 /// Hard upper bound on the persistent coalescing staging buffer (`2 MiB`) so initial tile upload
 /// bursts never pin tens of megabytes of transient staging memory.
 const MAX_STAGING_BUFFER_CAPACITY: u64 = 2 * 1024 * 1024;
 
-/// Consecutive low-volume frames before a burst-sized staging buffer shrinks back to `256 KiB`.
+/// Consecutive low-volume frames before a burst-sized staging buffer shrinks back.
+#[cfg(target_arch = "wasm32")]
+const QUIET_FRAMES_BEFORE_SHRINK: u8 = 4;
+/// Consecutive low-volume frames before a burst-sized staging buffer shrinks back.
+#[cfg(not(target_arch = "wasm32"))]
 const QUIET_FRAMES_BEFORE_SHRINK: u8 = 8;
 
 #[derive(Debug)]
@@ -103,17 +115,29 @@ impl UploadQueue {
 
         if can_stage {
             let mut staging = crate::platform::lock_unpoisoned(&self.staging);
-            if let Some(last) = staging.copies.last() {
+            let StagingBeltState {
+                payload, copies, ..
+            } = &mut *staging;
+            if let Some(last) = copies.last_mut() {
                 if &last.dst == buffer && last.dst_offset == offset && last.size == size {
                     let start = last.src_offset as usize;
-                    staging.payload[start..start + data.len()].copy_from_slice(data);
+                    payload[start..start + data.len()].copy_from_slice(data);
+                    return;
+                }
+                if &last.dst == buffer
+                    && last.dst_offset + last.size == offset
+                    && (last.src_offset + last.size) as usize == payload.len()
+                    && payload.len() + data.len() <= MAX_STAGING_BUFFER_CAPACITY as usize
+                {
+                    payload.extend_from_slice(data);
+                    last.size += size;
                     return;
                 }
             }
-            if staging.payload.len() + data.len() <= MAX_STAGING_BUFFER_CAPACITY as usize {
-                let src_offset = staging.payload.len() as u64;
-                staging.payload.extend_from_slice(data);
-                staging.copies.push(StagedCopy {
+            if payload.len() + data.len() <= MAX_STAGING_BUFFER_CAPACITY as usize {
+                let src_offset = payload.len() as u64;
+                payload.extend_from_slice(data);
+                copies.push(StagedCopy {
                     dst: buffer.clone(),
                     src_offset,
                     dst_offset: offset,
@@ -218,15 +242,16 @@ impl UploadQueue {
                     .unwrap_or(max_buf)
                     .min(max_buf)
             };
+            if let Some((old_buf, _)) = staging.buffer.take() {
+                old_buf.destroy();
+            }
             let buf = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("upload_queue_staging_buffer"),
                 size: next_cap,
                 usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
-            if let Some((old_buf, _)) = staging.buffer.replace((buf, next_cap)) {
-                old_buf.destroy();
-            }
+            staging.buffer = Some((buf, next_cap));
         }
 
         let (staging_buf, _) = staging.buffer.as_ref()?;

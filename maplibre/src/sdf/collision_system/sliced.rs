@@ -6,12 +6,9 @@
 //! a consistent `(ViewState, ShaderProjectionData)` snapshot, then commits `PlacedSymbols` and
 //! dirty GPU `SDFShaderFeatureMetadata` runs atomically when the final group completes.
 
-use std::{
-    collections::{HashMap, HashSet},
-    time::Duration,
-};
+use std::time::Duration;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashMap as HashMap, FxHashSet as HashSet};
 
 use super::{
     family, layer_pass::slice::LayerSliceProgress, signatures::obstructed_grid, temporal,
@@ -134,7 +131,7 @@ impl ActiveEpoch {
             groups,
             group_idx: 0,
             active_group: None,
-            outcomes: HashMap::new(),
+            outcomes: HashMap::default(),
             mirrored: Vec::new(),
             placed_layers: Vec::new(),
         }

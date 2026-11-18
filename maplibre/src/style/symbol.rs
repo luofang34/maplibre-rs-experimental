@@ -121,7 +121,7 @@ impl SymbolPaint {
         if !ZOOM_ONLY_ENUMS.contains(&name) && !ZOOM_ONLY_PAINT_ENUMS.contains(&name) {
             return None;
         }
-        self.text(name, &FeatureProperties::new(), zoom)
+        self.text(name, &FeatureProperties::default(), zoom)
     }
 
     /// Replaces the zoom expressions of [`ZOOM_ONLY_ENUMS`] with their value at `zoom`, as GL JS

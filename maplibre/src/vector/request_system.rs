@@ -73,8 +73,11 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
             .get::<crate::render::eye_covering::MultiViewExtractCovering>()
             .filter(|m| m.active)
             .cloned();
-        let view_tiles_and_level = if let Some(multi) = &multi {
-            Some((multi.vector_tiles.clone(), multi.max_view_level))
+        let (view_tiles_and_level, tight_covering) = if let Some(multi) = &multi {
+            (
+                Some((multi.vector_tiles.clone(), multi.max_view_level)),
+                false,
+            )
         } else {
             let visible_level = view_state.zoom().zoom_level(DEFAULT_TILE_SIZE);
             let request_padding = if renderer.settings.tight_tile_requests
@@ -110,7 +113,7 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                 request_padding,
                 visible_level,
             ));
-            computed
+            (computed, request_padding == ViewStatePadding::Tight)
         };
 
         // Tile arrivals, eviction and a settling eye can change the covering without motion.
@@ -153,7 +156,11 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                 style,
                 view_state,
                 world,
-                (renderer.settings.tight_tile_requests, multi.is_some()),
+                (
+                    renderer.settings.tight_tile_requests,
+                    multi.is_some(),
+                    tight_covering,
+                ),
                 &view_tiles,
                 (level, magnifies),
             );

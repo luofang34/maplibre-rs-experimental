@@ -1,7 +1,5 @@
 //! Style `font-faces` specification types, CSS `unicode-range` parsing, and font-stack matching.
 
-use std::collections::BTreeMap;
-
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// Default value for `Style::local_ideograph_font_family` (`Some("sans-serif")`).
@@ -15,14 +13,10 @@ pub fn is_default_local_ideograph_font_family(value: &Option<String>) -> bool {
     value.as_deref() == Some("sans-serif")
 }
 
-/// Deserializes `localIdeographFontFamily`, accepting a font family string, `false`, or `null`.
-pub fn deserialize_local_ideograph_font_family<'de, D>(
-    deserializer: D,
-) -> Result<Option<String>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+/// Parses `localIdeographFontFamily` from a [`serde_json::Value`], accepting string, bool, or null.
+pub fn parse_local_ideograph_font_family(
+    value: Option<&serde_json::Value>,
+) -> Result<Option<String>, String> {
     match value {
         None | Some(serde_json::Value::Null) | Some(serde_json::Value::Bool(false)) => Ok(None),
         Some(serde_json::Value::Bool(true)) => Ok(default_local_ideograph_font_family()),
@@ -34,10 +28,21 @@ where
                 Ok(Some(trimmed.to_owned()))
             }
         }
-        Some(other) => Err(serde::de::Error::custom(format!(
+        Some(other) => Err(format!(
             "expected string or boolean for localIdeographFontFamily, got {other}"
-        ))),
+        )),
     }
+}
+
+/// Deserializes `localIdeographFontFamily`, accepting a font family string, `false`, or `null`.
+pub fn deserialize_local_ideograph_font_family<'de, D>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    parse_local_ideograph_font_family(value.as_ref()).map_err(serde::de::Error::custom)
 }
 
 /// Font weight (`100..=900` or CSS keywords `normal` / `bold`).
@@ -56,18 +61,23 @@ impl<'de> Deserialize<'de> for FontWeight {
         D: Deserializer<'de>,
     {
         let value = serde_json::Value::deserialize(deserializer)?;
-        match &value {
-            serde_json::Value::Number(num) => {
-                let raw = num.as_u64().unwrap_or(400).clamp(1, 1000) as u16;
-                Ok(Self(raw))
-            }
-            serde_json::Value::String(text) => Ok(Self::from_css(text)),
-            _ => Ok(Self::default()),
-        }
+        Ok(Self::from_json_value(&value))
     }
 }
 
 impl FontWeight {
+    /// Parses a JSON number or CSS weight string into [`FontWeight`].
+    pub(crate) fn from_json_value(value: &serde_json::Value) -> Self {
+        match value {
+            serde_json::Value::Number(num) => {
+                let raw = num.as_u64().unwrap_or(400).clamp(1, 1000) as u16;
+                Self(raw)
+            }
+            serde_json::Value::String(text) => Self::from_css(text),
+            _ => Self::default(),
+        }
+    }
+
     /// Parses a CSS weight keyword or numeric string.
     pub fn from_css(value: &str) -> Self {
         let lower = value.trim().to_ascii_lowercase();
@@ -113,6 +123,14 @@ impl<'de> Deserialize<'de> for FontStyle {
 }
 
 impl FontStyle {
+    /// Parses a [`serde_json::Value`] string token into [`FontStyle`].
+    pub(crate) fn from_json_value(value: &serde_json::Value) -> Self {
+        match value.as_str() {
+            Some(text) => Self::from_css(text),
+            None => Self::default(),
+        }
+    }
+
     /// Parses a CSS `font-style` token.
     pub fn from_css(value: &str) -> Self {
         match value.trim().to_ascii_lowercase().as_str() {
@@ -220,31 +238,28 @@ impl FontFaces {
     }
 }
 
-impl<'de> Deserialize<'de> for FontFaces {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let raw = serde_json::Value::deserialize(deserializer)?;
+impl FontFaces {
+    /// Parses a `font-faces` array or family map directly from a [`serde_json::Value`].
+    pub(crate) fn from_json_value(raw: &serde_json::Value) -> Self {
         let mut rules = Vec::new();
         match raw {
             serde_json::Value::Array(items) => {
                 for item in items {
-                    if let Some(rule) = parse_rule_object(None, &item) {
+                    if let Some(rule) = parse_rule_object(None, item) {
                         rules.push(rule);
                     }
                 }
             }
             serde_json::Value::Object(map) => {
-                // Deterministic iteration order across keys.
-                let ordered: BTreeMap<String, serde_json::Value> = map.into_iter().collect();
+                let mut ordered: Vec<(&String, &serde_json::Value)> = map.iter().collect();
+                ordered.sort_by(|a, b| a.0.cmp(b.0));
                 for (family, entry) in ordered {
                     match entry {
                         serde_json::Value::String(url) => {
-                            let urls = extract_urls_from_str(&url);
+                            let urls = extract_urls_from_str(url);
                             if !urls.is_empty() {
                                 rules.push(FontFaceRule {
-                                    family,
+                                    family: family.clone(),
                                     urls,
                                     weight: FontWeight::default(),
                                     style: FontStyle::default(),
@@ -254,13 +269,13 @@ impl<'de> Deserialize<'de> for FontFaces {
                         }
                         serde_json::Value::Array(sub_items) => {
                             for sub in sub_items {
-                                if let Some(rule) = parse_rule_object(Some(&family), &sub) {
+                                if let Some(rule) = parse_rule_object(Some(family), sub) {
                                     rules.push(rule);
                                 }
                             }
                         }
                         other => {
-                            if let Some(rule) = parse_rule_object(Some(&family), &other) {
+                            if let Some(rule) = parse_rule_object(Some(family), other) {
                                 rules.push(rule);
                             }
                         }
@@ -269,7 +284,17 @@ impl<'de> Deserialize<'de> for FontFaces {
             }
             _ => {}
         }
-        Ok(Self(rules))
+        Self(rules)
+    }
+}
+
+impl<'de> Deserialize<'de> for FontFaces {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = serde_json::Value::deserialize(deserializer)?;
+        Ok(Self::from_json_value(&raw))
     }
 }
 
@@ -303,13 +328,13 @@ fn parse_rule_object(
         .get("font-weight")
         .or_else(|| obj.get("fontWeight"))
         .or_else(|| obj.get("weight"))
-        .and_then(|v| serde_json::from_value::<FontWeight>(v.clone()).ok())
+        .map(FontWeight::from_json_value)
         .unwrap_or_default();
     let style = obj
         .get("font-style")
         .or_else(|| obj.get("fontStyle"))
         .or_else(|| obj.get("style"))
-        .and_then(|v| serde_json::from_value::<FontStyle>(v.clone()).ok())
+        .map(FontStyle::from_json_value)
         .unwrap_or_default();
     let unicode_ranges = obj
         .get("unicode-range")

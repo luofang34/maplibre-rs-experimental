@@ -10,6 +10,8 @@ use std::{
 use maplibre_build_tools::wgsl::validate_project_wgsl_blocking;
 use serde_json::{Map, Value};
 
+mod build_wgsl;
+
 type BuildResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 #[cfg(feature = "embed-static-tiles")]
@@ -444,5 +446,6 @@ fn main() -> BuildResult {
     #[cfg(feature = "embed-static-tiles")]
     embed_tiles_statically_blocking()?;
     generate_protobuf_blocking()?;
+    build_wgsl::generate_minified_wgsl_blocking()?;
     generate_style_spec_blocking()
 }

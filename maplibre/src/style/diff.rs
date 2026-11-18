@@ -4,7 +4,7 @@
 //! and resident tiles for unchanged sources, updates GPU paint and layer order in-place when
 //! layout/filtering did not change, and initiates configured paint transitions on retained layers.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use super::{
     layer::StyleLayer,
@@ -151,7 +151,7 @@ impl Style {
             ..Default::default()
         };
 
-        let mut changed_vector_sources = HashSet::new();
+        let mut changed_vector_sources = HashSet::default();
 
         for (name, old_source) in &self.sources {
             if !next.sources.contains_key(name) {

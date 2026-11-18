@@ -8,7 +8,7 @@
 
 #![deny(missing_docs)]
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
 use geo_types::{Coord, LineString, Point, Polygon};
 use rstar::RTree;
@@ -380,7 +380,7 @@ fn decode_properties(mut buf: &[u8]) -> Option<FeatureProperties> {
 
 pub(crate) fn decode_properties_from(buf: &mut &[u8]) -> Option<FeatureProperties> {
     let count = read_u32(buf)? as usize;
-    let mut props = FeatureProperties::with_capacity(count.min(256));
+    let mut props = FeatureProperties::with_capacity_and_hasher(count.min(256), Default::default());
     for _ in 0..count {
         let key = read_string(buf)?;
         let val = decode_value(buf)?;
@@ -464,7 +464,7 @@ fn decode_value(buf: &mut &[u8]) -> Option<Value> {
         }
         TAG_OBJECT => {
             let len = read_u32(buf)? as usize;
-            let mut map = BTreeMap::new();
+            let mut map = FxHashMap::default();
             for _ in 0..len {
                 let k = read_string(buf)?;
                 let v = decode_value(buf)?;

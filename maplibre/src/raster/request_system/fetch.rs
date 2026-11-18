@@ -1,7 +1,5 @@
 //! Fetches the sources of one raster tile on a worker and sends each back as it lands.
 
-use futures::{stream::FuturesUnordered, StreamExt};
-
 #[cfg(not(target_arch = "wasm32"))]
 use crate::raster::process_raster::process_raster_tile;
 use crate::{
@@ -39,7 +37,7 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
         } = input;
         let context = AttemptContext::new(context, attempt);
         let client = kernel.source_client();
-        let mut fetches: FuturesUnordered<_> = source_layer_groups(&style, TileKind::Raster)
+        let fetches = source_layer_groups(&style, TileKind::Raster)
             .into_iter()
             .filter(|group| {
                 !crate::raster::media_source::is_media_source(&style, group.source_name.as_deref())
@@ -60,12 +58,9 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
                         _ => None,
                     });
                 fetch_source::<T, _, _>(&client, group, dem_unpack, coords, context.clone())
-            })
-            .collect();
-        let mut retry = false;
-        while let Some(fetched) = fetches.next().await {
-            retry |= fetched?;
-        }
+            });
+        let outcomes = crate::util::async_join::try_join_all_concurrent(fetches.collect()).await?;
+        let retry = outcomes.into_iter().any(|fetched| fetched);
         context
             .send_back(TileRequestOutcome {
                 coords,
@@ -83,6 +78,7 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
 
 /// Fetches one source of the tile and sends back its pixels, or that it has none; returns
 /// whether a failed fetch is worth retrying.
+#[inline(never)]
 async fn fetch_source<T: RasterTransferables, HC: HttpClient, C: Context + Clone + Send>(
     client: &SourceClient<HC>,
     group: SourceLayerGroup,

@@ -33,8 +33,14 @@ impl Shader for RasterShader {
     fn describe_vertex(&self) -> VertexState {
         VertexState {
             source: concat!(
-                include_str!("projection.vertex.wgsl"),
-                include_str!("raster.vertex.wgsl")
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/projection.vertex.wgsl"
+                )),
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/raster.vertex.wgsl"
+                ))
             ),
             entry_point: "main",
             buffers: tile_texture_vertex_buffers(),
@@ -43,7 +49,10 @@ impl Shader for RasterShader {
 
     fn describe_fragment(&self) -> FragmentState {
         FragmentState {
-            source: include_str!("raster.fragment.wgsl"),
+            source: include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/raster.fragment.wgsl"
+            )),
             entry_point: "main",
             targets: vec![Some(wgpu::ColorTargetState {
                 format: self.format,
@@ -75,8 +84,14 @@ impl Shader for DemShader {
     fn describe_vertex(&self) -> VertexState {
         VertexState {
             source: concat!(
-                include_str!("projection.vertex.wgsl"),
-                include_str!("dem.vertex.wgsl")
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/projection.vertex.wgsl"
+                )),
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/dem.vertex.wgsl"
+                ))
             ),
             entry_point: "main",
             buffers: tile_texture_vertex_buffers(),
@@ -86,8 +101,14 @@ impl Shader for DemShader {
     fn describe_fragment(&self) -> FragmentState {
         FragmentState {
             source: match self.shading {
-                DemShading::Hillshade => include_str!("hillshade.fragment.wgsl"),
-                DemShading::ColorRelief => include_str!("color_relief.fragment.wgsl"),
+                DemShading::Hillshade => include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/hillshade.fragment.wgsl"
+                )),
+                DemShading::ColorRelief => include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/color_relief.fragment.wgsl"
+                )),
             },
             entry_point: "main",
             targets: vec![Some(wgpu::ColorTargetState {

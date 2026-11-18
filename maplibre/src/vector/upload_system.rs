@@ -222,7 +222,7 @@ fn upload_tessellated_layer_with_uncovered(
     let mut feature_meta_scratch = Vec::new();
     let mut needs_refetch = false;
     let mut any_deferred = false;
-    let protected: std::collections::HashSet<_> = source_tiles.iter().copied().collect();
+    let protected: rustc_hash::FxHashSet<_> = source_tiles.iter().copied().collect();
     for coords in source_tiles {
         let is_uncovered = uncovered_sources.contains(&coords);
         super::content::ensure(tiles, coords);

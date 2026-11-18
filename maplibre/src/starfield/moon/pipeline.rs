@@ -22,8 +22,14 @@ impl Shader for MoonShader {
     fn describe_vertex(&self) -> VertexState {
         VertexState {
             source: concat!(
-                include_str!("../../render/shaders/projection.vertex.wgsl"),
-                include_str!("moon.vertex.wgsl")
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/projection.vertex.wgsl"
+                )),
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/starfield/moon/moon.vertex.wgsl"
+                ))
             ),
             entry_point: "main",
             buffers: Vec::new(),
@@ -32,7 +38,10 @@ impl Shader for MoonShader {
 
     fn describe_fragment(&self) -> FragmentState {
         FragmentState {
-            source: include_str!("moon.fragment.wgsl"),
+            source: include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/starfield/moon/moon.fragment.wgsl"
+            )),
             entry_point: "main",
             targets: vec![Some(wgpu::ColorTargetState {
                 format: self.format,

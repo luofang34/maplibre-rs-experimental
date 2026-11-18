@@ -1,5 +1,5 @@
 #![allow(clippy::expect_used, clippy::panic)]
-use std::collections::BTreeSet;
+use prost::Message;
 
 use super::*;
 
@@ -9,7 +9,7 @@ fn glyph_subset_keeps_spaces_and_unicode_metrics_without_uploading_unused_letter
     let glyphs =
         crate::sdf::glyphs::Glyphs::decode(include_bytes!("../../../../data/0-255.pbf").as_slice())
             .expect("font");
-    builder.glyph_subset("test", &glyphs, Some(&BTreeSet::from([32, 65, 233])));
+    builder.glyph_subset("test", &glyphs, Some(&[32, 65, 233].into_iter().collect()));
     let atlas = builder.finish();
     let font = &atlas.glyphs["test"];
     assert_eq!(font.len(), 3);
@@ -51,7 +51,8 @@ fn worker_wire_roundtrip_preserves_exact_collision_ranges_and_anchor() {
                     "name".into(),
                     crate::style::expression::Value::String("Zürich".into()),
                 )]
-                .into(),
+                .into_iter()
+                .collect(),
             ),
             sort_key: 3.5,
             geometry_type: crate::style::filter::GeometryType::Polygon,

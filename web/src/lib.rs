@@ -17,13 +17,13 @@ mod offscreen;
 mod platform;
 mod startup;
 
-#[cfg(feature = "renderer")]
+#[cfg(feature = "winit-window")]
 pub use application::{
     create_kernel, default_plugins, run_map, run_maplibre, MapPlugin, MapType, WebMapHost,
 };
 #[cfg(feature = "renderer")]
 pub use controller::MapController;
-#[cfg(feature = "renderer")]
+#[cfg(feature = "winit-window")]
 pub use environment::CurrentEnvironment;
 pub use environment::WHATWGOffscreenKernelEnvironment;
 #[cfg(feature = "renderer")]

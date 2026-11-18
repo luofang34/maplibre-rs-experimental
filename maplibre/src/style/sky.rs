@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::style::{expression::Color, layer::StyleProperty};
 
 /// Root-level sky configuration; an absent property means the specification default.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct SkySpecification {
     /// Colour of the sky away from the horizon.
     #[serde(rename = "sky-color", default, skip_serializing_if = "Option::is_none")]
@@ -48,10 +48,44 @@ pub struct SkySpecification {
     #[serde(
         rename = "atmosphere-blend",
         default,
-        deserialize_with = "StyleProperty::<f32>::deserialize_f32_or_none",
         skip_serializing_if = "Option::is_none"
     )]
     pub atmosphere_blend: Option<StyleProperty<f32>>,
+}
+
+impl SkySpecification {
+    /// Parses a `sky` object directly from JSON.
+    pub(crate) fn from_json_value(value: &serde_json::Value) -> Result<Self, serde_json::Error> {
+        let Some(map) = value.as_object() else {
+            return Err(serde::de::Error::custom("sky must be a JSON object"));
+        };
+        let prop = |key: &str| {
+            map.get(key)
+                .filter(|v| !v.is_null())
+                .map(StyleProperty::<f32>::parse)
+        };
+        let cprop = |key: &str| {
+            map.get(key)
+                .filter(|v| !v.is_null())
+                .map(StyleProperty::<csscolorparser::Color>::parse)
+        };
+        Ok(Self {
+            sky_color: cprop("sky-color"),
+            horizon_color: cprop("horizon-color"),
+            fog_color: cprop("fog-color"),
+            fog_ground_blend: prop("fog-ground-blend"),
+            horizon_fog_blend: prop("horizon-fog-blend"),
+            sky_horizon_blend: prop("sky-horizon-blend"),
+            atmosphere_blend: prop("atmosphere-blend"),
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for SkySpecification {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Self::from_json_value(&value).map_err(serde::de::Error::custom)
+    }
 }
 
 /// The sky at one zoom and pitch, as the shaders take it.

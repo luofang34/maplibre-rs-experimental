@@ -271,8 +271,7 @@ pub struct LinePaint {
 }
 
 /// Requested raster texture filter, a constant, a zoom stop table, or a zoom expression.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(untagged)]
+#[derive(Debug, Clone)]
 pub enum RasterResampling {
     /// One filter at every zoom.
     Constant(ResamplingMode),
@@ -296,7 +295,76 @@ pub enum ResamplingMode {
     Nearest,
 }
 
+impl ResamplingMode {
+    pub(crate) fn from_str(value: &str) -> Result<Self, serde_json::Error> {
+        match value {
+            "linear" => Ok(Self::Linear),
+            "nearest" => Ok(Self::Nearest),
+            _ => Err(serde::de::Error::custom(
+                "resampling mode must be \"linear\" or \"nearest\"",
+            )),
+        }
+    }
+}
+
+impl Serialize for RasterResampling {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        match self {
+            Self::Constant(mode) => mode.serialize(serializer),
+            Self::ByZoom { stops } => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry("stops", stops)?;
+                map.end()
+            }
+            Self::Expression(items) => items.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for RasterResampling {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Self::from_json_value(&value).map_err(serde::de::Error::custom)
+    }
+}
+
 impl RasterResampling {
+    /// Parses `raster-resampling` / `*-resampling` directly from a JSON [`serde_json::Value`].
+    pub(crate) fn from_json_value(value: &serde_json::Value) -> Result<Self, serde_json::Error> {
+        match value {
+            serde_json::Value::String(s) => Ok(Self::Constant(ResamplingMode::from_str(s)?)),
+            serde_json::Value::Array(items) => Ok(Self::Expression(items.clone())),
+            serde_json::Value::Object(map) => {
+                let Some(stops_arr) = map.get("stops").and_then(|v| v.as_array()) else {
+                    return Err(serde::de::Error::custom("resampling object missing stops"));
+                };
+                let mut stops = Vec::with_capacity(stops_arr.len());
+                for item in stops_arr {
+                    let Some(pair) = item.as_array() else {
+                        return Err(serde::de::Error::custom("resampling stop must be pair"));
+                    };
+                    let [z_val, m_val] = pair.as_slice() else {
+                        return Err(serde::de::Error::custom("resampling stop must be pair"));
+                    };
+                    let Some(zoom) = z_val.as_f64() else {
+                        return Err(serde::de::Error::custom(
+                            "resampling stop zoom must be number",
+                        ));
+                    };
+                    let Some(mode_str) = m_val.as_str() else {
+                        return Err(serde::de::Error::custom(
+                            "resampling stop mode must be string",
+                        ));
+                    };
+                    stops.push((zoom, ResamplingMode::from_str(mode_str)?));
+                }
+                Ok(Self::ByZoom { stops })
+            }
+            _ => Err(serde::de::Error::custom("invalid resampling property")),
+        }
+    }
+
     /// Whether texels are picked without interpolation at `zoom`.
     pub fn is_nearest_at(&self, zoom: f64) -> bool {
         match self {
@@ -395,31 +463,17 @@ impl Default for RasterPaint {
 }
 
 /// Typed text properties and additional text/icon paint and layout values.
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct SymbolPaint {
     /// Text of each symbol: a `{token}` template, a literal, or an expression; `None` draws
     /// no text.
-    #[serde(rename = "text-field")]
-    #[serde(
-        default,
-        deserialize_with = "StyleProperty::<FormattedText>::deserialize_or_none"
-    )]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub text_field: Option<StyleProperty<FormattedText>>,
 
     /// Text em size in screen pixels, evaluated for each feature and zoom.
-    #[serde(rename = "text-size")]
-    #[serde(
-        default,
-        deserialize_with = "StyleProperty::<f32>::deserialize_f32_or_none"
-    )]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub text_size: Option<StyleProperty<f32>>,
     /// Symbol paint and layout properties evaluated during placement.
-    #[serde(flatten)]
     pub properties: serde_json::Map<String, serde_json::Value>,
     /// Pre-parsed compiled properties cache.
-    #[serde(skip)]
     pub(crate) compiled: crate::style::symbol::CompiledProperties,
 }
 

@@ -152,7 +152,7 @@ fn convert_comparison_op(
                 Json::String(_) => "string",
                 _ => "object",
             };
-            expected_types.insert(property.to_string(), json!(kind));
+            expected_types.insert(property.to_string(), Json::String(kind.to_owned()));
         }
     }
     if operator == "==" && property != "$id" && value.is_null() {

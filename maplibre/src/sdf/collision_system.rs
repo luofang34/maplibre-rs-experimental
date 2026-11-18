@@ -184,10 +184,20 @@ impl System for CollisionSystem {
                 crate::tcs::system::timings::FrameTimings::elapsed_this_frame,
             );
         if self.active_epoch.is_some() {
-            if triggers.obstructed || config.fade_duration.is_zero() || !view_valid {
+            let stale_camera = self.active_epoch.as_ref().is_some_and(|epoch| {
+                let zoom_delta = (zoom - epoch.zoom).abs();
+                let d = (view_state.camera().get_bearing().0 - epoch.bearing)
+                    .rem_euclid(std::f64::consts::TAU);
+                let bearing_deg = d.min(std::f64::consts::TAU - d).to_degrees();
+                zoom_delta > 0.35 || bearing_deg > 15.0
+            });
+            if triggers.obstructed || config.fade_duration.is_zero() || !view_valid || stale_camera
+            {
                 if let Some(epoch) = self.active_epoch.take() {
                     epoch.abort(&mut self.scratch);
                 }
+                self.placed_view = None;
+                self.last_content_signature = None;
             } else {
                 self.controller.advance_clock(now);
                 self.controller.note_background_dirty(zoom, triggers);

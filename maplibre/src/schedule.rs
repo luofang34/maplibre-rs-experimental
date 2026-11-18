@@ -79,7 +79,7 @@ struct Entry {
 impl Entry {
     fn new(label: BoxedStageLabel, stage: Box<dyn Stage>) -> Self {
         Self {
-            name: format!("{label:?}").into(),
+            name: Arc::from(label.label_name().as_ref()),
             label,
             stage,
             after_failure: false,
@@ -166,7 +166,9 @@ impl Schedule {
         stage: Box<dyn Stage>,
     ) -> Result<&mut Self, ScheduleError> {
         if self.position(&*label).is_some() {
-            return Err(ScheduleError::DuplicateStage(format!("{label:?}")));
+            return Err(ScheduleError::DuplicateStage(
+                label.label_name().into_owned(),
+            ));
         }
         self.entries.insert(index, Entry::new(label, stage));
         Ok(self)
@@ -174,7 +176,7 @@ impl Schedule {
 
     fn existing(&self, label: &dyn StageLabel) -> Result<usize, ScheduleError> {
         self.position(label)
-            .ok_or_else(|| ScheduleError::MissingStage(format!("{label:?}")))
+            .ok_or_else(|| ScheduleError::MissingStage(label.label_name().into_owned()))
     }
 
     /// Returns a shared reference to the stage identified by `label`, if it exists.
@@ -310,7 +312,7 @@ impl Schedule {
     ) -> Result<&mut Self, ScheduleError> {
         let stage = self
             .get_stage_mut::<SystemStage>(&stage_label)
-            .ok_or_else(|| ScheduleError::NotASystemStage(format!("{stage_label:?}")))?;
+            .ok_or_else(|| ScheduleError::NotASystemStage(stage_label.label_name().into_owned()))?;
         stage.add_system(system);
         Ok(self)
     }
@@ -324,7 +326,7 @@ impl Schedule {
     ) -> Result<&mut Self, ScheduleError> {
         let stage = self
             .get_stage_mut::<SystemStage>(&stage_label)
-            .ok_or_else(|| ScheduleError::NotASystemStage(format!("{stage_label:?}")))?;
+            .ok_or_else(|| ScheduleError::NotASystemStage(stage_label.label_name().into_owned()))?;
         stage.add_early_system(system);
         Ok(self)
     }

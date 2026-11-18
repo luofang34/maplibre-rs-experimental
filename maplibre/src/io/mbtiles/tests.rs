@@ -1,7 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::{
-    collections::HashMap,
     io::Write,
     path::{Path, PathBuf},
     sync::atomic::{AtomicUsize, Ordering},
@@ -13,6 +12,7 @@ use flate2::{
     Compression,
 };
 use rusqlite::{params, Connection};
+use rustc_hash::FxHashMap;
 
 use super::{MbtilesClient, MbtilesUrl};
 use crate::{
@@ -246,7 +246,7 @@ async fn mbtiles_resolves_through_shared_loader_and_works_while_offline() {
     );
     assert!(!source_client.is_online());
 
-    let mut sources = HashMap::new();
+    let mut sources = FxHashMap::default();
     sources.insert(
         "local_mb".to_owned(),
         Source::Vector(VectorSource {

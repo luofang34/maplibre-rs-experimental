@@ -1,7 +1,7 @@
 //! Font-face fetching, local CJK/fallback SDF rasterisation, and OpenType `harfrust` shaping
 //! during tile symbol asset loading.
 
-use std::collections::{BTreeSet, HashMap};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use super::{
     requests::GlyphRequests, AssetFailure, AtlasBuilder, SymbolAssetConfig, SymbolAssetError,
@@ -16,7 +16,7 @@ pub(super) async fn load_fonts_and_shaping<HC: HttpClient>(
     client: &SourceClient<HC>,
     config: SymbolAssetConfig<'_>,
     fonts: GlyphRequests,
-    labels: HashMap<String, BTreeSet<String>>,
+    labels: HashMap<String, HashSet<String>>,
     builder: &mut AtlasBuilder,
 ) -> Result<(), SymbolAssetError> {
     if let Some(style) = config.style {
@@ -27,7 +27,7 @@ pub(super) async fn load_fonts_and_shaping<HC: HttpClient>(
         .and_then(|style| style.local_ideograph_font_family.as_deref());
 
     for (font, characters) in fonts {
-        let mut remote_chars = BTreeSet::new();
+        let mut remote_chars = HashSet::default();
         let mut local_cjk = Vec::new();
         let has_registered = global_font_system().has_registered_stack(&font);
 
@@ -89,16 +89,47 @@ pub(super) async fn load_fonts_and_shaping<HC: HttpClient>(
             }
         }
 
-        let ranges: BTreeSet<u32> = remote_chars.iter().map(|code| (code / 256) * 256).collect();
-        let fetched_ranges = futures::future::try_join_all(
+        let mut ranges: Vec<u32> = remote_chars.iter().map(|code| (code / 256) * 256).collect();
+        ranges.sort_unstable();
+        ranges.dedup();
+        let fetched_ranges = crate::util::async_join::try_join_all_concurrent(
             ranges
                 .into_iter()
-                .map(|range| super::glyph_range(client, config.glyphs, &font, range)),
+                .map(|range| super::glyph_range(client, config.glyphs, &font, range))
+                .collect(),
         )
         .await?;
+        let mut had_any_pbf = false;
         for glyphs in fetched_ranges.into_iter().flatten() {
+            had_any_pbf = true;
             builder.glyph_subset(&font, &glyphs, Some(&remote_chars));
         }
+
+        #[cfg(target_arch = "wasm32")]
+        if (config.glyphs.is_none() || !had_any_pbf) && !remote_chars.is_empty() {
+            let fallback: Vec<(u32, char)> = remote_chars
+                .iter()
+                .filter_map(|&code| {
+                    let already = builder
+                        .atlas
+                        .glyphs
+                        .get(&font)
+                        .is_some_and(|map| map.contains_key(&code));
+                    (!already)
+                        .then(|| char::from_u32(code).map(|ch| (code, ch)))
+                        .flatten()
+                })
+                .collect();
+            if !fallback.is_empty() {
+                let family = ideograph_family.or(Some("sans-serif"));
+                for (code, glyph) in
+                    crate::font::rasterize_canvas2d_chars_sdf(family, &font, &fallback)
+                {
+                    builder.pack_rasterized_codepoint(&font, code, &glyph);
+                }
+            }
+        }
+        let _ = had_any_pbf;
 
         let mut fallback_used = false;
         if (has_registered || cfg!(not(target_arch = "wasm32")))
@@ -184,7 +215,7 @@ fn shape_stack_labels(
     ideograph_family: Option<&str>,
     has_registered: bool,
     fallback_used: bool,
-    stack_labels: &BTreeSet<String>,
+    stack_labels: &HashSet<String>,
     builder: &mut AtlasBuilder,
 ) {
     if !has_registered && !(ideograph_family.is_some() && fallback_used) {

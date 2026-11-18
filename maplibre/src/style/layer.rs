@@ -1,11 +1,9 @@
 //! Layer identity, visibility and typed paint properties.
 
-use std::{
-    collections::HashMap,
-    hash::{Hash, Hasher},
-};
+use std::hash::{Hash, Hasher};
 
 use cint::{Alpha, EncodedSrgb};
+use rustc_hash::FxHashMap as HashMap;
 use serde::{Deserialize, Serialize};
 
 pub use crate::style::property::{
@@ -20,7 +18,9 @@ use crate::style::{
 mod datum;
 mod fill_outline;
 mod paint;
+mod paint_from_value;
 mod serialization;
+mod symbol_serde;
 pub use datum::{ElevationDatum, ExtrusionPart};
 pub use paint::{
     BackgroundPaint, CustomPaint, FillExtrusionPaint, FillPaint, LinePaint, RasterPaint,
@@ -124,6 +124,15 @@ pub enum LayerVisibility {
     None,
 }
 
+/// Bitflag: layer paint or symbol layout reads `["id"]` / `["geometry-type"]`.
+pub(crate) const FLAG_READS_IDENTITY: u8 = 1;
+/// Bitflag: layer filter, paint or layout reads `["within", ...]` / `["distance", ...]`.
+pub(crate) const FLAG_READS_GEOMETRY: u8 = 2;
+/// Bitflag: layer paint reads `["feature-state", ...]`.
+pub(crate) const FLAG_READS_FEATURE_STATE: u8 = 4;
+/// Bitflag: layer geometry-affecting properties read `["feature-state", ...]`.
+pub(crate) const FLAG_GEOM_READS_FEATURE_STATE: u8 = 8;
+
 /// One entry in the style's painter order. Equality and hashing use only the layer ID.
 /// Zoom bounds control display visibility independently of source tile zoom limits.
 #[derive(Debug, Clone)]
@@ -152,9 +161,12 @@ pub struct StyleLayer {
     /// Whether the layer is drawn at all.
     pub visibility: LayerVisibility,
     /// Per-property `<prop>-transition` timing declarations carried in `paint`.
-    pub transitions: std::collections::BTreeMap<String, crate::style::transitions::TransitionSpec>,
+    pub transitions: rustc_hash::FxHashMap<String, crate::style::transitions::TransitionSpec>,
     /// Properties without a typed representation, retained for diagnostics and round trips.
     pub unrecognized: LayerProperties,
+    /// Precomputed input bitmask from deserialization, avoiding `Serialize` round-trips.
+    #[doc(hidden)]
+    pub input_flags: Option<u8>,
 }
 
 impl StyleLayer {
@@ -266,6 +278,7 @@ impl Default for StyleLayer {
             visibility: LayerVisibility::Visible,
             transitions: Default::default(),
             unrecognized: Default::default(),
+            input_flags: None,
         }
     }
 }

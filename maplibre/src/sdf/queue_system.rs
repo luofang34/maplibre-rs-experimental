@@ -30,6 +30,24 @@ pub fn queue_system(
         return Ok(());
     }
     super::covering::update(world, style, view_state, &renderer.device, &renderer.queue);
+    if world
+        .resources
+        .get::<SymbolCovering>()
+        .is_none_or(|covering| covering.tiles.is_empty())
+    {
+        return if world
+            .resources
+            .get::<RenderPhase<TranslucentItem>>()
+            .is_some()
+            && matches!(
+                world.resources.get::<Eventually<SymbolBufferPool>>(),
+                Some(Initialized(_))
+            ) {
+            Ok(())
+        } else {
+            Err(SystemError::Dependencies)
+        };
+    }
     let Some((covering, phase, Initialized(pool))) = world.resources.query_mut::<(
         &SymbolCovering,
         &mut RenderPhase<TranslucentItem>,

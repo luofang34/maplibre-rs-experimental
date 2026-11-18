@@ -76,6 +76,12 @@ impl Parser {
         }
     }
 
+    #[inline(never)]
+    pub(super) fn push_index_key(&mut self, index: usize) {
+        use std::fmt::Write;
+        let _ = write!(self.key, "[{index}]");
+    }
+
     /// Parses the element at `index` of the current array.
     pub(super) fn parse_at(
         &mut self,
@@ -84,7 +90,7 @@ impl Parser {
         expected: Option<&Type>,
     ) -> Result<Expression> {
         let length = self.key.len();
-        self.key.push_str(&format!("[{index}]"));
+        self.push_index_key(index);
         let result = self.parse(json, expected);
         self.key.truncate(length);
         result
@@ -116,7 +122,7 @@ impl Parser {
         expected: Option<&Type>,
     ) -> Result<Expression> {
         let length = self.key.len();
-        self.key.push_str(&format!("[{index}]"));
+        self.push_index_key(index);
         let result = self.parse_with(json, expected, Annotation::Omit);
         self.key.truncate(length);
         result

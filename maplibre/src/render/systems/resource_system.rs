@@ -39,7 +39,8 @@ impl System for ResourceSystem {
                     ..
                 },
             world,
-            ..
+            style,
+            view_state,
         }: &mut MapContext,
     ) -> SystemResult {
         if world
@@ -164,7 +165,23 @@ impl System for ResourceSystem {
             .with_buffer_destroyer(wgpu::Buffer::destroy)
         });
 
-        mask_pipeline.initialize(|| {
+        let transition = style.projection.as_ref().map_or(0.0, |spec| {
+            spec.projection_type
+                .globe_transition(view_state.zoom().value())
+        });
+        let want_globe = transition > 0.0;
+        let want_flat = transition < 1.0 || style.terrain.is_some();
+        let need_flat = want_flat
+            && match mask_pipeline {
+                Eventually::Uninitialized => true,
+                Eventually::Initialized(mask) => mask.flat.is_none(),
+            };
+        let need_globe = want_globe
+            && match mask_pipeline {
+                Eventually::Uninitialized => true,
+                Eventually::Initialized(mask) => mask.globe.is_none(),
+            };
+        if matches!(mask_pipeline, Eventually::Uninitialized) || need_flat || need_globe {
             let options = crate::render::resource::TilePipelineOptions {
                 depth_stencil_enabled: true,
                 update_stencil: true,
@@ -173,36 +190,51 @@ impl System for ResourceSystem {
                 multisampling: surface.is_multisampling_supported(settings.msaa),
                 textured: false,
             };
-            let flat_shader = shaders::FlatTileMaskShader {
-                format: surface.surface_format(),
-            };
-            let flat = TilePipeline::new(
-                "mask_pipeline_flat".into(),
-                *settings,
-                flat_shader.describe_vertex(),
-                flat_shader.describe_fragment(),
-                options,
-            )
-            .describe_render_pipeline()
-            .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
-
-            let globe_shader = shaders::TileMaskShader {
-                format: surface.surface_format(),
-                draw_colors: false,
-                debug_lines: false,
-            };
-            let globe = TilePipeline::new(
-                "mask_pipeline".into(),
-                *settings,
-                globe_shader.describe_vertex(),
-                globe_shader.describe_fragment(),
-                options,
-            )
-            .describe_render_pipeline()
-            .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
-
-            MaskPipeline { flat, globe }
-        });
+            let mask = mask_pipeline.initialize(|| MaskPipeline {
+                flat: None,
+                globe: None,
+            });
+            if need_flat {
+                let flat_shader = shaders::FlatTileMaskShader {
+                    format: surface.surface_format(),
+                };
+                mask.flat = Some(
+                    TilePipeline::new(
+                        "mask_pipeline_flat".into(),
+                        *settings,
+                        flat_shader.describe_vertex(),
+                        flat_shader.describe_fragment(),
+                        options,
+                    )
+                    .describe_render_pipeline()
+                    .initialize_with_prefix_layouts(
+                        device,
+                        &[projection_resources.bind_group_layout()],
+                    ),
+                );
+            }
+            if need_globe {
+                let globe_shader = shaders::TileMaskShader {
+                    format: surface.surface_format(),
+                    draw_colors: false,
+                    debug_lines: false,
+                };
+                mask.globe = Some(
+                    TilePipeline::new(
+                        "mask_pipeline".into(),
+                        *settings,
+                        globe_shader.describe_vertex(),
+                        globe_shader.describe_fragment(),
+                        options,
+                    )
+                    .describe_render_pipeline()
+                    .initialize_with_prefix_layouts(
+                        device,
+                        &[projection_resources.bind_group_layout()],
+                    ),
+                );
+            }
+        }
 
         Ok(())
     }

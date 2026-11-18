@@ -1,8 +1,9 @@
 //! Extrudes clipped polar tile boundaries of subdivided fill polygons to the globe poles.
 
-use std::{collections::HashMap, ops::Range};
+use std::ops::Range;
 
 use lyon::tessellation::{VertexBuffers, VertexId};
+use rustc_hash::FxHashMap as HashMap;
 
 use super::{vertex_index, FillSubdivisionOptions, NORTH_POLE_Y, SOUTH_POLE_Y};
 use crate::{coords::EXTENT_UINT, render::ShaderVertex};
@@ -26,7 +27,7 @@ pub(super) fn append_pole_quads<I>(
     let mut min_y = f32::INFINITY;
     let mut max_y = f32::NEG_INFINITY;
     let mut edge_counts: HashMap<(usize, usize), u32> =
-        HashMap::with_capacity(input_end - index_start);
+        HashMap::with_capacity_and_hasher(input_end - index_start, Default::default());
 
     for offset in (index_start..input_end).step_by(3) {
         let triangle = [

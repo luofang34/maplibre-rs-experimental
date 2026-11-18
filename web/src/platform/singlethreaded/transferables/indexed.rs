@@ -1,18 +1,18 @@
-//! Spatial and linear tile query indexes crossing the worker FlatBuffer boundary.
+//! Spatial and linear tile query indexes crossing the worker binary boundary.
 use std::sync::Arc;
 
-use maplibre::{
-    coords::ZoomLevel,
-    io::geometry_index::{
-        wire::{WireGeometry, WireTileIndex},
-        LazyMvtIndex,
-    },
+use maplibre::io::geometry_index::{
+    wire::{WireGeometry, WireTileIndex},
+    LazyMvtIndex,
 };
 
 use super::*;
 
 const LAZY_MVT_MAGIC: [u8; 4] = *b"MLIX";
 const LAZY_MVT_HEADER_LEN: usize = 20;
+const WIRE_INDEX_MAGIC: [u8; 4] = *b"MLWI";
+const WIRE_INDEX_HEADER_LEN: usize = 48;
+const WIRE_GEOM_BYTES: usize = 40;
 
 fn encode_lazy_mvt(
     coords: WorldTileCoords,
@@ -49,11 +49,9 @@ fn parse_lazy_mvt_header(payload: &[u8]) -> Option<(WorldTileCoords, bool, Optio
     if payload.len() < LAZY_MVT_HEADER_LEN || payload[..4] != LAZY_MVT_MAGIC {
         return None;
     }
-    let x = i32::from_le_bytes(payload[4..8].try_into().ok()?);
-    let y = i32::from_le_bytes(payload[8..12].try_into().ok()?);
-    let z = ZoomLevel::new(payload[12]);
+    let coords = read_coords_at(payload, 4)?;
     let compressed = payload[13] != 0;
-    let source_len_tag = u32::from_le_bytes(payload[16..20].try_into().ok()?);
+    let source_len_tag = read_u32_le(payload, 16)?;
     let (source, mvt_offset) = if source_len_tag == u32::MAX {
         (None, LAZY_MVT_HEADER_LEN)
     } else {
@@ -62,8 +60,160 @@ fn parse_lazy_mvt_header(payload: &[u8]) -> Option<(WorldTileCoords, bool, Optio
         let src_bytes = payload.get(LAZY_MVT_HEADER_LEN..end)?;
         (Some(std::str::from_utf8(src_bytes).ok()?), end)
     };
-    let mvt_bytes = payload.get(mvt_offset..)?;
-    Some((WorldTileCoords { x, y, z }, compressed, source, mvt_bytes))
+    Some((coords, compressed, source, payload.get(mvt_offset..)?))
+}
+
+fn encode_wire_index(
+    coords: WorldTileCoords,
+    source: Option<&str>,
+    wire: &WireTileIndex,
+) -> FlatBufferTransferable {
+    let source_bytes = source.map(str::as_bytes);
+    let source_len = source_bytes.map_or(0, <[u8]>::len);
+    let strings_bytes: usize = wire.strings.iter().map(|s| 4 + s.len()).sum();
+    let total = WIRE_INDEX_HEADER_LEN
+        + source_len
+        + strings_bytes
+        + wire.prop_blobs.len()
+        + wire.prop_offsets.len() * 4
+        + wire.geometries.len() * WIRE_GEOM_BYTES
+        + wire.ring_ends.len() * 4
+        + wire.xy.len() * 8;
+    let mut out = Vec::with_capacity(total);
+    out.extend_from_slice(&WIRE_INDEX_MAGIC);
+    out.extend_from_slice(&coords.x.to_le_bytes());
+    out.extend_from_slice(&coords.y.to_le_bytes());
+    out.push(u8::from(coords.z));
+    out.push(u8::from(wire.is_spatial));
+    out.push(u8::from(source_bytes.is_some()));
+    out.push(0);
+    out.extend_from_slice(&(source_len as u32).to_le_bytes());
+    out.extend_from_slice(&(wire.strings.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(wire.prop_blobs.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(wire.prop_offsets.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(wire.geometries.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(wire.ring_ends.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(wire.xy.len() as u32).to_le_bytes());
+    out.extend_from_slice(&0_u32.to_le_bytes());
+
+    if let Some(bytes) = source_bytes {
+        out.extend_from_slice(bytes);
+    }
+    for s in &wire.strings {
+        out.extend_from_slice(&(s.len() as u32).to_le_bytes());
+        out.extend_from_slice(s.as_bytes());
+    }
+    out.extend_from_slice(&wire.prop_blobs);
+    for &off in &wire.prop_offsets {
+        out.extend_from_slice(&off.to_le_bytes());
+    }
+    for g in &wire.geometries {
+        out.extend_from_slice(&g.id.to_le_bytes());
+        out.extend_from_slice(&g.source_layer_idx.to_le_bytes());
+        out.extend_from_slice(&g.prop_group_idx.to_le_bytes());
+        out.extend_from_slice(&g.feature_index.to_le_bytes());
+        out.extend_from_slice(&g.ring_start.to_le_bytes());
+        out.extend_from_slice(&g.ring_count.to_le_bytes());
+        out.extend_from_slice(&g.coord_start.to_le_bytes());
+        out.extend_from_slice(&g.coord_count.to_le_bytes());
+        out.push(g.kind);
+        out.push(u8::from(g.has_id));
+        out.extend_from_slice(&[0, 0]);
+    }
+    for &end in &wire.ring_ends {
+        out.extend_from_slice(&end.to_le_bytes());
+    }
+    for &val in &wire.xy {
+        out.extend_from_slice(&val.to_le_bytes());
+    }
+    FlatBufferTransferable::from_vec(WebMessageTag::LayerIndexed, out, 0)
+}
+
+fn parse_wire_header(payload: &[u8]) -> Option<(WorldTileCoords, bool, Option<&str>, usize)> {
+    if payload.len() < WIRE_INDEX_HEADER_LEN || payload[..4] != WIRE_INDEX_MAGIC {
+        return None;
+    }
+    let coords = read_coords_at(payload, 4)?;
+    let has_source = payload[14] != 0;
+    let source_len = read_u32_le(payload, 16)? as usize;
+    let end = WIRE_INDEX_HEADER_LEN.checked_add(source_len)?;
+    let source = if has_source {
+        let slice = payload.get(WIRE_INDEX_HEADER_LEN..end)?;
+        Some(std::str::from_utf8(slice).ok()?)
+    } else {
+        None
+    };
+    Some((coords, payload[13] != 0, source, end))
+}
+
+fn decode_wire_index(payload: &[u8]) -> Option<TileIndex> {
+    let (_, is_spatial, _, mut cursor) = parse_wire_header(payload)?;
+    let strings_cnt = read_u32_le(payload, 20)? as usize;
+    let prop_blobs_len = read_u32_le(payload, 24)? as usize;
+    let prop_offsets_cnt = read_u32_le(payload, 28)? as usize;
+    let geoms_cnt = read_u32_le(payload, 32)? as usize;
+    let ring_ends_cnt = read_u32_le(payload, 36)? as usize;
+    let xy_cnt = read_u32_le(payload, 40)? as usize;
+
+    let mut strings = Vec::with_capacity(strings_cnt);
+    for _ in 0..strings_cnt {
+        let len = read_u32_le(payload, cursor)? as usize;
+        cursor += 4;
+        let end = cursor.checked_add(len)?;
+        let s = std::str::from_utf8(payload.get(cursor..end)?)
+            .ok()?
+            .to_owned();
+        strings.push(s);
+        cursor = end;
+    }
+    let blobs_end = cursor.checked_add(prop_blobs_len)?;
+    let prop_blobs = payload.get(cursor..blobs_end)?.to_vec();
+    cursor = blobs_end;
+
+    let mut prop_offsets = Vec::with_capacity(prop_offsets_cnt);
+    for _ in 0..prop_offsets_cnt {
+        prop_offsets.push(read_u32_le(payload, cursor)?);
+        cursor += 4;
+    }
+    let mut geometries = Vec::with_capacity(geoms_cnt);
+    for _ in 0..geoms_cnt {
+        let g_slice = payload.get(cursor..cursor + WIRE_GEOM_BYTES)?;
+        geometries.push(WireGeometry {
+            id: read_u64_le(g_slice, 0)?,
+            source_layer_idx: read_u32_le(g_slice, 8)?,
+            prop_group_idx: read_u32_le(g_slice, 12)?,
+            feature_index: read_u32_le(g_slice, 16)?,
+            ring_start: read_u32_le(g_slice, 20)?,
+            ring_count: read_u32_le(g_slice, 24)?,
+            coord_start: read_u32_le(g_slice, 28)?,
+            coord_count: read_u32_le(g_slice, 32)?,
+            kind: g_slice[36],
+            has_id: g_slice[37] != 0,
+        });
+        cursor += WIRE_GEOM_BYTES;
+    }
+    let mut ring_ends = Vec::with_capacity(ring_ends_cnt);
+    for _ in 0..ring_ends_cnt {
+        ring_ends.push(read_u32_le(payload, cursor)?);
+        cursor += 4;
+    }
+    let mut xy = Vec::with_capacity(xy_cnt);
+    for _ in 0..xy_cnt {
+        xy.push(read_f64_le(payload, cursor)?);
+        cursor += 8;
+    }
+    Some(
+        WireTileIndex {
+            is_spatial,
+            strings,
+            prop_blobs,
+            prop_offsets,
+            geometries,
+            ring_ends,
+            xy,
+        }
+        .into_tile_index(),
+    )
 }
 
 impl LayerIndexed for FlatBufferTransferable {
@@ -78,152 +228,28 @@ impl LayerIndexed for FlatBufferTransferable {
             }
         }
         let wire = WireTileIndex::from_tile_index(&index);
-        let estimated = 256
-            + wire.prop_blobs.len()
-            + wire.prop_offsets.len() * 4
-            + wire.geometries.len() * std::mem::size_of::<FlatIndexedGeometry>()
-            + wire.ring_ends.len() * 4
-            + wire.xy.len() * 8;
-        let mut inner_builder = FlatBufferBuilder::with_capacity(estimated);
-
-        let source_fb = source.as_deref().map(|s| inner_builder.create_string(s));
-        let string_offsets: Vec<_> = wire
-            .strings
-            .iter()
-            .map(|s| inner_builder.create_string(s))
-            .collect();
-        let strings_fb = inner_builder.create_vector(&string_offsets);
-        let prop_blobs_fb = inner_builder.create_vector(&wire.prop_blobs);
-        let prop_offsets_fb = inner_builder.create_vector(&wire.prop_offsets);
-        let flat_geoms: Vec<FlatIndexedGeometry> = wire
-            .geometries
-            .iter()
-            .map(|g| {
-                FlatIndexedGeometry::new(
-                    g.id,
-                    g.source_layer_idx,
-                    g.prop_group_idx,
-                    g.feature_index,
-                    g.ring_start,
-                    g.ring_count,
-                    g.coord_start,
-                    g.coord_count,
-                    g.kind,
-                    g.has_id,
-                )
-            })
-            .collect();
-        let geometries_fb = inner_builder.create_vector(&flat_geoms);
-        let ring_ends_fb = inner_builder.create_vector(&wire.ring_ends);
-        let xy_fb = inner_builder.create_vector(&wire.xy);
-
-        let mut builder = FlatLayerIndexedBuilder::new(&mut inner_builder);
-        builder.add_coords(&FlatWorldTileCoords::new(
-            coords.x,
-            coords.y,
-            coords.z.into(),
-        ));
-        if let Some(source_fb) = source_fb {
-            builder.add_source(source_fb);
-        }
-        builder.add_is_spatial(wire.is_spatial);
-        builder.add_strings(strings_fb);
-        builder.add_prop_blobs(prop_blobs_fb);
-        builder.add_prop_offsets(prop_offsets_fb);
-        builder.add_geometries(geometries_fb);
-        builder.add_ring_ends(ring_ends_fb);
-        builder.add_xy(xy_fb);
-
-        let root = builder.finish();
-        inner_builder.finish(root, None);
-        let (data, start) = inner_builder.collapse();
-        FlatBufferTransferable::from_vec(WebMessageTag::LayerIndexed, data, start)
+        encode_wire_index(coords, source.as_deref(), &wire)
     }
 
     fn coords(&self) -> WorldTileCoords {
-        if let Some((coords, _, _, _)) = parse_lazy_mvt_header(&self.data[self.start..]) {
+        if let Some((coords, _, _, _)) = parse_lazy_mvt_header(self.data()) {
             return coords;
         }
-        root_as_flat_layer_indexed(&self.data[self.start..])
-            .ok()
-            .and_then(|data| data.coords())
-            .map_or_else(WorldTileCoords::default, Into::into)
+        parse_wire_header(self.data()).map_or_else(WorldTileCoords::default, |h| h.0)
     }
 
     fn source(&self) -> Option<String> {
-        if let Some((_, _, source, _)) = parse_lazy_mvt_header(&self.data[self.start..]) {
+        if let Some((_, _, source, _)) = parse_lazy_mvt_header(self.data()) {
             return source.map(str::to_owned);
         }
-        root_as_flat_layer_indexed(&self.data[self.start..])
-            .ok()
-            .and_then(|data| data.source())
-            .map(str::to_owned)
+        parse_wire_header(self.data()).and_then(|h| h.2.map(str::to_owned))
     }
 
     fn to_tile_index(self) -> TileIndex {
-        if let Some((_, compressed, _, mvt_bytes)) = parse_lazy_mvt_header(&self.data[self.start..])
-        {
+        if let Some((_, compressed, _, mvt_bytes)) = parse_lazy_mvt_header(self.data()) {
             return TileIndex::LazyMvt(LazyMvtIndex::from_packed(Arc::from(mvt_bytes), compressed));
         }
-        let Ok(data) = root_as_flat_layer_indexed(&self.data[self.start..]) else {
-            return WireTileIndex {
-                is_spatial: false,
-                strings: Vec::new(),
-                prop_blobs: Vec::new(),
-                prop_offsets: Vec::new(),
-                geometries: Vec::new(),
-                ring_ends: Vec::new(),
-                xy: Vec::new(),
-            }
-            .into_tile_index();
-        };
-        let strings = data
-            .strings()
-            .map(|v| v.iter().map(str::to_owned).collect())
-            .unwrap_or_default();
-        let prop_blobs = data
-            .prop_blobs()
-            .map(|v| v.bytes().to_vec())
-            .unwrap_or_default();
-        let prop_offsets = data
-            .prop_offsets()
-            .map(|v| v.iter().collect())
-            .unwrap_or_default();
-        let geometries = data
-            .geometries()
-            .map(|v| {
-                v.iter()
-                    .map(|g| WireGeometry {
-                        id: g.id(),
-                        source_layer_idx: g.source_layer_idx(),
-                        prop_group_idx: g.prop_group_idx(),
-                        feature_index: g.feature_index(),
-                        ring_start: g.ring_start(),
-                        ring_count: g.ring_count(),
-                        coord_start: g.coord_start(),
-                        coord_count: g.coord_count(),
-                        kind: g.kind(),
-                        has_id: g.has_id(),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        let ring_ends = data
-            .ring_ends()
-            .map(|v| v.iter().collect())
-            .unwrap_or_default();
-        let xy = data.xy().map(|v| v.iter().collect()).unwrap_or_default();
-
-        WireTileIndex {
-            is_spatial: data.is_spatial(),
-            strings,
-            prop_blobs,
-            prop_offsets,
-            geometries,
-            ring_ends,
-            xy,
-        }
-        .into_tile_index()
+        decode_wire_index(self.data()).unwrap_or_else(|| WireTileIndex::default().into_tile_index())
     }
 }
 

@@ -2,7 +2,7 @@
 //! `mergeLines` does before it places labels along them, so a road cut into pieces is labelled
 //! as one road.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 use crate::style::expression::FeatureProperties;
 
@@ -83,8 +83,8 @@ pub(super) fn merge_lines(features: Vec<PendingLine>) -> Vec<PendingLine> {
     let mut lines = Lines {
         chunks: Vec::new(),
         merged: Vec::new(),
-        left: HashMap::new(),
-        right: HashMap::new(),
+        left: HashMap::default(),
+        right: HashMap::default(),
     };
     for (index, feature) in features.iter().enumerate() {
         lines.chunks.push(Chunk {

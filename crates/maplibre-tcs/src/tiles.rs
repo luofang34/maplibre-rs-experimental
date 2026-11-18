@@ -74,9 +74,7 @@ impl<G: TileGeometryStore> Tiles<G> {
     /// Hierarchical pyramid of resident tiles carrying component `T`.
     #[inline]
     pub fn pyramid_of<T: TileComponent>(&self) -> &TilePyramid<()> {
-        self.component_pyramids
-            .get(&TypeId::of::<T>())
-            .unwrap_or(&EMPTY_PYRAMID)
+        pyramid_by_id(&self.component_pyramids, TypeId::of::<T>())
     }
 
     /// Borrows `&T` or a tuple of shared component references from one tile.
@@ -153,16 +151,96 @@ impl<G: TileGeometryStore> Tiles<G> {
     }
 
     fn get_component<T: TileComponent>(&self, tile: Tile) -> Option<&T> {
-        let index = *self.component_indices.get(&TypeId::of::<T>())?;
-        let slots = self.components.get(&tile.coords.build_quad_key()?)?;
-        slots.get(index)?.as_ref()?.downcast_ref()
+        get_component_boxed(
+            &self.component_indices,
+            &self.components,
+            tile.coords,
+            TypeId::of::<T>(),
+        )?
+        .downcast_ref()
     }
 
     fn get_component_mut<T: TileComponent>(&mut self, tile: Tile) -> Option<&mut T> {
-        let index = *self.component_indices.get(&TypeId::of::<T>())?;
-        let slots = self.components.get_mut(&tile.coords.build_quad_key()?)?;
-        slots.get_mut(index)?.as_mut()?.downcast_mut()
+        get_component_boxed_mut(
+            &self.component_indices,
+            &mut self.components,
+            tile.coords,
+            TypeId::of::<T>(),
+        )?
+        .downcast_mut()
     }
+}
+
+#[inline(never)]
+fn pyramid_by_id(
+    pyramids: &FxHashMap<TypeId, TilePyramid<()>>,
+    type_id: TypeId,
+) -> &TilePyramid<()> {
+    pyramids.get(&type_id).unwrap_or(&EMPTY_PYRAMID)
+}
+
+#[inline(never)]
+fn lookup_component_slot(indices: &FxHashMap<TypeId, usize>, type_id: TypeId) -> Option<usize> {
+    indices.get(&type_id).copied()
+}
+
+#[inline(never)]
+fn get_component_boxed<'t>(
+    indices: &FxHashMap<TypeId, usize>,
+    components: &'t FxHashMap<Quadkey, Vec<Option<Box<dyn TileComponent>>>>,
+    coords: WorldTileCoords,
+    type_id: TypeId,
+) -> Option<&'t dyn TileComponent> {
+    let index = *indices.get(&type_id)?;
+    let slots = components.get(&coords.build_quad_key()?)?;
+    slots.get(index)?.as_deref()
+}
+
+#[inline(never)]
+fn get_component_boxed_mut<'t>(
+    indices: &FxHashMap<TypeId, usize>,
+    components: &'t mut FxHashMap<Quadkey, Vec<Option<Box<dyn TileComponent>>>>,
+    coords: WorldTileCoords,
+    type_id: TypeId,
+) -> Option<&'t mut dyn TileComponent> {
+    let index = *indices.get(&type_id)?;
+    let slots = components.get_mut(&coords.build_quad_key()?)?;
+    slots.get_mut(index)?.as_deref_mut()
+}
+
+#[inline(never)]
+fn borrow_component_slots(
+    components: &mut FxHashMap<Quadkey, Vec<Option<Box<dyn TileComponent>>>>,
+    coords: WorldTileCoords,
+) -> Option<&mut Vec<Option<Box<dyn TileComponent>>>> {
+    let key = coords.build_quad_key()?;
+    components.get_mut(&key)
+}
+
+#[inline(never)]
+fn prepare_component_slot<'t>(
+    indices: &mut FxHashMap<TypeId, usize>,
+    components: &'t mut FxHashMap<Quadkey, Vec<Option<Box<dyn TileComponent>>>>,
+    coords: WorldTileCoords,
+    type_id: TypeId,
+) -> Option<&'t mut Option<Box<dyn TileComponent>>> {
+    let key = coords.build_quad_key()?;
+    let next_index = indices.len();
+    let slot_index = *indices.entry(type_id).or_insert(next_index);
+    let slots = components.entry(key).or_default();
+    if slots.len() <= slot_index {
+        slots.resize_with(slot_index + 1, || None);
+    }
+    slots.get_mut(slot_index)
+}
+
+#[inline(never)]
+fn register_component_pyramid(
+    pyramids: &mut FxHashMap<TypeId, TilePyramid<()>>,
+    coords: WorldTileCoords,
+    type_id: TypeId,
+) {
+    pyramids.entry(type_id).or_default().insert(coords, ());
 }
 
 /// Exclusive insertion handle for a valid tile; chained inserts share the same tile record.
@@ -174,30 +252,22 @@ pub struct TileSpawnResult<'t, G: TileGeometryStore = ()> {
 impl<G: TileGeometryStore> TileSpawnResult<'_, G> {
     /// Replaces this tile's component of the same type, dropping its old value immediately.
     pub fn insert<T: TileComponent>(&mut self, component: T) -> &mut Self {
-        if let Some(key) = self.tile.coords.build_quad_key() {
-            let type_id = TypeId::of::<T>();
-            let next_index = self.tiles.component_indices.len();
-            let slot_index = *self
-                .tiles
-                .component_indices
-                .entry(type_id)
-                .or_insert(next_index);
-            let slots = self.tiles.components.entry(key).or_default();
-            if slots.len() <= slot_index {
-                slots.resize_with(slot_index + 1, || None);
-            }
-            if let Some(existing) = slots[slot_index]
-                .as_mut()
-                .and_then(|stored| stored.downcast_mut::<T>())
-            {
+        let type_id = TypeId::of::<T>();
+        if let Some(slot) = prepare_component_slot(
+            &mut self.tiles.component_indices,
+            &mut self.tiles.components,
+            self.tile.coords,
+            type_id,
+        ) {
+            if let Some(existing) = slot.as_mut().and_then(|stored| stored.downcast_mut::<T>()) {
                 *existing = component;
             } else {
-                slots[slot_index] = Some(Box::new(component));
-                self.tiles
-                    .component_pyramids
-                    .entry(type_id)
-                    .or_default()
-                    .insert(self.tile.coords, ());
+                *slot = Some(Box::new(component));
+                register_component_pyramid(
+                    &mut self.tiles.component_pyramids,
+                    self.tile.coords,
+                    type_id,
+                );
             }
         }
         self
@@ -238,8 +308,7 @@ pub trait ComponentQueryMut {
         tiles: &mut Tiles<G>,
         tile: Tile,
     ) -> Option<Self::MutItem<'_>> {
-        let key = tile.coords.build_quad_key()?;
-        let slots = tiles.components.get_mut(&key)?;
+        let slots = borrow_component_slots(&mut tiles.components, tile.coords)?;
         let mut slice = DisjointSliceBorrow::new(slots);
         Self::borrow(&tiles.component_indices, &mut slice)
     }
@@ -252,7 +321,7 @@ impl<T: TileComponent> ComponentQueryMut for &T {
         component_indices: &FxHashMap<TypeId, usize>,
         slice: &mut DisjointSliceBorrow<'t, Option<Box<dyn TileComponent>>>,
     ) -> Option<Self::MutItem<'t>> {
-        let index = *component_indices.get(&TypeId::of::<T>())?;
+        let index = lookup_component_slot(component_indices, TypeId::of::<T>())?;
         slice.borrow_shared(index)?.as_ref()?.downcast_ref()
     }
 
@@ -271,7 +340,7 @@ impl<T: TileComponent> ComponentQueryMut for &mut T {
         component_indices: &FxHashMap<TypeId, usize>,
         slice: &mut DisjointSliceBorrow<'t, Option<Box<dyn TileComponent>>>,
     ) -> Option<Self::MutItem<'t>> {
-        let index = *component_indices.get(&TypeId::of::<T>())?;
+        let index = lookup_component_slot(component_indices, TypeId::of::<T>())?;
         slice.borrow_mut(index)?.as_mut()?.downcast_mut()
     }
 

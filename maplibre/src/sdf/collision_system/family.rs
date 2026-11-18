@@ -5,7 +5,7 @@
 //! their own paint and the same placement, so they neither collide with one another nor
 //! with the lowest, and a query finds a placed label in each of them.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 use super::layer_pass::{empty_metadata, write_feature_metadata};
 use crate::{
@@ -33,7 +33,7 @@ pub(super) type Outcomes = Vec<Vec<Option<Outcome>>>;
 /// The layer that places for each symbol layer GL JS would group with others: the lowest of
 /// its group in style order. Layers that are alone are absent.
 pub(super) fn leaders(style: &Style) -> HashMap<String, String> {
-    let mut groups: HashMap<String, Vec<(u32, &str)>> = HashMap::new();
+    let mut groups: HashMap<String, Vec<(u32, &str)>> = HashMap::default();
     for layer in style.layers.iter().filter(|layer| layer.type_ == "symbol") {
         if let Some(key) = layer.layout_group_key() {
             groups
@@ -42,7 +42,7 @@ pub(super) fn leaders(style: &Style) -> HashMap<String, String> {
                 .push((layer.index, &layer.id));
         }
     }
-    let mut leaders = HashMap::new();
+    let mut leaders = HashMap::default();
     for members in groups.values().filter(|members| members.len() > 1) {
         let Some((_, lowest)) = members.iter().min_by_key(|(index, _)| *index) else {
             continue;

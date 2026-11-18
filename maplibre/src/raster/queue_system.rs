@@ -31,7 +31,7 @@ pub fn queue_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
-    let departing_opacity: std::collections::HashMap<String, f32> = world
+    let departing_opacity: rustc_hash::FxHashMap<String, f32> = world
         .resources
         .get::<RasterCrossFade>()
         .map(|fade| {

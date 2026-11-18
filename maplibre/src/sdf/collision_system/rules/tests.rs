@@ -12,7 +12,7 @@ fn rules(properties: serde_json::Value) -> PlacementRules {
             .collect(),
         ..Default::default()
     };
-    PlacementRules::new(&paint, &FeatureProperties::new(), 12.0)
+    PlacementRules::new(&paint, &FeatureProperties::default(), 12.0)
 }
 
 #[test]

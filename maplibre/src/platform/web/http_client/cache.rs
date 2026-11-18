@@ -2,11 +2,12 @@
 
 use std::{
     cell::RefCell,
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     sync::{Arc, LazyLock, Mutex},
 };
 
 use js_sys::{ArrayBuffer, Reflect, Uint8Array};
+use rustc_hash::FxHashMap as HashMap;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Cache, CacheStorage, Response, ResponseInit};
@@ -31,7 +32,7 @@ struct LruState {
 impl LruState {
     fn new(cap_bytes: usize) -> Self {
         Self {
-            entries: HashMap::new(),
+            entries: HashMap::default(),
             order: VecDeque::new(),
             bytes: 0,
             clock: 0,
@@ -236,4 +237,50 @@ pub(super) async fn put_browser_cache(url: &str, body: &[u8]) {
         return;
     };
     let _ = JsFuture::from(cache.put_with_str(url, &response)).await;
+}
+
+const DECODED_RGBA_MAGIC: &[u8; 4] = b"MLRG";
+const DECODED_RGBA_MAX_BYTES: usize = 8 * 1024 * 1024;
+
+/// Returns a previously cached pre-decoded RGBA sprite sheet from persistent `CacheStorage`.
+pub(crate) async fn match_decoded_rgba_cache(url: &str) -> Option<image::RgbaImage> {
+    if !crate::io::source_client::is_remote_http_url(url) {
+        return None;
+    }
+    let key = format!("https://maplibre-decoded.local/v1/{url}");
+    let bytes = match_browser_cache(&key).await?;
+    if bytes.get(0..4)? != DECODED_RGBA_MAGIC {
+        return None;
+    }
+    let width = u32::from_le_bytes(bytes.get(4..8)?.try_into().ok()?);
+    let height = u32::from_le_bytes(bytes.get(8..12)?.try_into().ok()?);
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let expected = (width as usize)
+        .checked_mul(height as usize)?
+        .checked_mul(4)?;
+    let raw = bytes.get(12..)?;
+    if raw.len() != expected {
+        return None;
+    }
+    image::RgbaImage::from_raw(width, height, raw.to_vec())
+}
+
+/// Persists a decoded RGBA sprite sheet in `CacheStorage` in the background for sub-millisecond warm reloads.
+pub(crate) fn spawn_put_decoded_rgba_cache(url: &str, image: &image::RgbaImage) {
+    if !crate::io::source_client::is_remote_http_url(url)
+        || image.as_raw().len() > DECODED_RGBA_MAX_BYTES
+    {
+        return;
+    }
+    let key = format!("https://maplibre-decoded.local/v1/{url}");
+    let mut payload = Vec::with_capacity(12 + image.as_raw().len());
+    payload.extend_from_slice(DECODED_RGBA_MAGIC);
+    payload.extend_from_slice(&image.width().to_le_bytes());
+    payload.extend_from_slice(&image.height().to_le_bytes());
+    payload.extend_from_slice(image.as_raw());
+    wasm_bindgen_futures::spawn_local(async move {
+        put_browser_cache(&key, &payload).await;
+    });
 }

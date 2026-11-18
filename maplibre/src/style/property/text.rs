@@ -56,7 +56,7 @@ impl TextField {
                     .to_string()
             });
             let font = section.font.as_ref().map_or_else(String::new, |font| {
-                serde_json::to_string(&font.split(',').collect::<Vec<_>>()).unwrap_or_default()
+                crate::util::json::encode_json_str_list(font.split(','))
             });
             encoded.push(FORMAT_SECTION);
             encoded.push_str(
@@ -136,13 +136,8 @@ impl TextField {
             sections.push(TextSection {
                 length: content.chars().count(),
                 scale: scale.parse().ok(),
-                color: csscolorparser::parse(color)
-                    .ok()
-                    .map(|color| color.to_array()),
-                font: serde_json::from_str::<Vec<String>>(font)
-                    .ok()
-                    .filter(|fonts| !fonts.is_empty())
-                    .map(|fonts| fonts.join(",")),
+                color: crate::util::css_color::parse_css_color(color),
+                font: crate::style::property::text::parse_font_list(font),
                 image: (!image.is_empty()).then(|| image.to_owned()),
             });
         }
@@ -225,13 +220,27 @@ fn image_name(value: &Value) -> Option<String> {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FormattedText(pub TextField);
 
-/// Text with sections is written as the `format` expression that makes it, so a layer that is
-/// serialized and parsed again keeps its sections and images.
-impl Serialize for FormattedText {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+impl FormattedText {
+    pub(crate) fn hash_layout_key(&self, hasher: &mut impl std::hash::Hasher) {
+        use std::hash::Hash;
+
+        let TextField(text, sections) = &self.0;
+        text.hash(hasher);
+        sections.len().hash(hasher);
+        for section in sections {
+            section.length.hash(hasher);
+            section.scale.map(f32::to_bits).hash(hasher);
+            section.color.map(|c| c.map(f32::to_bits)).hash(hasher);
+            section.font.hash(hasher);
+            section.image.hash(hasher);
+        }
+    }
+
+    /// Converts to the same JSON representation emitted by `Serialize`.
+    pub(crate) fn to_json(&self) -> serde_json::Value {
         let TextField(text, sections) = &self.0;
         if sections.is_empty() {
-            return serializer.serialize_str(text);
+            return serde_json::Value::String(text.clone());
         }
         let mut format = vec![serde_json::json!("format")];
         let mut characters = text.chars();
@@ -258,7 +267,42 @@ impl Serialize for FormattedText {
             };
             format.push(serde_json::json!(["image", image]));
         }
-        serde_json::Value::Array(format).serialize(serializer)
+        serde_json::Value::Array(format)
+    }
+}
+
+/// Parses a serialized JSON string array of font names into a comma-joined font stack.
+pub(super) fn parse_font_list(raw: &str) -> Option<String> {
+    if raw.is_empty() {
+        return None;
+    }
+    let serde_json::Value::Array(items) =
+        serde_json::from_slice::<serde_json::Value>(raw.as_bytes()).ok()?
+    else {
+        return None;
+    };
+    if items.is_empty() {
+        return None;
+    }
+    let mut joined = String::new();
+    for item in &items {
+        let s = item.as_str()?;
+        if !joined.is_empty() {
+            joined.push(',');
+        }
+        joined.push_str(s);
+    }
+    Some(joined)
+}
+
+/// Text with sections is written as the `format` expression that makes it, so a layer that is
+/// serialized and parsed again keeps its sections and images.
+impl Serialize for FormattedText {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        if self.0 .1.is_empty() {
+            return serializer.serialize_str(&self.0 .0);
+        }
+        self.to_json().serialize(serializer)
     }
 }
 

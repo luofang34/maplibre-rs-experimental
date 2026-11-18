@@ -1,7 +1,5 @@
 #![allow(clippy::expect_used)]
 
-use std::collections::HashMap;
-
 use geo_types::{LineString, Point};
 
 use super::Tiles;
@@ -30,10 +28,14 @@ fn clearing_tiles_discards_geometry_queries_before_coordinates_are_reused() {
                     (0.0, 0.0),
                     (EXTENT, EXTENT),
                 ])),
-                properties: std::sync::Arc::new(HashMap::from([(
-                    "name".into(),
-                    crate::style::expression::Value::String("road".into()),
-                )])),
+                properties: std::sync::Arc::new(
+                    [(
+                        "name".into(),
+                        crate::style::expression::Value::String("road".into()),
+                    )]
+                    .into_iter()
+                    .collect(),
+                ),
                 source_layer: "roads".into(),
                 id: None,
                 feature_index: 0,

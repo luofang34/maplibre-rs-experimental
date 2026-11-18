@@ -1,5 +1,7 @@
 //! What each character of a label is drawn with, and how wide its lines are.
-use std::{collections::HashMap, ops::Range};
+use std::ops::Range;
+
+use rustc_hash::FxHashMap as HashMap;
 
 use super::super::layout::CollectedSymbol;
 use crate::{
@@ -48,7 +50,7 @@ pub(super) fn glyphs_for<'a>(
 }
 
 static NO_GLYPHS: std::sync::LazyLock<HashMap<u32, AtlasEntry>> =
-    std::sync::LazyLock::new(HashMap::new);
+    std::sync::LazyLock::new(HashMap::default);
 
 /// The style of each of the `count` characters of the label: its section's scale, colour and
 /// font, or the layer's own for text that is all one section.

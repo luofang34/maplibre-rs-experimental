@@ -2,9 +2,8 @@
 
 #![deny(missing_docs)]
 
-use std::collections::HashMap;
-
 pub use cint::*;
+use rustc_hash::FxHashMap as HashMap;
 use serde::{Deserialize, Serialize};
 
 pub(crate) mod arabic_shaping;
@@ -41,7 +40,7 @@ use crate::{
 
 /// Ordered layers, named data sources and initial view settings from a style document.
 /// [`Self::validate`] checks layer rendering capabilities, not all style-spec constraints.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Debug, Clone)]
 pub struct Style {
     /// Style specification version, normally 8; deserialization does not validate the version.
     pub version: u16,
@@ -55,7 +54,6 @@ pub struct Style {
     #[serde(default)]
     pub sources: HashMap<String, Source>,
     /// Painter order from bottom to top; deserialization assigns zero-based layer indices.
-    #[serde(deserialize_with = "layer_order::deserialize_layers")]
     pub layers: Vec<StyleLayer>,
     /// URL template for font glyph ranges.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -180,12 +178,56 @@ fn one() -> f32 {
     1.0
 }
 
+impl Style {
+    /// An empty version-8 style without default layers (avoids linking `default_style`).
+    pub fn empty() -> Self {
+        Self {
+            version: 8,
+            name: None,
+            metadata: Default::default(),
+            sources: Default::default(),
+            layers: Vec::new(),
+            glyphs: None,
+            font_faces: None,
+            local_ideograph_font_family: crate::font::default_local_ideograph_font_family(),
+            sprite: None,
+            center: None,
+            center_altitude: None,
+            zoom: None,
+            bearing: None,
+            pitch: None,
+            roll: None,
+            projection: None,
+            light: None,
+            sky: None,
+            terrain: None,
+            transition: None,
+            active_transitions: Default::default(),
+            state: Default::default(),
+            global_state: Default::default(),
+            feature_state: Default::default(),
+            state_templates: Default::default(),
+            light_template: None,
+            images: Default::default(),
+            revision_state: Default::default(),
+        }
+    }
+}
+
 mod default_style;
+mod from_value;
 mod layer_order;
 pub mod mutation;
 pub mod pattern_key;
 pub(crate) mod revision;
 pub mod state;
+
+impl<'de> Deserialize<'de> for Style {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Self::from_json_value(&value).map_err(serde::de::Error::custom)
+    }
+}
 
 #[cfg(test)]
 mod tests;

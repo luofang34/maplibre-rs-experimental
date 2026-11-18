@@ -17,9 +17,11 @@ fn atlas() -> Arc<SymbolAtlas> {
                     ..Default::default()
                 },
             )]
-            .into(),
+            .into_iter()
+            .collect(),
         )]
-        .into(),
+        .into_iter()
+        .collect(),
         ..Default::default()
     })
 }

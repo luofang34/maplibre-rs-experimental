@@ -55,7 +55,8 @@ fn kernel_config() -> OffscreenKernelConfig {
 
 /// Applies the map's serialized [`OffscreenKernelConfig`] inside a tile worker.
 pub fn set_kernel_config(config: String) -> Result<(), JSError> {
-    let config = serde_json::from_str(&config).map_err(WebError::KernelConfigDecoding)?;
+    let config = maplibre::environment::OffscreenKernelConfig::from_json_slice(config.as_bytes())
+        .map_err(WebError::KernelConfigDecoding)?;
     CONFIG.with(|slot| {
         *slot.borrow_mut() = Some(config);
     });
@@ -112,8 +113,8 @@ impl TileWorkerCalls {
 
     /// Keeps the style sent by the host as `revision` for subsequent tile calls naming it.
     pub fn set_style(&mut self, revision: u64, style: String) -> Result<(), JSError> {
-        let style: maplibre::style::Style =
-            serde_json::from_str(&style).map_err(WebError::StyleDecoding)?;
+        let style =
+            maplibre::style::Style::from_json_str(&style).map_err(WebError::StyleDecoding)?;
         self.styles.insert(revision, style);
         Ok(())
     }
@@ -128,7 +129,7 @@ impl TileWorkerCalls {
     ) -> Result<js_sys::Promise, JSError> {
         let procedure = resolve_procedure(procedure_tag)?;
 
-        let mut input = serde_json::from_str::<Input>(&input).map_err(|e| {
+        let mut input = Input::from_json_slice(input.as_bytes()).map_err(|e| {
             log::error!("DeserializeInput error: {e}");
             CallError::DeserializeInput(Box::new(e))
         })?;

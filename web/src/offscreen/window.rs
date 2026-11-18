@@ -5,7 +5,6 @@
 
 use std::{
     cell::{Cell, RefCell},
-    collections::HashMap,
     rc::Rc,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -17,6 +16,7 @@ use maplibre::{
     environment::Environment,
     window::{HeadedMapWindow, MapWindow, MapWindowConfig, PhysicalSize, WindowCreateError},
 };
+use rustc_hash::FxHashMap;
 use web_sys::OffscreenCanvas;
 
 use crate::platform::{http_client::WebHttpClient, UsedOffscreenKernelEnvironment};
@@ -32,7 +32,7 @@ pub(super) type WorkerApc = maplibre::io::apc::SchedulerAsyncProcedureCall<
 static NEXT_RUNNER_ID: AtomicU64 = AtomicU64::new(1);
 
 thread_local! {
-    static RUNNER_WAKERS: RefCell<HashMap<u64, Rc<dyn Fn()>>> = RefCell::new(HashMap::new());
+    static RUNNER_WAKERS: RefCell<FxHashMap<u64, Rc<dyn Fn()>>> = RefCell::new(FxHashMap::default());
 }
 
 pub(super) fn next_runner_id() -> u64 {

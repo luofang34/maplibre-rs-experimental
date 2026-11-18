@@ -1,30 +1,41 @@
 use super::*;
 
 impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM, FM> {
-    /// Plans whether `indices` can be uploaded into a `u16` slab (`IndexFormat::Uint16`) and
-    /// returns `(index_u16, copy_aligned_index_bytes)`.
+    /// Plans whether `indices` can be uploaded into a `u16` slab (`IndexFormat::Uint16`, either
+    /// directly or via `BASE_VERTEX` sub-chunks) and returns `(index_u16, copy_aligned_index_bytes, u16_chunks)`.
     pub(super) fn plan_index_upload(
         &self,
         indices: &[I],
         usable_indices: u32,
         vertex_count: u64,
         strides: ElementStrides,
-    ) -> (bool, u64) {
-        if self.enable_u16_indices && size_of::<I>() == size_of::<u32>() && vertex_count <= 65_536 {
+        allow_chunks: bool,
+    ) -> u16_chunks::IndexPlan {
+        if self.enable_u16_indices && size_of::<I>() == size_of::<u32>() {
             let u32_slice: &[u32] = bytemuck::cast_slice(indices);
             let usable = (usable_indices as usize).min(u32_slice.len());
-            if u32_slice[..usable]
-                .iter()
-                .all(|&idx| idx <= u32::from(u16::MAX))
-            {
+            if vertex_count <= 65_536 {
+                if u32_slice[..usable]
+                    .iter()
+                    .all(|&idx| idx <= u32::from(u16::MAX))
+                {
+                    let padded_u16 = usable.next_multiple_of(2);
+                    return (true, (padded_u16 as u64) * 2, None);
+                }
+            } else if self.enable_u16_chunks && allow_chunks && usable > 0 {
                 let padded_u16 = usable.next_multiple_of(2);
-                return (true, (padded_u16 as u64) * 2);
+                let u16_bytes = (padded_u16 as u64) * 2;
+                if u16_bytes <= self.max_page_bytes {
+                    if let Some(chunks) = u16_chunks::plan_u16_chunks(u32_slice, usable) {
+                        return (true, u16_bytes, Some(chunks));
+                    }
+                }
             }
         }
-        (false, (indices.len() as u64) * strides.index)
+        (false, (indices.len() as u64) * strides.index, None)
     }
 
-    /// Writes `indices` (`u16`-downcast or native `I`) into `entry`'s reserved index slab.
+    /// Writes `indices` (`u16`-downcast, chunked `u16`, or native `I`) into `entry`'s reserved index slab.
     pub(super) fn write_uploaded_indices(
         &mut self,
         queue: &Q,
@@ -39,13 +50,22 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         if entry.index_u16 {
             let u32_slice: &[u32] = bytemuck::cast_slice(indices);
             let usable = (usable_indices as usize).min(u32_slice.len());
-            let padded = usable.next_multiple_of(2);
-            self.u16_index_scratch.clear();
-            self.u16_index_scratch.reserve(padded);
-            self.u16_index_scratch
-                .extend(u32_slice[..usable].iter().map(|&idx| idx as u16));
-            if self.u16_index_scratch.len() < padded {
-                self.u16_index_scratch.push(0);
+            if let Some(chunks) = entry.u16_chunks() {
+                u16_chunks::write_chunked_u16_indices(
+                    u32_slice,
+                    usable,
+                    chunks,
+                    &mut self.u16_index_scratch,
+                );
+            } else {
+                let padded = usable.next_multiple_of(2);
+                self.u16_index_scratch.clear();
+                self.u16_index_scratch.reserve(padded);
+                self.u16_index_scratch
+                    .extend(u32_slice[..usable].iter().map(|&idx| idx as u16));
+                if self.u16_index_scratch.len() < padded {
+                    self.u16_index_scratch.push(0);
+                }
             }
             let buf = &self.index_u16_slab_of(entry.index_page).buffer.inner;
             queue.write_buffer(
@@ -53,6 +73,10 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
                 entry.buffer_indices.start,
                 bytemuck::cast_slice(&self.u16_index_scratch),
             );
+            #[cfg(target_arch = "wasm32")]
+            if self.u16_index_scratch.capacity() > 98_304 {
+                self.u16_index_scratch = Vec::new();
+            }
         } else {
             let buf = &self.index_native_slab_of(entry.index_page).buffer.inner;
             queue.write_buffer(
@@ -122,7 +146,9 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             FmStorageKind::Paired
         };
 
-        let (index_u16, index_bytes) = self.plan_geometry_index_upload(geometry, vertices, strides);
+        let allow_chunks = u16_chunks::layer_allows_u16_chunks(&style_layer);
+        let (index_u16, index_bytes, u16_chunk_ranges) =
+            self.plan_geometry_index_upload(geometry, vertices, strides, allow_chunks);
         let req = SlabRequest {
             vertex_bytes: vertices * strides.vertex,
             vertex_elem_align: V::vertex_element_alignment(&style_layer.type_),
@@ -193,6 +219,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             dynamic_circle_metadata: dynamic_circle_fm,
             shared_geometry_key: None,
             evaluated_zoom: None,
+            u16_chunks: u16_chunk_ranges,
         };
 
         if req.vertex_bytes > 0 {

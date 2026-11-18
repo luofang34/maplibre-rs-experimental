@@ -25,9 +25,18 @@ impl Shader for StarfieldShader {
     fn describe_vertex(&self) -> VertexState {
         VertexState {
             source: concat!(
-                include_str!("../render/shaders/projection.vertex.wgsl"),
-                include_str!("../render/shaders/atmosphere_scattering.wgsl.part"),
-                include_str!("starfield.vertex.wgsl")
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/projection.vertex.wgsl"
+                )),
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/atmosphere_scattering.wgsl.part"
+                )),
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/starfield/starfield.vertex.wgsl"
+                ))
             ),
             entry_point: "main",
             buffers: vec![VertexBufferLayout {
@@ -51,7 +60,10 @@ impl Shader for StarfieldShader {
 
     fn describe_fragment(&self) -> FragmentState {
         FragmentState {
-            source: include_str!("starfield.fragment.wgsl"),
+            source: include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/starfield/starfield.fragment.wgsl"
+            )),
             entry_point: "main",
             targets: vec![Some(wgpu::ColorTargetState {
                 format: self.format,

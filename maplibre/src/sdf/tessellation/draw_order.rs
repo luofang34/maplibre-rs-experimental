@@ -60,7 +60,8 @@ fn may_overlap(paint: &SymbolPaint, zoom: f64) -> bool {
             .properties
             .get(name)
             .and_then(|value| {
-                StyleProperty::<bool>::parse(value).evaluate_for(&FeatureProperties::new(), zoom)
+                StyleProperty::<bool>::parse(value)
+                    .evaluate_for(&FeatureProperties::default(), zoom)
             })
             .unwrap_or(false)
     };

@@ -216,7 +216,7 @@ struct HudShader {
 impl Shader for HudShader {
     fn describe_vertex(&self) -> VertexState {
         VertexState {
-            source: include_str!("hud/hud.vertex.wgsl"),
+            source: include_str!(concat!(env!("OUT_DIR"), "/wgsl/hud/hud.vertex.wgsl")),
             entry_point: "main",
             buffers: Vec::new(),
         }
@@ -224,7 +224,7 @@ impl Shader for HudShader {
 
     fn describe_fragment(&self) -> FragmentState {
         FragmentState {
-            source: include_str!("hud/hud.fragment.wgsl"),
+            source: include_str!(concat!(env!("OUT_DIR"), "/wgsl/hud/hud.fragment.wgsl")),
             entry_point: "main",
             targets: vec![Some(wgpu::ColorTargetState {
                 format: self.format,

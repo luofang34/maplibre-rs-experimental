@@ -202,6 +202,9 @@ pub(crate) fn release_committed_cpu_geometry(
     style_layer_id: &str,
     release_colors: bool,
 ) {
+    let keep_feature_indices = tiles
+        .query::<&TileFeaturePaintComponent>(coords)
+        .is_some_and(|store| store.committed.contains_key(style_layer_id));
     let Some(layers) = tiles.query_mut::<&mut VectorLayerBucketComponent>(coords) else {
         return;
     };
@@ -210,7 +213,9 @@ pub(crate) fn release_committed_cpu_geometry(
             if avail.style_layer_id == style_layer_id && avail.buffer.usable_indices > 0 {
                 avail.buffer.release_cpu_geometry();
                 if release_colors {
-                    avail.feature_indices = Vec::new();
+                    if !keep_feature_indices {
+                        avail.feature_indices = Vec::new();
+                    }
                     avail.feature_colors = Vec::new();
                     avail.feature_sort_keys = Vec::new();
                 }

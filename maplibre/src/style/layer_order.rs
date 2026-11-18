@@ -1,17 +1,16 @@
 //! Preserves the style document's painter order across asynchronous tile processing, and resolves
 //! layers that take their definition from another layer with `ref`.
-use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value};
 
 use super::layer::StyleLayer;
 
-pub(super) fn deserialize_layers<'de, D: Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Vec<StyleLayer>, D::Error> {
-    let documents = dereferenced(Vec::<Value>::deserialize(deserializer)?);
+pub(super) fn parse_layers_from_values(
+    values: &[Value],
+) -> Result<Vec<StyleLayer>, serde_json::Error> {
+    let documents = dereferenced(values.to_vec());
     let mut layers = documents
-        .into_iter()
-        .map(|document| StyleLayer::deserialize(document).map_err(serde::de::Error::custom))
+        .iter()
+        .map(StyleLayer::from_json_value)
         .collect::<Result<Vec<_>, _>>()?;
     for (index, layer) in layers.iter_mut().enumerate() {
         layer.index = u32::try_from(index).map_err(serde::de::Error::custom)?;

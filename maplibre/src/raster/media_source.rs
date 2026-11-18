@@ -1,8 +1,9 @@
 //! Synchronizes host-pushed `video` and `canvas` RGBA frames into visible raster tiles.
 
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use image::RgbaImage;
+use rustc_hash::FxHashMap as HashMap;
 
 use crate::{
     coords::WorldTileCoords,

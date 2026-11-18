@@ -257,7 +257,9 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             FmStorageKind::None
         };
 
-        let (index_u16, index_bytes) = self.plan_geometry_index_upload(geometry, vertices, strides);
+        let allow_chunks = u16_chunks::layer_allows_u16_chunks(&style_layer);
+        let (index_u16, index_bytes, u16_chunk_ranges) =
+            self.plan_geometry_index_upload(geometry, vertices, strides, allow_chunks);
 
         let (alloc, first_vertex_u32, first_index_u32, uploaded_vertices) =
             if let Some((vp, shared_info)) = existing_shared {
@@ -370,6 +372,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             dynamic_circle_metadata: false,
             shared_geometry_key: shared_key,
             evaluated_zoom: None,
+            u16_chunks: u16_chunk_ranges,
         };
 
         if uploaded_vertices {

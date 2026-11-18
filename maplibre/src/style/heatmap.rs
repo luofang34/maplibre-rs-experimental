@@ -120,7 +120,7 @@ impl HeatmapPaint {
 }
 
 fn default_color() -> StyleProperty<Color> {
-    match serde_json::from_str(DEFAULT_COLOR) {
+    match serde_json::from_slice(DEFAULT_COLOR.as_bytes()) {
         Ok(json) => StyleProperty::parse(&json),
         Err(_) => StyleProperty::Constant(Color::new(0.0, 0.0, 0.0, 0.0)),
     }

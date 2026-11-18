@@ -88,6 +88,33 @@ impl DemTile {
         Self::decode(image, unpack, Some(sample_metres))
     }
 
+    /// Constructs a tile directly from pre-decoded bordered RGBA pixels and elevation bounds.
+    pub fn from_raw_parts(
+        dim: u32,
+        stride: u32,
+        pixels: Vec<u8>,
+        unpack: [f64; 4],
+        min: f64,
+        max: f64,
+    ) -> Result<Self, DemError> {
+        let expected_stride = dim.checked_add(4).ok_or(DemError::Empty)?;
+        let expected_bytes = usize::try_from(stride)
+            .ok()
+            .and_then(|s| s.checked_mul(s))
+            .and_then(|n| n.checked_mul(4));
+        if dim == 0 || stride != expected_stride || expected_bytes != Some(pixels.len()) {
+            return Err(DemError::Empty);
+        }
+        Ok(Self {
+            dim,
+            stride,
+            pixels,
+            unpack,
+            min,
+            max,
+        })
+    }
+
     fn decode(
         image: &RgbaImage,
         unpack: [f64; 4],

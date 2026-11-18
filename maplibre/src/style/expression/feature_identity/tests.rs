@@ -19,7 +19,7 @@ fn only_the_operators_count_not_a_property_or_a_layer_called_id() {
 
 #[test]
 fn the_properties_a_feature_carries_answer_both_operators_and_stay_out_of_properties() {
-    let mut properties = FeatureProperties::new();
+    let mut properties = FeatureProperties::default();
     properties.insert(ID_PROPERTY.to_owned(), Value::Number(7.0));
     properties.insert(GEOMETRY_TYPE_PROPERTY.to_owned(), Value::from("Point"));
     properties.insert("name".to_owned(), Value::from("a"));

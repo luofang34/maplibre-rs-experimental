@@ -76,11 +76,32 @@ impl ProjectionType {
 }
 
 /// The root-level projection section of a style document.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct ProjectionSpecification {
     /// Projection used to display the map.
     #[serde(rename = "type")]
     pub projection_type: ProjectionType,
+}
+
+impl ProjectionSpecification {
+    /// Parses a root `projection` object directly from a JSON [`serde_json::Value`].
+    pub(crate) fn from_json_value(value: &serde_json::Value) -> Result<Self, serde_json::Error> {
+        let Some(map) = value.as_object() else {
+            return Err(serde::de::Error::custom("projection must be an object"));
+        };
+        let Some(ty) = map.get("type") else {
+            return Err(serde::de::Error::missing_field("type"));
+        };
+        let projection_type = expression::parse_projection(ty).map_err(serde::de::Error::custom)?;
+        Ok(Self { projection_type })
+    }
+}
+
+impl<'de> Deserialize<'de> for ProjectionSpecification {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Self::from_json_value(&value).map_err(serde::de::Error::custom)
+    }
 }
 
 #[cfg(test)]

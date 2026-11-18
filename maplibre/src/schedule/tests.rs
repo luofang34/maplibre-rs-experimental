@@ -83,7 +83,7 @@ async fn stage_times_are_kept_in_run_order_without_frame_bookkeeping() {
         .get_or_init_mut::<crate::tcs::system::timings::FrameTimings>()
         .take_stage_times();
     let names: Vec<&str> = stages.iter().map(|(name, _)| name.as_ref()).collect();
-    assert_eq!(names, ["\"first\"", "\"last\""]);
+    assert_eq!(names, ["first", "last"]);
     assert_eq!(
         context.last_frame_stats().frame,
         0,
@@ -159,16 +159,16 @@ fn builders_report_missing_and_duplicate_stages() {
 
     assert_eq!(
         schedule.add_stage("only", NopStage).err(),
-        Some(ScheduleError::DuplicateStage("\"only\"".into()))
+        Some(ScheduleError::DuplicateStage("only".into()))
     );
     assert_eq!(
         schedule.add_stage_after("missing", "new", NopStage).err(),
-        Some(ScheduleError::MissingStage("\"missing\"".into()))
+        Some(ScheduleError::MissingStage("missing".into()))
     );
     assert_eq!(
         schedule
             .add_system_to_stage("only", |_: &mut MapContext| Ok(()))
             .err(),
-        Some(ScheduleError::NotASystemStage("\"only\"".into()))
+        Some(ScheduleError::NotASystemStage("only".into()))
     );
 }

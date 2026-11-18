@@ -6,8 +6,7 @@
 //! whose window meets its old or its new bounds, at each tile's own zoom, and the other tiles
 //! would come back unchanged.
 
-use std::collections::HashMap;
-
+use rustc_hash::FxHashMap as HashMap;
 use serde_json::Value;
 
 use super::{feature_id, feature_list, promoted_property};

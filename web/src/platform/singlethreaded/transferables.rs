@@ -1,19 +1,19 @@
+//! Compact little-endian worker wire transferables without FlatBuffers overhead.
+
 use std::fmt::{Debug, Formatter};
 
-use flatbuffers::FlatBufferBuilder;
-use image::RgbaImage;
 #[cfg(test)]
 use js_sys::{ArrayBuffer, Uint8Array};
 use maplibre::{
     benchmarking::tessellation::{IndexDataType, OverAlignedVertexBuffer},
-    coords::WorldTileCoords,
+    coords::{WorldTileCoords, ZoomLevel},
     io::{
         apc::{IntoMessage, Message, MessageTag},
         geometry_index::TileIndex,
     },
     raster::{
         AvailableRasterLayerData, LayerRaster, LayerRasterMissing, MissingRasterLayerData,
-        RasterSourceId, RasterTransferables,
+        RasterSourceId, RasterTransferables, RgbaImage,
     },
     render::shaders::ShaderSymbolVertex,
     sdf::{Feature, SymbolLayerData},
@@ -25,123 +25,9 @@ use maplibre::{
     },
 };
 
-use crate::platform::singlethreaded::{
-    apc::WebMessageTag,
-    transferables::{
-        basic_generated::*, layer_dem_generated::*, layer_dem_missing_generated::*,
-        layer_indexed_generated::*, layer_missing_generated::*, layer_raster_generated::*,
-        symbol_layer_tessellated_generated::*, tile_tessellated_generated::*,
-    },
-};
+use crate::platform::singlethreaded::apc::WebMessageTag;
 
-pub mod basic_generated {
-    #![allow(
-        unused,
-        unused_imports,
-        unsafe_code,
-        clippy::all,
-        clippy::unwrap_used,
-        clippy::expect_used
-    )]
-
-    use maplibre::coords::{WorldTileCoords, ZoomLevel};
-
-    include!(concat!(env!("OUT_DIR"), "/basic_generated.rs"));
-
-    impl Into<WorldTileCoords> for &FlatWorldTileCoords {
-        fn into(self) -> WorldTileCoords {
-            WorldTileCoords {
-                x: self.x(),
-                y: self.y(),
-                z: ZoomLevel::new(self.z()),
-            }
-        }
-    }
-}
-pub mod layer_indexed_generated {
-    #![allow(
-        unused,
-        unused_imports,
-        unsafe_code,
-        clippy::all,
-        clippy::unwrap_used,
-        clippy::expect_used
-    )]
-    include!(concat!(env!("OUT_DIR"), "/layer_indexed_generated.rs"));
-}
-pub mod layer_missing_generated {
-    #![allow(
-        unused,
-        unused_imports,
-        unsafe_code,
-        clippy::all,
-        clippy::unwrap_used,
-        clippy::expect_used
-    )]
-    include!(concat!(env!("OUT_DIR"), "/layer_missing_generated.rs"));
-}
-pub mod tile_tessellated_generated {
-    #![allow(
-        unused,
-        unused_imports,
-        unsafe_code,
-        clippy::all,
-        clippy::unwrap_used,
-        clippy::expect_used
-    )]
-    include!(concat!(env!("OUT_DIR"), "/tile_tessellated_generated.rs"));
-}
-pub mod layer_raster_generated {
-    #![allow(
-        unused,
-        unused_imports,
-        unsafe_code,
-        clippy::all,
-        clippy::unwrap_used,
-        clippy::expect_used
-    )]
-    include!(concat!(env!("OUT_DIR"), "/layer_raster_generated.rs"));
-}
-
-pub mod layer_dem_generated {
-    #![allow(
-        unused,
-        unused_imports,
-        unsafe_code,
-        clippy::all,
-        clippy::unwrap_used,
-        clippy::expect_used
-    )]
-    include!(concat!(env!("OUT_DIR"), "/layer_dem_generated.rs"));
-}
-
-pub mod layer_dem_missing_generated {
-    #![allow(
-        unused,
-        unused_imports,
-        unsafe_code,
-        clippy::all,
-        clippy::unwrap_used,
-        clippy::expect_used
-    )]
-    include!(concat!(env!("OUT_DIR"), "/layer_dem_missing_generated.rs"));
-}
-
-pub mod symbol_layer_tessellated_generated {
-    #![allow(
-        unused,
-        unused_imports,
-        unsafe_code,
-        clippy::all,
-        clippy::unwrap_used,
-        clippy::expect_used
-    )]
-    include!(concat!(
-        env!("OUT_DIR"),
-        "/symbol_layer_tessellated_generated.rs"
-    ));
-}
-
+/// Owned byte buffer carrying a single worker-to-main transferable payload.
 pub struct FlatBufferTransferable {
     tag: WebMessageTag,
     data: Vec<u8>,
@@ -156,8 +42,7 @@ impl FlatBufferTransferable {
     #[cfg(test)]
     pub fn from_array_buffer(tag: WebMessageTag, buffer: ArrayBuffer) -> Self {
         let buffer = Uint8Array::new(&buffer);
-
-        FlatBufferTransferable {
+        Self {
             tag,
             data: buffer.to_vec(),
             start: 0,
@@ -166,7 +51,7 @@ impl FlatBufferTransferable {
     }
 
     pub fn from_vec(tag: WebMessageTag, data: Vec<u8>, start: usize) -> Self {
-        FlatBufferTransferable {
+        Self {
             tag,
             data,
             start,
@@ -181,7 +66,7 @@ impl FlatBufferTransferable {
         len: u32,
     ) -> Option<Self> {
         let (bucket, paint) = tessellated::js_wire::decode_from_js_slice(buffer, offset, len)?;
-        Some(FlatBufferTransferable {
+        Some(Self {
             tag: WebMessageTag::LayerTessellated,
             data: Vec::new(),
             start: 0,
@@ -192,6 +77,88 @@ impl FlatBufferTransferable {
     pub fn data(&self) -> &[u8] {
         &self.data[self.start..]
     }
+
+    pub(super) fn into_tail_vec(mut self, payload_offset: usize) -> Vec<u8> {
+        let total = self.start.saturating_add(payload_offset);
+        if total > 0 && total <= self.data.len() {
+            self.data.drain(..total);
+        } else if total > self.data.len() {
+            self.data.clear();
+        }
+        self.data
+    }
+}
+
+#[inline]
+pub(super) fn read_u32_le(bytes: &[u8], offset: usize) -> Option<u32> {
+    let slice = bytes.get(offset..offset + 4)?;
+    let arr: [u8; 4] = slice.try_into().ok()?;
+    Some(u32::from_le_bytes(arr))
+}
+
+#[inline]
+pub(super) fn read_i32_le(bytes: &[u8], offset: usize) -> Option<i32> {
+    let slice = bytes.get(offset..offset + 4)?;
+    let arr: [u8; 4] = slice.try_into().ok()?;
+    Some(i32::from_le_bytes(arr))
+}
+
+#[inline]
+pub(super) fn read_u64_le(bytes: &[u8], offset: usize) -> Option<u64> {
+    let slice = bytes.get(offset..offset + 8)?;
+    let arr: [u8; 8] = slice.try_into().ok()?;
+    Some(u64::from_le_bytes(arr))
+}
+
+#[inline]
+pub(super) fn read_f64_le(bytes: &[u8], offset: usize) -> Option<f64> {
+    read_u64_le(bytes, offset).map(f64::from_bits)
+}
+
+#[inline]
+pub(super) fn read_coords_at(bytes: &[u8], offset: usize) -> Option<WorldTileCoords> {
+    let x = read_i32_le(bytes, offset)?;
+    let y = read_i32_le(bytes, offset + 4)?;
+    let z = *bytes.get(offset + 8)?;
+    Some(WorldTileCoords {
+        x,
+        y,
+        z: ZoomLevel::new(z),
+    })
+}
+
+pub(super) fn encode_named_coords(
+    tag: WebMessageTag,
+    coords: WorldTileCoords,
+    name: Option<&str>,
+) -> FlatBufferTransferable {
+    let name_bytes = name.map(str::as_bytes);
+    let name_len = name_bytes.map_or(0, <[u8]>::len);
+    let mut data = Vec::with_capacity(16 + name_len);
+    data.extend_from_slice(&coords.x.to_le_bytes());
+    data.extend_from_slice(&coords.y.to_le_bytes());
+    data.push(u8::from(coords.z));
+    data.push(u8::from(name_bytes.is_some()));
+    data.extend_from_slice(&[0, 0]);
+    data.extend_from_slice(&(name_len as u32).to_le_bytes());
+    if let Some(bytes) = name_bytes {
+        data.extend_from_slice(bytes);
+    }
+    FlatBufferTransferable::from_vec(tag, data, 0)
+}
+
+pub(super) fn decode_named_coords(bytes: &[u8]) -> (WorldTileCoords, Option<&str>) {
+    let Some(coords) = read_coords_at(bytes, 0) else {
+        return (WorldTileCoords::default(), None);
+    };
+    let has_name = bytes.get(9).is_some_and(|&b| b != 0);
+    if !has_name {
+        return (coords, None);
+    }
+    let name = read_u32_le(bytes, 12)
+        .and_then(|len| bytes.get(16..16 + len as usize))
+        .and_then(|slice| std::str::from_utf8(slice).ok());
+    (coords, name)
 }
 
 impl TileTessellated for FlatBufferTransferable {
@@ -202,28 +169,28 @@ impl TileTessellated for FlatBufferTransferable {
     fn build_from(coords: WorldTileCoords) -> Self {
         tile_completion(coords, false, false)
     }
+
     fn build_partial(coords: WorldTileCoords) -> Self {
         tile_completion(coords, true, false)
     }
+
     fn build_failed(coords: WorldTileCoords, pending_symbols: bool) -> Self {
         tile_completion(coords, pending_symbols, true)
     }
+
     fn failed(&self) -> bool {
-        root_as_flat_tile_tessellated(&self.data[self.start..])
-            .map(|data| data.failed())
-            .unwrap_or(true)
+        self.data().get(10).is_none_or(|&b| b != 0)
     }
+
     fn pending_symbols(&self) -> bool {
-        root_as_flat_tile_tessellated(&self.data[self.start..])
-            .map(|data| data.pending_symbols())
-            .unwrap_or(false)
+        self.data().get(9).is_some_and(|&b| b != 0)
     }
 
     fn coords(&self) -> WorldTileCoords {
-        root_as_flat_tile_tessellated(&self.data[self.start..])
-            .ok()
-            .and_then(|data| data.coords())
-            .map_or_else(WorldTileCoords::default, Into::into)
+        self.data()
+            .get(..11)
+            .and_then(|bytes| read_coords_at(bytes, 0))
+            .unwrap_or_default()
     }
 }
 
@@ -233,41 +200,22 @@ impl LayerMissing for FlatBufferTransferable {
     }
 
     fn build_from(coords: WorldTileCoords, layer_name: String) -> Self {
-        let mut inner_builder = FlatBufferBuilder::with_capacity(128);
-        let layer_name = inner_builder.create_string(&layer_name);
-
-        let mut builder = FlatLayerMissingBuilder::new(&mut inner_builder);
-        builder.add_coords(&FlatWorldTileCoords::new(
-            coords.x,
-            coords.y,
-            coords.z.into(),
-        ));
-        builder.add_layer_name(layer_name);
-        let root = builder.finish();
-
-        inner_builder.finish(root, None);
-        let (data, start) = inner_builder.collapse();
-        FlatBufferTransferable::from_vec(WebMessageTag::LayerMissing, data, start)
+        encode_named_coords(WebMessageTag::LayerMissing, coords, Some(&layer_name))
     }
 
     fn coords(&self) -> WorldTileCoords {
-        root_as_flat_layer_missing(&self.data[self.start..])
-            .ok()
-            .and_then(|data| data.coords())
-            .map_or_else(WorldTileCoords::default, Into::into)
+        decode_named_coords(self.data()).0
     }
 
     fn layer_name(&self) -> &str {
-        root_as_flat_layer_missing(&self.data[self.start..])
-            .ok()
-            .and_then(|data| data.layer_name())
-            .unwrap_or_default()
+        decode_named_coords(self.data()).1.unwrap_or_default()
     }
 
     fn to_bucket(self) -> MissingVectorLayerBucket {
+        let (coords, name) = decode_named_coords(self.data());
         MissingVectorLayerBucket {
-            source_layer: self.layer_name().to_owned(),
-            coords: LayerMissing::coords(&self),
+            source_layer: name.unwrap_or_default().to_owned(),
+            coords,
         }
     }
 }

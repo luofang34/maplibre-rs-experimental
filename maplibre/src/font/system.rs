@@ -1,19 +1,20 @@
 //! In-memory font registry, `Style::font_faces` rule binding, and lazy native system fallback.
 
-#[cfg(feature = "font-shaping")]
-use std::collections::HashSet;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 #[cfg(feature = "font-shaping")]
 use harfrust::Font as HbFont;
 #[cfg(feature = "font-shaping")]
-use read_fonts::{tables::os2::SelectionFlags, FileRef, FontRef, TableProvider};
-#[cfg(feature = "font-shaping")]
-use skrifa::MetadataProvider;
+use read_fonts::{FileRef, FontRef};
+use rustc_hash::FxHashMap as HashMap;
 
+mod metadata;
 #[cfg(all(not(target_arch = "wasm32"), feature = "font-shaping"))]
 mod native;
 
+#[cfg(feature = "font-shaping")]
+pub(super) use self::metadata::inspect_face_metadata;
+use self::metadata::stack_style_suffix;
 #[cfg(feature = "font-shaping")]
 use super::container::unpack_font_container;
 #[cfg(feature = "font-shaping")]
@@ -109,6 +110,24 @@ impl std::fmt::Debug for FontSystem {
     }
 }
 
+fn rule_dedup_key(rule: &FontFaceRule, url: &str) -> String {
+    use std::fmt::Write;
+    let style = match rule.style {
+        FontStyle::Normal => "n",
+        FontStyle::Italic => "i",
+        FontStyle::Oblique => "o",
+    };
+    let mut key = format!(
+        "{url}|{}|{}|{style}",
+        rule.family.to_ascii_lowercase(),
+        rule.weight.0
+    );
+    for r in &rule.unicode_ranges {
+        let _ = write!(key, "|{:x}-{:x}", r.start, r.end);
+    }
+    key
+}
+
 impl FontSystem {
     /// Creates an empty [`FontSystem`] (system fonts on native targets load lazily on demand).
     pub fn new() -> Self {
@@ -155,15 +174,7 @@ impl FontSystem {
 
     /// Returns `true` when `rule` at `url` has already been unpacked and registered.
     pub fn has_registered_rule(&self, rule: &FontFaceRule, url: &str) -> bool {
-        let dedup_key = format!(
-            "{}|{}|{}|{:?}|{:?}",
-            url,
-            rule.family.to_ascii_lowercase(),
-            rule.weight.0,
-            rule.style,
-            rule.unicode_ranges
-        );
-        self.rule_keys.contains_key(&dedup_key)
+        self.rule_keys.contains_key(&rule_dedup_key(rule, url))
     }
 
     /// Unpacks and registers a font fetched for a [`FontFaceRule`], deduplicating by URL and
@@ -174,14 +185,7 @@ impl FontSystem {
         url: &str,
         data: Vec<u8>,
     ) -> Result<Vec<u64>, FontError> {
-        let dedup_key = format!(
-            "{}|{}|{}|{:?}|{:?}",
-            url,
-            rule.family.to_ascii_lowercase(),
-            rule.weight.0,
-            rule.style,
-            rule.unicode_ranges
-        );
+        let dedup_key = rule_dedup_key(rule, url);
         if let Some(existing) = self.rule_keys.get(&dedup_key) {
             return Ok(existing.clone());
         }
@@ -442,59 +446,4 @@ impl FontSystem {
         }
         Ok(added)
     }
-}
-
-#[cfg(feature = "font-shaping")]
-pub(super) fn inspect_face_metadata(font: &FontRef<'_>) -> (Vec<String>, FontWeight, FontStyle) {
-    let mut seen = HashSet::new();
-    let mut families = Vec::new();
-    for name_id in [
-        read_fonts::types::NameId::TYPOGRAPHIC_FAMILY_NAME,
-        read_fonts::types::NameId::FAMILY_NAME,
-        read_fonts::types::NameId::FULL_NAME,
-    ] {
-        if let Some(localized) = font.localized_strings(name_id).english_or_first() {
-            let text: String = localized.chars().collect();
-            let norm = text.trim().to_ascii_lowercase();
-            if !norm.is_empty() && seen.insert(norm.clone()) {
-                families.push(norm);
-            }
-        }
-    }
-
-    let mut weight = FontWeight::default();
-    let mut style = FontStyle::Normal;
-    if let Ok(os2) = font.os2() {
-        weight = FontWeight(os2.us_weight_class().clamp(1, 1000));
-        let flags = os2.fs_selection();
-        if flags.contains(SelectionFlags::ITALIC) {
-            style = FontStyle::Italic;
-        } else if flags.contains(SelectionFlags::OBLIQUE) {
-            style = FontStyle::Oblique;
-        }
-    }
-    (families, weight, style)
-}
-
-fn stack_style_suffix(font_stack: &str) -> String {
-    let first = font_stack.split(',').next().unwrap_or(font_stack);
-    let (_, weight, style) = parse_font_stack_entry(first);
-    let mut out = String::new();
-    match weight.0 {
-        0..=150 => out.push_str(" Thin"),
-        151..=250 => out.push_str(" ExtraLight"),
-        251..=350 => out.push_str(" Light"),
-        351..=450 => {}
-        451..=550 => out.push_str(" Medium"),
-        551..=650 => out.push_str(" Semibold"),
-        651..=750 => out.push_str(" Bold"),
-        751..=850 => out.push_str(" ExtraBold"),
-        _ => out.push_str(" Black"),
-    }
-    match style {
-        FontStyle::Normal => {}
-        FontStyle::Italic => out.push_str(" Italic"),
-        FontStyle::Oblique => out.push_str(" Oblique"),
-    }
-    out
 }

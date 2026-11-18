@@ -4,7 +4,7 @@
 
 use std::{marker::PhantomData, rc::Rc};
 
-use image::RgbaImage;
+pub use image::RgbaImage;
 
 use crate::{
     coords::WorldTileCoords,

@@ -11,9 +11,18 @@ impl Shader for TerrainShader {
     fn describe_vertex(&self) -> VertexState {
         VertexState {
             source: concat!(
-                include_str!("projection.vertex.wgsl"),
-                include_str!("terrain_surface.wgsl.part"),
-                include_str!("terrain.vertex.wgsl")
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/projection.vertex.wgsl"
+                )),
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/terrain_surface.wgsl.part"
+                )),
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/terrain.vertex.wgsl"
+                ))
             ),
             entry_point: "main",
             buffers: vec![VertexBufferLayout {
@@ -38,8 +47,14 @@ impl Shader for TerrainShader {
     fn describe_fragment(&self) -> FragmentState {
         FragmentState {
             source: concat!(
-                include_str!("daylight.wgsl.part"),
-                include_str!("terrain.fragment.wgsl")
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/daylight.wgsl.part"
+                )),
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/terrain.fragment.wgsl"
+                ))
             ),
             entry_point: "main",
             targets: vec![Some(wgpu::ColorTargetState {

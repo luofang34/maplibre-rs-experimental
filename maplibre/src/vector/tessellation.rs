@@ -158,7 +158,7 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             path_builder: RefCell::new(Path::builder()),
             buffer: VertexBuffers::new(),
             feature_indices: Vec::new(),
-            feature_properties: FeatureProperties::new(),
+            feature_properties: FeatureProperties::default(),
             zoom: 0.0,
             feature_colors: Vec::new(),
             omit_feature_colors: false,

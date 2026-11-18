@@ -4,7 +4,7 @@
 //! request's outcome lands or the request is given up. The tiles marked loading are kept in a
 //! set, so counting them reads that set instead of every tile.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet as HashSet;
 
 use crate::{
     coords::WorldTileCoords,

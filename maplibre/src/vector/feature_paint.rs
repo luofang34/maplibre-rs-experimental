@@ -5,7 +5,9 @@ pub(crate) mod intern;
 /// Binary wire encoding of [`BucketFeatureEntry`] slices for worker transport.
 pub mod wire;
 
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
+
+use rustc_hash::FxHashMap as HashMap;
 
 use crate::{
     style::{

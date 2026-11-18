@@ -19,9 +19,11 @@ fn letter_spacing_is_between_glyphs_and_does_not_shift_centered_text() {
                     ..Default::default()
                 },
             )]
-            .into(),
+            .into_iter()
+            .collect(),
         )]
-        .into(),
+        .into_iter()
+        .collect(),
         ..Default::default()
     };
     let symbol = CollectedSymbol {
@@ -73,9 +75,11 @@ fn label_top(anchor: &str, field: &str) -> i32 {
                     ..Default::default()
                 },
             )]
-            .into(),
+            .into_iter()
+            .collect(),
         )]
-        .into(),
+        .into_iter()
+        .collect(),
         ..Default::default()
     };
     let symbol = CollectedSymbol {
@@ -124,9 +128,12 @@ fn a_bidirectional_mark_is_not_drawn_even_where_the_font_has_a_glyph_for_it() {
     let atlas = SymbolAtlas {
         glyphs: [(
             "test".into(),
-            [('A' as u32, entry.clone()), ('\u{200E}' as u32, entry)].into(),
+            [('A' as u32, entry.clone()), ('\u{200E}' as u32, entry)]
+                .into_iter()
+                .collect(),
         )]
-        .into(),
+        .into_iter()
+        .collect(),
         ..Default::default()
     };
     let symbol = CollectedSymbol {

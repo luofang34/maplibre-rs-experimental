@@ -42,6 +42,8 @@ pub struct IndexEntry {
     pub(super) shared_geometry_key: Option<u64>,
     // View zoom at which `feature_metadata` was last evaluated.
     pub(super) evaluated_zoom: Option<f32>,
+    // Sub-ranges `(vertex_offset, local_index_range)` when > 65,536 vertices pack into `u16` indices.
+    pub(super) u16_chunks: Option<super::u16_chunks::U16Chunks>,
 }
 
 impl IndexEntry {
@@ -85,6 +87,30 @@ impl IndexEntry {
     #[inline]
     pub fn evaluated_zoom(&self) -> Option<f32> {
         self.evaluated_zoom
+    }
+
+    /// Sub-ranges `(vertex_offset, local_index_range)` when `> 65,536` vertices pack into `u16`.
+    #[inline]
+    pub fn u16_chunks(&self) -> Option<&[(u32, Range<u32>)]> {
+        self.u16_chunks.as_deref()
+    }
+
+    /// Resident GPU vertex, index, and feature-metadata bytes occupied by this allocation.
+    #[inline]
+    pub fn gpu_bytes(&self) -> usize {
+        let v = self
+            .buffer_vertices
+            .end
+            .saturating_sub(self.buffer_vertices.start);
+        let i = self
+            .buffer_indices
+            .end
+            .saturating_sub(self.buffer_indices.start);
+        let fm = self
+            .buffer_feature_metadata
+            .end
+            .saturating_sub(self.buffer_feature_metadata.start);
+        usize::try_from(v.saturating_add(i).saturating_add(fm)).unwrap_or(usize::MAX)
     }
 
     /// Identifies this upload, even when an evicted layer reuses the same buffer range.
@@ -235,6 +261,13 @@ impl RingIndex {
     #[inline]
     pub fn max_zoom(&self) -> Option<u8> {
         self.pyramid.max_zoom()
+    }
+
+    /// Total resident GPU bytes (vertices, indices, feature metadata) across all layers at `coords`.
+    #[inline]
+    pub fn tile_gpu_bytes(&self, coords: WorldTileCoords) -> usize {
+        self.get_layers(coords)
+            .map_or(0, |layers| layers.iter().map(IndexEntry::gpu_bytes).sum())
     }
 
     /// Iterates per-tile layer queues across the index in coarse-to-fine Morton order.

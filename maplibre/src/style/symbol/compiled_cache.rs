@@ -2,9 +2,10 @@
 
 use std::{
     any::{Any, TypeId},
-    collections::HashMap,
     sync::Mutex,
 };
+
+use rustc_hash::FxHashMap as HashMap;
 
 use crate::style::property::{CompiledProperty, PropertyValue};
 

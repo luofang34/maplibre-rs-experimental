@@ -1,6 +1,12 @@
 //! The PMTiles v3 layout: a fixed header, varint-encoded directories, and tile IDs that
 //! number tiles zoom by zoom along a Hilbert curve.
 
+#[cfg(any(
+    test,
+    not(target_arch = "wasm32"),
+    feature = "font-shaping",
+    feature = "thread-safe-futures"
+))]
 use std::io::Read;
 
 use thiserror::Error;
@@ -113,7 +119,13 @@ impl Header {
     }
 }
 
-/// Undoes `compression` (1 none, 2 gzip).
+/// Undoes `compression` (1 none, 2 gzip) synchronously when `flate2` is available.
+#[cfg(any(
+    test,
+    not(target_arch = "wasm32"),
+    feature = "font-shaping",
+    feature = "thread-safe-futures"
+))]
 pub fn decompress(
     compression: u8,
     bytes: Vec<u8>,
@@ -131,6 +143,93 @@ pub fn decompress(
         }
         other => Err(PmtilesFormatError::Compression(other)),
     }
+}
+
+/// Undoes `compression` (1 none, 2 gzip) asynchronously using `DecompressionStream("gzip")` on
+/// render-free web builds without `flate2`, or sync `flate2` elsewhere.
+pub(super) async fn decompress_async(
+    compression: u8,
+    bytes: Vec<u8>,
+    what: &'static str,
+) -> Result<Vec<u8>, PmtilesFormatError> {
+    #[cfg(any(
+        test,
+        not(target_arch = "wasm32"),
+        feature = "font-shaping",
+        feature = "thread-safe-futures"
+    ))]
+    {
+        decompress(compression, bytes, what)
+    }
+    #[cfg(not(any(
+        test,
+        not(target_arch = "wasm32"),
+        feature = "font-shaping",
+        feature = "thread-safe-futures"
+    )))]
+    match compression {
+        0 | 1 => Ok(bytes),
+        2 => decompress_gzip_web(bytes, what).await,
+        other => Err(PmtilesFormatError::Compression(other)),
+    }
+}
+
+#[cfg(not(any(
+    test,
+    not(target_arch = "wasm32"),
+    feature = "font-shaping",
+    feature = "thread-safe-futures"
+)))]
+async fn decompress_gzip_web(
+    bytes: Vec<u8>,
+    what: &'static str,
+) -> Result<Vec<u8>, PmtilesFormatError> {
+    use wasm_bindgen::JsCast;
+    let err = |msg: wasm_bindgen::JsValue| PmtilesFormatError::Decompress {
+        what,
+        source: std::io::Error::other(msg.as_string().unwrap_or_else(|| "js error".to_owned())),
+    };
+    let global = js_sys::global();
+    let ds_ctor: js_sys::Function = js_sys::Reflect::get(
+        &global,
+        &wasm_bindgen::JsValue::from_str("DecompressionStream"),
+    )
+    .map_err(err)?
+    .dyn_into()
+    .map_err(err)?;
+    let ds = js_sys::Reflect::construct(
+        &ds_ctor,
+        &js_sys::Array::of1(&wasm_bindgen::JsValue::from_str("gzip")),
+    )
+    .map_err(err)?;
+    let u8_arr = js_sys::Uint8Array::from(bytes.as_slice());
+    let parts = js_sys::Array::of1(&u8_arr);
+    let blob = web_sys::Blob::new_with_u8_array_sequence(&parts).map_err(err)?;
+    let stream_fn: js_sys::Function =
+        js_sys::Reflect::get(&blob, &wasm_bindgen::JsValue::from_str("stream"))
+            .map_err(err)?
+            .dyn_into()
+            .map_err(err)?;
+    let readable = stream_fn.call0(&blob).map_err(err)?;
+    let pipe_fn: js_sys::Function =
+        js_sys::Reflect::get(&readable, &wasm_bindgen::JsValue::from_str("pipeThrough"))
+            .map_err(err)?
+            .dyn_into()
+            .map_err(err)?;
+    let decompressed = pipe_fn.call1(&readable, &ds).map_err(err)?;
+    let resp_ctor: js_sys::Function =
+        js_sys::Reflect::get(&global, &wasm_bindgen::JsValue::from_str("Response"))
+            .map_err(err)?
+            .dyn_into()
+            .map_err(err)?;
+    let resp_val =
+        js_sys::Reflect::construct(&resp_ctor, &js_sys::Array::of1(&decompressed)).map_err(err)?;
+    let resp: web_sys::Response = resp_val.dyn_into().map_err(err)?;
+    let ab_promise = resp.array_buffer().map_err(err)?;
+    let ab = wasm_bindgen_futures::JsFuture::from(ab_promise)
+        .await
+        .map_err(err)?;
+    Ok(js_sys::Uint8Array::new(&ab).to_vec())
 }
 
 /// One directory entry: a run of tiles stored at one place, or with no run a leaf directory.

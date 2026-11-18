@@ -30,7 +30,10 @@ impl Shader for FlatTileMaskShader {
 
     fn describe_fragment(&self) -> FragmentState {
         FragmentState {
-            source: include_str!("tile_mask_flat.fragment.wgsl"),
+            source: include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/tile_mask_flat.fragment.wgsl"
+            )),
             entry_point: "main",
             targets: vec![Some(wgpu::ColorTargetState {
                 format: self.format,
@@ -55,13 +58,25 @@ impl Shader for TileMaskShader {
         VertexState {
             source: if self.debug_lines {
                 concat!(
-                    include_str!("projection.vertex.wgsl"),
-                    include_str!("tile_debug.vertex.wgsl")
+                    include_str!(concat!(
+                        env!("OUT_DIR"),
+                        "/wgsl/render/shaders/projection.vertex.wgsl"
+                    )),
+                    include_str!(concat!(
+                        env!("OUT_DIR"),
+                        "/wgsl/render/shaders/tile_debug.vertex.wgsl"
+                    ))
                 )
             } else {
                 concat!(
-                    include_str!("projection.vertex.wgsl"),
-                    include_str!("tile_mask.vertex.wgsl")
+                    include_str!(concat!(
+                        env!("OUT_DIR"),
+                        "/wgsl/render/shaders/projection.vertex.wgsl"
+                    )),
+                    include_str!(concat!(
+                        env!("OUT_DIR"),
+                        "/wgsl/render/shaders/tile_mask.vertex.wgsl"
+                    ))
                 )
             },
             entry_point: "main",
@@ -71,7 +86,10 @@ impl Shader for TileMaskShader {
 
     fn describe_fragment(&self) -> FragmentState {
         FragmentState {
-            source: include_str!("tile_mask.fragment.wgsl"),
+            source: include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/tile_mask.fragment.wgsl"
+            )),
             entry_point: "main",
             targets: vec![Some(wgpu::ColorTargetState {
                 format: self.format,

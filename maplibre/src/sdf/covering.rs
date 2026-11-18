@@ -1,5 +1,5 @@
 //! Keeps symbol tiles until replacement glyphs and GPU geometry are ready.
-use std::collections::HashSet;
+use rustc_hash::FxHashSet as HashSet;
 
 use crate::{
     coords::WorldTileCoords,
@@ -28,7 +28,7 @@ impl Drop for SymbolCovering {
 }
 
 pub(super) fn targets(world: &World) -> Vec<WorldTileCoords> {
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::default();
     let mut targets = Vec::new();
     if let Some(Initialized(pattern)) = world.resources.get::<Eventually<WgpuTileViewPattern>>() {
         for tile in pattern.iter() {
@@ -98,7 +98,7 @@ pub(super) fn select(
     targets: &[WorldTileCoords],
     ready: impl Fn(WorldTileCoords) -> bool,
 ) -> Vec<WorldTileCoords> {
-    let mut selected = HashSet::new();
+    let mut selected = HashSet::default();
     for &target in targets {
         let mut current = target;
         loop {
@@ -140,8 +140,8 @@ pub(super) fn update(
     if tiles.is_empty() {
         if let Some(covering) = world.resources.get_mut::<SymbolCovering>() {
             covering.tiles.clear();
-            return;
         }
+        return;
     }
     let entries: Vec<_> = tiles.iter().map(|coords| metadata(*coords, view)).collect();
     let bytes = bytemuck::cast_slice(&entries);

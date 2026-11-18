@@ -169,6 +169,28 @@ impl Input {
             refetch: false,
         }
     }
+
+    /// Parses a serialized worker [`Input`] from UTF-8 JSON bytes without `serde::Deserialize` bloat.
+    pub fn from_json_slice(bytes: &[u8]) -> Result<Self, serde_json::Error> {
+        use crate::util::json::extract::{
+            field_err, json_bool_or, json_f64_or, json_opt_string_vec, json_opt_u64, json_opt_u8,
+            json_req_coords, missing_field_err,
+        };
+        let value: serde_json::Value = serde_json::from_slice(bytes)?;
+        let Some(map) = value.as_object() else {
+            return Err(field_err("input", "expected object"));
+        };
+        let attempt = json_opt_u64(map, "attempt")?.ok_or_else(|| missing_field_err("attempt"))?;
+        Ok(Self {
+            coords: json_req_coords(map, "coords")?,
+            style: Arc::new(Style::empty()),
+            attempt,
+            overscaled_zoom: json_opt_u8(map, "overscaled_zoom")?.unwrap_or(0),
+            pixel_ratio: json_f64_or(map, "pixel_ratio", 1.0)? as f32,
+            only_sources: json_opt_string_vec(map, "only_sources")?,
+            refetch: json_bool_or(map, "refetch", false)?,
+        })
+    }
 }
 
 /// A worker result could not be delivered to its caller.

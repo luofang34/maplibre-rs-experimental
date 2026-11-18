@@ -41,17 +41,20 @@ fn is_intermediate_vector_layer(message: &Message) -> bool {
     )
 }
 
+pub(crate) type ArrivalWaker = Arc<dyn Fn() + Send + Sync>;
+type SharedArrivalWaker = Arc<Mutex<Option<ArrivalWaker>>>;
+
 /// Reply sender whose clones share the scheduler-backed APC's receiving channel.
 #[derive(Clone)]
 pub struct SchedulerContext {
     pub(crate) sender: Sender<Message>,
-    pub(crate) waker: Option<Arc<dyn Fn() + Send + Sync>>,
+    pub(crate) waker: Option<ArrivalWaker>,
     #[cfg(target_arch = "wasm32")]
     pending: Arc<Mutex<Vec<Message>>>,
 }
 
 impl SchedulerContext {
-    pub(crate) fn new(sender: Sender<Message>, waker: Option<Arc<dyn Fn() + Send + Sync>>) -> Self {
+    pub(crate) fn new(sender: Sender<Message>, waker: Option<ArrivalWaker>) -> Self {
         Self {
             sender,
             waker,
@@ -130,7 +133,7 @@ pub struct SchedulerAsyncProcedureCall<K: OffscreenKernel, S: Scheduler> {
     offscreen_kernel_config: OffscreenKernelConfig,
     /// Tracked calls still running, by attempt, so a cancelled one can be stopped.
     running: Arc<Mutex<HashMap<u64, AbortHandle>>>,
-    pub(crate) waker: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    pub(crate) waker: SharedArrivalWaker,
 }
 
 impl<K: OffscreenKernel, S: Scheduler> SchedulerAsyncProcedureCall<K, S> {
@@ -145,7 +148,7 @@ impl<K: OffscreenKernel, S: Scheduler> SchedulerAsyncProcedureCall<K, S> {
             scheduler,
             offscreen_kernel_config,
             running: Arc::default(),
-            waker: Mutex::new(None),
+            waker: Arc::default(),
         }
     }
 
@@ -235,7 +238,13 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
         procedure: AsyncProcedure<K, Self::Context>,
     ) -> Result<(), CallError> {
         let sender = self.channel.0.clone();
-        let waker = crate::platform::lock_unpoisoned(&self.waker).clone();
+        let waker_slot = self.waker.clone();
+        let waker: Option<ArrivalWaker> = Some(Arc::new(move || {
+            let current = crate::platform::lock_unpoisoned(&waker_slot).clone();
+            if let Some(wake) = current {
+                wake();
+            }
+        }));
         let offscreen_kernel_config = self.offscreen_kernel_config.clone();
         let attempt = input.attempt;
         let (abort, registration) = AbortHandle::new_pair();
@@ -288,6 +297,42 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
     fn cancel(&self, attempt: u64) {
         if let Some(abort) = self.running().remove(&attempt) {
             abort.abort();
+        }
+    }
+
+    fn supports_prewarm(&self) -> bool {
+        cfg!(target_arch = "wasm32")
+    }
+
+    fn prewarm_call(&self, tag: super::ProcedureTag, input: Input) -> Result<(), CallError> {
+        match tag {
+            super::ProcedureTag::FetchVector => self.call(
+                input,
+                crate::vector::fetch_vector_apc::<
+                    K,
+                    crate::vector::DefaultVectorTransferables,
+                    Self::Context,
+                >,
+            ),
+            #[cfg(feature = "raster")]
+            super::ProcedureTag::FetchRaster => self.call(
+                input,
+                crate::raster::fetch_raster_apc::<
+                    K,
+                    crate::raster::DefaultRasterTransferables,
+                    Self::Context,
+                >,
+            ),
+            #[cfg(not(feature = "raster"))]
+            super::ProcedureTag::FetchRaster => Ok(()),
+            super::ProcedureTag::FetchDem => self.call(
+                input,
+                crate::terrain::fetch_dem_apc::<
+                    K,
+                    crate::terrain::DefaultDemTransferables,
+                    Self::Context,
+                >,
+            ),
         }
     }
 

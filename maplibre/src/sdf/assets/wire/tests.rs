@@ -16,7 +16,7 @@ use crate::{
 fn binary_symbol_wire_roundtrips_and_shares_polylines_and_repeat_keys() {
     let shared_poly: Arc<[[f32; 2]]> = vec![[0.0, 1.0], [10.0, 20.0], [30.0, 40.0]].into();
     let shared_key: Arc<str> = Arc::from("Prinsengracht");
-    let mut props = FeatureProperties::new();
+    let mut props = FeatureProperties::default();
     props.insert("name".into(), Value::String("Prinsengracht".into()));
     props.insert("rank".into(), Value::Number(2.0));
     let props = Arc::new(props);

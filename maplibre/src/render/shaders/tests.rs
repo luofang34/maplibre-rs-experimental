@@ -109,17 +109,62 @@ fn stages() -> Vec<Stage> {
     }
     // Passes that build their pipelines without the trait.
     for (name, source) in [
-        ("depth copy", include_str!("depth_copy.vertex.wgsl")),
-        ("depth copy", include_str!("depth_copy.fragment.wgsl")),
         (
             "depth copy",
-            include_str!("depth_copy_multisampled.fragment.wgsl"),
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/depth_copy.vertex.wgsl"
+            )),
         ),
-        ("mipmap", include_str!("mipmap.vertex.wgsl")),
-        ("mipmap", include_str!("mipmap.fragment.wgsl")),
-        ("overlay", include_str!("overlay.wgsl")),
-        ("depth probe", include_str!("depth_probe.wgsl")),
-        ("depth probe", include_str!("depth_probe_multisampled.wgsl")),
+        (
+            "depth copy",
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/depth_copy.fragment.wgsl"
+            )),
+        ),
+        (
+            "depth copy",
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/depth_copy_multisampled.fragment.wgsl"
+            )),
+        ),
+        (
+            "mipmap",
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/mipmap.vertex.wgsl"
+            )),
+        ),
+        (
+            "mipmap",
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/mipmap.fragment.wgsl"
+            )),
+        ),
+        (
+            "overlay",
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/overlay.wgsl"
+            )),
+        ),
+        (
+            "depth probe",
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/depth_probe.wgsl"
+            )),
+        ),
+        (
+            "depth probe",
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/depth_probe_multisampled.wgsl"
+            )),
+        ),
     ] {
         stages.push((name, source.to_owned(), ""));
     }
@@ -127,13 +172,22 @@ fn stages() -> Vec<Stage> {
     for (name, source) in [
         (
             "globe daylight vertex",
-            include_str!("globe_daylight.vertex.wgsl"),
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/globe_daylight.vertex.wgsl"
+            )),
         ),
         (
             "globe daylight fragment",
             concat!(
-                include_str!("daylight.wgsl.part"),
-                include_str!("globe_daylight.fragment.wgsl")
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/daylight.wgsl.part"
+                )),
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/globe_daylight.fragment.wgsl"
+                ))
             ),
         ),
     ] {
@@ -181,6 +235,49 @@ fn every_shader_translates_to_msl_and_spirv() {
 }
 
 #[test]
+fn every_shader_spirv_roundtrips_with_strict_capabilities() {
+    let spv_out = naga::back::spv::Options {
+        flags: naga::back::spv::WriterFlags::LABEL_VARYINGS
+            | naga::back::spv::WriterFlags::CLAMP_FRAG_DEPTH,
+        ..naga::back::spv::Options::default()
+    };
+    let spv_in = naga::front::spv::Options {
+        adjust_coordinate_space: false,
+        strict_capabilities: true,
+        block_ctx_dump_prefix: None,
+    };
+    for (name, source, _) in stages() {
+        let (module, info) = validated(name, &source);
+        let words = naga::back::spv::write_vec(&module, &info, &spv_out, None)
+            .unwrap_or_else(|error| panic!("{name}: SPIR-V encode {error:?}"));
+        let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_ne_bytes()).collect();
+        let decoded = naga::front::spv::parse_u8_slice(&bytes, &spv_in)
+            .unwrap_or_else(|error| panic!("{name}: SPIR-V decode {error:?}"));
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&decoded)
+        .unwrap_or_else(|error| panic!("{name}: SPIR-V validate {error:?}"));
+    }
+}
+
+fn minify_wgsl_for_test(source: &str) -> String {
+    let mut out = String::new();
+    for raw_line in source.lines() {
+        let trimmed = raw_line
+            .split_once("//")
+            .map_or(raw_line, |(head, _)| head)
+            .trim();
+        if !trimmed.is_empty() {
+            out.push_str(trimmed);
+            out.push('\n');
+        }
+    }
+    out
+}
+
+#[test]
 fn every_shader_file_is_part_of_a_pipeline() {
     let stages = stages();
     let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/render/shaders");
@@ -190,10 +287,11 @@ fn every_shader_file_is_part_of_a_pipeline() {
             continue;
         }
         let text = std::fs::read_to_string(&path).expect("shader");
+        let minified = minify_wgsl_for_test(&text);
         assert!(
             stages
                 .iter()
-                .any(|(_, source, _)| source.contains(text.trim())),
+                .any(|(_, source, _)| source.contains(minified.trim())),
             "{} is not part of any pipeline this test translates",
             path.display()
         );

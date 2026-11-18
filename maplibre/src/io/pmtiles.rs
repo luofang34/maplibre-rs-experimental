@@ -5,17 +5,15 @@
 //! whose tile template `pmtiles://<archive URL>/{z}/{x}/{y}` then answers with each tile. The
 //! header and directories are read once per archive and kept; a tile costs one range request.
 
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use rustc_hash::FxHashMap;
 use thiserror::Error;
 
 pub use self::format::PmtilesFormatError;
 use self::format::{
-    decompress, find, parse_directory, tile_id, Entry, Found, Header, HEADER_BYTES,
+    decompress_async, find, parse_directory, tile_id, Entry, Found, Header, HEADER_BYTES,
 };
 use crate::io::source_client::{
     ByteRange, HttpClient, HttpRequest, NetworkStatus, ResourceKind, SourceFetchError,
@@ -84,13 +82,63 @@ fn failed(archive: &str, source: PmtilesFormatError) -> SourceFetchError {
 struct Archive {
     header: Header,
     root: Vec<Entry>,
-    leaves: Mutex<HashMap<u64, Arc<Vec<Entry>>>>,
+    leaves: Mutex<FxHashMap<u64, Arc<Vec<Entry>>>>,
 }
 
 /// Reads tiles out of PMTiles archives, keeping each archive's header and directories.
 #[derive(Clone, Default)]
 pub struct PmtilesReader {
-    archives: Arc<Mutex<HashMap<String, Arc<Archive>>>>,
+    archives: Arc<Mutex<FxHashMap<String, Arc<Archive>>>>,
+}
+
+#[inline(never)]
+fn build_range_request(base: &HttpRequest, url: &str, offset: u64, length: u64) -> HttpRequest {
+    let mut sub = base.clone();
+    sub.url = url.to_owned();
+    sub.range = Some(ByteRange { offset, length });
+    sub
+}
+
+#[inline(never)]
+fn parse_header(archive: &str, bytes: &[u8]) -> Result<Header, SourceFetchError> {
+    Header::parse(bytes).map_err(|error| failed(archive, error))
+}
+
+#[inline(never)]
+fn parse_dir(archive: &str, bytes: &[u8]) -> Result<Vec<Entry>, SourceFetchError> {
+    parse_directory(bytes).map_err(|error| failed(archive, error))
+}
+
+#[inline(never)]
+fn build_tile_json_document(
+    header: &Header,
+    archive: &str,
+    metadata: &[u8],
+) -> Result<Vec<u8>, SourceFetchError> {
+    let mut document = match serde_json::from_slice::<serde_json::Value>(metadata) {
+        Ok(serde_json::Value::Object(fields)) => fields,
+        _ => serde_json::Map::new(),
+    };
+    let [west, south, east, north] = header.bounds;
+    for (key, value) in [
+        ("tilejson", serde_json::json!("3.0.0")),
+        (
+            "tiles",
+            serde_json::json!([format!("{SCHEME}{archive}/{{z}}/{{x}}/{{y}}")]),
+        ),
+        ("minzoom", serde_json::json!(header.zooms.0)),
+        ("maxzoom", serde_json::json!(header.zooms.1)),
+        ("bounds", serde_json::json!([west, south, east, north])),
+        (
+            "center",
+            serde_json::json!([header.center.0, header.center.1, header.center.2]),
+        ),
+    ] {
+        document.insert(key.to_owned(), value);
+    }
+    let mut out = Vec::with_capacity(256);
+    crate::util::json::write_json_bytes(&serde_json::Value::Object(document), &mut out);
+    Ok(out)
 }
 
 async fn range<C: HttpClient>(
@@ -101,9 +149,7 @@ async fn range<C: HttpClient>(
     offset: u64,
     length: u64,
 ) -> Result<Vec<u8>, SourceFetchError> {
-    let mut sub = base.clone();
-    sub.url = url.to_owned();
-    sub.range = Some(ByteRange { offset, length });
+    let sub = build_range_request(base, url, offset, length);
     client.fetch_request_with_status(&sub, status).await
 }
 
@@ -148,7 +194,8 @@ impl PmtilesReader {
                     entry.length,
                 )
                 .await?;
-                decompress(opened.header.tile_compression, bytes, "tile")
+                decompress_async(opened.header.tile_compression, bytes, "tile")
+                    .await
                     .map_err(|error| failed(&archive, error))
             }
         }
@@ -167,7 +214,7 @@ impl PmtilesReader {
             }
         }
         let bytes = range(client, base, status, archive, 0, HEADER_BYTES).await?;
-        let header = Header::parse(&bytes).map_err(|error| failed(archive, error))?;
+        let header = parse_header(archive, &bytes)?;
         let root = self
             .directory(
                 client,
@@ -179,22 +226,52 @@ impl PmtilesReader {
                 header.root.1,
             )
             .await?;
+        let opened = self.finish_open(archive, header, root, base.cache_policy.is_volatile());
+        Ok(opened)
+    }
+
+    #[inline(never)]
+    fn finish_open(
+        &self,
+        archive: &str,
+        header: Header,
+        root: Vec<Entry>,
+        is_volatile: bool,
+    ) -> Arc<Archive> {
         let opened = Arc::new(Archive {
             header,
             root,
             leaves: Mutex::default(),
         });
-        if !base.cache_policy.is_volatile() {
+        if !is_volatile {
             crate::platform::lock_unpoisoned(&self.archives)
                 .insert(archive.to_owned(), opened.clone());
         }
-        Ok(opened)
+        opened
     }
 
+    #[inline(never)]
     fn cached(&self, archive: &str) -> Option<Arc<Archive>> {
         crate::platform::lock_unpoisoned(&self.archives)
             .get(archive)
             .cloned()
+    }
+
+    #[inline(never)]
+    fn lookup_leaf(opened: &Archive, offset: u64) -> Option<Arc<Vec<Entry>>> {
+        crate::platform::lock_unpoisoned(&opened.leaves)
+            .get(&offset)
+            .cloned()
+    }
+
+    #[inline(never)]
+    fn store_leaf(opened: &Archive, offset: u64, entries: Arc<Vec<Entry>>) {
+        crate::platform::lock_unpoisoned(&opened.leaves).insert(offset, entries);
+    }
+
+    #[inline(never)]
+    fn find_entry(entries: &[Entry], id: u64) -> Option<Found> {
+        find(entries, id)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -209,9 +286,10 @@ impl PmtilesReader {
         length: u64,
     ) -> Result<Vec<Entry>, SourceFetchError> {
         let bytes = range(client, base, status, archive, offset, length).await?;
-        decompress(header.internal_compression, bytes, "directory")
-            .and_then(|bytes| parse_directory(&bytes))
-            .map_err(|error| failed(archive, error))
+        let bytes = decompress_async(header.internal_compression, bytes, "directory")
+            .await
+            .map_err(|error| failed(archive, error))?;
+        parse_dir(archive, &bytes)
     }
 
     async fn locate<C: HttpClient>(
@@ -225,15 +303,12 @@ impl PmtilesReader {
     ) -> Result<Option<Entry>, SourceFetchError> {
         let mut directory = Arc::new(opened.root.clone());
         for _ in 0..MAX_DEPTH {
-            match find(&directory, id) {
+            match Self::find_entry(&directory, id) {
                 None => return Ok(None),
                 Some(Found::Tile(entry)) => return Ok(Some(entry)),
                 Some(Found::Leaf(leaf)) => {
                     let offset = opened.header.leaves_offset + leaf.offset;
-                    let known = crate::platform::lock_unpoisoned(&opened.leaves)
-                        .get(&offset)
-                        .cloned();
-                    directory = match known {
+                    directory = match Self::lookup_leaf(opened, offset) {
                         Some(entries) => entries,
                         None => {
                             let entries = Arc::new(
@@ -248,8 +323,7 @@ impl PmtilesReader {
                                 )
                                 .await?,
                             );
-                            crate::platform::lock_unpoisoned(&opened.leaves)
-                                .insert(offset, entries.clone());
+                            Self::store_leaf(opened, offset, entries.clone());
                             entries
                         }
                     };
@@ -279,30 +353,10 @@ impl PmtilesReader {
             header.metadata.1,
         )
         .await?;
-        let metadata = decompress(header.internal_compression, metadata, "metadata")
+        let metadata = decompress_async(header.internal_compression, metadata, "metadata")
+            .await
             .map_err(|error| failed(archive, error))?;
-        let mut document = match serde_json::from_slice::<serde_json::Value>(&metadata) {
-            Ok(serde_json::Value::Object(fields)) => fields,
-            _ => serde_json::Map::new(),
-        };
-        let [west, south, east, north] = header.bounds;
-        for (key, value) in [
-            ("tilejson", serde_json::json!("3.0.0")),
-            (
-                "tiles",
-                serde_json::json!([format!("{SCHEME}{archive}/{{z}}/{{x}}/{{y}}")]),
-            ),
-            ("minzoom", serde_json::json!(header.zooms.0)),
-            ("maxzoom", serde_json::json!(header.zooms.1)),
-            ("bounds", serde_json::json!([west, south, east, north])),
-            (
-                "center",
-                serde_json::json!([header.center.0, header.center.1, header.center.2]),
-            ),
-        ] {
-            document.insert(key.to_owned(), value);
-        }
-        serde_json::to_vec(&document).map_err(|error| SourceFetchError(Box::new(error)))
+        build_tile_json_document(header, archive, &metadata)
     }
 }
 

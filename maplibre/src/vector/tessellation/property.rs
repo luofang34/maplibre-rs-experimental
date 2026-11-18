@@ -17,7 +17,7 @@ pub(crate) fn property_value(value: &ColumnValue) -> Option<Value> {
         ColumnValue::String(text) | ColumnValue::DateTime(text) => {
             Value::String((*text).to_string())
         }
-        ColumnValue::Json(text) => serde_json::from_str::<serde_json::Value>(text)
+        ColumnValue::Json(text) => serde_json::from_slice::<serde_json::Value>(text.as_bytes())
             .map(|json| Value::from_json(&json))
             .unwrap_or_else(|_| Value::String((*text).to_string())),
         ColumnValue::Binary(_) => return None,

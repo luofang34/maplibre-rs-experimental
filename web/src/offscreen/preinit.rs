@@ -39,13 +39,22 @@ pub struct PreinitializedOffscreen {
     renderer: Renderer,
 }
 
-pub(super) async fn preinit_offscreen_inner(
+struct WindowAndKernel {
+    scope: DedicatedWorkerGlobalScope,
+    size: PhysicalSize,
+    scale: f64,
+    runner_id: u64,
+    window_state: Rc<SharedWindowState>,
+    kernel: Kernel<OffscreenEnvironment>,
+}
+
+fn create_window_and_kernel(
     canvas: OffscreenCanvas,
     width: u32,
     height: u32,
     scale_factor: f64,
     new_worker: js_sys::Function,
-) -> Result<PreinitializedOffscreen, JSError> {
+) -> Result<WindowAndKernel, JSError> {
     let scope: DedicatedWorkerGlobalScope = js_sys::global().dyn_into().map_err(|_| {
         WebError::TypeError("run_maplibre_offscreen requires DedicatedWorkerGlobalScope".into())
     })?;
@@ -94,7 +103,49 @@ pub(super) async fn preinit_offscreen_inner(
         .with_asset_cache(offscreen_kernel_config.asset_cache)
         .with_apc(apc)
         .build()?;
-    let window = kernel
+
+    Ok(WindowAndKernel {
+        scope,
+        size,
+        scale,
+        runner_id,
+        window_state,
+        kernel,
+    })
+}
+
+fn build_map(
+    kernel: Kernel<OffscreenEnvironment>,
+    mut style_json: Option<String>,
+) -> Result<Map<OffscreenEnvironment>, JSError> {
+    let style = match style_json.take().as_deref() {
+        Some(raw) => parse_style(raw)?,
+        None => Style::default(),
+    };
+    let plugins = default_plugins_for::<OffscreenEnvironment>(&style);
+    let mut map = Map::new(style.clone(), kernel, RendererBuilder::new(), plugins)?;
+    if style.terrain.is_some()
+        || style.pitch.is_some_and(|pitch| pitch > 60.0)
+        || style
+            .projection
+            .as_ref()
+            .is_some_and(|p| p.projection_type != maplibre::projection::ProjectionType::Mercator)
+    {
+        map.set_max_pitch_degrees(style.pitch.unwrap_or(0.0).max(70.0));
+    }
+    Ok(map)
+}
+
+pub(super) async fn preinit_offscreen_inner(
+    canvas: OffscreenCanvas,
+    width: u32,
+    height: u32,
+    scale_factor: f64,
+    new_worker: js_sys::Function,
+) -> Result<PreinitializedOffscreen, JSError> {
+    let wk = create_window_and_kernel(canvas, width, height, scale_factor, new_worker)?;
+    let window = wk
+        .kernel
         .map_window_config()
         .create()
         .map_err(maplibre::map::MapError::Window)?;
@@ -105,35 +156,21 @@ pub(super) async fn preinit_offscreen_inner(
         .map_err(maplibre::map::MapError::DeviceInit)?;
 
     Ok(PreinitializedOffscreen {
-        scope,
-        size,
-        scale,
-        runner_id,
-        window_state,
-        kernel,
+        scope: wk.scope,
+        size: wk.size,
+        scale: wk.scale,
+        runner_id: wk.runner_id,
+        window_state: wk.window_state,
+        kernel: wk.kernel,
         renderer,
     })
 }
 
 pub(super) async fn finish_offscreen_inner(
     pre: PreinitializedOffscreen,
-    mut style_json: Option<String>,
+    style_json: Option<String>,
 ) -> Result<OffscreenMapRunner, JSError> {
-    let style = match style_json.take().as_deref() {
-        Some(raw) => parse_style(raw)?,
-        None => Style::default(),
-    };
-    let plugins = default_plugins_for::<OffscreenEnvironment>(&style);
-    let mut map = Map::new(style.clone(), pre.kernel, RendererBuilder::new(), plugins)?;
-    if style.terrain.is_some()
-        || style.pitch.is_some_and(|pitch| pitch > 60.0)
-        || style
-            .projection
-            .as_ref()
-            .is_some_and(|p| p.projection_type != maplibre::projection::ProjectionType::Mercator)
-    {
-        map.set_max_pitch_degrees(style.pitch.unwrap_or(0.0).max(70.0));
-    }
+    let mut map = build_map(pre.kernel, style_json)?;
     map.initialize_with_renderer(Some(pre.renderer)).await?;
     if let Ok(context) = map.context_mut() {
         context.resize(pre.size, pre.scale);
@@ -178,6 +215,11 @@ pub async fn run_maplibre_offscreen(
     new_worker: js_sys::Function,
     style_json: Option<String>,
 ) -> Result<OffscreenMapRunner, JSError> {
-    let pre = preinit_offscreen_inner(canvas, width, height, scale_factor, new_worker).await?;
-    finish_offscreen_inner(pre, style_json).await
+    let wk = create_window_and_kernel(canvas, width, height, scale_factor, new_worker)?;
+    let mut map = build_map(wk.kernel, style_json)?;
+    map.initialize_renderer().await?;
+    if let Ok(context) = map.context_mut() {
+        context.resize(wk.size, wk.scale);
+    }
+    Ok(start_runner(wk.runner_id, wk.scope, wk.window_state, map))
 }

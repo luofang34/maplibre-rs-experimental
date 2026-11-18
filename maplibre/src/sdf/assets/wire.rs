@@ -1,5 +1,5 @@
 //! Worker transport for symbol collision geometry and atlases.
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
 
@@ -16,7 +16,9 @@ use crate::{
     },
 };
 
+#[cfg(any(test, not(target_arch = "wasm32")))]
 mod json_legacy;
+#[cfg(any(test, not(target_arch = "wasm32")))]
 pub use json_legacy::{LineLabelWire, SymbolFeature};
 
 const SYM_WIRE_MAGIC_V1: [u8; 4] = *b"SYM1";
@@ -27,7 +29,7 @@ const SYM_WIRE_MAGIC_V2: [u8; 4] = *b"SYM2";
 pub fn encode_symbol_features(features: &[Feature]) -> Vec<u8> {
     let mut poly_ids: FxHashMap<usize, u32> = FxHashMap::default();
     let mut polys: Vec<&[[f32; 2]]> = Vec::new();
-    let mut repeat_ids: HashMap<&str, u32> = HashMap::new();
+    let mut repeat_ids: FxHashMap<&str, u32> = FxHashMap::default();
     let mut repeat_keys: Vec<&str> = Vec::new();
     let mut prop_ids: FxHashMap<usize, u32> = FxHashMap::default();
     let mut prop_groups: Vec<&FeatureProperties> = Vec::new();
@@ -183,9 +185,12 @@ pub fn encode_symbol_features(features: &[Feature]) -> Vec<u8> {
 pub fn decode_symbol_features(bytes: &[u8]) -> Option<Vec<Feature>> {
     let is_v2 = bytes.starts_with(&SYM_WIRE_MAGIC_V2);
     if !is_v2 && !bytes.starts_with(&SYM_WIRE_MAGIC_V1) {
-        return serde_json::from_slice::<Vec<SymbolFeature>>(bytes)
+        #[cfg(any(test, not(target_arch = "wasm32")))]
+        return crate::util::json::from_json_slice::<Vec<SymbolFeature>>(bytes)
             .ok()
             .map(|items| items.into_iter().map(Feature::from).collect());
+        #[cfg(all(target_arch = "wasm32", not(test)))]
+        return None;
     }
     let mut buf = &bytes[4..];
 

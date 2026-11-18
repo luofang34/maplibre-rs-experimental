@@ -13,10 +13,22 @@ pub struct LineShader {
 impl Shader for LineShader {
     fn describe_vertex(&self) -> VertexState {
         line_vertex(concat!(
-            include_str!("projection.vertex.wgsl"),
-            include_str!("line_ground.wgsl"),
-            include_str!("line_flat.wgsl"),
-            include_str!("line.vertex.wgsl")
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/projection.vertex.wgsl"
+            )),
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/line_ground.wgsl"
+            )),
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/line_flat.wgsl"
+            )),
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/line.vertex.wgsl"
+            ))
         ))
     }
 
@@ -35,11 +47,26 @@ pub struct TerrainLineShader {
 impl Shader for TerrainLineShader {
     fn describe_vertex(&self) -> VertexState {
         line_vertex(concat!(
-            include_str!("projection.vertex.wgsl"),
-            include_str!("line_ground.wgsl"),
-            include_str!("terrain_surface.wgsl.part"),
-            include_str!("line_terrain.wgsl"),
-            include_str!("line.vertex.wgsl")
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/projection.vertex.wgsl"
+            )),
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/line_ground.wgsl"
+            )),
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/terrain_surface.wgsl.part"
+            )),
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/line_terrain.wgsl"
+            )),
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/line.vertex.wgsl"
+            ))
         ))
     }
 
@@ -100,7 +127,10 @@ fn line_vertex(source: &'static str) -> VertexState {
 
 fn line_fragment(format: wgpu::TextureFormat) -> FragmentState {
     FragmentState {
-        source: include_str!("line.fragment.wgsl"),
+        source: include_str!(concat!(
+            env!("OUT_DIR"),
+            "/wgsl/render/shaders/line.fragment.wgsl"
+        )),
         entry_point: "main",
         targets: vec![Some(wgpu::ColorTargetState {
             format,

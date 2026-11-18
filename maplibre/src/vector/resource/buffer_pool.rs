@@ -54,6 +54,7 @@ pub struct BufferPool<Q, B, V: PoolVertex, I, TM, FM> {
     decoupled_feature_metadata: bool,
     shared_layer_metadata: bool,
     enable_u16_indices: bool,
+    enable_u16_chunks: bool,
     zero_initialized_slabs: bool,
 
     index: RingIndex,
@@ -158,6 +159,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             decoupled_feature_metadata: false,
             shared_layer_metadata: false,
             enable_u16_indices: false,
+            enable_u16_chunks: false,
             zero_initialized_slabs: false,
             index: RingIndex::new(),
             shared_vertices: Default::default(),
@@ -196,6 +198,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             decoupled_feature_metadata: sizes.feature_metadata < sizes.vertices,
             shared_layer_metadata: false,
             enable_u16_indices: false,
+            enable_u16_chunks: false,
             zero_initialized_slabs: false,
             index: RingIndex::new(),
             shared_vertices: Default::default(),
@@ -454,6 +457,7 @@ mod page;
 mod prepacked;
 mod reclaim;
 mod shared;
+mod u16_chunks;
 mod updates;
 mod upload;
 pub use allocation_error::AllocationError;
