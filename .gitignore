@@ -45,3 +45,9 @@ frame_*.png
 /.dpm/
 
 xcode/libs/*/**
+
+# Local agent phase harness state
+.harness/
+
+# Python bytecode cache
+**/__pycache__/
