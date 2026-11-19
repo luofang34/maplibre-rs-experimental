@@ -127,6 +127,11 @@ impl GlobeTileMeshCache {
         Self::default()
     }
 
+    /// Returns `true` when no GPU tile meshes have been prepared yet.
+    pub fn is_empty(&self) -> bool {
+        self.meshes.is_empty()
+    }
+
     /// Updates whether spherical globe projection (`transition > 0.0`) is active this frame.
     ///
     /// Flat Mercator frames (`!globe_active`) reuse a minimal `1x1` quad (`granularity = 1`, no

@@ -52,6 +52,16 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
     ) -> SystemResult {
         tile_retry::stop_cancelled(world, self.kernel.apc());
         crate::io::tile_backpressure::set_raster_deferred(world, false);
+        let all_sources: Vec<_> = source_layer_groups(style, TileKind::Raster)
+            .into_iter()
+            .filter(|group| {
+                !crate::raster::media_source::is_media_source(style, group.source_name.as_deref())
+            })
+            .map(|group| RasterSourceId::new(group.source_name))
+            .collect();
+        if all_sources.is_empty() {
+            return Ok(());
+        }
         // Missing ancestors and deferred tiles must progress while the camera is stationary.
         // Each raster source covers the view at its own tile size and rounding, as GL JS's
         // per-source tile managers do; the tiles of every source are requested together.
@@ -64,9 +74,7 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
             multi.raster_regions.clone()
         } else {
             let request_padding = if renderer.settings.tight_tile_requests
-                || (cfg!(target_arch = "wasm32")
-                    && style.terrain.is_none()
-                    && !view_state.has_external_view())
+                || (cfg!(target_arch = "wasm32") && !view_state.has_external_view())
             {
                 ViewStatePadding::Tight
             } else {
@@ -98,13 +106,6 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
         let mut budget = request_budget(world);
         let stand_ins = drape_stand_ins(style, view_state, world);
         let (wanted, wanted_sources) = wanted_tiles_with_sources(regions, stand_ins, style, world);
-        let all_sources: Vec<_> = source_layer_groups(style, TileKind::Raster)
-            .into_iter()
-            .filter(|group| {
-                !crate::raster::media_source::is_media_source(style, group.source_name.as_deref())
-            })
-            .map(|group| RasterSourceId::new(group.source_name))
-            .collect();
         let mut deferred = false;
         let mut frame_style = FrameStyle::new(style);
         for coords in wanted {

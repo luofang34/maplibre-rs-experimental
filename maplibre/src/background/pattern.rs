@@ -17,6 +17,7 @@ pub(crate) struct BackgroundPatternGpu {
     pipeline: wgpu::RenderPipeline,
     buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    last_view_bytes: Option<[u8; std::mem::size_of::<ViewUniforms>()]>,
     globe: Option<GlobePattern>,
 }
 
@@ -25,6 +26,7 @@ struct GlobePattern {
     pipeline: wgpu::RenderPipeline,
     buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    last_world_bits: Option<u32>,
 }
 
 fn view_layout_entries() -> Vec<wgpu::BindGroupLayoutEntry> {
@@ -83,6 +85,7 @@ impl BackgroundPatternGpu {
             pipeline,
             buffer,
             bind_group,
+            last_view_bytes: None,
             globe: None,
         }
     }
@@ -115,6 +118,7 @@ impl BackgroundPatternGpu {
             pipeline,
             buffer,
             bind_group,
+            last_world_bits: None,
         });
     }
 
@@ -132,7 +136,7 @@ impl BackgroundPatternGpu {
 
     /// Points the pattern at the map the view looks at, as far as the frame can see it.
     pub(crate) fn write(
-        &self,
+        &mut self,
         queue: &crate::render::upload_queue::UploadQueue,
         view: &ViewState,
         physical: [f32; 2],
@@ -163,15 +167,27 @@ impl BackgroundPatternGpu {
             // the view has logical ones.
             viewport: [physical[0], physical[1], 0.0, 0.0],
         };
-        queue.write_buffer(&self.buffer, 0, bytemuck::bytes_of(&uniforms));
-        if let Some(globe) = &self.globe {
+        let bytes = bytemuck::bytes_of(&uniforms);
+        if self
+            .last_view_bytes
+            .as_ref()
+            .is_none_or(|prev| prev.as_slice() != bytes)
+        {
+            queue.write_buffer(&self.buffer, 0, bytes);
+            self.last_view_bytes = bytes.try_into().ok();
+        }
+        if let Some(globe) = &mut self.globe {
             // Map pixels the world spans at the view's zoom, which the pattern repeats over.
             let world = (crate::coords::TILE_SIZE * 2_f64.powf(view.zoom().value())) as f32;
-            queue.write_buffer(
-                &globe.buffer,
-                0,
-                bytemuck::bytes_of(&[world, 0.0, 0.0, 0.0]),
-            );
+            let world_bits = world.to_bits();
+            if globe.last_world_bits != Some(world_bits) {
+                queue.write_buffer(
+                    &globe.buffer,
+                    0,
+                    bytemuck::bytes_of(&[world, 0.0, 0.0, 0.0]),
+                );
+                globe.last_world_bits = Some(world_bits);
+            }
         }
     }
 

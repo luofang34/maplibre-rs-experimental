@@ -19,6 +19,10 @@ use crate::{
 pub(crate) struct SymbolCovering {
     pub tiles: Vec<WorldTileCoords>,
     pub buffer: wgpu::Buffer,
+    selection_key: Option<(u64, u64, u64, u64, u64)>,
+    all_targets_ready: bool,
+    metadata_scratch: Vec<ShaderTileMetadata>,
+    last_uploaded_bytes: Vec<u8>,
 }
 
 impl Drop for SymbolCovering {
@@ -71,7 +75,31 @@ pub(super) fn upload_tiles(world: &World) -> Vec<WorldTileCoords> {
     tiles
 }
 
-fn ready(world: &World, style: &Style, zoom: f64, coords: WorldTileCoords) -> bool {
+fn visible_symbol_hash(style: &Style, zoom: f64) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = rustc_hash::FxHasher::default();
+    for (idx, layer) in style.layers.iter().enumerate() {
+        if layer.type_ == "symbol" && layer.is_visible_at(zoom) {
+            idx.hash(&mut hasher);
+        }
+    }
+    hasher.finish()
+}
+
+fn visible_symbol_ids(style: &Style, zoom: f64) -> Vec<crate::style::StyleLayerId> {
+    style
+        .layers
+        .iter()
+        .filter(|layer| layer.type_ == "symbol" && layer.is_visible_at(zoom))
+        .map(crate::style::layer::StyleLayer::layer_id)
+        .collect()
+}
+
+fn ready(
+    world: &World,
+    visible_layers: &[crate::style::StyleLayerId],
+    coords: WorldTileCoords,
+) -> bool {
     let Some(symbols) = world.tiles.query::<&SymbolLayersDataComponent>(coords) else {
         return false;
     };
@@ -81,30 +109,33 @@ fn ready(world: &World, style: &Style, zoom: f64, coords: WorldTileCoords) -> bo
     let Some(Initialized(pool)) = world.resources.get::<Eventually<SymbolBufferPool>>() else {
         return false;
     };
-    let loaded = pool.get_loaded_style_layers_at(coords).unwrap_or_default();
+    let loaded = pool.index().get_layers(coords);
     symbols.layers.iter().all(|layer| {
-        let visible = style
-            .layers
-            .iter()
-            .any(|style| style.id == layer.style_layer_id && style.is_visible_at(zoom));
-        !visible
+        let style_id = crate::style::StyleLayerId::intern(&layer.style_layer_id);
+        !visible_layers.contains(&style_id)
             || layer.buffer.usable_indices == 0
             || layer.buffer.buffer.indices.is_empty()
-            || loaded.contains(layer.style_layer_id.as_str())
+            || loaded.is_some_and(|entries| entries.iter().any(|e| e.style_layer_id == style_id))
     })
 }
 
-pub(super) fn select(
+fn select_with_status(
     targets: &[WorldTileCoords],
     ready: impl Fn(WorldTileCoords) -> bool,
-) -> Vec<WorldTileCoords> {
+) -> (Vec<WorldTileCoords>, bool) {
     let mut selected = HashSet::default();
+    let mut all_targets_ready = !targets.is_empty();
     for &target in targets {
         let mut current = target;
+        let mut first = true;
         loop {
             if ready(current) {
                 selected.insert(current);
                 break;
+            }
+            if first {
+                all_targets_ready = false;
+                first = false;
             }
             let Some(parent) = current.get_parent() else {
                 break;
@@ -116,7 +147,15 @@ pub(super) fn select(
     // priority resolves duplicate anchors across levels without hiding an entire region.
     let mut result: Vec<_> = selected.into_iter().collect();
     result.sort_by_key(|tile| (tile.z, tile.y, tile.x));
-    result
+    (result, all_targets_ready)
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn select(
+    targets: &[WorldTileCoords],
+    ready: impl Fn(WorldTileCoords) -> bool,
+) -> Vec<WorldTileCoords> {
+    select_with_status(targets, ready).0
 }
 
 pub(super) fn update(
@@ -126,24 +165,70 @@ pub(super) fn update(
     device: &wgpu::Device,
     queue: &crate::render::upload_queue::UploadQueue,
 ) {
-    let tiles = if crate::render::eye_covering::EyeInFrame::reuses_content(world) {
-        world
+    let topology_gen = match world.resources.get::<Eventually<WgpuTileViewPattern>>() {
+        Some(Initialized(pattern)) => pattern.topology_generation(),
+        _ => 0,
+    };
+    let (pool_rev, pool_evict) = match world.resources.get::<Eventually<SymbolBufferPool>>() {
+        Some(Initialized(pool)) => (pool.revision(), pool.eviction_generation()),
+        _ => (0, 0),
+    };
+    let visible_hash = visible_symbol_hash(style, view.style_zoom().value());
+    let key = (
+        topology_gen,
+        pool_rev,
+        pool_evict,
+        style.revision(),
+        visible_hash,
+    );
+    let can_reuse = crate::render::eye_covering::EyeInFrame::reuses_content(world)
+        || world
             .resources
             .get::<SymbolCovering>()
-            .map(|covering| covering.tiles.clone())
-            .unwrap_or_default()
-    } else {
-        select(&targets(world), |coords| {
-            ready(world, style, view.style_zoom().value(), coords)
-        })
-    };
-    if tiles.is_empty() {
+            .is_some_and(|c| c.all_targets_ready && c.selection_key == Some(key));
+    if can_reuse {
         if let Some(covering) = world.resources.get_mut::<SymbolCovering>() {
-            covering.tiles.clear();
+            if covering.tiles.is_empty() {
+                return;
+            }
+            let SymbolCovering {
+                tiles,
+                buffer,
+                metadata_scratch,
+                last_uploaded_bytes,
+                ..
+            } = covering;
+            metadata_scratch.clear();
+            metadata_scratch.extend(tiles.iter().map(|coords| metadata(*coords, view)));
+            let bytes = bytemuck::cast_slice(metadata_scratch.as_slice());
+            if !bytes.is_empty() && last_uploaded_bytes.as_slice() != bytes {
+                queue.write_buffer(buffer, 0, bytes);
+                last_uploaded_bytes.clear();
+                last_uploaded_bytes.extend_from_slice(bytes);
+            }
         }
         return;
     }
-    let entries: Vec<_> = tiles.iter().map(|coords| metadata(*coords, view)).collect();
+    let visible_layers = visible_symbol_ids(style, view.style_zoom().value());
+    let (tiles, all_targets_ready) = select_with_status(&targets(world), |coords| {
+        ready(world, &visible_layers, coords)
+    });
+    let next_key = Some(key);
+    if tiles.is_empty() {
+        if let Some(covering) = world.resources.get_mut::<SymbolCovering>() {
+            covering.tiles.clear();
+            covering.selection_key = next_key;
+            covering.all_targets_ready = false;
+        }
+        return;
+    }
+    let mut entries = world
+        .resources
+        .get_mut::<SymbolCovering>()
+        .map(|c| std::mem::take(&mut c.metadata_scratch))
+        .unwrap_or_default();
+    entries.clear();
+    entries.extend(tiles.iter().map(|coords| metadata(*coords, view)));
     let bytes = bytemuck::cast_slice(&entries);
     let required = (bytes.len() as u64).max(256);
     let grow = world
@@ -164,13 +249,22 @@ pub(super) fn update(
         world.resources.insert(SymbolCovering {
             tiles: Vec::new(),
             buffer,
+            selection_key: None,
+            all_targets_ready: false,
+            metadata_scratch: Vec::new(),
+            last_uploaded_bytes: Vec::new(),
         });
     }
     if let Some(covering) = world.resources.get_mut::<SymbolCovering>() {
-        if !bytes.is_empty() {
+        if !bytes.is_empty() && covering.last_uploaded_bytes.as_slice() != bytes {
             queue.write_buffer(&covering.buffer, 0, bytes);
+            covering.last_uploaded_bytes.clear();
+            covering.last_uploaded_bytes.extend_from_slice(bytes);
         }
         covering.tiles = tiles;
+        covering.selection_key = next_key;
+        covering.all_targets_ready = all_targets_ready;
+        covering.metadata_scratch = entries;
     }
 }
 

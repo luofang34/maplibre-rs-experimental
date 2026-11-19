@@ -12,6 +12,13 @@ use crate::{
     tcs::system::{SystemError, SystemResult},
 };
 
+#[derive(Clone, Default)]
+struct GlobeMeshPrepareMemo {
+    flat_prepared: bool,
+    flat_with_raster: bool,
+    last_globe: Option<(u64, bool, Vec<crate::coords::WorldTileCoords>)>,
+}
+
 pub fn upload_system(
     MapContext {
         world,
@@ -22,6 +29,11 @@ pub fn upload_system(
     }: &mut MapContext,
 ) -> SystemResult {
     let background_tiles = crate::background::queue_system::globe_tiles(world);
+    let mut memo = world
+        .resources
+        .get::<GlobeMeshPrepareMemo>()
+        .cloned()
+        .unwrap_or_default();
     let (view_proj, projection_data) = match world
         .resources
         .get::<ResolvedFrameView>()
@@ -58,6 +70,9 @@ pub fn upload_system(
     );
     projection_resources.upload(queue, projection_data);
     tile_mesh_cache.set_globe_active(projection_data.transition > 0.0);
+    if tile_mesh_cache.is_empty() {
+        memo = GlobeMeshPrepareMemo::default();
+    }
 
     let needs_raster_mesh = style.layers.iter().any(|layer| {
         !layer.is_hidden()
@@ -81,29 +96,47 @@ pub fn upload_system(
     };
 
     if projection_data.transition > 0.0 {
-        for coords in background_tiles {
-            tile_mesh_cache
-                .prepare(device, queue, coords, TileMeshUsage::Raster, false)
-                .map_err(|error| {
-                    tracing::error!(%error, %coords, "unable to prepare globe background mesh");
-                    SystemError::Setup
-                })?;
-        }
-        let mut visible_tiles = Vec::new();
-        for view_tile in tile_view_pattern.iter() {
-            view_tile.render(|shape| visible_tiles.push(shape.coords()));
-        }
-        for coords in visible_tiles {
-            for &(usage, generate_borders) in usages {
+        let topology_gen = tile_view_pattern.topology_generation();
+        let globe_unchanged = memo
+            .last_globe
+            .as_ref()
+            .is_some_and(|(topo_gen, raster, bg)| {
+                *topo_gen == topology_gen
+                    && (*raster || !needs_raster_mesh)
+                    && *bg == background_tiles
+            });
+        if !globe_unchanged {
+            for &coords in &background_tiles {
                 tile_mesh_cache
-                    .prepare(device, queue, coords, usage, generate_borders)
+                    .prepare(device, queue, coords, TileMeshUsage::Raster, false)
                     .map_err(|error| {
-                        tracing::error!(%error, %coords, "unable to prepare globe tile mesh");
+                        tracing::error!(%error, %coords, "unable to prepare globe background mesh");
                         SystemError::Setup
                     })?;
             }
+            let mut visible_tiles = Vec::new();
+            for view_tile in tile_view_pattern.iter() {
+                view_tile.render(|shape| visible_tiles.push(shape.coords()));
+            }
+            for coords in visible_tiles {
+                for &(usage, generate_borders) in usages {
+                    tile_mesh_cache
+                        .prepare(device, queue, coords, usage, generate_borders)
+                        .map_err(|error| {
+                            tracing::error!(%error, %coords, "unable to prepare globe tile mesh");
+                            SystemError::Setup
+                        })?;
+                }
+            }
+            let with_raster = memo
+                .last_globe
+                .as_ref()
+                .is_some_and(|(topo_gen, raster, _)| *topo_gen == topology_gen && *raster)
+                || needs_raster_mesh;
+            memo.last_globe = Some((topology_gen, with_raster, background_tiles));
+            world.resources.insert(memo);
         }
-    } else {
+    } else if !(memo.flat_prepared && (!needs_raster_mesh || memo.flat_with_raster)) {
         let coords = crate::coords::WorldTileCoords::default();
         for &(usage, generate_borders) in usages {
             tile_mesh_cache
@@ -113,6 +146,10 @@ pub fn upload_system(
                     SystemError::Setup
                 })?;
         }
+        memo.flat_prepared = true;
+        memo.flat_with_raster |= needs_raster_mesh;
+        memo.last_globe = None;
+        world.resources.insert(memo);
     }
 
     Ok(())

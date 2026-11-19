@@ -33,21 +33,19 @@ pub fn resource_system(
     }: &mut MapContext,
 ) -> crate::tcs::system::SystemResult {
     let style_zoom = view_state.style_zoom().value();
-    let needs_bg_pattern = !cfg!(target_arch = "wasm32")
-        || style.layers.iter().any(|layer| {
-            layer.type_ == "background"
-                && layer
-                    .paint
-                    .as_ref()
-                    .is_some_and(|p| crate::vector::pattern::pattern_name(p, style_zoom).is_some())
-        });
-    let needs_globe = !cfg!(target_arch = "wasm32")
-        || style.projection.as_ref().is_some_and(|spec| {
-            spec.projection_type
-                .globe_transition(view_state.zoom().value())
-                > 0.0
-        });
-    let needs_sky = !cfg!(target_arch = "wasm32") || style.sky.is_some();
+    let needs_bg_pattern = style.layers.iter().any(|layer| {
+        layer.type_ == "background"
+            && layer
+                .paint
+                .as_ref()
+                .is_some_and(|p| crate::vector::pattern::pattern_name(p, style_zoom).is_some())
+    });
+    let needs_globe = style.projection.as_ref().is_some_and(|spec| {
+        spec.projection_type
+            .globe_transition(view_state.zoom().value())
+            > 0.0
+    });
+    let needs_sky = style.sky.is_some();
     if needs_bg_pattern
         && world
             .resources

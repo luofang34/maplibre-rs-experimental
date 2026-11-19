@@ -44,10 +44,14 @@ pub struct BackgroundGpuBuffers {
 struct AllocatedBuffers {
     metadata_buffer: wgpu::Buffer,
     metadata_capacity: usize,
+    last_metadata_bytes: Vec<u8>,
     tile_metadata_buffer: wgpu::Buffer,
     tile_metadata_capacity: usize,
+    last_tile_metadata_bytes: Vec<u8>,
     atmosphere_metadata_buffer: wgpu::Buffer,
+    last_atmosphere_bytes: Option<[u8; std::mem::size_of::<AtmosphereLayerMetadata>()]>,
     sky_metadata_buffer: wgpu::Buffer,
+    last_sky_bytes: Option<[u8; std::mem::size_of::<SkyLayerMetadata>()]>,
 }
 
 impl Drop for AllocatedBuffers {
@@ -98,11 +102,40 @@ impl AllocatedBuffers {
         Self {
             metadata_buffer,
             metadata_capacity,
+            last_metadata_bytes: Vec::new(),
             tile_metadata_buffer,
             tile_metadata_capacity,
+            last_tile_metadata_bytes: Vec::new(),
             atmosphere_metadata_buffer,
+            last_atmosphere_bytes: None,
             sky_metadata_buffer,
+            last_sky_bytes: None,
         }
+    }
+}
+
+fn write_slice_if_changed(
+    queue: &UploadQueue,
+    buffer: &wgpu::Buffer,
+    bytes: &[u8],
+    cached: &mut Vec<u8>,
+) {
+    if cached.as_slice() != bytes {
+        queue.write_buffer(buffer, 0, bytes);
+        cached.clear();
+        cached.extend_from_slice(bytes);
+    }
+}
+
+fn write_pod_if_changed<const N: usize>(
+    queue: &UploadQueue,
+    buffer: &wgpu::Buffer,
+    bytes: &[u8],
+    cached: &mut Option<[u8; N]>,
+) {
+    if cached.as_ref().is_none_or(|prev| prev.as_slice() != bytes) {
+        queue.write_buffer(buffer, 0, bytes);
+        *cached = bytes.try_into().ok();
     }
 }
 
@@ -145,9 +178,15 @@ impl BackgroundGpuBuffers {
                 mapped_at_creation: false,
             });
             inner.metadata_capacity = new_capacity;
+            inner.last_metadata_bytes.clear();
         }
         if !metadatas.is_empty() {
-            queue.write_buffer(&inner.metadata_buffer, 0, bytemuck::cast_slice(metadatas));
+            write_slice_if_changed(
+                queue,
+                &inner.metadata_buffer,
+                bytemuck::cast_slice(metadatas),
+                &mut inner.last_metadata_bytes,
+            );
         }
         &inner.metadata_buffer
     }
@@ -173,12 +212,14 @@ impl BackgroundGpuBuffers {
                 mapped_at_creation: false,
             });
             inner.tile_metadata_capacity = new_capacity;
+            inner.last_tile_metadata_bytes.clear();
         }
         if !tile_metadata.is_empty() {
-            queue.write_buffer(
+            write_slice_if_changed(
+                queue,
                 &inner.tile_metadata_buffer,
-                0,
                 bytemuck::cast_slice(tile_metadata),
+                &mut inner.last_tile_metadata_bytes,
             );
         }
         &inner.tile_metadata_buffer
@@ -192,10 +233,11 @@ impl BackgroundGpuBuffers {
         metadata: &AtmosphereLayerMetadata,
     ) -> &wgpu::Buffer {
         let inner = self.ensure_allocated(device);
-        queue.write_buffer(
+        write_pod_if_changed(
+            queue,
             &inner.atmosphere_metadata_buffer,
-            0,
             bytemuck::bytes_of(metadata),
+            &mut inner.last_atmosphere_bytes,
         );
         &inner.atmosphere_metadata_buffer
     }
@@ -208,7 +250,12 @@ impl BackgroundGpuBuffers {
         sky: &SkyLayerMetadata,
     ) -> &wgpu::Buffer {
         let inner = self.ensure_allocated(device);
-        queue.write_buffer(&inner.sky_metadata_buffer, 0, bytemuck::bytes_of(sky));
+        write_pod_if_changed(
+            queue,
+            &inner.sky_metadata_buffer,
+            bytemuck::bytes_of(sky),
+            &mut inner.last_sky_bytes,
+        );
         &inner.sky_metadata_buffer
     }
 
@@ -423,76 +470,4 @@ pub fn world_rows(view_state: &ViewState, edges: bool) -> [[f32; 4]; 2] {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn persistent_buffers_initialize_and_upload() {
-        futures::executor::block_on(async {
-            let instance = wgpu::Instance::default();
-            let Ok(adapter) = instance
-                .request_adapter(&wgpu::RequestAdapterOptions::default())
-                .await
-            else {
-                return;
-            };
-            let (device, queue) = adapter
-                .request_device(&wgpu::DeviceDescriptor::default())
-                .await
-                .expect("device");
-            let queue = UploadQueue::new(queue);
-
-            let mut gpu_buffers = BackgroundGpuBuffers::new(&device);
-            assert_eq!(
-                gpu_buffers.metadata_capacity(),
-                BackgroundGpuBuffers::INITIAL_METADATA_CAPACITY
-            );
-            assert_eq!(
-                gpu_buffers.tile_metadata_capacity(),
-                BackgroundGpuBuffers::INITIAL_TILE_METADATA_CAPACITY
-            );
-
-            let meta = BackgroundLayerMetadata {
-                color: [1.0, 0.0, 0.0, 1.0],
-                z_index: 0.0,
-                padding: [0.0; 3],
-                horizon: [0.0; 4],
-                viewport: [600.0, 0.0, 800.0, 600.0],
-                world_rows: [[0.0; 4]; 2],
-            };
-            gpu_buffers.write_metadata(&device, &queue, &[meta]);
-            assert!(queue.take_written_bytes() > 0);
-
-            let items: Vec<BackgroundLayerMetadata> = vec![meta; 32];
-            gpu_buffers.write_metadata(&device, &queue, &items);
-            assert_eq!(gpu_buffers.metadata_capacity(), 32);
-
-            let items_64: Vec<BackgroundLayerMetadata> = vec![meta; 33];
-            gpu_buffers.write_metadata(&device, &queue, &items_64);
-            assert_eq!(gpu_buffers.metadata_capacity(), 64);
-        })
-    }
-
-    #[test]
-    fn opacity_scales_alpha() {
-        let layer = serde_json::json!({"id": "b", "type": "background", "paint": {"background-color": "blue", "background-opacity": 0.5}});
-        let layer: crate::style::layer::StyleLayer =
-            serde_json::from_value(layer).expect("valid background layer");
-        let color = background_color(&layer, 0.0);
-        assert_eq!(color, [0.0, 0.0, 1.0, 0.5]);
-    }
-
-    #[test]
-    fn colour_follows_zoom() {
-        let paint = serde_json::json!({"background-color": {
-            "stops": [[0, "red"], [10, "blue"]], "base": 1.0
-        }});
-        let layer = serde_json::json!({"id": "b", "type": "background", "paint": paint});
-        let layer: crate::style::layer::StyleLayer =
-            serde_json::from_value(layer).expect("valid background layer");
-        let start = background_color(&layer, 0.0);
-        let end = background_color(&layer, 10.0);
-        assert_eq!(start[..3], [1.0, 0.0, 0.0]);
-        assert_eq!(end[..3], [0.0, 0.0, 1.0]);
-    }
-}
+mod tests;

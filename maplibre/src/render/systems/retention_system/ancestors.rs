@@ -14,25 +14,44 @@ use crate::{
     terrain::{dem_tile_coords, resources::TerrainResources, source::dem_source},
 };
 
-/// Appends active drape requests, drape prefetch requests, non-terrain vector fallback tiles,
-/// and only the raster/DEM fallback ancestors actually needed by tiles whose own source data
-/// (and GPU DEM upload) has not yet settled.
+/// Appends active drape requests, drape prefetch requests, terrain overview + wanted DEMs,
+/// non-terrain vector fallback tiles, and only the raster/DEM fallback ancestors actually needed
+/// by tiles whose own source data (and GPU DEM upload) has not yet settled.
 pub(crate) fn finish_tiles_in_use(
     world: &World,
     style: &Style,
     mut in_use: FxHashSet<WorldTileCoords>,
 ) -> FxHashSet<WorldTileCoords> {
+    let dem = dem_source(style);
+    let max_zoom = crate::io::tile_sources::source_max_zoom(style, TileKind::Vector);
+    if style.terrain.is_some()
+        && !crate::io::tile_sources::source_layer_groups(style, TileKind::Vector).is_empty()
+        && crate::io::tile_sources::source_min_zoom(style, TileKind::Vector)
+            .is_none_or(|min| min == 0)
+    {
+        in_use.insert(WorldTileCoords::default());
+    }
     if let Some(requests) = world
         .resources
         .get::<crate::terrain::request_system::DrapeRequests>()
     {
-        in_use.extend(requests.0.iter().copied());
+        for &coords in &requests.0 {
+            retain_drape_tile(&mut in_use, coords, max_zoom, dem.as_ref());
+        }
     }
     if let Some(prefetch) = world
         .resources
         .get::<crate::terrain::request_system::DrapePrefetchRequests>()
     {
-        in_use.extend(prefetch.0.iter().copied());
+        for &coords in &prefetch.0 {
+            retain_drape_tile(&mut in_use, coords, max_zoom, dem.as_ref());
+        }
+    }
+    if let Some(wanted_dems) = world
+        .resources
+        .get::<crate::terrain::request_system::TerrainWantedDems>()
+    {
+        in_use.extend(wanted_dems.0.iter().copied());
     }
     if let Some(fallbacks) = world
         .resources
@@ -40,7 +59,6 @@ pub(crate) fn finish_tiles_in_use(
     {
         in_use.extend(fallbacks.0.iter().copied());
     }
-    let dem = dem_source(style);
     let raster_sources = active_raster_sources(style);
     if dem.is_none() && raster_sources.is_empty() {
         return in_use;
@@ -66,6 +84,58 @@ pub(crate) fn finish_tiles_in_use(
         }
     }
     in_use
+}
+
+fn retain_drape_tile(
+    in_use: &mut FxHashSet<WorldTileCoords>,
+    coords: WorldTileCoords,
+    max_zoom: Option<u8>,
+    dem: Option<&crate::terrain::source::DemSource>,
+) {
+    if let Some((canonical, _)) = coords.wrapped() {
+        in_use.insert(canonical);
+    } else {
+        in_use.insert(coords);
+    }
+    if let Some(target) =
+        crate::coords::OverscaledTileId::for_source(coords, u8::from(coords.z), max_zoom, false)
+    {
+        in_use.insert(target.canonical);
+    }
+    if let Some(dem) = dem {
+        if let Some(dem_coords) = dem_tile_coords(coords, dem.minzoom, dem.maxzoom) {
+            in_use.insert(dem_coords);
+        }
+    }
+}
+
+pub(super) fn retain_terrain_region_if_needed(
+    world: &World,
+    style: &Style,
+    view_state: &crate::render::view_state::ViewState,
+    padding: crate::render::view_state::ViewStatePadding,
+    in_use: &mut FxHashSet<WorldTileCoords>,
+) {
+    if world
+        .resources
+        .get::<crate::terrain::request_system::TerrainWantedDems>()
+        .is_some()
+    {
+        return;
+    }
+    let Some(dem) = dem_source(style) else {
+        return;
+    };
+    let Ok(Some(region)) =
+        crate::render::projection::terrain_region(style, view_state, world, dem.tile_size, padding)
+    else {
+        return;
+    };
+    for coords in region.iter() {
+        if let Some(dem_coords) = dem_tile_coords(coords, dem.minzoom, dem.maxzoom) {
+            in_use.insert(dem_coords);
+        }
+    }
 }
 
 fn active_raster_sources(style: &Style) -> Vec<(RasterSourceId, u8)> {

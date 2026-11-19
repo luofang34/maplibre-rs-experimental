@@ -100,9 +100,18 @@ pub fn upload_system(
                 })
         })
     };
-    if has_pending_uploads {
+    let terrain_booting = style.terrain.is_some()
+        && world
+            .resources
+            .get::<crate::terrain::request_system::DrapeRequests>()
+            .is_none_or(|requests| requests.0.is_empty());
+    if has_pending_uploads && !terrain_booting {
         crate::render::systems::retention_system::evict_before_upload(
-            world, style, view_state, queue,
+            world,
+            style,
+            view_state,
+            queue,
+            settings.tight_tile_requests,
         );
     }
     let (spatial, changed) = super::structures::for_frame(world, style, &painted_tiles);
@@ -125,6 +134,7 @@ pub fn upload_system(
         return Err(SystemError::Dependencies);
     };
     if refresh_paint {
+        paint_scratch.sync_style(style);
         paint::refresh_layer_paint(
             buffer_pool,
             queue,

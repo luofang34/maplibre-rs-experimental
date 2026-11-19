@@ -69,6 +69,7 @@ pub struct TileViewPattern<Q, B> {
     topology_generation: u64,
     stencil_ids: FxHashMap<(i32, WorldTileCoords), u8>,
     metadata_scratch: Vec<ShaderTileMetadata>,
+    last_uploaded_bytes: Vec<u8>,
     scratch: Mutex<PatternScratch>,
     phantom_q: PhantomData<Q>,
 }
@@ -106,6 +107,7 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
             topology_generation: 0,
             stencil_ids: FxHashMap::default(),
             metadata_scratch: Vec::with_capacity(64),
+            last_uploaded_bytes: Vec::new(),
             scratch: Mutex::new(PatternScratch::default()),
             phantom_q: Default::default(),
         }
@@ -378,7 +380,11 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
         }
         self.uploaded = buffer.len() as u64;
         let raw_buffer = bytemuck::cast_slice(buffer.as_slice());
-        queue.write_buffer(&self.view_tiles_buffer.inner, 0, raw_buffer);
+        if self.last_uploaded_bytes.as_slice() != raw_buffer {
+            queue.write_buffer(&self.view_tiles_buffer.inner, 0, raw_buffer);
+            self.last_uploaded_bytes.clear();
+            self.last_uploaded_bytes.extend_from_slice(raw_buffer);
+        }
         self.stencil_ids = stencil_ids;
         self.metadata_scratch = buffer;
     }

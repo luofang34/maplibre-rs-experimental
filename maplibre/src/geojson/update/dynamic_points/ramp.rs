@@ -7,8 +7,8 @@ use crate::style::{
 
 const MAX_INLINE_STOPS: usize = 16;
 
-struct PropertyInput<'a> {
-    key: &'a str,
+struct PropertyInput {
+    key: String,
     fallback: Option<f64>,
 }
 
@@ -55,20 +55,20 @@ impl<T: Copy> RampStops<T> {
 }
 
 /// Zero-allocation 1D linear scalar interpolation ramp (`["interpolate", ["linear"], input, ...]`).
-pub(super) struct ScalarRamp<'a> {
-    input: PropertyInput<'a>,
+pub(super) struct ScalarRamp {
+    input: PropertyInput,
     stops: RampStops<f64>,
 }
 
 /// Zero-allocation 1D linear RGBA interpolation ramp (`["interpolate", ["linear"], input, ...]`).
-pub(super) struct ColorRamp<'a> {
-    input: PropertyInput<'a>,
+pub(super) struct ColorRamp {
+    input: PropertyInput,
     stops: RampStops<[f32; 4]>,
 }
 
-impl<'a> ScalarRamp<'a> {
+impl ScalarRamp {
     /// Returns `Some` when `prop` is a simple 1D linear scalar ramp over one feature property.
-    pub(super) fn compile(prop: &'a StyleProperty<f32>) -> Option<Self> {
+    pub(super) fn compile(prop: &StyleProperty<f32>) -> Option<Self> {
         let StyleProperty::Expression(expr_prop) = prop else {
             return None;
         };
@@ -88,13 +88,15 @@ impl<'a> ScalarRamp<'a> {
     }
 
     #[inline]
-    pub(super) fn key(&self) -> &'a str {
-        self.input.key
+    pub(super) fn key(&self) -> &str {
+        &self.input.key
     }
 
     #[inline]
     pub(super) fn eval(&self, props: &FeatureProperties) -> Option<f32> {
-        let raw = props.get(self.input.key).and_then(Value::as_number);
+        let raw = props
+            .get(self.input.key.as_str())
+            .and_then(Value::as_number);
         self.eval_f64(raw)
     }
 
@@ -126,9 +128,9 @@ impl<'a> ScalarRamp<'a> {
     }
 }
 
-impl<'a> ColorRamp<'a> {
+impl ColorRamp {
     /// Returns `Some` when `prop` is a simple 1D linear sRGB color ramp over one feature property.
-    pub(super) fn compile<T>(prop: &'a StyleProperty<T>) -> Option<Self> {
+    pub(super) fn compile<T>(prop: &StyleProperty<T>) -> Option<Self> {
         let StyleProperty::Expression(expr_prop) = prop else {
             return None;
         };
@@ -153,13 +155,15 @@ impl<'a> ColorRamp<'a> {
     }
 
     #[inline]
-    pub(super) fn key(&self) -> &'a str {
-        self.input.key
+    pub(super) fn key(&self) -> &str {
+        &self.input.key
     }
 
     #[inline]
     pub(super) fn eval(&self, props: &FeatureProperties) -> Option<[f32; 4]> {
-        let raw = props.get(self.input.key).and_then(Value::as_number);
+        let raw = props
+            .get(self.input.key.as_str())
+            .and_then(Value::as_number);
         self.eval_f64(raw)
     }
 
@@ -196,10 +200,10 @@ impl<'a> ColorRamp<'a> {
     }
 }
 
-fn compile_input(expr: &Expression) -> Option<PropertyInput<'_>> {
+fn compile_input(expr: &Expression) -> Option<PropertyInput> {
     match expr {
         Expression::Get { key, object: None } => Some(PropertyInput {
-            key: literal_str(key)?,
+            key: literal_str(key)?.to_owned(),
             fallback: None,
         }),
         Expression::Coalesce { operands, .. } if operands.len() == 2 => {
@@ -207,7 +211,7 @@ fn compile_input(expr: &Expression) -> Option<PropertyInput<'_>> {
                 return None;
             };
             Some(PropertyInput {
-                key: literal_str(key)?,
+                key: literal_str(key)?.to_owned(),
                 fallback: Some(stop_number(&operands[1])?),
             })
         }

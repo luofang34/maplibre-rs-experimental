@@ -120,6 +120,7 @@ pub struct StarfieldGpu {
     count: u32,
     generation: Option<u64>,
     frame: Option<(wgpu::Buffer, wgpu::BindGroup)>,
+    last_frame_bytes: Option<[u8; std::mem::size_of::<StarfieldFrame>()]>,
     visible: bool,
 }
 
@@ -224,8 +225,14 @@ pub(super) fn queue_system(
         sky,
         moon,
     };
-    renderer
-        .queue
-        .write_buffer(buffer, 0, bytemuck::bytes_of(&frame));
+    let bytes = bytemuck::bytes_of(&frame);
+    if gpu
+        .last_frame_bytes
+        .as_ref()
+        .is_none_or(|prev| prev.as_slice() != bytes)
+    {
+        renderer.queue.write_buffer(buffer, 0, bytes);
+        gpu.last_frame_bytes = bytes.try_into().ok();
+    }
     Ok(())
 }

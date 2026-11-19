@@ -111,6 +111,7 @@ pub struct ProjectionGpuResources {
     flat_bind_group: wgpu::BindGroup,
     /// Latest uploaded `ShaderProjectionData::transition` (`f32::to_bits`) for pipeline selection.
     transition_bits: std::sync::atomic::AtomicU32,
+    last_uploaded: Option<[u8; std::mem::size_of::<ShaderProjectionData>()]>,
 }
 
 impl Drop for ProjectionGpuResources {
@@ -179,6 +180,7 @@ impl ProjectionGpuResources {
             flat_buffer,
             flat_bind_group,
             transition_bits: std::sync::atomic::AtomicU32::new(initial_data.transition.to_bits()),
+            last_uploaded: None,
         }
     }
 
@@ -209,17 +211,28 @@ impl ProjectionGpuResources {
         &self.bind_group
     }
 
-    /// Uploads projection state for the current frame.
+    /// Uploads projection state for the current frame when its GPU bytes changed.
     pub fn upload(
-        &self,
+        &mut self,
         queue: &crate::render::upload_queue::UploadQueue,
         data: ShaderProjectionData,
     ) {
+        let bytes = bytemuck::bytes_of(&data);
+        if self
+            .last_uploaded
+            .as_ref()
+            .is_some_and(|prev| prev.as_slice() == bytes)
+        {
+            return;
+        }
         self.transition_bits.store(
             data.transition.to_bits(),
             std::sync::atomic::Ordering::Relaxed,
         );
-        queue.write_buffer(&self.buffer, 0, bytemuck::bytes_of(&data));
+        queue.write_buffer(&self.buffer, 0, bytes);
+        if let Ok(arr) = bytes.try_into() {
+            self.last_uploaded = Some(arr);
+        }
     }
 }
 

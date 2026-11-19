@@ -155,6 +155,7 @@ impl CompiledStyleRules {
 pub(super) struct VectorQueueScratch {
     compiled: CompiledStyleRules,
     last_digest: Option<(u64, u64)>,
+    last_style_zoom_bits: Option<u64>,
     pub(super) layer_state_digest: u64,
     pub(super) pattern_layers: FxHashSet<StyleLayerId>,
     pub(super) missing_image_layers: FxHashSet<StyleLayerId>,
@@ -175,6 +176,13 @@ impl VectorQueueScratch {
     pub(super) fn sync_style_sets(&mut self, style: &Style, style_zoom: f64) -> u64 {
         let style_changed = self.compiled.sync(style);
         let style_rev = style.revision();
+        let zoom_bits = style_zoom.to_bits();
+        if style_changed {
+            self.last_style_zoom_bits = None;
+        } else if self.last_style_zoom_bits == Some(zoom_bits) {
+            return self.layer_state_digest;
+        }
+        self.last_style_zoom_bits = Some(zoom_bits);
 
         let mut hasher = FxHasher::default();
         self.compiled.rules.len().hash(&mut hasher);

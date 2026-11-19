@@ -43,12 +43,14 @@ use crate::{
 pub(crate) struct DynamicPointGeoJson {
     last_style_revision: Option<u64>,
     sources: FxHashMap<String, DynamicPointSource>,
+    circle_layers: Vec<(usize, String)>,
     gpu_scratch: Vec<FillShaderFeatureMetadata>,
 }
 
 #[derive(Default)]
 pub(super) struct EvalCache {
     pub key: Option<(u64, StyleLayerId, u64)>,
+    pub ramps: Option<gpu::eval::CompiledCircleRamps>,
     pub pairs: Vec<[FillShaderFeatureMetadata; 2]>,
 }
 
@@ -64,6 +66,8 @@ struct DynamicPointSource {
     tile_hits: FxHashMap<WorldTileCoords, Vec<u32>>,
     applied_seq: FxHashMap<(WorldTileCoords, StyleLayerId), (u64, u64)>,
     deferred_bytes: Option<Vec<u8>>,
+    fast_ramp_keys_rev: Option<u64>,
+    fast_ramp_keys_ok: bool,
     pub(super) fast_columns: FastColumnStore,
     eval_cache: EvalCache,
 }
@@ -138,6 +142,8 @@ pub(crate) fn invalidate_after_style_change(style: &Style, world: &mut World) {
         src_state.inject_identity = source_layers_read_identity(style, name);
         src_state.seq = src_state.seq.wrapping_add(1);
         src_state.applied_seq.clear();
+        src_state.fast_ramp_keys_rev = None;
+        src_state.eval_cache.ramps = None;
     }
 }
 
@@ -239,6 +245,8 @@ fn build_source_from_value(
         tile_hits: FxHashMap::default(),
         applied_seq: FxHashMap::default(),
         deferred_bytes: None,
+        fast_ramp_keys_rev: None,
+        fast_ramp_keys_ok: false,
         fast_columns: FastColumnStore::default(),
         eval_cache: EvalCache::default(),
     })
@@ -279,9 +287,18 @@ pub(crate) fn try_apply_stationary_bytes<'a>(
     let Some(src_state) = state.sources.get_mut(source_name) else {
         return Err(bytes);
     };
-    if !src_state.inject_identity
-        && src_state.promoted.is_none()
-        && collect_fast_ramp_keys(style, source_name, &mut src_state.fast_columns.keys)
+    let style_rev = style.revision();
+    let fast_eligible = if src_state.fast_ramp_keys_rev == Some(style_rev) {
+        src_state.fast_ramp_keys_ok
+    } else {
+        let ok = !src_state.inject_identity
+            && src_state.promoted.is_none()
+            && collect_fast_ramp_keys(style, source_name, &mut src_state.fast_columns.keys);
+        src_state.fast_ramp_keys_rev = Some(style_rev);
+        src_state.fast_ramp_keys_ok = ok;
+        ok
+    };
+    if fast_eligible
         && try_fast_scan_stationary_bytes(&bytes, &src_state.keys, &mut src_state.fast_columns)
     {
         src_state.seq = src_state.seq.wrapping_add(1);

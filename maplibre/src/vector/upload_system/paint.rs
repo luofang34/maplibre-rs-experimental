@@ -93,6 +93,10 @@ pub(super) fn feature_paint_depends_on_zoom(layer: &StyleLayer) -> bool {
 
 #[derive(Default)]
 pub(super) struct PaintRefreshScratch {
+    style_rev: Option<u64>,
+    style_flags_union: u8,
+    layer_flags: FxHashMap<u32, u8>,
+    prev_meta: FxHashMap<(u32, u8), (VectorPaintFrame, ShaderLayerMetadata)>,
     meta_memo: FxHashMap<(u32, u8), (ShaderLayerMetadata, bool)>,
     updated_layer_slots: FxHashSet<(u16, u64)>,
     color_memo: FxHashMap<u32, Option<[f32; 4]>>,
@@ -102,6 +106,22 @@ pub(super) struct PaintRefreshScratch {
 }
 
 impl PaintRefreshScratch {
+    pub(super) fn sync_style(&mut self, style: &crate::style::Style) {
+        let style_rev = style.revision();
+        if self.style_rev != Some(style_rev) {
+            self.style_rev = Some(style_rev);
+            self.layer_flags.clear();
+            self.prev_meta.clear();
+            let mut union = 0_u8;
+            for layer in &style.layers {
+                let flags = layer_paint_flags(layer);
+                self.layer_flags.insert(layer.index, flags);
+                union |= flags;
+            }
+            self.style_flags_union = union;
+        }
+    }
+
     fn clear(&mut self) {
         self.meta_memo.clear();
         self.updated_layer_slots.clear();
@@ -110,6 +130,18 @@ impl PaintRefreshScratch {
         self.feature_zoom_updates.clear();
         self.feature_zoom_only_updates.clear();
     }
+}
+
+#[inline]
+fn layer_paint_flags(layer: &StyleLayer) -> u8 {
+    let paint = layer.paint.as_ref();
+    u8::from(paint_metadata_depends_on_zoom(paint))
+        | (u8::from(paint_depends_on_bearing(paint)) << 1)
+        | (u8::from(matches!(paint, Some(LayerPaint::FillExtrusion(_)))) << 2)
+        | (u8::from(feature_paint_depends_on_zoom(layer)) << 3)
+        | (u8::from(feature_colors_depend_on_zoom(layer)) << 4)
+        | (u8::from(uses_layer_metadata_uniform_color(layer)) << 5)
+        | (u8::from(uniform_color_depends_on_zoom(layer)) << 6)
 }
 
 pub(super) fn refresh_layer_paint(
@@ -125,17 +157,29 @@ pub(super) fn refresh_layer_paint(
     let zoom_changed = previous.is_none_or(|prev| prev.zoom != zoom);
     let bearing_changed = previous.is_none_or(|prev| prev.bearing != frame.bearing);
     let light_changed = previous.is_none_or(|prev| prev.light != frame.light);
+    if !zoom_changed && !bearing_changed && !light_changed {
+        return;
+    }
+    let active_flags = (u8::from(zoom_changed) * (1 | 8 | 64))
+        | (u8::from(bearing_changed) * 2)
+        | (u8::from(light_changed) * 4);
+    if previous.is_some() && (scratch.style_flags_union & active_flags) == 0 {
+        return;
+    }
     let continuous_zoom =
         previous.is_some_and(|prev| prev.zoom != zoom && (zoom - prev.zoom).abs() < 0.05);
     let feature_zoom_threshold = if continuous_zoom { 0.125 } else { 1.0 / 32.0 };
     scratch.clear();
     let PaintRefreshScratch {
+        layer_flags,
+        prev_meta,
         meta_memo,
         updated_layer_slots,
         color_memo,
         feature_meta_scratch,
         feature_zoom_updates,
         feature_zoom_only_updates,
+        ..
     } = scratch;
 
     for coords in source_tiles {
@@ -146,24 +190,34 @@ pub(super) fn refresh_layer_paint(
             .into_iter()
             .flatten()
         {
-            let paint = entry.style_layer.paint.as_ref();
-            let meta_dirty = (zoom_changed && paint_metadata_depends_on_zoom(paint))
-                || (bearing_changed && paint_depends_on_bearing(paint))
-                || (light_changed && matches!(paint, Some(LayerPaint::FillExtrusion(_))));
+            let flags = *layer_flags
+                .entry(entry.style_layer.index)
+                .or_insert_with(|| layer_paint_flags(&entry.style_layer));
+            let meta_dirty = (zoom_changed && (flags & 1) != 0)
+                || (bearing_changed && (flags & 2) != 0)
+                || (light_changed && (flags & 4) != 0);
             if meta_dirty {
-                let (metadata, changed) = *meta_memo
-                    .entry((entry.style_layer.index, tile_z))
-                    .or_insert_with(|| {
-                        let metadata = metadata_for_layer(&entry.style_layer, *coords, frame);
-                        let changed = previous.is_none_or(|prev| {
+                let key = (entry.style_layer.index, tile_z);
+                let (metadata, changed) = *meta_memo.entry(key).or_insert_with(|| {
+                    let metadata = metadata_for_layer(&entry.style_layer, *coords, frame);
+                    let changed = match (previous, prev_meta.get(&key)) {
+                        (Some(prev_frame), Some((cached_frame, cached_meta)))
+                            if *cached_frame == prev_frame =>
+                        {
+                            bytemuck::bytes_of(cached_meta) != bytemuck::bytes_of(&metadata)
+                        }
+                        (Some(prev_frame), _) => {
                             bytemuck::bytes_of(&metadata_for_layer(
                                 &entry.style_layer,
                                 *coords,
-                                prev,
+                                prev_frame,
                             )) != bytemuck::bytes_of(&metadata)
-                        });
-                        (metadata, changed)
-                    });
+                        }
+                        (None, _) => true,
+                    };
+                    prev_meta.insert(key, (frame, metadata));
+                    (metadata, changed)
+                });
                 if changed
                     && updated_layer_slots
                         .insert((entry.page(), entry.layer_metadata_buffer_range().start))
@@ -174,13 +228,13 @@ pub(super) fn refresh_layer_paint(
             if zoom_changed
                 && !entry.is_uniform_feature_metadata()
                 && !entry.is_dynamic_circle_metadata()
+                && (flags & 8) != 0
                 && entry
                     .evaluated_zoom()
                     .is_none_or(|evaluated| (zoom - evaluated).abs() >= feature_zoom_threshold)
-                && feature_paint_depends_on_zoom(&entry.style_layer)
             {
                 if let Some(evaluated) = entry.evaluated_zoom() {
-                    if !feature_colors_depend_on_zoom(&entry.style_layer)
+                    if (flags & 16) == 0
                         && quantized_layer_opacity(&entry.style_layer, zoom)
                             .zip(quantized_layer_opacity(&entry.style_layer, evaluated))
                             .is_some_and(|(a, b)| a == b)
@@ -256,10 +310,7 @@ pub(super) fn refresh_layer_paint(
                 }
             }
             // Uniform fill and line colours already ride in `ShaderLayerMetadata::stroke_color`.
-            if !zoom_changed
-                || uses_layer_metadata_uniform_color(&entry.style_layer)
-                || !uniform_color_depends_on_zoom(&entry.style_layer)
-            {
+            if !zoom_changed || (flags & 32) != 0 || (flags & 64) == 0 {
                 continue;
             }
             let changed_color = *color_memo

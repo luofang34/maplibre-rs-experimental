@@ -41,10 +41,12 @@ pub(super) fn mercator_view_region(
                 ViewStatePadding::Loose => 1,
                 ViewStatePadding::Tight => 0,
             },
-            world_copies: if !view_state.has_external_view() {
+            world_copies: if view_state.has_external_view() {
+                0
+            } else if view_state.zoom().value() < 2.0 {
                 3
             } else {
-                0
+                1
             },
             max_tiles: 512,
         },

@@ -42,6 +42,7 @@ struct SunFrame {
 #[derive(Default)]
 pub struct SunGpu {
     frame: Option<(wgpu::Buffer, wgpu::BindGroup)>,
+    last_frame_bytes: Option<[u8; std::mem::size_of::<SunFrame>()]>,
     drawn: bool,
 }
 
@@ -130,9 +131,15 @@ pub(super) fn queue_system(
             });
         (buffer, bind_group)
     });
-    renderer
-        .queue
-        .write_buffer(buffer, 0, bytemuck::bytes_of(&frame));
+    let bytes = bytemuck::bytes_of(&frame);
+    if gpu
+        .last_frame_bytes
+        .as_ref()
+        .is_none_or(|prev| prev.as_slice() != bytes)
+    {
+        renderer.queue.write_buffer(buffer, 0, bytes);
+        gpu.last_frame_bytes = bytes.try_into().ok();
+    }
     Ok(())
 }
 

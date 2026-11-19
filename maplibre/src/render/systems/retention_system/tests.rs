@@ -4,6 +4,8 @@ use std::collections::HashSet;
 
 use super::{evict_beyond, evict_stale_tiles, CacheBudget, MIN_CACHE_TILES};
 
+mod terrain;
+
 #[test]
 fn offline_tiles_survive_a_view_with_no_loaded_coverage() {
     let mut world = World::default();
@@ -113,11 +115,11 @@ fn recently_used_tiles_outlive_never_used_ones() {
 #[test]
 fn nothing_is_evicted_within_the_budget() {
     let mut world = World::default();
-    for index in 0..8 {
+    for index in 0..MIN_CACHE_TILES as i32 {
         spawn_vector(&mut world, tile(index), true);
     }
     assert!(evict_stale_tiles(&mut world, &HashSet::new(), 0).is_empty());
-    assert_eq!(world.tiles.tiles.len(), 8);
+    assert_eq!(world.tiles.tiles.len(), MIN_CACHE_TILES);
 }
 
 #[test]
@@ -182,8 +184,8 @@ fn the_cache_is_sized_from_drawn_tiles_rather_than_requested_ones() {
         spawn_vector(&mut world, tile(index), true);
     }
 
-    // Two drawn tiles: the cache stays at its minimum even though a hundred are requested.
-    let evicted = evict_stale_tiles(&mut world, &requested, 2);
+    // One drawn tile: the cache stays at its minimum even though a hundred are requested.
+    let evicted = evict_stale_tiles(&mut world, &requested, 1);
 
     assert_eq!(evicted.len(), 100 - MIN_CACHE_TILES);
     assert!(requested.iter().all(|coords| world.tiles.exists(*coords)));
@@ -271,7 +273,7 @@ async fn tile_eviction_clears_vector_and_symbol_gpu_geometry_together() {
         CacheBudget { tiles: 0, bytes: 0 },
     );
     assert_eq!(evicted, vec![coords]);
-    super::drop_gpu_data_with_queue(&mut world, &evicted, None);
+    super::gpu::drop_gpu_data_with_queue(&mut world, &evicted, None);
     let Some(Eventually::Initialized(vectors)) =
         world.resources.get::<Eventually<VectorBufferPool>>()
     else {

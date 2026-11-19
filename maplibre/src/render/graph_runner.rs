@@ -23,6 +23,7 @@ pub(crate) fn run_graph(
         device,
         device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default()),
     );
+    queue.encode_staged_into(device, &mut render_context.command_encoder);
     graph.run(&mut render_context, state, world)?;
     if let Some(hooks) = world.resources.get::<BeforeSubmitHooks>() {
         hooks.run(world, &mut render_context.command_encoder);

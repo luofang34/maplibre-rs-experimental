@@ -1,6 +1,6 @@
 //! GPU feature-metadata evaluation, bucket population, and per-frame visible-tile refresh.
 
-mod eval;
+pub(super) mod eval;
 
 use eval::{evaluate_circle_metadata_into, fallback_dynamic_circle_from_vertices};
 
@@ -46,11 +46,27 @@ pub(crate) fn ensure_seeded_for_style(world: &mut World, style: &Style) {
     if eligible.is_empty() && world.resources.get::<DynamicPointGeoJson>().is_none() {
         return;
     }
+    let circle_layers: Vec<(usize, String)> = style
+        .layers
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, layer)| {
+            if layer.is_hidden() || !matches!(layer.paint.as_ref(), Some(LayerPaint::Circle(_))) {
+                return None;
+            }
+            let src = layer.source.as_deref()?;
+            eligible
+                .iter()
+                .any(|e| e == src)
+                .then(|| (idx, src.to_owned()))
+        })
+        .collect();
     {
         let state = world.resources.get_or_init_mut::<DynamicPointGeoJson>();
         state
             .sources
             .retain(|name, _| eligible.iter().any(|e| e == name));
+        state.circle_layers = circle_layers;
         state.last_style_revision = Some(current_rev);
     }
     for name in eligible {
@@ -192,20 +208,22 @@ pub(crate) fn refresh_dynamic_point_layers(
         };
         let DynamicPointGeoJson {
             sources,
+            circle_layers,
             gpu_scratch,
             ..
         } = dyn_points;
 
-        for style_layer in &style.layers {
+        for (layer_idx, source_name) in circle_layers.iter() {
+            let Some(style_layer) = style.layers.get(*layer_idx) else {
+                continue;
+            };
             if style_layer.is_hidden() {
                 continue;
             }
-            let (Some(source_name), Some(LayerPaint::Circle(circle_paint))) =
-                (style_layer.source.as_deref(), style_layer.paint.as_ref())
-            else {
+            let Some(LayerPaint::Circle(circle_paint)) = style_layer.paint.as_ref() else {
                 continue;
             };
-            let Some(src_state) = sources.get_mut(source_name) else {
+            let Some(src_state) = sources.get_mut(source_name.as_str()) else {
                 continue;
             };
             let seq = src_state.seq;

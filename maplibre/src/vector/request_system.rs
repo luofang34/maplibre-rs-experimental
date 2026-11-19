@@ -26,16 +26,23 @@ use crate::{
 mod fallback;
 mod group_tile;
 mod limiter;
+mod memo;
 pub mod rescale;
 mod velocity;
 mod worker;
 #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
 pub(crate) use limiter::SharedTilePermit;
+use memo::{
+    display_pixel_ratio, update_loose_covering_cache, vector_eviction_generation, RequestMemo,
+    RequestViewKey,
+};
 pub use worker::fetch_vector_apc;
 
 pub struct RequestSystem<E: Environment, T> {
     kernel: Rc<Kernel<E>>,
     phantom_t: PhantomData<T>,
+    requested: FxHashSet<crate::coords::WorldTileCoords>,
+    memo: Option<RequestMemo>,
 }
 
 impl<E: Environment, T> RequestSystem<E, T> {
@@ -43,6 +50,8 @@ impl<E: Environment, T> RequestSystem<E, T> {
         Self {
             kernel: kernel.clone(),
             phantom_t: Default::default(),
+            requested: FxHashSet::default(),
+            memo: None,
         }
     }
 }
@@ -61,11 +70,11 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
             renderer,
         }: &mut MapContext,
     ) -> SystemResult {
-        tile_retry::stop_cancelled(world, self.kernel.apc());
         crate::io::tile_backpressure::set_vector_deferred(world, false);
         let vectors_disabled = renderer.settings.buffer_pools.is_empty();
         let symbols_disabled = renderer.settings.symbol_pools.is_empty();
         if vectors_disabled && symbols_disabled {
+            tile_retry::stop_cancelled(world, self.kernel.apc());
             return Ok(());
         }
         let pixel_ratio = display_pixel_ratio(world, renderer, view_state);
@@ -74,64 +83,89 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
             .get::<crate::render::eye_covering::MultiViewExtractCovering>()
             .filter(|m| m.active)
             .cloned();
-        let (view_tiles_and_level, tight_covering) = if let Some(multi) = &multi {
+        let visible_level = view_state.zoom().zoom_level(DEFAULT_TILE_SIZE);
+        let request_padding = if renderer.settings.tight_tile_requests
+            || (cfg!(target_arch = "wasm32") && !view_state.has_external_view())
+        {
+            ViewStatePadding::Tight
+        } else {
+            ViewStatePadding::Loose
+        };
+        let drapes = world
+            .resources
+            .get::<crate::terrain::request_system::DrapeRequests>()
+            .map(|requests| requests.0.clone())
+            .unwrap_or_default();
+        let prefetch = world
+            .resources
+            .get::<crate::terrain::request_system::DrapePrefetchRequests>()
+            .map(|requests| requests.0.clone())
+            .unwrap_or_default();
+        let vector_evictions = vector_eviction_generation(world);
+        let key = RequestViewKey::build(
+            style,
+            view_state,
+            renderer,
+            pixel_ratio,
+            request_padding,
+            visible_level,
+        );
+        if multi.is_none() {
+            if let Some(memo) = self.memo.as_ref() {
+                if memo.settled
+                    && memo.key == key
+                    && memo.drapes == drapes
+                    && memo.prefetch == prefetch
+                    && memo.vector_evictions == vector_evictions
+                    && crate::io::tile_backpressure::tiles_in_flight(world) == 0
+                    && !tile_retry::needs_frame(world)
+                    && tile_retry::next_retry_delay(world).is_none()
+                {
+                    update_loose_covering_cache(
+                        world,
+                        memo.computed.as_ref(),
+                        request_padding,
+                        visible_level,
+                    );
+                    return Ok(());
+                }
+            }
+        }
+        tile_retry::stop_cancelled(world, self.kernel.apc());
+
+        let (view_tiles_and_level, tight_covering, memo_computed) = if let Some(multi) = &multi {
             (
                 Some((multi.vector_tiles.clone(), multi.max_view_level)),
                 false,
+                None,
             )
         } else {
-            let visible_level = view_state.zoom().zoom_level(DEFAULT_TILE_SIZE);
-            let request_padding = if renderer.settings.tight_tile_requests
-                || (cfg!(target_arch = "wasm32") && !view_state.has_external_view())
-            {
-                ViewStatePadding::Tight
-            } else {
-                ViewStatePadding::Loose
+            let computed = match self.memo.as_ref().filter(|memo| memo.key == key) {
+                Some(memo) => memo.computed.clone(),
+                None => view_region_for_projection(
+                    style,
+                    view_state,
+                    world,
+                    visible_level,
+                    request_padding,
+                )?
+                .map(|region| (region.iter().collect::<Vec<_>>(), u8::from(visible_level))),
             };
-            let computed = view_region_for_projection(
-                style,
-                view_state,
-                world,
-                visible_level,
-                request_padding,
-            )?
-            .map(|region| (region.iter().collect::<Vec<_>>(), u8::from(visible_level)));
-            let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
-            let cache = world
-                .resources
-                .get_or_init_mut::<crate::render::eye_covering::FrameLooseCovering>();
-            if cache.host_frame != host_frame {
-                *cache = crate::render::eye_covering::FrameLooseCovering {
-                    host_frame,
-                    view_tiles: None,
-                    raster_tiles: None,
-                };
-            }
-            cache.view_tiles = Some((
-                computed.as_ref().map(|(tiles, _)| tiles.clone()),
-                request_padding,
-                visible_level,
-            ));
-            (computed, request_padding == ViewStatePadding::Tight)
+            update_loose_covering_cache(world, computed.as_ref(), request_padding, visible_level);
+            (
+                computed.clone(),
+                request_padding == ViewStatePadding::Tight,
+                computed,
+            )
         };
 
         // Tile arrivals, eviction and a settling eye can change the covering without motion.
         if let Some((view_tiles, level)) = view_tiles_and_level {
             let max_zoom = source_max_zoom(style, TileKind::Vector);
             let min_zoom = source_min_zoom(style, TileKind::Vector);
-            let mut requested = FxHashSet::default();
+            self.requested.clear();
             let mut budget = vector_request_budget(world, style.terrain.is_some());
 
-            let drapes = world
-                .resources
-                .get::<crate::terrain::request_system::DrapeRequests>()
-                .map(|requests| requests.0.clone())
-                .unwrap_or_default();
-            let prefetch = world
-                .resources
-                .get::<crate::terrain::request_system::DrapePrefetchRequests>()
-                .map(|requests| requests.0.clone())
-                .unwrap_or_default();
             let overview = style
                 .terrain
                 .is_some()
@@ -167,12 +201,13 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                 (level, magnifies),
             );
             let mut deferred = false;
+            let mut issued_any = false;
             let mut frame_style = FrameStyle::new(style);
             for coords in overview
                 .into_iter()
-                .chain(drapes)
+                .chain(drapes.iter().copied())
                 .chain(view_tiles.into_iter().filter(|_| needs_view_tiles))
-                .chain(prefetch)
+                .chain(prefetch.iter().copied())
                 .chain(extra_fallbacks)
             {
                 // Past the deepest source zoom the ancestor tile is fetched once and the view
@@ -188,7 +223,7 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                 };
                 let coords = target.canonical;
                 if outside_source_bounds(style, TileKind::Vector, coords)
-                    || !requested.insert(coords)
+                    || !self.requested.insert(coords)
                 {
                     continue;
                 }
@@ -220,6 +255,7 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                     continue;
                 }
                 budget -= 1;
+                issued_any = true;
 
                 let only_sources = if evicted_gpu {
                     let _ = tile_retry::take_refresh_sources(world, coords);
@@ -228,7 +264,8 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                     refresh_only(world, coords, laid_out_for)
                 };
                 // One rejected tile must not cost the frame its other tiles.
-                if let Err(error) = self.request(
+                if let Err(error) = request_tile::<E, T>(
+                    &self.kernel,
                     coords,
                     &mut frame_style,
                     world,
@@ -247,10 +284,30 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
             }
             crate::io::tile_backpressure::set_vector_deferred(world, deferred);
             if let Some(multi) = &multi {
-                requested.extend(multi.skipped_wanted_vector.iter().copied());
+                self.requested
+                    .extend(multi.skipped_wanted_vector.iter().copied());
             }
-            tile_retry::want(world, RequestKind::Vector, &requested);
-            self.release_unwanted(world, &requested);
+            tile_retry::want(world, RequestKind::Vector, &self.requested);
+            release_unwanted_tiles(&self.kernel, world, &self.requested);
+            if multi.is_none() {
+                let settled = !deferred
+                    && !issued_any
+                    && crate::io::tile_backpressure::tiles_in_flight(world) == 0
+                    && !tile_retry::needs_frame(world)
+                    && tile_retry::next_retry_delay(world).is_none();
+                self.memo = Some(RequestMemo {
+                    key,
+                    computed: memo_computed,
+                    drapes,
+                    prefetch,
+                    vector_evictions,
+                    settled,
+                });
+            } else {
+                self.memo = None;
+            }
+        } else {
+            self.memo = None;
         }
         Ok(())
     }
@@ -291,123 +348,93 @@ fn refresh_only(
     .then_some(sources)
 }
 
-/// Device pixels per layout pixel of the display: as the host reported it, or else as the
-/// surface and viewport sizes give it.
-fn display_pixel_ratio(
-    world: &crate::tcs::world::World,
-    renderer: &crate::render::Renderer,
-    view_state: &crate::render::view_state::ViewState,
-) -> f32 {
-    world
-        .resources
-        .get::<crate::sdf::provided::DisplayPixelRatio>()
-        .map_or_else(
-            || {
-                pixel_ratio(
-                    renderer.state().surface().size().width(),
-                    view_state.width(),
-                )
-            },
-            |ratio| ratio.0,
-        )
-}
-
-/// Device pixels per layout pixel read from the surface and viewport, to the hundredth so that
-/// a ratio computed from rounded sizes does not ask for images again.
-fn pixel_ratio(physical_width: u32, logical_width: f64) -> f32 {
-    let ratio = f64::from(physical_width) / logical_width.max(1.0);
-    ((ratio * 100.0).round() / 100.0).clamp(0.25, 8.0) as f32
-}
-
-impl<E: Environment, T: VectorTransferables> RequestSystem<E, T> {
-    /// Stops the workers that wait for images for tiles no longer in view.
-    fn release_unwanted(
-        &self,
-        world: &mut crate::tcs::world::World,
-        wanted: &FxHashSet<crate::coords::WorldTileCoords>,
-    ) {
-        for attempt in crate::sdf::provided::release_unwanted(world, wanted) {
-            self.kernel.apc().cancel(attempt);
-        }
+/// Stops the workers that wait for images for tiles no longer in view.
+fn release_unwanted_tiles<E: Environment>(
+    kernel: &Rc<Kernel<E>>,
+    world: &mut crate::tcs::world::World,
+    wanted: &FxHashSet<crate::coords::WorldTileCoords>,
+) {
+    for attempt in crate::sdf::provided::release_unwanted(world, wanted) {
+        kernel.apc().cancel(attempt);
     }
+}
 
-    fn request(
-        &self,
-        coords: crate::coords::WorldTileCoords,
-        style: &mut FrameStyle,
-        world: &mut crate::tcs::world::World,
-        (overscaled_zoom, pixel_ratio): (u8, f32),
-        only_sources: Option<Vec<String>>,
-        (vectors_disabled, symbols_disabled): (bool, bool),
-    ) -> SystemResult {
-        if world.tiles.spawn_mut(coords).is_none() {
-            return Err(SystemError::InvalidTile { coords });
-        }
-        let refetch = tile_retry::due(world, coords, RequestKind::Vector);
-        let attempt = tile_retry::next_attempt(world);
-        let issued_for = only_sources.clone();
-        let worker_style = style.filtered_worker_snapshot(vectors_disabled, symbols_disabled);
-        // What the worker is asked to build: its style's non-symbol layers, for the refreshed
-        // sources alone when the request is limited to them.
-        let requested: Vec<String> = if only_sources.is_none() && !vectors_disabled {
-            style.style().cached_vector_layer_ids().to_vec()
-        } else {
-            worker_style
-                .layers
-                .iter()
-                .filter(|layer| {
-                    layer.type_ != "symbol"
-                        && crate::style::mutation::from_vector_tiles(layer)
-                        && only_sources.as_ref().is_none_or(|sources| {
-                            layer
-                                .source
-                                .as_ref()
-                                .is_some_and(|source| sources.contains(source))
-                        })
-                })
-                .map(|layer| layer.id.clone())
-                .collect()
-        };
-        self.kernel
-            .apc()
-            .call_tagged(
-                ProcedureTag::FetchVector,
-                Input {
-                    coords,
-                    style: worker_style,
-                    attempt,
-                    overscaled_zoom,
-                    pixel_ratio,
-                    only_sources,
-                    refetch,
-                },
-                fetch_vector_apc::<E::OffscreenKernelEnvironment, T, _>,
-            )
-            .map_err(|source| SystemError::TileRequest {
-                kind: "vector",
+fn request_tile<E: Environment, T: VectorTransferables>(
+    kernel: &Rc<Kernel<E>>,
+    coords: crate::coords::WorldTileCoords,
+    style: &mut FrameStyle,
+    world: &mut crate::tcs::world::World,
+    (overscaled_zoom, pixel_ratio): (u8, f32),
+    only_sources: Option<Vec<String>>,
+    (vectors_disabled, symbols_disabled): (bool, bool),
+) -> SystemResult {
+    if world.tiles.spawn_mut(coords).is_none() {
+        return Err(SystemError::InvalidTile { coords });
+    }
+    let refetch = tile_retry::due(world, coords, RequestKind::Vector);
+    let attempt = tile_retry::next_attempt(world);
+    let issued_for = only_sources.clone();
+    let worker_style = style.filtered_worker_snapshot(vectors_disabled, symbols_disabled);
+    // What the worker is asked to build: its style's non-symbol layers, for the refreshed
+    // sources alone when the request is limited to them.
+    let requested: Vec<String> = if only_sources.is_none() && !vectors_disabled {
+        style.style().cached_vector_layer_ids().to_vec()
+    } else {
+        worker_style
+            .layers
+            .iter()
+            .filter(|layer| {
+                layer.type_ != "symbol"
+                    && crate::style::mutation::from_vector_tiles(layer)
+                    && only_sources.as_ref().is_none_or(|sources| {
+                        layer
+                            .source
+                            .as_ref()
+                            .is_some_and(|source| sources.contains(source))
+                    })
+            })
+            .map(|layer| layer.id.clone())
+            .collect()
+    };
+    kernel
+        .apc()
+        .call_tagged(
+            ProcedureTag::FetchVector,
+            Input {
                 coords,
-                source,
-            })?;
-        super::content::begin(world, coords, requested);
-        if let Some(tile) = world
-            .tiles
-            .query_mut::<&mut VectorLayerBucketComponent>(coords)
-        {
-            tile.overscaled_zoom = overscaled_zoom;
-        }
-        tile_retry::started(
-            world,
+                style: worker_style,
+                attempt,
+                overscaled_zoom,
+                pixel_ratio,
+                only_sources,
+                refetch,
+            },
+            fetch_vector_apc::<E::OffscreenKernelEnvironment, T, _>,
+        )
+        .map_err(|source| SystemError::TileRequest {
+            kind: "vector",
             coords,
-            RequestKind::Vector,
-            attempt,
-            issued_for.as_deref(),
-        );
-        if let Some(replaced) = crate::sdf::provided::restarted(world, coords, pixel_ratio) {
-            self.kernel.apc().cancel(replaced);
-        }
-        tracing::debug!(%coords, "vector tile request accepted");
-        Ok(())
+            source,
+        })?;
+    super::content::begin(world, coords, requested);
+    if let Some(tile) = world
+        .tiles
+        .query_mut::<&mut VectorLayerBucketComponent>(coords)
+    {
+        tile.overscaled_zoom = overscaled_zoom;
     }
+    tile_retry::started(
+        world,
+        coords,
+        RequestKind::Vector,
+        attempt,
+        issued_for.as_deref(),
+    );
+    if let Some(replaced) = crate::sdf::provided::restarted(world, coords, pixel_ratio) {
+        kernel.apc().cancel(replaced);
+    }
+    tracing::debug!(%coords, "vector tile request accepted");
+    Ok(())
 }
 
 /// Whether tiles are laid out for the zoom they are magnified to: layout and filter

@@ -14,8 +14,6 @@ use std::{collections::HashSet, hash::BuildHasher};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-#[cfg(feature = "raster")]
-use crate::raster::resource::RasterResources;
 use crate::{
     context::MapContext,
     coords::WorldTileCoords,
@@ -33,11 +31,11 @@ use crate::{
     },
     style::Style,
     tcs::{system::SystemResult, world::World},
-    terrain::resources::TerrainResources,
     vector::VectorBufferPool,
 };
 
 mod ancestors;
+mod gpu;
 mod summary;
 
 pub(crate) use ancestors::finish_tiles_in_use;
@@ -87,6 +85,8 @@ fn run_eviction(
     view_state: &ViewState,
     queue: Option<&crate::render::upload_queue::UploadQueue>,
     cancel_unwanted: bool,
+    include_drawn: bool,
+    tight_tile_requests: bool,
 ) -> (FxHashSet<WorldTileCoords>, usize) {
     let floor = world
         .resources
@@ -96,24 +96,34 @@ fn run_eviction(
         .resources
         .get::<crate::render::eye_covering::MultiViewExtractCovering>()
         .is_some_and(|m| m.active);
-    let drawn_set = drawn_tiles(world);
-    let drawn = drawn_set
-        .len()
-        .max(floor.as_ref().map_or(0, |floor| floor.drawn_count));
-    let mut in_use = if multi_active {
+    let (mut in_use, drawn) = if multi_active {
+        let drawn_set = drawn_tiles(world);
+        let drawn = drawn_set
+            .len()
+            .max(floor.as_ref().map_or(0, |floor| floor.drawn_count));
         let mut combined = drawn_set;
         if let Some(floor) = &floor {
             combined.extend(floor.retained_tiles.iter().copied());
             combined.extend(floor.retained_drapes.iter().copied());
         }
-        finish_tiles_in_use(world, style, combined)
+        (finish_tiles_in_use(world, style, combined), drawn)
     } else {
-        let mut single = tiles_in_use(world, style, view_state);
+        let mut single =
+            tiles_in_use_inner(world, style, view_state, include_drawn, tight_tile_requests);
         if let Some(floor) = &floor {
             single.extend(floor.retained_tiles.iter().copied());
             single.extend(floor.retained_drapes.iter().copied());
         }
-        single
+        let drawn = if include_drawn {
+            drawn_tiles(world)
+                .len()
+                .max(floor.as_ref().map_or(0, |floor| floor.drawn_count))
+        } else {
+            single
+                .len()
+                .max(floor.as_ref().map_or(0, |floor| floor.drawn_count))
+        };
+        (single, drawn)
     };
     let _ = &mut in_use;
     if cancel_unwanted {
@@ -122,9 +132,9 @@ fn run_eviction(
     let evicted = evict_stale_tiles(world, &in_use, drawn);
     if !evicted.is_empty() {
         tracing::debug!(count = evicted.len(), "evicted tiles that left the view");
-        drop_gpu_data_with_queue(world, &evicted, queue);
+        gpu::drop_gpu_data_with_queue(world, &evicted, queue);
     }
-    reclaim_pool_pages(world, queue);
+    gpu::reclaim_pool_pages(world, queue);
     (in_use, drawn)
 }
 
@@ -134,8 +144,17 @@ pub(crate) fn evict_before_upload(
     style: &Style,
     view_state: &ViewState,
     queue: &crate::render::upload_queue::UploadQueue,
+    tight_tile_requests: bool,
 ) {
-    let _ = run_eviction(world, style, view_state, Some(queue), false);
+    let _ = run_eviction(
+        world,
+        style,
+        view_state,
+        Some(queue),
+        false,
+        false,
+        tight_tile_requests,
+    );
 }
 
 /// Drops the least recently used tiles beyond the cache budget and releases their GPU data.
@@ -151,7 +170,15 @@ pub fn retention_system(
     if crate::render::eye_covering::EyeInFrame::reuses_content(world) {
         return Ok(());
     }
-    let (in_use, drawn) = run_eviction(world, style, view_state, Some(&renderer.queue), true);
+    let (in_use, drawn) = run_eviction(
+        world,
+        style,
+        view_state,
+        Some(&renderer.queue),
+        true,
+        true,
+        renderer.settings.tight_tile_requests,
+    );
     if view_state.has_external_view() {
         summary::summarize_residency(world, drawn, in_use.len(), view_state.eye_settled());
         #[cfg(not(target_arch = "wasm32"))]
@@ -217,19 +244,36 @@ fn retain_loose_vector_tile(
 
 /// Every tile the current frame draws from or requests, with the DEM tiles and ancestors
 /// terrain reads.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn tiles_in_use(
     world: &World,
     style: &Style,
     view_state: &ViewState,
 ) -> FxHashSet<WorldTileCoords> {
-    let mut in_use = drawn_tiles(world);
+    tiles_in_use_inner(world, style, view_state, true, false)
+}
+
+fn tiles_in_use_inner(
+    world: &World,
+    style: &Style,
+    view_state: &ViewState,
+    include_drawn: bool,
+    tight_tile_requests: bool,
+) -> FxHashSet<WorldTileCoords> {
+    let mut in_use = if include_drawn {
+        drawn_tiles(world)
+    } else {
+        FxHashSet::default()
+    };
     let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
     let loose_cache = world
         .resources
         .get::<crate::render::eye_covering::FrameLooseCovering>()
         .filter(|cache| cache.host_frame == host_frame);
 
-    let request_padding = if cfg!(target_arch = "wasm32") && !view_state.has_external_view() {
+    let request_padding = if tight_tile_requests
+        || (cfg!(target_arch = "wasm32") && !view_state.has_external_view())
+    {
         ViewStatePadding::Tight
     } else {
         ViewStatePadding::Loose
@@ -251,8 +295,6 @@ pub(crate) fn tiles_in_use(
             request_padding,
         ) {
             Ok(Some(requested)) => {
-                // The request systems fetch the ancestor at the source's maximum zoom in place of
-                // a finer tile, so that is the tile to keep.
                 for coords in requested.iter() {
                     retain_loose_vector_tile(&mut in_use, coords, max_zoom);
                 }
@@ -274,32 +316,29 @@ pub(crate) fn tiles_in_use(
             in_use.extend(tiles);
         }
     }
+    ancestors::retain_terrain_region_if_needed(
+        world,
+        style,
+        view_state,
+        request_padding,
+        &mut in_use,
+    );
     finish_tiles_in_use(world, style, in_use)
 }
 
-/// Removes the least recently used settled tiles beyond the cache budget and returns them;
-/// the tile budget follows `view_tiles`, the tiles the frame draws.
-pub(crate) fn evict_stale_tiles<S: BuildHasher>(
-    world: &mut World,
-    in_use: &HashSet<WorldTileCoords, S>,
-    view_tiles: usize,
-) -> Vec<WorldTileCoords> {
+/// Returns the out-of-view cache budget under current memory pressure, honoring `RetainLoadedTiles`.
+fn effective_cache_budget(world: &World, view_tiles: usize) -> CacheBudget {
     if world.resources.get::<RetainLoadedTiles>().is_some() {
-        return evict_beyond(
-            world,
-            in_use,
-            CacheBudget {
-                tiles: usize::MAX,
-                bytes: usize::MAX,
-            },
-        );
+        return CacheBudget {
+            tiles: usize::MAX,
+            bytes: usize::MAX,
+        };
     }
-    // A host nearly out of memory keeps nothing beyond what the frame draws from.
     let pressure = world
         .resources
         .get::<MemoryBudget>()
         .map_or(MemoryPressure::Comfortable, MemoryBudget::pressure);
-    let budget = match pressure {
+    match pressure {
         MemoryPressure::Critical => CacheBudget { tiles: 0, bytes: 0 },
         MemoryPressure::Low => CacheBudget {
             tiles: MIN_CACHE_TILES,
@@ -309,8 +348,17 @@ pub(crate) fn evict_stale_tiles<S: BuildHasher>(
             tiles: (view_tiles * CACHE_TILES_PER_VIEW_TILE).clamp(MIN_CACHE_TILES, MAX_CACHE_TILES),
             bytes: CACHE_BYTES,
         },
-    };
-    evict_beyond(world, in_use, budget)
+    }
+}
+
+/// Removes the least recently used settled tiles beyond the cache budget and returns them;
+/// the tile budget follows `view_tiles`, the tiles the frame draws.
+pub(crate) fn evict_stale_tiles<S: BuildHasher>(
+    world: &mut World,
+    in_use: &HashSet<WorldTileCoords, S>,
+    view_tiles: usize,
+) -> Vec<WorldTileCoords> {
+    evict_beyond(world, in_use, effective_cache_budget(world, view_tiles))
 }
 
 /// Removes the least recently used settled tiles until the rest fit `budget`, in tiles and
@@ -402,64 +450,7 @@ fn drop_cancelled<S: BuildHasher>(
     for coords in &cancelled {
         world.tiles.remove(*coords);
     }
-    drop_gpu_data_with_queue(world, &cancelled, queue);
-}
-
-fn drop_gpu_data_with_queue(
-    world: &mut World,
-    evicted: &[WorldTileCoords],
-    queue: Option<&crate::render::upload_queue::UploadQueue>,
-) {
-    if let Some(Initialized(pool)) = world.resources.get_mut::<Eventually<VectorBufferPool>>() {
-        for coords in evicted {
-            pool.remove_evicted_tile_with_queue(*coords, queue);
-        }
-    }
-    if let Some(Initialized(pool)) = world
-        .resources
-        .get_mut::<Eventually<crate::sdf::SymbolBufferPool>>()
-    {
-        for coords in evicted {
-            pool.remove_evicted_tile_with_queue(*coords, queue);
-        }
-    }
-    #[cfg(feature = "raster")]
-    if let Some(Initialized(raster)) = world.resources.get_mut::<Eventually<RasterResources>>() {
-        for coords in evicted {
-            raster.remove_texture(*coords);
-        }
-    }
-    if let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>() {
-        for coords in evicted {
-            terrain.drop_dem(*coords);
-        }
-    }
-    if let Some(pool) = world.resources.get_mut::<crate::terrain::GpuDemPool>() {
-        for coords in evicted {
-            pool.drop_coords(*coords);
-        }
-    }
-}
-
-fn reclaim_pool_pages(world: &mut World, queue: Option<&crate::render::upload_queue::UploadQueue>) {
-    #[cfg(target_arch = "wasm32")]
-    let keep_spare = 0;
-    #[cfg(not(target_arch = "wasm32"))]
-    let keep_spare = usize::from(
-        !world
-            .resources
-            .get::<MemoryBudget>()
-            .is_some_and(MemoryBudget::is_tight),
-    );
-    if let Some(Initialized(pool)) = world.resources.get_mut::<Eventually<VectorBufferPool>>() {
-        pool.reclaim_empty_pages_with_queue(keep_spare, queue);
-    }
-    if let Some(Initialized(pool)) = world
-        .resources
-        .get_mut::<Eventually<crate::sdf::SymbolBufferPool>>()
-    {
-        pool.reclaim_empty_pages_with_queue(keep_spare, queue);
-    }
+    gpu::drop_gpu_data_with_queue(world, &cancelled, queue);
 }
 
 #[cfg(test)]

@@ -15,10 +15,6 @@ use std::sync::{
 use wgpu::util::DeviceExt;
 
 /// Maximum single `write_buffer` payload (exclusive) staged into the per-frame coalescing belt.
-#[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
-const MAX_STAGED_WRITE_BYTES: usize = 262_144;
-/// Maximum single `write_buffer` payload (exclusive) staged into the per-frame coalescing belt.
-#[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
 const MAX_STAGED_WRITE_BYTES: usize = 65_536;
 
 /// Minimum persistent GPU staging buffer capacity (`64 KiB`).
@@ -166,12 +162,16 @@ impl UploadQueue {
         }
     }
 
-    /// Uploads all staged `< 64 KiB` writes via a single `wgpu::Queue::write_buffer` into the
-    /// persistent staging buffer and returns a command buffer encoding the `copy_buffer_to_buffer`
-    /// transfers to submit ahead of the frame's render passes.
-    pub fn flush_staged(&self, device: &wgpu::Device) -> Option<wgpu::CommandBuffer> {
+    /// Encodes all staged `< 64 KiB` writes via a single `wgpu::Queue::write_buffer` into the
+    /// persistent staging buffer and records `copy_buffer_to_buffer` transfers onto `encoder`.
+    /// Returns `true` when at least one staged copy was recorded.
+    pub fn encode_staged_into(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> bool {
         if !self.staging_enabled {
-            return None;
+            return false;
         }
         let mut staging = crate::platform::lock_unpoisoned(&self.staging);
         if staging.copies.is_empty() {
@@ -193,7 +193,7 @@ impl UploadQueue {
                     staging.quiet_frames = 0;
                 }
             }
-            return None;
+            return false;
         }
 
         let payload_bytes = staging.payload.len() as u64;
@@ -218,7 +218,7 @@ impl UploadQueue {
                     .write_buffer(&copy.dst, copy.dst_offset, &payload[start..end]);
             }
             payload.clear();
-            return None;
+            return false;
         }
 
         let should_shrink = staging.quiet_frames >= QUIET_FRAMES_BEFORE_SHRINK
@@ -254,20 +254,20 @@ impl UploadQueue {
             staging.buffer = Some((buf, next_cap));
         }
 
-        let (staging_buf, _) = staging.buffer.as_ref()?;
+        let Some((staging_buf, _)) = staging.buffer.as_ref() else {
+            return false;
+        };
         #[allow(clippy::disallowed_methods)]
         self.queue.write_buffer(staging_buf, 0, &staging.payload);
 
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("upload_queue_staging_encoder"),
-        });
         let StagingBeltState {
             payload,
             copies,
             buffer,
             ..
         } = &mut *staging;
-        if let Some((staging_buf, _)) = buffer.as_ref() {
+        let encoded = if let Some((staging_buf, _)) = buffer.as_ref() {
+            let any = !copies.is_empty();
             for copy in copies.drain(..) {
                 encoder.copy_buffer_to_buffer(
                     staging_buf,
@@ -277,13 +277,34 @@ impl UploadQueue {
                     copy.size,
                 );
             }
-        }
+            any
+        } else {
+            false
+        };
         payload.clear();
         if should_shrink {
             payload.shrink_to(SHRINK_STAGING_BUFFER_CAPACITY as usize);
             copies.shrink_to(256);
         }
-        Some(encoder.finish())
+        encoded
+    }
+
+    /// Uploads all staged `< 64 KiB` writes via a single `wgpu::Queue::write_buffer` into the
+    /// persistent staging buffer and returns a command buffer encoding the `copy_buffer_to_buffer`
+    /// transfers to submit ahead of the frame's render passes.
+    pub fn flush_staged(&self, device: &wgpu::Device) -> Option<wgpu::CommandBuffer> {
+        if !self.staging_enabled
+            || crate::platform::lock_unpoisoned(&self.staging)
+                .copies
+                .is_empty()
+        {
+            return None;
+        }
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("upload_queue_staging_encoder"),
+        });
+        self.encode_staged_into(device, &mut encoder)
+            .then(|| encoder.finish())
     }
 
     fn flush_staged_for_buffer(&self, target: &wgpu::Buffer) {

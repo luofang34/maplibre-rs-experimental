@@ -102,7 +102,7 @@ pub fn queue_system(
 
     if let Some(gpu) = world
         .resources
-        .get::<super::pattern::BackgroundPatternGpu>()
+        .get_mut::<super::pattern::BackgroundPatternGpu>()
     {
         let size = renderer.state().surface().size();
         gpu.write(
@@ -119,17 +119,6 @@ pub fn queue_system(
             return Err(SystemError::Dependencies);
         };
 
-        let patterned: rustc_hash::FxHashSet<crate::style::StyleLayerId> = style
-            .layers
-            .iter()
-            .filter(|layer| {
-                layer.paint.as_ref().is_some_and(|paint| {
-                    crate::vector::pattern::pattern_name(paint, view_state.style_zoom().value())
-                        .is_some()
-                })
-            })
-            .map(crate::style::layer::StyleLayer::layer_id)
-            .collect();
         let mut background_index = 0;
         for layer in &style.layers {
             if layer.type_ != "background" || !layer.is_visible_at(view_state.zoom().value()) {
@@ -148,6 +137,10 @@ pub fn queue_system(
             ) {
                 continue;
             }
+            let is_patterned = layer.paint.as_ref().is_some_and(|paint| {
+                crate::vector::pattern::pattern_name(paint, view_state.style_zoom().value())
+                    .is_some()
+            });
             background_index = background_index.max(layer.index);
             let c = background_color(layer, view_state.zoom().value());
             let z_index = layer.index as f32;
@@ -168,11 +161,11 @@ pub fn queue_system(
             });
 
             let draw_function: &'static dyn crate::render::render_phase::Draw<LayerItem> =
-                if uses_globe && patterned.contains(&layer_id) {
+                if uses_globe && is_patterned {
                     &DrawState::<LayerItem, DrawGlobeBackgroundPattern>::INSTANCE
                 } else if uses_globe {
                     &DrawState::<LayerItem, DrawGlobeBackground>::INSTANCE
-                } else if patterned.contains(&layer_id) {
+                } else if is_patterned {
                     &DrawState::<LayerItem, DrawBackgroundPattern>::INSTANCE
                 } else {
                     &DrawState::<LayerItem, DrawBackground>::INSTANCE
@@ -242,7 +235,11 @@ pub fn queue_system(
                 world_rows,
             });
         }
-        let globe_tiles = globe_tiles(world);
+        let globe_tiles = if uses_globe {
+            globe_tiles(world)
+        } else {
+            Vec::new()
+        };
         let tile_metadata: Vec<ShaderTileMetadata> = globe_tiles
             .iter()
             .map(|coords| globe_tile_metadata(view_state, *coords))
