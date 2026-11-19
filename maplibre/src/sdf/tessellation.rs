@@ -15,7 +15,6 @@ use crate::{
     },
     style::{
         expression::{empty_feature_properties, FeatureProperties},
-        filter::GeometryType,
         layer::{FormattedText, StyleProperty, SymbolPaint},
     },
     vector::tessellation::{property_value, IndexDataType},
@@ -29,9 +28,11 @@ mod line_anchors;
 mod line_break;
 mod line_merge;
 mod pole;
+mod prune;
 mod text_layout;
 mod text_offset;
 use layout::CollectedSymbol;
+pub(crate) use prune::{prune_symbol_features, source_feature_indices};
 
 type GeoResult<T> = geozero::error::Result<T>;
 
@@ -60,6 +61,8 @@ pub struct TextTessellator {
     pub overscaling: f64,
     /// Source IDs indexed by the feature order supplied to the geometry processor.
     pub source_ids: Vec<Option<u64>>,
+    /// Original MVT/MLT feature indices indexed by slice feature order.
+    pub source_indices: Vec<Option<u32>>,
     /// Source `promoteId` and active runtime `feature-state` snapshot for this layer.
     pub(crate) feature_state_ctx:
         Option<crate::vector::tessellation::feature_paint::FeatureStateSyncContext>,
@@ -96,6 +99,7 @@ impl TextTessellator {
             coordinate_scale: 1.0,
             overscaling: 1.0,
             source_ids: Vec::new(),
+            source_indices: Vec::new(),
             feature_state_ctx: None,
         }
     }
@@ -225,7 +229,7 @@ pub(crate) fn is_line_placed(paint: &SymbolPaint) -> bool {
 const TILE_UNITS_PER_PIXEL: f64 = 8.0;
 
 impl TextTessellator {
-    fn take_feature_properties(
+    pub(super) fn take_feature_properties(
         &mut self,
         idx: Option<usize>,
         id: Option<u64>,
@@ -431,17 +435,7 @@ impl FeatureProcessor for TextTessellator {
     fn feature_end(&mut self, idx: u64) -> GeoResult<()> {
         if let Some(geometry) = self.geo_writer.take_geometry() {
             let slice_idx = usize::try_from(idx).ok();
-            let id = slice_idx
-                .and_then(|i| self.source_ids.get(i).copied())
-                .flatten();
-            let props = self.take_feature_properties(slice_idx, id);
-            let kind = match &geometry {
-                Geometry::Point(_) | Geometry::MultiPoint(_) => GeometryType::Point,
-                Geometry::LineString(_) | Geometry::MultiLineString(_) => GeometryType::LineString,
-                Geometry::Polygon(_) | Geometry::MultiPolygon(_) => GeometryType::Polygon,
-                _ => GeometryType::Unknown,
-            };
-            let source = layout::SourceFeature { id, kind };
+            let (source, props) = prune::build_source_feature(self, slice_idx, &geometry);
             let lines: Option<Vec<Vec<[f64; 2]>>> = match &geometry {
                 Geometry::LineString(line) => {
                     Some(vec![line.coords().map(|c| [c.x, c.y]).collect()])

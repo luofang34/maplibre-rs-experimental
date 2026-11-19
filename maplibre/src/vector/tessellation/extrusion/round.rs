@@ -242,7 +242,7 @@ pub(super) fn push_smooth_wall<I: From<VertexId>>(
         let scale = if top { 2.0 } else { 1.0 };
         let mut vertex = ShaderVertex::new(pt, [norm[0] * scale, norm[1] * scale]);
         heights.apply(&mut vertex, top);
-        vertex.edge_distance = distance;
+        vertex.edge_distance = if heights.has_pattern { distance } else { 0.0 };
         buffer.vertices.push(vertex);
     }
     buffer.indices.extend([0, 1, 2, 0, 2, 3].map(index));

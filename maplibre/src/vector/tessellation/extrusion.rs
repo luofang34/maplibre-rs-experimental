@@ -59,6 +59,8 @@ pub struct ExtrusionOptions {
     /// Tile units past the tile's edge to which the polygons are clipped, for geometry that is
     /// not clipped already; translucent volumes default to `0.0` so tiles partition cleanly.
     pub clip_buffer: Option<f32>,
+    /// Whether this layer samples `fill-extrusion-pattern` and needs wall `edge_distance` encoded.
+    pub has_pattern: bool,
     /// Zoom levels the tile is drawn past its own: the zoom the heights are evaluated at less
     /// the zoom of the tile's coordinates.
     pub overscale: u8,
@@ -78,6 +80,7 @@ impl ExtrusionOptions {
             rounded_corner_distance: paint.fill_extrusion_rounded_corner_distance.clone(),
             translucent,
             clip_buffer: translucent.then_some(0.0),
+            has_pattern: paint.fill_extrusion_pattern.is_some(),
             overscale: overscaling.log2().round().clamp(0.0, f64::from(u8::MAX)) as u8,
         }
     }
@@ -108,6 +111,8 @@ pub struct ExtrusionHeights {
     pub translucent: bool,
     /// Whether walls lying along `0` or `4096` are suppressed as tile-partition seams.
     pub suppress_tile_boundary_walls: bool,
+    /// Whether wall vertices should preserve non-zero `edge_distance` for textured patterns.
+    pub has_pattern: bool,
 }
 
 impl ExtrusionHeights {
@@ -162,6 +167,7 @@ impl ExtrusionHeights {
             rounded_corner_distance: evaluate(&options.rounded_corner_distance, zoom),
             translucent: options.translucent,
             suppress_tile_boundary_walls: options.clip_buffer == Some(0.0),
+            has_pattern: options.has_pattern,
         }
     }
 
@@ -180,6 +186,7 @@ impl ExtrusionHeights {
             rounded_corner_distance: 0.0,
             translucent: false,
             suppress_tile_boundary_walls: false,
+            has_pattern: false,
         }
     }
 
@@ -252,7 +259,7 @@ fn push_wall<I: From<VertexId>>(
         let scale = if top { 2.0 } else { 1.0 };
         let mut vertex = ShaderVertex::new(point, [normal[0] * scale, normal[1] * scale]);
         heights.apply(&mut vertex, top);
-        vertex.edge_distance = distance;
+        vertex.edge_distance = if heights.has_pattern { distance } else { 0.0 };
         buffer.vertices.push(vertex);
     }
     buffer.indices.extend([0, 1, 2, 0, 2, 3].map(index));
@@ -299,14 +306,16 @@ where
     let rounded = round::build_rounded_extrusion(path, heights);
     let active_path = rounded.as_ref().map_or(path, |(p, _)| p);
 
+    let mut earcut_used = false;
     if heights.part != ExtrusionPart::Walls {
         let cap_vertex_start = buffer.vertices.len();
         let cap_index_start = buffer.indices.len();
-        if !earcut.try_triangulate(active_path, true, buffer, |pos| {
+        earcut_used = earcut.try_triangulate(active_path, true, buffer, |pos| {
             let mut output = ShaderVertex::new(pos, [0.0, 0.0]);
             heights.apply(&mut output, true);
             output
-        }) {
+        });
+        if !earcut_used {
             tessellator
                 .tessellate_path(
                     active_path,
@@ -347,13 +356,20 @@ where
         return Ok(());
     }
 
-    let raw_rings = rings(path);
-    let wound_rings;
-    let active_rings = if heights.translucent {
-        wound_rings = normalized_rings(&raw_rings);
-        &wound_rings
+    let owned_rings;
+    let active_rings: &[Vec<[f32; 2]>] = if heights.translucent {
+        if earcut_used {
+            owned_rings = normalized_rings(earcut.last_rings());
+        } else {
+            let raw_rings = rings(path);
+            owned_rings = normalized_rings(&raw_rings);
+        }
+        &owned_rings
+    } else if earcut_used {
+        earcut.last_rings()
     } else {
-        &raw_rings
+        owned_rings = rings(path);
+        &owned_rings
     };
     for (index, ring) in active_rings.iter().enumerate() {
         let area = signed_area(ring);

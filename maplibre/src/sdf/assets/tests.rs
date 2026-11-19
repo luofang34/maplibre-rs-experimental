@@ -56,6 +56,7 @@ fn worker_wire_roundtrip_preserves_exact_collision_ranges_and_anchor() {
             ),
             sort_key: 3.5,
             geometry_type: crate::style::filter::GeometryType::Polygon,
+            source_feature_index: Some(7),
         },
         parts: [
             Some(crate::sdf::placement_geometry::SymbolBounds {

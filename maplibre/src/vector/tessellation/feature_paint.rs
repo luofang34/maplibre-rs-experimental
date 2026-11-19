@@ -49,6 +49,7 @@ where
             .flatten();
         self.current_shared_props = index.and_then(|i| self.shared_properties.get(i).cloned());
         self.state_synced = self.current_shared_props.is_some();
+        self.current_extrusion_heights = None;
     }
 
     pub(super) fn ensure_feature_state_synced(&mut self) {
@@ -69,6 +70,7 @@ where
 
     pub(super) fn finish_feature(&mut self) {
         self.ensure_feature_state_synced();
+        self.current_extrusion_heights = None;
         let polygons = std::mem::take(&mut self.polygon_entries);
         let first_entry = self.feature_indices.len() - polygons;
         if polygons == 0 {

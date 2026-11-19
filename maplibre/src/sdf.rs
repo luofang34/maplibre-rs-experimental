@@ -134,6 +134,8 @@ pub struct SymbolFeatureData {
     pub sort_key: f32,
     /// The kind of the source feature's geometry, which a query reports and filters by.
     pub geometry_type: crate::style::filter::GeometryType,
+    /// Original MVT/MLT feature index within `source_layer` for runtime `GeometryIndex` lookup.
+    pub source_feature_index: Option<u32>,
 }
 
 impl Default for SymbolFeatureData {
@@ -143,6 +145,7 @@ impl Default for SymbolFeatureData {
             properties: std::sync::Arc::clone(crate::style::expression::empty_feature_properties()),
             sort_key: 0.0,
             geometry_type: crate::style::filter::GeometryType::default(),
+            source_feature_index: None,
         }
     }
 }

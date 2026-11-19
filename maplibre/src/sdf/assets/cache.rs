@@ -62,7 +62,7 @@ impl AssetFailure {
 /// A sprite sheet decoded once for every icon later cut from it.
 pub(super) struct SpriteSheet {
     pub(super) document: HashMap<String, super::sprite::SpriteEntry>,
-    pub(super) image: image::RgbaImage,
+    pub(super) image: Arc<image::RgbaImage>,
 }
 
 /// Shared handle to the glyph and sprite cache; clones use the same storage.
@@ -194,15 +194,14 @@ impl AssetCache {
                         return Ok(cached);
                     }
                     let png = fetch(client, png_url, "symbol sprite image").await?;
-                    let image =
-                        crate::platform::decode_rgba_bytes(&png)
-                            .await
-                            .map_err(|error| {
-                                tracing::warn!(%png_url, %error, "invalid sprite image");
-                                AssetFailure::Terminal(format!(
-                                    "invalid sprite image {png_url}: {error}"
-                                ))
-                            })?;
+                    let image = Arc::new(crate::platform::decode_rgba_bytes(&png).await.map_err(
+                        |error| {
+                            tracing::warn!(%png_url, %error, "invalid sprite image");
+                            AssetFailure::Terminal(format!(
+                                "invalid sprite image {png_url}: {error}"
+                            ))
+                        },
+                    )?);
                     crate::platform::http_client::cache::put_decoded_rgba_memory(png_url, &image);
                     Ok(image)
                 },
@@ -215,12 +214,16 @@ impl AssetCache {
                     fetch(client, png_url, "symbol sprite image"),
                 )
                 .await?;
-                let image = image::load_from_memory(&png)
-                    .map_err(|error| {
-                        tracing::warn!(%png_url, %error, "invalid sprite image");
-                        AssetFailure::Terminal(format!("invalid sprite image {png_url}: {error}"))
-                    })?
-                    .to_rgba8();
+                let image = Arc::new(
+                    image::load_from_memory(&png)
+                        .map_err(|error| {
+                            tracing::warn!(%png_url, %error, "invalid sprite image");
+                            AssetFailure::Terminal(format!(
+                                "invalid sprite image {png_url}: {error}"
+                            ))
+                        })?
+                        .to_rgba8(),
+                );
                 (json, image)
             };
             let document = super::sprite::parse_sprite_document(&json).map_err(|error| {

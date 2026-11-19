@@ -40,6 +40,7 @@ fn label(id: u64, sort_key: f32, at: [f32; 2]) -> Feature {
             properties: Default::default(),
             sort_key,
             geometry_type: crate::style::filter::GeometryType::Point,
+            source_feature_index: None,
         },
         bbox: Box2D::zero(),
         indices: 0..0,
@@ -373,4 +374,65 @@ fn labels_that_may_overlap_come_in_the_order_drawn_on_the_rotated_screen() {
     let found =
         query_rendered_symbols_in(&world, &style, screen, &QueryOptions::default()).expect("query");
     assert_eq!(ids(&found), [1, 3, 2]);
+}
+
+#[test]
+fn query_rendered_symbols_resolves_pruned_properties_and_filters_from_geometry_index() {
+    use std::sync::Arc;
+
+    use crate::{
+        io::geometry_index::{ExactGeometry, IndexedGeometry, TileIndex},
+        style::expression::{FeatureProperties, Value, FEATURE_STATE_PREFIX},
+    };
+
+    let style = style();
+    let tile = coords(0, 0, 0);
+    let mut pruned_props = FeatureProperties::default();
+    pruned_props.insert(format!("{FEATURE_STATE_PREFIX}hover"), Value::Bool(true));
+
+    let mut feat = label(99, 0.0, [100.0, 100.0]);
+    feat.data.properties = Arc::new(pruned_props);
+    feat.data.source_feature_index = Some(5);
+
+    let mut world = placed(vec![bucket(tile, "low", vec![feat])]);
+
+    let mut full_props = FeatureProperties::default();
+    full_props.insert("name".into(), Value::String("Zürich".into()));
+    full_props.insert("class".into(), Value::String("city".into()));
+    world.tiles.geometry_index.index_tile(
+        &tile,
+        Some("s".to_owned()),
+        TileIndex::Linear {
+            list: vec![IndexedGeometry {
+                bounds: rstar::AABB::from_point(geo_types::Point::new(100.0, 100.0)),
+                exact: ExactGeometry::Point(geo_types::Point::new(100.0, 100.0)),
+                properties: Arc::new(full_props),
+                source_layer: Arc::from("places"),
+                id: Some(99),
+                feature_index: 5,
+            }],
+        },
+    );
+
+    let options = QueryOptions {
+        layers: None,
+        filter: Some(serde_json::json!(["==", ["get", "class"], "city"])),
+    };
+    let found = query_rendered_symbols_in(
+        &world,
+        &style,
+        QueryGeometry::Point([150.0, 120.0]),
+        &options,
+    )
+    .expect("query succeeds");
+    assert_eq!(found.len(), 1);
+    assert_eq!(
+        found[0].properties.get("name"),
+        Some(&serde_json::json!("Zürich"))
+    );
+    assert_eq!(
+        found[0].properties.get("class"),
+        Some(&serde_json::json!("city"))
+    );
+    assert_eq!(found[0].state.get("hover"), Some(&serde_json::json!(true)));
 }

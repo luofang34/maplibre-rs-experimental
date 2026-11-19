@@ -32,6 +32,7 @@ pub use line_elevation::LineElevationOptions;
 pub use line_style::{LineFeatureStyle, PackedLine};
 mod extrusion;
 mod outline;
+mod prepack;
 mod sharp_corners;
 pub use sharp_corners::offset_for as sharp_corner_offset;
 mod sort_key;
@@ -145,6 +146,8 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     /// What each retained entry keeps for this layer's paint.
     pub(crate) feature_paint_retention: crate::vector::feature_paint::FeaturePaintRetention,
     current_index: usize,
+    streaming_prepack: Option<prepack::StreamingPrepack>,
+    current_extrusion_heights: Option<extrusion::ExtrusionHeights>,
     earcut: earcut_fill::PolygonEarcut,
     fill_tessellator: FillTessellator,
     stroke_tessellator: StrokeTessellator,
@@ -202,6 +205,8 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             feature_paint: Vec::new(),
             slot_kind_properties: Arc::default(),
             feature_paint_retention: crate::vector::feature_paint::FeaturePaintRetention::None,
+            streaming_prepack: None,
+            current_extrusion_heights: None,
             earcut: earcut_fill::PolygonEarcut::default(),
             fill_tessellator: FillTessellator::new(),
             stroke_tessellator: StrokeTessellator::new(),
@@ -246,8 +251,61 @@ where
         self
     }
 
+    /// Streams geometry directly into compact/encoded GPU vertex storage after each polygon or stroke
+    /// when `style_type` and layer paint flags support prepacking.
+    pub(crate) fn maybe_enable_streaming_prepack(&mut self, style_type: &str) {
+        if self.outline_property.is_none()
+            && self.pattern_property.is_none()
+            && !self.sort_key.is_keyed()
+        {
+            let allow_compact = self.omit_feature_colors
+                && self.feature_paint_retention
+                    == crate::vector::feature_paint::FeaturePaintRetention::None
+                && style_type == "fill-extrusion"
+                && self.extrusion.as_ref().is_some_and(|e| !e.has_pattern);
+            self.enable_streaming_prepack(style_type, allow_compact);
+        }
+    }
+
+    /// Streams geometry directly into compact/encoded GPU vertex storage after each polygon or stroke.
+    pub(crate) fn enable_streaming_prepack(
+        &mut self,
+        style_type: &str,
+        allow_compact_extrusion: bool,
+    ) {
+        self.streaming_prepack =
+            prepack::StreamingPrepack::new(style_type, allow_compact_extrusion);
+    }
+
+    #[inline]
+    fn total_vertex_count(&self) -> usize {
+        self.streaming_prepack
+            .as_ref()
+            .map_or(0, prepack::StreamingPrepack::logical_len)
+            + self.buffer.vertices.len()
+    }
+
+    fn flush_streaming_prepack(&mut self, index_start: usize) {
+        let Some(prepack) = &mut self.streaming_prepack else {
+            return;
+        };
+        if self.buffer.vertices.is_empty() {
+            return;
+        }
+        let base = prepack.logical_len();
+        if base > 0 {
+            for idx in &mut self.buffer.indices[index_start..] {
+                *idx = I::from(lyon::tessellation::VertexId::from_usize(
+                    base + (*idx).into() as usize,
+                ));
+            }
+        }
+        prepack.push_vertices(&self.buffer.vertices);
+        self.buffer.vertices.clear();
+    }
+
     fn update_feature_indices(&mut self) {
-        let next_index = self.buffer.vertices.len();
+        let next_index = self.total_vertex_count();
         let indices = (next_index - self.current_index) as u32;
         self.feature_indices.push(indices);
         self.current_index = next_index;
@@ -267,11 +325,19 @@ where
     }
 
     fn tessellate_extrusion(&mut self, options: &ExtrusionOptions) -> GeoResult<()> {
+        let index_start = self.buffer.indices.len();
         let mut path = self.path_builder.replace(Path::builder()).build();
         if let Some(buffer) = options.clip_buffer {
             path = extrusion::clipped(&path, buffer);
         }
-        let heights = extrusion::ExtrusionHeights::for_feature(options, self.props(), self.zoom);
+        let heights = if let Some(cached) = self.current_extrusion_heights {
+            cached
+        } else {
+            let evaluated =
+                extrusion::ExtrusionHeights::for_feature(options, self.props(), self.zoom);
+            self.current_extrusion_heights = Some(evaluated);
+            evaluated
+        };
         let subdivision = crate::projection::globe::subdivision::FillSubdivisionOptions {
             granularity: self.subdivision_granularity,
             clip_x_to_tile: self.clip_x_to_tile,
@@ -292,6 +358,7 @@ where
             ),
         )
         .map_err(GeozeroError::Geometry)?;
+        self.flush_streaming_prepack(index_start);
         // Each polygon of a multipolygon is a building of its own, standing on its own ground.
         self.update_feature_indices();
         self.polygon_entries += 1;
@@ -349,7 +416,27 @@ where
                 extend_to_south_pole: self.extend_to_south_pole,
             },
         )
-        .map_err(|error| GeozeroError::Geometry(error.to_string()))
+        .map_err(|error| GeozeroError::Geometry(error.to_string()))?;
+        self.flush_streaming_prepack(index_start);
+        Ok(())
+    }
+}
+
+impl ZeroTessellator<IndexDataType> {
+    /// Finalizes tessellated geometry into an upload-ready [`OverAlignedVertexBuffer`].
+    pub(crate) fn into_over_aligned_buffer(
+        mut self,
+    ) -> OverAlignedVertexBuffer<ShaderVertex, IndexDataType> {
+        if let Some(mut prepack) = self.streaming_prepack.take() {
+            if !self.buffer.vertices.is_empty() {
+                prepack.push_vertices(&self.buffer.vertices);
+                self.buffer.vertices = Vec::new();
+            }
+            return prepack.finish(self.buffer.indices);
+        }
+        self.buffer.vertices.shrink_to_fit();
+        self.buffer.indices.shrink_to_fit();
+        self.buffer.into()
     }
 }
 

@@ -7,10 +7,7 @@ use rustc_hash::FxHashSet;
 use super::{AtlasEntry, SymbolAtlas};
 use crate::sdf::glyphs;
 
-#[cfg(target_arch = "wasm32")]
 const INITIAL_ATLAS_WIDTH: u32 = 512;
-#[cfg(not(target_arch = "wasm32"))]
-const INITIAL_ATLAS_WIDTH: u32 = 1024;
 
 /// Incremental shelf packer with a transparent border around every image.
 pub(in crate::sdf) struct AtlasBuilder {
@@ -289,7 +286,6 @@ impl AtlasBuilder {
 
     pub(in crate::sdf) fn finish(mut self) -> Arc<SymbolAtlas> {
         self.atlas.size[1] = self.atlas.size[1].max(1);
-        #[cfg(target_arch = "wasm32")]
         if self.cursor[1] == 1 {
             let trimmed_w = self.cursor[0]
                 .max(4)
@@ -315,10 +311,10 @@ impl AtlasBuilder {
             .pixels
             .resize((self.atlas.size[0] * self.atlas.size[1] * 4) as usize, 0);
         self.atlas.pixels.shrink_to_fit();
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(not(test))]
         {
             let staged = std::mem::take(&mut self.atlas.pixels);
-            self.atlas.gpu_staging = Arc::new(std::sync::Mutex::new(staged));
+            self.atlas.gpu_staging = Some(Arc::new(std::sync::Mutex::new(staged)));
         }
         Arc::new(self.atlas)
     }

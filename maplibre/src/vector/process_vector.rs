@@ -153,7 +153,8 @@ mod geometry_tags;
 mod mvt_slice;
 mod processing;
 mod shared_geometry;
-pub(crate) use decode::{decode_tile, decode_tile_for_layers};
+pub(crate) use decode::*;
+#[cfg(test)]
 pub(crate) use mvt_slice::index_mvt_bytes;
 #[cfg(feature = "mlt")]
 pub(crate) use mvt_slice::looks_like_mvt;
@@ -375,7 +376,6 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
         self
     }
 
-    #[cfg(feature = "mlt")]
     pub(crate) fn index_geometry(&self) -> bool {
         self.index_geometry
     }
@@ -409,6 +409,22 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
             .map_err(ProcessVectorError::SendError)
     }
 
+    pub(crate) fn allow_prepack_for_style(
+        &self,
+        coords: WorldTileCoords,
+        style: &crate::style::layer::StyleLayer,
+        has_sort_keys: bool,
+        has_shared_geometry: bool,
+    ) -> bool {
+        processing::allow_prepack_for_style(
+            coords,
+            self.has_dem_source,
+            style,
+            has_sort_keys,
+            has_shared_geometry,
+        )
+    }
+
     pub(crate) fn layer_tessellation_finished(
         &mut self,
         coords: &WorldTileCoords,
@@ -423,19 +439,12 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
         style: &crate::style::layer::StyleLayer,
     ) -> Result<(), ProcessVectorError> {
         let overscaled = self.overscaled_zoom.max(u8::from(coords.z));
-        let per_feature_pattern = style
-            .paint
-            .as_ref()
-            .and_then(crate::vector::pattern::per_feature_pattern)
-            .is_some();
-        let allow_prepack = cfg!(target_arch = "wasm32")
-            && !self.has_dem_source
-            && !per_feature_pattern
-            && feature_sort_keys.is_empty()
-            && style.type_ != "circle"
-            && crate::vector::structures::kind(style)
-                .is_none_or(|k| matches!(k, crate::vector::structures::StructureKind::Extrusion))
-            && buffer.shared_geometry_key().is_none();
+        let allow_prepack = self.allow_prepack_for_style(
+            *coords,
+            style,
+            !feature_sort_keys.is_empty(),
+            buffer.shared_geometry_key().is_some(),
+        );
         let msg = T::LayerTessellated::build_from_with_paint_typed(
             *coords,
             buffer,

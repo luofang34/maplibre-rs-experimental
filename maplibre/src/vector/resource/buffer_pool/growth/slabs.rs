@@ -76,7 +76,6 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
                     })
                 })
                 .count();
-            #[cfg(target_arch = "wasm32")]
             let (target_v, req_align) = (
                 match family_pages {
                     0 => 2 * 1024,
@@ -85,15 +84,6 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
                     _ => DEFAULT_PAGE_VERTICES,
                 },
                 1024,
-            );
-            #[cfg(not(target_arch = "wasm32"))]
-            let (target_v, req_align) = (
-                match family_pages {
-                    0 => 32 * 1024,
-                    1 => 64 * 1024,
-                    _ => DEFAULT_PAGE_VERTICES,
-                },
-                16 * 1024,
             );
             target_v
                 .min(max_v_page)
@@ -200,7 +190,6 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
                     .filter(|s| !s.dedicated_oversize)
                     .count()
             };
-            #[cfg(target_arch = "wasm32")]
             let (target_i, req_align) = (
                 match existing_count {
                     0 => 4 * 1024,
@@ -209,15 +198,6 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
                     _ => DEFAULT_PAGE_INDICES,
                 },
                 1024,
-            );
-            #[cfg(not(target_arch = "wasm32"))]
-            let (target_i, req_align) = (
-                match existing_count {
-                    0 => 64 * 1024,
-                    1 => 128 * 1024,
-                    _ => DEFAULT_PAGE_INDICES,
-                },
-                32 * 1024,
             );
             target_i
                 .min(max_i_page)
@@ -389,7 +369,6 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
                 .flatten()
                 .filter(|s| !s.dedicated_oversize)
                 .count();
-            #[cfg(target_arch = "wasm32")]
             let (target_fm, min_req) = (
                 match count {
                     0 => 2 * 1024,
@@ -397,15 +376,6 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
                     _ => DEFAULT_PAGE_FEATURE_META,
                 },
                 req_elems.next_multiple_of(1024).min(max_fm_page),
-            );
-            #[cfg(not(target_arch = "wasm32"))]
-            let (target_fm, min_req) = (
-                match count {
-                    0 => 4 * 1024,
-                    1 => 16 * 1024,
-                    _ => DEFAULT_PAGE_FEATURE_META,
-                },
-                req_elems.next_power_of_two().min(max_fm_page),
             );
             target_fm
                 .min(max_fm_page)

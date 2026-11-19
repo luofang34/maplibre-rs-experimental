@@ -440,3 +440,30 @@ fn a_raster_layer_draws_an_image_source() {
         Err(StyleMutationError::WrongSourceKind { .. })
     ));
 }
+
+#[test]
+fn symbol_paint_adding_new_runtime_property_triggers_tile_redraw() {
+    let mut style = style();
+    style
+        .add_layer(
+            json!({
+                "id": "labels",
+                "type": "symbol",
+                "source": "roads",
+                "source-layer": "places",
+                "layout": {"text-field": "{name}"},
+                "paint": {"text-color": "#000000"}
+            }),
+            None,
+        )
+        .expect("add symbol layer");
+    let const_edit = style
+        .set_paint_property("labels", "text-color", json!("#111111"))
+        .expect("constant paint update");
+    assert!(!const_edit.redraw_tiles);
+
+    let new_prop_edit = style
+        .set_paint_property("labels", "text-color", json!(["get", "custom_tint"]))
+        .expect("data-driven paint update");
+    assert!(new_prop_edit.redraw_tiles);
+}

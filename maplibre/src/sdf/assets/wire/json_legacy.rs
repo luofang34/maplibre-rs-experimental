@@ -126,6 +126,7 @@ impl From<SymbolFeature> for Feature {
                 properties,
                 sort_key: feature.sort_key,
                 geometry_type: feature.geometry_type,
+                source_feature_index: None,
             },
             anchor_shifts: feature.anchor_shifts,
             text_sets: feature.text_sets.iter().map(|set| set[0]..set[1]).collect(),

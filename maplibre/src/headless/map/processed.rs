@@ -211,7 +211,7 @@ pub fn process_tile_layers_with_atlas(
         layer,
         coords,
         projection,
-        (atlas, overscaled_zoom),
+        (atlas, overscaled_zoom, true),
         (None, None),
     )
 }
@@ -232,12 +232,13 @@ pub fn process_tile_layers_for_style(
             style.feature_state.source(name).cloned(),
         )
     });
+    let has_dem_source = crate::terrain::source::dem_source(style).is_some();
     process_tile_layers_with_state(
         tile_data,
         layer,
         coords,
         projection,
-        (atlas, overscaled_zoom),
+        (atlas, overscaled_zoom, has_dem_source),
         source_state,
     )
 }
@@ -247,7 +248,7 @@ fn process_tile_layers_with_state(
     layer: &StyleLayer,
     coords: WorldTileCoords,
     projection: ProjectionType,
-    (atlas, overscaled_zoom): (Option<Arc<SymbolAtlas>>, u8),
+    (atlas, overscaled_zoom, has_dem_source): (Option<Arc<SymbolAtlas>>, u8, bool),
     (promote_id, feature_state): (
         Option<crate::style::source::PromoteId>,
         Option<crate::style::feature_state::SourceFeatureState>,
@@ -256,6 +257,7 @@ fn process_tile_layers_with_state(
     let mut processor = ProcessVectorContext::<DefaultVectorTransferables, HeadlessContext>::new(
         HeadlessContext::default(),
     )
+    .with_has_dem_source(has_dem_source)
     .with_source_feature_state(promote_id, feature_state);
     process_vector_tile_with_assets(
         tile_data,

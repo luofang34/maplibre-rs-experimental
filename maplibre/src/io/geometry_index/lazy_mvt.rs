@@ -7,7 +7,10 @@ use std::sync::{Arc, OnceLock};
 use rustc_hash::FxHashSet;
 
 use super::{properties_bytes, IndexedGeometry};
-use crate::style::{feature_state::SourceFeatureState, source::PromoteId};
+use crate::{
+    coords::WorldTileCoords,
+    style::{feature_state::SourceFeatureState, source::PromoteId},
+};
 
 /// Compact raw-MVT tile query index that defers decoding `IndexedGeometry<f64>` and feature
 /// property maps until a point or box query actually inspects the tile.
@@ -15,6 +18,7 @@ use crate::style::{feature_state::SourceFeatureState, source::PromoteId};
 pub struct LazyMvtIndex {
     mvt_bytes: Arc<[u8]>,
     compressed: bool,
+    rescale: Option<(WorldTileCoords, WorldTileCoords)>,
     promote_id: Option<PromoteId>,
     feature_state: Option<Arc<SourceFeatureState>>,
     materialized: OnceLock<Vec<IndexedGeometry<f64>>>,
@@ -29,6 +33,7 @@ impl Clone for LazyMvtIndex {
         Self {
             mvt_bytes: Arc::clone(&self.mvt_bytes),
             compressed: self.compressed,
+            rescale: self.rescale,
             promote_id: self.promote_id.clone(),
             feature_state: self.feature_state.clone(),
             materialized,
@@ -37,37 +42,29 @@ impl Clone for LazyMvtIndex {
 }
 
 impl LazyMvtIndex {
-    /// Packs raw MVT bytes for storage (LZ4-compressing on `wasm32` so resident tile indices stay
-    /// compact in linear memory without linking a deflate compressor).
+    /// Packs raw MVT bytes with LZ4 block compression when it shrinks the payload.
     pub(crate) fn pack_slice(raw: &[u8]) -> (Arc<[u8]>, bool) {
-        #[cfg(target_arch = "wasm32")]
         if let Some(packed) = compress_lz4_block(raw) {
             return (Arc::from(packed), true);
         }
         (Arc::from(raw), false)
     }
 
-    /// Packs owned raw MVT bytes without copying on native and deflating on `wasm32`.
+    /// Packs owned raw MVT bytes, compressing when LZ4 shrinks the payload.
     pub(crate) fn pack_vec(raw: Vec<u8>) -> (Arc<[u8]>, bool) {
-        #[cfg(target_arch = "wasm32")]
-        {
-            Self::pack_slice(&raw)
+        if let Some(packed) = compress_lz4_block(&raw) {
+            return (Arc::from(packed), true);
         }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            (Arc::from(raw), false)
-        }
+        (Arc::from(raw), false)
     }
 
     /// Creates an unmaterialized index over raw MVT bytes.
     pub fn new(mvt_bytes: Arc<[u8]>) -> Self {
-        #[cfg(target_arch = "wasm32")]
         let (mvt_bytes, compressed) = Self::pack_slice(&mvt_bytes);
-        #[cfg(not(target_arch = "wasm32"))]
-        let compressed = false;
         Self {
             mvt_bytes,
             compressed,
+            rescale: None,
             promote_id: None,
             feature_state: None,
             materialized: OnceLock::new(),
@@ -79,6 +76,7 @@ impl LazyMvtIndex {
         Self {
             mvt_bytes,
             compressed,
+            rescale: None,
             promote_id: None,
             feature_state: None,
             materialized: OnceLock::new(),
@@ -95,10 +93,23 @@ impl LazyMvtIndex {
         Self {
             mvt_bytes,
             compressed,
+            rescale: None,
             promote_id,
             feature_state: feature_state.map(Arc::new),
             materialized: OnceLock::new(),
         }
+    }
+
+    /// Attaches an `(ancestor, descendant)` rescaling pair so dormant overscaled indices clip and
+    /// rescale from the shared ancestor MVT bytes only when a feature query materializes them.
+    pub fn with_rescale(mut self, rescale: Option<(WorldTileCoords, WorldTileCoords)>) -> Self {
+        self.rescale = rescale;
+        self
+    }
+
+    /// Optional `(ancestor, descendant)` coordinates to rescale raw bytes on materialization.
+    pub fn rescale(&self) -> Option<(WorldTileCoords, WorldTileCoords)> {
+        self.rescale
     }
 
     /// Underlying stored MVT byte slice and whether it is deflate-compressed.
@@ -116,16 +127,18 @@ impl LazyMvtIndex {
         self.materialized.get_or_init(|| {
             if self.compressed {
                 if let Some(raw) = decompress_lz4_block(&self.mvt_bytes) {
-                    return crate::vector::index_mvt_bytes(
+                    return crate::vector::index_mvt_bytes_rescaled(
                         &raw,
+                        self.rescale,
                         self.promote_id.as_ref(),
                         self.feature_state.as_ref(),
                     );
                 }
                 return Vec::new();
             }
-            crate::vector::index_mvt_bytes(
+            crate::vector::index_mvt_bytes_rescaled(
                 &self.mvt_bytes,
+                self.rescale,
                 self.promote_id.as_ref(),
                 self.feature_state.as_ref(),
             )
@@ -179,7 +192,6 @@ fn push_lz4_extra(out: &mut Vec<u8>, mut len: usize) {
     out.push(len as u8);
 }
 
-#[cfg_attr(not(any(target_arch = "wasm32", test)), allow(dead_code))]
 fn compress_lz4_block(raw: &[u8]) -> Option<Vec<u8>> {
     if raw.len() < 16 {
         return None;

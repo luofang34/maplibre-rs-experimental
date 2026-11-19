@@ -196,6 +196,14 @@ impl PropertyExpression {
     pub fn source(&self) -> &serde_json::Value {
         &self.source
     }
+
+    #[cfg(test)]
+    pub(crate) fn from_worker_expression(expression: Expression) -> Self {
+        Self {
+            source: serde_json::Value::Null,
+            expression,
+        }
+    }
 }
 
 /// A property value the engine could not parse.

@@ -54,6 +54,11 @@ impl Translation {
         Self(StyleProperty::parse(value))
     }
 
+    /// The underlying `[x, y]` style property.
+    pub(crate) fn property(&self) -> &StyleProperty<Pair> {
+        &self.0
+    }
+
     /// The `[x, y]` translation at `zoom`; none is no translation.
     pub fn at_zoom(&self, zoom: f64) -> [f32; 2] {
         self.0

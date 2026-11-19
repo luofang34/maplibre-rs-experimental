@@ -61,7 +61,7 @@ impl SymbolTextures {
             || (uniforms.text[1] > 0.0
                 && paint.number("text-letter-spacing", &Default::default(), zoom, 0.0) < 0.0);
         if let Some(binding) = self.bindings.get_mut(&key) {
-            if Arc::ptr_eq(&binding.atlas.source, atlas) {
+            if binding.atlas.source.same_gpu_atlas(atlas) {
                 binding.separate_halo = separate_halo;
                 if binding.uniforms != uniforms {
                     gpu.queue
@@ -72,17 +72,17 @@ impl SymbolTextures {
             }
         }
         // Source atlases can share tile coordinates without sharing sprite or font pixels.
-        let identity = Arc::as_ptr(atlas) as usize;
+        let identity = atlas.gpu_identity();
         let texture = self
             .tile_atlases
             .get(&(key.0, identity))
-            .filter(|cached| Arc::ptr_eq(&cached.source, atlas))
+            .filter(|cached| cached.source.same_gpu_atlas(atlas))
             .cloned()
             .or_else(|| {
                 self.atlases
                     .get(&identity)
                     .and_then(Weak::upgrade)
-                    .filter(|cached| Arc::ptr_eq(&cached.source, atlas))
+                    .filter(|cached| cached.source.same_gpu_atlas(atlas))
             })
             .unwrap_or_else(|| {
                 let texture = share_gpu(TileAtlas::new(gpu, atlas));

@@ -2,7 +2,10 @@
 use geozero::{FeatureProcessor, GeomProcessor};
 
 use super::*;
-use crate::sdf::assets::{AtlasEntry, SymbolAtlas};
+use crate::{
+    sdf::assets::{AtlasEntry, SymbolAtlas},
+    style::filter::GeometryType,
+};
 
 fn atlas() -> Arc<SymbolAtlas> {
     Arc::new(SymbolAtlas {

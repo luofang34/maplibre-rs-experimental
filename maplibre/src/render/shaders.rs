@@ -30,6 +30,10 @@ pub use gpu_vertex::{
     f32_to_f16_bits, pack_f16_pair, unpack_compact_extrusion_vertices, EmptyLayerMetadata,
     GpuShaderVertex, PoolVertex,
 };
+pub(crate) use gpu_vertex::{
+    encode_compact_extrusion_words, is_compact_extrusion_vertex, unpack_compact_extrusion_word,
+    GpuVertexKind,
+};
 pub use heatmap::{HeatmapCompositeShader, HeatmapDensityShader, DENSITY_FORMAT};
 pub use line::{LineShader, TerrainLineShader};
 pub use symbol::SymbolShader;

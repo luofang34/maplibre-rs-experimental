@@ -36,6 +36,7 @@ fn parse_symbol_header_uses_total_len_and_roundtrips_bucket() {
             properties: Arc::clone(empty_feature_properties()),
             sort_key: 1.5,
             geometry_type: GeometryType::Point,
+            source_feature_index: Some(17),
         },
         bbox: Box2D::new(Point2D::new(-4.0, -4.0), Point2D::new(4.0, 4.0)),
         indices: 0..6,
@@ -94,5 +95,6 @@ fn parse_symbol_header_uses_total_len_and_roundtrips_bucket() {
     assert_eq!(bucket.buffer.buffer.indices.len(), 6);
     assert_eq!(bucket.features.len(), 1);
     assert_eq!(bucket.features[0].str, "Amstel");
+    assert_eq!(bucket.features[0].data.source_feature_index, Some(17));
     assert_eq!(bucket.atlas.as_ref().expect("atlas").size, [4, 1]);
 }

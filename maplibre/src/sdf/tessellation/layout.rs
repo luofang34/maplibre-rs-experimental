@@ -23,6 +23,7 @@ pub(super) type LineContext = (std::sync::Arc<[[f32; 2]]>, f32);
 pub(super) struct SourceFeature {
     pub id: Option<u64>,
     pub kind: crate::style::filter::GeometryType,
+    pub feature_index: Option<u32>,
 }
 
 pub(super) struct CollectedSymbol {
@@ -254,6 +255,7 @@ pub(super) fn append(
             geometry_type: symbol.source.kind,
             properties: symbol.properties.clone(),
             sort_key: paint.number("symbol-sort-key", &symbol.properties, zoom, 0.0),
+            source_feature_index: symbol.source.feature_index,
         },
         bbox,
         indices: start..buffer.indices.len(),

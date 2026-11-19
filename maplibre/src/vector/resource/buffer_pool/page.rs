@@ -11,29 +11,17 @@ use crate::render::resource::BackingBufferDescriptor;
 /// Sentinel page index for an unused slab family (e.g. `0`-byte `EmptyLayerMetadata` or `0`-byte uniform FM).
 pub(super) const NO_SLAB: u16 = u16::MAX;
 
-/// Steady-state vertices per on-demand GPU vertex slab (`32 Ki` on WebGPU, `128 Ki` on native).
-#[cfg(target_arch = "wasm32")]
+/// Steady-state vertices per on-demand GPU vertex slab (`32 Ki`).
 pub(super) const DEFAULT_PAGE_VERTICES: u64 = 32 * 1024;
-/// Steady-state vertices per on-demand GPU vertex slab (`32 Ki` on WebGPU, `128 Ki` on native).
-#[cfg(not(target_arch = "wasm32"))]
-pub(super) const DEFAULT_PAGE_VERTICES: u64 = 128 * 1024;
 
-/// Steady-state indices per on-demand GPU index slab (`96 Ki` on WebGPU, `256 Ki` on native).
-#[cfg(target_arch = "wasm32")]
+/// Steady-state indices per on-demand GPU index slab (`96 Ki`).
 pub(super) const DEFAULT_PAGE_INDICES: u64 = 96 * 1024;
-/// Steady-state indices per on-demand GPU index slab (`96 Ki` on WebGPU, `256 Ki` on native).
-#[cfg(not(target_arch = "wasm32"))]
-pub(super) const DEFAULT_PAGE_INDICES: u64 = 256 * 1024;
 
 /// Steady-state records per on-demand GPU layer-metadata slab (`1,024` records = `64 KiB` at `64 B` stride).
 pub(super) const DEFAULT_PAGE_LAYER_META: u64 = 1024;
 
-/// Steady-state records per standalone feature-metadata slab (`32 Ki` on WebGPU, `64 Ki` on native).
-#[cfg(target_arch = "wasm32")]
+/// Steady-state records per standalone feature-metadata slab (`32 Ki`).
 pub(super) const DEFAULT_PAGE_FEATURE_META: u64 = 32 * 1024;
-/// Steady-state records per standalone feature-metadata slab (`32 Ki` on WebGPU, `64 Ki` on native).
-#[cfg(not(target_arch = "wasm32"))]
-pub(super) const DEFAULT_PAGE_FEATURE_META: u64 = 64 * 1024;
 
 /// Where an [`IndexEntry`](super::IndexEntry)'s `feature_metadata` bytes reside.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

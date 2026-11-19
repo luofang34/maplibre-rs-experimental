@@ -27,18 +27,15 @@ pub fn resource_system(
     )>() else {
         return Err(SystemError::Dependencies);
     };
-    #[cfg(target_arch = "wasm32")]
-    if matches!(pipeline, Eventually::Uninitialized) && !super::style_has_symbol_layers(style) {
-        return Ok(());
-    }
     pool.initialize(|| {
         BufferPool::from_device_with_sizes(&renderer.device, renderer.settings.symbol_pools)
     });
+    if matches!(pipeline, Eventually::Uninitialized) && !super::style_has_symbol_layers(style) {
+        return Ok(());
+    }
     if renderer.settings.symbol_pools.is_empty() {
         return Ok(());
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    let _ = style;
     pipeline.initialize(|| create_pipeline(renderer, projection));
     let Some((depth, Initialized(pipeline))) = world.resources.query_mut::<(
         &mut Eventually<super::depth::SymbolDepth>,

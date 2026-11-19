@@ -24,22 +24,57 @@ type Point = (i64, i64);
 
 /// Brings the features of `tile`, cut for `from`, into the grid of its descendant `to`.
 pub fn into_descendant(tile: &mut Tile, from: WorldTileCoords, to: WorldTileCoords) {
-    let levels = u32::from(u8::from(to.z).saturating_sub(u8::from(from.z))).min(31);
-    if levels == 0 {
+    if u8::from(to.z) <= u8::from(from.z) {
         return;
     }
-    let scale = 1_i64 << levels;
-    let column = i64::from(to.x) - (i64::from(from.x) << levels);
-    let row = i64::from(to.y) - (i64::from(from.y) << levels);
     for layer in &mut tile.layers {
-        let extent = i64::from(layer.extent.unwrap_or(4096)).max(1);
-        let frame = Frame {
+        let _ = into_descendant_layer(layer, from, to);
+    }
+}
+
+/// Brings `layer`'s features from `from` into descendant tile `to`, clipping out non-intersecting
+/// features; returns `false` when `to.z <= from.z` so nothing changed.
+pub(crate) fn into_descendant_layer(
+    layer: &mut tile::Layer,
+    from: WorldTileCoords,
+    to: WorldTileCoords,
+) -> bool {
+    let Some(frame) = DescendantFrame::for_extent(from, to, layer.extent.unwrap_or(4096)) else {
+        return false;
+    };
+    layer.features.retain_mut(|feature| frame.cut(feature));
+    true
+}
+
+/// Rescaling and clipping frame for bringing an ancestor MVT layer into a descendant tile.
+pub(crate) struct DescendantFrame(Frame);
+
+impl DescendantFrame {
+    /// Builds the rescaling frame for transforming an MVT layer of `extent` from `from` to `to`.
+    pub(crate) fn for_extent(
+        from: WorldTileCoords,
+        to: WorldTileCoords,
+        extent: u32,
+    ) -> Option<Self> {
+        let levels = u32::from(u8::from(to.z).saturating_sub(u8::from(from.z))).min(31);
+        if levels == 0 {
+            return None;
+        }
+        let scale = 1_i64 << levels;
+        let column = i64::from(to.x) - (i64::from(from.x) << levels);
+        let row = i64::from(to.y) - (i64::from(from.y) << levels);
+        let extent = i64::from(extent).max(1);
+        Some(Self(Frame {
             scale,
             offset: (column * extent, row * extent),
             low: -extent / BUFFER_DIVISOR,
             high: extent + extent / BUFFER_DIVISOR,
-        };
-        layer.features.retain_mut(|feature| frame.cut(feature));
+        }))
+    }
+
+    /// Rescales `feature` in place; `false` when nothing of it lies in the frame.
+    pub(crate) fn cut(&self, feature: &mut tile::Feature) -> bool {
+        self.0.cut(feature)
     }
 }
 
@@ -72,6 +107,9 @@ impl Kind {
 impl Frame {
     /// Rescales the feature in place; `false` when nothing of it lies in the frame.
     fn cut(&self, feature: &mut tile::Feature) -> bool {
+        if !self.geometry_may_intersect(&feature.geometry) {
+            return false;
+        }
         let Some(kind) = Kind::of(feature) else {
             return false;
         };

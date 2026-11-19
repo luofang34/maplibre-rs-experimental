@@ -121,7 +121,12 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
             };
             super::limiter::wait_for_shared_tile_slot().await;
             let mut heavy_slot = Some(acquire_heavy_tile_slot().await);
-            let tile = match decode_group_tile(&client, raw_tile, coords, &group.layers) {
+            let promote_id = group
+                .source_name
+                .as_deref()
+                .and_then(|name| style.source_promote_id(name));
+            let tile = match decode_group_tile(&client, raw_tile, coords, &group.layers, promote_id)
+            {
                 Ok(tile) => tile,
                 Err(error) => {
                     tracing::warn!(%coords, source = ?group.source_name, error = %error.describe(), "vector tile unavailable");
@@ -229,6 +234,7 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
         mut tile,
         mvt_bytes,
         mvt_compressed,
+        mvt_rescale,
     } = group_tile;
     let SourcePass {
         last_source,
@@ -258,7 +264,8 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
             mvt_compressed,
             source_state.0.clone(),
             source_state.1.clone(),
-        );
+        )
+        .with_rescale(mvt_rescale);
         context
             .send_back(T::LayerIndexed::build_from(
                 coords,
@@ -277,7 +284,7 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
     if symbols.is_empty() {
         tessellate::<T, C>(
             context,
-            (last_source, false, has_dem_source),
+            (false, false, has_dem_source),
             (tile, request),
             source_state,
             Arc::new(SymbolAtlas::default()),
@@ -307,7 +314,7 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
     .await;
     tessellate::<T, C>(
         context.clone(),
-        (last_source, false, has_dem_source),
+        (false, false, has_dem_source),
         (tile.clone(), request),
         source_state.clone(),
         Arc::new(SymbolAtlas::default()),
@@ -330,25 +337,43 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
                 .any(|sl| sl.source_layer.as_deref() == Some(mvt.name.as_str()))
         });
     }
-    // Release HeavyTileSlot strictly BEFORE awaiting remote glyph/sprite HTTP I/O.
-    let _ = heavy_slot.take();
-
+    if pre_assets.is_none() {
+        let _ = std::future::poll_fn(|cx| {
+            if let std::task::Poll::Ready(res) = std::future::Future::poll(assets_fut.as_mut(), cx)
+            {
+                pre_assets = Some(res);
+            }
+            std::task::Poll::Ready(())
+        })
+        .await;
+    }
     let assets = match pre_assets {
         Some(res) => res,
-        None => assets_fut.await,
+        None => {
+            if last_source {
+                context
+                    .send_back(T::TileTessellated::build_partial(coords))
+                    .map_err(ProcessVectorError::SendError)?;
+            }
+            // Release HeavyTileSlot strictly BEFORE awaiting remote glyph/sprite HTTP I/O.
+            let _ = heavy_slot.take();
+            let loaded = assets_fut.await;
+            *heavy_slot = Some(acquire_heavy_tile_slot().await);
+            loaded
+        }
     }
     .map_err(ProcessVectorError::SymbolAssets)?;
     // Only a source still waiting for images keeps its tile and layers to lay out again.
     let again = (!assets.awaiting.is_empty()).then(|| (tile.clone(), sym_request.clone()));
-    let _sym_slot = acquire_heavy_tile_slot().await;
     tessellate::<T, C>(
         context,
-        (last_source, false, has_dem_source),
+        (false, false, has_dem_source),
         (tile, sym_request),
         source_state,
         assets.atlas,
     )
     .await?;
+    let _ = heavy_slot.take();
     Ok(Some(provided::Symbols {
         again,
         pixel_ratio,
@@ -361,7 +386,7 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
 /// replying with their geometry as it is made.
 async fn tessellate<T: VectorTransferables, C: Context + Send>(
     context: C,
-    (last_source, index_geometry, has_dem_source): (bool, bool, bool),
+    (emit_partial, index_geometry, has_dem_source): (bool, bool, bool),
     (tile, request): (
         Arc<crate::vector::process_vector::DecodedVectorTile>,
         VectorTileRequest,
@@ -373,7 +398,7 @@ async fn tessellate<T: VectorTransferables, C: Context + Send>(
     atlas: Arc<SymbolAtlas>,
 ) -> Result<(), ProcessVectorError> {
     run_cpu_bound_replying(context, move |context| {
-        let mut processor = source_processor::<T, _>(context, last_source)
+        let mut processor = source_processor::<T, _>(context, emit_partial)
             .with_has_dem_source(has_dem_source)
             .with_source_feature_state(promote_id, feature_state);
         if !index_geometry {
@@ -387,11 +412,10 @@ async fn tessellate<T: VectorTransferables, C: Context + Send>(
 
 fn source_processor<T: VectorTransferables, C: Context>(
     context: C,
-    last_source: bool,
+    emit_partial: bool,
 ) -> ProcessVectorContext<T, C> {
     let processor = ProcessVectorContext::new(context).with_pending_symbols();
-    // Earlier sources cannot replace an ancestor before the other sources' base layers arrive.
-    if last_source {
+    if emit_partial {
         processor
     } else {
         processor.without_completion()

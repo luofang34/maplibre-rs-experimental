@@ -364,6 +364,7 @@ fn subdivided_vertex_agl_walls_preserve_continuous_edge_distance_across_seams() 
     let build = |datum: ElevationDatum| {
         let mut buffer: VertexBuffers<ShaderVertex, u32> = VertexBuffers::new();
         let mut heights = ExtrusionHeights::constant(0.0, 80.0);
+        heights.has_pattern = true;
         heights.part = ExtrusionPart::Walls;
         heights.height_datum = datum;
         extrude(

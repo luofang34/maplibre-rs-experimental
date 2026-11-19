@@ -301,18 +301,20 @@ pub(super) fn layer_header(layer: &tile::Layer) -> tile::Layer {
 
 /// Decodes raw MVT bytes on demand into tile-local [`crate::io::geometry_index::IndexedGeometry`]
 /// entries for point and box feature queries.
+#[cfg(test)]
 pub(crate) fn index_mvt_bytes(
     mvt_bytes: &[u8],
     promote_id: Option<&crate::style::source::PromoteId>,
     feature_state: Option<&Arc<crate::style::feature_state::SourceFeatureState>>,
 ) -> Vec<crate::io::geometry_index::IndexedGeometry<f64>> {
-    #[cfg(feature = "mlt")]
-    if !looks_like_mvt(mvt_bytes) && crate::vector::mlt::is_valid_mlt(mvt_bytes) {
-        return crate::vector::mlt::index_mlt_bytes(mvt_bytes, promote_id, feature_state);
-    }
-    let Ok(tile) = super::decode_tile(mvt_bytes) else {
-        return Vec::new();
-    };
+    super::decode::index_mvt_bytes_rescaled(mvt_bytes, None, promote_id, feature_state)
+}
+
+pub(super) fn index_decoded_mvt_tile(
+    tile: &geozero::mvt::Tile,
+    promote_id: Option<&crate::style::source::PromoteId>,
+    feature_state: Option<&Arc<crate::style::feature_state::SourceFeatureState>>,
+) -> Vec<crate::io::geometry_index::IndexedGeometry<f64>> {
     let mut index = crate::io::geometry_index::IndexProcessor::new();
     for layer in &tile.layers {
         index.set_coordinate_scale(super::extent_scale(layer));
@@ -385,6 +387,9 @@ pub(crate) fn looks_like_mvt(data: &[u8]) -> bool {
     }
     saw_mvt_layer
 }
+
+mod filtered;
+pub(super) use filtered::try_decode_mvt_filtered_with_keys_rescaled;
 
 /// Scans raw MVT protobuf wire tags (`Tile.layers = 3`, `Layer.name = 1`) and decodes only layers
 /// matching `keep`, avoiding `prost` allocations for unused source layers. Returns `None` when

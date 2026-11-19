@@ -15,6 +15,8 @@ mod interpolation;
 mod legacy;
 mod number_format;
 mod parse;
+mod referenced_keys;
+pub(crate) use referenced_keys::{collect_layer_referenced_keys, symbol_runtime_referenced_keys};
 mod value;
 
 pub use ast::{

@@ -77,10 +77,9 @@ pub enum TextFit {
 pub struct SymbolAtlas {
     /// RGBA pixels.
     pub pixels: Vec<u8>,
-    /// Transient RGBA staging buffer on `wasm32` freed immediately after GPU texture upload.
-    #[cfg(target_arch = "wasm32")]
+    /// Transient RGBA staging buffer freed immediately after GPU texture upload.
     #[serde(skip)]
-    pub gpu_staging: Arc<std::sync::Mutex<Vec<u8>>>,
+    pub gpu_staging: Option<Arc<std::sync::Mutex<Vec<u8>>>>,
     /// Texture dimensions.
     pub size: [u32; 2],
     /// Font stack and Unicode scalar to atlas entry.
@@ -102,24 +101,28 @@ impl SymbolAtlas {
     pub fn with_wasm_staging(size: [u32; 2], pixels: Vec<u8>) -> Self {
         Self {
             size,
-            gpu_staging: Arc::new(std::sync::Mutex::new(pixels)),
+            gpu_staging: Some(Arc::new(std::sync::Mutex::new(pixels))),
             ..Default::default()
         }
     }
 
-    /// Returns a compact handle sharing only texture dimensions and one-shot GPU staging pixels on
-    /// `wasm32`, allowing worker glyph/icon/shaping tables to free immediately after tessellation.
+    /// Returns a compact handle sharing only texture dimensions and one-shot GPU staging pixels,
+    /// allowing worker glyph/icon/shaping tables to free immediately after tessellation.
     pub(crate) fn gpu_upload_handle(self: &Arc<Self>) -> Arc<Self> {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(not(test))]
         {
             Arc::new(Self {
                 size: self.size,
-                gpu_staging: Arc::clone(&self.gpu_staging),
-                pixels: self.pixels.clone(),
+                gpu_staging: self.gpu_staging.clone(),
+                pixels: if self.gpu_staging.is_some() {
+                    Vec::new()
+                } else {
+                    self.pixels.clone()
+                },
                 ..Default::default()
             })
         }
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(test)]
         {
             Arc::clone(self)
         }
@@ -130,18 +133,19 @@ impl SymbolAtlas {
     pub fn with_pixels<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
         if !self.pixels.is_empty() {
             f(&self.pixels)
-        } else {
-            let guard = crate::platform::lock_unpoisoned(&self.gpu_staging);
+        } else if let Some(staging) = &self.gpu_staging {
+            let guard = crate::platform::lock_unpoisoned(staging);
             f(&guard)
+        } else {
+            f(&[])
         }
     }
 
-    /// Takes staged RGBA bytes on `wasm32` (releasing CPU heap immediately once uploaded to GPU)
+    /// Takes staged RGBA bytes (releasing CPU heap immediately once uploaded to GPU)
     /// or borrows `self.pixels`.
     pub(crate) fn take_pixels_for_gpu(&self) -> std::borrow::Cow<'_, [u8]> {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let taken = std::mem::take(&mut *crate::platform::lock_unpoisoned(&self.gpu_staging));
+        if let Some(staging) = &self.gpu_staging {
+            let taken = std::mem::take(&mut *crate::platform::lock_unpoisoned(staging));
             if !taken.is_empty() {
                 return std::borrow::Cow::Owned(taken);
             }
@@ -149,12 +153,28 @@ impl SymbolAtlas {
         std::borrow::Cow::Borrowed(&self.pixels)
     }
 
+    /// Stable identity key shared across compact `gpu_upload_handle` clones.
+    pub(crate) fn gpu_identity(self: &Arc<Self>) -> usize {
+        self.gpu_staging
+            .as_ref()
+            .map_or(Arc::as_ptr(self) as usize, |s| Arc::as_ptr(s) as usize)
+    }
+
+    /// Returns `true` when `self` and `other` reference the same underlying atlas pixels/staging.
+    pub(crate) fn same_gpu_atlas(self: &Arc<Self>, other: &Arc<Self>) -> bool {
+        match (&self.gpu_staging, &other.gpu_staging) {
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            (None, None) => Arc::ptr_eq(self, other),
+            _ => false,
+        }
+    }
+
     /// Estimated CPU storage, counting allocated pixel capacity and glyph metadata.
     pub fn approximate_bytes(&self) -> usize {
-        #[cfg(target_arch = "wasm32")]
-        let staged_cap = crate::platform::lock_unpoisoned(&self.gpu_staging).capacity();
-        #[cfg(not(target_arch = "wasm32"))]
-        let staged_cap = 0_usize;
+        let staged_cap = self
+            .gpu_staging
+            .as_ref()
+            .map_or(0, |s| crate::platform::lock_unpoisoned(s).capacity());
         self.pixels.capacity()
             + staged_cap
             + self

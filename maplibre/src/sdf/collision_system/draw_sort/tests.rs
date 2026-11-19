@@ -13,6 +13,7 @@ fn label(at: [f32; 2], indices: std::ops::Range<usize>) -> Feature {
             properties: Default::default(),
             sort_key: 0.0,
             geometry_type: crate::style::filter::GeometryType::Point,
+            source_feature_index: None,
         },
         bbox: Box2D::zero(),
         indices,

@@ -252,30 +252,30 @@ pub(super) async fn put_browser_cache(url: &str, body: &[u8]) {
     let _ = JsFuture::from(cache.put_with_str(url, &response)).await;
 }
 
-const DECODED_RGBA_MAX_BYTES: usize = 8 * 1024 * 1024;
-const DECODED_SPRITE_CACHE_CAP_BYTES: usize = 16 * 1024 * 1024;
+const DECODED_RGBA_MAX_BYTES: usize = 4 * 1024 * 1024;
+const DECODED_SPRITE_CACHE_CAP_BYTES: usize = 4 * 1024 * 1024;
 
 struct DecodedSpriteEntry {
     url: Arc<str>,
-    image: image::RgbaImage,
+    image: Arc<image::RgbaImage>,
 }
 
 static DECODED_SPRITE_CACHE: LazyLock<Mutex<Vec<DecodedSpriteEntry>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
 
 /// Returns a previously cached decoded RGBA sprite sheet from the in-memory cache.
-pub(crate) fn get_decoded_rgba_memory(url: &str) -> Option<image::RgbaImage> {
+pub(crate) fn get_decoded_rgba_memory(url: &str) -> Option<Arc<image::RgbaImage>> {
     let mut cache = crate::platform::lock_unpoisoned(&DECODED_SPRITE_CACHE);
     let idx = cache.iter().position(|entry| entry.url.as_ref() == url)?;
     if idx + 1 != cache.len() {
         let entry = cache.remove(idx);
         cache.push(entry);
     }
-    cache.last().map(|entry| entry.image.clone())
+    cache.last().map(|entry| Arc::clone(&entry.image))
 }
 
 /// Stores a decoded RGBA sprite sheet in the bounded in-memory cache without `CacheStorage` IPC.
-pub(crate) fn put_decoded_rgba_memory(url: &str, image: &image::RgbaImage) {
+pub(crate) fn put_decoded_rgba_memory(url: &str, image: &Arc<image::RgbaImage>) {
     if image.as_raw().len() > DECODED_RGBA_MAX_BYTES {
         return;
     }
@@ -292,6 +292,6 @@ pub(crate) fn put_decoded_rgba_memory(url: &str, image: &image::RgbaImage) {
     }
     cache.push(DecodedSpriteEntry {
         url: Arc::from(url),
-        image: image.clone(),
+        image: Arc::clone(image),
     });
 }

@@ -23,6 +23,7 @@ pub use json_legacy::{LineLabelWire, SymbolFeature};
 
 const SYM_WIRE_MAGIC_V1: [u8; 4] = *b"SYM1";
 const SYM_WIRE_MAGIC_V2: [u8; 4] = *b"SYM2";
+const SYM_WIRE_MAGIC_V3: [u8; 4] = *b"SYM3";
 
 /// Encodes symbol placement features in compact binary format, deduplicating shared polylines,
 /// repeat keys, and `Arc<FeatureProperties>` maps without intermediate JSON allocations.
@@ -61,7 +62,7 @@ pub fn encode_symbol_features(features: &[Feature]) -> Vec<u8> {
     }
 
     let mut out = Vec::with_capacity(32 + features.len() * 80);
-    out.extend_from_slice(&SYM_WIRE_MAGIC_V2);
+    out.extend_from_slice(&SYM_WIRE_MAGIC_V3);
 
     out.extend_from_slice(&(polys.len() as u32).to_le_bytes());
     for poly in &polys {
@@ -116,6 +117,13 @@ pub fn encode_symbol_features(features: &[Feature]) -> Vec<u8> {
         };
         out.push(geom_tag);
         out.extend_from_slice(&feature.data.sort_key.to_le_bytes());
+        out.extend_from_slice(
+            &feature
+                .data
+                .source_feature_index
+                .unwrap_or(u32::MAX)
+                .to_le_bytes(),
+        );
 
         for part in feature.parts.iter().flatten() {
             for b in part.bounds {
@@ -183,7 +191,8 @@ pub fn encode_symbol_features(features: &[Feature]) -> Vec<u8> {
 /// Decodes symbol placement features from [`encode_symbol_features`] (falling back to JSON for
 /// legacy payloads), sharing `Arc` polylines, repeat keys, and property maps across labels.
 pub fn decode_symbol_features(bytes: &[u8]) -> Option<Vec<Feature>> {
-    let is_v2 = bytes.starts_with(&SYM_WIRE_MAGIC_V2);
+    let is_v3 = bytes.starts_with(&SYM_WIRE_MAGIC_V3);
+    let is_v2 = is_v3 || bytes.starts_with(&SYM_WIRE_MAGIC_V2);
     if !is_v2 && !bytes.starts_with(&SYM_WIRE_MAGIC_V1) {
         #[cfg(any(test, not(target_arch = "wasm32")))]
         return crate::util::json::from_json_slice::<Vec<SymbolFeature>>(bytes)
@@ -245,6 +254,12 @@ pub fn decode_symbol_features(bytes: &[u8]) -> Option<Vec<Feature>> {
             _ => GeometryType::Unknown,
         };
         let sort_key = read_f32(&mut buf)?;
+        let source_feature_index = if is_v3 {
+            let raw = read_u32(&mut buf)?;
+            (raw != u32::MAX).then_some(raw)
+        } else {
+            None
+        };
 
         let mut parts: [Option<SymbolBounds>; 3] = [None, None, None];
         for (slot_idx, slot) in parts.iter_mut().enumerate() {
@@ -374,6 +389,7 @@ pub fn decode_symbol_features(bytes: &[u8]) -> Option<Vec<Feature>> {
                 properties,
                 sort_key,
                 geometry_type,
+                source_feature_index,
             },
             anchor_shifts,
             text_sets,

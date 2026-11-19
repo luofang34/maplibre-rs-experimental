@@ -25,6 +25,14 @@ pub(crate) struct PolygonEarcut {
 }
 
 impl PolygonEarcut {
+    /// Returns the extracted polygon rings from the most recent `try_triangulate` call.
+    #[inline]
+    pub(crate) fn last_rings(&self) -> &[Vec<[f32; 2]>] {
+        &self.rings
+    }
+}
+
+impl PolygonEarcut {
     /// Triangulates `path` directly into `buffer` when `path` is a clean simple polygon (with
     /// optional strictly interior non-crossing holes) whose fill matches `even_odd` (`false` =
     /// `FillRule::NonZero`, `true` = `FillRule::EvenOdd`). Returns `false` without modifying

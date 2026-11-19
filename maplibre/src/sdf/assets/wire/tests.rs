@@ -37,6 +37,7 @@ fn binary_symbol_wire_roundtrips_and_shares_polylines_and_repeat_keys() {
             properties: Arc::clone(&props),
             sort_key: 1.5,
             geometry_type: GeometryType::LineString,
+            source_feature_index: Some(13),
         },
         bbox: Box2D::new(Point2D::new(-12.0, -6.0), Point2D::new(12.0, 6.0)),
         indices: first_glyph..(first_glyph + 18),
@@ -72,6 +73,7 @@ fn binary_symbol_wire_roundtrips_and_shares_polylines_and_repeat_keys() {
     assert_eq!(decoded.len(), 2);
     assert_eq!(decoded[0].str, "Prinsengracht");
     assert_eq!(decoded[0].data.id, Some(42));
+    assert_eq!(decoded[0].data.source_feature_index, Some(13));
     assert_eq!(
         decoded[0].data.properties.get("name"),
         Some(&Value::String("Prinsengracht".into()))

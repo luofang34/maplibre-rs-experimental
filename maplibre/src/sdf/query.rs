@@ -207,13 +207,20 @@ pub fn query_rendered_symbols_in(
         if style_layer.is_hidden() {
             continue;
         }
+        let resolved_properties = resolve_symbol_properties(
+            world,
+            hit.coords,
+            style_layer.source.as_deref(),
+            &layer.source_layer,
+            &feature.data,
+        );
         if let Some(filter) = &filter {
             let id = feature
                 .data
                 .id
                 .map(|id| Value::from_json(&serde_json::json!(id)));
             let passes = filter.evaluate(&FeatureContext {
-                properties: &feature.data.properties,
+                properties: resolved_properties.as_ref(),
                 geometry_type: feature.data.geometry_type,
                 id,
                 zoom: f64::from(u8::from(hit.coords.z)),
@@ -249,8 +256,10 @@ pub fn query_rendered_symbols_in(
                 source: style_layer.source.clone(),
                 source_layer: layer.source_layer.clone(),
                 id: feature.data.id,
-                properties: crate::query::source_properties(&feature.data.properties),
-                state: crate::style::feature_state::extract_feature_state(&feature.data.properties),
+                properties: crate::query::source_properties(resolved_properties.as_ref()),
+                state: crate::style::feature_state::extract_feature_state(
+                    resolved_properties.as_ref(),
+                ),
                 geometry_type: feature.data.geometry_type,
                 text: feature.str.clone(),
                 coordinates: [
@@ -271,6 +280,40 @@ pub fn query_rendered_symbols_in(
         .into_iter()
         .map(|(_, _, _, feature)| feature)
         .collect())
+}
+
+fn resolve_symbol_properties<'a>(
+    world: &World,
+    coords: crate::coords::WorldTileCoords,
+    source: Option<&str>,
+    source_layer: &str,
+    data: &'a crate::sdf::SymbolFeatureData,
+) -> std::borrow::Cow<'a, crate::style::expression::FeatureProperties> {
+    let Some(feature_idx) = data.source_feature_index else {
+        return std::borrow::Cow::Borrowed(&data.properties);
+    };
+    let Some(mut indexes) = world.tiles.geometry_index.tile_indexes(&coords) else {
+        return std::borrow::Cow::Borrowed(&data.properties);
+    };
+    let Some(resolved) = indexes
+        .find(|(src, _)| *src == source)
+        .and_then(|(_, tile_index)| tile_index.feature_properties(source_layer, feature_idx))
+    else {
+        return std::borrow::Cow::Borrowed(&data.properties);
+    };
+    let has_missing_state = data.properties.iter().any(|(k, _)| {
+        k.starts_with(crate::style::expression::FEATURE_STATE_PREFIX) && !resolved.contains_key(k)
+    });
+    if !has_missing_state {
+        return std::borrow::Cow::Owned((*resolved).clone());
+    }
+    let mut merged = (*resolved).clone();
+    for (k, v) in data.properties.iter() {
+        if k.starts_with(crate::style::expression::FEATURE_STATE_PREFIX) {
+            merged.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+    }
+    std::borrow::Cow::Owned(merged)
 }
 
 impl crate::context::MapContext {

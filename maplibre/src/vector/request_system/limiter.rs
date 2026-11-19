@@ -2,7 +2,6 @@
 //! `wasm32`, and bounds unconsumed completed tiles in shared-memory channels (`wasm32 + atomics`)
 //! while allowing raw network `fetch` requests and asset prefetches to run with full concurrency.
 
-#[cfg(target_arch = "wasm32")]
 use std::{
     future::poll_fn,
     sync::{LazyLock, Mutex},
@@ -12,19 +11,19 @@ use std::{
 #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
 const MAX_HEAVY_TILES: usize = 2;
 #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
-const MAX_HEAVY_TILES: usize = 2;
+const MAX_HEAVY_TILES: usize = 1;
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_HEAVY_TILES: usize = 1;
 
 #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
-const MAX_UNCONSUMED_SHARED_TILES: usize = 12;
+const MAX_UNCONSUMED_SHARED_TILES: usize = 8;
 
-#[cfg(target_arch = "wasm32")]
 #[derive(Default)]
 struct LimiterState {
     in_use: usize,
     waiters: Vec<Waker>,
 }
 
-#[cfg(target_arch = "wasm32")]
 static LIMITER: LazyLock<Mutex<LimiterState>> =
     LazyLock::new(|| Mutex::new(LimiterState::default()));
 
@@ -45,41 +44,31 @@ pub(super) struct HeavyTileSlot {
 
 impl Drop for HeavyTileSlot {
     fn drop(&mut self) {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let waiters = {
-                let mut state = crate::platform::lock_unpoisoned(&LIMITER);
-                state.in_use = state.in_use.saturating_sub(1);
-                std::mem::take(&mut state.waiters)
-            };
-            for waker in waiters {
-                waker.wake();
-            }
+        let waiters = {
+            let mut state = crate::platform::lock_unpoisoned(&LIMITER);
+            state.in_use = state.in_use.saturating_sub(1);
+            std::mem::take(&mut state.waiters)
+        };
+        for waker in waiters {
+            waker.wake();
         }
     }
 }
 
 pub(super) async fn acquire_heavy_tile_slot() -> HeavyTileSlot {
-    #[cfg(target_arch = "wasm32")]
-    {
-        poll_fn(|cx| {
-            let mut state = crate::platform::lock_unpoisoned(&LIMITER);
-            if state.in_use < MAX_HEAVY_TILES {
-                state.in_use += 1;
-                Poll::Ready(HeavyTileSlot { _private: () })
-            } else {
-                if !state.waiters.iter().any(|w| w.will_wake(cx.waker())) {
-                    state.waiters.push(cx.waker().clone());
-                }
-                Poll::Pending
+    poll_fn(|cx| {
+        let mut state = crate::platform::lock_unpoisoned(&LIMITER);
+        if state.in_use < MAX_HEAVY_TILES {
+            state.in_use += 1;
+            Poll::Ready(HeavyTileSlot { _private: () })
+        } else {
+            if !state.waiters.iter().any(|w| w.will_wake(cx.waker())) {
+                state.waiters.push(cx.waker().clone());
             }
-        })
-        .await
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        HeavyTileSlot { _private: () }
-    }
+            Poll::Pending
+        }
+    })
+    .await
 }
 
 /// RAII token attached to a completed `wasm32 + atomics` vector tile outcome so the worker yields

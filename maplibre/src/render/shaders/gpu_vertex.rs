@@ -12,6 +12,38 @@ use bytemuck_derive::{Pod, Zeroable};
 use super::{ShaderSymbolVertex, ShaderVertex};
 
 /// Compact 16-byte GPU vertex record stored in [`VectorBufferPool`](crate::vector::VectorBufferPool).
+/// Vertex encoding family matching WGSL vertex buffer decoding for vector geometry pipelines.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GpuVertexKind {
+    /// Fill/polygon pipeline vertex encoding.
+    Fill,
+    /// Line/stroke pipeline vertex encoding.
+    Line,
+    /// Fill-extrusion pipeline vertex encoding.
+    Extrusion,
+}
+
+impl GpuVertexKind {
+    pub(crate) fn from_layer_type(layer_type: &str) -> Option<Self> {
+        match layer_type {
+            "line" => Some(Self::Line),
+            "fill-extrusion" => Some(Self::Extrusion),
+            "circle" | "heatmap" => None,
+            _ => Some(Self::Fill),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn encode(self, v: &ShaderVertex) -> GpuShaderVertex {
+        match self {
+            Self::Fill => encode_fill_vertex(v),
+            Self::Line => encode_line_vertex(v),
+            Self::Extrusion => encode_extrusion_vertex(v),
+        }
+    }
+}
+
+/// Packed GPU-ready vertex layout (`16` bytes, 4×`u32`) matching [`ShaderVertex`].
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Pod, Zeroable)]
 pub struct GpuShaderVertex(pub [u32; 4]);
@@ -259,35 +291,34 @@ fn extrusion_kind_and_angle(normal: [f32; 2]) -> (u32, f32) {
 }
 
 #[inline]
-fn extrusion_zoom_params(corner_code: f32) -> (f32, f32) {
+fn extrusion_zoom_params(corner_code: f32) -> (f32, f32, f32) {
     let datum_code = (corner_code / 1_048_576.0).floor();
     let zoom_code = corner_code - datum_code * 1_048_576.0;
     let overscale_f = (zoom_code / 65536.0).floor();
     let rise = zoom_code - overscale_f * 65536.0 - 32768.0;
-    (overscale_f, rise)
+    (datum_code, overscale_f, rise)
 }
 
-/// Returns `true` when every vertex in `src` fits losslessly in the compact 8-byte
-/// `fill-extrusion` vertex format (uniform layer height/base <= `255.5` m / `1023.5` m in
-/// `0.5` m increments, zero `edge_distance`, zero `rise`, and zero `overscale`).
+/// Returns `true` when `v` fits in the compact 8-byte `fill-extrusion` vertex format.
+#[inline]
+pub(crate) fn is_compact_extrusion_vertex(v: &ShaderVertex) -> bool {
+    let (datum_code, _overscale_f, rise) = extrusion_zoom_params(v.corner_code);
+    v.edge_distance.abs() <= 1e-3
+        && datum_code.abs() <= 1e-3
+        && rise.abs() <= 1e-3
+        && (0.0..=255.5).contains(&v.distance)
+        && (0.0..=1023.5).contains(&v.elevation)
+}
+
+/// Returns `true` when every vertex in `src` fits in the compact 8-byte `fill-extrusion`
+/// vertex format (base in `0..=255.5` m, height in `0..=1023.5` m, zero `edge_distance`,
+/// default ground-datum `0`, and zero zoom-interpolated `rise`).
 pub fn can_encode_compact_extrusion(src: &[ShaderVertex]) -> bool {
-    !src.is_empty()
-        && src.iter().all(|v| {
-            let (overscale_f, rise) = extrusion_zoom_params(v.corner_code);
-            let b2 = v.distance * 2.0;
-            let h2 = v.elevation * 2.0;
-            v.edge_distance.abs() <= 1e-3
-                && overscale_f.abs() <= 1e-3
-                && rise.abs() <= 1e-3
-                && (0.0..=255.5).contains(&v.distance)
-                && (b2 - b2.round()).abs() <= 1e-3
-                && (0.0..=1023.5).contains(&v.elevation)
-                && (h2 - h2.round()).abs() <= 1e-3
-        })
+    !src.is_empty() && src.iter().all(is_compact_extrusion_vertex)
 }
 
 #[inline]
-fn encode_compact_extrusion_words(v: &ShaderVertex) -> [u32; 2] {
+pub(crate) fn encode_compact_extrusion_words(v: &ShaderVertex) -> [u32; 2] {
     let w0 = pack_tile_pos_q2(v.position);
     let (kind, angle) = extrusion_kind_and_angle(v.normal);
     let angle_u10 = if kind >= 2 {
@@ -299,6 +330,20 @@ fn encode_compact_extrusion_words(v: &ShaderVertex) -> [u32; 2] {
     let height_u11 = (v.elevation * 2.0).round().clamp(0.0, 2047.0) as u32;
     let w1 = kind | (angle_u10 << 2) | (base_u9 << 12) | (height_u11 << 21);
     [w0, w1]
+}
+
+/// Expands a single 8-byte compact extrusion record into a standard 16-byte [`GpuShaderVertex`].
+#[inline]
+pub(crate) fn unpack_compact_extrusion_word([w0, compact_w1]: [u32; 2]) -> GpuShaderVertex {
+    let rise_f16 = u32::from(f32_to_f16_bits(0.0));
+    let kind = compact_w1 & 3;
+    let angle_u14 = ((compact_w1 >> 2) & 0x3ff) << 4;
+    let base_i24 = (((compact_w1 >> 12) & 0x1ff) * 8) as i32;
+    let height_i24 = ((compact_w1 >> 21) * 8) as i32;
+    let w1 = kind | (angle_u14 << 2);
+    let w2 = ((base_i24 as u32) & 0x00ff_ffff) | ((rise_f16 & 0xff) << 24);
+    let w3 = ((height_i24 as u32) & 0x00ff_ffff) | (((rise_f16 >> 8) & 0xff) << 24);
+    GpuShaderVertex([w0, w1, w2, w3])
 }
 
 /// Packs two 8-byte compact extrusion vertices per 16-byte [`GpuShaderVertex`] word.
@@ -321,22 +366,13 @@ pub fn unpack_compact_extrusion_vertices(
 ) {
     out.clear();
     out.reserve(logical_count);
-    let rise_f16 = u32::from(f32_to_f16_bits(0.0));
     let mut emitted = 0_usize;
     for word in packed {
-        let halves = [[word.0[0], word.0[1]], [word.0[2], word.0[3]]];
-        for [w0, compact_w1] in halves {
+        for half in [[word.0[0], word.0[1]], [word.0[2], word.0[3]]] {
             if emitted >= logical_count {
                 return;
             }
-            let kind = compact_w1 & 3;
-            let angle_u14 = ((compact_w1 >> 2) & 0x3ff) << 4;
-            let base_i24 = (((compact_w1 >> 12) & 0x1ff) * 8) as i32;
-            let height_i24 = ((compact_w1 >> 21) * 8) as i32;
-            let w1 = kind | (angle_u14 << 2);
-            let w2 = ((base_i24 as u32) & 0x00ff_ffff) | ((rise_f16 & 0xff) << 24);
-            let w3 = ((height_i24 as u32) & 0x00ff_ffff) | (((rise_f16 >> 8) & 0xff) << 24);
-            out.push(GpuShaderVertex([w0, w1, w2, w3]));
+            out.push(unpack_compact_extrusion_word(half));
             emitted += 1;
         }
     }
@@ -431,4 +467,31 @@ pub fn f16_bits_to_f32(bits: u16) -> f32 {
         sign | ((exp + 127 - 15) << 23) | (mant << 13)
     };
     f32::from_bits(f32_bits)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vector::tessellation::pack_extrusion_code;
+
+    #[test]
+    fn compact_extrusion_allows_overscale_and_fractional_height_without_rise_or_pattern() {
+        let mut v = ShaderVertex::new([100.0, 200.0], [1.0, 0.0]);
+        v.distance = 1.25;
+        v.elevation = 12.3;
+        v.corner_code = pack_extrusion_code(0.0, 2, 0);
+        assert!(can_encode_compact_extrusion(&[v]));
+
+        let mut with_pattern = v;
+        with_pattern.edge_distance = 5.0;
+        assert!(!can_encode_compact_extrusion(&[with_pattern]));
+
+        let mut with_rise = v;
+        with_rise.corner_code = pack_extrusion_code(4.0, 2, 0);
+        assert!(!can_encode_compact_extrusion(&[with_rise]));
+
+        let mut with_datum = v;
+        with_datum.corner_code = pack_extrusion_code(0.0, 0, 1);
+        assert!(!can_encode_compact_extrusion(&[with_datum]));
+    }
 }

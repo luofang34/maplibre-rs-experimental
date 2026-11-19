@@ -25,15 +25,24 @@ fn encode_lazy_mvt(
         None => u32::MAX,
     };
     let (mvt_bytes, compressed) = lazy.wire_bytes();
-    let total = LAZY_MVT_HEADER_LEN + source_bytes.map_or(0, <[u8]>::len) + mvt_bytes.len();
+    let rescale = lazy.rescale();
+    let rescale_len = if rescale.is_some() { 9 } else { 0 };
+    let total =
+        LAZY_MVT_HEADER_LEN + rescale_len + source_bytes.map_or(0, <[u8]>::len) + mvt_bytes.len();
     let mut data = Vec::with_capacity(total);
     data.extend_from_slice(&LAZY_MVT_MAGIC);
     data.extend_from_slice(&coords.x.to_le_bytes());
     data.extend_from_slice(&coords.y.to_le_bytes());
     data.push(u8::from(coords.z));
     data.push(u8::from(compressed));
-    data.extend_from_slice(&[0, 0]);
+    data.push(u8::from(rescale.is_some()));
+    data.push(0);
     data.extend_from_slice(&source_len_tag.to_le_bytes());
+    if let Some((from, _)) = rescale {
+        data.extend_from_slice(&from.x.to_le_bytes());
+        data.extend_from_slice(&from.y.to_le_bytes());
+        data.push(u8::from(from.z));
+    }
     if let Some(bytes) = source_bytes {
         data.extend_from_slice(bytes);
     }
@@ -45,22 +54,45 @@ fn encode_lazy_mvt(
     ))
 }
 
-fn parse_lazy_mvt_header(payload: &[u8]) -> Option<(WorldTileCoords, bool, Option<&str>, &[u8])> {
+type ParsedLazyMvtHeader<'a> = (
+    WorldTileCoords,
+    bool,
+    Option<(WorldTileCoords, WorldTileCoords)>,
+    Option<&'a str>,
+    &'a [u8],
+);
+
+fn parse_lazy_mvt_header(payload: &[u8]) -> Option<ParsedLazyMvtHeader<'_>> {
     if payload.len() < LAZY_MVT_HEADER_LEN || payload[..4] != LAZY_MVT_MAGIC {
         return None;
     }
     let coords = read_coords_at(payload, 4)?;
     let compressed = payload[13] != 0;
+    let has_rescale = payload[14] != 0;
     let source_len_tag = read_u32_le(payload, 16)?;
+    let mut cursor = LAZY_MVT_HEADER_LEN;
+    let rescale = if has_rescale {
+        let from = read_coords_at(payload, cursor)?;
+        cursor += 9;
+        Some((from, coords))
+    } else {
+        None
+    };
     let (source, mvt_offset) = if source_len_tag == u32::MAX {
-        (None, LAZY_MVT_HEADER_LEN)
+        (None, cursor)
     } else {
         let len = usize::try_from(source_len_tag).ok()?;
-        let end = LAZY_MVT_HEADER_LEN.checked_add(len)?;
-        let src_bytes = payload.get(LAZY_MVT_HEADER_LEN..end)?;
+        let end = cursor.checked_add(len)?;
+        let src_bytes = payload.get(cursor..end)?;
         (Some(std::str::from_utf8(src_bytes).ok()?), end)
     };
-    Some((coords, compressed, source, payload.get(mvt_offset..)?))
+    Some((
+        coords,
+        compressed,
+        rescale,
+        source,
+        payload.get(mvt_offset..)?,
+    ))
 }
 
 fn encode_wire_index(
@@ -236,12 +268,31 @@ pub(super) fn decode_js_layer_indexed(
     if hdr[..4] == LAZY_MVT_MAGIC {
         let coords = read_coords_at(&hdr, 4)?;
         let compressed = hdr[13] != 0;
+        let has_rescale = hdr[14] != 0;
         let source_len_tag = read_u32_le(&hdr, 16)?;
+        let mut cursor = LAZY_MVT_HEADER_LEN;
+        let rescale = if has_rescale {
+            let from_end = cursor.checked_add(9)?;
+            if from_end > byte_len as usize {
+                return None;
+            }
+            let mut from_buf = [0_u8; 9];
+            js_sys::Uint8Array::new_with_byte_offset_and_length(
+                buffer,
+                base_offset + cursor as u32,
+                9,
+            )
+            .copy_to(&mut from_buf);
+            cursor = from_end;
+            Some((read_coords_at(&from_buf, 0)?, coords))
+        } else {
+            None
+        };
         let (source, mvt_off) = if source_len_tag == u32::MAX {
-            (None, LAZY_MVT_HEADER_LEN)
+            (None, cursor)
         } else {
             let len = usize::try_from(source_len_tag).ok()?;
-            let off_end = LAZY_MVT_HEADER_LEN.checked_add(len)?;
+            let off_end = cursor.checked_add(len)?;
             if off_end > byte_len as usize {
                 return None;
             }
@@ -249,7 +300,7 @@ pub(super) fn decode_js_layer_indexed(
             if len > 0 {
                 js_sys::Uint8Array::new_with_byte_offset_and_length(
                     buffer,
-                    base_offset + LAZY_MVT_HEADER_LEN as u32,
+                    base_offset + cursor as u32,
                     len as u32,
                 )
                 .copy_to(&mut src_buf);
@@ -266,7 +317,9 @@ pub(super) fn decode_js_layer_indexed(
             )
             .copy_to(&mut mvt);
         }
-        let index = TileIndex::LazyMvt(LazyMvtIndex::from_packed(Arc::from(mvt), compressed));
+        let index = TileIndex::LazyMvt(
+            LazyMvtIndex::from_packed(Arc::from(mvt), compressed).with_rescale(rescale),
+        );
         return Some(FlatBufferTransferable {
             tag: WebMessageTag::LayerIndexed,
             data: Vec::new(),
@@ -304,7 +357,7 @@ impl LayerIndexed for FlatBufferTransferable {
         if let Some((coords, _, _)) = &self.unpacked_index {
             return *coords;
         }
-        if let Some((coords, _, _, _)) = parse_lazy_mvt_header(self.data()) {
+        if let Some((coords, _, _, _, _)) = parse_lazy_mvt_header(self.data()) {
             return coords;
         }
         parse_wire_header(self.data()).map_or_else(WorldTileCoords::default, |h| h.0)
@@ -314,7 +367,7 @@ impl LayerIndexed for FlatBufferTransferable {
         if let Some((_, source, _)) = &self.unpacked_index {
             return source.clone();
         }
-        if let Some((_, _, source, _)) = parse_lazy_mvt_header(self.data()) {
+        if let Some((_, _, _, source, _)) = parse_lazy_mvt_header(self.data()) {
             return source.map(str::to_owned);
         }
         parse_wire_header(self.data()).and_then(|h| h.2.map(str::to_owned))
@@ -324,100 +377,14 @@ impl LayerIndexed for FlatBufferTransferable {
         if let Some((_, _, index)) = self.unpacked_index.take() {
             return index;
         }
-        if let Some((_, compressed, _, mvt_bytes)) = parse_lazy_mvt_header(self.data()) {
-            return TileIndex::LazyMvt(LazyMvtIndex::from_packed(Arc::from(mvt_bytes), compressed));
+        if let Some((_, compressed, rescale, _, mvt_bytes)) = parse_lazy_mvt_header(self.data()) {
+            return TileIndex::LazyMvt(
+                LazyMvtIndex::from_packed(Arc::from(mvt_bytes), compressed).with_rescale(rescale),
+            );
         }
         decode_wire_index(self.data()).unwrap_or_else(|| WireTileIndex::default().into_tile_index())
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use maplibre::{
-        coords::{InnerCoords, WorldTileCoords, ZoomLevel},
-        io::geometry_index::wire::{WireGeometry, WireTileIndex},
-        vector::LayerIndexed,
-    };
-    use wasm_bindgen_test::*;
-
-    use super::FlatBufferTransferable;
-
-    #[wasm_bindgen_test]
-    fn flatbuffer_layer_indexed_roundtrips_spatial_and_source() {
-        assert!(<FlatBufferTransferable as LayerIndexed>::requires_geometry_index());
-        let wire = WireTileIndex {
-            is_spatial: true,
-            strings: vec!["road".into()],
-            prop_blobs: vec![0, 0, 0, 0],
-            prop_offsets: vec![0, 4],
-            geometries: vec![WireGeometry {
-                id: 99,
-                source_layer_idx: 0,
-                prop_group_idx: 0,
-                feature_index: 3,
-                ring_start: 0,
-                ring_count: 0,
-                coord_start: 0,
-                coord_count: 2,
-                kind: 1,
-                has_id: true,
-            }],
-            ring_ends: vec![],
-            xy: vec![100.0, 200.0, 300.0, 200.0],
-        };
-        let coords = WorldTileCoords {
-            x: 4,
-            y: 5,
-            z: ZoomLevel::new(3),
-        };
-        let transferable = <FlatBufferTransferable as LayerIndexed>::build_from(
-            coords,
-            Some("openmaptiles".into()),
-            wire.into_tile_index(),
-        );
-        assert_eq!(LayerIndexed::coords(&transferable), coords);
-        assert_eq!(
-            LayerIndexed::source(&transferable).as_deref(),
-            Some("openmaptiles")
-        );
-        let decoded = transferable.to_tile_index();
-        let hits = decoded.point_query(InnerCoords { x: 200.0, y: 202.0 });
-        assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].id, Some(99));
-        assert_eq!(&*hits[0].source_layer, "road");
-    }
-
-    #[wasm_bindgen_test]
-    fn lazy_mvt_layer_indexed_roundtrips_without_eager_decode() {
-        use std::sync::Arc;
-
-        use maplibre::io::geometry_index::{LazyMvtIndex, TileIndex};
-
-        let coords = WorldTileCoords {
-            x: -2,
-            y: 7,
-            z: ZoomLevel::new(4),
-        };
-        let payload = b"packed-mvt-payload";
-        let lazy = LazyMvtIndex::from_packed(Arc::from(payload.as_slice()), true);
-        let transferable = <FlatBufferTransferable as LayerIndexed>::build_from(
-            coords,
-            Some("basemap".into()),
-            TileIndex::LazyMvt(lazy),
-        );
-        assert_eq!(LayerIndexed::coords(&transferable), coords);
-        assert_eq!(
-            LayerIndexed::source(&transferable).as_deref(),
-            Some("basemap")
-        );
-        let decoded = transferable.to_tile_index();
-        match decoded {
-            TileIndex::LazyMvt(lazy) => {
-                let (bytes, compressed) = lazy.wire_bytes();
-                assert!(compressed);
-                assert_eq!(&**bytes, payload);
-            }
-            _ => panic!("expected LazyMvt variant without eager decode"),
-        }
-    }
-}
+mod tests;

@@ -4,6 +4,7 @@
 
 mod clip;
 mod lazy_mvt;
+mod lookup;
 mod processor;
 pub mod wire;
 use std::{collections::BTreeMap, sync::Arc};

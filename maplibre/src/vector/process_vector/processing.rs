@@ -203,6 +203,31 @@ pub(crate) fn tessellator(
     tessellator
 }
 
+pub(super) fn allow_prepack_for_style(
+    coords: WorldTileCoords,
+    has_dem_source: bool,
+    style: &StyleLayer,
+    has_sort_keys: bool,
+    has_shared_geometry: bool,
+) -> bool {
+    let per_feature_pattern = style
+        .paint
+        .as_ref()
+        .and_then(crate::vector::pattern::per_feature_pattern)
+        .is_some();
+    let edge_y = (1_i32 << u8::from(coords.z).min(30)) - 1;
+    let is_polar_row = coords.y <= 0 || coords.y >= edge_y;
+    !cfg!(test)
+        && !has_dem_source
+        && !(is_polar_row && style.type_ == "fill")
+        && !per_feature_pattern
+        && !has_sort_keys
+        && style.type_ != "circle"
+        && crate::vector::structures::kind(style)
+            .is_none_or(|k| matches!(k, crate::vector::structures::StructureKind::Extrusion))
+        && !has_shared_geometry
+}
+
 fn vector_layer<T: VectorTransferables, C: Context>(
     layer: &tile::Layer,
     selected: Option<&[usize]>,
@@ -213,7 +238,7 @@ fn vector_layer<T: VectorTransferables, C: Context>(
     context: &mut ProcessVectorContext<T, C>,
 ) -> Result<(), ProcessVectorError> {
     let state_ctx = context.state_context_for_layer(&layer.name);
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(any(target_arch = "wasm32", not(test)))]
     let uniform_paint =
         crate::vector::upload_system::paint::uniform_color(style, request.style_zoom()).is_some()
             && style.type_ != "circle"
@@ -230,13 +255,21 @@ fn vector_layer<T: VectorTransferables, C: Context>(
         tessellator.sort_key = crate::vector::tessellation::SortKeys::by(
             crate::vector::tessellation::sort_key_of(style),
         );
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(any(target_arch = "wasm32", not(test)))]
         if uniform_paint
             && tessellator.pattern_property.is_none()
             && tessellator.outline_property.is_none()
             && !tessellator.line_gradient
         {
             tessellator.omit_feature_colors = true;
+        }
+        if context.allow_prepack_for_style(
+            request.coords,
+            style,
+            tessellator.sort_key.is_keyed(),
+            false,
+        ) {
+            tessellator.maybe_enable_streaming_prepack(style.type_.as_str());
         }
         process_mvt_slice(layer, slice, shared_props.is_some(), &mut tessellator)?;
         Ok(tessellator)
@@ -246,25 +279,23 @@ fn vector_layer<T: VectorTransferables, C: Context>(
     };
     tessellator.apply_sort_keys();
     let mut sort_keys = tessellator.sort_key_values();
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(any(target_arch = "wasm32", not(test)))]
     if uniform_paint && tessellator.pattern_property.is_none() && !tessellator.line_gradient {
         tessellator.feature_colors = Vec::new();
     }
-    tessellator.buffer.vertices.shrink_to_fit();
-    tessellator.buffer.indices.shrink_to_fit();
-    tessellator.feature_indices.shrink_to_fit();
-    tessellator.feature_colors.shrink_to_fit();
+    let mut feature_indices = std::mem::take(&mut tessellator.feature_indices);
+    let mut feature_colors = std::mem::take(&mut tessellator.feature_colors);
+    let mut feature_paint = std::mem::take(&mut tessellator.feature_paint);
+    feature_indices.shrink_to_fit();
+    feature_colors.shrink_to_fit();
     sort_keys.shrink_to_fit();
-    tessellator.feature_paint.shrink_to_fit();
+    feature_paint.shrink_to_fit();
+    let buffer = tessellator.into_over_aligned_buffer();
     context.layer_tessellation_finished(
         &request.coords,
-        tessellator.buffer.into(),
-        tessellator.feature_indices,
-        (
-            tessellator.feature_colors,
-            sort_keys,
-            tessellator.feature_paint,
-        ),
+        buffer,
+        feature_indices,
+        (feature_colors, sort_keys, feature_paint),
         layer_header(layer),
         style,
     )
@@ -320,6 +351,8 @@ fn symbol_layer<T: VectorTransferables, C: Context>(
         tessellator.coordinate_scale = extent_scale(layer);
         tessellator.overscaling = request.overscaling();
         tessellator.source_ids = source_ids_for_slice(layer, slice);
+        tessellator.source_indices =
+            crate::sdf::tessellation::source_feature_indices(layer.features.len(), slice);
         tessellator.shared_properties = shared_props_for_slice(shared_props, slice);
         tessellator.feature_state_ctx = state_ctx.clone();
         process_mvt_slice(layer, slice, shared_props.is_some(), &mut tessellator)?;
@@ -329,6 +362,15 @@ fn symbol_layer<T: VectorTransferables, C: Context>(
         return context.layer_missing(&request.coords, &layer.name);
     };
     tessellator.finish();
+    if !context.index_geometry() {
+        crate::sdf::tessellation::prune_symbol_features(
+            &mut tessellator.features,
+            style,
+            state_ctx
+                .as_ref()
+                .and_then(|ctx| ctx.promote_property.as_deref()),
+        );
+    }
     tessellator.quad_buffer.vertices.shrink_to_fit();
     tessellator.quad_buffer.indices.shrink_to_fit();
     tessellator.features.shrink_to_fit();

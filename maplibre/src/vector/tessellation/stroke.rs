@@ -246,6 +246,7 @@ where
                 datum,
             );
         }
+        self.flush_streaming_prepack(stroke_index_start);
         Ok(())
     }
 

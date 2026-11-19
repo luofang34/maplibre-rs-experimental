@@ -80,11 +80,11 @@ pub(crate) fn needs_tile_redraw(before: &StyleLayer, after: &StyleLayer) -> bool
     {
         return true;
     }
-    needs_paint_retessellation(before.paint.as_ref(), after.paint.as_ref())
+    needs_paint_retessellation(before, after)
 }
 
-fn needs_paint_retessellation(before: Option<&LayerPaint>, after: Option<&LayerPaint>) -> bool {
-    match (before, after) {
+fn needs_paint_retessellation(before: &StyleLayer, after: &StyleLayer) -> bool {
+    match (before.paint.as_ref(), after.paint.as_ref()) {
         (None, None) => false,
         (Some(bp @ LayerPaint::Fill(a)), Some(ap @ LayerPaint::Fill(b))) => {
             a.outline_color().is_some() != b.outline_color().is_some()
@@ -145,7 +145,16 @@ fn needs_paint_retessellation(before: Option<&LayerPaint>, after: Option<&LayerP
                 || ((a.radius_per_feature() || b.radius_per_feature())
                     && !same_prop(&a.heatmap_radius, &b.heatmap_radius))
         }
-        (Some(LayerPaint::Symbol(_)), Some(LayerPaint::Symbol(_))) => false,
+        (Some(LayerPaint::Symbol(_)), Some(LayerPaint::Symbol(_))) => {
+            match (
+                crate::style::expression::symbol_runtime_referenced_keys(before, None),
+                crate::style::expression::symbol_runtime_referenced_keys(after, None),
+            ) {
+                (None, _) => false,
+                (Some(_), None) => true,
+                (Some(prev), Some(next)) => !next.is_subset(&prev),
+            }
+        }
         _ => true,
     }
 }
