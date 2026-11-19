@@ -57,6 +57,11 @@ interface OffscreenStartArgs {
 
 export const ST_TILE_WORKER_COUNT = 4;
 
+export const computeStTileWorkerCount = (): number => {
+    const cores = Number(globalThis.navigator?.hardwareConcurrency) || 4;
+    return Math.min(6, Math.max(ST_TILE_WORKER_COUNT, Math.floor(cores / 2)));
+};
+
 export const computeMtTileWorkerCount = (): number => {
     // Shared-memory WASM workers share one global dlmalloc spinlock with the OffscreenCanvas
     // render worker; 2 work-stealing workers overlap network HTTP I/O without allocator convoying.
@@ -79,7 +84,7 @@ export const startOffscreenController = async ({
     const offscreen = canvas.transferControlToOffscreen();
 
     // Spawn render worker + tile workers immediately at t=0 in parallel with WASM compilation.
-    const workerCount = MULTITHREADED ? computeMtTileWorkerCount() : ST_TILE_WORKER_COUNT;
+    const workerCount = MULTITHREADED ? computeMtTileWorkerCount() : computeStTileWorkerCount();
     const renderWorker = prewarmedRenderWorker ?? createRenderWorker();
     const tileWorkers: Worker[] = [];
     const channels: MessageChannel[] = [];

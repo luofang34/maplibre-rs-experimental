@@ -14,7 +14,9 @@ pub(super) use builder::AtlasBuilder;
 #[allow(unused_imports)]
 pub(crate) use cache::{fetch, tiles};
 pub use cache::{AssetCache, AssetFailure};
-pub use load::{load_symbol_assets, SymbolAssetConfig, SymbolAssetError};
+pub use load::{
+    load_symbol_assets, spawn_worker_symbol_prefetch, SymbolAssetConfig, SymbolAssetError,
+};
 #[allow(unused_imports)]
 pub(crate) use load::{
     load_symbol_assets_awaiting, load_symbol_assets_awaiting_from_tile,

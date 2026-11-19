@@ -9,7 +9,7 @@ use web_sys::{MessageEvent, MessagePort, Worker};
 use super::{worker_message, ReceivedType};
 use crate::{error::WebError, platform::singlethreaded::wasm_entries::deliver_received_data};
 
-const MAX_RECYCLED_ST_WORKERS: usize = 4;
+const MAX_RECYCLED_ST_WORKERS: usize = 6;
 
 pub(super) enum WorkerEndpoint {
     Dedicated(Worker),
@@ -62,6 +62,9 @@ pub(super) fn acquire_workers(
                 let created = new_worker
                     .call1(&JsValue::undefined(), &JsValue::from(0_u32))
                     .map_err(WebError::from)?;
+                if created.is_undefined() || created.is_null() {
+                    break;
+                }
                 match created.dyn_into::<Worker>() {
                     Ok(worker) => (WorkerEndpoint::Dedicated(worker), true),
                     Err(other) => {
@@ -92,6 +95,11 @@ pub(super) fn acquire_workers(
         endpoint.post_message(&configure).map_err(WebError::from)?;
         workers.push(endpoint);
         listeners.push(listener);
+    }
+    if workers.is_empty() {
+        return Err(WebError::TypeError(
+            "Unable to create any single-threaded tile workers".into(),
+        ));
     }
 
     Ok((workers, listeners))

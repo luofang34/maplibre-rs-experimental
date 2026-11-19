@@ -118,3 +118,34 @@ fn arrivals_are_reported_until_a_receive_offers_them() {
     );
     assert!(!apc.has_arrivals(), "a receive offered it");
 }
+
+#[cfg(all(feature = "native-io", not(target_arch = "wasm32")))]
+#[test]
+#[allow(clippy::expect_used)]
+fn buffered_unmatched_arrivals_keep_reporting_until_matching_consumer_drains_them() {
+    use super::{AsyncProcedureCall, Message, SchedulerAsyncProcedureCall};
+    use crate::{
+        environment::OffscreenKernelConfig, io::scheduler::NopScheduler,
+        platform::ReqwestOffscreenKernelEnvironment,
+    };
+    let apc = SchedulerAsyncProcedureCall::<ReqwestOffscreenKernelEnvironment, _>::new(
+        NopScheduler,
+        OffscreenKernelConfig::default(),
+    );
+    apc.channel
+        .0
+        .send(Message::new(&0_u32, Box::new(99_u32)))
+        .expect("send");
+    assert!(apc.has_arrivals());
+    assert_eq!(apc.receive(|_| false).count(), 0);
+    assert!(
+        apc.has_arrivals(),
+        "unmatched messages parked in self.buffer must keep waking the map until their consumer drains them"
+    );
+    let drained: Vec<_> = apc
+        .receive(|_| true)
+        .map(|message| *message.into_transferable::<u32>().expect("u32 payload"))
+        .collect();
+    assert_eq!(drained, [99]);
+    assert!(!apc.has_arrivals());
+}

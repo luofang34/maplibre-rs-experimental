@@ -4,7 +4,6 @@ import {
     checkRequirements,
     ensureWebGpuCompatibility,
     isWebGLSupported,
-    probeWebGpuAvailable,
     selectGraphicsBackend,
 } from "./browser";
 import {preventDefaultTouchActions} from "./canvas";
@@ -12,7 +11,7 @@ import {MapLibreMap} from "./map";
 import {
     compileWasmModule,
     computeMtTileWorkerCount,
-    ST_TILE_WORKER_COUNT,
+    computeStTileWorkerCount,
     startOffscreenController,
     type WasmModuleSource,
 } from "./offscreen-client";
@@ -34,6 +33,36 @@ export interface StartMapOptions {
 
 let mtWasmPrimed = false;
 const prewarmedMtWorkers: Worker[] = [];
+
+const loadWebGlFallback = async (
+    workerPath: string | undefined,
+    styleJson: string | Promise<string | undefined>,
+    imageProviderModules: string[],
+    canvasId: string | undefined,
+    options: StartMapOptions | undefined,
+): Promise<MapLibreMap | undefined> => {
+    const relFallback = ["webgl", "module.js"].join("/");
+    const webglUrl = options?.webglModulePath ?? new URL(relFallback, import.meta.url).href;
+    const resolvedStyle = await styleJson;
+    try {
+        const webglMod = await import(/* @vite-ignore */ webglUrl);
+        if (typeof webglMod?.startMapLibre === "function") {
+            console.warn("WebGPU unavailable in this browser; falling back automatically to WebGL2.");
+            return webglMod.startMapLibre(
+                options?.webglWasmPath,
+                workerPath,
+                resolvedStyle,
+                imageProviderModules,
+                canvasId,
+                {workerWasmPath: options?.workerWasmPath},
+            );
+        }
+    } catch (err) {
+        console.warn("WebGL2 fallback module failed to load:", err);
+    }
+    console.error("WebGPU is unavailable and WebGL2 fallback could not be loaded.");
+    return undefined;
+};
 
 /**
  * Starts the map. `styleJson` is a MapLibre style document; without it the built-in style is used.
@@ -63,8 +92,11 @@ export const startMapLibre = async (
         return
     }
 
-    const webGpuProbe =
-        !WEBGL && !MULTITHREADED ? probeWebGpuAvailable() : null;
+    const hasWebGpuFeature = Boolean(
+        typeof navigator !== "undefined" &&
+        "gpu" in navigator &&
+        typeof (navigator as {gpu?: {requestAdapter?: unknown}}).gpu?.requestAdapter === "function",
+    );
     const mainModulePrefetch = compileWasmModule(wasmPath);
     const workerModulePrefetch =
         !MULTITHREADED
@@ -76,12 +108,12 @@ export const startMapLibre = async (
     const preRenderWorker =
         !workerPath &&
         typeof Worker !== "undefined" &&
-        (WEBGL ? isWebGLSupported() : (typeof navigator !== "undefined" && "gpu" in navigator))
+        (WEBGL ? isWebGLSupported() : hasWebGpuFeature)
             ? RenderWorker()
             : undefined;
     const prePoolWorkers: Worker[] = preRenderWorker
         ? Array.from(
-              {length: MULTITHREADED ? computeMtTileWorkerCount() : ST_TILE_WORKER_COUNT},
+              {length: MULTITHREADED ? computeMtTileWorkerCount() : computeStTileWorkerCount()},
               () => MULTITHREADED ? MultithreadedPoolWorker() : PoolWorker(),
           )
         : [];
@@ -93,38 +125,21 @@ export const startMapLibre = async (
     };
 
     if (!WEBGL) {
-        const hasWebGpu = MULTITHREADED
-            ? Boolean(typeof navigator !== "undefined" && "gpu" in navigator)
-            : await (webGpuProbe ?? probeWebGpuAvailable());
         const decision = selectGraphicsBackend({
             webgl: false,
-            hasWebGpu,
-            hasWebGl: hasWebGpu ? false : isWebGLSupported(),
+            hasWebGpu: hasWebGpuFeature,
+            hasWebGl: hasWebGpuFeature ? false : isWebGLSupported(),
             hasWebglFallbackModule: true,
         });
         if (decision.backend === "fallback-webgl2") {
             terminatePrewarmedWorkers();
-            const relFallback = ["webgl", "module.js"].join("/");
-            const webglUrl = options?.webglModulePath ?? new URL(relFallback, import.meta.url).href;
-            const resolvedStyle = await styleJson;
-            try {
-                const webglMod = await import(/* @vite-ignore */ webglUrl);
-                if (typeof webglMod?.startMapLibre === "function") {
-                    console.warn("WebGPU unavailable in this browser; falling back automatically to WebGL2.");
-                    return webglMod.startMapLibre(
-                        options?.webglWasmPath,
-                        workerPath,
-                        resolvedStyle,
-                        imageProviderModules,
-                        canvasId,
-                        {workerWasmPath: options?.workerWasmPath},
-                    );
-                }
-            } catch (err) {
-                console.warn("WebGL2 fallback module failed to load:", err);
-            }
-            console.error("WebGPU is unavailable and WebGL2 fallback could not be loaded.");
-            return undefined;
+            return loadWebGlFallback(
+                workerPath,
+                styleJson,
+                imageProviderModules,
+                canvasId,
+                options,
+            );
         }
         if (decision.backend === "error") {
             terminatePrewarmedWorkers();
@@ -161,6 +176,19 @@ export const startMapLibre = async (
             return new MapLibreMap(controller, canvas);
         } catch (err) {
             terminatePrewarmedWorkers();
+            // Fall back to WebGL2 if the WebGPU worker failed at runtime (e.g. null GPUAdapter),
+            // cloning the canvas in case `transferControlToOffscreen()` already detached it.
+            if (!WEBGL && !(err instanceof DOMException && err.name === "InvalidStateError") && isWebGLSupported()) {
+                const freshCanvas = canvas.cloneNode(false) as HTMLCanvasElement;
+                canvas.replaceWith(freshCanvas);
+                return loadWebGlFallback(
+                    workerPath,
+                    styleJson,
+                    imageProviderModules,
+                    canvasId,
+                    options,
+                );
+            }
             // Fall back to main-thread winit only if canvas control was not already transferred.
             if (!(err instanceof DOMException && err.name === "InvalidStateError")) {
                 throw err;

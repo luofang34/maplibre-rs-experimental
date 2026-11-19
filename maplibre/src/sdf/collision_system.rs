@@ -61,6 +61,9 @@ pub struct CollisionSystem {
     seen: FxHashSet<WorldTileCoords>,
     /// Revision of the host's label obstacles the last placement kept clear.
     obstacles: u64,
+    initial_boot_loading: bool,
+    initial_boot_finished: bool,
+    initial_boot_started_at: Option<std::time::Duration>,
 }
 
 /// World-level counter recording how many times [`CollisionSystem`] has executed.
@@ -113,6 +116,7 @@ impl System for CollisionSystem {
             .get::<PlacementConfig>()
             .copied()
             .unwrap_or_default();
+        let caller_immediate = config.fade_duration.is_zero();
         if crate::render::eye_covering::EyeInFrame::reuses_content(world) {
             sync_symbol_depth_fade(
                 world,
@@ -128,7 +132,21 @@ impl System for CollisionSystem {
             .resources
             .get::<crate::render::frame_input::FrameInput>()
             .map_or(std::time::Duration::ZERO, |input| input.timestamp);
-        self.history.set_fade_duration(config.fade_duration);
+        let total_requests = crate::io::tile_backpressure::total_tile_requests(world);
+        let in_flight = crate::io::tile_backpressure::tiles_in_flight(world);
+        if !caller_immediate && !self.initial_boot_finished && total_requests > 0 {
+            self.initial_boot_loading = true;
+            if !now.is_zero() {
+                self.initial_boot_started_at.get_or_insert(now);
+            }
+        }
+        let effective_fade_duration = if self.initial_boot_loading {
+            std::time::Duration::ZERO
+        } else {
+            config.fade_duration
+        };
+
+        self.history.set_fade_duration(effective_fade_duration);
         self.history.advance_clock(now);
 
         self.runs = self.runs.wrapping_add(1);
@@ -277,6 +295,25 @@ impl System for CollisionSystem {
             }
         }
 
+        if self.initial_boot_loading
+            && in_flight > 0
+            && !moving_this_frame
+            && !triggers.obstructed
+            && self.initial_boot_started_at.is_some_and(|start| {
+                now.saturating_sub(start) < std::time::Duration::from_millis(250)
+            })
+        {
+            self.controller.advance_clock(now);
+            sync_symbol_depth_fade(
+                world,
+                &renderer.queue,
+                &renderer.render_graph,
+                &self.history,
+            );
+            self.prune_inactive_symbol_draws(world);
+            return Ok(());
+        }
+
         let bearing = view_state.camera().get_bearing().0;
         if !moving_this_frame
             && self
@@ -287,9 +324,16 @@ impl System for CollisionSystem {
                 .follow_bearing(world, &renderer.queue, (bearing, zoom), &layers);
         }
 
-        if !self.controller.should_place(now, zoom, config, triggers)
+        let controller_wants = self.controller.should_place(now, zoom, config, triggers);
+        let boot_final_settle = self.initial_boot_loading
+            && in_flight == 0
+            && (triggers.new_content
+                || self.controller.is_pending()
+                || !self.controller.is_initialized());
+        if !(controller_wants || boot_final_settle)
             || (moving_this_frame
-                && !config.fade_duration.is_zero()
+                && !caller_immediate
+                && !self.initial_boot_loading
                 && earlier_stage_spent > std::time::Duration::from_micros(2_200)
                 && self.controller.defer_for_frame_budget(triggers))
         {
@@ -302,6 +346,9 @@ impl System for CollisionSystem {
             self.prune_inactive_symbol_draws(world);
             if self.history.is_fading() || self.controller.is_pending() {
                 crate::render::frame_signals::keep_animating(world);
+            } else if self.initial_boot_loading && in_flight == 0 {
+                self.initial_boot_finished = true;
+                self.initial_boot_loading = false;
             }
             return Ok(());
         }
@@ -316,7 +363,7 @@ impl System for CollisionSystem {
 
         let use_slicing = self.controller.is_initialized()
             && self.controller.last_dt_non_zero()
-            && !config.fade_duration.is_zero()
+            && !effective_fade_duration.is_zero()
             && !triggers.obstructed;
         if !moving_this_frame || !use_slicing {
             self.draw_sort
@@ -335,7 +382,8 @@ impl System for CollisionSystem {
             SystemError::Setup
         })?;
         let has_symbols = !layers.is_empty();
-        self.history.begin_with_duration(now, config.fade_duration);
+        self.history
+            .begin_with_duration(now, effective_fade_duration);
         self.uploaded.retain(|(coords, _), cached| {
             let keep = self.seen.contains(coords);
             if !keep {
@@ -357,6 +405,10 @@ impl System for CollisionSystem {
             let followup_needed = self.history.repeats.yielded_to_previous();
             self.controller
                 .record_commit(zoom, has_symbols, followup_needed);
+            if self.initial_boot_loading && in_flight == 0 && !followup_needed {
+                self.initial_boot_finished = true;
+                self.initial_boot_loading = false;
+            }
             world.resources.insert(epoch.take_placed());
             world
                 .resources

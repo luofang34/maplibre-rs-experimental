@@ -269,6 +269,7 @@ impl MapController {
                 if stats.frame > 0
                     && !context.needs_redraw()
                     && !context.has_pending_drapes()
+                    && !context.has_scheduled_retries()
                     && !has_arrivals
                 {
                     Some(CameraState::of(context))

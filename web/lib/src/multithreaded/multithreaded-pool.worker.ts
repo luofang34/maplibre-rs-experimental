@@ -6,16 +6,15 @@ type MessageData =
     | {type: 'wasm_init', module: WebAssembly.Module, memory: WebAssembly.Memory}
     | {type: 'pool_call', work_ptr: number}
 
-let initialised: Promise<maplibre.InitOutput> = null
+let initialised: Promise<maplibre.InitOutput> | null = null;
+let resolveInitReady: (() => void) | null = null;
+const initReady = new Promise<void>(resolve => {
+    resolveInitReady = resolve;
+});
 
 const handleMessage = async (message: MessageEvent<MessageData>) => {
     const data = message.data;
     if (!data) return;
-
-    if (initialised) {
-        // Queue further commands up until the module is fully initialised:
-        await initialised;
-    }
 
     const type = data.type;
     if (type === 'wasm_init') {
@@ -29,7 +28,18 @@ const handleMessage = async (message: MessageEvent<MessageData>) => {
             // Rethrow to keep promise rejected and prevent execution of further commands:
             throw err;
         });
-    } else if (type === 'pool_call') {
+        resolveInitReady?.();
+        resolveInitReady = null;
+        return;
+    }
+
+    if (!initialised) {
+        await initReady;
+    }
+    // Queue further commands up until the module is fully initialised:
+    await initialised;
+
+    if (type === 'pool_call') {
         const work_ptr = data.work_ptr; // shared memory pointer valid across render worker and pool workers
 
         const process_data: (msg: any) => Promise<void> = maplibre["multithreaded_process_data"]

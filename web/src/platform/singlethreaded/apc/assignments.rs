@@ -81,7 +81,6 @@ impl Assignments {
     }
 
     /// Calls that may still be running.
-    #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.calls.len()
     }

@@ -6,6 +6,8 @@ mod defaults;
 
 use std::fmt::Debug;
 
+#[cfg(all(not(test), target_arch = "wasm32"))]
+pub(crate) use defaults::DefaultTileTessellated;
 #[cfg(test)]
 pub use defaults::{
     DefaultLayerIndexed, DefaultLayerMissing, DefaultLayerTessellated, DefaultTileTessellated,

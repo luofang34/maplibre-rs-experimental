@@ -21,3 +21,13 @@ lto = true
 codegen-units = 1
 strip = false
 panic = 'abort'
+
+[profile.wasm-worker-release]
+inherits = "wasm-release"
+opt-level = 2
+
+[profile.wasm-release.package.earcut]
+opt-level = 2
+
+[profile.wasm-release.package.rustc-hash]
+opt-level = 2

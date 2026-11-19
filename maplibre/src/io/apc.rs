@@ -103,6 +103,12 @@ impl Message {
         self.tag == tag
     }
 
+    /// Borrows the underlying payload if it has concrete type `T`.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn downcast_ref<T: 'static>(&self) -> Option<&T> {
+        self.transferable.downcast_ref::<T>()
+    }
+
     /// Borrows the routing tag for this result.
     pub fn tag(&self) -> &'static dyn MessageTag {
         self.tag
@@ -366,6 +372,14 @@ pub trait AsyncProcedureCall<K: OffscreenKernel>: 'static {
     /// Pre-delivers `style` to offscreen workers while GPU initialization is still in flight so
     /// workers can parse the style and warm symbol assets concurrently.
     fn warm_style(&self, _style: &Style) {}
+
+    /// Number of dispatched worker calls still in flight (default `0`).
+    fn in_flight_calls(&self) -> usize {
+        0
+    }
+
+    /// Controls whether `receive` lifts steady-state per-frame batch caps during initial load.
+    fn set_boot_unthrottled(&self, _unthrottled: bool) {}
 }
 
 /// Applies valid results in the entire drained batch before reporting its first type error.

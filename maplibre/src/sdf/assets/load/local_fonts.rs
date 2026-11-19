@@ -12,6 +12,14 @@ use crate::{
     style::Style,
 };
 
+struct PendingFont {
+    font: String,
+    has_registered: bool,
+    remote_chars: HashSet<u32>,
+    range_start: usize,
+    range_len: usize,
+}
+
 pub(super) async fn load_fonts_and_shaping<HC: HttpClient>(
     client: &SourceClient<HC>,
     config: SymbolAssetConfig<'_>,
@@ -25,6 +33,9 @@ pub(super) async fn load_fonts_and_shaping<HC: HttpClient>(
     let ideograph_family = config
         .style
         .and_then(|style| style.local_ideograph_font_family.as_deref());
+
+    let mut pending_fonts = Vec::with_capacity(fonts.len());
+    let mut range_jobs: Vec<(usize, u32)> = Vec::new();
 
     for (font, characters) in fonts {
         let mut remote_chars = HashSet::default();
@@ -92,17 +103,45 @@ pub(super) async fn load_fonts_and_shaping<HC: HttpClient>(
         let mut ranges: Vec<u32> = remote_chars.iter().map(|code| (code / 256) * 256).collect();
         ranges.sort_unstable();
         ranges.dedup();
-        let fetched_ranges = crate::util::async_join::try_join_all_concurrent(
-            ranges
-                .into_iter()
-                .map(|range| super::glyph_range(client, config.glyphs, &font, range))
-                .collect(),
-        )
-        .await?;
+        let font_idx = pending_fonts.len();
+        let range_start = range_jobs.len();
+        for range in ranges {
+            range_jobs.push((font_idx, range));
+        }
+        let range_len = range_jobs.len() - range_start;
+        pending_fonts.push(PendingFont {
+            font,
+            has_registered,
+            remote_chars,
+            range_start,
+            range_len,
+        });
+    }
+
+    let fetched_ranges = crate::util::async_join::try_join_all_concurrent(
+        range_jobs
+            .iter()
+            .map(|&(font_idx, range)| {
+                super::glyph_range(client, config.glyphs, &pending_fonts[font_idx].font, range)
+            })
+            .collect(),
+    )
+    .await?;
+
+    for PendingFont {
+        font,
+        has_registered,
+        remote_chars,
+        range_start,
+        range_len,
+    } in pending_fonts
+    {
         let mut had_any_pbf = false;
-        for glyphs in fetched_ranges.into_iter().flatten() {
-            had_any_pbf = true;
-            builder.glyph_subset(&font, &glyphs, Some(&remote_chars));
+        if let Some(slice) = fetched_ranges.get(range_start..range_start + range_len) {
+            for glyphs in slice.iter().flatten() {
+                had_any_pbf = true;
+                builder.glyph_subset(&font, glyphs, Some(&remote_chars));
+            }
         }
 
         #[cfg(target_arch = "wasm32")]

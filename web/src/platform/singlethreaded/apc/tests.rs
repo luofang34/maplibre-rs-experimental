@@ -211,6 +211,7 @@ fn passing_apc_reports_arrivals_until_receive_offers_them() {
         listeners: Vec::new(),
         buffer: RefCell::new(Vec::new()),
         batch_open: Cell::new(true),
+        boot_unthrottled: Cell::new(true),
         received: received.clone(),
         assignments: RefCell::default(),
         styles: RefCell::default(),
@@ -237,9 +238,17 @@ fn passing_apc_reports_arrivals_until_receive_offers_them() {
     .collect();
     assert!(matched.is_empty());
     assert!(
-        !<PassingAsyncProcedureCall as AsyncProcedureCall<
+        <PassingAsyncProcedureCall as AsyncProcedureCall<
             UsedOffscreenKernelEnvironment,
         >>::has_arrivals(&apc),
-        "buffered unmatched messages do not keep asking for frames after receive offered them"
+        "buffered unmatched messages stay visible to has_arrivals until their consumer drains them"
     );
+    let drained: Vec<_> = <PassingAsyncProcedureCall as AsyncProcedureCall<
+        UsedOffscreenKernelEnvironment,
+    >>::receive(&apc, |_| true)
+    .collect();
+    assert_eq!(drained.len(), 1);
+    assert!(!<PassingAsyncProcedureCall as AsyncProcedureCall<
+        UsedOffscreenKernelEnvironment,
+    >>::has_arrivals(&apc));
 }

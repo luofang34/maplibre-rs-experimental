@@ -4,6 +4,11 @@
 #[cfg(not(any(no_pendantic_os_check, target_arch = "wasm32")))]
 compile_error!("web works only on wasm32.");
 
+#[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+#[global_allocator]
+static GLOBAL_ALLOC: platform::multithreaded::alloc::MagazineAllocator =
+    platform::multithreaded::alloc::MagazineAllocator;
+
 #[cfg(feature = "renderer")]
 mod application;
 #[cfg(all(feature = "renderer", feature = "arena-telemetry"))]

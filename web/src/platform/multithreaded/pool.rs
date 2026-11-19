@@ -26,7 +26,7 @@ type Execute = Box<dyn (FnOnce() -> PinnedFuture) + Send>;
 const MAX_RECYCLED_WORKERS: usize = 8;
 /// Concurrent async tasks claimed per worker so network `fetch` I/O overlaps while excess jobs
 /// stay in [`SharedWorkQueue`] for whichever worker finishes its CPU work first to steal.
-const PER_WORKER_CONCURRENCY: usize = 8;
+const PER_WORKER_CONCURRENCY: usize = 6;
 
 thread_local! {
     static RECYCLED_WORKERS: RefCell<Vec<Worker>> = const { RefCell::new(Vec::new()) };
@@ -303,10 +303,10 @@ impl WorkerPool {
             };
             CURRENT_WORKER_WAKE.with(|slot| {
                 if let Some(wake_pending) = slot.borrow().as_ref() {
-                    if !wake_pending.swap(true, Ordering::AcqRel)
+                    if !wake_pending.swap(true, Ordering::SeqCst)
                         && post_worker_wake(&scope).is_err()
                     {
-                        wake_pending.store(false, Ordering::Release);
+                        wake_pending.store(false, Ordering::SeqCst);
                     }
                 } else {
                     let _ = post_worker_wake(&scope);
@@ -344,7 +344,7 @@ impl WorkerPool {
         let wake_pending = Arc::new(AtomicBool::new(false));
         let listener_wake_pending = wake_pending.clone();
         let onmessage = Closure::wrap(Box::new(move |_event: MessageEvent| {
-            listener_wake_pending.store(false, Ordering::Release);
+            listener_wake_pending.store(false, Ordering::SeqCst);
             let waker = state.upgrade().and_then(|s| s.waker.borrow().clone());
             if let Some(wake) = waker {
                 wake();

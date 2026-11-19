@@ -47,7 +47,7 @@ console_error_panic_hook.workspace = true
 web-sys = { workspace = true, features = [
     "Window",
     "Worker", "WorkerGlobalScope", "DedicatedWorkerGlobalScope", "MessageEvent",
-    "MessagePort", "OffscreenCanvas",
+    "MessageChannel", "MessagePort", "OffscreenCanvas",
     "Request", "RequestInit", "RequestMode", "Response", "Headers",
     "ErrorEvent"
 ] }

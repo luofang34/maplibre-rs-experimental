@@ -89,7 +89,7 @@ fn create_window_and_kernel(
     #[cfg(not(target_feature = "atomics"))]
     let apc = platform::singlethreaded::apc::PassingAsyncProcedureCall::new(
         new_worker,
-        4,
+        6,
         offscreen_kernel_config.clone(),
     )?;
     #[cfg(target_feature = "atomics")]

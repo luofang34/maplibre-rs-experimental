@@ -18,6 +18,7 @@ mod local_fonts;
 mod prefetch;
 mod requests;
 pub(crate) use prefetch::spawn_style_symbol_prefetch;
+pub use prefetch::spawn_worker_symbol_prefetch;
 #[cfg(test)]
 use requests::requests;
 use requests::symbol_requests;

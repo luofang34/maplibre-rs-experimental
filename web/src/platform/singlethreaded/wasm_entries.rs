@@ -115,6 +115,11 @@ impl TileWorkerCalls {
     pub fn set_style(&mut self, revision: u64, style: String) -> Result<(), JSError> {
         let style =
             maplibre::style::Style::from_json_str(&style).map_err(WebError::StyleDecoding)?;
+        #[cfg(all(target_arch = "wasm32", not(test)))]
+        if CONFIG.with(|slot| slot.borrow().is_some()) {
+            let client = UsedOffscreenKernelEnvironment::create(kernel_config()).source_client();
+            maplibre::sdf::assets::spawn_worker_symbol_prefetch(client, &style);
+        }
         self.styles.insert(revision, style);
         Ok(())
     }
@@ -230,7 +235,11 @@ pub(crate) fn deliver_received_data(
 
         if tag == WebMessageTag::CallFinished {
             received.finished.push(decode_call_finished(&buffer)?);
-            None
+            if !received.messages.is_empty() || !received.queued.is_empty() {
+                received.waker.clone()
+            } else {
+                None
+            }
         } else {
             let was_empty = received.messages.is_empty() && received.queued.is_empty();
             crate::platform::singlethreaded::apc::QueuedMessage::push_from_wire(

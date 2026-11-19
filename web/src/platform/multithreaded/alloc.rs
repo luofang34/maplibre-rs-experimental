@@ -1,0 +1,210 @@
+//! Thread-local small-block magazine allocator for `wasm32 + atomics`.
+//!
+//! Under shared-memory WASM, `std::alloc::System` delegates to `dlmalloc` protected by a single
+//! global spinlock. By caching freed small/medium blocks (`16..=16384` bytes, `align <= 8`) in
+//! per-thread freelists, the render worker and tile workers avoid contending with decode,
+//! tessellation, and eviction bursts on every `Vec`/hash-map churn allocation.
+#![allow(unsafe_code)]
+
+use std::{
+    alloc::{GlobalAlloc, Layout, System},
+    cell::{Cell, UnsafeCell},
+    ptr,
+};
+
+const NUM_CLASSES: usize = 11;
+const MIN_CLASS_BYTES: usize = 16;
+const MAX_CLASS_BYTES: usize = 16384;
+const BASE_ALIGN: usize = 8;
+const CLASS_CAPS: [u16; NUM_CLASSES] = [128, 128, 128, 64, 48, 32, 24, 16, 8, 4, 2];
+
+struct Magazine {
+    heads: [*mut u8; NUM_CLASSES],
+    counts: [u16; NUM_CLASSES],
+}
+
+impl Magazine {
+    const fn new() -> Self {
+        Self {
+            heads: [ptr::null_mut(); NUM_CLASSES],
+            counts: [0; NUM_CLASSES],
+        }
+    }
+
+    fn pop(&mut self, class_idx: usize) -> Option<*mut u8> {
+        let head = self.heads[class_idx];
+        if head.is_null() {
+            return None;
+        }
+        // SAFETY: `head` points to a free `class_layout(class_idx)` block (size >= 16 >= ptr size)
+        // whose first pointer-sized word stores the next node address.
+        let next = unsafe { *head.cast::<*mut u8>() };
+        self.heads[class_idx] = next;
+        self.counts[class_idx] = self.counts[class_idx].saturating_sub(1);
+        Some(head)
+    }
+
+    fn push(&mut self, class_idx: usize, ptr_raw: *mut u8) -> bool {
+        if self.counts[class_idx] >= CLASS_CAPS[class_idx] {
+            self.drain_half(class_idx);
+        }
+        // SAFETY: `ptr_raw` is a uniquely owned block of `class_layout(class_idx)` (`>= 16` bytes,
+        // 8-byte aligned), large and aligned enough to store a `*mut u8` freelist link at offset 0.
+        unsafe { *ptr_raw.cast::<*mut u8>() = self.heads[class_idx] };
+        self.heads[class_idx] = ptr_raw;
+        self.counts[class_idx] = self.counts[class_idx].saturating_add(1);
+        true
+    }
+
+    fn drain_half(&mut self, class_idx: usize) {
+        let target = self.counts[class_idx] / 2;
+        let layout = class_layout(class_idx);
+        while self.counts[class_idx] > target {
+            let head = self.heads[class_idx];
+            if head.is_null() {
+                self.counts[class_idx] = 0;
+                break;
+            }
+            // SAFETY: `head` was allocated from `System` with `class_layout(class_idx)` and stores
+            // its next freelist link in word 0.
+            unsafe {
+                self.heads[class_idx] = *head.cast::<*mut u8>();
+                self.counts[class_idx] = self.counts[class_idx].saturating_sub(1);
+                System.dealloc(head, layout);
+            }
+        }
+    }
+}
+
+struct ThreadMagazine {
+    in_alloc: Cell<bool>,
+    mag: UnsafeCell<Magazine>,
+}
+
+impl ThreadMagazine {
+    const fn new() -> Self {
+        Self {
+            in_alloc: Cell::new(false),
+            mag: UnsafeCell::new(Magazine::new()),
+        }
+    }
+
+    fn with_mut<R>(&self, f: impl FnOnce(&mut Magazine) -> R) -> Option<R> {
+        if self.in_alloc.get() {
+            return None;
+        }
+        self.in_alloc.set(true);
+        // SAFETY: `self` resides in thread-local storage and `in_alloc` prevents re-entrant
+        // mutable access on this thread while the returned `&mut Magazine` is live.
+        let res = f(unsafe { &mut *self.mag.get() });
+        self.in_alloc.set(false);
+        Some(res)
+    }
+}
+
+thread_local! {
+    static MAG: ThreadMagazine = const { ThreadMagazine::new() };
+}
+
+#[inline]
+const fn class_index(layout: Layout) -> Option<usize> {
+    let size = layout.size();
+    if size == 0 || size > MAX_CLASS_BYTES || layout.align() > BASE_ALIGN {
+        return None;
+    }
+    let normalized = if size < MIN_CLASS_BYTES {
+        MIN_CLASS_BYTES
+    } else {
+        size.next_power_of_two()
+    };
+    Some((normalized.trailing_zeros() - 4) as usize)
+}
+
+#[inline]
+const fn class_layout(class_idx: usize) -> Layout {
+    let size = MIN_CLASS_BYTES << class_idx;
+    // SAFETY: `size` is a non-zero power-of-two in `16..=16384` and `BASE_ALIGN` is `8`,
+    // satisfying all `Layout::from_size_align` invariants without panic paths.
+    unsafe { Layout::from_size_align_unchecked(size, BASE_ALIGN) }
+}
+
+pub struct MagazineAllocator;
+
+unsafe impl GlobalAlloc for MagazineAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        let Some(class_idx) = class_index(layout) else {
+            // SAFETY: Caller upholds `GlobalAlloc::alloc` preconditions for `layout`.
+            return unsafe { System.alloc(layout) };
+        };
+        let popped = MAG
+            .try_with(|tm| tm.with_mut(|m| m.pop(class_idx)).flatten())
+            .ok()
+            .flatten();
+        if let Some(cached) = popped {
+            return cached;
+        }
+        // SAFETY: Always back small-class allocations with `class_layout(class_idx)` so `dealloc`
+        // and freelist recycling match identically across threads and re-entrancy guards.
+        unsafe { System.alloc(class_layout(class_idx)) }
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        let Some(class_idx) = class_index(layout) else {
+            // SAFETY: Caller upholds `GlobalAlloc::alloc_zeroed` preconditions for `layout`.
+            return unsafe { System.alloc_zeroed(layout) };
+        };
+        let popped = MAG
+            .try_with(|tm| tm.with_mut(|m| m.pop(class_idx)).flatten())
+            .ok()
+            .flatten();
+        if let Some(cached) = popped {
+            // SAFETY: `cached` has at least `layout.size()` writable bytes.
+            unsafe { cached.write_bytes(0, layout.size()) };
+            return cached;
+        }
+        // SAFETY: Back with `class_layout(class_idx)` for uniform free/reuse layout matching.
+        unsafe { System.alloc_zeroed(class_layout(class_idx)) }
+    }
+
+    unsafe fn dealloc(&self, ptr_raw: *mut u8, layout: Layout) {
+        let Some(class_idx) = class_index(layout) else {
+            // SAFETY: Uncached classes were allocated directly from `System` with `layout`.
+            unsafe { System.dealloc(ptr_raw, layout) };
+            return;
+        };
+        let pushed = MAG
+            .try_with(|tm| tm.with_mut(|m| m.push(class_idx, ptr_raw)).unwrap_or(false))
+            .unwrap_or(false);
+        if !pushed {
+            // SAFETY: Block was allocated from `System` with `class_layout(class_idx)`.
+            unsafe { System.dealloc(ptr_raw, class_layout(class_idx)) };
+        }
+    }
+
+    unsafe fn realloc(&self, ptr_raw: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        let old_class = class_index(layout);
+        let Ok(new_layout) = Layout::from_size_align(new_size, layout.align()) else {
+            return ptr::null_mut();
+        };
+        let new_class = class_index(new_layout);
+        if old_class.is_some() && old_class == new_class {
+            return ptr_raw;
+        }
+        if old_class.is_none() && new_class.is_none() {
+            // SAFETY: Neither size class uses the thread-local magazine.
+            return unsafe { System.realloc(ptr_raw, layout, new_size) };
+        }
+        // SAFETY: Caller guarantees `ptr_raw` is valid for `layout`.
+        let new_ptr = unsafe { self.alloc(new_layout) };
+        if new_ptr.is_null() {
+            return ptr::null_mut();
+        }
+        // SAFETY: Both regions are valid for at least `min(layout.size(), new_size)` bytes and
+        // do not overlap.
+        unsafe {
+            ptr::copy_nonoverlapping(ptr_raw, new_ptr, layout.size().min(new_size));
+            self.dealloc(ptr_raw, layout);
+        }
+        new_ptr
+    }
+}

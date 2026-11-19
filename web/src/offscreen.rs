@@ -21,7 +21,7 @@ use maplibre::{
     render::frame_input::FrameInput,
 };
 use wasm_bindgen::{closure::Closure, prelude::*, JsCast};
-use web_sys::DedicatedWorkerGlobalScope;
+use web_sys::{DedicatedWorkerGlobalScope, MessageChannel, MessagePort};
 
 pub(crate) use self::window::OffscreenEnvironment;
 use self::window::{register_runner_waker, unregister_runner_waker, SharedWindowState, WorkerApc};
@@ -38,10 +38,10 @@ fn apc_supports_waker(apc: &WorkerApc) -> bool {
 }
 
 type WakeTimerSlot = RefCell<Option<(i32, Closure<dyn FnMut()>)>>;
+type WakeChannelSlot = RefCell<Option<(MessagePort, MessagePort, Closure<dyn FnMut()>)>>;
 type RafClosureSlot = RefCell<Option<Closure<dyn FnMut(f64)>>>;
 
-const BOOT_WAKE_COALESCE_DELAY: Duration = Duration::from_millis(2);
-const MAX_BOOT_IMMEDIATE_PUMPS: u8 = 16;
+const MAX_BOOT_IMMEDIATE_PUMPS: u8 = 128;
 
 struct RunnerInner {
     id: u64,
@@ -56,6 +56,7 @@ struct RunnerInner {
     cmd_pending: Cell<bool>,
     raf_handle: Cell<Option<i32>>,
     wake_timer: WakeTimerSlot,
+    boot_wake_channel: WakeChannelSlot,
     immediate_wake_pending: Cell<bool>,
     raf_closure: RafClosureSlot,
     initial_load_settled: Cell<bool>,
@@ -166,26 +167,55 @@ impl RunnerInner {
         }
     }
 
+    fn take_boot_pump(&self, arrivals: bool) -> bool {
+        if self.initial_load_settled.get() || self.initial_pumps.get() >= MAX_BOOT_IMMEDIATE_PUMPS {
+            return false;
+        }
+        if arrivals || self.initial_pumps.get() <= 2 {
+            self.initial_pumps
+                .set(self.initial_pumps.get().saturating_add(1));
+            true
+        } else {
+            false
+        }
+    }
+
+    fn cancel_raf(&self) {
+        self.raf_pending.set(false);
+        if let Some(raf_id) = self.raf_handle.take() {
+            if let Ok(cancel) =
+                js_sys::Reflect::get(&self.scope, &JsValue::from_str("cancelAnimationFrame"))
+            {
+                if let Ok(func) = cancel.dyn_into::<js_sys::Function>() {
+                    let _ = func.call1(&self.scope, &JsValue::from(raf_id));
+                }
+            }
+        }
+    }
+
     fn schedule_wakeup(rc: &Rc<RefCell<Self>>) {
-        let immediate = {
+        let pump_immediate = {
             let Ok(inner) = rc.try_borrow() else {
                 return;
             };
-            if inner.closed.get() || inner.raf_pending.get() || inner.immediate_wake_pending.get() {
+            if inner.closed.get() || inner.immediate_wake_pending.get() {
                 return;
             }
-            if !inner.initial_load_settled.get()
-                && inner.initial_pumps.get() < MAX_BOOT_IMMEDIATE_PUMPS
-            {
-                inner
-                    .initial_pumps
-                    .set(inner.initial_pumps.get().saturating_add(1));
-                true
+            let arrivals = apc_has_arrivals(inner.map.kernel().apc());
+            if inner.raf_pending.get() {
+                if !inner.initial_load_settled.get() && arrivals && inner.take_boot_pump(true) {
+                    inner.cancel_raf();
+                    true
+                } else {
+                    return;
+                }
+            } else if !inner.map.has_ready_work() && !arrivals && !inner.input.moved_view() {
+                return;
             } else {
-                false
+                inner.take_boot_pump(arrivals)
             }
         };
-        if immediate {
+        if pump_immediate {
             Self::schedule_immediate_pump(rc);
         } else {
             Self::schedule_raf(rc);
@@ -193,7 +223,7 @@ impl RunnerInner {
     }
 
     fn run_frame(rc: &Rc<RefCell<Self>>) {
-        let (next_delay, use_immediate_pump) = {
+        let (next_delay, boot_pump) = {
             let Ok(mut inner) = rc.try_borrow_mut() else {
                 return;
             };
@@ -236,6 +266,10 @@ impl RunnerInner {
             };
             let arrivals = apc_has_arrivals(s.map.kernel().apc());
             let input_moved = s.input.moved_view();
+            let in_flight =
+                <WorkerApc as AsyncProcedureCall<UsedOffscreenKernelEnvironment>>::in_flight_calls(
+                    s.map.kernel().apc(),
+                );
             let wait = match (s.input.next_wait(after), s.map.next_retry_delay()) {
                 (Some(a), Some(b)) => Some(a.min(b)),
                 (Some(a), None) => Some(a),
@@ -244,12 +278,16 @@ impl RunnerInner {
             };
 
             if !s.initial_load_settled.get()
-                && !s.map.needs_redraw()
+                && !s.map.is_loading()
                 && !arrivals
-                && !input_moved
+                && in_flight == 0
                 && wait.is_none()
             {
                 s.initial_load_settled.set(true);
+                <WorkerApc as AsyncProcedureCall<UsedOffscreenKernelEnvironment>>::set_boot_unthrottled(
+                    s.map.kernel().apc(),
+                    false,
+                );
             }
             let next_delay = if map_ready || arrivals || input_moved || wait == Some(Duration::ZERO)
             {
@@ -257,16 +295,11 @@ impl RunnerInner {
             } else {
                 wait
             };
-            let use_immediate_pump = next_delay == Some(Duration::ZERO)
-                && !s.initial_load_settled.get()
-                && s.initial_pumps.get() < MAX_BOOT_IMMEDIATE_PUMPS;
-            if use_immediate_pump {
-                s.initial_pumps.set(s.initial_pumps.get().saturating_add(1));
-            }
-            (next_delay, use_immediate_pump)
+            let boot_pump = next_delay == Some(Duration::ZERO) && s.take_boot_pump(arrivals);
+            (next_delay, boot_pump)
         };
 
-        match (next_delay, use_immediate_pump) {
+        match (next_delay, boot_pump) {
             (Some(Duration::ZERO), true) => Self::schedule_immediate_pump(rc),
             (Some(Duration::ZERO), false) => Self::schedule_raf(rc),
             (Some(delay), _) => Self::schedule_wake(rc, delay),
@@ -283,18 +316,50 @@ impl RunnerInner {
     }
 
     fn schedule_immediate_pump(rc: &Rc<RefCell<Self>>) {
-        {
+        let should_post = {
             let Ok(inner) = rc.try_borrow() else {
                 return;
             };
-            if inner.immediate_wake_pending.get() {
+            if inner.closed.get() || inner.raf_pending.get() || inner.immediate_wake_pending.get() {
                 return;
             }
-        }
-        Self::schedule_timer(rc, BOOT_WAKE_COALESCE_DELAY, Self::run_frame);
-        if let Ok(inner) = rc.try_borrow() {
-            if inner.wake_timer.borrow().is_some() {
-                inner.immediate_wake_pending.set(true);
+            inner.clear_wake_timer();
+            if inner.boot_wake_channel.borrow().is_none() {
+                if let Ok(channel) = MessageChannel::new() {
+                    let port1 = channel.port1();
+                    let port2 = channel.port2();
+                    let weak = Rc::downgrade(rc);
+                    let closure = Closure::wrap(Box::new(move || {
+                        if let Some(strong) = weak.upgrade() {
+                            let still_pending = strong
+                                .try_borrow()
+                                .is_ok_and(|s| !s.closed.get() && s.immediate_wake_pending.get());
+                            if still_pending {
+                                Self::run_frame(&strong);
+                            }
+                        }
+                    }) as Box<dyn FnMut()>);
+                    port2.set_onmessage(Some(closure.as_ref().unchecked_ref()));
+                    *inner.boot_wake_channel.borrow_mut() = Some((port1, port2, closure));
+                }
+            }
+            if let Some((port1, _, _)) = inner.boot_wake_channel.borrow().as_ref() {
+                if port1.post_message(&JsValue::UNDEFINED).is_ok() {
+                    inner.immediate_wake_pending.set(true);
+                    false
+                } else {
+                    true
+                }
+            } else {
+                true
+            }
+        };
+        if should_post {
+            Self::schedule_timer(rc, Duration::ZERO, Self::run_frame);
+            if let Ok(inner) = rc.try_borrow() {
+                if inner.wake_timer.borrow().is_some() {
+                    inner.immediate_wake_pending.set(true);
+                }
             }
         }
     }
@@ -335,15 +400,12 @@ impl RunnerInner {
         }
         unregister_runner_waker(self.id);
         self.clear_wake_timer();
-        if let Some(raf_id) = self.raf_handle.take() {
-            if let Ok(cancel) =
-                js_sys::Reflect::get(&self.scope, &JsValue::from_str("cancelAnimationFrame"))
-            {
-                if let Ok(func) = cancel.dyn_into::<js_sys::Function>() {
-                    let _ = func.call1(&self.scope, &JsValue::from(raf_id));
-                }
-            }
+        if let Some((port1, port2, _)) = self.boot_wake_channel.borrow_mut().take() {
+            port2.set_onmessage(None);
+            port1.close();
+            port2.close();
         }
+        self.cancel_raf();
         *self.window_state.redraw.borrow_mut() = None;
         *self.raf_closure.borrow_mut() = None;
         self.commands.close();
@@ -384,6 +446,7 @@ fn start_runner(
         cmd_pending: Cell::new(false),
         raf_handle: Cell::new(None),
         wake_timer: RefCell::new(None),
+        boot_wake_channel: RefCell::new(None),
         immediate_wake_pending: Cell::new(false),
         raf_closure: RefCell::new(None),
         initial_load_settled: Cell::new(false),

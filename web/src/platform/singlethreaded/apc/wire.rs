@@ -129,7 +129,11 @@ impl Context for PassingContext {
         let message = message.into();
         let attempt = message.attempt();
         let (tag, payload) = prepare_payload_bytes(message)?;
-        if tag.is_intermediate_layer() {
+        if tag.is_intermediate_layer()
+            || tag == WebMessageTag::ProvidedImages
+            || (tag == WebMessageTag::TileTessellated
+                && payload.as_slice().get(9).is_none_or(|&b| b == 0))
+        {
             lock_pending(&self.pending).push(BufferedItem {
                 tag,
                 attempt,

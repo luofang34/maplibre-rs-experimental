@@ -1,13 +1,12 @@
 //! Concurrent startup prefetch for `HTTPS` sprite sheets and `0-255` Latin glyph ranges.
 
 use super::sprite_sources;
-#[cfg(all(
-    not(target_arch = "wasm32"),
-    feature = "native-io",
-    feature = "thread-safe-futures"
+#[cfg(any(
+    target_arch = "wasm32",
+    all(feature = "native-io", feature = "thread-safe-futures")
 ))]
 use super::{fetch_sprite_sheet, glyph_range};
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
 use super::{glyph_url, sprite_url};
 use crate::{
     io::source_client::{HttpClient, SourceClient},
@@ -90,7 +89,7 @@ impl PrefetchPlan {
     }
 
     /// Warms raw HTTP/CacheStorage entries once on the map worker without PNG/PBF CPU decoding.
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     async fn execute_warm_raw<HC: HttpClient>(self, client: &SourceClient<HC>) {
         if !self.has_symbols || (self.sources.is_empty() && self.stacks.is_empty()) {
             return;
@@ -110,6 +109,53 @@ impl PrefetchPlan {
         )
         .await;
     }
+
+    /// Pre-fetches and decodes sprites and `0-255` glyph ranges into `client`'s `AssetCache`.
+    #[cfg(target_arch = "wasm32")]
+    async fn execute_decoded_wasm<HC: HttpClient>(self, client: &SourceClient<HC>) {
+        if !self.has_symbols || (self.sources.is_empty() && self.stacks.is_empty()) {
+            return;
+        }
+        let tpl = self.glyph_template.as_deref();
+        let sprite_fut = async {
+            let _ = crate::util::async_join::join_all_concurrent(
+                self.sources
+                    .iter()
+                    .map(|(prefix, url)| fetch_sprite_sheet(client, prefix, url)),
+            )
+            .await;
+            Ok::<(), ()>(())
+        };
+        let glyph_fut = async {
+            if let Some(tpl) = tpl {
+                let _ = crate::util::async_join::join_all_concurrent(
+                    self.stacks
+                        .iter()
+                        .map(|stack| glyph_range(client, Some(tpl), stack, 0)),
+                )
+                .await;
+            }
+            Ok::<(), ()>(())
+        };
+        let _ = crate::util::async_join::try_join2(sprite_fut, glyph_fut).await;
+    }
+}
+
+/// Pre-fetches and decodes `HTTPS` sprites and `0-255` glyph ranges into a tile worker's cache.
+pub fn spawn_worker_symbol_prefetch<HC: HttpClient + 'static>(
+    client: SourceClient<HC>,
+    style: &Style,
+) {
+    let plan = PrefetchPlan::from_style(style);
+    if !plan.has_symbols || (plan.sources.is_empty() && plan.stacks.is_empty()) {
+        return;
+    }
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen_futures::spawn_local(async move {
+        plan.execute_decoded_wasm(&client).await;
+    });
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = (client, plan);
 }
 
 /// Fires `HTTPS` sprite and `0-255` glyph prefetch in the background without blocking map
@@ -119,7 +165,11 @@ pub(crate) fn spawn_style_symbol_prefetch<HC: HttpClient>(client: SourceClient<H
     if !plan.has_symbols || (plan.sources.is_empty() && plan.stacks.is_empty()) {
         return;
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+    wasm_bindgen_futures::spawn_local(async move {
+        plan.execute_decoded_wasm(&client).await;
+    });
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     wasm_bindgen_futures::spawn_local(async move {
         plan.execute_warm_raw(&client).await;
     });

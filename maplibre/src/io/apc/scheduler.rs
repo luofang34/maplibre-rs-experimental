@@ -27,6 +27,7 @@ const MAX_ADMITTED_ATTEMPTS_PER_BATCH: usize = 16;
 
 #[cfg(target_arch = "wasm32")]
 fn is_intermediate_vector_layer(message: &Message) -> bool {
+    use crate::vector::transferables::TileTessellated as _;
     matches!(
         message
             .tag()
@@ -38,7 +39,10 @@ fn is_intermediate_vector_layer(message: &Message) -> bool {
                 | crate::vector::transferables::VectorMessageTag::SymbolLayerTessellated
                 | crate::vector::transferables::VectorMessageTag::LayerIndexed
         )
-    )
+    ) || message.has_tag(crate::sdf::provided::ProvidedImagesReport::message_tag())
+        || message
+            .downcast_ref::<crate::vector::transferables::DefaultTileTessellated>()
+            .is_some_and(|tile| !tile.pending_symbols())
 }
 
 pub(crate) type ArrivalWaker = Arc<dyn Fn() + Send + Sync>;
@@ -128,6 +132,9 @@ pub struct SchedulerAsyncProcedureCall<K: OffscreenKernel, S: Scheduler> {
     queued: RefCell<VecDeque<Message>>,
     /// Whether `receive` may admit new messages from `channel` during the current frame.
     batch_open: Cell<bool>,
+    /// When `true` (initial boot), `receive` drains all ready worker results without batch caps.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    boot_unthrottled: Cell<bool>,
     scheduler: S,
     phantom_k: PhantomData<K>,
     offscreen_kernel_config: OffscreenKernelConfig,
@@ -144,6 +151,7 @@ impl<K: OffscreenKernel, S: Scheduler> SchedulerAsyncProcedureCall<K, S> {
             buffer: RefCell::new(Vec::new()),
             queued: RefCell::new(VecDeque::new()),
             batch_open: Cell::new(true),
+            boot_unthrottled: Cell::new(true),
             phantom_k: PhantomData,
             scheduler,
             offscreen_kernel_config,
@@ -172,6 +180,24 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
 
         #[cfg(target_arch = "wasm32")]
         {
+            if self.boot_unthrottled.get() {
+                let mut queued = self.queued.borrow_mut();
+                while let Some(message) = queued.pop_front() {
+                    if filter(&message) {
+                        ret.push(message);
+                    } else {
+                        buffer.push(message);
+                    }
+                }
+                while let Ok(message) = self.channel.1.try_recv() {
+                    if filter(&message) {
+                        ret.push(message);
+                    } else {
+                        buffer.push(message);
+                    }
+                }
+                return ret.into_iter();
+            }
             let mut queued = self.queued.borrow_mut();
             while let Ok(message) = self.channel.1.try_recv() {
                 queued.push_back(message);
@@ -250,6 +276,7 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
         let (abort, registration) = AbortHandle::new_pair();
         self.running().insert(attempt, abort);
         let running = self.running.clone();
+        let finish_waker = waker.clone();
 
         let scheduled = self.scheduler.schedule(move || async move {
             tracing::debug!(thread = ?std::thread::current().name(), "processing worker call");
@@ -272,7 +299,16 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
                 }
                 Err(Aborted) => tracing::debug!(attempt, "cancelled worker call stopped"),
             }
-            crate::platform::lock_unpoisoned(&running).remove(&attempt);
+            let remaining = {
+                let mut map = crate::platform::lock_unpoisoned(&running);
+                map.remove(&attempt);
+                map.len()
+            };
+            if remaining == 0 {
+                if let Some(wake) = finish_waker {
+                    wake();
+                }
+            }
         });
         if scheduled.is_err() {
             // A rejected factory never runs, so nothing else removes its entry.
@@ -283,6 +319,13 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
 
     fn has_arrivals(&self) -> bool {
         self.batch_open.set(true);
+        if self
+            .buffer
+            .try_borrow()
+            .is_ok_and(|buffer| !buffer.is_empty())
+        {
+            return true;
+        }
         let mut queued = self.queued.borrow_mut();
         if !queued.is_empty() {
             return true;
@@ -348,5 +391,13 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
         self.scheduler.set_main_thread_waker(wake.clone());
         let wrapped = self.scheduler.wrap_worker_waker(wake);
         *crate::platform::lock_unpoisoned(&self.waker) = Some(wrapped);
+    }
+
+    fn in_flight_calls(&self) -> usize {
+        self.running.try_lock().map_or(1, |running| running.len())
+    }
+
+    fn set_boot_unthrottled(&self, unthrottled: bool) {
+        self.boot_unthrottled.set(unthrottled);
     }
 }

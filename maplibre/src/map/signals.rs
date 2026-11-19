@@ -19,6 +19,17 @@ where
         }
     }
 
+    /// Whether viewport tile or symbol image loads are still in progress.
+    pub fn is_loading(&self) -> bool {
+        match &self.map_context {
+            CurrentMapContext::Ready(context) => {
+                let reasons = context.redraw_reasons();
+                reasons.loading || reasons.awaiting_images
+            }
+            CurrentMapContext::Pending(_) => true,
+        }
+    }
+
     /// Whether the map has immediately actionable frame work without spinning while worker HTTP
     /// requests are merely in flight on the wire.
     pub fn has_ready_work(&self) -> bool {

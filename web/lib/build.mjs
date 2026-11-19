@@ -71,7 +71,8 @@ let baseConfig = {
         WEBGL: `${webgl}`,
         MULTITHREADED: `${multithreaded}`,
         ARENA_TELEMETRY: `${arenaTelemetry}`,
-        MT_INITIAL_MEMORY_PAGES: "32"
+        MT_INITIAL_MEMORY_PAGES: "32",
+        MT_MAX_MEMORY_PAGES: "16384",
     },
 }
 
@@ -220,12 +221,13 @@ const wasmPack = () => {
     }
 
     if (!multithreaded) {
+        let workerProfile = release ? "wasm-worker-release" : profile;
         let workerCargo = spawnTool('cargo', [
             "--config", singlethreaded_config,
             "build",
             "-p", "web-tile-worker", "--lib",
             "--target", "wasm32-unknown-unknown",
-            "--profile", profile,
+            "--profile", workerProfile,
             ...(release
                 ? ["-Z", "build-std=std,panic_abort", "-Z", "build-std-features=optimize_for_size"]
                 : []),
@@ -235,7 +237,7 @@ const wasmPack = () => {
         }
 
         let workerBindgen = spawnTool('wasm-bindgen', [
-            `${getProjectDirectory()}/target/wasm32-unknown-unknown/${profile}/web_tile_worker.wasm`,
+            `${getProjectDirectory()}/target/wasm32-unknown-unknown/${workerProfile}/web_tile_worker.wasm`,
             "--out-name", "maplibre_tile_worker",
             "--out-dir", outDirectory,
             "--typescript",
@@ -270,9 +272,14 @@ const wasmPack = () => {
 
     if (multithreaded) {
         const mainJs = readFileSync(`${outDirectory}/maplibre.js`, 'utf8');
-        const memMatch = mainJs.match(/new WebAssembly\.Memory\(\{\s*initial:\s*(\d+)/);
+        const memMatch = mainJs.match(
+            /new WebAssembly\.Memory\(\{\s*initial:\s*(\d+)(?:\s*,\s*maximum:\s*(\d+))?/,
+        );
         if (memMatch) {
             baseConfig.define.MT_INITIAL_MEMORY_PAGES = memMatch[1];
+            if (memMatch[2]) {
+                baseConfig.define.MT_MAX_MEMORY_PAGES = memMatch[2];
+            }
         }
     }
 
@@ -289,12 +296,12 @@ const wasmPack = () => {
 
     if (release) {
         console.log("Running wasm-opt")
-        const optArgs = (inputPath, tmpPath) => [
+        const optArgs = (inputPath, tmpPath, optLevel = "-Oz") => [
             "exec",
             "wasm-opt", "--",
             inputPath,
             "-o", tmpPath,
-            "-Oz",
+            optLevel,
             "--converge",
             "--one-caller-inline-max-function-size=20",
             "--strip-debug",
@@ -318,7 +325,7 @@ const wasmPack = () => {
             const tmpWorkerWasm = `${outDirectory}/maplibre_tile_worker_bg.wasm.${process.pid}.tmp`;
             let workerOpt = spawnTool(
                 'npm',
-                optArgs(`${outDirectory}/maplibre_tile_worker_bg.wasm`, tmpWorkerWasm),
+                optArgs(`${outDirectory}/maplibre_tile_worker_bg.wasm`, tmpWorkerWasm, "-O2"),
             );
             if (workerOpt.status !== 0) {
                 rmSync(tmpWorkerWasm, {force: true});

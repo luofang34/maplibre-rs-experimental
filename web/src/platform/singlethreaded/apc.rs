@@ -62,6 +62,7 @@ pub struct PassingAsyncProcedureCall {
 
     buffer: RefCell<Vec<QueuedMessage>>,
     batch_open: Cell<bool>,
+    boot_unthrottled: Cell<bool>,
 
     received: Rc<ReceivedType>,
 
@@ -89,6 +90,7 @@ impl PassingAsyncProcedureCall {
             listeners,
             buffer: RefCell::new(Vec::default()),
             batch_open: Cell::new(true),
+            boot_unthrottled: Cell::new(true),
             received,
             assignments: RefCell::default(),
             styles: RefCell::default(),
@@ -208,6 +210,16 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
                 buffer.push(QueuedMessage::Decoded(message));
             }
         }
+        if self.boot_unthrottled.get() {
+            for item in received.queued.drain(..) {
+                if item.matches(&mut filter) {
+                    ret.push(item);
+                } else {
+                    buffer.push(item);
+                }
+            }
+            return PassingReceiveIter::new(ret);
+        }
         if !self.batch_open.get() {
             return PassingReceiveIter::new(ret);
         }
@@ -305,6 +317,13 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
 
     fn has_arrivals(&self) -> bool {
         self.batch_open.set(true);
+        if self
+            .buffer
+            .try_borrow()
+            .is_ok_and(|buffer| !buffer.is_empty())
+        {
+            return true;
+        }
         self.received
             .try_borrow()
             .is_ok_and(|received| !received.messages.is_empty() || !received.queued.is_empty())
@@ -329,6 +348,22 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
         }) {
             tracing::warn!(%error, "pre-warming worker style failed");
         }
+    }
+
+    fn in_flight_calls(&self) -> usize {
+        let Ok(mut assignments) = self.assignments.try_borrow_mut() else {
+            return 1;
+        };
+        if let Ok(mut received) = self.received.try_borrow_mut() {
+            for attempt in received.finished.drain(..) {
+                assignments.finished(attempt);
+            }
+        }
+        assignments.len()
+    }
+
+    fn set_boot_unthrottled(&self, unthrottled: bool) {
+        self.boot_unthrottled.set(unthrottled);
     }
 }
 
