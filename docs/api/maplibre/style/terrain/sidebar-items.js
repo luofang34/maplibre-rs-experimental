@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["default_exaggeration"],"struct":["TerrainSpecification"]};
+window.SIDEBAR_ITEMS = {"struct":["TerrainSpecification"]};

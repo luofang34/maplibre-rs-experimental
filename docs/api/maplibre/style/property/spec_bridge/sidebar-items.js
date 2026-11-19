@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["lookup_legacy_property_spec"]};
+window.SIDEBAR_ITEMS = {"enum":["RawParsedProperty"],"fn":["lookup_legacy_property_spec","parse_dynamic_property","unsupported_type_mismatch"]};

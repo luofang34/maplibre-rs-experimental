@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["create_shader_module_from_wgsl","create_shader_module_uncached"]};

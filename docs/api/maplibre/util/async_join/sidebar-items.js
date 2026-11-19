@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["join_all_concurrent","poll_all_dyn","try_join2","try_join_all_concurrent"],"trait":["MaybeSend"],"type":["BoxFut"]};

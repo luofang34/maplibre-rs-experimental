@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["ProcessGeoJsonError"],"fn":["feature_passes","filter_geojson","process_geojson_features"],"mod":["cluster","geometry_property","index","query","query_index","store","tessellator","update"],"struct":["GeoJsonTileRequest","ProjectingTessellator"]};
+window.SIDEBAR_ITEMS = {"enum":["ProcessGeoJsonError"],"fn":["feature_passes","filter_geojson","process_geojson_features"],"mod":["cluster","geometry_property","index","query","query_index","store","tessellator","update","value_reader"],"struct":["GeoJsonTileRequest","ProjectingTessellator"]};

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::path::PathBuf;
 
 use maplibre::{
     projection::{ProjectionSpecification, ProjectionType},
@@ -19,7 +19,7 @@ pub fn style() -> Style {
         projection: Some(ProjectionSpecification {
             projection_type: ProjectionType::Globe,
         }),
-        sources: HashMap::from([(
+        sources: [(
             "satellite".to_string(),
             Source::Raster(VectorSource {
                 tiles: Some(vec![
@@ -28,7 +28,9 @@ pub fn style() -> Style {
                 ]),
                 ..Default::default()
             }),
-        )]),
+        )]
+        .into_iter()
+        .collect(),
         layers: vec![StyleLayer {
             index: 1,
             id: "Satellite".to_string(),

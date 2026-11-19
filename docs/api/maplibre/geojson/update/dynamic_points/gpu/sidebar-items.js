@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["ensure_seeded_for_style","evaluate_circle_metadata_into","fallback_dynamic_circle_from_vertices","populate_dynamic_circle_bucket","record_uploaded_dynamic_circle","refresh_dynamic_point_layers"]};
+window.SIDEBAR_ITEMS = {"fn":["ensure_seeded_for_style","populate_dynamic_circle_bucket","record_uploaded_dynamic_circle","refresh_dynamic_point_layers"],"mod":["eval"]};

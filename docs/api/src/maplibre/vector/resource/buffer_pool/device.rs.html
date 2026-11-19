@@ -46,98 +46,106 @@
 <a href=#46 id=46 data-nosnippet>46</a>        });
 <a href=#47 id=47 data-nosnippet>47</a>        pool.slab_destroyer = <span class="prelude-val">Some</span>(page::SlabDestroyer(|buf| buf.destroy()));
 <a href=#48 id=48 data-nosnippet>48</a>        pool.enable_u16_indices = size_of::&lt;I&gt;() == size_of::&lt;u32&gt;();
-<a href=#49 id=49 data-nosnippet>49</a>        pool.zero_initialized_slabs = <span class="bool-val">true</span>;
-<a href=#50 id=50 data-nosnippet>50</a>        pool
-<a href=#51 id=51 data-nosnippet>51</a>    }
-<a href=#52 id=52 data-nosnippet>52</a>
-<a href=#53 id=53 data-nosnippet>53</a>    <span class="doccomment">/// Total GPU buffer bytes currently physically allocated on the device across all live slabs.
-<a href=#54 id=54 data-nosnippet>54</a>    </span><span class="kw">pub fn </span>device_buffer_bytes(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; wgpu::BufferAddress {
-<a href=#55 id=55 data-nosnippet>55</a>        <span class="kw">let </span>v_bytes: u64 = <span class="self">self
-<a href=#56 id=56 data-nosnippet>56</a>            </span>.vertex_slabs
-<a href=#57 id=57 data-nosnippet>57</a>            .iter()
-<a href=#58 id=58 data-nosnippet>58</a>            .flatten()
-<a href=#59 id=59 data-nosnippet>59</a>            .map(|slab| {
-<a href=#60 id=60 data-nosnippet>60</a>                slab.vertices.inner.size() + slab.paired_fm.as_ref().map_or(<span class="number">0</span>, |fm| fm.inner.size())
-<a href=#61 id=61 data-nosnippet>61</a>            })
-<a href=#62 id=62 data-nosnippet>62</a>            .sum();
-<a href=#63 id=63 data-nosnippet>63</a>        <span class="kw">let </span>other_bytes: u64 = <span class="self">self
-<a href=#64 id=64 data-nosnippet>64</a>            </span>.index_u16_slabs
+<a href=#49 id=49 data-nosnippet>49</a>        pool.enable_u16_chunks = <span class="bool-val">false</span>;
+<a href=#50 id=50 data-nosnippet>50</a>        pool.zero_initialized_slabs = <span class="bool-val">true</span>;
+<a href=#51 id=51 data-nosnippet>51</a>        pool
+<a href=#52 id=52 data-nosnippet>52</a>    }
+<a href=#53 id=53 data-nosnippet>53</a>
+<a href=#54 id=54 data-nosnippet>54</a>    <span class="doccomment">/// Enables or disables `u16` base-vertex index chunks (when `DownlevelFlags::BASE_VERTEX`
+<a href=#55 id=55 data-nosnippet>55</a>    /// and `u16` indices are both supported).
+<a href=#56 id=56 data-nosnippet>56</a>    </span><span class="kw">pub fn </span>with_u16_chunks(<span class="kw-2">mut </span><span class="self">self</span>, enabled: bool) -&gt; <span class="self">Self </span>{
+<a href=#57 id=57 data-nosnippet>57</a>        <span class="self">self</span>.enable_u16_chunks = enabled &amp;&amp; <span class="self">self</span>.enable_u16_indices;
+<a href=#58 id=58 data-nosnippet>58</a>        <span class="self">self
+<a href=#59 id=59 data-nosnippet>59</a>    </span>}
+<a href=#60 id=60 data-nosnippet>60</a>
+<a href=#61 id=61 data-nosnippet>61</a>    <span class="doccomment">/// Total GPU buffer bytes currently physically allocated on the device across all live slabs.
+<a href=#62 id=62 data-nosnippet>62</a>    </span><span class="kw">pub fn </span>device_buffer_bytes(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; wgpu::BufferAddress {
+<a href=#63 id=63 data-nosnippet>63</a>        <span class="kw">let </span>v_bytes: u64 = <span class="self">self
+<a href=#64 id=64 data-nosnippet>64</a>            </span>.vertex_slabs
 <a href=#65 id=65 data-nosnippet>65</a>            .iter()
 <a href=#66 id=66 data-nosnippet>66</a>            .flatten()
-<a href=#67 id=67 data-nosnippet>67</a>            .chain(<span class="self">self</span>.index_native_slabs.iter().flatten())
-<a href=#68 id=68 data-nosnippet>68</a>            .chain(<span class="self">self</span>.layer_slabs.iter().flatten())
-<a href=#69 id=69 data-nosnippet>69</a>            .chain(<span class="self">self</span>.feature_slabs.iter().flatten())
-<a href=#70 id=70 data-nosnippet>70</a>            .map(|slab| slab.buffer.inner.size())
-<a href=#71 id=71 data-nosnippet>71</a>            .sum();
-<a href=#72 id=72 data-nosnippet>72</a>        v_bytes + other_bytes
-<a href=#73 id=73 data-nosnippet>73</a>    }
-<a href=#74 id=74 data-nosnippet>74</a>
-<a href=#75 id=75 data-nosnippet>75</a>    <span class="doccomment">/// Binds a layer's indices (`u16` or `u32`), vertices, and feature metadata (at `feature_slot`)
-<a href=#76 id=76 data-nosnippet>76</a>    /// from their decoupled slabs and returns `(first_index, base_vertex)`.
-<a href=#77 id=77 data-nosnippet>77</a>    </span><span class="kw">pub fn </span>bind_layer&lt;<span class="lifetime">'w</span>&gt;(
-<a href=#78 id=78 data-nosnippet>78</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#79 id=79 data-nosnippet>79</a>        pass: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::render::tracked_pass::TrackedRenderPass&lt;<span class="lifetime">'w</span>&gt;,
-<a href=#80 id=80 data-nosnippet>80</a>        entry: <span class="kw-2">&amp;</span>IndexEntry,
-<a href=#81 id=81 data-nosnippet>81</a>        (feature_slot, whole): (u32, bool),
-<a href=#82 id=82 data-nosnippet>82</a>    ) -&gt; (u32, i32) {
-<a href=#83 id=83 data-nosnippet>83</a>        <span class="kw">let </span>format = <span class="kw">if </span>entry.index_u16 {
-<a href=#84 id=84 data-nosnippet>84</a>            wgpu::IndexFormat::Uint16
-<a href=#85 id=85 data-nosnippet>85</a>        } <span class="kw">else </span>{
-<a href=#86 id=86 data-nosnippet>86</a>            <span class="kw">crate</span>::render::INDEX_FORMAT
-<a href=#87 id=87 data-nosnippet>87</a>        };
-<a href=#88 id=88 data-nosnippet>88</a>        <span class="kw">let </span>idx_buf = <span class="self">self</span>.indices_for(entry);
-<a href=#89 id=89 data-nosnippet>89</a>        <span class="kw">let </span>v_slab = <span class="self">self</span>.vertex_slab_of(entry.vertex_page);
-<a href=#90 id=90 data-nosnippet>90</a>
-<a href=#91 id=91 data-nosnippet>91</a>        <span class="kw">if </span>entry.is_uniform_feature_metadata() {
-<a href=#92 id=92 data-nosnippet>92</a>            <span class="kw">let </span>fm_range = entry.feature_metadata_buffer_range();
-<a href=#93 id=93 data-nosnippet>93</a>            <span class="kw">if </span>!fm_range.is_empty() {
-<a href=#94 id=94 data-nosnippet>94</a>                pass.set_vertex_buffer(
-<a href=#95 id=95 data-nosnippet>95</a>                    feature_slot,
-<a href=#96 id=96 data-nosnippet>96</a>                    <span class="self">self</span>.feature_metadata_for(entry).slice(fm_range),
-<a href=#97 id=97 data-nosnippet>97</a>                );
-<a href=#98 id=98 data-nosnippet>98</a>            }
-<a href=#99 id=99 data-nosnippet>99</a>            <span class="kw">if </span>whole {
-<a href=#100 id=100 data-nosnippet>100</a>                pass.set_index_buffer(idx_buf.slice(..), format);
-<a href=#101 id=101 data-nosnippet>101</a>                pass.set_vertex_buffer(<span class="number">0</span>, v_slab.vertices.inner.slice(..));
-<a href=#102 id=102 data-nosnippet>102</a>                (entry.whole_buffer_indices().start, entry.base_vertex())
-<a href=#103 id=103 data-nosnippet>103</a>            } <span class="kw">else </span>{
-<a href=#104 id=104 data-nosnippet>104</a>                pass.set_index_buffer(idx_buf.slice(entry.indices_buffer_range()), format);
-<a href=#105 id=105 data-nosnippet>105</a>                pass.set_vertex_buffer(
-<a href=#106 id=106 data-nosnippet>106</a>                    <span class="number">0</span>,
-<a href=#107 id=107 data-nosnippet>107</a>                    v_slab.vertices.inner.slice(entry.vertices_buffer_range()),
-<a href=#108 id=108 data-nosnippet>108</a>                );
-<a href=#109 id=109 data-nosnippet>109</a>                (<span class="number">0</span>, <span class="number">0</span>)
-<a href=#110 id=110 data-nosnippet>110</a>            }
-<a href=#111 id=111 data-nosnippet>111</a>        } <span class="kw">else if </span>whole &amp;&amp; entry.has_paired_fm() &amp;&amp; !entry.is_dual_feature_metadata() {
-<a href=#112 id=112 data-nosnippet>112</a>            pass.set_index_buffer(idx_buf.slice(..), format);
-<a href=#113 id=113 data-nosnippet>113</a>            pass.set_vertex_buffer(<span class="number">0</span>, v_slab.vertices.inner.slice(..));
-<a href=#114 id=114 data-nosnippet>114</a>            pass.set_vertex_buffer(feature_slot, <span class="self">self</span>.feature_metadata_for(entry).slice(..));
-<a href=#115 id=115 data-nosnippet>115</a>            (entry.whole_buffer_indices().start, entry.base_vertex())
-<a href=#116 id=116 data-nosnippet>116</a>        } <span class="kw">else if </span>whole {
-<a href=#117 id=117 data-nosnippet>117</a>            pass.set_index_buffer(idx_buf.slice(..), format);
-<a href=#118 id=118 data-nosnippet>118</a>            pass.set_vertex_buffer(
-<a href=#119 id=119 data-nosnippet>119</a>                <span class="number">0</span>,
-<a href=#120 id=120 data-nosnippet>120</a>                v_slab.vertices.inner.slice(entry.vertices_buffer_range()),
-<a href=#121 id=121 data-nosnippet>121</a>            );
-<a href=#122 id=122 data-nosnippet>122</a>            pass.set_vertex_buffer(
-<a href=#123 id=123 data-nosnippet>123</a>                feature_slot,
-<a href=#124 id=124 data-nosnippet>124</a>                <span class="self">self</span>.feature_metadata_for(entry)
-<a href=#125 id=125 data-nosnippet>125</a>                    .slice(entry.buffer_feature_metadata.start..),
-<a href=#126 id=126 data-nosnippet>126</a>            );
-<a href=#127 id=127 data-nosnippet>127</a>            (entry.whole_buffer_indices().start, <span class="number">0</span>)
-<a href=#128 id=128 data-nosnippet>128</a>        } <span class="kw">else </span>{
-<a href=#129 id=129 data-nosnippet>129</a>            pass.set_index_buffer(idx_buf.slice(entry.indices_buffer_range()), format);
+<a href=#67 id=67 data-nosnippet>67</a>            .map(|slab| {
+<a href=#68 id=68 data-nosnippet>68</a>                slab.vertices.inner.size() + slab.paired_fm.as_ref().map_or(<span class="number">0</span>, |fm| fm.inner.size())
+<a href=#69 id=69 data-nosnippet>69</a>            })
+<a href=#70 id=70 data-nosnippet>70</a>            .sum();
+<a href=#71 id=71 data-nosnippet>71</a>        <span class="kw">let </span>other_bytes: u64 = <span class="self">self
+<a href=#72 id=72 data-nosnippet>72</a>            </span>.index_u16_slabs
+<a href=#73 id=73 data-nosnippet>73</a>            .iter()
+<a href=#74 id=74 data-nosnippet>74</a>            .flatten()
+<a href=#75 id=75 data-nosnippet>75</a>            .chain(<span class="self">self</span>.index_native_slabs.iter().flatten())
+<a href=#76 id=76 data-nosnippet>76</a>            .chain(<span class="self">self</span>.layer_slabs.iter().flatten())
+<a href=#77 id=77 data-nosnippet>77</a>            .chain(<span class="self">self</span>.feature_slabs.iter().flatten())
+<a href=#78 id=78 data-nosnippet>78</a>            .map(|slab| slab.buffer.inner.size())
+<a href=#79 id=79 data-nosnippet>79</a>            .sum();
+<a href=#80 id=80 data-nosnippet>80</a>        v_bytes + other_bytes
+<a href=#81 id=81 data-nosnippet>81</a>    }
+<a href=#82 id=82 data-nosnippet>82</a>
+<a href=#83 id=83 data-nosnippet>83</a>    <span class="doccomment">/// Binds a layer's indices (`u16` or `u32`), vertices, and feature metadata (at `feature_slot`)
+<a href=#84 id=84 data-nosnippet>84</a>    /// from their decoupled slabs and returns `(first_index, base_vertex)`.
+<a href=#85 id=85 data-nosnippet>85</a>    </span><span class="kw">pub fn </span>bind_layer&lt;<span class="lifetime">'w</span>&gt;(
+<a href=#86 id=86 data-nosnippet>86</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#87 id=87 data-nosnippet>87</a>        pass: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::render::tracked_pass::TrackedRenderPass&lt;<span class="lifetime">'w</span>&gt;,
+<a href=#88 id=88 data-nosnippet>88</a>        entry: <span class="kw-2">&amp;</span>IndexEntry,
+<a href=#89 id=89 data-nosnippet>89</a>        (feature_slot, whole): (u32, bool),
+<a href=#90 id=90 data-nosnippet>90</a>    ) -&gt; (u32, i32) {
+<a href=#91 id=91 data-nosnippet>91</a>        <span class="kw">let </span>format = <span class="kw">if </span>entry.index_u16 {
+<a href=#92 id=92 data-nosnippet>92</a>            wgpu::IndexFormat::Uint16
+<a href=#93 id=93 data-nosnippet>93</a>        } <span class="kw">else </span>{
+<a href=#94 id=94 data-nosnippet>94</a>            <span class="kw">crate</span>::render::INDEX_FORMAT
+<a href=#95 id=95 data-nosnippet>95</a>        };
+<a href=#96 id=96 data-nosnippet>96</a>        <span class="kw">let </span>idx_buf = <span class="self">self</span>.indices_for(entry);
+<a href=#97 id=97 data-nosnippet>97</a>        <span class="kw">let </span>v_slab = <span class="self">self</span>.vertex_slab_of(entry.vertex_page);
+<a href=#98 id=98 data-nosnippet>98</a>
+<a href=#99 id=99 data-nosnippet>99</a>        <span class="kw">if </span>entry.is_uniform_feature_metadata() {
+<a href=#100 id=100 data-nosnippet>100</a>            <span class="kw">let </span>fm_range = entry.feature_metadata_buffer_range();
+<a href=#101 id=101 data-nosnippet>101</a>            <span class="kw">if </span>!fm_range.is_empty() {
+<a href=#102 id=102 data-nosnippet>102</a>                pass.set_vertex_buffer(
+<a href=#103 id=103 data-nosnippet>103</a>                    feature_slot,
+<a href=#104 id=104 data-nosnippet>104</a>                    <span class="self">self</span>.feature_metadata_for(entry).slice(fm_range),
+<a href=#105 id=105 data-nosnippet>105</a>                );
+<a href=#106 id=106 data-nosnippet>106</a>            }
+<a href=#107 id=107 data-nosnippet>107</a>            <span class="kw">if </span>whole {
+<a href=#108 id=108 data-nosnippet>108</a>                pass.set_index_buffer(idx_buf.slice(..), format);
+<a href=#109 id=109 data-nosnippet>109</a>                pass.set_vertex_buffer(<span class="number">0</span>, v_slab.vertices.inner.slice(..));
+<a href=#110 id=110 data-nosnippet>110</a>                (entry.whole_buffer_indices().start, entry.base_vertex())
+<a href=#111 id=111 data-nosnippet>111</a>            } <span class="kw">else </span>{
+<a href=#112 id=112 data-nosnippet>112</a>                pass.set_index_buffer(idx_buf.slice(entry.indices_buffer_range()), format);
+<a href=#113 id=113 data-nosnippet>113</a>                pass.set_vertex_buffer(
+<a href=#114 id=114 data-nosnippet>114</a>                    <span class="number">0</span>,
+<a href=#115 id=115 data-nosnippet>115</a>                    v_slab.vertices.inner.slice(entry.vertices_buffer_range()),
+<a href=#116 id=116 data-nosnippet>116</a>                );
+<a href=#117 id=117 data-nosnippet>117</a>                (<span class="number">0</span>, <span class="number">0</span>)
+<a href=#118 id=118 data-nosnippet>118</a>            }
+<a href=#119 id=119 data-nosnippet>119</a>        } <span class="kw">else if </span>whole &amp;&amp; entry.has_paired_fm() &amp;&amp; !entry.is_dual_feature_metadata() {
+<a href=#120 id=120 data-nosnippet>120</a>            pass.set_index_buffer(idx_buf.slice(..), format);
+<a href=#121 id=121 data-nosnippet>121</a>            pass.set_vertex_buffer(<span class="number">0</span>, v_slab.vertices.inner.slice(..));
+<a href=#122 id=122 data-nosnippet>122</a>            pass.set_vertex_buffer(feature_slot, <span class="self">self</span>.feature_metadata_for(entry).slice(..));
+<a href=#123 id=123 data-nosnippet>123</a>            (entry.whole_buffer_indices().start, entry.base_vertex())
+<a href=#124 id=124 data-nosnippet>124</a>        } <span class="kw">else if </span>whole {
+<a href=#125 id=125 data-nosnippet>125</a>            pass.set_index_buffer(idx_buf.slice(..), format);
+<a href=#126 id=126 data-nosnippet>126</a>            pass.set_vertex_buffer(
+<a href=#127 id=127 data-nosnippet>127</a>                <span class="number">0</span>,
+<a href=#128 id=128 data-nosnippet>128</a>                v_slab.vertices.inner.slice(entry.vertices_buffer_range()),
+<a href=#129 id=129 data-nosnippet>129</a>            );
 <a href=#130 id=130 data-nosnippet>130</a>            pass.set_vertex_buffer(
-<a href=#131 id=131 data-nosnippet>131</a>                <span class="number">0</span>,
-<a href=#132 id=132 data-nosnippet>132</a>                v_slab.vertices.inner.slice(entry.vertices_buffer_range()),
-<a href=#133 id=133 data-nosnippet>133</a>            );
-<a href=#134 id=134 data-nosnippet>134</a>            pass.set_vertex_buffer(
-<a href=#135 id=135 data-nosnippet>135</a>                feature_slot,
-<a href=#136 id=136 data-nosnippet>136</a>                <span class="self">self</span>.feature_metadata_for(entry)
-<a href=#137 id=137 data-nosnippet>137</a>                    .slice(entry.buffer_feature_metadata.start..),
-<a href=#138 id=138 data-nosnippet>138</a>            );
-<a href=#139 id=139 data-nosnippet>139</a>            (<span class="number">0</span>, <span class="number">0</span>)
-<a href=#140 id=140 data-nosnippet>140</a>        }
-<a href=#141 id=141 data-nosnippet>141</a>    }
-<a href=#142 id=142 data-nosnippet>142</a>}
+<a href=#131 id=131 data-nosnippet>131</a>                feature_slot,
+<a href=#132 id=132 data-nosnippet>132</a>                <span class="self">self</span>.feature_metadata_for(entry)
+<a href=#133 id=133 data-nosnippet>133</a>                    .slice(entry.buffer_feature_metadata.start..),
+<a href=#134 id=134 data-nosnippet>134</a>            );
+<a href=#135 id=135 data-nosnippet>135</a>            (entry.whole_buffer_indices().start, <span class="number">0</span>)
+<a href=#136 id=136 data-nosnippet>136</a>        } <span class="kw">else </span>{
+<a href=#137 id=137 data-nosnippet>137</a>            pass.set_index_buffer(idx_buf.slice(entry.indices_buffer_range()), format);
+<a href=#138 id=138 data-nosnippet>138</a>            pass.set_vertex_buffer(
+<a href=#139 id=139 data-nosnippet>139</a>                <span class="number">0</span>,
+<a href=#140 id=140 data-nosnippet>140</a>                v_slab.vertices.inner.slice(entry.vertices_buffer_range()),
+<a href=#141 id=141 data-nosnippet>141</a>            );
+<a href=#142 id=142 data-nosnippet>142</a>            pass.set_vertex_buffer(
+<a href=#143 id=143 data-nosnippet>143</a>                feature_slot,
+<a href=#144 id=144 data-nosnippet>144</a>                <span class="self">self</span>.feature_metadata_for(entry)
+<a href=#145 id=145 data-nosnippet>145</a>                    .slice(entry.buffer_feature_metadata.start..),
+<a href=#146 id=146 data-nosnippet>146</a>            );
+<a href=#147 id=147 data-nosnippet>147</a>            (<span class="number">0</span>, <span class="number">0</span>)
+<a href=#148 id=148 data-nosnippet>148</a>        }
+<a href=#149 id=149 data-nosnippet>149</a>    }
+<a href=#150 id=150 data-nosnippet>150</a>}
 </code></pre></div></section></main></body></html>

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["merge_symbol_layout","parse_paint"],"struct":["LayerProperties","PaintWithExtras","StyleLayerDef"]};
+window.SIDEBAR_ITEMS = {"fn":["compute_input_flags","is_gpu_feature_state_paint_key","json_reads_geometry","merge_symbol_layout_ref"],"struct":["LayerProperties"]};

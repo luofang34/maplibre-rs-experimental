@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_U16_CHUNKS"],"fn":["layer_allows_u16_chunks","plan_u16_chunks","write_chunked_u16_indices"],"type":["IndexPlan","U16Chunks"]};

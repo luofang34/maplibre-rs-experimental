@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["compile_input","eval_input","literal_str","stop_color","stop_number"],"struct":["ColorRamp","PropertyInput","ScalarRamp"]};
+window.SIDEBAR_ITEMS = {"constant":["MAX_INLINE_STOPS"],"enum":["RampStops"],"fn":["compile_input","literal_str","stop_color","stop_number"],"struct":["ColorRamp","PropertyInput","ScalarRamp"]};

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["fps_meter","grid","label","math"],"struct":["ChangeObserver","FPSMeter"],"trait":["SignificantlyDifferent"]};
+window.SIDEBAR_ITEMS = {"mod":["async_join","css_color","fps_meter","grid","json","label","math"],"struct":["ChangeObserver","FPSMeter"],"trait":["SignificantlyDifferent"]};

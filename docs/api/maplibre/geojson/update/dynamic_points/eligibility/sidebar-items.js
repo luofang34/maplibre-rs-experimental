@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["json_reads_spatial","layer_supports_dynamic_points","prop_reads_identity","prop_reads_spatial","source_layers_read_identity","source_supports_dynamic_points","uses_dynamic_circle_metadata"]};

@@ -51,14 +51,31 @@
 <a href=#51 id=51 data-nosnippet>51</a>    </span><span class="kw">pub </span>loader: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::io::resource_loader::SharedLoader&gt;,
 <a href=#52 id=52 data-nosnippet>52</a>}
 <a href=#53 id=53 data-nosnippet>53</a>
-<a href=#54 id=54 data-nosnippet>54</a><span class="doccomment">/// Worker-side services, independent of window and GPU ownership.
-<a href=#55 id=55 data-nosnippet>55</a></span><span class="kw">pub trait </span>OffscreenKernel: Send + Sync + <span class="lifetime">'static </span>{
-<a href=#56 id=56 data-nosnippet>56</a>    <span class="doccomment">/// HTTP implementation used by this environment's source loader.
-<a href=#57 id=57 data-nosnippet>57</a>    </span><span class="kw">type </span>HttpClient: HttpClient;
-<a href=#58 id=58 data-nosnippet>58</a>    <span class="doccomment">/// Constructs worker services from the configuration supplied at worker startup.
-<a href=#59 id=59 data-nosnippet>59</a>    </span><span class="kw">fn </span>create(config: OffscreenKernelConfig) -&gt; <span class="self">Self</span>;
-<a href=#60 id=60 data-nosnippet>60</a>
-<a href=#61 id=61 data-nosnippet>61</a>    <span class="doccomment">/// Creates a source loader using this worker's HTTP and cache configuration.
-<a href=#62 id=62 data-nosnippet>62</a>    </span><span class="kw">fn </span>source_client(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; SourceClient&lt;<span class="self">Self</span>::HttpClient&gt;;
-<a href=#63 id=63 data-nosnippet>63</a>}
+<a href=#54 id=54 data-nosnippet>54</a><span class="kw">impl </span>OffscreenKernelConfig {
+<a href=#55 id=55 data-nosnippet>55</a>    <span class="doccomment">/// Decodes serialized worker config bytes without instantiating `serde::Deserialize` glue.
+<a href=#56 id=56 data-nosnippet>56</a>    </span><span class="kw">pub fn </span>from_json_slice(bytes: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, serde_json::Error&gt; {
+<a href=#57 id=57 data-nosnippet>57</a>        <span class="kw">let </span>value: serde_json::Value = serde_json::from_slice(bytes)<span class="question-mark">?</span>;
+<a href=#58 id=58 data-nosnippet>58</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(map) = value.as_object() <span class="kw">else </span>{
+<a href=#59 id=59 data-nosnippet>59</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="kw">crate</span>::util::json::extract::field_err(
+<a href=#60 id=60 data-nosnippet>60</a>                <span class="string">"config"</span>,
+<a href=#61 id=61 data-nosnippet>61</a>                <span class="string">"expected object"</span>,
+<a href=#62 id=62 data-nosnippet>62</a>            ));
+<a href=#63 id=63 data-nosnippet>63</a>        };
+<a href=#64 id=64 data-nosnippet>64</a>        <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
+<a href=#65 id=65 data-nosnippet>65</a>            cache_directory: <span class="kw">crate</span>::util::json::extract::json_opt_string(map, <span class="string">"cache_directory"</span>)<span class="question-mark">?</span>,
+<a href=#66 id=66 data-nosnippet>66</a>            ..<span class="self">Self</span>::default()
+<a href=#67 id=67 data-nosnippet>67</a>        })
+<a href=#68 id=68 data-nosnippet>68</a>    }
+<a href=#69 id=69 data-nosnippet>69</a>}
+<a href=#70 id=70 data-nosnippet>70</a>
+<a href=#71 id=71 data-nosnippet>71</a><span class="doccomment">/// Worker-side services, independent of window and GPU ownership.
+<a href=#72 id=72 data-nosnippet>72</a></span><span class="kw">pub trait </span>OffscreenKernel: Send + Sync + <span class="lifetime">'static </span>{
+<a href=#73 id=73 data-nosnippet>73</a>    <span class="doccomment">/// HTTP implementation used by this environment's source loader.
+<a href=#74 id=74 data-nosnippet>74</a>    </span><span class="kw">type </span>HttpClient: HttpClient;
+<a href=#75 id=75 data-nosnippet>75</a>    <span class="doccomment">/// Constructs worker services from the configuration supplied at worker startup.
+<a href=#76 id=76 data-nosnippet>76</a>    </span><span class="kw">fn </span>create(config: OffscreenKernelConfig) -&gt; <span class="self">Self</span>;
+<a href=#77 id=77 data-nosnippet>77</a>
+<a href=#78 id=78 data-nosnippet>78</a>    <span class="doccomment">/// Creates a source loader using this worker's HTTP and cache configuration.
+<a href=#79 id=79 data-nosnippet>79</a>    </span><span class="kw">fn </span>source_client(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; SourceClient&lt;<span class="self">Self</span>::HttpClient&gt;;
+<a href=#80 id=80 data-nosnippet>80</a>}
 </code></pre></div></section></main></body></html>

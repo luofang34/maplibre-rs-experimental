@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":["ArrSeqAccess","MapEnumAccess","ObjMapAccess","StrEnumAccess","UnitVariantAccess"]};

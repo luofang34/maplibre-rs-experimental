@@ -35,7 +35,7 @@
 <a href=#35 id=35 data-nosnippet>35</a>        <span class="self">Self </span>{
 <a href=#36 id=36 data-nosnippet>36</a>            geo_writer: GeoWriter::new(),
 <a href=#37 id=37 data-nosnippet>37</a>            geometries: Vec::new(),
-<a href=#38 id=38 data-nosnippet>38</a>            properties: FeatureProperties::new(),
+<a href=#38 id=38 data-nosnippet>38</a>            properties: FeatureProperties::default(),
 <a href=#39 id=39 data-nosnippet>39</a>            shared_properties: Vec::new(),
 <a href=#40 id=40 data-nosnippet>40</a>            coordinate_scale: <span class="number">1.0</span>,
 <a href=#41 id=41 data-nosnippet>41</a>            source_layer: Arc::from(<span class="string">""</span>),
@@ -224,7 +224,7 @@
 <a href=#224 id=224 data-nosnippet>224</a>            <span class="self">self</span>.properties
 <a href=#225 id=225 data-nosnippet>225</a>                .insert(name.to_string(), column_value(value));
 <a href=#226 id=226 data-nosnippet>226</a>        }
-<a href=#227 id=227 data-nosnippet>227</a>        <span class="prelude-val">Ok</span>(<span class="bool-val">true</span>)
+<a href=#227 id=227 data-nosnippet>227</a>        <span class="prelude-val">Ok</span>(<span class="bool-val">false</span>)
 <a href=#228 id=228 data-nosnippet>228</a>    }
 <a href=#229 id=229 data-nosnippet>229</a>}
 <a href=#230 id=230 data-nosnippet>230</a>
@@ -264,7 +264,7 @@
 <a href=#264 id=264 data-nosnippet>264</a>        ColumnValue::Float(number) =&gt; Value::Number(f64::from(<span class="kw-2">*</span>number)),
 <a href=#265 id=265 data-nosnippet>265</a>        ColumnValue::Double(number) =&gt; Value::Number(<span class="kw-2">*</span>number),
 <a href=#266 id=266 data-nosnippet>266</a>        <span class="comment">// A GeoJSON property that is an object or an array stays one, as GL JS reports it.
-<a href=#267 id=267 data-nosnippet>267</a>        </span>ColumnValue::Json(json) =&gt; serde_json::from_str(json)
+<a href=#267 id=267 data-nosnippet>267</a>        </span>ColumnValue::Json(json) =&gt; serde_json::from_slice(json.as_bytes())
 <a href=#268 id=268 data-nosnippet>268</a>            .map(|parsed: serde_json::Value| Value::from_json(<span class="kw-2">&amp;</span>parsed))
 <a href=#269 id=269 data-nosnippet>269</a>            .unwrap_or_else(|<span class="kw">_</span>| Value::String((<span class="kw-2">*</span>json).to_owned())),
 <a href=#270 id=270 data-nosnippet>270</a>        other =&gt; Value::String(other.to_string()),

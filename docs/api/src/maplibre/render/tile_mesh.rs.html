@@ -132,160 +132,166 @@
 <a href=#132 id=132 data-nosnippet>132</a>    /// Flat Mercator frames (`!globe_active`) reuse a minimal `1x1` quad (`granularity = 1`, no
 <a href=#133 id=133 data-nosnippet>133</a>    /// pole caps) instead of uploading dense `128x128` globe grids.
 <a href=#134 id=134 data-nosnippet>134</a>    </span><span class="kw">pub fn </span>set_globe_active(<span class="kw-2">&amp;mut </span><span class="self">self</span>, globe_active: bool) {
-<a href=#135 id=135 data-nosnippet>135</a>        <span class="self">self</span>.globe_active = globe_active;
-<a href=#136 id=136 data-nosnippet>136</a>    }
-<a href=#137 id=137 data-nosnippet>137</a>
-<a href=#138 id=138 data-nosnippet>138</a>    <span class="doccomment">/// Returns a reference to the reusable scratch buffer.
-<a href=#139 id=139 data-nosnippet>139</a>    </span><span class="kw">pub fn </span>scratch(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>TileMeshScratch {
-<a href=#140 id=140 data-nosnippet>140</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.scratch
-<a href=#141 id=141 data-nosnippet>141</a>    }
-<a href=#142 id=142 data-nosnippet>142</a>
-<a href=#143 id=143 data-nosnippet>143</a>    <span class="kw">fn </span>key_for(
-<a href=#144 id=144 data-nosnippet>144</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#145 id=145 data-nosnippet>145</a>        coords: WorldTileCoords,
-<a href=#146 id=146 data-nosnippet>146</a>        usage: TileMeshUsage,
-<a href=#147 id=147 data-nosnippet>147</a>        generate_borders: bool,
-<a href=#148 id=148 data-nosnippet>148</a>    ) -&gt; TileMeshKey {
-<a href=#149 id=149 data-nosnippet>149</a>        <span class="kw">if </span><span class="self">self</span>.globe_active {
-<a href=#150 id=150 data-nosnippet>150</a>            mesh_key(coords, usage, generate_borders)
-<a href=#151 id=151 data-nosnippet>151</a>        } <span class="kw">else </span>{
-<a href=#152 id=152 data-nosnippet>152</a>            flat_mesh_key(generate_borders)
-<a href=#153 id=153 data-nosnippet>153</a>        }
-<a href=#154 id=154 data-nosnippet>154</a>    }
-<a href=#155 id=155 data-nosnippet>155</a>
-<a href=#156 id=156 data-nosnippet>156</a>    <span class="doccomment">/// Creates the mesh variant needed by a draw if it is not cached.
-<a href=#157 id=157 data-nosnippet>157</a>    </span><span class="kw">pub fn </span>prepare(
-<a href=#158 id=158 data-nosnippet>158</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#159 id=159 data-nosnippet>159</a>        device: <span class="kw-2">&amp;</span>wgpu::Device,
-<a href=#160 id=160 data-nosnippet>160</a>        queue: <span class="kw-2">&amp;</span><span class="kw">crate</span>::render::upload_queue::UploadQueue,
-<a href=#161 id=161 data-nosnippet>161</a>        coords: WorldTileCoords,
-<a href=#162 id=162 data-nosnippet>162</a>        usage: TileMeshUsage,
-<a href=#163 id=163 data-nosnippet>163</a>        generate_borders: bool,
-<a href=#164 id=164 data-nosnippet>164</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), GpuTileMeshError&gt; {
-<a href=#165 id=165 data-nosnippet>165</a>        <span class="kw">let </span>key = <span class="self">self</span>.key_for(coords, usage, generate_borders);
-<a href=#166 id=166 data-nosnippet>166</a>        <span class="kw">if </span><span class="self">self</span>.meshes.contains_key(<span class="kw-2">&amp;</span>key) {
-<a href=#167 id=167 data-nosnippet>167</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>(());
-<a href=#168 id=168 data-nosnippet>168</a>        }
-<a href=#169 id=169 data-nosnippet>169</a>        <span class="kw">let </span>views = create_tile_mesh_into(
-<a href=#170 id=170 data-nosnippet>170</a>            <span class="kw-2">&amp;mut </span><span class="self">self</span>.scratch,
-<a href=#171 id=171 data-nosnippet>171</a>            TileMeshOptions {
-<a href=#172 id=172 data-nosnippet>172</a>                granularity: key.granularity,
-<a href=#173 id=173 data-nosnippet>173</a>                generate_borders: key.generate_borders,
-<a href=#174 id=174 data-nosnippet>174</a>                extend_to_north_pole: key.extend_to_north_pole,
-<a href=#175 id=175 data-nosnippet>175</a>                extend_to_south_pole: key.extend_to_south_pole,
-<a href=#176 id=176 data-nosnippet>176</a>            },
-<a href=#177 id=177 data-nosnippet>177</a>            TileIndexType::U32,
-<a href=#178 id=178 data-nosnippet>178</a>        )
-<a href=#179 id=179 data-nosnippet>179</a>        .map_err(|source| GpuTileMeshError::Generate { source })<span class="question-mark">?</span>;
-<a href=#180 id=180 data-nosnippet>180</a>        <span class="kw">let </span>index_count = u32::try_from(views.indices.len())
-<a href=#181 id=181 data-nosnippet>181</a>            .map_err(|source| GpuTileMeshError::IndexCount { source })<span class="question-mark">?</span>;
-<a href=#182 id=182 data-nosnippet>182</a>        <span class="kw">let </span>gpu_vertices: Vec&lt;GpuTileMeshVertex&gt; = views
-<a href=#183 id=183 data-nosnippet>183</a>            .vertices
-<a href=#184 id=184 data-nosnippet>184</a>            .iter()
-<a href=#185 id=185 data-nosnippet>185</a>            .map(|v| GpuTileMeshVertex {
-<a href=#186 id=186 data-nosnippet>186</a>                position: [f32::from(v.x), f32::from(v.y)],
-<a href=#187 id=187 data-nosnippet>187</a>            })
-<a href=#188 id=188 data-nosnippet>188</a>            .collect();
-<a href=#189 id=189 data-nosnippet>189</a>        <span class="kw">let </span>vertex_buffer = upload_buffer(
-<a href=#190 id=190 data-nosnippet>190</a>            device,
-<a href=#191 id=191 data-nosnippet>191</a>            queue,
-<a href=#192 id=192 data-nosnippet>192</a>            <span class="string">"globe tile mesh vertices"</span>,
-<a href=#193 id=193 data-nosnippet>193</a>            wgpu::BufferUsages::VERTEX,
-<a href=#194 id=194 data-nosnippet>194</a>            bytemuck::cast_slice(<span class="kw-2">&amp;</span>gpu_vertices),
-<a href=#195 id=195 data-nosnippet>195</a>        );
-<a href=#196 id=196 data-nosnippet>196</a>        <span class="kw">let </span>(index_buffer, index_format) = upload_indices(device, queue, views.indices);
-<a href=#197 id=197 data-nosnippet>197</a>        <span class="self">self</span>.meshes.insert(
-<a href=#198 id=198 data-nosnippet>198</a>            key,
-<a href=#199 id=199 data-nosnippet>199</a>            GpuTileMesh {
-<a href=#200 id=200 data-nosnippet>200</a>                vertex_buffer,
-<a href=#201 id=201 data-nosnippet>201</a>                index_buffer,
-<a href=#202 id=202 data-nosnippet>202</a>                index_format,
-<a href=#203 id=203 data-nosnippet>203</a>                index_count,
-<a href=#204 id=204 data-nosnippet>204</a>            },
-<a href=#205 id=205 data-nosnippet>205</a>        );
-<a href=#206 id=206 data-nosnippet>206</a>        <span class="prelude-val">Ok</span>(())
-<a href=#207 id=207 data-nosnippet>207</a>    }
-<a href=#208 id=208 data-nosnippet>208</a>
-<a href=#209 id=209 data-nosnippet>209</a>    <span class="doccomment">/// Returns a previously prepared mesh variant.
-<a href=#210 id=210 data-nosnippet>210</a>    </span><span class="kw">pub fn </span>get(
-<a href=#211 id=211 data-nosnippet>211</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#212 id=212 data-nosnippet>212</a>        coords: WorldTileCoords,
-<a href=#213 id=213 data-nosnippet>213</a>        usage: TileMeshUsage,
-<a href=#214 id=214 data-nosnippet>214</a>        generate_borders: bool,
-<a href=#215 id=215 data-nosnippet>215</a>    ) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>GpuTileMesh&gt; {
-<a href=#216 id=216 data-nosnippet>216</a>        <span class="self">self</span>.meshes
-<a href=#217 id=217 data-nosnippet>217</a>            .get(<span class="kw-2">&amp;</span><span class="self">self</span>.key_for(coords, usage, generate_borders))
-<a href=#218 id=218 data-nosnippet>218</a>    }
-<a href=#219 id=219 data-nosnippet>219</a>}
-<a href=#220 id=220 data-nosnippet>220</a>
-<a href=#221 id=221 data-nosnippet>221</a><span class="kw">fn </span>upload_buffer(
-<a href=#222 id=222 data-nosnippet>222</a>    device: <span class="kw-2">&amp;</span>wgpu::Device,
-<a href=#223 id=223 data-nosnippet>223</a>    queue: <span class="kw-2">&amp;</span><span class="kw">crate</span>::render::upload_queue::UploadQueue,
-<a href=#224 id=224 data-nosnippet>224</a>    label: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str,
-<a href=#225 id=225 data-nosnippet>225</a>    usage: wgpu::BufferUsages,
-<a href=#226 id=226 data-nosnippet>226</a>    bytes: <span class="kw-2">&amp;</span>[u8],
-<a href=#227 id=227 data-nosnippet>227</a>) -&gt; wgpu::Buffer {
-<a href=#228 id=228 data-nosnippet>228</a>    <span class="kw">let </span>size = (bytes.len().max(<span class="number">16</span>).next_multiple_of(<span class="number">16</span>)) <span class="kw">as </span>wgpu::BufferAddress;
-<a href=#229 id=229 data-nosnippet>229</a>    <span class="kw">let </span>buffer = device.create_buffer(<span class="kw-2">&amp;</span>wgpu::BufferDescriptor {
-<a href=#230 id=230 data-nosnippet>230</a>        label: <span class="prelude-val">Some</span>(label),
-<a href=#231 id=231 data-nosnippet>231</a>        size,
-<a href=#232 id=232 data-nosnippet>232</a>        usage: usage | wgpu::BufferUsages::COPY_DST,
-<a href=#233 id=233 data-nosnippet>233</a>        mapped_at_creation: <span class="bool-val">false</span>,
-<a href=#234 id=234 data-nosnippet>234</a>    });
-<a href=#235 id=235 data-nosnippet>235</a>    <span class="kw">if </span>!bytes.is_empty() {
-<a href=#236 id=236 data-nosnippet>236</a>        queue.write_buffer(<span class="kw-2">&amp;</span>buffer, <span class="number">0</span>, bytes);
-<a href=#237 id=237 data-nosnippet>237</a>    }
-<a href=#238 id=238 data-nosnippet>238</a>    buffer
-<a href=#239 id=239 data-nosnippet>239</a>}
-<a href=#240 id=240 data-nosnippet>240</a>
-<a href=#241 id=241 data-nosnippet>241</a><span class="kw">fn </span>upload_indices(
-<a href=#242 id=242 data-nosnippet>242</a>    device: <span class="kw-2">&amp;</span>wgpu::Device,
-<a href=#243 id=243 data-nosnippet>243</a>    queue: <span class="kw-2">&amp;</span><span class="kw">crate</span>::render::upload_queue::UploadQueue,
-<a href=#244 id=244 data-nosnippet>244</a>    indices: TileMeshIndicesRef&lt;<span class="lifetime">'_</span>&gt;,
-<a href=#245 id=245 data-nosnippet>245</a>) -&gt; (wgpu::Buffer, wgpu::IndexFormat) {
-<a href=#246 id=246 data-nosnippet>246</a>    <span class="kw">let </span>(bytes, format) = <span class="kw">match </span>indices {
-<a href=#247 id=247 data-nosnippet>247</a>        TileMeshIndicesRef::U16(values) =&gt; {
-<a href=#248 id=248 data-nosnippet>248</a>            (bytemuck::cast_slice(values), wgpu::IndexFormat::Uint16)
-<a href=#249 id=249 data-nosnippet>249</a>        }
-<a href=#250 id=250 data-nosnippet>250</a>        TileMeshIndicesRef::U32(values) =&gt; {
-<a href=#251 id=251 data-nosnippet>251</a>            (bytemuck::cast_slice(values), wgpu::IndexFormat::Uint32)
-<a href=#252 id=252 data-nosnippet>252</a>        }
-<a href=#253 id=253 data-nosnippet>253</a>    };
-<a href=#254 id=254 data-nosnippet>254</a>    <span class="kw">let </span>buffer = upload_buffer(
-<a href=#255 id=255 data-nosnippet>255</a>        device,
-<a href=#256 id=256 data-nosnippet>256</a>        queue,
-<a href=#257 id=257 data-nosnippet>257</a>        <span class="string">"globe tile mesh indices"</span>,
-<a href=#258 id=258 data-nosnippet>258</a>        wgpu::BufferUsages::INDEX,
-<a href=#259 id=259 data-nosnippet>259</a>        bytes,
-<a href=#260 id=260 data-nosnippet>260</a>    );
-<a href=#261 id=261 data-nosnippet>261</a>    (buffer, format)
-<a href=#262 id=262 data-nosnippet>262</a>}
-<a href=#263 id=263 data-nosnippet>263</a>
-<a href=#264 id=264 data-nosnippet>264</a><span class="kw">fn </span>flat_mesh_key(generate_borders: bool) -&gt; TileMeshKey {
-<a href=#265 id=265 data-nosnippet>265</a>    TileMeshKey {
-<a href=#266 id=266 data-nosnippet>266</a>        granularity: <span class="number">1</span>,
-<a href=#267 id=267 data-nosnippet>267</a>        generate_borders,
-<a href=#268 id=268 data-nosnippet>268</a>        extend_to_north_pole: <span class="bool-val">false</span>,
-<a href=#269 id=269 data-nosnippet>269</a>        extend_to_south_pole: <span class="bool-val">false</span>,
-<a href=#270 id=270 data-nosnippet>270</a>    }
-<a href=#271 id=271 data-nosnippet>271</a>}
-<a href=#272 id=272 data-nosnippet>272</a>
-<a href=#273 id=273 data-nosnippet>273</a><span class="kw">fn </span>mesh_key(coords: WorldTileCoords, usage: TileMeshUsage, generate_borders: bool) -&gt; TileMeshKey {
-<a href=#274 id=274 data-nosnippet>274</a>    <span class="kw">let </span>zoom = u32::from(u8::from(coords.z));
-<a href=#275 id=275 data-nosnippet>275</a>    <span class="kw">let </span>minimum = <span class="kw">match </span>usage {
-<a href=#276 id=276 data-nosnippet>276</a>        TileMeshUsage::Raster =&gt; <span class="number">32</span>,
-<a href=#277 id=277 data-nosnippet>277</a>        TileMeshUsage::Stencil =&gt; <span class="number">1</span>,
-<a href=#278 id=278 data-nosnippet>278</a>    };
-<a href=#279 id=279 data-nosnippet>279</a>    <span class="kw">let </span>granularity = <span class="number">128_u32</span>.checked_shr(zoom).unwrap_or(<span class="number">0</span>).max(minimum);
-<a href=#280 id=280 data-nosnippet>280</a>    <span class="kw">let </span>last_row = i64::from(ZOOM_BOUNDS[usize::from(u8::from(coords.z))]) - <span class="number">1</span>;
-<a href=#281 id=281 data-nosnippet>281</a>    TileMeshKey {
-<a href=#282 id=282 data-nosnippet>282</a>        granularity,
-<a href=#283 id=283 data-nosnippet>283</a>        generate_borders,
-<a href=#284 id=284 data-nosnippet>284</a>        extend_to_north_pole: coords.y == <span class="number">0</span>,
-<a href=#285 id=285 data-nosnippet>285</a>        extend_to_south_pole: i64::from(coords.y) == last_row,
-<a href=#286 id=286 data-nosnippet>286</a>    }
-<a href=#287 id=287 data-nosnippet>287</a>}
-<a href=#288 id=288 data-nosnippet>288</a>
-<a href=#289 id=289 data-nosnippet>289</a><span class="attr">#[cfg(test)]
-<a href=#290 id=290 data-nosnippet>290</a></span><span class="kw">mod </span>tests;
+<a href=#135 id=135 data-nosnippet>135</a>        <span class="kw">if </span><span class="self">self</span>.globe_active &amp;&amp; !globe_active {
+<a href=#136 id=136 data-nosnippet>136</a>            <span class="self">self</span>.meshes.retain(|key, <span class="kw">_</span>| key.granularity == <span class="number">1</span>);
+<a href=#137 id=137 data-nosnippet>137</a>            <span class="self">self</span>.scratch = TileMeshScratch::default();
+<a href=#138 id=138 data-nosnippet>138</a>        }
+<a href=#139 id=139 data-nosnippet>139</a>        <span class="self">self</span>.globe_active = globe_active;
+<a href=#140 id=140 data-nosnippet>140</a>    }
+<a href=#141 id=141 data-nosnippet>141</a>
+<a href=#142 id=142 data-nosnippet>142</a>    <span class="doccomment">/// Returns a reference to the reusable scratch buffer.
+<a href=#143 id=143 data-nosnippet>143</a>    </span><span class="kw">pub fn </span>scratch(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>TileMeshScratch {
+<a href=#144 id=144 data-nosnippet>144</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.scratch
+<a href=#145 id=145 data-nosnippet>145</a>    }
+<a href=#146 id=146 data-nosnippet>146</a>
+<a href=#147 id=147 data-nosnippet>147</a>    <span class="kw">fn </span>key_for(
+<a href=#148 id=148 data-nosnippet>148</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#149 id=149 data-nosnippet>149</a>        coords: WorldTileCoords,
+<a href=#150 id=150 data-nosnippet>150</a>        usage: TileMeshUsage,
+<a href=#151 id=151 data-nosnippet>151</a>        generate_borders: bool,
+<a href=#152 id=152 data-nosnippet>152</a>    ) -&gt; TileMeshKey {
+<a href=#153 id=153 data-nosnippet>153</a>        <span class="kw">if </span><span class="self">self</span>.globe_active {
+<a href=#154 id=154 data-nosnippet>154</a>            mesh_key(coords, usage, generate_borders)
+<a href=#155 id=155 data-nosnippet>155</a>        } <span class="kw">else </span>{
+<a href=#156 id=156 data-nosnippet>156</a>            flat_mesh_key(generate_borders)
+<a href=#157 id=157 data-nosnippet>157</a>        }
+<a href=#158 id=158 data-nosnippet>158</a>    }
+<a href=#159 id=159 data-nosnippet>159</a>
+<a href=#160 id=160 data-nosnippet>160</a>    <span class="doccomment">/// Creates the mesh variant needed by a draw if it is not cached.
+<a href=#161 id=161 data-nosnippet>161</a>    </span><span class="kw">pub fn </span>prepare(
+<a href=#162 id=162 data-nosnippet>162</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#163 id=163 data-nosnippet>163</a>        device: <span class="kw-2">&amp;</span>wgpu::Device,
+<a href=#164 id=164 data-nosnippet>164</a>        queue: <span class="kw-2">&amp;</span><span class="kw">crate</span>::render::upload_queue::UploadQueue,
+<a href=#165 id=165 data-nosnippet>165</a>        coords: WorldTileCoords,
+<a href=#166 id=166 data-nosnippet>166</a>        usage: TileMeshUsage,
+<a href=#167 id=167 data-nosnippet>167</a>        generate_borders: bool,
+<a href=#168 id=168 data-nosnippet>168</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), GpuTileMeshError&gt; {
+<a href=#169 id=169 data-nosnippet>169</a>        <span class="kw">let </span>key = <span class="self">self</span>.key_for(coords, usage, generate_borders);
+<a href=#170 id=170 data-nosnippet>170</a>        <span class="kw">if </span><span class="self">self</span>.meshes.contains_key(<span class="kw-2">&amp;</span>key) {
+<a href=#171 id=171 data-nosnippet>171</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+<a href=#172 id=172 data-nosnippet>172</a>        }
+<a href=#173 id=173 data-nosnippet>173</a>        <span class="kw">let </span>views = create_tile_mesh_into(
+<a href=#174 id=174 data-nosnippet>174</a>            <span class="kw-2">&amp;mut </span><span class="self">self</span>.scratch,
+<a href=#175 id=175 data-nosnippet>175</a>            TileMeshOptions {
+<a href=#176 id=176 data-nosnippet>176</a>                granularity: key.granularity,
+<a href=#177 id=177 data-nosnippet>177</a>                generate_borders: key.generate_borders,
+<a href=#178 id=178 data-nosnippet>178</a>                extend_to_north_pole: key.extend_to_north_pole,
+<a href=#179 id=179 data-nosnippet>179</a>                extend_to_south_pole: key.extend_to_south_pole,
+<a href=#180 id=180 data-nosnippet>180</a>            },
+<a href=#181 id=181 data-nosnippet>181</a>            TileIndexType::U32,
+<a href=#182 id=182 data-nosnippet>182</a>        )
+<a href=#183 id=183 data-nosnippet>183</a>        .map_err(|source| GpuTileMeshError::Generate { source })<span class="question-mark">?</span>;
+<a href=#184 id=184 data-nosnippet>184</a>        <span class="kw">let </span>index_count = u32::try_from(views.indices.len())
+<a href=#185 id=185 data-nosnippet>185</a>            .map_err(|source| GpuTileMeshError::IndexCount { source })<span class="question-mark">?</span>;
+<a href=#186 id=186 data-nosnippet>186</a>        <span class="kw">let </span>gpu_vertices: Vec&lt;GpuTileMeshVertex&gt; = views
+<a href=#187 id=187 data-nosnippet>187</a>            .vertices
+<a href=#188 id=188 data-nosnippet>188</a>            .iter()
+<a href=#189 id=189 data-nosnippet>189</a>            .map(|v| GpuTileMeshVertex {
+<a href=#190 id=190 data-nosnippet>190</a>                position: [f32::from(v.x), f32::from(v.y)],
+<a href=#191 id=191 data-nosnippet>191</a>            })
+<a href=#192 id=192 data-nosnippet>192</a>            .collect();
+<a href=#193 id=193 data-nosnippet>193</a>        <span class="kw">let </span>vertex_buffer = upload_buffer(
+<a href=#194 id=194 data-nosnippet>194</a>            device,
+<a href=#195 id=195 data-nosnippet>195</a>            queue,
+<a href=#196 id=196 data-nosnippet>196</a>            <span class="string">"globe tile mesh vertices"</span>,
+<a href=#197 id=197 data-nosnippet>197</a>            wgpu::BufferUsages::VERTEX,
+<a href=#198 id=198 data-nosnippet>198</a>            bytemuck::cast_slice(<span class="kw-2">&amp;</span>gpu_vertices),
+<a href=#199 id=199 data-nosnippet>199</a>        );
+<a href=#200 id=200 data-nosnippet>200</a>        drop(gpu_vertices);
+<a href=#201 id=201 data-nosnippet>201</a>        <span class="kw">let </span>(index_buffer, index_format) = upload_indices(device, queue, views.indices);
+<a href=#202 id=202 data-nosnippet>202</a>        <span class="self">self</span>.scratch = TileMeshScratch::default();
+<a href=#203 id=203 data-nosnippet>203</a>        <span class="self">self</span>.meshes.insert(
+<a href=#204 id=204 data-nosnippet>204</a>            key,
+<a href=#205 id=205 data-nosnippet>205</a>            GpuTileMesh {
+<a href=#206 id=206 data-nosnippet>206</a>                vertex_buffer,
+<a href=#207 id=207 data-nosnippet>207</a>                index_buffer,
+<a href=#208 id=208 data-nosnippet>208</a>                index_format,
+<a href=#209 id=209 data-nosnippet>209</a>                index_count,
+<a href=#210 id=210 data-nosnippet>210</a>            },
+<a href=#211 id=211 data-nosnippet>211</a>        );
+<a href=#212 id=212 data-nosnippet>212</a>        <span class="prelude-val">Ok</span>(())
+<a href=#213 id=213 data-nosnippet>213</a>    }
+<a href=#214 id=214 data-nosnippet>214</a>
+<a href=#215 id=215 data-nosnippet>215</a>    <span class="doccomment">/// Returns a previously prepared mesh variant.
+<a href=#216 id=216 data-nosnippet>216</a>    </span><span class="kw">pub fn </span>get(
+<a href=#217 id=217 data-nosnippet>217</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#218 id=218 data-nosnippet>218</a>        coords: WorldTileCoords,
+<a href=#219 id=219 data-nosnippet>219</a>        usage: TileMeshUsage,
+<a href=#220 id=220 data-nosnippet>220</a>        generate_borders: bool,
+<a href=#221 id=221 data-nosnippet>221</a>    ) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>GpuTileMesh&gt; {
+<a href=#222 id=222 data-nosnippet>222</a>        <span class="self">self</span>.meshes
+<a href=#223 id=223 data-nosnippet>223</a>            .get(<span class="kw-2">&amp;</span><span class="self">self</span>.key_for(coords, usage, generate_borders))
+<a href=#224 id=224 data-nosnippet>224</a>    }
+<a href=#225 id=225 data-nosnippet>225</a>}
+<a href=#226 id=226 data-nosnippet>226</a>
+<a href=#227 id=227 data-nosnippet>227</a><span class="kw">fn </span>upload_buffer(
+<a href=#228 id=228 data-nosnippet>228</a>    device: <span class="kw-2">&amp;</span>wgpu::Device,
+<a href=#229 id=229 data-nosnippet>229</a>    queue: <span class="kw-2">&amp;</span><span class="kw">crate</span>::render::upload_queue::UploadQueue,
+<a href=#230 id=230 data-nosnippet>230</a>    label: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str,
+<a href=#231 id=231 data-nosnippet>231</a>    usage: wgpu::BufferUsages,
+<a href=#232 id=232 data-nosnippet>232</a>    bytes: <span class="kw-2">&amp;</span>[u8],
+<a href=#233 id=233 data-nosnippet>233</a>) -&gt; wgpu::Buffer {
+<a href=#234 id=234 data-nosnippet>234</a>    <span class="kw">let </span>size = (bytes.len().max(<span class="number">16</span>).next_multiple_of(<span class="number">16</span>)) <span class="kw">as </span>wgpu::BufferAddress;
+<a href=#235 id=235 data-nosnippet>235</a>    <span class="kw">let </span>buffer = device.create_buffer(<span class="kw-2">&amp;</span>wgpu::BufferDescriptor {
+<a href=#236 id=236 data-nosnippet>236</a>        label: <span class="prelude-val">Some</span>(label),
+<a href=#237 id=237 data-nosnippet>237</a>        size,
+<a href=#238 id=238 data-nosnippet>238</a>        usage: usage | wgpu::BufferUsages::COPY_DST,
+<a href=#239 id=239 data-nosnippet>239</a>        mapped_at_creation: <span class="bool-val">false</span>,
+<a href=#240 id=240 data-nosnippet>240</a>    });
+<a href=#241 id=241 data-nosnippet>241</a>    <span class="kw">if </span>!bytes.is_empty() {
+<a href=#242 id=242 data-nosnippet>242</a>        queue.write_buffer(<span class="kw-2">&amp;</span>buffer, <span class="number">0</span>, bytes);
+<a href=#243 id=243 data-nosnippet>243</a>    }
+<a href=#244 id=244 data-nosnippet>244</a>    buffer
+<a href=#245 id=245 data-nosnippet>245</a>}
+<a href=#246 id=246 data-nosnippet>246</a>
+<a href=#247 id=247 data-nosnippet>247</a><span class="kw">fn </span>upload_indices(
+<a href=#248 id=248 data-nosnippet>248</a>    device: <span class="kw-2">&amp;</span>wgpu::Device,
+<a href=#249 id=249 data-nosnippet>249</a>    queue: <span class="kw-2">&amp;</span><span class="kw">crate</span>::render::upload_queue::UploadQueue,
+<a href=#250 id=250 data-nosnippet>250</a>    indices: TileMeshIndicesRef&lt;<span class="lifetime">'_</span>&gt;,
+<a href=#251 id=251 data-nosnippet>251</a>) -&gt; (wgpu::Buffer, wgpu::IndexFormat) {
+<a href=#252 id=252 data-nosnippet>252</a>    <span class="kw">let </span>(bytes, format) = <span class="kw">match </span>indices {
+<a href=#253 id=253 data-nosnippet>253</a>        TileMeshIndicesRef::U16(values) =&gt; {
+<a href=#254 id=254 data-nosnippet>254</a>            (bytemuck::cast_slice(values), wgpu::IndexFormat::Uint16)
+<a href=#255 id=255 data-nosnippet>255</a>        }
+<a href=#256 id=256 data-nosnippet>256</a>        TileMeshIndicesRef::U32(values) =&gt; {
+<a href=#257 id=257 data-nosnippet>257</a>            (bytemuck::cast_slice(values), wgpu::IndexFormat::Uint32)
+<a href=#258 id=258 data-nosnippet>258</a>        }
+<a href=#259 id=259 data-nosnippet>259</a>    };
+<a href=#260 id=260 data-nosnippet>260</a>    <span class="kw">let </span>buffer = upload_buffer(
+<a href=#261 id=261 data-nosnippet>261</a>        device,
+<a href=#262 id=262 data-nosnippet>262</a>        queue,
+<a href=#263 id=263 data-nosnippet>263</a>        <span class="string">"globe tile mesh indices"</span>,
+<a href=#264 id=264 data-nosnippet>264</a>        wgpu::BufferUsages::INDEX,
+<a href=#265 id=265 data-nosnippet>265</a>        bytes,
+<a href=#266 id=266 data-nosnippet>266</a>    );
+<a href=#267 id=267 data-nosnippet>267</a>    (buffer, format)
+<a href=#268 id=268 data-nosnippet>268</a>}
+<a href=#269 id=269 data-nosnippet>269</a>
+<a href=#270 id=270 data-nosnippet>270</a><span class="kw">fn </span>flat_mesh_key(generate_borders: bool) -&gt; TileMeshKey {
+<a href=#271 id=271 data-nosnippet>271</a>    TileMeshKey {
+<a href=#272 id=272 data-nosnippet>272</a>        granularity: <span class="number">1</span>,
+<a href=#273 id=273 data-nosnippet>273</a>        generate_borders,
+<a href=#274 id=274 data-nosnippet>274</a>        extend_to_north_pole: <span class="bool-val">false</span>,
+<a href=#275 id=275 data-nosnippet>275</a>        extend_to_south_pole: <span class="bool-val">false</span>,
+<a href=#276 id=276 data-nosnippet>276</a>    }
+<a href=#277 id=277 data-nosnippet>277</a>}
+<a href=#278 id=278 data-nosnippet>278</a>
+<a href=#279 id=279 data-nosnippet>279</a><span class="kw">fn </span>mesh_key(coords: WorldTileCoords, usage: TileMeshUsage, generate_borders: bool) -&gt; TileMeshKey {
+<a href=#280 id=280 data-nosnippet>280</a>    <span class="kw">let </span>zoom = u32::from(u8::from(coords.z));
+<a href=#281 id=281 data-nosnippet>281</a>    <span class="kw">let </span>minimum = <span class="kw">match </span>usage {
+<a href=#282 id=282 data-nosnippet>282</a>        TileMeshUsage::Raster =&gt; <span class="number">32</span>,
+<a href=#283 id=283 data-nosnippet>283</a>        TileMeshUsage::Stencil =&gt; <span class="number">1</span>,
+<a href=#284 id=284 data-nosnippet>284</a>    };
+<a href=#285 id=285 data-nosnippet>285</a>    <span class="kw">let </span>granularity = <span class="number">128_u32</span>.checked_shr(zoom).unwrap_or(<span class="number">0</span>).max(minimum);
+<a href=#286 id=286 data-nosnippet>286</a>    <span class="kw">let </span>last_row = i64::from(ZOOM_BOUNDS[usize::from(u8::from(coords.z))]) - <span class="number">1</span>;
+<a href=#287 id=287 data-nosnippet>287</a>    TileMeshKey {
+<a href=#288 id=288 data-nosnippet>288</a>        granularity,
+<a href=#289 id=289 data-nosnippet>289</a>        generate_borders,
+<a href=#290 id=290 data-nosnippet>290</a>        extend_to_north_pole: coords.y == <span class="number">0</span>,
+<a href=#291 id=291 data-nosnippet>291</a>        extend_to_south_pole: i64::from(coords.y) == last_row,
+<a href=#292 id=292 data-nosnippet>292</a>    }
+<a href=#293 id=293 data-nosnippet>293</a>}
+<a href=#294 id=294 data-nosnippet>294</a>
+<a href=#295 id=295 data-nosnippet>295</a><span class="attr">#[cfg(test)]
+<a href=#296 id=296 data-nosnippet>296</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

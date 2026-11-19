@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["INITIAL_ATLAS_WIDTH"],"struct":["AtlasBuilder"]};

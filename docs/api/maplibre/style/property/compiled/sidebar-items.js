@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["CompiledProperty"],"struct":["ZoomCurve"]};
+window.SIDEBAR_ITEMS = {"enum":["CompiledExprKind","CompiledProperty"],"fn":["compile_expression"],"struct":["ZoomCurve"]};

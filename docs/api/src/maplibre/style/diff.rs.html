@@ -4,7 +4,7 @@
 <a href=#4 id=4 data-nosnippet>4</a>//! and resident tiles for unchanged sources, updates GPU paint and layer order in-place when
 <a href=#5 id=5 data-nosnippet>5</a>//! layout/filtering did not change, and initiates configured paint transitions on retained layers.
 <a href=#6 id=6 data-nosnippet>6</a>
-<a href=#7 id=7 data-nosnippet>7</a></span><span class="kw">use </span>std::collections::{HashMap, HashSet};
+<a href=#7 id=7 data-nosnippet>7</a></span><span class="kw">use </span>rustc_hash::{FxHashMap <span class="kw">as </span>HashMap, FxHashSet <span class="kw">as </span>HashSet};
 <a href=#8 id=8 data-nosnippet>8</a>
 <a href=#9 id=9 data-nosnippet>9</a><span class="kw">use super</span>::{
 <a href=#10 id=10 data-nosnippet>10</a>    layer::StyleLayer,
@@ -151,7 +151,7 @@
 <a href=#151 id=151 data-nosnippet>151</a>            ..Default::default()
 <a href=#152 id=152 data-nosnippet>152</a>        };
 <a href=#153 id=153 data-nosnippet>153</a>
-<a href=#154 id=154 data-nosnippet>154</a>        <span class="kw">let </span><span class="kw-2">mut </span>changed_vector_sources = HashSet::new();
+<a href=#154 id=154 data-nosnippet>154</a>        <span class="kw">let </span><span class="kw-2">mut </span>changed_vector_sources = HashSet::default();
 <a href=#155 id=155 data-nosnippet>155</a>
 <a href=#156 id=156 data-nosnippet>156</a>        <span class="kw">for </span>(name, old_source) <span class="kw">in </span><span class="kw-2">&amp;</span><span class="self">self</span>.sources {
 <a href=#157 id=157 data-nosnippet>157</a>            <span class="kw">if </span>!next.sources.contains_key(name) {

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_FAST_COLS"],"fn":["check_coords","check_id","collect_fast_ramp_keys","push_key","scan_collection","scan_feature","scan_features","scan_point_geometry","scan_properties","try_fast_scan_stationary_bytes"],"mod":["cursor"],"struct":["FastColumnStore"]};

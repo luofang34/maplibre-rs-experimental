@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["MAX_DEPTH","SCHEME"],"enum":["PmtilesFormatError","PmtilesUrl"],"fn":["failed","range"],"mod":["format"],"struct":["Archive","PmtilesClient","PmtilesError","PmtilesReader"]};
+window.SIDEBAR_ITEMS = {"constant":["MAX_DEPTH","SCHEME"],"enum":["PmtilesFormatError","PmtilesUrl"],"fn":["build_range_request","build_tile_json_document","failed","parse_dir","parse_header","range"],"mod":["format"],"struct":["Archive","PmtilesClient","PmtilesError","PmtilesReader"]};

@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-0a9629c7.js";
+            window.path_to_searchindex_js = "searchindex-1cdf82b0.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-ae8692d6.js"></script>
@@ -486,7 +486,7 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
 </div>
 
 <div class="example-code-tabs">
-<pre class="playground"><code class="language-rust no_run">use std::{collections::HashMap, path::PathBuf};
+<pre class="playground"><code class="language-rust no_run">use std::path::PathBuf;
 
 use maplibre::{
     projection::{ProjectionSpecification, ProjectionType},
@@ -502,7 +502,7 @@ use maplibre_winit::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
 pub fn style() -&gt; Style {
     Style {
         version: 8,
-        sources: HashMap::from([(
+        sources: [(
             "satellite".to_string(),
             Source::Raster(VectorSource {
                 tiles: Some(vec![
@@ -512,7 +512,9 @@ pub fn style() -&gt; Style {
                 tile_size: Some(256),
                 ..Default::default()
             }),
-        )]),
+        )]
+        .into_iter()
+        .collect(),
         layers: vec![StyleLayer {
             index: 1,
             id: "satellite".to_string(),
@@ -734,7 +736,7 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
 </div>
 
 <div class="example-code-tabs">
-<pre class="playground"><code class="language-rust no_run">use std::{collections::HashMap, path::PathBuf};
+<pre class="playground"><code class="language-rust no_run">use std::path::PathBuf;
 
 use maplibre::{
     projection::{ProjectionSpecification, ProjectionType},
@@ -755,7 +757,7 @@ pub fn style() -&gt; Style {
         projection: Some(ProjectionSpecification {
             projection_type: ProjectionType::Globe,
         }),
-        sources: HashMap::from([(
+        sources: [(
             "satellite".to_string(),
             Source::Raster(VectorSource {
                 tiles: Some(vec![
@@ -764,7 +766,9 @@ pub fn style() -&gt; Style {
                 ]),
                 ..Default::default()
             }),
-        )]),
+        )]
+        .into_iter()
+        .collect(),
         layers: vec![StyleLayer {
             index: 1,
             id: "Satellite".to_string(),
@@ -930,7 +934,7 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
 </div>
 
 <div class="example-code-tabs">
-<pre class="playground"><code class="language-rust no_run">use std::{collections::HashMap, path::PathBuf};
+<pre class="playground"><code class="language-rust no_run">use std::path::PathBuf;
 
 use maplibre::{
     projection::{ProjectionSpecification, ProjectionType},
@@ -949,7 +953,7 @@ use maplibre_winit::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
 pub fn style() -&gt; Style {
     Style {
         version: 8,
-        sources: HashMap::from([
+        sources: [
             (
                 "osm".to_string(),
                 Source::Raster(VectorSource {
@@ -976,7 +980,9 @@ pub fn style() -&gt; Style {
                     ..Default::default()
                 }),
             ),
-        ]),
+        ]
+        .into_iter()
+        .collect(),
         layers: vec![
             StyleLayer {
                 index: 1,
@@ -1172,7 +1178,7 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
 </div>
 
 <div class="example-code-tabs">
-<pre class="playground"><code class="language-rust no_run">use std::{collections::HashMap, path::PathBuf};
+<pre class="playground"><code class="language-rust no_run">use std::path::PathBuf;
 
 use maplibre::{
     projection::{ProjectionSpecification, ProjectionType},
@@ -1190,14 +1196,16 @@ use maplibre_winit::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
 pub fn style() -&gt; Style {
     Style {
         version: 8,
-        sources: HashMap::from([(
+        sources: [(
             "hillshadeSource".to_string(),
             Source::RasterDem(RasterDemSource {
                 url: Some("https://demotiles.maplibre.org/terrain-tiles/tiles.json".to_string()),
                 tile_size: Some(256),
                 ..Default::default()
             }),
-        )]),
+        )]
+        .into_iter()
+        .collect(),
         layers: vec![StyleLayer {
             index: 1,
             id: "hillshade".to_string(),
@@ -1356,7 +1364,7 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
 </div>
 
 <div class="example-code-tabs">
-<pre class="playground"><code class="language-rust no_run">use std::{collections::HashMap, path::PathBuf};
+<pre class="playground"><code class="language-rust no_run">use std::path::PathBuf;
 
 use maplibre::{
     projection::{ProjectionSpecification, ProjectionType},
@@ -1374,14 +1382,16 @@ use serde_json::json;
 pub fn style() -&gt; Style {
     Style {
         version: 8,
-        sources: HashMap::from([(
+        sources: [(
             "elevationSource".to_string(),
             Source::RasterDem(RasterDemSource {
                 url: Some("https://demotiles.maplibre.org/terrain-tiles/tiles.json".to_string()),
                 tile_size: Some(256),
                 ..Default::default()
             }),
-        )]),
+        )]
+        .into_iter()
+        .collect(),
         layers: vec![
             StyleLayer {
                 index: 0,
@@ -2416,7 +2426,7 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
 </div>
 
 <div class="example-code-tabs">
-<pre class="playground"><code class="language-rust no_run">use std::{collections::HashMap, path::PathBuf};
+<pre class="playground"><code class="language-rust no_run">use std::path::PathBuf;
 
 use maplibre::{
     projection::{ProjectionSpecification, ProjectionType},
@@ -2432,7 +2442,7 @@ use maplibre_winit::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
 pub fn style() -&gt; Style {
     Style {
         version: 8,
-        sources: HashMap::from([(
+        sources: [(
             "raster-tiles".to_string(),
             Source::Raster(VectorSource {
                 attribution: Some("© OpenStreetMap contributors".to_string()),
@@ -2444,7 +2454,9 @@ pub fn style() -&gt; Style {
                 tile_size: Some(256),
                 ..Default::default()
             }),
-        )]),
+        )]
+        .into_iter()
+        .collect(),
         layers: vec![StyleLayer {
             index: 1,
             id: "simple-tiles".to_string(),

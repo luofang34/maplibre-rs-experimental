@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["REF_PROPERTIES"],"fn":["dereferenced","deserialize_layers"]};
+window.SIDEBAR_ITEMS = {"constant":["REF_PROPERTIES"],"fn":["dereferenced","parse_layers_from_values"]};

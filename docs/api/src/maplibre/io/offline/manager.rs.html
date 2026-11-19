@@ -350,7 +350,7 @@
 <a href=#350 id=350 data-nosnippet>350</a>                    .<span class="kw">await</span><span class="question-mark">?</span>;
 <a href=#351 id=351 data-nosnippet>351</a>                <span class="kw-2">*</span>pre_stored += <span class="number">1</span>;
 <a href=#352 id=352 data-nosnippet>352</a>            }
-<a href=#353 id=353 data-nosnippet>353</a>            <span class="kw">return </span>serde_json::from_str::&lt;Style&gt;(style_json).map_err(|source| {
+<a href=#353 id=353 data-nosnippet>353</a>            <span class="kw">return </span>Style::from_json_str(style_json).map_err(|source| {
 <a href=#354 id=354 data-nosnippet>354</a>                OfflineDownloadError::InvalidJson {
 <a href=#355 id=355 data-nosnippet>355</a>                    context: <span class="string">"inline style_json"</span>.to_owned(),
 <a href=#356 id=356 data-nosnippet>356</a>                    source,
@@ -429,7 +429,7 @@
 <a href=#429 id=429 data-nosnippet>429</a>                }
 <a href=#430 id=430 data-nosnippet>430</a>            };
 <a href=#431 id=431 data-nosnippet>431</a>            <span class="kw">let _ </span>= pre_stored; <span class="comment">// TileJSON URL is also included in `enumerate_style_resources` via `link_existing_resource`.
-<a href=#432 id=432 data-nosnippet>432</a>            </span><span class="kw">let </span>tile_json: TileJson = serde_json::from_slice(<span class="kw-2">&amp;</span>bytes).map_err(|source| {
+<a href=#432 id=432 data-nosnippet>432</a>            </span><span class="kw">let </span>tile_json = TileJson::from_json_slice(<span class="kw-2">&amp;</span>bytes).map_err(|source| {
 <a href=#433 id=433 data-nosnippet>433</a>                OfflineDownloadError::InvalidJson {
 <a href=#434 id=434 data-nosnippet>434</a>                    context: url,
 <a href=#435 id=435 data-nosnippet>435</a>                    source,

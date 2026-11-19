@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-0a9629c7.js";
+            window.path_to_searchindex_js = "../searchindex-1cdf82b0.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-ae8692d6.js"></script>
@@ -189,7 +189,7 @@
 </div>
 
 <div class="example-code-tabs">
-<pre class="playground"><code class="language-rust no_run">use std::{collections::HashMap, path::PathBuf};
+<pre class="playground"><code class="language-rust no_run">use std::path::PathBuf;
 
 use maplibre::{
     projection::{ProjectionSpecification, ProjectionType},
@@ -210,7 +210,7 @@ pub fn style() -&gt; Style {
         projection: Some(ProjectionSpecification {
             projection_type: ProjectionType::Globe,
         }),
-        sources: HashMap::from([(
+        sources: [(
             "satellite".to_string(),
             Source::Raster(VectorSource {
                 tiles: Some(vec![
@@ -219,7 +219,9 @@ pub fn style() -&gt; Style {
                 ]),
                 ..Default::default()
             }),
-        )]),
+        )]
+        .into_iter()
+        .collect(),
         layers: vec![StyleLayer {
             index: 1,
             id: "Satellite".to_string(),

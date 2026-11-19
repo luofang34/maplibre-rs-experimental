@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::path::PathBuf;
 
 use maplibre::{
     projection::{ProjectionSpecification, ProjectionType},
@@ -14,7 +14,7 @@ use maplibre_winit::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
 pub fn style() -> Style {
     Style {
         version: 8,
-        sources: HashMap::from([(
+        sources: [(
             "raster-tiles".to_string(),
             Source::Raster(VectorSource {
                 attribution: Some("© OpenStreetMap contributors".to_string()),
@@ -26,7 +26,9 @@ pub fn style() -> Style {
                 tile_size: Some(256),
                 ..Default::default()
             }),
-        )]),
+        )]
+        .into_iter()
+        .collect(),
         layers: vec![StyleLayer {
             index: 1,
             id: "simple-tiles".to_string(),

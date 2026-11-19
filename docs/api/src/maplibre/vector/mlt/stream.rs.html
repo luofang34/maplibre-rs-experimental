@@ -106,7 +106,7 @@
 <a href=#106 id=106 data-nosnippet>106</a>                base_props.push(Arc::clone(existing));
 <a href=#107 id=107 data-nosnippet>107</a>                <span class="kw">continue</span>;
 <a href=#108 id=108 data-nosnippet>108</a>            }
-<a href=#109 id=109 data-nosnippet>109</a>            <span class="kw">let </span><span class="kw-2">mut </span>props = FeatureProperties::new();
+<a href=#109 id=109 data-nosnippet>109</a>            <span class="kw">let </span><span class="kw-2">mut </span>props = FeatureProperties::default();
 <a href=#110 id=110 data-nosnippet>110</a>            <span class="kw">for </span><span class="kw-2">&amp;</span>(col_idx, atom) <span class="kw">in </span><span class="kw-2">&amp;</span>key_scratch {
 <a href=#111 id=111 data-nosnippet>111</a>                <span class="kw">if let </span><span class="prelude-val">Some</span>(name) = col_names.get(usize::from(col_idx)) {
 <a href=#112 id=112 data-nosnippet>112</a>                    props.insert(name.clone(), atom.to_value());
@@ -163,7 +163,7 @@
 <a href=#163 id=163 data-nosnippet>163</a>            <span class="kw">let </span><span class="kw-2">mut </span>map = col
 <a href=#164 id=164 data-nosnippet>164</a>                .base_props
 <a href=#165 id=165 data-nosnippet>165</a>                .get(idx)
-<a href=#166 id=166 data-nosnippet>166</a>                .map_or_else(FeatureProperties::new, |arc| (<span class="kw-2">**</span>arc).clone());
+<a href=#166 id=166 data-nosnippet>166</a>                .map_or_else(FeatureProperties::default, |arc| (<span class="kw-2">**</span>arc).clone());
 <a href=#167 id=167 data-nosnippet>167</a>            <span class="kw">if </span>reads_id {
 <a href=#168 id=168 data-nosnippet>168</a>                <span class="kw">let </span>gtype = col
 <a href=#169 id=169 data-nosnippet>169</a>                    .geom_types
@@ -203,7 +203,7 @@
 <a href=#203 id=203 data-nosnippet>203</a>        <span class="kw">let </span><span class="kw-2">mut </span>map = col
 <a href=#204 id=204 data-nosnippet>204</a>            .base_props
 <a href=#205 id=205 data-nosnippet>205</a>            .get(idx)
-<a href=#206 id=206 data-nosnippet>206</a>            .map_or_else(FeatureProperties::new, |arc| (<span class="kw-2">**</span>arc).clone());
+<a href=#206 id=206 data-nosnippet>206</a>            .map_or_else(FeatureProperties::default, |arc| (<span class="kw-2">**</span>arc).clone());
 <a href=#207 id=207 data-nosnippet>207</a>        <span class="kw">if </span>reads_id {
 <a href=#208 id=208 data-nosnippet>208</a>            <span class="kw">let </span>gtype = col
 <a href=#209 id=209 data-nosnippet>209</a>                .geom_types

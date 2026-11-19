@@ -216,7 +216,7 @@
 <a href=#216 id=216 data-nosnippet>216</a><span class="kw">impl </span>Shader <span class="kw">for </span>HudShader {
 <a href=#217 id=217 data-nosnippet>217</a>    <span class="kw">fn </span>describe_vertex(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; VertexState {
 <a href=#218 id=218 data-nosnippet>218</a>        VertexState {
-<a href=#219 id=219 data-nosnippet>219</a>            source: <span class="macro">include_str!</span>(<span class="string">"hud/hud.vertex.wgsl"</span>),
+<a href=#219 id=219 data-nosnippet>219</a>            source: <span class="macro">include_str!</span>(<span class="macro">concat!</span>(<span class="macro">env!</span>(<span class="string">"OUT_DIR"</span>), <span class="string">"/wgsl/hud/hud.vertex.wgsl"</span>)),
 <a href=#220 id=220 data-nosnippet>220</a>            entry_point: <span class="string">"main"</span>,
 <a href=#221 id=221 data-nosnippet>221</a>            buffers: Vec::new(),
 <a href=#222 id=222 data-nosnippet>222</a>        }
@@ -224,7 +224,7 @@
 <a href=#224 id=224 data-nosnippet>224</a>
 <a href=#225 id=225 data-nosnippet>225</a>    <span class="kw">fn </span>describe_fragment(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; FragmentState {
 <a href=#226 id=226 data-nosnippet>226</a>        FragmentState {
-<a href=#227 id=227 data-nosnippet>227</a>            source: <span class="macro">include_str!</span>(<span class="string">"hud/hud.fragment.wgsl"</span>),
+<a href=#227 id=227 data-nosnippet>227</a>            source: <span class="macro">include_str!</span>(<span class="macro">concat!</span>(<span class="macro">env!</span>(<span class="string">"OUT_DIR"</span>), <span class="string">"/wgsl/hud/hud.fragment.wgsl"</span>)),
 <a href=#228 id=228 data-nosnippet>228</a>            entry_point: <span class="string">"main"</span>,
 <a href=#229 id=229 data-nosnippet>229</a>            targets: <span class="macro">vec!</span>[<span class="prelude-val">Some</span>(wgpu::ColorTargetState {
 <a href=#230 id=230 data-nosnippet>230</a>                format: <span class="self">self</span>.format,

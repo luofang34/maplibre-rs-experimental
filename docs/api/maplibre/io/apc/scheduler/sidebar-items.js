@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["SchedulerAsyncProcedureCall","SchedulerContext"]};
+window.SIDEBAR_ITEMS = {"struct":["SchedulerAsyncProcedureCall","SchedulerContext"],"type":["ArrivalWaker","SharedArrivalWaker"]};

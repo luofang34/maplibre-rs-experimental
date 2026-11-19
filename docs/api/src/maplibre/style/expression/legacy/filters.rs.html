@@ -152,7 +152,7 @@
 <a href=#152 id=152 data-nosnippet>152</a>                Json::String(<span class="kw">_</span>) =&gt; <span class="string">"string"</span>,
 <a href=#153 id=153 data-nosnippet>153</a>                <span class="kw">_ </span>=&gt; <span class="string">"object"</span>,
 <a href=#154 id=154 data-nosnippet>154</a>            };
-<a href=#155 id=155 data-nosnippet>155</a>            expected_types.insert(property.to_string(), <span class="macro">json!</span>(kind));
+<a href=#155 id=155 data-nosnippet>155</a>            expected_types.insert(property.to_string(), Json::String(kind.to_owned()));
 <a href=#156 id=156 data-nosnippet>156</a>        }
 <a href=#157 id=157 data-nosnippet>157</a>    }
 <a href=#158 id=158 data-nosnippet>158</a>    <span class="kw">if </span>operator == <span class="string">"==" </span>&amp;&amp; property != <span class="string">"$id" </span>&amp;&amp; value.is_null() {

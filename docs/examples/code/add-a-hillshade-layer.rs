@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::path::PathBuf;
 
 use maplibre::{
     projection::{ProjectionSpecification, ProjectionType},
@@ -16,14 +16,16 @@ use maplibre_winit::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
 pub fn style() -> Style {
     Style {
         version: 8,
-        sources: HashMap::from([(
+        sources: [(
             "hillshadeSource".to_string(),
             Source::RasterDem(RasterDemSource {
                 url: Some("https://demotiles.maplibre.org/terrain-tiles/tiles.json".to_string()),
                 tile_size: Some(256),
                 ..Default::default()
             }),
-        )]),
+        )]
+        .into_iter()
+        .collect(),
         layers: vec![StyleLayer {
             index: 1,
             id: "hillshade".to_string(),

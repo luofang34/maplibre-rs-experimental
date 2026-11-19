@@ -7,7 +7,7 @@
 <span class="item-spacer"></span>    fn <a href="#tymethod.build_from" class="fn">build_from</a>(
         coords: <a class="struct" href="../coords/struct.WorldTileCoords.html" title="struct maplibre::coords::WorldTileCoords">WorldTileCoords</a>,
         source: <a class="struct" href="../io/tile_sources/struct.RasterSourceId.html" title="struct maplibre::io::tile_sources::RasterSourceId">RasterSourceId</a>,
-        image: RgbaImage,
+        image: <a class="type" href="type.RgbaImage.html" title="type maplibre::raster::RgbaImage">RgbaImage</a>,
     ) -&gt; Self;
 <span class="item-spacer"></span>    fn <a href="#tymethod.coords" class="fn">coords</a>(&amp;self) -&gt; <a class="struct" href="../coords/struct.WorldTileCoords.html" title="struct maplibre::coords::WorldTileCoords">WorldTileCoords</a>;
 <span class="item-spacer"></span>    fn <a href="#tymethod.to_layer" class="fn">to_layer</a>(self) -&gt; <a class="struct" href="struct.AvailableRasterLayerData.html" title="struct maplibre::raster::AvailableRasterLayerData">AvailableRasterLayerData</a>;
@@ -18,7 +18,7 @@
         source: <a class="struct" href="../io/tile_sources/struct.RasterSourceId.html" title="struct maplibre::io::tile_sources::RasterSourceId">RasterSourceId</a>,
         tile: <a class="struct" href="https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html" title="struct alloc::sync::Arc">Arc</a>&lt;<a class="struct" href="../terrain/dem/struct.DemTile.html" title="struct maplibre::terrain::dem::DemTile">DemTile</a>&gt;,
         circumference_meters: <a class="primitive" href="https://doc.rust-lang.org/1.100.0/std/primitive.f64.html">f64</a>,
-        fallback: <a class="struct" href="https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html" title="struct alloc::sync::Arc">Arc</a>&lt;RgbaImage&gt;,
+        fallback: <a class="struct" href="https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html" title="struct alloc::sync::Arc">Arc</a>&lt;<a class="type" href="type.RgbaImage.html" title="type maplibre::raster::RgbaImage">RgbaImage</a>&gt;,
     ) -&gt; Self
        <span class="where">where Self: <a class="trait" href="https://doc.rust-lang.org/1.100.0/core/marker/trait.Sized.html" title="trait core::marker::Sized">Sized</a></span> { ... }
 <span class="item-spacer"></span>    fn <a href="#method.into_dem_or_layer" class="fn">into_dem_or_layer</a>(
@@ -30,7 +30,7 @@
 </div></details><details class="toggle method-toggle" open><summary><section id="tymethod.build_from" class="method"><a class="src rightside" href="../../src/maplibre/raster/transferables.rs.html#54">Source</a><h4 class="code-header">fn <a href="#tymethod.build_from" class="fn">build_from</a>(
     coords: <a class="struct" href="../coords/struct.WorldTileCoords.html" title="struct maplibre::coords::WorldTileCoords">WorldTileCoords</a>,
     source: <a class="struct" href="../io/tile_sources/struct.RasterSourceId.html" title="struct maplibre::io::tile_sources::RasterSourceId">RasterSourceId</a>,
-    image: RgbaImage,
+    image: <a class="type" href="type.RgbaImage.html" title="type maplibre::raster::RgbaImage">RgbaImage</a>,
 ) -&gt; Self</h4></section></summary><div class="docblock"><p>Takes ownership of a decoded image and its source identity at the supplied tile coordinates.</p>
 </div></details><details class="toggle method-toggle" open><summary><section id="tymethod.coords" class="method"><a class="src rightside" href="../../src/maplibre/raster/transferables.rs.html#74">Source</a><h4 class="code-header">fn <a href="#tymethod.coords" class="fn">coords</a>(&amp;self) -&gt; <a class="struct" href="../coords/struct.WorldTileCoords.html" title="struct maplibre::coords::WorldTileCoords">WorldTileCoords</a></h4></section></summary><div class="docblock"><p>Tile-grid coordinates covered by the image.</p>
 </div></details><details class="toggle method-toggle" open><summary><section id="tymethod.to_layer" class="method"><a class="src rightside" href="../../src/maplibre/raster/transferables.rs.html#77">Source</a><h4 class="code-header">fn <a href="#tymethod.to_layer" class="fn">to_layer</a>(self) -&gt; <a class="struct" href="struct.AvailableRasterLayerData.html" title="struct maplibre::raster::AvailableRasterLayerData">AvailableRasterLayerData</a></h4></section></summary><div class="docblock"><p>Consumes the message into pixel data awaiting GPU upload.</p>
@@ -39,7 +39,7 @@
     source: <a class="struct" href="../io/tile_sources/struct.RasterSourceId.html" title="struct maplibre::io::tile_sources::RasterSourceId">RasterSourceId</a>,
     tile: <a class="struct" href="https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html" title="struct alloc::sync::Arc">Arc</a>&lt;<a class="struct" href="../terrain/dem/struct.DemTile.html" title="struct maplibre::terrain::dem::DemTile">DemTile</a>&gt;,
     circumference_meters: <a class="primitive" href="https://doc.rust-lang.org/1.100.0/std/primitive.f64.html">f64</a>,
-    fallback: <a class="struct" href="https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html" title="struct alloc::sync::Arc">Arc</a>&lt;RgbaImage&gt;,
+    fallback: <a class="struct" href="https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html" title="struct alloc::sync::Arc">Arc</a>&lt;<a class="type" href="type.RgbaImage.html" title="type maplibre::raster::RgbaImage">RgbaImage</a>&gt;,
 ) -&gt; Self<div class="where">where
     Self: <a class="trait" href="https://doc.rust-lang.org/1.100.0/core/marker/trait.Sized.html" title="trait core::marker::Sized">Sized</a>,</div></h4></section></summary><div class="docblock"><p>Wraps a worker-decoded <a href="../terrain/dem/struct.DemTile.html" title="struct maplibre::terrain::dem::DemTile"><code>DemTile</code></a> for <code>raster-dem</code> sources when supported by the transport,
 falling back to <code>fallback</code> (or reconstructing the interior image from <code>tile</code> when <code>fallback</code>

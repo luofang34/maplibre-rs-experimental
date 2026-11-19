@@ -5,7 +5,7 @@
 <a href=#5 id=5 data-nosnippet>5</a>//! their own paint and the same placement, so they neither collide with one another nor
 <a href=#6 id=6 data-nosnippet>6</a>//! with the lowest, and a query finds a placed label in each of them.
 <a href=#7 id=7 data-nosnippet>7</a>
-<a href=#8 id=8 data-nosnippet>8</a></span><span class="kw">use </span>std::collections::HashMap;
+<a href=#8 id=8 data-nosnippet>8</a></span><span class="kw">use </span>rustc_hash::FxHashMap <span class="kw">as </span>HashMap;
 <a href=#9 id=9 data-nosnippet>9</a>
 <a href=#10 id=10 data-nosnippet>10</a><span class="kw">use </span><span class="kw">super</span>::layer_pass::{empty_metadata, write_feature_metadata};
 <a href=#11 id=11 data-nosnippet>11</a><span class="kw">use crate</span>::{
@@ -33,7 +33,7 @@
 <a href=#33 id=33 data-nosnippet>33</a><span class="doccomment">/// The layer that places for each symbol layer GL JS would group with others: the lowest of
 <a href=#34 id=34 data-nosnippet>34</a>/// its group in style order. Layers that are alone are absent.
 <a href=#35 id=35 data-nosnippet>35</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>leaders(style: <span class="kw-2">&amp;</span>Style) -&gt; HashMap&lt;String, String&gt; {
-<a href=#36 id=36 data-nosnippet>36</a>    <span class="kw">let </span><span class="kw-2">mut </span>groups: HashMap&lt;String, Vec&lt;(u32, <span class="kw-2">&amp;</span>str)&gt;&gt; = HashMap::new();
+<a href=#36 id=36 data-nosnippet>36</a>    <span class="kw">let </span><span class="kw-2">mut </span>groups: HashMap&lt;String, Vec&lt;(u32, <span class="kw-2">&amp;</span>str)&gt;&gt; = HashMap::default();
 <a href=#37 id=37 data-nosnippet>37</a>    <span class="kw">for </span>layer <span class="kw">in </span>style.layers.iter().filter(|layer| layer.type_ == <span class="string">"symbol"</span>) {
 <a href=#38 id=38 data-nosnippet>38</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(key) = layer.layout_group_key() {
 <a href=#39 id=39 data-nosnippet>39</a>            groups
@@ -42,7 +42,7 @@
 <a href=#42 id=42 data-nosnippet>42</a>                .push((layer.index, <span class="kw-2">&amp;</span>layer.id));
 <a href=#43 id=43 data-nosnippet>43</a>        }
 <a href=#44 id=44 data-nosnippet>44</a>    }
-<a href=#45 id=45 data-nosnippet>45</a>    <span class="kw">let </span><span class="kw-2">mut </span>leaders = HashMap::new();
+<a href=#45 id=45 data-nosnippet>45</a>    <span class="kw">let </span><span class="kw-2">mut </span>leaders = HashMap::default();
 <a href=#46 id=46 data-nosnippet>46</a>    <span class="kw">for </span>members <span class="kw">in </span>groups.values().filter(|members| members.len() &gt; <span class="number">1</span>) {
 <a href=#47 id=47 data-nosnippet>47</a>        <span class="kw">let </span><span class="prelude-val">Some</span>((<span class="kw">_</span>, lowest)) = members.iter().min_by_key(|(index, <span class="kw">_</span>)| <span class="kw-2">*</span>index) <span class="kw">else </span>{
 <a href=#48 id=48 data-nosnippet>48</a>            <span class="kw">continue</span>;

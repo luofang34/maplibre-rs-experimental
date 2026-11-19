@@ -2,7 +2,7 @@
 <a href=#2 id=2 data-nosnippet>2</a>//! `mergeLines` does before it places labels along them, so a road cut into pieces is labelled
 <a href=#3 id=3 data-nosnippet>3</a>//! as one road.
 <a href=#4 id=4 data-nosnippet>4</a>
-<a href=#5 id=5 data-nosnippet>5</a></span><span class="kw">use </span>std::collections::HashMap;
+<a href=#5 id=5 data-nosnippet>5</a></span><span class="kw">use </span>rustc_hash::FxHashMap <span class="kw">as </span>HashMap;
 <a href=#6 id=6 data-nosnippet>6</a>
 <a href=#7 id=7 data-nosnippet>7</a><span class="kw">use </span><span class="kw">crate</span>::style::expression::FeatureProperties;
 <a href=#8 id=8 data-nosnippet>8</a>
@@ -83,8 +83,8 @@
 <a href=#83 id=83 data-nosnippet>83</a>    <span class="kw">let </span><span class="kw-2">mut </span>lines = Lines {
 <a href=#84 id=84 data-nosnippet>84</a>        chunks: Vec::new(),
 <a href=#85 id=85 data-nosnippet>85</a>        merged: Vec::new(),
-<a href=#86 id=86 data-nosnippet>86</a>        left: HashMap::new(),
-<a href=#87 id=87 data-nosnippet>87</a>        right: HashMap::new(),
+<a href=#86 id=86 data-nosnippet>86</a>        left: HashMap::default(),
+<a href=#87 id=87 data-nosnippet>87</a>        right: HashMap::default(),
 <a href=#88 id=88 data-nosnippet>88</a>    };
 <a href=#89 id=89 data-nosnippet>89</a>    <span class="kw">for </span>(index, feature) <span class="kw">in </span>features.iter().enumerate() {
 <a href=#90 id=90 data-nosnippet>90</a>        lines.chunks.push(Chunk {

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["emit_coord_seq","emit_feature","emit_geometry","emit_point_coords","emit_properties","emit_rings","err","process_geojson_value"]};

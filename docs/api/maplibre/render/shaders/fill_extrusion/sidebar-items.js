@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["ExtrusionPass"],"struct":["FillExtrusionShader"]};
+window.SIDEBAR_ITEMS = {"enum":["ExtrusionPass"],"fn":["extrusion_layer_layout","extrusion_vertex_source"],"struct":["FillExtrusionCompactShader","FillExtrusionShader"]};

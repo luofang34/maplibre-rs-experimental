@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["image_name"],"struct":["FormattedText","ImageName","PatternName","TextField","TextSection"]};
+window.SIDEBAR_ITEMS = {"fn":["image_name","parse_font_list"],"struct":["FormattedText","ImageName","PatternName","TextField","TextSection"]};
