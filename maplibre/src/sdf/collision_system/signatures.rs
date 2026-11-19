@@ -128,11 +128,9 @@ pub(super) fn obstructed_grid(
 pub(super) fn has_symbol_depth_occluders(
     world: &crate::tcs::world::World,
     render_graph: &crate::render::graph::RenderGraph,
+    pitch: f64,
 ) -> bool {
-    use crate::render::{
-        projection::ProjectionGpuResources,
-        render_phase::{LayerItem, MaskGroup, ProjectionBinding, RenderPhase},
-    };
+    use crate::render::render_phase::{LayerItem, MaskGroup, RenderPhase};
     if render_graph.has_custom_scene_depth_writers() {
         return true;
     }
@@ -150,17 +148,15 @@ pub(super) fn has_symbol_depth_occluders(
     {
         return true;
     }
-    if let Some(Initialized(proj)) = world.resources.get::<Eventually<ProjectionGpuResources>>() {
-        if proj.is_globe_active(ProjectionBinding::View) {
-            return true;
-        }
-    }
+    let flat_view = pitch.abs() < 1e-4;
     world
         .resources
         .get::<RenderPhase<LayerItem>>()
         .is_some_and(|layers| {
-            layers
-                .into_iter()
-                .any(|item| matches!(item.mask_group, MaskGroup::Mutating | MaskGroup::Custom))
+            layers.into_iter().any(|item| match item.mask_group {
+                MaskGroup::Custom => true,
+                MaskGroup::Mutating => !flat_view,
+                MaskGroup::Unmasked | MaskGroup::Vector => false,
+            })
         })
 }

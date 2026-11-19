@@ -5,6 +5,8 @@
 //! depth with a stencil, in whatever format the device favours; this pass copies it into the
 //! `Depth32Float` texture the host provides, after everything has been drawn.
 
+use std::sync::Mutex;
+
 use wgpu::StoreOp;
 
 use crate::{
@@ -16,11 +18,18 @@ use crate::{
     tcs::world::World,
 };
 
+struct CachedDepthBind {
+    source: wgpu::Texture,
+    _view: wgpu::TextureView,
+    bind_group: wgpu::BindGroup,
+}
+
 /// The pipeline that resolves the map's depth into a single-sample depth texture.
 pub struct DepthCopyPipeline {
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     samples: u32,
+    cached_bind: Mutex<Option<CachedDepthBind>>,
 }
 
 impl DepthCopyPipeline {
@@ -102,6 +111,7 @@ impl DepthCopyPipeline {
             pipeline,
             layout,
             samples,
+            cached_bind: Mutex::new(None),
         }
     }
     /// Resolves the rendered depth into a single-sample target.
@@ -112,19 +122,32 @@ impl DepthCopyPipeline {
         source_texture: &wgpu::Texture,
         target: &wgpu::TextureView,
     ) {
-        // The map's depth texture carries a stencil; a depth texture binding sees one aspect.
-        let source = source_texture.create_view(&wgpu::TextureViewDescriptor {
-            aspect: wgpu::TextureAspect::DepthOnly,
-            ..Default::default()
-        });
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("depth copy"),
-            layout: &self.layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&source),
-            }],
-        });
+        let bind_group = {
+            let mut cached = crate::platform::lock_unpoisoned(&self.cached_bind);
+            if let Some(entry) = cached.as_ref().filter(|e| e.source == *source_texture) {
+                entry.bind_group.clone()
+            } else {
+                // The map's depth texture carries a stencil; a depth texture binding sees one aspect.
+                let view = source_texture.create_view(&wgpu::TextureViewDescriptor {
+                    aspect: wgpu::TextureAspect::DepthOnly,
+                    ..Default::default()
+                });
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("depth copy"),
+                    layout: &self.layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    }],
+                });
+                *cached = Some(CachedDepthBind {
+                    source: source_texture.clone(),
+                    _view: view,
+                    bind_group: bind_group.clone(),
+                });
+                bind_group
+            }
+        };
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             multiview_mask: None,
             label: Some("depth_copy"),

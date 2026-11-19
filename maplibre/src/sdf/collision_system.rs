@@ -123,6 +123,7 @@ impl System for CollisionSystem {
                 &renderer.queue,
                 &renderer.render_graph,
                 &self.history,
+                view_state.camera().get_pitch().0,
             );
             self.prune_inactive_symbol_draws(world);
             return Ok(());
@@ -238,6 +239,7 @@ impl System for CollisionSystem {
                         &renderer.queue,
                         &renderer.render_graph,
                         &self.history,
+                        view_state.camera().get_pitch().0,
                     );
                     self.prune_inactive_symbol_draws(world);
                     crate::render::frame_signals::keep_animating(world);
@@ -283,6 +285,7 @@ impl System for CollisionSystem {
                     &renderer.queue,
                     &renderer.render_graph,
                     &self.history,
+                    view_state.camera().get_pitch().0,
                 );
                 self.prune_inactive_symbol_draws(world);
                 if self.active_epoch.is_some()
@@ -309,6 +312,7 @@ impl System for CollisionSystem {
                 &renderer.queue,
                 &renderer.render_graph,
                 &self.history,
+                view_state.camera().get_pitch().0,
             );
             self.prune_inactive_symbol_draws(world);
             return Ok(());
@@ -342,6 +346,7 @@ impl System for CollisionSystem {
                 &renderer.queue,
                 &renderer.render_graph,
                 &self.history,
+                view_state.camera().get_pitch().0,
             );
             self.prune_inactive_symbol_draws(world);
             if self.history.is_fading() || self.controller.is_pending() {
@@ -421,6 +426,7 @@ impl System for CollisionSystem {
             &renderer.queue,
             &renderer.render_graph,
             &self.history,
+            view_state.camera().get_pitch().0,
         );
         self.prune_inactive_symbol_draws(world);
         if self.active_epoch.is_some() || self.history.is_fading() || self.controller.is_pending() {
@@ -435,10 +441,11 @@ fn sync_symbol_depth_fade(
     queue: &crate::render::upload_queue::UploadQueue,
     render_graph: &crate::render::graph::RenderGraph,
     history: &temporal::PlacementHistory,
+    pitch: f64,
 ) {
     let time_ms = history.effective_shader_time_ms();
     let duration_ms = history.fade_duration_ms();
-    let skip_depth_occlusion = !has_symbol_depth_occluders(world, render_graph);
+    let skip_depth_occlusion = !has_symbol_depth_occluders(world, render_graph, pitch);
     if let Some(Initialized(depth)) = world
         .resources
         .get_mut::<Eventually<super::depth::SymbolDepth>>()

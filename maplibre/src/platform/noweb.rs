@@ -39,8 +39,8 @@ pub fn native_http_client<P: Into<std::path::PathBuf>>(cache_path: Option<P>) ->
 #[allow(clippy::expect_used)]
 pub fn run_multithreaded<F: Future>(future: F) -> F::Output {
     tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(4)
-        .max_blocking_threads(4)
+        .worker_threads(2)
+        .max_blocking_threads(2)
         .enable_io()
         .enable_time()
         .thread_name_fn(|| {

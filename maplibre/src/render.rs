@@ -288,7 +288,10 @@ impl Renderer {
         Ok(Self {
             instance,
             device: share_gpu(device),
+            #[cfg(target_arch = "wasm32")]
             queue: upload_queue::UploadQueue::with_staging(queue),
+            #[cfg(not(target_arch = "wasm32"))]
+            queue: upload_queue::UploadQueue::new(queue),
             adapter,
             wgpu_settings,
             settings,
@@ -342,7 +345,10 @@ impl Renderer {
         Ok(Self {
             instance,
             device: share_gpu(device),
+            #[cfg(target_arch = "wasm32")]
             queue: upload_queue::UploadQueue::with_staging(queue),
+            #[cfg(not(target_arch = "wasm32"))]
+            queue: upload_queue::UploadQueue::new(queue),
             adapter,
             wgpu_settings,
             settings,

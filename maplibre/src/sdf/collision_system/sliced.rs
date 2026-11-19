@@ -38,7 +38,7 @@ const SLICE_BUDGET_SETTLED: Duration = Duration::from_micros(1800);
 #[cfg(target_arch = "wasm32")]
 const SLICE_BUDGET_MOVING: Duration = Duration::from_micros(650);
 #[cfg(not(target_arch = "wasm32"))]
-const SLICE_BUDGET_MOVING: Duration = Duration::from_micros(1800);
+const SLICE_BUDGET_MOVING: Duration = Duration::from_micros(550);
 
 type BucketMetadataList = Vec<(WorldTileCoords, Vec<SDFShaderFeatureMetadata>)>;
 
