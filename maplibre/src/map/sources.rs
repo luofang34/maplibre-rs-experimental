@@ -183,14 +183,25 @@ where
         bytes: &[u8],
         was_string: bool,
     ) -> Result<(), MapError> {
+        self.set_geojson_bytes_owned(source_name, bytes.to_vec(), was_string)
+    }
+
+    /// Replaces the data of a GeoJSON source from an owned UTF-8 buffer without cloning it on fast updates.
+    #[cfg(feature = "geojson")]
+    pub fn set_geojson_bytes_owned(
+        &mut self,
+        source_name: &str,
+        bytes: Vec<u8>,
+        was_string: bool,
+    ) -> Result<(), MapError> {
         let result = match &mut self.map_context {
             CurrentMapContext::Ready(context) => {
-                context.set_geojson_bytes(source_name, bytes, was_string)
+                context.set_geojson_bytes_owned(source_name, bytes, was_string)
             }
             CurrentMapContext::Pending(pending) => {
                 pending
                     .style
-                    .set_geojson_bytes(source_name, bytes, was_string)
+                    .set_geojson_bytes(source_name, &bytes, was_string)
             }
         };
         match result {

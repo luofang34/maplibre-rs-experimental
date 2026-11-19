@@ -31,19 +31,68 @@ pub struct FillExtrusionShader {
     pub pass: ExtrusionPass,
 }
 
+fn extrusion_vertex_source() -> &'static str {
+    concat!(
+        include_str!(concat!(
+            env!("OUT_DIR"),
+            "/wgsl/render/shaders/projection.vertex.wgsl"
+        )),
+        include_str!(concat!(
+            env!("OUT_DIR"),
+            "/wgsl/render/shaders/fill_extrusion.vertex.wgsl"
+        ))
+    )
+}
+
+fn extrusion_layer_layout(include_uniform_color: bool) -> VertexBufferLayout {
+    let mut attributes = vec![
+        attribute(
+            std::mem::offset_of!(ShaderLayerMetadata, translate) as u64,
+            wgpu::VertexFormat::Float32x2,
+            15,
+        ),
+        attribute(
+            std::mem::offset_of!(ShaderLayerMetadata, stroke_color) as u64,
+            wgpu::VertexFormat::Float32x4,
+            12,
+        ),
+        attribute(
+            std::mem::offset_of!(ShaderLayerMetadata, circle_params) as u64,
+            wgpu::VertexFormat::Float32x4,
+            13,
+        ),
+        attribute(
+            std::mem::offset_of!(ShaderLayerMetadata, circle_flags) as u64,
+            wgpu::VertexFormat::Float32x4,
+            14,
+        ),
+    ];
+    if include_uniform_color {
+        attributes.push(attribute(
+            std::mem::offset_of!(ShaderLayerMetadata, uniform_color) as u64,
+            wgpu::VertexFormat::Float32x4,
+            8,
+        ));
+    }
+    VertexBufferLayout {
+        array_stride: 0,
+        step_mode: wgpu::VertexStepMode::Instance,
+        attributes,
+    }
+}
+
+/// Compact 8-byte vertex layout for uniform-height/base extruded polygons (`FillExtrusionCompactShader`).
+pub struct FillExtrusionCompactShader {
+    /// Format of the color attachment used by the render pipeline.
+    pub format: wgpu::TextureFormat,
+    /// Which pass of an extrusion the pipeline draws.
+    pub pass: ExtrusionPass,
+}
+
 impl Shader for FillExtrusionShader {
     fn describe_vertex(&self) -> VertexState {
         VertexState {
-            source: concat!(
-                include_str!(concat!(
-                    env!("OUT_DIR"),
-                    "/wgsl/render/shaders/projection.vertex.wgsl"
-                )),
-                include_str!(concat!(
-                    env!("OUT_DIR"),
-                    "/wgsl/render/shaders/fill_extrusion.vertex.wgsl"
-                ))
-            ),
+            source: extrusion_vertex_source(),
             entry_point: match self.pass {
                 ExtrusionPass::TranslucentBack => "translucent_back_main",
                 ExtrusionPass::TranslucentFront => "translucent_front_main",
@@ -61,32 +110,7 @@ impl Shader for FillExtrusionShader {
                     .to_vec(),
                 },
                 ShaderTileMetadata::basic_layout(),
-                VertexBufferLayout {
-                    array_stride: 0,
-                    step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: vec![
-                        attribute(
-                            std::mem::offset_of!(ShaderLayerMetadata, translate) as u64,
-                            wgpu::VertexFormat::Float32x2,
-                            15,
-                        ),
-                        attribute(
-                            std::mem::offset_of!(ShaderLayerMetadata, stroke_color) as u64,
-                            wgpu::VertexFormat::Float32x4,
-                            12,
-                        ),
-                        attribute(
-                            std::mem::offset_of!(ShaderLayerMetadata, circle_params) as u64,
-                            wgpu::VertexFormat::Float32x4,
-                            13,
-                        ),
-                        attribute(
-                            std::mem::offset_of!(ShaderLayerMetadata, circle_flags) as u64,
-                            wgpu::VertexFormat::Float32x4,
-                            14,
-                        ),
-                    ],
-                },
+                extrusion_layer_layout(false),
                 VertexBufferLayout {
                     array_stride: std::mem::size_of::<FillShaderFeatureMetadata>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
@@ -118,5 +142,39 @@ impl Shader for FillExtrusionShader {
                 },
             })],
         }
+    }
+}
+
+impl Shader for FillExtrusionCompactShader {
+    fn describe_vertex(&self) -> VertexState {
+        VertexState {
+            source: extrusion_vertex_source(),
+            entry_point: match self.pass {
+                ExtrusionPass::TranslucentBack => "compact_translucent_back_main",
+                ExtrusionPass::TranslucentFront => "compact_translucent_front_main",
+                _ => "compact_main",
+            },
+            buffers: vec![
+                VertexBufferLayout {
+                    array_stride: 8,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: wgpu::vertex_attr_array![
+                        0 => Sint16x2,
+                        1 => Uint32
+                    ]
+                    .to_vec(),
+                },
+                ShaderTileMetadata::basic_layout(),
+                extrusion_layer_layout(true),
+            ],
+        }
+    }
+
+    fn describe_fragment(&self) -> FragmentState {
+        FillExtrusionShader {
+            format: self.format,
+            pass: self.pass,
+        }
+        .describe_fragment()
     }
 }

@@ -126,18 +126,16 @@ impl PipelineSetup<'_> {
         )
     }
 
-    fn create_extrusion(
+    fn extrusion_descriptor(
         &self,
         pass: shaders::ExtrusionPass,
-    ) -> crate::render::resource::FeaturePipelinePair {
+        vertex: crate::render::resource::VertexState,
+        fragment: crate::render::resource::FragmentState,
+    ) -> crate::render::resource::RenderPipelineDescriptor {
         use shaders::ExtrusionPass::{
             Clear, Color, Depth, PatternColor, TranslucentBack, TranslucentFront,
         };
 
-        let shader = shaders::FillExtrusionShader {
-            format: self.format,
-            pass,
-        };
         let mut descriptor = TilePipeline::new(
             match pass {
                 Depth => "extrusion_depth_pipeline",
@@ -149,8 +147,8 @@ impl PipelineSetup<'_> {
             }
             .into(),
             self.settings,
-            shader.describe_vertex(),
-            shader.describe_fragment(),
+            vertex,
+            fragment,
             crate::render::resource::TilePipelineOptions {
                 depth_stencil_enabled: true,
                 update_stencil: false,
@@ -203,12 +201,38 @@ impl PipelineSetup<'_> {
                 state.stencil.write_mask = 0;
             }
         }
-        let layouts: &[&wgpu::BindGroupLayout] = if pass == PatternColor {
+        descriptor
+    }
+
+    fn create_extrusion(
+        &self,
+        pass: shaders::ExtrusionPass,
+    ) -> crate::render::resource::FeaturePipelinePair {
+        let shader = shaders::FillExtrusionShader {
+            format: self.format,
+            pass,
+        };
+        let descriptor =
+            self.extrusion_descriptor(pass, shader.describe_vertex(), shader.describe_fragment());
+        let layouts: &[&wgpu::BindGroupLayout] = if pass == shaders::ExtrusionPass::PatternColor {
             &[self.projection, &self.pattern]
         } else {
             &[self.projection]
         };
         descriptor.initialize_pair_with_binding(self.device, layouts, Self::layer_color_binding())
+    }
+
+    fn create_compact_extrusion(&self, pass: shaders::ExtrusionPass) -> wgpu::RenderPipeline {
+        let shader = shaders::FillExtrusionCompactShader {
+            format: self.format,
+            pass,
+        };
+        let mut descriptor =
+            self.extrusion_descriptor(pass, shader.describe_vertex(), shader.describe_fragment());
+        if let Some(label) = descriptor.label.take() {
+            descriptor.label = Some(std::borrow::Cow::Owned(format!("{label}_compact")));
+        }
+        descriptor.initialize_with_prefix_layouts(self.device, &[self.projection])
     }
 
     pub(super) fn initialize_extrusion(
@@ -221,9 +245,14 @@ impl PipelineSetup<'_> {
             depth: self.create_extrusion(shaders::ExtrusionPass::Depth),
             color: self.create_extrusion(shaders::ExtrusionPass::Color),
             clear: self.create_extrusion(shaders::ExtrusionPass::Clear),
+            compact_depth: self.create_compact_extrusion(shaders::ExtrusionPass::Depth),
+            compact_color: self.create_compact_extrusion(shaders::ExtrusionPass::Color),
+            compact_clear: self.create_compact_extrusion(shaders::ExtrusionPass::Clear),
             pattern: None,
             translucent_back: None,
             translucent_front: None,
+            compact_translucent_back: None,
+            compact_translucent_front: None,
         });
         if needs_pattern {
             ep.pattern
@@ -235,6 +264,12 @@ impl PipelineSetup<'_> {
             });
             ep.translucent_front.get_or_insert_with(|| {
                 self.create_extrusion(shaders::ExtrusionPass::TranslucentFront)
+            });
+            ep.compact_translucent_back.get_or_insert_with(|| {
+                self.create_compact_extrusion(shaders::ExtrusionPass::TranslucentBack)
+            });
+            ep.compact_translucent_front.get_or_insert_with(|| {
+                self.create_compact_extrusion(shaders::ExtrusionPass::TranslucentFront)
             });
         }
     }

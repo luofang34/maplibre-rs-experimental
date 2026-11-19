@@ -44,9 +44,17 @@ pub struct IndexEntry {
     pub(super) evaluated_zoom: Option<f32>,
     // Sub-ranges `(vertex_offset, local_index_range)` when > 65,536 vertices pack into `u16` indices.
     pub(super) u16_chunks: Option<super::u16_chunks::U16Chunks>,
+    // True when `buffer_vertices` stores 8-byte compact extrusion records instead of 16-byte vertices.
+    pub(super) compact_extrusion: bool,
 }
 
 impl IndexEntry {
+    /// Whether this entry stores 8-byte compact extrusion vertices (slot 0 stride `8`, no slot 3).
+    #[inline]
+    pub fn is_compact_extrusion(&self) -> bool {
+        self.compact_extrusion
+    }
+
     /// Whether this entry stores one `VertexStepMode::Instance` feature metadata record (or zero
     /// bytes when carried in `ShaderLayerMetadata`) instead of one record per vertex.
     #[inline]

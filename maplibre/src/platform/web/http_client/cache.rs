@@ -27,6 +27,7 @@ struct LruState {
     bytes: usize,
     clock: u64,
     cap_bytes: usize,
+    persist_offline: bool,
 }
 
 impl LruState {
@@ -37,6 +38,7 @@ impl LruState {
             bytes: 0,
             clock: 0,
             cap_bytes,
+            persist_offline: false,
         }
     }
 
@@ -124,6 +126,17 @@ impl BrowserMemoryCache {
     /// Creates a bounded in-memory LRU cache capped at `cap_bytes`.
     pub fn new(cap_bytes: usize) -> Self {
         Self(Arc::new(Mutex::new(LruState::new(cap_bytes))))
+    }
+
+    /// Enables or disables persistent `CacheStorage` write-back for offline reloads.
+    pub fn with_offline_persistence(self, enabled: bool) -> Self {
+        crate::platform::lock_unpoisoned(&self.0).persist_offline = enabled;
+        self
+    }
+
+    /// Whether persistent `CacheStorage` write-back is enabled.
+    pub fn persist_offline(&self) -> bool {
+        crate::platform::lock_unpoisoned(&self.0).persist_offline
     }
 
     /// Looks up `key` and updates its LRU recency stamp on hit.
@@ -239,48 +252,46 @@ pub(super) async fn put_browser_cache(url: &str, body: &[u8]) {
     let _ = JsFuture::from(cache.put_with_str(url, &response)).await;
 }
 
-const DECODED_RGBA_MAGIC: &[u8; 4] = b"MLRG";
 const DECODED_RGBA_MAX_BYTES: usize = 8 * 1024 * 1024;
+const DECODED_SPRITE_CACHE_CAP_BYTES: usize = 16 * 1024 * 1024;
 
-/// Returns a previously cached pre-decoded RGBA sprite sheet from persistent `CacheStorage`.
-pub(crate) async fn match_decoded_rgba_cache(url: &str) -> Option<image::RgbaImage> {
-    if !crate::io::source_client::is_remote_http_url(url) {
-        return None;
-    }
-    let key = format!("https://maplibre-decoded.local/v1/{url}");
-    let bytes = match_browser_cache(&key).await?;
-    if bytes.get(0..4)? != DECODED_RGBA_MAGIC {
-        return None;
-    }
-    let width = u32::from_le_bytes(bytes.get(4..8)?.try_into().ok()?);
-    let height = u32::from_le_bytes(bytes.get(8..12)?.try_into().ok()?);
-    if width == 0 || height == 0 {
-        return None;
-    }
-    let expected = (width as usize)
-        .checked_mul(height as usize)?
-        .checked_mul(4)?;
-    let raw = bytes.get(12..)?;
-    if raw.len() != expected {
-        return None;
-    }
-    image::RgbaImage::from_raw(width, height, raw.to_vec())
+struct DecodedSpriteEntry {
+    url: Arc<str>,
+    image: image::RgbaImage,
 }
 
-/// Persists a decoded RGBA sprite sheet in `CacheStorage` in the background for sub-millisecond warm reloads.
-pub(crate) fn spawn_put_decoded_rgba_cache(url: &str, image: &image::RgbaImage) {
-    if !crate::io::source_client::is_remote_http_url(url)
-        || image.as_raw().len() > DECODED_RGBA_MAX_BYTES
-    {
+static DECODED_SPRITE_CACHE: LazyLock<Mutex<Vec<DecodedSpriteEntry>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
+
+/// Returns a previously cached decoded RGBA sprite sheet from the in-memory cache.
+pub(crate) fn get_decoded_rgba_memory(url: &str) -> Option<image::RgbaImage> {
+    let mut cache = crate::platform::lock_unpoisoned(&DECODED_SPRITE_CACHE);
+    let idx = cache.iter().position(|entry| entry.url.as_ref() == url)?;
+    if idx + 1 != cache.len() {
+        let entry = cache.remove(idx);
+        cache.push(entry);
+    }
+    cache.last().map(|entry| entry.image.clone())
+}
+
+/// Stores a decoded RGBA sprite sheet in the bounded in-memory cache without `CacheStorage` IPC.
+pub(crate) fn put_decoded_rgba_memory(url: &str, image: &image::RgbaImage) {
+    if image.as_raw().len() > DECODED_RGBA_MAX_BYTES {
         return;
     }
-    let key = format!("https://maplibre-decoded.local/v1/{url}");
-    let mut payload = Vec::with_capacity(12 + image.as_raw().len());
-    payload.extend_from_slice(DECODED_RGBA_MAGIC);
-    payload.extend_from_slice(&image.width().to_le_bytes());
-    payload.extend_from_slice(&image.height().to_le_bytes());
-    payload.extend_from_slice(image.as_raw());
-    wasm_bindgen_futures::spawn_local(async move {
-        put_browser_cache(&key, &payload).await;
+    let mut cache = crate::platform::lock_unpoisoned(&DECODED_SPRITE_CACHE);
+    if let Some(idx) = cache.iter().position(|entry| entry.url.as_ref() == url) {
+        cache.remove(idx);
+    }
+    let mut total_bytes: usize = cache.iter().map(|entry| entry.image.as_raw().len()).sum();
+    while !cache.is_empty()
+        && total_bytes.saturating_add(image.as_raw().len()) > DECODED_SPRITE_CACHE_CAP_BYTES
+    {
+        let evicted = cache.remove(0);
+        total_bytes = total_bytes.saturating_sub(evicted.image.as_raw().len());
+    }
+    cache.push(DecodedSpriteEntry {
+        url: Arc::from(url),
+        image: image.clone(),
     });
 }

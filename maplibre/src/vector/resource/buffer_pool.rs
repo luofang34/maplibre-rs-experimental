@@ -239,6 +239,21 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
 
     /// Releases GPU geometry for `coords`, cancelling staged writes on reclaimed empty slabs.
     pub fn remove_tile_with_queue(&mut self, coords: WorldTileCoords, queue: Option<&Q>) {
+        self.remove_tile_inner(coords, queue, true);
+    }
+
+    /// Releases GPU geometry for an already-evicted tile whose `World` entity has been removed,
+    /// preserving `eviction_generation` so surviving tiles keep their `uploaded_stamp` fast path.
+    pub fn remove_evicted_tile_with_queue(&mut self, coords: WorldTileCoords, queue: Option<&Q>) {
+        self.remove_tile_inner(coords, queue, false);
+    }
+
+    fn remove_tile_inner(
+        &mut self,
+        coords: WorldTileCoords,
+        queue: Option<&Q>,
+        bump_eviction: bool,
+    ) {
         self.pattern_runs.retain(|(tile, _), _| *tile != coords);
         self.sort_runs.retain(|(tile, _), _| *tile != coords);
         let removed = self.index.remove_tile(coords);
@@ -249,7 +264,9 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             let keep_spare = usize::from(!cfg!(target_arch = "wasm32"));
             self.reclaim_empty_pages_with_queue(keep_spare, queue);
             self.revision = self.revision.wrapping_add(1);
-            self.eviction_generation = self.eviction_generation.wrapping_add(1);
+            if bump_eviction {
+                self.eviction_generation = self.eviction_generation.wrapping_add(1);
+            }
         }
     }
 

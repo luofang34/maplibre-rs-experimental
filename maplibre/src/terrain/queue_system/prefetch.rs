@@ -49,6 +49,10 @@ pub(super) fn prepare(
         .resources
         .get::<PrefetchView>()
         .is_some_and(|prefetch| prefetch.view_state.is_some());
+    if cfg!(target_arch = "wasm32") && !view.has_external_view() && !has_ahead {
+        world.resources.insert(DrapePrefetchRequests::default());
+        return;
+    }
     let min_interval = if !view.has_external_view() && has_ahead {
         Duration::from_millis(32)
     } else {

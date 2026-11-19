@@ -1,18 +1,3 @@
-import {
-    bigInt,
-    bulkMemory,
-    exceptions,
-    multiValue,
-    mutableGlobals,
-    referenceTypes,
-    saturatedFloatToInt,
-    signExtensions,
-    simd,
-    tailCall,
-    threads
-} from "wasm-feature-detect"
-
-
 import {ensureWebGpuCompatibility} from "./webgpu-compat.mjs";
 
 export {ensureWebGpuCompatibility};
@@ -123,32 +108,4 @@ export const isWebGLSupported = () => {
     } catch (x) {
         return false
     }
-}
-
-let checkedFeatures: Promise<void> | null = null;
-
-export const checkWasmFeatures = (): Promise<void> => {
-    if (!checkedFeatures) {
-        checkedFeatures = (async () => {
-            const entries: Array<[string, () => Promise<boolean>]> = [
-                ["bulkMemory", bulkMemory],
-                ["exceptions", exceptions],
-                ["multiValue", multiValue],
-                ["mutableGlobals", mutableGlobals],
-                ["referenceTypes", referenceTypes],
-                ["saturatedFloatToInt", saturatedFloatToInt],
-                ["signExtensions", signExtensions],
-                ["simd", simd],
-                ["tailCall", tailCall],
-                ["threads", threads],
-                ["bigInt", bigInt],
-            ];
-            await Promise.all(entries.map(async ([name, detect]) => {
-                if (!(await detect())) {
-                    console.warn(`WASM feature ${name} is unsupported in this browser.`);
-                }
-            }));
-        })();
-    }
-    return checkedFeatures;
 }

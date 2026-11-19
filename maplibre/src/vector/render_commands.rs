@@ -8,8 +8,11 @@ use crate::{
         tile_view_pattern::WgpuTileViewPattern,
     },
     tcs::world::World,
-    vector::{CirclePipeline, ExtrusionPipeline, LinePipeline, VectorBufferPool, VectorPipeline},
+    vector::{CirclePipeline, LinePipeline, VectorBufferPool, VectorPipeline},
 };
+
+mod extrusion;
+pub use extrusion::*;
 
 #[inline]
 fn resolve_vector_entry<'w>(
@@ -327,60 +330,6 @@ impl RenderCommand<LayerItem> for SetPatternTilePipeline {
     }
 }
 
-/// Binds one pass of the extrusion pipeline and the item's view or flat projection.
-pub struct SetExtrusionPipeline<const PASS: u8>;
-/// The pass an extrusion draw belongs to.
-pub mod extrusion_pass {
-    /// Depth only.
-    pub const DEPTH: u8 = 0;
-    /// Colour once per pixel.
-    pub const COLOR: u8 = 1;
-    /// Stencil reset.
-    pub const CLEAR: u8 = 2;
-    /// Colour from an image, once per pixel.
-    pub const PATTERN: u8 = 3;
-    /// Back-facing shell of a translucent 3D volume.
-    pub const TRANSLUCENT_BACK: u8 = 4;
-    /// Front-facing shell of a translucent 3D volume.
-    pub const TRANSLUCENT_FRONT: u8 = 5;
-}
-
-impl<const PASS: u8> RenderCommand<LayerItem> for SetExtrusionPipeline<PASS> {
-    fn render<'w>(
-        world: &'w World,
-        item: &LayerItem,
-        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
-    ) -> RenderCommandResult {
-        let Some((Initialized(pipeline), Initialized(projection_resources))) =
-            world.resources.query::<(
-                &Eventually<ExtrusionPipeline>,
-                &Eventually<ProjectionGpuResources>,
-            )>()
-        else {
-            return RenderCommandResult::Failure;
-        };
-
-        let pair = match PASS {
-            extrusion_pass::DEPTH => Some(&pipeline.depth),
-            extrusion_pass::COLOR => Some(&pipeline.color),
-            extrusion_pass::PATTERN => pipeline.pattern.as_ref(),
-            extrusion_pass::TRANSLUCENT_BACK => pipeline.translucent_back.as_ref(),
-            extrusion_pass::TRANSLUCENT_FRONT => pipeline.translucent_front.as_ref(),
-            _ => Some(&pipeline.clear),
-        };
-        let Some(pair) = pair else {
-            return RenderCommandResult::Failure;
-        };
-        pass.set_pipeline(pair.select(is_uniform_entry(world, item)));
-        pass.set_bind_group(
-            0,
-            projection_resources.bind_group_for(item.projection_binding()),
-            &[],
-        );
-        RenderCommandResult::Success
-    }
-}
-
 /// Binds and draws a polygon bucket filled with a repeating image.
 pub type DrawPatternTiles = (SetPatternTilePipeline, DrawVectorTile<true>);
 /// Binds the image of the item's layer at the second bind group.
@@ -403,37 +352,6 @@ impl RenderCommand<LayerItem> for SetPatternBindGroup {
     }
 }
 
-/// Draws an extruded bucket into depth only.
-pub type DrawExtrusionDepth = (
-    SetExtrusionPipeline<{ extrusion_pass::DEPTH }>,
-    DrawVectorTile,
-);
-/// Draws an extruded bucket where its depth pass left the nearest surface, once per pixel.
-pub type DrawExtrusionColor = (
-    SetExtrusionPipeline<{ extrusion_pass::COLOR }>,
-    DrawVectorTile,
-);
-/// Draws an extruded bucket from an image, once per pixel.
-pub type DrawExtrusionPatternColor = (
-    SetExtrusionPipeline<{ extrusion_pass::PATTERN }>,
-    SetPatternBindGroup,
-    DrawVectorTile<true>,
-);
-/// Resets the stencil bit the colour draw marked.
-pub type DrawExtrusionClear = (
-    SetExtrusionPipeline<{ extrusion_pass::CLEAR }>,
-    DrawVectorTile,
-);
-/// Draws the back-facing shell of a translucent 3D volume bucket.
-pub type DrawExtrusionTranslucentBack = (
-    SetExtrusionPipeline<{ extrusion_pass::TRANSLUCENT_BACK }>,
-    DrawVectorTile,
-);
-/// Draws the front-facing shell of a translucent 3D volume bucket.
-pub type DrawExtrusionTranslucentFront = (
-    SetExtrusionPipeline<{ extrusion_pass::TRANSLUCENT_FRONT }>,
-    DrawVectorTile,
-);
 /// Binds and draws a polygon-fill bucket when both commands succeed.
 pub type DrawVectorTiles = (SetVectorTilePipeline, DrawVectorTile);
 /// Draws a stroked-line bucket. A line on the terrain is drawn once over each terrain tile its

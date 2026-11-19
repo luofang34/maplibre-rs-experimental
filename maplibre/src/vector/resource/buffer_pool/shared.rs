@@ -202,11 +202,11 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             return Err(AllocationError::Coordinates { coords });
         }
         let style_layer_id = style_layer.layer_id();
-        let family = V::encoding_family(&style_layer.type_);
+        let mut family = V::encoding_family(&style_layer.type_);
         let vertex_elem_align = V::vertex_element_alignment(&style_layer.type_);
         let layer_meta_key = self.layer_meta_share_key(style_layer_id, coords);
-        let prepacked_verts = Self::prepacked_vertices(geometry);
-        let strides = ElementStrides::of::<V::Gpu, I, TM, FM>();
+        let prepacked_info = Self::prepacked_info(geometry);
+        let prepacked_verts = prepacked_info.map(|(v, _, cmp)| (v, cmp));
         let source_vertices: &[V] =
             if prepacked_verts.is_none() && !geometry.buffer.vertices.is_empty() {
                 &geometry.buffer.vertices
@@ -225,8 +225,27 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             Some((_, s)) if prepacked_verts.is_none() && source_vertices.is_empty() => {
                 s.vertex_count
             }
-            _ => prepacked_verts.map_or(source_vertices.len(), |v| v.len()) as u64,
+            _ => prepacked_info.map_or(source_vertices.len(), |(_, len, _)| len) as u64,
         };
+        let uniform_fm = self.decoupled_feature_metadata;
+        let strides = ElementStrides::of::<V::Gpu, I, TM, FM>();
+        let use_compact_extrusion = uniform_fm
+            && !needs_feature_slot
+            && strides.vertex == 16
+            && existing_shared.is_none()
+            && shared_key.is_none()
+            && style_layer.type_ == "fill-extrusion"
+            && (prepacked_info.is_some_and(|(_, _, cmp)| cmp)
+                || (prepacked_verts.is_none()
+                    && V::can_encode_compact_extrusion(&style_layer.type_, source_vertices)));
+        let slab_vertex_words = if use_compact_extrusion {
+            vertices.div_ceil(2)
+        } else {
+            vertices
+        };
+        if use_compact_extrusion {
+            family = 4;
+        }
         let records_u64 = records as u64;
         if !self.decoupled_feature_metadata && records_u64 > vertices {
             return Err(AllocationError::FeatureMetadata {
@@ -234,7 +253,6 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
                 records: records_u64,
             });
         }
-        let uniform_fm = self.decoupled_feature_metadata;
         let fm_records = if uniform_fm {
             usize::from(
                 needs_feature_slot
@@ -298,7 +316,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
                 (alloc, shared_info.first_vertex, fi, false)
             } else {
                 let req = SlabRequest {
-                    vertex_bytes: vertices * strides.vertex,
+                    vertex_bytes: slab_vertex_words * strides.vertex,
                     vertex_elem_align,
                     index_bytes,
                     index_u16,
@@ -316,10 +334,15 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
                     &mut protect,
                 )?;
                 let idx_stride = strides.active_index_stride(alloc.index_u16);
+                let first_vert_stride = if use_compact_extrusion {
+                    8
+                } else {
+                    strides.vertex
+                };
                 let first_vertex = alloc
                     .vertices
                     .start
-                    .checked_div(strides.vertex)
+                    .checked_div(first_vert_stride)
                     .unwrap_or(0);
                 let first_index = alloc.indices.start.checked_div(idx_stride).unwrap_or(0);
                 let (fv, fi) = match (
@@ -343,7 +366,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
                         },
                     );
                 }
-                (alloc, fv, fi, vertices * strides.vertex > 0)
+                (alloc, fv, fi, slab_vertex_words * strides.vertex > 0)
             };
 
         let allocation_id = self.revision.wrapping_add(1);
@@ -373,10 +396,17 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             shared_geometry_key: shared_key,
             evaluated_zoom: None,
             u16_chunks: u16_chunk_ranges,
+            compact_extrusion: use_compact_extrusion,
         };
 
         if uploaded_vertices {
-            self.write_geometry_vertices(queue, &entry, prepacked_verts, source_vertices);
+            self.write_geometry_vertices(
+                queue,
+                &entry,
+                prepacked_verts,
+                vertices as usize,
+                source_vertices,
+            );
         }
         self.write_geometry_indices(queue, &entry, geometry, index_bytes);
         if strides.layer_metadata > 0 && entry.layer_page != NO_SLAB {

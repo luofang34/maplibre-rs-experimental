@@ -27,6 +27,7 @@ mod fallback;
 mod group_tile;
 mod limiter;
 pub mod rescale;
+mod velocity;
 mod worker;
 #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
 pub(crate) use limiter::SharedTilePermit;
@@ -81,9 +82,7 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
         } else {
             let visible_level = view_state.zoom().zoom_level(DEFAULT_TILE_SIZE);
             let request_padding = if renderer.settings.tight_tile_requests
-                || (cfg!(target_arch = "wasm32")
-                    && style.terrain.is_none()
-                    && !view_state.has_external_view())
+                || (cfg!(target_arch = "wasm32") && !view_state.has_external_view())
             {
                 ViewStatePadding::Tight
             } else {
@@ -150,7 +149,10 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                 });
             // View-space 3D volumes (`fill-extrusion`) and elevated 3D paths (`line-elevation`)
             // draw from `view_tiles` (which carry vertical headroom) rather than terrain drapes.
-            let needs_view_tiles = !draped || derived.elevated_headroom_meters > 0.0;
+            let needs_view_tiles = !draped
+                || derived.elevated_headroom_meters > 0.0
+                || (!renderer.settings.terrain_drape_mode.is_procedural_relief()
+                    && drapes.is_empty());
             let magnifies = derived.depends_on_overscaling;
             let extra_fallbacks = fallback::plan_non_terrain_fallbacks(
                 style,

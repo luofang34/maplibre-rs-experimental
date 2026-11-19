@@ -7,17 +7,21 @@ use super::*;
 use crate::render::shaders::GpuShaderVertex;
 
 impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM, FM> {
-    /// Returns pre-packed 16-byte GPU vertices when attached and `V::Gpu` matches
+    /// Returns `(prepacked_words, logical_vertex_count, compact_extrusion)` when `V::Gpu` matches
     /// [`GpuShaderVertex`].
     #[inline]
-    pub(super) fn prepacked_vertices(
+    pub(super) fn prepacked_info(
         geometry: &OverAlignedVertexBuffer<V, I>,
-    ) -> Option<&[GpuShaderVertex]> {
+    ) -> Option<(&[GpuShaderVertex], usize, bool)> {
         if TypeId::of::<V::Gpu>() != TypeId::of::<GpuShaderVertex>() {
             return None;
         }
         let prepacked = geometry.prepacked_gpu()?;
-        (!prepacked.vertices.is_empty()).then_some(prepacked.vertices.as_slice())
+        (!prepacked.vertices.is_empty()).then_some((
+            prepacked.vertices.as_slice(),
+            prepacked.logical_len(),
+            prepacked.compact_extrusion,
+        ))
     }
 
     /// Plans `(index_u16, copy_aligned_index_bytes, u16_chunks)` honoring worker pre-narrowed `u16` indices.
@@ -56,23 +60,60 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         &mut self,
         queue: &Q,
         entry: &IndexEntry,
-        prepacked_verts: Option<&[GpuShaderVertex]>,
+        prepacked_verts: Option<(&[GpuShaderVertex], bool)>,
+        logical_vertices: usize,
         source_vertices: &[V],
     ) {
-        if let Some(pre) = prepacked_verts {
-            queue.write_buffer(
-                &self.vertex_slab_of(entry.vertex_page).vertices.inner,
-                entry.buffer_vertices.start,
-                bytemuck::cast_slice(pre),
-            );
-            return;
+        if let Some((pre, is_compact)) = prepacked_verts {
+            if is_compact == entry.compact_extrusion {
+                queue.write_buffer(
+                    &self.vertex_slab_of(entry.vertex_page).vertices.inner,
+                    entry.buffer_vertices.start,
+                    bytemuck::cast_slice(pre),
+                );
+                return;
+            }
+            if is_compact && !entry.compact_extrusion {
+                let mut unpacked = Vec::new();
+                crate::render::shaders::unpack_compact_extrusion_vertices(
+                    pre,
+                    logical_vertices,
+                    &mut unpacked,
+                );
+                queue.write_buffer(
+                    &self.vertex_slab_of(entry.vertex_page).vertices.inner,
+                    entry.buffer_vertices.start,
+                    bytemuck::cast_slice(&unpacked),
+                );
+                return;
+            }
         }
         let mut scratch = std::mem::take(&mut self.vertex_scratch);
-        let gpu_verts = V::encode_vertices(&entry.style_layer.type_, source_vertices, &mut scratch);
+        let bytes_to_write: &[u8] = if entry.compact_extrusion {
+            if let Some(compact) = V::try_encode_compact_extrusion(
+                &entry.style_layer.type_,
+                source_vertices,
+                &mut scratch,
+            ) {
+                bytemuck::cast_slice(compact)
+            } else {
+                bytemuck::cast_slice(V::encode_vertices(
+                    &entry.style_layer.type_,
+                    source_vertices,
+                    &mut scratch,
+                ))
+            }
+        } else {
+            bytemuck::cast_slice(V::encode_vertices(
+                &entry.style_layer.type_,
+                source_vertices,
+                &mut scratch,
+            ))
+        };
         queue.write_buffer(
             &self.vertex_slab_of(entry.vertex_page).vertices.inner,
             entry.buffer_vertices.start,
-            bytemuck::cast_slice(gpu_verts),
+            bytes_to_write,
         );
         #[cfg(target_arch = "wasm32")]
         if scratch.capacity() > 65_536 {

@@ -15,7 +15,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             let Some(slab) = slot.as_mut() else {
                 continue;
             };
-            if slab.paired_fm.is_some() != needs_paired_fm {
+            if slab.paired_fm.is_some() != needs_paired_fm || slab.dedicated_oversize {
                 continue;
             }
             if let Some(range) = slab.vertex_alloc.allocate(bytes, align) {
@@ -59,38 +59,48 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         if req_elems > max_v_page {
             return None;
         }
-        let family_pages = self
-            .vertex_slabs
-            .iter()
-            .filter(|slot| {
-                slot.as_ref()
-                    .is_some_and(|slab| slab.paired_fm.is_some() == needs_paired_fm)
-            })
-            .count();
-        #[cfg(target_arch = "wasm32")]
-        let (target_v, req_align) = (
-            match family_pages {
-                0 => 4 * 1024,
-                1 => 8 * 1024,
-                2 => 16 * 1024,
-                _ => DEFAULT_PAGE_VERTICES,
-            },
-            4 * 1024,
-        );
-        #[cfg(not(target_arch = "wasm32"))]
-        let (target_v, req_align) = (
-            match family_pages {
-                0 => 32 * 1024,
-                1 => 64 * 1024,
-                _ => DEFAULT_PAGE_VERTICES,
-            },
-            16 * 1024,
-        );
-        let slab_elems = target_v
-            .min(max_v_page)
-            .max(req_elems.next_multiple_of(req_align).min(max_v_page))
-            .min(rem_elems)
-            .max(req_elems);
+        let is_oversize = req_elems > DEFAULT_PAGE_VERTICES;
+        let slab_elems = if is_oversize {
+            req_elems
+                .next_multiple_of(1024)
+                .min(max_v_page)
+                .min(rem_elems)
+                .max(req_elems)
+        } else {
+            let family_pages = self
+                .vertex_slabs
+                .iter()
+                .filter(|slot| {
+                    slot.as_ref().is_some_and(|slab| {
+                        !slab.dedicated_oversize && slab.paired_fm.is_some() == needs_paired_fm
+                    })
+                })
+                .count();
+            #[cfg(target_arch = "wasm32")]
+            let (target_v, req_align) = (
+                match family_pages {
+                    0 => 2 * 1024,
+                    1 => 4 * 1024,
+                    2 => 16 * 1024,
+                    _ => DEFAULT_PAGE_VERTICES,
+                },
+                1024,
+            );
+            #[cfg(not(target_arch = "wasm32"))]
+            let (target_v, req_align) = (
+                match family_pages {
+                    0 => 32 * 1024,
+                    1 => 64 * 1024,
+                    _ => DEFAULT_PAGE_VERTICES,
+                },
+                16 * 1024,
+            );
+            target_v
+                .min(max_v_page)
+                .max(req_elems.next_multiple_of(req_align).min(max_v_page))
+                .min(rem_elems)
+                .max(req_elems)
+        };
         let v_bytes = fitting_buffer_size(strides.vertex as usize, slab_elems, self.max_page_bytes);
         let slot_idx = first_free_slot(&self.vertex_slabs);
         let page_id = u16::try_from(slot_idx).ok()?;
@@ -110,6 +120,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             paired_desc,
             strides,
         );
+        slab.dedicated_oversize = is_oversize;
         let range = slab.vertex_alloc.allocate(bytes, align)?;
         slab.live_entries = 1;
         place_slot(&mut self.vertex_slabs, slot_idx, slab);
@@ -137,9 +148,11 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             }
             for (idx, slot) in target_slabs.iter_mut().enumerate() {
                 if let Some(slab) = slot.as_mut() {
-                    if let Some(range) = slab.alloc.allocate(bytes, align) {
-                        slab.live_entries += 1;
-                        return Some((idx as u16, range));
+                    if !slab.dedicated_oversize {
+                        if let Some(range) = slab.alloc.allocate(bytes, align) {
+                            slab.live_entries += 1;
+                            return Some((idx as u16, range));
+                        }
                     }
                 }
             }
@@ -166,39 +179,57 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         if req_elems > rem_i || req_elems > max_i_page {
             return None;
         }
-        let existing_count = if use_u16 {
-            self.index_u16_slabs.iter().flatten().count()
+        let is_oversize = req_elems > DEFAULT_PAGE_INDICES;
+        let slab_elems = if is_oversize {
+            req_elems
+                .next_multiple_of(1024)
+                .min(max_i_page)
+                .min(rem_i)
+                .max(req_elems)
         } else {
-            self.index_native_slabs.iter().flatten().count()
+            let existing_count = if use_u16 {
+                self.index_u16_slabs
+                    .iter()
+                    .flatten()
+                    .filter(|s| !s.dedicated_oversize)
+                    .count()
+            } else {
+                self.index_native_slabs
+                    .iter()
+                    .flatten()
+                    .filter(|s| !s.dedicated_oversize)
+                    .count()
+            };
+            #[cfg(target_arch = "wasm32")]
+            let (target_i, req_align) = (
+                match existing_count {
+                    0 => 4 * 1024,
+                    1 => 16 * 1024,
+                    2 => 32 * 1024,
+                    _ => DEFAULT_PAGE_INDICES,
+                },
+                1024,
+            );
+            #[cfg(not(target_arch = "wasm32"))]
+            let (target_i, req_align) = (
+                match existing_count {
+                    0 => 64 * 1024,
+                    1 => 128 * 1024,
+                    _ => DEFAULT_PAGE_INDICES,
+                },
+                32 * 1024,
+            );
+            target_i
+                .min(max_i_page)
+                .max(req_elems.next_multiple_of(req_align).min(max_i_page))
+                .min(rem_i)
+                .max(req_elems)
         };
-        #[cfg(target_arch = "wasm32")]
-        let (target_i, req_align) = (
-            match existing_count {
-                0 => 8 * 1024,
-                1 => 16 * 1024,
-                2 => 32 * 1024,
-                _ => DEFAULT_PAGE_INDICES,
-            },
-            8 * 1024,
-        );
-        #[cfg(not(target_arch = "wasm32"))]
-        let (target_i, req_align) = (
-            match existing_count {
-                0 => 64 * 1024,
-                1 => 128 * 1024,
-                _ => DEFAULT_PAGE_INDICES,
-            },
-            32 * 1024,
-        );
-        let slab_elems = target_i
-            .min(max_i_page)
-            .max(req_elems.next_multiple_of(req_align).min(max_i_page))
-            .min(rem_i)
-            .max(req_elems);
         let i_bytes = fitting_buffer_size(elem_stride as usize, slab_elems, self.max_page_bytes);
         let factory = self.page_factory.as_ref()?;
         let i_buf = (factory.0)(BackingBufferType::Indices, i_bytes);
         let mut slab = BufferSlab::new(BackingBufferDescriptor::new(i_buf, i_bytes), elem_stride);
+        slab.dedicated_oversize = is_oversize;
         let range = slab.alloc.allocate(bytes, align)?;
         slab.live_entries = 1;
         let target_slabs = if use_u16 {
@@ -269,10 +300,14 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         if req_elems > rem_lm || req_elems > max_lm_page {
             return None;
         }
+        #[cfg(target_arch = "wasm32")]
+        let initial_lm = 64;
+        #[cfg(not(target_arch = "wasm32"))]
+        let initial_lm = 256;
         let target_lm = if self.layer_slabs.iter().any(Option::is_some) {
             DEFAULT_PAGE_LAYER_META
         } else {
-            256
+            initial_lm
         };
         let slab_elems = target_lm
             .min(max_lm_page)
@@ -315,9 +350,11 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
     ) -> Option<(u16, Range<u64>)> {
         for (idx, slot) in self.feature_slabs.iter_mut().enumerate() {
             if let Some(slab) = slot.as_mut() {
-                if let Some(range) = slab.alloc.allocate(bytes, strides.feature_align) {
-                    slab.live_entries += 1;
-                    return Some((idx as u16, range));
+                if !slab.dedicated_oversize {
+                    if let Some(range) = slab.alloc.allocate(bytes, strides.feature_align) {
+                        slab.live_entries += 1;
+                        return Some((idx as u16, range));
+                    }
                 }
             }
         }
@@ -338,20 +375,44 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         if req_elems > rem_fm || req_elems > max_fm_page {
             return None;
         }
-        let target_fm = match self.feature_slabs.iter().flatten().count() {
-            0 => 4 * 1024,
-            1 => 16 * 1024,
-            _ => DEFAULT_PAGE_FEATURE_META,
+        let is_oversize = req_elems > DEFAULT_PAGE_FEATURE_META;
+        let slab_elems = if is_oversize {
+            req_elems
+                .next_multiple_of(1024)
+                .min(max_fm_page)
+                .min(rem_fm)
+                .max(req_elems)
+        } else {
+            let count = self
+                .feature_slabs
+                .iter()
+                .flatten()
+                .filter(|s| !s.dedicated_oversize)
+                .count();
+            #[cfg(target_arch = "wasm32")]
+            let (target_fm, min_req) = (
+                match count {
+                    0 => 2 * 1024,
+                    1 => 8 * 1024,
+                    _ => DEFAULT_PAGE_FEATURE_META,
+                },
+                req_elems.next_multiple_of(1024).min(max_fm_page),
+            );
+            #[cfg(not(target_arch = "wasm32"))]
+            let (target_fm, min_req) = (
+                match count {
+                    0 => 4 * 1024,
+                    1 => 16 * 1024,
+                    _ => DEFAULT_PAGE_FEATURE_META,
+                },
+                req_elems.next_power_of_two().min(max_fm_page),
+            );
+            target_fm
+                .min(max_fm_page)
+                .max(min_req)
+                .min(rem_fm)
+                .max(req_elems)
         };
-        #[cfg(target_arch = "wasm32")]
-        let min_req = req_elems.next_multiple_of(4 * 1024).min(max_fm_page);
-        #[cfg(not(target_arch = "wasm32"))]
-        let min_req = req_elems.next_power_of_two().min(max_fm_page);
-        let slab_elems = target_fm
-            .min(max_fm_page)
-            .max(min_req)
-            .min(rem_fm)
-            .max(req_elems);
         let fm_bytes = fitting_buffer_size(
             strides.feature_metadata as usize,
             slab_elems,
@@ -365,6 +426,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             BackingBufferDescriptor::new(fm_buf, fm_bytes),
             strides.feature_metadata,
         );
+        slab.dedicated_oversize = is_oversize;
         let range = slab.alloc.allocate(bytes, strides.feature_align)?;
         slab.live_entries = 1;
         place_slot(&mut self.feature_slabs, slot_idx, slab);

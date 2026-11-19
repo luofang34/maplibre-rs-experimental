@@ -17,6 +17,8 @@ pub(super) struct VectorPreparedState {
     pub(super) needs_circle_feature_stroke: bool,
     pub(super) needs_circle_dynamic_radius: bool,
     pub(super) extrusion_minzoom: Option<f64>,
+    initial_zoom_checked: bool,
+    eager_extrusion: bool,
     pub(super) needs_extrusion_pattern: bool,
     pub(super) needs_extrusion_translucent: bool,
     pub(super) has_pattern_paint: bool,
@@ -107,6 +109,8 @@ impl VectorPreparedState {
         self.needs_circle_feature_stroke = needs_circle_feature_stroke;
         self.needs_circle_dynamic_radius = needs_circle_dynamic_radius;
         self.extrusion_minzoom = extrusion_minzoom;
+        self.initial_zoom_checked = false;
+        self.eager_extrusion = false;
         self.needs_extrusion_pattern = needs_extrusion_pattern;
         self.needs_extrusion_translucent = needs_extrusion_translucent;
         self.has_pattern_paint = has_pattern_paint;
@@ -114,9 +118,21 @@ impl VectorPreparedState {
         true
     }
 
-    pub(super) fn needs_extrusion_at_zoom(&self, style_zoom: f64) -> bool {
-        self.extrusion_minzoom
-            .is_some_and(|m| style_zoom + 0.5 >= m)
+    pub(super) fn needs_extrusion_at_zoom(&mut self, style_zoom: f64, uses_globe: bool) -> bool {
+        if !self.initial_zoom_checked {
+            self.initial_zoom_checked = true;
+            if !uses_globe
+                && self
+                    .extrusion_minzoom
+                    .is_some_and(|m| style_zoom + 1.0 >= m)
+            {
+                self.eager_extrusion = true;
+            }
+        }
+        self.eager_extrusion
+            || self
+                .extrusion_minzoom
+                .is_some_and(|m| style_zoom + 0.5 >= m)
     }
 
     pub(super) fn should_update_dashes(&mut self, style: &Style) -> bool {

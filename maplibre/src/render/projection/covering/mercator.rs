@@ -42,7 +42,7 @@ pub(super) fn mercator_view_region(
                 ViewStatePadding::Tight => 0,
             },
             world_copies: if !view_state.has_external_view() {
-                1
+                3
             } else {
                 0
             },

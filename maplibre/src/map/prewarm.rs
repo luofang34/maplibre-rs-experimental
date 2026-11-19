@@ -3,7 +3,7 @@
 use rustc_hash::FxHashSet;
 
 use crate::{
-    coords::{OverscaledTileId, WorldTileCoords},
+    coords::{OverscaledTileId, WorldTileCoords, ZoomLevel},
     environment::OffscreenKernel,
     io::{
         apc::{AsyncProcedureCall, Input, ProcedureTag},
@@ -29,6 +29,7 @@ use crate::{
 };
 
 const MAX_PREWARM_VECTOR_TILES: usize = 16;
+const MAX_PREWARM_TERRAIN_VECTOR_TILES: usize = 10;
 const MAX_PREWARM_DEM_TILES: usize = 12;
 #[cfg(feature = "raster")]
 const MAX_PREWARM_RASTER_TILES: usize = 16;
@@ -69,8 +70,8 @@ pub(super) async fn prepare_io_and_prewarm<
     source_client: &SourceClient<H>,
     apc: &A,
 ) -> PrewarmedRequests {
-    resolve_tile_json_sources(style, source_client).await;
     crate::sdf::assets::spawn_style_symbol_prefetch(source_client.clone(), style);
+    resolve_tile_json_sources(style, source_client).await;
     apc.warm_style(style);
     prewarm_initial_tiles(style, view_state, scale_factor, request_attempts, apc)
 }
@@ -102,9 +103,55 @@ fn prewarm_initial_tiles<K: OffscreenKernel, A: AsyncProcedureCall<K>>(
             .iter()
             .any(|l| l.type_ == "symbol" && crate::style::mutation::from_vector_tiles(l));
 
-    if has_vector && style.terrain.is_none() {
+    if has_vector {
         let visible_level = view_state.zoom().zoom_level(DEFAULT_TILE_SIZE);
         let level = u8::from(visible_level);
+        let max_vector_tiles = if style.terrain.is_some() {
+            MAX_PREWARM_TERRAIN_VECTOR_TILES
+        } else {
+            MAX_PREWARM_VECTOR_TILES
+        };
+        out.requested_vector_layers = style.cached_vector_layer_ids().to_vec();
+        let mut try_dispatch = |coords: WorldTileCoords, overscaled_zoom: u8| {
+            if out.vectors.len() >= max_vector_tiles
+                || outside_source_bounds(style, TileKind::Vector, coords)
+                || !out.wanted_vectors.insert(coords)
+            {
+                return;
+            }
+            let attempt = request_attempts.next();
+            if apc
+                .prewarm_call(
+                    ProcedureTag::FetchVector,
+                    Input {
+                        coords,
+                        style: worker_style.clone(),
+                        attempt,
+                        overscaled_zoom,
+                        pixel_ratio: out.pixel_ratio,
+                        only_sources: None,
+                        refetch: false,
+                    },
+                )
+                .is_ok()
+            {
+                out.vectors.push(PrewarmedVector {
+                    coords,
+                    attempt,
+                    overscaled_zoom,
+                });
+            }
+        };
+        if style.terrain.is_some() && min_zoom.is_none_or(|min| min == 0) {
+            try_dispatch(
+                WorldTileCoords {
+                    x: 0,
+                    y: 0,
+                    z: ZoomLevel::new(0),
+                },
+                0,
+            );
+        }
         if let Ok(Some(region)) = view_region_for_projection(
             style,
             view_state,
@@ -112,11 +159,7 @@ fn prewarm_initial_tiles<K: OffscreenKernel, A: AsyncProcedureCall<K>>(
             visible_level,
             ViewStatePadding::Tight,
         ) {
-            out.requested_vector_layers = style.cached_vector_layer_ids().to_vec();
             for raw in region.iter() {
-                if out.vectors.len() >= MAX_PREWARM_VECTOR_TILES {
-                    break;
-                }
                 if min_zoom.is_some_and(|min| u8::from(raw.z) < min) {
                     continue;
                 }
@@ -125,39 +168,13 @@ fn prewarm_initial_tiles<K: OffscreenKernel, A: AsyncProcedureCall<K>>(
                     continue;
                 };
                 let coords = target.canonical;
-                if outside_source_bounds(style, TileKind::Vector, coords)
-                    || !out.wanted_vectors.insert(coords)
-                {
-                    continue;
-                }
                 let overscaled_zoom =
                     if magnifies && max_zoom.is_some_and(|m| u8::from(coords.z) >= m) {
                         target.overscaled_z
                     } else {
                         0
                     };
-                let attempt = request_attempts.next();
-                if apc
-                    .prewarm_call(
-                        ProcedureTag::FetchVector,
-                        Input {
-                            coords,
-                            style: worker_style.clone(),
-                            attempt,
-                            overscaled_zoom,
-                            pixel_ratio: out.pixel_ratio,
-                            only_sources: None,
-                            refetch: false,
-                        },
-                    )
-                    .is_ok()
-                {
-                    out.vectors.push(PrewarmedVector {
-                        coords,
-                        attempt,
-                        overscaled_zoom,
-                    });
-                }
+                try_dispatch(coords, overscaled_zoom);
             }
         }
     }

@@ -303,12 +303,39 @@ impl MapContext {
                 &self.style,
                 &mut self.world,
                 source_name,
-                bytes,
-            ) {
+                Cow::Borrowed(bytes),
+            )
+            .is_ok()
+            {
                 return Ok(());
             }
         }
         let data = parse_geojson_bytes_payload(source_name, bytes, was_string)?;
+        self.set_geojson_data(source_name, data)
+    }
+
+    /// Replaces a GeoJSON source's data from an owned UTF-8 buffer, moving the buffer without
+    /// copying on stationary dynamic-point updates.
+    pub fn set_geojson_bytes_owned(
+        &mut self,
+        source_name: &str,
+        bytes: Vec<u8>,
+        was_string: bool,
+    ) -> Result<(), SourceUpdateError> {
+        let bytes = if !was_string || trim_ascii_start(&bytes).starts_with(b"{") {
+            match dynamic_points::try_apply_stationary_bytes(
+                &self.style,
+                &mut self.world,
+                source_name,
+                Cow::Owned(bytes),
+            ) {
+                Ok(()) => return Ok(()),
+                Err(rejected) => rejected.into_owned(),
+            }
+        } else {
+            bytes
+        };
+        let data = parse_geojson_bytes_payload(source_name, &bytes, was_string)?;
         self.set_geojson_data(source_name, data)
     }
 

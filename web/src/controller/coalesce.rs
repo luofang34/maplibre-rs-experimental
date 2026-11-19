@@ -149,7 +149,7 @@ where
                         map.set_geojson_data(&source, data).map_err(JSError::from)
                     }
                     PendingGeoJsonPayload::Bytes { bytes, was_string } => map
-                        .set_geojson_bytes(&source, &bytes, was_string)
+                        .set_geojson_bytes_owned(&source, bytes, was_string)
                         .map_err(JSError::from),
                 };
                 let err_msg = outcome.err().map(|e| e.to_string());

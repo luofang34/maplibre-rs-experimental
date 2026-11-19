@@ -302,6 +302,13 @@ pub(crate) fn has_evicted_cpu_released_vector_layers(
         return false;
     };
     let pending = world.tiles.query::<&LayerReplacements>(coords);
+    if layers
+        .uploaded_stamp
+        .is_some_and(|(_, eviction_gen)| eviction_gen == pool.eviction_generation())
+        && pending.is_none_or(|p| p.vector.is_empty())
+    {
+        return false;
+    }
     layers.layers.iter().any(|layer| match layer {
         VectorLayerBucket::AvailableLayer(bucket) => {
             bucket.buffer.usable_indices > 0
@@ -325,6 +332,7 @@ pub(crate) fn has_evicted_gpu_geometry(
     (vectors_disabled, symbols_disabled): (bool, bool),
     coords: WorldTileCoords,
 ) -> bool {
+    let rev = style.revision();
     let pending = world.tiles.query::<&LayerReplacements>(coords);
     if !vectors_disabled {
         if let Some(Eventually::Initialized(pool)) =
@@ -332,25 +340,30 @@ pub(crate) fn has_evicted_gpu_geometry(
         {
             if pool.has_capacity() {
                 if let Some(layers) = world.tiles.query::<&VectorLayerBucketComponent>(coords) {
-                    let evicted_vector = layers.layers.iter().any(|layer| match layer {
-                        VectorLayerBucket::AvailableLayer(bucket) => {
-                            bucket.buffer.usable_indices > 0
-                                && !bucket.buffer.has_cpu_indices()
-                                && !pool.has_layer(coords, &bucket.style_layer_id)
-                                && !pending.is_some_and(|p| {
-                                    p.vector
+                    let vector_stamped = layers.uploaded_stamp
+                        == Some((rev, pool.eviction_generation()))
+                        && pending.is_none_or(|p| p.vector.is_empty());
+                    if !vector_stamped {
+                        let evicted_vector = layers.layers.iter().any(|layer| match layer {
+                            VectorLayerBucket::AvailableLayer(bucket) => {
+                                bucket.buffer.usable_indices > 0
+                                    && !bucket.buffer.has_cpu_indices()
+                                    && !pool.has_layer(coords, &bucket.style_layer_id)
+                                    && !pending.is_some_and(|p| {
+                                        p.vector.iter().any(|item| {
+                                            item.style_layer_id == bucket.style_layer_id
+                                        })
+                                    })
+                                    && style
+                                        .layers
                                         .iter()
-                                        .any(|item| item.style_layer_id == bucket.style_layer_id)
-                                })
-                                && style
-                                    .layers
-                                    .iter()
-                                    .any(|l| l.id == bucket.style_layer_id && !l.is_hidden())
+                                        .any(|l| l.id == bucket.style_layer_id && !l.is_hidden())
+                            }
+                            VectorLayerBucket::Missing(_) => false,
+                        });
+                        if evicted_vector {
+                            return true;
                         }
-                        VectorLayerBucket::Missing(_) => false,
-                    });
-                    if evicted_vector {
-                        return true;
                     }
                 }
             }
@@ -362,22 +375,27 @@ pub(crate) fn has_evicted_gpu_geometry(
         {
             if pool.has_capacity() {
                 if let Some(symbols) = world.tiles.query::<&SymbolLayersDataComponent>(coords) {
-                    let evicted_symbol = symbols.layers.iter().any(|layer| {
-                        layer.buffer.usable_indices > 0
-                            && layer.buffer.buffer.vertices.is_empty()
-                            && !pool.has_layer(coords, &layer.style_layer_id)
-                            && !pending.is_some_and(|p| {
-                                p.symbols
+                    let symbol_stamped = symbols.uploaded_stamp
+                        == Some((rev, pool.eviction_generation()))
+                        && pending.is_none_or(|p| p.symbols.is_empty());
+                    if !symbol_stamped {
+                        let evicted_symbol = symbols.layers.iter().any(|layer| {
+                            layer.buffer.usable_indices > 0
+                                && layer.buffer.buffer.vertices.is_empty()
+                                && !pool.has_layer(coords, &layer.style_layer_id)
+                                && !pending.is_some_and(|p| {
+                                    p.symbols
+                                        .iter()
+                                        .any(|item| item.style_layer_id == layer.style_layer_id)
+                                })
+                                && style
+                                    .layers
                                     .iter()
-                                    .any(|item| item.style_layer_id == layer.style_layer_id)
-                            })
-                            && style
-                                .layers
-                                .iter()
-                                .any(|l| l.id == layer.style_layer_id && !l.is_hidden())
-                    });
-                    if evicted_symbol {
-                        return true;
+                                    .any(|l| l.id == layer.style_layer_id && !l.is_hidden())
+                        });
+                        if evicted_symbol {
+                            return true;
+                        }
                     }
                 }
             }

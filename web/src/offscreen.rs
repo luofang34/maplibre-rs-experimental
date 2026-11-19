@@ -40,6 +40,9 @@ fn apc_supports_waker(apc: &WorkerApc) -> bool {
 type WakeTimerSlot = RefCell<Option<(i32, Closure<dyn FnMut()>)>>;
 type RafClosureSlot = RefCell<Option<Closure<dyn FnMut(f64)>>>;
 
+const BOOT_WAKE_COALESCE_DELAY: Duration = Duration::from_millis(2);
+const MAX_BOOT_IMMEDIATE_PUMPS: u8 = 16;
+
 struct RunnerInner {
     id: u64,
     scope: DedicatedWorkerGlobalScope,
@@ -53,6 +56,7 @@ struct RunnerInner {
     cmd_pending: Cell<bool>,
     raf_handle: Cell<Option<i32>>,
     wake_timer: WakeTimerSlot,
+    immediate_wake_pending: Cell<bool>,
     raf_closure: RafClosureSlot,
     initial_load_settled: Cell<bool>,
     initial_pumps: Cell<u8>,
@@ -61,6 +65,7 @@ struct RunnerInner {
 
 impl RunnerInner {
     fn clear_wake_timer(&self) {
+        self.immediate_wake_pending.set(false);
         if let Some((id, _)) = self.wake_timer.borrow_mut().take() {
             self.scope.clear_timeout_with_handle(id);
         }
@@ -166,10 +171,12 @@ impl RunnerInner {
             let Ok(inner) = rc.try_borrow() else {
                 return;
             };
-            if inner.closed.get() || inner.raf_pending.get() {
+            if inner.closed.get() || inner.raf_pending.get() || inner.immediate_wake_pending.get() {
                 return;
             }
-            if !inner.initial_load_settled.get() && inner.initial_pumps.get() < 32 {
+            if !inner.initial_load_settled.get()
+                && inner.initial_pumps.get() < MAX_BOOT_IMMEDIATE_PUMPS
+            {
                 inner
                     .initial_pumps
                     .set(inner.initial_pumps.get().saturating_add(1));
@@ -252,7 +259,7 @@ impl RunnerInner {
             };
             let use_immediate_pump = next_delay == Some(Duration::ZERO)
                 && !s.initial_load_settled.get()
-                && s.initial_pumps.get() < 32;
+                && s.initial_pumps.get() < MAX_BOOT_IMMEDIATE_PUMPS;
             if use_immediate_pump {
                 s.initial_pumps.set(s.initial_pumps.get().saturating_add(1));
             }
@@ -276,7 +283,20 @@ impl RunnerInner {
     }
 
     fn schedule_immediate_pump(rc: &Rc<RefCell<Self>>) {
-        Self::schedule_timer(rc, Duration::ZERO, Self::run_frame);
+        {
+            let Ok(inner) = rc.try_borrow() else {
+                return;
+            };
+            if inner.immediate_wake_pending.get() {
+                return;
+            }
+        }
+        Self::schedule_timer(rc, BOOT_WAKE_COALESCE_DELAY, Self::run_frame);
+        if let Ok(inner) = rc.try_borrow() {
+            if inner.wake_timer.borrow().is_some() {
+                inner.immediate_wake_pending.set(true);
+            }
+        }
     }
 
     fn schedule_timer(
@@ -364,6 +384,7 @@ fn start_runner(
         cmd_pending: Cell::new(false),
         raf_handle: Cell::new(None),
         wake_timer: RefCell::new(None),
+        immediate_wake_pending: Cell::new(false),
         raf_closure: RefCell::new(None),
         initial_load_settled: Cell::new(false),
         initial_pumps: Cell::new(0),

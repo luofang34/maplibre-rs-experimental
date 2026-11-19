@@ -4,9 +4,12 @@ use bytemuck::Zeroable;
 
 use super::*;
 
+#[cfg(any(test, feature = "renderer"))]
+pub(super) mod js_wire;
+
 const SYMBOL_HEADER_BYTES: usize = 40;
 
-struct SymbolHeader {
+pub(super) struct SymbolHeader {
     coords: WorldTileCoords,
     has_atlas: bool,
     usable_indices: u32,
@@ -18,7 +21,7 @@ struct SymbolHeader {
     atlas_len: usize,
 }
 
-fn parse_symbol_header(bytes: &[u8]) -> Option<SymbolHeader> {
+pub(super) fn parse_symbol_header(bytes: &[u8]) -> Option<SymbolHeader> {
     if bytes.len() < SYMBOL_HEADER_BYTES {
         return None;
     }
@@ -115,6 +118,9 @@ impl SymbolLayerTessellated for FlatBufferTransferable {
     }
 
     fn coords(&self) -> WorldTileCoords {
+        if let Some(sym) = &self.unpacked_symbol {
+            return sym.coords;
+        }
         self.data()
             .get(..SYMBOL_HEADER_BYTES)
             .and_then(|bytes| read_coords_at(bytes, 0))
@@ -122,13 +128,19 @@ impl SymbolLayerTessellated for FlatBufferTransferable {
     }
 
     fn is_empty(&self) -> bool {
+        if let Some(sym) = &self.unpacked_symbol {
+            return sym.buffer.usable_indices == 0;
+        }
         self.data()
             .get(..SYMBOL_HEADER_BYTES)
             .and_then(|bytes| read_u32_le(bytes, 12))
             .is_none_or(|usable| usable == 0)
     }
 
-    fn to_bucket(self) -> SymbolLayerData {
+    fn to_bucket(mut self) -> SymbolLayerData {
+        if let Some(sym) = self.unpacked_symbol.take() {
+            return *sym;
+        }
         let bytes = self.data();
         let Some(hdr) = parse_symbol_header(bytes) else {
             return SymbolLayerData {
@@ -194,10 +206,94 @@ impl SymbolLayerTessellated for FlatBufferTransferable {
     }
 }
 
-const ATLAS_WIRE_MAGIC: u32 = u32::MAX;
+pub(super) const ATLAS_WIRE_MAGIC: u32 = u32::MAX;
 const ATLAS_WIRE_FULL: u32 = 1;
-const ATLAS_WIRE_REF: u32 = 2;
+pub(super) const ATLAS_WIRE_REF: u32 = 2;
 const RECENT_ATLAS_RING_CAP: usize = 1;
+
+pub(super) type AtlasCacheKey = (WorldTileCoords, u32, u32, u64);
+
+struct MainAtlasCache {
+    weak: rustc_hash::FxHashMap<AtlasCacheKey, std::sync::Weak<maplibre::sdf::assets::SymbolAtlas>>,
+    recent: std::collections::VecDeque<(
+        AtlasCacheKey,
+        std::sync::Arc<maplibre::sdf::assets::SymbolAtlas>,
+    )>,
+}
+
+thread_local! {
+    static ATLAS_CACHE: std::cell::RefCell<MainAtlasCache> =
+        std::cell::RefCell::new(MainAtlasCache {
+            weak: rustc_hash::FxHashMap::default(),
+            recent: std::collections::VecDeque::with_capacity(RECENT_ATLAS_RING_CAP),
+        });
+}
+
+pub(super) fn check_atlas_cache(
+    key: &AtlasCacheKey,
+) -> Option<std::sync::Arc<maplibre::sdf::assets::SymbolAtlas>> {
+    ATLAS_CACHE.with(|cache| {
+        let cache = cache.borrow();
+        if let Some((_, arc)) = cache.recent.iter().find(|(k, _)| k == key) {
+            return Some(std::sync::Arc::clone(arc));
+        }
+        cache.weak.get(key).and_then(std::sync::Weak::upgrade)
+    })
+}
+
+pub(super) fn insert_atlas_cache(
+    key: AtlasCacheKey,
+    size: [u32; 2],
+    pixels: Vec<u8>,
+) -> std::sync::Arc<maplibre::sdf::assets::SymbolAtlas> {
+    ATLAS_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        cache.weak.retain(|_, weak| weak.strong_count() > 0);
+        let arc = std::sync::Arc::new(maplibre::sdf::assets::SymbolAtlas::with_wasm_staging(
+            size, pixels,
+        ));
+        cache.weak.insert(key, std::sync::Arc::downgrade(&arc));
+        if cache.recent.len() >= RECENT_ATLAS_RING_CAP {
+            cache.recent.pop_front();
+        }
+        cache.recent.push_back((key, std::sync::Arc::clone(&arc)));
+        arc
+    })
+}
+
+pub(super) fn atlas_from_wire_bytes(
+    coords: WorldTileCoords,
+    bytes: &[u8],
+) -> Option<std::sync::Arc<maplibre::sdf::assets::SymbolAtlas>> {
+    if bytes.len() < 8 {
+        return None;
+    }
+    let first_word = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+    if first_word == ATLAS_WIRE_MAGIC {
+        return None;
+    }
+    let width = first_word;
+    let height = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+    let pixels = &bytes[8..];
+    if pixels.len()
+        != (width as usize)
+            .saturating_mul(height as usize)
+            .saturating_mul(4)
+    {
+        return None;
+    }
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    coords.hash(&mut hasher);
+    width.hash(&mut hasher);
+    height.hash(&mut hasher);
+    pixels.hash(&mut hasher);
+    let key = (coords, width, height, hasher.finish());
+    if let Some(existing) = check_atlas_cache(&key) {
+        return Some(existing);
+    }
+    Some(insert_atlas_cache(key, [width, height], pixels.to_vec()))
+}
 
 fn encode_symbol_atlas(
     coords: WorldTileCoords,
@@ -260,24 +356,6 @@ fn decode_symbol_atlas_owned(
     if bytes.len() < 8 {
         return None;
     }
-    type AtlasCacheKey = (WorldTileCoords, u32, u32, u64);
-    struct MainAtlasCache {
-        weak: rustc_hash::FxHashMap<
-            AtlasCacheKey,
-            std::sync::Weak<maplibre::sdf::assets::SymbolAtlas>,
-        >,
-        recent: std::collections::VecDeque<(
-            AtlasCacheKey,
-            std::sync::Arc<maplibre::sdf::assets::SymbolAtlas>,
-        )>,
-    }
-    thread_local! {
-        static ATLAS_CACHE: std::cell::RefCell<MainAtlasCache> =
-            std::cell::RefCell::new(MainAtlasCache {
-                weak: rustc_hash::FxHashMap::default(),
-                recent: std::collections::VecDeque::with_capacity(RECENT_ATLAS_RING_CAP),
-            });
-    }
     let first_word = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
     if first_word == ATLAS_WIRE_MAGIC && bytes.len() >= 24 {
         let kind = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
@@ -287,13 +365,7 @@ fn decode_symbol_atlas_owned(
             bytes[16], bytes[17], bytes[18], bytes[19], bytes[20], bytes[21], bytes[22], bytes[23],
         ]);
         let key = (coords, width, height, ptr_id);
-        if let Some(hit) = ATLAS_CACHE.with(|cache| {
-            let cache = cache.borrow();
-            if let Some((_, arc)) = cache.recent.iter().find(|(k, _)| *k == key) {
-                return Some(std::sync::Arc::clone(arc));
-            }
-            cache.weak.get(&key).and_then(std::sync::Weak::upgrade)
-        }) {
+        if let Some(hit) = check_atlas_cache(&key) {
             return Some(hit);
         }
         if kind == ATLAS_WIRE_REF {
@@ -308,20 +380,10 @@ fn decode_symbol_atlas_owned(
         owned_data.truncate(end);
         owned_data.drain(..offset + 24);
         owned_data.shrink_to_fit();
-        return ATLAS_CACHE.with(|cache| {
-            let mut cache = cache.borrow_mut();
-            cache.weak.retain(|_, weak| weak.strong_count() > 0);
-            let arc = std::sync::Arc::new(maplibre::sdf::assets::SymbolAtlas::with_wasm_staging(
-                [width, height],
-                owned_data,
-            ));
-            cache.weak.insert(key, std::sync::Arc::downgrade(&arc));
-            if cache.recent.len() >= RECENT_ATLAS_RING_CAP {
-                cache.recent.pop_front();
-            }
-            cache.recent.push_back((key, std::sync::Arc::clone(&arc)));
-            Some(arc)
-        });
+        return Some(insert_atlas_cache(key, [width, height], owned_data));
+    }
+    if first_word == ATLAS_WIRE_MAGIC {
+        return None;
     }
     let width = first_word;
     let height = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
@@ -340,26 +402,11 @@ fn decode_symbol_atlas_owned(
     height.hash(&mut hasher);
     pixels.hash(&mut hasher);
     let key = (coords, width, height, hasher.finish());
-    if let Some(existing) = ATLAS_CACHE.with(|cache| {
-        cache
-            .borrow()
-            .weak
-            .get(&key)
-            .and_then(std::sync::Weak::upgrade)
-    }) {
+    if let Some(existing) = check_atlas_cache(&key) {
         return Some(existing);
     }
     owned_data.truncate(end);
     owned_data.drain(..offset + 8);
     owned_data.shrink_to_fit();
-    ATLAS_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        cache.weak.retain(|_, weak| weak.strong_count() > 0);
-        let arc = std::sync::Arc::new(maplibre::sdf::assets::SymbolAtlas::with_wasm_staging(
-            [width, height],
-            owned_data,
-        ));
-        cache.weak.insert(key, std::sync::Arc::downgrade(&arc));
-        Some(arc)
-    })
+    Some(insert_atlas_cache(key, [width, height], owned_data))
 }

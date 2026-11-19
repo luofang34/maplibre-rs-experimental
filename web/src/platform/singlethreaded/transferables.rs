@@ -36,6 +36,8 @@ pub struct FlatBufferTransferable {
         Box<maplibre::vector::AvailableVectorLayerBucket>,
         Option<Vec<maplibre::vector::feature_paint::BucketFeatureEntry>>,
     )>,
+    pub(crate) unpacked_symbol: Option<Box<maplibre::sdf::SymbolLayerData>>,
+    pub(crate) unpacked_index: Option<(WorldTileCoords, Option<String>, TileIndex)>,
 }
 
 impl FlatBufferTransferable {
@@ -47,6 +49,8 @@ impl FlatBufferTransferable {
             data: buffer.to_vec(),
             start: 0,
             unpacked_vector: None,
+            unpacked_symbol: None,
+            unpacked_index: None,
         }
     }
 
@@ -56,6 +60,8 @@ impl FlatBufferTransferable {
             data,
             start,
             unpacked_vector: None,
+            unpacked_symbol: None,
+            unpacked_index: None,
         }
     }
 
@@ -71,7 +77,35 @@ impl FlatBufferTransferable {
             data: Vec::new(),
             start: 0,
             unpacked_vector: Some((bucket, paint)),
+            unpacked_symbol: None,
+            unpacked_index: None,
         })
+    }
+
+    #[cfg(any(test, feature = "renderer"))]
+    pub(crate) fn from_js_symbol_layer(
+        buffer: &js_sys::ArrayBuffer,
+        offset: u32,
+        len: u32,
+    ) -> Option<Self> {
+        let bucket = symbol::js_wire::decode_symbol_layer_from_js(buffer, offset, len)?;
+        Some(Self {
+            tag: WebMessageTag::SymbolLayerTessellated,
+            data: Vec::new(),
+            start: 0,
+            unpacked_vector: None,
+            unpacked_symbol: Some(Box::new(bucket)),
+            unpacked_index: None,
+        })
+    }
+
+    #[cfg(any(test, feature = "renderer"))]
+    pub(crate) fn from_js_layer_indexed(
+        buffer: &js_sys::ArrayBuffer,
+        offset: u32,
+        len: u32,
+    ) -> Option<Self> {
+        indexed::decode_js_layer_indexed(buffer, offset, len)
     }
 
     pub fn data(&self) -> &[u8] {

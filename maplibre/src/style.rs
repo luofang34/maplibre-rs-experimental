@@ -212,6 +212,13 @@ impl Style {
             revision_state: Default::default(),
         }
     }
+
+    /// Returns whether globe rendering contributes to the view at `zoom`.
+    pub(crate) fn uses_globe_at(&self, zoom: f64) -> bool {
+        self.projection
+            .as_ref()
+            .is_some_and(|specification| specification.projection_type.uses_globe_rendering(zoom))
+    }
 }
 
 mod default_style;

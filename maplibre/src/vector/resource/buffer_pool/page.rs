@@ -157,6 +157,7 @@ pub(super) struct BufferSlab<B> {
     pub alloc: RangeAllocator,
     pub element_capacity: u64,
     pub live_entries: u32,
+    pub dedicated_oversize: bool,
 }
 
 impl<B> BufferSlab<B> {
@@ -168,6 +169,7 @@ impl<B> BufferSlab<B> {
             alloc: RangeAllocator::new(usable_bytes),
             element_capacity,
             live_entries: 0,
+            dedicated_oversize: false,
         }
     }
 
@@ -195,6 +197,7 @@ pub(super) struct VertexSlab<B> {
     pub element_capacity: u64,
     pub live_entries: u32,
     pub paired_fm_dirty_end: u64,
+    pub dedicated_oversize: bool,
 }
 
 impl<B> VertexSlab<B> {
@@ -219,6 +222,7 @@ impl<B> VertexSlab<B> {
             element_capacity,
             live_entries: 0,
             paired_fm_dirty_end: 0,
+            dedicated_oversize: false,
         }
     }
 

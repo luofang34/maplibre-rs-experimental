@@ -174,7 +174,7 @@ const wasmPack = () => {
         # Enables the possibility to import memory into wasm.
         # Without --shared-memory it is not possible to use shared WebAssembly.Memory.
         # Set maximum memory ceiling to 1 GiB (initial linear memory stays ~1.25 MiB and grows on demand)
-        "-C", "link-args=--shared-memory --import-memory --max-memory=1073741824 -zstack-size=262144",
+        "-C", "link-args=--shared-memory --import-memory --max-memory=1073741824 -zstack-size=131072",
         # Exports are needed for "error: failed to prepare module for threading" / "failed to find" errors
         "-C", "link-args=--export=__heap_base --export=__wasm_init_tls --export=__tls_size --export=__tls_align --export=__tls_base"
     ]`

@@ -216,6 +216,75 @@ fn decode_wire_index(payload: &[u8]) -> Option<TileIndex> {
     )
 }
 
+#[cfg(any(test, feature = "renderer"))]
+pub(super) fn decode_js_layer_indexed(
+    buffer: &js_sys::ArrayBuffer,
+    base_offset: u32,
+    byte_len: u32,
+) -> Option<FlatBufferTransferable> {
+    let end = base_offset.checked_add(byte_len)?;
+    if end > buffer.byte_length() || (byte_len as usize) < LAZY_MVT_HEADER_LEN {
+        return None;
+    }
+    let mut hdr = [0_u8; LAZY_MVT_HEADER_LEN];
+    js_sys::Uint8Array::new_with_byte_offset_and_length(
+        buffer,
+        base_offset,
+        LAZY_MVT_HEADER_LEN as u32,
+    )
+    .copy_to(&mut hdr);
+    if hdr[..4] == LAZY_MVT_MAGIC {
+        let coords = read_coords_at(&hdr, 4)?;
+        let compressed = hdr[13] != 0;
+        let source_len_tag = read_u32_le(&hdr, 16)?;
+        let (source, mvt_off) = if source_len_tag == u32::MAX {
+            (None, LAZY_MVT_HEADER_LEN)
+        } else {
+            let len = usize::try_from(source_len_tag).ok()?;
+            let off_end = LAZY_MVT_HEADER_LEN.checked_add(len)?;
+            if off_end > byte_len as usize {
+                return None;
+            }
+            let mut src_buf = vec![0_u8; len];
+            if len > 0 {
+                js_sys::Uint8Array::new_with_byte_offset_and_length(
+                    buffer,
+                    base_offset + LAZY_MVT_HEADER_LEN as u32,
+                    len as u32,
+                )
+                .copy_to(&mut src_buf);
+            }
+            (Some(String::from_utf8(src_buf).ok()?), off_end)
+        };
+        let mvt_len = (byte_len as usize).checked_sub(mvt_off)?;
+        let mut mvt = vec![0_u8; mvt_len];
+        if mvt_len > 0 {
+            js_sys::Uint8Array::new_with_byte_offset_and_length(
+                buffer,
+                base_offset + mvt_off as u32,
+                mvt_len as u32,
+            )
+            .copy_to(&mut mvt);
+        }
+        let index = TileIndex::LazyMvt(LazyMvtIndex::from_packed(Arc::from(mvt), compressed));
+        return Some(FlatBufferTransferable {
+            tag: WebMessageTag::LayerIndexed,
+            data: Vec::new(),
+            start: 0,
+            unpacked_vector: None,
+            unpacked_symbol: None,
+            unpacked_index: Some((coords, source, index)),
+        });
+    }
+    let bytes =
+        js_sys::Uint8Array::new_with_byte_offset_and_length(buffer, base_offset, byte_len).to_vec();
+    Some(FlatBufferTransferable::from_vec(
+        WebMessageTag::LayerIndexed,
+        bytes,
+        0,
+    ))
+}
+
 impl LayerIndexed for FlatBufferTransferable {
     fn message_tag() -> &'static dyn MessageTag {
         &WebMessageTag::LayerIndexed
@@ -232,6 +301,9 @@ impl LayerIndexed for FlatBufferTransferable {
     }
 
     fn coords(&self) -> WorldTileCoords {
+        if let Some((coords, _, _)) = &self.unpacked_index {
+            return *coords;
+        }
         if let Some((coords, _, _, _)) = parse_lazy_mvt_header(self.data()) {
             return coords;
         }
@@ -239,13 +311,19 @@ impl LayerIndexed for FlatBufferTransferable {
     }
 
     fn source(&self) -> Option<String> {
+        if let Some((_, source, _)) = &self.unpacked_index {
+            return source.clone();
+        }
         if let Some((_, _, source, _)) = parse_lazy_mvt_header(self.data()) {
             return source.map(str::to_owned);
         }
         parse_wire_header(self.data()).and_then(|h| h.2.map(str::to_owned))
     }
 
-    fn to_tile_index(self) -> TileIndex {
+    fn to_tile_index(mut self) -> TileIndex {
+        if let Some((_, _, index)) = self.unpacked_index.take() {
+            return index;
+        }
         if let Some((_, compressed, _, mvt_bytes)) = parse_lazy_mvt_header(self.data()) {
             return TileIndex::LazyMvt(LazyMvtIndex::from_packed(Arc::from(mvt_bytes), compressed));
         }

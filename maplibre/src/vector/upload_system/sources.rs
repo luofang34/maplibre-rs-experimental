@@ -89,8 +89,10 @@ pub(super) fn frame_sources_and_painted(
         view_tile_sources.of_kind(TileKind::Vector),
         crate::vector::UploadedVectorGeometry::for_world(world),
     );
-    let (source_tiles, uncovered) = if style.terrain.is_some() {
-        terrain_sources(world, style)
+    let (source_tiles, mut painted_tiles, uncovered) = if style.terrain.is_some() {
+        let (src, uncov) = terrain_sources(world, style);
+        let painted = src.clone();
+        (src, painted, uncov)
     } else {
         let mut uncovered_list = Vec::new();
         let mut covered_list = Vec::new();
@@ -148,6 +150,9 @@ pub(super) fn frame_sources_and_painted(
                 covered_list.push(coords);
             }
         }
+        let mut painted = Vec::with_capacity(uncovered_list.len() + covered_list.len());
+        painted.extend_from_slice(&uncovered_list);
+        painted.extend_from_slice(&covered_list);
         if let Some(fallbacks) = world.resources.get::<VectorFallbackTiles>() {
             for &coords in &fallbacks.0 {
                 if seen.insert(coords) {
@@ -156,9 +161,8 @@ pub(super) fn frame_sources_and_painted(
             }
         }
         uncovered_list.extend(covered_list);
-        (uncovered_list, uncovered_set)
+        (uncovered_list, painted, uncovered_set)
     };
-    let mut painted_tiles = source_tiles.clone();
     let mut seen_painted: FxHashSet<_> = painted_tiles.iter().copied().collect();
     if let Some(tiles) = &view_tiles {
         for &coords in tiles {

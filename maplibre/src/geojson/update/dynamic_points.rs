@@ -12,7 +12,7 @@ mod gpu;
 mod ramp;
 mod wire;
 
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 
 use eligibility::source_layers_read_identity;
 pub(crate) use eligibility::{source_supports_dynamic_points, uses_dynamic_circle_metadata};
@@ -49,7 +49,7 @@ pub(crate) struct DynamicPointGeoJson {
 #[derive(Default)]
 pub(super) struct EvalCache {
     pub key: Option<(u64, StyleLayerId, u64)>,
-    pub slots: Vec<Option<[FillShaderFeatureMetadata; 2]>>,
+    pub pairs: Vec<[FillShaderFeatureMetadata; 2]>,
 }
 
 struct DynamicPointSource {
@@ -63,8 +63,7 @@ struct DynamicPointSource {
     seq: u64,
     tile_hits: FxHashMap<WorldTileCoords, Vec<u32>>,
     applied_seq: FxHashMap<(WorldTileCoords, StyleLayerId), (u64, u64)>,
-    deferred_bytes: Vec<u8>,
-    has_deferred_bytes: bool,
+    deferred_bytes: Option<Vec<u8>>,
     pub(super) fast_columns: FastColumnStore,
     eval_cache: EvalCache,
 }
@@ -99,12 +98,11 @@ pub(crate) fn flush_deferred_geojson_bytes(style: &mut Style, world: &mut World)
         return;
     };
     for (name, src_state) in &mut state.sources {
-        if !src_state.has_deferred_bytes {
+        let Some(bytes) = src_state.deferred_bytes.take() else {
             continue;
-        }
-        src_state.has_deferred_bytes = false;
+        };
         if let Some(Source::GeoJson(src)) = style.sources.get_mut(name) {
-            if let Ok(doc) = serde_json::from_slice::<JsonValue>(&src_state.deferred_bytes) {
+            if let Ok(doc) = serde_json::from_slice::<JsonValue>(&bytes) {
                 src.data = GeoJsonData::Inline(Arc::new(doc));
             }
         }
@@ -123,17 +121,17 @@ pub(crate) fn invalidate_after_style_change(style: &Style, world: &mut World) {
         .retain(|name, _| source_supports_dynamic_points(style, name));
     for (name, src_state) in &mut state.sources {
         if src_state.fast_columns.active_seq == Some(src_state.seq) {
-            if src_state.has_deferred_bytes
-                && try_parse_stationary_bytes(
-                    &src_state.deferred_bytes,
+            if let Some(bytes) = src_state.deferred_bytes.as_deref() {
+                if try_parse_stationary_bytes(
+                    bytes,
                     &src_state.keys,
                     &mut src_state.scratch_props,
                     src_state.promoted.as_deref(),
                     src_state.generate_id,
                     src_state.inject_identity,
-                )
-            {
-                std::mem::swap(&mut src_state.properties, &mut src_state.scratch_props);
+                ) {
+                    std::mem::swap(&mut src_state.properties, &mut src_state.scratch_props);
+                }
             }
             src_state.fast_columns.active_seq = None;
         }
@@ -150,9 +148,9 @@ pub(crate) fn deferred_inline_value(world: &World, source_name: &str) -> Option<
         .get::<DynamicPointGeoJson>()?
         .sources
         .get(source_name)?;
-    src.has_deferred_bytes
-        .then(|| serde_json::from_slice(&src.deferred_bytes).ok())
-        .flatten()
+    src.deferred_bytes
+        .as_deref()
+        .and_then(|bytes| serde_json::from_slice(bytes).ok())
 }
 
 /// Seeds or removes `source_name` in [`DynamicPointGeoJson`] from `style`'s current inline data.
@@ -240,22 +238,33 @@ fn build_source_from_value(
         seq: 1,
         tile_hits: FxHashMap::default(),
         applied_seq: FxHashMap::default(),
-        deferred_bytes: Vec::new(),
-        has_deferred_bytes: false,
+        deferred_bytes: None,
         fast_columns: FastColumnStore::default(),
         eval_cache: EvalCache::default(),
     })
 }
 
-/// Attempts a zero-DOM-allocation stationary update from UTF-8 JSON `bytes`.
-pub(crate) fn try_apply_stationary_bytes(
+fn store_deferred_bytes(slot: &mut Option<Vec<u8>>, bytes: Cow<'_, [u8]>) {
+    match bytes {
+        Cow::Owned(owned) => *slot = Some(owned),
+        Cow::Borrowed(borrowed) => {
+            let buf = slot.get_or_insert_with(Vec::new);
+            buf.clear();
+            buf.extend_from_slice(borrowed);
+        }
+    }
+}
+
+/// Attempts a zero-DOM-allocation stationary update from UTF-8 JSON `bytes`, moving owned buffers
+/// directly without copying on success and returning the buffer back on `Err` otherwise.
+pub(crate) fn try_apply_stationary_bytes<'a>(
     style: &Style,
     world: &mut World,
     source_name: &str,
-    bytes: &[u8],
-) -> bool {
+    bytes: Cow<'a, [u8]>,
+) -> Result<(), Cow<'a, [u8]>> {
     if !source_supports_dynamic_points(style, source_name) {
-        return false;
+        return Err(bytes);
     }
     let needs_seed = world
         .resources
@@ -265,42 +274,38 @@ pub(crate) fn try_apply_stationary_bytes(
         seed_from_inline(style, world, source_name);
     }
     let Some(state) = world.resources.get_mut::<DynamicPointGeoJson>() else {
-        return false;
+        return Err(bytes);
     };
     let Some(src_state) = state.sources.get_mut(source_name) else {
-        return false;
+        return Err(bytes);
     };
     if !src_state.inject_identity
         && src_state.promoted.is_none()
         && collect_fast_ramp_keys(style, source_name, &mut src_state.fast_columns.keys)
-        && try_fast_scan_stationary_bytes(bytes, &src_state.keys, &mut src_state.fast_columns)
+        && try_fast_scan_stationary_bytes(&bytes, &src_state.keys, &mut src_state.fast_columns)
     {
         src_state.seq = src_state.seq.wrapping_add(1);
         src_state.fast_columns.active_seq = Some(src_state.seq);
-        src_state.deferred_bytes.clear();
-        src_state.deferred_bytes.extend_from_slice(bytes);
-        src_state.has_deferred_bytes = true;
+        store_deferred_bytes(&mut src_state.deferred_bytes, bytes);
         crate::render::frame_signals::mark_dirty(world);
-        return true;
+        return Ok(());
     }
     src_state.fast_columns.active_seq = None;
     if !try_parse_stationary_bytes(
-        bytes,
+        &bytes,
         &src_state.keys,
         &mut src_state.scratch_props,
         src_state.promoted.as_deref(),
         src_state.generate_id,
         src_state.inject_identity,
     ) {
-        return false;
+        return Err(bytes);
     }
     std::mem::swap(&mut src_state.properties, &mut src_state.scratch_props);
     src_state.seq = src_state.seq.wrapping_add(1);
-    src_state.deferred_bytes.clear();
-    src_state.deferred_bytes.extend_from_slice(bytes);
-    src_state.has_deferred_bytes = true;
+    store_deferred_bytes(&mut src_state.deferred_bytes, bytes);
     crate::render::frame_signals::mark_dirty(world);
-    true
+    Ok(())
 }
 
 /// Attempts an in-place stationary update from an inline `serde_json::Value` document.
@@ -373,7 +378,7 @@ pub(crate) fn try_apply_stationary_inline(
     std::mem::swap(&mut src_state.properties, &mut src_state.scratch_props);
     src_state.seq = src_state.seq.wrapping_add(1);
     src_state.fast_columns.active_seq = None;
-    src_state.has_deferred_bytes = false;
+    src_state.deferred_bytes = None;
     if let Some(Source::GeoJson(src)) = style.sources.get_mut(source_name) {
         src.data = GeoJsonData::Inline(Arc::clone(doc));
     }

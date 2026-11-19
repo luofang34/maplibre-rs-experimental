@@ -428,7 +428,7 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
             .as_ref()
             .and_then(crate::vector::pattern::per_feature_pattern)
             .is_some();
-        let allow_prepack = cfg!(all(target_arch = "wasm32", not(target_feature = "atomics")))
+        let allow_prepack = cfg!(target_arch = "wasm32")
             && !self.has_dem_source
             && !per_feature_pattern
             && feature_sort_keys.is_empty()

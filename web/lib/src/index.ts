@@ -2,7 +2,6 @@ import * as maplibre from "./wasm/maplibre"
 import {initializeWasm} from "./wasm-instance.mjs";
 import {
     checkRequirements,
-    checkWasmFeatures,
     ensureWebGpuCompatibility,
     isWebGLSupported,
     probeWebGpuAvailable,
@@ -64,6 +63,8 @@ export const startMapLibre = async (
         return
     }
 
+    const webGpuProbe =
+        !WEBGL && !MULTITHREADED ? probeWebGpuAvailable() : null;
     const mainModulePrefetch = compileWasmModule(wasmPath);
     const workerModulePrefetch =
         !MULTITHREADED
@@ -91,17 +92,14 @@ export const startMapLibre = async (
         }
     };
 
-    if (WEBGL) {
-        await checkWasmFeatures();
-    } else {
-        void checkWasmFeatures();
+    if (!WEBGL) {
         const hasWebGpu = MULTITHREADED
             ? Boolean(typeof navigator !== "undefined" && "gpu" in navigator)
-            : await probeWebGpuAvailable();
+            : await (webGpuProbe ?? probeWebGpuAvailable());
         const decision = selectGraphicsBackend({
             webgl: false,
             hasWebGpu,
-            hasWebGl: isWebGLSupported(),
+            hasWebGl: hasWebGpu ? false : isWebGLSupported(),
             hasWebglFallbackModule: true,
         });
         if (decision.backend === "fallback-webgl2") {

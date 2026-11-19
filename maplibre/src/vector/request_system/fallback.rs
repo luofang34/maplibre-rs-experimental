@@ -7,6 +7,7 @@ use crate::{
     coords::{OverscaledTileId, WorldTileCoords, ZoomLevel},
     io::tile_sources::{outside_source_bounds, source_max_zoom, source_min_zoom, TileKind},
     render::{
+        eventually::Eventually,
         memory_budget::MemoryBudget,
         projection::view_region_for_projection,
         tile_view_pattern::DEFAULT_TILE_SIZE,
@@ -14,7 +15,9 @@ use crate::{
     },
     style::Style,
     tcs::world::World,
-    vector::upload_system::sources::VectorFallbackTiles,
+    vector::{
+        upload_system::sources::VectorFallbackTiles, VectorBufferPool, VectorLayerBucketComponent,
+    },
 };
 
 /// Maximum coarse `z - 3` ancestor cover tiles requested alongside the tight viewport during motion.
@@ -75,18 +78,55 @@ fn plan_non_terrain_fallbacks_for_platform(
     if is_web && !view_state.has_external_view() {
         let max_zoom = source_max_zoom(style, TileKind::Vector);
         let source_z = max_zoom.map_or(level, |m| level.min(m));
-        let moving = crate::render::frame_signals::camera_moved(world, view_state);
         let ahead_view = world
             .resources
             .get::<crate::render::xr::PrefetchView>()
             .and_then(|pv| pv.view_state.clone());
+        let allow_new_coarse = super::velocity::should_request_coarse_fallback(
+            world,
+            view_state,
+            ahead_view.is_some(),
+        );
 
         // 1. Single coarse `z - 3` ancestor cover (covers an 8x8 tile block): never requested on
-        // stationary cold boot (keeping initial boot single-wave with minimal WASM/GPU memory),
-        // requested once motion or lookahead starts, and retained once spawned in `world.tiles`.
+        // stationary cold boot or gentle continuous spin, requested only during rapid pan/zoom
+        // or lookahead when child viewport tiles lack GPU geometry, and retained once spawned.
         if source_z >= 3 {
             let coarse_z = source_z - 3;
-            let allow_new_coarse = moving || ahead_view.is_some();
+            let all_children_uploaded = |world: &World, ancestor: WorldTileCoords| {
+                let Some(Eventually::Initialized(pool)) =
+                    world.resources.get::<Eventually<VectorBufferPool>>()
+                else {
+                    return false;
+                };
+                if !pool.has_capacity() {
+                    return false;
+                }
+                let az = u8::from(ancestor.z);
+                let mut any_covered = false;
+                for &child in view_tiles {
+                    let Some((wrapped, _)) = child.wrapped() else {
+                        continue;
+                    };
+                    let cz = u8::from(wrapped.z);
+                    if cz <= az {
+                        continue;
+                    }
+                    let shift = u32::from(cz - az);
+                    if wrapped.x >> shift == ancestor.x && wrapped.y >> shift == ancestor.y {
+                        any_covered = true;
+                        if world
+                            .tiles
+                            .query::<&VectorLayerBucketComponent>(child)
+                            .is_none_or(|b| !b.done)
+                            || !crate::vector::geometry_uploaded(child, world)
+                        {
+                            return false;
+                        }
+                    }
+                }
+                any_covered
+            };
             let mut coarse_count = 0;
             for &coords in view_tiles {
                 let Some((wrapped, _)) = coords.wrapped() else {
@@ -102,7 +142,8 @@ fn plan_non_terrain_fallbacks_for_platform(
                     y: wrapped.y >> shift,
                     z: ZoomLevel::new(coarse_z),
                 };
-                if !allow_new_coarse && !tile_spawned(world, ancestor) {
+                let spawned = tile_spawned(world, ancestor);
+                if !spawned && (!allow_new_coarse || all_children_uploaded(world, ancestor)) {
                     continue;
                 }
                 if seen_extra.insert(ancestor) {

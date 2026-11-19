@@ -289,8 +289,9 @@ fn stationary_point_bytes_update_skips_generation_and_flushes_cleanly() {
         &s,
         &mut world,
         "places",
-        &next_bytes
-    ));
+        std::borrow::Cow::Borrowed(&next_bytes),
+    )
+    .is_ok());
     assert_eq!(generation(&s), gen_before);
     assert_eq!(s.revision(), rev_before);
 
@@ -304,12 +305,13 @@ fn stationary_point_bytes_update_skips_generation_and_flushes_cleanly() {
         {"type": "Feature", "id": 2, "properties": {"load": 0.45}, "geometry": {"type": "Point", "coordinates": [-122.3, 37.8]}}
     ])))
     .expect("moved bytes");
-    assert!(!super::dynamic_points::try_apply_stationary_bytes(
+    assert!(super::dynamic_points::try_apply_stationary_bytes(
         &s,
         &mut world,
         "places",
-        &moved_bytes
-    ));
+        std::borrow::Cow::Borrowed(&moved_bytes),
+    )
+    .is_err());
 
     super::dynamic_points::flush_deferred_geojson_bytes(&mut s, &mut world);
     assert_eq!(data(&s)["features"][0]["properties"]["load"], json!(0.85));

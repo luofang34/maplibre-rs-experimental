@@ -83,6 +83,28 @@ pub fn upload_system(
     let refresh_paint = previous_paint != Some(paint_frame);
     let (source_tiles, painted_tiles, uncovered_sources) =
         sources::frame_sources_and_painted(world, style, view_state)?;
+    let has_pending_uploads = {
+        let stamp = match world.resources.get::<Eventually<VectorBufferPool>>() {
+            Some(Initialized(pool)) => (style.revision(), pool.eviction_generation()),
+            _ => return Err(SystemError::Dependencies),
+        };
+        !source_tiles.iter().all(|&coords| {
+            world
+                .tiles
+                .query::<(
+                    &VectorLayerBucketComponent,
+                    &super::content::LayerReplacements,
+                )>(coords)
+                .is_some_and(|(layers, pending)| {
+                    layers.done && pending.vector.is_empty() && layers.uploaded_stamp == Some(stamp)
+                })
+        })
+    };
+    if has_pending_uploads {
+        crate::render::systems::retention_system::evict_before_upload(
+            world, style, view_state, queue,
+        );
+    }
     let (spatial, changed) = super::structures::for_frame(world, style, &painted_tiles);
     world.resources.get_or_init_mut::<FrameUploads>();
     world.resources.get_or_init_mut::<DynPoints>();

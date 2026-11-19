@@ -132,6 +132,10 @@ impl GlobeTileMeshCache {
     /// Flat Mercator frames (`!globe_active`) reuse a minimal `1x1` quad (`granularity = 1`, no
     /// pole caps) instead of uploading dense `128x128` globe grids.
     pub fn set_globe_active(&mut self, globe_active: bool) {
+        if self.globe_active && !globe_active {
+            self.meshes.retain(|key, _| key.granularity == 1);
+            self.scratch = TileMeshScratch::default();
+        }
         self.globe_active = globe_active;
     }
 
@@ -193,7 +197,9 @@ impl GlobeTileMeshCache {
             wgpu::BufferUsages::VERTEX,
             bytemuck::cast_slice(&gpu_vertices),
         );
+        drop(gpu_vertices);
         let (index_buffer, index_format) = upload_indices(device, queue, views.indices);
+        self.scratch = TileMeshScratch::default();
         self.meshes.insert(
             key,
             GpuTileMesh {

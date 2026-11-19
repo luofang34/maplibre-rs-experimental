@@ -7,10 +7,27 @@ use lyon::tessellation::VertexBuffers;
 /// Worker pre-packed GPU geometry ready for zero-conversion buffer upload.
 #[derive(Clone, Debug)]
 pub struct PrepackedGpuGeometry {
-    /// Pre-packed 16-byte GPU vertices matching [`crate::render::shaders::GpuShaderVertex`].
+    /// Pre-packed 16-byte GPU vertices (or packed 8-byte compact extrusion pairs when
+    /// [`Self::compact_extrusion`] is set) matching [`crate::render::shaders::GpuShaderVertex`].
     pub vertices: Vec<crate::render::shaders::GpuShaderVertex>,
     /// Optional pre-narrowed `u16` indices when all vertices fit in 16 bits.
     pub indices_u16: Option<Vec<u16>>,
+    /// True when [`Self::vertices`] stores two 8-byte compact extrusion vertices per word.
+    pub compact_extrusion: bool,
+    /// Logical vertex count referenced by indices (equals `vertices.len()` unless compact).
+    pub logical_vertex_count: u32,
+}
+
+impl PrepackedGpuGeometry {
+    /// Returns the logical vertex count referenced by indices.
+    #[inline]
+    pub fn logical_len(&self) -> usize {
+        if self.logical_vertex_count > 0 {
+            self.logical_vertex_count as usize
+        } else {
+            self.vertices.len()
+        }
+    }
 }
 
 /// Conversion from `VertexBuffers` pads indices and requires copy-aligned vertex bytes.
@@ -91,7 +108,7 @@ impl<V, I> OverAlignedVertexBuffer<V, I> {
 
     /// Attaches worker pre-packed GPU vertices and optional `u16` indices.
     pub fn with_prepacked_gpu(mut self, prepacked: PrepackedGpuGeometry) -> Self {
-        let len = u32::try_from(prepacked.vertices.len()).unwrap_or(u32::MAX);
+        let len = u32::try_from(prepacked.logical_len()).unwrap_or(u32::MAX);
         self.uploaded_vertices = self.uploaded_vertices.max(len);
         self.prepacked_gpu = Some(Box::new(prepacked));
         self
@@ -106,7 +123,7 @@ impl<V, I> OverAlignedVertexBuffer<V, I> {
     /// Releases worker pre-packed GPU geometry after upload.
     pub fn clear_prepacked_gpu(&mut self) {
         if let Some(prepacked) = self.prepacked_gpu.take() {
-            let len = u32::try_from(prepacked.vertices.len()).unwrap_or(u32::MAX);
+            let len = u32::try_from(prepacked.logical_len()).unwrap_or(u32::MAX);
             self.uploaded_vertices = self.uploaded_vertices.max(len);
         }
     }
@@ -114,7 +131,7 @@ impl<V, I> OverAlignedVertexBuffer<V, I> {
     /// Takes ownership of any attached pre-packed GPU geometry while preserving `vertex_count()`.
     pub fn take_prepacked_gpu(&mut self) -> Option<PrepackedGpuGeometry> {
         let prepacked = self.prepacked_gpu.take()?;
-        let len = u32::try_from(prepacked.vertices.len()).unwrap_or(u32::MAX);
+        let len = u32::try_from(prepacked.logical_len()).unwrap_or(u32::MAX);
         self.uploaded_vertices = self.uploaded_vertices.max(len);
         Some(*prepacked)
     }
@@ -179,7 +196,7 @@ impl<V, I> OverAlignedVertexBuffer<V, I> {
     pub fn vertex_count(&self) -> usize {
         if let Some(prepacked) = &self.prepacked_gpu {
             if !prepacked.vertices.is_empty() {
-                return prepacked.vertices.len();
+                return prepacked.logical_len();
             }
         }
         if self.buffer.vertices.is_empty() {

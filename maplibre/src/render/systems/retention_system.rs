@@ -52,12 +52,12 @@ const MIN_CACHE_TILES: usize = 8;
 /// Hard ceiling on out-of-view cached tiles so wide oblique/globe coverings cannot accumulate
 /// hundreds of multi-megabyte raster/DEM tiles along a corridor.
 #[cfg(target_arch = "wasm32")]
-const MAX_CACHE_TILES: usize = 4;
+const MAX_CACHE_TILES: usize = 2;
 #[cfg(not(target_arch = "wasm32"))]
 const MAX_CACHE_TILES: usize = 24;
 /// Tessellated geometry the out-of-view cache may hold.
 #[cfg(target_arch = "wasm32")]
-const CACHE_BYTES: usize = 2 << 20;
+const CACHE_BYTES: usize = 1 << 20;
 #[cfg(not(target_arch = "wasm32"))]
 const CACHE_BYTES: usize = 12 << 20;
 /// Frames between resident-memory summaries for hosts driving the map from an eye, which
@@ -81,19 +81,13 @@ pub struct TileRetention {
 /// Offline hosts cannot replace an evicted tile without an active source loader.
 pub(crate) struct RetainLoadedTiles;
 
-/// Drops the least recently used tiles beyond the cache budget and releases their GPU data.
-pub fn retention_system(
-    MapContext {
-        world,
-        style,
-        view_state,
-        renderer,
-        ..
-    }: &mut MapContext,
-) -> SystemResult {
-    if crate::render::eye_covering::EyeInFrame::reuses_content(world) {
-        return Ok(());
-    }
+fn run_eviction(
+    world: &mut World,
+    style: &Style,
+    view_state: &ViewState,
+    queue: Option<&crate::render::upload_queue::UploadQueue>,
+    cancel_unwanted: bool,
+) -> (FxHashSet<WorldTileCoords>, usize) {
     let floor = world
         .resources
         .get::<crate::render::eye_covering::SlotResidencyFloor>()
@@ -122,13 +116,42 @@ pub fn retention_system(
         single
     };
     let _ = &mut in_use;
-    drop_cancelled(world, &in_use, Some(&renderer.queue));
+    if cancel_unwanted {
+        drop_cancelled(world, &in_use, queue);
+    }
     let evicted = evict_stale_tiles(world, &in_use, drawn);
     if !evicted.is_empty() {
         tracing::debug!(count = evicted.len(), "evicted tiles that left the view");
-        drop_gpu_data_with_queue(world, &evicted, Some(&renderer.queue));
+        drop_gpu_data_with_queue(world, &evicted, queue);
     }
-    reclaim_pool_pages(world, Some(&renderer.queue));
+    reclaim_pool_pages(world, queue);
+    (in_use, drawn)
+}
+
+/// Frees unneeded out-of-view GPU buffers right before uploading new vector buckets.
+pub(crate) fn evict_before_upload(
+    world: &mut World,
+    style: &Style,
+    view_state: &ViewState,
+    queue: &crate::render::upload_queue::UploadQueue,
+) {
+    let _ = run_eviction(world, style, view_state, Some(queue), false);
+}
+
+/// Drops the least recently used tiles beyond the cache budget and releases their GPU data.
+pub fn retention_system(
+    MapContext {
+        world,
+        style,
+        view_state,
+        renderer,
+        ..
+    }: &mut MapContext,
+) -> SystemResult {
+    if crate::render::eye_covering::EyeInFrame::reuses_content(world) {
+        return Ok(());
+    }
+    let (in_use, drawn) = run_eviction(world, style, view_state, Some(&renderer.queue), true);
     if view_state.has_external_view() {
         summary::summarize_residency(world, drawn, in_use.len(), view_state.eye_settled());
         #[cfg(not(target_arch = "wasm32"))]
@@ -206,10 +229,7 @@ pub(crate) fn tiles_in_use(
         .get::<crate::render::eye_covering::FrameLooseCovering>()
         .filter(|cache| cache.host_frame == host_frame);
 
-    let request_padding = if cfg!(target_arch = "wasm32")
-        && style.terrain.is_none()
-        && !view_state.has_external_view()
-    {
+    let request_padding = if cfg!(target_arch = "wasm32") && !view_state.has_external_view() {
         ViewStatePadding::Tight
     } else {
         ViewStatePadding::Loose
@@ -392,7 +412,7 @@ fn drop_gpu_data_with_queue(
 ) {
     if let Some(Initialized(pool)) = world.resources.get_mut::<Eventually<VectorBufferPool>>() {
         for coords in evicted {
-            pool.remove_tile_with_queue(*coords, queue);
+            pool.remove_evicted_tile_with_queue(*coords, queue);
         }
     }
     if let Some(Initialized(pool)) = world
@@ -400,7 +420,7 @@ fn drop_gpu_data_with_queue(
         .get_mut::<Eventually<crate::sdf::SymbolBufferPool>>()
     {
         for coords in evicted {
-            pool.remove_tile_with_queue(*coords, queue);
+            pool.remove_evicted_tile_with_queue(*coords, queue);
         }
     }
     #[cfg(feature = "raster")]

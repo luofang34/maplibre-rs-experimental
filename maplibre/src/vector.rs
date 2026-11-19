@@ -86,12 +86,17 @@ struct ExtrusionPipeline {
     depth: crate::render::resource::FeaturePipelinePair,
     color: crate::render::resource::FeaturePipelinePair,
     clear: crate::render::resource::FeaturePipelinePair,
+    compact_depth: wgpu::RenderPipeline,
+    compact_color: wgpu::RenderPipeline,
+    compact_clear: wgpu::RenderPipeline,
     /// The colour pass with an image in place of the colour.
     pattern: Option<crate::render::resource::FeaturePipelinePair>,
     /// Back-facing shell of a closed translucent 3D volume (`depth_write = false`).
     translucent_back: Option<crate::render::resource::FeaturePipelinePair>,
     /// Front-facing shell of a closed translucent 3D volume (`depth_write = false`).
     translucent_front: Option<crate::render::resource::FeaturePipelinePair>,
+    compact_translucent_back: Option<wgpu::RenderPipeline>,
+    compact_translucent_front: Option<wgpu::RenderPipeline>,
 }
 
 struct CirclePipeline {
@@ -200,6 +205,12 @@ pub fn geometry_uploaded(coords: WorldTileCoords, world: &World) -> bool {
     match world.resources.get::<Eventually<VectorBufferPool>>() {
         Some(Eventually::Initialized(pool)) => {
             if !pool.has_capacity() {
+                return true;
+            }
+            if buckets
+                .uploaded_stamp
+                .is_some_and(|(_, eviction_gen)| eviction_gen == pool.eviction_generation())
+            {
                 return true;
             }
             buckets.layers.iter().all(|layer| match layer {

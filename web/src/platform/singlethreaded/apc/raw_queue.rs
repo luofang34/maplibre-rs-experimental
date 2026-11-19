@@ -215,6 +215,35 @@ impl PassingReceiveIter {
     }
 }
 
+fn try_decode_direct_js(
+    effective_tag: WebMessageTag,
+    attempt: Option<u64>,
+    buffer: &ArrayBuffer,
+    offset: u32,
+    len: u32,
+) -> Option<Result<Message, ()>> {
+    let decoded = match effective_tag {
+        WebMessageTag::LayerTessellated => {
+            FlatBufferTransferable::from_js_layer_tessellated(buffer, offset, len)
+        }
+        WebMessageTag::SymbolLayerTessellated => {
+            FlatBufferTransferable::from_js_symbol_layer(buffer, offset, len)
+        }
+        WebMessageTag::LayerIndexed => {
+            FlatBufferTransferable::from_js_layer_indexed(buffer, offset, len)
+        }
+        _ => return None,
+    };
+    let Some(transferable) = decoded else {
+        return Some(Err(()));
+    };
+    let msg = Message::new(effective_tag.to_static(), Box::new(transferable));
+    Some(Ok(match attempt {
+        Some(id) => msg.with_attempt(id),
+        None => msg,
+    }))
+}
+
 impl Iterator for PassingReceiveIter {
     type Item = Message;
 
@@ -228,27 +257,26 @@ impl Iterator for PassingReceiveIter {
                     attempt,
                     buffer,
                 } => {
-                    if effective_tag == WebMessageTag::LayerTessellated {
-                        let offset = if wire_tag == WebMessageTag::TrackedPayload {
-                            12_u32
-                        } else {
-                            0_u32
-                        };
-                        let len = buffer.byte_length().saturating_sub(offset);
-                        if let Some(transferable) =
-                            FlatBufferTransferable::from_js_layer_tessellated(&buffer, offset, len)
-                        {
-                            let msg = Message::new(
-                                WebMessageTag::LayerTessellated.to_static(),
-                                Box::new(transferable),
-                            );
-                            return Some(match attempt {
-                                Some(id) => msg.with_attempt(id),
-                                None => msg,
-                            });
+                    let offset = if wire_tag == WebMessageTag::TrackedPayload {
+                        12_u32
+                    } else {
+                        0_u32
+                    };
+                    let len = buffer.byte_length().saturating_sub(offset);
+                    if let Some(result) =
+                        try_decode_direct_js(effective_tag, attempt, &buffer, offset, len)
+                    {
+                        match result {
+                            Ok(msg) => return Some(msg),
+                            Err(()) => {
+                                tracing::warn!(
+                                    ?wire_tag,
+                                    ?effective_tag,
+                                    "dropping malformed worker payload"
+                                );
+                                continue;
+                            }
                         }
-                        tracing::warn!(?wire_tag, "dropping malformed LayerTessellated payload");
-                        continue;
                     }
                     match decode_message(wire_tag, buffer) {
                         Ok(message) => return Some(message),
@@ -264,28 +292,19 @@ impl Iterator for PassingReceiveIter {
                     byte_offset,
                     byte_len,
                 } => {
-                    if effective_tag == WebMessageTag::LayerTessellated {
-                        if let Some(transferable) =
-                            FlatBufferTransferable::from_js_layer_tessellated(
-                                &buffer,
-                                byte_offset,
-                                byte_len,
-                            )
-                        {
-                            let msg = Message::new(
-                                WebMessageTag::LayerTessellated.to_static(),
-                                Box::new(transferable),
-                            );
-                            return Some(match attempt {
-                                Some(id) => msg.with_attempt(id),
-                                None => msg,
-                            });
+                    if let Some(result) =
+                        try_decode_direct_js(effective_tag, attempt, &buffer, byte_offset, byte_len)
+                    {
+                        match result {
+                            Ok(msg) => return Some(msg),
+                            Err(()) => {
+                                tracing::warn!(
+                                    ?effective_tag,
+                                    "dropping malformed batched worker payload"
+                                );
+                                continue;
+                            }
                         }
-                        tracing::warn!(
-                            ?effective_tag,
-                            "dropping malformed batched LayerTessellated payload"
-                        );
-                        continue;
                     }
                     let bytes =
                         Uint8Array::new_with_byte_offset_and_length(&buffer, byte_offset, byte_len)

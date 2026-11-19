@@ -204,17 +204,30 @@ impl LayerTessellated for DefaultLayerTessellated {
         allow_prepack: bool,
     ) -> Self {
         if allow_prepack && buffer.prepacked_gpu().is_none() && !buffer.buffer.vertices.is_empty() {
-            let mut packed = Vec::with_capacity(buffer.buffer.vertices.len());
-            let _ = <ShaderVertex as crate::render::shaders::PoolVertex>::encode_vertices(
-                style_type,
-                &buffer.buffer.vertices,
-                &mut packed,
-            );
+            let logical_count = buffer.buffer.vertices.len();
+            let mut packed = Vec::new();
+            let compact_extrusion = feature_colors.is_empty()
+                && entries.is_empty()
+                && buffer.shared_geometry_key().is_none()
+                && <ShaderVertex as crate::render::shaders::PoolVertex>::try_encode_compact_extrusion(
+                    style_type,
+                    &buffer.buffer.vertices,
+                    &mut packed,
+                )
+                .is_some();
+            if !compact_extrusion {
+                let _ = <ShaderVertex as crate::render::shaders::PoolVertex>::encode_vertices(
+                    style_type,
+                    &buffer.buffer.vertices,
+                    &mut packed,
+                );
+            }
             let shared_key = buffer.shared_geometry_key();
             let usable = buffer.usable_indices;
             let raw_indices = std::mem::take(&mut buffer.buffer.indices);
             let usable_len = (usable as usize).min(raw_indices.len());
-            let can_u16 = packed.len() <= 65_536
+            let logical_vertex_count = u32::try_from(logical_count).unwrap_or(u32::MAX);
+            let can_u16 = logical_count <= 65_536
                 && raw_indices[..usable_len]
                     .iter()
                     .all(|&idx| idx <= u32::from(u16::MAX));
@@ -229,6 +242,8 @@ impl LayerTessellated for DefaultLayerTessellated {
                     .with_prepacked_gpu(crate::vector::tessellation::PrepackedGpuGeometry {
                         vertices: packed,
                         indices_u16: Some(u16s),
+                        compact_extrusion,
+                        logical_vertex_count,
                     })
                     .with_shared_geometry_key(shared_key)
             } else {
@@ -236,6 +251,8 @@ impl LayerTessellated for DefaultLayerTessellated {
                     .with_prepacked_gpu(crate::vector::tessellation::PrepackedGpuGeometry {
                         vertices: packed,
                         indices_u16: None,
+                        compact_extrusion,
+                        logical_vertex_count,
                     })
                     .with_shared_geometry_key(shared_key)
             };

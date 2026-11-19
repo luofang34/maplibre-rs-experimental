@@ -212,28 +212,21 @@ pub(crate) fn refresh_dynamic_point_layers(
             let style_layer_id = style_layer.layer_id();
 
             for &coords in painted_tiles {
-                let entry_info = buffer_pool
-                    .index()
-                    .get_layers(coords)
-                    .and_then(|layers| {
-                        layers.iter().find(|e| {
-                            e.style_layer_id == style_layer_id && e.is_dynamic_circle_metadata()
-                        })
+                let Some(entry) = buffer_pool.index().get_layers(coords).and_then(|layers| {
+                    layers.iter().find(|e| {
+                        e.style_layer_id == style_layer_id && e.is_dynamic_circle_metadata()
                     })
-                    .map(|e| {
-                        let bytes = e.feature_metadata_buffer_range().end
-                            - e.feature_metadata_buffer_range().start;
-                        (
-                            e.allocation_id(),
-                            bytes as usize / std::mem::size_of::<FillShaderFeatureMetadata>(),
-                        )
-                    });
-                let Some((alloc_id, allocated_records)) = entry_info else {
+                }) else {
                     continue;
                 };
+                let alloc_id = entry.allocation_id();
                 if src_state.applied_seq.get(&(coords, style_layer_id)) == Some(&(seq, alloc_id)) {
                     continue;
                 }
+                let allocated_bytes = entry.feature_metadata_buffer_range().end
+                    - entry.feature_metadata_buffer_range().start;
+                let allocated_records =
+                    allocated_bytes as usize / std::mem::size_of::<FillShaderFeatureMetadata>();
 
                 let hits: &[u32] = src_state
                     .tile_hits
@@ -246,7 +239,7 @@ pub(crate) fn refresh_dynamic_point_layers(
                     continue;
                 }
                 let verts = allocated_records / 2;
-                if allocated_records % 2 != 0
+                if !allocated_records.is_multiple_of(2)
                     || hits.is_empty()
                     || !(verts == hits.len() * 4 || verts == hits.len() * 16)
                 {
@@ -279,13 +272,7 @@ pub(crate) fn refresh_dynamic_point_layers(
                     f64::from(overscaled_z),
                     (seq, style_layer_id, &mut src_state.eval_cache),
                 );
-                if let Some(entry) = buffer_pool.index().get_layers(coords).and_then(|layers| {
-                    layers.iter().find(|e| {
-                        e.style_layer_id == style_layer_id && e.allocation_id() == alloc_id
-                    })
-                }) {
-                    buffer_pool.update_feature_metadata(queue, entry, gpu_scratch);
-                }
+                buffer_pool.update_feature_metadata(queue, entry, gpu_scratch);
                 if style.terrain.is_some() {
                     buffer_pool.bump_layer_paint_revision(coords, &style_layer.id);
                 }

@@ -53,7 +53,8 @@ pub fn resource_system(
     let needs_circle = prepared.needs_circle;
     let needs_circle_feature_stroke = needs_circle && prepared.needs_circle_feature_stroke;
     let needs_circle_dynamic_radius = needs_circle && prepared.needs_circle_dynamic_radius;
-    let needs_extrusion = prepared.needs_extrusion_at_zoom(style_zoom);
+    let needs_extrusion =
+        prepared.needs_extrusion_at_zoom(style_zoom, style.uses_globe_at(style_zoom));
     let needs_extrusion_pattern = needs_extrusion && prepared.needs_extrusion_pattern;
     let needs_extrusion_translucent = needs_extrusion && prepared.needs_extrusion_translucent;
     let has_pattern_paint = prepared.has_pattern_paint;

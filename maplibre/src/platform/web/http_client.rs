@@ -225,26 +225,25 @@ impl WHATWGFetchHttpClient {
             }
         }
 
-        if !volatile
+        let can_browser_cache = !volatile
             && req.range.is_none()
             && req.headers.is_empty()
-            && is_remote_http_url(&req.url)
-        {
-            if let Some(persisted) = match_browser_cache(&req.url).await {
-                self.memory.insert(&mem_key, &persisted);
-                return Ok(persisted);
+            && is_remote_http_url(&req.url);
+
+        if status.is_offline() && is_remote_http_url(&req.url) {
+            if can_browser_cache {
+                if let Some(persisted) = match_browser_cache(&req.url).await {
+                    self.memory.insert(&mem_key, &persisted);
+                    return Ok(persisted);
+                }
             }
-            if status.is_offline() {
-                return Err(SourceFetchError::offline(&req.url));
-            }
-        } else if status.is_offline() && is_remote_http_url(&req.url) {
             return Err(SourceFetchError::offline(&req.url));
         }
 
         let payload = match Self::fetch_wire(req).await {
             Ok(payload) => payload,
             Err(err) => {
-                if !volatile && req.range.is_none() && req.headers.is_empty() {
+                if can_browser_cache && self.memory.persist_offline() {
                     if let Some(persisted) = match_browser_cache(&req.url).await {
                         self.memory.insert(&mem_key, &persisted);
                         return Ok(persisted);
@@ -255,7 +254,8 @@ impl WHATWGFetchHttpClient {
         };
         if !volatile {
             self.memory.insert(&mem_key, &payload.bytes);
-            if req.headers.is_empty()
+            if self.memory.persist_offline()
+                && req.headers.is_empty()
                 && should_store_in_browser_cache(
                     payload.status,
                     req.range,

@@ -189,7 +189,7 @@ impl AssetCache {
                 fetch(client, json_url, "symbol sprite metadata"),
                 async {
                     if let Some(cached) =
-                        crate::platform::http_client::cache::match_decoded_rgba_cache(png_url).await
+                        crate::platform::http_client::cache::get_decoded_rgba_memory(png_url)
                     {
                         return Ok(cached);
                     }
@@ -203,9 +203,7 @@ impl AssetCache {
                                     "invalid sprite image {png_url}: {error}"
                                 ))
                             })?;
-                    crate::platform::http_client::cache::spawn_put_decoded_rgba_cache(
-                        png_url, &image,
-                    );
+                    crate::platform::http_client::cache::put_decoded_rgba_memory(png_url, &image);
                     Ok(image)
                 },
             )

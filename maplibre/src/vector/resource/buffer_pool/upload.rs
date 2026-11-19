@@ -123,10 +123,11 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         if coords.build_quad_key().is_none() {
             return Err(AllocationError::Coordinates { coords });
         }
-        let prepacked_verts = Self::prepacked_vertices(geometry);
+        let prepacked_info = Self::prepacked_info(geometry);
+        let prepacked_verts = prepacked_info.map(|(v, _, cmp)| (v, cmp));
         let strides = ElementStrides::of::<V::Gpu, I, TM, FM>();
         let (vertices, records) = (
-            prepacked_verts.map_or(geometry.buffer.vertices.len(), |v| v.len()) as u64,
+            prepacked_info.map_or(geometry.buffer.vertices.len(), |(_, len, _)| len) as u64,
             feature_metadata.len() as u64,
         );
         let dual_fm = self.decoupled_feature_metadata && vertices > 0 && records == 2 * vertices;
@@ -220,10 +221,17 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             shared_geometry_key: None,
             evaluated_zoom: None,
             u16_chunks: u16_chunk_ranges,
+            compact_extrusion: false,
         };
 
         if req.vertex_bytes > 0 {
-            self.write_geometry_vertices(queue, &entry, prepacked_verts, &geometry.buffer.vertices);
+            self.write_geometry_vertices(
+                queue,
+                &entry,
+                prepacked_verts,
+                vertices as usize,
+                &geometry.buffer.vertices,
+            );
         }
         self.write_geometry_indices(queue, &entry, geometry, req.index_bytes);
         if req.layer_bytes > 0 && entry.layer_page != NO_SLAB {
