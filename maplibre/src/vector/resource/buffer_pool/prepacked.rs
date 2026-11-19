@@ -115,9 +115,9 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             entry.buffer_vertices.start,
             bytes_to_write,
         );
-        #[cfg(target_arch = "wasm32")]
         if scratch.capacity() > 65_536 {
-            scratch = Vec::new();
+            scratch.clear();
+            scratch.shrink_to(0);
         }
         self.vertex_scratch = scratch;
     }

@@ -9,6 +9,7 @@ use crate::error::WebError;
 
 const MAX_MT_WORKERS: usize = 2;
 
+#[cfg_attr(not(feature = "winit-window"), allow(dead_code))]
 fn hardware_mt_worker_count() -> usize {
     let cores = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("navigator"))
         .ok()
@@ -29,6 +30,7 @@ pub struct WebWorkerPoolScheduler {
 }
 
 impl WebWorkerPoolScheduler {
+    #[cfg_attr(not(feature = "winit-window"), allow(dead_code))]
     pub fn new(new_worker: js_sys::Function) -> Result<Self, WebError> {
         let count = hardware_mt_worker_count();
         let pool = WorkerPool::new(

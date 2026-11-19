@@ -89,7 +89,7 @@ pub(super) fn upload_bucket(
         None
     };
     #[cfg(not(feature = "geojson"))]
-    let _ = dyn_points;
+    let _ = (dyn_points, overscaled_zoom);
 
     if !is_dynamic_circle && uniform.is_none() {
         feature_metadata_into(

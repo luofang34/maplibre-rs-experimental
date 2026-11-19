@@ -167,6 +167,7 @@ impl WorkerEndpoint {
     }
 }
 
+#[cfg_attr(not(feature = "winit-window"), allow(dead_code))]
 enum EndpointFactory {
     Dedicated(NewWorker),
     Port(NewPort),
@@ -263,6 +264,7 @@ fn post_worker_wake(scope: &DedicatedWorkerGlobalScope) -> Result<(), JsValue> {
 
 impl WorkerPool {
     /// Creates a `WorkerPool` primed with `initial` dedicated web workers.
+    #[cfg_attr(not(feature = "winit-window"), allow(dead_code))]
     pub fn new(initial: usize, new_worker: NewWorker) -> Result<WorkerPool, WebError> {
         Self::with_factory(initial, EndpointFactory::Dedicated(new_worker))
     }

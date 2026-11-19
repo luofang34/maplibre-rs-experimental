@@ -82,18 +82,7 @@ pub(crate) fn decode_symbol_layer_from_js(
     let mut hdr_bytes = [0_u8; SYMBOL_HEADER_BYTES];
     Uint8Array::new_with_byte_offset_and_length(buffer, base_offset, SYMBOL_HEADER_BYTES as u32)
         .copy_to(&mut hdr_bytes);
-    let hdr = parse_symbol_header(&hdr_bytes)?;
-    let body = hdr
-        .vert_count
-        .checked_mul(std::mem::size_of::<ShaderSymbolVertex>())?
-        .checked_add(hdr.idx_count.checked_mul(4)?)?
-        .checked_add(hdr.layer_name_len)?
-        .checked_add(hdr.style_id_len)?
-        .checked_add(hdr.feat_len)?
-        .checked_add(hdr.atlas_len)?;
-    if SYMBOL_HEADER_BYTES.checked_add(body)? > byte_len as usize {
-        return None;
-    }
+    let hdr = parse_symbol_header(&hdr_bytes, byte_len as usize)?;
 
     let mut cur = base_offset + SYMBOL_HEADER_BYTES as u32;
     let mut vertices = vec![ShaderSymbolVertex::zeroed(); hdr.vert_count];

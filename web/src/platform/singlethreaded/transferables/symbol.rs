@@ -6,6 +6,8 @@ use super::*;
 
 #[cfg(any(test, feature = "renderer"))]
 pub(super) mod js_wire;
+#[cfg(test)]
+mod tests;
 
 const SYMBOL_HEADER_BYTES: usize = 40;
 
@@ -21,8 +23,8 @@ pub(super) struct SymbolHeader {
     atlas_len: usize,
 }
 
-pub(super) fn parse_symbol_header(bytes: &[u8]) -> Option<SymbolHeader> {
-    if bytes.len() < SYMBOL_HEADER_BYTES {
+pub(super) fn parse_symbol_header(bytes: &[u8], total_len: usize) -> Option<SymbolHeader> {
+    if bytes.len() < SYMBOL_HEADER_BYTES || total_len < SYMBOL_HEADER_BYTES {
         return None;
     }
     let coords = read_coords_at(bytes, 0)?;
@@ -41,7 +43,7 @@ pub(super) fn parse_symbol_header(bytes: &[u8]) -> Option<SymbolHeader> {
         .checked_add(style_id_len)?
         .checked_add(feat_len)?
         .checked_add(atlas_len)?;
-    if SYMBOL_HEADER_BYTES.checked_add(body)? > bytes.len() {
+    if SYMBOL_HEADER_BYTES.checked_add(body)? > total_len {
         return None;
     }
     Some(SymbolHeader {
@@ -142,7 +144,7 @@ impl SymbolLayerTessellated for FlatBufferTransferable {
             return *sym;
         }
         let bytes = self.data();
-        let Some(hdr) = parse_symbol_header(bytes) else {
+        let Some(hdr) = parse_symbol_header(bytes, bytes.len()) else {
             return SymbolLayerData {
                 coords: SymbolLayerTessellated::coords(&self),
                 source_layer: String::new(),
@@ -261,6 +263,7 @@ pub(super) fn insert_atlas_cache(
     })
 }
 
+#[cfg(any(test, feature = "renderer"))]
 pub(super) fn atlas_from_wire_bytes(
     coords: WorldTileCoords,
     bytes: &[u8],

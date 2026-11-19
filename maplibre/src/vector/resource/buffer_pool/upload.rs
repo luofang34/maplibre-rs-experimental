@@ -73,9 +73,9 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
                 entry.buffer_indices.start,
                 bytemuck::cast_slice(&self.u16_index_scratch),
             );
-            #[cfg(target_arch = "wasm32")]
             if self.u16_index_scratch.capacity() > 98_304 {
-                self.u16_index_scratch = Vec::new();
+                self.u16_index_scratch.clear();
+                self.u16_index_scratch.shrink_to(0);
             }
         } else {
             let buf = &self.index_native_slab_of(entry.index_page).buffer.inner;

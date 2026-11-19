@@ -41,6 +41,7 @@ impl VectorPreparedState {
         let mut needs_elevated_lines = false;
         let mut needs_circle = false;
         let mut needs_circle_feature_stroke = false;
+        #[cfg_attr(not(feature = "geojson"), allow(unused_mut))]
         let mut needs_circle_dynamic_radius = false;
         let mut extrusion_minzoom: Option<f64> = None;
         let mut needs_extrusion_pattern = false;
@@ -67,6 +68,7 @@ impl VectorPreparedState {
                             needs_circle_feature_stroke = true;
                         }
                     }
+                    #[cfg(feature = "geojson")]
                     if crate::geojson::update::dynamic_points::uses_dynamic_circle_metadata(
                         style, layer,
                     ) {
