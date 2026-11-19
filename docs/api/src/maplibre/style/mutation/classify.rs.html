@@ -80,11 +80,11 @@
 <a href=#80 id=80 data-nosnippet>80</a>    {
 <a href=#81 id=81 data-nosnippet>81</a>        <span class="kw">return </span><span class="bool-val">true</span>;
 <a href=#82 id=82 data-nosnippet>82</a>    }
-<a href=#83 id=83 data-nosnippet>83</a>    needs_paint_retessellation(before.paint.as_ref(), after.paint.as_ref())
+<a href=#83 id=83 data-nosnippet>83</a>    needs_paint_retessellation(before, after)
 <a href=#84 id=84 data-nosnippet>84</a>}
 <a href=#85 id=85 data-nosnippet>85</a>
-<a href=#86 id=86 data-nosnippet>86</a><span class="kw">fn </span>needs_paint_retessellation(before: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>LayerPaint&gt;, after: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>LayerPaint&gt;) -&gt; bool {
-<a href=#87 id=87 data-nosnippet>87</a>    <span class="kw">match </span>(before, after) {
+<a href=#86 id=86 data-nosnippet>86</a><span class="kw">fn </span>needs_paint_retessellation(before: <span class="kw-2">&amp;</span>StyleLayer, after: <span class="kw-2">&amp;</span>StyleLayer) -&gt; bool {
+<a href=#87 id=87 data-nosnippet>87</a>    <span class="kw">match </span>(before.paint.as_ref(), after.paint.as_ref()) {
 <a href=#88 id=88 data-nosnippet>88</a>        (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>) =&gt; <span class="bool-val">false</span>,
 <a href=#89 id=89 data-nosnippet>89</a>        (<span class="prelude-val">Some</span>(bp @ LayerPaint::Fill(a)), <span class="prelude-val">Some</span>(ap @ LayerPaint::Fill(b))) =&gt; {
 <a href=#90 id=90 data-nosnippet>90</a>            a.outline_color().is_some() != b.outline_color().is_some()
@@ -145,8 +145,17 @@
 <a href=#145 id=145 data-nosnippet>145</a>                || ((a.radius_per_feature() || b.radius_per_feature())
 <a href=#146 id=146 data-nosnippet>146</a>                    &amp;&amp; !same_prop(<span class="kw-2">&amp;</span>a.heatmap_radius, <span class="kw-2">&amp;</span>b.heatmap_radius))
 <a href=#147 id=147 data-nosnippet>147</a>        }
-<a href=#148 id=148 data-nosnippet>148</a>        (<span class="prelude-val">Some</span>(LayerPaint::Symbol(<span class="kw">_</span>)), <span class="prelude-val">Some</span>(LayerPaint::Symbol(<span class="kw">_</span>))) =&gt; <span class="bool-val">false</span>,
-<a href=#149 id=149 data-nosnippet>149</a>        <span class="kw">_ </span>=&gt; <span class="bool-val">true</span>,
-<a href=#150 id=150 data-nosnippet>150</a>    }
-<a href=#151 id=151 data-nosnippet>151</a>}
+<a href=#148 id=148 data-nosnippet>148</a>        (<span class="prelude-val">Some</span>(LayerPaint::Symbol(<span class="kw">_</span>)), <span class="prelude-val">Some</span>(LayerPaint::Symbol(<span class="kw">_</span>))) =&gt; {
+<a href=#149 id=149 data-nosnippet>149</a>            <span class="kw">match </span>(
+<a href=#150 id=150 data-nosnippet>150</a>                <span class="kw">crate</span>::style::expression::symbol_runtime_referenced_keys(before, <span class="prelude-val">None</span>),
+<a href=#151 id=151 data-nosnippet>151</a>                <span class="kw">crate</span>::style::expression::symbol_runtime_referenced_keys(after, <span class="prelude-val">None</span>),
+<a href=#152 id=152 data-nosnippet>152</a>            ) {
+<a href=#153 id=153 data-nosnippet>153</a>                (<span class="prelude-val">None</span>, <span class="kw">_</span>) =&gt; <span class="bool-val">false</span>,
+<a href=#154 id=154 data-nosnippet>154</a>                (<span class="prelude-val">Some</span>(<span class="kw">_</span>), <span class="prelude-val">None</span>) =&gt; <span class="bool-val">true</span>,
+<a href=#155 id=155 data-nosnippet>155</a>                (<span class="prelude-val">Some</span>(prev), <span class="prelude-val">Some</span>(next)) =&gt; !next.is_subset(<span class="kw-2">&amp;</span>prev),
+<a href=#156 id=156 data-nosnippet>156</a>            }
+<a href=#157 id=157 data-nosnippet>157</a>        }
+<a href=#158 id=158 data-nosnippet>158</a>        <span class="kw">_ </span>=&gt; <span class="bool-val">true</span>,
+<a href=#159 id=159 data-nosnippet>159</a>    }
+<a href=#160 id=160 data-nosnippet>160</a>}
 </code></pre></div></section></main></body></html>

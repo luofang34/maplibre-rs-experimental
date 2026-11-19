@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["decode_mvt","decode_tile","decode_tile_for_layers"]};
+window.SIDEBAR_ITEMS = {"fn":["decode_mvt","decode_tile","decode_tile_for_layers","decode_tile_for_layers_with_keys_rescaled","index_mvt_bytes_rescaled"]};

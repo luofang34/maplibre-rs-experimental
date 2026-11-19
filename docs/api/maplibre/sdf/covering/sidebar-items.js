@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["metadata","ready","select","targets","update","upload_tiles"],"struct":["SymbolCovering"]};
+window.SIDEBAR_ITEMS = {"fn":["metadata","ready","select","select_with_status","targets","update","upload_tiles","visible_symbol_hash","visible_symbol_ids"],"struct":["SymbolCovering"]};

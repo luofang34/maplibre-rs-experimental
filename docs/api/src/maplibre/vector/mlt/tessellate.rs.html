@@ -229,7 +229,7 @@
 <a href=#229 id=229 data-nosnippet>229</a>            | LayerPaint::Circle(<span class="kw">_</span>)
 <a href=#230 id=230 data-nosnippet>230</a>            | LayerPaint::Heatmap(<span class="kw">_</span>)),
 <a href=#231 id=231 data-nosnippet>231</a>        ) =&gt; {
-<a href=#232 id=232 data-nosnippet>232</a>            <span class="attr">#[cfg(target_arch = <span class="string">"wasm32"</span>)]
+<a href=#232 id=232 data-nosnippet>232</a>            <span class="attr">#[cfg(any(target_arch = <span class="string">"wasm32"</span>, not(test)))]
 <a href=#233 id=233 data-nosnippet>233</a>            </span><span class="kw">let </span>uniform_paint =
 <a href=#234 id=234 data-nosnippet>234</a>                <span class="kw">crate</span>::vector::upload_system::paint::uniform_color(style, request.style_zoom())
 <a href=#235 id=235 data-nosnippet>235</a>                    .is_some()
@@ -247,7 +247,7 @@
 <a href=#247 id=247 data-nosnippet>247</a>            tessellator.sort_key = <span class="kw">crate</span>::vector::tessellation::SortKeys::by(
 <a href=#248 id=248 data-nosnippet>248</a>                <span class="kw">crate</span>::vector::tessellation::sort_key_of(style),
 <a href=#249 id=249 data-nosnippet>249</a>            );
-<a href=#250 id=250 data-nosnippet>250</a>            <span class="attr">#[cfg(target_arch = <span class="string">"wasm32"</span>)]
+<a href=#250 id=250 data-nosnippet>250</a>            <span class="attr">#[cfg(any(target_arch = <span class="string">"wasm32"</span>, not(test)))]
 <a href=#251 id=251 data-nosnippet>251</a>            </span><span class="kw">if </span>uniform_paint
 <a href=#252 id=252 data-nosnippet>252</a>                &amp;&amp; tessellator.pattern_property.is_none()
 <a href=#253 id=253 data-nosnippet>253</a>                &amp;&amp; tessellator.outline_property.is_none()
@@ -255,180 +255,197 @@
 <a href=#255 id=255 data-nosnippet>255</a>            {
 <a href=#256 id=256 data-nosnippet>256</a>                tessellator.omit_feature_colors = <span class="bool-val">true</span>;
 <a href=#257 id=257 data-nosnippet>257</a>            }
-<a href=#258 id=258 data-nosnippet>258</a>            <span class="kw">if let </span><span class="prelude-val">Err</span>(error) = stream_layer_slice(col, sel_slice, <span class="kw-2">&amp;mut </span>tessellator) {
-<a href=#259 id=259 data-nosnippet>259</a>                <span class="macro">tracing::error!</span>(coords = %request.coords, layer = %layer_name, <span class="question-mark">?</span>error, <span class="string">"MLT vector tessellation failed"</span>);
-<a href=#260 id=260 data-nosnippet>260</a>                <span class="kw">return </span>context.layer_missing(<span class="kw-2">&amp;</span>request.coords, layer_name);
-<a href=#261 id=261 data-nosnippet>261</a>            }
-<a href=#262 id=262 data-nosnippet>262</a>            tessellator.apply_sort_keys();
-<a href=#263 id=263 data-nosnippet>263</a>            <span class="kw">let </span><span class="kw-2">mut </span>sort_keys = tessellator.sort_key_values();
-<a href=#264 id=264 data-nosnippet>264</a>            <span class="attr">#[cfg(target_arch = <span class="string">"wasm32"</span>)]
-<a href=#265 id=265 data-nosnippet>265</a>            </span><span class="kw">if </span>uniform_paint &amp;&amp; tessellator.pattern_property.is_none() &amp;&amp; !tessellator.line_gradient
-<a href=#266 id=266 data-nosnippet>266</a>            {
-<a href=#267 id=267 data-nosnippet>267</a>                tessellator.feature_colors = Vec::new();
-<a href=#268 id=268 data-nosnippet>268</a>            }
-<a href=#269 id=269 data-nosnippet>269</a>            tessellator.buffer.vertices.shrink_to_fit();
-<a href=#270 id=270 data-nosnippet>270</a>            tessellator.buffer.indices.shrink_to_fit();
-<a href=#271 id=271 data-nosnippet>271</a>            tessellator.feature_indices.shrink_to_fit();
-<a href=#272 id=272 data-nosnippet>272</a>            tessellator.feature_colors.shrink_to_fit();
-<a href=#273 id=273 data-nosnippet>273</a>            sort_keys.shrink_to_fit();
-<a href=#274 id=274 data-nosnippet>274</a>            tessellator.feature_paint.shrink_to_fit();
-<a href=#275 id=275 data-nosnippet>275</a>            context.layer_tessellation_finished(
-<a href=#276 id=276 data-nosnippet>276</a>                <span class="kw-2">&amp;</span>request.coords,
-<a href=#277 id=277 data-nosnippet>277</a>                tessellator.buffer.into(),
-<a href=#278 id=278 data-nosnippet>278</a>                tessellator.feature_indices,
-<a href=#279 id=279 data-nosnippet>279</a>                (
-<a href=#280 id=280 data-nosnippet>280</a>                    tessellator.feature_colors,
-<a href=#281 id=281 data-nosnippet>281</a>                    sort_keys,
-<a href=#282 id=282 data-nosnippet>282</a>                    tessellator.feature_paint,
-<a href=#283 id=283 data-nosnippet>283</a>                ),
-<a href=#284 id=284 data-nosnippet>284</a>                col.header.clone(),
-<a href=#285 id=285 data-nosnippet>285</a>                style,
-<a href=#286 id=286 data-nosnippet>286</a>            )
-<a href=#287 id=287 data-nosnippet>287</a>        }
-<a href=#288 id=288 data-nosnippet>288</a>        <span class="prelude-val">Some</span>(LayerPaint::Symbol(paint)) =&gt; {
-<a href=#289 id=289 data-nosnippet>289</a>            <span class="kw">let </span><span class="kw-2">mut </span>tessellator = TextTessellator::with_assets(
-<a href=#290 id=290 data-nosnippet>290</a>                paint.clone(),
-<a href=#291 id=291 data-nosnippet>291</a>                request.style_zoom(),
-<a href=#292 id=292 data-nosnippet>292</a>                layout_atlas.clone(),
-<a href=#293 id=293 data-nosnippet>293</a>            );
-<a href=#294 id=294 data-nosnippet>294</a>            tessellator.coordinate_scale = col.extent_scale;
-<a href=#295 id=295 data-nosnippet>295</a>            tessellator.overscaling = request.overscaling();
-<a href=#296 id=296 data-nosnippet>296</a>            tessellator.source_ids = sliced_ids;
-<a href=#297 id=297 data-nosnippet>297</a>            tessellator.shared_properties = sliced_props;
-<a href=#298 id=298 data-nosnippet>298</a>            tessellator.feature_state_ctx = state_ctx;
-<a href=#299 id=299 data-nosnippet>299</a>            <span class="kw">if let </span><span class="prelude-val">Err</span>(error) = stream_layer_slice(col, sel_slice, <span class="kw-2">&amp;mut </span>tessellator) {
-<a href=#300 id=300 data-nosnippet>300</a>                <span class="macro">tracing::error!</span>(coords = %request.coords, layer = %layer_name, <span class="question-mark">?</span>error, <span class="string">"MLT symbol tessellation failed"</span>);
-<a href=#301 id=301 data-nosnippet>301</a>                <span class="kw">return </span>context.layer_missing(<span class="kw-2">&amp;</span>request.coords, layer_name);
-<a href=#302 id=302 data-nosnippet>302</a>            }
-<a href=#303 id=303 data-nosnippet>303</a>            tessellator.finish();
-<a href=#304 id=304 data-nosnippet>304</a>            tessellator.quad_buffer.vertices.shrink_to_fit();
-<a href=#305 id=305 data-nosnippet>305</a>            tessellator.quad_buffer.indices.shrink_to_fit();
-<a href=#306 id=306 data-nosnippet>306</a>            tessellator.features.shrink_to_fit();
-<a href=#307 id=307 data-nosnippet>307</a>            <span class="kw">let </span>has_geometry = !tessellator.quad_buffer.indices.is_empty();
-<a href=#308 id=308 data-nosnippet>308</a>            context.symbol_layer_tessellation_finished(DefaultSymbolLayerTessellated {
-<a href=#309 id=309 data-nosnippet>309</a>                coords: request.coords,
-<a href=#310 id=310 data-nosnippet>310</a>                buffer: tessellator.quad_buffer.into(),
-<a href=#311 id=311 data-nosnippet>311</a>                features: tessellator.features,
-<a href=#312 id=312 data-nosnippet>312</a>                atlas: has_geometry.then(|| gpu_atlas.clone()),
-<a href=#313 id=313 data-nosnippet>313</a>                layer_data: col.header.clone(),
-<a href=#314 id=314 data-nosnippet>314</a>                style_layer_id: style.id.clone(),
-<a href=#315 id=315 data-nosnippet>315</a>            })
-<a href=#316 id=316 data-nosnippet>316</a>        }
-<a href=#317 id=317 data-nosnippet>317</a>        <span class="kw">_ </span>=&gt; <span class="prelude-val">Ok</span>(()),
-<a href=#318 id=318 data-nosnippet>318</a>    }
-<a href=#319 id=319 data-nosnippet>319</a>}
-<a href=#320 id=320 data-nosnippet>320</a>
-<a href=#321 id=321 data-nosnippet>321</a><span class="kw">fn </span>slice_ids_and_props(
-<a href=#322 id=322 data-nosnippet>322</a>    ids: <span class="kw-2">&amp;</span>[<span class="prelude-ty">Option</span>&lt;u64&gt;],
-<a href=#323 id=323 data-nosnippet>323</a>    props: <span class="kw-2">&amp;</span>[Arc&lt;FeatureProperties&gt;],
-<a href=#324 id=324 data-nosnippet>324</a>    selected: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[usize]&gt;,
-<a href=#325 id=325 data-nosnippet>325</a>) -&gt; (Vec&lt;<span class="prelude-ty">Option</span>&lt;u64&gt;&gt;, Vec&lt;Arc&lt;FeatureProperties&gt;&gt;) {
-<a href=#326 id=326 data-nosnippet>326</a>    <span class="kw">match </span>selected {
-<a href=#327 id=327 data-nosnippet>327</a>        <span class="prelude-val">Some</span>(indices) =&gt; (
-<a href=#328 id=328 data-nosnippet>328</a>            indices
-<a href=#329 id=329 data-nosnippet>329</a>                .iter()
-<a href=#330 id=330 data-nosnippet>330</a>                .map(|<span class="kw-2">&amp;</span>idx| ids.get(idx).copied().flatten())
-<a href=#331 id=331 data-nosnippet>331</a>                .collect(),
-<a href=#332 id=332 data-nosnippet>332</a>            indices
-<a href=#333 id=333 data-nosnippet>333</a>                .iter()
-<a href=#334 id=334 data-nosnippet>334</a>                .filter_map(|<span class="kw-2">&amp;</span>idx| props.get(idx).cloned())
-<a href=#335 id=335 data-nosnippet>335</a>                .collect(),
-<a href=#336 id=336 data-nosnippet>336</a>        ),
-<a href=#337 id=337 data-nosnippet>337</a>        <span class="prelude-val">None </span>=&gt; (ids.to_vec(), props.to_vec()),
-<a href=#338 id=338 data-nosnippet>338</a>    }
-<a href=#339 id=339 data-nosnippet>339</a>}
-<a href=#340 id=340 data-nosnippet>340</a>
-<a href=#341 id=341 data-nosnippet>341</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>index_mlt_bytes(
-<a href=#342 id=342 data-nosnippet>342</a>    data: <span class="kw-2">&amp;</span>[u8],
-<a href=#343 id=343 data-nosnippet>343</a>    promote_id: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>PromoteId&gt;,
-<a href=#344 id=344 data-nosnippet>344</a>    feature_state: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Arc&lt;<span class="kw">crate</span>::style::feature_state::SourceFeatureState&gt;&gt;,
-<a href=#345 id=345 data-nosnippet>345</a>) -&gt; Vec&lt;IndexedGeometry&lt;f64&gt;&gt; {
-<a href=#346 id=346 data-nosnippet>346</a>    <span class="kw">let </span><span class="prelude-val">Ok</span>(raw_layers) = Parser::default().parse_layers(data) <span class="kw">else </span>{
-<a href=#347 id=347 data-nosnippet>347</a>        <span class="kw">return </span>Vec::new();
-<a href=#348 id=348 data-nosnippet>348</a>    };
-<a href=#349 id=349 data-nosnippet>349</a>    <span class="kw">let </span><span class="kw-2">mut </span>decoder = Decoder::default();
-<a href=#350 id=350 data-nosnippet>350</a>    <span class="kw">let </span><span class="kw-2">mut </span>index = IndexProcessor::new();
-<a href=#351 id=351 data-nosnippet>351</a>    <span class="kw">for </span>layer <span class="kw">in </span>raw_layers {
-<a href=#352 id=352 data-nosnippet>352</a>        <span class="kw">let </span>Layer::Tag01(layer01) = layer <span class="kw">else </span>{
-<a href=#353 id=353 data-nosnippet>353</a>            <span class="kw">continue</span>;
-<a href=#354 id=354 data-nosnippet>354</a>        };
-<a href=#355 id=355 data-nosnippet>355</a>        <span class="kw">let </span><span class="prelude-val">Ok</span>(col) = decode_columnar_layer(layer01, <span class="kw-2">&amp;mut </span>decoder) <span class="kw">else </span>{
-<a href=#356 id=356 data-nosnippet>356</a>            <span class="kw">continue</span>;
-<a href=#357 id=357 data-nosnippet>357</a>        };
-<a href=#358 id=358 data-nosnippet>358</a>        <span class="kw">let </span>name = col.parsed.name();
-<a href=#359 id=359 data-nosnippet>359</a>        <span class="kw">let </span>state_ctx =
-<a href=#360 id=360 data-nosnippet>360</a>            (promote_id.is_some() || feature_state.is_some()).then(|| FeatureStateSyncContext {
-<a href=#361 id=361 data-nosnippet>361</a>                promote_property: promote_id
-<a href=#362 id=362 data-nosnippet>362</a>                    .and_then(|p| p.property_for(<span class="prelude-val">Some</span>(name)))
-<a href=#363 id=363 data-nosnippet>363</a>                    .map(str::to_owned),
-<a href=#364 id=364 data-nosnippet>364</a>                source_state: feature_state.cloned(),
-<a href=#365 id=365 data-nosnippet>365</a>                source_layer: <span class="prelude-val">Some</span>(name.to_owned()),
-<a href=#366 id=366 data-nosnippet>366</a>            });
-<a href=#367 id=367 data-nosnippet>367</a>        <span class="kw">let </span>props = <span class="kw">if let </span><span class="prelude-val">Some</span>(ctx) = <span class="kw-2">&amp;</span>state_ctx {
-<a href=#368 id=368 data-nosnippet>368</a>            <span class="kw">let </span><span class="kw-2">mut </span>synced = Vec::with_capacity(col.base_props.len());
-<a href=#369 id=369 data-nosnippet>369</a>            <span class="kw">for </span>(idx, base) <span class="kw">in </span>col.base_props.iter().enumerate() {
-<a href=#370 id=370 data-nosnippet>370</a>                <span class="kw">let </span><span class="kw-2">mut </span>map = (<span class="kw-2">**</span>base).clone();
-<a href=#371 id=371 data-nosnippet>371</a>                <span class="kw">crate</span>::style::feature_state::sync_properties_feature_state(
-<a href=#372 id=372 data-nosnippet>372</a>                    <span class="kw-2">&amp;mut </span>map,
-<a href=#373 id=373 data-nosnippet>373</a>                    col.ids.get(idx).copied().flatten(),
-<a href=#374 id=374 data-nosnippet>374</a>                    ctx.promote_property.as_deref(),
-<a href=#375 id=375 data-nosnippet>375</a>                    ctx.source_state.as_deref(),
-<a href=#376 id=376 data-nosnippet>376</a>                    ctx.source_layer.as_deref(),
-<a href=#377 id=377 data-nosnippet>377</a>                );
-<a href=#378 id=378 data-nosnippet>378</a>                synced.push(Arc::new(map));
-<a href=#379 id=379 data-nosnippet>379</a>            }
-<a href=#380 id=380 data-nosnippet>380</a>            synced
-<a href=#381 id=381 data-nosnippet>381</a>        } <span class="kw">else </span>{
-<a href=#382 id=382 data-nosnippet>382</a>            col.base_props.clone()
-<a href=#383 id=383 data-nosnippet>383</a>        };
-<a href=#384 id=384 data-nosnippet>384</a>        index.set_coordinate_scale(col.extent_scale);
-<a href=#385 id=385 data-nosnippet>385</a>        index.set_feature_state_context(state_ctx);
-<a href=#386 id=386 data-nosnippet>386</a>        index.begin_layer(name, col.ids.clone());
-<a href=#387 id=387 data-nosnippet>387</a>        index.set_shared_properties(props);
-<a href=#388 id=388 data-nosnippet>388</a>        <span class="kw">let _ </span>= stream_layer_slice(<span class="kw-2">&amp;</span>col, <span class="prelude-val">None</span>, <span class="kw-2">&amp;mut </span>index);
-<a href=#389 id=389 data-nosnippet>389</a>    }
-<a href=#390 id=390 data-nosnippet>390</a>    index.get_geometries()
-<a href=#391 id=391 data-nosnippet>391</a>}
-<a href=#392 id=392 data-nosnippet>392</a>
-<a href=#393 id=393 data-nosnippet>393</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>visit_mlt_features(
-<a href=#394 id=394 data-nosnippet>394</a>    data: <span class="kw-2">&amp;</span>[u8],
-<a href=#395 id=395 data-nosnippet>395</a>    keep_layer: <span class="kw">impl </span>Fn(<span class="kw-2">&amp;</span>str) -&gt; bool,
-<a href=#396 id=396 data-nosnippet>396</a>    <span class="kw-2">mut </span>visit: <span class="kw">impl </span>FnMut(<span class="kw-2">&amp;</span>str, <span class="prelude-ty">Option</span>&lt;u64&gt;, GeometryType, <span class="kw-2">&amp;</span>FeatureProperties),
-<a href=#397 id=397 data-nosnippet>397</a>) {
-<a href=#398 id=398 data-nosnippet>398</a>    <span class="kw">let </span><span class="prelude-val">Ok</span>(raw_layers) = Parser::default().parse_layers(data) <span class="kw">else </span>{
-<a href=#399 id=399 data-nosnippet>399</a>        <span class="kw">return</span>;
-<a href=#400 id=400 data-nosnippet>400</a>    };
-<a href=#401 id=401 data-nosnippet>401</a>    <span class="kw">let </span><span class="kw-2">mut </span>decoder = Decoder::default();
-<a href=#402 id=402 data-nosnippet>402</a>    <span class="kw">let </span>empty = empty_feature_properties();
-<a href=#403 id=403 data-nosnippet>403</a>    <span class="kw">let </span><span class="kw-2">mut </span>scratch = FeatureProperties::default();
-<a href=#404 id=404 data-nosnippet>404</a>    <span class="kw">for </span>layer <span class="kw">in </span>raw_layers {
-<a href=#405 id=405 data-nosnippet>405</a>        <span class="kw">let </span>Layer::Tag01(layer01) = layer <span class="kw">else </span>{
-<a href=#406 id=406 data-nosnippet>406</a>            <span class="kw">continue</span>;
-<a href=#407 id=407 data-nosnippet>407</a>        };
-<a href=#408 id=408 data-nosnippet>408</a>        <span class="kw">let </span>name = layer01.name();
-<a href=#409 id=409 data-nosnippet>409</a>        <span class="kw">if </span>!keep_layer(name) {
-<a href=#410 id=410 data-nosnippet>410</a>            <span class="kw">continue</span>;
-<a href=#411 id=411 data-nosnippet>411</a>        }
-<a href=#412 id=412 data-nosnippet>412</a>        <span class="kw">let </span><span class="prelude-val">Ok</span>(parsed) = layer01.decode_all(<span class="kw-2">&amp;mut </span>decoder) <span class="kw">else </span>{
-<a href=#413 id=413 data-nosnippet>413</a>            <span class="kw">continue</span>;
-<a href=#414 id=414 data-nosnippet>414</a>        };
-<a href=#415 id=415 data-nosnippet>415</a>        <span class="kw">let </span>col_names: Vec&lt;String&gt; = parsed.iterate_prop_names().map(|n| n.to_string()).collect();
-<a href=#416 id=416 data-nosnippet>416</a>        <span class="kw">let </span><span class="kw-2">mut </span>iter = parsed.iter_features();
-<a href=#417 id=417 data-nosnippet>417</a>        <span class="kw">while let </span><span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(feat)) = iter.next() {
-<a href=#418 id=418 data-nosnippet>418</a>            scratch.clear();
-<a href=#419 id=419 data-nosnippet>419</a>            <span class="kw">for </span>(col_idx, opt_val) <span class="kw">in </span>feat.iter_all_properties().enumerate() {
-<a href=#420 id=420 data-nosnippet>420</a>                <span class="kw">if let </span>(<span class="prelude-val">Some</span>(col_name), <span class="prelude-val">Some</span>(val)) = (col_names.get(col_idx), opt_val) {
-<a href=#421 id=421 data-nosnippet>421</a>                    scratch.insert(col_name.clone(), prop_ref_to_value(val));
-<a href=#422 id=422 data-nosnippet>422</a>                }
-<a href=#423 id=423 data-nosnippet>423</a>            }
-<a href=#424 id=424 data-nosnippet>424</a>            <span class="kw">let </span>props_ref: <span class="kw-2">&amp;</span>FeatureProperties = <span class="kw">if </span>scratch.is_empty() { empty } <span class="kw">else </span>{ <span class="kw-2">&amp;</span>scratch };
-<a href=#425 id=425 data-nosnippet>425</a>            visit(
-<a href=#426 id=426 data-nosnippet>426</a>                name,
-<a href=#427 id=427 data-nosnippet>427</a>                feat.id(),
-<a href=#428 id=428 data-nosnippet>428</a>                geometry_type_of(feat.geometry()),
-<a href=#429 id=429 data-nosnippet>429</a>                props_ref,
-<a href=#430 id=430 data-nosnippet>430</a>            );
-<a href=#431 id=431 data-nosnippet>431</a>        }
-<a href=#432 id=432 data-nosnippet>432</a>    }
-<a href=#433 id=433 data-nosnippet>433</a>}
+<a href=#258 id=258 data-nosnippet>258</a>            <span class="kw">if </span>context.allow_prepack_for_style(
+<a href=#259 id=259 data-nosnippet>259</a>                request.coords,
+<a href=#260 id=260 data-nosnippet>260</a>                style,
+<a href=#261 id=261 data-nosnippet>261</a>                tessellator.sort_key.is_keyed(),
+<a href=#262 id=262 data-nosnippet>262</a>                <span class="bool-val">false</span>,
+<a href=#263 id=263 data-nosnippet>263</a>            ) {
+<a href=#264 id=264 data-nosnippet>264</a>                tessellator.maybe_enable_streaming_prepack(style.type_.as_str());
+<a href=#265 id=265 data-nosnippet>265</a>            }
+<a href=#266 id=266 data-nosnippet>266</a>            <span class="kw">if let </span><span class="prelude-val">Err</span>(error) = stream_layer_slice(col, sel_slice, <span class="kw-2">&amp;mut </span>tessellator) {
+<a href=#267 id=267 data-nosnippet>267</a>                <span class="macro">tracing::error!</span>(coords = %request.coords, layer = %layer_name, <span class="question-mark">?</span>error, <span class="string">"MLT vector tessellation failed"</span>);
+<a href=#268 id=268 data-nosnippet>268</a>                <span class="kw">return </span>context.layer_missing(<span class="kw-2">&amp;</span>request.coords, layer_name);
+<a href=#269 id=269 data-nosnippet>269</a>            }
+<a href=#270 id=270 data-nosnippet>270</a>            tessellator.apply_sort_keys();
+<a href=#271 id=271 data-nosnippet>271</a>            <span class="kw">let </span><span class="kw-2">mut </span>sort_keys = tessellator.sort_key_values();
+<a href=#272 id=272 data-nosnippet>272</a>            <span class="attr">#[cfg(any(target_arch = <span class="string">"wasm32"</span>, not(test)))]
+<a href=#273 id=273 data-nosnippet>273</a>            </span><span class="kw">if </span>uniform_paint &amp;&amp; tessellator.pattern_property.is_none() &amp;&amp; !tessellator.line_gradient
+<a href=#274 id=274 data-nosnippet>274</a>            {
+<a href=#275 id=275 data-nosnippet>275</a>                tessellator.feature_colors = Vec::new();
+<a href=#276 id=276 data-nosnippet>276</a>            }
+<a href=#277 id=277 data-nosnippet>277</a>            <span class="kw">let </span><span class="kw-2">mut </span>feature_indices = std::mem::take(<span class="kw-2">&amp;mut </span>tessellator.feature_indices);
+<a href=#278 id=278 data-nosnippet>278</a>            <span class="kw">let </span><span class="kw-2">mut </span>feature_colors = std::mem::take(<span class="kw-2">&amp;mut </span>tessellator.feature_colors);
+<a href=#279 id=279 data-nosnippet>279</a>            <span class="kw">let </span><span class="kw-2">mut </span>feature_paint = std::mem::take(<span class="kw-2">&amp;mut </span>tessellator.feature_paint);
+<a href=#280 id=280 data-nosnippet>280</a>            feature_indices.shrink_to_fit();
+<a href=#281 id=281 data-nosnippet>281</a>            feature_colors.shrink_to_fit();
+<a href=#282 id=282 data-nosnippet>282</a>            sort_keys.shrink_to_fit();
+<a href=#283 id=283 data-nosnippet>283</a>            feature_paint.shrink_to_fit();
+<a href=#284 id=284 data-nosnippet>284</a>            <span class="kw">let </span>buffer = tessellator.into_over_aligned_buffer();
+<a href=#285 id=285 data-nosnippet>285</a>            context.layer_tessellation_finished(
+<a href=#286 id=286 data-nosnippet>286</a>                <span class="kw-2">&amp;</span>request.coords,
+<a href=#287 id=287 data-nosnippet>287</a>                buffer,
+<a href=#288 id=288 data-nosnippet>288</a>                feature_indices,
+<a href=#289 id=289 data-nosnippet>289</a>                (feature_colors, sort_keys, feature_paint),
+<a href=#290 id=290 data-nosnippet>290</a>                col.header.clone(),
+<a href=#291 id=291 data-nosnippet>291</a>                style,
+<a href=#292 id=292 data-nosnippet>292</a>            )
+<a href=#293 id=293 data-nosnippet>293</a>        }
+<a href=#294 id=294 data-nosnippet>294</a>        <span class="prelude-val">Some</span>(LayerPaint::Symbol(paint)) =&gt; {
+<a href=#295 id=295 data-nosnippet>295</a>            <span class="kw">let </span><span class="kw-2">mut </span>tessellator = TextTessellator::with_assets(
+<a href=#296 id=296 data-nosnippet>296</a>                paint.clone(),
+<a href=#297 id=297 data-nosnippet>297</a>                request.style_zoom(),
+<a href=#298 id=298 data-nosnippet>298</a>                layout_atlas.clone(),
+<a href=#299 id=299 data-nosnippet>299</a>            );
+<a href=#300 id=300 data-nosnippet>300</a>            tessellator.coordinate_scale = col.extent_scale;
+<a href=#301 id=301 data-nosnippet>301</a>            tessellator.overscaling = request.overscaling();
+<a href=#302 id=302 data-nosnippet>302</a>            tessellator.source_ids = sliced_ids;
+<a href=#303 id=303 data-nosnippet>303</a>            tessellator.source_indices =
+<a href=#304 id=304 data-nosnippet>304</a>                <span class="kw">crate</span>::sdf::tessellation::source_feature_indices(props.len(), sel_slice);
+<a href=#305 id=305 data-nosnippet>305</a>            tessellator.shared_properties = sliced_props;
+<a href=#306 id=306 data-nosnippet>306</a>            tessellator.feature_state_ctx = state_ctx.clone();
+<a href=#307 id=307 data-nosnippet>307</a>            <span class="kw">if let </span><span class="prelude-val">Err</span>(error) = stream_layer_slice(col, sel_slice, <span class="kw-2">&amp;mut </span>tessellator) {
+<a href=#308 id=308 data-nosnippet>308</a>                <span class="macro">tracing::error!</span>(coords = %request.coords, layer = %layer_name, <span class="question-mark">?</span>error, <span class="string">"MLT symbol tessellation failed"</span>);
+<a href=#309 id=309 data-nosnippet>309</a>                <span class="kw">return </span>context.layer_missing(<span class="kw-2">&amp;</span>request.coords, layer_name);
+<a href=#310 id=310 data-nosnippet>310</a>            }
+<a href=#311 id=311 data-nosnippet>311</a>            tessellator.finish();
+<a href=#312 id=312 data-nosnippet>312</a>            <span class="kw">if </span>!context.index_geometry() {
+<a href=#313 id=313 data-nosnippet>313</a>                <span class="kw">crate</span>::sdf::tessellation::prune_symbol_features(
+<a href=#314 id=314 data-nosnippet>314</a>                    <span class="kw-2">&amp;mut </span>tessellator.features,
+<a href=#315 id=315 data-nosnippet>315</a>                    style,
+<a href=#316 id=316 data-nosnippet>316</a>                    state_ctx
+<a href=#317 id=317 data-nosnippet>317</a>                        .as_ref()
+<a href=#318 id=318 data-nosnippet>318</a>                        .and_then(|ctx| ctx.promote_property.as_deref()),
+<a href=#319 id=319 data-nosnippet>319</a>                );
+<a href=#320 id=320 data-nosnippet>320</a>            }
+<a href=#321 id=321 data-nosnippet>321</a>            tessellator.quad_buffer.vertices.shrink_to_fit();
+<a href=#322 id=322 data-nosnippet>322</a>            tessellator.quad_buffer.indices.shrink_to_fit();
+<a href=#323 id=323 data-nosnippet>323</a>            tessellator.features.shrink_to_fit();
+<a href=#324 id=324 data-nosnippet>324</a>            <span class="kw">let </span>has_geometry = !tessellator.quad_buffer.indices.is_empty();
+<a href=#325 id=325 data-nosnippet>325</a>            context.symbol_layer_tessellation_finished(DefaultSymbolLayerTessellated {
+<a href=#326 id=326 data-nosnippet>326</a>                coords: request.coords,
+<a href=#327 id=327 data-nosnippet>327</a>                buffer: tessellator.quad_buffer.into(),
+<a href=#328 id=328 data-nosnippet>328</a>                features: tessellator.features,
+<a href=#329 id=329 data-nosnippet>329</a>                atlas: has_geometry.then(|| gpu_atlas.clone()),
+<a href=#330 id=330 data-nosnippet>330</a>                layer_data: col.header.clone(),
+<a href=#331 id=331 data-nosnippet>331</a>                style_layer_id: style.id.clone(),
+<a href=#332 id=332 data-nosnippet>332</a>            })
+<a href=#333 id=333 data-nosnippet>333</a>        }
+<a href=#334 id=334 data-nosnippet>334</a>        <span class="kw">_ </span>=&gt; <span class="prelude-val">Ok</span>(()),
+<a href=#335 id=335 data-nosnippet>335</a>    }
+<a href=#336 id=336 data-nosnippet>336</a>}
+<a href=#337 id=337 data-nosnippet>337</a>
+<a href=#338 id=338 data-nosnippet>338</a><span class="kw">fn </span>slice_ids_and_props(
+<a href=#339 id=339 data-nosnippet>339</a>    ids: <span class="kw-2">&amp;</span>[<span class="prelude-ty">Option</span>&lt;u64&gt;],
+<a href=#340 id=340 data-nosnippet>340</a>    props: <span class="kw-2">&amp;</span>[Arc&lt;FeatureProperties&gt;],
+<a href=#341 id=341 data-nosnippet>341</a>    selected: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[usize]&gt;,
+<a href=#342 id=342 data-nosnippet>342</a>) -&gt; (Vec&lt;<span class="prelude-ty">Option</span>&lt;u64&gt;&gt;, Vec&lt;Arc&lt;FeatureProperties&gt;&gt;) {
+<a href=#343 id=343 data-nosnippet>343</a>    <span class="kw">match </span>selected {
+<a href=#344 id=344 data-nosnippet>344</a>        <span class="prelude-val">Some</span>(indices) =&gt; (
+<a href=#345 id=345 data-nosnippet>345</a>            indices
+<a href=#346 id=346 data-nosnippet>346</a>                .iter()
+<a href=#347 id=347 data-nosnippet>347</a>                .map(|<span class="kw-2">&amp;</span>idx| ids.get(idx).copied().flatten())
+<a href=#348 id=348 data-nosnippet>348</a>                .collect(),
+<a href=#349 id=349 data-nosnippet>349</a>            indices
+<a href=#350 id=350 data-nosnippet>350</a>                .iter()
+<a href=#351 id=351 data-nosnippet>351</a>                .filter_map(|<span class="kw-2">&amp;</span>idx| props.get(idx).cloned())
+<a href=#352 id=352 data-nosnippet>352</a>                .collect(),
+<a href=#353 id=353 data-nosnippet>353</a>        ),
+<a href=#354 id=354 data-nosnippet>354</a>        <span class="prelude-val">None </span>=&gt; (ids.to_vec(), props.to_vec()),
+<a href=#355 id=355 data-nosnippet>355</a>    }
+<a href=#356 id=356 data-nosnippet>356</a>}
+<a href=#357 id=357 data-nosnippet>357</a>
+<a href=#358 id=358 data-nosnippet>358</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>index_mlt_bytes(
+<a href=#359 id=359 data-nosnippet>359</a>    data: <span class="kw-2">&amp;</span>[u8],
+<a href=#360 id=360 data-nosnippet>360</a>    promote_id: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>PromoteId&gt;,
+<a href=#361 id=361 data-nosnippet>361</a>    feature_state: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Arc&lt;<span class="kw">crate</span>::style::feature_state::SourceFeatureState&gt;&gt;,
+<a href=#362 id=362 data-nosnippet>362</a>) -&gt; Vec&lt;IndexedGeometry&lt;f64&gt;&gt; {
+<a href=#363 id=363 data-nosnippet>363</a>    <span class="kw">let </span><span class="prelude-val">Ok</span>(raw_layers) = Parser::default().parse_layers(data) <span class="kw">else </span>{
+<a href=#364 id=364 data-nosnippet>364</a>        <span class="kw">return </span>Vec::new();
+<a href=#365 id=365 data-nosnippet>365</a>    };
+<a href=#366 id=366 data-nosnippet>366</a>    <span class="kw">let </span><span class="kw-2">mut </span>decoder = Decoder::default();
+<a href=#367 id=367 data-nosnippet>367</a>    <span class="kw">let </span><span class="kw-2">mut </span>index = IndexProcessor::new();
+<a href=#368 id=368 data-nosnippet>368</a>    <span class="kw">for </span>layer <span class="kw">in </span>raw_layers {
+<a href=#369 id=369 data-nosnippet>369</a>        <span class="kw">let </span>Layer::Tag01(layer01) = layer <span class="kw">else </span>{
+<a href=#370 id=370 data-nosnippet>370</a>            <span class="kw">continue</span>;
+<a href=#371 id=371 data-nosnippet>371</a>        };
+<a href=#372 id=372 data-nosnippet>372</a>        <span class="kw">let </span><span class="prelude-val">Ok</span>(col) = decode_columnar_layer(layer01, <span class="kw-2">&amp;mut </span>decoder) <span class="kw">else </span>{
+<a href=#373 id=373 data-nosnippet>373</a>            <span class="kw">continue</span>;
+<a href=#374 id=374 data-nosnippet>374</a>        };
+<a href=#375 id=375 data-nosnippet>375</a>        <span class="kw">let </span>name = col.parsed.name();
+<a href=#376 id=376 data-nosnippet>376</a>        <span class="kw">let </span>state_ctx =
+<a href=#377 id=377 data-nosnippet>377</a>            (promote_id.is_some() || feature_state.is_some()).then(|| FeatureStateSyncContext {
+<a href=#378 id=378 data-nosnippet>378</a>                promote_property: promote_id
+<a href=#379 id=379 data-nosnippet>379</a>                    .and_then(|p| p.property_for(<span class="prelude-val">Some</span>(name)))
+<a href=#380 id=380 data-nosnippet>380</a>                    .map(str::to_owned),
+<a href=#381 id=381 data-nosnippet>381</a>                source_state: feature_state.cloned(),
+<a href=#382 id=382 data-nosnippet>382</a>                source_layer: <span class="prelude-val">Some</span>(name.to_owned()),
+<a href=#383 id=383 data-nosnippet>383</a>            });
+<a href=#384 id=384 data-nosnippet>384</a>        <span class="kw">let </span>props = <span class="kw">if let </span><span class="prelude-val">Some</span>(ctx) = <span class="kw-2">&amp;</span>state_ctx {
+<a href=#385 id=385 data-nosnippet>385</a>            <span class="kw">let </span><span class="kw-2">mut </span>synced = Vec::with_capacity(col.base_props.len());
+<a href=#386 id=386 data-nosnippet>386</a>            <span class="kw">for </span>(idx, base) <span class="kw">in </span>col.base_props.iter().enumerate() {
+<a href=#387 id=387 data-nosnippet>387</a>                <span class="kw">let </span><span class="kw-2">mut </span>map = (<span class="kw-2">**</span>base).clone();
+<a href=#388 id=388 data-nosnippet>388</a>                <span class="kw">crate</span>::style::feature_state::sync_properties_feature_state(
+<a href=#389 id=389 data-nosnippet>389</a>                    <span class="kw-2">&amp;mut </span>map,
+<a href=#390 id=390 data-nosnippet>390</a>                    col.ids.get(idx).copied().flatten(),
+<a href=#391 id=391 data-nosnippet>391</a>                    ctx.promote_property.as_deref(),
+<a href=#392 id=392 data-nosnippet>392</a>                    ctx.source_state.as_deref(),
+<a href=#393 id=393 data-nosnippet>393</a>                    ctx.source_layer.as_deref(),
+<a href=#394 id=394 data-nosnippet>394</a>                );
+<a href=#395 id=395 data-nosnippet>395</a>                synced.push(Arc::new(map));
+<a href=#396 id=396 data-nosnippet>396</a>            }
+<a href=#397 id=397 data-nosnippet>397</a>            synced
+<a href=#398 id=398 data-nosnippet>398</a>        } <span class="kw">else </span>{
+<a href=#399 id=399 data-nosnippet>399</a>            col.base_props.clone()
+<a href=#400 id=400 data-nosnippet>400</a>        };
+<a href=#401 id=401 data-nosnippet>401</a>        index.set_coordinate_scale(col.extent_scale);
+<a href=#402 id=402 data-nosnippet>402</a>        index.set_feature_state_context(state_ctx);
+<a href=#403 id=403 data-nosnippet>403</a>        index.begin_layer(name, col.ids.clone());
+<a href=#404 id=404 data-nosnippet>404</a>        index.set_shared_properties(props);
+<a href=#405 id=405 data-nosnippet>405</a>        <span class="kw">let _ </span>= stream_layer_slice(<span class="kw-2">&amp;</span>col, <span class="prelude-val">None</span>, <span class="kw-2">&amp;mut </span>index);
+<a href=#406 id=406 data-nosnippet>406</a>    }
+<a href=#407 id=407 data-nosnippet>407</a>    index.get_geometries()
+<a href=#408 id=408 data-nosnippet>408</a>}
+<a href=#409 id=409 data-nosnippet>409</a>
+<a href=#410 id=410 data-nosnippet>410</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>visit_mlt_features(
+<a href=#411 id=411 data-nosnippet>411</a>    data: <span class="kw-2">&amp;</span>[u8],
+<a href=#412 id=412 data-nosnippet>412</a>    keep_layer: <span class="kw">impl </span>Fn(<span class="kw-2">&amp;</span>str) -&gt; bool,
+<a href=#413 id=413 data-nosnippet>413</a>    <span class="kw-2">mut </span>visit: <span class="kw">impl </span>FnMut(<span class="kw-2">&amp;</span>str, <span class="prelude-ty">Option</span>&lt;u64&gt;, GeometryType, <span class="kw-2">&amp;</span>FeatureProperties),
+<a href=#414 id=414 data-nosnippet>414</a>) {
+<a href=#415 id=415 data-nosnippet>415</a>    <span class="kw">let </span><span class="prelude-val">Ok</span>(raw_layers) = Parser::default().parse_layers(data) <span class="kw">else </span>{
+<a href=#416 id=416 data-nosnippet>416</a>        <span class="kw">return</span>;
+<a href=#417 id=417 data-nosnippet>417</a>    };
+<a href=#418 id=418 data-nosnippet>418</a>    <span class="kw">let </span><span class="kw-2">mut </span>decoder = Decoder::default();
+<a href=#419 id=419 data-nosnippet>419</a>    <span class="kw">let </span>empty = empty_feature_properties();
+<a href=#420 id=420 data-nosnippet>420</a>    <span class="kw">let </span><span class="kw-2">mut </span>scratch = FeatureProperties::default();
+<a href=#421 id=421 data-nosnippet>421</a>    <span class="kw">for </span>layer <span class="kw">in </span>raw_layers {
+<a href=#422 id=422 data-nosnippet>422</a>        <span class="kw">let </span>Layer::Tag01(layer01) = layer <span class="kw">else </span>{
+<a href=#423 id=423 data-nosnippet>423</a>            <span class="kw">continue</span>;
+<a href=#424 id=424 data-nosnippet>424</a>        };
+<a href=#425 id=425 data-nosnippet>425</a>        <span class="kw">let </span>name = layer01.name();
+<a href=#426 id=426 data-nosnippet>426</a>        <span class="kw">if </span>!keep_layer(name) {
+<a href=#427 id=427 data-nosnippet>427</a>            <span class="kw">continue</span>;
+<a href=#428 id=428 data-nosnippet>428</a>        }
+<a href=#429 id=429 data-nosnippet>429</a>        <span class="kw">let </span><span class="prelude-val">Ok</span>(parsed) = layer01.decode_all(<span class="kw-2">&amp;mut </span>decoder) <span class="kw">else </span>{
+<a href=#430 id=430 data-nosnippet>430</a>            <span class="kw">continue</span>;
+<a href=#431 id=431 data-nosnippet>431</a>        };
+<a href=#432 id=432 data-nosnippet>432</a>        <span class="kw">let </span>col_names: Vec&lt;String&gt; = parsed.iterate_prop_names().map(|n| n.to_string()).collect();
+<a href=#433 id=433 data-nosnippet>433</a>        <span class="kw">let </span><span class="kw-2">mut </span>iter = parsed.iter_features();
+<a href=#434 id=434 data-nosnippet>434</a>        <span class="kw">while let </span><span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(feat)) = iter.next() {
+<a href=#435 id=435 data-nosnippet>435</a>            scratch.clear();
+<a href=#436 id=436 data-nosnippet>436</a>            <span class="kw">for </span>(col_idx, opt_val) <span class="kw">in </span>feat.iter_all_properties().enumerate() {
+<a href=#437 id=437 data-nosnippet>437</a>                <span class="kw">if let </span>(<span class="prelude-val">Some</span>(col_name), <span class="prelude-val">Some</span>(val)) = (col_names.get(col_idx), opt_val) {
+<a href=#438 id=438 data-nosnippet>438</a>                    scratch.insert(col_name.clone(), prop_ref_to_value(val));
+<a href=#439 id=439 data-nosnippet>439</a>                }
+<a href=#440 id=440 data-nosnippet>440</a>            }
+<a href=#441 id=441 data-nosnippet>441</a>            <span class="kw">let </span>props_ref: <span class="kw-2">&amp;</span>FeatureProperties = <span class="kw">if </span>scratch.is_empty() { empty } <span class="kw">else </span>{ <span class="kw-2">&amp;</span>scratch };
+<a href=#442 id=442 data-nosnippet>442</a>            visit(
+<a href=#443 id=443 data-nosnippet>443</a>                name,
+<a href=#444 id=444 data-nosnippet>444</a>                feat.id(),
+<a href=#445 id=445 data-nosnippet>445</a>                geometry_type_of(feat.geometry()),
+<a href=#446 id=446 data-nosnippet>446</a>                props_ref,
+<a href=#447 id=447 data-nosnippet>447</a>            );
+<a href=#448 id=448 data-nosnippet>448</a>        }
+<a href=#449 id=449 data-nosnippet>449</a>    }
+<a href=#450 id=450 data-nosnippet>450</a>}
 </code></pre></div></section></main></body></html>

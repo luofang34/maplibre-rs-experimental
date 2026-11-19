@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["display_pixel_ratio","pixel_ratio","update_loose_covering_cache","vector_eviction_generation"],"struct":["RequestMemo","RequestViewKey"]};

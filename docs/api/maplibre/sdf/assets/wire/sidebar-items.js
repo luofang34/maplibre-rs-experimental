@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["SYM_WIRE_MAGIC_V1","SYM_WIRE_MAGIC_V2"],"fn":["decode_symbol_features","encode_symbol_features"],"mod":["json_legacy"],"struct":["LineLabelWire","SymbolFeature"]};
+window.SIDEBAR_ITEMS = {"constant":["SYM_WIRE_MAGIC_V1","SYM_WIRE_MAGIC_V2","SYM_WIRE_MAGIC_V3"],"fn":["decode_symbol_features","encode_symbol_features"],"mod":["json_legacy"],"struct":["LineLabelWire","SymbolFeature"]};

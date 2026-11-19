@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["spawn_style_symbol_prefetch"],"struct":["PrefetchPlan"]};
+window.SIDEBAR_ITEMS = {"fn":["spawn_style_symbol_prefetch","spawn_worker_symbol_prefetch"],"struct":["PrefetchPlan"]};

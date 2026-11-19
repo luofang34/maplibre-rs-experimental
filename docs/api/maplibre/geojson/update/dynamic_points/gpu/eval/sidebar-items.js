@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["col_index","evaluate_circle_metadata_into","fallback_dynamic_circle_from_vertices"]};
+window.SIDEBAR_ITEMS = {"fn":["col_index","evaluate_circle_metadata_into","fallback_dynamic_circle_from_vertices"],"struct":["CompiledCircleRamps"]};

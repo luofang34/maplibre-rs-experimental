@@ -69,410 +69,416 @@
 <a href=#69 id=69 data-nosnippet>69</a>    </span>topology_generation: u64,
 <a href=#70 id=70 data-nosnippet>70</a>    stencil_ids: FxHashMap&lt;(i32, WorldTileCoords), u8&gt;,
 <a href=#71 id=71 data-nosnippet>71</a>    metadata_scratch: Vec&lt;ShaderTileMetadata&gt;,
-<a href=#72 id=72 data-nosnippet>72</a>    scratch: Mutex&lt;PatternScratch&gt;,
-<a href=#73 id=73 data-nosnippet>73</a>    phantom_q: PhantomData&lt;Q&gt;,
-<a href=#74 id=74 data-nosnippet>74</a>}
-<a href=#75 id=75 data-nosnippet>75</a>
-<a href=#76 id=76 data-nosnippet>76</a><span class="kw">impl</span>&lt;Q, B&gt; Drop <span class="kw">for </span>TileViewPattern&lt;Q, B&gt; {
-<a href=#77 id=77 data-nosnippet>77</a>    <span class="kw">fn </span>drop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
-<a href=#78 id=78 data-nosnippet>78</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(destroy) = <span class="self">self</span>.buffer_destroyer {
-<a href=#79 id=79 data-nosnippet>79</a>            destroy(<span class="kw-2">&amp;</span><span class="self">self</span>.view_tiles_buffer.inner);
-<a href=#80 id=80 data-nosnippet>80</a>        }
-<a href=#81 id=81 data-nosnippet>81</a>    }
-<a href=#82 id=82 data-nosnippet>82</a>}
-<a href=#83 id=83 data-nosnippet>83</a>
-<a href=#84 id=84 data-nosnippet>84</a><span class="doccomment">/// The metadata buffer cannot hold every requested entry.
-<a href=#85 id=85 data-nosnippet>85</a></span><span class="attr">#[derive(Clone, Copy, Debug, thiserror::Error, PartialEq, Eq)]
-<a href=#86 id=86 data-nosnippet>86</a>#[error(<span class="string">"tile metadata buffer holds {capacity} entries, {requested} were requested"</span>)]
-<a href=#87 id=87 data-nosnippet>87</a></span><span class="kw">pub struct </span>TileMetadataOverflow {
-<a href=#88 id=88 data-nosnippet>88</a>    <span class="doccomment">/// Entries the buffer can hold.
-<a href=#89 id=89 data-nosnippet>89</a>    </span><span class="kw">pub </span>capacity: u64,
-<a href=#90 id=90 data-nosnippet>90</a>    <span class="doccomment">/// Entries needed this frame.
-<a href=#91 id=91 data-nosnippet>91</a>    </span><span class="kw">pub </span>requested: u64,
-<a href=#92 id=92 data-nosnippet>92</a>}
-<a href=#93 id=93 data-nosnippet>93</a>
-<a href=#94 id=94 data-nosnippet>94</a><span class="kw">impl</span>&lt;Q: Queue&lt;B&gt;, B&gt; TileViewPattern&lt;Q, B&gt; {
-<a href=#95 id=95 data-nosnippet>95</a>    <span class="doccomment">/// Takes ownership of a metadata buffer whose descriptor capacity is measured in bytes.
-<a href=#96 id=96 data-nosnippet>96</a>    </span><span class="kw">pub fn </span>new(view_tiles_buffer: BackingBufferDescriptor&lt;B&gt;) -&gt; <span class="self">Self </span>{
-<a href=#97 id=97 data-nosnippet>97</a>        <span class="self">Self </span>{
-<a href=#98 id=98 data-nosnippet>98</a>            view_tiles: Vec::with_capacity(<span class="number">64</span>),
-<a href=#99 id=99 data-nosnippet>99</a>            view_tiles_buffer: BackingBuffer::new(
-<a href=#100 id=100 data-nosnippet>100</a>                view_tiles_buffer.buffer,
-<a href=#101 id=101 data-nosnippet>101</a>                view_tiles_buffer.inner_size,
-<a href=#102 id=102 data-nosnippet>102</a>            ),
-<a href=#103 id=103 data-nosnippet>103</a>            buffer_destroyer: <span class="prelude-val">None</span>,
-<a href=#104 id=104 data-nosnippet>104</a>            uploaded: <span class="number">0</span>,
-<a href=#105 id=105 data-nosnippet>105</a>            last_topology_hash: <span class="number">0</span>,
-<a href=#106 id=106 data-nosnippet>106</a>            topology_generation: <span class="number">0</span>,
-<a href=#107 id=107 data-nosnippet>107</a>            stencil_ids: FxHashMap::default(),
-<a href=#108 id=108 data-nosnippet>108</a>            metadata_scratch: Vec::with_capacity(<span class="number">64</span>),
-<a href=#109 id=109 data-nosnippet>109</a>            scratch: Mutex::new(PatternScratch::default()),
-<a href=#110 id=110 data-nosnippet>110</a>            phantom_q: Default::default(),
-<a href=#111 id=111 data-nosnippet>111</a>        }
-<a href=#112 id=112 data-nosnippet>112</a>    }
-<a href=#113 id=113 data-nosnippet>113</a>
-<a href=#114 id=114 data-nosnippet>114</a>    <span class="doccomment">/// Monotonic generation incremented whenever tile shapes, buffer ranges, or stencil refs change.
-<a href=#115 id=115 data-nosnippet>115</a>    </span><span class="attr">#[inline]
-<a href=#116 id=116 data-nosnippet>116</a>    </span><span class="kw">pub fn </span>topology_generation(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64 {
-<a href=#117 id=117 data-nosnippet>117</a>        <span class="self">self</span>.topology_generation
-<a href=#118 id=118 data-nosnippet>118</a>    }
-<a href=#119 id=119 data-nosnippet>119</a>
-<a href=#120 id=120 data-nosnippet>120</a>    <span class="doccomment">/// Registers a destructor invoked on the backing metadata buffer when dropped.
-<a href=#121 id=121 data-nosnippet>121</a>    </span><span class="kw">pub fn </span>with_buffer_destroyer(<span class="kw-2">mut </span><span class="self">self</span>, destroyer: <span class="kw">fn</span>(<span class="kw-2">&amp;</span>B)) -&gt; <span class="self">Self </span>{
-<a href=#122 id=122 data-nosnippet>122</a>        <span class="self">self</span>.buffer_destroyer = <span class="prelude-val">Some</span>(destroyer);
-<a href=#123 id=123 data-nosnippet>123</a>        <span class="self">self
-<a href=#124 id=124 data-nosnippet>124</a>    </span>}
-<a href=#125 id=125 data-nosnippet>125</a>
-<a href=#126 id=126 data-nosnippet>126</a>    <span class="doccomment">/// Number of metadata entries still available in this frame.
-<a href=#127 id=127 data-nosnippet>127</a>    </span><span class="kw">pub fn </span>remaining_metadata_capacity(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-<a href=#128 id=128 data-nosnippet>128</a>        <span class="kw">let </span>capacity = <span class="self">self</span>.view_tiles_buffer.inner_size / size_of::&lt;ShaderTileMetadata&gt;() <span class="kw">as </span>u64;
-<a href=#129 id=129 data-nosnippet>129</a>        capacity.saturating_sub(<span class="self">self</span>.uploaded) <span class="kw">as </span>usize
-<a href=#130 id=130 data-nosnippet>130</a>    }
-<a href=#131 id=131 data-nosnippet>131</a>
-<a href=#132 id=132 data-nosnippet>132</a>    <span class="doccomment">/// Appends entries without changing ranges returned by earlier appends in this frame.
-<a href=#133 id=133 data-nosnippet>133</a>    /// Call after [`Self::upload_pattern`]; the next pattern upload invalidates these ranges.
-<a href=#134 id=134 data-nosnippet>134</a>    /// Returns an overflow error without writing or reserving entries if they do not all fit.
-<a href=#135 id=135 data-nosnippet>135</a>    </span><span class="kw">pub fn </span>upload_extra_metadata(
-<a href=#136 id=136 data-nosnippet>136</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#137 id=137 data-nosnippet>137</a>        queue: <span class="kw-2">&amp;</span>Q,
-<a href=#138 id=138 data-nosnippet>138</a>        entries: <span class="kw-2">&amp;</span>[ShaderTileMetadata],
-<a href=#139 id=139 data-nosnippet>139</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;std::ops::Range&lt;wgpu::BufferAddress&gt;&gt;, TileMetadataOverflow&gt; {
-<a href=#140 id=140 data-nosnippet>140</a>        <span class="kw">const </span>STRIDE: u64 = size_of::&lt;ShaderTileMetadata&gt;() <span class="kw">as </span>u64;
-<a href=#141 id=141 data-nosnippet>141</a>        <span class="kw">let </span>capacity = <span class="self">self</span>.view_tiles_buffer.inner_size / STRIDE;
-<a href=#142 id=142 data-nosnippet>142</a>        <span class="kw">let </span>requested = <span class="self">self</span>.uploaded + entries.len() <span class="kw">as </span>u64;
-<a href=#143 id=143 data-nosnippet>143</a>        <span class="kw">if </span>requested &gt; capacity {
-<a href=#144 id=144 data-nosnippet>144</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(TileMetadataOverflow {
-<a href=#145 id=145 data-nosnippet>145</a>                capacity,
-<a href=#146 id=146 data-nosnippet>146</a>                requested,
-<a href=#147 id=147 data-nosnippet>147</a>            });
-<a href=#148 id=148 data-nosnippet>148</a>        }
-<a href=#149 id=149 data-nosnippet>149</a>        <span class="kw">if </span>entries.is_empty() {
-<a href=#150 id=150 data-nosnippet>150</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>(Vec::new());
-<a href=#151 id=151 data-nosnippet>151</a>        }
-<a href=#152 id=152 data-nosnippet>152</a>        <span class="kw">let </span>offset = <span class="self">self</span>.uploaded * STRIDE;
-<a href=#153 id=153 data-nosnippet>153</a>        queue.write_buffer(
-<a href=#154 id=154 data-nosnippet>154</a>            <span class="kw-2">&amp;</span><span class="self">self</span>.view_tiles_buffer.inner,
-<a href=#155 id=155 data-nosnippet>155</a>            offset,
-<a href=#156 id=156 data-nosnippet>156</a>            bytemuck::cast_slice(entries),
-<a href=#157 id=157 data-nosnippet>157</a>        );
-<a href=#158 id=158 data-nosnippet>158</a>        <span class="self">self</span>.uploaded = requested;
-<a href=#159 id=159 data-nosnippet>159</a>        <span class="prelude-val">Ok</span>((<span class="number">0</span>..entries.len() <span class="kw">as </span>u64)
-<a href=#160 id=160 data-nosnippet>160</a>            .map(|index| offset + index * STRIDE..offset + (index + <span class="number">1</span>) * STRIDE)
-<a href=#161 id=161 data-nosnippet>161</a>            .collect())
-<a href=#162 id=162 data-nosnippet>162</a>    }
-<a href=#163 id=163 data-nosnippet>163</a>
-<a href=#164 id=164 data-nosnippet>164</a>    <span class="doccomment">/// Pairs every view tile with the loaded sources that draw it. Vector shapes come from
-<a href=#165 id=165 data-nosnippet>165</a>    /// the pyramid nearest the tile; raster shapes follow each raster source's own covering,
-<a href=#166 id=166 data-nosnippet>166</a>    /// as GL JS pairs a source's visible tiles with the view, and fall back to the pyramid
-<a href=#167 id=167 data-nosnippet>167</a>    /// while those tiles load.
-<a href=#168 id=168 data-nosnippet>168</a>    </span><span class="attr">#[tracing::instrument(skip_all)]
-<a href=#169 id=169 data-nosnippet>169</a>    #[must_use]
-<a href=#170 id=170 data-nosnippet>170</a>    </span><span class="kw">pub fn </span>generate_pattern(
-<a href=#171 id=171 data-nosnippet>171</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#172 id=172 data-nosnippet>172</a>        view_region: <span class="kw-2">&amp;</span>ViewRegion,
-<a href=#173 id=173 data-nosnippet>173</a>        sources: <span class="kw-2">&amp;</span>ViewTileSources,
-<a href=#174 id=174 data-nosnippet>174</a>        raster_coverings: <span class="kw-2">&amp;</span>RasterCoverings,
-<a href=#175 id=175 data-nosnippet>175</a>        zoom: Zoom,
-<a href=#176 id=176 data-nosnippet>176</a>        world: <span class="kw-2">&amp;</span>World,
-<a href=#177 id=177 data-nosnippet>177</a>    ) -&gt; Vec&lt;ViewTile&gt; {
-<a href=#178 id=178 data-nosnippet>178</a>        <span class="kw">let </span><span class="kw-2">mut </span>view_tiles = Vec::with_capacity(<span class="self">self</span>.view_tiles.len());
-<a href=#179 id=179 data-nosnippet>179</a>        <span class="comment">// A parent stands in once for each copy of the world it is seen in.
-<a href=#180 id=180 data-nosnippet>180</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>scratch = <span class="self">self</span>.scratch.lock().unwrap_or_else(|e| e.into_inner());
-<a href=#181 id=181 data-nosnippet>181</a>        <span class="kw">for </span>set <span class="kw">in </span>scratch.vector_parents.values_mut() {
-<a href=#182 id=182 data-nosnippet>182</a>            set.clear();
-<a href=#183 id=183 data-nosnippet>183</a>        }
-<a href=#184 id=184 data-nosnippet>184</a>        <span class="kw">if </span>!raster_coverings.is_empty() {
-<a href=#185 id=185 data-nosnippet>185</a>            <span class="kw">for </span>set <span class="kw">in </span>scratch.raster_parents.values_mut() {
-<a href=#186 id=186 data-nosnippet>186</a>                set.clear();
-<a href=#187 id=187 data-nosnippet>187</a>            }
-<a href=#188 id=188 data-nosnippet>188</a>        }
-<a href=#189 id=189 data-nosnippet>189</a>        <span class="kw">let </span>PatternScratch {
-<a href=#190 id=190 data-nosnippet>190</a>            vector_parents,
-<a href=#191 id=191 data-nosnippet>191</a>            raster_parents,
-<a href=#192 id=192 data-nosnippet>192</a>        } = <span class="kw-2">&amp;mut *</span>scratch;
-<a href=#193 id=193 data-nosnippet>193</a>
-<a href=#194 id=194 data-nosnippet>194</a>        <span class="kw">let </span>vector_availability = (
-<a href=#195 id=195 data-nosnippet>195</a>            sources.of_kind(TileKind::Vector),
-<a href=#196 id=196 data-nosnippet>196</a>            <span class="kw">crate</span>::vector::UploadedVectorGeometry::for_world(world),
-<a href=#197 id=197 data-nosnippet>197</a>        );
-<a href=#198 id=198 data-nosnippet>198</a>        <span class="kw">let </span>vector_max_zoom = vector_availability.<span class="number">1</span>.max_zoom;
-<a href=#199 id=199 data-nosnippet>199</a>
-<a href=#200 id=200 data-nosnippet>200</a>        <span class="kw">for </span>seen <span class="kw">in </span>view_region.copies() {
-<a href=#201 id=201 data-nosnippet>201</a>            <span class="kw">let </span><span class="prelude-val">Some</span>((coords, wrap)) = seen.wrapped() <span class="kw">else </span>{
-<a href=#202 id=202 data-nosnippet>202</a>                <span class="kw">continue</span>;
-<a href=#203 id=203 data-nosnippet>203</a>            };
-<a href=#204 id=204 data-nosnippet>204</a>            <span class="kw">let </span><span class="kw-2">mut </span>vector = source_shapes_bounded(
-<a href=#205 id=205 data-nosnippet>205</a>                <span class="kw-2">&amp;</span>vector_availability,
-<a href=#206 id=206 data-nosnippet>206</a>                coords,
-<a href=#207 id=207 data-nosnippet>207</a>                zoom,
-<a href=#208 id=208 data-nosnippet>208</a>                world,
-<a href=#209 id=209 data-nosnippet>209</a>                vector_parents.entry(wrap).or_default(),
-<a href=#210 id=210 data-nosnippet>210</a>                vector_max_zoom,
-<a href=#211 id=211 data-nosnippet>211</a>            );
-<a href=#212 id=212 data-nosnippet>212</a>            vector.for_each_mut(<span class="kw-2">&amp;mut </span>|shape| shape.wrapped(wrap, zoom));
-<a href=#213 id=213 data-nosnippet>213</a>            <span class="kw">let </span>raster = <span class="kw">if </span>raster_coverings.is_empty() {
-<a href=#214 id=214 data-nosnippet>214</a>                Vec::new()
-<a href=#215 id=215 data-nosnippet>215</a>            } <span class="kw">else </span>{
-<a href=#216 id=216 data-nosnippet>216</a>                raster_coverings
-<a href=#217 id=217 data-nosnippet>217</a>                    .iter()
-<a href=#218 id=218 data-nosnippet>218</a>                    .map(|(source, covering)| {
-<a href=#219 id=219 data-nosnippet>219</a>                        <span class="kw">let </span>availability = <span class="kw">super</span>::SourceTiles {
-<a href=#220 id=220 data-nosnippet>220</a>                            source,
-<a href=#221 id=221 data-nosnippet>221</a>                            availability: sources.of_kind(TileKind::Raster),
-<a href=#222 id=222 data-nosnippet>222</a>                        };
-<a href=#223 id=223 data-nosnippet>223</a>                        <span class="kw">let </span>covered = covering_shapes_for(coords, covering)
-<a href=#224 id=224 data-nosnippet>224</a>                            .into_iter()
-<a href=#225 id=225 data-nosnippet>225</a>                            .filter(|tile| availability.has_tile(<span class="kw-2">*</span>tile, world))
-<a href=#226 id=226 data-nosnippet>226</a>                            .collect();
-<a href=#227 id=227 data-nosnippet>227</a>                        <span class="kw">let </span><span class="kw-2">mut </span>shapes = raster_shapes(
-<a href=#228 id=228 data-nosnippet>228</a>                            <span class="kw-2">&amp;</span>availability,
-<a href=#229 id=229 data-nosnippet>229</a>                            coords,
-<a href=#230 id=230 data-nosnippet>230</a>                            covered,
-<a href=#231 id=231 data-nosnippet>231</a>                            zoom,
-<a href=#232 id=232 data-nosnippet>232</a>                            world,
-<a href=#233 id=233 data-nosnippet>233</a>                            raster_parents.entry((source.clone(), wrap)).or_default(),
-<a href=#234 id=234 data-nosnippet>234</a>                        );
-<a href=#235 id=235 data-nosnippet>235</a>                        <span class="kw">if let </span><span class="prelude-val">Some</span>(faded) =
-<a href=#236 id=236 data-nosnippet>236</a>                            with_departing((<span class="kw-2">&amp;</span>availability, source, <span class="kw-2">&amp;</span>shapes), zoom, world)
-<a href=#237 id=237 data-nosnippet>237</a>                        {
-<a href=#238 id=238 data-nosnippet>238</a>                            shapes = faded;
-<a href=#239 id=239 data-nosnippet>239</a>                        }
-<a href=#240 id=240 data-nosnippet>240</a>                        shapes.for_each_mut(<span class="kw-2">&amp;mut </span>|shape| shape.wrapped(wrap, zoom));
-<a href=#241 id=241 data-nosnippet>241</a>                        (source.clone(), shapes)
-<a href=#242 id=242 data-nosnippet>242</a>                    })
-<a href=#243 id=243 data-nosnippet>243</a>                    .collect()
-<a href=#244 id=244 data-nosnippet>244</a>            };
-<a href=#245 id=245 data-nosnippet>245</a>            view_tiles.push(ViewTile {
-<a href=#246 id=246 data-nosnippet>246</a>                target: coords,
-<a href=#247 id=247 data-nosnippet>247</a>                vector,
-<a href=#248 id=248 data-nosnippet>248</a>                raster,
-<a href=#249 id=249 data-nosnippet>249</a>            });
-<a href=#250 id=250 data-nosnippet>250</a>        }
-<a href=#251 id=251 data-nosnippet>251</a>
-<a href=#252 id=252 data-nosnippet>252</a>        view_tiles
-<a href=#253 id=253 data-nosnippet>253</a>    }
-<a href=#254 id=254 data-nosnippet>254</a>
-<a href=#255 id=255 data-nosnippet>255</a>    <span class="doccomment">/// Replaces the CPU-side view tiles; call [`Self::upload_pattern`] before drawing them.
-<a href=#256 id=256 data-nosnippet>256</a>    </span><span class="kw">pub fn </span>update_pattern(<span class="kw-2">&amp;mut </span><span class="self">self</span>, <span class="kw-2">mut </span>view_tiles: Vec&lt;ViewTile&gt;) {
-<a href=#257 id=257 data-nosnippet>257</a>        <span class="self">self</span>.view_tiles.clear();
-<a href=#258 id=258 data-nosnippet>258</a>        <span class="self">self</span>.view_tiles.append(<span class="kw-2">&amp;mut </span>view_tiles)
-<a href=#259 id=259 data-nosnippet>259</a>    }
-<a href=#260 id=260 data-nosnippet>260</a>
-<a href=#261 id=261 data-nosnippet>261</a>    <span class="doccomment">/// Iterates view tiles in covering order; source shapes may reference shared ancestors.
-<a href=#262 id=262 data-nosnippet>262</a>    </span><span class="kw">pub fn </span>iter(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <span class="kw-2">&amp;</span>ViewTile&gt; + <span class="lifetime">'_ </span>{
-<a href=#263 id=263 data-nosnippet>263</a>        <span class="self">self</span>.view_tiles.iter()
-<a href=#264 id=264 data-nosnippet>264</a>    }
-<a href=#265 id=265 data-nosnippet>265</a>
-<a href=#266 id=266 data-nosnippet>266</a>    <span class="doccomment">/// Borrows the backing metadata buffer, including space reserved for extra entries.
-<a href=#267 id=267 data-nosnippet>267</a>    </span><span class="kw">pub fn </span>buffer(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>B {
-<a href=#268 id=268 data-nosnippet>268</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.view_tiles_buffer.inner
-<a href=#269 id=269 data-nosnippet>269</a>    }
-<a href=#270 id=270 data-nosnippet>270</a>
-<a href=#271 id=271 data-nosnippet>271</a>    <span class="doccomment">/// Writes this frame's view metadata and resets the append cursor.
-<a href=#272 id=272 data-nosnippet>272</a>    /// Shapes exceeding capacity lose their buffer ranges and are skipped for this frame.
-<a href=#273 id=273 data-nosnippet>273</a>    /// Viewport dimensions and `style_zoom` determine screen-pixel line widths.
-<a href=#274 id=274 data-nosnippet>274</a>    </span><span class="attr">#[tracing::instrument(skip_all)]
-<a href=#275 id=275 data-nosnippet>275</a>    </span><span class="kw">pub fn </span>upload_pattern(
-<a href=#276 id=276 data-nosnippet>276</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#277 id=277 data-nosnippet>277</a>        queue: <span class="kw-2">&amp;</span>Q,
-<a href=#278 id=278 data-nosnippet>278</a>        view_proj: <span class="kw-2">&amp;</span>ViewProjection,
-<a href=#279 id=279 data-nosnippet>279</a>        viewport_width: f32,
-<a href=#280 id=280 data-nosnippet>280</a>        viewport_height: f32,
-<a href=#281 id=281 data-nosnippet>281</a>        style_zoom: Zoom,
-<a href=#282 id=282 data-nosnippet>282</a>    ) {
-<a href=#283 id=283 data-nosnippet>283</a>        <span class="kw">let </span>capacity = (<span class="self">self</span>.view_tiles_buffer.inner_size
-<a href=#284 id=284 data-nosnippet>284</a>            / std::mem::size_of::&lt;ShaderTileMetadata&gt;() <span class="kw">as </span>wgpu::BufferAddress)
-<a href=#285 id=285 data-nosnippet>285</a>            <span class="kw">as </span>usize;
-<a href=#286 id=286 data-nosnippet>286</a>        <span class="kw">let </span><span class="kw-2">mut </span>buffer = std::mem::take(<span class="kw-2">&amp;mut </span><span class="self">self</span>.metadata_scratch);
-<a href=#287 id=287 data-nosnippet>287</a>        buffer.clear();
-<a href=#288 id=288 data-nosnippet>288</a>        <span class="kw">let </span><span class="kw-2">mut </span>skipped = <span class="number">0_usize</span>;
-<a href=#289 id=289 data-nosnippet>289</a>        <span class="kw">let </span><span class="kw-2">mut </span>stencil_ids = std::mem::take(<span class="kw-2">&amp;mut </span><span class="self">self</span>.stencil_ids);
-<a href=#290 id=290 data-nosnippet>290</a>        stencil_ids.clear();
-<a href=#291 id=291 data-nosnippet>291</a>        <span class="kw">let </span><span class="kw-2">mut </span>next_stencil = <span class="number">0_u8</span>;
-<a href=#292 id=292 data-nosnippet>292</a>
-<a href=#293 id=293 data-nosnippet>293</a>        <span class="kw">let </span><span class="kw-2">mut </span>add_to_buffer = |shape: <span class="kw-2">&amp;mut </span>TileShape| {
-<a href=#294 id=294 data-nosnippet>294</a>            <span class="kw">if </span>buffer.len() &gt;= capacity {
-<a href=#295 id=295 data-nosnippet>295</a>                <span class="comment">// A pitched view falling back to many small child tiles can exceed the
-<a href=#296 id=296 data-nosnippet>296</a>                // buffer; shapes past the end stay unrendered until their own tiles load.
-<a href=#297 id=297 data-nosnippet>297</a>                </span>shape.clear_buffer_range();
-<a href=#298 id=298 data-nosnippet>298</a>                skipped += <span class="number">1</span>;
-<a href=#299 id=299 data-nosnippet>299</a>                <span class="kw">return</span>;
-<a href=#300 id=300 data-nosnippet>300</a>            }
-<a href=#301 id=301 data-nosnippet>301</a>            <span class="kw">let </span>stencil_coords = shape.stencil_coords();
-<a href=#302 id=302 data-nosnippet>302</a>            <span class="kw">let </span>stencil_ref = <span class="kw-2">*</span>stencil_ids
-<a href=#303 id=303 data-nosnippet>303</a>                .entry((shape.wrap, stencil_coords))
-<a href=#304 id=304 data-nosnippet>304</a>                .or_insert_with(|| {
-<a href=#305 id=305 data-nosnippet>305</a>                    <span class="kw">if </span>next_stencil &lt; <span class="number">124 </span>{
-<a href=#306 id=306 data-nosnippet>306</a>                        <span class="kw">let </span>assigned = next_stencil;
-<a href=#307 id=307 data-nosnippet>307</a>                        next_stencil += <span class="number">1</span>;
-<a href=#308 id=308 data-nosnippet>308</a>                        assigned
-<a href=#309 id=309 data-nosnippet>309</a>                    } <span class="kw">else </span>{
-<a href=#310 id=310 data-nosnippet>310</a>                        stencil_coords.stencil_reference_value_3d()
-<a href=#311 id=311 data-nosnippet>311</a>                    }
-<a href=#312 id=312 data-nosnippet>312</a>                });
-<a href=#313 id=313 data-nosnippet>313</a>            shape.set_stencil_reference(stencil_ref);
-<a href=#314 id=314 data-nosnippet>314</a>            shape.set_buffer_range(buffer.len() <span class="kw">as </span>u64);
-<a href=#315 id=315 data-nosnippet>315</a>            <span class="kw">let </span>transform = view_proj
-<a href=#316 id=316 data-nosnippet>316</a>                .to_model_view_projection(shape.transform)
-<a href=#317 id=317 data-nosnippet>317</a>                .downcast()
-<a href=#318 id=318 data-nosnippet>318</a>                .into();
-<a href=#319 id=319 data-nosnippet>319</a>            buffer.push(ShaderTileMetadata {
-<a href=#320 id=320 data-nosnippet>320</a>                transform,
-<a href=#321 id=321 data-nosnippet>321</a>                zoom_factor: shape.zoom_factor <span class="kw">as </span>f32,
-<a href=#322 id=322 data-nosnippet>322</a>                viewport_width,
-<a href=#323 id=323 data-nosnippet>323</a>                viewport_height,
-<a href=#324 id=324 data-nosnippet>324</a>                tile_mercator_coords: {
-<a href=#325 id=325 data-nosnippet>325</a>                    <span class="kw">let </span><span class="kw-2">mut </span>mercator = tile_mercator_coordinates(
-<a href=#326 id=326 data-nosnippet>326</a>                        shape
-<a href=#327 id=327 data-nosnippet>327</a>                            .coords()
-<a href=#328 id=328 data-nosnippet>328</a>                            .into_tile(<span class="kw">crate</span>::style::source::TileAddressingScheme::XYZ),
-<a href=#329 id=329 data-nosnippet>329</a>                    );
-<a href=#330 id=330 data-nosnippet>330</a>                    <span class="comment">// A copy of the world lies whole worlds over in Mercator units.
-<a href=#331 id=331 data-nosnippet>331</a>                    </span>mercator.x += shape.wrap <span class="kw">as </span>f32;
-<a href=#332 id=332 data-nosnippet>332</a>                    mercator.into()
-<a href=#333 id=333 data-nosnippet>333</a>                },
-<a href=#334 id=334 data-nosnippet>334</a>                line_width_scale: <span class="number">1.0</span>,
-<a href=#335 id=335 data-nosnippet>335</a>                line_units_per_pixel: <span class="number">8.0 </span>* style_zoom.scale_to_tile(<span class="kw-2">&amp;</span>shape.coords()) <span class="kw">as </span>f32,
-<a href=#336 id=336 data-nosnippet>336</a>                clip_antimeridian: u32::from(u8::from(shape.coords().z) == <span class="number">0</span>),
-<a href=#337 id=337 data-nosnippet>337</a>                clip_region: clip_region(shape),
-<a href=#338 id=338 data-nosnippet>338</a>                _pad: [<span class="number">0</span>; <span class="number">2</span>],
-<a href=#339 id=339 data-nosnippet>339</a>            });
-<a href=#340 id=340 data-nosnippet>340</a>        };
-<a href=#341 id=341 data-nosnippet>341</a>
-<a href=#342 id=342 data-nosnippet>342</a>        <span class="kw">let </span><span class="kw-2">mut </span>topo_hasher = rustc_hash::FxHasher::default();
-<a href=#343 id=343 data-nosnippet>343</a>        <span class="self">self</span>.view_tiles.len().hash(<span class="kw-2">&amp;mut </span>topo_hasher);
-<a href=#344 id=344 data-nosnippet>344</a>        <span class="kw">for </span>view_tile <span class="kw">in </span><span class="kw-2">&amp;mut </span><span class="self">self</span>.view_tiles {
-<a href=#345 id=345 data-nosnippet>345</a>            view_tile.target.hash(<span class="kw-2">&amp;mut </span>topo_hasher);
-<a href=#346 id=346 data-nosnippet>346</a>            <span class="kw">let </span><span class="kw-2">mut </span>v_count = <span class="number">0usize</span>;
-<a href=#347 id=347 data-nosnippet>347</a>            view_tile.vector.for_each_mut(<span class="kw-2">&amp;mut </span>|shape| {
-<a href=#348 id=348 data-nosnippet>348</a>                add_to_buffer(shape);
-<a href=#349 id=349 data-nosnippet>349</a>                v_count += <span class="number">1</span>;
-<a href=#350 id=350 data-nosnippet>350</a>                hash_shape_topology(shape, <span class="kw-2">&amp;mut </span>topo_hasher);
-<a href=#351 id=351 data-nosnippet>351</a>            });
-<a href=#352 id=352 data-nosnippet>352</a>            v_count.hash(<span class="kw-2">&amp;mut </span>topo_hasher);
-<a href=#353 id=353 data-nosnippet>353</a>            view_tile.raster.len().hash(<span class="kw-2">&amp;mut </span>topo_hasher);
-<a href=#354 id=354 data-nosnippet>354</a>            <span class="kw">for </span>(source_id, shapes) <span class="kw">in </span><span class="kw-2">&amp;mut </span>view_tile.raster {
-<a href=#355 id=355 data-nosnippet>355</a>                source_id.hash(<span class="kw-2">&amp;mut </span>topo_hasher);
-<a href=#356 id=356 data-nosnippet>356</a>                <span class="kw">let </span><span class="kw-2">mut </span>r_count = <span class="number">0usize</span>;
-<a href=#357 id=357 data-nosnippet>357</a>                shapes.for_each_mut(<span class="kw-2">&amp;mut </span>|shape| {
-<a href=#358 id=358 data-nosnippet>358</a>                    add_to_buffer(shape);
-<a href=#359 id=359 data-nosnippet>359</a>                    r_count += <span class="number">1</span>;
-<a href=#360 id=360 data-nosnippet>360</a>                    hash_shape_topology(shape, <span class="kw-2">&amp;mut </span>topo_hasher);
-<a href=#361 id=361 data-nosnippet>361</a>                });
-<a href=#362 id=362 data-nosnippet>362</a>                r_count.hash(<span class="kw-2">&amp;mut </span>topo_hasher);
-<a href=#363 id=363 data-nosnippet>363</a>            }
-<a href=#364 id=364 data-nosnippet>364</a>        }
-<a href=#365 id=365 data-nosnippet>365</a>        drop(add_to_buffer);
-<a href=#366 id=366 data-nosnippet>366</a>        <span class="kw">let </span>topology_hash = topo_hasher.finish();
-<a href=#367 id=367 data-nosnippet>367</a>        <span class="kw">if </span><span class="self">self</span>.topology_generation == <span class="number">0 </span>|| topology_hash != <span class="self">self</span>.last_topology_hash {
-<a href=#368 id=368 data-nosnippet>368</a>            <span class="self">self</span>.last_topology_hash = topology_hash;
-<a href=#369 id=369 data-nosnippet>369</a>            <span class="self">self</span>.topology_generation = <span class="self">self</span>.topology_generation.wrapping_add(<span class="number">1</span>);
-<a href=#370 id=370 data-nosnippet>370</a>        }
-<a href=#371 id=371 data-nosnippet>371</a>
-<a href=#372 id=372 data-nosnippet>372</a>        <span class="kw">if </span>skipped &gt; <span class="number">0 </span>{
-<a href=#373 id=373 data-nosnippet>373</a>            <span class="macro">tracing::warn!</span>(
-<a href=#374 id=374 data-nosnippet>374</a>                skipped,
-<a href=#375 id=375 data-nosnippet>375</a>                capacity,
-<a href=#376 id=376 data-nosnippet>376</a>                <span class="string">"tile pattern exceeds its buffer; distant shapes are skipped this frame"
-<a href=#377 id=377 data-nosnippet>377</a>            </span>);
-<a href=#378 id=378 data-nosnippet>378</a>        }
-<a href=#379 id=379 data-nosnippet>379</a>        <span class="self">self</span>.uploaded = buffer.len() <span class="kw">as </span>u64;
-<a href=#380 id=380 data-nosnippet>380</a>        <span class="kw">let </span>raw_buffer = bytemuck::cast_slice(buffer.as_slice());
-<a href=#381 id=381 data-nosnippet>381</a>        queue.write_buffer(<span class="kw-2">&amp;</span><span class="self">self</span>.view_tiles_buffer.inner, <span class="number">0</span>, raw_buffer);
-<a href=#382 id=382 data-nosnippet>382</a>        <span class="self">self</span>.stencil_ids = stencil_ids;
-<a href=#383 id=383 data-nosnippet>383</a>        <span class="self">self</span>.metadata_scratch = buffer;
-<a href=#384 id=384 data-nosnippet>384</a>    }
-<a href=#385 id=385 data-nosnippet>385</a>}
-<a href=#386 id=386 data-nosnippet>386</a>
-<a href=#387 id=387 data-nosnippet>387</a><span class="kw">fn </span>hash_shape_topology(shape: <span class="kw-2">&amp;</span>TileShape, hasher: <span class="kw-2">&amp;mut </span>rustc_hash::FxHasher) {
-<a href=#388 id=388 data-nosnippet>388</a>    shape.coords().hash(hasher);
-<a href=#389 id=389 data-nosnippet>389</a>    shape.wrap.hash(hasher);
-<a href=#390 id=390 data-nosnippet>390</a>    shape.is_drawn_within_another().hash(hasher);
-<a href=#391 id=391 data-nosnippet>391</a>    shape.stencil_reference().hash(hasher);
-<a href=#392 id=392 data-nosnippet>392</a>    shape.buffer_range().hash(hasher);
-<a href=#393 id=393 data-nosnippet>393</a>}
-<a href=#394 id=394 data-nosnippet>394</a>
-<a href=#395 id=395 data-nosnippet>395</a><span class="doccomment">/// The shown tiles with the loaded descendants their source is fading out drawn over each of
-<a href=#396 id=396 data-nosnippet>396</a>/// them, as GL JS draws departing tiles over the tile that replaces them until the fade ends;
-<a href=#397 id=397 data-nosnippet>397</a>/// `None` when nothing under these shapes is departing.
-<a href=#398 id=398 data-nosnippet>398</a></span><span class="attr">#[cfg(feature = <span class="string">"raster"</span>)]
-<a href=#399 id=399 data-nosnippet>399</a></span><span class="kw">fn </span>with_departing&lt;T: HasTile&gt;(
-<a href=#400 id=400 data-nosnippet>400</a>    (availability, source, shapes): (<span class="kw-2">&amp;</span>T, <span class="kw-2">&amp;</span>RasterSourceId, <span class="kw-2">&amp;</span>SourceShapes),
-<a href=#401 id=401 data-nosnippet>401</a>    zoom: Zoom,
-<a href=#402 id=402 data-nosnippet>402</a>    world: <span class="kw-2">&amp;</span>World,
-<a href=#403 id=403 data-nosnippet>403</a>) -&gt; <span class="prelude-ty">Option</span>&lt;SourceShapes&gt; {
-<a href=#404 id=404 data-nosnippet>404</a>    <span class="kw">let </span>shown: Vec&lt;WorldTileCoords&gt; = <span class="kw">match </span>shapes {
-<a href=#405 id=405 data-nosnippet>405</a>        SourceShapes::SourceEqTarget(shape) =&gt; <span class="macro">vec!</span>[shape.coords()],
-<a href=#406 id=406 data-nosnippet>406</a>        SourceShapes::Children(shapes) =&gt; shapes.iter().map(TileShape::coords).collect(),
-<a href=#407 id=407 data-nosnippet>407</a>        SourceShapes::Parent(<span class="kw">_</span>) | SourceShapes::None =&gt; <span class="kw">return </span><span class="prelude-val">None</span>,
-<a href=#408 id=408 data-nosnippet>408</a>    };
-<a href=#409 id=409 data-nosnippet>409</a>    <span class="kw">let </span>departing = world
-<a href=#410 id=410 data-nosnippet>410</a>        .resources
-<a href=#411 id=411 data-nosnippet>411</a>        .get::&lt;<span class="kw">crate</span>::raster::cross_fade::RasterCrossFade&gt;()<span class="question-mark">?
-<a href=#412 id=412 data-nosnippet>412</a>        </span>.departing(source.name())<span class="question-mark">?</span>;
-<a href=#413 id=413 data-nosnippet>413</a>    <span class="kw">let </span><span class="kw-2">mut </span>tiles = Vec::new();
-<a href=#414 id=414 data-nosnippet>414</a>    <span class="kw">let </span><span class="kw-2">mut </span>any = <span class="bool-val">false</span>;
-<a href=#415 id=415 data-nosnippet>415</a>    <span class="kw">for </span>tile <span class="kw">in </span>shown {
-<a href=#416 id=416 data-nosnippet>416</a>        tiles.push(TileShape::new(tile, zoom));
-<a href=#417 id=417 data-nosnippet>417</a>        <span class="kw">let </span><span class="kw-2">mut </span>under: Vec&lt;<span class="kw">_</span>&gt; = departing
-<a href=#418 id=418 data-nosnippet>418</a>            .tiles
-<a href=#419 id=419 data-nosnippet>419</a>            .iter()
-<a href=#420 id=420 data-nosnippet>420</a>            .copied()
-<a href=#421 id=421 data-nosnippet>421</a>            .filter(|departed| {
-<a href=#422 id=422 data-nosnippet>422</a>                departed.z &gt; tile.z
-<a href=#423 id=423 data-nosnippet>423</a>                    &amp;&amp; cover::ancestor_at(<span class="kw-2">*</span>departed, tile.z) == <span class="prelude-val">Some</span>(tile)
-<a href=#424 id=424 data-nosnippet>424</a>                    &amp;&amp; availability.has_tile(<span class="kw-2">*</span>departed, world)
-<a href=#425 id=425 data-nosnippet>425</a>            })
-<a href=#426 id=426 data-nosnippet>426</a>            .collect();
-<a href=#427 id=427 data-nosnippet>427</a>        under.sort_by_key(|departed| (departed.z, departed.x, departed.y));
-<a href=#428 id=428 data-nosnippet>428</a>        any |= !under.is_empty();
-<a href=#429 id=429 data-nosnippet>429</a>        tiles.extend(
-<a href=#430 id=430 data-nosnippet>430</a>            under
-<a href=#431 id=431 data-nosnippet>431</a>                .into_iter()
-<a href=#432 id=432 data-nosnippet>432</a>                .map(|departed| TileShape::new(departed, zoom).within(tile)),
-<a href=#433 id=433 data-nosnippet>433</a>        );
-<a href=#434 id=434 data-nosnippet>434</a>    }
-<a href=#435 id=435 data-nosnippet>435</a>    any.then_some(SourceShapes::Children(tiles))
-<a href=#436 id=436 data-nosnippet>436</a>}
-<a href=#437 id=437 data-nosnippet>437</a>
-<a href=#438 id=438 data-nosnippet>438</a><span class="attr">#[cfg(not(feature = <span class="string">"raster"</span>))]
-<a href=#439 id=439 data-nosnippet>439</a></span><span class="kw">fn </span>with_departing&lt;T: HasTile&gt;(
-<a href=#440 id=440 data-nosnippet>440</a>    _args: (<span class="kw-2">&amp;</span>T, <span class="kw-2">&amp;</span>RasterSourceId, <span class="kw-2">&amp;</span>SourceShapes),
-<a href=#441 id=441 data-nosnippet>441</a>    _zoom: Zoom,
-<a href=#442 id=442 data-nosnippet>442</a>    _world: <span class="kw-2">&amp;</span>World,
-<a href=#443 id=443 data-nosnippet>443</a>) -&gt; <span class="prelude-ty">Option</span>&lt;SourceShapes&gt; {
-<a href=#444 id=444 data-nosnippet>444</a>    <span class="prelude-val">None
-<a href=#445 id=445 data-nosnippet>445</a></span>}
-<a href=#446 id=446 data-nosnippet>446</a>
-<a href=#447 id=447 data-nosnippet>447</a><span class="kw">fn </span>raster_shapes&lt;T: HasTile&gt;(
-<a href=#448 id=448 data-nosnippet>448</a>    sources: <span class="kw-2">&amp;</span>T,
-<a href=#449 id=449 data-nosnippet>449</a>    coords: WorldTileCoords,
-<a href=#450 id=450 data-nosnippet>450</a>    covered: Vec&lt;WorldTileCoords&gt;,
-<a href=#451 id=451 data-nosnippet>451</a>    zoom: Zoom,
-<a href=#452 id=452 data-nosnippet>452</a>    world: <span class="kw-2">&amp;</span>World,
-<a href=#453 id=453 data-nosnippet>453</a>    used_parents: <span class="kw-2">&amp;mut </span>FxHashSet&lt;WorldTileCoords&gt;,
-<a href=#454 id=454 data-nosnippet>454</a>) -&gt; SourceShapes {
-<a href=#455 id=455 data-nosnippet>455</a>    <span class="kw">let </span>covered = <span class="kw">super</span>::coverage::disjoint_tiles(coords, covered);
-<a href=#456 id=456 data-nosnippet>456</a>    <span class="kw">let </span>complete = <span class="kw">super</span>::coverage::covers_target(coords, <span class="kw-2">&amp;</span>covered).then(|| covered.clone());
-<a href=#457 id=457 data-nosnippet>457</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(tiles) = complete {
-<a href=#458 id=458 data-nosnippet>458</a>        selected_shapes(coords, tiles, zoom, used_parents)
-<a href=#459 id=459 data-nosnippet>459</a>    } <span class="kw">else if </span>covered.is_empty() {
-<a href=#460 id=460 data-nosnippet>460</a>        <span class="kw">match </span><span class="kw">super</span>::coverage::loaded_cover(sources, coords, world) {
-<a href=#461 id=461 data-nosnippet>461</a>            <span class="prelude-val">Some</span>(tiles) =&gt; selected_shapes(coords, tiles, zoom, used_parents),
-<a href=#462 id=462 data-nosnippet>462</a>            <span class="prelude-val">None </span>=&gt; source_shapes(sources, coords, zoom, world, used_parents),
-<a href=#463 id=463 data-nosnippet>463</a>        }
-<a href=#464 id=464 data-nosnippet>464</a>    } <span class="kw">else </span>{
-<a href=#465 id=465 data-nosnippet>465</a>        <span class="comment">// What the view needs of this tile is loaded in part: the nearest loaded tile above or
-<a href=#466 id=466 data-nosnippet>466</a>        // at it stays underneath, and the part's own tiles are drawn over it.
-<a href=#467 id=467 data-nosnippet>467</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>tiles = <span class="kw">super</span>::coverage::loaded_cover(sources, coords, world).unwrap_or_default();
-<a href=#468 id=468 data-nosnippet>468</a>        tiles.retain(|tile| !covered.contains(tile));
-<a href=#469 id=469 data-nosnippet>469</a>        tiles.extend(covered);
-<a href=#470 id=470 data-nosnippet>470</a>        tiles.sort_by_key(|tile| tile.z);
-<a href=#471 id=471 data-nosnippet>471</a>        selected_shapes(coords, tiles, zoom, used_parents)
-<a href=#472 id=472 data-nosnippet>472</a>    }
-<a href=#473 id=473 data-nosnippet>473</a>}
-<a href=#474 id=474 data-nosnippet>474</a>
-<a href=#475 id=475 data-nosnippet>475</a><span class="kw">mod </span>cover;
-<a href=#476 id=476 data-nosnippet>476</a><span class="kw">pub use </span>cover::covering_shapes_for;
-<a href=#477 id=477 data-nosnippet>477</a><span class="kw">use </span>cover::{clip_region, selected_shapes, source_shapes, source_shapes_bounded};
+<a href=#72 id=72 data-nosnippet>72</a>    last_uploaded_bytes: Vec&lt;u8&gt;,
+<a href=#73 id=73 data-nosnippet>73</a>    scratch: Mutex&lt;PatternScratch&gt;,
+<a href=#74 id=74 data-nosnippet>74</a>    phantom_q: PhantomData&lt;Q&gt;,
+<a href=#75 id=75 data-nosnippet>75</a>}
+<a href=#76 id=76 data-nosnippet>76</a>
+<a href=#77 id=77 data-nosnippet>77</a><span class="kw">impl</span>&lt;Q, B&gt; Drop <span class="kw">for </span>TileViewPattern&lt;Q, B&gt; {
+<a href=#78 id=78 data-nosnippet>78</a>    <span class="kw">fn </span>drop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+<a href=#79 id=79 data-nosnippet>79</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(destroy) = <span class="self">self</span>.buffer_destroyer {
+<a href=#80 id=80 data-nosnippet>80</a>            destroy(<span class="kw-2">&amp;</span><span class="self">self</span>.view_tiles_buffer.inner);
+<a href=#81 id=81 data-nosnippet>81</a>        }
+<a href=#82 id=82 data-nosnippet>82</a>    }
+<a href=#83 id=83 data-nosnippet>83</a>}
+<a href=#84 id=84 data-nosnippet>84</a>
+<a href=#85 id=85 data-nosnippet>85</a><span class="doccomment">/// The metadata buffer cannot hold every requested entry.
+<a href=#86 id=86 data-nosnippet>86</a></span><span class="attr">#[derive(Clone, Copy, Debug, thiserror::Error, PartialEq, Eq)]
+<a href=#87 id=87 data-nosnippet>87</a>#[error(<span class="string">"tile metadata buffer holds {capacity} entries, {requested} were requested"</span>)]
+<a href=#88 id=88 data-nosnippet>88</a></span><span class="kw">pub struct </span>TileMetadataOverflow {
+<a href=#89 id=89 data-nosnippet>89</a>    <span class="doccomment">/// Entries the buffer can hold.
+<a href=#90 id=90 data-nosnippet>90</a>    </span><span class="kw">pub </span>capacity: u64,
+<a href=#91 id=91 data-nosnippet>91</a>    <span class="doccomment">/// Entries needed this frame.
+<a href=#92 id=92 data-nosnippet>92</a>    </span><span class="kw">pub </span>requested: u64,
+<a href=#93 id=93 data-nosnippet>93</a>}
+<a href=#94 id=94 data-nosnippet>94</a>
+<a href=#95 id=95 data-nosnippet>95</a><span class="kw">impl</span>&lt;Q: Queue&lt;B&gt;, B&gt; TileViewPattern&lt;Q, B&gt; {
+<a href=#96 id=96 data-nosnippet>96</a>    <span class="doccomment">/// Takes ownership of a metadata buffer whose descriptor capacity is measured in bytes.
+<a href=#97 id=97 data-nosnippet>97</a>    </span><span class="kw">pub fn </span>new(view_tiles_buffer: BackingBufferDescriptor&lt;B&gt;) -&gt; <span class="self">Self </span>{
+<a href=#98 id=98 data-nosnippet>98</a>        <span class="self">Self </span>{
+<a href=#99 id=99 data-nosnippet>99</a>            view_tiles: Vec::with_capacity(<span class="number">64</span>),
+<a href=#100 id=100 data-nosnippet>100</a>            view_tiles_buffer: BackingBuffer::new(
+<a href=#101 id=101 data-nosnippet>101</a>                view_tiles_buffer.buffer,
+<a href=#102 id=102 data-nosnippet>102</a>                view_tiles_buffer.inner_size,
+<a href=#103 id=103 data-nosnippet>103</a>            ),
+<a href=#104 id=104 data-nosnippet>104</a>            buffer_destroyer: <span class="prelude-val">None</span>,
+<a href=#105 id=105 data-nosnippet>105</a>            uploaded: <span class="number">0</span>,
+<a href=#106 id=106 data-nosnippet>106</a>            last_topology_hash: <span class="number">0</span>,
+<a href=#107 id=107 data-nosnippet>107</a>            topology_generation: <span class="number">0</span>,
+<a href=#108 id=108 data-nosnippet>108</a>            stencil_ids: FxHashMap::default(),
+<a href=#109 id=109 data-nosnippet>109</a>            metadata_scratch: Vec::with_capacity(<span class="number">64</span>),
+<a href=#110 id=110 data-nosnippet>110</a>            last_uploaded_bytes: Vec::new(),
+<a href=#111 id=111 data-nosnippet>111</a>            scratch: Mutex::new(PatternScratch::default()),
+<a href=#112 id=112 data-nosnippet>112</a>            phantom_q: Default::default(),
+<a href=#113 id=113 data-nosnippet>113</a>        }
+<a href=#114 id=114 data-nosnippet>114</a>    }
+<a href=#115 id=115 data-nosnippet>115</a>
+<a href=#116 id=116 data-nosnippet>116</a>    <span class="doccomment">/// Monotonic generation incremented whenever tile shapes, buffer ranges, or stencil refs change.
+<a href=#117 id=117 data-nosnippet>117</a>    </span><span class="attr">#[inline]
+<a href=#118 id=118 data-nosnippet>118</a>    </span><span class="kw">pub fn </span>topology_generation(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64 {
+<a href=#119 id=119 data-nosnippet>119</a>        <span class="self">self</span>.topology_generation
+<a href=#120 id=120 data-nosnippet>120</a>    }
+<a href=#121 id=121 data-nosnippet>121</a>
+<a href=#122 id=122 data-nosnippet>122</a>    <span class="doccomment">/// Registers a destructor invoked on the backing metadata buffer when dropped.
+<a href=#123 id=123 data-nosnippet>123</a>    </span><span class="kw">pub fn </span>with_buffer_destroyer(<span class="kw-2">mut </span><span class="self">self</span>, destroyer: <span class="kw">fn</span>(<span class="kw-2">&amp;</span>B)) -&gt; <span class="self">Self </span>{
+<a href=#124 id=124 data-nosnippet>124</a>        <span class="self">self</span>.buffer_destroyer = <span class="prelude-val">Some</span>(destroyer);
+<a href=#125 id=125 data-nosnippet>125</a>        <span class="self">self
+<a href=#126 id=126 data-nosnippet>126</a>    </span>}
+<a href=#127 id=127 data-nosnippet>127</a>
+<a href=#128 id=128 data-nosnippet>128</a>    <span class="doccomment">/// Number of metadata entries still available in this frame.
+<a href=#129 id=129 data-nosnippet>129</a>    </span><span class="kw">pub fn </span>remaining_metadata_capacity(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+<a href=#130 id=130 data-nosnippet>130</a>        <span class="kw">let </span>capacity = <span class="self">self</span>.view_tiles_buffer.inner_size / size_of::&lt;ShaderTileMetadata&gt;() <span class="kw">as </span>u64;
+<a href=#131 id=131 data-nosnippet>131</a>        capacity.saturating_sub(<span class="self">self</span>.uploaded) <span class="kw">as </span>usize
+<a href=#132 id=132 data-nosnippet>132</a>    }
+<a href=#133 id=133 data-nosnippet>133</a>
+<a href=#134 id=134 data-nosnippet>134</a>    <span class="doccomment">/// Appends entries without changing ranges returned by earlier appends in this frame.
+<a href=#135 id=135 data-nosnippet>135</a>    /// Call after [`Self::upload_pattern`]; the next pattern upload invalidates these ranges.
+<a href=#136 id=136 data-nosnippet>136</a>    /// Returns an overflow error without writing or reserving entries if they do not all fit.
+<a href=#137 id=137 data-nosnippet>137</a>    </span><span class="kw">pub fn </span>upload_extra_metadata(
+<a href=#138 id=138 data-nosnippet>138</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#139 id=139 data-nosnippet>139</a>        queue: <span class="kw-2">&amp;</span>Q,
+<a href=#140 id=140 data-nosnippet>140</a>        entries: <span class="kw-2">&amp;</span>[ShaderTileMetadata],
+<a href=#141 id=141 data-nosnippet>141</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;std::ops::Range&lt;wgpu::BufferAddress&gt;&gt;, TileMetadataOverflow&gt; {
+<a href=#142 id=142 data-nosnippet>142</a>        <span class="kw">const </span>STRIDE: u64 = size_of::&lt;ShaderTileMetadata&gt;() <span class="kw">as </span>u64;
+<a href=#143 id=143 data-nosnippet>143</a>        <span class="kw">let </span>capacity = <span class="self">self</span>.view_tiles_buffer.inner_size / STRIDE;
+<a href=#144 id=144 data-nosnippet>144</a>        <span class="kw">let </span>requested = <span class="self">self</span>.uploaded + entries.len() <span class="kw">as </span>u64;
+<a href=#145 id=145 data-nosnippet>145</a>        <span class="kw">if </span>requested &gt; capacity {
+<a href=#146 id=146 data-nosnippet>146</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(TileMetadataOverflow {
+<a href=#147 id=147 data-nosnippet>147</a>                capacity,
+<a href=#148 id=148 data-nosnippet>148</a>                requested,
+<a href=#149 id=149 data-nosnippet>149</a>            });
+<a href=#150 id=150 data-nosnippet>150</a>        }
+<a href=#151 id=151 data-nosnippet>151</a>        <span class="kw">if </span>entries.is_empty() {
+<a href=#152 id=152 data-nosnippet>152</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>(Vec::new());
+<a href=#153 id=153 data-nosnippet>153</a>        }
+<a href=#154 id=154 data-nosnippet>154</a>        <span class="kw">let </span>offset = <span class="self">self</span>.uploaded * STRIDE;
+<a href=#155 id=155 data-nosnippet>155</a>        queue.write_buffer(
+<a href=#156 id=156 data-nosnippet>156</a>            <span class="kw-2">&amp;</span><span class="self">self</span>.view_tiles_buffer.inner,
+<a href=#157 id=157 data-nosnippet>157</a>            offset,
+<a href=#158 id=158 data-nosnippet>158</a>            bytemuck::cast_slice(entries),
+<a href=#159 id=159 data-nosnippet>159</a>        );
+<a href=#160 id=160 data-nosnippet>160</a>        <span class="self">self</span>.uploaded = requested;
+<a href=#161 id=161 data-nosnippet>161</a>        <span class="prelude-val">Ok</span>((<span class="number">0</span>..entries.len() <span class="kw">as </span>u64)
+<a href=#162 id=162 data-nosnippet>162</a>            .map(|index| offset + index * STRIDE..offset + (index + <span class="number">1</span>) * STRIDE)
+<a href=#163 id=163 data-nosnippet>163</a>            .collect())
+<a href=#164 id=164 data-nosnippet>164</a>    }
+<a href=#165 id=165 data-nosnippet>165</a>
+<a href=#166 id=166 data-nosnippet>166</a>    <span class="doccomment">/// Pairs every view tile with the loaded sources that draw it. Vector shapes come from
+<a href=#167 id=167 data-nosnippet>167</a>    /// the pyramid nearest the tile; raster shapes follow each raster source's own covering,
+<a href=#168 id=168 data-nosnippet>168</a>    /// as GL JS pairs a source's visible tiles with the view, and fall back to the pyramid
+<a href=#169 id=169 data-nosnippet>169</a>    /// while those tiles load.
+<a href=#170 id=170 data-nosnippet>170</a>    </span><span class="attr">#[tracing::instrument(skip_all)]
+<a href=#171 id=171 data-nosnippet>171</a>    #[must_use]
+<a href=#172 id=172 data-nosnippet>172</a>    </span><span class="kw">pub fn </span>generate_pattern(
+<a href=#173 id=173 data-nosnippet>173</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#174 id=174 data-nosnippet>174</a>        view_region: <span class="kw-2">&amp;</span>ViewRegion,
+<a href=#175 id=175 data-nosnippet>175</a>        sources: <span class="kw-2">&amp;</span>ViewTileSources,
+<a href=#176 id=176 data-nosnippet>176</a>        raster_coverings: <span class="kw-2">&amp;</span>RasterCoverings,
+<a href=#177 id=177 data-nosnippet>177</a>        zoom: Zoom,
+<a href=#178 id=178 data-nosnippet>178</a>        world: <span class="kw-2">&amp;</span>World,
+<a href=#179 id=179 data-nosnippet>179</a>    ) -&gt; Vec&lt;ViewTile&gt; {
+<a href=#180 id=180 data-nosnippet>180</a>        <span class="kw">let </span><span class="kw-2">mut </span>view_tiles = Vec::with_capacity(<span class="self">self</span>.view_tiles.len());
+<a href=#181 id=181 data-nosnippet>181</a>        <span class="comment">// A parent stands in once for each copy of the world it is seen in.
+<a href=#182 id=182 data-nosnippet>182</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>scratch = <span class="self">self</span>.scratch.lock().unwrap_or_else(|e| e.into_inner());
+<a href=#183 id=183 data-nosnippet>183</a>        <span class="kw">for </span>set <span class="kw">in </span>scratch.vector_parents.values_mut() {
+<a href=#184 id=184 data-nosnippet>184</a>            set.clear();
+<a href=#185 id=185 data-nosnippet>185</a>        }
+<a href=#186 id=186 data-nosnippet>186</a>        <span class="kw">if </span>!raster_coverings.is_empty() {
+<a href=#187 id=187 data-nosnippet>187</a>            <span class="kw">for </span>set <span class="kw">in </span>scratch.raster_parents.values_mut() {
+<a href=#188 id=188 data-nosnippet>188</a>                set.clear();
+<a href=#189 id=189 data-nosnippet>189</a>            }
+<a href=#190 id=190 data-nosnippet>190</a>        }
+<a href=#191 id=191 data-nosnippet>191</a>        <span class="kw">let </span>PatternScratch {
+<a href=#192 id=192 data-nosnippet>192</a>            vector_parents,
+<a href=#193 id=193 data-nosnippet>193</a>            raster_parents,
+<a href=#194 id=194 data-nosnippet>194</a>        } = <span class="kw-2">&amp;mut *</span>scratch;
+<a href=#195 id=195 data-nosnippet>195</a>
+<a href=#196 id=196 data-nosnippet>196</a>        <span class="kw">let </span>vector_availability = (
+<a href=#197 id=197 data-nosnippet>197</a>            sources.of_kind(TileKind::Vector),
+<a href=#198 id=198 data-nosnippet>198</a>            <span class="kw">crate</span>::vector::UploadedVectorGeometry::for_world(world),
+<a href=#199 id=199 data-nosnippet>199</a>        );
+<a href=#200 id=200 data-nosnippet>200</a>        <span class="kw">let </span>vector_max_zoom = vector_availability.<span class="number">1</span>.max_zoom;
+<a href=#201 id=201 data-nosnippet>201</a>
+<a href=#202 id=202 data-nosnippet>202</a>        <span class="kw">for </span>seen <span class="kw">in </span>view_region.copies() {
+<a href=#203 id=203 data-nosnippet>203</a>            <span class="kw">let </span><span class="prelude-val">Some</span>((coords, wrap)) = seen.wrapped() <span class="kw">else </span>{
+<a href=#204 id=204 data-nosnippet>204</a>                <span class="kw">continue</span>;
+<a href=#205 id=205 data-nosnippet>205</a>            };
+<a href=#206 id=206 data-nosnippet>206</a>            <span class="kw">let </span><span class="kw-2">mut </span>vector = source_shapes_bounded(
+<a href=#207 id=207 data-nosnippet>207</a>                <span class="kw-2">&amp;</span>vector_availability,
+<a href=#208 id=208 data-nosnippet>208</a>                coords,
+<a href=#209 id=209 data-nosnippet>209</a>                zoom,
+<a href=#210 id=210 data-nosnippet>210</a>                world,
+<a href=#211 id=211 data-nosnippet>211</a>                vector_parents.entry(wrap).or_default(),
+<a href=#212 id=212 data-nosnippet>212</a>                vector_max_zoom,
+<a href=#213 id=213 data-nosnippet>213</a>            );
+<a href=#214 id=214 data-nosnippet>214</a>            vector.for_each_mut(<span class="kw-2">&amp;mut </span>|shape| shape.wrapped(wrap, zoom));
+<a href=#215 id=215 data-nosnippet>215</a>            <span class="kw">let </span>raster = <span class="kw">if </span>raster_coverings.is_empty() {
+<a href=#216 id=216 data-nosnippet>216</a>                Vec::new()
+<a href=#217 id=217 data-nosnippet>217</a>            } <span class="kw">else </span>{
+<a href=#218 id=218 data-nosnippet>218</a>                raster_coverings
+<a href=#219 id=219 data-nosnippet>219</a>                    .iter()
+<a href=#220 id=220 data-nosnippet>220</a>                    .map(|(source, covering)| {
+<a href=#221 id=221 data-nosnippet>221</a>                        <span class="kw">let </span>availability = <span class="kw">super</span>::SourceTiles {
+<a href=#222 id=222 data-nosnippet>222</a>                            source,
+<a href=#223 id=223 data-nosnippet>223</a>                            availability: sources.of_kind(TileKind::Raster),
+<a href=#224 id=224 data-nosnippet>224</a>                        };
+<a href=#225 id=225 data-nosnippet>225</a>                        <span class="kw">let </span>covered = covering_shapes_for(coords, covering)
+<a href=#226 id=226 data-nosnippet>226</a>                            .into_iter()
+<a href=#227 id=227 data-nosnippet>227</a>                            .filter(|tile| availability.has_tile(<span class="kw-2">*</span>tile, world))
+<a href=#228 id=228 data-nosnippet>228</a>                            .collect();
+<a href=#229 id=229 data-nosnippet>229</a>                        <span class="kw">let </span><span class="kw-2">mut </span>shapes = raster_shapes(
+<a href=#230 id=230 data-nosnippet>230</a>                            <span class="kw-2">&amp;</span>availability,
+<a href=#231 id=231 data-nosnippet>231</a>                            coords,
+<a href=#232 id=232 data-nosnippet>232</a>                            covered,
+<a href=#233 id=233 data-nosnippet>233</a>                            zoom,
+<a href=#234 id=234 data-nosnippet>234</a>                            world,
+<a href=#235 id=235 data-nosnippet>235</a>                            raster_parents.entry((source.clone(), wrap)).or_default(),
+<a href=#236 id=236 data-nosnippet>236</a>                        );
+<a href=#237 id=237 data-nosnippet>237</a>                        <span class="kw">if let </span><span class="prelude-val">Some</span>(faded) =
+<a href=#238 id=238 data-nosnippet>238</a>                            with_departing((<span class="kw-2">&amp;</span>availability, source, <span class="kw-2">&amp;</span>shapes), zoom, world)
+<a href=#239 id=239 data-nosnippet>239</a>                        {
+<a href=#240 id=240 data-nosnippet>240</a>                            shapes = faded;
+<a href=#241 id=241 data-nosnippet>241</a>                        }
+<a href=#242 id=242 data-nosnippet>242</a>                        shapes.for_each_mut(<span class="kw-2">&amp;mut </span>|shape| shape.wrapped(wrap, zoom));
+<a href=#243 id=243 data-nosnippet>243</a>                        (source.clone(), shapes)
+<a href=#244 id=244 data-nosnippet>244</a>                    })
+<a href=#245 id=245 data-nosnippet>245</a>                    .collect()
+<a href=#246 id=246 data-nosnippet>246</a>            };
+<a href=#247 id=247 data-nosnippet>247</a>            view_tiles.push(ViewTile {
+<a href=#248 id=248 data-nosnippet>248</a>                target: coords,
+<a href=#249 id=249 data-nosnippet>249</a>                vector,
+<a href=#250 id=250 data-nosnippet>250</a>                raster,
+<a href=#251 id=251 data-nosnippet>251</a>            });
+<a href=#252 id=252 data-nosnippet>252</a>        }
+<a href=#253 id=253 data-nosnippet>253</a>
+<a href=#254 id=254 data-nosnippet>254</a>        view_tiles
+<a href=#255 id=255 data-nosnippet>255</a>    }
+<a href=#256 id=256 data-nosnippet>256</a>
+<a href=#257 id=257 data-nosnippet>257</a>    <span class="doccomment">/// Replaces the CPU-side view tiles; call [`Self::upload_pattern`] before drawing them.
+<a href=#258 id=258 data-nosnippet>258</a>    </span><span class="kw">pub fn </span>update_pattern(<span class="kw-2">&amp;mut </span><span class="self">self</span>, <span class="kw-2">mut </span>view_tiles: Vec&lt;ViewTile&gt;) {
+<a href=#259 id=259 data-nosnippet>259</a>        <span class="self">self</span>.view_tiles.clear();
+<a href=#260 id=260 data-nosnippet>260</a>        <span class="self">self</span>.view_tiles.append(<span class="kw-2">&amp;mut </span>view_tiles)
+<a href=#261 id=261 data-nosnippet>261</a>    }
+<a href=#262 id=262 data-nosnippet>262</a>
+<a href=#263 id=263 data-nosnippet>263</a>    <span class="doccomment">/// Iterates view tiles in covering order; source shapes may reference shared ancestors.
+<a href=#264 id=264 data-nosnippet>264</a>    </span><span class="kw">pub fn </span>iter(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <span class="kw-2">&amp;</span>ViewTile&gt; + <span class="lifetime">'_ </span>{
+<a href=#265 id=265 data-nosnippet>265</a>        <span class="self">self</span>.view_tiles.iter()
+<a href=#266 id=266 data-nosnippet>266</a>    }
+<a href=#267 id=267 data-nosnippet>267</a>
+<a href=#268 id=268 data-nosnippet>268</a>    <span class="doccomment">/// Borrows the backing metadata buffer, including space reserved for extra entries.
+<a href=#269 id=269 data-nosnippet>269</a>    </span><span class="kw">pub fn </span>buffer(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>B {
+<a href=#270 id=270 data-nosnippet>270</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.view_tiles_buffer.inner
+<a href=#271 id=271 data-nosnippet>271</a>    }
+<a href=#272 id=272 data-nosnippet>272</a>
+<a href=#273 id=273 data-nosnippet>273</a>    <span class="doccomment">/// Writes this frame's view metadata and resets the append cursor.
+<a href=#274 id=274 data-nosnippet>274</a>    /// Shapes exceeding capacity lose their buffer ranges and are skipped for this frame.
+<a href=#275 id=275 data-nosnippet>275</a>    /// Viewport dimensions and `style_zoom` determine screen-pixel line widths.
+<a href=#276 id=276 data-nosnippet>276</a>    </span><span class="attr">#[tracing::instrument(skip_all)]
+<a href=#277 id=277 data-nosnippet>277</a>    </span><span class="kw">pub fn </span>upload_pattern(
+<a href=#278 id=278 data-nosnippet>278</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#279 id=279 data-nosnippet>279</a>        queue: <span class="kw-2">&amp;</span>Q,
+<a href=#280 id=280 data-nosnippet>280</a>        view_proj: <span class="kw-2">&amp;</span>ViewProjection,
+<a href=#281 id=281 data-nosnippet>281</a>        viewport_width: f32,
+<a href=#282 id=282 data-nosnippet>282</a>        viewport_height: f32,
+<a href=#283 id=283 data-nosnippet>283</a>        style_zoom: Zoom,
+<a href=#284 id=284 data-nosnippet>284</a>    ) {
+<a href=#285 id=285 data-nosnippet>285</a>        <span class="kw">let </span>capacity = (<span class="self">self</span>.view_tiles_buffer.inner_size
+<a href=#286 id=286 data-nosnippet>286</a>            / std::mem::size_of::&lt;ShaderTileMetadata&gt;() <span class="kw">as </span>wgpu::BufferAddress)
+<a href=#287 id=287 data-nosnippet>287</a>            <span class="kw">as </span>usize;
+<a href=#288 id=288 data-nosnippet>288</a>        <span class="kw">let </span><span class="kw-2">mut </span>buffer = std::mem::take(<span class="kw-2">&amp;mut </span><span class="self">self</span>.metadata_scratch);
+<a href=#289 id=289 data-nosnippet>289</a>        buffer.clear();
+<a href=#290 id=290 data-nosnippet>290</a>        <span class="kw">let </span><span class="kw-2">mut </span>skipped = <span class="number">0_usize</span>;
+<a href=#291 id=291 data-nosnippet>291</a>        <span class="kw">let </span><span class="kw-2">mut </span>stencil_ids = std::mem::take(<span class="kw-2">&amp;mut </span><span class="self">self</span>.stencil_ids);
+<a href=#292 id=292 data-nosnippet>292</a>        stencil_ids.clear();
+<a href=#293 id=293 data-nosnippet>293</a>        <span class="kw">let </span><span class="kw-2">mut </span>next_stencil = <span class="number">0_u8</span>;
+<a href=#294 id=294 data-nosnippet>294</a>
+<a href=#295 id=295 data-nosnippet>295</a>        <span class="kw">let </span><span class="kw-2">mut </span>add_to_buffer = |shape: <span class="kw-2">&amp;mut </span>TileShape| {
+<a href=#296 id=296 data-nosnippet>296</a>            <span class="kw">if </span>buffer.len() &gt;= capacity {
+<a href=#297 id=297 data-nosnippet>297</a>                <span class="comment">// A pitched view falling back to many small child tiles can exceed the
+<a href=#298 id=298 data-nosnippet>298</a>                // buffer; shapes past the end stay unrendered until their own tiles load.
+<a href=#299 id=299 data-nosnippet>299</a>                </span>shape.clear_buffer_range();
+<a href=#300 id=300 data-nosnippet>300</a>                skipped += <span class="number">1</span>;
+<a href=#301 id=301 data-nosnippet>301</a>                <span class="kw">return</span>;
+<a href=#302 id=302 data-nosnippet>302</a>            }
+<a href=#303 id=303 data-nosnippet>303</a>            <span class="kw">let </span>stencil_coords = shape.stencil_coords();
+<a href=#304 id=304 data-nosnippet>304</a>            <span class="kw">let </span>stencil_ref = <span class="kw-2">*</span>stencil_ids
+<a href=#305 id=305 data-nosnippet>305</a>                .entry((shape.wrap, stencil_coords))
+<a href=#306 id=306 data-nosnippet>306</a>                .or_insert_with(|| {
+<a href=#307 id=307 data-nosnippet>307</a>                    <span class="kw">if </span>next_stencil &lt; <span class="number">124 </span>{
+<a href=#308 id=308 data-nosnippet>308</a>                        <span class="kw">let </span>assigned = next_stencil;
+<a href=#309 id=309 data-nosnippet>309</a>                        next_stencil += <span class="number">1</span>;
+<a href=#310 id=310 data-nosnippet>310</a>                        assigned
+<a href=#311 id=311 data-nosnippet>311</a>                    } <span class="kw">else </span>{
+<a href=#312 id=312 data-nosnippet>312</a>                        stencil_coords.stencil_reference_value_3d()
+<a href=#313 id=313 data-nosnippet>313</a>                    }
+<a href=#314 id=314 data-nosnippet>314</a>                });
+<a href=#315 id=315 data-nosnippet>315</a>            shape.set_stencil_reference(stencil_ref);
+<a href=#316 id=316 data-nosnippet>316</a>            shape.set_buffer_range(buffer.len() <span class="kw">as </span>u64);
+<a href=#317 id=317 data-nosnippet>317</a>            <span class="kw">let </span>transform = view_proj
+<a href=#318 id=318 data-nosnippet>318</a>                .to_model_view_projection(shape.transform)
+<a href=#319 id=319 data-nosnippet>319</a>                .downcast()
+<a href=#320 id=320 data-nosnippet>320</a>                .into();
+<a href=#321 id=321 data-nosnippet>321</a>            buffer.push(ShaderTileMetadata {
+<a href=#322 id=322 data-nosnippet>322</a>                transform,
+<a href=#323 id=323 data-nosnippet>323</a>                zoom_factor: shape.zoom_factor <span class="kw">as </span>f32,
+<a href=#324 id=324 data-nosnippet>324</a>                viewport_width,
+<a href=#325 id=325 data-nosnippet>325</a>                viewport_height,
+<a href=#326 id=326 data-nosnippet>326</a>                tile_mercator_coords: {
+<a href=#327 id=327 data-nosnippet>327</a>                    <span class="kw">let </span><span class="kw-2">mut </span>mercator = tile_mercator_coordinates(
+<a href=#328 id=328 data-nosnippet>328</a>                        shape
+<a href=#329 id=329 data-nosnippet>329</a>                            .coords()
+<a href=#330 id=330 data-nosnippet>330</a>                            .into_tile(<span class="kw">crate</span>::style::source::TileAddressingScheme::XYZ),
+<a href=#331 id=331 data-nosnippet>331</a>                    );
+<a href=#332 id=332 data-nosnippet>332</a>                    <span class="comment">// A copy of the world lies whole worlds over in Mercator units.
+<a href=#333 id=333 data-nosnippet>333</a>                    </span>mercator.x += shape.wrap <span class="kw">as </span>f32;
+<a href=#334 id=334 data-nosnippet>334</a>                    mercator.into()
+<a href=#335 id=335 data-nosnippet>335</a>                },
+<a href=#336 id=336 data-nosnippet>336</a>                line_width_scale: <span class="number">1.0</span>,
+<a href=#337 id=337 data-nosnippet>337</a>                line_units_per_pixel: <span class="number">8.0 </span>* style_zoom.scale_to_tile(<span class="kw-2">&amp;</span>shape.coords()) <span class="kw">as </span>f32,
+<a href=#338 id=338 data-nosnippet>338</a>                clip_antimeridian: u32::from(u8::from(shape.coords().z) == <span class="number">0</span>),
+<a href=#339 id=339 data-nosnippet>339</a>                clip_region: clip_region(shape),
+<a href=#340 id=340 data-nosnippet>340</a>                _pad: [<span class="number">0</span>; <span class="number">2</span>],
+<a href=#341 id=341 data-nosnippet>341</a>            });
+<a href=#342 id=342 data-nosnippet>342</a>        };
+<a href=#343 id=343 data-nosnippet>343</a>
+<a href=#344 id=344 data-nosnippet>344</a>        <span class="kw">let </span><span class="kw-2">mut </span>topo_hasher = rustc_hash::FxHasher::default();
+<a href=#345 id=345 data-nosnippet>345</a>        <span class="self">self</span>.view_tiles.len().hash(<span class="kw-2">&amp;mut </span>topo_hasher);
+<a href=#346 id=346 data-nosnippet>346</a>        <span class="kw">for </span>view_tile <span class="kw">in </span><span class="kw-2">&amp;mut </span><span class="self">self</span>.view_tiles {
+<a href=#347 id=347 data-nosnippet>347</a>            view_tile.target.hash(<span class="kw-2">&amp;mut </span>topo_hasher);
+<a href=#348 id=348 data-nosnippet>348</a>            <span class="kw">let </span><span class="kw-2">mut </span>v_count = <span class="number">0usize</span>;
+<a href=#349 id=349 data-nosnippet>349</a>            view_tile.vector.for_each_mut(<span class="kw-2">&amp;mut </span>|shape| {
+<a href=#350 id=350 data-nosnippet>350</a>                add_to_buffer(shape);
+<a href=#351 id=351 data-nosnippet>351</a>                v_count += <span class="number">1</span>;
+<a href=#352 id=352 data-nosnippet>352</a>                hash_shape_topology(shape, <span class="kw-2">&amp;mut </span>topo_hasher);
+<a href=#353 id=353 data-nosnippet>353</a>            });
+<a href=#354 id=354 data-nosnippet>354</a>            v_count.hash(<span class="kw-2">&amp;mut </span>topo_hasher);
+<a href=#355 id=355 data-nosnippet>355</a>            view_tile.raster.len().hash(<span class="kw-2">&amp;mut </span>topo_hasher);
+<a href=#356 id=356 data-nosnippet>356</a>            <span class="kw">for </span>(source_id, shapes) <span class="kw">in </span><span class="kw-2">&amp;mut </span>view_tile.raster {
+<a href=#357 id=357 data-nosnippet>357</a>                source_id.hash(<span class="kw-2">&amp;mut </span>topo_hasher);
+<a href=#358 id=358 data-nosnippet>358</a>                <span class="kw">let </span><span class="kw-2">mut </span>r_count = <span class="number">0usize</span>;
+<a href=#359 id=359 data-nosnippet>359</a>                shapes.for_each_mut(<span class="kw-2">&amp;mut </span>|shape| {
+<a href=#360 id=360 data-nosnippet>360</a>                    add_to_buffer(shape);
+<a href=#361 id=361 data-nosnippet>361</a>                    r_count += <span class="number">1</span>;
+<a href=#362 id=362 data-nosnippet>362</a>                    hash_shape_topology(shape, <span class="kw-2">&amp;mut </span>topo_hasher);
+<a href=#363 id=363 data-nosnippet>363</a>                });
+<a href=#364 id=364 data-nosnippet>364</a>                r_count.hash(<span class="kw-2">&amp;mut </span>topo_hasher);
+<a href=#365 id=365 data-nosnippet>365</a>            }
+<a href=#366 id=366 data-nosnippet>366</a>        }
+<a href=#367 id=367 data-nosnippet>367</a>        drop(add_to_buffer);
+<a href=#368 id=368 data-nosnippet>368</a>        <span class="kw">let </span>topology_hash = topo_hasher.finish();
+<a href=#369 id=369 data-nosnippet>369</a>        <span class="kw">if </span><span class="self">self</span>.topology_generation == <span class="number">0 </span>|| topology_hash != <span class="self">self</span>.last_topology_hash {
+<a href=#370 id=370 data-nosnippet>370</a>            <span class="self">self</span>.last_topology_hash = topology_hash;
+<a href=#371 id=371 data-nosnippet>371</a>            <span class="self">self</span>.topology_generation = <span class="self">self</span>.topology_generation.wrapping_add(<span class="number">1</span>);
+<a href=#372 id=372 data-nosnippet>372</a>        }
+<a href=#373 id=373 data-nosnippet>373</a>
+<a href=#374 id=374 data-nosnippet>374</a>        <span class="kw">if </span>skipped &gt; <span class="number">0 </span>{
+<a href=#375 id=375 data-nosnippet>375</a>            <span class="macro">tracing::warn!</span>(
+<a href=#376 id=376 data-nosnippet>376</a>                skipped,
+<a href=#377 id=377 data-nosnippet>377</a>                capacity,
+<a href=#378 id=378 data-nosnippet>378</a>                <span class="string">"tile pattern exceeds its buffer; distant shapes are skipped this frame"
+<a href=#379 id=379 data-nosnippet>379</a>            </span>);
+<a href=#380 id=380 data-nosnippet>380</a>        }
+<a href=#381 id=381 data-nosnippet>381</a>        <span class="self">self</span>.uploaded = buffer.len() <span class="kw">as </span>u64;
+<a href=#382 id=382 data-nosnippet>382</a>        <span class="kw">let </span>raw_buffer = bytemuck::cast_slice(buffer.as_slice());
+<a href=#383 id=383 data-nosnippet>383</a>        <span class="kw">if </span><span class="self">self</span>.last_uploaded_bytes.as_slice() != raw_buffer {
+<a href=#384 id=384 data-nosnippet>384</a>            queue.write_buffer(<span class="kw-2">&amp;</span><span class="self">self</span>.view_tiles_buffer.inner, <span class="number">0</span>, raw_buffer);
+<a href=#385 id=385 data-nosnippet>385</a>            <span class="self">self</span>.last_uploaded_bytes.clear();
+<a href=#386 id=386 data-nosnippet>386</a>            <span class="self">self</span>.last_uploaded_bytes.extend_from_slice(raw_buffer);
+<a href=#387 id=387 data-nosnippet>387</a>        }
+<a href=#388 id=388 data-nosnippet>388</a>        <span class="self">self</span>.stencil_ids = stencil_ids;
+<a href=#389 id=389 data-nosnippet>389</a>        <span class="self">self</span>.metadata_scratch = buffer;
+<a href=#390 id=390 data-nosnippet>390</a>    }
+<a href=#391 id=391 data-nosnippet>391</a>}
+<a href=#392 id=392 data-nosnippet>392</a>
+<a href=#393 id=393 data-nosnippet>393</a><span class="kw">fn </span>hash_shape_topology(shape: <span class="kw-2">&amp;</span>TileShape, hasher: <span class="kw-2">&amp;mut </span>rustc_hash::FxHasher) {
+<a href=#394 id=394 data-nosnippet>394</a>    shape.coords().hash(hasher);
+<a href=#395 id=395 data-nosnippet>395</a>    shape.wrap.hash(hasher);
+<a href=#396 id=396 data-nosnippet>396</a>    shape.is_drawn_within_another().hash(hasher);
+<a href=#397 id=397 data-nosnippet>397</a>    shape.stencil_reference().hash(hasher);
+<a href=#398 id=398 data-nosnippet>398</a>    shape.buffer_range().hash(hasher);
+<a href=#399 id=399 data-nosnippet>399</a>}
+<a href=#400 id=400 data-nosnippet>400</a>
+<a href=#401 id=401 data-nosnippet>401</a><span class="doccomment">/// The shown tiles with the loaded descendants their source is fading out drawn over each of
+<a href=#402 id=402 data-nosnippet>402</a>/// them, as GL JS draws departing tiles over the tile that replaces them until the fade ends;
+<a href=#403 id=403 data-nosnippet>403</a>/// `None` when nothing under these shapes is departing.
+<a href=#404 id=404 data-nosnippet>404</a></span><span class="attr">#[cfg(feature = <span class="string">"raster"</span>)]
+<a href=#405 id=405 data-nosnippet>405</a></span><span class="kw">fn </span>with_departing&lt;T: HasTile&gt;(
+<a href=#406 id=406 data-nosnippet>406</a>    (availability, source, shapes): (<span class="kw-2">&amp;</span>T, <span class="kw-2">&amp;</span>RasterSourceId, <span class="kw-2">&amp;</span>SourceShapes),
+<a href=#407 id=407 data-nosnippet>407</a>    zoom: Zoom,
+<a href=#408 id=408 data-nosnippet>408</a>    world: <span class="kw-2">&amp;</span>World,
+<a href=#409 id=409 data-nosnippet>409</a>) -&gt; <span class="prelude-ty">Option</span>&lt;SourceShapes&gt; {
+<a href=#410 id=410 data-nosnippet>410</a>    <span class="kw">let </span>shown: Vec&lt;WorldTileCoords&gt; = <span class="kw">match </span>shapes {
+<a href=#411 id=411 data-nosnippet>411</a>        SourceShapes::SourceEqTarget(shape) =&gt; <span class="macro">vec!</span>[shape.coords()],
+<a href=#412 id=412 data-nosnippet>412</a>        SourceShapes::Children(shapes) =&gt; shapes.iter().map(TileShape::coords).collect(),
+<a href=#413 id=413 data-nosnippet>413</a>        SourceShapes::Parent(<span class="kw">_</span>) | SourceShapes::None =&gt; <span class="kw">return </span><span class="prelude-val">None</span>,
+<a href=#414 id=414 data-nosnippet>414</a>    };
+<a href=#415 id=415 data-nosnippet>415</a>    <span class="kw">let </span>departing = world
+<a href=#416 id=416 data-nosnippet>416</a>        .resources
+<a href=#417 id=417 data-nosnippet>417</a>        .get::&lt;<span class="kw">crate</span>::raster::cross_fade::RasterCrossFade&gt;()<span class="question-mark">?
+<a href=#418 id=418 data-nosnippet>418</a>        </span>.departing(source.name())<span class="question-mark">?</span>;
+<a href=#419 id=419 data-nosnippet>419</a>    <span class="kw">let </span><span class="kw-2">mut </span>tiles = Vec::new();
+<a href=#420 id=420 data-nosnippet>420</a>    <span class="kw">let </span><span class="kw-2">mut </span>any = <span class="bool-val">false</span>;
+<a href=#421 id=421 data-nosnippet>421</a>    <span class="kw">for </span>tile <span class="kw">in </span>shown {
+<a href=#422 id=422 data-nosnippet>422</a>        tiles.push(TileShape::new(tile, zoom));
+<a href=#423 id=423 data-nosnippet>423</a>        <span class="kw">let </span><span class="kw-2">mut </span>under: Vec&lt;<span class="kw">_</span>&gt; = departing
+<a href=#424 id=424 data-nosnippet>424</a>            .tiles
+<a href=#425 id=425 data-nosnippet>425</a>            .iter()
+<a href=#426 id=426 data-nosnippet>426</a>            .copied()
+<a href=#427 id=427 data-nosnippet>427</a>            .filter(|departed| {
+<a href=#428 id=428 data-nosnippet>428</a>                departed.z &gt; tile.z
+<a href=#429 id=429 data-nosnippet>429</a>                    &amp;&amp; cover::ancestor_at(<span class="kw-2">*</span>departed, tile.z) == <span class="prelude-val">Some</span>(tile)
+<a href=#430 id=430 data-nosnippet>430</a>                    &amp;&amp; availability.has_tile(<span class="kw-2">*</span>departed, world)
+<a href=#431 id=431 data-nosnippet>431</a>            })
+<a href=#432 id=432 data-nosnippet>432</a>            .collect();
+<a href=#433 id=433 data-nosnippet>433</a>        under.sort_by_key(|departed| (departed.z, departed.x, departed.y));
+<a href=#434 id=434 data-nosnippet>434</a>        any |= !under.is_empty();
+<a href=#435 id=435 data-nosnippet>435</a>        tiles.extend(
+<a href=#436 id=436 data-nosnippet>436</a>            under
+<a href=#437 id=437 data-nosnippet>437</a>                .into_iter()
+<a href=#438 id=438 data-nosnippet>438</a>                .map(|departed| TileShape::new(departed, zoom).within(tile)),
+<a href=#439 id=439 data-nosnippet>439</a>        );
+<a href=#440 id=440 data-nosnippet>440</a>    }
+<a href=#441 id=441 data-nosnippet>441</a>    any.then_some(SourceShapes::Children(tiles))
+<a href=#442 id=442 data-nosnippet>442</a>}
+<a href=#443 id=443 data-nosnippet>443</a>
+<a href=#444 id=444 data-nosnippet>444</a><span class="attr">#[cfg(not(feature = <span class="string">"raster"</span>))]
+<a href=#445 id=445 data-nosnippet>445</a></span><span class="kw">fn </span>with_departing&lt;T: HasTile&gt;(
+<a href=#446 id=446 data-nosnippet>446</a>    _args: (<span class="kw-2">&amp;</span>T, <span class="kw-2">&amp;</span>RasterSourceId, <span class="kw-2">&amp;</span>SourceShapes),
+<a href=#447 id=447 data-nosnippet>447</a>    _zoom: Zoom,
+<a href=#448 id=448 data-nosnippet>448</a>    _world: <span class="kw-2">&amp;</span>World,
+<a href=#449 id=449 data-nosnippet>449</a>) -&gt; <span class="prelude-ty">Option</span>&lt;SourceShapes&gt; {
+<a href=#450 id=450 data-nosnippet>450</a>    <span class="prelude-val">None
+<a href=#451 id=451 data-nosnippet>451</a></span>}
+<a href=#452 id=452 data-nosnippet>452</a>
+<a href=#453 id=453 data-nosnippet>453</a><span class="kw">fn </span>raster_shapes&lt;T: HasTile&gt;(
+<a href=#454 id=454 data-nosnippet>454</a>    sources: <span class="kw-2">&amp;</span>T,
+<a href=#455 id=455 data-nosnippet>455</a>    coords: WorldTileCoords,
+<a href=#456 id=456 data-nosnippet>456</a>    covered: Vec&lt;WorldTileCoords&gt;,
+<a href=#457 id=457 data-nosnippet>457</a>    zoom: Zoom,
+<a href=#458 id=458 data-nosnippet>458</a>    world: <span class="kw-2">&amp;</span>World,
+<a href=#459 id=459 data-nosnippet>459</a>    used_parents: <span class="kw-2">&amp;mut </span>FxHashSet&lt;WorldTileCoords&gt;,
+<a href=#460 id=460 data-nosnippet>460</a>) -&gt; SourceShapes {
+<a href=#461 id=461 data-nosnippet>461</a>    <span class="kw">let </span>covered = <span class="kw">super</span>::coverage::disjoint_tiles(coords, covered);
+<a href=#462 id=462 data-nosnippet>462</a>    <span class="kw">let </span>complete = <span class="kw">super</span>::coverage::covers_target(coords, <span class="kw-2">&amp;</span>covered).then(|| covered.clone());
+<a href=#463 id=463 data-nosnippet>463</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(tiles) = complete {
+<a href=#464 id=464 data-nosnippet>464</a>        selected_shapes(coords, tiles, zoom, used_parents)
+<a href=#465 id=465 data-nosnippet>465</a>    } <span class="kw">else if </span>covered.is_empty() {
+<a href=#466 id=466 data-nosnippet>466</a>        <span class="kw">match </span><span class="kw">super</span>::coverage::loaded_cover(sources, coords, world) {
+<a href=#467 id=467 data-nosnippet>467</a>            <span class="prelude-val">Some</span>(tiles) =&gt; selected_shapes(coords, tiles, zoom, used_parents),
+<a href=#468 id=468 data-nosnippet>468</a>            <span class="prelude-val">None </span>=&gt; source_shapes(sources, coords, zoom, world, used_parents),
+<a href=#469 id=469 data-nosnippet>469</a>        }
+<a href=#470 id=470 data-nosnippet>470</a>    } <span class="kw">else </span>{
+<a href=#471 id=471 data-nosnippet>471</a>        <span class="comment">// What the view needs of this tile is loaded in part: the nearest loaded tile above or
+<a href=#472 id=472 data-nosnippet>472</a>        // at it stays underneath, and the part's own tiles are drawn over it.
+<a href=#473 id=473 data-nosnippet>473</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>tiles = <span class="kw">super</span>::coverage::loaded_cover(sources, coords, world).unwrap_or_default();
+<a href=#474 id=474 data-nosnippet>474</a>        tiles.retain(|tile| !covered.contains(tile));
+<a href=#475 id=475 data-nosnippet>475</a>        tiles.extend(covered);
+<a href=#476 id=476 data-nosnippet>476</a>        tiles.sort_by_key(|tile| tile.z);
+<a href=#477 id=477 data-nosnippet>477</a>        selected_shapes(coords, tiles, zoom, used_parents)
+<a href=#478 id=478 data-nosnippet>478</a>    }
+<a href=#479 id=479 data-nosnippet>479</a>}
+<a href=#480 id=480 data-nosnippet>480</a>
+<a href=#481 id=481 data-nosnippet>481</a><span class="kw">mod </span>cover;
+<a href=#482 id=482 data-nosnippet>482</a><span class="kw">pub use </span>cover::covering_shapes_for;
+<a href=#483 id=483 data-nosnippet>483</a><span class="kw">use </span>cover::{clip_region, selected_shapes, source_shapes, source_shapes_bounded};
 </code></pre></div></section></main></body></html>

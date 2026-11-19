@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["active_raster_sources","finish_tiles_in_use","retain_dem_fallback_ancestors","retain_raster_fallback_ancestors","tile_has_raster_data","tile_raster_settled"]};
+window.SIDEBAR_ITEMS = {"fn":["active_raster_sources","finish_tiles_in_use","retain_dem_fallback_ancestors","retain_drape_tile","retain_raster_fallback_ancestors","retain_terrain_region_if_needed","tile_has_raster_data","tile_raster_settled"]};

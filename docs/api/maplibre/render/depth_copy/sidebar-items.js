@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["DepthCopyNode","DepthCopyPipeline"]};
+window.SIDEBAR_ITEMS = {"struct":["CachedDepthBind","DepthCopyNode","DepthCopyPipeline"]};

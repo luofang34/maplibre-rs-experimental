@@ -246,61 +246,62 @@
 <a href=#246 id=246 data-nosnippet>246</a>                datum,
 <a href=#247 id=247 data-nosnippet>247</a>            );
 <a href=#248 id=248 data-nosnippet>248</a>        }
-<a href=#249 id=249 data-nosnippet>249</a>        <span class="prelude-val">Ok</span>(())
-<a href=#250 id=250 data-nosnippet>250</a>    }
-<a href=#251 id=251 data-nosnippet>251</a>
-<a href=#252 id=252 data-nosnippet>252</a>    <span class="kw">fn </span>feature_join(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; LineJoin {
-<a href=#253 id=253 data-nosnippet>253</a>        <span class="self">self</span>.join_property
-<a href=#254 id=254 data-nosnippet>254</a>            .as_ref()
-<a href=#255 id=255 data-nosnippet>255</a>            .and_then(|property| property.evaluate_for(<span class="self">self</span>.props(), <span class="self">self</span>.zoom))
-<a href=#256 id=256 data-nosnippet>256</a>            .and_then(|name| <span class="kw">crate</span>::style::line_stroke::LineStroke::join_named(<span class="kw-2">&amp;</span>name))
-<a href=#257 id=257 data-nosnippet>257</a>            .unwrap_or(<span class="self">self</span>.stroke.join)
-<a href=#258 id=258 data-nosnippet>258</a>    }
-<a href=#259 id=259 data-nosnippet>259</a>}
-<a href=#260 id=260 data-nosnippet>260</a>
-<a href=#261 id=261 data-nosnippet>261</a><span class="attr">#[cfg(test)]
-<a href=#262 id=262 data-nosnippet>262</a></span><span class="kw">mod </span>tests {
-<a href=#263 id=263 data-nosnippet>263</a>    <span class="attr">#![allow(clippy::expect_used)]
-<a href=#264 id=264 data-nosnippet>264</a>    </span><span class="kw">use </span>geozero::GeomProcessor;
-<a href=#265 id=265 data-nosnippet>265</a>
-<a href=#266 id=266 data-nosnippet>266</a>    <span class="kw">use crate</span>::{
-<a href=#267 id=267 data-nosnippet>267</a>        style::layer::StyleLayer,
-<a href=#268 id=268 data-nosnippet>268</a>        vector::tessellation::{IndexDataType, ZeroTessellator},
-<a href=#269 id=269 data-nosnippet>269</a>    };
-<a href=#270 id=270 data-nosnippet>270</a>
-<a href=#271 id=271 data-nosnippet>271</a>    <span class="kw">fn </span>stroke_vertex_count(round_limit: f32) -&gt; usize {
-<a href=#272 id=272 data-nosnippet>272</a>        <span class="kw">let </span>layer: StyleLayer = serde_json::from_value(<span class="macro">serde_json::json!</span>({
-<a href=#273 id=273 data-nosnippet>273</a>            <span class="string">"id"</span>: <span class="string">"roads"</span>,
-<a href=#274 id=274 data-nosnippet>274</a>            <span class="string">"type"</span>: <span class="string">"line"</span>,
-<a href=#275 id=275 data-nosnippet>275</a>            <span class="string">"source"</span>: <span class="string">"s"</span>,
-<a href=#276 id=276 data-nosnippet>276</a>            <span class="string">"layout"</span>: {
-<a href=#277 id=277 data-nosnippet>277</a>                <span class="string">"line-join"</span>: <span class="string">"round"</span>,
-<a href=#278 id=278 data-nosnippet>278</a>                <span class="string">"line-round-limit"</span>: round_limit
-<a href=#279 id=279 data-nosnippet>279</a>            }
-<a href=#280 id=280 data-nosnippet>280</a>        }))
-<a href=#281 id=281 data-nosnippet>281</a>        .expect(<span class="string">"layer"</span>);
-<a href=#282 id=282 data-nosnippet>282</a>        <span class="kw">let </span><span class="kw-2">mut </span>tess = ZeroTessellator::&lt;IndexDataType&gt; {
-<a href=#283 id=283 data-nosnippet>283</a>            is_line_layer: <span class="bool-val">true</span>,
-<a href=#284 id=284 data-nosnippet>284</a>            ..Default::default()
-<a href=#285 id=285 data-nosnippet>285</a>        };
-<a href=#286 id=286 data-nosnippet>286</a>        tess.set_layer_strokes(<span class="kw-2">&amp;</span>layer);
-<a href=#287 id=287 data-nosnippet>287</a>        <span class="comment">// 90-degree corner has miter ratio sqrt(2) ~= 1.4142.
-<a href=#288 id=288 data-nosnippet>288</a>        </span>tess.linestring_begin(<span class="bool-val">true</span>, <span class="number">3</span>, <span class="number">0</span>).expect(<span class="string">"begin"</span>);
-<a href=#289 id=289 data-nosnippet>289</a>        tess.xy(<span class="number">100.0</span>, <span class="number">100.0</span>, <span class="number">0</span>).expect(<span class="string">"p0"</span>);
-<a href=#290 id=290 data-nosnippet>290</a>        tess.xy(<span class="number">300.0</span>, <span class="number">100.0</span>, <span class="number">1</span>).expect(<span class="string">"p1"</span>);
-<a href=#291 id=291 data-nosnippet>291</a>        tess.xy(<span class="number">300.0</span>, <span class="number">300.0</span>, <span class="number">2</span>).expect(<span class="string">"p2"</span>);
-<a href=#292 id=292 data-nosnippet>292</a>        tess.linestring_end(<span class="bool-val">true</span>, <span class="number">0</span>).expect(<span class="string">"end"</span>);
-<a href=#293 id=293 data-nosnippet>293</a>        tess.buffer.vertices.len()
-<a href=#294 id=294 data-nosnippet>294</a>    }
-<a href=#295 id=295 data-nosnippet>295</a>
-<a href=#296 id=296 data-nosnippet>296</a>    <span class="attr">#[test]
-<a href=#297 id=297 data-nosnippet>297</a>    </span><span class="kw">fn </span>line_round_limit_converts_round_join_to_miter_when_threshold_exceeds_corner_ratio() {
-<a href=#298 id=298 data-nosnippet>298</a>        <span class="kw">let </span>round_verts = stroke_vertex_count(<span class="number">1.05</span>);
-<a href=#299 id=299 data-nosnippet>299</a>        <span class="kw">let </span>miter_verts = stroke_vertex_count(<span class="number">1.6</span>);
-<a href=#300 id=300 data-nosnippet>300</a>        <span class="macro">assert!</span>(
-<a href=#301 id=301 data-nosnippet>301</a>            miter_verts &lt; round_verts,
-<a href=#302 id=302 data-nosnippet>302</a>            <span class="string">"round_limit=1.6 should convert 90-deg round join (ratio ~1.414) to miter ({miter_verts} &lt; {round_verts})"
-<a href=#303 id=303 data-nosnippet>303</a>        </span>);
-<a href=#304 id=304 data-nosnippet>304</a>    }
-<a href=#305 id=305 data-nosnippet>305</a>}
+<a href=#249 id=249 data-nosnippet>249</a>        <span class="self">self</span>.flush_streaming_prepack(stroke_index_start);
+<a href=#250 id=250 data-nosnippet>250</a>        <span class="prelude-val">Ok</span>(())
+<a href=#251 id=251 data-nosnippet>251</a>    }
+<a href=#252 id=252 data-nosnippet>252</a>
+<a href=#253 id=253 data-nosnippet>253</a>    <span class="kw">fn </span>feature_join(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; LineJoin {
+<a href=#254 id=254 data-nosnippet>254</a>        <span class="self">self</span>.join_property
+<a href=#255 id=255 data-nosnippet>255</a>            .as_ref()
+<a href=#256 id=256 data-nosnippet>256</a>            .and_then(|property| property.evaluate_for(<span class="self">self</span>.props(), <span class="self">self</span>.zoom))
+<a href=#257 id=257 data-nosnippet>257</a>            .and_then(|name| <span class="kw">crate</span>::style::line_stroke::LineStroke::join_named(<span class="kw-2">&amp;</span>name))
+<a href=#258 id=258 data-nosnippet>258</a>            .unwrap_or(<span class="self">self</span>.stroke.join)
+<a href=#259 id=259 data-nosnippet>259</a>    }
+<a href=#260 id=260 data-nosnippet>260</a>}
+<a href=#261 id=261 data-nosnippet>261</a>
+<a href=#262 id=262 data-nosnippet>262</a><span class="attr">#[cfg(test)]
+<a href=#263 id=263 data-nosnippet>263</a></span><span class="kw">mod </span>tests {
+<a href=#264 id=264 data-nosnippet>264</a>    <span class="attr">#![allow(clippy::expect_used)]
+<a href=#265 id=265 data-nosnippet>265</a>    </span><span class="kw">use </span>geozero::GeomProcessor;
+<a href=#266 id=266 data-nosnippet>266</a>
+<a href=#267 id=267 data-nosnippet>267</a>    <span class="kw">use crate</span>::{
+<a href=#268 id=268 data-nosnippet>268</a>        style::layer::StyleLayer,
+<a href=#269 id=269 data-nosnippet>269</a>        vector::tessellation::{IndexDataType, ZeroTessellator},
+<a href=#270 id=270 data-nosnippet>270</a>    };
+<a href=#271 id=271 data-nosnippet>271</a>
+<a href=#272 id=272 data-nosnippet>272</a>    <span class="kw">fn </span>stroke_vertex_count(round_limit: f32) -&gt; usize {
+<a href=#273 id=273 data-nosnippet>273</a>        <span class="kw">let </span>layer: StyleLayer = serde_json::from_value(<span class="macro">serde_json::json!</span>({
+<a href=#274 id=274 data-nosnippet>274</a>            <span class="string">"id"</span>: <span class="string">"roads"</span>,
+<a href=#275 id=275 data-nosnippet>275</a>            <span class="string">"type"</span>: <span class="string">"line"</span>,
+<a href=#276 id=276 data-nosnippet>276</a>            <span class="string">"source"</span>: <span class="string">"s"</span>,
+<a href=#277 id=277 data-nosnippet>277</a>            <span class="string">"layout"</span>: {
+<a href=#278 id=278 data-nosnippet>278</a>                <span class="string">"line-join"</span>: <span class="string">"round"</span>,
+<a href=#279 id=279 data-nosnippet>279</a>                <span class="string">"line-round-limit"</span>: round_limit
+<a href=#280 id=280 data-nosnippet>280</a>            }
+<a href=#281 id=281 data-nosnippet>281</a>        }))
+<a href=#282 id=282 data-nosnippet>282</a>        .expect(<span class="string">"layer"</span>);
+<a href=#283 id=283 data-nosnippet>283</a>        <span class="kw">let </span><span class="kw-2">mut </span>tess = ZeroTessellator::&lt;IndexDataType&gt; {
+<a href=#284 id=284 data-nosnippet>284</a>            is_line_layer: <span class="bool-val">true</span>,
+<a href=#285 id=285 data-nosnippet>285</a>            ..Default::default()
+<a href=#286 id=286 data-nosnippet>286</a>        };
+<a href=#287 id=287 data-nosnippet>287</a>        tess.set_layer_strokes(<span class="kw-2">&amp;</span>layer);
+<a href=#288 id=288 data-nosnippet>288</a>        <span class="comment">// 90-degree corner has miter ratio sqrt(2) ~= 1.4142.
+<a href=#289 id=289 data-nosnippet>289</a>        </span>tess.linestring_begin(<span class="bool-val">true</span>, <span class="number">3</span>, <span class="number">0</span>).expect(<span class="string">"begin"</span>);
+<a href=#290 id=290 data-nosnippet>290</a>        tess.xy(<span class="number">100.0</span>, <span class="number">100.0</span>, <span class="number">0</span>).expect(<span class="string">"p0"</span>);
+<a href=#291 id=291 data-nosnippet>291</a>        tess.xy(<span class="number">300.0</span>, <span class="number">100.0</span>, <span class="number">1</span>).expect(<span class="string">"p1"</span>);
+<a href=#292 id=292 data-nosnippet>292</a>        tess.xy(<span class="number">300.0</span>, <span class="number">300.0</span>, <span class="number">2</span>).expect(<span class="string">"p2"</span>);
+<a href=#293 id=293 data-nosnippet>293</a>        tess.linestring_end(<span class="bool-val">true</span>, <span class="number">0</span>).expect(<span class="string">"end"</span>);
+<a href=#294 id=294 data-nosnippet>294</a>        tess.buffer.vertices.len()
+<a href=#295 id=295 data-nosnippet>295</a>    }
+<a href=#296 id=296 data-nosnippet>296</a>
+<a href=#297 id=297 data-nosnippet>297</a>    <span class="attr">#[test]
+<a href=#298 id=298 data-nosnippet>298</a>    </span><span class="kw">fn </span>line_round_limit_converts_round_join_to_miter_when_threshold_exceeds_corner_ratio() {
+<a href=#299 id=299 data-nosnippet>299</a>        <span class="kw">let </span>round_verts = stroke_vertex_count(<span class="number">1.05</span>);
+<a href=#300 id=300 data-nosnippet>300</a>        <span class="kw">let </span>miter_verts = stroke_vertex_count(<span class="number">1.6</span>);
+<a href=#301 id=301 data-nosnippet>301</a>        <span class="macro">assert!</span>(
+<a href=#302 id=302 data-nosnippet>302</a>            miter_verts &lt; round_verts,
+<a href=#303 id=303 data-nosnippet>303</a>            <span class="string">"round_limit=1.6 should convert 90-deg round join (ratio ~1.414) to miter ({miter_verts} &lt; {round_verts})"
+<a href=#304 id=304 data-nosnippet>304</a>        </span>);
+<a href=#305 id=305 data-nosnippet>305</a>    }
+<a href=#306 id=306 data-nosnippet>306</a>}
 </code></pre></div></section></main></body></html>

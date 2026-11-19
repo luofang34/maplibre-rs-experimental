@@ -39,8 +39,8 @@
 <a href=#39 id=39 data-nosnippet>39</a></span><span class="attr">#[allow(clippy::expect_used)]
 <a href=#40 id=40 data-nosnippet>40</a></span><span class="kw">pub fn </span>run_multithreaded&lt;F: Future&gt;(future: F) -&gt; F::Output {
 <a href=#41 id=41 data-nosnippet>41</a>    tokio::runtime::Builder::new_multi_thread()
-<a href=#42 id=42 data-nosnippet>42</a>        .worker_threads(<span class="number">4</span>)
-<a href=#43 id=43 data-nosnippet>43</a>        .max_blocking_threads(<span class="number">4</span>)
+<a href=#42 id=42 data-nosnippet>42</a>        .worker_threads(<span class="number">2</span>)
+<a href=#43 id=43 data-nosnippet>43</a>        .max_blocking_threads(<span class="number">2</span>)
 <a href=#44 id=44 data-nosnippet>44</a>        .enable_io()
 <a href=#45 id=45 data-nosnippet>45</a>        .enable_time()
 <a href=#46 id=46 data-nosnippet>46</a>        .thread_name_fn(|| {

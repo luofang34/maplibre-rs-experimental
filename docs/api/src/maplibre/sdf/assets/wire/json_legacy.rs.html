@@ -126,25 +126,26 @@
 <a href=#126 id=126 data-nosnippet>126</a>                properties,
 <a href=#127 id=127 data-nosnippet>127</a>                sort_key: feature.sort_key,
 <a href=#128 id=128 data-nosnippet>128</a>                geometry_type: feature.geometry_type,
-<a href=#129 id=129 data-nosnippet>129</a>            },
-<a href=#130 id=130 data-nosnippet>130</a>            anchor_shifts: feature.anchor_shifts,
-<a href=#131 id=131 data-nosnippet>131</a>            text_sets: feature.text_sets.iter().map(|set| set[<span class="number">0</span>]..set[<span class="number">1</span>]).collect(),
-<a href=#132 id=132 data-nosnippet>132</a>            anchor_sets: feature.anchor_sets,
-<a href=#133 id=133 data-nosnippet>133</a>            text_colors: feature
-<a href=#134 id=134 data-nosnippet>134</a>                .text_colors
-<a href=#135 id=135 data-nosnippet>135</a>                .into_iter()
-<a href=#136 id=136 data-nosnippet>136</a>                .map(|(range, color)| (range[<span class="number">0</span>]..range[<span class="number">1</span>], color))
-<a href=#137 id=137 data-nosnippet>137</a>                .collect(),
-<a href=#138 id=138 data-nosnippet>138</a>            fallback: feature.fallback,
-<a href=#139 id=139 data-nosnippet>139</a>            repeat_key: feature.repeat_key.map(Arc::from),
-<a href=#140 id=140 data-nosnippet>140</a>            line: feature.line.map(|line| <span class="kw">crate</span>::sdf::LineLabel {
-<a href=#141 id=141 data-nosnippet>141</a>                polyline: line.polyline.into(),
-<a href=#142 id=142 data-nosnippet>142</a>                anchor_distance: line.anchor_distance,
-<a href=#143 id=143 data-nosnippet>143</a>                glyph_offsets: line.glyph_offsets,
-<a href=#144 id=144 data-nosnippet>144</a>                image_sizes: line.image_sizes,
-<a href=#145 id=145 data-nosnippet>145</a>                first_glyph_index: line.first_glyph_index,
-<a href=#146 id=146 data-nosnippet>146</a>            }),
-<a href=#147 id=147 data-nosnippet>147</a>        }
-<a href=#148 id=148 data-nosnippet>148</a>    }
-<a href=#149 id=149 data-nosnippet>149</a>}
+<a href=#129 id=129 data-nosnippet>129</a>                source_feature_index: <span class="prelude-val">None</span>,
+<a href=#130 id=130 data-nosnippet>130</a>            },
+<a href=#131 id=131 data-nosnippet>131</a>            anchor_shifts: feature.anchor_shifts,
+<a href=#132 id=132 data-nosnippet>132</a>            text_sets: feature.text_sets.iter().map(|set| set[<span class="number">0</span>]..set[<span class="number">1</span>]).collect(),
+<a href=#133 id=133 data-nosnippet>133</a>            anchor_sets: feature.anchor_sets,
+<a href=#134 id=134 data-nosnippet>134</a>            text_colors: feature
+<a href=#135 id=135 data-nosnippet>135</a>                .text_colors
+<a href=#136 id=136 data-nosnippet>136</a>                .into_iter()
+<a href=#137 id=137 data-nosnippet>137</a>                .map(|(range, color)| (range[<span class="number">0</span>]..range[<span class="number">1</span>], color))
+<a href=#138 id=138 data-nosnippet>138</a>                .collect(),
+<a href=#139 id=139 data-nosnippet>139</a>            fallback: feature.fallback,
+<a href=#140 id=140 data-nosnippet>140</a>            repeat_key: feature.repeat_key.map(Arc::from),
+<a href=#141 id=141 data-nosnippet>141</a>            line: feature.line.map(|line| <span class="kw">crate</span>::sdf::LineLabel {
+<a href=#142 id=142 data-nosnippet>142</a>                polyline: line.polyline.into(),
+<a href=#143 id=143 data-nosnippet>143</a>                anchor_distance: line.anchor_distance,
+<a href=#144 id=144 data-nosnippet>144</a>                glyph_offsets: line.glyph_offsets,
+<a href=#145 id=145 data-nosnippet>145</a>                image_sizes: line.image_sizes,
+<a href=#146 id=146 data-nosnippet>146</a>                first_glyph_index: line.first_glyph_index,
+<a href=#147 id=147 data-nosnippet>147</a>            }),
+<a href=#148 id=148 data-nosnippet>148</a>        }
+<a href=#149 id=149 data-nosnippet>149</a>    }
+<a href=#150 id=150 data-nosnippet>150</a>}
 </code></pre></div></section></main></body></html>

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["depends_on_overscaling","display_pixel_ratio","is_current","pixel_ratio","refresh_only"],"mod":["fallback","group_tile","limiter","rescale","velocity","worker"],"struct":["RequestSystem"]};
+window.SIDEBAR_ITEMS = {"fn":["depends_on_overscaling","is_current","refresh_only","release_unwanted_tiles","request_tile"],"mod":["fallback","group_tile","limiter","memo","rescale","velocity","worker"],"struct":["RequestSystem"]};

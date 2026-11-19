@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["QueryError","QueryGeometry"],"fn":["query_rendered_symbols","query_rendered_symbols_in"],"struct":["PlacedSymbol","PlacedSymbols","PlacementBearing","QueryOptions","RenderedSymbol"]};
+window.SIDEBAR_ITEMS = {"enum":["QueryError","QueryGeometry"],"fn":["query_rendered_symbols","query_rendered_symbols_in","resolve_symbol_properties"],"struct":["PlacedSymbol","PlacedSymbols","PlacementBearing","QueryOptions","RenderedSymbol"]};

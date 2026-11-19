@@ -61,7 +61,7 @@
 <a href=#61 id=61 data-nosnippet>61</a>            </span>|| (uniforms.text[<span class="number">1</span>] &gt; <span class="number">0.0
 <a href=#62 id=62 data-nosnippet>62</a>                </span>&amp;&amp; paint.number(<span class="string">"text-letter-spacing"</span>, <span class="kw-2">&amp;</span>Default::default(), zoom, <span class="number">0.0</span>) &lt; <span class="number">0.0</span>);
 <a href=#63 id=63 data-nosnippet>63</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(binding) = <span class="self">self</span>.bindings.get_mut(<span class="kw-2">&amp;</span>key) {
-<a href=#64 id=64 data-nosnippet>64</a>            <span class="kw">if </span>Arc::ptr_eq(<span class="kw-2">&amp;</span>binding.atlas.source, atlas) {
+<a href=#64 id=64 data-nosnippet>64</a>            <span class="kw">if </span>binding.atlas.source.same_gpu_atlas(atlas) {
 <a href=#65 id=65 data-nosnippet>65</a>                binding.separate_halo = separate_halo;
 <a href=#66 id=66 data-nosnippet>66</a>                <span class="kw">if </span>binding.uniforms != uniforms {
 <a href=#67 id=67 data-nosnippet>67</a>                    gpu.queue
@@ -72,17 +72,17 @@
 <a href=#72 id=72 data-nosnippet>72</a>            }
 <a href=#73 id=73 data-nosnippet>73</a>        }
 <a href=#74 id=74 data-nosnippet>74</a>        <span class="comment">// Source atlases can share tile coordinates without sharing sprite or font pixels.
-<a href=#75 id=75 data-nosnippet>75</a>        </span><span class="kw">let </span>identity = Arc::as_ptr(atlas) <span class="kw">as </span>usize;
+<a href=#75 id=75 data-nosnippet>75</a>        </span><span class="kw">let </span>identity = atlas.gpu_identity();
 <a href=#76 id=76 data-nosnippet>76</a>        <span class="kw">let </span>texture = <span class="self">self
 <a href=#77 id=77 data-nosnippet>77</a>            </span>.tile_atlases
 <a href=#78 id=78 data-nosnippet>78</a>            .get(<span class="kw-2">&amp;</span>(key.<span class="number">0</span>, identity))
-<a href=#79 id=79 data-nosnippet>79</a>            .filter(|cached| Arc::ptr_eq(<span class="kw-2">&amp;</span>cached.source, atlas))
+<a href=#79 id=79 data-nosnippet>79</a>            .filter(|cached| cached.source.same_gpu_atlas(atlas))
 <a href=#80 id=80 data-nosnippet>80</a>            .cloned()
 <a href=#81 id=81 data-nosnippet>81</a>            .or_else(|| {
 <a href=#82 id=82 data-nosnippet>82</a>                <span class="self">self</span>.atlases
 <a href=#83 id=83 data-nosnippet>83</a>                    .get(<span class="kw-2">&amp;</span>identity)
 <a href=#84 id=84 data-nosnippet>84</a>                    .and_then(Weak::upgrade)
-<a href=#85 id=85 data-nosnippet>85</a>                    .filter(|cached| Arc::ptr_eq(<span class="kw-2">&amp;</span>cached.source, atlas))
+<a href=#85 id=85 data-nosnippet>85</a>                    .filter(|cached| cached.source.same_gpu_atlas(atlas))
 <a href=#86 id=86 data-nosnippet>86</a>            })
 <a href=#87 id=87 data-nosnippet>87</a>            .unwrap_or_else(|| {
 <a href=#88 id=88 data-nosnippet>88</a>                <span class="kw">let </span>texture = share_gpu(TileAtlas::new(gpu, atlas));

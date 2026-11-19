@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["current_zoom","feature_colors_depend_on_zoom","feature_paint_depends_on_zoom","next_zoom","pattern_color","quantized_layer_opacity","refresh_layer_paint","stabilize_zoom","uniform_color"],"struct":["PaintRefreshScratch","PaintZoom"]};
+window.SIDEBAR_ITEMS = {"fn":["current_zoom","feature_colors_depend_on_zoom","feature_paint_depends_on_zoom","layer_paint_flags","next_zoom","pattern_color","quantized_layer_opacity","refresh_layer_paint","stabilize_zoom","uniform_color"],"struct":["PaintRefreshScratch","PaintZoom"]};
