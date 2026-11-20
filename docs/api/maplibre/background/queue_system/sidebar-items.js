@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["atmosphere_blend","queue_system"]};
+window.SIDEBAR_ITEMS = {"fn":["atmosphere_blend","flat_viewport_covered","queue_system"]};

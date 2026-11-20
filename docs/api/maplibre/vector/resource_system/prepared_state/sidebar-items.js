@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["layer_uses_pattern","line_uses_dash_or_pattern"],"struct":["VectorPreparedState"]};
+window.SIDEBAR_ITEMS = {"fn":["classify_fill_opacity","layer_uses_pattern","line_uses_dash_or_pattern"],"struct":["VectorPreparedState"]};

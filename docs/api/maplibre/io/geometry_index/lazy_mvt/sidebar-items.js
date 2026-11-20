@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["MAX_DECOMPRESSED_MVT_BYTES"],"fn":["compress_lz4_block","decompress_lz4_block","push_lz4_extra","read_lz4_extra"],"struct":["LazyMvtIndex"]};
+window.SIDEBAR_ITEMS = {"constant":["DEFLATE_MAGIC","MAX_DECOMPRESSED_MVT_BYTES"],"fn":["compress_packed","decompress_lz4_block","decompress_packed_bytes","read_lz4_extra"],"struct":["LazyMvtIndex"]};

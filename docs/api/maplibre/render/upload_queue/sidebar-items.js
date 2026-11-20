@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["MAX_STAGED_WRITE_BYTES","MAX_STAGING_BUFFER_CAPACITY","MIN_STAGING_BUFFER_CAPACITY","QUIET_FRAMES_BEFORE_SHRINK","SHRINK_STAGING_BUFFER_CAPACITY"],"struct":["StagedCopy","StagingBeltState","UploadQueue"]};
+window.SIDEBAR_ITEMS = {"constant":["MAX_STAGED_WRITE_BYTES","MAX_STAGING_BUFFER_CAPACITY","SHRINK_STAGING_BUFFER_CAPACITY"],"fn":["flush_copies_direct"],"mod":["native_ring"],"struct":["StagedCopy","StagingBeltState","UploadQueue"]};

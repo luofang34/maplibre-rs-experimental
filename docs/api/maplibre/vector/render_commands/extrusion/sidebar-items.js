@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["extrusion_pass"],"struct":["SetExtrusionPipeline"],"type":["DrawExtrusionClear","DrawExtrusionColor","DrawExtrusionDepth","DrawExtrusionPatternColor","DrawExtrusionTranslucentBack","DrawExtrusionTranslucentFront"]};
+window.SIDEBAR_ITEMS = {"mod":["extrusion_pass"],"struct":["DrawExtrusionStencilClear","SetExtrusionPipeline"],"type":["DrawExtrusionColor","DrawExtrusionDepth","DrawExtrusionPatternColor","DrawExtrusionTranslucentBack","DrawExtrusionTranslucentFront"]};

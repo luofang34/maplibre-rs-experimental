@@ -306,12 +306,12 @@
 <a href=#306 id=306 data-nosnippet>306</a>    v.edge_distance.abs() &lt;= <span class="number">1e-3
 <a href=#307 id=307 data-nosnippet>307</a>        </span>&amp;&amp; datum_code.abs() &lt;= <span class="number">1e-3
 <a href=#308 id=308 data-nosnippet>308</a>        </span>&amp;&amp; rise.abs() &lt;= <span class="number">1e-3
-<a href=#309 id=309 data-nosnippet>309</a>        </span>&amp;&amp; (<span class="number">0.0</span>..=<span class="number">255.5</span>).contains(<span class="kw-2">&amp;</span>v.distance)
+<a href=#309 id=309 data-nosnippet>309</a>        </span>&amp;&amp; (<span class="number">0.0</span>..=<span class="number">511.5</span>).contains(<span class="kw-2">&amp;</span>v.distance)
 <a href=#310 id=310 data-nosnippet>310</a>        &amp;&amp; (<span class="number">0.0</span>..=<span class="number">1023.5</span>).contains(<span class="kw-2">&amp;</span>v.elevation)
 <a href=#311 id=311 data-nosnippet>311</a>}
 <a href=#312 id=312 data-nosnippet>312</a>
 <a href=#313 id=313 data-nosnippet>313</a><span class="doccomment">/// Returns `true` when every vertex in `src` fits in the compact 8-byte `fill-extrusion`
-<a href=#314 id=314 data-nosnippet>314</a>/// vertex format (base in `0..=255.5` m, height in `0..=1023.5` m, zero `edge_distance`,
+<a href=#314 id=314 data-nosnippet>314</a>/// vertex format (base in `0..=511.5` m, height in `0..=1023.5` m, zero `edge_distance`,
 <a href=#315 id=315 data-nosnippet>315</a>/// default ground-datum `0`, and zero zoom-interpolated `rise`).
 <a href=#316 id=316 data-nosnippet>316</a></span><span class="kw">pub fn </span>can_encode_compact_extrusion(src: <span class="kw-2">&amp;</span>[ShaderVertex]) -&gt; bool {
 <a href=#317 id=317 data-nosnippet>317</a>    !src.is_empty() &amp;&amp; src.iter().all(is_compact_extrusion_vertex)
@@ -321,14 +321,14 @@
 <a href=#321 id=321 data-nosnippet>321</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>encode_compact_extrusion_words(v: <span class="kw-2">&amp;</span>ShaderVertex) -&gt; [u32; <span class="number">2</span>] {
 <a href=#322 id=322 data-nosnippet>322</a>    <span class="kw">let </span>w0 = pack_tile_pos_q2(v.position);
 <a href=#323 id=323 data-nosnippet>323</a>    <span class="kw">let </span>(kind, angle) = extrusion_kind_and_angle(v.normal);
-<a href=#324 id=324 data-nosnippet>324</a>    <span class="kw">let </span>angle_u10 = <span class="kw">if </span>kind &gt;= <span class="number">2 </span>{
-<a href=#325 id=325 data-nosnippet>325</a>        (angle * (<span class="number">1024.0 </span>/ TAU)).round() <span class="kw">as </span>u32 &amp; <span class="number">0x3ff
+<a href=#324 id=324 data-nosnippet>324</a>    <span class="kw">let </span>angle_u9 = <span class="kw">if </span>kind &gt;= <span class="number">2 </span>{
+<a href=#325 id=325 data-nosnippet>325</a>        (angle * (<span class="number">512.0 </span>/ TAU)).round() <span class="kw">as </span>u32 &amp; <span class="number">0x1ff
 <a href=#326 id=326 data-nosnippet>326</a>    </span>} <span class="kw">else </span>{
 <a href=#327 id=327 data-nosnippet>327</a>        <span class="number">0
 <a href=#328 id=328 data-nosnippet>328</a>    </span>};
-<a href=#329 id=329 data-nosnippet>329</a>    <span class="kw">let </span>base_u9 = (v.distance * <span class="number">2.0</span>).round().clamp(<span class="number">0.0</span>, <span class="number">511.0</span>) <span class="kw">as </span>u32;
+<a href=#329 id=329 data-nosnippet>329</a>    <span class="kw">let </span>base_u10 = (v.distance * <span class="number">2.0</span>).round().clamp(<span class="number">0.0</span>, <span class="number">1023.0</span>) <span class="kw">as </span>u32;
 <a href=#330 id=330 data-nosnippet>330</a>    <span class="kw">let </span>height_u11 = (v.elevation * <span class="number">2.0</span>).round().clamp(<span class="number">0.0</span>, <span class="number">2047.0</span>) <span class="kw">as </span>u32;
-<a href=#331 id=331 data-nosnippet>331</a>    <span class="kw">let </span>w1 = kind | (angle_u10 &lt;&lt; <span class="number">2</span>) | (base_u9 &lt;&lt; <span class="number">12</span>) | (height_u11 &lt;&lt; <span class="number">21</span>);
+<a href=#331 id=331 data-nosnippet>331</a>    <span class="kw">let </span>w1 = kind | (angle_u9 &lt;&lt; <span class="number">2</span>) | (base_u10 &lt;&lt; <span class="number">11</span>) | (height_u11 &lt;&lt; <span class="number">21</span>);
 <a href=#332 id=332 data-nosnippet>332</a>    [w0, w1]
 <a href=#333 id=333 data-nosnippet>333</a>}
 <a href=#334 id=334 data-nosnippet>334</a>
@@ -337,8 +337,8 @@
 <a href=#337 id=337 data-nosnippet>337</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>unpack_compact_extrusion_word([w0, compact_w1]: [u32; <span class="number">2</span>]) -&gt; GpuShaderVertex {
 <a href=#338 id=338 data-nosnippet>338</a>    <span class="kw">let </span>rise_f16 = u32::from(f32_to_f16_bits(<span class="number">0.0</span>));
 <a href=#339 id=339 data-nosnippet>339</a>    <span class="kw">let </span>kind = compact_w1 &amp; <span class="number">3</span>;
-<a href=#340 id=340 data-nosnippet>340</a>    <span class="kw">let </span>angle_u14 = ((compact_w1 &gt;&gt; <span class="number">2</span>) &amp; <span class="number">0x3ff</span>) &lt;&lt; <span class="number">4</span>;
-<a href=#341 id=341 data-nosnippet>341</a>    <span class="kw">let </span>base_i24 = (((compact_w1 &gt;&gt; <span class="number">12</span>) &amp; <span class="number">0x1ff</span>) * <span class="number">8</span>) <span class="kw">as </span>i32;
+<a href=#340 id=340 data-nosnippet>340</a>    <span class="kw">let </span>angle_u14 = ((compact_w1 &gt;&gt; <span class="number">2</span>) &amp; <span class="number">0x1ff</span>) &lt;&lt; <span class="number">5</span>;
+<a href=#341 id=341 data-nosnippet>341</a>    <span class="kw">let </span>base_i24 = (((compact_w1 &gt;&gt; <span class="number">11</span>) &amp; <span class="number">0x3ff</span>) * <span class="number">8</span>) <span class="kw">as </span>i32;
 <a href=#342 id=342 data-nosnippet>342</a>    <span class="kw">let </span>height_i24 = ((compact_w1 &gt;&gt; <span class="number">21</span>) * <span class="number">8</span>) <span class="kw">as </span>i32;
 <a href=#343 id=343 data-nosnippet>343</a>    <span class="kw">let </span>w1 = kind | (angle_u14 &lt;&lt; <span class="number">2</span>);
 <a href=#344 id=344 data-nosnippet>344</a>    <span class="kw">let </span>w2 = ((base_i24 <span class="kw">as </span>u32) &amp; <span class="number">0x00ff_ffff</span>) | ((rise_f16 &amp; <span class="number">0xff</span>) &lt;&lt; <span class="number">24</span>);
@@ -475,24 +475,21 @@
 <a href=#475 id=475 data-nosnippet>475</a>    <span class="kw">use </span><span class="kw">crate</span>::vector::tessellation::pack_extrusion_code;
 <a href=#476 id=476 data-nosnippet>476</a>
 <a href=#477 id=477 data-nosnippet>477</a>    <span class="attr">#[test]
-<a href=#478 id=478 data-nosnippet>478</a>    </span><span class="kw">fn </span>compact_extrusion_allows_overscale_and_fractional_height_without_rise_or_pattern() {
+<a href=#478 id=478 data-nosnippet>478</a>    </span><span class="kw">fn </span>compact_extrusion_allows_overscale_and_tall_base_without_rise_or_pattern() {
 <a href=#479 id=479 data-nosnippet>479</a>        <span class="kw">let </span><span class="kw-2">mut </span>v = ShaderVertex::new([<span class="number">100.0</span>, <span class="number">200.0</span>], [<span class="number">1.0</span>, <span class="number">0.0</span>]);
-<a href=#480 id=480 data-nosnippet>480</a>        v.distance = <span class="number">1.25</span>;
-<a href=#481 id=481 data-nosnippet>481</a>        v.elevation = <span class="number">12.3</span>;
+<a href=#480 id=480 data-nosnippet>480</a>        v.distance = <span class="number">350.0</span>;
+<a href=#481 id=481 data-nosnippet>481</a>        v.elevation = <span class="number">450.5</span>;
 <a href=#482 id=482 data-nosnippet>482</a>        v.corner_code = pack_extrusion_code(<span class="number">0.0</span>, <span class="number">2</span>, <span class="number">0</span>);
 <a href=#483 id=483 data-nosnippet>483</a>        <span class="macro">assert!</span>(can_encode_compact_extrusion(<span class="kw-2">&amp;</span>[v]));
-<a href=#484 id=484 data-nosnippet>484</a>
-<a href=#485 id=485 data-nosnippet>485</a>        <span class="kw">let </span><span class="kw-2">mut </span>with_pattern = v;
-<a href=#486 id=486 data-nosnippet>486</a>        with_pattern.edge_distance = <span class="number">5.0</span>;
-<a href=#487 id=487 data-nosnippet>487</a>        <span class="macro">assert!</span>(!can_encode_compact_extrusion(<span class="kw-2">&amp;</span>[with_pattern]));
-<a href=#488 id=488 data-nosnippet>488</a>
-<a href=#489 id=489 data-nosnippet>489</a>        <span class="kw">let </span><span class="kw-2">mut </span>with_rise = v;
-<a href=#490 id=490 data-nosnippet>490</a>        with_rise.corner_code = pack_extrusion_code(<span class="number">4.0</span>, <span class="number">2</span>, <span class="number">0</span>);
-<a href=#491 id=491 data-nosnippet>491</a>        <span class="macro">assert!</span>(!can_encode_compact_extrusion(<span class="kw-2">&amp;</span>[with_rise]));
-<a href=#492 id=492 data-nosnippet>492</a>
-<a href=#493 id=493 data-nosnippet>493</a>        <span class="kw">let </span><span class="kw-2">mut </span>with_datum = v;
-<a href=#494 id=494 data-nosnippet>494</a>        with_datum.corner_code = pack_extrusion_code(<span class="number">0.0</span>, <span class="number">0</span>, <span class="number">1</span>);
-<a href=#495 id=495 data-nosnippet>495</a>        <span class="macro">assert!</span>(!can_encode_compact_extrusion(<span class="kw-2">&amp;</span>[with_datum]));
-<a href=#496 id=496 data-nosnippet>496</a>    }
-<a href=#497 id=497 data-nosnippet>497</a>}
+<a href=#484 id=484 data-nosnippet>484</a>        <span class="kw">let </span>unpacked = unpack_compact_extrusion_word(encode_compact_extrusion_words(<span class="kw-2">&amp;</span>v));
+<a href=#485 id=485 data-nosnippet>485</a>        <span class="macro">assert!</span>((((unpacked.<span class="number">0</span>[<span class="number">2</span>] &lt;&lt; <span class="number">8</span>) <span class="kw">as </span>i32 &gt;&gt; <span class="number">8</span>) <span class="kw">as </span>f32 / <span class="number">16.0 </span>- <span class="number">350.0</span>).abs() &lt;= <span class="number">0.5</span>);
+<a href=#486 id=486 data-nosnippet>486</a>        <span class="macro">assert!</span>((((unpacked.<span class="number">0</span>[<span class="number">3</span>] &lt;&lt; <span class="number">8</span>) <span class="kw">as </span>i32 &gt;&gt; <span class="number">8</span>) <span class="kw">as </span>f32 / <span class="number">16.0 </span>- <span class="number">450.5</span>).abs() &lt;= <span class="number">0.5</span>);
+<a href=#487 id=487 data-nosnippet>487</a>        <span class="kw">for </span>bad <span class="kw">in </span>[(<span class="number">5.0</span>, <span class="number">0.0</span>, <span class="number">0</span>), (<span class="number">0.0</span>, <span class="number">4.0</span>, <span class="number">0</span>), (<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1</span>)] {
+<a href=#488 id=488 data-nosnippet>488</a>            <span class="kw">let </span><span class="kw-2">mut </span>other = v;
+<a href=#489 id=489 data-nosnippet>489</a>            (other.edge_distance, other.corner_code) =
+<a href=#490 id=490 data-nosnippet>490</a>                (bad.<span class="number">0</span>, pack_extrusion_code(bad.<span class="number">1</span>, <span class="number">0</span>, bad.<span class="number">2</span>));
+<a href=#491 id=491 data-nosnippet>491</a>            <span class="macro">assert!</span>(!can_encode_compact_extrusion(<span class="kw-2">&amp;</span>[other]));
+<a href=#492 id=492 data-nosnippet>492</a>        }
+<a href=#493 id=493 data-nosnippet>493</a>    }
+<a href=#494 id=494 data-nosnippet>494</a>}
 </code></pre></div></section></main></body></html>

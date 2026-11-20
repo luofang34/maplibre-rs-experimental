@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["AtmosphereMetadataError"],"fn":["atmosphere_buffers","globe_background_buffers","matrix_attribute"],"struct":["AtmosphereLayerMetadata","AtmosphereShader","BackgroundLayerMetadata","BackgroundPatternShader","BackgroundShader","GlobeBackgroundPatternShader","GlobeBackgroundShader","SkyLayerMetadata","SkyShader"]};
+window.SIDEBAR_ITEMS = {"fn":["globe_background_buffers"],"mod":["atmosphere"],"struct":["BackgroundLayerMetadata","BackgroundPatternShader","BackgroundShader","GlobeBackgroundPatternShader","GlobeBackgroundShader"]};

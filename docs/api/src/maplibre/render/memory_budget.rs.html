@@ -37,7 +37,7 @@
 <a href=#37 id=37 data-nosnippet>37</a></span><span class="attr">#[cfg(target_arch = <span class="string">"wasm32"</span>)]
 <a href=#38 id=38 data-nosnippet>38</a></span><span class="kw">const </span>MOVING_UPLOADS_PER_FRAME: usize = <span class="number">1</span>;
 <a href=#39 id=39 data-nosnippet>39</a><span class="attr">#[cfg(not(target_arch = <span class="string">"wasm32"</span>))]
-<a href=#40 id=40 data-nosnippet>40</a></span><span class="kw">const </span>MOVING_UPLOADS_PER_FRAME: usize = <span class="number">4</span>;
+<a href=#40 id=40 data-nosnippet>40</a></span><span class="kw">const </span>MOVING_UPLOADS_PER_FRAME: usize = <span class="number">2</span>;
 <a href=#41 id=41 data-nosnippet>41</a><span class="doccomment">/// Uncovered viewport tiles (with no loaded ancestor stand-in on the GPU) admitted per moving
 <a href=#42 id=42 data-nosnippet>42</a>/// frame so visible pan holes fill immediately on arrival.
 <a href=#43 id=43 data-nosnippet>43</a></span><span class="attr">#[cfg(target_arch = <span class="string">"wasm32"</span>)]
@@ -49,7 +49,7 @@
 <a href=#49 id=49 data-nosnippet>49</a></span><span class="attr">#[cfg(target_arch = <span class="string">"wasm32"</span>)]
 <a href=#50 id=50 data-nosnippet>50</a></span><span class="kw">const </span>MOVING_GEOMETRY_UPLOAD_BYTES: usize = <span class="number">512 </span>&lt;&lt; <span class="number">10</span>;
 <a href=#51 id=51 data-nosnippet>51</a><span class="attr">#[cfg(not(target_arch = <span class="string">"wasm32"</span>))]
-<a href=#52 id=52 data-nosnippet>52</a></span><span class="kw">const </span>MOVING_GEOMETRY_UPLOAD_BYTES: usize = <span class="number">4 </span>&lt;&lt; <span class="number">20</span>;
+<a href=#52 id=52 data-nosnippet>52</a></span><span class="kw">const </span>MOVING_GEOMETRY_UPLOAD_BYTES: usize = <span class="number">2 </span>&lt;&lt; <span class="number">20</span>;
 <a href=#53 id=53 data-nosnippet>53</a><span class="attr">#[cfg(target_arch = <span class="string">"wasm32"</span>)]
 <a href=#54 id=54 data-nosnippet>54</a></span><span class="kw">const </span>MOVING_UNCOVERED_GEOMETRY_UPLOAD_BYTES: usize = <span class="number">1536 </span>&lt;&lt; <span class="number">10</span>;
 <a href=#55 id=55 data-nosnippet>55</a><span class="attr">#[cfg(not(target_arch = <span class="string">"wasm32"</span>))]

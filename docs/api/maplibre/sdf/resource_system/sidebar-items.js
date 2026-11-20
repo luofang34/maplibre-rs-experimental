@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["create_pipeline","resource_system"]};
+window.SIDEBAR_ITEMS = {"fn":["create_symbol_descriptor","resource_system"]};

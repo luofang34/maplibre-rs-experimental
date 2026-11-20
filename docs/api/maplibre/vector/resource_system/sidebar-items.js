@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["resource_system"],"mod":["prepared_state","setup"]};
+window.SIDEBAR_ITEMS = {"fn":["detect_extrusion_encodings","resource_system"],"mod":["extrusion_setup","prepared_state","setup"]};
