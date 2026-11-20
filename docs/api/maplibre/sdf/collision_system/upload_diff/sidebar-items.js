@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["MAX_CLEAN_GAP_VERTICES"],"fn":["diff_and_upload_bucket_with_scratch","dirty_runs"],"struct":["CachedBucketMetadata","MetadataScratchPool"]};
+window.SIDEBAR_ITEMS = {"constant":["MAX_CLEAN_GAP_QUADS","MAX_UPLOAD_QUADS_PER_CHUNK"],"fn":["diff_and_upload_bucket_with_scratch","dirty_runs"],"struct":["CachedBucketMetadata","MetadataScratchPool"]};

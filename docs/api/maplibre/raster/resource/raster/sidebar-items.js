@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["has_tile"],"struct":["RasterResources"],"type":["DemSourceBindings"]};
+window.SIDEBAR_ITEMS = {"mod":["has_tile"],"struct":["RasterResources"],"type":["DemSourceBindings","LayerPaintBinding","LayerPaintBindings","LayerPaintUniformBytes"]};

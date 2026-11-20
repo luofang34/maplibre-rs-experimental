@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["SymbolDepth"]};
+window.SIDEBAR_ITEMS = {"fn":["create_bind_group","create_depth_target"],"struct":["SymbolDepth"]};

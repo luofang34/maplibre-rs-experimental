@@ -4,128 +4,186 @@
 <a href=#4 id=4 data-nosnippet>4</a>
 <a href=#5 id=5 data-nosnippet>5</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>SymbolDepth {
 <a href=#6 id=6 data-nosnippet>6</a>    <span class="kw">pub </span>texture: wgpu::Texture,
-<a href=#7 id=7 data-nosnippet>7</a>    samples: u32,
-<a href=#8 id=8 data-nosnippet>8</a>    <span class="kw">pub </span>view: wgpu::TextureView,
-<a href=#9 id=9 data-nosnippet>9</a>    fade_buffer: wgpu::Buffer,
-<a href=#10 id=10 data-nosnippet>10</a>    last_fade_bits: <span class="prelude-ty">Option</span>&lt;[u32; <span class="number">3</span>]&gt;,
-<a href=#11 id=11 data-nosnippet>11</a>    <span class="kw">pub </span>skip_depth_copy: bool,
-<a href=#12 id=12 data-nosnippet>12</a>    <span class="kw">pub </span>binding: wgpu::BindGroup,
-<a href=#13 id=13 data-nosnippet>13</a>    <span class="kw">pub </span>copy: DepthCopyPipeline,
-<a href=#14 id=14 data-nosnippet>14</a>}
-<a href=#15 id=15 data-nosnippet>15</a>
-<a href=#16 id=16 data-nosnippet>16</a><span class="kw">impl </span>SymbolDepth {
-<a href=#17 id=17 data-nosnippet>17</a>    <span class="kw">pub fn </span>layout() -&gt; Vec&lt;wgpu::BindGroupLayoutEntry&gt; {
-<a href=#18 id=18 data-nosnippet>18</a>        <span class="macro">vec!</span>[
-<a href=#19 id=19 data-nosnippet>19</a>            wgpu::BindGroupLayoutEntry {
-<a href=#20 id=20 data-nosnippet>20</a>                binding: <span class="number">0</span>,
-<a href=#21 id=21 data-nosnippet>21</a>                visibility: wgpu::ShaderStages::VERTEX,
-<a href=#22 id=22 data-nosnippet>22</a>                ty: wgpu::BindingType::Texture {
-<a href=#23 id=23 data-nosnippet>23</a>                    <span class="comment">// An unfiltered float binding preserves raw depth reads on GLSL backends.
-<a href=#24 id=24 data-nosnippet>24</a>                    </span>sample_type: wgpu::TextureSampleType::Float { filterable: <span class="bool-val">false </span>},
-<a href=#25 id=25 data-nosnippet>25</a>                    view_dimension: wgpu::TextureViewDimension::D2,
-<a href=#26 id=26 data-nosnippet>26</a>                    multisampled: <span class="bool-val">false</span>,
-<a href=#27 id=27 data-nosnippet>27</a>                },
-<a href=#28 id=28 data-nosnippet>28</a>                count: <span class="prelude-val">None</span>,
-<a href=#29 id=29 data-nosnippet>29</a>            },
-<a href=#30 id=30 data-nosnippet>30</a>            wgpu::BindGroupLayoutEntry {
-<a href=#31 id=31 data-nosnippet>31</a>                binding: <span class="number">1</span>,
-<a href=#32 id=32 data-nosnippet>32</a>                visibility: wgpu::ShaderStages::VERTEX,
-<a href=#33 id=33 data-nosnippet>33</a>                ty: wgpu::BindingType::Buffer {
-<a href=#34 id=34 data-nosnippet>34</a>                    ty: wgpu::BufferBindingType::Uniform,
-<a href=#35 id=35 data-nosnippet>35</a>                    has_dynamic_offset: <span class="bool-val">false</span>,
-<a href=#36 id=36 data-nosnippet>36</a>                    min_binding_size: std::num::NonZeroU64::new(<span class="number">16</span>),
-<a href=#37 id=37 data-nosnippet>37</a>                },
-<a href=#38 id=38 data-nosnippet>38</a>                count: <span class="prelude-val">None</span>,
-<a href=#39 id=39 data-nosnippet>39</a>            },
-<a href=#40 id=40 data-nosnippet>40</a>        ]
-<a href=#41 id=41 data-nosnippet>41</a>    }
-<a href=#42 id=42 data-nosnippet>42</a>
-<a href=#43 id=43 data-nosnippet>43</a>    <span class="kw">pub fn </span>new(
-<a href=#44 id=44 data-nosnippet>44</a>        device: <span class="kw-2">&amp;</span>wgpu::Device,
-<a href=#45 id=45 data-nosnippet>45</a>        size: wgpu::Extent3d,
-<a href=#46 id=46 data-nosnippet>46</a>        samples: u32,
-<a href=#47 id=47 data-nosnippet>47</a>        pipeline: <span class="kw-2">&amp;</span>wgpu::RenderPipeline,
-<a href=#48 id=48 data-nosnippet>48</a>    ) -&gt; <span class="self">Self </span>{
-<a href=#49 id=49 data-nosnippet>49</a>        <span class="kw">let </span>texture = device.create_texture(<span class="kw-2">&amp;</span>wgpu::TextureDescriptor {
-<a href=#50 id=50 data-nosnippet>50</a>            label: <span class="prelude-val">Some</span>(<span class="string">"symbol anchor depth"</span>),
-<a href=#51 id=51 data-nosnippet>51</a>            size,
-<a href=#52 id=52 data-nosnippet>52</a>            mip_level_count: <span class="number">1</span>,
-<a href=#53 id=53 data-nosnippet>53</a>            sample_count: <span class="number">1</span>,
-<a href=#54 id=54 data-nosnippet>54</a>            dimension: wgpu::TextureDimension::D2,
-<a href=#55 id=55 data-nosnippet>55</a>            format: wgpu::TextureFormat::Depth32Float,
-<a href=#56 id=56 data-nosnippet>56</a>            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-<a href=#57 id=57 data-nosnippet>57</a>            view_formats: <span class="kw-2">&amp;</span>[],
-<a href=#58 id=58 data-nosnippet>58</a>        });
-<a href=#59 id=59 data-nosnippet>59</a>        <span class="kw">let </span>view = texture.create_view(<span class="kw-2">&amp;</span>Default::default());
-<a href=#60 id=60 data-nosnippet>60</a>        <span class="kw">let </span>fade_buffer = device.create_buffer(<span class="kw-2">&amp;</span>wgpu::BufferDescriptor {
-<a href=#61 id=61 data-nosnippet>61</a>            label: <span class="prelude-val">Some</span>(<span class="string">"symbol fade clock"</span>),
-<a href=#62 id=62 data-nosnippet>62</a>            size: <span class="number">16</span>,
-<a href=#63 id=63 data-nosnippet>63</a>            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-<a href=#64 id=64 data-nosnippet>64</a>            mapped_at_creation: <span class="bool-val">false</span>,
-<a href=#65 id=65 data-nosnippet>65</a>        });
-<a href=#66 id=66 data-nosnippet>66</a>        <span class="kw">let </span>binding = device.create_bind_group(<span class="kw-2">&amp;</span>wgpu::BindGroupDescriptor {
-<a href=#67 id=67 data-nosnippet>67</a>            label: <span class="prelude-val">Some</span>(<span class="string">"symbol anchor depth and fade"</span>),
-<a href=#68 id=68 data-nosnippet>68</a>            layout: <span class="kw-2">&amp;</span>pipeline.get_bind_group_layout(<span class="number">2</span>),
-<a href=#69 id=69 data-nosnippet>69</a>            entries: <span class="kw-2">&amp;</span>[
-<a href=#70 id=70 data-nosnippet>70</a>                wgpu::BindGroupEntry {
-<a href=#71 id=71 data-nosnippet>71</a>                    binding: <span class="number">0</span>,
-<a href=#72 id=72 data-nosnippet>72</a>                    resource: wgpu::BindingResource::TextureView(<span class="kw-2">&amp;</span>view),
-<a href=#73 id=73 data-nosnippet>73</a>                },
-<a href=#74 id=74 data-nosnippet>74</a>                wgpu::BindGroupEntry {
-<a href=#75 id=75 data-nosnippet>75</a>                    binding: <span class="number">1</span>,
-<a href=#76 id=76 data-nosnippet>76</a>                    resource: fade_buffer.as_entire_binding(),
-<a href=#77 id=77 data-nosnippet>77</a>                },
-<a href=#78 id=78 data-nosnippet>78</a>            ],
-<a href=#79 id=79 data-nosnippet>79</a>        });
-<a href=#80 id=80 data-nosnippet>80</a>        <span class="self">Self </span>{
-<a href=#81 id=81 data-nosnippet>81</a>            texture,
-<a href=#82 id=82 data-nosnippet>82</a>            view,
-<a href=#83 id=83 data-nosnippet>83</a>            fade_buffer,
-<a href=#84 id=84 data-nosnippet>84</a>            last_fade_bits: <span class="prelude-val">None</span>,
-<a href=#85 id=85 data-nosnippet>85</a>            skip_depth_copy: <span class="bool-val">false</span>,
-<a href=#86 id=86 data-nosnippet>86</a>            binding,
-<a href=#87 id=87 data-nosnippet>87</a>            samples,
-<a href=#88 id=88 data-nosnippet>88</a>            copy: DepthCopyPipeline::new(device, samples),
-<a href=#89 id=89 data-nosnippet>89</a>        }
-<a href=#90 id=90 data-nosnippet>90</a>    }
-<a href=#91 id=91 data-nosnippet>91</a>
-<a href=#92 id=92 data-nosnippet>92</a>    <span class="kw">pub fn </span>write_fade_time(
-<a href=#93 id=93 data-nosnippet>93</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#94 id=94 data-nosnippet>94</a>        queue: <span class="kw-2">&amp;</span><span class="kw">crate</span>::render::upload_queue::UploadQueue,
-<a href=#95 id=95 data-nosnippet>95</a>        fade_time_ms: f32,
-<a href=#96 id=96 data-nosnippet>96</a>        fade_duration_ms: f32,
-<a href=#97 id=97 data-nosnippet>97</a>        skip_depth_occlusion: bool,
-<a href=#98 id=98 data-nosnippet>98</a>    ) {
-<a href=#99 id=99 data-nosnippet>99</a>        <span class="self">self</span>.skip_depth_copy = skip_depth_occlusion;
-<a href=#100 id=100 data-nosnippet>100</a>        <span class="kw">let </span>skip_flag = <span class="kw">if </span>skip_depth_occlusion {
-<a href=#101 id=101 data-nosnippet>101</a>            <span class="number">1.0_f32
-<a href=#102 id=102 data-nosnippet>102</a>        </span>} <span class="kw">else </span>{
-<a href=#103 id=103 data-nosnippet>103</a>            <span class="number">0.0_f32
-<a href=#104 id=104 data-nosnippet>104</a>        </span>};
-<a href=#105 id=105 data-nosnippet>105</a>        <span class="kw">let </span>bits = [
-<a href=#106 id=106 data-nosnippet>106</a>            fade_time_ms.to_bits(),
-<a href=#107 id=107 data-nosnippet>107</a>            fade_duration_ms.to_bits(),
-<a href=#108 id=108 data-nosnippet>108</a>            skip_flag.to_bits(),
-<a href=#109 id=109 data-nosnippet>109</a>        ];
-<a href=#110 id=110 data-nosnippet>110</a>        <span class="kw">if </span><span class="self">self</span>.last_fade_bits != <span class="prelude-val">Some</span>(bits) {
-<a href=#111 id=111 data-nosnippet>111</a>            <span class="kw">let </span>payload = [fade_time_ms, fade_duration_ms, skip_flag, <span class="number">0.0_f32</span>];
-<a href=#112 id=112 data-nosnippet>112</a>            queue.write_buffer(<span class="kw-2">&amp;</span><span class="self">self</span>.fade_buffer, <span class="number">0</span>, bytemuck::bytes_of(<span class="kw-2">&amp;</span>payload));
-<a href=#113 id=113 data-nosnippet>113</a>            <span class="self">self</span>.last_fade_bits = <span class="prelude-val">Some</span>(bits);
-<a href=#114 id=114 data-nosnippet>114</a>        }
-<a href=#115 id=115 data-nosnippet>115</a>    }
-<a href=#116 id=116 data-nosnippet>116</a>}
-<a href=#117 id=117 data-nosnippet>117</a>
-<a href=#118 id=118 data-nosnippet>118</a><span class="kw">impl </span><span class="kw">crate</span>::render::eventually::HasChanged <span class="kw">for </span>SymbolDepth {
-<a href=#119 id=119 data-nosnippet>119</a>    <span class="kw">type </span>Criteria = (u32, u32, u32);
-<a href=#120 id=120 data-nosnippet>120</a>    <span class="kw">fn </span>has_changed(<span class="kw-2">&amp;</span><span class="self">self</span>, criteria: <span class="kw-2">&amp;</span><span class="self">Self</span>::Criteria) -&gt; bool {
-<a href=#121 id=121 data-nosnippet>121</a>        (<span class="self">self</span>.texture.width(), <span class="self">self</span>.texture.height(), <span class="self">self</span>.samples) != <span class="kw-2">*</span>criteria
-<a href=#122 id=122 data-nosnippet>122</a>    }
-<a href=#123 id=123 data-nosnippet>123</a>}
-<a href=#124 id=124 data-nosnippet>124</a>
-<a href=#125 id=125 data-nosnippet>125</a><span class="kw">impl </span>Drop <span class="kw">for </span>SymbolDepth {
-<a href=#126 id=126 data-nosnippet>126</a>    <span class="kw">fn </span>drop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
-<a href=#127 id=127 data-nosnippet>127</a>        <span class="self">self</span>.texture.destroy();
-<a href=#128 id=128 data-nosnippet>128</a>        <span class="self">self</span>.fade_buffer.destroy();
+<a href=#7 id=7 data-nosnippet>7</a>    target_size: wgpu::Extent3d,
+<a href=#8 id=8 data-nosnippet>8</a>    samples: u32,
+<a href=#9 id=9 data-nosnippet>9</a>    allocated_full: bool,
+<a href=#10 id=10 data-nosnippet>10</a>    bind_group_layout: wgpu::BindGroupLayout,
+<a href=#11 id=11 data-nosnippet>11</a>    <span class="kw">pub </span>view: wgpu::TextureView,
+<a href=#12 id=12 data-nosnippet>12</a>    fade_buffer: wgpu::Buffer,
+<a href=#13 id=13 data-nosnippet>13</a>    last_fade_bits: <span class="prelude-ty">Option</span>&lt;[u32; <span class="number">3</span>]&gt;,
+<a href=#14 id=14 data-nosnippet>14</a>    <span class="kw">pub </span>skip_depth_copy: bool,
+<a href=#15 id=15 data-nosnippet>15</a>    <span class="kw">pub </span>binding: wgpu::BindGroup,
+<a href=#16 id=16 data-nosnippet>16</a>    <span class="kw">pub </span>copy: <span class="prelude-ty">Option</span>&lt;DepthCopyPipeline&gt;,
+<a href=#17 id=17 data-nosnippet>17</a>}
+<a href=#18 id=18 data-nosnippet>18</a>
+<a href=#19 id=19 data-nosnippet>19</a><span class="kw">impl </span>SymbolDepth {
+<a href=#20 id=20 data-nosnippet>20</a>    <span class="kw">pub fn </span>layout() -&gt; Vec&lt;wgpu::BindGroupLayoutEntry&gt; {
+<a href=#21 id=21 data-nosnippet>21</a>        <span class="macro">vec!</span>[
+<a href=#22 id=22 data-nosnippet>22</a>            wgpu::BindGroupLayoutEntry {
+<a href=#23 id=23 data-nosnippet>23</a>                binding: <span class="number">0</span>,
+<a href=#24 id=24 data-nosnippet>24</a>                visibility: wgpu::ShaderStages::VERTEX,
+<a href=#25 id=25 data-nosnippet>25</a>                ty: wgpu::BindingType::Texture {
+<a href=#26 id=26 data-nosnippet>26</a>                    <span class="comment">// An unfiltered float binding preserves raw depth reads on GLSL backends.
+<a href=#27 id=27 data-nosnippet>27</a>                    </span>sample_type: wgpu::TextureSampleType::Float { filterable: <span class="bool-val">false </span>},
+<a href=#28 id=28 data-nosnippet>28</a>                    view_dimension: wgpu::TextureViewDimension::D2,
+<a href=#29 id=29 data-nosnippet>29</a>                    multisampled: <span class="bool-val">false</span>,
+<a href=#30 id=30 data-nosnippet>30</a>                },
+<a href=#31 id=31 data-nosnippet>31</a>                count: <span class="prelude-val">None</span>,
+<a href=#32 id=32 data-nosnippet>32</a>            },
+<a href=#33 id=33 data-nosnippet>33</a>            wgpu::BindGroupLayoutEntry {
+<a href=#34 id=34 data-nosnippet>34</a>                binding: <span class="number">1</span>,
+<a href=#35 id=35 data-nosnippet>35</a>                visibility: wgpu::ShaderStages::VERTEX,
+<a href=#36 id=36 data-nosnippet>36</a>                ty: wgpu::BindingType::Buffer {
+<a href=#37 id=37 data-nosnippet>37</a>                    ty: wgpu::BufferBindingType::Uniform,
+<a href=#38 id=38 data-nosnippet>38</a>                    has_dynamic_offset: <span class="bool-val">false</span>,
+<a href=#39 id=39 data-nosnippet>39</a>                    min_binding_size: std::num::NonZeroU64::new(<span class="number">16</span>),
+<a href=#40 id=40 data-nosnippet>40</a>                },
+<a href=#41 id=41 data-nosnippet>41</a>                count: <span class="prelude-val">None</span>,
+<a href=#42 id=42 data-nosnippet>42</a>            },
+<a href=#43 id=43 data-nosnippet>43</a>        ]
+<a href=#44 id=44 data-nosnippet>44</a>    }
+<a href=#45 id=45 data-nosnippet>45</a>
+<a href=#46 id=46 data-nosnippet>46</a>    <span class="kw">pub fn </span>new(
+<a href=#47 id=47 data-nosnippet>47</a>        device: <span class="kw-2">&amp;</span>wgpu::Device,
+<a href=#48 id=48 data-nosnippet>48</a>        size: wgpu::Extent3d,
+<a href=#49 id=49 data-nosnippet>49</a>        samples: u32,
+<a href=#50 id=50 data-nosnippet>50</a>        pipeline: <span class="kw-2">&amp;</span>wgpu::RenderPipeline,
+<a href=#51 id=51 data-nosnippet>51</a>    ) -&gt; <span class="self">Self </span>{
+<a href=#52 id=52 data-nosnippet>52</a>        <span class="kw">let </span>placeholder_size = wgpu::Extent3d {
+<a href=#53 id=53 data-nosnippet>53</a>            width: <span class="number">1</span>,
+<a href=#54 id=54 data-nosnippet>54</a>            height: <span class="number">1</span>,
+<a href=#55 id=55 data-nosnippet>55</a>            depth_or_array_layers: <span class="number">1</span>,
+<a href=#56 id=56 data-nosnippet>56</a>        };
+<a href=#57 id=57 data-nosnippet>57</a>        <span class="kw">let </span>(texture, view) = create_depth_target(device, placeholder_size);
+<a href=#58 id=58 data-nosnippet>58</a>        <span class="kw">let </span>fade_buffer = device.create_buffer(<span class="kw-2">&amp;</span>wgpu::BufferDescriptor {
+<a href=#59 id=59 data-nosnippet>59</a>            label: <span class="prelude-val">Some</span>(<span class="string">"symbol fade clock"</span>),
+<a href=#60 id=60 data-nosnippet>60</a>            size: <span class="number">16</span>,
+<a href=#61 id=61 data-nosnippet>61</a>            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+<a href=#62 id=62 data-nosnippet>62</a>            mapped_at_creation: <span class="bool-val">false</span>,
+<a href=#63 id=63 data-nosnippet>63</a>        });
+<a href=#64 id=64 data-nosnippet>64</a>        <span class="kw">let </span>bind_group_layout = pipeline.get_bind_group_layout(<span class="number">2</span>);
+<a href=#65 id=65 data-nosnippet>65</a>        <span class="kw">let </span>binding = create_bind_group(device, <span class="kw-2">&amp;</span>bind_group_layout, <span class="kw-2">&amp;</span>view, <span class="kw-2">&amp;</span>fade_buffer);
+<a href=#66 id=66 data-nosnippet>66</a>        <span class="self">Self </span>{
+<a href=#67 id=67 data-nosnippet>67</a>            texture,
+<a href=#68 id=68 data-nosnippet>68</a>            target_size: size,
+<a href=#69 id=69 data-nosnippet>69</a>            samples,
+<a href=#70 id=70 data-nosnippet>70</a>            allocated_full: <span class="bool-val">false</span>,
+<a href=#71 id=71 data-nosnippet>71</a>            bind_group_layout,
+<a href=#72 id=72 data-nosnippet>72</a>            view,
+<a href=#73 id=73 data-nosnippet>73</a>            fade_buffer,
+<a href=#74 id=74 data-nosnippet>74</a>            last_fade_bits: <span class="prelude-val">None</span>,
+<a href=#75 id=75 data-nosnippet>75</a>            skip_depth_copy: <span class="bool-val">true</span>,
+<a href=#76 id=76 data-nosnippet>76</a>            binding,
+<a href=#77 id=77 data-nosnippet>77</a>            copy: <span class="prelude-val">None</span>,
+<a href=#78 id=78 data-nosnippet>78</a>        }
+<a href=#79 id=79 data-nosnippet>79</a>    }
+<a href=#80 id=80 data-nosnippet>80</a>
+<a href=#81 id=81 data-nosnippet>81</a>    <span class="kw">fn </span>ensure_allocated(<span class="kw-2">&amp;mut </span><span class="self">self</span>, device: <span class="kw-2">&amp;</span>wgpu::Device) {
+<a href=#82 id=82 data-nosnippet>82</a>        <span class="kw">if </span><span class="self">self</span>.allocated_full {
+<a href=#83 id=83 data-nosnippet>83</a>            <span class="kw">return</span>;
+<a href=#84 id=84 data-nosnippet>84</a>        }
+<a href=#85 id=85 data-nosnippet>85</a>        <span class="kw">let </span>(new_tex, new_view) = create_depth_target(device, <span class="self">self</span>.target_size);
+<a href=#86 id=86 data-nosnippet>86</a>        <span class="kw">let </span>new_binding = create_bind_group(
+<a href=#87 id=87 data-nosnippet>87</a>            device,
+<a href=#88 id=88 data-nosnippet>88</a>            <span class="kw-2">&amp;</span><span class="self">self</span>.bind_group_layout,
+<a href=#89 id=89 data-nosnippet>89</a>            <span class="kw-2">&amp;</span>new_view,
+<a href=#90 id=90 data-nosnippet>90</a>            <span class="kw-2">&amp;</span><span class="self">self</span>.fade_buffer,
+<a href=#91 id=91 data-nosnippet>91</a>        );
+<a href=#92 id=92 data-nosnippet>92</a>        <span class="kw">let </span>old_tex = std::mem::replace(<span class="kw-2">&amp;mut </span><span class="self">self</span>.texture, new_tex);
+<a href=#93 id=93 data-nosnippet>93</a>        old_tex.destroy();
+<a href=#94 id=94 data-nosnippet>94</a>        <span class="self">self</span>.view = new_view;
+<a href=#95 id=95 data-nosnippet>95</a>        <span class="self">self</span>.binding = new_binding;
+<a href=#96 id=96 data-nosnippet>96</a>        <span class="kw">if </span><span class="self">self</span>.copy.is_none() {
+<a href=#97 id=97 data-nosnippet>97</a>            <span class="self">self</span>.copy = <span class="prelude-val">Some</span>(DepthCopyPipeline::new(device, <span class="self">self</span>.samples));
+<a href=#98 id=98 data-nosnippet>98</a>        }
+<a href=#99 id=99 data-nosnippet>99</a>        <span class="self">self</span>.allocated_full = <span class="bool-val">true</span>;
+<a href=#100 id=100 data-nosnippet>100</a>    }
+<a href=#101 id=101 data-nosnippet>101</a>
+<a href=#102 id=102 data-nosnippet>102</a>    <span class="kw">pub fn </span>write_fade_time(
+<a href=#103 id=103 data-nosnippet>103</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#104 id=104 data-nosnippet>104</a>        device: <span class="kw-2">&amp;</span>wgpu::Device,
+<a href=#105 id=105 data-nosnippet>105</a>        queue: <span class="kw-2">&amp;</span><span class="kw">crate</span>::render::upload_queue::UploadQueue,
+<a href=#106 id=106 data-nosnippet>106</a>        fade_time_ms: f32,
+<a href=#107 id=107 data-nosnippet>107</a>        fade_duration_ms: f32,
+<a href=#108 id=108 data-nosnippet>108</a>        skip_depth_occlusion: bool,
+<a href=#109 id=109 data-nosnippet>109</a>    ) {
+<a href=#110 id=110 data-nosnippet>110</a>        <span class="kw">if </span>!skip_depth_occlusion {
+<a href=#111 id=111 data-nosnippet>111</a>            <span class="self">self</span>.ensure_allocated(device);
+<a href=#112 id=112 data-nosnippet>112</a>        }
+<a href=#113 id=113 data-nosnippet>113</a>        <span class="self">self</span>.skip_depth_copy = skip_depth_occlusion;
+<a href=#114 id=114 data-nosnippet>114</a>        <span class="kw">let </span>skip_flag = <span class="kw">if </span>skip_depth_occlusion {
+<a href=#115 id=115 data-nosnippet>115</a>            <span class="number">1.0_f32
+<a href=#116 id=116 data-nosnippet>116</a>        </span>} <span class="kw">else </span>{
+<a href=#117 id=117 data-nosnippet>117</a>            <span class="number">0.0_f32
+<a href=#118 id=118 data-nosnippet>118</a>        </span>};
+<a href=#119 id=119 data-nosnippet>119</a>        <span class="kw">let </span>bits = [
+<a href=#120 id=120 data-nosnippet>120</a>            fade_time_ms.to_bits(),
+<a href=#121 id=121 data-nosnippet>121</a>            fade_duration_ms.to_bits(),
+<a href=#122 id=122 data-nosnippet>122</a>            skip_flag.to_bits(),
+<a href=#123 id=123 data-nosnippet>123</a>        ];
+<a href=#124 id=124 data-nosnippet>124</a>        <span class="kw">if </span><span class="self">self</span>.last_fade_bits != <span class="prelude-val">Some</span>(bits) {
+<a href=#125 id=125 data-nosnippet>125</a>            <span class="kw">let </span>payload = [fade_time_ms, fade_duration_ms, skip_flag, <span class="number">0.0_f32</span>];
+<a href=#126 id=126 data-nosnippet>126</a>            queue.write_buffer(<span class="kw-2">&amp;</span><span class="self">self</span>.fade_buffer, <span class="number">0</span>, bytemuck::bytes_of(<span class="kw-2">&amp;</span>payload));
+<a href=#127 id=127 data-nosnippet>127</a>            <span class="self">self</span>.last_fade_bits = <span class="prelude-val">Some</span>(bits);
+<a href=#128 id=128 data-nosnippet>128</a>        }
 <a href=#129 id=129 data-nosnippet>129</a>    }
 <a href=#130 id=130 data-nosnippet>130</a>}
+<a href=#131 id=131 data-nosnippet>131</a>
+<a href=#132 id=132 data-nosnippet>132</a><span class="kw">fn </span>create_depth_target(
+<a href=#133 id=133 data-nosnippet>133</a>    device: <span class="kw-2">&amp;</span>wgpu::Device,
+<a href=#134 id=134 data-nosnippet>134</a>    size: wgpu::Extent3d,
+<a href=#135 id=135 data-nosnippet>135</a>) -&gt; (wgpu::Texture, wgpu::TextureView) {
+<a href=#136 id=136 data-nosnippet>136</a>    <span class="kw">let </span>texture = device.create_texture(<span class="kw-2">&amp;</span>wgpu::TextureDescriptor {
+<a href=#137 id=137 data-nosnippet>137</a>        label: <span class="prelude-val">Some</span>(<span class="string">"symbol anchor depth"</span>),
+<a href=#138 id=138 data-nosnippet>138</a>        size,
+<a href=#139 id=139 data-nosnippet>139</a>        mip_level_count: <span class="number">1</span>,
+<a href=#140 id=140 data-nosnippet>140</a>        sample_count: <span class="number">1</span>,
+<a href=#141 id=141 data-nosnippet>141</a>        dimension: wgpu::TextureDimension::D2,
+<a href=#142 id=142 data-nosnippet>142</a>        format: wgpu::TextureFormat::Depth32Float,
+<a href=#143 id=143 data-nosnippet>143</a>        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+<a href=#144 id=144 data-nosnippet>144</a>        view_formats: <span class="kw-2">&amp;</span>[],
+<a href=#145 id=145 data-nosnippet>145</a>    });
+<a href=#146 id=146 data-nosnippet>146</a>    <span class="kw">let </span>view = texture.create_view(<span class="kw-2">&amp;</span>Default::default());
+<a href=#147 id=147 data-nosnippet>147</a>    (texture, view)
+<a href=#148 id=148 data-nosnippet>148</a>}
+<a href=#149 id=149 data-nosnippet>149</a>
+<a href=#150 id=150 data-nosnippet>150</a><span class="kw">fn </span>create_bind_group(
+<a href=#151 id=151 data-nosnippet>151</a>    device: <span class="kw-2">&amp;</span>wgpu::Device,
+<a href=#152 id=152 data-nosnippet>152</a>    layout: <span class="kw-2">&amp;</span>wgpu::BindGroupLayout,
+<a href=#153 id=153 data-nosnippet>153</a>    view: <span class="kw-2">&amp;</span>wgpu::TextureView,
+<a href=#154 id=154 data-nosnippet>154</a>    fade_buffer: <span class="kw-2">&amp;</span>wgpu::Buffer,
+<a href=#155 id=155 data-nosnippet>155</a>) -&gt; wgpu::BindGroup {
+<a href=#156 id=156 data-nosnippet>156</a>    device.create_bind_group(<span class="kw-2">&amp;</span>wgpu::BindGroupDescriptor {
+<a href=#157 id=157 data-nosnippet>157</a>        label: <span class="prelude-val">Some</span>(<span class="string">"symbol anchor depth and fade"</span>),
+<a href=#158 id=158 data-nosnippet>158</a>        layout,
+<a href=#159 id=159 data-nosnippet>159</a>        entries: <span class="kw-2">&amp;</span>[
+<a href=#160 id=160 data-nosnippet>160</a>            wgpu::BindGroupEntry {
+<a href=#161 id=161 data-nosnippet>161</a>                binding: <span class="number">0</span>,
+<a href=#162 id=162 data-nosnippet>162</a>                resource: wgpu::BindingResource::TextureView(view),
+<a href=#163 id=163 data-nosnippet>163</a>            },
+<a href=#164 id=164 data-nosnippet>164</a>            wgpu::BindGroupEntry {
+<a href=#165 id=165 data-nosnippet>165</a>                binding: <span class="number">1</span>,
+<a href=#166 id=166 data-nosnippet>166</a>                resource: fade_buffer.as_entire_binding(),
+<a href=#167 id=167 data-nosnippet>167</a>            },
+<a href=#168 id=168 data-nosnippet>168</a>        ],
+<a href=#169 id=169 data-nosnippet>169</a>    })
+<a href=#170 id=170 data-nosnippet>170</a>}
+<a href=#171 id=171 data-nosnippet>171</a>
+<a href=#172 id=172 data-nosnippet>172</a><span class="kw">impl </span><span class="kw">crate</span>::render::eventually::HasChanged <span class="kw">for </span>SymbolDepth {
+<a href=#173 id=173 data-nosnippet>173</a>    <span class="kw">type </span>Criteria = (u32, u32, u32);
+<a href=#174 id=174 data-nosnippet>174</a>    <span class="kw">fn </span>has_changed(<span class="kw-2">&amp;</span><span class="self">self</span>, criteria: <span class="kw-2">&amp;</span><span class="self">Self</span>::Criteria) -&gt; bool {
+<a href=#175 id=175 data-nosnippet>175</a>        (
+<a href=#176 id=176 data-nosnippet>176</a>            <span class="self">self</span>.target_size.width,
+<a href=#177 id=177 data-nosnippet>177</a>            <span class="self">self</span>.target_size.height,
+<a href=#178 id=178 data-nosnippet>178</a>            <span class="self">self</span>.samples,
+<a href=#179 id=179 data-nosnippet>179</a>        ) != <span class="kw-2">*</span>criteria
+<a href=#180 id=180 data-nosnippet>180</a>    }
+<a href=#181 id=181 data-nosnippet>181</a>}
+<a href=#182 id=182 data-nosnippet>182</a>
+<a href=#183 id=183 data-nosnippet>183</a><span class="kw">impl </span>Drop <span class="kw">for </span>SymbolDepth {
+<a href=#184 id=184 data-nosnippet>184</a>    <span class="kw">fn </span>drop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+<a href=#185 id=185 data-nosnippet>185</a>        <span class="self">self</span>.texture.destroy();
+<a href=#186 id=186 data-nosnippet>186</a>        <span class="self">self</span>.fade_buffer.destroy();
+<a href=#187 id=187 data-nosnippet>187</a>    }
+<a href=#188 id=188 data-nosnippet>188</a>}
 </code></pre></div></section></main></body></html>
