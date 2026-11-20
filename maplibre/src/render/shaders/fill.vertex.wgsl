@@ -2,7 +2,6 @@
 
 struct VertexOutput {
     @location(0)  v_color: vec4<f32>,
-    @location(4) horizon_distance: f32,
     @builtin(position) position: vec4<f32>,
 };
 
@@ -20,8 +19,7 @@ fn main(
     @location(10) z_index: f32,
     @location(15) layer_translate: vec2<f32>,
 ) -> VertexOutput {
-    // Tile-space z is elevation in metres; fills sit on the surface and take their
-    // draw order from the clip depth written below.
+    // Tile-space z is elevation in metres; fills clip against the globe horizon via Z.
     let z = 0.0;
     let width = 3.0 * zoom_factor;
 
@@ -31,7 +29,7 @@ fn main(
         tile_mercator_coords,
     );
     var final_position = projected.clip_position;
-    final_position.z = 0.0;
+    final_position.z = projected.horizon_distance * 0.5 * final_position.w;
 
-    return VertexOutput(color, projected.horizon_distance, final_position);
+    return VertexOutput(color, final_position);
 }

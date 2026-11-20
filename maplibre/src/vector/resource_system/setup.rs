@@ -5,9 +5,8 @@ use crate::{
         eventually::Eventually,
         resource::{RenderPipeline, TilePipeline},
         shaders::{self, Shader},
-        STENCIL_MARK,
     },
-    vector::{CirclePipeline, ExtrusionPipeline, LinePipeline, VectorPipeline},
+    vector::{CirclePipeline, LinePipeline, VectorPipeline},
 };
 
 pub(super) struct PipelineSetup<'a> {
@@ -21,7 +20,7 @@ pub(super) struct PipelineSetup<'a> {
 }
 
 impl PipelineSetup<'_> {
-    fn layer_color_binding() -> crate::render::resource::UniformFeatureBinding {
+    pub(super) fn layer_color_binding() -> crate::render::resource::UniformFeatureBinding {
         crate::render::resource::UniformFeatureBinding::LayerMetadata {
             layer_slot: 2,
             feature_slot: 3,
@@ -126,152 +125,40 @@ impl PipelineSetup<'_> {
         )
     }
 
-    fn extrusion_descriptor(
+    fn create_fill(
         &self,
-        pass: shaders::ExtrusionPass,
-        vertex: crate::render::resource::VertexState,
-        fragment: crate::render::resource::FragmentState,
-    ) -> crate::render::resource::RenderPipelineDescriptor {
-        use shaders::ExtrusionPass::{
-            Clear, Color, Depth, PatternColor, TranslucentBack, TranslucentFront,
+        name: &'static str,
+        globe: bool,
+        opaque: bool,
+    ) -> crate::render::resource::FeaturePipelinePair {
+        let shader = shaders::FillShader {
+            format: self.format,
         };
-
-        let mut descriptor = TilePipeline::new(
-            match pass {
-                Depth => "extrusion_depth_pipeline",
-                Color => "extrusion_color_pipeline",
-                PatternColor => "extrusion_pattern_pipeline",
-                Clear => "extrusion_clear_pipeline",
-                TranslucentBack => "extrusion_translucent_back_pipeline",
-                TranslucentFront => "extrusion_translucent_front_pipeline",
-            }
-            .into(),
+        let pipeline = TilePipeline::new(
+            name.into(),
             self.settings,
-            vertex,
-            fragment,
+            shader.describe_vertex_for_globe(globe),
+            if opaque {
+                shader.describe_fragment_opaque()
+            } else {
+                shader.describe_fragment()
+            },
             crate::render::resource::TilePipelineOptions {
                 depth_stencil_enabled: true,
                 update_stencil: false,
-                debug_stencil: true,
+                debug_stencil: false,
                 wireframe: false,
                 multisampling: self.multisampling,
                 textured: false,
             },
-        )
-        .with_depth_write()
-        .describe_render_pipeline();
-        descriptor.primitive.cull_mode = match pass {
-            TranslucentBack => Some(wgpu::Face::Front),
-            TranslucentFront => Some(wgpu::Face::Back),
-            _ => None,
-        };
-        if let Some(state) = &mut descriptor.depth_stencil {
-            state.depth_write_enabled = Some(pass == Depth);
-            state.depth_compare = Some(match pass {
-                Depth | Color | PatternColor | TranslucentBack | TranslucentFront => {
-                    wgpu::CompareFunction::GreaterEqual
-                }
-                Clear => wgpu::CompareFunction::Always,
-            });
-            // Tile references use the low seven bits; the top bit marks the pixels the colour
-            // pass has drawn, so a surface that two tiles both hold is blended once.
-            let marked = wgpu::StencilFaceState {
-                compare: wgpu::CompareFunction::Equal,
-                fail_op: wgpu::StencilOperation::Keep,
-                depth_fail_op: wgpu::StencilOperation::Keep,
-                pass_op: wgpu::StencilOperation::Invert,
-            };
-            let unmark = wgpu::StencilFaceState {
-                compare: wgpu::CompareFunction::Always,
-                fail_op: wgpu::StencilOperation::Keep,
-                depth_fail_op: wgpu::StencilOperation::Keep,
-                pass_op: wgpu::StencilOperation::Zero,
-            };
-            match pass {
-                Depth | TranslucentBack | TranslucentFront => {}
-                Color | PatternColor => state.stencil.front = marked,
-                Clear => state.stencil.front = unmark,
-            }
-            state.stencil.back = state.stencil.front;
-            if matches!(pass, Color | PatternColor | Clear) {
-                state.stencil.read_mask = STENCIL_MARK;
-                state.stencil.write_mask = STENCIL_MARK;
-            } else if matches!(pass, TranslucentBack | TranslucentFront) {
-                state.stencil.read_mask = 0;
-                state.stencil.write_mask = 0;
-            }
-        }
-        descriptor
-    }
-
-    fn create_extrusion(
-        &self,
-        pass: shaders::ExtrusionPass,
-    ) -> crate::render::resource::FeaturePipelinePair {
-        let shader = shaders::FillExtrusionShader {
-            format: self.format,
-            pass,
-        };
-        let descriptor =
-            self.extrusion_descriptor(pass, shader.describe_vertex(), shader.describe_fragment());
-        let layouts: &[&wgpu::BindGroupLayout] = if pass == shaders::ExtrusionPass::PatternColor {
-            &[self.projection, &self.pattern]
-        } else {
-            &[self.projection]
-        };
-        descriptor.initialize_pair_with_binding(self.device, layouts, Self::layer_color_binding())
-    }
-
-    fn create_compact_extrusion(&self, pass: shaders::ExtrusionPass) -> wgpu::RenderPipeline {
-        let shader = shaders::FillExtrusionCompactShader {
-            format: self.format,
-            pass,
-        };
-        let mut descriptor =
-            self.extrusion_descriptor(pass, shader.describe_vertex(), shader.describe_fragment());
-        if let Some(label) = descriptor.label.take() {
-            descriptor.label = Some(std::borrow::Cow::Owned(format!("{label}_compact")));
-        }
-        descriptor.initialize_with_prefix_layouts(self.device, &[self.projection])
-    }
-
-    pub(super) fn initialize_extrusion(
-        &self,
-        extrusion: &mut Eventually<ExtrusionPipeline>,
-        needs_pattern: bool,
-        needs_translucent: bool,
-    ) {
-        let ep = extrusion.initialize(|| ExtrusionPipeline {
-            depth: self.create_extrusion(shaders::ExtrusionPass::Depth),
-            color: self.create_extrusion(shaders::ExtrusionPass::Color),
-            clear: self.create_extrusion(shaders::ExtrusionPass::Clear),
-            compact_depth: self.create_compact_extrusion(shaders::ExtrusionPass::Depth),
-            compact_color: self.create_compact_extrusion(shaders::ExtrusionPass::Color),
-            compact_clear: self.create_compact_extrusion(shaders::ExtrusionPass::Clear),
-            pattern: None,
-            translucent_back: None,
-            translucent_front: None,
-            compact_translucent_back: None,
-            compact_translucent_front: None,
-        });
-        if needs_pattern {
-            ep.pattern
-                .get_or_insert_with(|| self.create_extrusion(shaders::ExtrusionPass::PatternColor));
-        }
-        if needs_translucent {
-            ep.translucent_back.get_or_insert_with(|| {
-                self.create_extrusion(shaders::ExtrusionPass::TranslucentBack)
-            });
-            ep.translucent_front.get_or_insert_with(|| {
-                self.create_extrusion(shaders::ExtrusionPass::TranslucentFront)
-            });
-            ep.compact_translucent_back.get_or_insert_with(|| {
-                self.create_compact_extrusion(shaders::ExtrusionPass::TranslucentBack)
-            });
-            ep.compact_translucent_front.get_or_insert_with(|| {
-                self.create_compact_extrusion(shaders::ExtrusionPass::TranslucentFront)
-            });
-        }
+        );
+        pipeline
+            .describe_render_pipeline()
+            .initialize_pair_with_binding(
+                self.device,
+                &[self.projection],
+                Self::layer_color_binding(),
+            )
     }
 
     pub(super) fn initialize(
@@ -282,29 +169,73 @@ impl PipelineSetup<'_> {
         dashes: Option<&wgpu::BindGroupLayout>,
         needs: VectorPipelineNeeds,
     ) {
-        if needs.fill {
-            vector.initialize(|| {
-                VectorPipeline(self.create(
-                    "vector_pipeline",
-                    &shaders::FillShader {
-                        format: self.format,
-                    },
-                    &[self.projection],
-                    false,
-                ))
-            });
+        if needs.flat_fill_opaque
+            || needs.flat_fill_blended
+            || needs.globe_fill_opaque
+            || needs.globe_fill_blended
+        {
+            let vp = vector.initialize(VectorPipeline::default);
+            if needs.flat_fill_opaque {
+                vp.flat_opaque
+                    .get_or_insert_with(|| self.create_fill("vector_flat_opaque", false, true));
+            }
+            if needs.flat_fill_blended {
+                vp.flat_blended
+                    .get_or_insert_with(|| self.create_fill("vector_flat_blended", false, false));
+            }
+            if needs.globe_fill_opaque {
+                vp.globe_opaque
+                    .get_or_insert_with(|| self.create_fill("vector_globe_opaque", true, true));
+            }
+            if needs.globe_fill_blended {
+                vp.globe_blended
+                    .get_or_insert_with(|| self.create_fill("vector_globe_blended", true, false));
+            }
         }
-        if needs.flat_lines || needs.terrain_lines || needs.elevated_lines {
+        if needs.plain_flat_lines
+            || needs.plain_globe_lines
+            || needs.flat_lines
+            || needs.terrain_lines
+            || needs.elevated_lines
+        {
             if let Some(dashes) = dashes {
                 let line_shader = shaders::LineShader {
                     format: self.format,
                 };
                 let line = line.initialize(|| LinePipeline {
+                    flat_plain: None,
+                    globe_plain: None,
                     flat: None,
                     structure: None,
                     elevated: None,
                     terrain: None,
                 });
+                if needs.plain_flat_lines {
+                    line.flat_plain.get_or_insert_with(|| {
+                        self.create(
+                            "plain_line_flat_pipeline",
+                            &shaders::PlainLineShader {
+                                format: self.format,
+                                globe: false,
+                            },
+                            &[self.projection],
+                            false,
+                        )
+                    });
+                }
+                if needs.plain_globe_lines {
+                    line.globe_plain.get_or_insert_with(|| {
+                        self.create(
+                            "plain_line_globe_pipeline",
+                            &shaders::PlainLineShader {
+                                format: self.format,
+                                globe: true,
+                            },
+                            &[self.projection],
+                            false,
+                        )
+                    });
+                }
                 if needs.flat_lines {
                     line.flat.get_or_insert_with(|| {
                         self.create(
@@ -388,7 +319,12 @@ impl PipelineSetup<'_> {
 }
 
 pub(super) struct VectorPipelineNeeds {
-    pub(super) fill: bool,
+    pub(super) flat_fill_opaque: bool,
+    pub(super) flat_fill_blended: bool,
+    pub(super) globe_fill_opaque: bool,
+    pub(super) globe_fill_blended: bool,
+    pub(super) plain_flat_lines: bool,
+    pub(super) plain_globe_lines: bool,
     pub(super) flat_lines: bool,
     pub(super) terrain_lines: bool,
     pub(super) elevated_lines: bool,

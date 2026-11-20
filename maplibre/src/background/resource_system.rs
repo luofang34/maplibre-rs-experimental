@@ -115,7 +115,7 @@ pub fn resource_system(
             };
             let image_layouts = super::pattern::layouts(device);
             let world_layout = super::pattern::world_layout(device);
-            let pipeline = TilePipeline::new(
+            let mut descriptor = TilePipeline::new(
                 "globe_background_pattern_pipeline".into(),
                 *settings,
                 shader.describe_vertex(),
@@ -130,8 +130,9 @@ pub fn resource_system(
                 },
             )
             .with_depth_write()
-            .describe_render_pipeline()
-            .initialize_with_prefix_layouts(
+            .describe_render_pipeline();
+            descriptor.primitive.cull_mode = Some(wgpu::Face::Back);
+            let pipeline = descriptor.initialize_with_prefix_layouts(
                 device,
                 &[&projection_layout, &image_layouts[0], &world_layout],
             );
@@ -143,6 +144,7 @@ pub fn resource_system(
             }
         }
     }
+    let needs_atmosphere = super::queue_system::atmosphere_blend(style, view_state, world) > 0.0;
     let Some((
         background_pipeline,
         globe_background_pipeline,
@@ -160,81 +162,183 @@ pub fn resource_system(
         return Err(crate::tcs::system::SystemError::Dependencies);
     };
 
-    background_pipeline.initialize(|| {
+    let zoom = view_state.zoom().value();
+    let (mut has_opaque_bg, mut has_blended_bg) = (false, false);
+    for layer in style
+        .layers
+        .iter()
+        .filter(|layer| layer.type_ == "background" && layer.is_visible_at(zoom))
+    {
+        if layer
+            .paint
+            .as_ref()
+            .is_some_and(|p| crate::vector::pattern::pattern_name(p, style_zoom).is_some())
+        {
+            continue;
+        }
+        if super::buffers::background_color(layer, zoom)[3] >= 1.0 {
+            has_opaque_bg = true;
+        } else {
+            has_blended_bg = true;
+        }
+    }
+
+    let bg_pipelines = background_pipeline.initialize(BackgroundRenderPipeline::default);
+    if !needs_globe {
+        let size = surface.size();
+        let covers = super::queue_system::flat_viewport_covered(
+            view_state,
+            style.terrain.is_none(),
+            [size.width() as f32, size.height() as f32],
+        );
         let shader = BackgroundShader {
             format: surface.surface_format(),
         };
-
-        let pipeline = TilePipeline::new(
-            "background_pipeline".into(),
-            *settings,
-            shader.describe_vertex(),
-            shader.describe_fragment(),
-            crate::render::resource::TilePipelineOptions {
-                depth_stencil_enabled: true,
-                update_stencil: false,
-                debug_stencil: true,
-                wireframe: false,
-                multisampling: surface.is_multisampling_supported(settings.msaa),
-                textured: false,
-            },
-        )
-        .describe_render_pipeline()
-        .initialize(device);
-
-        BackgroundRenderPipeline(pipeline)
-    });
+        let options = crate::render::resource::TilePipelineOptions {
+            depth_stencil_enabled: true,
+            update_stencil: false,
+            debug_stencil: true,
+            wireframe: false,
+            multisampling: surface.is_multisampling_supported(settings.msaa),
+            textured: false,
+        };
+        if covers {
+            if has_opaque_bg {
+                bg_pipelines.solid_opaque.get_or_insert_with(|| {
+                    TilePipeline::new(
+                        "background_solid_opaque_pipeline".into(),
+                        *settings,
+                        shader.describe_vertex(),
+                        shader.describe_solid_opaque_fragment(),
+                        options,
+                    )
+                    .describe_render_pipeline()
+                    .initialize(device)
+                });
+            }
+            if has_blended_bg {
+                bg_pipelines.solid.get_or_insert_with(|| {
+                    TilePipeline::new(
+                        "background_solid_pipeline".into(),
+                        *settings,
+                        shader.describe_vertex(),
+                        shader.describe_solid_fragment(),
+                        options,
+                    )
+                    .describe_render_pipeline()
+                    .initialize(device)
+                });
+            }
+        } else {
+            if has_opaque_bg {
+                bg_pipelines.clipped_opaque.get_or_insert_with(|| {
+                    TilePipeline::new(
+                        "background_clipped_opaque_pipeline".into(),
+                        *settings,
+                        shader.describe_vertex(),
+                        shader.describe_clipped_opaque_fragment(),
+                        options,
+                    )
+                    .describe_render_pipeline()
+                    .initialize(device)
+                });
+            }
+            if has_blended_bg {
+                bg_pipelines.clipped.get_or_insert_with(|| {
+                    TilePipeline::new(
+                        "background_pipeline".into(),
+                        *settings,
+                        shader.describe_vertex(),
+                        shader.describe_fragment(),
+                        options,
+                    )
+                    .describe_render_pipeline()
+                    .initialize(device)
+                });
+            }
+        }
+    }
 
     if needs_globe {
-        globe_background_pipeline.initialize(|| {
-            let shader = GlobeBackgroundShader {
-                format: surface.surface_format(),
-            };
-            let pipeline = TilePipeline::new(
-                "globe_background_pipeline".into(),
-                *settings,
-                shader.describe_vertex(),
-                shader.describe_fragment(),
-                crate::render::resource::TilePipelineOptions {
-                    depth_stencil_enabled: true,
-                    update_stencil: false,
-                    debug_stencil: true,
-                    wireframe: false,
-                    multisampling: surface.is_multisampling_supported(settings.msaa),
-                    textured: false,
-                },
-            )
-            .with_depth_write()
-            .describe_render_pipeline()
-            .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
-            GlobeBackgroundRenderPipeline(pipeline)
-        });
+        let globe_bg = globe_background_pipeline.initialize(GlobeBackgroundRenderPipeline::default);
+        let shader = GlobeBackgroundShader {
+            format: surface.surface_format(),
+        };
+        let options = crate::render::resource::TilePipelineOptions {
+            depth_stencil_enabled: true,
+            update_stencil: false,
+            debug_stencil: true,
+            wireframe: false,
+            multisampling: surface.is_multisampling_supported(settings.msaa),
+            textured: false,
+        };
+        if has_opaque_bg {
+            globe_bg.opaque.get_or_insert_with(|| {
+                let mut descriptor = TilePipeline::new(
+                    "globe_background_opaque_pipeline".into(),
+                    *settings,
+                    shader.describe_vertex(),
+                    shader.describe_opaque_fragment(),
+                    options,
+                )
+                .with_depth_write()
+                .describe_render_pipeline();
+                descriptor.primitive.cull_mode = Some(wgpu::Face::Back);
+                descriptor.initialize_with_prefix_layouts(
+                    device,
+                    &[projection_resources.bind_group_layout()],
+                )
+            });
+        }
+        if has_blended_bg {
+            globe_bg.blended.get_or_insert_with(|| {
+                let mut descriptor = TilePipeline::new(
+                    "globe_background_pipeline".into(),
+                    *settings,
+                    shader.describe_vertex(),
+                    shader.describe_fragment(),
+                    options,
+                )
+                .with_depth_write()
+                .describe_render_pipeline();
+                descriptor.primitive.cull_mode = Some(wgpu::Face::Back);
+                descriptor.initialize_with_prefix_layouts(
+                    device,
+                    &[projection_resources.bind_group_layout()],
+                )
+            });
+        }
 
-        atmosphere_pipeline.initialize(|| {
-            let shader = AtmosphereShader {
-                format: surface.surface_format(),
-            };
-            let pipeline = TilePipeline::new(
-                "atmosphere_pipeline".into(),
-                *settings,
-                shader.describe_vertex(),
-                shader.describe_fragment(),
-                crate::render::resource::TilePipelineOptions {
-                    depth_stencil_enabled: true,
-                    update_stencil: false,
-                    debug_stencil: true,
-                    wireframe: false,
-                    multisampling: surface.is_multisampling_supported(settings.msaa),
-                    textured: false,
-                },
-            )
-            // The scattering lies behind the globe, its terrain and everything else that writes
-            // depth, as GL JS draws it with a read-only depth test.
-            .with_depth_test()
-            .describe_render_pipeline()
-            .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
-            AtmosphereRenderPipeline(pipeline)
-        });
+        if needs_atmosphere {
+            atmosphere_pipeline.initialize(|| {
+                let shader = AtmosphereShader {
+                    format: surface.surface_format(),
+                };
+                let pipeline = TilePipeline::new(
+                    "atmosphere_pipeline".into(),
+                    *settings,
+                    shader.describe_vertex(),
+                    shader.describe_fragment(),
+                    crate::render::resource::TilePipelineOptions {
+                        depth_stencil_enabled: true,
+                        update_stencil: false,
+                        debug_stencil: true,
+                        wireframe: false,
+                        multisampling: surface.is_multisampling_supported(settings.msaa),
+                        textured: false,
+                    },
+                )
+                // The scattering lies behind the globe, its terrain and everything else that writes
+                // depth, as GL JS draws it with a read-only depth test.
+                .with_depth_test()
+                .describe_render_pipeline()
+                .initialize_with_prefix_layouts(
+                    device,
+                    &[projection_resources.bind_group_layout()],
+                );
+                AtmosphereRenderPipeline(pipeline)
+            });
+        }
     }
 
     if needs_sky {
@@ -267,11 +371,27 @@ pub fn resource_system(
     Ok(())
 }
 
-/// Pipeline drawing a flat fullscreen background.
-pub struct BackgroundRenderPipeline(pub wgpu::RenderPipeline);
+/// Pipelines drawing a flat fullscreen background (`solid` omits fragment `discard`).
+#[derive(Default)]
+pub struct BackgroundRenderPipeline {
+    /// Horizon/world-edge-clipped opaque (`blend: None`) background pipeline.
+    pub clipped_opaque: Option<wgpu::RenderPipeline>,
+    /// Horizon/world-edge-clipped background pipeline for tilted or partial flat views.
+    pub clipped: Option<wgpu::RenderPipeline>,
+    /// Zero-`discard` opaque (`blend: None`) background pipeline when the flat world fills viewport.
+    pub solid_opaque: Option<wgpu::RenderPipeline>,
+    /// Zero-`discard` background pipeline when the flat world covers the entire viewport.
+    pub solid: Option<wgpu::RenderPipeline>,
+}
 
-/// Pipeline drawing background paint on a globe mesh.
-pub struct GlobeBackgroundRenderPipeline(pub wgpu::RenderPipeline);
+/// Pipelines drawing background paint on a globe mesh (`opaque` skips color blending).
+#[derive(Default)]
+pub struct GlobeBackgroundRenderPipeline {
+    /// Opaque (`blend: None`) globe background pipeline for alpha `1.0` backgrounds.
+    pub opaque: Option<wgpu::RenderPipeline>,
+    /// Premultiplied-alpha blended globe background pipeline.
+    pub blended: Option<wgpu::RenderPipeline>,
+}
 
 /// Pipeline drawing optional atmospheric scattering.
 pub struct AtmosphereRenderPipeline(pub wgpu::RenderPipeline);

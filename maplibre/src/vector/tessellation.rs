@@ -14,7 +14,7 @@ use lyon::{
 };
 
 use crate::{
-    projection::globe::subdivision::subdivide_triangles,
+    projection::globe::subdivision::{subdivide_triangles, subdivide_triangles_from},
     render::ShaderVertex,
     style::expression::{FeatureProperties, Value},
 };
@@ -62,6 +62,7 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     path_builder: RefCell<Builder>,
     path_open: bool,
     is_point: bool,
+    in_polygon: bool,
     contour_start: Option<[f32; 2]>,
     contour_last: Option<[f32; 2]>,
     subdivision_granularity: u32,
@@ -189,6 +190,7 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             current_index: 0,
             path_open: false,
             is_point: false,
+            in_polygon: false,
             contour_start: None,
             contour_last: None,
             subdivision_granularity: 1,
@@ -376,6 +378,7 @@ where
             return self.tessellate_extrusion(&options);
         }
         let path_builder = self.path_builder.replace(Path::builder());
+        let vertex_start = self.buffer.vertices.len();
         let index_start = self.buffer.indices.len();
         let path = path_builder.build();
         if self.outline_property.is_some() {
@@ -413,8 +416,9 @@ where
                 )
                 .map_err(|error| GeozeroError::Geometry(error.to_string()))?;
         }
-        subdivide_triangles(
+        subdivide_triangles_from(
             &mut self.buffer,
+            vertex_start,
             index_start,
             crate::projection::globe::subdivision::FillSubdivisionOptions {
                 granularity: self.subdivision_granularity,

@@ -73,7 +73,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
                 entry.buffer_indices.start,
                 bytemuck::cast_slice(&self.u16_index_scratch),
             );
-            if self.u16_index_scratch.capacity() > 98_304 {
+            if self.u16_index_scratch.capacity() > 8_192 {
                 self.u16_index_scratch.clear();
                 self.u16_index_scratch.shrink_to(0);
             }
@@ -92,7 +92,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         &mut self,
         queue: &Q,
         coords: WorldTileCoords,
-        style_layer: StyleLayer,
+        style_layer: impl Into<std::sync::Arc<StyleLayer>>,
         geometry: &OverAlignedVertexBuffer<V, I>,
         layer_metadata: TM,
         feature_metadata: &[FM],
@@ -114,12 +114,13 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         &mut self,
         queue: &Q,
         coords: WorldTileCoords,
-        style_layer: StyleLayer,
+        style_layer: impl Into<std::sync::Arc<StyleLayer>>,
         geometry: &OverAlignedVertexBuffer<V, I>,
         layer_metadata: TM,
         feature_metadata: &[FM],
         mut protect: impl FnMut(WorldTileCoords) -> bool,
     ) -> Result<(), AllocationError> {
+        let style_layer: std::sync::Arc<StyleLayer> = style_layer.into();
         if coords.build_quad_key().is_none() {
             return Err(AllocationError::Coordinates { coords });
         }
@@ -222,6 +223,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             evaluated_zoom: None,
             u16_chunks: u16_chunk_ranges,
             compact_extrusion: false,
+            opaque_color: false,
         };
 
         if req.vertex_bytes > 0 {
@@ -292,7 +294,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         &mut self,
         queue: &Q,
         coords: WorldTileCoords,
-        style_layer: StyleLayer,
+        style_layer: impl Into<std::sync::Arc<StyleLayer>>,
         geometry: &OverAlignedVertexBuffer<V, I>,
         layer_metadata: TM,
         uniform_feature: FM,
@@ -317,7 +319,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         &mut self,
         queue: &Q,
         coords: WorldTileCoords,
-        style_layer: StyleLayer,
+        style_layer: impl Into<std::sync::Arc<StyleLayer>>,
         geometry: &OverAlignedVertexBuffer<V, I>,
         layer_metadata: TM,
         feature_metadata: &[FM],
@@ -339,12 +341,13 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         &mut self,
         queue: &Q,
         coords: WorldTileCoords,
-        style_layer: StyleLayer,
+        style_layer: impl Into<std::sync::Arc<StyleLayer>>,
         geometry: &OverAlignedVertexBuffer<V, I>,
         layer_metadata: TM,
         feature_metadata: &[FM],
         protect: impl FnMut(WorldTileCoords) -> bool,
     ) -> Result<(), AllocationError> {
+        let style_layer: std::sync::Arc<StyleLayer> = style_layer.into();
         let style_layer_id = style_layer.layer_id();
         self.allocate_layer_geometry_unless(
             queue,

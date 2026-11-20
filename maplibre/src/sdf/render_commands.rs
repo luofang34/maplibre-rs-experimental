@@ -2,9 +2,11 @@ use crate::{
     render::{
         eventually::{Eventually, Eventually::Initialized},
         projection::ProjectionGpuResources,
-        render_phase::{PhaseItem, RenderCommand, RenderCommandResult, TranslucentItem},
+        render_phase::{
+            PhaseItem, ProjectionBinding, RenderCommand, RenderCommandResult, TranslucentItem,
+        },
     },
-    sdf::{textures::SymbolTextures, SymbolBufferPool, SymbolPipeline},
+    sdf::{textures::SymbolTextures, SymbolBufferPool, SymbolModePipelines, SymbolPipeline},
     tcs::world::World,
 };
 
@@ -23,8 +25,12 @@ impl<P: PhaseItem> RenderCommand<P> for SetSymbolPipeline {
         else {
             return RenderCommandResult::Failure;
         };
+        let Some(_) = symbol_pipeline
+            .for_globe(projection_resources.is_globe_active(ProjectionBinding::View))
+        else {
+            return RenderCommandResult::Failure;
+        };
 
-        pass.set_pipeline(&symbol_pipeline.combined);
         pass.set_bind_group(0, projection_resources.bind_group(), &[]);
         let Some(Initialized(depth)) = world
             .resources
@@ -44,12 +50,22 @@ impl RenderCommand<TranslucentItem> for DrawSymbol {
         item: &TranslucentItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some((Initialized(symbol_buffer_pool), covering, Initialized(pipeline))) =
-            world.resources.query::<(
-                &Eventually<SymbolBufferPool>,
-                &super::covering::SymbolCovering,
-                &Eventually<SymbolPipeline>,
-            )>()
+        let Some((
+            Initialized(symbol_buffer_pool),
+            covering,
+            Initialized(pipeline),
+            Initialized(projection_resources),
+        )) = world.resources.query::<(
+            &Eventually<SymbolBufferPool>,
+            &super::covering::SymbolCovering,
+            &Eventually<SymbolPipeline>,
+            &Eventually<ProjectionGpuResources>,
+        )>()
+        else {
+            return RenderCommandResult::Failure;
+        };
+        let Some(mode) =
+            pipeline.for_globe(projection_resources.is_globe_active(ProjectionBinding::View))
         else {
             return RenderCommandResult::Failure;
         };
@@ -98,31 +114,40 @@ impl RenderCommand<TranslucentItem> for DrawSymbol {
         };
         draw_indices(
             pass,
-            pipeline,
+            mode,
             (
                 first..first + entry.indices_range().len() as u32,
                 base_vertex,
                 instances,
             ),
             binding.separate_halo,
-        );
-        RenderCommandResult::Success
+        )
     }
 }
 
 fn draw_indices<'w>(
     pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
-    pipeline: &'w SymbolPipeline,
+    pipeline: &'w SymbolModePipelines,
     (indices, base_vertex, instances): (std::ops::Range<u32>, i32, std::ops::Range<u32>),
     separate_halo: bool,
-) {
+) -> RenderCommandResult {
     if separate_halo {
+        let (Some(halo), Some(fill)) = (&pipeline.halo, &pipeline.fill) else {
+            return RenderCommandResult::Failure;
+        };
         // All halos must precede fills so an adjacent glyph cannot cover a finished stroke.
-        pass.set_pipeline(&pipeline.halo);
+        pass.set_pipeline(halo);
         pass.draw_indexed(indices.clone(), base_vertex, instances.clone());
-        pass.set_pipeline(&pipeline.fill);
+        pass.set_pipeline(fill);
+        pass.draw_indexed(indices, base_vertex, instances);
+    } else {
+        let Some(combined) = &pipeline.combined else {
+            return RenderCommandResult::Failure;
+        };
+        pass.set_pipeline(combined);
+        pass.draw_indexed(indices, base_vertex, instances);
     }
-    pass.draw_indexed(indices, base_vertex, instances);
+    RenderCommandResult::Success
 }
 
 pub type DrawSymbols = (SetSymbolPipeline, DrawSymbol);

@@ -19,6 +19,7 @@ pub fn resource_system(
     MapContext {
         world,
         style,
+        view_state,
         renderer:
             Renderer {
                 device,
@@ -29,6 +30,15 @@ pub fn resource_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
+    let style_zoom = view_state.style_zoom().value();
+    let has_raster_or_dem_tiles = !world
+        .tiles
+        .pyramid_of::<crate::raster::RasterLayersDataComponent>()
+        .is_empty()
+        || !world
+            .tiles
+            .pyramid_of::<crate::raster::DemLayersComponent>()
+            .is_empty();
     let Some((raster_resources, Initialized(projection_resources))) = world.resources.query_mut::<(
         &mut Eventually<RasterResources>,
         &mut Eventually<ProjectionGpuResources>,
@@ -37,21 +47,19 @@ pub fn resource_system(
     };
     if matches!(raster_resources, Eventually::Uninitialized)
         && style.terrain.is_none()
+        && !has_raster_or_dem_tiles
         && !style.sources.values().any(|source| {
             matches!(
                 source,
-                Source::Raster(_)
-                    | Source::RasterDem(_)
-                    | Source::Image(_)
-                    | Source::Video(_)
-                    | Source::Canvas(_)
+                Source::Image(_) | Source::Video(_) | Source::Canvas(_)
             )
         })
         && !style.layers.iter().any(|layer| {
             matches!(
                 layer.type_.as_str(),
                 "raster" | "hillshade" | "color-relief"
-            )
+            ) && !layer.is_hidden()
+                && layer.is_visible_at(style_zoom)
         })
     {
         return Ok(());

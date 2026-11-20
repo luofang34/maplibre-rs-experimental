@@ -29,6 +29,10 @@ pub struct BackgroundBuffers {
     pub atmosphere_metadata_buffer: wgpu::Buffer,
     /// Sky colours and horizon, when the style has a sky the frame draws.
     pub sky_metadata_buffer: Option<wgpu::Buffer>,
+    /// Whether an unclipped flat background fills the entire viewport cleanly.
+    pub flat_covers_viewport: bool,
+    /// Solid-color background layers whose evaluated alpha is `1.0` (`blend: None` eligible).
+    pub opaque_layers: rustc_hash::FxHashSet<crate::style::StyleLayerId>,
 }
 
 /// Persistent GPU buffers updated in place via `UploadQueue::write_buffer`.

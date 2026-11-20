@@ -21,7 +21,7 @@ pub(crate) mod paint;
 pub(crate) mod sources;
 pub(crate) mod style_refresh;
 
-use bucket::{upload_bucket, UploadOutcome};
+use bucket::{upload_bucket, SharedStyleLayers, UploadOutcome};
 use metadata::upload_size;
 #[cfg(test)]
 use metadata::{metadata_for_layer, pattern_runs, sort_runs};
@@ -123,6 +123,7 @@ pub fn upload_system(
     world
         .resources
         .get_or_init_mut::<paint::PaintRefreshScratch>();
+    world.resources.get_or_init_mut::<SharedStyleLayers>();
     #[cfg(feature = "geojson")]
     crate::geojson::update::dynamic_points::ensure_seeded_for_style(world, style);
     style_refresh::apply_dirty_style(world, style, queue, paint_frame);
@@ -130,12 +131,13 @@ pub fn upload_system(
         .resources
         .get::<crate::render::systems::retention_system::RetainLoadedTiles>()
         .is_some();
-    let Some((Initialized(buffer_pool), budget, dyn_points, paint_scratch)) =
+    let Some((Initialized(buffer_pool), budget, dyn_points, paint_scratch, shared_layers)) =
         world.resources.query_mut::<(
             &mut Eventually<VectorBufferPool>,
             &mut FrameUploads,
             &mut DynPoints,
             &mut paint::PaintRefreshScratch,
+            &mut SharedStyleLayers,
         )>()
     else {
         return Err(SystemError::Dependencies);
@@ -159,11 +161,13 @@ pub fn upload_system(
         let allow_cpu_release = (style.terrain.is_none() || cfg!(target_arch = "wasm32"))
             && !retain_loaded_tiles
             && settings.buffer_pools.vertices >= 1_000_000;
+        let shared_style_layers = shared_layers.sync(style);
         upload_tessellated_layer_with_uncovered(
             buffer_pool,
             queue,
             &mut world.tiles,
             style,
+            shared_style_layers,
             (source_tiles, &uncovered_sources),
             (&spatial, paint_frame),
             (budget, allow_cpu_release, dyn_points),
@@ -238,22 +242,31 @@ fn upload_tessellated_layer(
     (budget, allow_cpu_release, dyn_points): (&mut FrameUploads, bool, &mut DynPoints),
 ) -> (bool, bool) {
     let empty = rustc_hash::FxHashSet::default();
+    let shared: Vec<_> = style
+        .layers
+        .iter()
+        .cloned()
+        .map(std::sync::Arc::new)
+        .collect();
     upload_tessellated_layer_with_uncovered(
         buffer_pool,
         queue,
         tiles,
         style,
+        &shared,
         (source_tiles, &empty),
         (spatial, paint),
         (budget, allow_cpu_release, dyn_points),
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn upload_tessellated_layer_with_uncovered(
     buffer_pool: &mut VectorBufferPool,
     queue: &crate::render::upload_queue::UploadQueue,
     tiles: &mut Tiles,
     style: &Style,
+    shared_style_layers: &[std::sync::Arc<crate::style::layer::StyleLayer>],
     (source_tiles, uncovered_sources): (
         Vec<crate::coords::WorldTileCoords>,
         &rustc_hash::FxHashSet<crate::coords::WorldTileCoords>,
@@ -294,7 +307,7 @@ fn upload_tessellated_layer_with_uncovered(
         let mut tile_incomplete = false;
         let mut uploaded = false;
         let mut pending_cpu_releases: Vec<(String, Option<u64>, bool)> = Vec::new();
-        for style_layer in &style.layers {
+        for style_layer in shared_style_layers {
             enum Step {
                 Skip,
                 Exhausted,

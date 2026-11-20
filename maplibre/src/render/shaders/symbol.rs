@@ -7,6 +7,17 @@ pub struct SymbolShader {
     pub format: wgpu::TextureFormat,
 }
 
+impl SymbolShader {
+    /// Returns the globe-aware vertex descriptor or the lean flat-Mercator variant (`flat_main`).
+    pub fn describe_vertex_for_globe(&self, globe: bool) -> VertexState {
+        let mut vertex = self.describe_vertex();
+        if !globe {
+            vertex.entry_point = "flat_main";
+        }
+        vertex
+    }
+}
+
 impl Shader for SymbolShader {
     fn describe_vertex(&self) -> VertexState {
         VertexState {

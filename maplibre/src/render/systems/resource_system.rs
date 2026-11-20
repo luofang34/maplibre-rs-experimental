@@ -267,20 +267,19 @@ impl System for ResourceSystem {
                     draw_colors: false,
                     debug_lines: false,
                 };
-                mask.globe = Some(
-                    TilePipeline::new(
-                        "mask_pipeline".into(),
-                        *settings,
-                        globe_shader.describe_vertex(),
-                        globe_shader.describe_fragment(),
-                        options,
-                    )
-                    .describe_render_pipeline()
-                    .initialize_with_prefix_layouts(
-                        device,
-                        &[projection_resources.bind_group_layout()],
-                    ),
-                );
+                let mut descriptor = TilePipeline::new(
+                    "mask_pipeline".into(),
+                    *settings,
+                    globe_shader.describe_vertex(),
+                    globe_shader.describe_fragment(),
+                    options,
+                )
+                .describe_render_pipeline();
+                descriptor.primitive.cull_mode = Some(wgpu::Face::Back);
+                mask.globe = Some(descriptor.initialize_with_prefix_layouts(
+                    device,
+                    &[projection_resources.bind_group_layout()],
+                ));
             }
         }
 

@@ -10,7 +10,6 @@ struct PatternUniforms {
 struct VertexOutput {
     @location(0) v_color: vec4<f32>,
     @location(1) pattern_position: vec2<f32>,
-    @location(4) horizon_distance: f32,
     @builtin(position) position: vec4<f32>,
 };
 
@@ -34,7 +33,7 @@ fn main(
         tile_mercator_coords,
     );
     var final_position = projected.clip_position;
-    final_position.z = 0.0;
+    final_position.z = projected.horizon_distance * 0.5 * final_position.w;
 
     // The pattern is fixed to the pixel grid of the whole map at the view zoom, so tiles
     // agree where they meet: the tile's corner in map pixels, taken modulo the pattern size,
@@ -54,5 +53,5 @@ fn main(
     let offset = low - size * floor(low / size);
     let pattern_position = (position + layer_translate) * tile_units_to_pixels + offset;
 
-    return VertexOutput(color, pattern_position, projected.horizon_distance, final_position);
+    return VertexOutput(color, pattern_position, final_position);
 }

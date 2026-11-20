@@ -233,21 +233,56 @@ async fn cancel_staged_buffer_before_destroy_prevents_validation_error() {
 }
 
 #[test]
-fn staging_is_enabled_only_for_non_gl_wasm32_backends() {
+fn staging_is_enabled_for_non_gl_backends() {
     assert!(UploadQueue::should_stage_for_backend(
         true,
         wgpu::Backend::BrowserWebGpu
     ));
+    assert!(UploadQueue::should_stage_for_backend(
+        false,
+        wgpu::Backend::Metal
+    ));
+    assert!(UploadQueue::should_stage_for_backend(
+        false,
+        wgpu::Backend::Vulkan
+    ));
+    assert!(UploadQueue::should_stage_for_backend(
+        false,
+        wgpu::Backend::Dx12
+    ));
     assert!(!UploadQueue::should_stage_for_backend(
         true,
         wgpu::Backend::Gl
     ));
     assert!(!UploadQueue::should_stage_for_backend(
         false,
-        wgpu::Backend::Metal
-    ));
-    assert!(!UploadQueue::should_stage_for_backend(
-        false,
         wgpu::Backend::Gl
     ));
+}
+
+#[tokio::test]
+async fn consecutive_staged_frames_reuse_mapped_ring_chunks_after_poll() {
+    let Some((device, queue)) = test_device_and_queue().await else {
+        return;
+    };
+    let queue = UploadQueue::with_staging(queue);
+    let dst = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("ring_dst"),
+        size: 128,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+
+    for round in 1_u8..=4 {
+        queue.write_buffer(&dst, 0, &[round; 64]);
+        queue.write_buffer(&dst, 64, &[round.wrapping_mul(3); 64]);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        assert!(queue.encode_staged_into(&device, &mut encoder));
+        queue.submit([encoder.finish()]);
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+
+        let got = readback_bytes(&device, &queue, &dst, 128).await;
+        assert_eq!(&got[..64], &[round; 64][..]);
+        assert_eq!(&got[64..], &[round.wrapping_mul(3); 64][..]);
+    }
 }

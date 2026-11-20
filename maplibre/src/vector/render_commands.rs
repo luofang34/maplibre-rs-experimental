@@ -48,7 +48,16 @@ impl RenderCommand<LayerItem> for SetVectorTilePipeline {
             return RenderCommandResult::Failure;
         };
 
-        pass.set_pipeline(pipeline.select(is_uniform_entry(world, item)));
+        let entry = resolve_vector_entry(world, item);
+        let globe = projection_resources.is_globe_active(item.projection_binding());
+        let opaque = entry.is_some_and(crate::vector::resource::IndexEntry::is_opaque_color);
+        let uniform =
+            entry.is_some_and(crate::vector::resource::IndexEntry::is_uniform_feature_metadata);
+        let Some(selected) = pipeline.select(globe, opaque, uniform) else {
+            return RenderCommandResult::Failure;
+        };
+
+        pass.set_pipeline(selected);
         pass.set_bind_group(
             0,
             projection_resources.bind_group_for(item.projection_binding()),
@@ -243,11 +252,30 @@ impl RenderCommand<LayerItem> for SetLineTilePipeline {
             return RenderCommandResult::Failure;
         };
 
-        let chosen = match line_mode(world, item) {
-            LineMode::Flat => pipeline.flat.as_ref(),
-            LineMode::Structure => pipeline.structure.as_ref(),
-            LineMode::Elevated => pipeline.elevated.as_ref(),
-            LineMode::Terrain => pipeline.terrain.as_ref(),
+        let mode = line_mode(world, item);
+        let dashes = world.resources.get::<super::line_dash::LineDashResources>();
+        let (chosen, needs_dash_group) = match mode {
+            LineMode::Flat => {
+                let is_plain = item.run.is_none()
+                    && dashes.is_some_and(|dashes| dashes.is_plain_solid(item.style_layer));
+                if is_plain {
+                    let plain = if projection_resources.is_globe_active(item.projection_binding()) {
+                        pipeline.globe_plain.as_ref()
+                    } else {
+                        pipeline.flat_plain.as_ref()
+                    };
+                    if let Some(plain) = plain {
+                        (Some(plain), false)
+                    } else {
+                        (pipeline.flat.as_ref(), true)
+                    }
+                } else {
+                    (pipeline.flat.as_ref(), true)
+                }
+            }
+            LineMode::Structure => (pipeline.structure.as_ref(), true),
+            LineMode::Elevated => (pipeline.elevated.as_ref(), true),
+            LineMode::Terrain => (pipeline.terrain.as_ref(), true),
         };
         let Some(chosen) = chosen else {
             return RenderCommandResult::Failure;
@@ -258,10 +286,12 @@ impl RenderCommand<LayerItem> for SetLineTilePipeline {
             projection_resources.bind_group_for(item.projection_binding()),
             &[],
         );
-        let Some(dashes) = world.resources.get::<super::line_dash::LineDashResources>() else {
-            return RenderCommandResult::Failure;
-        };
-        pass.set_bind_group(1, dashes.binding(item.style_layer), &[]);
+        if needs_dash_group {
+            let Some(dashes) = dashes else {
+                return RenderCommandResult::Failure;
+            };
+            pass.set_bind_group(1, dashes.binding(item.style_layer), &[]);
+        }
         RenderCommandResult::Success
     }
 }

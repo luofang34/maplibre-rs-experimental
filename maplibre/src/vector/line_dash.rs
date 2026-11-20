@@ -253,6 +253,11 @@ impl LineDashResources {
     pub(crate) fn binding(&self, layer: StyleLayerId) -> &wgpu::BindGroup {
         &self.entries.get(&layer).unwrap_or(&self.solid).binding
     }
+
+    #[inline]
+    pub(crate) fn is_plain_solid(&self, layer: StyleLayerId) -> bool {
+        !self.entries.contains_key(&layer) && !self.per_feature.contains(&layer)
+    }
 }
 
 /// The pattern as GL JS's line atlas reads it: an odd-length array joins its last dash to its

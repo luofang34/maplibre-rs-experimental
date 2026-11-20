@@ -1,5 +1,7 @@
 //! Single-bucket GPU geometry + layer/feature metadata upload helper.
 
+use std::sync::Arc;
+
 use super::{
     metadata::{
         feature_metadata_into, metadata_for_layer, pattern_runs, sort_runs,
@@ -9,8 +11,31 @@ use super::{
 };
 use crate::{
     render::shaders::{FillShaderFeatureMetadata, Vec4f32},
+    style::{layer::StyleLayer, Style},
     vector::{AvailableVectorLayerBucket, VectorBufferPool},
 };
+
+/// Caches one `Arc<StyleLayer>` per style layer for the active `style.revision()` so resident
+/// [`IndexEntry`](crate::vector::IndexEntry) records share definitions instead of deep-cloning
+/// per tile.
+#[derive(Default)]
+pub(super) struct SharedStyleLayers {
+    revision: Option<u64>,
+    layers: Vec<Arc<StyleLayer>>,
+}
+
+impl SharedStyleLayers {
+    pub(super) fn sync(&mut self, style: &Style) -> &[Arc<StyleLayer>] {
+        let rev = style.revision();
+        if self.revision != Some(rev) || self.layers.len() != style.layers.len() {
+            self.revision = Some(rev);
+            self.layers.clear();
+            self.layers
+                .extend(style.layers.iter().map(|layer| Arc::new(layer.clone())));
+        }
+        &self.layers
+    }
+}
 
 pub(super) enum UploadOutcome {
     Uploaded,
@@ -22,7 +47,7 @@ pub(super) enum UploadOutcome {
 pub(super) fn upload_bucket(
     buffer_pool: &mut VectorBufferPool,
     queue: &crate::render::upload_queue::UploadQueue,
-    style_layer: &crate::style::layer::StyleLayer,
+    style_layer: &Arc<StyleLayer>,
     bucket: &AvailableVectorLayerBucket,
     fallback_vertices: Option<&[crate::render::ShaderVertex]>,
     (paint_entries, overscaled_zoom, is_dynamic_circle): (
@@ -123,7 +148,7 @@ pub(super) fn upload_bucket(
             buffer_pool.replace_layer_geometry_layer_uniform_shared_unless(
                 queue,
                 coords,
-                style_layer.clone(),
+                Arc::clone(style_layer),
                 buffer,
                 fallback_vertices,
                 layer_metadata,
@@ -135,7 +160,7 @@ pub(super) fn upload_bucket(
             buffer_pool.replace_layer_geometry_uniform_shared_unless(
                 queue,
                 coords,
-                style_layer.clone(),
+                Arc::clone(style_layer),
                 buffer,
                 fallback_vertices,
                 layer_metadata,
@@ -148,7 +173,7 @@ pub(super) fn upload_bucket(
         buffer_pool.replace_layer_geometry_unless(
             queue,
             coords,
-            style_layer.clone(),
+            Arc::clone(style_layer),
             buffer,
             layer_metadata,
             feature_metadata,
@@ -173,6 +198,17 @@ pub(super) fn upload_bucket(
     buffer_pool.set_pattern_runs(coords, &style_layer.id, runs);
     buffer_pool.set_sort_runs(coords, &style_layer.id, sort_runs);
     buffer_pool.set_layer_evaluated_zoom(coords, &style_layer.id, zoom);
+    let opaque_fill = style_layer.type_ == "fill"
+        && !matches!(
+            style_layer.paint.as_ref(),
+            Some(crate::style::layer::LayerPaint::Fill(f)) if f.fill_pattern.is_some()
+        )
+        && if let Some(color) = uniform {
+            color[3] >= 1.0
+        } else {
+            !feature_metadata.is_empty() && feature_metadata.iter().all(|fm| fm.color[3] == 255)
+        };
+    buffer_pool.set_layer_opaque_color(coords, &style_layer.id, opaque_fill);
     #[cfg(feature = "geojson")]
     if is_dynamic_circle {
         crate::geojson::update::dynamic_points::record_uploaded_dynamic_circle(

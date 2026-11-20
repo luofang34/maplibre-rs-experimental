@@ -215,13 +215,16 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
     /// tile coordinates touched.
     pub fn sync_style_layer(&mut self, style_layer: &StyleLayer) -> Vec<WorldTileCoords> {
         let mut touched = Vec::new();
+        let mut shared: Option<std::sync::Arc<StyleLayer>> = None;
         let target_id = style_layer.layer_id();
         for tile_layers in self.index.iter_mut() {
             for entry in tile_layers {
                 if entry.style_layer_id == target_id
                     && !entry.style_layer.same_gpu_definition(style_layer)
                 {
-                    entry.style_layer = style_layer.clone();
+                    let arc =
+                        shared.get_or_insert_with(|| std::sync::Arc::new(style_layer.clone()));
+                    entry.style_layer = std::sync::Arc::clone(arc);
                     entry.style_layer_id = target_id;
                     entry.paint_revision = entry.paint_revision.wrapping_add(1);
                     touched.push(entry.coords);
@@ -260,5 +263,26 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
                 }
             }
         }
+    }
+
+    /// Records whether a resident layer allocation draws exclusively with opaque (`alpha == 1.0`) color.
+    pub fn set_layer_opaque_color_by_id(
+        &mut self,
+        coords: WorldTileCoords,
+        target_id: crate::style::StyleLayerId,
+        opaque: bool,
+    ) {
+        if let Some(layers) = self.index.get_layers_mut(coords) {
+            for entry in layers {
+                if entry.style_layer_id == target_id {
+                    entry.opaque_color = opaque;
+                }
+            }
+        }
+    }
+
+    /// Records whether a resident layer allocation draws exclusively with opaque (`alpha == 1.0`) color.
+    pub fn set_layer_opaque_color(&mut self, coords: WorldTileCoords, id: &str, opaque: bool) {
+        self.set_layer_opaque_color_by_id(coords, crate::style::StyleLayerId::intern(id), opaque);
     }
 }

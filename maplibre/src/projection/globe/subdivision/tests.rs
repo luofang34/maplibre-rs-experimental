@@ -1,7 +1,8 @@
 use lyon::tessellation::{VertexBuffers, VertexId};
 
 use super::{
-    granularity_for_zoom, subdivide_line_segment, subdivide_triangles, FillSubdivisionOptions,
+    granularity_for_zoom, subdivide_line_segment, subdivide_triangles, subdivide_triangles_from,
+    FillSubdivisionOptions,
 };
 use crate::render::ShaderVertex;
 
@@ -306,4 +307,42 @@ fn buffered_coastal_bay_clipped_horizontally_at_buffer_rim_does_not_extrude_to_p
         pole_vertex_indices(&buffer).is_empty(),
         "sub-tile coastal bays clipped at MVT buffer rim must not extrude wedges to 90°S"
     );
+}
+
+#[test]
+fn subdivide_triangles_from_removes_orphaned_vertices_with_identical_triangles() {
+    let tris = [
+        [[100.0, 100.0], [300.0, 100.0], [200.0, 300.0]],
+        [[100.0, 100.0], [3500.0, 100.0], [200.0, 3500.0]],
+    ];
+    let mut legacy = VertexBuffers::<ShaderVertex, u32>::new();
+    let mut compacted = VertexBuffers::<ShaderVertex, u32>::new();
+    for buf in [&mut legacy, &mut compacted] {
+        for tri in tris {
+            for p in tri {
+                buf.indices.push(buf.vertices.len() as u32);
+                buf.vertices.push(ShaderVertex::new(p, [0.0; 2]));
+            }
+        }
+    }
+    subdivide_triangles(&mut legacy, 0, options(4)).expect("legacy");
+    subdivide_triangles_from(&mut compacted, 0, 0, options(4)).expect("compacted");
+
+    let mut referenced = vec![false; compacted.vertices.len()];
+    for &idx in &compacted.indices {
+        referenced[idx as usize] = true;
+    }
+    assert!(
+        referenced.into_iter().all(|used| used),
+        "subdivide_triangles_from must leave zero orphaned vertices"
+    );
+    assert!(compacted.vertices.len() < legacy.vertices.len());
+    assert_eq!(compacted.indices.len(), legacy.indices.len());
+    let coords = |buf: &VertexBuffers<ShaderVertex, u32>| -> Vec<[f32; 2]> {
+        buf.indices
+            .iter()
+            .map(|&idx| buf.vertices[idx as usize].position)
+            .collect()
+    };
+    assert_eq!(coords(&compacted), coords(&legacy));
 }

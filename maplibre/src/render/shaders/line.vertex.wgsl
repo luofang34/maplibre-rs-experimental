@@ -21,15 +21,20 @@ fn screen_normal(
 }
 
 // How the clip position of a tile position changes per metre of height.
-fn project_tile_up_3d(
-    tile_position: vec3<f32>,
+fn project_tile_up_from_surface(
+    surface: vec3<f32>,
     fallback_matrix: mat4x4<f32>,
-    tile_mercator_coords: vec4<f32>,
 ) -> vec4<f32> {
-    let surface = tile_position_on_unit_sphere(tile_position.xy, tile_mercator_coords);
+    let transition = projection.transition_and_padding.x;
+    if transition <= 0.0 {
+        return fallback_matrix * vec4<f32>(0.0, 0.0, 1.0, 0.0);
+    }
     let globe = projection.main_matrix * vec4<f32>(surface / projection.transition_and_padding.z, 0.0);
+    if transition >= 1.0 {
+        return globe;
+    }
     let flat = fallback_matrix * vec4<f32>(0.0, 0.0, 1.0, 0.0);
-    return blend_clip(flat, globe, projection.transition_and_padding.x);
+    return blend_clip(flat, globe, transition);
 }
 
 struct VertexOutput {
@@ -106,20 +111,36 @@ fn main(
 
     let elev_u16 = (w3 & 0xffu) | (((v_meta.x >> 24u) & 0xffu) << 8u);
     let spatial_elevation = f32(elev_u16) * 0.25 - 1000.0;
-    let ground = line_ground(position + layer_translate, tile_mercator_coords);
+    let pos_2d = position + layer_translate;
+    let ground = line_ground(pos_2d, tile_mercator_coords);
     let elevation = select(select(0.0, spatial_elevation, spatial), ground.elevation, ground.on_terrain);
-    let projected_center = project_tile_position_3d(
-        vec3<f32>(position + layer_translate, elevation),
-        transform,
-        tile_mercator_coords,
-    );
-    let tangent = project_tile_tangent_3d(
-        vec3<f32>(position + layer_translate, elevation),
-        normal,
-        transform,
-        tile_mercator_coords,
-    );
-    var center = projected_center.clip_position;
+    let position_3d = vec3<f32>(pos_2d, elevation);
+    let is_globe = projection.transition_and_padding.x > 0.0;
+    var sp = GlobeSurfacePoint(vec3<f32>(0.0), 0.0, 1.0, 1.0, false, false);
+    var center = vec4<f32>(0.0);
+    var tangent = vec4<f32>(0.0);
+    var horizon_distance = 1.0;
+    if is_globe {
+        sp = tile_surface_point(pos_2d, tile_mercator_coords);
+        let projected_center = project_tile_position_3d_from_surface(
+            sp,
+            position_3d,
+            transform,
+            tile_mercator_coords,
+        );
+        center = projected_center.clip_position;
+        horizon_distance = projected_center.horizon_distance;
+        tangent = project_tile_tangent_from_surface(
+            sp,
+            elevation,
+            normal,
+            transform,
+            tile_mercator_coords,
+        );
+    } else {
+        center = transform * vec4<f32>(position_3d, 1.0);
+        tangent = transform * vec4<f32>(normal, 0.0, 0.0);
+    }
     // The offset moves both edges of the line the same way: the sign of the side undoes the
     // opposite directions of their extrusions.
     let side = select(1.0, -1.0, negative_side);
@@ -131,9 +152,15 @@ fn main(
         // Elevated 3D paths (`line-elevation`) keep crisp screen-pixel widths at all pitches and
         // when viewed from above, eye level, or below by rotating the projected path tangent 90°
         // in screen pixels (without flipping across the horizontal plane's horizon).
-        let position_3d = vec3<f32>(position + layer_translate, elevation);
-        let east = project_tile_tangent_3d(position_3d, vec2<f32>(1.0, 0.0), transform, tile_mercator_coords);
-        let south = project_tile_tangent_3d(position_3d, vec2<f32>(0.0, 1.0), transform, tile_mercator_coords);
+        var east: vec4<f32>;
+        var south: vec4<f32>;
+        if is_globe {
+            east = project_tile_tangent_from_surface(sp, elevation, vec2<f32>(1.0, 0.0), transform, tile_mercator_coords);
+            south = project_tile_tangent_from_surface(sp, elevation, vec2<f32>(0.0, 1.0), transform, tile_mercator_coords);
+        } else {
+            east = transform * vec4<f32>(1.0, 0.0, 0.0, 0.0);
+            south = transform * vec4<f32>(0.0, 1.0, 0.0, 0.0);
+        }
         let half_viewport = viewport * 0.5;
         let w = max(center.w, 1e-6);
         let east_px = (east.xy * w - center.xy * east.w) / (w * w) * half_viewport;
@@ -156,12 +183,18 @@ fn main(
         // The edges lie the line's width in pixels from its centre on the screen, however far
         // away the ground is. The tangents follow the slope of the surface, so the edges stay
         // square to the line where it climbs.
-        let position_3d = vec3<f32>(position + layer_translate, elevation);
-        let up = project_tile_up_3d(position_3d, transform, tile_mercator_coords);
-        let east = project_tile_tangent_3d(position_3d, vec2<f32>(1.0, 0.0), transform, tile_mercator_coords)
-            + up * ground.slope.x;
-        let south = project_tile_tangent_3d(position_3d, vec2<f32>(0.0, 1.0), transform, tile_mercator_coords)
-            + up * ground.slope.y;
+        let up = project_tile_up_from_surface(sp.surface, transform);
+        var east: vec4<f32>;
+        var south: vec4<f32>;
+        if is_globe {
+            east = project_tile_tangent_from_surface(sp, elevation, vec2<f32>(1.0, 0.0), transform, tile_mercator_coords);
+            south = project_tile_tangent_from_surface(sp, elevation, vec2<f32>(0.0, 1.0), transform, tile_mercator_coords);
+        } else {
+            east = transform * vec4<f32>(1.0, 0.0, 0.0, 0.0);
+            south = transform * vec4<f32>(0.0, 1.0, 0.0, 0.0);
+        }
+        east += up * ground.slope.x;
+        south += up * ground.slope.y;
         let half_viewport = viewport * 0.5;
         let direction = screen_normal(center, east, south, normal, half_viewport);
         center = vec4<f32>(center.xy + direction * moved / half_viewport * center.w, center.zw);
@@ -170,10 +203,13 @@ fn main(
         center.z += max(abs(center.z), 1e-8) * TERRAIN_LINE_DEPTH_BIAS;
     } else {
         // The extrusion lies on the map, so it shrinks with distance as the ground does.
-        let line_units =
-            line_scale.y * project_symbol_scale((position + layer_translate).y, tile_mercator_coords);
+        var line_units = line_scale.y;
+        if is_globe {
+            line_units *= project_symbol_scale_from_cos_lat(sp.cos_lat);
+        }
         let offset = tangent * (moved * line_units / max(extent, 1e-6));
-        center = vec4<f32>(center.xy + offset.xy, 0.0, center.w + offset.w);
+        let out_w = center.w + offset.w;
+        center = vec4<f32>(center.xy + offset.xy, horizon_distance * 0.5 * out_w, out_w);
     }
 
     let dash_scale = line_scale.y * select(
@@ -186,14 +222,19 @@ fn main(
     // a range of 32767, in widths rounded down: a pattern repeats every `sum * 16 * floor(width)`
     // of those units, as GL JS draws it.
     let floor_width = max(floor(select(line_width, feature_width, per_feature)), 1.0);
-    let grad_len_q4 = round(color.x * 255.0)
-        + round(color.y * 255.0) * 256.0
-        + round(color.z * 255.0) * 65536.0;
-    let grad_len = max(grad_len_q4 / 16.0, 1e-6);
-    let gradient_dash = vec2<f32>(
-        path_dist / grad_len * 32767.0 / (16.0 * floor_width),
-        grad_len / max(dash_scale, 1e-6) * 16.0 * floor_width / 32767.0,
-    );
+    var dash = vec2<f32>(path_dist / max(dash_scale * dash_unit, 1e-6), dash_unit);
+    var progress = 0.0;
+    if is_gradient {
+        let grad_len_q4 = round(color.x * 255.0)
+            + round(color.y * 255.0) * 256.0
+            + round(color.z * 255.0) * 65536.0;
+        let grad_len = max(grad_len_q4 / 16.0, 1e-6);
+        dash = vec2<f32>(
+            path_dist / grad_len * 32767.0 / (16.0 * floor_width),
+            grad_len / max(dash_scale, 1e-6) * 16.0 * floor_width / 32767.0,
+        );
+        progress = path_dist / grad_len;
+    }
     return VertexOutput(
         center,
         color,
@@ -202,18 +243,14 @@ fn main(
         // A deck and a line on the terrain keep a one-pixel feather; zero lets a line on the map
         // scale its feather with how much it has narrowed, as GL JS's gamma scale does.
         select(0.0, 1.0, spatial || ground.on_terrain),
-        projected_center.horizon_distance,
+        horizon_distance,
         position.x,
         clip_antimeridian,
-        select(
-            vec2<f32>(path_dist / max(dash_scale * dash_unit, 1e-6), dash_unit),
-            gradient_dash,
-            is_gradient,
-        ),
+        dash,
         // A gradient layer carries the 24-bit fixed-point length of the line in `color.xyz`.
-        path_dist / grad_len,
+        progress,
         // Which side of the line the vertex is on: the elevation sentinel of a stroke encodes it.
-        select(1.0, -1.0, negative_side) * min(length(normal), 1.0),
+        select(1.0, -1.0, negative_side) * min(extent, 1.0),
         blur_width,
         floor_width,
         select(

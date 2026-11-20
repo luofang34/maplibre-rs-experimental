@@ -16,9 +16,43 @@ use crate::{
         projection::globe_camera_for_view,
         render_phase::{DrawState, LayerItem, ProjectionBinding, RenderPhase, TranslucentItem},
         shaders::{AtmosphereLayerMetadata, BackgroundLayerMetadata, ShaderTileMetadata},
+        view_state::ViewState,
     },
     tcs::system::{SystemError, SystemResult},
 };
+
+/// Returns `true` when an unclipped flat quad is guaranteed to pass every `background.fragment.wgsl` check.
+pub(crate) fn flat_viewport_covered(view_state: &ViewState, edges: bool, frame: [f32; 2]) -> bool {
+    if !edges || frame[0] <= 0.0 || frame[1] <= 0.0 {
+        return false;
+    }
+    let horizon = view_state.horizon_line().to_shader();
+    let [row_num, row_den] = world_rows(view_state, edges);
+    let logical_h = view_state.height() as f32;
+    let scale = logical_h / frame[1].max(1.0);
+    for (px, py, nx, ny) in [
+        (0.0_f32, 0.0_f32, -1.0_f32, 1.0_f32),
+        (frame[0], 0.0, 1.0, 1.0),
+        (0.0, frame[1], -1.0, -1.0),
+        (frame[0], frame[1], 1.0, -1.0),
+    ] {
+        let x = px * scale;
+        let y = logical_h - py * scale;
+        let distance = (y - horizon[1]) * horizon[3] + (x - horizon[0]) * horizon[2];
+        if !distance.is_finite() || distance > -1e-3 {
+            return false;
+        }
+        let denom = row_den[0] * nx + row_den[1] * ny + row_den[2];
+        if !denom.is_finite() || denom <= 1e-9 {
+            return false;
+        }
+        let row = (row_num[0] * nx + row_num[1] * ny + row_num[2]) / denom;
+        if !row.is_finite() || row < row_num[3] + 1e-3 || row > row_den[3] - 1e-3 {
+            return false;
+        }
+    }
+    true
+}
 
 /// How strongly the atmosphere is drawn this frame: as the style's `sky` blends it, or in full
 /// where the host turned it on, faded with the projection's globe transition and camera altitude below 100 km.
@@ -71,6 +105,7 @@ pub fn queue_system(
     };
     let world_rows = world_rows(view_state, style.terrain.is_none());
     let mut instances = rustc_hash::FxHashMap::default();
+    let mut opaque_layers = rustc_hash::FxHashSet::default();
     let projection_transition = style.projection.as_ref().map_or(0.0, |specification| {
         specification
             .projection_type
@@ -141,10 +176,16 @@ pub fn queue_system(
                 crate::vector::pattern::pattern_name(paint, view_state.style_zoom().value())
                     .is_some()
             });
-            background_index = background_index.max(layer.index);
             let c = background_color(layer, view_state.zoom().value());
+            if uses_globe && !is_patterned && c[3] <= 0.0 {
+                continue;
+            }
+            background_index = background_index.max(layer.index);
             let z_index = layer.index as f32;
             let layer_id = layer.layer_id();
+            if !is_patterned && c[3] >= 1.0 {
+                opaque_layers.insert(layer_id);
+            }
             instances.insert(layer_id, metadatas.len() as u32);
             metadatas.push(BackgroundLayerMetadata {
                 color: c,
@@ -300,6 +341,9 @@ pub fn queue_system(
             globe_tiles,
             atmosphere_metadata_buffer,
             sky_metadata_buffer,
+            flat_covers_viewport: !uses_globe
+                && flat_viewport_covered(view_state, style.terrain.is_none(), frame),
+            opaque_layers,
         });
     }
 

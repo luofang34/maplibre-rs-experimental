@@ -32,3 +32,8 @@ fn main(
     }
     return Output(vec4<f32>(v_color.rgb * v_color.a, v_color.a));
 }
+
+@fragment
+fn solid_main(@location(0) v_color: vec4<f32>) -> Output {
+    return Output(vec4<f32>(v_color.rgb * v_color.a, v_color.a));
+}

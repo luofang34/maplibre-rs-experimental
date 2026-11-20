@@ -49,10 +49,82 @@ pub(crate) use depth::SymbolDepth;
 pub(crate) mod glyphs;
 pub mod tessellation;
 
+#[derive(Default)]
+struct SymbolModePipelines {
+    combined: Option<wgpu::RenderPipeline>,
+    halo: Option<wgpu::RenderPipeline>,
+    fill: Option<wgpu::RenderPipeline>,
+}
+
 struct SymbolPipeline {
-    combined: wgpu::RenderPipeline,
-    halo: wgpu::RenderPipeline,
-    fill: wgpu::RenderPipeline,
+    atlas_layout: wgpu::BindGroupLayout,
+    depth_layout: wgpu::BindGroupLayout,
+    flat: Option<SymbolModePipelines>,
+    globe: Option<SymbolModePipelines>,
+}
+
+impl SymbolPipeline {
+    fn new(device: &wgpu::Device) -> Self {
+        let atlas_layout = crate::render::resource::create_bind_group_layout_cached(
+            device,
+            Some("symbol atlas and paint layout"),
+            &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        );
+        let depth_layout = crate::render::resource::create_bind_group_layout_cached(
+            device,
+            Some("symbol anchor depth layout"),
+            &depth::SymbolDepth::layout(),
+        );
+        Self {
+            atlas_layout,
+            depth_layout,
+            flat: None,
+            globe: None,
+        }
+    }
+
+    fn for_globe(&self, globe: bool) -> Option<&SymbolModePipelines> {
+        if globe {
+            self.globe.as_ref()
+        } else {
+            self.flat.as_ref()
+        }
+    }
+
+    fn slot_mut(&mut self, globe: bool) -> &mut Option<SymbolModePipelines> {
+        if globe {
+            &mut self.globe
+        } else {
+            &mut self.flat
+        }
+    }
 }
 
 /// Checks whether `style` declares any `"symbol"` layer.

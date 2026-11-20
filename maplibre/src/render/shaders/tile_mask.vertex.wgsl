@@ -2,7 +2,6 @@
 
 struct VertexOutput {
     @location(0) v_color: vec4<f32>,
-    @location(4) horizon_distance: f32,
     @builtin(position) position: vec4<f32>,
 };
 
@@ -24,5 +23,7 @@ fn main(
         mat4x4<f32>(translate1, translate2, translate3, translate4),
         tile_mercator_coords,
     );
-    return VertexOutput(DEBUG_COLOR, projected.horizon_distance, projected.clip_position);
+    var final_position = projected.clip_position;
+    final_position.z = projected.horizon_distance * 0.5 * final_position.w;
+    return VertexOutput(DEBUG_COLOR, final_position);
 }

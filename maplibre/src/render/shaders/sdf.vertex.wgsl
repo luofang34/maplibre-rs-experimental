@@ -111,12 +111,21 @@ fn main(
     // A glyph along a line lies on the ground under it, so a label climbing a slope lies on it.
     let elevation = label_elevation + select(0.0, pose_rise, has_pose) * alignment.w;
     let transform = mat4x4<f32>(translate1, translate2, translate3, translate4);
-    let projected = project_tile_position_3d(vec3<f32>(anchor, elevation), transform, tile_mercator_coords);
+    let sp = tile_surface_point(anchor, tile_mercator_coords);
+    let sym_scale = project_symbol_scale_from_cos_lat(sp.cos_lat);
+    let projected = project_tile_position_3d_from_surface(
+        sp,
+        vec3<f32>(anchor, elevation),
+        transform,
+        tile_mercator_coords,
+    );
     // Every glyph of a label takes the size its anchor's depth gives, as GL JS sizes them, so
     // a label along a receding line keeps one size and the spacing placement gave it.
-    let label_clip = select(projected.clip_position, project_tile_position_3d(
-        vec3<f32>(vec2<f32>(a_pos_offset.xy), label_elevation), transform, tile_mercator_coords).clip_position,
-        has_pose);
+    var label_clip = projected.clip_position;
+    if has_pose {
+        label_clip = project_tile_position_3d(
+            vec3<f32>(vec2<f32>(a_pos_offset.xy), label_elevation), transform, tile_mercator_coords).clip_position;
+    }
     let label_w = label_clip.w;
     let distance_ratio = select(projection.transition_and_padding.y / max(label_w, 1e-6),
         label_w / max(projection.transition_and_padding.y, 1e-6), alignment.x > 0.5);
@@ -128,12 +137,26 @@ fn main(
     let scale = select(size, size / 24.0, is_text);
     var world_angle = 0.0;
     if projection.transition_and_padding.w > 0.5 {
-        let top = project_tile_position_3d(vec3<f32>(anchor, elevation + 100.0), transform, tile_mercator_coords).clip_position;
-        var up = (top.xy * projected.clip_position.w - projected.clip_position.xy * top.w) / (projected.clip_position.w * projected.clip_position.w)
+        let c = projected.clip_position;
+        let transition = projection.transition_and_padding.x;
+        var d_top = projection.main_matrix
+            * vec4<f32>(sp.surface * (100.0 / max(projection.transition_and_padding.z, 1.0)), 0.0);
+        if transition <= 0.0 {
+            d_top = transform * vec4<f32>(0.0, 0.0, 100.0, 0.0);
+        } else if transition < 1.0 {
+            d_top = mix(transform * vec4<f32>(0.0, 0.0, 100.0, 0.0), d_top, transition);
+        }
+        var up = (d_top.xy * c.w - c.xy * d_top.w) / (c.w * c.w)
             * vec2<f32>(viewport_width, -viewport_height);
         if length(up) < 0.01 {
-            let north = project_tile_position_3d(vec3<f32>(anchor + vec2<f32>(0.0,-16.0), elevation), transform, tile_mercator_coords).clip_position;
-            up = (north.xy * projected.clip_position.w - projected.clip_position.xy * north.w) / (projected.clip_position.w * projected.clip_position.w)
+            let d_north = project_tile_tangent_from_surface(
+                sp,
+                elevation,
+                vec2<f32>(0.0, -16.0),
+                transform,
+                tile_mercator_coords,
+            );
+            up = (d_north.xy * c.w - c.xy * d_north.w) / (c.w * c.w)
                 * vec2<f32>(viewport_width, -viewport_height);
         }
         world_angle = atan2(up.y, up.x) + PROJECTION_PI * 0.5;
@@ -146,8 +169,13 @@ fn main(
         // perspective divide. Subtracting two projected points a few metres apart loses the
         // direction to f32 rounding in a close view of the globe.
         let clip = projected.clip_position;
-        let tangent = project_tile_tangent_3d(vec3<f32>(anchor, elevation),
-            vec2<f32>(cos(angle), sin(angle)), transform, tile_mercator_coords);
+        let tangent = project_tile_tangent_from_surface(
+            sp,
+            elevation,
+            vec2<f32>(cos(angle), sin(angle)),
+            transform,
+            tile_mercator_coords,
+        );
         let delta = (tangent.xy * clip.w - clip.xy * tangent.w) / (clip.w * clip.w)
             * vec2<f32>(viewport_width, -viewport_height);
         if alignment.x < 0.5 { angle = atan2(delta.y, delta.x); }
@@ -168,7 +196,7 @@ fn main(
     let offset = rotation * local;
     var position = projected.clip_position;
     if alignment.x > 0.5 {
-        let tile_offset = offset * 8.0 * zoom_factor * project_symbol_scale(anchor.y, tile_mercator_coords);
+        let tile_offset = offset * 8.0 * zoom_factor * sym_scale;
         position = project_tile_position_3d(vec3<f32>(anchor + tile_offset, elevation), transform, tile_mercator_coords).clip_position;
     } else {
         position.x += offset.x * 2.0 / viewport_width * position.w;
@@ -182,11 +210,22 @@ fn main(
     position.z += max(abs(position.z) * 2e-5, 1e-10);
     var near_visibility = 1.0;
     if alignment.x > 0.5 {
-        let radius = (f32(a_data.z >> 2u) / 16.0) * scale * 8.0 * zoom_factor
-            * project_symbol_scale(anchor.y, tile_mercator_coords);
-        let x = project_tile_position_3d(vec3<f32>(anchor + vec2<f32>(radius,0.0),elevation),transform,tile_mercator_coords).clip_position;
-        let y = project_tile_position_3d(vec3<f32>(anchor + vec2<f32>(0.0,radius),elevation),transform,tile_mercator_coords).clip_position;
-        let depth_radius = abs(x.w - projected.clip_position.w) + abs(y.w - projected.clip_position.w);
+        let radius = (f32(a_data.z >> 2u) / 16.0) * scale * 8.0 * zoom_factor * sym_scale;
+        let dx = project_tile_tangent_from_surface(
+            sp,
+            elevation,
+            vec2<f32>(radius, 0.0),
+            transform,
+            tile_mercator_coords,
+        );
+        let dy = project_tile_tangent_from_surface(
+            sp,
+            elevation,
+            vec2<f32>(0.0, radius),
+            transform,
+            tile_mercator_coords,
+        );
+        let depth_radius = abs(dx.w) + abs(dy.w);
         near_visibility = select(0.0,1.0,projected.clip_position.w - depth_radius > 0.0);
     }
     // A label is hidden or faded as a whole, judged at its anchor as GL JS judges it, so ground
@@ -196,4 +235,136 @@ fn main(
     if visibility <= 0.001 || projected.clip_position.w <= 0.0 { position = vec4<f32>(2.0, 2.0, 2.0, 1.0); }
     return VertexOutput(vec2<f32>(a_data.xy) / symbol.atlas.xy, kind, size,
         visibility, projected.horizon_distance, style_fill, style_halo, metrics, position);
+}
+
+@vertex
+fn flat_main(
+    @location(0) a_pos_offset: vec4<i32>,
+    @location(1) a_data: vec4<u32>,
+    @location(2) a_pixel_and_height: vec2<i32>,
+    @location(4) translate1: vec4<f32>,
+    @location(5) translate2: vec4<f32>,
+    @location(6) translate3: vec4<f32>,
+    @location(7) translate4: vec4<f32>,
+    @location(8) viewport_width: f32,
+    @location(9) zoom_factor: f32,
+    @location(11) viewport_height: f32,
+    @location(15) packed: vec4<u32>,
+    @location(12) pose_xy: vec2<f32>,
+    @location(10) style_fill: vec4<f32>,
+    @location(13) style_halo: vec4<f32>,
+) -> VertexOutput {
+    let kind = a_data.z & 3u;
+    let target_opacity = f32(packed.w & 0xffu) / 255.0;
+    let start_opacity = f32((packed.w >> 8u) & 0xffu) / 255.0;
+    let style_opacity = f32((packed.w >> 16u) & 0xffu) / 255.0;
+    let start_ticks = (packed.z >> 16u) | ((packed.x >> 29u) << 16u);
+    let start_time_ms = f32(start_ticks) * 4.0;
+    let fade_alpha = select(
+        clamp((symbol_fade.x - start_time_ms) / max(symbol_fade.y, 0.001), 0.0, 1.0),
+        1.0,
+        symbol_fade.y <= 0.0,
+    );
+    let fade_opacity = mix(start_opacity, target_opacity, fade_alpha);
+    if fade_opacity <= 0.001 || style_opacity <= 0.0 {
+        return VertexOutput(
+            vec2<f32>(0.0),
+            kind,
+            0.0,
+            0.0,
+            -1.0,
+            vec4<f32>(0.0),
+            vec4<f32>(0.0),
+            vec4<f32>(0.0),
+            vec4<f32>(2.0, 2.0, 2.0, 1.0),
+        );
+    }
+    let has_pose = ((packed.x >> 28u) & 1u) != 0u;
+    let is_text = kind == 0u || kind == 3u;
+    let size_and_rise = unpack2x16float(packed.y);
+    let metrics = vec4<f32>(
+        size_and_rise.x,
+        f32((packed.x >> 20u) & 0xffu) * 0.0625,
+        f32(packed.w >> 24u) * 0.0625,
+        style_opacity,
+    );
+    let ground_elev = f32((i32(packed.x) << 12u) >> 12u) * 0.0625;
+    let pose_angle = f32(packed.z & 0xffffu) * (PROJECTION_TWO_PI / 65536.0);
+    let pose_rise = size_and_rise.y;
+    let px_off_x = (a_pixel_and_height.x << 16u) >> 16u;
+    let px_off_y = a_pixel_and_height.x >> 16u;
+    let height_offset = bitcast<f32>(a_pixel_and_height.y);
+    let alignment = select(symbol.icon_layout, symbol.text_layout, is_text);
+    let anchor = vec2<f32>(a_pos_offset.xy) + select(vec2<f32>(0.0), pose_xy, has_pose);
+    let label_elevation = ground_elev * alignment.w + height_offset;
+    let elevation = label_elevation + select(0.0, pose_rise, has_pose) * alignment.w;
+    let transform = mat4x4<f32>(translate1, translate2, translate3, translate4);
+    let projected_clip = transform * vec4<f32>(anchor, elevation, 1.0);
+    var label_clip = projected_clip;
+    if has_pose {
+        label_clip = transform * vec4<f32>(vec2<f32>(a_pos_offset.xy), label_elevation, 1.0);
+    }
+    let label_w = label_clip.w;
+    let distance_ratio = select(projection.transition_and_padding.y / max(label_w, 1e-6),
+        label_w / max(projection.transition_and_padding.y, 1e-6), alignment.x > 0.5);
+    let perspective_ratio = select(clamp(0.5 + 0.5 * distance_ratio, 0.0, 4.0),
+        1.0, projection.globe_circle.z > 0.5 || projection.transition_and_padding.w > 0.5);
+    let size = metrics.x * perspective_ratio;
+    let scale = select(size, size / 24.0, is_text);
+    var world_angle = 0.0;
+    if projection.transition_and_padding.w > 0.5 {
+        let top = transform * vec4<f32>(anchor, elevation + 100.0, 1.0);
+        var up = (top.xy * projected_clip.w - projected_clip.xy * top.w) / (projected_clip.w * projected_clip.w)
+            * vec2<f32>(viewport_width, -viewport_height);
+        if length(up) < 0.01 {
+            let north = transform * vec4<f32>(anchor + vec2<f32>(0.0, -16.0), elevation, 1.0);
+            up = (north.xy * projected_clip.w - projected_clip.xy * north.w) / (projected_clip.w * projected_clip.w)
+                * vec2<f32>(viewport_width, -viewport_height);
+        }
+        world_angle = atan2(up.y, up.x) + PROJECTION_PI * 0.5;
+    }
+    let anchor_angle = select(0.0, f32(a_data.w) * (PROJECTION_TWO_PI / 65536.0), alignment.y > 0.5);
+    var angle = alignment.z + select(anchor_angle, pose_angle, has_pose);
+    if alignment.y > 0.5 {
+        let clip = projected_clip;
+        let tangent = transform * vec4<f32>(cos(angle), sin(angle), 0.0, 0.0);
+        let delta = (tangent.xy * clip.w - clip.xy * tangent.w) / (clip.w * clip.w)
+            * vec2<f32>(viewport_width, -viewport_height);
+        if alignment.x < 0.5 { angle = atan2(delta.y, delta.x); }
+        let keep_upright = select(symbol.placement.w, symbol.placement.z, is_text);
+        if keep_upright > 0.5 && !has_pose && dot(delta, vec2<f32>(cos(world_angle), sin(world_angle))) < 0.0 { angle += PROJECTION_PI; }
+    }
+    if alignment.x < 0.5 && alignment.y < 0.5 { angle += world_angle; }
+    let rotation = mat2x2<f32>(cos(angle), sin(angle), -sin(angle), cos(angle));
+    let centre = vec2<f32>(f32(px_off_x) / 32.0, 0.0);
+    let anchor_shift = select(vec2<f32>(0.0), pose_xy * scale, !has_pose);
+    let local = select(
+        vec2<f32>(a_pos_offset.zw) / 32.0 * scale + vec2<f32>(f32(px_off_x), f32(px_off_y)) / 16.0 + anchor_shift,
+        (vec2<f32>(a_pos_offset.zw) / 32.0 - centre) * scale,
+        has_pose);
+    let offset = rotation * local;
+    var position = projected_clip;
+    if alignment.x > 0.5 {
+        let tile_offset = offset * 8.0 * zoom_factor;
+        position = transform * vec4<f32>(anchor + tile_offset, elevation, 1.0);
+    } else {
+        position.x += offset.x * 2.0 / viewport_width * position.w;
+        position.y -= offset.y * 2.0 / viewport_height * position.w;
+    }
+    let shift = select(symbol.translate.zw, symbol.translate.xy, is_text);
+    position.x += shift.x * 2.0 / viewport_width * position.w;
+    position.y -= shift.y * 2.0 / viewport_height * position.w;
+    position.z += max(abs(position.z) * 2e-5, 1e-10);
+    var near_visibility = 1.0;
+    if alignment.x > 0.5 {
+        let radius = (f32(a_data.z >> 2u) / 16.0) * scale * 8.0 * zoom_factor;
+        let x = transform * vec4<f32>(anchor + vec2<f32>(radius, 0.0), elevation, 1.0);
+        let y = transform * vec4<f32>(anchor + vec2<f32>(0.0, radius), elevation, 1.0);
+        let depth_radius = abs(x.w - projected_clip.w) + abs(y.w - projected_clip.w);
+        near_visibility = select(0.0, 1.0, projected_clip.w - depth_radius > 0.0);
+    }
+    let visibility = fade_opacity * metrics.w * near_visibility * anchor_visibility(label_clip);
+    if visibility <= 0.001 || projected_clip.w <= 0.0 { position = vec4<f32>(2.0, 2.0, 2.0, 1.0); }
+    return VertexOutput(vec2<f32>(a_data.xy) / symbol.atlas.xy, kind, size,
+        visibility, 1.0, style_fill, style_halo, metrics, position);
 }

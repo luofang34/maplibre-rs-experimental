@@ -24,7 +24,9 @@ pub use circle::{
     pack_dynamic_circle_radii, CircleDynamicRadiusShader, CircleFeatureStrokeShader, CircleShader,
 };
 pub use fill::{FillPatternShader, FillShader};
-pub use fill_extrusion::{ExtrusionPass, FillExtrusionCompactShader, FillExtrusionShader};
+pub use fill_extrusion::{
+    ExtrusionPass, FillExtrusionCompactShader, FillExtrusionShader, StencilClearShader,
+};
 pub use gpu_vertex::{
     can_encode_compact_extrusion, encode_compact_extrusion_vertices, f16_bits_to_f32,
     f32_to_f16_bits, pack_f16_pair, unpack_compact_extrusion_vertices, EmptyLayerMetadata,
@@ -35,7 +37,7 @@ pub(crate) use gpu_vertex::{
     GpuVertexKind,
 };
 pub use heatmap::{HeatmapCompositeShader, HeatmapDensityShader, DENSITY_FORMAT};
-pub use line::{LineShader, TerrainLineShader};
+pub use line::{LineShader, PlainLineShader, TerrainLineShader};
 pub use symbol::SymbolShader;
 pub use symbol_vertex::ShaderSymbolVertex;
 pub use terrain::TerrainShader;

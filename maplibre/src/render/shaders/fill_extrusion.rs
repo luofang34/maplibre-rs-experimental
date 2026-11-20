@@ -15,12 +15,44 @@ pub enum ExtrusionPass {
     Color,
     /// The colour pass with an image in place of the colour.
     PatternColor,
-    /// Nothing but the stencil reset of the pixels the colour pass marked.
-    Clear,
     /// Back-facing shell of a translucent 3D volume, depth-tested without writing depth.
     TranslucentBack,
     /// Front-facing shell of a translucent 3D volume, depth-tested without writing depth.
     TranslucentFront,
+}
+
+/// Fullscreen 3-vertex triangle pass clearing bit 7 (`STENCIL_MARK`) without re-transforming tile geometry.
+pub struct StencilClearShader {
+    /// Format of the color attachment used by the render pipeline.
+    pub format: wgpu::TextureFormat,
+}
+
+impl Shader for StencilClearShader {
+    fn describe_vertex(&self) -> VertexState {
+        VertexState {
+            source: include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/stencil_clear.vertex.wgsl"
+            )),
+            entry_point: "main",
+            buffers: Vec::new(),
+        }
+    }
+
+    fn describe_fragment(&self) -> FragmentState {
+        FragmentState {
+            source: include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/fill_extrusion.fragment.wgsl"
+            )),
+            entry_point: "depth_flat",
+            targets: vec![Some(wgpu::ColorTargetState {
+                format: self.format,
+                blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::empty(),
+            })],
+        }
+    }
 }
 
 /// Walls and roofs lit by the root light, with premultiplied-alpha output.
@@ -89,38 +121,24 @@ pub struct FillExtrusionCompactShader {
     pub pass: ExtrusionPass,
 }
 
-impl Shader for FillExtrusionShader {
-    fn describe_vertex(&self) -> VertexState {
-        VertexState {
-            source: extrusion_vertex_source(),
-            entry_point: match self.pass {
+impl FillExtrusionShader {
+    /// Selects either the flat zero-globe vertex entry points or the globe-aware variants.
+    pub fn describe_vertex_for_globe(&self, globe: bool) -> VertexState {
+        let mut vertex = self.describe_vertex();
+        if !globe {
+            vertex.entry_point = match self.pass {
+                ExtrusionPass::Depth => "flat_depth_main",
+                ExtrusionPass::Color => "flat_main",
+                ExtrusionPass::PatternColor => "pattern_main",
                 ExtrusionPass::TranslucentBack => "translucent_back_main",
                 ExtrusionPass::TranslucentFront => "translucent_front_main",
-                _ => "main",
-            },
-            buffers: vec![
-                VertexBufferLayout {
-                    array_stride: std::mem::size_of::<GpuShaderVertex>() as u64,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: wgpu::vertex_attr_array![
-                        0 => Sint16x2,
-                        1 => Uint32,
-                        10 => Uint32x2
-                    ]
-                    .to_vec(),
-                },
-                ShaderTileMetadata::basic_layout(),
-                extrusion_layer_layout(false),
-                VertexBufferLayout {
-                    array_stride: std::mem::size_of::<FillShaderFeatureMetadata>() as u64,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: vec![attribute(0, wgpu::VertexFormat::Unorm8x4, 8)],
-                },
-            ],
+            };
         }
+        vertex
     }
 
-    fn describe_fragment(&self) -> FragmentState {
+    /// Selects either the flat zero-`discard` fragment entry points or the globe-clipped variants.
+    pub fn describe_fragment_for_globe(&self, globe: bool) -> FragmentState {
         FragmentState {
             source: include_str!(concat!(
                 env!("OUT_DIR"),
@@ -128,13 +146,28 @@ impl Shader for FillExtrusionShader {
             )),
             entry_point: match self.pass {
                 ExtrusionPass::PatternColor => "pattern_main",
-                _ => "main",
+                ExtrusionPass::Depth => {
+                    if globe {
+                        "depth_globe"
+                    } else {
+                        "depth_flat"
+                    }
+                }
+                ExtrusionPass::Color
+                | ExtrusionPass::TranslucentBack
+                | ExtrusionPass::TranslucentFront => {
+                    if globe {
+                        "main"
+                    } else {
+                        "main_flat"
+                    }
+                }
             },
             targets: vec![Some(wgpu::ColorTargetState {
                 format: self.format,
                 blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                 write_mask: match self.pass {
-                    ExtrusionPass::Depth | ExtrusionPass::Clear => wgpu::ColorWrites::empty(),
+                    ExtrusionPass::Depth => wgpu::ColorWrites::empty(),
                     ExtrusionPass::Color
                     | ExtrusionPass::PatternColor
                     | ExtrusionPass::TranslucentBack
@@ -145,14 +178,81 @@ impl Shader for FillExtrusionShader {
     }
 }
 
+impl Shader for FillExtrusionShader {
+    fn describe_vertex(&self) -> VertexState {
+        let mut buffers = vec![
+            VertexBufferLayout {
+                array_stride: std::mem::size_of::<GpuShaderVertex>() as u64,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: wgpu::vertex_attr_array![
+                    0 => Sint16x2,
+                    1 => Uint32,
+                    10 => Uint32x2
+                ]
+                .to_vec(),
+            },
+            ShaderTileMetadata::basic_layout(),
+            extrusion_layer_layout(false),
+        ];
+        if self.pass != ExtrusionPass::Depth {
+            buffers.push(VertexBufferLayout {
+                array_stride: std::mem::size_of::<FillShaderFeatureMetadata>() as u64,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: vec![attribute(0, wgpu::VertexFormat::Unorm8x4, 8)],
+            });
+        }
+        VertexState {
+            source: extrusion_vertex_source(),
+            entry_point: match self.pass {
+                ExtrusionPass::Depth => "depth_main",
+                ExtrusionPass::PatternColor => "pattern_main",
+                ExtrusionPass::TranslucentBack => "translucent_back_main",
+                ExtrusionPass::TranslucentFront => "translucent_front_main",
+                ExtrusionPass::Color => "main",
+            },
+            buffers,
+        }
+    }
+
+    fn describe_fragment(&self) -> FragmentState {
+        self.describe_fragment_for_globe(true)
+    }
+}
+
+impl FillExtrusionCompactShader {
+    /// Selects either the flat zero-globe vertex entry points or the globe-aware variants.
+    pub fn describe_vertex_for_globe(&self, globe: bool) -> VertexState {
+        let mut vertex = self.describe_vertex();
+        if !globe {
+            vertex.entry_point = match self.pass {
+                ExtrusionPass::Depth => "flat_compact_depth_main",
+                ExtrusionPass::Color | ExtrusionPass::PatternColor => "flat_compact_main",
+                ExtrusionPass::TranslucentBack => "compact_translucent_back_main",
+                ExtrusionPass::TranslucentFront => "compact_translucent_front_main",
+            };
+        }
+        vertex
+    }
+
+    /// Selects either the flat zero-`discard` fragment entry points or the globe-clipped variants.
+    pub fn describe_fragment_for_globe(&self, globe: bool) -> FragmentState {
+        FillExtrusionShader {
+            format: self.format,
+            pass: self.pass,
+        }
+        .describe_fragment_for_globe(globe)
+    }
+}
+
 impl Shader for FillExtrusionCompactShader {
     fn describe_vertex(&self) -> VertexState {
         VertexState {
             source: extrusion_vertex_source(),
             entry_point: match self.pass {
+                ExtrusionPass::Depth => "compact_depth_main",
                 ExtrusionPass::TranslucentBack => "compact_translucent_back_main",
                 ExtrusionPass::TranslucentFront => "compact_translucent_front_main",
-                _ => "compact_main",
+                ExtrusionPass::Color | ExtrusionPass::PatternColor => "compact_main",
             },
             buffers: vec![
                 VertexBufferLayout {
@@ -171,10 +271,6 @@ impl Shader for FillExtrusionCompactShader {
     }
 
     fn describe_fragment(&self) -> FragmentState {
-        FillExtrusionShader {
-            format: self.format,
-            pass: self.pass,
-        }
-        .describe_fragment()
+        self.describe_fragment_for_globe(true)
     }
 }

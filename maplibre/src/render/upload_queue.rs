@@ -14,29 +14,28 @@ use std::sync::{
 
 use wgpu::util::DeviceExt;
 
+#[cfg(not(target_arch = "wasm32"))]
+mod native_ring;
+#[cfg(target_arch = "wasm32")]
+mod wasm_belt;
+
 /// Maximum single `write_buffer` payload (exclusive) staged into the per-frame coalescing belt.
+#[cfg(target_arch = "wasm32")]
 const MAX_STAGED_WRITE_BYTES: usize = 65_536;
+/// Maximum single `write_buffer` payload (exclusive) staged into the per-frame coalescing belt.
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_STAGED_WRITE_BYTES: usize = 256 * 1024;
 
-/// Minimum persistent GPU staging buffer capacity (`64 KiB`).
-const MIN_STAGING_BUFFER_CAPACITY: u64 = 64 * 1024;
-
-/// Steady-state post-burst staging buffer ceiling (`64 KiB` on wasm32, `256 KiB` elsewhere).
-#[cfg(target_arch = "wasm32")]
+/// Steady-state post-burst staging buffer ceiling (`64 KiB`).
 const SHRINK_STAGING_BUFFER_CAPACITY: u64 = 64 * 1024;
-/// Steady-state post-burst staging buffer ceiling (`64 KiB` on wasm32, `256 KiB` elsewhere).
-#[cfg(not(target_arch = "wasm32"))]
-const SHRINK_STAGING_BUFFER_CAPACITY: u64 = 256 * 1024;
 
-/// Hard upper bound on the persistent coalescing staging buffer (`2 MiB`) so initial tile upload
-/// bursts never pin tens of megabytes of transient staging memory.
-const MAX_STAGING_BUFFER_CAPACITY: u64 = 2 * 1024 * 1024;
-
-/// Consecutive low-volume frames before a burst-sized staging buffer shrinks back.
+/// Hard upper bound on the persistent coalescing staging buffer (`1 MiB` on native, `2 MiB` on
+/// wasm32) so initial tile upload bursts never pin tens of megabytes of transient staging memory.
 #[cfg(target_arch = "wasm32")]
-const QUIET_FRAMES_BEFORE_SHRINK: u8 = 4;
-/// Consecutive low-volume frames before a burst-sized staging buffer shrinks back.
+const MAX_STAGING_BUFFER_CAPACITY: u64 = 2 * 1024 * 1024;
+/// Hard upper bound on the persistent coalescing staging buffer (`1 MiB` on native).
 #[cfg(not(target_arch = "wasm32"))]
-const QUIET_FRAMES_BEFORE_SHRINK: u8 = 8;
+const MAX_STAGING_BUFFER_CAPACITY: u64 = 1024 * 1024;
 
 #[derive(Debug)]
 struct StagedCopy {
@@ -50,16 +49,20 @@ struct StagedCopy {
 struct StagingBeltState {
     payload: Vec<u8>,
     copies: Vec<StagedCopy>,
-    buffer: Option<(wgpu::Buffer, u64)>,
-    quiet_frames: u8,
+    #[cfg(target_arch = "wasm32")]
+    wasm_belt: wasm_belt::WasmStagingBelt,
+    #[cfg(not(target_arch = "wasm32"))]
+    native_ring: native_ring::NativeStagingRing,
 }
 
-impl Drop for StagingBeltState {
-    fn drop(&mut self) {
-        if let Some((buf, _)) = self.buffer.take() {
-            buf.destroy();
-        }
+fn flush_copies_direct(queue: &wgpu::Queue, payload: &mut Vec<u8>, copies: &mut Vec<StagedCopy>) {
+    for copy in copies.drain(..) {
+        let start = copy.src_offset as usize;
+        let end = start + copy.size as usize;
+        #[allow(clippy::disallowed_methods)]
+        queue.write_buffer(&copy.dst, copy.dst_offset, &payload[start..end]);
     }
+    payload.clear();
 }
 
 /// A [`wgpu::Queue`] that counts the bytes written through it and optionally coalesces small
@@ -93,12 +96,16 @@ impl UploadQueue {
         }
     }
 
-    /// Returns whether small-write staging should be enabled for `(is_wasm32, backend)`.
+    /// Returns whether small-write staging should be enabled for `(_is_wasm32, backend)`.
     ///
-    /// WebGL2 (`Backend::Gl`) forbids `copyBufferSubData` between non-element staging buffers and
-    /// `ELEMENT_ARRAY_BUFFER` destinations (WebGL2 §5.14.5), so direct `write_buffer` must be used.
-    pub(crate) const fn should_stage_for_backend(is_wasm32: bool, backend: wgpu::Backend) -> bool {
-        is_wasm32 && !matches!(backend, wgpu::Backend::Gl)
+    /// All non-GL backends (WebGPU, Metal, Vulkan, DX12) coalesce `< 64 KiB` aligned buffer
+    /// writes into a single persistent staging buffer and record `copy_buffer_to_buffer` transfers
+    /// in the frame command encoder, avoiding per-write `wgpu` staging buffer / `PendingWrites`
+    /// churn. WebGL2 (`Backend::Gl`) forbids `copyBufferSubData` between non-element staging
+    /// buffers and `ELEMENT_ARRAY_BUFFER` destinations (WebGL2 §5.14.5), so direct `write_buffer`
+    /// must be used.
+    pub(crate) const fn should_stage_for_backend(_is_wasm32: bool, backend: wgpu::Backend) -> bool {
+        !matches!(backend, wgpu::Backend::Gl)
     }
 
     /// Wraps `queue` using per-frame staging only when the target architecture and backend support
@@ -180,9 +187,9 @@ impl UploadQueue {
         }
     }
 
-    /// Encodes all staged `< 64 KiB` writes via a single `wgpu::Queue::write_buffer` into the
-    /// persistent staging buffer and records `copy_buffer_to_buffer` transfers onto `encoder`.
-    /// Returns `true` when at least one staged copy was recorded.
+    /// Encodes all staged writes into a reusable staging chunk (`NativeStagingRing` on native, or
+    /// a `write_buffer`-updated staging belt on wasm32) and records `copy_buffer_to_buffer`
+    /// transfers onto `encoder`. Returns `true` when at least one staged copy was recorded.
     pub fn encode_staged_into(
         &self,
         device: &wgpu::Device,
@@ -192,119 +199,46 @@ impl UploadQueue {
             return false;
         }
         let mut staging = crate::platform::lock_unpoisoned(&self.staging);
-        if staging.copies.is_empty() {
-            staging.payload.clear();
-            if staging
-                .buffer
-                .as_ref()
-                .is_some_and(|(_, cap)| *cap > SHRINK_STAGING_BUFFER_CAPACITY)
-            {
-                staging.quiet_frames = staging.quiet_frames.saturating_add(1);
-                if staging.quiet_frames >= QUIET_FRAMES_BEFORE_SHRINK {
-                    if let Some((old_buf, _)) = staging.buffer.take() {
-                        old_buf.destroy();
-                    }
-                    staging
-                        .payload
-                        .shrink_to(SHRINK_STAGING_BUFFER_CAPACITY as usize);
-                    staging.copies.shrink_to(256);
-                    staging.quiet_frames = 0;
-                }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if staging.copies.is_empty() {
+                staging.payload.clear();
+                staging.native_ring.record_quiet_frame();
+                staging
+                    .payload
+                    .shrink_to(SHRINK_STAGING_BUFFER_CAPACITY as usize);
+                staging.copies.shrink_to(256);
+                return false;
             }
-            return false;
-        }
-
-        let payload_bytes = staging.payload.len() as u64;
-        if payload_bytes <= SHRINK_STAGING_BUFFER_CAPACITY {
-            staging.quiet_frames = staging.quiet_frames.saturating_add(1);
-        } else {
-            staging.quiet_frames = 0;
-        }
-        let max_buf = device
-            .limits()
-            .max_buffer_size
-            .min(MAX_STAGING_BUFFER_CAPACITY);
-        if payload_bytes > max_buf {
+            let max_buf = device
+                .limits()
+                .max_buffer_size
+                .min(MAX_STAGING_BUFFER_CAPACITY);
             let StagingBeltState {
-                payload, copies, ..
+                payload,
+                copies,
+                native_ring,
             } = &mut *staging;
-            for copy in copies.drain(..) {
-                let start = copy.src_offset as usize;
-                let end = start + copy.size as usize;
-                #[allow(clippy::disallowed_methods)]
-                self.queue
-                    .write_buffer(&copy.dst, copy.dst_offset, &payload[start..end]);
+            if native_ring.encode_into(device, encoder, payload, copies, max_buf) {
+                payload.clear();
+                if payload.capacity() > SHRINK_STAGING_BUFFER_CAPACITY as usize * 4 {
+                    payload.shrink_to(SHRINK_STAGING_BUFFER_CAPACITY as usize);
+                    copies.shrink_to(256);
+                }
+                return true;
             }
-            payload.clear();
-            return false;
-        }
-
-        let should_shrink = staging.quiet_frames >= QUIET_FRAMES_BEFORE_SHRINK
-            && staging
-                .buffer
-                .as_ref()
-                .is_some_and(|(_, cap)| *cap > SHRINK_STAGING_BUFFER_CAPACITY);
-        let need_alloc = should_shrink
-            || staging
-                .buffer
-                .as_ref()
-                .is_none_or(|(_, cap)| *cap < payload_bytes);
-        if need_alloc {
-            let next_cap = if should_shrink {
-                staging.quiet_frames = 0;
-                SHRINK_STAGING_BUFFER_CAPACITY.min(max_buf)
-            } else {
-                payload_bytes
-                    .max(MIN_STAGING_BUFFER_CAPACITY)
-                    .checked_next_power_of_two()
-                    .unwrap_or(max_buf)
-                    .min(max_buf)
-            };
-            if let Some((old_buf, _)) = staging.buffer.take() {
-                old_buf.destroy();
-            }
-            let buf = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("upload_queue_staging_buffer"),
-                size: next_cap,
-                usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            staging.buffer = Some((buf, next_cap));
-        }
-
-        let Some((staging_buf, _)) = staging.buffer.as_ref() else {
-            return false;
-        };
-        #[allow(clippy::disallowed_methods)]
-        self.queue.write_buffer(staging_buf, 0, &staging.payload);
-
-        let StagingBeltState {
-            payload,
-            copies,
-            buffer,
-            ..
-        } = &mut *staging;
-        let encoded = if let Some((staging_buf, _)) = buffer.as_ref() {
-            let any = !copies.is_empty();
-            for copy in copies.drain(..) {
-                encoder.copy_buffer_to_buffer(
-                    staging_buf,
-                    copy.src_offset,
-                    &copy.dst,
-                    copy.dst_offset,
-                    copy.size,
-                );
-            }
-            any
-        } else {
+            flush_copies_direct(&self.queue, payload, copies);
             false
-        };
-        payload.clear();
-        if should_shrink {
-            payload.shrink_to(SHRINK_STAGING_BUFFER_CAPACITY as usize);
-            copies.shrink_to(256);
         }
-        encoded
+        #[cfg(target_arch = "wasm32")]
+        {
+            let StagingBeltState {
+                payload,
+                copies,
+                wasm_belt,
+            } = &mut *staging;
+            wasm_belt.encode_into(&self.queue, device, encoder, payload, copies)
+        }
     }
 
     /// Uploads all staged `< 64 KiB` writes via a single `wgpu::Queue::write_buffer` into the
@@ -388,7 +322,8 @@ impl UploadQueue {
         device.create_texture_with_data(&self.queue, descriptor, order, data)
     }
 
-    /// Submits command buffers, flushing any remaining direct-submission staged buffer writes first.
+    /// Submits command buffers, flushing any remaining direct-submission staged buffer writes first
+    /// and re-mapping native staging chunks after submission.
     pub fn submit<I: IntoIterator<Item = wgpu::CommandBuffer>>(
         &self,
         command_buffers: I,
@@ -399,17 +334,17 @@ impl UploadQueue {
                 let StagingBeltState {
                     payload, copies, ..
                 } = &mut *staging;
-                for copy in copies.drain(..) {
-                    let start = copy.src_offset as usize;
-                    let end = start + copy.size as usize;
-                    #[allow(clippy::disallowed_methods)]
-                    self.queue
-                        .write_buffer(&copy.dst, copy.dst_offset, &payload[start..end]);
-                }
-                payload.clear();
+                flush_copies_direct(&self.queue, payload, copies);
             }
         }
-        self.queue.submit(command_buffers)
+        let submission = self.queue.submit(command_buffers);
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.staging_enabled {
+            crate::platform::lock_unpoisoned(&self.staging)
+                .native_ring
+                .recall_after_submit();
+        }
+        submission
     }
 
     /// Presents a surface texture.

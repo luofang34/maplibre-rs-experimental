@@ -18,16 +18,39 @@ use crate::{
 
 /// Binds the flat-background pipeline when it is initialized.
 pub struct SetBackgroundPipeline;
-impl<P: PhaseItem> RenderCommand<P> for SetBackgroundPipeline {
+impl RenderCommand<LayerItem> for SetBackgroundPipeline {
     fn render<'w>(
         world: &'w World,
-        _item: &P,
+        item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some(Initialized(BackgroundRenderPipeline(pipeline))) = world
+        let Some(Initialized(pipelines)) = world
             .resources
             .get::<Eventually<BackgroundRenderPipeline>>()
         else {
+            return RenderCommandResult::Failure;
+        };
+        let buffers = world
+            .resources
+            .get::<crate::background::queue_system::BackgroundBuffers>();
+        let covers = buffers.is_some_and(|buffers| buffers.flat_covers_viewport);
+        let opaque =
+            buffers.is_some_and(|buffers| buffers.opaque_layers.contains(&item.style_layer));
+        let pipeline = match (covers, opaque) {
+            (true, true) => pipelines
+                .solid_opaque
+                .as_ref()
+                .or(pipelines.solid.as_ref())
+                .or(pipelines.clipped_opaque.as_ref())
+                .or(pipelines.clipped.as_ref()),
+            (true, false) => pipelines.solid.as_ref().or(pipelines.clipped.as_ref()),
+            (false, true) => pipelines
+                .clipped_opaque
+                .as_ref()
+                .or(pipelines.clipped.as_ref()),
+            (false, false) => pipelines.clipped.as_ref(),
+        };
+        let Some(pipeline) = pipeline else {
             return RenderCommandResult::Failure;
         };
 
@@ -61,20 +84,30 @@ impl RenderCommand<LayerItem> for DrawBackgroundQuad {
 
 /// Binds the globe-background pipeline and view projection uniform.
 pub struct SetGlobeBackgroundPipeline;
-impl<P: PhaseItem> RenderCommand<P> for SetGlobeBackgroundPipeline {
+impl RenderCommand<LayerItem> for SetGlobeBackgroundPipeline {
     fn render<'w>(
         world: &'w World,
-        _item: &P,
+        item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some((
-            Initialized(GlobeBackgroundRenderPipeline(pipeline)),
-            Initialized(projection_resources),
-        )) = world.resources.query::<(
-            &Eventually<GlobeBackgroundRenderPipeline>,
-            &Eventually<ProjectionGpuResources>,
-        )>()
+        let Some((Initialized(pipelines), Initialized(projection_resources))) =
+            world.resources.query::<(
+                &Eventually<GlobeBackgroundRenderPipeline>,
+                &Eventually<ProjectionGpuResources>,
+            )>()
         else {
+            return RenderCommandResult::Failure;
+        };
+        let opaque = world
+            .resources
+            .get::<crate::background::queue_system::BackgroundBuffers>()
+            .is_some_and(|buffers| buffers.opaque_layers.contains(&item.style_layer));
+        let pipeline = if opaque {
+            pipelines.opaque.as_ref().or(pipelines.blended.as_ref())
+        } else {
+            pipelines.blended.as_ref()
+        };
+        let Some(pipeline) = pipeline else {
             return RenderCommandResult::Failure;
         };
         pass.set_pipeline(pipeline);

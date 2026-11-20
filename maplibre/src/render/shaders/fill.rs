@@ -47,6 +47,36 @@ pub struct FillShader {
     pub format: wgpu::TextureFormat,
 }
 
+impl FillShader {
+    /// Returns either the globe-aware vertex descriptor or the lean flat-Mercator variant.
+    pub fn describe_vertex_for_globe(&self, globe: bool) -> VertexState {
+        if globe {
+            self.describe_vertex()
+        } else {
+            VertexState {
+                source: include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/fill_flat.vertex.wgsl"
+                )),
+                ..self.describe_vertex()
+            }
+        }
+    }
+
+    /// Returns the opaque fragment state (`blend: None`) for fills whose alpha is `1.0`, enabling
+    /// Apple Silicon TBDR hardware hidden-surface removal.
+    pub fn describe_fragment_opaque(&self) -> FragmentState {
+        FragmentState {
+            targets: vec![Some(wgpu::ColorTargetState {
+                format: self.format,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            ..self.describe_fragment()
+        }
+    }
+}
+
 impl Shader for FillShader {
     fn describe_vertex(&self) -> VertexState {
         VertexState {

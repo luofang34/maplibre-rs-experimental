@@ -66,14 +66,17 @@ where
     }
 
     fn polygon_begin(&mut self, _tagged: bool, _size: usize, _idx: usize) -> GeoResult<()> {
+        self.in_polygon = true;
         Ok(())
     }
 
     fn polygon_end(&mut self, tagged: bool, _idx: usize) -> GeoResult<()> {
         if self.circle.is_some() {
+            self.in_polygon = false;
             return Ok(());
         }
         self.end(true)?;
+        self.in_polygon = false;
         // Triangulate each polygon of a multipolygon independently so `earcut`, globe
         // subdivision, and streaming prepack run per polygon instead of buffering thousands
         // of merged rings inside one `lyon` sweep-line.

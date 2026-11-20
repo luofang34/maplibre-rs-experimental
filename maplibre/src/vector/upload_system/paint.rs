@@ -103,6 +103,7 @@ pub(super) struct PaintRefreshScratch {
     feature_meta_scratch: Vec<FillShaderFeatureMetadata>,
     feature_zoom_updates: Vec<(WorldTileCoords, String, Option<PatternRuns>)>,
     feature_zoom_only_updates: Vec<(WorldTileCoords, String)>,
+    opaque_updates: Vec<(WorldTileCoords, crate::style::StyleLayerId, bool)>,
 }
 
 impl PaintRefreshScratch {
@@ -129,6 +130,7 @@ impl PaintRefreshScratch {
         self.feature_meta_scratch.clear();
         self.feature_zoom_updates.clear();
         self.feature_zoom_only_updates.clear();
+        self.opaque_updates.clear();
     }
 }
 
@@ -179,6 +181,7 @@ pub(super) fn refresh_layer_paint(
         feature_meta_scratch,
         feature_zoom_updates,
         feature_zoom_only_updates,
+        opaque_updates,
         ..
     } = scratch;
 
@@ -218,11 +221,25 @@ pub(super) fn refresh_layer_paint(
                     prev_meta.insert(key, (frame, metadata));
                     (metadata, changed)
                 });
-                if changed
-                    && updated_layer_slots
+                if changed {
+                    if entry.style_layer.type_ == "fill"
+                        && (flags & 32) != 0
+                        && !matches!(
+                            entry.style_layer.paint.as_ref(),
+                            Some(LayerPaint::Fill(f)) if f.fill_pattern.is_some()
+                        )
+                    {
+                        opaque_updates.push((
+                            *coords,
+                            entry.style_layer_id,
+                            metadata.uniform_color[3] >= 1.0,
+                        ));
+                    }
+                    if updated_layer_slots
                         .insert((entry.page(), entry.layer_metadata_buffer_range().start))
-                {
-                    buffer_pool.update_layer_metadata(queue, entry, metadata);
+                    {
+                        buffer_pool.update_layer_metadata(queue, entry, metadata);
+                    }
                 }
             }
             if zoom_changed
@@ -304,6 +321,21 @@ pub(super) fn refresh_layer_paint(
                                     entry.style_layer.id.clone(),
                                     runs,
                                 ));
+                                if entry.style_layer.type_ == "fill"
+                                    && !matches!(
+                                        entry.style_layer.paint.as_ref(),
+                                        Some(LayerPaint::Fill(f)) if f.fill_pattern.is_some()
+                                    )
+                                {
+                                    opaque_updates.push((
+                                        *coords,
+                                        entry.style_layer_id,
+                                        !feature_meta_scratch.is_empty()
+                                            && feature_meta_scratch
+                                                .iter()
+                                                .all(|fm| fm.color[3] == 255),
+                                    ));
+                                }
                             }
                         }
                     }
@@ -328,6 +360,9 @@ pub(super) fn refresh_layer_paint(
                     entry,
                     FillShaderFeatureMetadata::from_rgba(color),
                 );
+                if entry.style_layer.type_ == "fill" {
+                    opaque_updates.push((*coords, entry.style_layer_id, color[3] >= 1.0));
+                }
             }
         }
     }
@@ -341,6 +376,9 @@ pub(super) fn refresh_layer_paint(
     }
     for (coords, layer_id) in feature_zoom_only_updates.drain(..) {
         buffer_pool.set_layer_evaluated_zoom(coords, &layer_id, zoom);
+    }
+    for (coords, layer_id, opaque) in opaque_updates.drain(..) {
+        buffer_pool.set_layer_opaque_color_by_id(coords, layer_id, opaque);
     }
 }
 

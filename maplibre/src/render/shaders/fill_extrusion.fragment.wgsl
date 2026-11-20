@@ -19,6 +19,28 @@ fn main(
 }
 
 @fragment
+fn main_flat(
+    @location(0) v_color: vec4<f32>,
+) -> Output {
+    return Output(v_color);
+}
+
+@fragment
+fn depth_flat() -> Output {
+    return Output(vec4<f32>(0.0));
+}
+
+@fragment
+fn depth_globe(
+    @location(4) horizon_distance: f32,
+) -> Output {
+    if horizon_distance < 0.0 {
+        discard;
+    }
+    return Output(vec4<f32>(0.0));
+}
+
+@fragment
 fn pattern_main(
     @location(4) horizon_distance: f32,
     @location(5) pattern_pixels: vec2<f32>,

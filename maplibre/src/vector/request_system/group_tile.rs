@@ -26,7 +26,6 @@ pub(super) struct GroupTile {
 }
 
 struct CachedOverscaledTile {
-    raw: Arc<[u8]>,
     packed: Arc<[u8]>,
     compressed: bool,
 }
@@ -120,25 +119,9 @@ pub(super) async fn fetch_raw_group_tile<H: HttpClient>(
                         AssetFailure::Terminal(error.describe())
                     }
                 })?;
-            let (packed, compressed) = LazyMvtIndex::pack_slice(&bytes);
-            let raw: Arc<[u8]> = if compressed {
-                Arc::from(bytes.as_slice())
-            } else {
-                Arc::clone(&packed)
-            };
-            let stored_bytes = if compressed {
-                raw.len().saturating_add(packed.len())
-            } else {
-                raw.len()
-            };
-            Ok((
-                CachedOverscaledTile {
-                    raw,
-                    packed,
-                    compressed,
-                },
-                stored_bytes,
-            ))
+            let (packed, compressed) = LazyMvtIndex::pack_vec(bytes);
+            let stored_bytes = packed.len();
+            Ok((CachedOverscaledTile { packed, compressed }, stored_bytes))
         })
         .await
         .map_err(|failure| fetch_failure(failure, &url))?;
@@ -222,31 +205,42 @@ pub(super) fn decode_group_tile<H: HttpClient>(
             })
         }
         RawPayload::Cached { cached, url } => {
+            let decompressed;
+            let bytes: &[u8] = if cached.compressed {
+                let Some(raw) = LazyMvtIndex::decompress_packed(&cached.packed) else {
+                    client.assets().forget(&format!("tile:{url}"));
+                    return Err(fetch_failure(
+                        AssetFailure::Terminal(format!("vector tile {url} cannot be decompressed")),
+                        &url,
+                    ));
+                };
+                decompressed = raw;
+                &decompressed
+            } else {
+                &cached.packed
+            };
             #[cfg(feature = "mlt")]
             if source_tile == coords
-                && !looks_like_mvt(&cached.raw)
-                && crate::vector::mlt::is_valid_mlt(&cached.raw)
+                && !looks_like_mvt(bytes)
+                && crate::vector::mlt::is_valid_mlt(bytes)
             {
                 return Ok(GroupTile {
-                    tile: Arc::new(DecodedVectorTile::Mlt(Arc::clone(&cached.raw))),
+                    tile: Arc::new(DecodedVectorTile::Mlt(Arc::from(bytes))),
                     mvt_bytes: Arc::clone(&cached.packed),
                     mvt_compressed: cached.compressed,
                     mvt_rescale: None,
                 });
             }
-            let mut tile =
-                decode_tile_for_layers_with_keys_rescaled(&cached.raw, rescale, |name| {
-                    key_map.get(name).map(|opt| opt.as_ref())
-                })
-                .map_err(|error| {
-                    client.assets().forget(&format!("tile:{url}"));
-                    fetch_failure(
-                        AssetFailure::Terminal(format!(
-                            "vector tile {url} cannot be decoded: {error}"
-                        )),
-                        &url,
-                    )
-                })?;
+            let mut tile = decode_tile_for_layers_with_keys_rescaled(bytes, rescale, |name| {
+                key_map.get(name).map(|opt| opt.as_ref())
+            })
+            .map_err(|error| {
+                client.assets().forget(&format!("tile:{url}"));
+                fetch_failure(
+                    AssetFailure::Terminal(format!("vector tile {url} cannot be decoded: {error}")),
+                    &url,
+                )
+            })?;
             tile.layers.retain(|mvt| keep_layer(mvt.name.as_str()));
             Ok(GroupTile {
                 tile: Arc::new(DecodedVectorTile::Mvt(tile)),

@@ -37,7 +37,7 @@ pub const UPLOADS_PER_FRAME: usize = 8;
 #[cfg(target_arch = "wasm32")]
 const MOVING_UPLOADS_PER_FRAME: usize = 1;
 #[cfg(not(target_arch = "wasm32"))]
-const MOVING_UPLOADS_PER_FRAME: usize = 4;
+const MOVING_UPLOADS_PER_FRAME: usize = 2;
 /// Uncovered viewport tiles (with no loaded ancestor stand-in on the GPU) admitted per moving
 /// frame so visible pan holes fill immediately on arrival.
 #[cfg(target_arch = "wasm32")]
@@ -49,7 +49,7 @@ const MOVING_UNCOVERED_UPLOADS_PER_FRAME: usize = UPLOADS_PER_FRAME;
 #[cfg(target_arch = "wasm32")]
 const MOVING_GEOMETRY_UPLOAD_BYTES: usize = 512 << 10;
 #[cfg(not(target_arch = "wasm32"))]
-const MOVING_GEOMETRY_UPLOAD_BYTES: usize = 4 << 20;
+const MOVING_GEOMETRY_UPLOAD_BYTES: usize = 2 << 20;
 #[cfg(target_arch = "wasm32")]
 const MOVING_UNCOVERED_GEOMETRY_UPLOAD_BYTES: usize = 1536 << 10;
 #[cfg(not(target_arch = "wasm32"))]

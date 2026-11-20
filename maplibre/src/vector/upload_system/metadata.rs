@@ -411,12 +411,10 @@ pub(super) fn can_release_cpu_geometry(
     bucket: &crate::vector::AvailableVectorLayerBucket,
     has_dem_source: bool,
 ) -> bool {
-    let edge_y = (1_i32 << u8::from(bucket.coords.z).min(30)) - 1;
+    let z = u8::from(bucket.coords.z);
+    let edge_y = (1_i32 << z.min(30)) - 1;
     let is_polar_row = bucket.coords.y <= 0 || bucket.coords.y >= edge_y;
-    #[cfg(target_arch = "wasm32")]
-    let allow_row = !(has_dem_source && is_polar_row && style_layer.type_ == "fill");
-    #[cfg(not(target_arch = "wasm32"))]
-    let allow_row = !is_polar_row;
+    let allow_row = z > 0 && !(has_dem_source && is_polar_row && style_layer.type_ == "fill");
     allow_row
         && (!has_dem_source || crate::vector::structures::kind(style_layer).is_none())
         && style_layer

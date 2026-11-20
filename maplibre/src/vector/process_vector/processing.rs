@@ -111,7 +111,7 @@ pub(crate) fn tessellator(
     let style_zoom = request.style_zoom();
     let granularity = match paint {
         LayerPaint::Fill(_) => granularity_for_zoom(128, 2, zoom),
-        LayerPaint::Line(_) => granularity_for_zoom(512, 0, zoom),
+        LayerPaint::Line(_) => granularity_for_zoom(128, 0, zoom),
         _ => 1,
     };
     let mut tessellator = match paint {

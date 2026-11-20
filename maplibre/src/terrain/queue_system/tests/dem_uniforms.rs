@@ -96,7 +96,9 @@ async fn resources() -> (HeadlessMap, HillshadeResources) {
         .await
         .expect("renderer");
     let mut map = HeadlessMap::new(
-        serde_json::from_value(serde_json::json!({"version":8,"sources":{},"layers":[]}))
+        serde_json::from_value(
+            serde_json::json!({"version":8,"sources":{},"layers":[{"id":"dem","type":"hillshade"}]}),
+        )
             .expect("style"),
         renderer,
         kernel,

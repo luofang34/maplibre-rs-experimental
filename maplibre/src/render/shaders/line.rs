@@ -33,7 +33,54 @@ impl Shader for LineShader {
     }
 
     fn describe_fragment(&self) -> FragmentState {
-        line_fragment(self.format)
+        line_fragment(
+            self.format,
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/line.fragment.wgsl"
+            )),
+        )
+    }
+}
+
+/// Lean stroked-path shader for plain solid lines without dashes, patterns, gradients, or terrain.
+pub struct PlainLineShader {
+    /// Format of the color attachment used by the render pipeline.
+    pub format: wgpu::TextureFormat,
+    /// Uses globe projection when `true`, or pure Mercator projection when `false`.
+    pub globe: bool,
+}
+
+impl Shader for PlainLineShader {
+    fn describe_vertex(&self) -> VertexState {
+        let source = if self.globe {
+            concat!(
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/projection.vertex.wgsl"
+                )),
+                include_str!(concat!(
+                    env!("OUT_DIR"),
+                    "/wgsl/render/shaders/line_plain_globe.vertex.wgsl"
+                ))
+            )
+        } else {
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/line_plain_flat.vertex.wgsl"
+            ))
+        };
+        line_vertex(source)
+    }
+
+    fn describe_fragment(&self) -> FragmentState {
+        line_fragment(
+            self.format,
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/line_plain.fragment.wgsl"
+            )),
+        )
     }
 }
 
@@ -71,7 +118,13 @@ impl Shader for TerrainLineShader {
     }
 
     fn describe_fragment(&self) -> FragmentState {
-        line_fragment(self.format)
+        line_fragment(
+            self.format,
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/wgsl/render/shaders/line.fragment.wgsl"
+            )),
+        )
     }
 }
 
@@ -125,12 +178,9 @@ fn line_vertex(source: &'static str) -> VertexState {
     }
 }
 
-fn line_fragment(format: wgpu::TextureFormat) -> FragmentState {
+fn line_fragment(format: wgpu::TextureFormat, source: &'static str) -> FragmentState {
     FragmentState {
-        source: include_str!(concat!(
-            env!("OUT_DIR"),
-            "/wgsl/render/shaders/line.fragment.wgsl"
-        )),
+        source,
         entry_point: "main",
         targets: vec![Some(wgpu::ColorTargetState {
             format,

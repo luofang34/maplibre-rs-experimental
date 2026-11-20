@@ -34,7 +34,7 @@ impl Drop for DrawBinding {
 pub(super) struct TextureContext<'a> {
     pub device: &'a wgpu::Device,
     pub queue: &'a crate::render::upload_queue::UploadQueue,
-    pub pipeline: &'a wgpu::RenderPipeline,
+    pub atlas_layout: &'a wgpu::BindGroupLayout,
 }
 
 #[derive(Default)]
@@ -105,6 +105,23 @@ impl SymbolTextures {
     /// Tiles whose glyphs and icons became drawable since the last call.
     pub fn take_bound(&mut self) -> Vec<WorldTileCoords> {
         std::mem::take(&mut self.bound)
+    }
+
+    /// Returns `(any_combined, any_separate_halo)` across currently prepared draw bindings.
+    pub fn separate_halo_flags(&self) -> (bool, bool) {
+        let mut combined = false;
+        let mut separate_halo = false;
+        for binding in self.bindings.values() {
+            if binding.separate_halo {
+                separate_halo = true;
+            } else {
+                combined = true;
+            }
+            if combined && separate_halo {
+                break;
+            }
+        }
+        (combined, separate_halo)
     }
 
     #[cfg(all(test, feature = "headless"))]
@@ -198,7 +215,7 @@ impl DrawBinding {
         let view = atlas.texture.create_view(&Default::default());
         let group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("symbol atlas and paint"),
-            layout: &gpu.pipeline.get_bind_group_layout(1),
+            layout: gpu.atlas_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,

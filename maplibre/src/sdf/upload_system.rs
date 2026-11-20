@@ -68,7 +68,7 @@ pub fn upload_system(
         &TextureContext {
             device,
             queue,
-            pipeline: &pipeline.combined,
+            atlas_layout: &pipeline.atlas_layout,
         },
         &mut world.tiles,
         (style, &visible, zoom),

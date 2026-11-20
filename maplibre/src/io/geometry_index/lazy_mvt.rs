@@ -42,20 +42,25 @@ impl Clone for LazyMvtIndex {
 }
 
 impl LazyMvtIndex {
-    /// Packs raw MVT bytes with LZ4 block compression when it shrinks the payload.
+    /// Compresses raw MVT bytes when compression shrinks the payload.
     pub(crate) fn pack_slice(raw: &[u8]) -> (Arc<[u8]>, bool) {
-        if let Some(packed) = compress_lz4_block(raw) {
+        if let Some(packed) = compress_packed(raw) {
             return (Arc::from(packed), true);
         }
         (Arc::from(raw), false)
     }
 
-    /// Packs owned raw MVT bytes, compressing when LZ4 shrinks the payload.
+    /// Packs owned raw MVT bytes, compressing when compression shrinks the payload.
     pub(crate) fn pack_vec(raw: Vec<u8>) -> (Arc<[u8]>, bool) {
-        if let Some(packed) = compress_lz4_block(&raw) {
+        if let Some(packed) = compress_packed(&raw) {
             return (Arc::from(packed), true);
         }
         (Arc::from(raw), false)
+    }
+
+    /// Decompresses packed MVT bytes produced by [`Self::pack_slice`] / [`Self::pack_vec`].
+    pub(crate) fn decompress_packed(packed: &[u8]) -> Option<Vec<u8>> {
+        decompress_packed_bytes(packed)
     }
 
     /// Creates an unmaterialized index over raw MVT bytes.
@@ -126,7 +131,7 @@ impl LazyMvtIndex {
     pub fn geometries(&self) -> &[IndexedGeometry<f64>] {
         self.materialized.get_or_init(|| {
             if self.compressed {
-                if let Some(raw) = decompress_lz4_block(&self.mvt_bytes) {
+                if let Some(raw) = Self::decompress_packed(&self.mvt_bytes) {
                     return crate::vector::index_mvt_bytes_rescaled(
                         &raw,
                         self.rescale,
@@ -179,7 +184,58 @@ impl LazyMvtIndex {
 }
 
 const MAX_DECOMPRESSED_MVT_BYTES: usize = 64 * 1024 * 1024;
+#[cfg(not(target_arch = "wasm32"))]
+const DEFLATE_MAGIC: [u8; 4] = *b"ZMVT";
 
+#[cfg(not(target_arch = "wasm32"))]
+fn compress_packed(raw: &[u8]) -> Option<Vec<u8>> {
+    use std::io::Write as _;
+    if raw.len() < 16 {
+        return None;
+    }
+    let orig_len = u32::try_from(raw.len()).ok()?;
+    let mut out = Vec::with_capacity(raw.len() / 2 + 16);
+    out.extend_from_slice(&DEFLATE_MAGIC);
+    out.extend_from_slice(&orig_len.to_le_bytes());
+    let mut encoder = flate2::write::DeflateEncoder::new(out, flate2::Compression::fast());
+    encoder.write_all(raw).ok()?;
+    let mut compressed = encoder.finish().ok()?;
+    if compressed.len() < raw.len() {
+        compressed.shrink_to_fit();
+        Some(compressed)
+    } else {
+        None
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn compress_packed(raw: &[u8]) -> Option<Vec<u8>> {
+    compress_lz4_block(raw)
+}
+
+fn decompress_packed_bytes(packed: &[u8]) -> Option<Vec<u8>> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if packed.starts_with(&DEFLATE_MAGIC) {
+        use std::io::Read as _;
+        let len_bytes = packed.get(4..8)?;
+        let expected =
+            u32::from_le_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]) as usize;
+        if expected > MAX_DECOMPRESSED_MVT_BYTES {
+            return None;
+        }
+        let payload = packed.get(8..)?;
+        let mut out = Vec::with_capacity(expected);
+        let decoder = flate2::read::DeflateDecoder::new(payload);
+        decoder
+            .take((expected as u64) + 1)
+            .read_to_end(&mut out)
+            .ok()?;
+        return (out.len() == expected).then_some(out);
+    }
+    decompress_lz4_block(packed)
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
 fn push_lz4_extra(out: &mut Vec<u8>, mut len: usize) {
     if len < 15 {
         return;
@@ -192,6 +248,7 @@ fn push_lz4_extra(out: &mut Vec<u8>, mut len: usize) {
     out.push(len as u8);
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
 fn compress_lz4_block(raw: &[u8]) -> Option<Vec<u8>> {
     if raw.len() < 16 {
         return None;
@@ -318,7 +375,7 @@ fn decompress_lz4_block(packed: &[u8]) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{compress_lz4_block, decompress_lz4_block};
+    use super::{compress_lz4_block, decompress_lz4_block, LazyMvtIndex};
 
     #[test]
     fn lz4_block_round_trips_repetitive_and_rle_streams() {
@@ -333,6 +390,17 @@ mod tests {
         if let Some(packed) = packed {
             assert!(packed.len() * 2 < sample.len());
             assert_eq!(decompress_lz4_block(&packed).as_deref(), Some(&sample[..]));
+            assert_eq!(
+                LazyMvtIndex::decompress_packed(&packed).as_deref(),
+                Some(&sample[..])
+            );
         }
+        let (native_packed, compressed) = LazyMvtIndex::pack_slice(&sample);
+        assert!(compressed);
+        assert!(native_packed.len() * 2 < sample.len());
+        assert_eq!(
+            LazyMvtIndex::decompress_packed(&native_packed).as_deref(),
+            Some(&sample[..])
+        );
     }
 }

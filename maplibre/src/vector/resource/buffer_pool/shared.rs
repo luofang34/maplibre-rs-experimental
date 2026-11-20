@@ -138,7 +138,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         &mut self,
         queue: &Q,
         coords: WorldTileCoords,
-        style_layer: StyleLayer,
+        style_layer: impl Into<std::sync::Arc<StyleLayer>>,
         geometry: &OverAlignedVertexBuffer<V, I>,
         fallback_vertices: Option<&[V]>,
         layer_metadata: TM,
@@ -166,7 +166,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         &mut self,
         queue: &Q,
         coords: WorldTileCoords,
-        style_layer: StyleLayer,
+        style_layer: impl Into<std::sync::Arc<StyleLayer>>,
         geometry: &OverAlignedVertexBuffer<V, I>,
         fallback_vertices: Option<&[V]>,
         layer_metadata: TM,
@@ -191,13 +191,14 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         &mut self,
         queue: &Q,
         coords: WorldTileCoords,
-        style_layer: StyleLayer,
+        style_layer: impl Into<std::sync::Arc<StyleLayer>>,
         geometry: &OverAlignedVertexBuffer<V, I>,
         fallback_vertices: Option<&[V]>,
         layer_metadata: TM,
         (uniform_feature, records, needs_feature_slot): (FM, usize, bool),
         mut protect: impl FnMut(WorldTileCoords) -> bool,
     ) -> Result<(), AllocationError> {
+        let style_layer: std::sync::Arc<StyleLayer> = style_layer.into();
         if coords.build_quad_key().is_none() {
             return Err(AllocationError::Coordinates { coords });
         }
@@ -397,6 +398,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             evaluated_zoom: None,
             u16_chunks: u16_chunk_ranges,
             compact_extrusion: use_compact_extrusion,
+            opaque_color: false,
         };
 
         if uploaded_vertices {

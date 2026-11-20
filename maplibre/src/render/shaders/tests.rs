@@ -6,8 +6,8 @@ use super::{
     BackgroundShader, CircleDynamicRadiusShader, CircleFeatureStrokeShader, CircleShader,
     FillExtrusionShader, FillPatternShader, FillShader, FlatTileMaskShader,
     GlobeBackgroundPatternShader, GlobeBackgroundShader, HeatmapCompositeShader,
-    HeatmapDensityShader, LineShader, RasterShader, Shader, ShaderTileMetadata, SkyShader,
-    SymbolShader, TerrainLineShader, TerrainShader, TileMaskShader,
+    HeatmapDensityShader, LineShader, PlainLineShader, RasterShader, Shader, ShaderTileMetadata,
+    SkyShader, StencilClearShader, SymbolShader, TerrainLineShader, TerrainShader, TileMaskShader,
 };
 
 /// A stage's WGSL and its entry point.
@@ -78,7 +78,22 @@ fn stages() -> Vec<Stage> {
             }),
         ),
         ("line", Box::new(LineShader { format })),
+        (
+            "plain line flat",
+            Box::new(PlainLineShader {
+                format,
+                globe: false,
+            }),
+        ),
+        (
+            "plain line globe",
+            Box::new(PlainLineShader {
+                format,
+                globe: true,
+            }),
+        ),
         ("terrain line", Box::new(TerrainLineShader { format })),
+        ("stencil clear", Box::new(StencilClearShader { format })),
         ("circle", Box::new(CircleShader { format })),
         (
             "circle feature stroke",
@@ -107,6 +122,32 @@ fn stages() -> Vec<Stage> {
         let fragment = shader.describe_fragment();
         stages.push((name, fragment.source.to_owned(), fragment.entry_point));
     }
+    let fill_shader = FillShader { format };
+    let flat_fill_v = fill_shader.describe_vertex_for_globe(false);
+    stages.push((
+        "fill flat",
+        flat_fill_v.source.to_owned(),
+        flat_fill_v.entry_point,
+    ));
+    let opaque_fill_f = fill_shader.describe_fragment_opaque();
+    stages.push((
+        "fill opaque",
+        opaque_fill_f.source.to_owned(),
+        opaque_fill_f.entry_point,
+    ));
+    let symbol_shader = SymbolShader { format };
+    let flat_symbol_v = symbol_shader.describe_vertex_for_globe(false);
+    stages.push((
+        "symbol flat",
+        flat_symbol_v.source.to_owned(),
+        flat_symbol_v.entry_point,
+    ));
+    let symbol_f = symbol_shader.describe_fragment();
+    stages.push((
+        "symbol flat",
+        symbol_f.source.to_owned(),
+        symbol_f.entry_point,
+    ));
     // Passes that build their pipelines without the trait.
     for (name, source) in [
         (

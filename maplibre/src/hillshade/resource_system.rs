@@ -30,7 +30,6 @@ fn uniform_layout() -> Vec<wgpu::BindGroupLayoutEntry> {
 pub fn resource_system(
     MapContext {
         world,
-        #[cfg(target_arch = "wasm32")]
         style,
         renderer:
             Renderer {
@@ -50,7 +49,6 @@ pub fn resource_system(
     else {
         return Err(SystemError::Dependencies);
     };
-    #[cfg(target_arch = "wasm32")]
     if matches!(hillshade_resources, Eventually::Uninitialized)
         && !style
             .layers

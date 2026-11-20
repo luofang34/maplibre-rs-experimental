@@ -125,14 +125,39 @@ pub fn subdivide_triangles<I>(
 where
     I: Copy + Into<u32> + From<VertexId>,
 {
+    subdivide_triangles_from(buffer, buffer.vertices.len(), index_start, options)
+}
+
+/// Clips newly tessellated triangles added starting at `(vertex_start, index_start)` to the
+/// regular subdivision grid, discarding the un-subdivided source vertices when every input index
+/// lies at or above `vertex_start`.
+pub fn subdivide_triangles_from<I>(
+    buffer: &mut VertexBuffers<ShaderVertex, I>,
+    vertex_start: usize,
+    index_start: usize,
+    options: FillSubdivisionOptions,
+) -> Result<(), SubdivisionError>
+where
+    I: Copy + Into<u32> + From<VertexId>,
+{
     if options.granularity < 2 {
         return Ok(());
     }
-    let input = buffer.indices[index_start..].to_vec();
+    let slice = &buffer.indices[index_start..];
+    let can_truncate = slice
+        .iter()
+        .all(|&index| (index.into() as usize) >= vertex_start);
+    let mut input_triangles = Vec::with_capacity(slice.len() / 3);
+    for triangle in slice.as_chunks::<3>().0 {
+        input_triangles.push(triangle_points(&buffer.vertices, triangle)?);
+    }
     buffer.indices.truncate(index_start);
-    let mut vertices = HashMap::with_capacity_and_hasher(input.len(), Default::default());
-    for triangle in input.as_chunks::<3>().0 {
-        let points = triangle_points(&buffer.vertices, triangle)?;
+    if can_truncate {
+        buffer.vertices.truncate(vertex_start);
+    }
+    let mut vertices =
+        HashMap::with_capacity_and_hasher(input_triangles.len() * 3, Default::default());
+    for points in input_triangles {
         subdivide_triangle(
             buffer,
             points,
@@ -248,6 +273,13 @@ where
 {
     let cell_size = (EXTENT_UINT / granularity).max(1) as f32;
     let bounds = triangle_bounds(triangle, cell_size);
+    if bounds.1 <= bounds.0 || bounds.3 <= bounds.2 {
+        return Ok(());
+    }
+    if bounds.1 - bounds.0 == 1 && bounds.3 - bounds.2 == 1 {
+        append_polygon(buffer, &triangle, clip_x_to_tile, cache);
+        return Ok(());
+    }
     let cell_count = (bounds.1 - bounds.0) as usize * (bounds.3 - bounds.2) as usize;
     if cell_count > MAX_CELLS_PER_TRIANGLE {
         return Err(SubdivisionError::TriangleCellLimit {

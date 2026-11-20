@@ -47,7 +47,7 @@ impl SymbolDepth {
         device: &wgpu::Device,
         size: wgpu::Extent3d,
         samples: u32,
-        pipeline: &wgpu::RenderPipeline,
+        bind_group_layout: wgpu::BindGroupLayout,
     ) -> Self {
         let placeholder_size = wgpu::Extent3d {
             width: 1,
@@ -61,7 +61,6 @@ impl SymbolDepth {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let bind_group_layout = pipeline.get_bind_group_layout(2);
         let binding = create_bind_group(device, &bind_group_layout, &view, &fade_buffer);
         Self {
             texture,

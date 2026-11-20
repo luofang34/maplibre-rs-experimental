@@ -32,19 +32,34 @@ where
         }
     }
 
+    #[inline]
+    fn skip_contour_subdivision(&self) -> bool {
+        self.in_polygon
+            && !self.is_line_layer
+            && self.outline_property.is_none()
+            && !self.terrain_grid
+            && self.extrusion.is_none()
+    }
+
     pub(super) fn append_coordinate(&mut self, coordinate: [f32; 2]) -> GeoResult<()> {
         if let Some(previous) = self.contour_last {
-            let points = subdivide_line_segment_on_grid(
-                previous,
-                coordinate,
-                self.subdivision_granularity,
-                self.terrain_grid,
-            )
-            .map_err(|error| GeozeroError::Geometry(error.to_string()))?;
-            for point in points {
+            if self.skip_contour_subdivision() {
                 self.path_builder
                     .borrow_mut()
-                    .line_to(geom::point(point[0], point[1]));
+                    .line_to(geom::point(coordinate[0], coordinate[1]));
+            } else {
+                let points = subdivide_line_segment_on_grid(
+                    previous,
+                    coordinate,
+                    self.subdivision_granularity,
+                    self.terrain_grid,
+                )
+                .map_err(|error| GeozeroError::Geometry(error.to_string()))?;
+                for point in points {
+                    self.path_builder
+                        .borrow_mut()
+                        .line_to(geom::point(point[0], point[1]));
+                }
             }
         } else {
             self.path_builder
@@ -58,6 +73,9 @@ where
     }
 
     pub(super) fn subdivide_closing_segment(&mut self) -> GeoResult<()> {
+        if self.skip_contour_subdivision() {
+            return Ok(());
+        }
         let (Some(start), Some(last)) = (self.contour_start, self.contour_last) else {
             return Ok(());
         };

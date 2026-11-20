@@ -124,7 +124,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             entry.buffer_vertices.start,
             bytes_to_write,
         );
-        if scratch.capacity() > 65_536 {
+        if scratch.capacity() > 4_096 {
             scratch.clear();
             scratch.shrink_to(0);
         }

@@ -133,7 +133,7 @@ fn upload(context: &mut MapContext, zoom: f32) {
         &TextureContext {
             device: &context.renderer.device,
             queue: &context.renderer.queue,
-            pipeline: &pipeline.combined,
+            atlas_layout: &pipeline.atlas_layout,
         },
         &mut context.world.tiles,
         (&context.style, &[WorldTileCoords::default()], zoom),

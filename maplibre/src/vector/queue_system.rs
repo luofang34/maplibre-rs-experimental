@@ -20,8 +20,8 @@ use crate::{
     },
     vector::{
         render_commands::{
-            DrawCircleTiles, DrawExtrusionClear, DrawExtrusionColor, DrawExtrusionDepth,
-            DrawExtrusionPatternColor, DrawExtrusionTranslucentBack, DrawExtrusionTranslucentFront,
+            DrawCircleTiles, DrawExtrusionColor, DrawExtrusionDepth, DrawExtrusionPatternColor,
+            DrawExtrusionStencilClear, DrawExtrusionTranslucentBack, DrawExtrusionTranslucentFront,
             DrawLineTiles, DrawPatternTiles, DrawVectorTiles,
         },
         VectorBufferPool,
@@ -207,21 +207,28 @@ pub fn queue_system(
                                 &DrawState::<LayerItem, DrawExtrusionTranslucentBack>::INSTANCE
                             }
                             "fill-extrusion" => {
-                                extrusion_clears.push(LayerItem {
-                                    projection: ProjectionBinding::View,
-                                    draw_function:
-                                        &DrawState::<LayerItem, DrawExtrusionClear>::INSTANCE,
-                                    index: layer_entry.style_layer.index,
-                                    generate_borders: false,
-                                    style_layer: layer_id,
-                                    entry_slot,
-                                    tile: Tile {
-                                        coords: layer_entry.coords,
-                                    },
-                                    source_shape: shape_data,
-                                    mask_group: MaskGroup::Vector,
-                                    run: None,
-                                });
+                                if !extrusion_clears
+                                    .iter()
+                                    .any(|item| item.style_layer == layer_id)
+                                {
+                                    extrusion_clears.push(LayerItem {
+                                        projection: ProjectionBinding::View,
+                                        draw_function: &DrawState::<
+                                            LayerItem,
+                                            DrawExtrusionStencilClear,
+                                        >::INSTANCE,
+                                        index: layer_entry.style_layer.index,
+                                        generate_borders: false,
+                                        style_layer: layer_id,
+                                        entry_slot: UNSET_ENTRY_SLOT,
+                                        tile: Tile {
+                                            coords: layer_entry.coords,
+                                        },
+                                        source_shape: shape_data,
+                                        mask_group: MaskGroup::Vector,
+                                        run: None,
+                                    });
+                                }
                                 let color: &'static dyn crate::render::render_phase::Draw<
                                     LayerItem,
                                 > = if pattern_layers.contains(&layer_id) {

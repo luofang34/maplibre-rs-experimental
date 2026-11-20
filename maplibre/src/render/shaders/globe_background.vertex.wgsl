@@ -2,7 +2,6 @@
 
 struct VertexOutput {
     @location(0) color: vec4<f32>,
-    @location(4) horizon_distance: f32,
     @builtin(position) position: vec4<f32>,
 };
 
@@ -30,5 +29,5 @@ fn main(
     if viewport.y > 0.5 {
         position.z = max(position.z, 0.0) * 1.0e-6;
     }
-    return VertexOutput(color, projected.horizon_distance, position);
+    return VertexOutput(color, position);
 }

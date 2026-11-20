@@ -61,18 +61,34 @@ pub(crate) mod upload_system;
 pub(crate) mod pattern;
 pub mod tessellation;
 
-struct VectorPipeline(crate::render::resource::FeaturePipelinePair);
-impl Deref for VectorPipeline {
-    type Target = crate::render::resource::FeaturePipelinePair;
+/// Polygon fill pipelines separated by projection mode (flat/globe) and opacity (`blend: None`).
+#[derive(Default)]
+struct VectorPipeline {
+    flat_opaque: Option<crate::render::resource::FeaturePipelinePair>,
+    flat_blended: Option<crate::render::resource::FeaturePipelinePair>,
+    globe_opaque: Option<crate::render::resource::FeaturePipelinePair>,
+    globe_blended: Option<crate::render::resource::FeaturePipelinePair>,
+}
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
+impl VectorPipeline {
+    fn select(&self, globe: bool, opaque: bool, uniform: bool) -> Option<&wgpu::RenderPipeline> {
+        let pair = match (globe, opaque) {
+            (false, true) => self.flat_opaque.as_ref().or(self.flat_blended.as_ref()),
+            (false, false) => self.flat_blended.as_ref(),
+            (true, true) => self.globe_opaque.as_ref().or(self.globe_blended.as_ref()),
+            (true, false) => self.globe_blended.as_ref(),
+        }?;
+        Some(pair.select(uniform))
     }
 }
 
 /// The pipelines of stroked lines, by where a line lies.
 struct LinePipeline {
-    /// On the map plane, or draped into the terrain textures.
+    /// Plain solid lines on the flat Mercator plane (or into drape textures), without dash/pattern bindings.
+    flat_plain: Option<crate::render::resource::FeaturePipelinePair>,
+    /// Plain solid lines projected onto the globe surface, without dash/pattern bindings.
+    globe_plain: Option<crate::render::resource::FeaturePipelinePair>,
+    /// Full line pipeline (dashes, patterns, or gradients) on the map plane or draped textures.
     flat: Option<crate::render::resource::FeaturePipelinePair>,
     /// At heights of its own, as a bridge deck or tunnel is, tested against the terrain depth.
     structure: Option<crate::render::resource::FeaturePipelinePair>,
@@ -83,14 +99,12 @@ struct LinePipeline {
     terrain: Option<crate::render::resource::FeaturePipelinePair>,
 }
 
-/// The passes of extruded polygons: depth, colour once per pixel, stencil reset, and translucent shells.
-struct ExtrusionPipeline {
-    depth: crate::render::resource::FeaturePipelinePair,
-    color: crate::render::resource::FeaturePipelinePair,
-    clear: crate::render::resource::FeaturePipelinePair,
-    compact_depth: wgpu::RenderPipeline,
-    compact_color: wgpu::RenderPipeline,
-    compact_clear: wgpu::RenderPipeline,
+#[derive(Default)]
+struct ExtrusionModePipelines {
+    depth: Option<wgpu::RenderPipeline>,
+    color: Option<crate::render::resource::FeaturePipelinePair>,
+    compact_depth: Option<wgpu::RenderPipeline>,
+    compact_color: Option<wgpu::RenderPipeline>,
     /// The colour pass with an image in place of the colour.
     pattern: Option<crate::render::resource::FeaturePipelinePair>,
     /// Back-facing shell of a closed translucent 3D volume (`depth_write = false`).
@@ -99,6 +113,32 @@ struct ExtrusionPipeline {
     translucent_front: Option<crate::render::resource::FeaturePipelinePair>,
     compact_translucent_back: Option<wgpu::RenderPipeline>,
     compact_translucent_front: Option<wgpu::RenderPipeline>,
+}
+
+/// The passes of extruded polygons: depth, colour once per pixel, stencil reset, and translucent shells.
+#[derive(Default)]
+struct ExtrusionPipeline {
+    flat: Option<ExtrusionModePipelines>,
+    globe: Option<ExtrusionModePipelines>,
+    clear_mark: Option<wgpu::RenderPipeline>,
+}
+
+impl ExtrusionPipeline {
+    fn for_globe(&self, globe: bool) -> Option<&ExtrusionModePipelines> {
+        if globe {
+            self.globe.as_ref()
+        } else {
+            self.flat.as_ref()
+        }
+    }
+
+    fn slot_mut(&mut self, globe: bool) -> &mut Option<ExtrusionModePipelines> {
+        if globe {
+            &mut self.globe
+        } else {
+            &mut self.flat
+        }
+    }
 }
 
 struct CirclePipeline {

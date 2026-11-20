@@ -17,7 +17,7 @@ pub struct IndexEntry {
     /// Interned style layer identifier for `O(1)` equality checks during `Queue` and `Render`.
     pub style_layer_id: crate::style::StyleLayerId,
     /// Style layer definition at upload time.
-    pub style_layer: StyleLayer,
+    pub style_layer: std::sync::Arc<StyleLayer>,
     // Range of bytes within `vertex_slabs[vertex_page]` for vertices
     pub(super) buffer_vertices: Range<wgpu::BufferAddress>,
     // Range of bytes within `index_{u16,native}_slabs[index_page]` for indices
@@ -46,9 +46,17 @@ pub struct IndexEntry {
     pub(super) u16_chunks: Option<super::u16_chunks::U16Chunks>,
     // True when `buffer_vertices` stores 8-byte compact extrusion records instead of 16-byte vertices.
     pub(super) compact_extrusion: bool,
+    // True when all vertices of a solid-color fill draw with alpha == 1.0 (`blend: None` eligible).
+    pub(super) opaque_color: bool,
 }
 
 impl IndexEntry {
+    /// Whether this entry draws with fully opaque alpha (`1.0`) and can skip alpha blending.
+    #[inline]
+    pub fn is_opaque_color(&self) -> bool {
+        self.opaque_color
+    }
+
     /// Whether this entry stores 8-byte compact extrusion vertices (slot 0 stride `8`, no slot 3).
     #[inline]
     pub fn is_compact_extrusion(&self) -> bool {
