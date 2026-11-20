@@ -37,7 +37,7 @@ fn bucket_angle_rad(bucket: u16) -> f64 {
 /// The quantized bearing bucket each layer's indices were last sorted for, by tile and allocation.
 #[derive(Default)]
 pub(super) struct DrawSort {
-    sorted: HashMap<(WorldTileCoords, String), (u64, u16)>,
+    sorted: HashMap<(WorldTileCoords, crate::style::StyleLayerId), (u64, u16)>,
 }
 
 impl DrawSort {
@@ -49,24 +49,28 @@ impl DrawSort {
         (bearing, zoom): (f64, f64),
         layers: &[(u32, &SymbolLayerData, &SymbolPaint)],
     ) -> bool {
+        let bucket = bearing_bucket(bearing);
+        if self.sorted.is_empty() && bucket == 0 {
+            return false;
+        }
         let Some(Initialized(pool)) = world.resources.get::<Eventually<SymbolBufferPool>>() else {
             return false;
         };
-        let bucket = bearing_bucket(bearing);
         for (_, layer, paint) in layers {
             if !sorts_by_height(paint, zoom) {
                 continue;
             }
+            let layer_id = crate::style::StyleLayerId::intern(&layer.style_layer_id);
             let Some(entry) = pool.index().get_layers(layer.coords).and_then(|entries| {
                 entries
                     .iter()
-                    .find(|entry| entry.style_layer.id == layer.style_layer_id)
+                    .find(|entry| entry.style_layer_id == layer_id)
             }) else {
                 continue;
             };
             let sorted_for = self
                 .sorted
-                .get(&(layer.coords, layer.style_layer_id.clone()))
+                .get(&(layer.coords, layer_id))
                 .filter(|(allocation, _)| *allocation == entry.allocation_id())
                 .map_or(0_u16, |(_, b)| *b);
             if sorted_for != bucket {
@@ -97,14 +101,15 @@ impl DrawSort {
             if !sorts_by_height(paint, zoom) {
                 continue;
             }
+            let layer_id = crate::style::StyleLayerId::intern(&layer.style_layer_id);
             let Some(entry) = pool.index().get_layers(layer.coords).and_then(|entries| {
                 entries
                     .iter()
-                    .find(|entry| entry.style_layer.id == layer.style_layer_id)
+                    .find(|entry| entry.style_layer_id == layer_id)
             }) else {
                 continue;
             };
-            let key = (layer.coords, layer.style_layer_id.clone());
+            let key = (layer.coords, layer_id);
             let sorted_for = self
                 .sorted
                 .get(&key)

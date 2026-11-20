@@ -98,6 +98,7 @@ fn a_settled_map_needs_a_frame_only_after_its_camera_or_style_changes() {
 fn frame_statistics_count_the_work_of_each_frame() {
     crate::headless::map::test_async::run_async(async {
         let mut map = raster_map().await;
+        map.enable_frame_trace(8);
         map.render_frames_with_terrain(Default::default(), vec![picture()], vec![], 1)
             .expect("frame");
         let loading = map.last_frame_stats();
@@ -203,9 +204,14 @@ async fn heavy_map(layers: usize) -> Option<HeadlessMap> {
             .collect::<Vec<_>>()
     }))
     .expect("style");
-    let (kernel, renderer) = create_headless_renderer(1024, 1024, None)
-        .await
-        .expect("renderer");
+    let settings = crate::render::settings::RendererSettings {
+        gpu_timing: true,
+        ..Default::default()
+    };
+    let (kernel, renderer) =
+        crate::headless::create_headless_renderer_with_settings(1024, 1024, None, settings)
+            .await
+            .expect("renderer");
     let map = HeadlessMap::new(
         style,
         renderer,

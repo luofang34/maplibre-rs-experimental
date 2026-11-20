@@ -27,6 +27,7 @@ pub struct SharedPipelines(Arc<Inner>);
 
 struct Inner {
     state: Mutex<State>,
+    evict_shaders_after_frame: bool,
     shader_compiles: AtomicUsize,
     shader_hits: AtomicUsize,
     pipeline_compiles: AtomicUsize,
@@ -37,6 +38,7 @@ impl Default for Inner {
     fn default() -> Self {
         Self {
             state: Mutex::new(State::default()),
+            evict_shaders_after_frame: false,
             shader_compiles: AtomicUsize::new(0),
             shader_hits: AtomicUsize::new(0),
             pipeline_compiles: AtomicUsize::new(0),
@@ -123,6 +125,28 @@ impl SharedPipelines {
     /// Creates an empty pipeline cache.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Creates a per-renderer pipeline cache whose compiled [`wgpu::ShaderModule`] entries are
+    /// released at the end of each frame after pipelines are built, freeing Naga/`wgpu_hal` memory.
+    pub(crate) fn new_transient() -> Self {
+        Self(super::shared::share_gpu(Inner {
+            evict_shaders_after_frame: true,
+            ..Default::default()
+        }))
+    }
+
+    /// Clears transient shader modules when [`Self::new_transient`] is active so Naga AST / IR
+    /// allocations are not pinned across the lifetime of a single renderer.
+    pub(crate) fn clear_transient_shaders(&self) {
+        if !self.0.evict_shaders_after_frame {
+            return;
+        }
+        let mut state = crate::platform::lock_unpoisoned(&self.0.state);
+        if !state.shaders.is_empty() {
+            state.shaders.clear();
+            state.shaders.shrink_to_fit();
+        }
     }
 
     /// Number of WGSL shader modules compiled on the device through this cache.

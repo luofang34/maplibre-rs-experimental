@@ -12,32 +12,45 @@ use crate::{
     vector::resource::{BufferPool, IndexEntry},
 };
 
-/// Clean vertices tolerated between two dirty runs before splitting into two `writeBuffer` calls.
-/// `32 * 80 B = 2,560 B`, balancing fewer WebGPU IPC calls against minimal clean-byte over-upload.
-const MAX_CLEAN_GAP_VERTICES: usize = 32;
+/// Clean quads tolerated between two dirty runs before splitting into two `writeBuffer` calls.
+/// `8 * 4 * 80 B = 2,560 B`, balancing fewer WebGPU IPC calls against minimal clean-byte over-upload.
+const MAX_CLEAN_GAP_QUADS: usize = 8;
 
-/// Reusable pool of per-bucket `SDFShaderFeatureMetadata` vectors and zeroed staging slices so
-/// placement epochs do not churn multi-hundred-kilobyte heap allocations on WASM or native.
+/// Maximum quads expanded or zeroed per chunk upload (`1024 * 4 * 80 B = 320 KiB` scratch cap).
+const MAX_UPLOAD_QUADS_PER_CHUNK: usize = 1024;
+
+/// Reusable pool of per-bucket per-quad `SDFShaderFeatureMetadata` vectors and bounded upload
+/// staging slices so placement epochs do not churn multi-hundred-kilobyte heap allocations.
 #[derive(Default)]
 pub(super) struct MetadataScratchPool {
     free: Vec<Vec<SDFShaderFeatureMetadata>>,
+    expand: Vec<SDFShaderFeatureMetadata>,
     zeros: Vec<SDFShaderFeatureMetadata>,
 }
 
 impl MetadataScratchPool {
-    /// Pops a cleared `Vec<SDFShaderFeatureMetadata>` with retained capacity when available.
+    /// Pops a cleared per-quad `Vec<SDFShaderFeatureMetadata>` with retained capacity when available.
     pub(super) fn acquire(&mut self) -> Vec<SDFShaderFeatureMetadata> {
         let mut buf = self.free.pop().unwrap_or_default();
         buf.clear();
         buf
     }
 
-    /// Returns a `Vec<SDFShaderFeatureMetadata>` to the scratch pool if capacity is worth keeping.
+    /// Returns a per-quad `Vec<SDFShaderFeatureMetadata>` to the pool if capacity is bounded.
     pub(super) fn recycle(&mut self, mut buf: Vec<SDFShaderFeatureMetadata>) {
-        if buf.capacity() > 0 && buf.capacity() <= 65_536 && self.free.len() < 16 {
+        if buf.capacity() > 0 && buf.capacity() <= 16_384 && self.free.len() < 2 {
             buf.clear();
             self.free.push(buf);
         }
+    }
+
+    fn expand_quads(&mut self, quads: &[SDFShaderFeatureMetadata]) -> &[SDFShaderFeatureMetadata] {
+        self.expand.clear();
+        self.expand.reserve(quads.len() * 4);
+        for &quad in quads {
+            self.expand.extend_from_slice(&[quad; 4]);
+        }
+        &self.expand
     }
 
     fn zero_slice(&mut self, len: usize) -> &[SDFShaderFeatureMetadata] {
@@ -48,17 +61,17 @@ impl MetadataScratchPool {
     }
 }
 
-/// Last GPU-resident `SDFShaderFeatureMetadata` state for one `(WorldTileCoords, style_layer_id)` bucket.
+/// Last GPU-resident per-quad `SDFShaderFeatureMetadata` state for one bucket.
 #[derive(Clone, Debug, Default)]
 pub(super) struct CachedBucketMetadata {
     /// `IndexEntry::allocation_id()` of the backing GPU buffer slice.
     pub allocation_id: u64,
-    /// Whether at least one vertex in `vertices` has target `opacity > 0.0`.
+    /// Whether at least one quad in `quads` has target `opacity > 0.0`.
     pub has_target_visible: bool,
-    /// Latest `start_time_ms` among vertices with `start_opacity > 0.0`, or `-1.0` when none.
+    /// Latest `start_time_ms` among quads with `start_opacity > 0.0`, or `-1.0` when none.
     pub latest_fade_start_ms: f32,
-    /// Empty when all GPU vertices in this allocation are `SDFShaderFeatureMetadata::default()`.
-    pub vertices: Vec<SDFShaderFeatureMetadata>,
+    /// One entry per 4-vertex quad; empty when all GPU vertices are default-zeroed.
+    pub quads: Vec<SDFShaderFeatureMetadata>,
 }
 
 impl CachedBucketMetadata {
@@ -67,7 +80,7 @@ impl CachedBucketMetadata {
             allocation_id,
             has_target_visible: false,
             latest_fade_start_ms: -1.0,
-            vertices: Vec::new(),
+            quads: Vec::new(),
         }
     }
 
@@ -118,15 +131,15 @@ pub(super) fn diff_and_upload_bucket_with_scratch<
     let allocation_id = entry.allocation_id();
     let stride = size_of::<SDFShaderFeatureMetadata>() as u64;
     let range = entry.feature_metadata_buffer_range();
-    let allocated_vertices = ((range.end - range.start) / stride) as usize;
-    if allocated_vertices == 0 {
+    let allocated_quads = (((range.end - range.start) / stride) as usize) / 4;
+    if allocated_quads == 0 {
         scratch.recycle(next);
         return CachedBucketMetadata::empty(allocation_id);
     }
 
     let prev_slice = prev
         .filter(|cached| cached.allocation_id == allocation_id)
-        .map_or(&[][..], |cached| cached.vertices.as_slice());
+        .map_or(&[][..], |cached| cached.quads.as_slice());
 
     // Fast path 1: all symbols hidden on a newly zeroed allocation or already-zeroed bucket.
     if next.is_empty() && prev_slice.is_empty() {
@@ -139,18 +152,23 @@ pub(super) fn diff_and_upload_bucket_with_scratch<
         scratch.recycle(next);
         let zero = SDFShaderFeatureMetadata::default();
         let zero_bytes = bytemuck::bytes_of(&zero);
-        let limit = prev_slice.len().min(allocated_vertices);
+        let limit = prev_slice.len().min(allocated_quads);
         for (start, end) in dirty_runs(limit, |i| bytemuck::bytes_of(&prev_slice[i]) != zero_bytes)
         {
-            let zeros = scratch.zero_slice(end - start);
-            pool.update_feature_metadata_range(queue, entry, start, zeros);
+            let mut cursor = start;
+            while cursor < end {
+                let chunk_end = (cursor + MAX_UPLOAD_QUADS_PER_CHUNK).min(end);
+                let zeros = scratch.zero_slice((chunk_end - cursor) * 4);
+                pool.update_feature_metadata_range(queue, entry, cursor * 4, zeros);
+                cursor = chunk_end;
+            }
         }
         return CachedBucketMetadata::empty(allocation_id);
     }
 
     let mut next = next;
-    if next.len() > allocated_vertices {
-        next.truncate(allocated_vertices);
+    if next.len() > allocated_quads {
+        next.truncate(allocated_quads);
     }
     let zero = SDFShaderFeatureMetadata::default();
     let limit = next.len();
@@ -158,27 +176,38 @@ pub(super) fn diff_and_upload_bucket_with_scratch<
         let old = prev_slice.get(i).unwrap_or(&zero);
         bytemuck::bytes_of(old) != bytemuck::bytes_of(&next[i])
     }) {
-        pool.update_feature_metadata_range(queue, entry, start, &next[start..end]);
+        let mut cursor = start;
+        while cursor < end {
+            let chunk_end = (cursor + MAX_UPLOAD_QUADS_PER_CHUNK).min(end);
+            let expanded = scratch.expand_quads(&next[cursor..chunk_end]);
+            pool.update_feature_metadata_range(queue, entry, cursor * 4, expanded);
+            cursor = chunk_end;
+        }
     }
     if prev_slice.len() > limit {
-        let tail_end = prev_slice.len().min(allocated_vertices);
+        let tail_end = prev_slice.len().min(allocated_quads);
         let zero_bytes = bytemuck::bytes_of(&zero);
         for (rel_start, rel_end) in dirty_runs(tail_end - limit, |i| {
             bytemuck::bytes_of(&prev_slice[limit + i]) != zero_bytes
         }) {
-            let zeros = scratch.zero_slice(rel_end - rel_start);
-            pool.update_feature_metadata_range(queue, entry, limit + rel_start, zeros);
+            let mut cursor = rel_start;
+            while cursor < rel_end {
+                let chunk_end = (cursor + MAX_UPLOAD_QUADS_PER_CHUNK).min(rel_end);
+                let zeros = scratch.zero_slice((chunk_end - cursor) * 4);
+                pool.update_feature_metadata_range(queue, entry, (limit + cursor) * 4, zeros);
+                cursor = chunk_end;
+            }
         }
     }
 
     let mut has_target_visible = false;
     let mut latest_fade_start_ms = -1.0_f32;
-    for vertex in &next {
-        if vertex.has_target_opacity() {
+    for quad in &next {
+        if quad.has_target_opacity() {
             has_target_visible = true;
         }
-        if vertex.has_start_opacity() {
-            latest_fade_start_ms = latest_fade_start_ms.max(vertex.start_time_ms());
+        if quad.has_start_opacity() {
+            latest_fade_start_ms = latest_fade_start_ms.max(quad.start_time_ms());
         }
     }
 
@@ -186,7 +215,7 @@ pub(super) fn diff_and_upload_bucket_with_scratch<
         allocation_id,
         has_target_visible,
         latest_fade_start_ms,
-        vertices: next,
+        quads: next,
     }
 }
 
@@ -205,7 +234,7 @@ fn dirty_runs(len: usize, mut is_dirty: impl FnMut(usize) -> bool) -> Vec<(usize
         }
         let end = i;
         if let Some(last) = runs.last_mut() {
-            if start - last.1 <= MAX_CLEAN_GAP_VERTICES {
+            if start - last.1 <= MAX_CLEAN_GAP_QUADS {
                 last.1 = end;
                 continue;
             }
@@ -297,11 +326,9 @@ mod tests {
         let entry = &pool.index().get_layers(coords).expect("layers")[0];
         let stride = size_of::<SDFShaderFeatureMetadata>();
 
-        // Only 1 quad (vertices 100..104) is placed out of 200 vertices.
-        let mut next = vec![SDFShaderFeatureMetadata::default(); 200];
-        for v in &mut next[100..104] {
-            v.set_target_opacity(1.0);
-        }
+        // Only 1 quad (quad 25 => vertices 100..104) is placed out of 50 quads (200 vertices).
+        let mut next = vec![SDFShaderFeatureMetadata::default(); 50];
+        next[25].set_target_opacity(1.0);
         let cached = diff_and_upload_bucket(&pool, &queue, entry, None, next.clone());
         assert_eq!(
             *queue.writes.borrow(),
@@ -319,7 +346,7 @@ mod tests {
             *queue.writes.borrow(),
             vec![((100 * stride) as u64, 4 * stride)]
         );
-        assert!(cached.vertices.is_empty());
+        assert!(cached.quads.is_empty());
     }
 
     #[test]
@@ -328,17 +355,17 @@ mod tests {
         let entry = &pool.index().get_layers(coords).expect("layers")[0];
         let stride = size_of::<SDFShaderFeatureMetadata>();
 
-        let mut next = vec![SDFShaderFeatureMetadata::default(); 200];
-        // Quads at 10..14 and 20..24 are separated by 6 clean vertices (<= 32) -> coalesced!
-        // Quad at 120..124 is 96 clean vertices away (> 32) -> separate sub-range!
-        for idx in (10..14).chain(20..24).chain(120..124) {
+        let mut next = vec![SDFShaderFeatureMetadata::default(); 50];
+        // Quads 2 (8..12) and 5 (20..24) are separated by 2 clean quads (<= 8) -> coalesced!
+        // Quad 30 (120..124) is 24 clean quads away (> 8) -> separate sub-range!
+        for idx in [2, 5, 30] {
             next[idx].set_target_opacity(1.0);
         }
         let _ = diff_and_upload_bucket(&pool, &queue, entry, None, next);
         assert_eq!(
             *queue.writes.borrow(),
             vec![
-                ((10 * stride) as u64, 14 * stride),
+                ((8 * stride) as u64, 16 * stride),
                 ((120 * stride) as u64, 4 * stride),
             ]
         );

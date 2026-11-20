@@ -299,6 +299,11 @@ pub struct RendererSettings {
     /// Omits the 1-tile surround prefetch ring when requesting tiles for stationary one-shot
     /// offscreen snapshots.
     pub tight_tile_requests: bool,
+    /// Collects main-pass GPU timestamp queries on devices supporting `TIMESTAMP_QUERY`.
+    /// Defaults to `false` to avoid per-frame render->compute timestamp resolves and buffer
+    /// readbacks when neither `gpu_timing` nor [`FrameTrace`](crate::render::frame_trace::FrameTrace)
+    /// is active.
+    pub gpu_timing: bool,
 }
 
 /// Resource mirroring [`RendererSettings::tight_tile_requests`] for world-only prefetch helpers.
@@ -358,6 +363,7 @@ impl Default for RendererSettings {
             overdraw_inspector: false,
             depth_readout: false,
             tight_tile_requests: false,
+            gpu_timing: false,
         }
     }
 }

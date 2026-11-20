@@ -54,20 +54,13 @@ fn each_glyph_writes_its_own_pose_to_its_six_indices() {
             rise: 12.5,
         },
     ];
-    let mut metadata = vec![SDFShaderFeatureMetadata::default(); 12];
+    let mut metadata = vec![SDFShaderFeatureMetadata::default(); 3];
     write_glyph_poses(&layer, &line, &poses, &mut metadata);
-    assert!(
-        metadata[..4].iter().all(|entry| !entry.has_pose()),
-        "the icon has no pose"
-    );
-    assert!(metadata[4..8].iter().all(|entry| {
-        let p = entry.decoded_pose();
-        [p[0], p[1], p[3]] == [-10.0, 0.0, POSED_GLYPH] && (p[2] - 0.5).abs() < 1e-4
-    }));
-    assert!(metadata[8..].iter().all(|entry| {
-        let p = entry.decoded_pose();
-        [p[0], p[1], p[3]] == [10.0, 5.0, POSED_GLYPH + 12.5] && (p[2] - 0.75).abs() < 1e-4
-    }));
+    assert!(!metadata[0].has_pose(), "the icon has no pose");
+    let p = metadata[1].decoded_pose();
+    assert!([p[0], p[1], p[3]] == [-10.0, 0.0, POSED_GLYPH] && (p[2] - 0.5).abs() < 1e-4);
+    let p = metadata[2].decoded_pose();
+    assert!([p[0], p[1], p[3]] == [10.0, 5.0, POSED_GLYPH + 12.5] && (p[2] - 0.75).abs() < 1e-4);
 }
 
 #[test]

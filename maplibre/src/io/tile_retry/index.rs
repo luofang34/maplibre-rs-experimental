@@ -228,12 +228,21 @@ pub(crate) fn cancel_unwanted<S: std::hash::BuildHasher>(
     for (coords, kind) in given_up {
         crate::io::tile_load::abandoned(world, coords, kind);
     }
+    queue_cancelled(world, cancelled);
+    tiles
+}
+
+/// Records attempts to stop in the worker on the next cancellation drain.
+pub(crate) fn queue_cancelled(world: &mut World, attempts: impl IntoIterator<Item = u64>) {
+    let mut iter = attempts.into_iter().peekable();
+    if iter.peek().is_none() {
+        return;
+    }
     world
         .resources
         .get_or_init_mut::<CancelledAttempts>()
         .0
-        .extend(cancelled);
-    tiles
+        .extend(iter);
 }
 
 /// Stops the worker calls of the attempts cancelled since the last call.
@@ -241,11 +250,16 @@ pub(crate) fn stop_cancelled<K: crate::environment::OffscreenKernel>(
     world: &mut World,
     apc: &impl crate::io::apc::AsyncProcedureCall<K>,
 ) {
-    let cancelled = world
+    let mut cancelled = world
         .resources
         .get_mut::<CancelledAttempts>()
         .map(|cancelled| std::mem::take(&mut cancelled.0))
         .unwrap_or_default();
+    if cancelled.is_empty() {
+        return;
+    }
+    cancelled.sort_unstable_by(|a, b| b.cmp(a));
+    cancelled.dedup();
     for attempt in cancelled {
         apc.cancel(attempt);
     }

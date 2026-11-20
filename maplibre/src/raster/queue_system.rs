@@ -54,13 +54,14 @@ pub fn queue_system(
     let (Initialized(tile_view_pattern), Initialized(raster_resources)) =
         (tile_view_pattern, raster_resources)
     else {
-        #[cfg(target_arch = "wasm32")]
         return Ok(());
-        #[cfg(not(target_arch = "wasm32"))]
-        return Err(SystemError::Dependencies);
     };
     let style_zoom = view_state.style_zoom().value();
-    for layer in style.layers.iter().filter(|layer| layer.type_ == "raster") {
+    for layer in style
+        .layers
+        .iter()
+        .filter(|layer| layer.type_ == "raster" && layer.is_visible_at(style_zoom))
+    {
         let mut uniforms = match &layer.paint {
             Some(LayerPaint::Raster(paint)) => RasterUniforms::from_paint(paint, style_zoom),
             _ => RasterUniforms::from_paint(&RasterPaint::default(), 0.0),

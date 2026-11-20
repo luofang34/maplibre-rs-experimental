@@ -49,7 +49,7 @@ impl<E: Environment> Plugin<E> for RenderPlugin {
     fn build(
         &self,
         schedule: &mut Schedule,
-        _kernel: Rc<Kernel<E>>,
+        kernel: Rc<Kernel<E>>,
         world: &mut World,
         renderer: &mut crate::render::Renderer,
     ) -> Result<(), crate::plugin::PluginError> {
@@ -118,11 +118,38 @@ impl<E: Environment> Plugin<E> for RenderPlugin {
             RenderStageLabel::Cleanup,
             SystemStage::default()
                 .with_system(cleanup_system)
-                .with_system(retention_system),
+                .with_system(retention_system)
+                .with_system(SystemContainer::new(StopCancelledSystem::new(&kernel))),
         )?;
         // A frame that fails part-way still clears its render phases, or the next frame
         // draws its items twice.
         schedule.run_after_failure(RenderStageLabel::Cleanup)?;
+        Ok(())
+    }
+}
+
+struct StopCancelledSystem<E: Environment> {
+    kernel: Rc<Kernel<E>>,
+}
+
+impl<E: Environment> StopCancelledSystem<E> {
+    fn new(kernel: &Rc<Kernel<E>>) -> Self {
+        Self {
+            kernel: kernel.clone(),
+        }
+    }
+}
+
+impl<E: Environment> crate::tcs::system::System for StopCancelledSystem<E> {
+    fn name(&self) -> std::borrow::Cow<'static, str> {
+        "stop_cancelled".into()
+    }
+
+    fn run(
+        &mut self,
+        crate::context::MapContext { world, .. }: &mut crate::context::MapContext,
+    ) -> crate::tcs::system::SystemResult {
+        crate::io::tile_retry::stop_cancelled(world, self.kernel.apc());
         Ok(())
     }
 }

@@ -98,6 +98,10 @@ pub(super) fn build_multi_view_coverings(
     active: &[(ViewSlotEntry, ViewState)],
 ) -> (MultiViewExtractCovering, SlotResidencyFloor) {
     let active_ids: FxHashSet<ViewSlotId> = active.iter().map(|(entry, _)| entry.slot).collect();
+    world
+        .resources
+        .remove::<crate::terrain::request_system::TerrainWantedDems>();
+    world.resources.remove::<DrapeRequests>();
     let mut extract = MultiViewExtractCovering {
         active: true,
         ..Default::default()

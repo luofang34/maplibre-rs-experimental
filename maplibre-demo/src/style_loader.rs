@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use maplibre::{
     io::{resource_loader::SharedLoader, source_client::HttpClient},
     platform::http_client::ReqwestHttpClient,
@@ -86,7 +84,8 @@ fn read_style_document(spec: &str) -> Result<(String, Option<String>), Box<dyn s
     if is_absolute_uri(spec) {
         let owned = spec.to_owned();
         let bytes = maplibre::platform::run_multithreaded(async move {
-            let loader = SharedLoader::new(ReqwestHttpClient::new::<PathBuf>(None));
+            let cache_dir = std::env::temp_dir().join("maplibre-rs-snapshot-cache");
+            let loader = SharedLoader::new(ReqwestHttpClient::new(Some(cache_dir)));
             loader.fetch(&owned).await.map_err(|err| err.describe())
         })
         .map_err(|msg| format!("cannot fetch style '{spec}': {msg}"))?;

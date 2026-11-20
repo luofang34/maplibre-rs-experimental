@@ -4,13 +4,16 @@ use crate::render::depth_copy::DepthCopyPipeline;
 
 pub(crate) struct SymbolDepth {
     pub texture: wgpu::Texture,
+    target_size: wgpu::Extent3d,
     samples: u32,
+    allocated_full: bool,
+    bind_group_layout: wgpu::BindGroupLayout,
     pub view: wgpu::TextureView,
     fade_buffer: wgpu::Buffer,
     last_fade_bits: Option<[u32; 3]>,
     pub skip_depth_copy: bool,
     pub binding: wgpu::BindGroup,
-    pub copy: DepthCopyPipeline,
+    pub copy: Option<DepthCopyPipeline>,
 }
 
 impl SymbolDepth {
@@ -46,56 +49,67 @@ impl SymbolDepth {
         samples: u32,
         pipeline: &wgpu::RenderPipeline,
     ) -> Self {
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("symbol anchor depth"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let view = texture.create_view(&Default::default());
+        let placeholder_size = wgpu::Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        };
+        let (texture, view) = create_depth_target(device, placeholder_size);
         let fade_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("symbol fade clock"),
             size: 16,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let binding = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("symbol anchor depth and fade"),
-            layout: &pipeline.get_bind_group_layout(2),
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: fade_buffer.as_entire_binding(),
-                },
-            ],
-        });
+        let bind_group_layout = pipeline.get_bind_group_layout(2);
+        let binding = create_bind_group(device, &bind_group_layout, &view, &fade_buffer);
         Self {
             texture,
+            target_size: size,
+            samples,
+            allocated_full: false,
+            bind_group_layout,
             view,
             fade_buffer,
             last_fade_bits: None,
-            skip_depth_copy: false,
+            skip_depth_copy: true,
             binding,
-            samples,
-            copy: DepthCopyPipeline::new(device, samples),
+            copy: None,
         }
+    }
+
+    fn ensure_allocated(&mut self, device: &wgpu::Device) {
+        if self.allocated_full {
+            return;
+        }
+        let (new_tex, new_view) = create_depth_target(device, self.target_size);
+        let new_binding = create_bind_group(
+            device,
+            &self.bind_group_layout,
+            &new_view,
+            &self.fade_buffer,
+        );
+        let old_tex = std::mem::replace(&mut self.texture, new_tex);
+        old_tex.destroy();
+        self.view = new_view;
+        self.binding = new_binding;
+        if self.copy.is_none() {
+            self.copy = Some(DepthCopyPipeline::new(device, self.samples));
+        }
+        self.allocated_full = true;
     }
 
     pub fn write_fade_time(
         &mut self,
+        device: &wgpu::Device,
         queue: &crate::render::upload_queue::UploadQueue,
         fade_time_ms: f32,
         fade_duration_ms: f32,
         skip_depth_occlusion: bool,
     ) {
+        if !skip_depth_occlusion {
+            self.ensure_allocated(device);
+        }
         self.skip_depth_copy = skip_depth_occlusion;
         let skip_flag = if skip_depth_occlusion {
             1.0_f32
@@ -115,10 +129,54 @@ impl SymbolDepth {
     }
 }
 
+fn create_depth_target(
+    device: &wgpu::Device,
+    size: wgpu::Extent3d,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("symbol anchor depth"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Depth32Float,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&Default::default());
+    (texture, view)
+}
+
+fn create_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    view: &wgpu::TextureView,
+    fade_buffer: &wgpu::Buffer,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("symbol anchor depth and fade"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: fade_buffer.as_entire_binding(),
+            },
+        ],
+    })
+}
+
 impl crate::render::eventually::HasChanged for SymbolDepth {
     type Criteria = (u32, u32, u32);
     fn has_changed(&self, criteria: &Self::Criteria) -> bool {
-        (self.texture.width(), self.texture.height(), self.samples) != *criteria
+        (
+            self.target_size.width,
+            self.target_size.height,
+            self.samples,
+        ) != *criteria
     }
 }
 

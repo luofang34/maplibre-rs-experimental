@@ -21,8 +21,9 @@ pub(in crate::sdf::collision_system) fn write_feature_metadata(
         return;
     }
     let vertex_count = layer.buffer.vertex_count();
-    if metadata.is_empty() && vertex_count > 0 {
-        metadata.resize(vertex_count, SDFShaderFeatureMetadata::default());
+    let quad_count = vertex_count / 4;
+    if metadata.is_empty() && quad_count > 0 {
+        metadata.resize(quad_count, SDFShaderFeatureMetadata::default());
     }
     let properties = &feature.data.properties;
     let styles = ["text", "icon"].map(|prefix| feature_style(paint, prefix, properties, zoom));
@@ -41,13 +42,13 @@ pub(in crate::sdf::collision_system) fn write_feature_metadata(
         .anchor_sets
         .get(anchor)
         .and_then(|set| feature.text_sets.get(usize::from(*set)));
-    for index in feature.indices.clone() {
+    for index in feature.indices.clone().step_by(6) {
         let Some(&v_idx) = layer.buffer.buffer.indices.get(index) else {
             continue;
         };
         let v_idx = v_idx as usize;
         let kind = usize::from(layer.buffer.is_icon_vertex(v_idx));
-        if let Some(vertex) = metadata.get_mut(v_idx) {
+        if let Some(quad) = metadata.get_mut(v_idx / 4) {
             let ramp = if kind == 0 && shown_set.is_some_and(|set| !set.contains(&index)) {
                 super::super::temporal::FadeRamp::default()
             } else {
@@ -62,7 +63,7 @@ pub(in crate::sdf::collision_system) fn write_feature_metadata(
             } else {
                 styles[kind][0]
             };
-            *vertex = SDFShaderFeatureMetadata::from_placement(
+            *quad = SDFShaderFeatureMetadata::from_placement(
                 ramp.target,
                 ground,
                 ramp.start,
@@ -106,26 +107,24 @@ fn write_glyph_poses_with_anchor(
     let buffer = &layer.buffer.buffer;
     for (glyph, pose) in poses.iter().enumerate() {
         let first = line.first_glyph_index + glyph * 6;
-        for index in first..first + 6 {
-            let Some(vertex_index) = buffer.indices.get(index).map(|index| *index as usize) else {
-                continue;
-            };
-            let Some(entry) = metadata.get_mut(vertex_index) else {
-                continue;
-            };
-            let anchor_xy = buffer
-                .vertices
-                .get(vertex_index)
-                .map_or(fallback_anchor, |vertex| {
-                    [vertex.a_pos_offset[0] as f32, vertex.a_pos_offset[1] as f32]
-                });
-            // The vertex anchor is the label anchor rounded to whole tile units.
-            entry.set_glyph_pose(
-                pose.point[0] - anchor_xy[0],
-                pose.point[1] - anchor_xy[1],
-                pose.angle,
-                pose.rise,
-            );
-        }
+        let Some(vertex_index) = buffer.indices.get(first).map(|index| *index as usize) else {
+            continue;
+        };
+        let Some(entry) = metadata.get_mut(vertex_index / 4) else {
+            continue;
+        };
+        let anchor_xy = buffer
+            .vertices
+            .get(vertex_index)
+            .map_or(fallback_anchor, |vertex| {
+                [vertex.a_pos_offset[0] as f32, vertex.a_pos_offset[1] as f32]
+            });
+        // The vertex anchor is the label anchor rounded to whole tile units.
+        entry.set_glyph_pose(
+            pose.point[0] - anchor_xy[0],
+            pose.point[1] - anchor_xy[1],
+            pose.angle,
+            pose.rise,
+        );
     }
 }

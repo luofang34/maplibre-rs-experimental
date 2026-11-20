@@ -168,11 +168,36 @@ impl GpuTimer {
 pub(crate) fn gpu_timer_system(
     crate::context::MapContext {
         world,
-        renderer: crate::render::Renderer { device, queue, .. },
+        renderer:
+            crate::render::Renderer {
+                device,
+                queue,
+                settings,
+                ..
+            },
         ..
     }: &mut crate::context::MapContext,
 ) -> crate::tcs::system::SystemResult {
-    if world.resources.get::<GpuTimerSlot>().is_none() {
+    let trace_active = world
+        .resources
+        .get::<crate::render::frame_trace::FrameTraceSlot>()
+        .is_some_and(|slot| slot.0.is_some());
+    let enabled = settings.gpu_timing || trace_active;
+    if !enabled {
+        if world
+            .resources
+            .get::<GpuTimerSlot>()
+            .is_some_and(|slot| slot.0.is_some())
+        {
+            world.resources.insert(GpuTimerSlot(None));
+        }
+        return Ok(());
+    }
+    if world
+        .resources
+        .get::<GpuTimerSlot>()
+        .is_none_or(|slot| slot.0.is_none())
+    {
         world.resources.insert(GpuTimerSlot(GpuTimer::new(device)));
     }
     let timer = world

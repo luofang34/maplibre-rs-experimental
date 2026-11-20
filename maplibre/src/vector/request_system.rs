@@ -70,11 +70,11 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
             renderer,
         }: &mut MapContext,
     ) -> SystemResult {
+        tile_retry::stop_cancelled(world, self.kernel.apc());
         crate::io::tile_backpressure::set_vector_deferred(world, false);
         let vectors_disabled = renderer.settings.buffer_pools.is_empty();
         let symbols_disabled = renderer.settings.symbol_pools.is_empty();
         if vectors_disabled && symbols_disabled {
-            tile_retry::stop_cancelled(world, self.kernel.apc());
             return Ok(());
         }
         let pixel_ratio = display_pixel_ratio(world, renderer, view_state);
@@ -111,16 +111,19 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
             visible_level,
         );
         if multi.is_none() {
-            if let Some(memo) = self.memo.as_ref() {
+            if let (Some(key), Some(memo)) = (key.as_ref(), self.memo.as_ref()) {
                 if memo.settled
-                    && memo.key == key
+                    && memo.key == *key
                     && memo.drapes == drapes
                     && memo.prefetch == prefetch
                     && memo.vector_evictions == vector_evictions
+                    && !crate::sdf::provided::awaiting(world)
                     && crate::io::tile_backpressure::tiles_in_flight(world) == 0
                     && !tile_retry::needs_frame(world)
                     && tile_retry::next_retry_delay(world).is_none()
                 {
+                    tile_retry::want(world, RequestKind::Vector, &self.requested);
+                    release_unwanted_tiles(world, &self.requested);
                     update_loose_covering_cache(
                         world,
                         memo.computed.as_ref(),
@@ -131,7 +134,6 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                 }
             }
         }
-        tile_retry::stop_cancelled(world, self.kernel.apc());
 
         let (view_tiles_and_level, tight_covering, memo_computed) = if let Some(multi) = &multi {
             (
@@ -140,7 +142,11 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                 None,
             )
         } else {
-            let computed = match self.memo.as_ref().filter(|memo| memo.key == key) {
+            let computed = match self
+                .memo
+                .as_ref()
+                .filter(|memo| key.as_ref() == Some(&memo.key))
+            {
                 Some(memo) => memo.computed.clone(),
                 None => view_region_for_projection(
                     style,
@@ -288,10 +294,11 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                     .extend(multi.skipped_wanted_vector.iter().copied());
             }
             tile_retry::want(world, RequestKind::Vector, &self.requested);
-            release_unwanted_tiles(&self.kernel, world, &self.requested);
-            if multi.is_none() {
+            release_unwanted_tiles(world, &self.requested);
+            if let Some(key) = key.filter(|_| multi.is_none()) {
                 let settled = !deferred
                     && !issued_any
+                    && !crate::sdf::provided::awaiting(world)
                     && crate::io::tile_backpressure::tiles_in_flight(world) == 0
                     && !tile_retry::needs_frame(world)
                     && tile_retry::next_retry_delay(world).is_none();
@@ -348,15 +355,13 @@ fn refresh_only(
     .then_some(sources)
 }
 
-/// Stops the workers that wait for images for tiles no longer in view.
-fn release_unwanted_tiles<E: Environment>(
-    kernel: &Rc<Kernel<E>>,
+/// Queues the waiting workers of tiles no longer in view to stop with the frame's cancellations.
+fn release_unwanted_tiles(
     world: &mut crate::tcs::world::World,
     wanted: &FxHashSet<crate::coords::WorldTileCoords>,
 ) {
-    for attempt in crate::sdf::provided::release_unwanted(world, wanted) {
-        kernel.apc().cancel(attempt);
-    }
+    let attempts = crate::sdf::provided::release_unwanted(world, wanted);
+    tile_retry::queue_cancelled(world, attempts);
 }
 
 fn request_tile<E: Environment, T: VectorTransferables>(

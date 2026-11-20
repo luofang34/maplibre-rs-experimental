@@ -15,6 +15,13 @@ use crate::{
 };
 
 type DemSourceBindings = HashMap<WorldTileCoords, (Texture, Option<DemRevision>, wgpu::BindGroup)>;
+type LayerPaintUniformBytes = [u8; std::mem::size_of::<RasterUniforms>()];
+type LayerPaintBinding = (
+    wgpu::Buffer,
+    wgpu::BindGroup,
+    Option<LayerPaintUniformBytes>,
+);
+type LayerPaintBindings = HashMap<(crate::style::StyleLayerId, bool), LayerPaintBinding>;
 
 /// Raster pipeline and sampler with independent bindings for each source and tile.
 /// Raster imagery allocates mipmapped textures; `raster-dem` layers bind views into [`GpuDemPool`](crate::terrain::GpuDemPool).
@@ -33,8 +40,7 @@ pub struct RasterResources {
     dem_bindings: HashMap<RasterSourceId, DemSourceBindings>,
     /// Uniform buffer and bind group of each raster layer's paint adjustments, and of the
     /// same paint for the layer's departing tiles.
-    layer_paints:
-        rustc_hash::FxHashMap<(crate::style::StyleLayerId, bool), (wgpu::Buffer, wgpu::BindGroup)>,
+    layer_paints: LayerPaintBindings,
     /// Advances whenever a texture is bound or updated, so cached renders of raster tiles refresh.
     revision: u64,
 }
@@ -428,7 +434,7 @@ impl RasterResources {
     ) {
         let key = (crate::style::StyleLayerId::intern(layer_id), departing);
         let pipeline = &self.pipeline;
-        let (buffer, _) = self.layer_paints.entry(key).or_insert_with(|| {
+        let (buffer, _, last_bytes) = self.layer_paints.entry(key).or_insert_with(|| {
             let buffer = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Raster layer paint"),
                 size: std::mem::size_of::<RasterUniforms>() as u64,
@@ -443,9 +449,15 @@ impl RasterResources {
                     resource: buffer.as_entire_binding(),
                 }],
             });
-            (buffer, bind_group)
+            (buffer, bind_group, None)
         });
-        queue.write_buffer(buffer, 0, bytemuck::bytes_of(uniforms));
+        let bytes = *bytemuck::from_bytes::<[u8; std::mem::size_of::<RasterUniforms>()]>(
+            bytemuck::bytes_of(uniforms),
+        );
+        if last_bytes.as_ref() != Some(&bytes) {
+            queue.write_buffer(buffer, 0, &bytes);
+            *last_bytes = Some(bytes);
+        }
     }
 
     /// The paint bind group of a layer written this frame, or of its departing tiles.
@@ -457,7 +469,7 @@ impl RasterResources {
     ) -> Option<&wgpu::BindGroup> {
         self.layer_paints
             .get(&(layer_id, departing))
-            .map(|(_, group)| group)
+            .map(|(_, group, _)| group)
     }
 
     /// Borrows the raster pipeline whose group-one layout defines the texture bindings.
@@ -468,7 +480,7 @@ impl RasterResources {
 
 impl Drop for RasterResources {
     fn drop(&mut self) {
-        for (_, (buffer, _)) in self.layer_paints.drain() {
+        for (_, (buffer, _, _)) in self.layer_paints.drain() {
             buffer.destroy();
         }
     }

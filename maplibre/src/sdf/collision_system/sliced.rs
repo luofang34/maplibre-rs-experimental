@@ -311,7 +311,7 @@ impl ActiveEpoch {
                         scratch,
                     );
                     if let Some(prev) = prev {
-                        scratch.recycle(prev.vertices);
+                        scratch.recycle(prev.quads);
                     }
                     uploaded.insert(key, next_cached);
                 }

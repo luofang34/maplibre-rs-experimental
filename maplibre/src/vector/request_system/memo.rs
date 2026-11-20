@@ -31,10 +31,24 @@ impl RequestViewKey {
         pixel_ratio: f32,
         request_padding: ViewStatePadding,
         visible_level: ZoomLevel,
-    ) -> Self {
-        Self {
+    ) -> Option<Self> {
+        let width = view_state.width();
+        let height = view_state.height();
+        let fovy = view_state.field_of_view().0;
+        if !view_state.has_external_view()
+            && (!fovy.is_finite()
+                || fovy <= 0.0
+                || fovy >= std::f64::consts::PI
+                || !width.is_finite()
+                || width <= 0.0
+                || !height.is_finite()
+                || height <= 0.0)
+        {
+            return None;
+        }
+        Some(Self {
             view_proj: *AsRef::<[[f64; 4]; 4]>::as_ref(&view_state.view_projection().0),
-            viewport: (view_state.width(), view_state.height()),
+            viewport: (width, height),
             pixel_ratio,
             external_view: view_state.has_external_view(),
             tight_requests: renderer.settings.tight_tile_requests,
@@ -42,7 +56,7 @@ impl RequestViewKey {
             request_padding,
             visible_level: u8::from(visible_level),
             terrain_active: style.terrain.is_some(),
-        }
+        })
     }
 }
 

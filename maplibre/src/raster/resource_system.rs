@@ -11,6 +11,7 @@ use crate::{
         shaders::Shader,
         RenderResources, Renderer,
     },
+    style::source::Source,
     tcs::system::{SystemError, SystemResult},
 };
 
@@ -34,8 +35,18 @@ pub fn resource_system(
     )>() else {
         return Err(SystemError::Dependencies);
     };
-    #[cfg(target_arch = "wasm32")]
     if matches!(raster_resources, Eventually::Uninitialized)
+        && style.terrain.is_none()
+        && !style.sources.values().any(|source| {
+            matches!(
+                source,
+                Source::Raster(_)
+                    | Source::RasterDem(_)
+                    | Source::Image(_)
+                    | Source::Video(_)
+                    | Source::Canvas(_)
+            )
+        })
         && !style.layers.iter().any(|layer| {
             matches!(
                 layer.type_.as_str(),

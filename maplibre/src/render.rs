@@ -240,6 +240,14 @@ pub struct Renderer {
     pub shared_pipelines: Option<resource::SharedPipelines>,
 }
 
+fn default_instance_flags() -> wgpu::InstanceFlags {
+    if cfg!(debug_assertions) {
+        wgpu::InstanceFlags::from_build_config()
+    } else {
+        wgpu::InstanceFlags::empty()
+    }
+}
+
 #[deny(missing_docs)]
 impl Renderer {
     /// Requests a window-compatible adapter/device and configures the presentation surface.
@@ -256,7 +264,7 @@ impl Renderer {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu_settings.backends.unwrap_or(wgpu::Backends::all()),
             display: window.owned_display_handle(),
-            flags: Default::default(),
+            flags: default_instance_flags(),
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
 
@@ -297,7 +305,7 @@ impl Renderer {
             settings,
             resources: RenderResources::new(surface),
             render_graph: Default::default(),
-            shared_pipelines: Some(resource::SharedPipelines::new()),
+            shared_pipelines: Some(resource::SharedPipelines::new_transient()),
         })
     }
 
@@ -321,7 +329,7 @@ impl Renderer {
     {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu_settings.backends.unwrap_or(wgpu::Backends::all()),
-            flags: Default::default(),
+            flags: default_instance_flags(),
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
 
@@ -354,7 +362,7 @@ impl Renderer {
             settings,
             resources: RenderResources::new(surface),
             render_graph: Default::default(),
-            shared_pipelines: Some(resource::SharedPipelines::new()),
+            shared_pipelines: Some(resource::SharedPipelines::new_transient()),
         })
     }
 

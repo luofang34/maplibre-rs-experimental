@@ -46,18 +46,18 @@ const CACHE_TILES_PER_VIEW_TILE: usize = 2;
 #[cfg(target_arch = "wasm32")]
 const MIN_CACHE_TILES: usize = 2;
 #[cfg(not(target_arch = "wasm32"))]
-const MIN_CACHE_TILES: usize = 2;
+const MIN_CACHE_TILES: usize = 8;
 /// Hard ceiling on out-of-view cached tiles so wide oblique/globe coverings cannot accumulate
 /// hundreds of multi-megabyte raster/DEM tiles along a corridor.
 #[cfg(target_arch = "wasm32")]
 const MAX_CACHE_TILES: usize = 2;
 #[cfg(not(target_arch = "wasm32"))]
-const MAX_CACHE_TILES: usize = 4;
+const MAX_CACHE_TILES: usize = 24;
 /// Tessellated geometry the out-of-view cache may hold.
 #[cfg(target_arch = "wasm32")]
 const CACHE_BYTES: usize = 1 << 20;
 #[cfg(not(target_arch = "wasm32"))]
-const CACHE_BYTES: usize = 2 << 20;
+const CACHE_BYTES: usize = 12 << 20;
 /// Frames between resident-memory summaries for hosts driving the map from an eye, which
 /// run on devices with a memory limit.
 const SUMMARY_EVERY_FRAMES: u64 = 90;

@@ -36,6 +36,7 @@ impl System for ResourceSystem {
                     queue,
                     adapter,
                     resources: state,
+                    render_graph,
                     ..
                 },
             world,
@@ -54,6 +55,17 @@ impl System for ResourceSystem {
                 ),
             );
         }
+        let world_needs_persistent_depth = world
+            .resources
+            .get::<crate::render::ground::FrameGround>()
+            .is_some_and(|g| g.0.is_some())
+            || has_celestial_sun(world)
+            || matches!(
+                world
+                    .resources
+                    .get::<Eventually<crate::sdf::depth::SymbolDepth>>(),
+                Some(Eventually::Initialized(sd)) if !sd.skip_depth_copy
+            );
         let Some((tile_view_pattern, mask_pipeline, projection_resources, depth_copy)) =
             world.resources.query_mut::<(
                 &mut Eventually<WgpuTileViewPattern>,
@@ -86,6 +98,43 @@ impl System for ResourceSystem {
         } else {
             Msaa { samples: 1 }
         };
+        let supports_transient = adapter
+            .get_texture_format_features(settings.depth_texture_format)
+            .allowed_usages
+            .contains(wgpu::TextureUsages::TRANSIENT_ATTACHMENT);
+        let pitch_tilted = view_state.camera().get_pitch().0.abs() >= 1e-4;
+        let needs_persistent_depth = settings.depth_readout
+            || state.eye_depth_target.is_some()
+            || style.terrain.is_some()
+            || world_needs_persistent_depth
+            || render_graph.has_custom_scene_depth_writers()
+            || render_graph.contains("overlay_pass")
+            || render_graph.contains("depth_probe_pass")
+            || render_graph.contains("sun_depth_copy")
+            || matches!(
+                style.projection.as_ref().map(|p| &p.projection_type),
+                Some(crate::projection::ProjectionType::VerticalPerspective)
+            )
+            || style.layers.iter().any(|l| {
+                l.type_ == "custom"
+                    || (pitch_tilted
+                        && matches!(
+                            l.type_.as_str(),
+                            "fill-extrusion" | "raster" | "hillshade" | "color-relief"
+                        ))
+            });
+        let depth_usage = if supports_transient && !needs_persistent_depth {
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TRANSIENT_ATTACHMENT
+        } else {
+            // A host compositor or downstream pass reads depth back via copy or sampling.
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING
+        };
+        if matches!(
+            &state.depth_texture,
+            Eventually::Initialized(tex) if tex.texture.usage() != depth_usage
+        ) {
+            state.depth_texture.take();
+        }
         state.depth_texture.reinitialize(
             || {
                 Texture::new(
@@ -95,8 +144,7 @@ impl System for ResourceSystem {
                     size.width(),
                     size.height(),
                     depth_msaa,
-                    // A host compositor reads the depth back through the depth copy pass.
-                    wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                    depth_usage,
                 )
             },
             &(size.width(), size.height()),
@@ -237,5 +285,17 @@ impl System for ResourceSystem {
         }
 
         Ok(())
+    }
+}
+
+fn has_celestial_sun(world: &crate::tcs::world::World) -> bool {
+    #[cfg(feature = "experimental")]
+    {
+        crate::celestial::lighting(world).sun.is_some()
+    }
+    #[cfg(not(feature = "experimental"))]
+    {
+        let _ = world;
+        false
     }
 }

@@ -7,8 +7,8 @@ use std::{
 
 use tokio::sync::Semaphore;
 
-pub(super) const MEMORY_CACHE_CAP_BYTES: usize = 8 * 1024 * 1024;
-const MEMORY_CACHE_MAX_ITEM_BYTES: usize = 1024 * 1024;
+pub(super) const MEMORY_CACHE_CAP_BYTES: usize = 1024 * 1024;
+const MEMORY_CACHE_MAX_ITEM_BYTES: usize = 512 * 1024;
 const DISK_CACHE_IO_CONCURRENCY: usize = 6;
 
 pub(super) struct MemoryTileCacheState {
@@ -131,7 +131,7 @@ impl Default for HttpCacheFrontend {
 }
 
 impl HttpCacheFrontend {
-    /// Creates a fresh in-memory cache frontend with the default 64 MiB budget.
+    /// Creates a fresh in-memory cache frontend with the default 1 MiB budget.
     pub fn new() -> Self {
         Self(Arc::new(SharedCacheFrontend::new(MEMORY_CACHE_CAP_BYTES)))
     }

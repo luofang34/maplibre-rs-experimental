@@ -123,7 +123,16 @@ fn build_map(
         None => Style::default(),
     };
     let plugins = default_plugins_for::<OffscreenEnvironment>(&style);
-    let mut map = Map::new(style.clone(), kernel, RendererBuilder::new(), plugins)?;
+    let settings = maplibre::render::settings::RendererSettings {
+        gpu_timing: cfg!(feature = "arena-telemetry"),
+        ..Default::default()
+    };
+    let mut map = Map::new(
+        style.clone(),
+        kernel,
+        RendererBuilder::new().with_renderer_settings(settings),
+        plugins,
+    )?;
     if style.terrain.is_some()
         || style.pitch.is_some_and(|pitch| pitch > 60.0)
         || style
@@ -149,7 +158,12 @@ pub(super) async fn preinit_offscreen_inner(
         .map_window_config()
         .create()
         .map_err(maplibre::map::MapError::Window)?;
+    let settings = maplibre::render::settings::RendererSettings {
+        gpu_timing: cfg!(feature = "arena-telemetry"),
+        ..Default::default()
+    };
     let renderer = RendererBuilder::new()
+        .with_renderer_settings(settings)
         .build()
         .initialize_renderer::<OffscreenMapWindowConfig>(&window)
         .await

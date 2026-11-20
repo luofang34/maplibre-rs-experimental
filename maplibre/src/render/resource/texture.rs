@@ -110,6 +110,12 @@ impl Texture {
             depth_or_array_layers: 1,
         };
 
+        let view_formats: &[wgpu::TextureFormat] =
+            if usage.contains(wgpu::TextureUsages::TRANSIENT_ATTACHMENT) {
+                &[]
+            } else {
+                &[format]
+            };
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label,
             size,
@@ -118,7 +124,7 @@ impl Texture {
             dimension: wgpu::TextureDimension::D2,
             format,
             usage,
-            view_formats: &[format],
+            view_formats,
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let owner = super::shared::share_gpu(OwnedTexture(texture.clone()));

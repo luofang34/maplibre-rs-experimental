@@ -7,11 +7,13 @@ use std::{
     future::Future,
     path::PathBuf,
     pin::Pin,
-    sync::{Arc, LazyLock, RwLock},
+    sync::{Arc, LazyLock, OnceLock, RwLock},
 };
 
 use async_trait::async_trait;
-use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
+use http_cache_reqwest::{
+    CACacheManager, Cache, CacheManager, CacheMode, HttpCache, HttpCacheOptions,
+};
 use reqwest::{
     header::{HeaderMap, HeaderName, HeaderValue},
     Client, StatusCode,
@@ -149,8 +151,9 @@ static SHARED_RANGE_CLIENT: LazyLock<Client> = LazyLock::new(|| {
 /// A configured cache directory enables the HTTP cache middleware; clones share the client.
 #[derive(Clone)]
 pub struct ReqwestHttpClient {
-    client: ClientWithMiddleware,
-    offline_cache_client: Option<ClientWithMiddleware>,
+    cache_manager: Option<CACacheManager>,
+    client: Arc<OnceLock<ClientWithMiddleware>>,
+    offline_cache_client: Arc<OnceLock<ClientWithMiddleware>>,
     frontend: Option<Arc<SharedCacheFrontend>>,
     in_process: Option<InProcessRoutes>,
 }
@@ -195,30 +198,70 @@ impl ReqwestHttpClient {
         frontend: Option<Arc<SharedCacheFrontend>>,
         in_process: Option<InProcessRoutes>,
     ) -> Self {
-        let direct_client = SHARED_DIRECT_CLIENT.clone();
-        let mut builder = reqwest_middleware::ClientBuilder::new(direct_client.clone());
-        let offline_cache_client = cache_path.as_ref().map(|path| {
-            reqwest_middleware::ClientBuilder::new(direct_client)
-                .with(Cache(HttpCache {
-                    mode: CacheMode::OnlyIfCached,
-                    manager: CACacheManager::new(path.clone(), false),
-                    options: HttpCacheOptions::default(),
-                }))
-                .build()
-        });
-        if let Some(path) = cache_path {
-            builder = builder.with(Cache(HttpCache {
-                mode: CacheMode::ForceCache,
-                manager: CACacheManager::new(path, false),
-                options: HttpCacheOptions::default(),
-            }));
-        }
+        let cache_manager = cache_path.map(|path| CACacheManager::new(path, false));
         Self {
-            client: builder.build(),
-            offline_cache_client,
+            cache_manager,
+            client: Arc::new(OnceLock::new()),
+            offline_cache_client: Arc::new(OnceLock::new()),
             frontend,
             in_process,
         }
+    }
+
+    fn cached_client(&self) -> &ClientWithMiddleware {
+        self.client.get_or_init(|| {
+            let mut builder = reqwest_middleware::ClientBuilder::new(SHARED_DIRECT_CLIENT.clone());
+            if let Some(manager) = self.cache_manager.clone() {
+                builder = builder.with(Cache(HttpCache {
+                    mode: CacheMode::ForceCache,
+                    manager,
+                    options: HttpCacheOptions::default(),
+                }));
+            }
+            builder.build()
+        })
+    }
+
+    fn offline_client(&self) -> Option<&ClientWithMiddleware> {
+        let manager = self.cache_manager.as_ref()?;
+        Some(self.offline_cache_client.get_or_init(|| {
+            reqwest_middleware::ClientBuilder::new(SHARED_DIRECT_CLIENT.clone())
+                .with(Cache(HttpCache {
+                    mode: CacheMode::OnlyIfCached,
+                    manager: manager.clone(),
+                    options: HttpCacheOptions::default(),
+                }))
+                .build()
+        }))
+    }
+
+    async fn try_disk_cache(
+        &self,
+        url: &str,
+        cache_key: &str,
+    ) -> Option<Result<Vec<u8>, SourceFetchError>> {
+        let manager = self.cache_manager.as_ref()?;
+        let _io_permit = match &self.frontend {
+            Some(frontend) => frontend.io_gate.acquire().await.ok(),
+            None => None,
+        };
+        let normalized = reqwest::Url::parse(url)
+            .map(|parsed| parsed.to_string())
+            .unwrap_or_else(|_| url.to_owned());
+        let disk_key = format!("GET:{normalized}");
+        let Ok(Some((cached, _))) = manager.get(&disk_key).await else {
+            return None;
+        };
+        if cached.status == StatusCode::NOT_FOUND.as_u16() {
+            return Some(Err(SourceFetchError::not_found(url)));
+        }
+        if (200..300).contains(&cached.status) {
+            if let Some(frontend) = &self.frontend {
+                frontend.insert(cache_key, &cached.body);
+            }
+            return Some(Ok(cached.body));
+        }
+        None
     }
 
     fn lookup_in_process_handler(&self, url: &str) -> Option<InProcessHandler> {
@@ -245,6 +288,11 @@ impl ReqwestHttpClient {
                 .and_then(|frontend| frontend.get(&cache_key))
             {
                 return Ok(body.to_vec());
+            }
+            if range.is_none() && req.headers.is_empty() {
+                if let Some(cached) = self.try_disk_cache(url, &cache_key).await {
+                    return cached;
+                }
             }
         }
 
@@ -287,7 +335,13 @@ impl ReqwestHttpClient {
                     Some(frontend) => frontend.io_gate.acquire().await.ok(),
                     None => None,
                 };
-                match self.client.get(url).headers(header_map).send().await {
+                match self
+                    .cached_client()
+                    .get(url)
+                    .headers(header_map)
+                    .send()
+                    .await
+                {
                     Ok(response) => response,
                     Err(err) => match self.lookup_in_process_handler(url) {
                         Some(handler) => return handler(url, None).await,
@@ -309,7 +363,10 @@ impl ReqwestHttpClient {
     ) -> Result<Vec<u8>, SourceFetchError> {
         let url = req.url.as_str();
         if !req.cache_policy.is_volatile() && req.range.is_none() {
-            if let Some(offline_client) = &self.offline_cache_client {
+            if let Some(cached) = self.try_disk_cache(url, cache_key).await {
+                return cached;
+            }
+            if let Some(offline_client) = self.offline_client() {
                 let _io_permit = match &self.frontend {
                     Some(frontend) => frontend.io_gate.acquire().await.ok(),
                     None => None,

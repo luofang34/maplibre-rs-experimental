@@ -21,7 +21,11 @@ pub(crate) fn run_stages_only(
 ) -> StageResult {
     let _pipeline_scope =
         crate::render::resource::SharedPipelines::enter(context.renderer.shared_pipelines.clone());
-    schedule.run_stages(context, include)
+    let result = schedule.run_stages(context, include);
+    if let Some(cache) = &context.renderer.shared_pipelines {
+        cache.clear_transient_shaders();
+    }
+    result
 }
 
 /// Runs the stages `include` selects as one frame: pipelines compile into the renderer's

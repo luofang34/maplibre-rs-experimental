@@ -456,7 +456,7 @@ mod index;
 mod rejection;
 
 use clock::{now, observed_now};
-pub(crate) use index::{cancel_unwanted, stop_cancelled, want};
+pub(crate) use index::{cancel_unwanted, queue_cancelled, stop_cancelled, want};
 pub(crate) use rejection::{backing_off, rejected};
 
 #[cfg(test)]

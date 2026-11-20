@@ -120,8 +120,7 @@ impl System for CollisionSystem {
         if crate::render::eye_covering::EyeInFrame::reuses_content(world) {
             sync_symbol_depth_fade(
                 world,
-                &renderer.queue,
-                &renderer.render_graph,
+                renderer,
                 &self.history,
                 view_state.camera().get_pitch().0,
             );
@@ -236,8 +235,7 @@ impl System for CollisionSystem {
                     self.active_epoch = Some(epoch);
                     sync_symbol_depth_fade(
                         world,
-                        &renderer.queue,
-                        &renderer.render_graph,
+                        renderer,
                         &self.history,
                         view_state.camera().get_pitch().0,
                     );
@@ -282,8 +280,7 @@ impl System for CollisionSystem {
                 }
                 sync_symbol_depth_fade(
                     world,
-                    &renderer.queue,
-                    &renderer.render_graph,
+                    renderer,
                     &self.history,
                     view_state.camera().get_pitch().0,
                 );
@@ -309,8 +306,7 @@ impl System for CollisionSystem {
             self.controller.advance_clock(now);
             sync_symbol_depth_fade(
                 world,
-                &renderer.queue,
-                &renderer.render_graph,
+                renderer,
                 &self.history,
                 view_state.camera().get_pitch().0,
             );
@@ -343,8 +339,7 @@ impl System for CollisionSystem {
         {
             sync_symbol_depth_fade(
                 world,
-                &renderer.queue,
-                &renderer.render_graph,
+                renderer,
                 &self.history,
                 view_state.camera().get_pitch().0,
             );
@@ -392,7 +387,7 @@ impl System for CollisionSystem {
         self.uploaded.retain(|(coords, _), cached| {
             let keep = self.seen.contains(coords);
             if !keep {
-                self.scratch.recycle(std::mem::take(&mut cached.vertices));
+                self.scratch.recycle(std::mem::take(&mut cached.quads));
             }
             keep
         });
@@ -423,8 +418,7 @@ impl System for CollisionSystem {
         }
         sync_symbol_depth_fade(
             world,
-            &renderer.queue,
-            &renderer.render_graph,
+            renderer,
             &self.history,
             view_state.camera().get_pitch().0,
         );
@@ -438,19 +432,24 @@ impl System for CollisionSystem {
 
 fn sync_symbol_depth_fade(
     world: &mut crate::tcs::world::World,
-    queue: &crate::render::upload_queue::UploadQueue,
-    render_graph: &crate::render::graph::RenderGraph,
+    renderer: &crate::render::Renderer,
     history: &temporal::PlacementHistory,
     pitch: f64,
 ) {
     let time_ms = history.effective_shader_time_ms();
     let duration_ms = history.fade_duration_ms();
-    let skip_depth_occlusion = !has_symbol_depth_occluders(world, render_graph, pitch);
+    let skip_depth_occlusion = !has_symbol_depth_occluders(world, &renderer.render_graph, pitch);
     if let Some(Initialized(depth)) = world
         .resources
         .get_mut::<Eventually<super::depth::SymbolDepth>>()
     {
-        depth.write_fade_time(queue, time_ms, duration_ms, skip_depth_occlusion);
+        depth.write_fade_time(
+            &renderer.device,
+            &renderer.queue,
+            time_ms,
+            duration_ms,
+            skip_depth_occlusion,
+        );
     }
 }
 

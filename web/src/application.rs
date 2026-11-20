@@ -148,10 +148,14 @@ async fn run_map_on_canvas(
             config,
             move |bound_config| {
                 let plugins = host.plugins_for(&style);
+                let settings = maplibre::render::settings::RendererSettings {
+                    gpu_timing: cfg!(feature = "arena-telemetry"),
+                    ..Default::default()
+                };
                 let mut map = Map::new(
                     style.clone(),
                     create_kernel(new_worker.clone(), bound_config)?,
-                    RendererBuilder::new(),
+                    RendererBuilder::new().with_renderer_settings(settings),
                     plugins,
                 )?;
                 if style.terrain.is_some()

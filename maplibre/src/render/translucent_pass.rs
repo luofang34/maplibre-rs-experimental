@@ -127,12 +127,14 @@ impl Node for TranslucentPassNode {
                     .resources
                     .get::<crate::render::eventually::Eventually<crate::sdf::depth::SymbolDepth>>()
             {
-                symbol_depth.copy.copy(
-                    render_context.device,
-                    &mut render_context.command_encoder,
-                    &depth_texture.texture,
-                    &symbol_depth.view,
-                );
+                if let Some(copy) = &symbol_depth.copy {
+                    copy.copy(
+                        render_context.device,
+                        &mut render_context.command_encoder,
+                        &depth_texture.texture,
+                        &symbol_depth.view,
+                    );
+                }
             }
         }
         let color_attachment = if let Some(texture) = multisampling_texture {
