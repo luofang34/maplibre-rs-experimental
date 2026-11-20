@@ -26,7 +26,7 @@ type Execute = Box<dyn (FnOnce() -> PinnedFuture) + Send>;
 const MAX_RECYCLED_WORKERS: usize = 8;
 /// Concurrent async tasks claimed per worker so network `fetch` I/O overlaps while excess jobs
 /// stay in [`SharedWorkQueue`] for whichever worker finishes its CPU work first to steal.
-const PER_WORKER_CONCURRENCY: usize = 6;
+const PER_WORKER_CONCURRENCY: usize = 2;
 
 thread_local! {
     static RECYCLED_WORKERS: RefCell<Vec<Worker>> = const { RefCell::new(Vec::new()) };
@@ -250,6 +250,8 @@ impl Work {
             });
             func().await;
         }
+        #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+        super::alloc::drain_thread_magazine();
     }
 }
 

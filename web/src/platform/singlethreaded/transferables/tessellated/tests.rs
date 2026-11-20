@@ -346,8 +346,9 @@ fn prepacked_wire_round_trips_u16_odd_even_and_u32_dense_fallback() {
     assert_eq!(dense_bucket.buffer.vertex_count(), 65_537);
     assert_eq!(&pre_dense.vertices[..2], fill_expected.as_slice());
     assert_eq!(
-        dense_bucket.buffer.buffer.indices,
-        vec![0_u32, 65_536, 1, 2]
+        pre_dense.indices_u32.as_deref(),
+        Some(&[0_u32, 65_536, 1, 2][..])
     );
+    assert!(dense_bucket.buffer.buffer.indices.is_empty());
     let _: GpuShaderVertex = pre_dense.vertices[0];
 }

@@ -81,6 +81,15 @@ impl Message {
         self
     }
 
+    /// Takes any attached shared-memory tile permit so the caller can hold backpressure until
+    /// GPU upload completes.
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+    pub(crate) fn take_shared_permit(
+        &mut self,
+    ) -> Option<crate::vector::request_system::SharedTilePermit> {
+        self.permit.take()
+    }
+
     /// Request identity retained independently of the concrete worker payload.
     pub fn attempt(&self) -> Option<u64> {
         self.attempt

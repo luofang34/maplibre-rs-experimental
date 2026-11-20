@@ -24,7 +24,8 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         ))
     }
 
-    /// Plans `(index_u16, copy_aligned_index_bytes, u16_chunks)` honoring worker pre-narrowed `u16` indices.
+    /// Plans `(index_u16, copy_aligned_index_bytes, u16_chunks)` honoring worker pre-narrowed `u16`
+    /// or pre-packed `u32` indices.
     pub(super) fn plan_geometry_index_upload(
         &self,
         geometry: &OverAlignedVertexBuffer<V, I>,
@@ -32,18 +33,26 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         strides: ElementStrides,
         allow_chunks: bool,
     ) -> u16_chunks::IndexPlan {
-        if let Some(u16s) = geometry
-            .prepacked_gpu()
-            .and_then(|p| p.indices_u16.as_deref())
-        {
+        if let Some(pre) = geometry.prepacked_gpu() {
             if TypeId::of::<I>() == TypeId::of::<u32>() {
-                if self.enable_u16_indices {
+                if let Some(u16s) = pre.indices_u16.as_deref() {
+                    if self.enable_u16_indices {
+                        let usable = (geometry.usable_indices as usize).min(u16s.len());
+                        let padded = usable.next_multiple_of(2);
+                        return (true, (padded as u64) * 2, None);
+                    }
                     let usable = (geometry.usable_indices as usize).min(u16s.len());
-                    let padded = usable.next_multiple_of(2);
-                    return (true, (padded as u64) * 2, None);
+                    return (false, (usable as u64) * strides.index, None);
                 }
-                let usable = (geometry.usable_indices as usize).min(u16s.len());
-                return (false, (usable as u64) * strides.index, None);
+                if let Some(u32s) = pre.indices_u32.as_deref() {
+                    return self.plan_index_upload(
+                        bytemuck::cast_slice(u32s),
+                        geometry.usable_indices,
+                        vertex_count,
+                        strides,
+                        allow_chunks,
+                    );
+                }
             }
         }
         self.plan_index_upload(
@@ -122,7 +131,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         self.vertex_scratch = scratch;
     }
 
-    /// Writes `indices` directly from worker pre-narrowed `u16` indices when present.
+    /// Writes `indices` directly from worker pre-narrowed `u16` or pre-packed `u32` indices when present.
     pub(super) fn write_geometry_indices(
         &mut self,
         queue: &Q,
@@ -133,43 +142,53 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         if index_bytes == 0 || entry.index_page == NO_SLAB {
             return;
         }
-        if let Some(u16s) = geometry
-            .prepacked_gpu()
-            .and_then(|p| p.indices_u16.as_deref())
-        {
+        if let Some(pre) = geometry.prepacked_gpu() {
             if TypeId::of::<I>() == TypeId::of::<u32>() {
-                let usable = (geometry.usable_indices as usize).min(u16s.len());
-                if entry.index_u16 {
-                    let padded = usable.next_multiple_of(2);
-                    if u16s.len() >= padded && padded * 2 == index_bytes as usize {
-                        queue.write_buffer(
-                            self.indices_for(entry),
-                            entry.buffer_indices.start,
-                            bytemuck::cast_slice(&u16s[..padded]),
-                        );
-                    } else {
-                        self.u16_index_scratch.clear();
-                        self.u16_index_scratch.reserve(padded);
-                        self.u16_index_scratch.extend_from_slice(&u16s[..usable]);
-                        if self.u16_index_scratch.len() < padded {
-                            self.u16_index_scratch.push(0);
+                if let Some(u16s) = pre.indices_u16.as_deref() {
+                    let usable = (geometry.usable_indices as usize).min(u16s.len());
+                    if entry.index_u16 {
+                        let padded = usable.next_multiple_of(2);
+                        if u16s.len() >= padded && padded * 2 == index_bytes as usize {
+                            queue.write_buffer(
+                                self.indices_for(entry),
+                                entry.buffer_indices.start,
+                                bytemuck::cast_slice(&u16s[..padded]),
+                            );
+                        } else {
+                            self.u16_index_scratch.clear();
+                            self.u16_index_scratch.reserve(padded);
+                            self.u16_index_scratch.extend_from_slice(&u16s[..usable]);
+                            if self.u16_index_scratch.len() < padded {
+                                self.u16_index_scratch.push(0);
+                            }
+                            queue.write_buffer(
+                                self.indices_for(entry),
+                                entry.buffer_indices.start,
+                                bytemuck::cast_slice(&self.u16_index_scratch),
+                            );
+                            self.u16_index_scratch.clear();
                         }
+                    } else {
+                        let wide: Vec<u32> =
+                            u16s[..usable].iter().copied().map(u32::from).collect();
                         queue.write_buffer(
                             self.indices_for(entry),
                             entry.buffer_indices.start,
-                            bytemuck::cast_slice(&self.u16_index_scratch),
+                            bytemuck::cast_slice(&wide),
                         );
-                        self.u16_index_scratch.clear();
                     }
-                } else {
-                    let wide: Vec<u32> = u16s[..usable].iter().copied().map(u32::from).collect();
-                    queue.write_buffer(
-                        self.indices_for(entry),
-                        entry.buffer_indices.start,
-                        bytemuck::cast_slice(&wide),
-                    );
+                    return;
                 }
-                return;
+                if let Some(u32s) = pre.indices_u32.as_deref() {
+                    self.write_uploaded_indices(
+                        queue,
+                        entry,
+                        bytemuck::cast_slice(u32s),
+                        geometry.usable_indices,
+                        index_bytes,
+                    );
+                    return;
+                }
             }
         }
         self.write_uploaded_indices(

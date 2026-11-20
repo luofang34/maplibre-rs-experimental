@@ -203,7 +203,7 @@ pub(crate) fn tessellator(
     tessellator
 }
 
-pub(super) fn allow_prepack_for_style(
+fn allow_prepack_for_style_inner(
     coords: WorldTileCoords,
     has_dem_source: bool,
     style: &StyleLayer,
@@ -217,15 +217,35 @@ pub(super) fn allow_prepack_for_style(
         .is_some();
     let edge_y = (1_i32 << u8::from(coords.z).min(30)) - 1;
     let is_polar_row = coords.y <= 0 || coords.y >= edge_y;
-    !cfg!(test)
-        && !has_dem_source
-        && !(is_polar_row && style.type_ == "fill")
+    let structure_kind = crate::vector::structures::kind(style);
+    !(is_polar_row && style.type_ == "fill")
         && !per_feature_pattern
         && !has_sort_keys
         && style.type_ != "circle"
-        && crate::vector::structures::kind(style)
-            .is_none_or(|k| matches!(k, crate::vector::structures::StructureKind::Extrusion))
+        && if has_dem_source {
+            structure_kind.is_none()
+        } else {
+            structure_kind
+                .is_none_or(|k| matches!(k, crate::vector::structures::StructureKind::Extrusion))
+        }
         && !has_shared_geometry
+}
+
+pub(super) fn allow_prepack_for_style(
+    coords: WorldTileCoords,
+    has_dem_source: bool,
+    style: &StyleLayer,
+    has_sort_keys: bool,
+    has_shared_geometry: bool,
+) -> bool {
+    !cfg!(test)
+        && allow_prepack_for_style_inner(
+            coords,
+            has_dem_source,
+            style,
+            has_sort_keys,
+            has_shared_geometry,
+        )
 }
 
 fn vector_layer<T: VectorTransferables, C: Context>(
@@ -256,11 +276,7 @@ fn vector_layer<T: VectorTransferables, C: Context>(
             crate::vector::tessellation::sort_key_of(style),
         );
         #[cfg(any(target_arch = "wasm32", not(test)))]
-        if uniform_paint
-            && tessellator.pattern_property.is_none()
-            && tessellator.outline_property.is_none()
-            && !tessellator.line_gradient
-        {
+        if uniform_paint && tessellator.pattern_property.is_none() && !tessellator.line_gradient {
             tessellator.omit_feature_colors = true;
         }
         if context.allow_prepack_for_style(
@@ -345,6 +361,12 @@ fn symbol_layer<T: VectorTransferables, C: Context>(
 ) -> Result<(), ProcessVectorError> {
     let zoom = request.style_zoom();
     let state_ctx = context.state_context_for_layer(&layer.name);
+    let promote_prop = state_ctx
+        .as_ref()
+        .and_then(|ctx| ctx.promote_property.as_deref());
+    let stream_point = !context.index_geometry()
+        && !crate::sdf::tessellation::is_line_placed(paint)
+        && !paint.properties.contains_key("symbol-sort-key");
     let build = |slice: Option<&[usize]>| {
         let mut tessellator =
             TextTessellator::with_assets(paint.clone(), zoom, layout_atlas.clone());
@@ -355,6 +377,11 @@ fn symbol_layer<T: VectorTransferables, C: Context>(
             crate::sdf::tessellation::source_feature_indices(layer.features.len(), slice);
         tessellator.shared_properties = shared_props_for_slice(shared_props, slice);
         tessellator.feature_state_ctx = state_ctx.clone();
+        if stream_point {
+            tessellator.enable_streaming_point_layout(
+                crate::style::expression::symbol_runtime_referenced_keys(style, promote_prop),
+            );
+        }
         process_mvt_slice(layer, slice, shared_props.is_some(), &mut tessellator)?;
         Ok(tessellator)
     };
@@ -362,13 +389,11 @@ fn symbol_layer<T: VectorTransferables, C: Context>(
         return context.layer_missing(&request.coords, &layer.name);
     };
     tessellator.finish();
-    if !context.index_geometry() {
+    if !context.index_geometry() && !tessellator.streamed_point_layout() {
         crate::sdf::tessellation::prune_symbol_features(
             &mut tessellator.features,
             style,
-            state_ctx
-                .as_ref()
-                .and_then(|ctx| ctx.promote_property.as_deref()),
+            promote_prop,
         );
     }
     tessellator.quad_buffer.vertices.shrink_to_fit();
@@ -389,3 +414,65 @@ fn symbol_layer<T: VectorTransferables, C: Context>(
 
 mod building_bases;
 use building_bases::unhide_unreplaced_building_bases;
+
+#[cfg(test)]
+mod tests {
+    use super::allow_prepack_for_style_inner;
+    use crate::{coords::WorldTileCoords, style::layer::StyleLayer};
+
+    fn parse_layer(json: serde_json::Value) -> Option<StyleLayer> {
+        serde_json::from_value(json).ok()
+    }
+
+    #[test]
+    fn terrain_prepacks_draped_layers_but_keeps_structures_unpacked() {
+        let mid_tile = WorldTileCoords::from((5, 5, 4_u8.into()));
+        let fill = parse_layer(serde_json::json!({
+            "id": "water", "type": "fill", "paint": {"fill-color": "#38bdf8"}
+        }));
+        let line = parse_layer(serde_json::json!({
+            "id": "roads", "type": "line", "paint": {"line-color": "#64748b", "line-width": 2}
+        }));
+        let extrusion = parse_layer(serde_json::json!({
+            "id": "bld", "type": "fill-extrusion", "paint": {"fill-extrusion-color": "#cbd5e1"}
+        }));
+        let circle = parse_layer(serde_json::json!({
+            "id": "pts", "type": "circle", "paint": {"circle-radius": 4}
+        }));
+        let bridge = parse_layer(serde_json::json!({
+            "id": "bridge", "type": "line",
+            "metadata": {"maplibre-rs:terrain-structure": "bridge"},
+            "paint": {"line-color": "#64748b", "line-width": 2}
+        }));
+
+        assert!(
+            fill.is_some()
+                && line.is_some()
+                && extrusion.is_some()
+                && circle.is_some()
+                && bridge.is_some()
+        );
+        if let (Some(fill), Some(line), Some(extrusion), Some(circle), Some(bridge)) =
+            (fill, line, extrusion, circle, bridge)
+        {
+            assert!(allow_prepack_for_style_inner(
+                mid_tile, true, &fill, false, false
+            ));
+            assert!(allow_prepack_for_style_inner(
+                mid_tile, true, &line, false, false
+            ));
+            assert!(!allow_prepack_for_style_inner(
+                mid_tile, true, &extrusion, false, false
+            ));
+            assert!(allow_prepack_for_style_inner(
+                mid_tile, false, &extrusion, false, false
+            ));
+            assert!(!allow_prepack_for_style_inner(
+                mid_tile, true, &circle, false, false
+            ));
+            assert!(!allow_prepack_for_style_inner(
+                mid_tile, true, &bridge, false, false
+            ));
+        }
+    }
+}

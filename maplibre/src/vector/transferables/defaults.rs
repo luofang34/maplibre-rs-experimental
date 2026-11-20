@@ -242,15 +242,17 @@ impl LayerTessellated for DefaultLayerTessellated {
                     .with_prepacked_gpu(crate::vector::tessellation::PrepackedGpuGeometry {
                         vertices: packed,
                         indices_u16: Some(u16s),
+                        indices_u32: None,
                         compact_extrusion,
                         logical_vertex_count,
                     })
                     .with_shared_geometry_key(shared_key)
             } else {
-                OverAlignedVertexBuffer::from_vecs(Vec::new(), raw_indices, usable)
+                OverAlignedVertexBuffer::from_vecs(Vec::new(), Vec::new(), usable)
                     .with_prepacked_gpu(crate::vector::tessellation::PrepackedGpuGeometry {
                         vertices: packed,
                         indices_u16: None,
+                        indices_u32: Some(raw_indices),
                         compact_extrusion,
                         logical_vertex_count,
                     })

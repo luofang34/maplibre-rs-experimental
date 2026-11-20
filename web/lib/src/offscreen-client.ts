@@ -63,10 +63,8 @@ export const computeStTileWorkerCount = (): number => {
 };
 
 export const computeMtTileWorkerCount = (): number => {
-    // Shared-memory WASM workers share one global dlmalloc spinlock with the OffscreenCanvas
-    // render worker; 2 work-stealing workers overlap network HTTP I/O without allocator convoying.
     const cores = Number(globalThis.navigator?.hardwareConcurrency) || 4;
-    return Math.min(2, Math.max(2, Math.floor(cores / 2)));
+    return Math.min(4, Math.max(3, Math.floor(cores / 2)));
 };
 
 export const startOffscreenController = async ({

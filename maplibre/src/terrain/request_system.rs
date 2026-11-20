@@ -8,7 +8,7 @@ use crate::{
     environment::{Environment, OffscreenKernel},
     io::{
         apc::{
-            AsyncProcedureCall, AsyncProcedureFuture, AttemptContext, Context, Input,
+            AsyncProcedureCall, AsyncProcedureFuture, AttemptContext, Context, Input, IntoMessage,
             ProcedureError, ProcedureTag,
         },
         frame_style::FrameStyle,
@@ -27,6 +27,7 @@ use crate::{
         transferables::{DemTransferables, LayerDem, LayerDemMissing},
         DemTileComponent,
     },
+    vector::request_system::{SharedTileClaim, SharedTileSlot},
 };
 
 /// The terrain coverage queued for drawing; requests must include these coarsened tiles.
@@ -281,19 +282,27 @@ pub fn fetch_dem_apc<K: OffscreenKernel, T: DemTransferables, C: Context + Clone
         let mut retry = false;
         use crate::{projection::body::Body, sdf::assets::tiles::CachedTileFailure};
         let circumference = Body::EARTH.circumference_meters();
-        let loaded = match client
+        let claim = SharedTileClaim::default();
+        let (loaded, shared_slot) = match client
             .assets()
-            .load_dem_tile(&client, &dem.source, &coords, dem.unpack, circumference)
+            .load_dem_tile(
+                &client,
+                &dem.source,
+                &coords,
+                dem.unpack,
+                circumference,
+                &claim,
+            )
             .await
         {
-            Ok(entry) => Some(entry),
+            Ok((entry, slot)) => (Some(entry), slot),
             Err(CachedTileFailure::NotFound) => {
                 tracing::debug!(%coords, source = %dem.name, "no DEM tile at the source; flat");
-                None
+                (None, SharedTileSlot::default())
             }
             Err(CachedTileFailure::Decode(error)) => {
                 tracing::warn!(%coords, source = %dem.name, %error, "DEM tile is not an image");
-                None
+                (None, SharedTileSlot::default())
             }
             Err(CachedTileFailure::Transport { retryable, message }) => {
                 retry = retryable;
@@ -312,7 +321,7 @@ pub fn fetch_dem_apc<K: OffscreenKernel, T: DemTransferables, C: Context + Clone
                         "DEM tile fetch failed"
                     );
                 }
-                None
+                (None, SharedTileSlot::default())
             }
         };
         match loaded {
@@ -328,17 +337,18 @@ pub fn fetch_dem_apc<K: OffscreenKernel, T: DemTransferables, C: Context + Clone
                 .send_back(T::LayerDemMissing::build_from(coords))
                 .map_err(ProcedureError::Send),
         }?;
+        let outcome = IntoMessage::into(TileRequestOutcome {
+            coords,
+            kind: RequestKind::Dem,
+            attempt: Some(attempt),
+            disposition: if retry {
+                RequestDisposition::Retry
+            } else {
+                RequestDisposition::Complete
+            },
+        });
         context
-            .send_back(TileRequestOutcome {
-                coords,
-                kind: RequestKind::Dem,
-                attempt: Some(attempt),
-                disposition: if retry {
-                    RequestDisposition::Retry
-                } else {
-                    RequestDisposition::Complete
-                },
-            })
+            .send_back(shared_slot.attach(outcome))
             .map_err(ProcedureError::Send)
     })
 }

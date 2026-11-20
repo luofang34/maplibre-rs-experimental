@@ -212,6 +212,11 @@ impl FontSystem {
         }
     }
 
+    /// Returns `true` when any custom or style-defined font face is registered in memory.
+    pub(crate) fn has_registered_any(&self) -> bool {
+        !self.registered_order.is_empty()
+    }
+
     /// Returns `true` when at least one in-memory / `font-faces` face matches `font_stack`.
     pub fn has_registered_stack(&self, font_stack: &str) -> bool {
         for raw_entry in font_stack.split(',') {

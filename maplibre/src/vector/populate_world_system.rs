@@ -67,7 +67,21 @@ pub fn apply_vector_worker_batch<T: VectorTransferables>(
     apply_worker_messages(messages, |message| {
         let attempt = message.attempt();
         if message.has_tag(RequestKind::Vector.message_tag()) {
-            tile_retry::completed(world, *message.into_transferable::<TileRequestOutcome>()?);
+            #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+            let mut message = message;
+            #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+            let shared_permit = message.take_shared_permit();
+            let outcome = *message.into_transferable::<TileRequestOutcome>()?;
+            #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+            let coords = outcome.coords;
+            tile_retry::completed(world, outcome);
+            #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+            if let Some(permit) = shared_permit {
+                world
+                    .resources
+                    .get_or_init_mut::<super::request_system::PendingUploadPermits>()
+                    .push(coords, permit);
+            }
         } else if message.has_tag(T::TileTessellated::message_tag()) {
             let message = message.into_transferable::<T::TileTessellated>()?;
             if tile_retry::accepts(world, message.coords(), RequestKind::Vector, attempt) {

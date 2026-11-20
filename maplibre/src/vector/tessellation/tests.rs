@@ -166,9 +166,11 @@ fn assert_poles_survive_later_polygons(
 
 #[test]
 fn later_fill_features_leave_both_poles_exact() {
-    let tessellator =
-        ZeroTessellator::<IndexDataType>::default().with_globe_subdivision(2, true, true, true);
-    assert_poles_survive_later_polygons(tessellator, false);
+    for multipolygon in [false, true] {
+        let tessellator =
+            ZeroTessellator::<IndexDataType>::default().with_globe_subdivision(2, true, true, true);
+        assert_poles_survive_later_polygons(tessellator, multipolygon);
+    }
 }
 
 #[test]

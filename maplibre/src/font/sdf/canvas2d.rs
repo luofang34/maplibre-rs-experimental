@@ -1,5 +1,5 @@
 //! Zero-download browser `OffscreenCanvas` 2D local CJK / fallback SDF glyph rasteriser (`wasm32`)
-//! with per-realm glyph caching and grid-batched `getImageData` readbacks.
+//! with per-realm or shared glyph caching and grid-batched `getImageData` readbacks.
 
 use std::{cell::RefCell, sync::Arc};
 
@@ -12,6 +12,9 @@ use super::{
 };
 use crate::font::spec::{parse_font_stack_entry, FontStyle};
 
+#[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+const MAX_CACHED_GLYPHS: usize = 2048;
+#[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
 const MAX_CACHED_GLYPHS: usize = 4096;
 const BATCH_CELL_SIZE: usize = 48;
 const BATCH_COLS: usize = 8;
@@ -22,25 +25,59 @@ struct CanvasScratch {
     ctx: OffscreenCanvasRenderingContext2d,
 }
 
-type GlyphCacheMap = HashMap<(String, char), Option<Arc<RasterizedGlyph>>>;
+#[derive(Default)]
+struct GlyphCacheState {
+    fonts: HashMap<String, HashMap<char, Option<Arc<RasterizedGlyph>>>>,
+    total: usize,
+}
+
+impl GlyphCacheState {
+    fn insert_batch(
+        &mut self,
+        css_font: &str,
+        items: impl IntoIterator<Item = (char, Option<Arc<RasterizedGlyph>>)>,
+    ) {
+        for (ch, value) in items {
+            if self.total >= MAX_CACHED_GLYPHS {
+                self.fonts.clear();
+                self.total = 0;
+            }
+            if !self.fonts.contains_key(css_font) {
+                self.fonts.insert(css_font.to_owned(), HashMap::default());
+            }
+            if let Some(font_map) = self.fonts.get_mut(css_font) {
+                if font_map.insert(ch, value).is_none() {
+                    self.total += 1;
+                }
+            }
+        }
+    }
+}
 
 thread_local! {
     static CANVAS_SCRATCH: RefCell<Option<CanvasScratch>> = const { RefCell::new(None) };
-    static GLYPH_CACHE: RefCell<GlyphCacheMap> = RefCell::new(HashMap::default());
+    #[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
+    static GLYPH_CACHE: RefCell<GlyphCacheState> = RefCell::new(GlyphCacheState::default());
 }
 
-fn lookup_cached(css_font: &str, ch: char) -> Option<Option<Arc<RasterizedGlyph>>> {
-    GLYPH_CACHE.with(|cache| cache.borrow().get(&(css_font.to_owned(), ch)).cloned())
+#[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+static SHARED_GLYPH_CACHE: std::sync::LazyLock<std::sync::Mutex<GlyphCacheState>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(GlyphCacheState::default()));
+
+fn with_glyph_cache<R>(f: impl FnOnce(&mut GlyphCacheState) -> R) -> R {
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+    {
+        let mut guard = crate::platform::lock_unpoisoned(&SHARED_GLYPH_CACHE);
+        f(&mut guard)
+    }
+    #[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
+    {
+        GLYPH_CACHE.with(|cache| f(&mut cache.borrow_mut()))
+    }
 }
 
 fn store_cached(css_font: &str, ch: char, value: Option<Arc<RasterizedGlyph>>) {
-    GLYPH_CACHE.with(|cache| {
-        let mut map = cache.borrow_mut();
-        if map.len() >= MAX_CACHED_GLYPHS {
-            map.clear();
-        }
-        map.insert((css_font.to_owned(), ch), value);
-    });
+    with_glyph_cache(|cache| cache.insert_batch(css_font, std::iter::once((ch, value))));
 }
 
 fn ensure_scratch(
@@ -104,17 +141,19 @@ pub(crate) fn rasterize_canvas2d_chars_sdf(
     let css_font = build_css_font(ideograph_family, font_stack);
     let mut out = Vec::with_capacity(chars.len());
     let mut uncached = Vec::new();
-
-    for &(code, ch) in chars {
-        if ch.is_control() || matches!(ch, '\u{200B}'..='\u{200D}' | '\u{FEFF}') {
-            continue;
+    with_glyph_cache(|cache| {
+        let font_map = cache.fonts.get(css_font.as_str());
+        for &(code, ch) in chars {
+            if ch.is_control() || matches!(ch, '\u{200B}'..='\u{200D}' | '\u{FEFF}') {
+                continue;
+            }
+            match font_map.and_then(|map| map.get(&ch)) {
+                Some(Some(glyph)) => out.push((code, Arc::clone(glyph))),
+                Some(None) => {}
+                None => uncached.push((code, ch)),
+            }
         }
-        match lookup_cached(&css_font, ch) {
-            Some(Some(glyph)) => out.push((code, glyph)),
-            Some(None) => {}
-            None => uncached.push((code, ch)),
-        }
-    }
+    });
     if uncached.is_empty() {
         return out;
     }
@@ -127,20 +166,15 @@ pub(crate) fn rasterize_canvas2d_chars_sdf(
     ctx.set_text_align("left");
 
     let mut batchable = Vec::with_capacity(uncached.len());
+    let mut measured_cache = Vec::new();
     for (code, ch) in uncached {
-        if let Some(dup) = lookup_cached(&css_font, ch) {
-            if let Some(g) = dup {
-                out.push((code, g));
-            }
-            continue;
-        }
         match measure_one(&ctx, code, ch) {
             MeasureOutcome::Empty(glyph) => {
                 let arc = Arc::new(glyph);
-                store_cached(&css_font, ch, Some(Arc::clone(&arc)));
+                measured_cache.push((ch, Some(Arc::clone(&arc))));
                 out.push((code, arc));
             }
-            MeasureOutcome::Skip => store_cached(&css_font, ch, None),
+            MeasureOutcome::Skip => measured_cache.push((ch, None)),
             MeasureOutcome::Ink(m) => {
                 if m.padded_w <= BATCH_CELL_SIZE && m.padded_h <= BATCH_CELL_SIZE {
                     batchable.push(m);
@@ -153,6 +187,9 @@ pub(crate) fn rasterize_canvas2d_chars_sdf(
                 }
             }
         }
+    }
+    if !measured_cache.is_empty() {
+        with_glyph_cache(|cache| cache.insert_batch(&css_font, measured_cache));
     }
 
     for chunk in batchable.chunks(BATCH_CHUNK) {
@@ -285,6 +322,7 @@ fn rasterize_grid_chunk(
     }
 
     let mut coverage = Vec::new();
+    let mut chunk_cache = Vec::with_capacity(chunk.len());
     for (idx, m) in chunk.iter().enumerate() {
         let col = idx % cols;
         let row = idx / cols;
@@ -313,11 +351,12 @@ fn rasterize_grid_chunk(
                 bitmap: coverage_to_sdf(&coverage, m.padded_w, m.padded_h),
             })
         });
-        store_cached(css_font, m.ch, built.clone());
+        chunk_cache.push((m.ch, built.clone()));
         if let Some(arc) = built {
             out.push((m.code, arc));
         }
     }
+    with_glyph_cache(|cache| cache.insert_batch(css_font, chunk_cache));
 }
 
 fn rasterize_single_measured(css_font: &str, m: &MeasuredChar) -> Option<RasterizedGlyph> {

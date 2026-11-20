@@ -2,19 +2,25 @@
 
 use std::sync::Arc;
 
-use rustc_hash::FxHashMap;
+use lyon::tessellation::VertexBuffers;
+use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::{layout::SourceFeature, TextTessellator};
+use super::{
+    layout::{self, CollectedSymbol, SourceFeature},
+    TextTessellator,
+};
 use crate::{
-    sdf::Feature,
+    render::shaders::ShaderSymbolVertex,
+    sdf::{assets::SymbolAtlas, Feature},
     style::{
         expression::{
             empty_feature_properties, symbol_runtime_referenced_keys, FeatureProperties,
             FEATURE_STATE_PREFIX,
         },
         filter::GeometryType,
-        layer::StyleLayer,
+        layer::{StyleLayer, SymbolPaint},
     },
+    vector::tessellation::IndexDataType,
 };
 
 /// Maps the local geometry slice index to its original MVT/MLT feature index in the source layer.
@@ -57,6 +63,45 @@ pub(super) fn build_source_feature(
     )
 }
 
+pub(super) fn prune_single_feature(
+    feature: &mut Feature,
+    needed: &FxHashSet<String>,
+    empty: &Arc<FeatureProperties>,
+    mut cache: Option<&mut FxHashMap<usize, Arc<FeatureProperties>>>,
+) {
+    if feature.data.properties.is_empty() {
+        return;
+    }
+    let needs_prune = feature.data.properties.keys().any(|k| {
+        !k.starts_with('\u{1}') && !k.starts_with(FEATURE_STATE_PREFIX) && !needed.contains(k)
+    });
+    if !needs_prune {
+        return;
+    }
+    let ptr = Arc::as_ptr(&feature.data.properties) as usize;
+    if let Some(ref mut map) = cache {
+        if let Some(pruned) = map.get(&ptr) {
+            feature.data.properties = Arc::clone(pruned);
+            return;
+        }
+    }
+    let mut filtered = FeatureProperties::default();
+    for (k, v) in feature.data.properties.iter() {
+        if k.starts_with('\u{1}') || k.starts_with(FEATURE_STATE_PREFIX) || needed.contains(k) {
+            filtered.insert(k.clone(), v.clone());
+        }
+    }
+    let pruned = if filtered.is_empty() {
+        Arc::clone(empty)
+    } else {
+        Arc::new(filtered)
+    };
+    if let Some(map) = cache {
+        map.insert(ptr, Arc::clone(&pruned));
+    }
+    feature.data.properties = pruned;
+}
+
 /// Drops feature property entries that are only read during tessellation (`text-field`,
 /// `icon-image`, `filter`, layout-only keys) once symbol layout finishes, retaining only runtime
 /// placement/paint properties, `\u{1}*` internal state/identity tags, and `promote_id_key`.
@@ -70,35 +115,129 @@ pub(crate) fn prune_symbol_features(
     };
     let empty = empty_feature_properties();
     let mut cache: FxHashMap<usize, Arc<FeatureProperties>> = FxHashMap::default();
-
     for feature in features {
-        if feature.data.properties.is_empty() {
-            continue;
-        }
-        let needs_prune = feature.data.properties.keys().any(|k| {
-            !k.starts_with('\u{1}') && !k.starts_with(FEATURE_STATE_PREFIX) && !needed.contains(k)
-        });
-        if !needs_prune {
-            continue;
-        }
-        let ptr = Arc::as_ptr(&feature.data.properties) as usize;
-        if let Some(pruned) = cache.get(&ptr) {
-            feature.data.properties = Arc::clone(pruned);
-            continue;
-        }
-        let mut filtered = FeatureProperties::default();
-        for (k, v) in feature.data.properties.iter() {
-            if k.starts_with('\u{1}') || k.starts_with(FEATURE_STATE_PREFIX) || needed.contains(k) {
-                filtered.insert(k.clone(), v.clone());
+        prune_single_feature(feature, &needed, empty, Some(&mut cache));
+    }
+}
+
+pub(super) fn collect_symbol(
+    tessellator: &mut TextTessellator,
+    anchor: geo_types::Point<f64>,
+    angle: f32,
+    source: SourceFeature,
+    props: &Arc<FeatureProperties>,
+    (line, repeat_key): (Option<layout::LineContext>, Option<&Arc<str>>),
+) {
+    let ways = line
+        .is_none()
+        .then(|| {
+            tessellator
+                .paint
+                .label_among(props, tessellator.zoom, Some(&tessellator.atlas.icons))
+        })
+        .flatten()
+        .and_then(|text| super::text_layout::both_orientations(&tessellator.paint, &text));
+    let orientations: &[Option<bool>] = match ways {
+        Some([first, second]) => &[Some(first), Some(second)],
+        None => &[None],
+    };
+    for (index, &vertical) in orientations.iter().enumerate() {
+        push_or_stream_symbol(
+            tessellator.stream_point_runtime_keys.as_ref(),
+            &mut tessellator.collected,
+            (
+                &tessellator.paint,
+                tessellator.zoom,
+                tessellator.overscaling,
+            ),
+            &tessellator.atlas,
+            &mut tessellator.quad_buffer,
+            &mut tessellator.features,
+            CollectedSymbol {
+                source,
+                line: line.clone(),
+                anchor,
+                angle,
+                properties: Arc::clone(props),
+                vertical,
+                fallback: index == 1,
+                repeat_key: repeat_key.cloned(),
+            },
+        );
+    }
+}
+
+pub(super) fn push_or_stream_symbol(
+    stream_runtime_keys: Option<&Option<FxHashSet<String>>>,
+    collected: &mut Vec<CollectedSymbol>,
+    (paint, zoom, overscaling): (&SymbolPaint, f64, f64),
+    atlas: &SymbolAtlas,
+    quad_buffer: &mut VertexBuffers<ShaderSymbolVertex, IndexDataType>,
+    features: &mut Vec<Feature>,
+    symbol: CollectedSymbol,
+) {
+    if symbol.line.is_none() {
+        if let Some(maybe_needed) = stream_runtime_keys {
+            let start_len = features.len();
+            layout::append(
+                &symbol,
+                (paint, zoom, overscaling),
+                atlas,
+                quad_buffer,
+                features,
+            );
+            if let Some(needed) = maybe_needed {
+                let empty = empty_feature_properties();
+                for feature in &mut features[start_len..] {
+                    prune_single_feature(feature, needed, empty, None);
+                }
             }
+            return;
         }
-        let pruned = if filtered.is_empty() {
-            Arc::clone(empty)
-        } else {
-            Arc::new(filtered)
-        };
-        cache.insert(ptr, Arc::clone(&pruned));
-        feature.data.properties = pruned;
+    }
+    collected.push(symbol);
+}
+
+pub(super) fn finish_collected(
+    collected: Vec<CollectedSymbol>,
+    (paint, zoom, overscaling): (&SymbolPaint, f64, f64),
+    atlas: &SymbolAtlas,
+    quad_buffer: &mut VertexBuffers<ShaderSymbolVertex, IndexDataType>,
+    features: &mut Vec<Feature>,
+) {
+    if paint.properties.contains_key("symbol-sort-key") && collected.len() > 1 {
+        let mut keyed: Vec<(f32, usize)> = collected
+            .iter()
+            .enumerate()
+            .map(|(i, symbol)| {
+                (
+                    paint.number("symbol-sort-key", &symbol.properties, zoom, 0.0),
+                    i,
+                )
+            })
+            .collect();
+        if !keyed.windows(2).all(|w| w[0].0 <= w[1].0) {
+            keyed.sort_by(|a, b| a.0.total_cmp(&b.0));
+            for &(_, idx) in &keyed {
+                layout::append(
+                    &collected[idx],
+                    (paint, zoom, overscaling),
+                    atlas,
+                    quad_buffer,
+                    features,
+                );
+            }
+            return;
+        }
+    }
+    for symbol in &collected {
+        layout::append(
+            symbol,
+            (paint, zoom, overscaling),
+            atlas,
+            quad_buffer,
+            features,
+        );
     }
 }
 
@@ -196,5 +335,84 @@ mod tests {
             .properties
             .contains_key(&format!("{FEATURE_STATE_PREFIX}hover")));
         assert!(!features[1].data.properties.contains_key("name"));
+    }
+
+    #[test]
+    fn streaming_point_layout_matches_buffered_geometry_and_prunes_properties() {
+        use geozero::mvt::{tile, Message as _};
+
+        use crate::vector::decode_tile;
+
+        let raw = geozero::mvt::Tile {
+            layers: vec![tile::Layer {
+                version: 2,
+                name: "poi".into(),
+                extent: Some(4096),
+                keys: vec!["name".into(), "tint".into()],
+                values: vec![
+                    tile::Value {
+                        string_value: Some("Cafe".into()),
+                        ..Default::default()
+                    },
+                    tile::Value {
+                        string_value: Some("#112233".into()),
+                        ..Default::default()
+                    },
+                ],
+                features: vec![tile::Feature {
+                    id: Some(7),
+                    tags: vec![0, 0, 1, 1],
+                    r#type: Some(tile::GeomType::Point as i32),
+                    geometry: vec![9, 1000, 1000],
+                }],
+            }],
+        }
+        .encode_to_vec();
+        let tile = decode_tile(&raw).ok().unwrap_or_default();
+        let layer = &tile.layers[0];
+        let mut props_json = serde_json::Map::new();
+        props_json.insert("text-color".to_owned(), json!(["get", "tint"]));
+        let style = StyleLayer {
+            id: "poi".to_owned(),
+            type_: "symbol".to_owned(),
+            paint: Some(LayerPaint::Symbol(SymbolPaint {
+                text_field: Some(crate::style::layer::StyleProperty::parse(&json!("{name}"))),
+                properties: props_json,
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        let Some(LayerPaint::Symbol(ref paint)) = style.paint else {
+            return;
+        };
+        let atlas = crate::sdf::assets::fallback_atlas();
+        let runtime_keys = symbol_runtime_referenced_keys(&style, None);
+
+        let mut buffered = TextTessellator::with_assets(paint.clone(), 14.0, atlas.clone());
+        buffered.source_ids = vec![Some(7)];
+        let _ = geozero::mvt::process(layer, &mut buffered);
+        buffered.finish();
+        prune_symbol_features(&mut buffered.features, &style, None);
+
+        let mut streaming = TextTessellator::with_assets(paint.clone(), 14.0, atlas);
+        streaming.source_ids = vec![Some(7)];
+        streaming.enable_streaming_point_layout(runtime_keys);
+        let _ = geozero::mvt::process(layer, &mut streaming);
+        streaming.finish();
+
+        assert!(streaming.streamed_point_layout());
+        assert_eq!(
+            buffered.quad_buffer.vertices,
+            streaming.quad_buffer.vertices
+        );
+        assert_eq!(buffered.quad_buffer.indices, streaming.quad_buffer.indices);
+        assert_eq!(buffered.features.len(), streaming.features.len());
+        assert_eq!(buffered.features[0].str, streaming.features[0].str);
+        assert_eq!(buffered.features[0].bbox, streaming.features[0].bbox);
+        assert_eq!(
+            buffered.features[0].data.properties,
+            streaming.features[0].data.properties
+        );
+        assert!(!streaming.features[0].data.properties.contains_key("name"));
     }
 }

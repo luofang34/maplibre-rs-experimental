@@ -31,7 +31,11 @@ pub mod rescale;
 mod velocity;
 mod worker;
 #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
-pub(crate) use limiter::SharedTilePermit;
+pub(crate) use limiter::{acquire_heavy_tile_slot, PendingUploadPermits, SharedTilePermit};
+pub(crate) use limiter::{
+    clear_upload_permits, reconcile_upload_permits, snapshot_permit_sources, SharedTileClaim,
+    SharedTileSlot,
+};
 use memo::{
     display_pixel_ratio, update_loose_covering_cache, vector_eviction_generation, RequestMemo,
     RequestViewKey,

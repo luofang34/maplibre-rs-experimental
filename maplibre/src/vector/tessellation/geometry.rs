@@ -74,8 +74,10 @@ where
             return Ok(());
         }
         self.end(true)?;
-        // The polygons of a multipolygon are buildings of their own.
-        if tagged || (self.extrusion.is_some() && !self.is_line_layer) {
+        // Triangulate each polygon of a multipolygon independently so `earcut`, globe
+        // subdivision, and streaming prepack run per polygon instead of buffering thousands
+        // of merged rings inside one `lyon` sweep-line.
+        if tagged || !self.is_line_layer {
             if self.is_line_layer {
                 self.tessellate_strokes()?;
             } else {
@@ -95,8 +97,6 @@ where
         }
         if self.is_line_layer {
             self.tessellate_strokes()?;
-        } else if self.extrusion.is_none() {
-            self.tessellate_fill()?;
         }
         Ok(())
     }

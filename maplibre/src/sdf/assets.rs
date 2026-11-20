@@ -14,14 +14,14 @@ pub(super) use builder::AtlasBuilder;
 #[allow(unused_imports)]
 pub(crate) use cache::{fetch, tiles};
 pub use cache::{AssetCache, AssetFailure};
-pub use load::{
-    load_symbol_assets, spawn_worker_symbol_prefetch, SymbolAssetConfig, SymbolAssetError,
-};
 #[allow(unused_imports)]
 pub(crate) use load::{
-    load_symbol_assets_awaiting, load_symbol_assets_awaiting_from_tile,
-    load_symbol_assets_for_requests, spawn_style_symbol_prefetch, symbol_requests_from_tile,
-    SymbolRequests,
+    fetch_symbol_asset_inputs, load_symbol_assets_awaiting, load_symbol_assets_awaiting_from_tile,
+    load_symbol_assets_for_requests, pack_symbol_assets, spawn_style_symbol_prefetch,
+    symbol_requests_from_tile, SymbolRequests,
+};
+pub use load::{
+    load_symbol_assets, spawn_worker_symbol_prefetch, SymbolAssetConfig, SymbolAssetError,
 };
 pub(crate) use provider::Resolved;
 pub use provider::{

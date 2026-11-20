@@ -99,41 +99,54 @@ pub(super) fn encode_prepacked_layer_tessellated(
     let shared_key = buffer.shared_geometry_key().unwrap_or(0);
     let usable_indices = buffer.usable_indices;
 
-    let (gpu_vertices, logical_vertex_count, compact_extrusion, existing_u16, raw_indices) =
-        if let Some(pre) = buffer.take_prepacked_gpu() {
-            let logical = pre.logical_len();
-            let compact = pre.compact_extrusion;
-            (
-                pre.vertices,
-                logical,
-                compact,
-                pre.indices_u16,
-                buffer.buffer.indices,
+    let shared_pre = buffer.take_prepacked_gpu_arc();
+    let owned_vertices: Vec<GpuShaderVertex>;
+    let raw_indices_owned = buffer.buffer.indices;
+    let (gpu_vertices, logical_vertex_count, compact_extrusion, existing_u16, u32_indices): (
+        &[GpuShaderVertex],
+        usize,
+        bool,
+        Option<&[u16]>,
+        &[u32],
+    ) = if let Some(pre) = shared_pre.as_deref() {
+        owned_vertices = Vec::new();
+        (
+            pre.vertices.as_slice(),
+            pre.logical_len(),
+            pre.compact_extrusion,
+            pre.indices_u16.as_deref(),
+            pre.indices_u32.as_deref().unwrap_or(&raw_indices_owned),
+        )
+    } else {
+        let raw_vertices = buffer.buffer.vertices;
+        let logical = raw_vertices.len();
+        let mut packed = Vec::new();
+        let compact = shared_key == 0
+            && feature_colors.is_empty()
+            && paint_bytes.is_none_or(<[u8]>::is_empty)
+            && <ShaderVertex as PoolVertex>::try_encode_compact_extrusion(
+                style_type,
+                &raw_vertices,
+                &mut packed,
             )
-        } else {
-            let raw_vertices = buffer.buffer.vertices;
-            let raw_indices = buffer.buffer.indices;
-            let logical = raw_vertices.len();
-            let mut packed = Vec::new();
-            let compact = shared_key == 0
-                && feature_colors.is_empty()
-                && paint_bytes.is_none_or(<[u8]>::is_empty)
-                && <ShaderVertex as PoolVertex>::try_encode_compact_extrusion(
-                    style_type,
-                    &raw_vertices,
-                    &mut packed,
-                )
-                .is_some();
-            if !compact {
-                let _ = <ShaderVertex as PoolVertex>::encode_vertices(
-                    style_type,
-                    &raw_vertices,
-                    &mut packed,
-                );
-            }
-            drop(raw_vertices);
-            (packed, logical, compact, None, raw_indices)
-        };
+            .is_some();
+        if !compact {
+            let _ = <ShaderVertex as PoolVertex>::encode_vertices(
+                style_type,
+                &raw_vertices,
+                &mut packed,
+            );
+        }
+        drop(raw_vertices);
+        owned_vertices = packed;
+        (
+            owned_vertices.as_slice(),
+            logical,
+            compact,
+            None,
+            &raw_indices_owned,
+        )
+    };
 
     let paint_slice = paint_bytes.unwrap_or_default();
     let pick_magic = |u16_indices: bool| -> u32 {
@@ -145,18 +158,18 @@ pub(super) fn encode_prepacked_layer_tessellated(
         }
     };
     let (magic, out_index_count, use_u16_usable): (u32, usize, Option<usize>) =
-        if let Some(u16s) = &existing_u16 {
+        if let Some(u16s) = existing_u16 {
             (pick_magic(true), u16s.len(), None)
         } else {
-            let usable = (usable_indices as usize).min(raw_indices.len());
+            let usable = (usable_indices as usize).min(u32_indices.len());
             let can_u16 = logical_vertex_count <= 65_536
-                && raw_indices[..usable]
+                && u32_indices[..usable]
                     .iter()
                     .all(|&idx| idx <= u32::from(u16::MAX));
             if can_u16 {
                 (pick_magic(true), usable.next_multiple_of(2), Some(usable))
             } else {
-                (pick_magic(false), raw_indices.len(), None)
+                (pick_magic(false), u32_indices.len(), None)
             }
         };
 
@@ -199,25 +212,24 @@ pub(super) fn encode_prepacked_layer_tessellated(
 
     out.extend_from_slice(layer_name_str.as_bytes());
     out.extend_from_slice(style_layer_id.as_bytes());
-    let raw_gpu_bytes: &[u8] = bytemuck::cast_slice(&gpu_vertices);
+    let raw_gpu_bytes: &[u8] = bytemuck::cast_slice(gpu_vertices);
     out.extend_from_slice(&raw_gpu_bytes[..vert_bytes_len.min(raw_gpu_bytes.len())]);
-    drop(gpu_vertices);
 
     if let Some(u16s) = existing_u16 {
-        out.extend_from_slice(bytemuck::cast_slice(&u16s));
-        drop(u16s);
+        out.extend_from_slice(bytemuck::cast_slice(u16s));
     } else if let Some(usable) = use_u16_usable {
-        for &idx in &raw_indices[..usable] {
+        for &idx in &u32_indices[..usable] {
             out.extend_from_slice(&(idx as u16).to_le_bytes());
         }
         if usable < out_index_count {
             out.extend_from_slice(&0_u16.to_le_bytes());
         }
-        drop(raw_indices);
     } else {
-        out.extend_from_slice(bytemuck::cast_slice(&raw_indices));
-        drop(raw_indices);
+        out.extend_from_slice(bytemuck::cast_slice(u32_indices));
     }
+    drop(shared_pre);
+    drop(owned_vertices);
+    drop(raw_indices_owned);
 
     out.extend_from_slice(bytemuck::cast_slice(&feature_indices));
     drop(feature_indices);
@@ -269,6 +281,7 @@ pub(super) fn build_decoded_buffer(
                 .with_prepacked_gpu(PrepackedGpuGeometry {
                     vertices: gpu_vertices,
                     indices_u16: Some(indices_u16),
+                    indices_u32: None,
                     compact_extrusion: format.compact_extrusion,
                     logical_vertex_count,
                 })
@@ -281,10 +294,11 @@ pub(super) fn build_decoded_buffer(
             bytemuck::cast_slice_mut(&mut indices),
         )?;
         Some(
-            OverAlignedVertexBuffer::from_vecs(Vec::new(), indices, usable_indices)
+            OverAlignedVertexBuffer::from_vecs(Vec::new(), Vec::new(), usable_indices)
                 .with_prepacked_gpu(PrepackedGpuGeometry {
                     vertices: gpu_vertices,
                     indices_u16: None,
+                    indices_u32: Some(indices),
                     compact_extrusion: format.compact_extrusion,
                     logical_vertex_count,
                 })

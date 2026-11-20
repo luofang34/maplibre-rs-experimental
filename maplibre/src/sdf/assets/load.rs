@@ -126,30 +126,59 @@ pub(crate) async fn load_symbol_assets_awaiting_from_tile<'l, HC: HttpClient>(
     load_symbol_assets_for_requests(client, config, req).await
 }
 
-pub(crate) async fn load_symbol_assets_for_requests<HC: HttpClient>(
+/// Fetched remote font and sprite inputs ready to pack into a [`SymbolAtlas`].
+pub(crate) struct FetchedSymbolInputs {
+    icons: HashSet<String>,
+    fonts: local_fonts::FetchedFontInputs,
+    fetched_sheets: Vec<Option<(String, Arc<SpriteSheet>)>>,
+}
+
+/// Fetches remote font ranges and sprite sheets for `req` without allocating [`AtlasBuilder`] or
+/// rasterizing Canvas2D CJK glyphs yet, overlapping network I/O with base geometry tessellation.
+pub(crate) async fn fetch_symbol_asset_inputs<HC: HttpClient>(
     client: &SourceClient<HC>,
     config: SymbolAssetConfig<'_>,
     req: SymbolRequests,
-) -> Result<LoadedSymbolAssets, SymbolAssetError> {
-    let mut builder = AtlasBuilder::new();
+) -> Result<FetchedSymbolInputs, SymbolAssetError> {
     let icons = req.icons;
     let sources = if icons.is_empty() {
         Vec::new()
     } else {
         sprite_sources(config.sprite)
     };
-    let ((), fetched_sheets) = crate::util::async_join::try_join2(
-        local_fonts::load_fonts_and_shaping(client, config, req.fonts, req.labels, &mut builder),
+    let (fonts, fetched_sheets) = crate::util::async_join::try_join2(
+        local_fonts::fetch_font_inputs(client, config, req.fonts, req.labels),
         crate::util::async_join::try_join_all_concurrent(
             sources
-                .iter()
-                .map(|(prefix, url)| fetch_sprite_sheet(client, prefix, url))
+                .into_iter()
+                .map(|(prefix, url)| async move {
+                    let sheet = fetch_sprite_sheet(client, &prefix, &url)
+                        .await?
+                        .map(|(_, s)| s);
+                    Ok(sheet.map(|s| (prefix, s)))
+                })
                 .collect(),
         ),
     )
     .await?;
-    for (prefix, sheet) in fetched_sheets.into_iter().flatten() {
-        pack_sprites(&mut builder, prefix, &icons, &sheet);
+    Ok(FetchedSymbolInputs {
+        icons,
+        fonts,
+        fetched_sheets,
+    })
+}
+
+/// Synchronously packs fetched symbol fonts, Canvas2D CJK fallbacks, and sprites into an atlas.
+pub(crate) fn pack_symbol_assets<HC: HttpClient>(
+    client: &SourceClient<HC>,
+    config: SymbolAssetConfig<'_>,
+    inputs: FetchedSymbolInputs,
+) -> LoadedSymbolAssets {
+    let mut builder = AtlasBuilder::new();
+    let icons = inputs.icons;
+    local_fonts::pack_font_inputs(config, inputs.fonts, &mut builder);
+    for (prefix, sheet) in inputs.fetched_sheets.into_iter().flatten() {
+        pack_sprites(&mut builder, &prefix, &icons, &sheet);
     }
     for (name, image) in config.images {
         if icons.contains(name) {
@@ -165,11 +194,20 @@ pub(crate) async fn load_symbol_assets_for_requests<HC: HttpClient>(
             providers.record_missing(name);
         }
     }
-    Ok(LoadedSymbolAssets {
+    LoadedSymbolAssets {
         atlas: builder.finish(),
         provided,
         awaiting,
-    })
+    }
+}
+
+pub(crate) async fn load_symbol_assets_for_requests<HC: HttpClient>(
+    client: &SourceClient<HC>,
+    config: SymbolAssetConfig<'_>,
+    req: SymbolRequests,
+) -> Result<LoadedSymbolAssets, SymbolAssetError> {
+    let inputs = fetch_symbol_asset_inputs(client, config, req).await?;
+    Ok(pack_symbol_assets(client, config, inputs))
 }
 
 /// Packs the provided images among `icons` that nothing else supplied and whose answers are

@@ -1,9 +1,9 @@
 //! Thread-local small-block magazine allocator for `wasm32 + atomics`.
 //!
 //! Under shared-memory WASM, `std::alloc::System` delegates to `dlmalloc` protected by a single
-//! global spinlock. By caching freed small/medium blocks (`16..=16384` bytes, `align <= 8`) in
-//! per-thread freelists, the render worker and tile workers avoid contending with decode,
-//! tessellation, and eviction bursts on every `Vec`/hash-map churn allocation.
+//! global spinlock. By caching freed small blocks (`16..=8192` bytes, `align <= 8`) in per-thread
+//! freelists, the render worker and tile workers avoid contending with decode, tessellation, and
+//! eviction bursts on frequent small/medium `Vec`/hash-map churn while draining on worker idle.
 #![allow(unsafe_code)]
 
 use std::{
@@ -12,11 +12,11 @@ use std::{
     ptr,
 };
 
-const NUM_CLASSES: usize = 11;
+const NUM_CLASSES: usize = 10;
 const MIN_CLASS_BYTES: usize = 16;
-const MAX_CLASS_BYTES: usize = 16384;
+const MAX_CLASS_BYTES: usize = 8192;
 const BASE_ALIGN: usize = 8;
-const CLASS_CAPS: [u16; NUM_CLASSES] = [128, 128, 128, 64, 48, 32, 24, 16, 8, 4, 2];
+const CLASS_CAPS: [u16; NUM_CLASSES] = [64, 64, 48, 32, 24, 16, 8, 4, 2, 2];
 
 struct Magazine {
     heads: [*mut u8; NUM_CLASSES],
@@ -57,7 +57,16 @@ impl Magazine {
     }
 
     fn drain_half(&mut self, class_idx: usize) {
-        let target = self.counts[class_idx] / 2;
+        self.drain_to(class_idx, self.counts[class_idx] / 2);
+    }
+
+    fn drain_all(&mut self) {
+        for class_idx in 0..NUM_CLASSES {
+            self.drain_to(class_idx, 0);
+        }
+    }
+
+    fn drain_to(&mut self, class_idx: usize, target: u16) {
         let layout = class_layout(class_idx);
         while self.counts[class_idx] > target {
             let head = self.heads[class_idx];
@@ -74,6 +83,10 @@ impl Magazine {
             }
         }
     }
+}
+
+pub(crate) fn drain_thread_magazine() {
+    let _ = MAG.try_with(|tm| tm.with_mut(Magazine::drain_all));
 }
 
 struct ThreadMagazine {
@@ -123,7 +136,7 @@ const fn class_index(layout: Layout) -> Option<usize> {
 #[inline]
 const fn class_layout(class_idx: usize) -> Layout {
     let size = MIN_CLASS_BYTES << class_idx;
-    // SAFETY: `size` is a non-zero power-of-two in `16..=16384` and `BASE_ALIGN` is `8`,
+    // SAFETY: `size` is a non-zero power-of-two in `16..=8192` and `BASE_ALIGN` is `8`,
     // satisfying all `Layout::from_size_align` invariants without panic paths.
     unsafe { Layout::from_size_align_unchecked(size, BASE_ALIGN) }
 }
@@ -206,5 +219,89 @@ unsafe impl GlobalAlloc for MagazineAllocator {
             self.dealloc(ptr_raw, layout);
         }
         new_ptr
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn size_classes_cover_16_to_8192_bytes_and_drain_cleanly() {
+        assert_eq!(
+            class_index(
+                Layout::from_size_align(1, 1)
+                    .ok()
+                    .unwrap_or(Layout::new::<u8>())
+            ),
+            Some(0)
+        );
+        assert_eq!(
+            class_index(
+                Layout::from_size_align(16, 8)
+                    .ok()
+                    .unwrap_or(Layout::new::<u8>())
+            ),
+            Some(0)
+        );
+        assert_eq!(
+            class_index(
+                Layout::from_size_align(8192, 8)
+                    .ok()
+                    .unwrap_or(Layout::new::<u8>())
+            ),
+            Some(9)
+        );
+        assert_eq!(class_layout(9).size(), 8192);
+        assert_eq!(
+            class_index(
+                Layout::from_size_align(8193, 8)
+                    .ok()
+                    .unwrap_or(Layout::new::<u8>())
+            ),
+            None
+        );
+        assert_eq!(
+            class_index(
+                Layout::from_size_align(16384, 8)
+                    .ok()
+                    .unwrap_or(Layout::new::<u8>())
+            ),
+            None
+        );
+        assert_eq!(
+            class_index(
+                Layout::from_size_align(32, 16)
+                    .ok()
+                    .unwrap_or(Layout::new::<u8>())
+            ),
+            None
+        );
+
+        let layout = Layout::from_size_align(2048, 8)
+            .ok()
+            .unwrap_or(Layout::new::<u8>());
+        let Some(class_idx) = class_index(layout) else {
+            return;
+        };
+        // SAFETY: Allocates and deallocates a valid 2048-byte block through `MagazineAllocator`.
+        unsafe {
+            let ptr = MagazineAllocator.alloc(layout);
+            assert!(!ptr.is_null());
+            MagazineAllocator.dealloc(ptr, layout);
+        }
+        let before = MAG
+            .try_with(|tm| tm.with_mut(|m| m.counts[class_idx]))
+            .ok()
+            .flatten()
+            .unwrap_or(0);
+        assert_eq!(before, 1);
+        drain_thread_magazine();
+        let after = MAG
+            .try_with(|tm| tm.with_mut(|m| m.counts))
+            .ok()
+            .flatten()
+            .unwrap_or([u16::MAX; NUM_CLASSES]);
+        assert_eq!(after, [0; NUM_CLASSES]);
     }
 }

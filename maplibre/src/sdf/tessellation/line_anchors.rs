@@ -289,6 +289,26 @@ fn bends_within_limit(
     true
 }
 
+/// The rings of a polygon wound as GL JS winds them before it places labels: the outer ring
+/// runs clockwise on screen and holes run counter-clockwise, so labels start at the same end.
+pub(super) fn polygon_rings(polygon: &geo_types::Polygon<f64>) -> Vec<Vec<[f64; 2]>> {
+    let wound = |ring: &geo_types::LineString<f64>, outer: bool| {
+        let mut points: Vec<[f64; 2]> = ring.coords().map(|c| [c.x, c.y]).collect();
+        let area: f64 = points
+            .iter()
+            .zip(points.iter().cycle().skip(1))
+            .map(|(a, b)| a[0] * b[1] - b[0] * a[1])
+            .sum();
+        if (area > 0.0) != outer {
+            points.reverse();
+        }
+        points
+    };
+    std::iter::once(wound(polygon.exterior(), true))
+        .chain(polygon.interiors().iter().map(|ring| wound(ring, false)))
+        .collect()
+}
+
 #[cfg(test)]
 #[path = "line_anchors/tests.rs"]
 mod tests;

@@ -77,6 +77,7 @@ pub fn upload_system(
     if settings.buffer_pools.is_empty()
         || crate::render::eye_covering::EyeInFrame::reuses_content(world)
     {
+        super::request_system::clear_upload_permits(world);
         return Ok(());
     }
     let (paint_frame, previous_paint) = frame_paint(world, style, view_state);
@@ -100,6 +101,8 @@ pub fn upload_system(
                 })
         })
     };
+    let permit_source_set =
+        super::request_system::snapshot_permit_sources(world, has_pending_uploads, &source_tiles);
     let terrain_booting = style.terrain.is_some()
         && world
             .resources
@@ -123,6 +126,10 @@ pub fn upload_system(
     #[cfg(feature = "geojson")]
     crate::geojson::update::dynamic_points::ensure_seeded_for_style(world, style);
     style_refresh::apply_dirty_style(world, style, queue, paint_frame);
+    let retain_loaded_tiles = world
+        .resources
+        .get::<crate::render::systems::retention_system::RetainLoadedTiles>()
+        .is_some();
     let Some((Initialized(buffer_pool), budget, dyn_points, paint_scratch)) =
         world.resources.query_mut::<(
             &mut Eventually<VectorBufferPool>,
@@ -149,8 +156,9 @@ pub fn upload_system(
         super::structures::refresh_gpu(buffer_pool, queue, &spatial, &world.tiles);
     }
     let (deferred, needs_refetch) = if has_pending_uploads {
-        let allow_cpu_release =
-            style.terrain.is_none() && settings.buffer_pools.vertices >= 1_000_000;
+        let allow_cpu_release = (style.terrain.is_none() || cfg!(target_arch = "wasm32"))
+            && !retain_loaded_tiles
+            && settings.buffer_pools.vertices >= 1_000_000;
         upload_tessellated_layer_with_uncovered(
             buffer_pool,
             queue,
@@ -173,6 +181,12 @@ pub fn upload_system(
     if deferred {
         crate::render::frame_signals::keep_animating(world);
     }
+    super::request_system::reconcile_upload_permits(
+        world,
+        deferred,
+        style.revision(),
+        permit_source_set.as_ref(),
+    );
     if needs_refetch {
         crate::render::frame_signals::mark_dirty(world);
     }

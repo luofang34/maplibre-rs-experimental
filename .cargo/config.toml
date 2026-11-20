@@ -26,6 +26,42 @@ panic = 'abort'
 inherits = "wasm-release"
 opt-level = 2
 
+[profile.wasm-mt-release]
+inherits = "wasm-release"
+
+[profile.wasm-mt-release.package.maplibre]
+opt-level = "s"
+
+[profile.wasm-mt-release.package.geozero]
+opt-level = 2
+
+[profile.wasm-mt-release.package.prost]
+opt-level = 2
+
+[profile.wasm-mt-release.package.lyon_tessellation]
+opt-level = 2
+
+[profile.wasm-mt-release.package.lyon_path]
+opt-level = 2
+
+[profile.wasm-mt-release.package.lyon_geom]
+opt-level = 2
+
+[profile.wasm-mt-release.package.zlib-rs]
+opt-level = 2
+
+[profile.wasm-mt-release.package.flate2]
+opt-level = 2
+
+[profile.wasm-mt-release.package.png]
+opt-level = 2
+
+[profile.wasm-mt-release.package.earcut]
+opt-level = 2
+
+[profile.wasm-mt-release.package.rustc-hash]
+opt-level = 2
+
 [profile.wasm-release.package.earcut]
 opt-level = 2
 

@@ -6,7 +6,7 @@ use crate::{
     coords::WorldTileCoords,
     environment::OffscreenKernel,
     io::{
-        apc::{AsyncProcedureFuture, AttemptContext, Context, Input, ProcedureError},
+        apc::{AsyncProcedureFuture, AttemptContext, Context, Input, IntoMessage, ProcedureError},
         cpu_work::run_cpu_bound_replying,
         source_client::{HttpClient, SourceClient},
         source_type::SourceType,
@@ -18,6 +18,7 @@ use crate::{
         transferables::{LayerRasterMissing, RasterTransferables},
         RasterSourceId,
     },
+    vector::request_system::{SharedTileClaim, SharedTileSlot},
 };
 
 /// Fetches every raster source of the tile at once, so a tile costs its slowest source's
@@ -37,6 +38,7 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
         } = input;
         let context = AttemptContext::new(context, attempt);
         let client = kernel.source_client();
+        let claim = SharedTileClaim::default();
         let fetches = source_layer_groups(&style, TileKind::Raster)
             .into_iter()
             .filter(|group| {
@@ -57,21 +59,27 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
                         crate::style::source::Source::RasterDem(dem) => Some(dem.unpack_vector()),
                         _ => None,
                     });
-                fetch_source::<T, _, _>(&client, group, dem_unpack, coords, context.clone())
+                fetch_source::<T, _, _>(&client, group, dem_unpack, coords, &claim, context.clone())
             });
         let outcomes = crate::util::async_join::try_join_all_concurrent(fetches.collect()).await?;
-        let retry = outcomes.into_iter().any(|fetched| fetched);
+        let mut retry = false;
+        let mut shared_slot = SharedTileSlot::default();
+        for (source_retry, slot) in outcomes {
+            retry |= source_retry;
+            shared_slot.merge(slot);
+        }
+        let outcome = IntoMessage::into(TileRequestOutcome {
+            coords,
+            kind: RequestKind::Raster,
+            attempt: Some(attempt),
+            disposition: if retry {
+                RequestDisposition::Retry
+            } else {
+                RequestDisposition::Complete
+            },
+        });
         context
-            .send_back(TileRequestOutcome {
-                coords,
-                kind: RequestKind::Raster,
-                attempt: Some(attempt),
-                disposition: if retry {
-                    RequestDisposition::Retry
-                } else {
-                    RequestDisposition::Complete
-                },
-            })
+            .send_back(shared_slot.attach(outcome))
             .map_err(ProcedureError::Send)
     })
 }
@@ -84,16 +92,18 @@ async fn fetch_source<T: RasterTransferables, HC: HttpClient, C: Context + Clone
     group: SourceLayerGroup,
     dem_unpack: Option<[f64; 4]>,
     coords: WorldTileCoords,
+    claim: &SharedTileClaim,
     context: C,
-) -> Result<bool, ProcedureError> {
+) -> Result<(bool, SharedTileSlot), ProcedureError> {
     let mut retry = false;
     if let SourceType::Image(image) = &group.source {
-        return send_image_tile::<T, _, _>(
+        let retry = send_image_tile::<T, _, _>(
             (client, &image.source),
             (coords, RasterSourceId::new(group.source_name.clone())),
             context,
         )
-        .await;
+        .await?;
+        return Ok((retry, SharedTileSlot::default()));
     }
     if group.has_nothing_at(coords)
         || group
@@ -106,21 +116,22 @@ async fn fetch_source<T: RasterTransferables, HC: HttpClient, C: Context + Clone
                 RasterSourceId::new(group.source_name.clone()),
             ))
             .map_err(ProcedureError::Send)?;
-        return Ok(false);
+        return Ok((false, SharedTileSlot::default()));
     }
     if let Some(unpack) = dem_unpack {
         if group.source.format(&coords).is_some() {
-            return fetch_dem_source::<T, _, _>(client, group, unpack, coords, context).await;
+            return fetch_dem_source::<T, _, _>(client, group, unpack, coords, claim, context)
+                .await;
         }
     }
     if group.source.format(&coords).is_some() {
         use crate::sdf::assets::tiles::CachedTileFailure;
         match client
             .assets()
-            .load_raster_tile(client, &group.source, &coords)
+            .load_raster_tile(client, &group.source, &coords, claim)
             .await
         {
-            Ok(rgba) => {
+            Ok((rgba, slot)) => {
                 let source = RasterSourceId::new(group.source_name.clone());
                 let owned_rgba =
                     std::sync::Arc::try_unwrap(rgba).unwrap_or_else(|arc| (*arc).clone());
@@ -144,6 +155,7 @@ async fn fetch_source<T: RasterTransferables, HC: HttpClient, C: Context + Clone
                             .map_err(ProcedureError::Send)?;
                     }
                 }
+                return Ok((retry, slot));
             }
             Err(CachedTileFailure::Decode(error)) => {
                 tracing::warn!(%coords, source = ?group.source_name, %error, "invalid raster tile");
@@ -192,7 +204,7 @@ async fn fetch_source<T: RasterTransferables, HC: HttpClient, C: Context + Clone
                     .map_err(ProcedureError::Send)?;
             }
         }
-        return Ok(retry);
+        return Ok((retry, SharedTileSlot::default()));
     }
 
     let data = match client.fetch(&coords, &group.source).await {
@@ -228,7 +240,7 @@ async fn fetch_source<T: RasterTransferables, HC: HttpClient, C: Context + Clone
                     RasterSourceId::new(group.source_name.clone()),
                 ))
                 .map_err(ProcedureError::Send)?;
-            return Ok(retry);
+            return Ok((retry, SharedTileSlot::default()));
         }
     };
     let request = RasterTileRequest {
@@ -244,24 +256,32 @@ async fn fetch_source<T: RasterTransferables, HC: HttpClient, C: Context + Clone
     .map_err(ProcessRasterError::CpuWork)
     .and_then(|processed| processed);
     #[cfg(target_arch = "wasm32")]
-    let processed = match crate::platform::decode_rgba_bytes(&data).await {
-        Ok(rgba) => run_cpu_bound_replying(context.clone(), move |context| {
-            ProcessRasterContext::<T, _>::new(context).finish_decoded(
-                &request.coords,
-                request.source,
-                rgba,
-            )
-        })
-        .await
-        .map_err(ProcessRasterError::CpuWork)
-        .and_then(|processed| processed),
-        Err(reason) => Err(ProcessRasterError::Decoding {
-            source: image::ImageError::Decoding(image::error::DecodingError::new(
-                image::error::ImageFormatHint::Unknown,
-                reason,
-            )),
-        }),
+    let (processed, fallback_slot) = {
+        let slot = claim.acquire_once().await;
+        #[cfg(target_feature = "atomics")]
+        let _heavy = crate::vector::request_system::acquire_heavy_tile_slot().await;
+        let res = match crate::platform::decode_rgba_bytes(&data).await {
+            Ok(rgba) => run_cpu_bound_replying(context.clone(), move |context| {
+                ProcessRasterContext::<T, _>::new(context).finish_decoded(
+                    &request.coords,
+                    request.source,
+                    rgba,
+                )
+            })
+            .await
+            .map_err(ProcessRasterError::CpuWork)
+            .and_then(|processed| processed),
+            Err(reason) => Err(ProcessRasterError::Decoding {
+                source: image::ImageError::Decoding(image::error::DecodingError::new(
+                    image::error::ImageFormatHint::Unknown,
+                    reason,
+                )),
+            }),
+        };
+        (res, slot)
     };
+    #[cfg(not(target_arch = "wasm32"))]
+    let fallback_slot = SharedTileSlot::default();
     match processed {
         Ok(()) => {}
         Err(ProcessRasterError::Send(source)) => return Err(ProcedureError::Send(source)),
@@ -275,7 +295,7 @@ async fn fetch_source<T: RasterTransferables, HC: HttpClient, C: Context + Clone
                 .map_err(ProcedureError::Send)?;
         }
     }
-    Ok(retry)
+    Ok((retry, fallback_slot))
 }
 
 /// Fetches, PNG-decodes, and despikes a `raster-dem` source tile on a worker through the shared
@@ -286,8 +306,9 @@ async fn fetch_dem_source<T: RasterTransferables, HC: HttpClient, C: Context>(
     group: SourceLayerGroup,
     unpack: [f64; 4],
     coords: WorldTileCoords,
+    claim: &SharedTileClaim,
     context: C,
-) -> Result<bool, ProcedureError> {
+) -> Result<(bool, SharedTileSlot), ProcedureError> {
     use crate::{
         projection::body::Body, raster::transferables::LayerRaster,
         sdf::assets::tiles::CachedTileFailure,
@@ -296,10 +317,10 @@ async fn fetch_dem_source<T: RasterTransferables, HC: HttpClient, C: Context>(
     let circumference = Body::EARTH.circumference_meters();
     match client
         .assets()
-        .load_dem_tile(client, &group.source, &coords, unpack, circumference)
+        .load_dem_tile(client, &group.source, &coords, unpack, circumference, claim)
         .await
     {
-        Ok(entry) => {
+        Ok((entry, slot)) => {
             context
                 .send_back(T::LayerRaster::build_from_dem(
                     coords,
@@ -309,21 +330,21 @@ async fn fetch_dem_source<T: RasterTransferables, HC: HttpClient, C: Context>(
                     std::sync::Arc::clone(&entry.image),
                 ))
                 .map_err(ProcedureError::Send)?;
-            Ok(false)
+            Ok((false, slot))
         }
         Err(CachedTileFailure::Decode(error)) => {
             tracing::warn!(%coords, source = ?group.source_name, %error, "invalid DEM raster tile");
             context
                 .send_back(T::LayerRasterMissing::build_from(coords, source))
                 .map_err(ProcedureError::Send)?;
-            Ok(false)
+            Ok((false, SharedTileSlot::default()))
         }
         Err(CachedTileFailure::NotFound) => {
-            tracing::debug!(%coords, source = ?group.source_name, "no DEM raster tile at the source");
+            tracing::debug!(%coords, source = %group.source_name.as_deref().unwrap_or_default(), "no DEM raster tile at the source");
             context
                 .send_back(T::LayerRasterMissing::build_from(coords, source))
                 .map_err(ProcedureError::Send)?;
-            Ok(false)
+            Ok((false, SharedTileSlot::default()))
         }
         Err(CachedTileFailure::Transport { retryable, message }) => {
             if retryable {
@@ -334,7 +355,7 @@ async fn fetch_dem_source<T: RasterTransferables, HC: HttpClient, C: Context>(
             context
                 .send_back(T::LayerRasterMissing::build_from(coords, source))
                 .map_err(ProcedureError::Send)?;
-            Ok(retryable)
+            Ok((retryable, SharedTileSlot::default()))
         }
     }
 }

@@ -7,102 +7,22 @@ use geozero::{
     mvt::{process_geom, tile, Message, MvtError},
     ColumnValue, FeatureProcessor, GeozeroGeometry, ProcessorSink,
 };
-use rustc_hash::FxHashMap;
 
-use super::feature_properties;
+mod props;
+pub(crate) use props::fill_feature_properties;
+pub(super) use props::{decode_layer_properties, decode_layer_properties_bounded};
+
 use crate::{
     style::{
-        expression::{empty_feature_properties, FeatureProperties, Value},
+        expression::{FeatureProperties, Value},
         filter::{FeatureContext, Filter, GeometryType},
     },
     vector::tessellation::feature_paint::FeatureStateSyncContext,
 };
 
-/// Pre-decodes every feature's typed properties in `layer` once into `Arc<FeatureProperties>`
-/// (including active `feature-state` entries), memoizing identical MVT tag slices so repeated
-/// attribute combinations share a single heap map. Returns `None` if any feature's tag table is
-/// malformed so callers can fall back to `geozero::mvt::process` error reporting.
-pub(super) fn decode_layer_properties(
-    layer: &tile::Layer,
-    state_ctx: Option<&FeatureStateSyncContext>,
-) -> Option<Vec<Arc<FeatureProperties>>> {
-    let mut out = Vec::with_capacity(layer.features.len());
-    if let Some(ctx) = state_ctx {
-        for feature in &layer.features {
-            if !tags_are_valid(layer, &feature.tags) {
-                return None;
-            }
-            let mut properties = feature_properties(layer, feature);
-            crate::style::feature_state::sync_properties_feature_state(
-                &mut properties,
-                feature.id,
-                ctx.promote_property.as_deref(),
-                ctx.source_state.as_deref(),
-                ctx.source_layer.as_deref(),
-            );
-            if properties.is_empty() {
-                out.push(Arc::clone(empty_feature_properties()));
-            } else {
-                out.push(Arc::new(properties));
-            }
-        }
-        return Some(out);
-    }
-
-    let empty = empty_feature_properties();
-    let mut memo: FxHashMap<&[u32], Arc<FeatureProperties>> = FxHashMap::default();
-    for feature in &layer.features {
-        if feature.tags.is_empty() {
-            out.push(Arc::clone(empty));
-            continue;
-        }
-        if let Some(existing) = memo.get(feature.tags.as_slice()) {
-            out.push(Arc::clone(existing));
-            continue;
-        }
-        if !tags_are_valid(layer, &feature.tags) {
-            return None;
-        }
-        let properties = feature_properties(layer, feature);
-        let arc = if properties.is_empty() {
-            Arc::clone(empty)
-        } else {
-            Arc::new(properties)
-        };
-        memo.insert(feature.tags.as_slice(), Arc::clone(&arc));
-        out.push(arc);
-    }
-    Some(out)
-}
-
-fn tags_are_valid(layer: &tile::Layer, tags: &[u32]) -> bool {
-    let (pairs, remainder) = tags.as_chunks::<2>();
-    if !remainder.is_empty() {
-        return false;
-    }
-    for &[key_idx, val_idx] in pairs {
-        if layer.keys.get(key_idx as usize).is_none() {
-            return false;
-        }
-        let Some(val) = layer.values.get(val_idx as usize) else {
-            return false;
-        };
-        let has_val = val.string_value.is_some()
-            || val.float_value.is_some()
-            || val.double_value.is_some()
-            || val.int_value.is_some()
-            || val.uint_value.is_some()
-            || val.sint_value.is_some()
-            || val.bool_value.is_some();
-        if !has_val {
-            return false;
-        }
-    }
-    true
-}
-
 /// Evaluates `filter` against `layer.features` without cloning or mutating `layer`, reusing
-/// `shared_props` when available and returning matching feature indices in layer order.
+/// `shared_props` when available (or one scratch map otherwise) and returning matching feature
+/// indices in layer order.
 pub(super) fn select_filtered_features(
     layer: &tile::Layer,
     filter: &Filter,
@@ -111,24 +31,23 @@ pub(super) fn select_filtered_features(
     shared_props: Option<&[Arc<FeatureProperties>]>,
 ) -> Vec<usize> {
     let mut selected = Vec::new();
+    let mut scratch = FeatureProperties::default();
     for (index, feature) in layer.features.iter().enumerate() {
-        let owned;
         let props_ref: &FeatureProperties =
             if let Some(shared) = shared_props.and_then(|all| all.get(index)) {
                 shared.as_ref()
             } else {
-                let mut properties = feature_properties(layer, feature);
+                fill_feature_properties(layer, feature, &mut scratch);
                 if let Some(ctx) = state_ctx {
                     crate::style::feature_state::sync_properties_feature_state(
-                        &mut properties,
+                        &mut scratch,
                         feature.id,
                         ctx.promote_property.as_deref(),
                         ctx.source_state.as_deref(),
                         ctx.source_layer.as_deref(),
                     );
                 }
-                owned = properties;
-                &owned
+                &scratch
             };
         if filter.evaluate(&FeatureContext {
             properties: props_ref,

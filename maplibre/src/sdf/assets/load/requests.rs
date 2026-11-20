@@ -10,7 +10,7 @@ use crate::{
         expression::ImageSet,
         layer::{LayerPaint, StyleLayer},
     },
-    vector::feature_properties,
+    vector::fill_feature_properties,
 };
 
 /// Characters wanted from each font stack.
@@ -38,6 +38,13 @@ impl ImageSet for NamesAsked {
     }
 }
 
+fn needs_label_shaping(text: &str) -> bool {
+    text.chars().any(|ch| {
+        crate::font::is_complex_shaping_codepoint(ch)
+            || matches!(u32::from(ch), 0xFB50..=0xFDFF | 0xFE70..=0xFEFF)
+    })
+}
+
 /// Adds the characters of a feature's label to the fonts that draw them, as the label reads
 /// with `images` held.
 fn glyphs(
@@ -46,13 +53,16 @@ fn glyphs(
     paint: &crate::style::layer::SymbolPaint,
     (properties, zoom): (&crate::style::expression::FeatureProperties, f64),
     images: &dyn ImageSet,
+    has_registered_fonts: bool,
 ) {
     let Some(text) = paint.label_among(properties, zoom, Some(images)) else {
         return;
     };
     let stack = paint.font_stack();
-    if let Some(raw) = paint.raw_label_among(properties, zoom, Some(images)) {
-        labels.entry(stack.clone()).or_default().insert(raw);
+    if has_registered_fonts || needs_label_shaping(&text) {
+        if let Some(raw) = paint.raw_label_among(properties, zoom, Some(images)) {
+            labels.entry(stack.clone()).or_default().insert(raw);
+        }
     }
     fonts.entry(stack).or_default().extend(
         text.chars()
@@ -169,6 +179,7 @@ fn compile_symbol_layers<'l, 's>(
     by_source_layer
 }
 
+#[allow(clippy::too_many_arguments)]
 fn record_feature_symbol_requests(
     out: &mut SymbolRequests,
     compiled_layers: &[CompiledSymbolLayer<'_, '_>],
@@ -177,6 +188,7 @@ fn record_feature_symbol_requests(
     geometry_type: crate::style::filter::GeometryType,
     base_properties: &crate::style::expression::FeatureProperties,
     zoom: f64,
+    has_registered_fonts: bool,
 ) {
     let feature_id = raw_id.map(|id| crate::style::expression::Value::Number(id as f64));
     let mut state_scratch: Option<crate::style::expression::FeatureProperties> = None;
@@ -212,6 +224,7 @@ fn record_feature_symbol_requests(
             compiled.paint,
             (props, zoom),
             &asked,
+            has_registered_fonts,
         );
         if let Some(icon) = compiled
             .paint
@@ -237,11 +250,14 @@ fn symbol_requests_from_mvt<'l>(
     zoom: f64,
     style: Option<&crate::style::Style>,
 ) -> SymbolRequests {
+    const MAX_TAG_MEMO: usize = 128;
     let by_source_layer = compile_symbol_layers(layers, style);
     let mut out = SymbolRequests::default();
     if by_source_layer.is_empty() {
         return out;
     }
+    let has_registered_fonts = style.is_some_and(|s| s.font_faces.is_some())
+        || crate::font::global_font_system().has_registered_any();
 
     let empty_props = crate::style::expression::empty_feature_properties();
     for source in &tile.layers {
@@ -252,14 +268,20 @@ fn symbol_requests_from_mvt<'l>(
             &[u32],
             crate::style::expression::FeatureProperties,
         > = rustc_hash::FxHashMap::default();
+        let mut scratch = crate::style::expression::FeatureProperties::default();
         for feature in &source.features {
             let base_properties: &crate::style::expression::FeatureProperties =
                 if feature.tags.is_empty() {
                     empty_props
+                } else if let Some(existing) = tag_memo.get(feature.tags.as_slice()) {
+                    existing
+                } else if tag_memo.len() < MAX_TAG_MEMO {
+                    let mut props = crate::style::expression::FeatureProperties::default();
+                    fill_feature_properties(source, feature, &mut props);
+                    tag_memo.entry(feature.tags.as_slice()).or_insert(props)
                 } else {
-                    tag_memo
-                        .entry(feature.tags.as_slice())
-                        .or_insert_with(|| feature_properties(source, feature))
+                    fill_feature_properties(source, feature, &mut scratch);
+                    &scratch
                 };
             let geometry_type =
                 crate::style::filter::GeometryType::from_mvt(feature.r#type.unwrap_or_default());
@@ -271,6 +293,7 @@ fn symbol_requests_from_mvt<'l>(
                 geometry_type,
                 base_properties,
                 zoom,
+                has_registered_fonts,
             );
         }
     }
@@ -289,6 +312,8 @@ fn symbol_requests_from_mlt<'l>(
     if by_source_layer.is_empty() {
         return out;
     }
+    let has_registered_fonts = style.is_some_and(|s| s.font_faces.is_some())
+        || crate::font::global_font_system().has_registered_any();
     crate::vector::mlt::visit_mlt_features(
         data,
         |name| by_source_layer.contains_key(name),
@@ -302,9 +327,70 @@ fn symbol_requests_from_mlt<'l>(
                     geometry_type,
                     base_properties,
                     zoom,
+                    has_registered_fonts,
                 );
             }
         },
     );
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::style::{
+        expression::{FeatureProperties, Value},
+        layer::{StyleProperty, SymbolPaint},
+    };
+
+    #[test]
+    fn skips_label_shaping_strings_for_latin_cjk_unless_fonts_registered_or_complex() {
+        let paint = SymbolPaint {
+            text_field: Some(StyleProperty::parse(&serde_json::json!("{name}"))),
+            ..Default::default()
+        };
+        let asked = NamesAsked::default();
+
+        let mut latin_cjk = FeatureProperties::default();
+        latin_cjk.insert("name".into(), Value::String("Tokyo 東京".into()));
+        let mut fonts = GlyphRequests::default();
+        let mut labels = HashMap::default();
+        glyphs(
+            &mut fonts,
+            &mut labels,
+            &paint,
+            (&latin_cjk, 14.0),
+            &asked,
+            false,
+        );
+        assert!(labels.is_empty());
+        assert!(!fonts.is_empty());
+
+        let mut arabic = FeatureProperties::default();
+        arabic.insert("name".into(), Value::String("مرحبا".into()));
+        glyphs(
+            &mut fonts,
+            &mut labels,
+            &paint,
+            (&arabic, 14.0),
+            &asked,
+            false,
+        );
+        assert!(labels
+            .get(&paint.font_stack())
+            .is_some_and(|set| set.contains("مرحبا")));
+
+        let mut with_registered = HashMap::default();
+        glyphs(
+            &mut fonts,
+            &mut with_registered,
+            &paint,
+            (&latin_cjk, 14.0),
+            &asked,
+            true,
+        );
+        assert!(with_registered
+            .get(&paint.font_stack())
+            .is_some_and(|set| set.contains("Tokyo 東京")));
+    }
 }

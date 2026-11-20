@@ -1,32 +1,47 @@
 //! Font-face fetching, local CJK/fallback SDF rasterisation, and OpenType `harfrust` shaping
 //! during tile symbol asset loading.
 
+use std::sync::Arc;
+
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use super::{
     requests::GlyphRequests, AssetFailure, AtlasBuilder, SymbolAssetConfig, SymbolAssetError,
 };
 use crate::{
-    font::{global_font_system, is_complex_shaping_codepoint, is_local_cjk_codepoint},
+    font::{
+        global_font_system, is_complex_shaping_codepoint, is_local_cjk_codepoint, RasterizedGlyph,
+    },
     io::source_client::{HttpClient, SourceClient},
+    sdf::glyphs::Glyphs,
     style::Style,
 };
 
 struct PendingFont {
     font: String,
     has_registered: bool,
+    registered_glyphs: Vec<(u32, RasterizedGlyph)>,
     remote_chars: HashSet<u32>,
+    local_cjk: Vec<(u32, char)>,
     range_start: usize,
     range_len: usize,
 }
 
-pub(super) async fn load_fonts_and_shaping<HC: HttpClient>(
+/// Fetched remote glyph ranges and pending local-font jobs ready for synchronous atlas packing.
+pub(super) struct FetchedFontInputs {
+    pending_fonts: Vec<PendingFont>,
+    fetched_ranges: Vec<Option<Arc<Glyphs>>>,
+    labels: HashMap<String, HashSet<String>>,
+}
+
+/// Fetches remote font-face files and `.pbf` glyph ranges without touching `AtlasBuilder` or
+/// `OffscreenCanvas`, so network I/O overlaps base geometry tessellation with zero atlas memory.
+pub(super) async fn fetch_font_inputs<HC: HttpClient>(
     client: &SourceClient<HC>,
     config: SymbolAssetConfig<'_>,
     fonts: GlyphRequests,
     labels: HashMap<String, HashSet<String>>,
-    builder: &mut AtlasBuilder,
-) -> Result<(), SymbolAssetError> {
+) -> Result<FetchedFontInputs, SymbolAssetError> {
     if let Some(style) = config.style {
         ensure_style_font_faces(client, style).await?;
     }
@@ -40,6 +55,7 @@ pub(super) async fn load_fonts_and_shaping<HC: HttpClient>(
     for (font, characters) in fonts {
         let mut remote_chars = HashSet::default();
         let mut local_cjk = Vec::new();
+        let mut registered_glyphs = Vec::new();
         let has_registered = global_font_system().has_registered_stack(&font);
 
         if has_registered {
@@ -50,7 +66,7 @@ pub(super) async fn load_fonts_and_shaping<HC: HttpClient>(
                 };
                 if let Some((_, face)) = fs.resolve_face_for_char(&font, ch, false) {
                     if let Some(glyph) = face.rasterize_char(ch) {
-                        builder.pack_rasterized_codepoint(&font, code, &glyph);
+                        registered_glyphs.push((code, glyph));
                         continue;
                     }
                 }
@@ -73,33 +89,6 @@ pub(super) async fn load_fonts_and_shaping<HC: HttpClient>(
             }
         }
 
-        #[cfg(target_arch = "wasm32")]
-        if !local_cjk.is_empty() {
-            if has_registered {
-                let mut fs = global_font_system();
-                for &(code, ch) in &local_cjk {
-                    if let Some(glyph) = fs.rasterize_local_char(ideograph_family, &font, ch) {
-                        builder.pack_rasterized_codepoint(&font, code, &glyph);
-                    }
-                }
-            } else {
-                for (code, glyph) in
-                    crate::font::rasterize_canvas2d_chars_sdf(ideograph_family, &font, &local_cjk)
-                {
-                    builder.pack_rasterized_codepoint(&font, code, &glyph);
-                }
-            }
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        if !local_cjk.is_empty() {
-            let mut fs = global_font_system();
-            for &(code, ch) in &local_cjk {
-                if let Some(glyph) = fs.rasterize_local_char(ideograph_family, &font, ch) {
-                    builder.pack_rasterized_codepoint(&font, code, &glyph);
-                }
-            }
-        }
-
         let mut ranges: Vec<u32> = remote_chars.iter().map(|code| (code / 256) * 256).collect();
         ranges.sort_unstable();
         ranges.dedup();
@@ -112,7 +101,9 @@ pub(super) async fn load_fonts_and_shaping<HC: HttpClient>(
         pending_fonts.push(PendingFont {
             font,
             has_registered,
+            registered_glyphs,
             remote_chars,
+            local_cjk,
             range_start,
             range_len,
         });
@@ -128,12 +119,73 @@ pub(super) async fn load_fonts_and_shaping<HC: HttpClient>(
     )
     .await?;
 
+    Ok(FetchedFontInputs {
+        pending_fonts,
+        fetched_ranges,
+        labels,
+    })
+}
+
+/// Packs fetched `.pbf` glyphs, local CJK SDF rasterizations, and shaped glyph runs into `builder`.
+pub(super) fn pack_font_inputs(
+    config: SymbolAssetConfig<'_>,
+    inputs: FetchedFontInputs,
+    builder: &mut AtlasBuilder,
+) {
+    let ideograph_family = config
+        .style
+        .and_then(|style| style.local_ideograph_font_family.as_deref());
+    let FetchedFontInputs {
+        pending_fonts,
+        fetched_ranges,
+        labels,
+    } = inputs;
+
+    for pending in &pending_fonts {
+        for (code, glyph) in &pending.registered_glyphs {
+            builder.pack_rasterized_codepoint(&pending.font, *code, glyph);
+        }
+        if !pending.local_cjk.is_empty() {
+            #[cfg(target_arch = "wasm32")]
+            if pending.has_registered {
+                let mut fs = global_font_system();
+                for &(code, ch) in &pending.local_cjk {
+                    if let Some(glyph) =
+                        fs.rasterize_local_char(ideograph_family, &pending.font, ch)
+                    {
+                        builder.pack_rasterized_codepoint(&pending.font, code, &glyph);
+                    }
+                }
+            } else {
+                for (code, glyph) in crate::font::rasterize_canvas2d_chars_sdf(
+                    ideograph_family,
+                    &pending.font,
+                    &pending.local_cjk,
+                ) {
+                    builder.pack_rasterized_codepoint(&pending.font, code, &glyph);
+                }
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let mut fs = global_font_system();
+                for &(code, ch) in &pending.local_cjk {
+                    if let Some(glyph) =
+                        fs.rasterize_local_char(ideograph_family, &pending.font, ch)
+                    {
+                        builder.pack_rasterized_codepoint(&pending.font, code, &glyph);
+                    }
+                }
+            }
+        }
+    }
+
     for PendingFont {
         font,
         has_registered,
         remote_chars,
         range_start,
         range_len,
+        ..
     } in pending_fonts
     {
         let mut had_any_pbf = false;
@@ -206,7 +258,6 @@ pub(super) async fn load_fonts_and_shaping<HC: HttpClient>(
             );
         }
     }
-    Ok(())
 }
 
 async fn ensure_style_font_faces<HC: HttpClient>(

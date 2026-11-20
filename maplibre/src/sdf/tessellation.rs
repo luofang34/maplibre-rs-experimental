@@ -66,6 +66,9 @@ pub struct TextTessellator {
     /// Source `promoteId` and active runtime `feature-state` snapshot for this layer.
     pub(crate) feature_state_ctx:
         Option<crate::vector::tessellation::feature_paint::FeatureStateSyncContext>,
+    /// When `Some`, point symbols stream straight into `quad_buffer`/`features` and prune
+    /// feature properties immediately instead of buffering `CollectedSymbol`s.
+    stream_point_runtime_keys: Option<Option<rustc_hash::FxHashSet<String>>>,
 }
 
 impl TextTessellator {
@@ -101,7 +104,22 @@ impl TextTessellator {
             source_ids: Vec::new(),
             source_indices: Vec::new(),
             feature_state_ctx: None,
+            stream_point_runtime_keys: None,
         }
+    }
+
+    /// Streams point-placed labels straight into vertex/feature buffers and prunes properties
+    /// per feature instead of retaining every `CollectedSymbol` until [`Self::finish`].
+    pub(crate) fn enable_streaming_point_layout(
+        &mut self,
+        runtime_keys: Option<rustc_hash::FxHashSet<String>>,
+    ) {
+        self.stream_point_runtime_keys = Some(runtime_keys);
+    }
+
+    /// Whether point-placed symbols streamed and pruned properties during collection.
+    pub(crate) fn streamed_point_layout(&self) -> bool {
+        self.stream_point_runtime_keys.is_some()
     }
 
     /// Sets the style and the assets used by this tile's symbols.
@@ -123,22 +141,15 @@ impl TextTessellator {
             );
         }
         self.properties.clear();
-        self.collected.sort_by(|a, b| {
-            let key = |symbol: &CollectedSymbol| {
-                self.paint
-                    .number("symbol-sort-key", &symbol.properties, self.zoom, 0.0)
-            };
-            key(a).total_cmp(&key(b))
-        });
-        for symbol in &self.collected {
-            layout::append(
-                symbol,
-                (&self.paint, self.zoom, self.overscaling),
-                &self.atlas,
-                &mut self.quad_buffer,
-                &mut self.features,
-            );
-        }
+        let collected = std::mem::take(&mut self.collected);
+        self.shared_properties.clear();
+        prune::finish_collected(
+            collected,
+            (&self.paint, self.zoom, self.overscaling),
+            &self.atlas,
+            &mut self.quad_buffer,
+            &mut self.features,
+        );
         if draw_order::sorts_by_height(&self.paint, self.zoom) {
             draw_order::reorder(&mut self.quad_buffer, &mut self.features);
         }
@@ -261,35 +272,9 @@ impl TextTessellator {
         angle: f32,
         source: layout::SourceFeature,
         props: &Arc<FeatureProperties>,
-        (line, repeat_key): (Option<layout::LineContext>, Option<&Arc<str>>),
+        line_context: (Option<layout::LineContext>, Option<&Arc<str>>),
     ) {
-        let ways = line
-            .is_none()
-            .then(|| {
-                self.paint
-                    .label_among(props, self.zoom, Some(&self.atlas.icons))
-            })
-            .flatten()
-            .and_then(|text| text_layout::both_orientations(&self.paint, &text));
-        for (index, vertical) in ways
-            .map_or_else(
-                || vec![None],
-                |[first, second]| vec![Some(first), Some(second)],
-            )
-            .into_iter()
-            .enumerate()
-        {
-            self.collected.push(CollectedSymbol {
-                source,
-                line: line.clone(),
-                anchor,
-                angle,
-                properties: Arc::clone(props),
-                vertical,
-                fallback: index == 1,
-                repeat_key: repeat_key.cloned(),
-            });
-        }
+        prune::collect_symbol(self, anchor, angle, source, props, line_context);
     }
 
     fn anchor_is_too_close(
@@ -411,48 +396,36 @@ impl TextTessellator {
     }
 }
 
-/// The rings of a polygon wound as GL JS winds them before it places labels: the outer ring
-/// runs clockwise on screen and holes run counter-clockwise, so labels start at the same end.
-fn polygon_rings(polygon: &geo_types::Polygon<f64>) -> Vec<Vec<[f64; 2]>> {
-    let wound = |ring: &geo_types::LineString<f64>, outer: bool| {
-        let mut points: Vec<[f64; 2]> = ring.coords().map(|c| [c.x, c.y]).collect();
-        let area: f64 = points
-            .iter()
-            .zip(points.iter().cycle().skip(1))
-            .map(|(a, b)| a[0] * b[1] - b[0] * a[1])
-            .sum();
-        if (area > 0.0) != outer {
-            points.reverse();
-        }
-        points
-    };
-    std::iter::once(wound(polygon.exterior(), true))
-        .chain(polygon.interiors().iter().map(|ring| wound(ring, false)))
-        .collect()
-}
-
 impl FeatureProcessor for TextTessellator {
     fn feature_end(&mut self, idx: u64) -> GeoResult<()> {
         if let Some(geometry) = self.geo_writer.take_geometry() {
             let slice_idx = usize::try_from(idx).ok();
             let (source, props) = prune::build_source_feature(self, slice_idx, &geometry);
-            let lines: Option<Vec<Vec<[f64; 2]>>> = match &geometry {
-                Geometry::LineString(line) => {
-                    Some(vec![line.coords().map(|c| [c.x, c.y]).collect()])
+            let placement = line_placement(&self.paint);
+            let lines: Option<Vec<Vec<[f64; 2]>>> = if placement.is_some() {
+                match &geometry {
+                    Geometry::LineString(line) => {
+                        Some(vec![line.coords().map(|c| [c.x, c.y]).collect()])
+                    }
+                    Geometry::MultiLineString(lines) => Some(
+                        lines
+                            .iter()
+                            .map(|line| line.coords().map(|c| [c.x, c.y]).collect())
+                            .collect(),
+                    ),
+                    Geometry::Polygon(polygon) => Some(line_anchors::polygon_rings(polygon)),
+                    Geometry::MultiPolygon(polygons) => Some(
+                        polygons
+                            .iter()
+                            .flat_map(line_anchors::polygon_rings)
+                            .collect(),
+                    ),
+                    _ => None,
                 }
-                Geometry::MultiLineString(lines) => Some(
-                    lines
-                        .iter()
-                        .map(|line| line.coords().map(|c| [c.x, c.y]).collect())
-                        .collect(),
-                ),
-                Geometry::Polygon(polygon) => Some(polygon_rings(polygon)),
-                Geometry::MultiPolygon(polygons) => {
-                    Some(polygons.iter().flat_map(polygon_rings).collect())
-                }
-                _ => None,
+            } else {
+                None
             };
-            match (line_placement(&self.paint), lines) {
+            match (placement, lines) {
                 (Some(LinePlacement::Line), Some(lines)) => {
                     let text = self
                         .paint
@@ -477,6 +450,12 @@ impl FeatureProcessor for TextTessellator {
                         .filter(|anchor| tile.contains(&anchor.x()) && tile.contains(&anchor.y()))
                     {
                         self.collect(anchor, 0.0, source, &props, (None, None));
+                    }
+                    if self.stream_point_runtime_keys.is_some() {
+                        if let Ok(mut recycled) = Arc::try_unwrap(props) {
+                            recycled.clear();
+                            self.properties = recycled;
+                        }
                     }
                 }
             }

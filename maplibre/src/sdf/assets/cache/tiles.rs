@@ -14,6 +14,7 @@ use crate::{
         source_type::SourceType,
     },
     terrain::dem::{self, DemTile},
+    vector::request_system::{SharedTileClaim, SharedTileSlot},
 };
 
 /// Why a cached DEM or static raster tile fetch/decode did not yield a tile.
@@ -115,6 +116,27 @@ fn raster_cache_key(url: &str, coords: &WorldTileCoords) -> String {
     )
 }
 
+async fn fetch_tile_raw<HC: HttpClient>(
+    client: &SourceClient<HC>,
+    coords: &WorldTileCoords,
+    source: &SourceType,
+) -> Result<Vec<u8>, CachedTileFailure> {
+    client.fetch(coords, source).await.map_err(|error| {
+        if error.is_not_found() {
+            CachedTileFailure::NotFound
+        } else {
+            CachedTileFailure::Transport {
+                retryable: error.is_retryable(),
+                message: error.describe(),
+            }
+        }
+    })
+}
+
+async fn acquire_decode_slot(claim: &SharedTileClaim) -> SharedTileSlot {
+    claim.acquire_once().await
+}
+
 impl AssetCache {
     /// Number of DEM tiles decoded into [`DemTile`] grids through this cache.
     pub fn dem_decode_count(&self) -> usize {
@@ -155,7 +177,8 @@ impl AssetCache {
         client: &SourceClient<HC>,
         source: &SourceType,
         coords: &WorldTileCoords,
-    ) -> Result<Arc<RgbaImage>, CachedTileFailure> {
+        claim: &SharedTileClaim,
+    ) -> Result<(Arc<RgbaImage>, SharedTileSlot), CachedTileFailure> {
         let Some(url) = source.format(coords) else {
             return Err(CachedTileFailure::Transport {
                 retryable: false,
@@ -166,42 +189,30 @@ impl AssetCache {
             url.contains("127.0.0.1") || url.contains("localhost") || url.contains("/unstable/");
         let retain_tiles = !is_mock && self.0.budget_bytes > super::DEFAULT_BUDGET_BYTES;
         if !retain_tiles {
-            let data = client.fetch(coords, source).await.map_err(|error| {
-                if error.is_not_found() {
-                    CachedTileFailure::NotFound
-                } else {
-                    CachedTileFailure::Transport {
-                        retryable: error.is_retryable(),
-                        message: error.describe(),
-                    }
-                }
-            })?;
+            let data = fetch_tile_raw(client, coords, source).await?;
+            let slot = acquire_decode_slot(claim).await;
+            #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+            let _heavy = crate::vector::request_system::acquire_heavy_tile_slot().await;
             let rgba = decode_rgba(data).await?;
             self.0.raster_decodes.fetch_add(1, Ordering::Relaxed);
-            return Ok(Arc::new(rgba));
+            return Ok((Arc::new(rgba), slot));
         }
         let key = raster_cache_key(&url, coords);
-        self.load::<RgbaImage, _, _>(key, || async {
-            let data = client.fetch(coords, source).await.map_err(|error| {
-                if error.is_not_found() {
-                    CachedTileFailure::NotFound.into_asset_failure()
-                } else {
-                    CachedTileFailure::Transport {
-                        retryable: error.is_retryable(),
-                        message: error.describe(),
-                    }
-                    .into_asset_failure()
-                }
-            })?;
-            let rgba = decode_rgba(data)
-                .await
-                .map_err(CachedTileFailure::into_asset_failure)?;
-            self.0.raster_decodes.fetch_add(1, Ordering::Relaxed);
-            let bytes = rgba.as_raw().len();
-            Ok((rgba, bytes))
-        })
-        .await
-        .map_err(CachedTileFailure::from_asset_failure)
+        let rgba = self
+            .load::<RgbaImage, _, _>(key, || async {
+                let data = fetch_tile_raw(client, coords, source)
+                    .await
+                    .map_err(CachedTileFailure::into_asset_failure)?;
+                let rgba = decode_rgba(data)
+                    .await
+                    .map_err(CachedTileFailure::into_asset_failure)?;
+                self.0.raster_decodes.fetch_add(1, Ordering::Relaxed);
+                let bytes = rgba.as_raw().len();
+                Ok((rgba, bytes))
+            })
+            .await
+            .map_err(CachedTileFailure::from_asset_failure)?;
+        Ok((rgba, SharedTileSlot::default()))
     }
 
     /// Fetches, PNG-decodes, and despikes a DEM tile once across all maps sharing this cache.
@@ -212,7 +223,8 @@ impl AssetCache {
         coords: &WorldTileCoords,
         unpack: [f64; 4],
         circumference_meters: f64,
-    ) -> Result<Arc<CachedDemEntry>, CachedTileFailure> {
+        claim: &SharedTileClaim,
+    ) -> Result<(Arc<CachedDemEntry>, SharedTileSlot), CachedTileFailure> {
         let Some(url) = source.format(coords) else {
             return Err(CachedTileFailure::Transport {
                 retryable: false,
@@ -223,59 +235,50 @@ impl AssetCache {
             url.contains("127.0.0.1") || url.contains("localhost") || url.contains("/unstable/");
         let retain_tiles = !is_mock && self.0.budget_bytes > super::DEFAULT_BUDGET_BYTES;
         if !retain_tiles {
-            let data = client.fetch(coords, source).await.map_err(|error| {
-                if error.is_not_found() {
-                    CachedTileFailure::NotFound
-                } else {
-                    CachedTileFailure::Transport {
-                        retryable: error.is_retryable(),
-                        message: error.describe(),
-                    }
-                }
-            })?;
+            let data = fetch_tile_raw(client, coords, source).await?;
+            let slot = acquire_decode_slot(claim).await;
+            #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+            let _heavy = crate::vector::request_system::acquire_heavy_tile_slot().await;
             let rgba = decode_rgba(data).await?;
             let sample_metres = dem::sample_metres(*coords, rgba.width(), circumference_meters);
             let tile = decode_dem(Arc::new(rgba), unpack, sample_metres).await?;
             self.0.dem_decodes.fetch_add(1, Ordering::Relaxed);
-            return Ok(Arc::new(CachedDemEntry {
-                tile: Arc::new(tile),
-                image: Arc::new(RgbaImage::new(0, 0)),
-                circumference_meters,
-            }));
-        }
-        let key = dem_cache_key(&url, coords, unpack, circumference_meters);
-        self.load::<CachedDemEntry, _, _>(key, || async {
-            let data = client.fetch(coords, source).await.map_err(|error| {
-                if error.is_not_found() {
-                    CachedTileFailure::NotFound.into_asset_failure()
-                } else {
-                    CachedTileFailure::Transport {
-                        retryable: error.is_retryable(),
-                        message: error.describe(),
-                    }
-                    .into_asset_failure()
-                }
-            })?;
-            let rgba = decode_rgba(data)
-                .await
-                .map_err(CachedTileFailure::into_asset_failure)?;
-            let sample_metres = dem::sample_metres(*coords, rgba.width(), circumference_meters);
-            let tile = decode_dem(Arc::new(rgba), unpack, sample_metres)
-                .await
-                .map_err(CachedTileFailure::into_asset_failure)?;
-            self.0.dem_decodes.fetch_add(1, Ordering::Relaxed);
-            let bytes = tile.pixels().len();
-            Ok((
-                CachedDemEntry {
+            return Ok((
+                Arc::new(CachedDemEntry {
                     tile: Arc::new(tile),
                     image: Arc::new(RgbaImage::new(0, 0)),
                     circumference_meters,
-                },
-                bytes,
-            ))
-        })
-        .await
-        .map_err(CachedTileFailure::from_asset_failure)
+                }),
+                slot,
+            ));
+        }
+        let key = dem_cache_key(&url, coords, unpack, circumference_meters);
+        let entry = self
+            .load::<CachedDemEntry, _, _>(key, || async {
+                let data = fetch_tile_raw(client, coords, source)
+                    .await
+                    .map_err(CachedTileFailure::into_asset_failure)?;
+                let rgba = decode_rgba(data)
+                    .await
+                    .map_err(CachedTileFailure::into_asset_failure)?;
+                let sample_metres = dem::sample_metres(*coords, rgba.width(), circumference_meters);
+                let tile = decode_dem(Arc::new(rgba), unpack, sample_metres)
+                    .await
+                    .map_err(CachedTileFailure::into_asset_failure)?;
+                self.0.dem_decodes.fetch_add(1, Ordering::Relaxed);
+                let bytes = tile.pixels().len();
+                Ok((
+                    CachedDemEntry {
+                        tile: Arc::new(tile),
+                        image: Arc::new(RgbaImage::new(0, 0)),
+                        circumference_meters,
+                    },
+                    bytes,
+                ))
+            })
+            .await
+            .map_err(CachedTileFailure::from_asset_failure)?;
+        Ok((entry, SharedTileSlot::default()))
     }
 }
 

@@ -1,9 +1,9 @@
 //! The one-pixel outline of a filled polygon, drawn as a feature after its fill.
 
-use lyon::tessellation::{StrokeVertex, StrokeVertexConstructor, VertexBuffers};
+use lyon::tessellation::{StrokeVertex, StrokeVertexConstructor};
 
 use super::{VertexConstructor, ZeroTessellator};
-use crate::render::ShaderVertex;
+use crate::render::{shaders::GpuVertexKind, ShaderVertex};
 
 /// Only the path and its normals matter to the outline; the fill shader moves each vertex
 /// along its normal by a width that follows the view's zoom.
@@ -35,39 +35,121 @@ where
         + Copy
         + Into<u32>,
 {
+    /// Compacts one tessellated polygon outline into 16-byte [`GpuShaderVertex`] storage so
+    /// multi-polygon buildings never retain 56-byte [`ShaderVertex`] scratch across polygons.
+    pub(super) fn flush_polygon_outline_prepack(&mut self, index_start: usize) {
+        if self.streaming_prepack.is_none() || self.outline.vertices.is_empty() {
+            return;
+        }
+        let base = self.outline_prepack.len();
+        if base > 0 {
+            for idx in &mut self.outline.indices[index_start..] {
+                *idx = I::from(lyon::tessellation::VertexId::from_usize(
+                    base + (*idx).into() as usize,
+                ));
+            }
+        }
+        self.outline_prepack.reserve(self.outline.vertices.len());
+        for vertex in &self.outline.vertices {
+            self.outline_prepack
+                .push(GpuVertexKind::Fill.encode(vertex));
+        }
+        self.outline.vertices.clear();
+    }
+
     /// Draws the pending outline as a feature of its own, after the fill it belongs to.
     pub(super) fn append_outline(&mut self) -> bool {
-        let outline = std::mem::replace(&mut self.outline, VertexBuffers::new());
-        let Some(property) = &self.outline_property else {
-            return false;
-        };
-        let Some(colour) = property.evaluate_for(self.props(), self.zoom) else {
-            return false;
-        };
-        if outline.vertices.is_empty() {
+        if self.outline.vertices.is_empty() && self.outline_prepack.is_empty() {
+            self.outline.indices.clear();
             return false;
         }
-        let base = self.buffer.vertices.len();
-        self.buffer.vertices.extend(outline.vertices);
-        self.buffer
-            .indices
-            .extend(outline.indices.into_iter().map(|index| {
-                I::from(lyon::tessellation::VertexId::from_usize(
-                    base + index.into() as usize,
-                ))
-            }));
+        let Some(property) = &self.outline_property else {
+            self.outline.vertices.clear();
+            self.outline.indices.clear();
+            self.outline_prepack.clear();
+            return false;
+        };
+        let evaluated = if self.omit_feature_colors {
+            None
+        } else {
+            let Some(colour) = property.evaluate_for(self.props(), self.zoom) else {
+                self.outline.vertices.clear();
+                self.outline.indices.clear();
+                self.outline_prepack.clear();
+                return false;
+            };
+            Some(colour)
+        };
+        let index_start = self.buffer.indices.len();
+        let using_prepack = self.streaming_prepack.is_some() && !self.outline_prepack.is_empty();
+        if using_prepack {
+            self.flush_streaming_prepack(index_start);
+            let base = self.total_vertex_count();
+            if base == 0 {
+                self.buffer.indices.extend_from_slice(&self.outline.indices);
+            } else {
+                self.buffer
+                    .indices
+                    .extend(self.outline.indices.iter().map(|&index| {
+                        I::from(lyon::tessellation::VertexId::from_usize(
+                            base + index.into() as usize,
+                        ))
+                    }));
+            }
+            self.outline.indices.clear();
+            if let Some(prepack) = &mut self.streaming_prepack {
+                prepack.push_encoded(&self.outline_prepack);
+            }
+            self.outline_prepack.clear();
+            if self.outline_prepack.capacity() > 16_384 {
+                self.outline_prepack = Vec::new();
+            }
+            if self.outline.indices.capacity() > 32_768 {
+                self.outline.indices = Vec::new();
+            }
+        } else {
+            let base = self.buffer.vertices.len();
+            self.buffer
+                .vertices
+                .extend_from_slice(&self.outline.vertices);
+            if base == 0 {
+                self.buffer.indices.extend_from_slice(&self.outline.indices);
+            } else {
+                self.buffer
+                    .indices
+                    .extend(self.outline.indices.iter().map(|&index| {
+                        I::from(lyon::tessellation::VertexId::from_usize(
+                            base + index.into() as usize,
+                        ))
+                    }));
+            }
+            self.outline.vertices.clear();
+            self.outline.indices.clear();
+            if self.outline.vertices.capacity() > 16_384 {
+                self.outline.vertices = Vec::new();
+            }
+            if self.outline.indices.capacity() > 32_768 {
+                self.outline.indices = Vec::new();
+            }
+            self.flush_streaming_prepack(index_start);
+        }
         self.update_feature_indices();
-        let opacity = self
-            .feature_opacity
-            .as_ref()
-            .map_or(1.0, |(opacity, zoom)| {
-                opacity
-                    .evaluate_for(self.props(), *zoom)
-                    .unwrap_or(1.0)
-                    .clamp(0.0, 1.0)
-            });
-        self.feature_colors
-            .push([colour.r, colour.g, colour.b, colour.a * opacity]);
+        if self.record_outline_entries {
+            self.outline_entries.push(true);
+        }
+        if let Some(colour) = evaluated {
+            let opacity = self
+                .feature_opacity
+                .as_ref()
+                .map_or(1.0, |(opacity, zoom)| {
+                    opacity
+                        .evaluate_for(self.props(), *zoom)
+                        .unwrap_or(1.0)
+                        .clamp(0.0, 1.0)
+                });
+            self.feature_colors
+                .push([colour.r, colour.g, colour.b, colour.a * opacity]);
+        }
         true
     }
 }

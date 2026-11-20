@@ -1,5 +1,7 @@
 //! GPU copy-aligned vertex and index buffers produced by tessellation.
 
+use std::sync::Arc;
+
 use bytemuck::Pod;
 use lyon::tessellation::VertexBuffers;
 
@@ -12,6 +14,8 @@ pub struct PrepackedGpuGeometry {
     pub vertices: Vec<crate::render::shaders::GpuShaderVertex>,
     /// Optional pre-narrowed `u16` indices when all vertices fit in 16 bits.
     pub indices_u16: Option<Vec<u16>>,
+    /// Optional pre-packed `u32` indices when vertices exceed 16-bit addressing.
+    pub indices_u32: Option<Vec<u32>>,
     /// True when [`Self::vertices`] stores two 8-byte compact extrusion vertices per word.
     pub compact_extrusion: bool,
     /// Logical vertex count referenced by indices (equals `vertices.len()` unless compact).
@@ -40,7 +44,7 @@ pub struct OverAlignedVertexBuffer<V, I> {
     uploaded_vertices: u32,
     icon_bits: Vec<u64>,
     shared_geometry_key: Option<u64>,
-    prepacked_gpu: Option<Box<PrepackedGpuGeometry>>,
+    prepacked_gpu: Option<Arc<PrepackedGpuGeometry>>,
 }
 
 impl<V, I> OverAlignedVertexBuffer<V, I> {
@@ -110,7 +114,7 @@ impl<V, I> OverAlignedVertexBuffer<V, I> {
     pub fn with_prepacked_gpu(mut self, prepacked: PrepackedGpuGeometry) -> Self {
         let len = u32::try_from(prepacked.logical_len()).unwrap_or(u32::MAX);
         self.uploaded_vertices = self.uploaded_vertices.max(len);
-        self.prepacked_gpu = Some(Box::new(prepacked));
+        self.prepacked_gpu = Some(Arc::new(prepacked));
         self
     }
 
@@ -128,21 +132,35 @@ impl<V, I> OverAlignedVertexBuffer<V, I> {
         }
     }
 
-    /// Takes ownership of any attached pre-packed GPU geometry while preserving `vertex_count()`.
-    pub fn take_prepacked_gpu(&mut self) -> Option<PrepackedGpuGeometry> {
+    /// Takes shared ownership of any attached pre-packed GPU geometry while preserving `vertex_count()`.
+    pub fn take_prepacked_gpu_arc(&mut self) -> Option<Arc<PrepackedGpuGeometry>> {
         let prepacked = self.prepacked_gpu.take()?;
         let len = u32::try_from(prepacked.logical_len()).unwrap_or(u32::MAX);
         self.uploaded_vertices = self.uploaded_vertices.max(len);
-        Some(*prepacked)
+        Some(prepacked)
     }
 
-    /// Number of index elements currently stored in CPU memory (`u16` prepacked or raw).
+    /// Takes ownership of any attached pre-packed GPU geometry while preserving `vertex_count()`.
+    pub fn take_prepacked_gpu(&mut self) -> Option<PrepackedGpuGeometry> {
+        let prepacked = self.take_prepacked_gpu_arc()?;
+        Some(Arc::try_unwrap(prepacked).unwrap_or_else(|shared| (*shared).clone()))
+    }
+
+    /// Number of index elements currently stored in CPU memory (`u16` prepacked, `u32` prepacked, or raw).
     #[inline]
     pub fn cpu_index_len(&self) -> usize {
         self.prepacked_gpu
             .as_ref()
-            .and_then(|p| p.indices_u16.as_ref())
-            .map_or(self.buffer.indices.len(), Vec::len)
+            .map_or(self.buffer.indices.len(), |p| {
+                p.indices_u16.as_ref().map_or_else(
+                    || {
+                        p.indices_u32
+                            .as_ref()
+                            .map_or(self.buffer.indices.len(), Vec::len)
+                    },
+                    Vec::len,
+                )
+            })
     }
 
     /// Byte capacity of pre-packed GPU buffers currently held in CPU memory.
@@ -153,6 +171,9 @@ impl<V, I> OverAlignedVertexBuffer<V, I> {
                 + p.indices_u16
                     .as_ref()
                     .map_or(0, |idx| idx.capacity() * std::mem::size_of::<u16>())
+                + p.indices_u32
+                    .as_ref()
+                    .map_or(0, |idx| idx.capacity() * std::mem::size_of::<u32>())
         })
     }
 
@@ -170,11 +191,10 @@ impl<V, I> OverAlignedVertexBuffer<V, I> {
     #[inline]
     pub fn has_cpu_indices(&self) -> bool {
         !self.buffer.indices.is_empty()
-            || self
-                .prepacked_gpu
-                .as_ref()
-                .and_then(|p| p.indices_u16.as_ref())
-                .is_some_and(|idx| !idx.is_empty())
+            || self.prepacked_gpu.as_ref().is_some_and(|p| {
+                p.indices_u16.as_ref().is_some_and(|idx| !idx.is_empty())
+                    || p.indices_u32.as_ref().is_some_and(|idx| !idx.is_empty())
+            })
     }
 
     /// Returns `true` when this buffer carries non-empty drawable geometry.

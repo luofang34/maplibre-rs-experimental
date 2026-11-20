@@ -111,6 +111,10 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     pub feature_colors: Vec<[f32; 4]>,
     /// Skips per-feature `feature_colors` evaluation/storage when layer paint is uniform on web.
     pub(crate) omit_feature_colors: bool,
+    /// Records whether each entry in `feature_indices` is an outline (`true`) or main fill (`false`).
+    pub(crate) record_outline_entries: bool,
+    /// Parallel to `feature_indices` when `record_outline_entries` is set.
+    pub(crate) outline_entries: Vec<bool>,
     /// Color used when no color property is supplied or its evaluation fails.
     pub fallback_color: [f32; 4],
     /// Color expression evaluated against each feature's attributes at `zoom`.
@@ -126,6 +130,8 @@ pub struct ZeroTessellator<I: std::ops::Add + From<lyon::tessellation::VertexId>
     pub outline_property: Option<crate::style::layer::StyleProperty<csscolorparser::Color>>,
     /// The outline of the feature being processed, drawn after its fill.
     outline: VertexBuffers<ShaderVertex, I>,
+    /// Pre-encoded outline vertices accumulated per-polygon when `streaming_prepack` is active.
+    pub(super) outline_prepack: Vec<crate::render::shaders::GpuShaderVertex>,
     /// Orders features by `*-sort-key`, so the greater keys draw on top.
     pub sort_key: SortKeys,
     /// The sort key of each entry of `feature_indices`, set by `apply_sort_keys`.
@@ -165,6 +171,8 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             zoom: 0.0,
             feature_colors: Vec::new(),
             omit_feature_colors: false,
+            record_outline_entries: false,
+            outline_entries: Vec::new(),
             fallback_color: [0.0, 0.0, 0.0, 1.0],
             style_property: None,
             is_line_layer: false,
@@ -194,6 +202,7 @@ impl<I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex> Default
             feature_opacity: None,
             outline_property: None,
             outline: VertexBuffers::new(),
+            outline_prepack: Vec::new(),
             sort_key: Default::default(),
             entry_sort_keys: Vec::new(),
             source_ids: Vec::new(),
@@ -254,10 +263,7 @@ where
     /// Streams geometry directly into compact/encoded GPU vertex storage after each polygon or stroke
     /// when `style_type` and layer paint flags support prepacking.
     pub(crate) fn maybe_enable_streaming_prepack(&mut self, style_type: &str) {
-        if self.outline_property.is_none()
-            && self.pattern_property.is_none()
-            && !self.sort_key.is_keyed()
-        {
+        if self.pattern_property.is_none() && !self.sort_key.is_keyed() {
             let allow_compact = self.omit_feature_colors
                 && self.feature_paint_retention
                     == crate::vector::feature_paint::FeaturePaintRetention::None
@@ -390,6 +396,7 @@ where
                 outline_index_start,
                 outline::MAX_OUTLINE_NORMAL,
             );
+            self.flush_polygon_outline_prepack(outline_index_start);
         }
 
         if !self

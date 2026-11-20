@@ -1,30 +1,19 @@
 //! Deduplicates source-layer geometry tessellation and vertex buffers across sibling style layers.
 
-use std::{
-    ops::Range,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
 };
 
-use geozero::{
-    mvt::{process_geom, tile},
-    FeatureProcessor,
-};
+use geozero::mvt::tile;
 use lyon::tessellation::VertexBuffers;
 use rustc_hash::FxHashMap;
 
 use super::{
-    extent_scale, feature_properties,
-    mvt_slice::{
-        decode_layer_properties, layer_header, process_feature_properties, retain_readable_indices,
-        select_filtered_features, shared_props_for_slice, source_ids_for_slice,
-    },
+    mvt_slice::{decode_layer_properties_bounded, layer_header, select_filtered_features},
     processing, ProcessVectorContext, ProcessVectorError, VectorTileRequest,
 };
 use crate::{
-    render::ShaderVertex,
     sdf::assets::SymbolAtlas,
     style::{
         expression::{layer_reads_geometry, layer_reads_identity, FeatureProperties},
@@ -39,18 +28,23 @@ use crate::{
         structures,
         tessellation::{
             sort_key_of, IndexDataType, LineElevationOptions, LineFeatureStyle,
-            OverAlignedVertexBuffer, ZeroTessellator,
+            OverAlignedVertexBuffer,
         },
         transferables::VectorTransferables,
         upload_system::paint::uniform_color,
     },
 };
 
+mod fill_outlined;
+mod union;
+use union::{eval_sort_key, intersect_spans, tessellate_union_with_fallback, FeatureSpan};
+
 static NEXT_SHARED_GEOMETRY_KEY: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum GeometryBucketKey {
     Fill,
+    FillOutlined,
     Line {
         cap: LineCap,
         join: LineJoin,
@@ -63,13 +57,6 @@ enum GeometryBucketKey {
 enum SelectedSet {
     All,
     Indices(Vec<usize>),
-}
-
-#[derive(Clone)]
-struct FeatureSpan {
-    feat_idx: usize,
-    vtx_count: u32,
-    indices: Range<usize>,
 }
 
 pub(super) fn process_ordered_layers<'a, T: VectorTransferables, C: crate::io::apc::Context>(
@@ -101,16 +88,6 @@ pub(super) fn process_ordered_layers<'a, T: VectorTransferables, C: crate::io::a
         };
 
         let source_layer = tile.layers.iter().find(|layer| layer.name == name);
-        let shared_props = source_layer.and_then(|layer| {
-            shared_layer_props
-                .entry(layer.name.as_str())
-                .or_insert_with(|| {
-                    let state_ctx = context.state_context_for_layer(&layer.name);
-                    decode_layer_properties(layer, state_ctx.as_ref())
-                })
-                .as_deref()
-        });
-
         let mut key_counts: FxHashMap<GeometryBucketKey, usize> = FxHashMap::default();
         let mut layer_keys: Vec<Option<GeometryBucketKey>> = Vec::with_capacity(chunk.len());
         for &style in chunk {
@@ -124,6 +101,26 @@ pub(super) fn process_ordered_layers<'a, T: VectorTransferables, C: crate::io::a
             }
             layer_keys.push(key);
         }
+
+        let need_props = index_uses_props
+            || (chunk.len() > 1
+                && layer_keys
+                    .iter()
+                    .any(|k| !matches!(k, Some(GeometryBucketKey::FillOutlined))));
+        let shared_props = if !need_props {
+            None
+        } else {
+            source_layer.and_then(|layer| {
+                shared_layer_props
+                    .entry(layer.name.as_str())
+                    .or_insert_with(|| {
+                        let state_ctx = context.state_context_for_layer(&layer.name);
+                        let max_unique = if index_uses_props { usize::MAX } else { 512 };
+                        decode_layer_properties_bounded(layer, state_ctx.as_ref(), max_unique)
+                    })
+                    .as_deref()
+            })
+        };
 
         let mut shared_groups: FxHashMap<GeometryBucketKey, Vec<&StyleLayer>> =
             FxHashMap::default();
@@ -151,8 +148,12 @@ pub(super) fn process_ordered_layers<'a, T: VectorTransferables, C: crate::io::a
         }
 
         if let Some(layer) = source_layer {
-            for (_key, group) in shared_groups {
-                process_shared_group(layer, shared_props, &group, request, context, atlases)?;
+            for (key, group) in shared_groups {
+                if key == GeometryBucketKey::FillOutlined {
+                    fill_outlined::process_shared_fill_outlined(layer, &group, request, context)?;
+                } else {
+                    process_shared_group(layer, shared_props, &group, request, context, atlases)?;
+                }
             }
         }
 
@@ -179,19 +180,20 @@ fn bucket_key(
         || layer_geometry_reads_feature_state(style)
         || feature_paint_retention(style) != FeaturePaintRetention::None
         || structures::kind(style).is_some()
-        || uniform_color(style, style_zoom).is_none()
     {
         return None;
     }
     let paint = style.paint.as_ref()?;
     match paint {
-        LayerPaint::Fill(fill)
-            if fill.outline_color().is_none() && per_feature_pattern(paint).is_none() =>
-        {
-            Some(GeometryBucketKey::Fill)
+        LayerPaint::Fill(fill) if fill.outline_color().is_none() => {
+            (per_feature_pattern(paint).is_none() && uniform_color(style, style_zoom).is_some())
+                .then_some(GeometryBucketKey::Fill)
         }
+        LayerPaint::Fill(fill) => fill_outlined::qualifies_outlined_fill(style, fill, style_zoom)
+            .then_some(GeometryBucketKey::FillOutlined),
         LayerPaint::Line(line)
-            if !line.may_use_vertex_agl()
+            if uniform_color(style, style_zoom).is_some()
+                && !line.may_use_vertex_agl()
                 && line.line_gradient.is_none()
                 && per_feature_pattern(paint).is_none()
                 && LineFeatureStyle::for_paint(line, style_zoom).is_none()
@@ -342,6 +344,9 @@ fn process_shared_group<T: VectorTransferables, C: crate::io::apc::Context>(
         per_layer.push((*style, indices, feature_indices));
     }
 
+    drop(shared_indices);
+    drop(spans);
+
     let non_empty_count = per_layer
         .iter()
         .filter(|(_, idxs, _)| !idxs.is_empty())
@@ -374,117 +379,4 @@ fn process_shared_group<T: VectorTransferables, C: crate::io::apc::Context>(
         )?;
     }
     Ok(())
-}
-
-fn tessellate_union_with_fallback(
-    layer: &tile::Layer,
-    union_indices: &[usize],
-    shared_props: Option<&[Arc<FeatureProperties>]>,
-    first: (&StyleLayer, &LayerPaint),
-    request: &VectorTileRequest,
-    state_ctx: Option<crate::vector::tessellation::feature_paint::FeatureStateSyncContext>,
-) -> Option<(Vec<ShaderVertex>, Vec<IndexDataType>, Vec<FeatureSpan>)> {
-    match tessellate_union(
-        layer,
-        union_indices,
-        shared_props,
-        first,
-        request,
-        state_ctx.clone(),
-    ) {
-        Ok(res) => Some(res),
-        Err(error) => {
-            let (readable, dropped) = retain_readable_indices(layer, Some(union_indices));
-            if dropped == 0 {
-                tracing::error!(coords = %request.coords, layer = %layer.name, ?error, "vector tessellation failed");
-                return None;
-            }
-            tracing::warn!(coords = %request.coords, layer = %layer.name, dropped, ?error, "features whose geometry cannot be read are left out");
-            tessellate_union(layer, &readable, shared_props, first, request, state_ctx).ok()
-        }
-    }
-}
-
-fn tessellate_union(
-    layer: &tile::Layer,
-    slice: &[usize],
-    shared_props: Option<&[Arc<FeatureProperties>]>,
-    (first_style, first_paint): (&StyleLayer, &LayerPaint),
-    request: &VectorTileRequest,
-    state_ctx: Option<crate::vector::tessellation::feature_paint::FeatureStateSyncContext>,
-) -> geozero::error::Result<(Vec<ShaderVertex>, Vec<IndexDataType>, Vec<FeatureSpan>)> {
-    let mut tessellator: ZeroTessellator<IndexDataType> =
-        processing::tessellator(first_paint, request);
-    tessellator.set_layer_strokes(first_style);
-    tessellator.coordinate_scale = extent_scale(layer);
-    tessellator.source_ids = source_ids_for_slice(layer, Some(slice));
-    tessellator.shared_properties = shared_props_for_slice(shared_props, Some(slice));
-    tessellator.feature_state_ctx = state_ctx;
-    tessellator.omit_feature_colors = true;
-
-    let skip_props = shared_props.is_some();
-    let mut spans = Vec::with_capacity(slice.len());
-    tessellator.dataset_begin(Some(&layer.name))?;
-    for (out_idx, &feat_idx) in slice.iter().enumerate() {
-        let Some(feature) = layer.features.get(feat_idx) else {
-            continue;
-        };
-        let vtx_start = tessellator.buffer.vertices.len();
-        let idx_start = tessellator.buffer.indices.len();
-        tessellator.feature_begin(out_idx as u64)?;
-        if !skip_props {
-            process_feature_properties(layer, feature, &mut tessellator)?;
-        }
-        tessellator.geometry_begin()?;
-        process_geom(feature, &mut tessellator)?;
-        tessellator.geometry_end()?;
-        tessellator.feature_end(out_idx as u64)?;
-        let vtx_count = (tessellator.buffer.vertices.len() - vtx_start) as u32;
-        let idx_end = tessellator.buffer.indices.len();
-        spans.push(FeatureSpan {
-            feat_idx,
-            vtx_count,
-            indices: idx_start..idx_end,
-        });
-    }
-    tessellator.dataset_end()?;
-    Ok((
-        tessellator.buffer.vertices,
-        tessellator.buffer.indices,
-        spans,
-    ))
-}
-
-fn intersect_spans<'a>(spans: &'a [FeatureSpan], sorted_indices: &[usize]) -> Vec<&'a FeatureSpan> {
-    let mut out = Vec::with_capacity(sorted_indices.len().min(spans.len()));
-    let (mut i, mut j) = (0, 0);
-    while i < spans.len() && j < sorted_indices.len() {
-        match spans[i].feat_idx.cmp(&sorted_indices[j]) {
-            std::cmp::Ordering::Equal => {
-                out.push(&spans[i]);
-                i += 1;
-                j += 1;
-            }
-            std::cmp::Ordering::Less => i += 1,
-            std::cmp::Ordering::Greater => j += 1,
-        }
-    }
-    out
-}
-
-fn eval_sort_key(
-    layer: &tile::Layer,
-    shared_props: Option<&[Arc<FeatureProperties>]>,
-    feat_idx: usize,
-    sort_prop: &crate::style::layer::StyleProperty<f32>,
-    zoom: f64,
-) -> f32 {
-    if let Some(props) = shared_props.and_then(|all| all.get(feat_idx)) {
-        return sort_prop.evaluate_for(props, zoom).unwrap_or(0.0);
-    }
-    layer
-        .features
-        .get(feat_idx)
-        .and_then(|feat| sort_prop.evaluate_for(&feature_properties(layer, feat), zoom))
-        .unwrap_or(0.0)
 }

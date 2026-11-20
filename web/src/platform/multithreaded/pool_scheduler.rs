@@ -7,7 +7,7 @@ use web_sys::{MessagePort, Worker};
 use super::pool::WorkerPool;
 use crate::error::WebError;
 
-const MAX_MT_WORKERS: usize = 2;
+const MAX_MT_WORKERS: usize = 4;
 
 #[cfg_attr(not(feature = "winit-window"), allow(dead_code))]
 fn hardware_mt_worker_count() -> usize {
@@ -22,7 +22,7 @@ fn hardware_mt_worker_count() -> usize {
                 4
             }
         });
-    (cores / 2).clamp(2, MAX_MT_WORKERS)
+    (cores / 2).clamp(3, MAX_MT_WORKERS)
 }
 
 pub struct WebWorkerPoolScheduler {

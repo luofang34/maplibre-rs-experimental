@@ -18,7 +18,7 @@ use crate::{
     render::ShaderVertex,
     sdf::{assets::SymbolAssetError, tessellation::TextTessellator},
     style::{
-        expression::{FeatureProperties, Value},
+        expression::FeatureProperties,
         filter::Filter,
         layer::{LayerPaint, StyleLayer},
     },
@@ -101,35 +101,7 @@ pub(crate) fn feature_properties(
     feature: &tile::Feature,
 ) -> FeatureProperties {
     let mut properties = FeatureProperties::default();
-    for pair in feature.tags.chunks(2) {
-        let [key_index, value_index] = pair else {
-            continue;
-        };
-        let (Some(key), Some(value)) = (
-            layer.keys.get(*key_index as usize),
-            layer.values.get(*value_index as usize),
-        ) else {
-            continue;
-        };
-        let value = if let Some(text) = &value.string_value {
-            Value::String(text.clone())
-        } else if let Some(number) = value.float_value {
-            Value::Number(f64::from(number))
-        } else if let Some(number) = value.double_value {
-            Value::Number(number)
-        } else if let Some(number) = value.int_value {
-            Value::Number(number as f64)
-        } else if let Some(number) = value.uint_value {
-            Value::Number(number as f64)
-        } else if let Some(number) = value.sint_value {
-            Value::Number(number as f64)
-        } else if let Some(flag) = value.bool_value {
-            Value::Bool(flag)
-        } else {
-            continue;
-        };
-        properties.insert(key.clone(), value);
-    }
+    fill_feature_properties(layer, feature, &mut properties);
     properties
 }
 
@@ -154,6 +126,7 @@ mod mvt_slice;
 mod processing;
 mod shared_geometry;
 pub(crate) use decode::*;
+pub(crate) use mvt_slice::fill_feature_properties;
 #[cfg(test)]
 pub(crate) use mvt_slice::index_mvt_bytes;
 #[cfg(feature = "mlt")]

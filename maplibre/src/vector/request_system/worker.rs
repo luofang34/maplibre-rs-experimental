@@ -25,7 +25,8 @@ use crate::{
         tile_sources::{source_layer_groups, SourceLayerGroup, TileKind},
     },
     sdf::assets::{
-        load_symbol_assets_for_requests, symbol_requests_from_tile, SymbolAssetConfig, SymbolAtlas,
+        fetch_symbol_asset_inputs, pack_symbol_assets, symbol_requests_from_tile,
+        SymbolAssetConfig, SymbolAtlas,
     },
     style::{layer::StyleLayer, Style},
     vector::{
@@ -56,7 +57,7 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
         // A request for a change to some sources' data leaves the tile's other sources as the
         // tile shows them.
         let has_terrain = style.terrain.is_some();
-        let mut groups = source_layer_groups(&style, TileKind::Vector)
+        let mut group_list: Vec<_> = source_layer_groups(&style, TileKind::Vector)
             .into_iter()
             .filter_map(|mut group| {
                 let included = only_sources.as_ref().is_none_or(|only| {
@@ -73,10 +74,14 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
                     .retain(|layer| layer.needed_for_tile(has_terrain, coords, overscaled_zoom));
                 (!group.layers.is_empty()).then_some(group)
             })
-            .peekable();
+            .collect();
+        prioritize_remote_sources(&mut group_list);
+        let mut groups = group_list.into_iter().peekable();
         let mut failed = false;
         let mut retry = false;
         let mut images = provided::TileImages::new(coords, Some(attempt), pixel_ratio);
+        #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+        let mut shared_permit: Option<super::limiter::SharedTilePermit> = None;
         while let Some(group) = groups.next() {
             if group.has_nothing_at(coords) {
                 source_empty::<T, _>(coords, &group.layers, &context)
@@ -119,7 +124,10 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
                     continue;
                 }
             };
-            super::limiter::wait_for_shared_tile_slot().await;
+            #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+            if shared_permit.is_none() {
+                shared_permit = Some(super::limiter::acquire_shared_tile_permit().await);
+            }
             let mut heavy_slot = Some(acquire_heavy_tile_slot().await);
             let promote_id = group
                 .source_name
@@ -178,7 +186,14 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
         images
             .report_first(&context)
             .map_err(ProcedureError::Send)?;
-        finish::<T, _>(&context, coords, Some(attempt), failed, retry)?;
+        finish::<T, _>(
+            &context,
+            coords,
+            Some(attempt),
+            (failed, retry),
+            #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+            shared_permit,
+        )?;
         // The tile is complete and drawn; its labels are laid out again as images arrive.
         images
             .lay_out_again::<T, _, K::HttpClient>(&client, &style, context)
@@ -299,7 +314,7 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
         pixel_ratio,
         ..SymbolAssetConfig::of(style)
     };
-    let mut assets_fut = std::pin::pin!(load_symbol_assets_for_requests(
+    let mut assets_fut = std::pin::pin!(fetch_symbol_asset_inputs(
         client,
         asset_config,
         sym_requests
@@ -347,7 +362,7 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
         })
         .await;
     }
-    let assets = match pre_assets {
+    let fetched_inputs = match pre_assets {
         Some(res) => res,
         None => {
             if last_source {
@@ -363,6 +378,7 @@ async fn process_source<T: VectorTransferables, C: Context + Clone + Send, H: Ht
         }
     }
     .map_err(ProcessVectorError::SymbolAssets)?;
+    let assets = pack_symbol_assets(client, asset_config, fetched_inputs);
     // Only a source still waiting for images keeps its tile and layers to lay out again.
     let again = (!assets.awaiting.is_empty()).then(|| (tile.clone(), sym_request.clone()));
     tessellate::<T, C>(
@@ -426,8 +442,10 @@ fn finish<T: VectorTransferables, C: Context>(
     context: &C,
     coords: WorldTileCoords,
     attempt: Option<u64>,
-    failed: bool,
-    retry: bool,
+    (failed, retry): (bool, bool),
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))] permit: Option<
+        super::limiter::SharedTilePermit,
+    >,
 ) -> Result<(), ProcedureError> {
     let completion = if failed {
         T::TileTessellated::build_failed(coords, false)
@@ -448,6 +466,18 @@ fn finish<T: VectorTransferables, C: Context>(
         },
     });
     #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
-    let outcome = outcome.with_shared_permit(super::limiter::issue_shared_tile_permit());
+    let outcome = match permit {
+        Some(permit) => outcome.with_shared_permit(permit),
+        None => outcome,
+    };
     context.send_back(outcome).map_err(ProcedureError::Send)
 }
+
+fn prioritize_remote_sources(groups: &mut [SourceLayerGroup]) {
+    groups.sort_by_key(|group| {
+        matches!(group.source, crate::io::source_type::SourceType::GeoJson(_))
+    });
+}
+
+#[cfg(test)]
+mod tests;

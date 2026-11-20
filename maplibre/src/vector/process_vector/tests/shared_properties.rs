@@ -247,3 +247,96 @@ fn sibling_uniform_line_layers_share_one_tessellated_vertex_buffer() {
     );
     assert!(secondary.buffer.usable_indices > 0);
 }
+
+#[test]
+fn sibling_outlined_fill_layers_match_standalone_bit_for_bit() {
+    let size = zigzag(1024);
+    let bytes = Tile {
+        layers: vec![tile::Layer {
+            version: 2,
+            name: "building".to_string(),
+            features: vec![tile::Feature {
+                id: Some(7),
+                tags: Vec::new(),
+                r#type: Some(tile::GeomType::Polygon as i32),
+                geometry: vec![9, 200, 200, 26, size, 0, 0, size, zigzag(-1024), 0, 15],
+            }],
+            extent: Some(4096),
+            ..Default::default()
+        }],
+    }
+    .encode_to_vec();
+
+    let mut base: StyleLayer = serde_json::from_value(serde_json::json!({
+        "id": "building",
+        "type": "fill",
+        "source": "openmaptiles",
+        "source-layer": "building",
+        "paint": {
+            "fill-antialias": true,
+            "fill-color": ["interpolate", ["linear"], ["zoom"], 13, "#f2eae2", 16, "#dfdbd7"]
+        }
+    }))
+    .expect("building layer");
+    base.index = 0;
+    let mut top: StyleLayer = serde_json::from_value(serde_json::json!({
+        "id": "building-top",
+        "type": "fill",
+        "source": "openmaptiles",
+        "source-layer": "building",
+        "paint": {
+            "fill-color": "#f2eae2",
+            "fill-opacity": ["interpolate", ["linear"], ["zoom"], 13, 0.0, 16, 1.0],
+            "fill-outline-color": "#dfdbd7"
+        }
+    }))
+    .expect("building-top layer");
+    top.index = 1;
+
+    let coords = WorldTileCoords::from((8192, 5461, 14_u8.into()));
+    let run_tile = |layers: Vec<StyleLayer>| {
+        let mut processor =
+            ProcessVectorContext::<DefaultVectorTransferables, CollectingContext>::new(
+                CollectingContext::default(),
+            )
+            .without_indexing();
+        process_vector_tile(
+            &bytes,
+            VectorTileRequest {
+                coords,
+                layers: layers.into_iter().collect(),
+                projection: ProjectionType::Mercator,
+                overscaled_zoom: 14,
+            },
+            &mut processor,
+        )
+        .expect("tile processes");
+        super::tessellated(processor.take_context().0.take())
+    };
+
+    let shared = run_tile(vec![base.clone(), top.clone()]);
+    assert_eq!(shared.len(), 2);
+    let expected_base = run_tile(vec![base]);
+    let expected_top = run_tile(vec![top]);
+    assert_eq!(expected_base.len(), 1);
+    assert_eq!(expected_top.len(), 1);
+
+    for (id, expected) in [
+        ("building", &expected_base[0]),
+        ("building-top", &expected_top[0]),
+    ] {
+        let actual = shared
+            .iter()
+            .find(|l| l.style_layer_id() == id)
+            .expect("shared layer");
+        assert_eq!(
+            bytemuck::cast_slice::<_, u8>(&actual.buffer.buffer.vertices),
+            bytemuck::cast_slice::<_, u8>(&expected.buffer.buffer.vertices)
+        );
+        assert_eq!(actual.buffer.buffer.indices, expected.buffer.buffer.indices);
+        assert_eq!(actual.buffer.usable_indices, expected.buffer.usable_indices);
+        assert_eq!(actual.feature_indices, expected.feature_indices);
+        assert_eq!(actual.feature_colors, expected.feature_colors);
+        assert!(actual.feature_indices.len() >= 2);
+    }
+}

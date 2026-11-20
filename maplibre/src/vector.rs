@@ -41,7 +41,9 @@ pub mod mlt;
 pub(crate) mod populate_world_system;
 pub use populate_world_system::apply_vector_worker_batch;
 mod process_vector;
+#[cfg(test)]
 pub(crate) use process_vector::feature_properties;
+pub(crate) use process_vector::fill_feature_properties;
 mod queue_system;
 pub mod render_commands;
 pub(crate) mod request_system;

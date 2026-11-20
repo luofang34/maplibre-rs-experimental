@@ -305,7 +305,7 @@ fn polygon_rings_are_wound_clockwise_on_screen_outside_and_counter_clockwise_for
     // In tile coordinates y grows downwards, so this outer ring runs counter-clockwise.
     let outer = LineString::from(vec![(0.0, 0.0), (0.0, 10.0), (10.0, 10.0), (10.0, 0.0)]);
     let hole = LineString::from(vec![(2.0, 2.0), (8.0, 2.0), (8.0, 8.0), (2.0, 8.0)]);
-    let rings = super::polygon_rings(&Polygon::new(outer, vec![hole]));
+    let rings = super::line_anchors::polygon_rings(&Polygon::new(outer, vec![hole]));
     assert_eq!(
         rings[0],
         [

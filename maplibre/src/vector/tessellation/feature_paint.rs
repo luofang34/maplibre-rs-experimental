@@ -78,6 +78,10 @@ where
         }
         let line_length = self.line_length;
         let main_count = polygons.max(1);
+        if self.record_outline_entries {
+            self.outline_entries
+                .resize(self.outline_entries.len() + main_count, false);
+        }
         let pattern = if self.omit_feature_colors {
             self.line_length = 0.0;
             None

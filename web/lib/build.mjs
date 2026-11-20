@@ -152,7 +152,7 @@ const checkWasmBindgenVersion = () => {
 const wasmPack = () => {
     checkWasmBindgenVersion();
     let outDirectory = `${getLibDirectory()}/src/wasm`;
-    let profile = release ? "wasm-release" : "wasm-dev"
+    let profile = release ? (multithreaded ? "wasm-mt-release" : "wasm-release") : "wasm-dev"
 
     // language=toml
     let singlethreaded_config = wasmTargetConfig({release, webgl, multithreaded: false});
@@ -236,7 +236,7 @@ const wasmPack = () => {
         if (mainJs.includes('TileWorkerCalls')) {
             throw new Error('Single-threaded main maplibre.js unexpectedly exports TileWorkerCalls');
         }
-    } else if (!existsSync(`${outDirectory}/maplibre_tile_worker.js`)) {
+    } else {
         writeFileSync(
             `${outDirectory}/maplibre_tile_worker.js`,
             'export default async function init() { return {}; }\nexport function register_image_provider() {}\nexport function bind_worker_reply_port() {}\nexport function set_kernel_config() {}\nexport class TileWorkerCalls { set_style() {} async process() {} cancel() { return false; } finish_failed() {} }\n',
@@ -245,9 +245,7 @@ const wasmPack = () => {
             `${outDirectory}/maplibre_tile_worker.d.ts`,
             'export type InitOutput = {};\nexport default function init(input?: unknown): Promise<InitOutput>;\nexport function register_image_provider(...args: unknown[]): void;\nexport function bind_worker_reply_port(...args: unknown[]): void;\nexport function set_kernel_config(...args: unknown[]): void;\nexport class TileWorkerCalls { set_style(revision: bigint, style: string): void; process(procedure_tag: number, style_revision: bigint, input: string): Promise<void>; cancel(attempt: bigint): boolean; finish_failed(attempt: bigint): void; }\n',
         );
-        if (!existsSync(`${outDirectory}/maplibre_tile_worker_bg.wasm`)) {
-            writeFileSync(`${outDirectory}/maplibre_tile_worker_bg.wasm`, Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]));
-        }
+        writeFileSync(`${outDirectory}/maplibre_tile_worker_bg.wasm`, Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]));
     }
 
     if (multithreaded) {
@@ -294,7 +292,10 @@ const wasmPack = () => {
         ];
 
         const tmpWasm = `${outDirectory}/maplibre_bg.wasm.${process.pid}.tmp`;
-        let wasmOpt = spawnTool('npm', optArgs(`${outDirectory}/maplibre_bg.wasm`, tmpWasm));
+        let wasmOpt = spawnTool(
+            'npm',
+            optArgs(`${outDirectory}/maplibre_bg.wasm`, tmpWasm, "-Oz"),
+        );
         if (wasmOpt.status !== 0) {
             rmSync(tmpWasm, {force: true});
             throw new Error("Failed to execute wasm-opt")
