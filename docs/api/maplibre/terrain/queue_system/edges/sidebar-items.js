@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["N"],"fn":["build_edges","fill_horizontal_side","fill_vertical_side","owner","sample_source","scale_of","shared_height","touches"],"struct":["Dems","EdgeCache","EdgeHeights","ResolvedDem","Sources","TileHasher"],"type":["FastTileMap","Signature"]};
+window.SIDEBAR_ITEMS = {"constant":["N"],"fn":["touches"],"mod":["sample"],"struct":["EdgeCache","EdgeHeights","TileHasher"],"type":["FastTileMap","Signature"]};

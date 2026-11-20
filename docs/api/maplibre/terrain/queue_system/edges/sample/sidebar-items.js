@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["build_edges","fill_horizontal_side","fill_vertical_side","owner","sample_source","scale_of","shared_height"],"struct":["Dems","ResolvedDem","Sources"]};

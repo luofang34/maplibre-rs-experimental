@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["strip_srgb"],"struct":["WindowHead"]};
+window.SIDEBAR_ITEMS = {"fn":["select_alpha_mode","strip_srgb"],"struct":["WindowHead"]};

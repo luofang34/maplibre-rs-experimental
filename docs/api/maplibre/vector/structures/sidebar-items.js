@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["MAX_VERTICES"],"enum":["StructureKind"],"fn":["centroid_ground","elevate","elevate_span","fingerprint","for_frame","is_overlay","is_pure_msl_bucket","kind","number","prepare","profile","refresh_gpu"],"struct":["CachedProfiles"],"type":["SpatialBuffer"]};
+window.SIDEBAR_ITEMS = {"constant":["MAX_VERTICES"],"enum":["StructureKind"],"fn":["centroid_ground","elevate","elevate_span","is_overlay","is_pure_msl_bucket","kind","number","prepare","profile","refresh_gpu"],"mod":["cache"],"type":["SpatialBuffer"]};

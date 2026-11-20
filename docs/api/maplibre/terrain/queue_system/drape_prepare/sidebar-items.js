@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["loaded_content","prepare_drapes"],"struct":["LoadedContent","PreparedDrapes"]};
