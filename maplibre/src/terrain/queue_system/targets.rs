@@ -1,5 +1,6 @@
 //! Selects terrain textures and records their independent surface meshes.
 use super::*;
+use crate::render::memory_budget::MemoryBudget;
 
 /// The tiles a frame drapes ahead of the view: prepared, never redrawn, and drawn only with
 /// the time the view's own drapes leave.

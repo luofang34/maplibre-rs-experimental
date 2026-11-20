@@ -36,14 +36,20 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
     }
 
     fn run(&mut self, MapContext { world, style, .. }: &mut MapContext) -> SystemResult {
-        let messages = self.kernel.apc().receive(|message| {
-            message.has_tag(RequestKind::Vector.message_tag())
-                || message.has_tag(T::TileTessellated::message_tag())
-                || message.has_tag(T::LayerMissing::message_tag())
-                || message.has_tag(T::LayerTessellated::message_tag())
-                || message.has_tag(T::LayerIndexed::message_tag())
-        });
-        apply_vector_worker_batch::<T>(world, style, messages)?;
+        let mut messages = self
+            .kernel
+            .apc()
+            .receive(|message| {
+                message.has_tag(RequestKind::Vector.message_tag())
+                    || message.has_tag(T::TileTessellated::message_tag())
+                    || message.has_tag(T::LayerMissing::message_tag())
+                    || message.has_tag(T::LayerTessellated::message_tag())
+                    || message.has_tag(T::LayerIndexed::message_tag())
+            })
+            .peekable();
+        if messages.peek().is_some() {
+            apply_vector_worker_batch::<T>(world, style, messages)?;
+        }
 
         Ok(())
     }

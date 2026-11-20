@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use super::{covering, present_ancestors};
+use super::{covering, uniforms::present_ancestors};
 use crate::{
     coords::WorldTileCoords,
     render::memory_budget::MemoryBudget,

@@ -25,10 +25,11 @@ fn spec(coords: WorldTileCoords, sources: &[WorldTileCoords]) -> TargetSpec {
                 source: *source,
                 is_vector: false,
                 vector_layers: vec![VectorLayerSpec {
-                    id: "water".to_string(),
+                    id: crate::style::StyleLayerId::intern("water"),
                     index: 2,
                     is_line: false,
                     coords: *source,
+                    content_revision: 1,
                 }],
                 raster_layers: vec![("osm".to_string(), 1, false)],
             })
@@ -117,8 +118,13 @@ fn tiles_leaving_the_view_are_parked_and_hand_their_textures_on_once_parking_is_
 struct Loaded(bool);
 
 impl SourceContent for Loaded {
-    fn vector_layer_revision(&self, _: WorldTileCoords, _: &str) -> Option<u64> {
-        self.0.then_some(1)
+    fn vector_layer_revision(
+        &self,
+        _: WorldTileCoords,
+        _: crate::style::StyleLayerId,
+        cached_revision: u64,
+    ) -> Option<u64> {
+        self.0.then_some(cached_revision)
     }
 
     fn raster_revision(&self, _: WorldTileCoords, _: &str) -> Option<u64> {

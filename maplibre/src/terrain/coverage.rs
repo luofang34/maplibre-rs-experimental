@@ -17,7 +17,6 @@ use crate::{
     context::MapContext,
     coords::{TileCoords, WorldTileCoords, ZoomLevel, EXTENT},
     projection::globe::covering::{TileElevationProvider, TileElevationRange},
-    render::view_state::ViewStatePadding,
     tcs::{system::SystemResult, tiles::Tiles},
     terrain::{
         request_system::dem_tile_coords,
@@ -146,6 +145,54 @@ impl TerrainCoverageIndex {
     /// Configured polar cap datum elevations.
     pub fn poles(&self) -> super::PolarPoleElevations {
         self.poles
+    }
+
+    /// Number of loaded DEM tiles indexed in `dem_bounds`.
+    pub(crate) fn dem_bounds_len(&self) -> usize {
+        self.dem_bounds.len()
+    }
+
+    fn matches_inputs(
+        &self,
+        rendered: Option<&crate::coords::ViewRegion>,
+        tiles: &Tiles,
+        dem: &DemSource,
+        poles: super::PolarPoleElevations,
+    ) -> bool {
+        if self.exaggeration.to_bits() != f64::from(dem.exaggeration).to_bits()
+            || self.minzoom != dem.minzoom
+            || self.maxzoom != dem.maxzoom
+            || self.dem_tile_size != dem.tile_size
+            || self.poles != poles
+        {
+            return false;
+        }
+        let mut rendered_count = 0usize;
+        if let Some(region) = rendered {
+            for coords in region.iter().filter(|c| c.build_quad_key().is_some()) {
+                rendered_count += 1;
+                if !self.rendered.contains_key(&coords) {
+                    return false;
+                }
+            }
+        }
+        if rendered_count != self.rendered.len() {
+            return false;
+        }
+        let mut loaded_dems = 0usize;
+        for coords in tiles
+            .pyramid_of::<DemTileComponent>()
+            .coords_coarse_to_fine()
+        {
+            if let Some(DemTileComponent::Loaded(loaded)) = tiles.query::<&DemTileComponent>(coords)
+            {
+                loaded_dems += 1;
+                if self.dem_bounds.get(coords) != Some(&(loaded.tile.min(), loaded.tile.max())) {
+                    return false;
+                }
+            }
+        }
+        loaded_dems == self.dem_bounds.len()
     }
 
     /// Configures the north and south polar cap datum elevations, updating rendered bounds.
@@ -380,31 +427,37 @@ pub fn coverage_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
-    world.resources.remove::<PreparedTerrainRegion>();
     let Some(dem) = dem_source(style) else {
+        world.resources.remove::<PreparedTerrainRegion>();
         world.resources.insert(TerrainCoverageIndex::default());
         return Ok(());
     };
-    let prev_bounds = world
-        .resources
-        .get::<TerrainCoverageIndex>()
-        .map(|idx| (idx.min_elevation, idx.max_elevation, idx.dem_bounds.len()));
-    let rendered = crate::render::projection::terrain_region(
-        style,
-        view_state,
-        world,
-        dem.tile_size,
-        ViewStatePadding::Tight,
-    )
-    .map_err(|error| {
-        tracing::error!(%error, "unable to select terrain coverage tiles");
-        crate::tcs::system::SystemError::Setup
-    })?;
+    let rendered = take_or_compute_tight_terrain_region(style, view_state, world, dem.tile_size)
+        .map_err(|error| {
+            tracing::error!(%error, "unable to select terrain coverage tiles");
+            crate::tcs::system::SystemError::Setup
+        })?;
     let poles = world
         .resources
         .get::<super::PolarPoleElevations>()
         .copied()
         .unwrap_or_default();
+    if world
+        .resources
+        .get::<TerrainCoverageIndex>()
+        .is_some_and(|prev| prev.matches_inputs(rendered.as_ref(), &world.tiles, &dem, poles))
+    {
+        let key = PreparedTerrainKey::capture(view_state, world, dem.tile_size);
+        world.resources.insert(PreparedTerrainRegion {
+            key,
+            region: rendered,
+        });
+        return Ok(());
+    }
+    let prev_bounds = world
+        .resources
+        .get::<TerrainCoverageIndex>()
+        .map(|idx| (idx.min_elevation, idx.max_elevation, idx.dem_bounds.len()));
     let index = match &rendered {
         Some(region) => TerrainCoverageIndex::build(
             region

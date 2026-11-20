@@ -28,12 +28,6 @@ pub fn upload_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
-    let background_tiles = crate::background::queue_system::globe_tiles(world);
-    let mut memo = world
-        .resources
-        .get::<GlobeMeshPrepareMemo>()
-        .cloned()
-        .unwrap_or_default();
     let (view_proj, projection_data) = match world
         .resources
         .get::<ResolvedFrameView>()
@@ -50,13 +44,24 @@ pub fn upload_system(
             snapshot
         }
     };
+    let background_tiles = if projection_data.transition > 0.0 {
+        crate::background::queue_system::globe_tiles(world)
+    } else {
+        Vec::new()
+    };
+    world.resources.get_or_init_mut::<GlobeMeshPrepareMemo>();
 
-    let Some((Initialized(tile_view_pattern), Initialized(projection_resources), tile_mesh_cache)) =
-        world.resources.query_mut::<(
-            &mut Eventually<WgpuTileViewPattern>,
-            &mut Eventually<ProjectionGpuResources>,
-            &mut GlobeTileMeshCache,
-        )>()
+    let Some((
+        Initialized(tile_view_pattern),
+        Initialized(projection_resources),
+        tile_mesh_cache,
+        memo,
+    )) = world.resources.query_mut::<(
+        &mut Eventually<WgpuTileViewPattern>,
+        &mut Eventually<ProjectionGpuResources>,
+        &mut GlobeTileMeshCache,
+        &mut GlobeMeshPrepareMemo,
+    )>()
     else {
         return Err(SystemError::Dependencies);
     };
@@ -71,7 +76,7 @@ pub fn upload_system(
     projection_resources.upload(queue, projection_data);
     tile_mesh_cache.set_globe_active(projection_data.transition > 0.0);
     if tile_mesh_cache.is_empty() {
-        memo = GlobeMeshPrepareMemo::default();
+        *memo = GlobeMeshPrepareMemo::default();
     }
 
     let needs_raster_mesh = style.layers.iter().any(|layer| {
@@ -134,7 +139,6 @@ pub fn upload_system(
                 .is_some_and(|(topo_gen, raster, _)| *topo_gen == topology_gen && *raster)
                 || needs_raster_mesh;
             memo.last_globe = Some((topology_gen, with_raster, background_tiles));
-            world.resources.insert(memo);
         }
     } else if !(memo.flat_prepared && (!needs_raster_mesh || memo.flat_with_raster)) {
         let coords = crate::coords::WorldTileCoords::default();
@@ -149,7 +153,6 @@ pub fn upload_system(
         memo.flat_prepared = true;
         memo.flat_with_raster |= needs_raster_mesh;
         memo.last_globe = None;
-        world.resources.insert(memo);
     }
 
     Ok(())

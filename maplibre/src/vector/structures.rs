@@ -7,10 +7,8 @@
 //!
 //! `overlay` instead keeps a line on the terrain surface at its style width in screen pixels,
 //! where a draped line has the ground width of that many pixels at the center of the view.
-use std::{
-    hash::{Hash, Hasher},
-    sync::Arc,
-};
+mod cache;
+pub(crate) use cache::for_frame;
 
 use super::{
     tessellation::{
@@ -25,8 +23,8 @@ use crate::{
         layer::{ElevationDatum, LayerPaint, StyleLayer},
         Style,
     },
-    tcs::{tiles::Tiles, world::World},
-    terrain::{coverage::TerrainCoverageIndex, source::dem_source, DemTileComponent},
+    tcs::tiles::Tiles,
+    terrain::{coverage::TerrainCoverageIndex, source::dem_source},
 };
 
 const MAX_VERTICES: usize = 524_288;
@@ -87,110 +85,6 @@ pub(crate) fn kind(layer: &StyleLayer) -> Option<StructureKind> {
 /// Whether a layer is drawn over the terrain surface rather than draped into its textures.
 pub(crate) fn is_overlay(layer: &StyleLayer) -> bool {
     matches!(kind(layer), Some(StructureKind::Overlay))
-}
-
-#[derive(Default)]
-struct CachedProfiles {
-    key: u64,
-    buffers: Arc<Vec<SpatialBuffer>>,
-}
-
-pub(crate) fn for_frame(
-    world: &mut World,
-    style: &Style,
-    sources: &[WorldTileCoords],
-) -> (Arc<Vec<SpatialBuffer>>, bool) {
-    if dem_source(style).is_none() {
-        if let Some(cached) = world.resources.get::<CachedProfiles>() {
-            if cached.key == 0 {
-                return (cached.buffers.clone(), false);
-            }
-        }
-        let buffers = Arc::new(Vec::new());
-        world.resources.insert(CachedProfiles {
-            key: 0,
-            buffers: buffers.clone(),
-        });
-        return (buffers, false);
-    }
-    // The terrain this frame draws, which markers stand on.
-    let drawn = world.resources.get::<TerrainCoverageIndex>();
-    let key = fingerprint(&world.tiles, style, sources, drawn);
-    if let Some(cached) = world.resources.get::<CachedProfiles>() {
-        if cached.key == key {
-            return (cached.buffers.clone(), false);
-        }
-    }
-    let buffers = Arc::new(prepare(&world.tiles, style, sources, drawn));
-    world.resources.insert(CachedProfiles {
-        key,
-        buffers: buffers.clone(),
-    });
-    (buffers, true)
-}
-
-fn fingerprint(
-    tiles: &Tiles,
-    style: &Style,
-    sources: &[WorldTileCoords],
-    drawn: Option<&TerrainCoverageIndex>,
-) -> u64 {
-    let mut hash = std::hash::DefaultHasher::new();
-    // A marker moves when the drawn terrain switches DEM tiles, even if none has loaded. The
-    // index is rebuilt every frame in no fixed order, so its tiles are sorted first.
-    let has_markers = style
-        .layers
-        .iter()
-        .any(|layer| matches!(kind(layer), Some(StructureKind::Marker)));
-    if let Some(drawn) = drawn.filter(|_| has_markers) {
-        let mut terrain: Vec<_> = drawn
-            .rendered_tiles()
-            .map(|coords| (coords, drawn.loaded_dem_for(coords)))
-            .collect();
-        terrain.sort_unstable();
-        terrain.hash(&mut hash);
-    }
-    style
-        .terrain
-        .as_ref()
-        .map(|terrain| terrain.exaggeration.to_bits())
-        .hash(&mut hash);
-    for coords in tiles
-        .pyramid_of::<DemTileComponent>()
-        .coords_coarse_to_fine()
-    {
-        if let Some(DemTileComponent::Loaded(dem)) = tiles.query::<&DemTileComponent>(coords) {
-            coords.hash(&mut hash);
-            dem.revision.hash(&mut hash);
-            dem.tile.min().to_bits().hash(&mut hash);
-            dem.tile.max().to_bits().hash(&mut hash);
-        }
-    }
-    for coords in sources {
-        coords.hash(&mut hash);
-        if let Some(pending) = tiles.query::<&super::content::LayerReplacements>(*coords) {
-            pending.revision.hash(&mut hash);
-        }
-        for bucket in super::content::vector_layers(tiles, *coords) {
-            bucket.style_layer_id.hash(&mut hash);
-            bucket.buffer.buffer.vertices.len().hash(&mut hash);
-            if let Some(first) = bucket.buffer.buffer.vertices.first() {
-                first.corner_code.to_bits().hash(&mut hash);
-                first.elevation.to_bits().hash(&mut hash);
-                first.distance.to_bits().hash(&mut hash);
-            }
-        }
-    }
-    for layer in &style.layers {
-        layer.id.hash(&mut hash);
-        kind(layer).hash(&mut hash);
-        if let Some(metadata) = &layer.metadata {
-            let mut entries: Vec<_> = metadata.iter().collect();
-            entries.sort_by_key(|(key, _)| *key);
-            entries.hash(&mut hash);
-        }
-    }
-    hash.finish()
 }
 
 fn is_pure_msl_bucket(kind: StructureKind, vertices: &[ShaderVertex]) -> bool {

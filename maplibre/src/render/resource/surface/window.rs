@@ -20,7 +20,21 @@ pub struct WindowHead {
     /// (from CSS) are already in sRGB space.
     pub(super) render_format: wgpu::TextureFormat,
     pub(super) present_mode: wgpu::PresentMode,
+    pub(super) alpha_mode: wgpu::CompositeAlphaMode,
     pub(super) texture_format_features: TextureFormatFeatures,
+}
+
+/// Chooses `PreMultiplied` alpha compositing on `wasm32` when the WebGPU surface supports it
+/// so transparent pixels composite identically to WebGL2 (`{ alpha: true, premultipliedAlpha: true }`).
+pub(super) fn select_alpha_mode(
+    is_wasm32: bool,
+    supported: &[wgpu::CompositeAlphaMode],
+) -> wgpu::CompositeAlphaMode {
+    if is_wasm32 && supported.contains(&wgpu::CompositeAlphaMode::PreMultiplied) {
+        wgpu::CompositeAlphaMode::PreMultiplied
+    } else {
+        wgpu::CompositeAlphaMode::Auto
+    }
 }
 
 /// Returns the non-sRGB variant of a texture format.
@@ -61,7 +75,7 @@ impl WindowHead {
 
         let max_dim = device.limits().max_texture_dimension_2d.max(1);
         let surface_config = wgpu::SurfaceConfiguration {
-            alpha_mode: wgpu::CompositeAlphaMode::Auto,
+            alpha_mode: self.alpha_mode,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: self.texture_format,
             width: self.size.width().clamp(1, max_dim),

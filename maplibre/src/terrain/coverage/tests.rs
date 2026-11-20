@@ -209,3 +209,81 @@ fn camera_clearance_samples_fine_cached_terrain_outside_rendered_tiles() {
             < 1000.0
     );
 }
+
+#[test]
+fn prepared_region_and_coverage_index_detect_dem_and_camera_changes() {
+    use super::{take_or_compute_tight_terrain_region, PreparedTerrainKey, PreparedTerrainRegion};
+    use crate::{
+        coords::{LatLon, WorldCoords, Zoom},
+        render::view_state::{ViewState, ViewStatePadding},
+        tcs::world::World,
+        window::PhysicalSize,
+    };
+
+    let style: crate::style::Style = serde_json::from_str(
+        r#"{
+            "version": 8,
+            "sources": { "dem": { "type": "raster-dem", "tiles": ["https://dem.example/{z}/{x}/{y}.png"], "tileSize": 256, "maxzoom": 14 } },
+            "terrain": { "source": "dem", "exaggeration": 1.0 },
+            "layers": []
+        }"#,
+    )
+    .expect("style");
+    let zoom = Zoom::new(10.0);
+    let view = ViewState::new(
+        PhysicalSize::new(512, 512).expect("size"),
+        WorldCoords::from_lat_lon(LatLon::new(47.26, 11.39), zoom),
+        zoom,
+        cgmath::Deg(0.0),
+        cgmath::Deg(45.0),
+    );
+    let mut world = World::default();
+    let region = crate::render::projection::terrain_region(
+        &style,
+        &view,
+        &world,
+        256,
+        ViewStatePadding::Tight,
+    )
+    .expect("region");
+    let dem = source(1.0);
+    let built = TerrainCoverageIndex::build(
+        region
+            .iter()
+            .flat_map(|r| r.iter())
+            .filter(|c| c.build_quad_key().is_some()),
+        &world.tiles,
+        &dem,
+    );
+    assert!(built.matches_inputs(
+        region.as_ref(),
+        &world.tiles,
+        &dem,
+        super::super::PolarPoleElevations::default()
+    ));
+    world.resources.insert(built);
+    let key = PreparedTerrainKey::capture(&view, &world, 256);
+    world.resources.insert(PreparedTerrainRegion {
+        key,
+        region: region.clone(),
+    });
+    let taken =
+        take_or_compute_tight_terrain_region(&style, &view, &mut world, 256).expect("cached");
+    assert_eq!(
+        taken.as_ref().map(|r| r.iter().collect::<Vec<_>>()),
+        region.as_ref().map(|r| r.iter().collect::<Vec<_>>()),
+    );
+
+    // Loading a DEM tile invalidates `matches_inputs`.
+    load(&mut world.tiles, tile(3, 2, 4), gradient_tile(1000.0));
+    let index = world
+        .resources
+        .get::<TerrainCoverageIndex>()
+        .expect("index");
+    assert!(!index.matches_inputs(
+        region.as_ref(),
+        &world.tiles,
+        &dem,
+        super::super::PolarPoleElevations::default()
+    ));
+}

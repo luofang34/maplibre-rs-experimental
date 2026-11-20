@@ -132,32 +132,65 @@ pub(crate) fn want<S: std::hash::BuildHasher>(
     coords: &HashSet<WorldTileCoords, S>,
 ) {
     let idx = kind.index();
-    let wanted_set: FxHashSet<WorldTileCoords> = coords.iter().copied().collect();
-    let active: Vec<WorldTileCoords> = world
+    let has_active = world
         .resources
         .get::<RetryIndex>()
-        .map(|retry_idx| {
-            retry_idx.pending[idx]
-                .iter()
-                .chain(retry_idx.scheduled[idx].iter())
-                .copied()
-                .collect()
-        })
-        .unwrap_or_default();
-    let mut missing = Vec::new();
-    for held in active {
-        if let Some(retries) = world.tiles.query_mut::<&mut TileRequestRetries>(held) {
-            retries.0[idx].out_of_view = !wanted_set.contains(&held);
-        } else {
-            missing.push(held);
+        .is_some_and(|retry_idx| {
+            !retry_idx.pending[idx].is_empty() || !retry_idx.scheduled[idx].is_empty()
+        });
+    if has_active {
+        let active: Vec<WorldTileCoords> = world
+            .resources
+            .get::<RetryIndex>()
+            .map(|retry_idx| {
+                retry_idx.pending[idx]
+                    .iter()
+                    .chain(retry_idx.scheduled[idx].iter())
+                    .copied()
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut missing = Vec::new();
+        for held in active {
+            if let Some(retries) = world.tiles.query_mut::<&mut TileRequestRetries>(held) {
+                retries.0[idx].out_of_view = !coords.contains(&held);
+            } else {
+                missing.push(held);
+            }
+        }
+        if !missing.is_empty() {
+            let retry_idx = world.resources.get_or_init_mut::<RetryIndex>();
+            for gone in missing {
+                retry_idx.clear_kind(kind, gone);
+            }
         }
     }
-    let retry_idx = world.resources.get_or_init_mut::<RetryIndex>();
-    for gone in missing {
-        retry_idx.clear_kind(kind, gone);
+    let retry_unchanged = world
+        .resources
+        .get::<RetryIndex>()
+        .and_then(|r| r.last_wanted[idx].as_ref())
+        .is_some_and(|prev| prev.len() == coords.len() && coords.iter().all(|c| prev.contains(c)));
+    if !retry_unchanged {
+        let retry_idx = world.resources.get_or_init_mut::<RetryIndex>();
+        let slot = retry_idx.last_wanted[idx].get_or_insert_with(|| {
+            FxHashSet::with_capacity_and_hasher(coords.len(), Default::default())
+        });
+        slot.clear();
+        slot.extend(coords.iter().copied());
     }
-    retry_idx.last_wanted[idx] = Some(wanted_set.clone());
-    world.resources.get_or_init_mut::<WantedRequests>().0[idx] = Some(wanted_set);
+    let wanted_unchanged = world
+        .resources
+        .get::<WantedRequests>()
+        .and_then(|w| w.0[idx].as_ref())
+        .is_some_and(|prev| prev.len() == coords.len() && coords.iter().all(|c| prev.contains(c)));
+    if !wanted_unchanged {
+        let wanted = world.resources.get_or_init_mut::<WantedRequests>();
+        let slot = wanted.0[idx].get_or_insert_with(|| {
+            FxHashSet::with_capacity_and_hasher(coords.len(), Default::default())
+        });
+        slot.clear();
+        slot.extend(coords.iter().copied());
+    }
 }
 
 /// Gives up the requests in flight that no request family wanted this frame, so they stop

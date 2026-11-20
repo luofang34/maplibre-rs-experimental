@@ -139,20 +139,21 @@ fn bounded_by<E>(
     // Conservative bounds may expose parents whose children all cull away. Count those
     // splits too, so freeing a frontier slot cannot turn an empty view into unbounded work.
     let mut remaining_splits = limit.saturating_mul(32);
+    let mut children = Vec::with_capacity(4);
     while let Some(parent) = pending.pop() {
         if parent.priority() == 0 || remaining_splits == 0 {
             visible.push(parent.tile);
             continue;
         }
         remaining_splits -= 1;
-        let mut children = Vec::with_capacity(4);
+        children.clear();
         for tile in parent.tile.get_children() {
             if let Some(refinement) = inspect(tile, parent.refinement.fully_visible)? {
                 children.push(candidate(tile, refinement, focus, &rank));
             }
         }
         if visible.len() + pending.len() + children.len() <= limit {
-            pending.extend(children);
+            pending.extend(children.drain(..));
         } else {
             visible.push(parent.tile);
         }

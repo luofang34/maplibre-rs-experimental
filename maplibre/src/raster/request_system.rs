@@ -52,6 +52,12 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
     ) -> SystemResult {
         tile_retry::stop_cancelled(world, self.kernel.apc());
         crate::io::tile_backpressure::set_raster_deferred(world, false);
+        if !style.layers.iter().any(|layer| {
+            crate::io::tile_sources::RASTER_LAYER_TYPES.contains(&layer.type_.as_str())
+                && !layer.is_hidden()
+        }) {
+            return Ok(());
+        }
         let all_sources: Vec<_> = source_layer_groups(style, TileKind::Raster)
             .into_iter()
             .filter(|group| {
@@ -82,10 +88,8 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
             };
             let computed = raster_source_regions(style, view_state, world, request_padding)?;
             let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
-            let flat: Vec<WorldTileCoords> = computed
-                .iter()
-                .flat_map(|(_, tiles)| tiles.iter().copied())
-                .collect();
+            let terrain_key = crate::render::eye_covering::terrain_index_key(world);
+            let cached_regions = computed.clone();
             let cache = world
                 .resources
                 .get_or_init_mut::<crate::render::eye_covering::FrameLooseCovering>();
@@ -93,10 +97,10 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
                 *cache = crate::render::eye_covering::FrameLooseCovering {
                     host_frame,
                     view_tiles: None,
-                    raster_tiles: None,
+                    raster_regions: None,
                 };
             }
-            cache.raster_tiles = Some((flat, request_padding));
+            cache.raster_regions = Some((cached_regions, request_padding, terrain_key));
             computed
         };
         regions.retain(|(source, _)| {

@@ -93,6 +93,24 @@ impl UploadQueue {
         }
     }
 
+    /// Returns whether small-write staging should be enabled for `(is_wasm32, backend)`.
+    ///
+    /// WebGL2 (`Backend::Gl`) forbids `copyBufferSubData` between non-element staging buffers and
+    /// `ELEMENT_ARRAY_BUFFER` destinations (WebGL2 §5.14.5), so direct `write_buffer` must be used.
+    pub(crate) const fn should_stage_for_backend(is_wasm32: bool, backend: wgpu::Backend) -> bool {
+        is_wasm32 && !matches!(backend, wgpu::Backend::Gl)
+    }
+
+    /// Wraps `queue` using per-frame staging only when the target architecture and backend support
+    /// copying from a `COPY_SRC` staging buffer into any buffer usage (including index buffers).
+    pub fn for_backend(queue: wgpu::Queue, backend: wgpu::Backend) -> Self {
+        if Self::should_stage_for_backend(cfg!(target_arch = "wasm32"), backend) {
+            Self::with_staging(queue)
+        } else {
+            Self::new(queue)
+        }
+    }
+
     /// Writes `data` into `buffer` at `offset`, counting its bytes.
     ///
     /// When staging is enabled and `data` is `< 64 KiB` with 4-byte-aligned `offset` and length,

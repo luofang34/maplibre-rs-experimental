@@ -16,10 +16,12 @@ pub(super) type U16Chunks = Box<[(u32, Range<u32>)]>;
 pub(super) type IndexPlan = (bool, u64, Option<U16Chunks>);
 
 /// Returns `true` when `style_layer` can safely emit multiple `draw_indexed` sub-ranges without
-/// colliding with `sort_runs` (`circle`) or per-feature `pattern_runs`.
+/// colliding with `sort_runs` (`circle`), 3-pass `fill-extrusion` (`DEPTH`/`COLOR`/`CLEAR`),
+/// or per-feature `pattern_runs`.
 #[inline]
 pub(super) fn layer_allows_u16_chunks(style_layer: &StyleLayer) -> bool {
     style_layer.type_ != "circle"
+        && style_layer.type_ != "fill-extrusion"
         && style_layer
             .paint
             .as_ref()
@@ -90,5 +92,29 @@ pub(super) fn write_chunked_u16_indices(
     }
     if scratch.len() < padded {
         scratch.push(0);
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    fn layer(ty: &str) -> StyleLayer {
+        serde_json::from_value(serde_json::json!({
+            "id": ty,
+            "type": ty,
+            "source": "s",
+            "source-layer": "l",
+        }))
+        .expect("valid style layer")
+    }
+
+    #[test]
+    fn layer_allows_u16_chunks_excludes_circle_and_fill_extrusion() {
+        assert!(!layer_allows_u16_chunks(&layer("fill-extrusion")));
+        assert!(!layer_allows_u16_chunks(&layer("circle")));
+        assert!(layer_allows_u16_chunks(&layer("fill")));
+        assert!(layer_allows_u16_chunks(&layer("line")));
     }
 }

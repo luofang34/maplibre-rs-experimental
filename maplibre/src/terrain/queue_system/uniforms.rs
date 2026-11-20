@@ -4,74 +4,22 @@ use cgmath::{Matrix4, SquareMatrix, Vector3};
 use crate::{
     coords::{WorldTileCoords, EXTENT},
     projection::renderer_data::tile_mercator_coordinates,
-    render::{
-        eventually::{Eventually, Eventually::Initialized},
-        view_state::ViewState,
-    },
+    render::view_state::ViewState,
     style::{source::TileAddressingScheme, Style},
-    tcs::{system::SystemResult, world::World},
+    tcs::world::World,
     terrain::{
         drape_targets::TargetSpec,
         request_system::dem_tile_coords,
         resources::{TerrainFog, TerrainResources, TerrainTileUniforms},
         source::DemSource,
-        DrapePhase,
     },
 };
 mod globe;
 mod polar;
-#[derive(Clone, Default)]
-pub(crate) struct TerrainEyeFrame(pub Vec<(WorldTileCoords, TerrainTileUniforms)>);
+mod replay;
+pub(super) use replay::replay;
+pub(crate) use replay::TerrainEyeFrame;
 
-pub(super) fn replay(
-    world: &mut World,
-    style: &Style,
-    view: &ViewState,
-    queue: &crate::render::upload_queue::UploadQueue,
-) -> SystemResult {
-    let fog = terrain_fog(style, view);
-    let lighting = world
-        .resources
-        .get::<crate::render::SceneLighting>()
-        .copied()
-        .unwrap_or_default();
-    let drape_mode = world
-        .resources
-        .get::<crate::render::settings::TerrainDrapeMode>()
-        .copied()
-        .or_else(
-            || match world.resources.get::<Eventually<TerrainResources>>() {
-                Some(Initialized(terrain)) => Some(terrain.drape_mode()),
-                _ => None,
-            },
-        )
-        .unwrap_or_default();
-    let projection = view.gpu_view_projection();
-    if let Some(frame) = world.resources.get_mut::<TerrainEyeFrame>() {
-        for (coords, uniform) in &mut frame.0 {
-            uniform.transform = projection
-                .to_model_view_projection(coords.transform_for_zoom(view.zoom()))
-                .downcast()
-                .into();
-            uniform.fog_color = fog.fog_color;
-            uniform.horizon_color = fog.horizon_color;
-            uniform.fog_range = [fog.near, fog.far, fog.ground_blend, fog.horizon_blend];
-            uniform.fog_opacity[0] = fog.opacity;
-            uniform.fog_opacity[1] = f32::from(fog.globe);
-            surface_uniforms(uniform, *coords, (style, lighting, drape_mode), view);
-        }
-    }
-    if let (Some(frame), Some(Initialized(terrain))) = (
-        world.resources.get::<TerrainEyeFrame>(),
-        world.resources.get::<Eventually<TerrainResources>>(),
-    ) {
-        let uniforms: Vec<_> = frame.0.iter().map(|(_, uniform)| *uniform).collect();
-        terrain.write_uniforms(queue, &uniforms);
-    }
-    world.resources.insert(DrapePhase::default());
-    super::hide_draped_layers(world, style);
-    Ok(())
-}
 /// The nearest uploaded DEM tile at or above the DEM zoom of a view tile.
 pub(super) fn loaded_dem_tile(
     coords: WorldTileCoords,
@@ -260,6 +208,19 @@ pub(super) struct PreparedTerrain {
     pub(super) sources: Vec<TileSources>,
 }
 
+fn frame_globe_camera(
+    style: &Style,
+    view: &ViewState,
+) -> Option<crate::projection::globe::camera::GlobeCameraState> {
+    let uses_globe = style
+        .projection
+        .as_ref()
+        .is_some_and(|spec| spec.projection_type.globe_transition(view.zoom().value()) > 0.0);
+    uses_globe
+        .then(|| crate::render::projection::globe_camera_for_view(view).ok())
+        .flatten()
+}
+
 pub(super) struct SurfaceContext<'a> {
     style: &'a Style,
     view_state: &'a ViewState,
@@ -268,6 +229,8 @@ pub(super) struct SurfaceContext<'a> {
     poles: crate::terrain::PolarPoleElevations,
     lighting: crate::render::SceneLighting,
     paint_zoom: f64,
+    clear_color: [f32; 4],
+    globe_camera: Option<crate::projection::globe::camera::GlobeCameraState>,
 }
 
 /// Captures style, view, DEM and host lighting inputs for preparing terrain tile uniforms.
@@ -290,6 +253,14 @@ pub(super) fn surface_context<'a>(
         .unwrap_or_default();
     let paint_zoom =
         crate::vector::upload_system::paint::current_zoom(world, view_state.style_zoom().value());
+    let clear = super::drape_phase::background_clear_color(style);
+    let clear_color = [
+        clear.r as f32,
+        clear.g as f32,
+        clear.b as f32,
+        clear.a as f32,
+    ];
+    let globe_camera = frame_globe_camera(style, view_state);
     SurfaceContext {
         style,
         view_state,
@@ -298,6 +269,8 @@ pub(super) fn surface_context<'a>(
         poles,
         lighting,
         paint_zoom,
+        clear_color,
+        globe_camera,
     }
 }
 
@@ -315,6 +288,8 @@ pub(super) fn prepare_tiles(
         poles,
         lighting,
         paint_zoom,
+        clear_color,
+        globe_camera,
     } = ctx;
     let (specs, drape_sources) = targets;
     let zoom = view_state.zoom();
@@ -350,8 +325,14 @@ pub(super) fn prepare_tiles(
         ) else {
             continue;
         };
-        let [north_cap, south_cap] =
-            polar::cap_colors(spec.coords, drape_source, style, tiles, paint_zoom);
+        let [north_cap, south_cap] = polar::cap_colors_with_base(
+            spec.coords,
+            drape_source,
+            style,
+            tiles,
+            paint_zoom,
+            clear_color,
+        );
         let z = u8::from(spec.coords.z);
         let max_row = 1_i32.checked_shl(u32::from(z)).unwrap_or(1) - 1;
         let pole_elev = if spec.coords.y == 0 {
@@ -365,8 +346,9 @@ pub(super) fn prepare_tiles(
         surface_uniforms(
             &mut block,
             spec.coords,
-            (style, lighting, terrain.drape_mode()),
+            (clear_color, lighting, terrain.drape_mode()),
             view_state,
+            globe_camera.as_ref(),
         );
         uniforms.push(block);
         sources.push((dem_coords, spec.coords, drape_source));
@@ -418,24 +400,19 @@ pub(super) fn with_world_copies(
 fn surface_uniforms(
     block: &mut TerrainTileUniforms,
     coords: WorldTileCoords,
-    (style, lighting, drape_mode): (
-        &Style,
+    (clear_color, lighting, drape_mode): (
+        [f32; 4],
         crate::render::SceneLighting,
         crate::render::settings::TerrainDrapeMode,
     ),
     view: &ViewState,
+    globe_camera: Option<&crate::projection::globe::camera::GlobeCameraState>,
 ) {
-    globe::set_uniforms(block, coords, view);
+    globe::set_uniforms(block, coords, view, globe_camera);
     block.daylight = lighting.daylight_uniform();
     block.twilight = lighting.twilight;
     block.moonlight = lighting.moonlight;
-    let color = super::background_clear_color(style);
-    block.surface_color = [
-        color.r as f32,
-        color.g as f32,
-        color.b as f32,
-        color.a as f32,
-    ];
+    block.surface_color = clear_color;
     block.relief_strength = if view.has_external_view() { 0.45 } else { 0.0 };
     block.fog_opacity[3] = f32::from(view.has_external_view());
     block.fog_position = view.eye_fog_position(coords).unwrap_or([0.0; 4]);

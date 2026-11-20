@@ -159,7 +159,7 @@ pub(super) fn build_drape_phase(
                     draw_function,
                     index: layer.index,
                     generate_borders: false,
-                    style_layer: crate::style::StyleLayerId::intern(&layer.id),
+                    style_layer: layer.id,
                     entry_slot: crate::render::render_phase::UNSET_ENTRY_SLOT,
                     tile: Tile {
                         coords: layer.coords,
@@ -240,6 +240,16 @@ pub(super) fn encode_drapes(
         Some(Initialized(pattern)) => pattern.remaining_metadata_capacity(),
         _ => return Err(SystemError::Dependencies),
     };
+
+    if !redraw.iter().any(|&r| r) {
+        if !matches!(
+            world.resources.get::<Eventually<TerrainResources>>(),
+            Some(Initialized(_))
+        ) {
+            return Err(SystemError::Dependencies);
+        }
+        return Ok(DrapePhase::default());
+    }
 
     let target_sizes: Vec<u32> = match world.resources.get::<Eventually<TerrainResources>>() {
         Some(Initialized(terrain)) => {

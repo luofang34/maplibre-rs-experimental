@@ -90,7 +90,7 @@ pub(super) fn update_loose_covering_cache(
         *cache = crate::render::eye_covering::FrameLooseCovering {
             host_frame,
             view_tiles: None,
-            raster_tiles: None,
+            raster_regions: None,
         };
     }
     cache.view_tiles = Some((

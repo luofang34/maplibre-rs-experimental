@@ -7,6 +7,7 @@ import {spawnSync} from "child_process"
 import {existsSync, closeSync, openSync, readFileSync, renameSync, rmSync, writeFileSync} from "fs";
 import {dirname} from "path";
 import {fileURLToPath} from "url";
+import {wasmTargetConfig} from "./build-flags.mjs";
 
 let argv = yargs(process.argv.slice(2))
     .strict(true)
@@ -154,31 +155,10 @@ const wasmPack = () => {
     let profile = release ? "wasm-release" : "wasm-dev"
 
     // language=toml
-    let immediateAbortFlags = release
-        ? `"-Zunstable-options", "-Cpanic=immediate-abort", "-Zlocation-detail=none", "-Zfmt-debug=none",`
-        : ``;
-
+    let singlethreaded_config = wasmTargetConfig({release, webgl, multithreaded: false});
+    let worker_singlethreaded_config = wasmTargetConfig({release, webgl, multithreaded: false, worker: true});
     // language=toml
-    let singlethreaded_config = `target.wasm32-unknown-unknown.rustflags = [
-        "--cfg=web_sys_unstable_apis",
-        ${immediateAbortFlags}
-        "-C", "target-feature=+bulk-memory,+mutable-globals,+nontrapping-fptoint,+sign-ext",
-        "-C", "link-arg=-zstack-size=262144",
-    ]`
-
-    // language=toml
-    let multithreaded_config = `target.wasm32-unknown-unknown.rustflags = [
-        "--cfg=web_sys_unstable_apis",
-        ${immediateAbortFlags}
-        # Enables features which are required for shared-memory
-        "-C", "target-feature=+atomics,+bulk-memory,+mutable-globals,+nontrapping-fptoint,+sign-ext",
-        # Enables the possibility to import memory into wasm.
-        # Without --shared-memory it is not possible to use shared WebAssembly.Memory.
-        # Set maximum memory ceiling to 1 GiB (initial linear memory stays ~1.25 MiB and grows on demand)
-        "-C", "link-args=--shared-memory --import-memory --max-memory=1073741824 -zstack-size=131072",
-        # Exports are needed for "error: failed to prepare module for threading" / "failed to find" errors
-        "-C", "link-args=--export=__heap_base --export=__wasm_init_tls --export=__tls_size --export=__tls_align --export=__tls_base"
-    ]`
+    let multithreaded_config = wasmTargetConfig({release, webgl, multithreaded: true});
 
 
 
@@ -223,7 +203,7 @@ const wasmPack = () => {
     if (!multithreaded) {
         let workerProfile = release ? "wasm-worker-release" : profile;
         let workerCargo = spawnTool('cargo', [
-            "--config", singlethreaded_config,
+            "--config", worker_singlethreaded_config,
             "build",
             "-p", "web-tile-worker", "--lib",
             "--target", "wasm32-unknown-unknown",

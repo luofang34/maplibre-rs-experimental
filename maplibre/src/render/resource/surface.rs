@@ -80,6 +80,8 @@ impl Surface {
 
         let texture_format_features = adapter.get_texture_format_features(texture_format);
         log::info!("format features: {texture_format_features:?}");
+        let alpha_mode =
+            window::select_alpha_mode(cfg!(target_arch = "wasm32"), &capabilities.alpha_modes);
 
         Self {
             size,
@@ -90,6 +92,7 @@ impl Surface {
                 render_format,
                 texture_format_features,
                 present_mode: settings.present_mode,
+                alpha_mode,
             }),
         }
     }

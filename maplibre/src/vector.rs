@@ -195,21 +195,12 @@ pub fn geometry_uploaded(coords: WorldTileCoords, world: &World) -> bool {
     if !buckets.done {
         return false;
     }
-    let has_geometry = buckets.layers.iter().any(|layer| match layer {
-        VectorLayerBucket::AvailableLayer(bucket) => bucket.buffer.has_drawable_geometry(),
-        VectorLayerBucket::Missing(_) => false,
-    });
-    if !has_geometry {
-        return true;
-    }
     match world.resources.get::<Eventually<VectorBufferPool>>() {
         Some(Eventually::Initialized(pool)) => {
-            if !pool.has_capacity() {
-                return true;
-            }
-            if buckets
-                .uploaded_stamp
-                .is_some_and(|(_, eviction_gen)| eviction_gen == pool.eviction_generation())
+            if !pool.has_capacity()
+                || buckets
+                    .uploaded_stamp
+                    .is_some_and(|(_, eviction_gen)| eviction_gen == pool.eviction_generation())
             {
                 return true;
             }
@@ -221,7 +212,10 @@ pub fn geometry_uploaded(coords: WorldTileCoords, world: &World) -> bool {
                 VectorLayerBucket::Missing(_) => true,
             })
         }
-        _ => false,
+        _ => !buckets.layers.iter().any(|layer| match layer {
+            VectorLayerBucket::AvailableLayer(bucket) => bucket.buffer.has_drawable_geometry(),
+            VectorLayerBucket::Missing(_) => false,
+        }),
     }
 }
 

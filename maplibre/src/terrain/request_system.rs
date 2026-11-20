@@ -133,14 +133,25 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
         let terrain_tiles = if let Some(multi) = &multi {
             multi.terrain_tiles.clone()
         } else {
-            let Some(view_region) = crate::render::projection::terrain_region(
+            let view_region = crate::render::projection::terrain_region(
                 style,
                 view_state,
                 world,
                 dem.tile_size,
                 ViewStatePadding::Tight,
-            )?
-            else {
+            )?;
+            let key = crate::terrain::coverage::PreparedTerrainKey::capture(
+                view_state,
+                world,
+                dem.tile_size,
+            );
+            world
+                .resources
+                .insert(crate::terrain::coverage::PreparedTerrainRegion {
+                    key,
+                    region: view_region.clone(),
+                });
+            let Some(view_region) = view_region else {
                 return Ok(());
             };
             let order_key = crate::terrain::queue_system::draw_order_key(

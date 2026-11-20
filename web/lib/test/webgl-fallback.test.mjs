@@ -5,6 +5,7 @@ import {
     resetWebGpuProbeForTest,
     selectGraphicsBackend,
 } from '../src/browser.ts';
+import {releaseRustFlags, wasmTargetConfig} from '../build-flags.mjs';
 
 test('selectGraphicsBackend chooses WebGL2 fallback when WebGPU is absent and WebGL2 is available', () => {
     assert.deepEqual(
@@ -56,4 +57,17 @@ test('probeWebGpuAvailable handles missing navigator.gpu or null adapter without
         await probeWebGpuAvailable({gpu: {requestAdapter: async () => ({features: new Set()})}}),
         true,
     );
+});
+
+test('WebGL release builds preserve primitive/enum Debug formatting via -Zfmt-debug=shallow', () => {
+    const webglMainFlags = releaseRustFlags({release: true, webgl: true});
+    assert.ok(webglMainFlags.includes('-Zfmt-debug=shallow'));
+    assert.ok(!webglMainFlags.includes('-Zfmt-debug=none'));
+    assert.ok(wasmTargetConfig({release: true, webgl: true}).includes('-Zfmt-debug=shallow'));
+
+    const webgpuFlags = releaseRustFlags({release: true, webgl: false});
+    assert.ok(webgpuFlags.includes('-Zfmt-debug=none'));
+
+    const workerFlags = releaseRustFlags({release: true, webgl: true, worker: true});
+    assert.ok(workerFlags.includes('-Zfmt-debug=none'));
 });

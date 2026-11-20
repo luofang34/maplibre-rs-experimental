@@ -21,6 +21,7 @@ use crate::{
 };
 
 /// Returns `[north_rgba8, south_rgba8]` packed as little-endian `0xAABBGGRR` for `coords`.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn cap_colors(
     coords: WorldTileCoords,
     drape_source: Option<WorldTileCoords>,
@@ -35,6 +36,18 @@ pub(super) fn cap_colors(
         clear.b as f32,
         clear.a as f32,
     ];
+    cap_colors_with_base(coords, drape_source, style, tiles, zoom, base)
+}
+
+/// Returns `[north_rgba8, south_rgba8]` using a precomputed background clear color `base`.
+pub(super) fn cap_colors_with_base(
+    coords: WorldTileCoords,
+    drape_source: Option<WorldTileCoords>,
+    style: &Style,
+    tiles: &Tiles,
+    zoom: f64,
+    base: [f32; 4],
+) -> [u32; 2] {
     let packed_base = pack_rgba8(base);
     if drape_source.is_none() {
         return [packed_base, packed_base];

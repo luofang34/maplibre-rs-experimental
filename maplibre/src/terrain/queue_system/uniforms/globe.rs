@@ -4,7 +4,8 @@ use cgmath::{Matrix4, Vector3};
 
 use crate::{
     coords::{WorldTileCoords, EXTENT},
-    render::{projection::globe_camera_for_view, view_state::ViewState},
+    projection::globe::camera::GlobeCameraState,
+    render::view_state::ViewState,
     terrain::resources::TerrainTileUniforms,
 };
 
@@ -12,15 +13,16 @@ pub(super) fn set_uniforms(
     block: &mut TerrainTileUniforms,
     tile: WorldTileCoords,
     view: &ViewState,
+    globe_camera: Option<&GlobeCameraState>,
 ) {
     block.globe_origin = [0.0; 4];
+    let Some(camera) = globe_camera else {
+        return;
+    };
     // Coarse tiles and polar fans use the global sphere path. Their local angular span is large.
     if u8::from(tile.z) < 8 {
         return;
     }
-    let Ok(camera) = globe_camera_for_view(view) else {
-        return;
-    };
     let n = 2_f64.powi(i32::from(u8::from(tile.z)));
     let longitude = ((f64::from(tile.x) + 0.5) / n * 2.0 - 1.0) * std::f64::consts::PI;
     let latitude = (std::f64::consts::PI * (1.0 - 2.0 * (f64::from(tile.y) + 0.5) / n))

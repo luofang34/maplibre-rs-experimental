@@ -158,3 +158,32 @@ async fn oversized_surface_dimensions_clamp_to_device_max_texture_dimension_2d()
         "clamped resize must not fail validation"
     );
 }
+
+#[test]
+fn wasm32_prefers_premultiplied_alpha_when_supported() {
+    use wgpu::CompositeAlphaMode;
+    assert_eq!(
+        window::select_alpha_mode(
+            true,
+            &[
+                CompositeAlphaMode::Opaque,
+                CompositeAlphaMode::PreMultiplied
+            ]
+        ),
+        CompositeAlphaMode::PreMultiplied
+    );
+    assert_eq!(
+        window::select_alpha_mode(true, &[CompositeAlphaMode::Opaque]),
+        CompositeAlphaMode::Auto
+    );
+    assert_eq!(
+        window::select_alpha_mode(
+            false,
+            &[
+                CompositeAlphaMode::Opaque,
+                CompositeAlphaMode::PreMultiplied
+            ]
+        ),
+        CompositeAlphaMode::Auto
+    );
+}

@@ -37,6 +37,27 @@ pub fn upload_system(
     if crate::render::eye_covering::EyeInFrame::reuses_content(world) {
         return Ok(());
     }
+    let has_raster_or_media = style
+        .layers
+        .iter()
+        .any(|l| crate::io::tile_sources::RASTER_LAYER_TYPES.contains(&l.type_.as_str()))
+        || style.sources.values().any(|s| {
+            matches!(
+                s,
+                crate::style::source::Source::Image(_)
+                    | crate::style::source::Source::Video(_)
+                    | crate::style::source::Source::Canvas(_)
+            )
+        });
+    if !has_raster_or_media
+        && world
+            .tiles
+            .pyramid_of::<RasterLayersDataComponent>()
+            .is_empty()
+        && world.tiles.pyramid_of::<DemLayersComponent>().is_empty()
+    {
+        return Ok(());
+    }
     crate::raster::media_source::sync_media_sources(style, view_state, world);
     world.resources.get_or_init_mut::<FrameUploads>();
     world.resources.get_or_init_mut::<GpuDemPool>();

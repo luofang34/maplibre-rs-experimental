@@ -32,10 +32,11 @@ pub fn is_drapeable(layer_type: &str) -> bool {
 /// One vector layer of a source tile drawn into a drape texture.
 #[derive(Clone, Debug)]
 pub(crate) struct VectorLayerSpec {
-    pub(crate) id: String,
+    pub(crate) id: crate::style::StyleLayerId,
     pub(crate) index: u32,
     pub(crate) is_line: bool,
     pub(crate) coords: WorldTileCoords,
+    pub(crate) content_revision: u64,
 }
 
 /// A source tile with the layers it contributes.
@@ -376,20 +377,23 @@ fn vector_layer_specs(
     source: WorldTileCoords,
     zoom: f64,
 ) -> Vec<VectorLayerSpec> {
-    pool.index()
-        .get_layers(source)
-        .into_iter()
-        .flatten()
-        .filter(|entry| {
-            entry.style_layer.is_visible_at(zoom)
-                && is_drapeable(&entry.style_layer.type_)
-                && crate::vector::structures::kind(&entry.style_layer).is_none()
-        })
-        .map(|entry| VectorLayerSpec {
-            id: entry.style_layer.id.clone(),
-            index: entry.style_layer.index,
-            is_line: entry.style_layer.type_ == "line",
-            coords: entry.coords,
-        })
-        .collect()
+    let Some(entries) = pool.index().get_layers(source) else {
+        return Vec::new();
+    };
+    let mut specs = Vec::with_capacity(entries.len());
+    for entry in entries {
+        if entry.style_layer.is_visible_at(zoom)
+            && is_drapeable(&entry.style_layer.type_)
+            && crate::vector::structures::kind(&entry.style_layer).is_none()
+        {
+            specs.push(VectorLayerSpec {
+                id: entry.style_layer_id,
+                index: entry.style_layer.index,
+                is_line: entry.style_layer.type_ == "line",
+                coords: entry.coords,
+                content_revision: entry.content_revision(),
+            });
+        }
+    }
+    specs
 }

@@ -73,7 +73,7 @@ pub(crate) struct MultiViewExtractCovering {
 pub(crate) struct FrameLooseCovering {
     pub(crate) host_frame: u64,
     pub(crate) view_tiles: Option<(Option<Vec<WorldTileCoords>>, ViewStatePadding, ZoomLevel)>,
-    pub(crate) raster_tiles: Option<(Vec<WorldTileCoords>, ViewStatePadding)>,
+    pub(crate) raster_regions: Option<(RasterCoverings, ViewStatePadding, (u64, u64, usize))>,
 }
 
 /// Total number of eye passes executing in the current [`XrFrame`](crate::render::xr::XrFrame).
@@ -147,6 +147,11 @@ pub(crate) fn snapshot_lod_history(world: &mut World) {
 pub struct SharedCovering {
     /// The stereo frame whose eyes share the selection; none for a map camera's frame.
     frame: Option<u64>,
+    host_frame: u64,
+    style_rev: u64,
+    level: ZoomLevel,
+    view_proj_bits: [[u64; 4]; 4],
+    terrain_key: (u64, u64, usize),
     tiles: Option<(Vec<WorldTileCoords>, ZoomLevel)>,
     raster: RasterCoverings,
 }
@@ -157,8 +162,7 @@ impl SharedCovering {
     pub(crate) fn with_frame(&self, frame: u64) -> Self {
         Self {
             frame: Some(frame),
-            tiles: self.tiles.clone(),
-            raster: self.raster.clone(),
+            ..self.clone()
         }
     }
 
@@ -178,6 +182,19 @@ impl SharedCovering {
 /// or when it selected no region.
 pub(crate) fn drawn_tiles(world: &World) -> Option<&[WorldTileCoords]> {
     world.resources.get::<SharedCovering>()?.tiles()
+}
+
+pub(crate) fn terrain_index_key(world: &World) -> (u64, u64, usize) {
+    world
+        .resources
+        .get::<crate::terrain::coverage::TerrainCoverageIndex>()
+        .map_or((0, 0, 0), |idx| {
+            (
+                idx.min_elevation().to_bits(),
+                idx.max_elevation().to_bits(),
+                idx.dem_bounds_len(),
+            )
+        })
 }
 
 /// The tiles the frame draws at `level`, with the raster tiles each raster source draws:
@@ -204,6 +221,23 @@ pub(crate) fn drawn_covering(
         .resources
         .get::<MultiViewExtractCovering>()
         .is_some_and(|m| m.active);
+    let view_proj_bits: [[u64; 4]; 4] =
+        (*AsRef::<[[f64; 4]; 4]>::as_ref(&view_state.view_projection().0))
+            .map(|col| col.map(f64::to_bits));
+    let style_rev = style.revision();
+    let terrain_key = terrain_index_key(world);
+    if !multi_active && eye.is_none_or(|e| e.index == 0) {
+        if let Some(shared) = world.resources.get::<SharedCovering>().filter(|shared| {
+            shared.frame == eye.map(|e| e.frame)
+                && shared.host_frame == host_frame
+                && shared.style_rev == style_rev
+                && shared.level == level
+                && shared.view_proj_bits == view_proj_bits
+                && shared.terrain_key == terrain_key
+        }) {
+            return Ok((shared.region(), shared.raster.clone()));
+        }
+    }
     let cached_tight_region = if !multi_active && eye.is_none_or(|eye| eye.index == 0) {
         world
             .resources
@@ -227,10 +261,31 @@ pub(crate) fn drawn_covering(
             view_region_for_projection(style, view_state, world, level, ViewStatePadding::Tight)?
         }
     };
-    let raster = raster_source_regions(style, view_state, world, ViewStatePadding::Tight)?;
+    let cached_raster = if !multi_active && eye.is_none_or(|eye| eye.index == 0) {
+        world
+            .resources
+            .get::<FrameLooseCovering>()
+            .filter(|cache| cache.host_frame == host_frame)
+            .and_then(|cache| cache.raster_regions.as_ref())
+            .filter(|(_, padding, cached_terrain)| {
+                *padding == ViewStatePadding::Tight && *cached_terrain == terrain_key
+            })
+            .map(|(regions, _, _)| regions.clone())
+    } else {
+        None
+    };
+    let raster = match cached_raster {
+        Some(cached) => cached,
+        None => raster_source_regions(style, view_state, world, ViewStatePadding::Tight)?,
+    };
     if eye.is_none_or(|eye| eye.index == 0) {
         world.resources.insert(SharedCovering {
             frame: eye.map(|eye| eye.frame),
+            host_frame,
+            style_rev,
+            level,
+            view_proj_bits,
+            terrain_key,
             tiles: region
                 .as_ref()
                 .map(|region| (region.iter().collect(), region.zoom_level())),

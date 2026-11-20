@@ -257,3 +257,38 @@ fn side_sweep_matches_per_vertex_shared_height_across_four_way_corners_and_multi
         }
     }
 }
+
+#[test]
+fn assign_indices_keeps_generation_across_source_reorders_and_bumps_on_dem_change() {
+    use bytemuck::Zeroable;
+
+    let a = tile(3, 2, 3);
+    let b = tile(5, 2, 3);
+    let mut tiles = Tiles::default();
+    load(&mut tiles, a, 1000);
+    load(&mut tiles, b, 2000);
+
+    let sources_ab = [(Some(a), a, None), (Some(b), b, None)];
+    let sources_ba = [(Some(b), b, None), (Some(a), a, None)];
+    let mut uniforms = [TerrainTileUniforms::zeroed(), TerrainTileUniforms::zeroed()];
+    let mut cache = EdgeCache::default();
+
+    let (gen1, fallback1) = cache.assign_indices(&sources_ab, &mut uniforms, &tiles, 64);
+    assert_ne!(gen1, 0);
+    assert!(fallback1.is_none());
+    let row_a1 = uniforms[0].edge_index[0] as usize;
+    let row_b1 = uniforms[1].edge_index[0] as usize;
+    assert_ne!(row_a1, row_b1);
+
+    let (gen2, fallback2) = cache.assign_indices(&sources_ba, &mut uniforms, &tiles, 64);
+    assert_eq!(gen2, gen1, "reordering the same sources reuses edges");
+    assert!(fallback2.is_none());
+    assert_eq!(uniforms[0].edge_index[0] as usize, row_b1);
+    assert_eq!(uniforms[1].edge_index[0] as usize, row_a1);
+    assert!((cache.packed_edges()[row_a1].samples[0][0] - 1000.0).abs() < 100.0);
+    assert!((cache.packed_edges()[row_b1].samples[0][0] - 2000.0).abs() < 100.0);
+
+    load(&mut tiles, a, 3000);
+    let (gen3, _) = cache.assign_indices(&sources_ab, &mut uniforms, &tiles, 64);
+    assert_ne!(gen3, gen1, "replacing a DEM bumps generation");
+}

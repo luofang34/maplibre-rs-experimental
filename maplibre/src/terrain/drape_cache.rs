@@ -22,7 +22,12 @@ pub const HARD_MAX_DRAPE_TEXTURES: usize = crate::render::memory_budget::DRAPE_T
 /// content arrives or leaves and not when any other tile's does.
 pub(crate) trait SourceContent {
     /// Identity of the uploaded style-layer geometry, or `None` when it has no allocation.
-    fn vector_layer_revision(&self, coords: WorldTileCoords, layer_id: &str) -> Option<u64>;
+    fn vector_layer_revision(
+        &self,
+        coords: WorldTileCoords,
+        layer_id: crate::style::StyleLayerId,
+        cached_revision: u64,
+    ) -> Option<u64>;
     /// Revision of the raster binding, or `None` while no texture is uploaded.
     fn raster_revision(&self, coords: WorldTileCoords, layer: &str) -> Option<u64>;
     /// Identity of the evaluated uniforms used by a DEM-shaded layer.
@@ -36,7 +41,7 @@ pub(crate) fn fingerprint(
     clear: wgpu::Color,
     paint_zoom: f64,
 ) -> u64 {
-    let mut hasher = std::hash::DefaultHasher::new();
+    let mut hasher = rustc_hash::FxHasher::default();
     spec.coords.hash(&mut hasher);
     crate::vector::upload_system::drape_paint_zoom(paint_zoom)
         .to_bits()
@@ -53,7 +58,7 @@ pub(crate) fn fingerprint(
             layer.index.hash(&mut hasher);
             layer.coords.hash(&mut hasher);
             content
-                .vector_layer_revision(layer.coords, &layer.id)
+                .vector_layer_revision(layer.coords, layer.id, layer.content_revision)
                 .hash(&mut hasher);
         }
         for (id, index, dem) in &shape.raster_layers {

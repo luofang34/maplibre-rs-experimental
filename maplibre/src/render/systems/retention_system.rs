@@ -304,11 +304,13 @@ fn tiles_in_use_inner(
         }
     }
 
-    if let Some((cached_raster, _)) = loose_cache
-        .and_then(|c| c.raster_tiles.as_ref())
-        .filter(|(_, padding)| *padding == request_padding)
+    if let Some((cached_raster, _, _)) = loose_cache
+        .and_then(|c| c.raster_regions.as_ref())
+        .filter(|(_, padding, _)| *padding == request_padding)
     {
-        in_use.extend(cached_raster.iter().copied());
+        for (_, tiles) in cached_raster {
+            in_use.extend(tiles.iter().copied());
+        }
     } else if let Ok(regions) =
         crate::render::projection::raster_source_regions(style, view_state, world, request_padding)
     {

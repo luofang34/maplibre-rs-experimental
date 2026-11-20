@@ -29,6 +29,7 @@ pub(crate) struct EdgeHeightTexture {
     texture: wgpu::Texture,
     pub(super) view: wgpu::TextureView,
     capacity: usize,
+    uploaded_generation: Option<u64>,
 }
 
 impl EdgeHeightTexture {
@@ -49,6 +50,7 @@ impl EdgeHeightTexture {
             texture,
             view,
             capacity: rows as usize,
+            uploaded_generation: None,
         }
     }
 
@@ -64,6 +66,26 @@ impl Drop for EdgeHeightTexture {
 }
 
 impl TerrainResources {
+    /// Maximum tile rows supported by the edge height texture.
+    pub(crate) fn edge_capacity(&self) -> usize {
+        self.edge_heights.capacity()
+    }
+
+    /// Writes the edge height blocks only when `generation == 0` (fallback) or `generation` differs
+    /// from the previously uploaded generation.
+    pub(crate) fn write_edges_if_stale(
+        &mut self,
+        queue: &crate::render::upload_queue::UploadQueue,
+        generation: u64,
+        edges: &[crate::terrain::queue_system::edges::EdgeHeights],
+    ) {
+        if generation != 0 && self.edge_heights.uploaded_generation == Some(generation) {
+            return;
+        }
+        self.write_edges(queue, edges);
+        self.edge_heights.uploaded_generation = (generation != 0).then_some(generation);
+    }
+
     /// Writes the per-tile edge height blocks.
     pub(crate) fn write_edges(
         &self,

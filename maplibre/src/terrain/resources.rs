@@ -1,10 +1,6 @@
 //! GPU resources shared by the drape pass and the terrain draw.
 
-use std::{
-    collections::{HashMap, HashSet},
-    num::NonZeroU64,
-    sync::Arc,
-};
+use std::{collections::HashMap, num::NonZeroU64, sync::Arc};
 
 use bytemuck_derive::{Pod, Zeroable};
 
@@ -427,13 +423,13 @@ impl TerrainResources {
                 "more terrain tiles than uniform blocks; distant tiles are skipped"
             );
         }
-        let mut bytes = vec![0_u8; count * UNIFORM_STRIDE as usize];
-        for (index, block) in uniforms.iter().take(count).enumerate() {
-            let start = index * UNIFORM_STRIDE as usize;
-            let raw = bytemuck::bytes_of(block);
-            bytes[start..start + raw.len()].copy_from_slice(raw);
+        if count > 0 {
+            queue.write_buffer(
+                &self.uniform_buffer,
+                0,
+                bytemuck::cast_slice(&uniforms[..count]),
+            );
         }
-        queue.write_buffer(&self.uniform_buffer, 0, &bytes);
         count
     }
 
@@ -441,17 +437,18 @@ impl TerrainResources {
     pub fn set_draws(&mut self, draws: Vec<TerrainDraw>) {
         self.draws = draws;
         // A bind group keeps its textures alive; only the ones this frame draws with stay.
-        #[allow(
-            clippy::mutable_key_type,
-            reason = "wgpu hashes immutable resource identity, independent of internal synchronization"
-        )]
-        let used: HashSet<wgpu::BindGroup> = self
+        if self.bind_groups.len() <= self.draws.len()
+            && self.bind_groups.values().all(|g| Arc::strong_count(g) > 1)
+        {
+            return;
+        }
+        let used: rustc_hash::FxHashSet<usize> = self
             .draws
             .iter()
-            .map(|draw| draw.bind_group.as_ref().clone())
+            .map(|draw| Arc::as_ptr(&draw.bind_group) as usize)
             .collect();
         self.bind_groups
-            .retain(|_, group| used.contains(group.as_ref()));
+            .retain(|_, group| used.contains(&(Arc::as_ptr(group) as usize)));
     }
 
     /// Terrain draws of the current frame.

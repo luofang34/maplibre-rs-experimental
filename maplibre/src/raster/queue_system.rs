@@ -31,6 +31,14 @@ pub fn queue_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
+    let style_zoom = view_state.style_zoom().value();
+    if !style
+        .layers
+        .iter()
+        .any(|layer| layer.type_ == "raster" && layer.is_visible_at(style_zoom))
+    {
+        return Ok(());
+    }
     let departing_opacity: rustc_hash::FxHashMap<String, f32> = world
         .resources
         .get::<RasterCrossFade>()
@@ -56,7 +64,6 @@ pub fn queue_system(
     else {
         return Ok(());
     };
-    let style_zoom = view_state.style_zoom().value();
     for layer in style
         .layers
         .iter()

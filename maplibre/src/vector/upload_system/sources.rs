@@ -89,10 +89,11 @@ pub(super) fn frame_sources_and_painted(
         view_tile_sources.of_kind(TileKind::Vector),
         crate::vector::UploadedVectorGeometry::for_world(world),
     );
-    let (source_tiles, mut painted_tiles, uncovered) = if style.terrain.is_some() {
+    let (source_tiles, mut painted_tiles, uncovered, all_view_painted) = if style.terrain.is_some()
+    {
         let (src, uncov) = terrain_sources(world, style);
         let painted = src.clone();
-        (src, painted, uncov)
+        (src, painted, uncov, false)
     } else {
         let mut uncovered_list = Vec::new();
         let mut covered_list = Vec::new();
@@ -139,6 +140,7 @@ pub(super) fn frame_sources_and_painted(
                 }
             }
         }
+        let all_view_painted = uncovered_targets.is_empty() && covered_targets.is_empty();
         for coords in uncovered_targets {
             uncovered_set.insert(coords);
             if seen.insert(coords) {
@@ -161,24 +163,28 @@ pub(super) fn frame_sources_and_painted(
             }
         }
         uncovered_list.extend(covered_list);
-        (uncovered_list, painted, uncovered_set)
+        (uncovered_list, painted, uncovered_set, all_view_painted)
     };
-    let mut seen_painted: FxHashSet<_> = painted_tiles.iter().copied().collect();
-    if let Some(tiles) = &view_tiles {
-        for &coords in tiles {
-            if gpu_vector.has_tile(coords, world) {
-                if seen_painted.insert(coords) {
-                    painted_tiles.push(coords);
+    if !all_view_painted {
+        if let Some(tiles) = &view_tiles {
+            let mut seen_painted: FxHashSet<_> = painted_tiles.iter().copied().collect();
+            for &coords in tiles {
+                if gpu_vector.has_tile(coords, world) {
+                    if seen_painted.insert(coords) {
+                        painted_tiles.push(coords);
+                    }
+                    continue;
                 }
-                continue;
-            }
-            for stand_in in loaded_cover(&gpu_vector, coords, world)
-                .or_else(|| gpu_vector.get_available_children(coords, world, CHILDREN_SEARCH_DEPTH))
-                .into_iter()
-                .flatten()
-            {
-                if seen_painted.insert(stand_in) {
-                    painted_tiles.push(stand_in);
+                for stand_in in loaded_cover(&gpu_vector, coords, world)
+                    .or_else(|| {
+                        gpu_vector.get_available_children(coords, world, CHILDREN_SEARCH_DEPTH)
+                    })
+                    .into_iter()
+                    .flatten()
+                {
+                    if seen_painted.insert(stand_in) {
+                        painted_tiles.push(stand_in);
+                    }
                 }
             }
         }

@@ -1,0 +1,207 @@
+//! Prepares drape selection, fingerprints, budgets, and per-frame GPU allocation for terrain tiles.
+
+#[cfg(feature = "raster")]
+use crate::raster::resource::RasterResources;
+use crate::{
+    coords::WorldTileCoords,
+    render::{
+        eventually::{Eventually, Eventually::Initialized},
+        memory_budget::MemoryBudget,
+        tile_view_pattern::WgpuTileViewPattern,
+        view_state::ViewState,
+    },
+    style::Style,
+    tcs::{system::SystemError, world::World},
+    terrain::{
+        drape_cache::{fingerprint, SourceContent},
+        drape_targets::TargetSpec,
+        queue_system::{
+            acquire::acquire_drapes, activity, cohort, drape_phase::background_clear_color,
+            readiness, surface_covering, targets, DrapeBudget,
+        },
+        resources::TerrainResources,
+    },
+    vector::VectorBufferPool,
+};
+
+/// The GPU content of source tiles, read from the vector pool and the raster textures.
+pub(super) struct LoadedContent<'a> {
+    pool: Option<&'a VectorBufferPool>,
+    #[cfg(feature = "raster")]
+    raster: Option<&'a RasterResources>,
+    dem: Option<&'a crate::hillshade::HillshadeResources>,
+}
+
+impl SourceContent for LoadedContent<'_> {
+    fn vector_layer_revision(
+        &self,
+        _coords: WorldTileCoords,
+        _layer_id: crate::style::StyleLayerId,
+        cached_revision: u64,
+    ) -> Option<u64> {
+        self.pool.map(|_| cached_revision)
+    }
+
+    fn raster_revision(&self, coords: WorldTileCoords, layer: &str) -> Option<u64> {
+        #[cfg(feature = "raster")]
+        {
+            self.raster
+                .and_then(|raster| raster.texture_revision(layer, coords))
+        }
+        #[cfg(not(feature = "raster"))]
+        {
+            let _ = (coords, layer);
+            None
+        }
+    }
+
+    fn dem_layer_fingerprint(&self, layer: &str) -> Option<u64> {
+        self.dem.and_then(|dem| dem.layer_fingerprint(layer))
+    }
+}
+
+pub(super) fn loaded_content(world: &World) -> LoadedContent<'_> {
+    LoadedContent {
+        pool: match world.resources.get::<Eventually<VectorBufferPool>>() {
+            Some(Initialized(pool)) => Some(pool),
+            _ => None,
+        },
+        #[cfg(feature = "raster")]
+        raster: match world.resources.get::<Eventually<RasterResources>>() {
+            Some(Initialized(raster)) => Some(raster),
+            _ => None,
+        },
+        dem: match world
+            .resources
+            .get::<Eventually<crate::hillshade::HillshadeResources>>()
+        {
+            Some(Initialized(dem)) => Some(dem),
+            _ => None,
+        },
+    }
+}
+
+pub(super) struct PreparedDrapes {
+    pub(super) redraw: Vec<bool>,
+    pub(super) sources: Vec<Option<WorldTileCoords>>,
+    pub(super) clear_color: wgpu::Color,
+}
+
+pub(super) fn prepare_drapes(
+    specs: &[TargetSpec],
+    style: &Style,
+    view_state: &ViewState,
+    world: &mut World,
+    device: &wgpu::Device,
+    drape_zoom: f64,
+) -> Result<PreparedDrapes, SystemError> {
+    let memory = world
+        .resources
+        .get::<MemoryBudget>()
+        .copied()
+        .unwrap_or_default();
+    let clear_color = background_clear_color(style);
+    let prints: Vec<u64> = {
+        let content = loaded_content(world);
+        specs
+            .iter()
+            .map(|spec| fingerprint(spec, &content, clear_color, drape_zoom))
+            .collect()
+    };
+    // A tile whose vector sources are finished but not yet in the buffer pool would drape
+    // blank; it shows an ancestor's drape until they are.
+    let strict = world
+        .resources
+        .get::<cohort::TextureCohort>()
+        .is_some_and(|state| state.enabled);
+    let mut ready: Vec<bool> = specs
+        .iter()
+        .map(|spec| readiness::ready(spec, style, view_state.style_zoom().value(), world, strict))
+        .collect();
+    let capacity = match world.resources.get::<Eventually<WgpuTileViewPattern>>() {
+        Some(Initialized(pattern)) => pattern.remaining_metadata_capacity(),
+        _ => 0,
+    };
+    surface_covering::fit_metadata(specs, &mut ready, capacity);
+    let prefetch: Vec<bool> = {
+        let ahead = world.resources.get::<targets::PrefetchDrapes>();
+        specs
+            .iter()
+            .map(|spec| ahead.is_some_and(|ahead| ahead.0.contains(&spec.coords)))
+            .collect()
+    };
+    let budget = world
+        .resources
+        .get::<DrapeBudget>()
+        .copied()
+        .unwrap_or_default();
+    let limit = if view_state.has_external_view() {
+        budget.per_eye_frame
+    } else {
+        budget.per_frame
+    };
+    // A moving view draws what fits its time; the view at rest draws the rest at full pace.
+    let budget = if crate::render::frame_signals::camera_moved(world, view_state) {
+        world
+            .resources
+            .get::<crate::terrain::drape_timing::DrapeCost>()
+            .copied()
+            .unwrap_or_default()
+            .drapes_within(budget.moving_time, limit)
+    } else {
+        limit
+    };
+    let view_textures = crate::terrain::drape_share::textures(world, memory);
+    let (redraw, drape_sources, deferred, states) = {
+        let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>()
+        else {
+            return Err(SystemError::Dependencies);
+        };
+        let (redraw, drape_sources, deferred, states) = acquire_drapes(
+            specs,
+            (&prints, &ready, &prefetch),
+            (memory, view_textures),
+            (budget, limit),
+            terrain,
+            device,
+        );
+        for (spec, drawn) in specs.iter().zip(&redraw) {
+            if *drawn {
+                if let Some(edge_px) = terrain.drape_edge_px(spec.coords) {
+                    terrain.ensure_scratch_for_size(device, edge_px);
+                }
+            }
+        }
+        (redraw, drape_sources, deferred, states)
+    };
+    let drawn = |ahead: bool| {
+        redraw
+            .iter()
+            .zip(&prefetch)
+            .filter(|(drawn, prefetched)| **drawn && **prefetched == ahead)
+            .count()
+    };
+    crate::render::frame_signals::count_drape_redraws(world, drawn(false), drawn(true));
+    activity::record(
+        world,
+        &activity::FrameDrapes {
+            specs,
+            states: &states,
+            ready: &ready,
+            prefetch: &prefetch,
+            redraw: &redraw,
+            sources: &drape_sources,
+            budget: (budget, limit),
+            paint_zoom: drape_zoom,
+        },
+    );
+    // A drape left for a later frame's budget needs that frame.
+    if deferred {
+        crate::render::frame_signals::keep_animating(world);
+    }
+    Ok(PreparedDrapes {
+        redraw,
+        sources: drape_sources,
+        clear_color,
+    })
+}

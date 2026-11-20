@@ -282,9 +282,10 @@ impl Renderer {
         )
         .await?;
 
+        let backend = adapter.get_info().backend;
         let settings = settings
             .with_float_depth_if_supported(device.features())
-            .with_backend_msaa(adapter.get_info().backend);
+            .with_backend_msaa(backend);
         let mut surface = Surface::from_surface(surface, &adapter, window, &settings);
 
         let initial_size = surface.size();
@@ -296,10 +297,7 @@ impl Renderer {
         Ok(Self {
             instance,
             device: share_gpu(device),
-            #[cfg(target_arch = "wasm32")]
-            queue: upload_queue::UploadQueue::with_staging(queue),
-            #[cfg(not(target_arch = "wasm32"))]
-            queue: upload_queue::UploadQueue::new(queue),
+            queue: upload_queue::UploadQueue::for_backend(queue, backend),
             adapter,
             wgpu_settings,
             settings,
@@ -345,18 +343,16 @@ impl Renderer {
         )
         .await?;
 
+        let backend = adapter.get_info().backend;
         let settings = settings
             .with_float_depth_if_supported(device.features())
-            .with_backend_msaa(adapter.get_info().backend);
+            .with_backend_msaa(backend);
         let surface = Surface::from_image(&device, &adapter, window, &settings);
 
         Ok(Self {
             instance,
             device: share_gpu(device),
-            #[cfg(target_arch = "wasm32")]
-            queue: upload_queue::UploadQueue::with_staging(queue),
-            #[cfg(not(target_arch = "wasm32"))]
-            queue: upload_queue::UploadQueue::new(queue),
+            queue: upload_queue::UploadQueue::for_backend(queue, backend),
             adapter,
             wgpu_settings,
             settings,

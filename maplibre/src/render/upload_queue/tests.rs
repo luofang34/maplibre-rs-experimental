@@ -231,3 +231,23 @@ async fn cancel_staged_buffer_before_destroy_prevents_validation_error() {
     let got_live = readback_bytes(&device, &queue, &live, 64).await;
     assert_eq!(got_live, vec![0x42; 64]);
 }
+
+#[test]
+fn staging_is_enabled_only_for_non_gl_wasm32_backends() {
+    assert!(UploadQueue::should_stage_for_backend(
+        true,
+        wgpu::Backend::BrowserWebGpu
+    ));
+    assert!(!UploadQueue::should_stage_for_backend(
+        true,
+        wgpu::Backend::Gl
+    ));
+    assert!(!UploadQueue::should_stage_for_backend(
+        false,
+        wgpu::Backend::Metal
+    ));
+    assert!(!UploadQueue::should_stage_for_backend(
+        false,
+        wgpu::Backend::Gl
+    ));
+}

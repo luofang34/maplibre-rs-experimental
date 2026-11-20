@@ -148,16 +148,21 @@ pub fn upload_system(
     if changed {
         super::structures::refresh_gpu(buffer_pool, queue, &spatial, &world.tiles);
     }
-    let allow_cpu_release = style.terrain.is_none() && settings.buffer_pools.vertices >= 1_000_000;
-    let (deferred, needs_refetch) = upload_tessellated_layer_with_uncovered(
-        buffer_pool,
-        queue,
-        &mut world.tiles,
-        style,
-        (source_tiles, &uncovered_sources),
-        (&spatial, paint_frame),
-        (budget, allow_cpu_release, dyn_points),
-    );
+    let (deferred, needs_refetch) = if has_pending_uploads {
+        let allow_cpu_release =
+            style.terrain.is_none() && settings.buffer_pools.vertices >= 1_000_000;
+        upload_tessellated_layer_with_uncovered(
+            buffer_pool,
+            queue,
+            &mut world.tiles,
+            style,
+            (source_tiles, &uncovered_sources),
+            (&spatial, paint_frame),
+            (budget, allow_cpu_release, dyn_points),
+        )
+    } else {
+        (false, false)
+    };
     #[cfg(feature = "geojson")]
     crate::geojson::update::dynamic_points::refresh_dynamic_point_layers(
         world,
@@ -188,9 +193,14 @@ fn frame_paint(
         .to_radians() as f32;
     let light = style
         .light
-        .clone()
-        .unwrap_or_default()
-        .extrusion_light(view_state.style_zoom().value(), f64::from(bearing))
+        .as_ref()
+        .map_or_else(
+            || {
+                crate::style::light::LightSpecification::default()
+                    .extrusion_light(view_state.style_zoom().value(), f64::from(bearing))
+            },
+            |light| light.extrusion_light(view_state.style_zoom().value(), f64::from(bearing)),
+        )
         .unwrap_or_default();
     let paint_frame = VectorPaintFrame {
         zoom,

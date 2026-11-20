@@ -148,39 +148,63 @@ pub(super) fn evaluate_circle_metadata_into(
         };
 
         if use_fast {
-            for row in &fast_columns.values {
-                let mut rgba = ramps.color_const.unwrap_or_else(|| {
-                    ramps
-                        .color_ramp
-                        .as_ref()
-                        .and_then(|r| r.eval_f64(ramps.color_col.and_then(|c| row[c])))
-                        .unwrap_or([0.0, 0.0, 0.0, 1.0])
-                });
-                let opacity = ramps.opacity_const.unwrap_or_else(|| {
-                    ramps
-                        .opacity_ramp
-                        .as_ref()
-                        .and_then(|r| r.eval_f64(ramps.opacity_col.and_then(|c| row[c])))
-                        .unwrap_or(1.0)
-                        .clamp(0.0, 1.0)
-                });
-                rgba[3] *= opacity;
-
-                let (radius, radius_next) = if let Some(r) = ramps.radius_const {
-                    (r, r)
-                } else {
-                    let r0 = ramps
-                        .radius_ramp
-                        .as_ref()
-                        .and_then(|r| r.eval_f64(ramps.radius_col.and_then(|c| row[c])))
+            let color_const = ramps.color_const;
+            let color_ramp = ramps.color_ramp.as_ref();
+            let color_col = ramps.color_col;
+            let opacity_const = ramps.opacity_const;
+            let opacity_ramp = ramps.opacity_ramp.as_ref();
+            let opacity_col = ramps.opacity_col;
+            let radius_const = ramps.radius_const;
+            let radius_ramp = ramps.radius_ramp.as_ref();
+            let radius_col = ramps.radius_col;
+            if let (Some(c_ramp), Some(c_col), Some(o_const), Some(r_ramp), Some(r_col)) = (
+                color_ramp,
+                color_col,
+                opacity_const,
+                radius_ramp,
+                radius_col,
+            ) {
+                for row in &fast_columns.values {
+                    let mut rgba = c_ramp.eval_f64(row[c_col]).unwrap_or([0.0, 0.0, 0.0, 1.0]);
+                    rgba[3] *= o_const;
+                    let r0 = r_ramp
+                        .eval_f64(row[r_col])
                         .unwrap_or(CirclePaint::DEFAULT_RADIUS)
                         .max(0.0);
-                    (r0, r0)
-                };
-                cache.pairs.push([
-                    FillShaderFeatureMetadata::from_rgba(rgba),
-                    pack_dynamic_circle_radii(radius, radius_next),
-                ]);
+                    cache.pairs.push([
+                        FillShaderFeatureMetadata::from_rgba(rgba),
+                        pack_dynamic_circle_radii(r0, r0),
+                    ]);
+                }
+            } else {
+                for row in &fast_columns.values {
+                    let mut rgba = color_const.unwrap_or_else(|| {
+                        color_ramp
+                            .and_then(|r| r.eval_f64(color_col.and_then(|c| row[c])))
+                            .unwrap_or([0.0, 0.0, 0.0, 1.0])
+                    });
+                    let opacity = opacity_const.unwrap_or_else(|| {
+                        opacity_ramp
+                            .and_then(|r| r.eval_f64(opacity_col.and_then(|c| row[c])))
+                            .unwrap_or(1.0)
+                            .clamp(0.0, 1.0)
+                    });
+                    rgba[3] *= opacity;
+
+                    let (radius, radius_next) = if let Some(r) = radius_const {
+                        (r, r)
+                    } else {
+                        let r0 = radius_ramp
+                            .and_then(|r| r.eval_f64(radius_col.and_then(|c| row[c])))
+                            .unwrap_or(CirclePaint::DEFAULT_RADIUS)
+                            .max(0.0);
+                        (r0, r0)
+                    };
+                    cache.pairs.push([
+                        FillShaderFeatureMetadata::from_rgba(rgba),
+                        pack_dynamic_circle_radii(radius, radius_next),
+                    ]);
+                }
             }
         } else {
             let radius_prop = circle_paint.radius();
