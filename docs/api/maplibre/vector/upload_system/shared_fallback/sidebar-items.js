@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["can_release_cpu_geometry","find_shared_fallback_vertices","flush_safe_cpu_releases","missing_shared_vertices"]};

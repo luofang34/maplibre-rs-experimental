@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["SharedLayerMetaAlloc","SharedVertexAlloc"]};
+window.SIDEBAR_ITEMS = {"struct":["SharedVertexAlloc"]};

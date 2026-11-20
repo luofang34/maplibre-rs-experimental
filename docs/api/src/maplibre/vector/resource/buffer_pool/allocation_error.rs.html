@@ -35,5 +35,13 @@
 <a href=#35 id=35 data-nosnippet>35</a>        <span class="doccomment">/// Unaddressable tile.
 <a href=#36 id=36 data-nosnippet>36</a>        </span>coords: WorldTileCoords,
 <a href=#37 id=37 data-nosnippet>37</a>    },
-<a href=#38 id=38 data-nosnippet>38</a>}
+<a href=#38 id=38 data-nosnippet>38</a>    <span class="doccomment">/// A drawable layer has non-zero indices but no vertex payload or resident shared vertex slot.
+<a href=#39 id=39 data-nosnippet>39</a>    </span><span class="attr">#[error(<span class="string">"tile {coords} has {usable_indices} usable indices but 0 vertices"</span>)]
+<a href=#40 id=40 data-nosnippet>40</a>    </span>MissingVertices {
+<a href=#41 id=41 data-nosnippet>41</a>        <span class="doccomment">/// Tile missing vertex data.
+<a href=#42 id=42 data-nosnippet>42</a>        </span>coords: WorldTileCoords,
+<a href=#43 id=43 data-nosnippet>43</a>        <span class="doccomment">/// Number of drawable indices in the rejected bucket.
+<a href=#44 id=44 data-nosnippet>44</a>        </span>usable_indices: u32,
+<a href=#45 id=45 data-nosnippet>45</a>    },
+<a href=#46 id=46 data-nosnippet>46</a>}
 </code></pre></div></section></main></body></html>

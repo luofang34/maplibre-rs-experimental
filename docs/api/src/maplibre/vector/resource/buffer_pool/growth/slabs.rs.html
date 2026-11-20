@@ -254,7 +254,7 @@
 <a href=#254 id=254 data-nosnippet>254</a>                    <span class="kw">if let </span><span class="prelude-val">Some</span>((lid, z)) = layer_meta_key {
 <a href=#255 id=255 data-nosnippet>255</a>                        <span class="self">self</span>.shared_layer_meta.insert(
 <a href=#256 id=256 data-nosnippet>256</a>                            (page_id, lid, z),
-<a href=#257 id=257 data-nosnippet>257</a>                            shared::SharedLayerMetaAlloc {
+<a href=#257 id=257 data-nosnippet>257</a>                            shared_layer_meta::SharedLayerMetaAlloc {
 <a href=#258 id=258 data-nosnippet>258</a>                                range: range.clone(),
 <a href=#259 id=259 data-nosnippet>259</a>                                ref_count: <span class="number">1</span>,
 <a href=#260 id=260 data-nosnippet>260</a>                            },
@@ -313,7 +313,7 @@
 <a href=#313 id=313 data-nosnippet>313</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>((lid, z)) = layer_meta_key {
 <a href=#314 id=314 data-nosnippet>314</a>            <span class="self">self</span>.shared_layer_meta.insert(
 <a href=#315 id=315 data-nosnippet>315</a>                (page_id, lid, z),
-<a href=#316 id=316 data-nosnippet>316</a>                shared::SharedLayerMetaAlloc {
+<a href=#316 id=316 data-nosnippet>316</a>                shared_layer_meta::SharedLayerMetaAlloc {
 <a href=#317 id=317 data-nosnippet>317</a>                    range: range.clone(),
 <a href=#318 id=318 data-nosnippet>318</a>                    ref_count: <span class="number">1</span>,
 <a href=#319 id=319 data-nosnippet>319</a>                },
