@@ -104,6 +104,12 @@ impl<V, I> OverAlignedVertexBuffer<V, I> {
         self
     }
 
+    /// Overwrites the shared vertex-allocation key attached to this buffer.
+    #[inline]
+    pub fn set_shared_geometry_key(&mut self, key: Option<u64>) {
+        self.shared_geometry_key = key;
+    }
+
     /// Shared vertex-allocation key when multiple style layers reference one source-layer vertex slab.
     #[inline]
     pub fn shared_geometry_key(&self) -> Option<u64> {

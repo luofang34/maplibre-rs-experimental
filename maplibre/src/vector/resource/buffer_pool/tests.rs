@@ -443,3 +443,4 @@ fn more_feature_records_than_vertices_are_refused() {
 
 mod compact;
 mod paging;
+mod shared_collision;

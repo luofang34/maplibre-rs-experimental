@@ -10,54 +10,7 @@ pub(super) struct SharedVertexAlloc {
     pub ref_count: u32,
 }
 
-#[derive(Clone, Debug)]
-pub(super) struct SharedLayerMetaAlloc {
-    pub range: Range<wgpu::BufferAddress>,
-    pub ref_count: u32,
-}
-
 impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM, FM> {
-    /// Shares one `layer_metadata` record across all resident tiles of the same
-    /// `(style_layer_id, tile_z)` so consecutive draws of the same style layer reuse one vertex
-    /// buffer slice at Slot 2 across all vertex slabs.
-    pub fn with_shared_layer_metadata(mut self) -> Self {
-        self.shared_layer_metadata = true;
-        self
-    }
-
-    #[inline]
-    pub(super) fn layer_meta_share_key(
-        &self,
-        style_layer_id: crate::style::StyleLayerId,
-        coords: WorldTileCoords,
-    ) -> Option<(crate::style::StyleLayerId, u8)> {
-        self.shared_layer_metadata
-            .then_some((style_layer_id, u8::from(coords.z)))
-    }
-
-    pub(super) fn release_shared_layer_meta_ref(
-        &mut self,
-        layer_page: u16,
-        style_layer_id: crate::style::StyleLayerId,
-        tile_z: u8,
-    ) -> bool {
-        if !self.shared_layer_metadata {
-            return true;
-        }
-        let map_key = (layer_page, style_layer_id, tile_z);
-        match self.shared_layer_meta.get_mut(&map_key) {
-            Some(shared) if shared.ref_count > 1 => {
-                shared.ref_count -= 1;
-                false
-            }
-            Some(_) => {
-                self.shared_layer_meta.remove(&map_key);
-                true
-            }
-            None => true,
-        }
-    }
-
     /// Marks this pool to suballocate `feature_metadata` independently from uniform `vertices`,
     /// allowing uniform-paint layers to reserve zero `feature_metadata` bytes (or a single
     /// instance-stepped record) and sibling layers on the same source layer to share vertices.
@@ -128,6 +81,19 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             }
         }
         None
+    }
+
+    /// Returns `true` when `coords` holds a non-empty resident shared vertex slot for `(shared_key, layer_type)`.
+    pub fn has_shared_vertex_slot(
+        &self,
+        coords: WorldTileCoords,
+        shared_key: u64,
+        layer_type: &str,
+    ) -> bool {
+        self.decoupled_feature_metadata
+            && self
+                .find_shared_vertex_slot(coords, shared_key, V::encoding_family(layer_type))
+                .is_some_and(|(_, s)| s.vertex_count > 0)
     }
 
     /// Replaces `style_layer` at `coords` with uniform paint carried inside `layer_metadata` (zero
@@ -208,6 +174,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         let layer_meta_key = self.layer_meta_share_key(style_layer_id, coords);
         let prepacked_info = Self::prepacked_info(geometry);
         let prepacked_verts = prepacked_info.map(|(v, _, cmp)| (v, cmp));
+        let has_own_vertices = prepacked_verts.is_some() || !geometry.buffer.vertices.is_empty();
         let source_vertices: &[V] =
             if prepacked_verts.is_none() && !geometry.buffer.vertices.is_empty() {
                 &geometry.buffer.vertices
@@ -216,18 +183,49 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             } else {
                 &[]
             };
-        let shared_key = geometry
+        let mut shared_key = geometry
             .shared_geometry_key()
             .filter(|_| self.decoupled_feature_metadata);
 
-        let existing_shared =
+        let mut existing_shared =
             shared_key.and_then(|key| self.find_shared_vertex_slot(coords, key, family));
-        let vertices = match &existing_shared {
-            Some((_, s)) if prepacked_verts.is_none() && source_vertices.is_empty() => {
-                s.vertex_count
+        if has_own_vertices && existing_shared.is_some() {
+            tracing::warn!(
+                %coords,
+                layer = %style_layer.id,
+                shared_key = shared_key.unwrap_or(0),
+                "refusing to alias existing shared vertex slot for primary geometry upload"
+            );
+            existing_shared = None;
+            shared_key = None;
+        } else if let Some((_, ref shared_info)) = existing_shared {
+            let fallback_mismatch = fallback_vertices
+                .is_some_and(|verts| verts.len() as u64 != shared_info.vertex_count);
+            if shared_info.vertex_count == 0 || fallback_mismatch {
+                tracing::warn!(
+                    %coords,
+                    layer = %style_layer.id,
+                    shared_key = shared_key.unwrap_or(0),
+                    slot_vertices = shared_info.vertex_count,
+                    "refusing mismatched or empty shared vertex slot"
+                );
+                existing_shared = None;
+                shared_key = None;
             }
-            _ => prepacked_info.map_or(source_vertices.len(), |(_, len, _)| len) as u64,
+        }
+        let vertices = match &existing_shared {
+            Some((_, s)) => s.vertex_count,
+            None => prepacked_info.map_or(source_vertices.len(), |(_, len, _)| len) as u64,
         };
+        if existing_shared.is_none() && vertices == 0 {
+            if geometry.usable_indices > 0 {
+                return Err(AllocationError::MissingVertices {
+                    coords,
+                    usable_indices: geometry.usable_indices,
+                });
+            }
+            shared_key = None;
+        }
         let uniform_fm = self.decoupled_feature_metadata;
         let strides = ElementStrides::of::<V::Gpu, I, TM, FM>();
         let use_compact_extrusion = uniform_fm

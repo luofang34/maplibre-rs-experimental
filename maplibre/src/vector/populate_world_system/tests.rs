@@ -349,3 +349,5 @@ fn id_bearing_mvt_arrivals_without_feature_state_avoid_cloning_and_deduplicate_w
         "query index must share the exact canonical Arc<FeatureProperties> with feature paint"
     );
 }
+
+mod shared_keys;

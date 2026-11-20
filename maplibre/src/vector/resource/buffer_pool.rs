@@ -60,8 +60,10 @@ pub struct BufferPool<Q, B, V: PoolVertex, I, TM, FM> {
     index: RingIndex,
     shared_vertices:
         rustc_hash::FxHashMap<(WorldTileCoords, u16, u64, u8), shared::SharedVertexAlloc>,
-    shared_layer_meta:
-        rustc_hash::FxHashMap<(u16, crate::style::StyleLayerId, u8), shared::SharedLayerMetaAlloc>,
+    shared_layer_meta: rustc_hash::FxHashMap<
+        (u16, crate::style::StyleLayerId, u8),
+        shared_layer_meta::SharedLayerMetaAlloc,
+    >,
     pattern_runs: rustc_hash::FxHashMap<(WorldTileCoords, crate::style::StyleLayerId), PatternRuns>,
     sort_runs: rustc_hash::FxHashMap<(WorldTileCoords, crate::style::StyleLayerId), SortRuns>,
     vertex_scratch: Vec<V::Gpu>,
@@ -474,6 +476,7 @@ mod page;
 mod prepacked;
 mod reclaim;
 mod shared;
+mod shared_layer_meta;
 mod u16_chunks;
 mod updates;
 mod upload;

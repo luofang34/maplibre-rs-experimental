@@ -75,6 +75,12 @@ pub fn apply_vector_worker_batch<T: VectorTransferables>(
             #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
             let coords = outcome.coords;
             tile_retry::completed(world, outcome);
+            if let Some(remap) = world
+                .resources
+                .get_mut::<shared_keys::SharedGeometryKeyRemap>()
+            {
+                remap.finish(outcome.coords, outcome.attempt);
+            }
             #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
             if let Some(permit) = shared_permit {
                 world
@@ -135,6 +141,13 @@ pub fn apply_vector_worker_batch<T: VectorTransferables>(
                 );
                 if let Some(entries) = feature_paint.as_mut() {
                     interner.intern_entries(&world.tiles, coords, entries);
+                }
+                if let Some(raw_key) = bucket.buffer.shared_geometry_key() {
+                    let host_key = world
+                        .resources
+                        .get_or_init_mut::<shared_keys::SharedGeometryKeyRemap>()
+                        .remap(coords, attempt, raw_key);
+                    bucket.buffer.set_shared_geometry_key(Some(host_key));
                 }
                 super::content::accept_vector_with_paint(world, bucket, feature_paint);
                 if retessellate {
@@ -198,6 +211,8 @@ fn finish_tile<T: TileTessellated>(world: &mut crate::tcs::world::World, message
         super::content::drop_undelivered(world, message.coords());
     }
 }
+
+mod shared_keys;
 
 #[cfg(test)]
 mod tests;

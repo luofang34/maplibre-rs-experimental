@@ -35,4 +35,12 @@ pub enum AllocationError {
         /// Unaddressable tile.
         coords: WorldTileCoords,
     },
+    /// A drawable layer has non-zero indices but no vertex payload or resident shared vertex slot.
+    #[error("tile {coords} has {usable_indices} usable indices but 0 vertices")]
+    MissingVertices {
+        /// Tile missing vertex data.
+        coords: WorldTileCoords,
+        /// Number of drawable indices in the rejected bucket.
+        usable_indices: u32,
+    },
 }

@@ -133,6 +133,7 @@ pub(crate) struct SharedTileSlot {
 
 impl SharedTileSlot {
     /// Transfers any held permit from `other` into `self` when `self` has not claimed one yet.
+    #[cfg(feature = "raster")]
     pub(crate) fn merge(&mut self, other: Self) {
         #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
         if self.permit.is_none() {

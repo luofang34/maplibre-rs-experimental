@@ -254,7 +254,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
                     if let Some((lid, z)) = layer_meta_key {
                         self.shared_layer_meta.insert(
                             (page_id, lid, z),
-                            shared::SharedLayerMetaAlloc {
+                            shared_layer_meta::SharedLayerMetaAlloc {
                                 range: range.clone(),
                                 ref_count: 1,
                             },
@@ -313,7 +313,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         if let Some((lid, z)) = layer_meta_key {
             self.shared_layer_meta.insert(
                 (page_id, lid, z),
-                shared::SharedLayerMetaAlloc {
+                shared_layer_meta::SharedLayerMetaAlloc {
                     range: range.clone(),
                     ref_count: 1,
                 },

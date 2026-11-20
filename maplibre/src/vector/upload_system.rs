@@ -18,6 +18,7 @@ use crate::{
 mod bucket;
 mod metadata;
 pub(crate) mod paint;
+mod shared_fallback;
 pub(crate) mod sources;
 pub(crate) mod style_refresh;
 
@@ -362,6 +363,25 @@ fn upload_tessellated_layer_with_uncovered(
                     tile_incomplete = true;
                     continue;
                 } else {
+                    let fallback_vertices = shared_fallback::find_shared_fallback_vertices(
+                        bucket,
+                        layers,
+                        pending,
+                        replacement.is_some(),
+                    );
+                    if shared_fallback::missing_shared_vertices(
+                        buffer_pool,
+                        coords,
+                        style_layer,
+                        bucket,
+                        fallback_vertices,
+                    ) {
+                        if !style_layer.is_hidden() {
+                            needs_refetch = true;
+                        }
+                        tile_incomplete = true;
+                        continue;
+                    }
                     let bytes = upload_size(style_layer, bucket, is_uniform, is_dynamic_circle);
                     if budget.geometry_tiles_exhausted_for(is_uncovered)
                         || !budget.can_take_geometry(bytes, is_uncovered)
@@ -369,14 +389,12 @@ fn upload_tessellated_layer_with_uncovered(
                         Step::Exhausted
                     } else {
                         let release_cpu = (allow_cpu_release
-                            && metadata::can_release_cpu_geometry(
+                            && shared_fallback::can_release_cpu_geometry(
                                 style_layer,
                                 bucket,
                                 has_dem_source,
                             ))
                         .then(|| bucket.buffer.shared_geometry_key());
-                        let fallback_vertices =
-                            metadata::find_shared_fallback_vertices(bucket, layers, pending);
                         let paint_store =
                             tiles.query::<&super::feature_paint::TileFeaturePaintComponent>(coords);
                         let paint_entries = if replacement.is_some() {
@@ -418,7 +436,7 @@ fn upload_tessellated_layer_with_uncovered(
                     continue;
                 }
                 Step::Exhausted => {
-                    metadata::flush_safe_cpu_releases(
+                    shared_fallback::flush_safe_cpu_releases(
                         tiles,
                         buffer_pool,
                         coords,
@@ -451,7 +469,7 @@ fn upload_tessellated_layer_with_uncovered(
                 }
             }
         }
-        metadata::flush_safe_cpu_releases(tiles, buffer_pool, coords, &pending_cpu_releases);
+        shared_fallback::flush_safe_cpu_releases(tiles, buffer_pool, coords, &pending_cpu_releases);
         if !tile_incomplete {
             let end_stamp = (style.revision(), buffer_pool.eviction_generation());
             if let Some((layers, pending)) = tiles.query_mut::<(
