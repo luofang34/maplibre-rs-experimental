@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["decode_layer_properties","decode_layer_properties_bounded","fill_feature_properties","tags_are_valid"]};

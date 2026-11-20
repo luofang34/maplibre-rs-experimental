@@ -242,204 +242,206 @@
 <a href=#242 id=242 data-nosnippet>242</a>                    .with_prepacked_gpu(<span class="kw">crate</span>::vector::tessellation::PrepackedGpuGeometry {
 <a href=#243 id=243 data-nosnippet>243</a>                        vertices: packed,
 <a href=#244 id=244 data-nosnippet>244</a>                        indices_u16: <span class="prelude-val">Some</span>(u16s),
-<a href=#245 id=245 data-nosnippet>245</a>                        compact_extrusion,
-<a href=#246 id=246 data-nosnippet>246</a>                        logical_vertex_count,
-<a href=#247 id=247 data-nosnippet>247</a>                    })
-<a href=#248 id=248 data-nosnippet>248</a>                    .with_shared_geometry_key(shared_key)
-<a href=#249 id=249 data-nosnippet>249</a>            } <span class="kw">else </span>{
-<a href=#250 id=250 data-nosnippet>250</a>                OverAlignedVertexBuffer::from_vecs(Vec::new(), raw_indices, usable)
-<a href=#251 id=251 data-nosnippet>251</a>                    .with_prepacked_gpu(<span class="kw">crate</span>::vector::tessellation::PrepackedGpuGeometry {
-<a href=#252 id=252 data-nosnippet>252</a>                        vertices: packed,
-<a href=#253 id=253 data-nosnippet>253</a>                        indices_u16: <span class="prelude-val">None</span>,
-<a href=#254 id=254 data-nosnippet>254</a>                        compact_extrusion,
-<a href=#255 id=255 data-nosnippet>255</a>                        logical_vertex_count,
-<a href=#256 id=256 data-nosnippet>256</a>                    })
-<a href=#257 id=257 data-nosnippet>257</a>                    .with_shared_geometry_key(shared_key)
-<a href=#258 id=258 data-nosnippet>258</a>            };
-<a href=#259 id=259 data-nosnippet>259</a>        }
-<a href=#260 id=260 data-nosnippet>260</a>        <span class="self">Self</span>::build_from_with_paint(
-<a href=#261 id=261 data-nosnippet>261</a>            coords,
-<a href=#262 id=262 data-nosnippet>262</a>            buffer,
-<a href=#263 id=263 data-nosnippet>263</a>            feature_indices,
-<a href=#264 id=264 data-nosnippet>264</a>            feature_colors,
-<a href=#265 id=265 data-nosnippet>265</a>            feature_sort_keys,
-<a href=#266 id=266 data-nosnippet>266</a>            layer_data,
-<a href=#267 id=267 data-nosnippet>267</a>            style_layer_id,
-<a href=#268 id=268 data-nosnippet>268</a>            entries,
-<a href=#269 id=269 data-nosnippet>269</a>        )
-<a href=#270 id=270 data-nosnippet>270</a>    }
-<a href=#271 id=271 data-nosnippet>271</a>
-<a href=#272 id=272 data-nosnippet>272</a>    <span class="kw">fn </span>with_overscaled_zoom(<span class="kw-2">mut </span><span class="self">self</span>, overscaled_zoom: u8) -&gt; <span class="self">Self </span>{
-<a href=#273 id=273 data-nosnippet>273</a>        <span class="self">self</span>.overscaled_zoom = overscaled_zoom;
-<a href=#274 id=274 data-nosnippet>274</a>        <span class="self">self
-<a href=#275 id=275 data-nosnippet>275</a>    </span>}
-<a href=#276 id=276 data-nosnippet>276</a>
-<a href=#277 id=277 data-nosnippet>277</a>    <span class="kw">fn </span>overscaled_zoom(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u8 {
-<a href=#278 id=278 data-nosnippet>278</a>        <span class="self">self</span>.overscaled_zoom
-<a href=#279 id=279 data-nosnippet>279</a>    }
-<a href=#280 id=280 data-nosnippet>280</a>
-<a href=#281 id=281 data-nosnippet>281</a>    <span class="kw">fn </span>with_feature_paint(<span class="kw-2">mut </span><span class="self">self</span>, entries: Vec&lt;BucketFeatureEntry&gt;) -&gt; <span class="self">Self </span>{
-<a href=#282 id=282 data-nosnippet>282</a>        <span class="self">self</span>.feature_paint = (!entries.is_empty()).then_some(entries);
-<a href=#283 id=283 data-nosnippet>283</a>        <span class="self">self
-<a href=#284 id=284 data-nosnippet>284</a>    </span>}
-<a href=#285 id=285 data-nosnippet>285</a>
-<a href=#286 id=286 data-nosnippet>286</a>    <span class="kw">fn </span>take_feature_paint(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;BucketFeatureEntry&gt;&gt; {
-<a href=#287 id=287 data-nosnippet>287</a>        <span class="self">self</span>.feature_paint.take()
-<a href=#288 id=288 data-nosnippet>288</a>    }
-<a href=#289 id=289 data-nosnippet>289</a>
-<a href=#290 id=290 data-nosnippet>290</a>    <span class="kw">fn </span>coords(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; WorldTileCoords {
-<a href=#291 id=291 data-nosnippet>291</a>        <span class="self">self</span>.coords
-<a href=#292 id=292 data-nosnippet>292</a>    }
-<a href=#293 id=293 data-nosnippet>293</a>
-<a href=#294 id=294 data-nosnippet>294</a>    <span class="kw">fn </span>is_empty(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
-<a href=#295 id=295 data-nosnippet>295</a>        <span class="self">self</span>.buffer.usable_indices == <span class="number">0
-<a href=#296 id=296 data-nosnippet>296</a>    </span>}
-<a href=#297 id=297 data-nosnippet>297</a>
-<a href=#298 id=298 data-nosnippet>298</a>    <span class="kw">fn </span>style_layer_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>str {
-<a href=#299 id=299 data-nosnippet>299</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.style_layer_id
-<a href=#300 id=300 data-nosnippet>300</a>    }
-<a href=#301 id=301 data-nosnippet>301</a>
-<a href=#302 id=302 data-nosnippet>302</a>    <span class="kw">fn </span>to_bucket(<span class="self">self</span>) -&gt; AvailableVectorLayerBucket {
-<a href=#303 id=303 data-nosnippet>303</a>        AvailableVectorLayerBucket {
-<a href=#304 id=304 data-nosnippet>304</a>            coords: <span class="self">self</span>.coords,
-<a href=#305 id=305 data-nosnippet>305</a>            source_layer: <span class="self">self</span>.layer_data.name,
-<a href=#306 id=306 data-nosnippet>306</a>            style_layer_id: <span class="self">self</span>.style_layer_id,
-<a href=#307 id=307 data-nosnippet>307</a>            buffer: <span class="self">self</span>.buffer,
-<a href=#308 id=308 data-nosnippet>308</a>            feature_indices: <span class="self">self</span>.feature_indices,
-<a href=#309 id=309 data-nosnippet>309</a>            feature_colors: <span class="self">self</span>.feature_colors,
-<a href=#310 id=310 data-nosnippet>310</a>            feature_sort_keys: <span class="self">self</span>.feature_sort_keys,
-<a href=#311 id=311 data-nosnippet>311</a>        }
-<a href=#312 id=312 data-nosnippet>312</a>    }
-<a href=#313 id=313 data-nosnippet>313</a>}
-<a href=#314 id=314 data-nosnippet>314</a>
-<a href=#315 id=315 data-nosnippet>315</a><span class="doccomment">/// Owned symbol geometry and placement metadata with shared atlas ownership.
-<a href=#316 id=316 data-nosnippet>316</a></span><span class="kw">pub struct </span>DefaultSymbolLayerTessellated {
-<a href=#317 id=317 data-nosnippet>317</a>    <span class="doccomment">/// Glyph and sprite texels shared with other messages using the same atlas.
-<a href=#318 id=318 data-nosnippet>318</a>    </span><span class="kw">pub </span>atlas: <span class="prelude-ty">Option</span>&lt;std::sync::Arc&lt;<span class="kw">crate</span>::sdf::assets::SymbolAtlas&gt;&gt;,
-<a href=#319 id=319 data-nosnippet>319</a>    <span class="doccomment">/// Tile-grid coordinates whose local space contains the symbol anchors.
-<a href=#320 id=320 data-nosnippet>320</a>    </span><span class="kw">pub </span>coords: WorldTileCoords,
-<a href=#321 id=321 data-nosnippet>321</a>    <span class="doccomment">/// Padded symbol vertex/index storage and usable draw index count.
-<a href=#322 id=322 data-nosnippet>322</a>    </span><span class="kw">pub </span>buffer: OverAlignedVertexBuffer&lt;ShaderSymbolVertex, IndexDataType&gt;,
-<a href=#323 id=323 data-nosnippet>323</a>    <span class="doccomment">/// Placement metadata and geometry ranges for the symbols in this buffer.
-<a href=#324 id=324 data-nosnippet>324</a>    </span><span class="kw">pub </span>features: Vec&lt;Feature&gt;,
-<a href=#325 id=325 data-nosnippet>325</a>    <span class="doccomment">/// Decoded source layer; bucket conversion retains its name.
-<a href=#326 id=326 data-nosnippet>326</a>    </span><span class="kw">pub </span>layer_data: Layer,
-<a href=#327 id=327 data-nosnippet>327</a>    <span class="doccomment">/// Style entry whose symbol layout produced the geometry.
-<a href=#328 id=328 data-nosnippet>328</a>    </span><span class="kw">pub </span>style_layer_id: String,
-<a href=#329 id=329 data-nosnippet>329</a>}
-<a href=#330 id=330 data-nosnippet>330</a>
-<a href=#331 id=331 data-nosnippet>331</a><span class="kw">impl </span>Debug <span class="kw">for </span>DefaultSymbolLayerTessellated {
-<a href=#332 id=332 data-nosnippet>332</a>    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; std::fmt::Result {
-<a href=#333 id=333 data-nosnippet>333</a>        <span class="macro">write!</span>(f, <span class="string">"DefaultSymbolLayerTessellated({})"</span>, <span class="self">self</span>.coords)
-<a href=#334 id=334 data-nosnippet>334</a>    }
-<a href=#335 id=335 data-nosnippet>335</a>}
-<a href=#336 id=336 data-nosnippet>336</a>
-<a href=#337 id=337 data-nosnippet>337</a><span class="kw">impl </span>IntoMessage <span class="kw">for </span>DefaultSymbolLayerTessellated {
-<a href=#338 id=338 data-nosnippet>338</a>    <span class="kw">fn </span>into(<span class="self">self</span>) -&gt; Message {
-<a href=#339 id=339 data-nosnippet>339</a>        Message::new(<span class="self">Self</span>::message_tag(), Box::new(<span class="self">self</span>))
-<a href=#340 id=340 data-nosnippet>340</a>    }
-<a href=#341 id=341 data-nosnippet>341</a>}
-<a href=#342 id=342 data-nosnippet>342</a>
-<a href=#343 id=343 data-nosnippet>343</a><span class="kw">impl </span>SymbolLayerTessellated <span class="kw">for </span>DefaultSymbolLayerTessellated {
-<a href=#344 id=344 data-nosnippet>344</a>    <span class="kw">fn </span>message_tag() -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span><span class="kw">dyn </span>MessageTag {
-<a href=#345 id=345 data-nosnippet>345</a>        <span class="kw-2">&amp;</span>VectorMessageTag::SymbolLayerTessellated
-<a href=#346 id=346 data-nosnippet>346</a>    }
-<a href=#347 id=347 data-nosnippet>347</a>
-<a href=#348 id=348 data-nosnippet>348</a>    <span class="kw">fn </span>build_from(
-<a href=#349 id=349 data-nosnippet>349</a>        coords: WorldTileCoords,
-<a href=#350 id=350 data-nosnippet>350</a>        buffer: OverAlignedVertexBuffer&lt;ShaderSymbolVertex, IndexDataType&gt;,
-<a href=#351 id=351 data-nosnippet>351</a>        features: Vec&lt;Feature&gt;,
-<a href=#352 id=352 data-nosnippet>352</a>        atlas: <span class="prelude-ty">Option</span>&lt;std::sync::Arc&lt;<span class="kw">crate</span>::sdf::assets::SymbolAtlas&gt;&gt;,
-<a href=#353 id=353 data-nosnippet>353</a>        layer_data: Layer,
-<a href=#354 id=354 data-nosnippet>354</a>        style_layer_id: String,
-<a href=#355 id=355 data-nosnippet>355</a>    ) -&gt; <span class="self">Self </span>{
-<a href=#356 id=356 data-nosnippet>356</a>        <span class="self">Self </span>{
-<a href=#357 id=357 data-nosnippet>357</a>            atlas,
-<a href=#358 id=358 data-nosnippet>358</a>            coords,
-<a href=#359 id=359 data-nosnippet>359</a>            buffer,
-<a href=#360 id=360 data-nosnippet>360</a>            features,
-<a href=#361 id=361 data-nosnippet>361</a>            layer_data,
-<a href=#362 id=362 data-nosnippet>362</a>            style_layer_id,
-<a href=#363 id=363 data-nosnippet>363</a>        }
-<a href=#364 id=364 data-nosnippet>364</a>    }
-<a href=#365 id=365 data-nosnippet>365</a>
-<a href=#366 id=366 data-nosnippet>366</a>    <span class="kw">fn </span>coords(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; WorldTileCoords {
-<a href=#367 id=367 data-nosnippet>367</a>        <span class="self">self</span>.coords
-<a href=#368 id=368 data-nosnippet>368</a>    }
-<a href=#369 id=369 data-nosnippet>369</a>
-<a href=#370 id=370 data-nosnippet>370</a>    <span class="kw">fn </span>is_empty(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
-<a href=#371 id=371 data-nosnippet>371</a>        <span class="self">self</span>.buffer.usable_indices == <span class="number">0
-<a href=#372 id=372 data-nosnippet>372</a>    </span>}
-<a href=#373 id=373 data-nosnippet>373</a>
-<a href=#374 id=374 data-nosnippet>374</a>    <span class="kw">fn </span>to_bucket(<span class="self">self</span>) -&gt; SymbolLayerData {
-<a href=#375 id=375 data-nosnippet>375</a>        SymbolLayerData {
-<a href=#376 id=376 data-nosnippet>376</a>            atlas: <span class="self">self</span>.atlas,
-<a href=#377 id=377 data-nosnippet>377</a>            coords: <span class="self">self</span>.coords,
-<a href=#378 id=378 data-nosnippet>378</a>            source_layer: <span class="self">self</span>.layer_data.name,
-<a href=#379 id=379 data-nosnippet>379</a>            style_layer_id: <span class="self">self</span>.style_layer_id,
-<a href=#380 id=380 data-nosnippet>380</a>            buffer: <span class="self">self</span>.buffer,
-<a href=#381 id=381 data-nosnippet>381</a>            features: <span class="self">self</span>.features,
-<a href=#382 id=382 data-nosnippet>382</a>        }
-<a href=#383 id=383 data-nosnippet>383</a>    }
-<a href=#384 id=384 data-nosnippet>384</a>}
-<a href=#385 id=385 data-nosnippet>385</a>
-<a href=#386 id=386 data-nosnippet>386</a><span class="doccomment">/// Owned spatial index and the tile coordinates to which it belongs.
-<a href=#387 id=387 data-nosnippet>387</a></span><span class="kw">pub struct </span>DefaultLayerIndexed {
-<a href=#388 id=388 data-nosnippet>388</a>    coords: WorldTileCoords,
-<a href=#389 id=389 data-nosnippet>389</a>    source: <span class="prelude-ty">Option</span>&lt;String&gt;,
-<a href=#390 id=390 data-nosnippet>390</a>    index: TileIndex,
-<a href=#391 id=391 data-nosnippet>391</a>}
-<a href=#392 id=392 data-nosnippet>392</a>
-<a href=#393 id=393 data-nosnippet>393</a><span class="kw">impl </span>Debug <span class="kw">for </span>DefaultLayerIndexed {
-<a href=#394 id=394 data-nosnippet>394</a>    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; std::fmt::Result {
-<a href=#395 id=395 data-nosnippet>395</a>        <span class="macro">write!</span>(f, <span class="string">"DefaultLayerIndexed({})"</span>, <span class="self">self</span>.coords)
-<a href=#396 id=396 data-nosnippet>396</a>    }
-<a href=#397 id=397 data-nosnippet>397</a>}
-<a href=#398 id=398 data-nosnippet>398</a>
-<a href=#399 id=399 data-nosnippet>399</a><span class="kw">impl </span>IntoMessage <span class="kw">for </span>DefaultLayerIndexed {
-<a href=#400 id=400 data-nosnippet>400</a>    <span class="kw">fn </span>into(<span class="self">self</span>) -&gt; Message {
-<a href=#401 id=401 data-nosnippet>401</a>        Message::new(<span class="self">Self</span>::message_tag(), Box::new(<span class="self">self</span>))
-<a href=#402 id=402 data-nosnippet>402</a>    }
-<a href=#403 id=403 data-nosnippet>403</a>}
-<a href=#404 id=404 data-nosnippet>404</a>
-<a href=#405 id=405 data-nosnippet>405</a><span class="kw">impl </span>LayerIndexed <span class="kw">for </span>DefaultLayerIndexed {
-<a href=#406 id=406 data-nosnippet>406</a>    <span class="kw">fn </span>message_tag() -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span><span class="kw">dyn </span>MessageTag {
-<a href=#407 id=407 data-nosnippet>407</a>        <span class="kw-2">&amp;</span>VectorMessageTag::LayerIndexed
-<a href=#408 id=408 data-nosnippet>408</a>    }
-<a href=#409 id=409 data-nosnippet>409</a>
-<a href=#410 id=410 data-nosnippet>410</a>    <span class="kw">fn </span>build_from(coords: WorldTileCoords, source: <span class="prelude-ty">Option</span>&lt;String&gt;, index: TileIndex) -&gt; <span class="self">Self </span>{
-<a href=#411 id=411 data-nosnippet>411</a>        <span class="self">Self </span>{
-<a href=#412 id=412 data-nosnippet>412</a>            coords,
-<a href=#413 id=413 data-nosnippet>413</a>            source,
-<a href=#414 id=414 data-nosnippet>414</a>            index,
-<a href=#415 id=415 data-nosnippet>415</a>        }
-<a href=#416 id=416 data-nosnippet>416</a>    }
-<a href=#417 id=417 data-nosnippet>417</a>
-<a href=#418 id=418 data-nosnippet>418</a>    <span class="kw">fn </span>coords(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; WorldTileCoords {
-<a href=#419 id=419 data-nosnippet>419</a>        <span class="self">self</span>.coords
-<a href=#420 id=420 data-nosnippet>420</a>    }
-<a href=#421 id=421 data-nosnippet>421</a>
-<a href=#422 id=422 data-nosnippet>422</a>    <span class="kw">fn </span>source(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;String&gt; {
-<a href=#423 id=423 data-nosnippet>423</a>        <span class="self">self</span>.source.clone()
-<a href=#424 id=424 data-nosnippet>424</a>    }
-<a href=#425 id=425 data-nosnippet>425</a>
-<a href=#426 id=426 data-nosnippet>426</a>    <span class="kw">fn </span>to_tile_index(<span class="self">self</span>) -&gt; TileIndex {
-<a href=#427 id=427 data-nosnippet>427</a>        <span class="self">self</span>.index
-<a href=#428 id=428 data-nosnippet>428</a>    }
-<a href=#429 id=429 data-nosnippet>429</a>}
-<a href=#430 id=430 data-nosnippet>430</a>
-<a href=#431 id=431 data-nosnippet>431</a><span class="attr">#[derive(Copy, Clone)]
-<a href=#432 id=432 data-nosnippet>432</a></span><span class="doccomment">/// Uses owned Rust payloads without serializing them for worker transport.
-<a href=#433 id=433 data-nosnippet>433</a></span><span class="kw">pub struct </span>DefaultVectorTransferables;
-<a href=#434 id=434 data-nosnippet>434</a>
-<a href=#435 id=435 data-nosnippet>435</a><span class="kw">impl </span>VectorTransferables <span class="kw">for </span>DefaultVectorTransferables {
-<a href=#436 id=436 data-nosnippet>436</a>    <span class="kw">type </span>TileTessellated = DefaultTileTessellated;
-<a href=#437 id=437 data-nosnippet>437</a>    <span class="kw">type </span>LayerMissing = DefaultLayerMissing;
-<a href=#438 id=438 data-nosnippet>438</a>    <span class="kw">type </span>LayerTessellated = DefaultLayerTessellated;
-<a href=#439 id=439 data-nosnippet>439</a>    <span class="kw">type </span>SymbolLayerTessellated = DefaultSymbolLayerTessellated;
-<a href=#440 id=440 data-nosnippet>440</a>    <span class="kw">type </span>LayerIndexed = DefaultLayerIndexed;
-<a href=#441 id=441 data-nosnippet>441</a>}
-<a href=#442 id=442 data-nosnippet>442</a>
-<a href=#443 id=443 data-nosnippet>443</a><span class="attr">#[cfg(test)]
-<a href=#444 id=444 data-nosnippet>444</a></span><span class="kw">mod </span>tests;
+<a href=#245 id=245 data-nosnippet>245</a>                        indices_u32: <span class="prelude-val">None</span>,
+<a href=#246 id=246 data-nosnippet>246</a>                        compact_extrusion,
+<a href=#247 id=247 data-nosnippet>247</a>                        logical_vertex_count,
+<a href=#248 id=248 data-nosnippet>248</a>                    })
+<a href=#249 id=249 data-nosnippet>249</a>                    .with_shared_geometry_key(shared_key)
+<a href=#250 id=250 data-nosnippet>250</a>            } <span class="kw">else </span>{
+<a href=#251 id=251 data-nosnippet>251</a>                OverAlignedVertexBuffer::from_vecs(Vec::new(), Vec::new(), usable)
+<a href=#252 id=252 data-nosnippet>252</a>                    .with_prepacked_gpu(<span class="kw">crate</span>::vector::tessellation::PrepackedGpuGeometry {
+<a href=#253 id=253 data-nosnippet>253</a>                        vertices: packed,
+<a href=#254 id=254 data-nosnippet>254</a>                        indices_u16: <span class="prelude-val">None</span>,
+<a href=#255 id=255 data-nosnippet>255</a>                        indices_u32: <span class="prelude-val">Some</span>(raw_indices),
+<a href=#256 id=256 data-nosnippet>256</a>                        compact_extrusion,
+<a href=#257 id=257 data-nosnippet>257</a>                        logical_vertex_count,
+<a href=#258 id=258 data-nosnippet>258</a>                    })
+<a href=#259 id=259 data-nosnippet>259</a>                    .with_shared_geometry_key(shared_key)
+<a href=#260 id=260 data-nosnippet>260</a>            };
+<a href=#261 id=261 data-nosnippet>261</a>        }
+<a href=#262 id=262 data-nosnippet>262</a>        <span class="self">Self</span>::build_from_with_paint(
+<a href=#263 id=263 data-nosnippet>263</a>            coords,
+<a href=#264 id=264 data-nosnippet>264</a>            buffer,
+<a href=#265 id=265 data-nosnippet>265</a>            feature_indices,
+<a href=#266 id=266 data-nosnippet>266</a>            feature_colors,
+<a href=#267 id=267 data-nosnippet>267</a>            feature_sort_keys,
+<a href=#268 id=268 data-nosnippet>268</a>            layer_data,
+<a href=#269 id=269 data-nosnippet>269</a>            style_layer_id,
+<a href=#270 id=270 data-nosnippet>270</a>            entries,
+<a href=#271 id=271 data-nosnippet>271</a>        )
+<a href=#272 id=272 data-nosnippet>272</a>    }
+<a href=#273 id=273 data-nosnippet>273</a>
+<a href=#274 id=274 data-nosnippet>274</a>    <span class="kw">fn </span>with_overscaled_zoom(<span class="kw-2">mut </span><span class="self">self</span>, overscaled_zoom: u8) -&gt; <span class="self">Self </span>{
+<a href=#275 id=275 data-nosnippet>275</a>        <span class="self">self</span>.overscaled_zoom = overscaled_zoom;
+<a href=#276 id=276 data-nosnippet>276</a>        <span class="self">self
+<a href=#277 id=277 data-nosnippet>277</a>    </span>}
+<a href=#278 id=278 data-nosnippet>278</a>
+<a href=#279 id=279 data-nosnippet>279</a>    <span class="kw">fn </span>overscaled_zoom(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u8 {
+<a href=#280 id=280 data-nosnippet>280</a>        <span class="self">self</span>.overscaled_zoom
+<a href=#281 id=281 data-nosnippet>281</a>    }
+<a href=#282 id=282 data-nosnippet>282</a>
+<a href=#283 id=283 data-nosnippet>283</a>    <span class="kw">fn </span>with_feature_paint(<span class="kw-2">mut </span><span class="self">self</span>, entries: Vec&lt;BucketFeatureEntry&gt;) -&gt; <span class="self">Self </span>{
+<a href=#284 id=284 data-nosnippet>284</a>        <span class="self">self</span>.feature_paint = (!entries.is_empty()).then_some(entries);
+<a href=#285 id=285 data-nosnippet>285</a>        <span class="self">self
+<a href=#286 id=286 data-nosnippet>286</a>    </span>}
+<a href=#287 id=287 data-nosnippet>287</a>
+<a href=#288 id=288 data-nosnippet>288</a>    <span class="kw">fn </span>take_feature_paint(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;BucketFeatureEntry&gt;&gt; {
+<a href=#289 id=289 data-nosnippet>289</a>        <span class="self">self</span>.feature_paint.take()
+<a href=#290 id=290 data-nosnippet>290</a>    }
+<a href=#291 id=291 data-nosnippet>291</a>
+<a href=#292 id=292 data-nosnippet>292</a>    <span class="kw">fn </span>coords(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; WorldTileCoords {
+<a href=#293 id=293 data-nosnippet>293</a>        <span class="self">self</span>.coords
+<a href=#294 id=294 data-nosnippet>294</a>    }
+<a href=#295 id=295 data-nosnippet>295</a>
+<a href=#296 id=296 data-nosnippet>296</a>    <span class="kw">fn </span>is_empty(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+<a href=#297 id=297 data-nosnippet>297</a>        <span class="self">self</span>.buffer.usable_indices == <span class="number">0
+<a href=#298 id=298 data-nosnippet>298</a>    </span>}
+<a href=#299 id=299 data-nosnippet>299</a>
+<a href=#300 id=300 data-nosnippet>300</a>    <span class="kw">fn </span>style_layer_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>str {
+<a href=#301 id=301 data-nosnippet>301</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.style_layer_id
+<a href=#302 id=302 data-nosnippet>302</a>    }
+<a href=#303 id=303 data-nosnippet>303</a>
+<a href=#304 id=304 data-nosnippet>304</a>    <span class="kw">fn </span>to_bucket(<span class="self">self</span>) -&gt; AvailableVectorLayerBucket {
+<a href=#305 id=305 data-nosnippet>305</a>        AvailableVectorLayerBucket {
+<a href=#306 id=306 data-nosnippet>306</a>            coords: <span class="self">self</span>.coords,
+<a href=#307 id=307 data-nosnippet>307</a>            source_layer: <span class="self">self</span>.layer_data.name,
+<a href=#308 id=308 data-nosnippet>308</a>            style_layer_id: <span class="self">self</span>.style_layer_id,
+<a href=#309 id=309 data-nosnippet>309</a>            buffer: <span class="self">self</span>.buffer,
+<a href=#310 id=310 data-nosnippet>310</a>            feature_indices: <span class="self">self</span>.feature_indices,
+<a href=#311 id=311 data-nosnippet>311</a>            feature_colors: <span class="self">self</span>.feature_colors,
+<a href=#312 id=312 data-nosnippet>312</a>            feature_sort_keys: <span class="self">self</span>.feature_sort_keys,
+<a href=#313 id=313 data-nosnippet>313</a>        }
+<a href=#314 id=314 data-nosnippet>314</a>    }
+<a href=#315 id=315 data-nosnippet>315</a>}
+<a href=#316 id=316 data-nosnippet>316</a>
+<a href=#317 id=317 data-nosnippet>317</a><span class="doccomment">/// Owned symbol geometry and placement metadata with shared atlas ownership.
+<a href=#318 id=318 data-nosnippet>318</a></span><span class="kw">pub struct </span>DefaultSymbolLayerTessellated {
+<a href=#319 id=319 data-nosnippet>319</a>    <span class="doccomment">/// Glyph and sprite texels shared with other messages using the same atlas.
+<a href=#320 id=320 data-nosnippet>320</a>    </span><span class="kw">pub </span>atlas: <span class="prelude-ty">Option</span>&lt;std::sync::Arc&lt;<span class="kw">crate</span>::sdf::assets::SymbolAtlas&gt;&gt;,
+<a href=#321 id=321 data-nosnippet>321</a>    <span class="doccomment">/// Tile-grid coordinates whose local space contains the symbol anchors.
+<a href=#322 id=322 data-nosnippet>322</a>    </span><span class="kw">pub </span>coords: WorldTileCoords,
+<a href=#323 id=323 data-nosnippet>323</a>    <span class="doccomment">/// Padded symbol vertex/index storage and usable draw index count.
+<a href=#324 id=324 data-nosnippet>324</a>    </span><span class="kw">pub </span>buffer: OverAlignedVertexBuffer&lt;ShaderSymbolVertex, IndexDataType&gt;,
+<a href=#325 id=325 data-nosnippet>325</a>    <span class="doccomment">/// Placement metadata and geometry ranges for the symbols in this buffer.
+<a href=#326 id=326 data-nosnippet>326</a>    </span><span class="kw">pub </span>features: Vec&lt;Feature&gt;,
+<a href=#327 id=327 data-nosnippet>327</a>    <span class="doccomment">/// Decoded source layer; bucket conversion retains its name.
+<a href=#328 id=328 data-nosnippet>328</a>    </span><span class="kw">pub </span>layer_data: Layer,
+<a href=#329 id=329 data-nosnippet>329</a>    <span class="doccomment">/// Style entry whose symbol layout produced the geometry.
+<a href=#330 id=330 data-nosnippet>330</a>    </span><span class="kw">pub </span>style_layer_id: String,
+<a href=#331 id=331 data-nosnippet>331</a>}
+<a href=#332 id=332 data-nosnippet>332</a>
+<a href=#333 id=333 data-nosnippet>333</a><span class="kw">impl </span>Debug <span class="kw">for </span>DefaultSymbolLayerTessellated {
+<a href=#334 id=334 data-nosnippet>334</a>    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; std::fmt::Result {
+<a href=#335 id=335 data-nosnippet>335</a>        <span class="macro">write!</span>(f, <span class="string">"DefaultSymbolLayerTessellated({})"</span>, <span class="self">self</span>.coords)
+<a href=#336 id=336 data-nosnippet>336</a>    }
+<a href=#337 id=337 data-nosnippet>337</a>}
+<a href=#338 id=338 data-nosnippet>338</a>
+<a href=#339 id=339 data-nosnippet>339</a><span class="kw">impl </span>IntoMessage <span class="kw">for </span>DefaultSymbolLayerTessellated {
+<a href=#340 id=340 data-nosnippet>340</a>    <span class="kw">fn </span>into(<span class="self">self</span>) -&gt; Message {
+<a href=#341 id=341 data-nosnippet>341</a>        Message::new(<span class="self">Self</span>::message_tag(), Box::new(<span class="self">self</span>))
+<a href=#342 id=342 data-nosnippet>342</a>    }
+<a href=#343 id=343 data-nosnippet>343</a>}
+<a href=#344 id=344 data-nosnippet>344</a>
+<a href=#345 id=345 data-nosnippet>345</a><span class="kw">impl </span>SymbolLayerTessellated <span class="kw">for </span>DefaultSymbolLayerTessellated {
+<a href=#346 id=346 data-nosnippet>346</a>    <span class="kw">fn </span>message_tag() -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span><span class="kw">dyn </span>MessageTag {
+<a href=#347 id=347 data-nosnippet>347</a>        <span class="kw-2">&amp;</span>VectorMessageTag::SymbolLayerTessellated
+<a href=#348 id=348 data-nosnippet>348</a>    }
+<a href=#349 id=349 data-nosnippet>349</a>
+<a href=#350 id=350 data-nosnippet>350</a>    <span class="kw">fn </span>build_from(
+<a href=#351 id=351 data-nosnippet>351</a>        coords: WorldTileCoords,
+<a href=#352 id=352 data-nosnippet>352</a>        buffer: OverAlignedVertexBuffer&lt;ShaderSymbolVertex, IndexDataType&gt;,
+<a href=#353 id=353 data-nosnippet>353</a>        features: Vec&lt;Feature&gt;,
+<a href=#354 id=354 data-nosnippet>354</a>        atlas: <span class="prelude-ty">Option</span>&lt;std::sync::Arc&lt;<span class="kw">crate</span>::sdf::assets::SymbolAtlas&gt;&gt;,
+<a href=#355 id=355 data-nosnippet>355</a>        layer_data: Layer,
+<a href=#356 id=356 data-nosnippet>356</a>        style_layer_id: String,
+<a href=#357 id=357 data-nosnippet>357</a>    ) -&gt; <span class="self">Self </span>{
+<a href=#358 id=358 data-nosnippet>358</a>        <span class="self">Self </span>{
+<a href=#359 id=359 data-nosnippet>359</a>            atlas,
+<a href=#360 id=360 data-nosnippet>360</a>            coords,
+<a href=#361 id=361 data-nosnippet>361</a>            buffer,
+<a href=#362 id=362 data-nosnippet>362</a>            features,
+<a href=#363 id=363 data-nosnippet>363</a>            layer_data,
+<a href=#364 id=364 data-nosnippet>364</a>            style_layer_id,
+<a href=#365 id=365 data-nosnippet>365</a>        }
+<a href=#366 id=366 data-nosnippet>366</a>    }
+<a href=#367 id=367 data-nosnippet>367</a>
+<a href=#368 id=368 data-nosnippet>368</a>    <span class="kw">fn </span>coords(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; WorldTileCoords {
+<a href=#369 id=369 data-nosnippet>369</a>        <span class="self">self</span>.coords
+<a href=#370 id=370 data-nosnippet>370</a>    }
+<a href=#371 id=371 data-nosnippet>371</a>
+<a href=#372 id=372 data-nosnippet>372</a>    <span class="kw">fn </span>is_empty(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+<a href=#373 id=373 data-nosnippet>373</a>        <span class="self">self</span>.buffer.usable_indices == <span class="number">0
+<a href=#374 id=374 data-nosnippet>374</a>    </span>}
+<a href=#375 id=375 data-nosnippet>375</a>
+<a href=#376 id=376 data-nosnippet>376</a>    <span class="kw">fn </span>to_bucket(<span class="self">self</span>) -&gt; SymbolLayerData {
+<a href=#377 id=377 data-nosnippet>377</a>        SymbolLayerData {
+<a href=#378 id=378 data-nosnippet>378</a>            atlas: <span class="self">self</span>.atlas,
+<a href=#379 id=379 data-nosnippet>379</a>            coords: <span class="self">self</span>.coords,
+<a href=#380 id=380 data-nosnippet>380</a>            source_layer: <span class="self">self</span>.layer_data.name,
+<a href=#381 id=381 data-nosnippet>381</a>            style_layer_id: <span class="self">self</span>.style_layer_id,
+<a href=#382 id=382 data-nosnippet>382</a>            buffer: <span class="self">self</span>.buffer,
+<a href=#383 id=383 data-nosnippet>383</a>            features: <span class="self">self</span>.features,
+<a href=#384 id=384 data-nosnippet>384</a>        }
+<a href=#385 id=385 data-nosnippet>385</a>    }
+<a href=#386 id=386 data-nosnippet>386</a>}
+<a href=#387 id=387 data-nosnippet>387</a>
+<a href=#388 id=388 data-nosnippet>388</a><span class="doccomment">/// Owned spatial index and the tile coordinates to which it belongs.
+<a href=#389 id=389 data-nosnippet>389</a></span><span class="kw">pub struct </span>DefaultLayerIndexed {
+<a href=#390 id=390 data-nosnippet>390</a>    coords: WorldTileCoords,
+<a href=#391 id=391 data-nosnippet>391</a>    source: <span class="prelude-ty">Option</span>&lt;String&gt;,
+<a href=#392 id=392 data-nosnippet>392</a>    index: TileIndex,
+<a href=#393 id=393 data-nosnippet>393</a>}
+<a href=#394 id=394 data-nosnippet>394</a>
+<a href=#395 id=395 data-nosnippet>395</a><span class="kw">impl </span>Debug <span class="kw">for </span>DefaultLayerIndexed {
+<a href=#396 id=396 data-nosnippet>396</a>    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; std::fmt::Result {
+<a href=#397 id=397 data-nosnippet>397</a>        <span class="macro">write!</span>(f, <span class="string">"DefaultLayerIndexed({})"</span>, <span class="self">self</span>.coords)
+<a href=#398 id=398 data-nosnippet>398</a>    }
+<a href=#399 id=399 data-nosnippet>399</a>}
+<a href=#400 id=400 data-nosnippet>400</a>
+<a href=#401 id=401 data-nosnippet>401</a><span class="kw">impl </span>IntoMessage <span class="kw">for </span>DefaultLayerIndexed {
+<a href=#402 id=402 data-nosnippet>402</a>    <span class="kw">fn </span>into(<span class="self">self</span>) -&gt; Message {
+<a href=#403 id=403 data-nosnippet>403</a>        Message::new(<span class="self">Self</span>::message_tag(), Box::new(<span class="self">self</span>))
+<a href=#404 id=404 data-nosnippet>404</a>    }
+<a href=#405 id=405 data-nosnippet>405</a>}
+<a href=#406 id=406 data-nosnippet>406</a>
+<a href=#407 id=407 data-nosnippet>407</a><span class="kw">impl </span>LayerIndexed <span class="kw">for </span>DefaultLayerIndexed {
+<a href=#408 id=408 data-nosnippet>408</a>    <span class="kw">fn </span>message_tag() -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span><span class="kw">dyn </span>MessageTag {
+<a href=#409 id=409 data-nosnippet>409</a>        <span class="kw-2">&amp;</span>VectorMessageTag::LayerIndexed
+<a href=#410 id=410 data-nosnippet>410</a>    }
+<a href=#411 id=411 data-nosnippet>411</a>
+<a href=#412 id=412 data-nosnippet>412</a>    <span class="kw">fn </span>build_from(coords: WorldTileCoords, source: <span class="prelude-ty">Option</span>&lt;String&gt;, index: TileIndex) -&gt; <span class="self">Self </span>{
+<a href=#413 id=413 data-nosnippet>413</a>        <span class="self">Self </span>{
+<a href=#414 id=414 data-nosnippet>414</a>            coords,
+<a href=#415 id=415 data-nosnippet>415</a>            source,
+<a href=#416 id=416 data-nosnippet>416</a>            index,
+<a href=#417 id=417 data-nosnippet>417</a>        }
+<a href=#418 id=418 data-nosnippet>418</a>    }
+<a href=#419 id=419 data-nosnippet>419</a>
+<a href=#420 id=420 data-nosnippet>420</a>    <span class="kw">fn </span>coords(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; WorldTileCoords {
+<a href=#421 id=421 data-nosnippet>421</a>        <span class="self">self</span>.coords
+<a href=#422 id=422 data-nosnippet>422</a>    }
+<a href=#423 id=423 data-nosnippet>423</a>
+<a href=#424 id=424 data-nosnippet>424</a>    <span class="kw">fn </span>source(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;String&gt; {
+<a href=#425 id=425 data-nosnippet>425</a>        <span class="self">self</span>.source.clone()
+<a href=#426 id=426 data-nosnippet>426</a>    }
+<a href=#427 id=427 data-nosnippet>427</a>
+<a href=#428 id=428 data-nosnippet>428</a>    <span class="kw">fn </span>to_tile_index(<span class="self">self</span>) -&gt; TileIndex {
+<a href=#429 id=429 data-nosnippet>429</a>        <span class="self">self</span>.index
+<a href=#430 id=430 data-nosnippet>430</a>    }
+<a href=#431 id=431 data-nosnippet>431</a>}
+<a href=#432 id=432 data-nosnippet>432</a>
+<a href=#433 id=433 data-nosnippet>433</a><span class="attr">#[derive(Copy, Clone)]
+<a href=#434 id=434 data-nosnippet>434</a></span><span class="doccomment">/// Uses owned Rust payloads without serializing them for worker transport.
+<a href=#435 id=435 data-nosnippet>435</a></span><span class="kw">pub struct </span>DefaultVectorTransferables;
+<a href=#436 id=436 data-nosnippet>436</a>
+<a href=#437 id=437 data-nosnippet>437</a><span class="kw">impl </span>VectorTransferables <span class="kw">for </span>DefaultVectorTransferables {
+<a href=#438 id=438 data-nosnippet>438</a>    <span class="kw">type </span>TileTessellated = DefaultTileTessellated;
+<a href=#439 id=439 data-nosnippet>439</a>    <span class="kw">type </span>LayerMissing = DefaultLayerMissing;
+<a href=#440 id=440 data-nosnippet>440</a>    <span class="kw">type </span>LayerTessellated = DefaultLayerTessellated;
+<a href=#441 id=441 data-nosnippet>441</a>    <span class="kw">type </span>SymbolLayerTessellated = DefaultSymbolLayerTessellated;
+<a href=#442 id=442 data-nosnippet>442</a>    <span class="kw">type </span>LayerIndexed = DefaultLayerIndexed;
+<a href=#443 id=443 data-nosnippet>443</a>}
+<a href=#444 id=444 data-nosnippet>444</a>
+<a href=#445 id=445 data-nosnippet>445</a><span class="attr">#[cfg(test)]
+<a href=#446 id=446 data-nosnippet>446</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

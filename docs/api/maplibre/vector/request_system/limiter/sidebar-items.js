@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["MAX_HEAVY_TILES"],"fn":["acquire_heavy_tile_slot","wait_for_shared_tile_slot"],"static":["LIMITER"],"struct":["HeavyTileSlot","LimiterState"]};
+window.SIDEBAR_ITEMS = {"fn":["acquire_heavy_tile_slot","acquire_slot","clear_upload_permits","current_heavy_tile_limit","reconcile_upload_permits","release_slot","snapshot_permit_sources"],"static":["LIMITER"],"struct":["HeavyTileSlot","PendingUploadPermits","PermitState","SharedTileClaim","SharedTileSlot"]};

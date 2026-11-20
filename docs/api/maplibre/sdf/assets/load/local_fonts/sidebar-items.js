@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["combined_stack","ensure_style_font_faces","load_fonts_and_shaping","shape_stack_labels"],"struct":["PendingFont"]};
+window.SIDEBAR_ITEMS = {"fn":["combined_stack","ensure_style_font_faces","fetch_font_inputs","pack_font_inputs","shape_stack_labels"],"struct":["FetchedFontInputs","PendingFont"]};

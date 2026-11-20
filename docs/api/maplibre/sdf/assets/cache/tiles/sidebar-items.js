@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["DECODE_PREFIX","NOT_FOUND_PREFIX","TRANSPORT_RETRY_PREFIX","TRANSPORT_TERMINAL_PREFIX"],"enum":["CachedTileFailure"],"fn":["decode_dem","decode_rgba","dem_cache_key","raster_cache_key"],"struct":["CachedDemEntry"]};
+window.SIDEBAR_ITEMS = {"constant":["DECODE_PREFIX","NOT_FOUND_PREFIX","TRANSPORT_RETRY_PREFIX","TRANSPORT_TERMINAL_PREFIX"],"enum":["CachedTileFailure"],"fn":["acquire_decode_slot","decode_dem","decode_rgba","dem_cache_key","fetch_tile_raw","raster_cache_key"],"struct":["CachedDemEntry"]};

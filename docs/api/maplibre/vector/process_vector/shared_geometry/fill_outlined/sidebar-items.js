@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["eval_layer_colors","process_shared_fill_outlined","qualifies_outlined_fill","tessellate_readable"]};

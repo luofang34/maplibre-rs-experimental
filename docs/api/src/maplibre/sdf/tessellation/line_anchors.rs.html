@@ -289,7 +289,27 @@
 <a href=#289 id=289 data-nosnippet>289</a>    <span class="bool-val">true
 <a href=#290 id=290 data-nosnippet>290</a></span>}
 <a href=#291 id=291 data-nosnippet>291</a>
-<a href=#292 id=292 data-nosnippet>292</a><span class="attr">#[cfg(test)]
-<a href=#293 id=293 data-nosnippet>293</a>#[path = <span class="string">"line_anchors/tests.rs"</span>]
-<a href=#294 id=294 data-nosnippet>294</a></span><span class="kw">mod </span>tests;
+<a href=#292 id=292 data-nosnippet>292</a><span class="doccomment">/// The rings of a polygon wound as GL JS winds them before it places labels: the outer ring
+<a href=#293 id=293 data-nosnippet>293</a>/// runs clockwise on screen and holes run counter-clockwise, so labels start at the same end.
+<a href=#294 id=294 data-nosnippet>294</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>polygon_rings(polygon: <span class="kw-2">&amp;</span>geo_types::Polygon&lt;f64&gt;) -&gt; Vec&lt;Vec&lt;[f64; <span class="number">2</span>]&gt;&gt; {
+<a href=#295 id=295 data-nosnippet>295</a>    <span class="kw">let </span>wound = |ring: <span class="kw-2">&amp;</span>geo_types::LineString&lt;f64&gt;, outer: bool| {
+<a href=#296 id=296 data-nosnippet>296</a>        <span class="kw">let </span><span class="kw-2">mut </span>points: Vec&lt;[f64; <span class="number">2</span>]&gt; = ring.coords().map(|c| [c.x, c.y]).collect();
+<a href=#297 id=297 data-nosnippet>297</a>        <span class="kw">let </span>area: f64 = points
+<a href=#298 id=298 data-nosnippet>298</a>            .iter()
+<a href=#299 id=299 data-nosnippet>299</a>            .zip(points.iter().cycle().skip(<span class="number">1</span>))
+<a href=#300 id=300 data-nosnippet>300</a>            .map(|(a, b)| a[<span class="number">0</span>] * b[<span class="number">1</span>] - b[<span class="number">0</span>] * a[<span class="number">1</span>])
+<a href=#301 id=301 data-nosnippet>301</a>            .sum();
+<a href=#302 id=302 data-nosnippet>302</a>        <span class="kw">if </span>(area &gt; <span class="number">0.0</span>) != outer {
+<a href=#303 id=303 data-nosnippet>303</a>            points.reverse();
+<a href=#304 id=304 data-nosnippet>304</a>        }
+<a href=#305 id=305 data-nosnippet>305</a>        points
+<a href=#306 id=306 data-nosnippet>306</a>    };
+<a href=#307 id=307 data-nosnippet>307</a>    std::iter::once(wound(polygon.exterior(), <span class="bool-val">true</span>))
+<a href=#308 id=308 data-nosnippet>308</a>        .chain(polygon.interiors().iter().map(|ring| wound(ring, <span class="bool-val">false</span>)))
+<a href=#309 id=309 data-nosnippet>309</a>        .collect()
+<a href=#310 id=310 data-nosnippet>310</a>}
+<a href=#311 id=311 data-nosnippet>311</a>
+<a href=#312 id=312 data-nosnippet>312</a><span class="attr">#[cfg(test)]
+<a href=#313 id=313 data-nosnippet>313</a>#[path = <span class="string">"line_anchors/tests.rs"</span>]
+<a href=#314 id=314 data-nosnippet>314</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

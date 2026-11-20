@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["GeometryBucketKey","SelectedSet"],"fn":["bucket_key","eval_sort_key","intersect_spans","process_ordered_layers","process_shared_group","tessellate_union","tessellate_union_with_fallback"],"static":["NEXT_SHARED_GEOMETRY_KEY"],"struct":["FeatureSpan"]};
+window.SIDEBAR_ITEMS = {"enum":["GeometryBucketKey","SelectedSet"],"fn":["bucket_key","process_ordered_layers","process_shared_group"],"mod":["fill_outlined","union"],"static":["NEXT_SHARED_GEOMETRY_KEY"]};

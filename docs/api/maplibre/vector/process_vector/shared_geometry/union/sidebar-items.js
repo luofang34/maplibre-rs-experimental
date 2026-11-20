@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["eval_sort_key","intersect_spans","tessellate_union","tessellate_union_with_fallback"],"struct":["FeatureSpan"]};

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["build_source_feature","prune_symbol_features","source_feature_indices"]};
+window.SIDEBAR_ITEMS = {"fn":["build_source_feature","collect_symbol","finish_collected","prune_single_feature","prune_symbol_features","push_or_stream_symbol","source_feature_indices"]};

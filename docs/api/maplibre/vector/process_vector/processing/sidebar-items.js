@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["allow_prepack_for_style","process_layer","symbol_layer","tessellate_readable","tessellator","vector_layer"],"mod":["building_bases"]};
+window.SIDEBAR_ITEMS = {"fn":["allow_prepack_for_style","allow_prepack_for_style_inner","process_layer","symbol_layer","tessellate_readable","tessellator","vector_layer"],"mod":["building_bases"]};
