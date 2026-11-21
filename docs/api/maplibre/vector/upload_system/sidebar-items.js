@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["drape_paint_zoom","frame_paint","layer_is_dynamic_circle","upload_system","upload_tessellated_layer_with_uncovered"],"mod":["bucket","metadata","paint","shared_fallback","sources","style_refresh"],"struct":["VectorPaintFrame"],"type":["DynPoints"]};
+window.SIDEBAR_ITEMS = {"fn":["layer_is_dynamic_circle","upload_system","upload_tessellated_layer_with_uncovered"],"mod":["bucket","frame_state","metadata","paint","shared_fallback","sources","style_refresh"],"type":["DynPoints"]};

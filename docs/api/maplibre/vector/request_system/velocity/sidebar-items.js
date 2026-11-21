@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["should_request_coarse_fallback"],"struct":["FallbackMotionTracker"]};
+window.SIDEBAR_ITEMS = {"fn":["should_request_coarse_fallback","wrapped_norm_distance"],"struct":["FallbackMotionTracker"]};

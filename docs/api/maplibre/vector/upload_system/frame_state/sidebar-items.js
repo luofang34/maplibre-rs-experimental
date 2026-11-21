@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["drape_paint_zoom","frame_paint"],"struct":["VectorPaintFrame"]};

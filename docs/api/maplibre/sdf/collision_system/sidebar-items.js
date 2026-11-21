@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["sync_symbol_depth_fade"],"mod":["controller","draw_sort","family","layer_pass","repeat_spacing","rules","signatures","sliced","temporal","upload_diff"],"struct":["CollisionStats","CollisionSystem","PlacementConfig"],"type":["ViewSignature"]};
+window.SIDEBAR_ITEMS = {"mod":["controller","draw_sort","family","layer_pass","repeat_spacing","rules","signatures","sliced","sync","temporal","upload_diff"],"struct":["CollisionStats","CollisionSystem","PlacementConfig"],"type":["ViewSignature"]};

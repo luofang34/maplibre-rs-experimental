@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["SLICE_BUDGET_MOVING","SLICE_BUDGET_SETTLED"],"fn":["resolve_layer","resolve_paint"],"struct":["ActiveEpoch","EpochGroup"],"type":["BucketMetadataList"]};
+window.SIDEBAR_ITEMS = {"constant":["SLICE_BUDGET_MOVING","SLICE_BUDGET_SETTLED"],"fn":["resolve_layer","resolve_paint"],"struct":["ActiveEpoch","EpochGroup"]};

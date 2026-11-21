@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["pattern_color","uniform_color"]};
