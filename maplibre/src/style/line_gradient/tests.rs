@@ -31,9 +31,41 @@ fn a_step_gradient_changes_colour_at_its_stop() {
         0.5,
         "blue"
     ])));
-    assert_eq!(ramp.len(), STEP_RAMP_TEXELS);
+    assert_eq!(ramp.len(), HIGH_RES_RAMP_TEXELS);
     assert_eq!(ramp[100], [255, 0, 0, 255]);
-    assert_eq!(ramp[STEP_RAMP_TEXELS - 100], [0, 0, 255, 255]);
+    assert_eq!(ramp[HIGH_RES_RAMP_TEXELS - 100], [0, 0, 255, 255]);
+}
+
+#[test]
+fn narrow_interpolate_and_nested_step_use_high_res_linear_ramp() {
+    let narrow = ramp(&gradient(serde_json::json!([
+        "interpolate",
+        ["linear"],
+        ["line-progress"],
+        0.0,
+        "red",
+        0.495,
+        "red",
+        0.500,
+        "lime",
+        0.505,
+        "blue",
+        1.0,
+        "blue"
+    ])));
+    assert_eq!(narrow.len(), HIGH_RES_RAMP_TEXELS);
+    let mid = narrow[HIGH_RES_RAMP_TEXELS / 2];
+    assert!(mid[1] > 200, "narrow green band at 0.5 must be resolved: {mid:?}");
+
+    let nested = ramp(&gradient(serde_json::json!([
+        "case",
+        true,
+        ["step", ["line-progress"], "red", 0.75, "blue"],
+        "black"
+    ])));
+    assert_eq!(nested.len(), HIGH_RES_RAMP_TEXELS);
+    assert_eq!(nested[HIGH_RES_RAMP_TEXELS / 2], [255, 0, 0, 255]);
+    assert_eq!(nested[HIGH_RES_RAMP_TEXELS - 10], [0, 0, 255, 255]);
 }
 
 #[test]

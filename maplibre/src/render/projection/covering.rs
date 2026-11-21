@@ -256,8 +256,11 @@ pub(super) fn covering_region_with_history(
     }
     let mut region = covering_region_single(style, view_state, world, request, padding, history)?;
     if padding == ViewStatePadding::Loose && !view_state.has_external_view() {
+        let pitch_deg = view_state.camera().get_pitch().0.to_degrees().abs();
+        let has_extrusion = elevation::style_elevated_headroom_meters(style) > 0.0;
         let needs_nadir_apron = style.terrain.is_some()
-            || view_state.camera().get_pitch().0.to_degrees().abs()
+            || (has_extrusion && pitch_deg > 45.0)
+            || pitch_deg
                 > mercator::max_constant_zoom_pitch(view_state.field_of_view().0.to_degrees());
         if needs_nadir_apron {
             if let Some(apron) = view_state.pitched_nadir_apron() {

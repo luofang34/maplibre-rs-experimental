@@ -76,10 +76,12 @@ impl ViewState {
     }
 
     /// Takes the style's initial center altitude, and whether it draws terrain under the
-    /// center, as the view starts.
+    /// center, as the view starts. When `centerAltitude` is explicitly specified in the style,
+    /// ground clamping is disabled so the requested altitude takes effect above terrain.
     pub(crate) fn take_style_center(&mut self, style: &crate::style::Style) {
         if let Some(meters) = style.center_altitude {
             self.set_center_altitude(meters);
+            self.set_center_clamped_to_ground(false);
         }
         self.set_center_over_terrain(style.terrain.is_some());
     }

@@ -15,17 +15,29 @@ use crate::{
 /// style contains 3D translucent extrusions or elevated 3D lines (`line-elevation`).
 const ELEVATED_3D_HEADROOM_METERS: f64 = 20_000.0;
 
+/// Upper ceiling (`1,000 m`) added to view-tile culling boxes for standard opaque `fill-extrusion`
+/// layers so tall buildings near the camera or horizon at steep pitch are not culled.
+const OPAQUE_EXTRUSION_HEADROOM_METERS: f64 = 1_000.0;
+
 pub(crate) fn style_elevated_headroom_meters(style: &Style) -> f64 {
-    let has_elevated_3d = style.layers.iter().any(|layer| match &layer.paint {
-        Some(LayerPaint::FillExtrusion(paint)) => paint.fill_extrusion_translucent == Some(true),
-        Some(LayerPaint::Line(paint)) => paint.line_elevation.is_some(),
-        _ => false,
-    });
-    if has_elevated_3d {
-        ELEVATED_3D_HEADROOM_METERS
-    } else {
-        0.0
+    let mut headroom: f64 = 0.0;
+    for layer in &style.layers {
+        match &layer.paint {
+            Some(LayerPaint::FillExtrusion(paint))
+                if paint.fill_extrusion_translucent == Some(true) =>
+            {
+                return ELEVATED_3D_HEADROOM_METERS;
+            }
+            Some(LayerPaint::FillExtrusion(_)) if !layer.is_hidden() => {
+                headroom = headroom.max(OPAQUE_EXTRUSION_HEADROOM_METERS);
+            }
+            Some(LayerPaint::Line(paint)) if paint.line_elevation.is_some() => {
+                return ELEVATED_3D_HEADROOM_METERS;
+            }
+            _ => {}
+        }
     }
+    headroom
 }
 
 struct HeadroomTileElevation<P> {

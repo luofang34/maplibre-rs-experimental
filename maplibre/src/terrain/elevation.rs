@@ -35,6 +35,8 @@ struct CenterDemSmoothing {
 pub(crate) fn globe_orbits_center(style: &crate::style::Style) -> bool {
     style.projection.as_ref().is_some_and(|projection| {
         projection.projection_type == crate::projection::ProjectionType::VerticalPerspective
+            || (projection.projection_type == crate::projection::ProjectionType::Globe
+                && style.center_altitude.is_some())
     })
 }
 
