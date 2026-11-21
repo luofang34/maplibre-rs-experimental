@@ -55,6 +55,104 @@ impl<'a> LineWalker<'a> {
     }
 }
 
+/// Offsets `polyline` perpendicularly by `offset` (in tile units, positive to the right of travel
+/// in Y-down tile coordinates), intersecting adjacent offset segments at corners and projecting
+/// the anchor at `anchor_distance` onto the offset polyline.
+pub(crate) fn offset_polyline(
+    polyline: &[[f32; 2]],
+    anchor_distance: f32,
+    offset: f32,
+) -> (Vec<[f32; 2]>, f32) {
+    if offset.abs() <= 1e-4 || polyline.len() < 2 {
+        return (polyline.to_vec(), anchor_distance);
+    }
+
+    // Collect non-degenerate segment tangents and unit normals.
+    let mut segs: Vec<([f32; 2], [f32; 2], [f32; 2], [f32; 2])> = Vec::with_capacity(polyline.len());
+    for pair in polyline.windows(2) {
+        let dx = pair[1][0] - pair[0][0];
+        let dy = pair[1][1] - pair[0][1];
+        let len = dx.hypot(dy);
+        if len > 1e-6 {
+            let t = [dx / len, dy / len];
+            let n = [-t[1], t[0]];
+            segs.push((pair[0], pair[1], t, n));
+        }
+    }
+    if segs.is_empty() {
+        return (polyline.to_vec(), anchor_distance);
+    }
+
+    // Original anchor point in tile coordinates, so we can project it onto the offset polyline.
+    let mut anchor_pt = segs[0].0;
+    {
+        let mut walker = LineWalker::new(polyline);
+        if let Some((pt, _)) = walker.point_at(anchor_distance.max(0.0)) {
+            anchor_pt = pt;
+        }
+    }
+
+    let miter_limit = offset.abs() * 6.0;
+    let mut out: Vec<[f32; 2]> = Vec::with_capacity(segs.len() + 2);
+    out.push([
+        segs[0].0[0] + segs[0].3[0] * offset,
+        segs[0].0[1] + segs[0].3[1] * offset,
+    ]);
+
+    for pair in segs.windows(2) {
+        let (_, vertex, t0, n0) = pair[0];
+        let (_, _, t1, n1) = pair[1];
+        let det = t0[0] * t1[1] - t0[1] * t1[0];
+        if det.abs() < 1e-5 {
+            out.push([vertex[0] + n1[0] * offset, vertex[1] + n1[1] * offset]);
+            continue;
+        }
+        let dp = [(n1[0] - n0[0]) * offset, (n1[1] - n0[1]) * offset];
+        let s = (dp[0] * t1[1] - dp[1] * t1[0]) / det;
+        let miter = [
+            vertex[0] + n0[0] * offset + t0[0] * s,
+            vertex[1] + n0[1] * offset + t0[1] * s,
+        ];
+        if (miter[0] - vertex[0]).hypot(miter[1] - vertex[1]) <= miter_limit {
+            out.push(miter);
+        } else {
+            out.push([vertex[0] + n0[0] * offset, vertex[1] + n0[1] * offset]);
+            out.push([vertex[0] + n1[0] * offset, vertex[1] + n1[1] * offset]);
+        }
+    }
+
+    if let Some(&(_, end, _, n_last)) = segs.last() {
+        out.push([end[0] + n_last[0] * offset, end[1] + n_last[1] * offset]);
+    }
+
+    // Project `anchor_pt` onto the offset polyline to obtain the matching anchor arc length.
+    let mut best_dist_sq = f32::INFINITY;
+    let mut best_arc = 0.0_f32;
+    let mut travelled = 0.0_f32;
+    for pair in out.windows(2) {
+        let dx = pair[1][0] - pair[0][0];
+        let dy = pair[1][1] - pair[0][1];
+        let len_sq = dx * dx + dy * dy;
+        let len = len_sq.sqrt();
+        let t = if len_sq > 1e-12 {
+            (((anchor_pt[0] - pair[0][0]) * dx + (anchor_pt[1] - pair[0][1]) * dy) / len_sq)
+                .clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let px = pair[0][0] + dx * t;
+        let py = pair[0][1] + dy * t;
+        let d_sq = (px - anchor_pt[0]).powi(2) + (py - anchor_pt[1]).powi(2);
+        if d_sq < best_dist_sq {
+            best_dist_sq = d_sq;
+            best_arc = travelled + len * t;
+        }
+        travelled += len;
+    }
+
+    (out, best_arc)
+}
+
 /// Poses of glyphs whose centres are `offsets` (tile units, signed) from the anchor at
 /// `anchor_distance` along `polyline`. `flip` reads the text against the line direction: each
 /// glyph takes the mirrored distance and turns half way around. `None` when any glyph would

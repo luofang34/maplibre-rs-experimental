@@ -41,6 +41,7 @@ fn each_glyph_writes_its_own_pose_to_its_six_indices() {
         glyph_offsets: vec![-10.0, 10.0],
         image_sizes: vec![[0.0; 2]; 2],
         first_glyph_index: 6,
+        text_offset_y: 0.0,
     };
     let poses = [
         GlyphPose {

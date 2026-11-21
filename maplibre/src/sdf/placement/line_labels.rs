@@ -8,7 +8,10 @@ use crate::{
         view_state::ViewState,
     },
     sdf::{
-        line_glyphs::{place_glyphs, place_glyphs_on_screen, reads_backwards, GlyphPose, OnScreen},
+        line_glyphs::{
+            offset_polyline, place_glyphs, place_glyphs_on_screen, reads_backwards, GlyphPose,
+            OnScreen,
+        },
         paint::SymbolUniforms,
         Feature, LineLabel, SymbolLayerData,
     },
@@ -181,7 +184,17 @@ fn map_plane_poses(
         .iter()
         .map(|offset| (f64::from(*offset) * to_tile) as f32)
         .collect();
-    let place = |flip| place_glyphs(&line.polyline, line.anchor_distance, &offsets, flip);
+    let perp_offset = (f64::from(line.text_offset_y) * to_tile) as f32;
+    let place = |flip: bool| {
+        if perp_offset.abs() <= 1e-4 {
+            place_glyphs(&line.polyline, line.anchor_distance, &offsets, flip)
+        } else {
+            let signed = if flip { -perp_offset } else { perp_offset };
+            let (shifted_poly, shifted_anchor) =
+                offset_polyline(&line.polyline, line.anchor_distance, signed);
+            place_glyphs(&shifted_poly, shifted_anchor, &offsets, flip)
+        }
+    };
     let Some(mut poses) = place(false) else {
         return LinePoses::DoesNotFit;
     };
@@ -328,14 +341,22 @@ fn viewport_poses(
         .iter()
         .map(|offset| f64::from(*offset) * to_pixels)
         .collect();
-    let place = |flip| {
-        place_glyphs_on_screen(
-            &line.polyline,
-            line.anchor_distance,
-            &offsets,
-            flip,
-            on_screen,
-        )
+    let perp_offset = (f64::from(line.text_offset_y) * to_pixels * placement.tile_units()) as f32;
+    let place = |flip: bool| {
+        if perp_offset.abs() <= 1e-4 {
+            place_glyphs_on_screen(
+                &line.polyline,
+                line.anchor_distance,
+                &offsets,
+                flip,
+                on_screen,
+            )
+        } else {
+            let signed = if flip { -perp_offset } else { perp_offset };
+            let (shifted_poly, shifted_anchor) =
+                offset_polyline(&line.polyline, line.anchor_distance, signed);
+            place_glyphs_on_screen(&shifted_poly, shifted_anchor, &offsets, flip, on_screen)
+        }
     };
     let Some(poses) = place(false) else {
         return LinePoses::DoesNotFit;

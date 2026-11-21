@@ -51,6 +51,8 @@ pub struct LineLabelWire {
     #[serde(default)]
     image_sizes: Vec<[f32; 2]>,
     first_glyph_index: usize,
+    #[serde(default)]
+    text_offset_y: f32,
 }
 
 impl From<&Feature> for SymbolFeature {
@@ -95,6 +97,7 @@ impl From<&Feature> for SymbolFeature {
                 glyph_offsets: line.glyph_offsets.clone(),
                 image_sizes: line.image_sizes.clone(),
                 first_glyph_index: line.first_glyph_index,
+                text_offset_y: line.text_offset_y,
             }),
         }
     }
@@ -144,6 +147,7 @@ impl From<SymbolFeature> for Feature {
                 glyph_offsets: line.glyph_offsets,
                 image_sizes: line.image_sizes,
                 first_glyph_index: line.first_glyph_index,
+                text_offset_y: line.text_offset_y,
             }),
         }
     }

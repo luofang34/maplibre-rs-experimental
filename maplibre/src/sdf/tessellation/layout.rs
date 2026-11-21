@@ -286,6 +286,7 @@ pub(super) fn append(
                 glyph_offsets,
                 image_sizes: laid.image_sizes,
                 first_glyph_index,
+                text_offset_y: text_block.as_ref().map_or(0.0, |b| b.line_offset_y),
             }),
     });
 }

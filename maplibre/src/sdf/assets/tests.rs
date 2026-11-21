@@ -87,6 +87,7 @@ fn worker_wire_roundtrip_preserves_exact_collision_ranges_and_anchor() {
             glyph_offsets: vec![-5.0, 5.0],
             image_sizes: vec![[0.0; 2], [30.0, 20.0]],
             first_glyph_index: 12,
+            text_offset_y: 0.0,
         }),
     };
     let bytes = serde_json::to_vec(&wire::SymbolFeature::from(&feature)).expect("serialize");

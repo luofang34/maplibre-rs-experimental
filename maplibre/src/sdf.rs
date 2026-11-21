@@ -236,6 +236,9 @@ pub struct LineLabel {
     pub image_sizes: Vec<[f32; 2]>,
     /// Position in the index buffer where the first glyph's triangles begin; each takes six.
     pub first_glyph_index: usize,
+    /// Perpendicular `text-offset[1]` in 24-px em layout pixels, applied by offsetting the
+    /// placement polyline so glyphs wrap around corners and collision boxes match rendered text.
+    pub text_offset_y: f32,
 }
 
 /// One label of a symbol bucket.

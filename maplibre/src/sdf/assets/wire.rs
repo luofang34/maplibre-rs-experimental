@@ -173,6 +173,7 @@ pub fn encode_symbol_features(features: &[Feature]) -> Vec<u8> {
             let poly_idx = poly_ids.get(&key).copied().unwrap_or(0);
             out.extend_from_slice(&poly_idx.to_le_bytes());
             out.extend_from_slice(&line.anchor_distance.to_le_bytes());
+            out.extend_from_slice(&line.text_offset_y.to_le_bytes());
             out.extend_from_slice(&(line.first_glyph_index as u32).to_le_bytes());
             out.extend_from_slice(&(line.glyph_offsets.len() as u32).to_le_bytes());
             for &off in &line.glyph_offsets {
@@ -347,6 +348,7 @@ pub fn decode_symbol_features(bytes: &[u8]) -> Option<Vec<Feature>> {
             let poly_idx = read_u32(&mut buf)? as usize;
             let polyline = Arc::clone(polys.get(poly_idx)?);
             let anchor_distance = read_f32(&mut buf)?;
+            let text_offset_y = read_f32(&mut buf)?;
             let first_glyph_index = read_u32(&mut buf)? as usize;
             let off_count = read_u32(&mut buf)? as usize;
             if buf.len() < off_count.saturating_mul(4) {
@@ -370,6 +372,7 @@ pub fn decode_symbol_features(bytes: &[u8]) -> Option<Vec<Feature>> {
                 glyph_offsets,
                 image_sizes,
                 first_glyph_index,
+                text_offset_y,
             })
         } else {
             None

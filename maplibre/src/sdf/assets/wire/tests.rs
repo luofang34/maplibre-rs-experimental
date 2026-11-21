@@ -49,6 +49,7 @@ fn binary_symbol_wire_roundtrips_and_shares_polylines_and_repeat_keys() {
             glyph_offsets: vec![-8.0, 0.0, 8.0],
             image_sizes: Vec::new(),
             first_glyph_index: first_glyph,
+            text_offset_y: 0.0,
         }),
         anchor_shifts: vec![[4.0, -4.0]],
         text_sets: vec![0..6, 6..12],

@@ -47,6 +47,9 @@ pub(super) struct Block<'a> {
     fractions: [f32; 2],
     justify: f32,
     offset: [f32; 2],
+    /// Perpendicular `text-offset[1]` extracted for line-placed labels so placement offsets the
+    /// polyline instead of pushing individual glyphs off the centerline in the vertex shader.
+    pub(super) line_offset_y: f32,
     /// Whether the label is written top to bottom.
     pub(super) vertical: bool,
     pub(super) shaped: Option<shaped::ShapedBlock<'a>>,
@@ -161,6 +164,11 @@ pub(super) fn block<'a>(
     let height = line_scales.iter().sum::<f32>() * line_height + line_extras.iter().sum::<f32>();
     let mut fractions = fractions;
     let mut offset = anchored_offset(paint, &anchors, &anchor, (&symbol.properties, zoom));
+    let line_offset_y = if super::is_line_placed(paint) {
+        std::mem::take(&mut offset[1])
+    } else {
+        0.0
+    };
     if vertical && !anchors.is_empty() {
         // A vertical label with variable anchors is laid out centred before it turns; each
         // anchor then moves the turned box, which the first one has done already.
@@ -183,6 +191,7 @@ pub(super) fn block<'a>(
         fractions,
         justify,
         offset,
+        line_offset_y,
         vertical,
         shaped: None,
     })

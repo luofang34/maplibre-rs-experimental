@@ -87,7 +87,12 @@ pub(in crate::sdf::tessellation) fn build_shaped_block<'a>(
         _ => 0.5,
     };
     let height = line_count as f32 * line_height;
-    let offset = anchored_offset(paint, &anchors, &anchor, (&symbol.properties, zoom));
+    let mut offset = anchored_offset(paint, &anchors, &anchor, (&symbol.properties, zoom));
+    let line_offset_y = if super::super::is_line_placed(paint) {
+        std::mem::take(&mut offset[1])
+    } else {
+        0.0
+    };
 
     Some(Block {
         chars: Vec::new(),
@@ -103,6 +108,7 @@ pub(in crate::sdf::tessellation) fn build_shaped_block<'a>(
         fractions,
         justify,
         offset,
+        line_offset_y,
         vertical: vertical_requested,
         shaped: Some(ShapedBlock {
             atlas,
