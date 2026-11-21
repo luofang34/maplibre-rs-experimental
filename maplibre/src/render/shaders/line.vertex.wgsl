@@ -145,9 +145,13 @@ fn main(
     // opposite directions of their extrusions.
     let side = select(1.0, -1.0, negative_side);
     // A join vertex carries the miter or bevel offset as a normal longer or shorter than one,
-    // and the edge lies that much further out along it.
+    // and both the half-width outset and the polyline offset travel along that join normal so
+    // offset corners stay parallel to their adjoining segments without inside pinches or clipped
+    // outside miters. Cap the offset's miter multiplier to prevent unbounded concave spikes.
     let extent = length(normal);
-    let moved = outset * max(extent, 1.0) + side * line_offset;
+    let miter = max(extent, 1.0);
+    let offset_miter = min(miter, 4.0);
+    let moved = outset * miter + side * line_offset * offset_miter;
     if spatial && elevated_line {
         // Elevated 3D paths (`line-elevation`) keep crisp screen-pixel widths at all pitches and
         // when viewed from above, eye level, or below by rotating the projected path tangent 90°
@@ -176,7 +180,7 @@ fn main(
         // Decks share the map-space width of adjoining draped roads, including foreshortening.
         // Casing and deck share the centerline tangent plane. Independently projecting
         // different widths onto a curved sphere gives them intersecting depth surfaces.
-        center += tangent * (outset * line_scale.y);
+        center += tangent * (moved * line_scale.y / max(extent, 1e-6));
         // A small terrain bias keeps sampled road endpoints above the shared surface.
         center.z += max(abs(center.z), 1e-8) * 2e-5;
     } else if ground.on_terrain {

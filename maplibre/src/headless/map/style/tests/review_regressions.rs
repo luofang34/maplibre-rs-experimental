@@ -386,3 +386,73 @@ fn projection_global_state_switches_projection_live() {
         );
     })
 }
+
+#[test]
+fn line_offset_sharp_corners_render_across_joins_and_signs() {
+    use crate::headless::map::readback::{FrameReadback, PixelLayout};
+
+    crate::headless::map::test_async::run_async(async {
+        for (join, offset) in [
+            ("miter", 6.0),
+            ("miter", -6.0),
+            ("bevel", 6.0),
+            ("round", -6.0),
+        ] {
+            let map = vector_map(json!({
+                "version": 8,
+                "center": [0.0, 0.0],
+                "zoom": 0.0,
+                "sources": {
+                    "parks": {
+                        "type": "geojson",
+                        "data": {
+                            "type": "FeatureCollection",
+                            "features": [{
+                                "type": "Feature",
+                                "geometry": {
+                                    "type": "LineString",
+                                    "coordinates": [[-40.0, -20.0], [0.0, 20.0], [20.0, -20.0]]
+                                }
+                            }]
+                        }
+                    }
+                },
+                "layers": [
+                    {"id": "bg", "type": "background", "paint": {"background-color": "#000000"}},
+                    {
+                        "id": "road",
+                        "type": "line",
+                        "source": "parks",
+                        "layout": { "line-join": join },
+                        "paint": {
+                            "line-color": "#ff0000",
+                            "line-width": 4.0,
+                            "line-offset": offset
+                        }
+                    }
+                ]
+            }))
+            .await;
+
+            let mut readback = FrameReadback::new(&map, 64, 64);
+            let mut pixels = vec![0_u8; readback.frame_len(PixelLayout::Rgba8)];
+            readback
+                .read_into_blocking(
+                    &map,
+                    map.head_texture().expect("head texture"),
+                    PixelLayout::Rgba8,
+                    &mut pixels,
+                )
+                .expect("readback");
+
+            let red_pixels = pixels
+                .chunks_exact(4)
+                .filter(|px| px[0] > 180 && px[1] < 40 && px[2] < 40)
+                .count();
+            assert!(
+                red_pixels > 20 && red_pixels < 1500,
+                "join={join} offset={offset} produced unexpected red pixel count {red_pixels}"
+            );
+        }
+    })
+}
