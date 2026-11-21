@@ -87,26 +87,28 @@ fn unsupported_property_expressions_include_the_layer_and_property() {
 }
 
 #[test]
-fn raster_adjustments_and_unknown_layer_types_are_reported() {
-    for (kind, paint, path) in [
-        (
-            "raster",
-            serde_json::json!({"raster-fade-duration": 300}),
-            "paint.raster-fade-duration",
-        ),
-        ("model", serde_json::json!({}), "model"),
-    ] {
-        let style = style_with_layer(serde_json::json!({
-            "id": "unsupported", "type": kind, "paint": paint
-        }));
-        let errors = style
-            .validate()
-            .expect_err("unimplemented rendering must be reported");
-        assert!(
-            errors.iter().any(|error| error.to_string().contains(path)),
-            "{errors:?}"
-        );
-    }
+fn raster_fade_duration_is_accepted_and_unknown_layer_types_are_reported() {
+    let valid = style_with_layer(serde_json::json!({
+        "id": "imagery",
+        "type": "raster",
+        "source": "sat",
+        "paint": {"raster-fade-duration": 300}
+    }));
+    assert!(
+        valid.validate().is_ok(),
+        "raster-fade-duration should be accepted by validation"
+    );
+
+    let unsupported = style_with_layer(serde_json::json!({
+        "id": "unsupported", "type": "model", "paint": {}
+    }));
+    let errors = unsupported
+        .validate()
+        .expect_err("unimplemented rendering must be reported");
+    assert!(
+        errors.iter().any(|error| error.to_string().contains("model")),
+        "{errors:?}"
+    );
 }
 
 #[test]

@@ -195,12 +195,5 @@ impl LayerValidation<'_> {
             p.raster_saturation.as_ref(),
             Zoom,
         );
-        // Fading is the one adjustment the raster shader does not apply.
-        if p.raster_fade_duration.is_some_and(|v| v != 0) {
-            self.unsupported(
-                "paint.raster-fade-duration",
-                "raster paint adjustment is not implemented",
-            );
-        }
     }
 }

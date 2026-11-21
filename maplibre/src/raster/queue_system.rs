@@ -39,6 +39,11 @@ pub fn queue_system(
     {
         return Ok(());
     }
+    let now = instant::Instant::now();
+    let mut animating_fade = false;
+    if let Some(fade) = world.resources.get_mut::<RasterCrossFade>() {
+        animating_fade = fade.advance(now);
+    }
     let departing_opacity: rustc_hash::FxHashMap<String, f32> = world
         .resources
         .get::<RasterCrossFade>()
@@ -88,6 +93,10 @@ pub fn queue_system(
             .uses_globe_rendering(view_state.zoom().value())
     });
 
+    let mut visible_by_source: rustc_hash::FxHashMap<
+        String,
+        (u32, rustc_hash::FxHashSet<crate::coords::WorldTileCoords>),
+    > = rustc_hash::FxHashMap::default();
     for view_tile in tile_view_pattern.iter() {
         let coords = &view_tile.coords();
         tracing::trace!("Drawing tile at {coords}");
@@ -100,6 +109,12 @@ pub fn queue_system(
             let Some(source) = raster_resources.layer_source(&style_layer.id) else {
                 continue;
             };
+            let fade_duration = match &style_layer.paint {
+                Some(LayerPaint::Raster(paint)) => paint
+                    .raster_fade_duration
+                    .unwrap_or(crate::raster::cross_fade::DEFAULT_RASTER_FADE_DURATION_MS),
+                _ => crate::raster::cross_fade::DEFAULT_RASTER_FADE_DURATION_MS,
+            };
             view_tile.render_raster_source(source, |source_shape| {
                 if raster_resources
                     .layer_texture(&style_layer.id, &source_shape.coords())
@@ -107,9 +122,35 @@ pub fn queue_system(
                 {
                     return;
                 }
+                if !source_shape.is_drawn_within_another() {
+                    if let Some(src_name) = style_layer.source.as_deref() {
+                        let entry = visible_by_source
+                            .entry(src_name.to_owned())
+                            .or_insert_with(|| (fade_duration, Default::default()));
+                        entry.0 = entry.0.max(fade_duration);
+                        entry.1.insert(source_shape.coords());
+                    }
+                }
                 items.push(source_draws(source_shape, style_layer, uses_globe));
             });
         }
+    }
+
+    if !visible_by_source.is_empty() {
+        if world.resources.get::<RasterCrossFade>().is_none() {
+            world.resources.insert(RasterCrossFade::default());
+        }
+        if let Some(fade) = world.resources.get_mut::<RasterCrossFade>() {
+            for (src_name, (duration_ms, current_tiles)) in &visible_by_source {
+                fade.update_live_fades(src_name, current_tiles, *duration_ms, now);
+            }
+            if fade.has_active_timed_fade() {
+                animating_fade = true;
+            }
+        }
+    }
+    if animating_fade {
+        crate::render::frame_signals::keep_animating(world);
     }
 
     let Some((layer_item_phase, tile_mask_phase)) = world
