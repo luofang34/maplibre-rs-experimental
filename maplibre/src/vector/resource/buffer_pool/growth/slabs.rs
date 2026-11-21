@@ -257,6 +257,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
                             shared_layer_meta::SharedLayerMetaAlloc {
                                 range: range.clone(),
                                 ref_count: 1,
+                                last_opaque: None,
                             },
                         );
                     }
@@ -316,6 +317,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
                 shared_layer_meta::SharedLayerMetaAlloc {
                     range: range.clone(),
                     ref_count: 1,
+                    last_opaque: None,
                 },
             );
         }

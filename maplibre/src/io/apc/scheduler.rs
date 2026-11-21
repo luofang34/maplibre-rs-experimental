@@ -23,7 +23,7 @@ use crate::{
 };
 
 #[cfg(target_arch = "wasm32")]
-const MAX_ADMITTED_ATTEMPTS_PER_BATCH: usize = 16;
+const MAX_ADMITTED_ATTEMPTS_PER_BATCH: usize = 4;
 
 #[cfg(target_arch = "wasm32")]
 fn is_intermediate_vector_layer(message: &Message) -> bool {
@@ -199,11 +199,20 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
                 return ret.into_iter();
             }
             let mut queued = self.queued.borrow_mut();
+            if queued.is_empty() {
+                if let Ok(message) = self.channel.1.try_recv() {
+                    queued.push_back(message);
+                } else {
+                    return ret.into_iter();
+                }
+            }
             while let Ok(message) = self.channel.1.try_recv() {
                 queued.push_back(message);
             }
-            let mut admitted_attempts =
-                std::collections::HashSet::with_capacity(MAX_ADMITTED_ATTEMPTS_PER_BATCH);
+            let mut admitted_attempts = rustc_hash::FxHashSet::with_capacity_and_hasher(
+                MAX_ADMITTED_ATTEMPTS_PER_BATCH,
+                Default::default(),
+            );
             for existing in buffer.iter().chain(ret.iter()) {
                 if let Some(id) = existing.attempt() {
                     admitted_attempts.insert(id);
@@ -264,13 +273,18 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
         procedure: AsyncProcedure<K, Self::Context>,
     ) -> Result<(), CallError> {
         let sender = self.channel.0.clone();
-        let waker_slot = self.waker.clone();
-        let waker: Option<ArrivalWaker> = Some(Arc::new(move || {
-            let current = crate::platform::lock_unpoisoned(&waker_slot).clone();
-            if let Some(wake) = current {
-                wake();
-            }
-        }));
+        let waker: Option<ArrivalWaker> =
+            if let Some(wake) = crate::platform::lock_unpoisoned(&self.waker).clone() {
+                Some(wake)
+            } else {
+                let waker_slot = self.waker.clone();
+                Some(Arc::new(move || {
+                    let current = crate::platform::lock_unpoisoned(&waker_slot).clone();
+                    if let Some(wake) = current {
+                        wake();
+                    }
+                }))
+            };
         let offscreen_kernel_config = self.offscreen_kernel_config.clone();
         let attempt = input.attempt;
         let (abort, registration) = AbortHandle::new_pair();

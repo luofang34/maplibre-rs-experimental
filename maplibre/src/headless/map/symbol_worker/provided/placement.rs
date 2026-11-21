@@ -35,7 +35,11 @@ fn a_full_generation_queue_draws_every_shield_in_the_end() {
         assert_eq!(refused.running, 1, "{refused:?}");
         gate.add_permits(1024);
         let pixels = frames_until(&mut map, "every shield", |pixels| {
-            shown(pixels, SHIELD) > 300 && shown(pixels, MARKER) == 0
+            let stats = providers.stats();
+            shown(pixels, SHIELD) > 300
+                && shown(pixels, MARKER) == 0
+                && stats.images >= 3
+                && stats.running + stats.waiting == 0
         })
         .await;
         assert_eq!(shown(&pixels, MARKER), 0);

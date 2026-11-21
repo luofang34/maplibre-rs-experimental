@@ -479,5 +479,7 @@ fn raster_shapes<T: HasTile>(
 }
 
 mod cover;
+mod memo;
 pub use cover::covering_shapes_for;
 use cover::{clip_region, selected_shapes, source_shapes, source_shapes_bounded};
+pub use memo::TileViewPatternMemo;

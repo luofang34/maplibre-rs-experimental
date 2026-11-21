@@ -381,4 +381,20 @@ pub struct VectorLayerBucketComponent {
 
 impl TileComponent for VectorLayerBucketComponent {}
 
+/// Monotonic epoch bumped whenever vector tile worker results commit or tiles evict.
+#[derive(Default)]
+pub(crate) struct VectorArrivalEpoch(pub u64);
+
+pub(crate) fn bump_arrival_epoch(world: &mut World) {
+    let epoch = world.resources.get_or_init_mut::<VectorArrivalEpoch>();
+    epoch.0 = epoch.0.wrapping_add(1);
+}
+
+pub(crate) fn arrival_epoch(world: &World) -> u64 {
+    world
+        .resources
+        .get::<VectorArrivalEpoch>()
+        .map_or(0, |epoch| epoch.0)
+}
+
 pub(crate) mod line_dash;

@@ -110,6 +110,26 @@ impl LayerPaint {
             _ => None,
         }
     }
+
+    /// Evaluates a feature-constant base color in encoded sRGB at `zoom`.
+    /// Data-driven color expressions and paint families without one base color return `None`.
+    pub fn color_at(&self, zoom: f64) -> Option<Alpha<EncodedSrgb<f32>>> {
+        let property = match self {
+            Self::Background(paint) => &paint.background_color,
+            Self::Line(paint) => &paint.line_color,
+            Self::Circle(paint) => &paint.circle_color,
+            Self::Fill(paint) => &paint.fill_color,
+            Self::FillExtrusion(paint) => &paint.fill_extrusion_color,
+            Self::Raster(_)
+            | Self::Hillshade(_)
+            | Self::ColorRelief(_)
+            | Self::Symbol(_)
+            | Self::Heatmap(_)
+            | Self::Custom(_) => return None,
+        };
+        let color = property.as_ref()?.evaluate_at_zoom(zoom)?;
+        Some(color.into())
+    }
 }
 
 /// Whether a layer is drawn at all, the `layout.visibility` property.

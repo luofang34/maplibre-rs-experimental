@@ -17,7 +17,7 @@ use crate::{
     style::Style,
     tcs::{system::SystemError, world::World},
     terrain::{
-        drape_targets::select_targets, queue_system::uniforms::present_ancestors,
+        drape_targets::select_targets, queue_system::uniforms::has_present_ancestor,
         request_system::DrapeRequests, resources::TerrainResources,
     },
 };
@@ -38,50 +38,6 @@ pub(super) fn frame_sources_and_painted(
     style: &Style,
     view_state: &ViewState,
 ) -> Result<FrameSourcesAndPainted, SystemError> {
-    let visible_level = view_state.zoom().zoom_level(DEFAULT_TILE_SIZE);
-    let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
-    let multi_active = world
-        .resources
-        .get::<crate::render::eye_covering::MultiViewExtractCovering>()
-        .is_some_and(|m| m.active);
-    let cached_tiles = if !multi_active {
-        world
-            .resources
-            .get::<crate::render::eye_covering::FrameLooseCovering>()
-            .filter(|cache| cache.host_frame == host_frame)
-            .and_then(|cache| cache.view_tiles.as_ref())
-            .filter(|(_, padding, cached_level)| {
-                *padding == ViewStatePadding::Tight && *cached_level == visible_level
-            })
-            .map(|(tiles, _, _)| tiles.clone())
-    } else {
-        None
-    };
-    let view_tiles: Option<Vec<WorldTileCoords>> = match cached_tiles {
-        Some(tiles) => tiles.map(|tiles| {
-            tiles
-                .into_iter()
-                .filter_map(|coords| coords.wrapped().map(|(wrapped, _)| wrapped))
-                .collect()
-        }),
-        None => view_region_for_projection(
-            style,
-            view_state,
-            world,
-            visible_level,
-            ViewStatePadding::Tight,
-        )
-        .map_err(|error| {
-            tracing::error!(%error, "unable to select tiles for vector upload");
-            SystemError::Setup
-        })?
-        .map(|region| {
-            region
-                .copies()
-                .filter_map(|copy| copy.wrapped().map(|(coords, _)| coords))
-                .collect()
-        }),
-    };
     let Some(view_tile_sources) = world.resources.get::<ViewTileSources>() else {
         return Err(SystemError::Dependencies);
     };
@@ -90,6 +46,64 @@ pub(super) fn frame_sources_and_painted(
         view_tile_sources.of_kind(TileKind::Vector),
         crate::vector::UploadedVectorGeometry::for_world(world),
     );
+    let needs_view_tiles_for_paint = style.terrain.is_none()
+        || style.layers.iter().any(|l| {
+            !l.is_hidden()
+                && !matches!(
+                    l.type_.as_str(),
+                    "background" | "symbol" | "sky" | "raster" | "hillshade" | "color-relief"
+                )
+                && (!crate::terrain::is_drapeable(&l.type_)
+                    || crate::vector::structures::kind(l).is_some())
+        });
+    let view_tiles: Option<Vec<WorldTileCoords>> = if needs_view_tiles_for_paint {
+        let visible_level = view_state.zoom().zoom_level(DEFAULT_TILE_SIZE);
+        let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
+        let multi_active = world
+            .resources
+            .get::<crate::render::eye_covering::MultiViewExtractCovering>()
+            .is_some_and(|m| m.active);
+        let cached_tiles = if !multi_active {
+            world
+                .resources
+                .get::<crate::render::eye_covering::FrameLooseCovering>()
+                .filter(|cache| cache.host_frame == host_frame)
+                .and_then(|cache| cache.view_tiles.as_ref())
+                .filter(|(_, padding, cached_level)| {
+                    *padding == ViewStatePadding::Tight && *cached_level == visible_level
+                })
+                .map(|(tiles, _, _)| tiles.clone())
+        } else {
+            None
+        };
+        match cached_tiles {
+            Some(tiles) => tiles.map(|tiles| {
+                tiles
+                    .into_iter()
+                    .filter_map(|coords| coords.wrapped().map(|(wrapped, _)| wrapped))
+                    .collect()
+            }),
+            None => view_region_for_projection(
+                style,
+                view_state,
+                world,
+                visible_level,
+                ViewStatePadding::Tight,
+            )
+            .map_err(|error| {
+                tracing::error!(%error, "unable to select tiles for vector upload");
+                SystemError::Setup
+            })?
+            .map(|region| {
+                region
+                    .copies()
+                    .filter_map(|copy| copy.wrapped().map(|(coords, _)| coords))
+                    .collect()
+            }),
+        }
+    } else {
+        None
+    };
     let (source_tiles, mut painted_tiles, uncovered, all_view_painted) = if style.terrain.is_some()
     {
         let (src, uncov) = terrain_sources(world, style);
@@ -248,9 +262,8 @@ pub(super) fn terrain_sources(
     let mut covered_list = Vec::new();
     let mut uncovered_set = FxHashSet::default();
     for (target, shapes) in selected {
-        let is_uncovered = terrain.is_some_and(|t| {
-            t.drape_texture(target).is_none() && present_ancestors(target, t).is_empty()
-        });
+        let is_uncovered = terrain
+            .is_some_and(|t| t.drape_texture(target).is_none() && !has_present_ancestor(target, t));
         for source in shapes
             .into_iter()
             .filter(|shape| shape.raster_source.is_none())

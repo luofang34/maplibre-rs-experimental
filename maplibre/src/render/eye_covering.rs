@@ -184,6 +184,52 @@ pub(crate) fn drawn_tiles(world: &World) -> Option<&[WorldTileCoords]> {
     world.resources.get::<SharedCovering>()?.tiles()
 }
 
+/// Returns already-selected tight-padding tiles for this host frame when view projection and
+/// terrain state match [`SharedCovering`], avoiding duplicate quadtree walks in Cleanup.
+pub(crate) fn matching_tight_tiles<'a>(
+    world: &'a World,
+    style: &Style,
+    view_state: &ViewState,
+    level: ZoomLevel,
+) -> Option<&'a [WorldTileCoords]> {
+    let eye = world.resources.get::<EyeInFrame>().copied();
+    if let Some(eye) = eye.filter(|e| e.index > 0) {
+        return world
+            .resources
+            .get::<SharedCovering>()
+            .filter(|shared| shared.frame == Some(eye.frame))
+            .map(|shared| {
+                shared
+                    .tiles
+                    .as_ref()
+                    .map_or(&[][..], |(tiles, _)| tiles.as_slice())
+            });
+    }
+    let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
+    let view_proj_bits: [[u64; 4]; 4] =
+        (*AsRef::<[[f64; 4]; 4]>::as_ref(&view_state.view_projection().0))
+            .map(|col| col.map(f64::to_bits));
+    let style_rev = style.revision();
+    let terrain_key = terrain_index_key(world);
+    world
+        .resources
+        .get::<SharedCovering>()
+        .filter(|shared| {
+            shared.frame == eye.map(|e| e.frame)
+                && shared.host_frame == host_frame
+                && shared.style_rev == style_rev
+                && shared.level == level
+                && shared.view_proj_bits == view_proj_bits
+                && shared.terrain_key == terrain_key
+        })
+        .map(|shared| {
+            shared
+                .tiles
+                .as_ref()
+                .map_or(&[][..], |(tiles, _)| tiles.as_slice())
+        })
+}
+
 pub(crate) fn terrain_index_key(world: &World) -> (u64, u64, usize) {
     world
         .resources

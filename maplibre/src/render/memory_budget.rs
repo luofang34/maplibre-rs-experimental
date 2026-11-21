@@ -24,7 +24,8 @@ pub const DRAPE_TEXTURES_WHEN_LOW: usize = 32;
 pub const DRAPE_TEXTURES_WHEN_CRITICAL: usize = 12;
 /// Tiles in flight while memory is low.
 pub const TILES_IN_FLIGHT_WHEN_LOW: usize = 4;
-const WASM_UPLOADS_PER_FRAME: usize = 24;
+const WASM_BOOT_UPLOADS_PER_FRAME: usize = 4;
+const WASM_BOOT_GEOMETRY_UPLOAD_BYTES: usize = 3 << 20;
 const NATIVE_UPLOADS_PER_FRAME: usize = 8;
 const WASM_MOVING_UPLOADS_PER_FRAME: usize = 1;
 const NATIVE_MOVING_UPLOADS_PER_FRAME: usize = 2;
@@ -38,7 +39,7 @@ const WASM_POST_BOOT_GEOMETRY_UPLOAD_BYTES: usize = 1 << 20;
 /// Tiles whose geometry is uploaded in one frame; the rest wait for the next, so a burst of
 /// arrivals does not stage a hundred tiles' geometry at once.
 #[cfg(target_arch = "wasm32")]
-pub const UPLOADS_PER_FRAME: usize = WASM_UPLOADS_PER_FRAME;
+pub const UPLOADS_PER_FRAME: usize = WASM_BOOT_UPLOADS_PER_FRAME;
 /// Tiles whose geometry is uploaded in one frame; the rest wait for the next, so a burst of
 /// arrivals does not stage a hundred tiles' geometry at once.
 #[cfg(not(target_arch = "wasm32"))]
@@ -202,7 +203,12 @@ pub(super) const fn geometry_limits_for_platform(
                 WASM_POST_BOOT_GEOMETRY_UPLOAD_BYTES,
             )
         } else {
-            (WASM_UPLOADS_PER_FRAME, full_bytes)
+            let boot_bytes = if WASM_BOOT_GEOMETRY_UPLOAD_BYTES < full_bytes {
+                WASM_BOOT_GEOMETRY_UPLOAD_BYTES
+            } else {
+                full_bytes
+            };
+            (WASM_BOOT_UPLOADS_PER_FRAME, boot_bytes)
         }
     } else if moving {
         if uncovered {
@@ -249,8 +255,46 @@ impl FrameUploads {
     }
 
     /// Whether the camera has moved at least once since startup.
+    #[cfg(test)]
     pub(crate) fn is_post_boot(&self) -> bool {
         self.post_boot
+    }
+
+    pub(crate) fn vector_upload_time_budget(&self) -> Option<std::time::Duration> {
+        Self::upload_time_budget_for_platform(
+            self.moving,
+            self.post_boot,
+            cfg!(target_arch = "wasm32"),
+            (700, 800, 1_500),
+        )
+    }
+
+    pub(crate) fn sdf_upload_time_budget(&self) -> Option<std::time::Duration> {
+        Self::upload_time_budget_for_platform(
+            self.moving,
+            self.post_boot,
+            cfg!(target_arch = "wasm32"),
+            (350, 450, 800),
+        )
+    }
+
+    pub(super) const fn upload_time_budget_for_platform(
+        moving: bool,
+        post_boot: bool,
+        is_wasm: bool,
+        (moving_us, settled_us, boot_us): (u64, u64, u64),
+    ) -> Option<std::time::Duration> {
+        if !is_wasm {
+            return None;
+        }
+        let micros = if moving {
+            moving_us
+        } else if post_boot {
+            settled_us
+        } else {
+            boot_us
+        };
+        Some(std::time::Duration::from_micros(micros))
     }
 
     pub(super) fn can_take_geometry_for_platform(

@@ -64,3 +64,126 @@ fn the_hosts_obstacles_are_in_the_grid_before_any_label() {
     );
     assert!(!super::obstructed_grid(800.0, 600.0, None).overlaps([130.0, 105.0, 200.0, 120.0]));
 }
+
+#[cfg(all(feature = "headless", feature = "thread-safe-futures"))]
+#[tokio::test]
+async fn sliced_epoch_commits_all_pending_uploads_atomically_in_one_frame() {
+    use std::time::Duration;
+
+    use bytemuck::Zeroable;
+    use cgmath::{Deg, Rad};
+    use rustc_hash::FxHashMap;
+
+    use crate::{
+        coords::{LatLon, WorldCoords, Zoom},
+        headless::create_headless_renderer,
+        render::{
+            eventually::Eventually,
+            settings::BufferPoolSizes,
+            shaders::{SDFShaderFeatureMetadata, ShaderSymbolVertex},
+            view_state::ViewState,
+        },
+        sdf::SymbolBufferPool,
+        style::{layer::StyleLayer, Style, StyleLayerId},
+        tcs::world::World,
+        vector::tessellation::OverAlignedVertexBuffer,
+        window::PhysicalSize,
+    };
+
+    let (_, renderer) = create_headless_renderer(64, 64, None)
+        .await
+        .expect("renderer");
+    let sizes = BufferPoolSizes {
+        vertices: 16,
+        indices: 32,
+        feature_metadata: 16,
+        layer_metadata: 4,
+    };
+    let mut pool = SymbolBufferPool::from_device_with_sizes(&renderer.device, sizes);
+    let layer_id_str = "places";
+    let layer_id = StyleLayerId::intern(layer_id_str);
+    let coords_a = WorldTileCoords::from((0, 0, ZoomLevel::new(4)));
+    let coords_b = WorldTileCoords::from((1, 0, ZoomLevel::new(4)));
+    let style_layer = StyleLayer {
+        id: layer_id_str.to_owned(),
+        type_: "symbol".to_owned(),
+        ..StyleLayer::default()
+    };
+    let geometry = OverAlignedVertexBuffer::from_iters(
+        [ShaderSymbolVertex::zeroed(); 4],
+        [0_u32, 1, 2, 2, 1, 3],
+        6,
+    );
+    for coords in [coords_a, coords_b] {
+        pool.allocate_layer_geometry(
+            &renderer.queue,
+            coords,
+            style_layer.clone(),
+            &geometry,
+            bytemuck::Zeroable::zeroed(),
+            &[SDFShaderFeatureMetadata::zeroed(); 4],
+        )
+        .expect("symbol bucket fits");
+    }
+    let mut world = World::default();
+    world.resources.insert(Eventually::Initialized(pool));
+    let style: Style = serde_json::from_str(
+        r#"{"version":8,"sources":{},"layers":[{"id":"follower","type":"symbol"}]}"#,
+    )
+    .expect("style");
+    let size = PhysicalSize::new(64, 64).expect("size");
+    let zoom = Zoom::new(12.0);
+    let view = ViewState::new(
+        size,
+        WorldCoords::from_lat_lon(LatLon::default(), zoom),
+        zoom,
+        Deg(0.0),
+        Rad(0.75),
+    );
+    let meta_a = vec![SDFShaderFeatureMetadata::from_placement(
+        1.0, 0.0, 1.0, 0.0, [0.0; 2], [1.0; 4], [0.0; 4], [0.0; 4],
+    )];
+    let meta_b = vec![SDFShaderFeatureMetadata::from_placement(
+        1.0, 0.0, 1.0, 0.0, [0.0; 2], [1.0; 4], [0.0; 4], [0.0; 4],
+    )];
+    let mut epoch = super::sliced::ActiveEpoch::for_atomic_upload_test(
+        view,
+        vec![(layer_id, coords_a, meta_a), (layer_id, coords_b, meta_b)],
+    );
+    let mut history = super::temporal::PlacementHistory::default();
+    let mut uploaded = FxHashMap::default();
+    let mut scratch = super::upload_diff::MetadataScratchPool::default();
+
+    // First step finishes mirrored work with Duration::ZERO: must defer BEFORE uploading either bucket.
+    assert!(
+        !epoch.step_with_budget(
+            &world,
+            &style,
+            &renderer.queue,
+            &mut history,
+            &mut uploaded,
+            &mut scratch,
+            true,
+            Duration::ZERO,
+        ),
+        "must yield before committing pending_uploads once budget is spent"
+    );
+    assert!(
+        uploaded.is_empty(),
+        "zero buckets may commit prematurely on yield"
+    );
+
+    // Next step enters pending_uploads and must drain BOTH buckets atomically even with Duration::ZERO.
+    assert!(epoch.step_with_budget(
+        &world,
+        &style,
+        &renderer.queue,
+        &mut history,
+        &mut uploaded,
+        &mut scratch,
+        true,
+        Duration::ZERO,
+    ));
+    assert!(uploaded.contains_key(&(coords_a, layer_id)));
+    assert!(uploaded.contains_key(&(coords_b, layer_id)));
+}

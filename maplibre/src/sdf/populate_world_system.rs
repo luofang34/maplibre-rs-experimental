@@ -40,13 +40,22 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
             ..
         }: &mut MapContext,
     ) -> SystemResult {
-        let messages = self.kernel.apc().receive(|message| {
-            message.has_tag(T::SymbolLayerTessellated::message_tag())
-                || message.has_tag(super::provided::ProvidedImagesReport::message_tag())
-        });
-        if renderer.settings.symbol_pools.is_empty() {
+        let mut messages = self
+            .kernel
+            .apc()
+            .receive(|message| {
+                message.has_tag(T::SymbolLayerTessellated::message_tag())
+                    || message.has_tag(super::provided::ProvidedImagesReport::message_tag())
+            })
+            .peekable();
+        if messages.peek().is_none() || renderer.settings.symbol_pools.is_empty() {
             return Ok(());
         }
+        let layer_by_id: rustc_hash::FxHashMap<&str, &crate::style::layer::StyleLayer> = style
+            .layers
+            .iter()
+            .map(|layer| (layer.id.as_str(), layer))
+            .collect();
         let mut prop_interner =
             crate::vector::feature_paint::intern::TilePropertyInterner::default();
         let mut state_memo = crate::style::feature_state::FeatureStateArcMemo::default();
@@ -60,18 +69,19 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
                 let message = message.into_transferable::<T::SymbolLayerTessellated>()?;
                 let coords = message.coords();
                 let mut bucket = message.to_bucket();
-                if tile_retry::accepts(world, coords, RequestKind::Vector, attempt)
-                    && style
-                        .layers
-                        .iter()
-                        .any(|layer| layer.id == bucket.style_layer_id)
+                if let Some(&style_layer) =
+                    tile_retry::accepts(world, coords, RequestKind::Vector, attempt)
+                        .then(|| layer_by_id.get(bucket.style_layer_id.as_str()))
+                        .flatten()
                 {
                     prop_interner.intern_symbol_bucket(&world.tiles, &mut bucket);
-                    let retessellate = crate::vector::arrival_sync::sync_arriving_symbol_bucket(
-                        style,
-                        &mut bucket,
-                        &mut state_memo,
-                    );
+                    let retessellate =
+                        crate::vector::arrival_sync::sync_arriving_symbol_bucket_for_layer(
+                            style,
+                            style_layer,
+                            &mut bucket,
+                            &mut state_memo,
+                        );
                     crate::vector::content::accept_symbols(world, bucket);
                     if retessellate {
                         tile_retry::refresh_tiles(world, RequestKind::Vector, &[coords]);

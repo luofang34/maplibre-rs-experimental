@@ -257,7 +257,7 @@ fn prepared_region_and_coverage_index_detect_dem_and_camera_changes() {
     );
     assert!(built.matches_inputs(
         region.as_ref(),
-        &world.tiles,
+        super::dem_bounds::dem_bounds_signature(&world.tiles),
         &dem,
         super::super::PolarPoleElevations::default()
     ));
@@ -282,7 +282,7 @@ fn prepared_region_and_coverage_index_detect_dem_and_camera_changes() {
         .expect("index");
     assert!(!index.matches_inputs(
         region.as_ref(),
-        &world.tiles,
+        super::dem_bounds::dem_bounds_signature(&world.tiles),
         &dem,
         super::super::PolarPoleElevations::default()
     ));

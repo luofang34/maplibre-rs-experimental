@@ -1,6 +1,8 @@
 //! Paint shared by every feature must use the view zoom, including overzoomed source tiles.
+mod slots;
 mod uniform;
 use rustc_hash::{FxHashMap, FxHashSet};
+pub(super) use slots::SlotMetaCache;
 pub(crate) use uniform::uniform_color;
 
 use super::{
@@ -107,6 +109,7 @@ pub(super) struct PaintRefreshScratch {
     feature_zoom_updates: Vec<(WorldTileCoords, String, Option<PatternRuns>)>,
     feature_zoom_only_updates: Vec<(WorldTileCoords, String)>,
     opaque_updates: Vec<(WorldTileCoords, crate::style::StyleLayerId, bool)>,
+    pub(super) slots: SlotMetaCache,
 }
 
 impl PaintRefreshScratch {
@@ -172,6 +175,7 @@ pub(super) fn refresh_layer_paint(
     frame: VectorPaintFrame,
     previous: Option<VectorPaintFrame>,
     moving: bool,
+    tiles_changed: bool,
     scratch: &mut PaintRefreshScratch,
 ) {
     let VectorPaintFrame { zoom, .. } = frame;
@@ -179,12 +183,12 @@ pub(super) fn refresh_layer_paint(
     let bearing_changed = previous.is_none_or(|prev| prev.bearing != frame.bearing);
     let light_changed = previous.is_none_or(|prev| prev.light != frame.light);
     let settle_pass = !moving && scratch.needs_feature_zoom_settle;
-    if !zoom_changed && !bearing_changed && !light_changed && !settle_pass {
+    if !zoom_changed && !bearing_changed && !light_changed && !settle_pass && !tiles_changed {
         return;
     }
-    let active_flags = (u8::from(zoom_changed) * (1 | 8 | 64))
-        | (u8::from(bearing_changed) * 2)
-        | (u8::from(light_changed) * 4)
+    let active_flags = (u8::from(zoom_changed || tiles_changed) * (1 | 8 | 64))
+        | (u8::from(bearing_changed || tiles_changed) * 2)
+        | (u8::from(light_changed || tiles_changed) * 4)
         | (u8::from(settle_pass) * 8);
     if previous.is_some() && (scratch.style_flags_union & active_flags) == 0 {
         if settle_pass {
@@ -211,6 +215,7 @@ pub(super) fn refresh_layer_paint(
         feature_zoom_updates,
         feature_zoom_only_updates,
         opaque_updates,
+        slots,
         ..
     } = scratch;
 
@@ -225,12 +230,12 @@ pub(super) fn refresh_layer_paint(
             let flags = *layer_flags
                 .entry(entry.style_layer.index)
                 .or_insert_with(|| layer_paint_flags(&entry.style_layer));
-            let meta_dirty = (zoom_changed && (flags & 1) != 0)
-                || (bearing_changed && (flags & 2) != 0)
-                || (light_changed && (flags & 4) != 0);
+            let meta_dirty = ((zoom_changed || tiles_changed) && (flags & 1) != 0)
+                || ((bearing_changed || tiles_changed) && (flags & 2) != 0)
+                || ((light_changed || tiles_changed) && (flags & 4) != 0);
             if meta_dirty {
                 let key = (entry.style_layer.index, tile_z);
-                let (metadata, changed) = *meta_memo.entry(key).or_insert_with(|| {
+                let (metadata, changed_vs_prev) = *meta_memo.entry(key).or_insert_with(|| {
                     let metadata = metadata_for_layer(&entry.style_layer, *coords, frame);
                     let changed = match (previous, prev_meta.get(&key)) {
                         (Some(prev_frame), Some((cached_frame, cached_meta)))
@@ -250,28 +255,32 @@ pub(super) fn refresh_layer_paint(
                     prev_meta.insert(key, (frame, metadata));
                     (metadata, changed)
                 });
-                if changed {
-                    if entry.style_layer.type_ == "fill"
-                        && (flags & 32) != 0
-                        && !matches!(
-                            entry.style_layer.paint.as_ref(),
-                            Some(LayerPaint::Fill(f)) if f.fill_pattern.is_some()
-                        )
-                    {
-                        opaque_updates.push((
-                            *coords,
-                            entry.style_layer_id,
-                            metadata.uniform_color[3] >= 1.0,
-                        ));
-                    }
-                    if updated_layer_slots
-                        .insert((entry.page(), entry.layer_metadata_buffer_range().start))
-                    {
-                        buffer_pool.update_layer_metadata(queue, entry, metadata);
+                let slot_range = entry.layer_metadata_buffer_range();
+                let has_slot = slot_range.end > slot_range.start;
+                let slot_key = (entry.page(), slot_range.start);
+                let slot_stale = has_slot && slots.is_stale(slot_key, &metadata);
+                if (changed_vs_prev || slot_stale)
+                    && has_slot
+                    && updated_layer_slots.insert(slot_key)
+                {
+                    buffer_pool.update_layer_metadata(queue, entry, metadata);
+                    slots.record(slot_key, metadata);
+                }
+                if entry.style_layer.type_ == "fill"
+                    && (flags & 32) != 0
+                    && !matches!(
+                        entry.style_layer.paint.as_ref(),
+                        Some(LayerPaint::Fill(f)) if f.fill_pattern.is_some()
+                    )
+                    && uniform_color(&entry.style_layer, f64::from(zoom)).is_some()
+                {
+                    let expected_opaque = metadata.uniform_color[3] >= 1.0;
+                    if changed_vs_prev || entry.is_opaque_color() != expected_opaque {
+                        opaque_updates.push((*coords, entry.style_layer_id, expected_opaque));
                     }
                 }
             }
-            if (zoom_changed || settle_pass)
+            if (zoom_changed || settle_pass || tiles_changed)
                 && !entry.is_uniform_feature_metadata()
                 && !entry.is_dynamic_circle_metadata()
                 && (flags & 8) != 0
@@ -329,7 +338,7 @@ pub(super) fn refresh_layer_paint(
                                     .style_layer
                                     .paint
                                     .as_ref()
-                                    .and_then(LayerPaint::get_color)
+                                    .and_then(|paint| paint.color_at(f64::from(zoom)))
                                     .map(Into::into)
                                     .unwrap_or([0.0, 0.0, 0.0, 1.0]);
                                 feature_metadata_into(

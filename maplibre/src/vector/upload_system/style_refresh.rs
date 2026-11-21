@@ -65,9 +65,9 @@ pub(super) fn apply_dirty_style(
     style: &Style,
     queue: &UploadQueue,
     frame: VectorPaintFrame,
-) {
+) -> bool {
     let Some(dirty) = world.resources.remove::<DirtyVectorStyle>() else {
-        return;
+        return false;
     };
     let mut needs_worker_refresh = false;
     let mut recolor_layers = dirty.paint_layers;
@@ -127,6 +127,7 @@ pub(super) fn apply_dirty_style(
     if needs_worker_refresh {
         tile_retry::refresh(world, RequestKind::Vector);
     }
+    true
 }
 
 fn sync_symbol_pool_layers(world: &mut World, style: &Style) {
@@ -414,12 +415,27 @@ fn refresh_vector_pool(
     };
     let mut updated_layer_slots: rustc_hash::FxHashSet<(u16, u64)> =
         rustc_hash::FxHashSet::default();
+    let mut opaque_updates: Vec<(WorldTileCoords, crate::style::StyleLayerId, bool)> = Vec::new();
     for style_layer in &style.layers {
         let Some(coords_set) = touched_by_layer.get(&style_layer.id) else {
             continue;
         };
+        let is_uniform_fill = style_layer.type_ == "fill"
+            && super::metadata::uses_layer_metadata_uniform_color(style_layer)
+            && !matches!(
+                style_layer.paint.as_ref(),
+                Some(LayerPaint::Fill(f)) if f.fill_pattern.is_some()
+            )
+            && paint::uniform_color(style_layer, f64::from(frame.zoom)).is_some();
         for &coords in coords_set {
             let layer_meta = metadata_for_layer(style_layer, coords, frame);
+            if is_uniform_fill {
+                opaque_updates.push((
+                    coords,
+                    style_layer.layer_id(),
+                    layer_meta.uniform_color[3] >= 1.0,
+                ));
+            }
             if let Some(entry) = vector_pool
                 .index()
                 .get_layers(coords)
@@ -432,6 +448,9 @@ fn refresh_vector_pool(
                 }
             }
         }
+    }
+    for (coords, layer_id, opaque) in opaque_updates {
+        vector_pool.set_layer_opaque_color_by_id(coords, layer_id, opaque);
     }
     for GpuPaintUpdate {
         coords,

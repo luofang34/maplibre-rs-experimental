@@ -13,16 +13,12 @@
 
 use std::{collections::HashMap, sync::Arc};
 
+pub use super::PolarPoleElevations;
 use crate::{
-    context::MapContext,
     coords::{TileCoords, WorldTileCoords, ZoomLevel, EXTENT},
     projection::globe::covering::{TileElevationProvider, TileElevationRange},
-    tcs::{system::SystemResult, tiles::Tiles},
-    terrain::{
-        request_system::dem_tile_coords,
-        source::{dem_source, DemSource},
-        DemTileComponent,
-    },
+    tcs::tiles::Tiles,
+    terrain::{request_system::dem_tile_coords, source::DemSource, DemTileComponent},
 };
 
 /// Metres added around the sampled minimum and maximum so ray casts bracket the surface.
@@ -68,6 +64,7 @@ pub struct TerrainCoverageIndex {
     rendered: HashMap<WorldTileCoords, Option<WorldTileCoords>>,
     /// Interior elevation bounds of every loaded DEM tile, without exaggeration.
     dem_bounds: crate::tcs::pyramid::TilePyramid<(f64, f64)>,
+    dem_bounds_sig: u64,
     min_elevation: f64,
     max_elevation: f64,
     exaggeration: f64,
@@ -86,23 +83,26 @@ impl TerrainCoverageIndex {
         tiles: &Tiles,
         dem: &DemSource,
     ) -> Self {
+        let (dem_sig, _) = dem_bounds::dem_bounds_signature(tiles);
+        let bounds = dem_bounds::build_dem_bounds(tiles);
+        Self::build_with_dem_bounds(rendered, bounds, dem_sig, dem)
+    }
+
+    fn build_with_dem_bounds(
+        rendered: impl IntoIterator<Item = WorldTileCoords>,
+        bounds: crate::tcs::pyramid::TilePyramid<(f64, f64)>,
+        dem_bounds_sig: u64,
+        dem: &DemSource,
+    ) -> Self {
         let mut index = Self {
+            dem_bounds: bounds,
+            dem_bounds_sig,
             exaggeration: f64::from(dem.exaggeration),
             minzoom: dem.minzoom,
             maxzoom: dem.maxzoom,
             dem_tile_size: dem.tile_size,
             ..Self::default()
         };
-        for coords in tiles
-            .pyramid_of::<DemTileComponent>()
-            .coords_coarse_to_fine()
-        {
-            if let Some(DemTileComponent::Loaded(dem)) = tiles.query::<&DemTileComponent>(coords) {
-                index
-                    .dem_bounds
-                    .insert(coords, (dem.tile.min(), dem.tile.max()));
-            }
-        }
         let (mut min, mut max) = (0.0_f64, 0.0_f64);
         for coords in rendered {
             let zoom = u8::from(coords.z);
@@ -155,7 +155,7 @@ impl TerrainCoverageIndex {
     fn matches_inputs(
         &self,
         rendered: Option<&crate::coords::ViewRegion>,
-        tiles: &Tiles,
+        (dem_sig, dem_count): (u64, usize),
         dem: &DemSource,
         poles: super::PolarPoleElevations,
     ) -> bool {
@@ -164,6 +164,8 @@ impl TerrainCoverageIndex {
             || self.maxzoom != dem.maxzoom
             || self.dem_tile_size != dem.tile_size
             || self.poles != poles
+            || self.dem_bounds_sig != dem_sig
+            || self.dem_bounds.len() != dem_count
         {
             return false;
         }
@@ -176,23 +178,7 @@ impl TerrainCoverageIndex {
                 }
             }
         }
-        if rendered_count != self.rendered.len() {
-            return false;
-        }
-        let mut loaded_dems = 0usize;
-        for coords in tiles
-            .pyramid_of::<DemTileComponent>()
-            .coords_coarse_to_fine()
-        {
-            if let Some(DemTileComponent::Loaded(loaded)) = tiles.query::<&DemTileComponent>(coords)
-            {
-                loaded_dems += 1;
-                if self.dem_bounds.get(coords) != Some(&(loaded.tile.min(), loaded.tile.max())) {
-                    return false;
-                }
-            }
-        }
-        loaded_dems == self.dem_bounds.len()
+        rendered_count == self.rendered.len()
     }
 
     /// Configures the north and south polar cap datum elevations, updating rendered bounds.
@@ -413,77 +399,12 @@ impl TileElevationProvider for IndexedTileElevation<'_> {
     }
 }
 
+mod dem_bounds;
+pub use dem_bounds::coverage_system;
 mod prepared;
 pub(crate) use prepared::{
     take_or_compute_tight_terrain_region, PreparedTerrainKey, PreparedTerrainRegion,
 };
-
-/// Rebuilds the coverage index from the tiles the terrain will draw this frame.
-pub fn coverage_system(
-    MapContext {
-        style,
-        view_state,
-        world,
-        ..
-    }: &mut MapContext,
-) -> SystemResult {
-    let Some(dem) = dem_source(style) else {
-        world.resources.remove::<PreparedTerrainRegion>();
-        world.resources.insert(TerrainCoverageIndex::default());
-        return Ok(());
-    };
-    let rendered = take_or_compute_tight_terrain_region(style, view_state, world, dem.tile_size)
-        .map_err(|error| {
-            tracing::error!(%error, "unable to select terrain coverage tiles");
-            crate::tcs::system::SystemError::Setup
-        })?;
-    let poles = world
-        .resources
-        .get::<super::PolarPoleElevations>()
-        .copied()
-        .unwrap_or_default();
-    if world
-        .resources
-        .get::<TerrainCoverageIndex>()
-        .is_some_and(|prev| prev.matches_inputs(rendered.as_ref(), &world.tiles, &dem, poles))
-    {
-        let key = PreparedTerrainKey::capture(view_state, world, dem.tile_size);
-        world.resources.insert(PreparedTerrainRegion {
-            key,
-            region: rendered,
-        });
-        return Ok(());
-    }
-    let prev_bounds = world
-        .resources
-        .get::<TerrainCoverageIndex>()
-        .map(|idx| (idx.min_elevation, idx.max_elevation, idx.dem_bounds.len()));
-    let index = match &rendered {
-        Some(region) => TerrainCoverageIndex::build(
-            region
-                .iter()
-                .filter(|coords| coords.build_quad_key().is_some()),
-            &world.tiles,
-            &dem,
-        )
-        .with_poles(poles),
-        None => TerrainCoverageIndex::default().with_poles(poles),
-    };
-    let bounds_unchanged = prev_bounds.is_some_and(|(min_e, max_e, count)| {
-        count == index.dem_bounds.len()
-            && (min_e - index.min_elevation).abs() < 1e-3
-            && (max_e - index.max_elevation).abs() < 1e-3
-    });
-    world.resources.insert(index);
-    if bounds_unchanged {
-        let key = PreparedTerrainKey::capture(view_state, world, dem.tile_size);
-        world.resources.insert(PreparedTerrainRegion {
-            key,
-            region: rendered,
-        });
-    }
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests;

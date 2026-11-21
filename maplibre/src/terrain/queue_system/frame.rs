@@ -24,16 +24,43 @@ pub(super) fn set_frame(world: &mut World, frame: TerrainFrame) {
     world.resources.insert(frame);
 }
 
+/// Caches the style's drapeable layer IDs by `style.revision()` so terrain frames do not
+/// rebuild the filter set repeatedly.
+#[derive(Default)]
+struct DrapeableLayersCache {
+    style_rev: Option<u64>,
+    layers: FxHashSet<StyleLayerId>,
+}
+
+impl DrapeableLayersCache {
+    fn layers(&mut self, style: &Style) -> &FxHashSet<StyleLayerId> {
+        let rev = style.revision();
+        if self.style_rev != Some(rev) {
+            self.style_rev = Some(rev);
+            self.layers.clear();
+            self.layers.extend(
+                style
+                    .layers
+                    .iter()
+                    .filter(|layer| {
+                        is_drapeable(&layer.type_)
+                            && crate::vector::structures::kind(layer).is_none()
+                    })
+                    .map(crate::style::layer::StyleLayer::layer_id),
+            );
+        }
+        &self.layers
+    }
+}
+
 pub(super) fn hide_draped_layers(world: &mut World, style: &Style) {
-    let drapeable: FxHashSet<StyleLayerId> = style
-        .layers
-        .iter()
-        .filter(|layer| {
-            is_drapeable(&layer.type_) && crate::vector::structures::kind(layer).is_none()
-        })
-        .map(crate::style::layer::StyleLayer::layer_id)
-        .collect();
+    let mut cache = world
+        .resources
+        .remove::<DrapeableLayersCache>()
+        .unwrap_or_default();
+    let drapeable = cache.layers(style);
     if let Some(layer_phase) = world.resources.get_mut::<RenderPhase<LayerItem>>() {
         layer_phase.retain(|item| !drapeable.contains(&item.style_layer));
     }
+    world.resources.insert(cache);
 }

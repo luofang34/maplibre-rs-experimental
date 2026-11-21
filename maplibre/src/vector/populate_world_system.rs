@@ -64,6 +64,11 @@ pub fn apply_vector_worker_batch<T: VectorTransferables>(
 ) -> Result<(), MessageError> {
     let mut memo = crate::style::feature_state::FeatureStateArcMemo::default();
     let mut interner = super::feature_paint::intern::TilePropertyInterner::default();
+    let layer_by_id: rustc_hash::FxHashMap<&str, &crate::style::layer::StyleLayer> = style
+        .layers
+        .iter()
+        .map(|layer| (layer.id.as_str(), layer))
+        .collect();
     apply_worker_messages(messages, |message| {
         let attempt = message.attempt();
         if message.has_tag(RequestKind::Vector.message_tag()) {
@@ -122,18 +127,18 @@ pub fn apply_vector_worker_batch<T: VectorTransferables>(
             let coords = message.coords();
             let mut feature_paint = message.take_feature_paint();
             let mut bucket = message.to_bucket();
-            if tile_retry::accepts(world, coords, RequestKind::Vector, attempt)
-                && style
-                    .layers
-                    .iter()
-                    .any(|layer| layer.id == bucket.style_layer_id)
+            if let Some(&style_layer) =
+                tile_retry::accepts(world, coords, RequestKind::Vector, attempt)
+                    .then(|| layer_by_id.get(bucket.style_layer_id.as_str()))
+                    .flatten()
             {
                 let overscaled_zoom = world
                     .tiles
                     .query::<&VectorLayerBucketComponent>(coords)
                     .map_or(0, |b| b.overscaled_zoom);
-                let retessellate = super::arrival_sync::sync_arriving_vector_bucket(
+                let retessellate = super::arrival_sync::sync_arriving_vector_bucket_for_layer(
                     style,
+                    style_layer,
                     overscaled_zoom,
                     &mut bucket,
                     &mut feature_paint,
@@ -180,7 +185,9 @@ pub fn apply_vector_worker_batch<T: VectorTransferables>(
                 .index_tile(&coords, source, index);
         }
         Ok(())
-    })
+    })?;
+    super::bump_arrival_epoch(world);
+    Ok(())
 }
 
 fn finish_tile<T: TileTessellated>(world: &mut crate::tcs::world::World, message: &T) {

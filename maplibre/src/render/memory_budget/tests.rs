@@ -154,15 +154,17 @@ fn uncovered_tiles_get_emergency_moving_upload_headroom_past_soft_cap() {
 }
 
 #[test]
-fn wasm_post_boot_pacing_preserves_flag_across_reset_while_cold_boot_keeps_full_throughput() {
+fn wasm_boot_and_post_boot_pacing_cap_burst_uploads_while_preserving_progress() {
+    use std::time::Duration;
+
     use super::{
-        geometry_limits_for_platform, FrameUploads, FRAME_UPLOAD_BYTES, IMAGE_UPLOAD_FLOOR_BYTES,
+        geometry_limits_for_platform, FrameUploads, WASM_BOOT_GEOMETRY_UPLOAD_BYTES,
+        WASM_BOOT_UPLOADS_PER_FRAME,
     };
 
-    let full_geom = FRAME_UPLOAD_BYTES - IMAGE_UPLOAD_FLOOR_BYTES;
     assert_eq!(
         geometry_limits_for_platform(false, false, false, true),
-        (24, full_geom)
+        (WASM_BOOT_UPLOADS_PER_FRAME, WASM_BOOT_GEOMETRY_UPLOAD_BYTES)
     );
     assert_eq!(
         geometry_limits_for_platform(false, true, false, true),
@@ -176,10 +178,27 @@ fn wasm_post_boot_pacing_preserves_flag_across_reset_while_cold_boot_keeps_full_
         geometry_limits_for_platform(true, true, true, true),
         (2, 1 << 20)
     );
+    assert_eq!(
+        FrameUploads::upload_time_budget_for_platform(false, false, true, (700, 800, 1_500)),
+        Some(Duration::from_micros(1_500))
+    );
+    assert_eq!(
+        FrameUploads::upload_time_budget_for_platform(false, true, true, (700, 800, 1_500)),
+        Some(Duration::from_micros(800))
+    );
+    assert_eq!(
+        FrameUploads::upload_time_budget_for_platform(true, true, true, (700, 800, 1_500)),
+        Some(Duration::from_micros(700))
+    );
+    assert_eq!(
+        FrameUploads::upload_time_budget_for_platform(false, false, true, (350, 450, 800)),
+        Some(Duration::from_micros(800))
+    );
 
     let mut frame = FrameUploads::default();
-    // Cold boot: full 24-tile wasm throughput.
-    for _ in 0..23 {
+    // Cold boot: capped at 4 tiles / 3 MiB on wasm, still admitting an oversized first tile.
+    assert!(frame.can_take_geometry_for_platform(WASM_BOOT_GEOMETRY_UPLOAD_BYTES + 1, false, true));
+    for _ in 0..(WASM_BOOT_UPLOADS_PER_FRAME - 1) {
         frame.count_geometry_tile();
     }
     assert!(!frame.geometry_tiles_exhausted_for_platform(false, true));

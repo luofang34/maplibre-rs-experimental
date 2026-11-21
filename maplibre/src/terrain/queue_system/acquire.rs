@@ -3,7 +3,10 @@
 
 use std::collections::HashSet;
 
-use super::{covering, uniforms::present_ancestors};
+use super::{
+    covering,
+    uniforms::{has_present_ancestor, nearest_present_ancestor},
+};
 use crate::{
     coords::WorldTileCoords,
     render::memory_budget::MemoryBudget,
@@ -139,7 +142,7 @@ fn choose_redraws(
         if !prefetch[index]
             && *state == DrapeState::New
             && !redraw[index]
-            && present_ancestors(spec.coords, terrain).is_empty()
+            && !has_present_ancestor(spec.coords, terrain)
         {
             redraw[index] = true;
             drawn += 1;
@@ -176,9 +179,9 @@ pub(super) fn drape_sources(
         .zip(&hidden)
         .map(|(spec, hidden)| {
             if *hidden && terrain.drape_texture(spec.coords).is_none() {
-                present_ancestors(spec.coords, terrain)
-                    .into_iter()
-                    .find(|ancestor| !undrawn.contains(ancestor))
+                nearest_present_ancestor(spec.coords, terrain, |ancestor| {
+                    !undrawn.contains(&ancestor)
+                })
             } else {
                 Some(spec.coords)
             }

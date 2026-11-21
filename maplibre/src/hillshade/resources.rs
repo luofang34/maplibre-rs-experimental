@@ -240,6 +240,21 @@ impl HillshadeResources {
         self.layers.get(layer_id).map(|binding| binding.fingerprint)
     }
 
+    /// Combined digest across all loaded DEM-shaded layer uniform bindings.
+    pub(crate) fn fingerprint_all(&self) -> u64 {
+        let mut hasher = rustc_hash::FxHasher::default();
+        self.layers.len().hash(&mut hasher);
+        let mut acc = 0_u64;
+        for (id, binding) in &self.layers {
+            let mut h = rustc_hash::FxHasher::default();
+            id.hash(&mut h);
+            binding.fingerprint.hash(&mut h);
+            acc ^= h.finish();
+        }
+        acc.hash(&mut hasher);
+        hasher.finish()
+    }
+
     /// Whether `layer_id` requested `"nearest"` DEM resampling this frame.
     pub fn layer_nearest(&self, layer_id: &str) -> bool {
         self.layers

@@ -45,20 +45,32 @@ fn dem_matrix(coords: WorldTileCoords, dem: WorldTileCoords) -> Matrix4<f64> {
         * Matrix4::from_nonuniform_scale(1.0 / (EXTENT * scale), 1.0 / (EXTENT * scale), 1.0)
 }
 
-/// The ancestors of a tile, nearest first, that hold a drape texture.
-pub(crate) fn present_ancestors(
-    coords: WorldTileCoords,
-    terrain: &TerrainResources,
-) -> Vec<WorldTileCoords> {
-    let mut ancestors = Vec::new();
+/// Whether any ancestor of `coords` currently holds a drape texture.
+pub(crate) fn has_present_ancestor(coords: WorldTileCoords, terrain: &TerrainResources) -> bool {
     let mut current = coords;
     while let Some(parent) = current.get_parent() {
         if terrain.drape_texture(parent).is_some() {
-            ancestors.push(parent);
+            return true;
         }
         current = parent;
     }
-    ancestors
+    false
+}
+
+/// Nearest ancestor of `coords` that holds a drape texture and satisfies `accept`.
+pub(crate) fn nearest_present_ancestor(
+    coords: WorldTileCoords,
+    terrain: &TerrainResources,
+    mut accept: impl FnMut(WorldTileCoords) -> bool,
+) -> Option<WorldTileCoords> {
+    let mut current = coords;
+    while let Some(parent) = current.get_parent() {
+        if terrain.drape_texture(parent).is_some() && accept(parent) {
+            return Some(parent);
+        }
+        current = parent;
+    }
+    None
 }
 
 /// Maps unit coordinates of `coords` into the unit coordinates of its ancestor `source`.

@@ -187,15 +187,7 @@ fn upload_symbol_layer(
     let mut needs_atlas_settle = false;
     let upload_started = instant::Instant::now();
     let mut did_gpu_work = false;
-    let sdf_time_budget = if cfg!(target_arch = "wasm32") && budget.is_post_boot() {
-        Some(if moving {
-            std::time::Duration::from_micros(350)
-        } else {
-            std::time::Duration::from_micros(450)
-        })
-    } else {
-        None
-    };
+    let sdf_time_budget = budget.sdf_upload_time_budget();
     for &coords in visible {
         crate::vector::content::ensure(tiles, coords);
         let Some((layers, pending)) = tiles.query_mut::<(

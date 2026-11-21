@@ -139,10 +139,33 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
             }
         }
 
+        let draped = style.terrain.is_some();
+        let derived =
+            style.cached_derived_facts(|style| crate::style::revision::DerivedStyleFacts {
+                depends_on_overscaling: depends_on_overscaling(style),
+                elevated_headroom_meters: crate::render::projection::style_elevated_headroom_meters(
+                    style,
+                ),
+            });
+        // View-space 3D volumes (`fill-extrusion`) and elevated 3D paths (`line-elevation`)
+        // draw from `view_tiles` (which carry vertical headroom) rather than terrain drapes.
+        let needs_view_tiles = !draped
+            || derived.elevated_headroom_meters > 0.0
+            || (!renderer.settings.terrain_drape_mode.is_procedural_relief() && drapes.is_empty());
+        let magnifies = derived.depends_on_overscaling;
+
         let (view_tiles_and_level, tight_covering, memo_computed) = if let Some(multi) = &multi {
             (
                 Some((multi.vector_tiles.clone(), multi.max_view_level)),
                 false,
+                None,
+            )
+        } else if !needs_view_tiles {
+            // Terrain drapes drive vector requests via `drapes`/`prefetch`; skip `view_region`
+            // without overwriting `FrameLooseCovering.view_tiles`.
+            (
+                Some((Vec::new(), u8::from(visible_level))),
+                request_padding == ViewStatePadding::Tight,
                 None,
             )
         } else {
@@ -174,30 +197,13 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
             let max_zoom = source_max_zoom(style, TileKind::Vector);
             let min_zoom = source_min_zoom(style, TileKind::Vector);
             self.requested.clear();
-            let mut budget = vector_request_budget(world, style.terrain.is_some());
+            let mut budget = vector_request_budget(world, draped);
 
-            let overview = style
-                .terrain
-                .is_some()
-                .then_some(crate::coords::WorldTileCoords {
-                    x: 0,
-                    y: 0,
-                    z: crate::coords::ZoomLevel::new(0),
-                });
-            let draped = style.terrain.is_some();
-            let derived =
-                style.cached_derived_facts(|style| crate::style::revision::DerivedStyleFacts {
-                    depends_on_overscaling: depends_on_overscaling(style),
-                    elevated_headroom_meters:
-                        crate::render::projection::style_elevated_headroom_meters(style),
-                });
-            // View-space 3D volumes (`fill-extrusion`) and elevated 3D paths (`line-elevation`)
-            // draw from `view_tiles` (which carry vertical headroom) rather than terrain drapes.
-            let needs_view_tiles = !draped
-                || derived.elevated_headroom_meters > 0.0
-                || (!renderer.settings.terrain_drape_mode.is_procedural_relief()
-                    && drapes.is_empty());
-            let magnifies = derived.depends_on_overscaling;
+            let overview = draped.then_some(crate::coords::WorldTileCoords {
+                x: 0,
+                y: 0,
+                z: crate::coords::ZoomLevel::new(0),
+            });
             let extra_fallbacks = fallback::plan_non_terrain_fallbacks(
                 style,
                 view_state,

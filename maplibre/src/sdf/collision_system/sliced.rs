@@ -138,9 +138,10 @@ impl ActiveEpoch {
         }
     }
 
-    /// Steps this epoch within `SLICE_BUDGET_MOVING` (`650 µs` on `wasm32` while panning) or
-    /// `SLICE_BUDGET_SETTLED` (`1.8 ms`) when `sliced` is `true` (or runs all groups in one pass
-    /// when `sliced` is `false`), returning `true` once all groups have been placed and uploaded.
+    /// Steps this epoch within `SLICE_BUDGET_MOVING` (`500 µs` on `wasm32` while panning) or
+    /// `SLICE_BUDGET_SETTLED` (`1.0 ms` on `wasm32` / `1.8 ms` native) when `sliced` is `true`
+    /// (or runs all groups in one pass when `sliced` is `false`), returning `true` once all
+    /// groups have been placed and uploaded atomically.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn step(
         &mut self,
@@ -161,6 +162,26 @@ impl ActiveEpoch {
         } else {
             SLICE_BUDGET_SETTLED
         };
+        self.step_with_budget(
+            world, style, queue, history, uploaded, scratch, sliced, budget,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn step_with_budget(
+        &mut self,
+        world: &World,
+        style: &Style,
+        queue: &UploadQueue,
+        history: &mut temporal::PlacementHistory,
+        uploaded: &mut FxHashMap<
+            (WorldTileCoords, StyleLayerId),
+            upload_diff::CachedBucketMetadata,
+        >,
+        scratch: &mut upload_diff::MetadataScratchPool,
+        sliced: bool,
+        budget: Duration,
+    ) -> bool {
         let started = instant::Instant::now();
         let mut did_work = false;
 
@@ -306,13 +327,12 @@ impl ActiveEpoch {
         }
 
         if let Some(Initialized(pool)) = world.resources.get::<Eventually<SymbolBufferPool>>() {
-            while !self.pending_uploads.is_empty() {
-                if sliced && did_work && started.elapsed() >= budget {
-                    return false;
-                }
-                let Some((layer_id, coords, metadata)) = self.pending_uploads.pop_front() else {
-                    break;
-                };
+            // Defer before flushing so GPU updates across all tiles commit atomically in one frame.
+            if sliced && did_work && !self.pending_uploads.is_empty() && started.elapsed() >= budget
+            {
+                return false;
+            }
+            while let Some((layer_id, coords, metadata)) = self.pending_uploads.pop_front() {
                 let Some(entry) = pool.index().get_layers(coords).and_then(|entries| {
                     entries
                         .iter()
@@ -321,7 +341,6 @@ impl ActiveEpoch {
                     scratch.recycle(metadata);
                     continue;
                 };
-                did_work = true;
                 let key = (coords, layer_id);
                 let prev = uploaded.remove(&key);
                 let next_cached = upload_diff::diff_and_upload_bucket_with_scratch(
@@ -357,6 +376,33 @@ impl ActiveEpoch {
     fn recycle_pending_uploads(&mut self, scratch: &mut upload_diff::MetadataScratchPool) {
         while let Some((_, _, metadata)) = self.pending_uploads.pop_front() {
             scratch.recycle(metadata);
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn for_atomic_upload_test(
+        view_state: ViewState,
+        pending_uploads: Vec<(StyleLayerId, WorldTileCoords, Vec<SDFShaderFeatureMetadata>)>,
+    ) -> Self {
+        let mut outcomes = HashMap::default();
+        outcomes.insert("leader".to_owned(), (Vec::new(), Vec::new()));
+        let mut mirrored = VecDeque::new();
+        mirrored.push_back(("leader".to_owned(), "follower".to_owned(), Vec::new()));
+        Self {
+            view_state,
+            projection: bytemuck::Zeroable::zeroed(),
+            zoom: 12.0,
+            bearing: 0.0,
+            has_symbols: true,
+            saw_background_change: false,
+            boxes: CollisionGrid::new(0.0, 0.0),
+            placed: PlacedSymbols::default(),
+            groups: Vec::new(),
+            group_idx: 0,
+            active_group: None,
+            outcomes,
+            mirrored,
+            pending_uploads: pending_uploads.into_iter().collect(),
         }
     }
 }

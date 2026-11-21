@@ -25,7 +25,6 @@ use crate::{
         eventually::{Eventually, Eventually::Initialized},
         memory_budget::{MemoryBudget, MemoryPressure},
         projection::view_region_for_projection,
-        tile_memory::tile_bytes,
         tile_view_pattern::{WgpuTileViewPattern, DEFAULT_TILE_SIZE},
         view_state::{ViewState, ViewStatePadding},
     },
@@ -35,6 +34,7 @@ use crate::{
 };
 
 mod ancestors;
+mod bytes_cache;
 mod gpu;
 mod summary;
 
@@ -44,18 +44,18 @@ pub(crate) use ancestors::finish_tiles_in_use;
 const CACHE_TILES_PER_VIEW_TILE: usize = 2;
 /// Smallest cache, so a tiny viewport still keeps some history for panning back.
 #[cfg(target_arch = "wasm32")]
-const MIN_CACHE_TILES: usize = 6;
+const MIN_CACHE_TILES: usize = 4;
 #[cfg(not(target_arch = "wasm32"))]
 const MIN_CACHE_TILES: usize = 8;
 /// Hard ceiling on out-of-view cached tiles so wide oblique/globe coverings cannot accumulate
 /// hundreds of multi-megabyte raster/DEM tiles along a corridor.
 #[cfg(target_arch = "wasm32")]
-const MAX_CACHE_TILES: usize = 16;
+const MAX_CACHE_TILES: usize = 10;
 #[cfg(not(target_arch = "wasm32"))]
 const MAX_CACHE_TILES: usize = 24;
 /// Tessellated geometry the out-of-view cache may hold.
 #[cfg(target_arch = "wasm32")]
-const CACHE_BYTES: usize = 24 << 20;
+const CACHE_BYTES: usize = 10 << 20;
 #[cfg(not(target_arch = "wasm32"))]
 const CACHE_BYTES: usize = 12 << 20;
 /// Frames between resident-memory summaries for hosts driving the map from an eye, which
@@ -73,6 +73,7 @@ pub(crate) struct CacheBudget {
 #[derive(Default)]
 pub struct TileRetention {
     last_used: FxHashMap<WorldTileCoords, u64>,
+    bytes_cache: bytes_cache::TileBytesCache,
     frame: u64,
 }
 
@@ -131,6 +132,7 @@ fn run_eviction(
     let evicted = evict_stale_tiles(world, &in_use, drawn);
     if !evicted.is_empty() {
         tracing::debug!(count = evicted.len(), "evicted tiles that left the view");
+        crate::vector::bump_arrival_epoch(world);
         gpu::drop_gpu_data_with_queue(world, &evicted, queue);
     }
     gpu::reclaim_pool_pages(world, queue);
@@ -277,6 +279,7 @@ fn tiles_in_use_inner(
         ViewStatePadding::Loose
     };
     let max_zoom = source_max_zoom(style, TileKind::Vector);
+    let visible_level = view_state.zoom().zoom_level(DEFAULT_TILE_SIZE);
     if let Some((cached_view, _, _)) = loose_cache
         .and_then(|c| c.view_tiles.as_ref())
         .filter(|(_, padding, _)| *padding == request_padding)
@@ -284,14 +287,22 @@ fn tiles_in_use_inner(
         for &coords in cached_view.iter().flatten() {
             retain_loose_vector_tile(&mut in_use, coords, max_zoom);
         }
+    } else if let Some(shared_tiles) = (request_padding == ViewStatePadding::Tight)
+        .then(|| {
+            crate::render::eye_covering::matching_tight_tiles(
+                world,
+                style,
+                view_state,
+                visible_level,
+            )
+        })
+        .flatten()
+    {
+        for &coords in shared_tiles {
+            retain_loose_vector_tile(&mut in_use, coords, max_zoom);
+        }
     } else {
-        match view_region_for_projection(
-            style,
-            view_state,
-            world,
-            view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
-            request_padding,
-        ) {
+        match view_region_for_projection(style, view_state, world, visible_level, request_padding) {
             Ok(Some(requested)) => {
                 for coords in requested.iter() {
                     retain_loose_vector_tile(&mut in_use, coords, max_zoom);
@@ -369,16 +380,29 @@ pub(crate) fn evict_beyond<S: BuildHasher>(
     budget: CacheBudget,
 ) -> Vec<WorldTileCoords> {
     let World { resources, tiles } = world;
-    {
+    let mut candidates: Vec<(u64, WorldTileCoords, usize)> = {
         let retention = resources.get_or_init_mut::<TileRetention>();
         retention.frame = retention.frame.wrapping_add(1);
         let frame = retention.frame;
         for coords in in_use {
             retention.last_used.insert(*coords, frame);
         }
-    }
+        retention.bytes_cache.prune_if_oversized(tiles);
+        tiles
+            .tiles
+            .values()
+            .map(|tile| tile.coords)
+            .filter(|coords| !in_use.contains(coords) && is_settled(tiles, *coords))
+            .map(|coords| {
+                (
+                    retention.last_used.get(&coords).copied().unwrap_or(0),
+                    coords,
+                    retention.bytes_cache.get_or_compute(tiles, coords),
+                )
+            })
+            .collect()
+    };
 
-    let last_used = resources.get::<TileRetention>();
     let vector_pool = match resources.get::<Eventually<VectorBufferPool>>() {
         Some(Initialized(pool)) => Some(pool),
         _ => None,
@@ -387,23 +411,13 @@ pub(crate) fn evict_beyond<S: BuildHasher>(
         Some(Initialized(pool)) => Some(pool),
         _ => None,
     };
-    let mut candidates: Vec<(u64, WorldTileCoords, usize)> = tiles
-        .tiles
-        .values()
-        .map(|tile| tile.coords)
-        .filter(|coords| !in_use.contains(coords) && is_settled(tiles, *coords))
-        .map(|coords| {
-            let gpu_bytes = vector_pool.map_or(0, |p| p.index().tile_gpu_bytes(coords))
-                + symbol_pool.map_or(0, |p| p.index().tile_gpu_bytes(coords));
-            (
-                last_used
-                    .and_then(|r| r.last_used.get(&coords).copied())
-                    .unwrap_or(0),
-                coords,
-                tile_bytes(tiles, coords).saturating_add(gpu_bytes),
-            )
-        })
-        .collect();
+    if vector_pool.is_some() || symbol_pool.is_some() {
+        for (_, coords, bytes) in &mut candidates {
+            let gpu_bytes = vector_pool.map_or(0, |p| p.index().tile_gpu_bytes(*coords))
+                + symbol_pool.map_or(0, |p| p.index().tile_gpu_bytes(*coords));
+            *bytes = bytes.saturating_add(gpu_bytes);
+        }
+    }
     let mut kept = candidates.len();
     let mut kept_bytes: usize = candidates.iter().map(|(_, _, bytes)| bytes).sum();
     if kept <= budget.tiles && kept_bytes <= budget.bytes {
@@ -424,6 +438,7 @@ pub(crate) fn evict_beyond<S: BuildHasher>(
         for coords in &evicted {
             tiles.remove(*coords);
             retention.last_used.remove(coords);
+            retention.bytes_cache.remove(coords);
         }
     }
     evicted
@@ -451,15 +466,18 @@ fn drop_cancelled<S: BuildHasher>(
         crate::vector::content::discard_pending_refresh(world, coords);
     }
     if to_drop.is_empty() {
+        crate::vector::bump_arrival_epoch(world);
         return;
     }
     let retention = world.resources.get_or_init_mut::<TileRetention>();
     for coords in &to_drop {
         retention.last_used.remove(coords);
+        retention.bytes_cache.remove(coords);
     }
     for coords in &to_drop {
         world.tiles.remove(*coords);
     }
+    crate::vector::bump_arrival_epoch(world);
     gpu::drop_gpu_data_with_queue(world, &to_drop, queue);
 }
 

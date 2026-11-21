@@ -265,17 +265,56 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         }
     }
 
-    /// Records whether a resident layer allocation draws exclusively with opaque (`alpha == 1.0`) color.
+    /// Records whether a resident layer allocation draws exclusively with opaque (`alpha == 1.0`) color,
+    /// propagating to sibling resident tiles that share its `(layer_page, style_layer_id, tile_z)` slot.
     pub fn set_layer_opaque_color_by_id(
         &mut self,
         coords: WorldTileCoords,
         target_id: crate::style::StyleLayerId,
         opaque: bool,
     ) {
+        let mut shared_slot: Option<(u16, u8)> = None;
         if let Some(layers) = self.index.get_layers_mut(coords) {
             for entry in layers {
                 if entry.style_layer_id == target_id {
                     entry.opaque_color = opaque;
+                    if self.shared_layer_metadata
+                        && entry.layer_page != NO_SLAB
+                        && crate::vector::upload_system::paint::uniform_color(
+                            &entry.style_layer,
+                            0.0,
+                        )
+                        .is_some()
+                    {
+                        shared_slot = Some((entry.layer_page, u8::from(coords.z)));
+                    }
+                }
+            }
+        }
+        if let Some((layer_page, tile_z)) = shared_slot {
+            let propagate = self
+                .shared_layer_meta
+                .get_mut(&(layer_page, target_id, tile_z))
+                .is_none_or(|shared| {
+                    let changed = shared.last_opaque != Some(opaque);
+                    shared.last_opaque = Some(opaque);
+                    changed
+                });
+            if propagate {
+                for tile_layers in self.index.iter_mut() {
+                    for entry in tile_layers {
+                        if entry.layer_page == layer_page
+                            && entry.style_layer_id == target_id
+                            && u8::from(entry.coords.z) == tile_z
+                            && crate::vector::upload_system::paint::uniform_color(
+                                &entry.style_layer,
+                                0.0,
+                            )
+                            .is_some()
+                        {
+                            entry.opaque_color = opaque;
+                        }
+                    }
                 }
             }
         }

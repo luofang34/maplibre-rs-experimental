@@ -33,8 +33,11 @@ mod drape_prepare;
 pub(crate) mod edges;
 mod prefetch;
 mod readiness;
+mod spec_cache;
 mod targets;
-pub(crate) use targets::{draw_order_key, procedural_specs, target_specs};
+#[cfg(any(test, feature = "headless"))]
+pub(crate) use targets::target_specs;
+pub(crate) use targets::{draw_order_key, procedural_specs, target_specs_arc};
 mod drape_phase;
 mod frame;
 pub(crate) mod surface_covering;
@@ -186,7 +189,7 @@ pub fn queue_system(
         let sources = vec![None; specs.len()];
         (DrapePhase::default(), specs, sources)
     } else {
-        let specs = target_specs(style, view_state, world)?;
+        let specs = target_specs_arc(style, view_state, world)?;
         let drape_zoom = stabilize_drape_fingerprint_zoom(world, view_state.style_zoom().value());
         let PreparedDrapes {
             redraw,

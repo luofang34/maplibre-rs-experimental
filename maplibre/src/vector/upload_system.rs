@@ -119,7 +119,7 @@ pub fn upload_system(
     world.resources.get_or_init_mut::<SharedStyleLayers>();
     #[cfg(feature = "geojson")]
     crate::geojson::update::dynamic_points::ensure_seeded_for_style(world, style);
-    style_refresh::apply_dirty_style(world, style, queue, paint_frame);
+    let dirty_style_applied = style_refresh::apply_dirty_style(world, style, queue, paint_frame);
     let retain_loaded_tiles = world
         .resources
         .get::<crate::render::systems::retention_system::RetainLoadedTiles>()
@@ -135,8 +135,19 @@ pub fn upload_system(
     else {
         return Err(SystemError::Dependencies);
     };
+    if dirty_style_applied {
+        paint_scratch.slots.invalidate_all();
+    }
+    paint_scratch
+        .slots
+        .sync_generations(style.revision(), buffer_pool.eviction_generation());
     let moving = budget.is_moving();
-    if refresh_paint || (!moving && paint_scratch.needs_settle()) {
+    let (run_paint_refresh, tiles_changed) = paint_scratch.slots.check_refresh(
+        &painted_tiles,
+        refresh_paint,
+        !moving && paint_scratch.needs_settle(),
+    );
+    if run_paint_refresh {
         paint_scratch.sync_style(style);
         paint::refresh_layer_paint(
             buffer_pool,
@@ -146,6 +157,7 @@ pub fn upload_system(
             paint_frame,
             previous_paint,
             moving,
+            tiles_changed,
             paint_scratch,
         );
     }
@@ -166,7 +178,12 @@ pub fn upload_system(
             shared_style_layers,
             (source_tiles, &uncovered_sources),
             (&spatial, paint_frame),
-            (budget, allow_cpu_release, dyn_points),
+            (
+                budget,
+                allow_cpu_release,
+                dyn_points,
+                Some(&mut paint_scratch.slots),
+            ),
         )
     } else {
         (false, false)
@@ -219,7 +236,7 @@ fn upload_tessellated_layer(
         &shared,
         (source_tiles, &empty),
         (spatial, paint),
-        (budget, allow_cpu_release, dyn_points),
+        (budget, allow_cpu_release, dyn_points, None),
     )
 }
 
@@ -235,7 +252,12 @@ fn upload_tessellated_layer_with_uncovered(
         &rustc_hash::FxHashSet<crate::coords::WorldTileCoords>,
     ),
     (spatial, paint): (&[super::structures::SpatialBuffer], VectorPaintFrame),
-    (budget, allow_cpu_release, dyn_points): (&mut FrameUploads, bool, &mut DynPoints),
+    (budget, allow_cpu_release, dyn_points, mut paint_slots): (
+        &mut FrameUploads,
+        bool,
+        &mut DynPoints,
+        Option<&mut paint::SlotMetaCache>,
+    ),
 ) -> (bool, bool) {
     let stamp = (style.revision(), buffer_pool.eviction_generation());
     if source_tiles.iter().all(|&coords| {
@@ -256,15 +278,7 @@ fn upload_tessellated_layer_with_uncovered(
     let mut any_deferred = false;
     let upload_started = instant::Instant::now();
     let mut uploaded_any_bucket = false;
-    let time_budget = if cfg!(target_arch = "wasm32") && budget.is_post_boot() {
-        Some(if budget.is_moving() {
-            std::time::Duration::from_micros(700)
-        } else {
-            std::time::Duration::from_micros(800)
-        })
-    } else {
-        None
-    };
+    let time_budget = budget.vector_upload_time_budget();
     let protected: rustc_hash::FxHashSet<_> = source_tiles.iter().copied().collect();
     for coords in source_tiles {
         let is_uncovered = uncovered_sources.contains(&coords);
@@ -391,7 +405,12 @@ fn upload_tessellated_layer_with_uncovered(
                             (spatial, paint),
                             (&protected, &mut feature_meta_scratch, dyn_points),
                         ) {
-                            UploadOutcome::Uploaded => {
+                            UploadOutcome::Uploaded(uploaded_slot) => {
+                                if let (Some(slots), Some((slot, slot_meta))) =
+                                    (paint_slots.as_deref_mut(), uploaded_slot)
+                                {
+                                    slots.record(slot, slot_meta);
+                                }
                                 budget.take_geometry(bytes, is_uncovered);
                                 Step::Commit {
                                     replacement,

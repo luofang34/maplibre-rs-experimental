@@ -6,6 +6,7 @@ use super::*;
 pub(super) struct SharedLayerMetaAlloc {
     pub range: Range<wgpu::BufferAddress>,
     pub ref_count: u32,
+    pub last_opaque: Option<bool>,
 }
 
 impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V, I, TM, FM> {

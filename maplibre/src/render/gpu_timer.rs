@@ -148,12 +148,12 @@ impl GpuTimer {
         if self.state.load(Ordering::Acquire) != MAPPED {
             return None;
         }
-        // A pass that draws nothing may never reach the stage that writes its end on GPUs that
-        // sample at stage boundaries, so an end not after the start measures nothing.
+        // A pass that draws nothing or drops its end timestamp (`MTLCounterErrorValue` / stale
+        // counter on Metal) measures nothing.
         let elapsed = self.readback.get_mapped_range(..).ok().and_then(|bytes| {
             let start = u64::from_le_bytes(bytes[..8].try_into().unwrap_or_default());
             let end = u64::from_le_bytes(bytes[8..16].try_into().unwrap_or_default());
-            (end > start).then(|| {
+            (start != u64::MAX && end != u64::MAX && end > start).then(|| {
                 Duration::from_nanos(((end - start) as f64 * f64::from(period_nanos)) as u64)
             })
         });

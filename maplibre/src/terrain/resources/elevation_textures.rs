@@ -21,6 +21,7 @@ fn next_dem_tick() -> u64 {
 }
 
 pub(super) struct DemTexture {
+    pub(super) id: u64,
     pub(super) texture: Texture,
     revision: u32,
     source: Option<DemRevision>,
@@ -39,7 +40,10 @@ impl TerrainResources {
             else {
                 break;
             };
-            self.dem_textures.remove(&oldest);
+            if let Some(removed) = self.dem_textures.remove(&oldest) {
+                self.bind_groups
+                    .retain(|(dem_id, _), _| *dem_id != removed.id);
+            }
         }
     }
 
@@ -53,9 +57,22 @@ impl TerrainResources {
         if !self.dem_textures.contains_key(&coords) {
             self.evict_excess_dem_textures(coords);
         }
+        let prev = self.dem_textures.get(&coords);
+        let id = match prev {
+            Some(existing) if existing.texture.texture == texture.texture => existing.id,
+            _ => super::next_texture_id(),
+        };
+        if let Some(existing) = prev {
+            if existing.id != id {
+                let stale_id = existing.id;
+                self.bind_groups
+                    .retain(|(dem_id, _), _| *dem_id != stale_id);
+            }
+        }
         self.dem_textures.insert(
             coords,
             DemTexture {
+                id,
                 texture,
                 revision,
                 source: Some(source),
@@ -112,20 +129,23 @@ impl TerrainResources {
         let reusable = self
             .dem_textures
             .remove(&coords)
-            .map(|dem| dem.texture)
-            .filter(|texture| texture.size.width == dem.stride());
+            .filter(|dem_tex| dem_tex.texture.size.width == dem.stride());
         self.evict_excess_dem_textures(coords);
-        let texture = reusable.unwrap_or_else(|| {
-            Texture::new(
-                Some("DEM tile"),
-                device,
-                wgpu::TextureFormat::Rgba8Unorm,
-                dem.stride(),
-                dem.stride(),
-                Msaa { samples: 1 },
-                wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            )
-        });
+        let (id, texture) = match reusable {
+            Some(dem_tex) => (dem_tex.id, dem_tex.texture),
+            None => (
+                super::next_texture_id(),
+                Texture::new(
+                    Some("DEM tile"),
+                    device,
+                    wgpu::TextureFormat::Rgba8Unorm,
+                    dem.stride(),
+                    dem.stride(),
+                    Msaa { samples: 1 },
+                    wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                ),
+            ),
+        };
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &texture.texture,
@@ -144,6 +164,7 @@ impl TerrainResources {
         self.dem_textures.insert(
             coords,
             DemTexture {
+                id,
                 texture,
                 revision,
                 source: None,
@@ -154,7 +175,10 @@ impl TerrainResources {
 
     /// Releases the DEM texture of a tile that left the store.
     pub fn drop_dem(&mut self, coords: WorldTileCoords) {
-        self.dem_textures.remove(&coords);
+        if let Some(removed) = self.dem_textures.remove(&coords) {
+            self.bind_groups
+                .retain(|(dem_id, _), _| *dem_id != removed.id);
+        }
     }
 
     /// DEM texture of a tile, or the flat stand-in while it loads.
@@ -165,6 +189,12 @@ impl TerrainResources {
                 dem.last_used.store(next_dem_tick(), Ordering::Relaxed);
                 &dem.texture
             })
+    }
+
+    pub(super) fn dem_id(&self, coords: Option<WorldTileCoords>) -> u64 {
+        coords
+            .and_then(|coords| self.dem_textures.get(&coords))
+            .map_or(self.empty_dem_id, |dem| dem.id)
     }
 
     /// DEM textures resident on the GPU.

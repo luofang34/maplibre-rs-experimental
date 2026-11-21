@@ -44,6 +44,11 @@ impl RasterCrossFade {
         self.departing(source)
             .is_some_and(|departing| departing.tiles.contains(coords))
     }
+
+    /// Whether no raster source has departing tiles fading out.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.sources.is_empty()
+    }
 }
 
 #[cfg(test)]

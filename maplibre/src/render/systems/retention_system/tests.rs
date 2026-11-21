@@ -4,6 +4,7 @@ use std::collections::HashSet;
 
 use super::{evict_beyond, evict_stale_tiles, CacheBudget, MIN_CACHE_TILES};
 
+mod bytes_cache;
 mod terrain;
 mod zoom_fallback;
 

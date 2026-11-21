@@ -49,29 +49,42 @@ pub(crate) fn fingerprint(
     for component in [clear.r, clear.g, clear.b, clear.a] {
         component.to_bits().hash(&mut hasher);
     }
-    let mut shapes: Vec<&crate::terrain::drape_targets::ShapeSpec> = spec.shapes.iter().collect();
-    shapes.sort_by_key(|shape| shape.source);
-    for shape in shapes {
-        shape.source.hash(&mut hasher);
-        for layer in &shape.vector_layers {
-            layer.id.hash(&mut hasher);
-            layer.index.hash(&mut hasher);
-            layer.coords.hash(&mut hasher);
-            content
-                .vector_layer_revision(layer.coords, layer.id, layer.content_revision)
-                .hash(&mut hasher);
-        }
-        for (id, index, dem) in &shape.raster_layers {
-            id.hash(&mut hasher);
-            index.hash(&mut hasher);
-            dem.hash(&mut hasher);
-            content.raster_revision(shape.source, id).hash(&mut hasher);
-            if *dem {
-                content.dem_layer_fingerprint(id).hash(&mut hasher);
-            }
+    if let [shape] = spec.shapes.as_slice() {
+        hash_shape_spec(shape, content, &mut hasher);
+    } else if spec.shapes.len() > 1 {
+        let mut shapes: Vec<&crate::terrain::drape_targets::ShapeSpec> =
+            spec.shapes.iter().collect();
+        shapes.sort_by_key(|shape| shape.source);
+        for shape in shapes {
+            hash_shape_spec(shape, content, &mut hasher);
         }
     }
     hasher.finish()
+}
+
+fn hash_shape_spec(
+    shape: &crate::terrain::drape_targets::ShapeSpec,
+    content: &impl SourceContent,
+    hasher: &mut rustc_hash::FxHasher,
+) {
+    shape.source.hash(hasher);
+    for layer in &shape.vector_layers {
+        layer.id.hash(hasher);
+        layer.index.hash(hasher);
+        layer.coords.hash(hasher);
+        content
+            .vector_layer_revision(layer.coords, layer.id, layer.content_revision)
+            .hash(hasher);
+    }
+    for (id, index, dem) in &shape.raster_layers {
+        id.hash(hasher);
+        index.hash(hasher);
+        dem.hash(hasher);
+        content.raster_revision(shape.source, id).hash(hasher);
+        if *dem {
+            content.dem_layer_fingerprint(id).hash(hasher);
+        }
+    }
 }
 
 struct Entry<T> {

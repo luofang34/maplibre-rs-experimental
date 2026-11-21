@@ -13,7 +13,8 @@ pub use availability::{HasTile, KindSources, QueryHasTile, ViewTileSources};
 use cgmath::Matrix4;
 pub use pattern::{
     covering_shapes_for, RasterCoverings, TileMetadataOverflow, TileViewPattern,
-    CHILDREN_SEARCH_DEPTH, COMPLETE_CHILDREN_SEARCH_DEPTH, DEFAULT_TILE_VIEW_PATTERN_SIZE,
+    TileViewPatternMemo, CHILDREN_SEARCH_DEPTH, COMPLETE_CHILDREN_SEARCH_DEPTH,
+    DEFAULT_TILE_VIEW_PATTERN_SIZE,
 };
 
 use crate::{
@@ -205,6 +206,17 @@ impl TileShape {
         let mut shape = Self::new(coords, zoom);
         shape.buffer_range = Some(buffer_range);
         shape
+    }
+
+    /// Updates zoom scaling and tile transform in place while keeping coordinates and wrap.
+    pub(crate) fn set_zoom(&mut self, zoom: Zoom) {
+        self.zoom_factor = zoom.scale_to_tile(&self.coords);
+        let tiles = 1_i64 << u32::from(u8::from(self.coords.z));
+        let placed = WorldTileCoords {
+            x: (i64::from(self.coords.x) + i64::from(self.wrap) * tiles) as i32,
+            ..self.coords
+        };
+        self.transform = placed.transform_for_zoom(zoom);
     }
 
     /// The shape drawn `wrap` worlds over, where the view sees a copy of the world.

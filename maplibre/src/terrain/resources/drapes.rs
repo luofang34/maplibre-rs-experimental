@@ -22,6 +22,7 @@ pub(crate) type DrapeKey = (Option<ViewSlotId>, WorldTileCoords);
 /// time the drape is redrawn; the texture's own view spans every level, which an attachment
 /// may not.
 pub(crate) struct DrapeTexture {
+    id: u64,
     top_level: wgpu::TextureView,
     texture: Texture,
 }
@@ -34,7 +35,11 @@ impl DrapeTexture {
             mip_level_count: Some(1),
             ..Default::default()
         });
-        Self { top_level, texture }
+        Self {
+            id: super::next_texture_id(),
+            top_level,
+            texture,
+        }
     }
 }
 
@@ -211,6 +216,12 @@ impl TerrainResources {
         self.drapes
             .get(self.drape_key(coords))
             .map(|drape| &drape.texture)
+    }
+
+    pub(super) fn drape_id(&self, coords: WorldTileCoords) -> Option<u64> {
+        self.drapes
+            .get(self.drape_key(coords))
+            .map(|drape| drape.id)
     }
 
     /// Edge resolution in pixels of the resident drape texture assigned to `coords`, if any.

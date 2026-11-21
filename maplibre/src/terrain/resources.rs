@@ -1,8 +1,16 @@
 //! GPU resources shared by the drape pass and the terrain draw.
 
-use std::{collections::HashMap, num::NonZeroU64, sync::Arc};
+use std::{
+    collections::HashMap,
+    num::NonZeroU64,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 
 use bytemuck_derive::{Pod, Zeroable};
+use rustc_hash::FxHashMap;
 
 use crate::{
     coords::WorldTileCoords,
@@ -24,6 +32,12 @@ mod elevation_textures;
 mod tests;
 
 use elevation_textures::DemTexture;
+
+static NEXT_TERRAIN_TEXTURE_ID: AtomicU64 = AtomicU64::new(1);
+
+pub(super) fn next_texture_id() -> u64 {
+    NEXT_TERRAIN_TEXTURE_ID.fetch_add(1, Ordering::Relaxed)
+}
 
 /// Edge length in pixels of one drape texture; twice a 512 px tile (`1024 × 1024`).
 pub const DRAPE_SIZE: u32 = 1024;
@@ -144,15 +158,15 @@ pub struct TerrainResources {
     uniform_buffer: wgpu::Buffer,
     dem_textures: HashMap<WorldTileCoords, DemTexture>,
     empty_dem: Texture,
+    empty_dem_id: u64,
     drapes: DrapeCache<drapes::DrapeTexture, drapes::DrapeKey>,
     /// The view whose drapes the tile lookups below answer with.
     drape_view: Option<crate::render::eye_covering::ViewSlotId>,
     drape_scratches: Vec<(u32, DrapeScratch)>,
     draws: Vec<TerrainDraw>,
-    /// Bind groups by DEM and drape texture, kept across frames: creating one per tile per
-    /// frame is a hundred a frame, and on Metal the memory behind them is returned only
-    /// slowly, so the footprint climbs for as long as the map is looked at.
-    bind_groups: HashMap<(wgpu::Texture, wgpu::Texture), Arc<wgpu::BindGroup>>,
+    /// Bind groups keyed by monotonic `(dem_id, drape_id)` texture IDs, avoiding
+    /// `wgpu::Texture` clones on hit and stale retention across drops.
+    bind_groups: FxHashMap<(u64, u64), Arc<wgpu::BindGroup>>,
     edge_heights: edge_heights::EdgeHeightTexture,
     msaa: Msaa,
     color_format: wgpu::TextureFormat,
@@ -266,11 +280,12 @@ impl TerrainResources {
             uniform_buffer,
             dem_textures: HashMap::new(),
             empty_dem,
+            empty_dem_id: next_texture_id(),
             drapes: DrapeCache::default(),
             drape_view: None,
             drape_scratches: Vec::new(),
             draws: Vec::new(),
-            bind_groups: HashMap::new(),
+            bind_groups: FxHashMap::default(),
             edge_heights,
             msaa,
             color_format,
@@ -295,6 +310,7 @@ impl TerrainResources {
                 self.drape_size = 0;
                 self.drape_scratches.clear();
                 self.drapes = DrapeCache::default();
+                self.bind_groups.clear();
             }
             TerrainDrapeMode::Draped { edge_px } => {
                 let clamped = edge_px.clamp(MIN_DRAPE_SIZE, max_dim);
@@ -302,6 +318,7 @@ impl TerrainResources {
                     self.drape_size = clamped;
                     self.drape_scratches.clear();
                     self.drapes = DrapeCache::default();
+                    self.bind_groups.clear();
                 }
                 self.drape_mode = TerrainDrapeMode::Draped { edge_px: clamped };
                 if self.mipmaps.is_none() {

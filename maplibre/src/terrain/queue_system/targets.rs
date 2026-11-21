@@ -14,11 +14,21 @@ pub(crate) fn uses_uniform_texture_covering(view_state: &ViewState) -> bool {
     })
 }
 
+#[cfg(any(test, feature = "headless"))]
 pub(crate) fn target_specs(
     style: &Style,
     view_state: &ViewState,
     world: &mut World,
 ) -> Result<Vec<TargetSpec>, SystemError> {
+    target_specs_arc(style, view_state, world).map(|specs| (*specs).clone())
+}
+
+pub(crate) fn target_specs_arc(
+    style: &Style,
+    view_state: &ViewState,
+    world: &mut World,
+) -> Result<std::sync::Arc<Vec<TargetSpec>>, SystemError> {
+    use super::spec_cache;
     let zoom = view_state.zoom();
     let (_, raster_coverings) =
         drawn_covering(style, view_state, world, zoom.zoom_level(DEFAULT_TILE_SIZE)).map_err(
@@ -28,7 +38,7 @@ pub(crate) fn target_specs(
             },
         )?;
     let Some(dem) = crate::terrain::source::dem_source(style) else {
-        return Ok(Vec::new());
+        return Ok(std::sync::Arc::new(Vec::new()));
     };
     let view_region = crate::terrain::coverage::take_or_compute_tight_terrain_region(
         style,
@@ -41,7 +51,7 @@ pub(crate) fn target_specs(
         SystemError::Setup
     })?;
     let Some(view_region) = view_region else {
-        return Ok(Vec::new());
+        return Ok(std::sync::Arc::new(Vec::new()));
     };
     let memory = world
         .resources
@@ -92,13 +102,18 @@ pub(crate) fn target_specs(
         .resources
         .insert(crate::terrain::request_system::DrapeRequests(tiles.clone()));
     world.resources.insert(PrefetchDrapes::default());
-    let arrivals = if view_state.has_external_view() || view_state.pose_view().is_some() {
+    let arrivals_over_standin = view_state.has_external_view() || view_state.pose_view().is_some();
+    let arrivals = if arrivals_over_standin {
         Arrivals::OverStandIn
     } else {
         Arrivals::Together
     };
-    let mut targets = select_targets_as(tiles.into_iter(), world, &raster_coverings, arrivals);
-    if !uniform_globe && !view_state.has_external_view() && view_state.pose_view().is_none() {
+    let mut prefetch_plan: Option<(
+        Vec<WorldTileCoords>,
+        crate::render::eye_covering::RasterCoverings,
+    )> = None;
+    let mut fresh_prefetch = Vec::new();
+    if !uniform_globe && !arrivals_over_standin {
         let prefetch_tiles = world
             .resources
             .get::<crate::terrain::request_system::DrapePrefetchRequests>()
@@ -111,13 +126,8 @@ pub(crate) fn target_specs(
                 world,
                 crate::render::view_state::ViewStatePadding::Loose,
             ) {
-                // Prefetch prepares drapes ahead of the view, so they are ready when their tile
-                // scrolls in, and leaves alone those a view has drawn. A tile the view drapes
-                // keeps its view spec, as a second spec from the looser prefetch covering would
-                // alternate the drape's fingerprint and redraw it every frame, and a drape parked
-                // when its tile left the view keeps the content its view drew for its return.
                 let draped: rustc_hash::FxHashSet<WorldTileCoords> =
-                    targets.iter().map(|(coords, _)| *coords).collect();
+                    tiles.iter().copied().collect();
                 let held = |coords: &WorldTileCoords| match world
                     .resources
                     .get::<Eventually<TerrainResources>>()
@@ -125,23 +135,68 @@ pub(crate) fn target_specs(
                     Some(Eventually::Initialized(terrain)) => terrain.holds_shown_drape(*coords),
                     _ => false,
                 };
-                let fresh: Vec<WorldTileCoords> = prefetch_tiles
+                fresh_prefetch = prefetch_tiles
                     .into_iter()
                     .filter(|coords| !draped.contains(coords) && !held(coords))
                     .collect();
-                world
-                    .resources
-                    .insert(PrefetchDrapes(fresh.iter().copied().collect()));
-                targets.extend(select_targets(fresh.into_iter(), world, &loose_raster));
+                prefetch_plan = Some((fresh_prefetch.clone(), loose_raster));
             }
         }
     }
-    Ok(collect_layer_specs(
-        targets,
-        style,
+
+    let style_zoom = view_state.style_zoom().value();
+    let loose_raster_digest = prefetch_plan
+        .as_ref()
+        .map_or(0, |(_, loose)| spec_cache::raster_coverings_digest(loose));
+    let target_tiles_digest = spec_cache::target_coords_vector_digest(
+        tiles.iter().chain(fresh_prefetch.iter()).copied(),
         world,
-        view_state.style_zoom().value(),
-    ))
+    );
+    let specs_key = spec_cache::TargetSpecsKey {
+        tiles: tiles.clone(),
+        prefetch_fresh: fresh_prefetch,
+        arrivals_over_standin,
+        uniform_globe,
+        raster_coverings_digest: spec_cache::raster_coverings_digest(&raster_coverings),
+        loose_raster_digest,
+        vector_pool_state: spec_cache::vector_pool_state(world),
+        vector_arrival_epoch: crate::vector::arrival_epoch(world),
+        target_tiles_digest,
+        tiles_len: world.tiles.tiles.len(),
+        raster_gen: spec_cache::raster_mutation_gen(world),
+        style_rev: style.revision(),
+        style_vis_digest: spec_cache::style_visibility_digest(style, style_zoom),
+    };
+    if let Some((cached_specs, cached_prefetch)) = world
+        .resources
+        .get::<spec_cache::DrapePrepareCache>()
+        .and_then(|cache| cache.get_specs(&specs_key))
+    {
+        if !cached_prefetch.is_empty() {
+            world
+                .resources
+                .insert(PrefetchDrapes(cached_prefetch.clone()));
+        }
+        return Ok(cached_specs);
+    }
+
+    let mut targets = select_targets_as(tiles.into_iter(), world, &raster_coverings, arrivals);
+    let mut prefetch_drapes = rustc_hash::FxHashSet::default();
+    if let Some((fresh, loose_raster)) = prefetch_plan {
+        if !fresh.is_empty() {
+            prefetch_drapes = fresh.iter().copied().collect();
+            world
+                .resources
+                .insert(PrefetchDrapes(prefetch_drapes.clone()));
+            targets.extend(select_targets(fresh.into_iter(), world, &loose_raster));
+        }
+    }
+    let specs = std::sync::Arc::new(collect_layer_specs(targets, style, world, style_zoom));
+    world
+        .resources
+        .get_or_init_mut::<spec_cache::DrapePrepareCache>()
+        .store_specs(specs_key, std::sync::Arc::clone(&specs), prefetch_drapes);
+    Ok(specs)
 }
 
 /// Selects pure 3D DEM surface tiles for [`crate::render::settings::TerrainDrapeMode::ProceduralRelief`]

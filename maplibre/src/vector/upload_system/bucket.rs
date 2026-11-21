@@ -10,7 +10,7 @@ use super::{
     paint, DynPoints, VectorPaintFrame,
 };
 use crate::{
-    render::shaders::{FillShaderFeatureMetadata, Vec4f32},
+    render::shaders::{FillShaderFeatureMetadata, ShaderLayerMetadata, Vec4f32},
     style::{layer::StyleLayer, Style},
     vector::{AvailableVectorLayerBucket, VectorBufferPool},
 };
@@ -38,7 +38,7 @@ impl SharedStyleLayers {
 }
 
 pub(super) enum UploadOutcome {
-    Uploaded,
+    Uploaded(Option<((u16, u64), ShaderLayerMetadata)>),
     PoolSaturated,
     Failed,
 }
@@ -78,7 +78,7 @@ pub(super) fn upload_bucket(
     let color: Option<Vec4f32> = style_layer
         .paint
         .as_ref()
-        .and_then(|paint| paint.get_color())
+        .and_then(|paint| paint.color_at(f64::from(zoom)))
         .map(|color| color.into());
 
     let fallback_color = color.unwrap_or([0.0, 0.0, 0.0, 1.0]);
@@ -209,6 +209,19 @@ pub(super) fn upload_bucket(
             !feature_metadata.is_empty() && feature_metadata.iter().all(|fm| fm.color[3] == 255)
         };
     buffer_pool.set_layer_opaque_color(coords, &style_layer.id, opaque_fill);
+    let slot = buffer_pool
+        .index()
+        .get_layers(coords)
+        .and_then(|layers| {
+            layers
+                .iter()
+                .rev()
+                .find(|entry| entry.style_layer_id == style_layer.layer_id())
+        })
+        .and_then(|entry| {
+            let range = entry.layer_metadata_buffer_range();
+            (range.end > range.start).then_some((entry.page(), range.start))
+        });
     #[cfg(feature = "geojson")]
     if is_dynamic_circle {
         crate::geojson::update::dynamic_points::record_uploaded_dynamic_circle(
@@ -219,5 +232,5 @@ pub(super) fn upload_bucket(
             dynamic_seq,
         );
     }
-    UploadOutcome::Uploaded
+    UploadOutcome::Uploaded(slot.map(|slot| (slot, layer_metadata)))
 }

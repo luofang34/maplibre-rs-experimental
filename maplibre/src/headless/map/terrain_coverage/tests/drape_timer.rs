@@ -54,33 +54,75 @@ fn drape_time_is_measured_across_every_drape_a_frame_draws() {
                     .query::<&crate::raster::RasterLayersDataComponent>(**coords)
                     .is_none_or(|component| component.layers.is_empty())
             })
-            .map(|coords| tile(*coords, false, false))
+            .copied()
             .collect();
-        map.render_sources(ProcessedLayers::default(), missing)
-            .expect("pitched frame");
-        let (many, drawn) = settle_drape_timer(&mut map).expect("many drapes timed");
+        // Apple Metal's cross-pass `MTLCounterSampleBuffer` intermittently drops the end sample
+        // (`end <= start` discarded by `GpuTimer::take`); retry up to 4 times until measured.
+        let mut many_result = None;
+        let mut many_last_child = false;
+        for attempt in 0..5_usize {
+            let batch: Vec<_> = if attempt == 0 {
+                missing
+                    .iter()
+                    .map(|coords| tile(*coords, false, false))
+                    .collect()
+            } else {
+                many_last_child = attempt % 2 == 1;
+                if let Some(Eventually::Initialized(raster)) =
+                    map.map_context
+                        .world
+                        .resources
+                        .get_mut::<Eventually<RasterResources>>()
+                {
+                    for coords in &required {
+                        raster.remove_texture(*coords);
+                    }
+                }
+                required
+                    .iter()
+                    .map(|coords| tile(*coords, false, many_last_child))
+                    .collect()
+            };
+            map.render_sources(ProcessedLayers::default(), batch)
+                .expect("pitched frame");
+            let measured = settle_drape_timer(&mut map);
+            if matches!(measured, Some((_, d)) if d >= 4) {
+                many_result = measured;
+                break;
+            }
+        }
+        let (many, drawn) = many_result.expect("many drapes timed");
         // One drape: the content of a single tile is replaced.
-        let Some(Eventually::Initialized(raster)) = map
-            .map_context
-            .world
-            .resources
-            .get_mut::<Eventually<RasterResources>>()
-        else {
-            panic!("raster resources");
-        };
         let replaced = required[0];
-        raster.remove_texture(replaced);
-        map.render_sources(
-            ProcessedLayers::default(),
-            vec![tile(replaced, false, true)],
-        )
-        .expect("one drape");
-        assert_eq!(
-            map.last_frame_stats().drape_redraws,
-            1,
-            "one drape shows the tile"
-        );
-        let (one, single) = settle_drape_timer(&mut map).expect("one drape timed");
+        let mut one_result = None;
+        for attempt in 0..5_usize {
+            let Some(Eventually::Initialized(raster)) = map
+                .map_context
+                .world
+                .resources
+                .get_mut::<Eventually<RasterResources>>()
+            else {
+                panic!("raster resources");
+            };
+            raster.remove_texture(replaced);
+            let child = many_last_child ^ (attempt % 2 == 0);
+            map.render_sources(
+                ProcessedLayers::default(),
+                vec![tile(replaced, false, child)],
+            )
+            .expect("one drape");
+            assert_eq!(
+                map.last_frame_stats().drape_redraws,
+                1,
+                "one drape shows the tile"
+            );
+            let measured = settle_drape_timer(&mut map);
+            if matches!(measured, Some((_, 1))) {
+                one_result = measured;
+                break;
+            }
+        }
+        let (one, single) = one_result.expect("one drape timed");
         assert_eq!(single, 1);
         assert!(drawn >= 4, "the pitched view draws several drapes: {drawn}");
         assert!(

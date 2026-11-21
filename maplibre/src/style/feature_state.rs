@@ -3,7 +3,16 @@
 
 mod sync;
 
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    sync::atomic::{AtomicBool, Ordering},
+};
+
+static FEATURE_STATE_EVER_USED: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn ever_mutated() -> bool {
+    FEATURE_STATE_EVER_USED.load(Ordering::Relaxed)
+}
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -293,6 +302,9 @@ impl FeatureStateStore {
             }
             sources.insert(source.clone(), SourceFeatureState { layers });
         }
+        if !sources.is_empty() {
+            FEATURE_STATE_EVER_USED.store(true, Ordering::Relaxed);
+        }
         Ok(Self { sources })
     }
 
@@ -308,6 +320,7 @@ impl FeatureStateStore {
 
     /// Merges `state` into the state of `(target, id)`.
     pub fn set(&mut self, target: FeatureStateTarget, id: FeatureId, state: Map<String, Value>) {
+        FEATURE_STATE_EVER_USED.store(true, Ordering::Relaxed);
         self.sources.entry(target.source).or_default().set(
             target.source_layer.as_deref(),
             id.0,

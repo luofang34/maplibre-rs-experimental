@@ -57,11 +57,20 @@ fn shields_a_case_chooses_inside_format_are_drawn_as_images_never_as_their_names
             .expect("registry")
             .register("shield", shields.clone());
         // While the shields are made the label has nothing to draw: no name shows as text.
-        for _ in 0..40 {
+        for frame in 0..2500 {
             map.frame().await;
             let pixels = map.read();
             assert_eq!(shown(&pixels, TEXT), 0, "a request name is drawn as text");
             assert_eq!(shown(&pixels, SHIELD), 0);
+            if frame >= 39 {
+                if shields.requests.lock().is_ok_and(|r| r.len() >= 2) {
+                    break;
+                }
+                crate::headless::map::test_async::yield_to_workers(
+                    std::time::Duration::from_millis(2),
+                )
+                .await;
+            }
         }
         let mut requested: Vec<String> = shields
             .requests

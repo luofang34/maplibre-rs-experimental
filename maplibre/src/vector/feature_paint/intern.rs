@@ -132,6 +132,9 @@ impl TilePropertyInterner {
         tiles: &Tiles,
         bucket: &mut crate::sdf::SymbolLayerData,
     ) {
+        if bucket.features.iter().all(|f| f.data.properties.is_empty()) {
+            return;
+        }
         let table = self.table_for(tiles, bucket.coords);
         for feature in &mut bucket.features {
             table.intern(&mut feature.data.properties);

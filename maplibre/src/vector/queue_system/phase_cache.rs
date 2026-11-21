@@ -21,6 +21,7 @@ pub(super) struct VectorPhaseCacheKey {
     pub(super) style_rev: u64,
     pub(super) layer_state_digest: u64,
     pub(super) uses_globe: bool,
+    pub(super) skip_draped: bool,
 }
 
 pub(super) struct CachedVectorPhases {
@@ -36,6 +37,8 @@ struct CompiledLayerRule {
     maxzoom: Option<f64>,
     is_translucent_extrusion: bool,
     is_unclipped_3d: bool,
+    is_drapeable: bool,
+    is_heatmap: bool,
     pattern_prop: Option<StyleProperty<PatternName>>,
     missing_pattern_prop: Option<StyleProperty<PatternName>>,
     opacity_prop: Option<StyleProperty<f32>>,
@@ -53,6 +56,9 @@ impl CompiledLayerRule {
                 crate::vector::structures::kind(layer),
                 Some(crate::vector::structures::StructureKind::ElevatedLine)
             );
+        let is_drapeable = crate::terrain::is_drapeable(&layer.type_)
+            && crate::vector::structures::kind(layer).is_none();
+        let is_heatmap = layer.type_ == "heatmap";
         let raw_pattern = match &layer.paint {
             Some(LayerPaint::Fill(fill)) => fill.fill_pattern.as_ref(),
             Some(LayerPaint::FillExtrusion(extrusion)) => extrusion.fill_extrusion_pattern.as_ref(),
@@ -85,6 +91,8 @@ impl CompiledLayerRule {
             maxzoom: layer.maxzoom,
             is_translucent_extrusion,
             is_unclipped_3d,
+            is_drapeable,
+            is_heatmap,
             pattern_prop,
             missing_pattern_prop,
             opacity_prop,
@@ -162,6 +170,8 @@ pub(super) struct VectorQueueScratch {
     pub(super) translucent_extrusion_layers: FxHashSet<StyleLayerId>,
     pub(super) unclipped_3d_layers: FxHashSet<StyleLayerId>,
     pub(super) zero_opacity_layers: FxHashSet<StyleLayerId>,
+    pub(super) drapeable_layers: FxHashSet<StyleLayerId>,
+    pub(super) has_visible_heatmap: bool,
     pub(super) active_unclipped_3d_shapes: FxHashSet<(i32, crate::coords::WorldTileCoords, u32)>,
     pub(super) queued_unclipped_3d: FxHashSet<(i32, crate::coords::WorldTileCoords, u32)>,
     pub(super) extrusion_colors: Vec<LayerItem>,
@@ -192,7 +202,9 @@ impl VectorQueueScratch {
                 | (u8::from(rule.names_missing_image(style, style_zoom)) << 2)
                 | (u8::from(rule.is_zero_opacity(style_zoom)) << 3)
                 | (u8::from(rule.is_translucent_extrusion) << 4)
-                | (u8::from(rule.is_unclipped_3d) << 5);
+                | (u8::from(rule.is_unclipped_3d) << 5)
+                | (u8::from(rule.is_drapeable) << 6)
+                | (u8::from(rule.is_heatmap) << 7);
             (rule.id, rule.index, bits).hash(&mut hasher);
         }
         let digest = hasher.finish();
@@ -207,6 +219,8 @@ impl VectorQueueScratch {
         self.translucent_extrusion_layers.clear();
         self.unclipped_3d_layers.clear();
         self.zero_opacity_layers.clear();
+        self.drapeable_layers.clear();
+        self.has_visible_heatmap = false;
 
         for (rule, has_per_feature) in &self.compiled.rules {
             if rule.has_pattern(*has_per_feature, style_zoom) {
@@ -223,6 +237,12 @@ impl VectorQueueScratch {
             }
             if rule.is_zero_opacity(style_zoom) {
                 self.zero_opacity_layers.insert(rule.id);
+            }
+            if rule.is_drapeable {
+                self.drapeable_layers.insert(rule.id);
+            }
+            if rule.is_heatmap && rule.is_visible_at(style_zoom) {
+                self.has_visible_heatmap = true;
             }
         }
         digest

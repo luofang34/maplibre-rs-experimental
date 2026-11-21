@@ -337,21 +337,38 @@ pub(crate) fn collect_layer_specs(
         .into_iter()
         .map(|(coords, shapes)| TargetSpec {
             coords,
-            absent_sources: shapes
-                .iter()
-                .filter(|shape| shape.absent)
-                .filter_map(|shape| shape.raster_source.clone())
-                .collect(),
+            absent_sources: if shapes.iter().any(|shape| shape.absent) {
+                shapes
+                    .iter()
+                    .filter(|shape| shape.absent)
+                    .filter_map(|shape| shape.raster_source.clone())
+                    .collect()
+            } else {
+                Vec::new()
+            },
             shapes: shapes
                 .into_iter()
                 .filter(|shape| !shape.absent)
                 .map(|shape| {
                     #[cfg(feature = "raster")]
-                    let raster_layers = raster_layers.iter()
-                        .filter(|(_, _, source, _)| shape.raster_source.as_ref() == Some(source))
-                        .filter(|(id, _, _, _)| matches!(raster, Some(Initialized(resources)) if resources.layer_texture(id, &shape.coords).is_some()))
-                        .map(|(id, index, _, dem)| (id.clone(), *index, *dem))
-                        .collect();
+                    let raster_layers = if raster_layers.is_empty() {
+                        Vec::new()
+                    } else {
+                        raster_layers
+                            .iter()
+                            .filter(|(_, _, source, _)| {
+                                shape.raster_source.as_ref() == Some(source)
+                            })
+                            .filter(|(id, _, _, _)| {
+                                matches!(
+                                    raster,
+                                    Some(Initialized(resources))
+                                        if resources.layer_texture(id, &shape.coords).is_some()
+                                )
+                            })
+                            .map(|(id, index, _, dem)| (id.clone(), *index, *dem))
+                            .collect()
+                    };
                     #[cfg(not(feature = "raster"))]
                     let raster_layers = Vec::new();
                     ShapeSpec {

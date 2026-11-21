@@ -105,14 +105,13 @@ impl TerrainResources {
         dem: Option<WorldTileCoords>,
         drape_source: Option<WorldTileCoords>,
     ) -> Option<Arc<wgpu::BindGroup>> {
-        let key = {
-            let dem = self.dem_texture(dem);
-            let drape = match drape_source {
-                Some(source) => self.drape_texture(source)?,
-                None => &self.empty_dem,
-            };
-            (dem.texture.clone(), drape.texture.clone())
-        };
+        let key = (
+            self.dem_id(dem),
+            match drape_source {
+                Some(source) => self.drape_id(source)?,
+                None => self.empty_dem_id,
+            },
+        );
         if let Some(group) = self.bind_groups.get(&key) {
             return Some(Arc::clone(group));
         }

@@ -16,7 +16,25 @@ use crate::{
 struct GlobeMeshPrepareMemo {
     flat_prepared: bool,
     flat_with_raster: bool,
+    needs_raster_mesh: Option<(u64, bool)>,
     last_globe: Option<(u64, bool, Vec<crate::coords::WorldTileCoords>)>,
+}
+
+fn globe_tiles_match(
+    world: &crate::tcs::world::World,
+    cached_bg: &[crate::coords::WorldTileCoords],
+) -> bool {
+    let drawn = crate::render::eye_covering::drawn_tiles(world).unwrap_or_default();
+    let mut wrapped = drawn
+        .iter()
+        .copied()
+        .filter(|coords| coords.wrapped().is_some())
+        .peekable();
+    if wrapped.peek().is_none() {
+        cached_bg == [crate::coords::WorldTileCoords::default()]
+    } else {
+        wrapped.eq(cached_bg.iter().copied())
+    }
 }
 
 pub fn upload_system(
@@ -44,48 +62,23 @@ pub fn upload_system(
             snapshot
         }
     };
-    let background_tiles = if projection_data.transition > 0.0 {
-        crate::background::queue_system::globe_tiles(world)
+    let style_rev = style.revision();
+    let needs_raster_mesh = if let Some((_, needs)) = world
+        .resources
+        .get::<GlobeMeshPrepareMemo>()
+        .and_then(|m| m.needs_raster_mesh)
+        .filter(|(rev, _)| *rev == style_rev)
+    {
+        needs
     } else {
-        Vec::new()
+        style.layers.iter().any(|layer| {
+            !layer.is_hidden()
+                && matches!(
+                    layer.type_.as_str(),
+                    "raster" | "hillshade" | "color-relief"
+                )
+        })
     };
-    world.resources.get_or_init_mut::<GlobeMeshPrepareMemo>();
-
-    let Some((
-        Initialized(tile_view_pattern),
-        Initialized(projection_resources),
-        tile_mesh_cache,
-        memo,
-    )) = world.resources.query_mut::<(
-        &mut Eventually<WgpuTileViewPattern>,
-        &mut Eventually<ProjectionGpuResources>,
-        &mut GlobeTileMeshCache,
-        &mut GlobeMeshPrepareMemo,
-    )>()
-    else {
-        return Err(SystemError::Dependencies);
-    };
-
-    tile_view_pattern.upload_pattern(
-        queue,
-        &view_proj,
-        view_state.width() as f32,
-        view_state.height() as f32,
-        view_state.style_zoom(),
-    );
-    projection_resources.upload(queue, projection_data);
-    tile_mesh_cache.set_globe_active(projection_data.transition > 0.0);
-    if tile_mesh_cache.is_empty() {
-        *memo = GlobeMeshPrepareMemo::default();
-    }
-
-    let needs_raster_mesh = style.layers.iter().any(|layer| {
-        !layer.is_hidden()
-            && matches!(
-                layer.type_.as_str(),
-                "raster" | "hillshade" | "color-relief"
-            )
-    });
     let usages: &[(TileMeshUsage, bool)] = if needs_raster_mesh {
         &[
             (TileMeshUsage::Stencil, true),
@@ -100,30 +93,42 @@ pub fn upload_system(
         ]
     };
 
-    if projection_data.transition > 0.0 {
-        let topology_gen = tile_view_pattern.topology_generation();
-        let globe_unchanged = memo
-            .last_globe
-            .as_ref()
-            .is_some_and(|(topo_gen, raster, bg)| {
-                *topo_gen == topology_gen
-                    && (*raster || !needs_raster_mesh)
-                    && *bg == background_tiles
-            });
-        if !globe_unchanged {
-            for &coords in &background_tiles {
-                tile_mesh_cache
-                    .prepare(device, queue, coords, TileMeshUsage::Raster, false)
-                    .map_err(|error| {
-                        tracing::error!(%error, %coords, "unable to prepare globe background mesh");
-                        SystemError::Setup
-                    })?;
-            }
-            let mut visible_tiles = Vec::new();
-            for view_tile in tile_view_pattern.iter() {
-                view_tile.render(|shape| visible_tiles.push(shape.coords()));
-            }
-            for coords in visible_tiles {
+    let uses_globe = projection_data.transition > 0.0;
+    world.resources.get_or_init_mut::<GlobeMeshPrepareMemo>();
+
+    let (topology_gen, cached_last_globe) = {
+        let Some((
+            Initialized(tile_view_pattern),
+            Initialized(projection_resources),
+            tile_mesh_cache,
+            memo,
+        )) = world.resources.query_mut::<(
+            &mut Eventually<WgpuTileViewPattern>,
+            &mut Eventually<ProjectionGpuResources>,
+            &mut GlobeTileMeshCache,
+            &mut GlobeMeshPrepareMemo,
+        )>()
+        else {
+            return Err(SystemError::Dependencies);
+        };
+
+        tile_view_pattern.upload_pattern(
+            queue,
+            &view_proj,
+            view_state.width() as f32,
+            view_state.height() as f32,
+            view_state.style_zoom(),
+        );
+        projection_resources.upload(queue, projection_data);
+        tile_mesh_cache.set_globe_active(uses_globe);
+        if tile_mesh_cache.is_empty() {
+            *memo = GlobeMeshPrepareMemo::default();
+        }
+        memo.needs_raster_mesh = Some((style_rev, needs_raster_mesh));
+
+        if !uses_globe {
+            if !(memo.flat_prepared && (!needs_raster_mesh || memo.flat_with_raster)) {
+                let coords = crate::coords::WorldTileCoords::default();
                 for &(usage, generate_borders) in usages {
                     tile_mesh_cache
                         .prepare(device, queue, coords, usage, generate_borders)
@@ -132,16 +137,49 @@ pub fn upload_system(
                             SystemError::Setup
                         })?;
                 }
+                memo.flat_prepared = true;
+                memo.flat_with_raster |= needs_raster_mesh;
+                memo.last_globe = None;
             }
-            let with_raster = memo
-                .last_globe
-                .as_ref()
-                .is_some_and(|(topo_gen, raster, _)| *topo_gen == topology_gen && *raster)
-                || needs_raster_mesh;
-            memo.last_globe = Some((topology_gen, with_raster, background_tiles));
+            return Ok(());
         }
-    } else if !(memo.flat_prepared && (!needs_raster_mesh || memo.flat_with_raster)) {
-        let coords = crate::coords::WorldTileCoords::default();
+
+        (
+            tile_view_pattern.topology_generation(),
+            memo.last_globe.clone(),
+        )
+    };
+
+    let globe_unchanged = cached_last_globe.as_ref().is_some_and(|(tg, raster, bg)| {
+        *tg == topology_gen && (*raster || !needs_raster_mesh) && globe_tiles_match(world, bg)
+    });
+    if globe_unchanged {
+        return Ok(());
+    }
+
+    let background_tiles = crate::background::queue_system::globe_tiles(world);
+    let Some((Initialized(tile_view_pattern), tile_mesh_cache, memo)) =
+        world.resources.query_mut::<(
+            &Eventually<WgpuTileViewPattern>,
+            &mut GlobeTileMeshCache,
+            &mut GlobeMeshPrepareMemo,
+        )>()
+    else {
+        return Err(SystemError::Dependencies);
+    };
+    for &coords in &background_tiles {
+        tile_mesh_cache
+            .prepare(device, queue, coords, TileMeshUsage::Raster, false)
+            .map_err(|error| {
+                tracing::error!(%error, %coords, "unable to prepare globe background mesh");
+                SystemError::Setup
+            })?;
+    }
+    let mut visible_tiles = Vec::new();
+    for view_tile in tile_view_pattern.iter() {
+        view_tile.render(|shape| visible_tiles.push(shape.coords()));
+    }
+    for coords in visible_tiles {
         for &(usage, generate_borders) in usages {
             tile_mesh_cache
                 .prepare(device, queue, coords, usage, generate_borders)
@@ -150,10 +188,12 @@ pub fn upload_system(
                     SystemError::Setup
                 })?;
         }
-        memo.flat_prepared = true;
-        memo.flat_with_raster |= needs_raster_mesh;
-        memo.last_globe = None;
     }
+    let with_raster = cached_last_globe
+        .as_ref()
+        .is_some_and(|(tg, raster, _)| *tg == topology_gen && *raster)
+        || needs_raster_mesh;
+    memo.last_globe = Some((topology_gen, with_raster, background_tiles));
 
     Ok(())
 }

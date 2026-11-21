@@ -95,34 +95,84 @@ pub(super) fn prepare_drapes(
     device: &wgpu::Device,
     drape_zoom: f64,
 ) -> Result<PreparedDrapes, SystemError> {
+    use super::spec_cache;
     let memory = world
         .resources
         .get::<MemoryBudget>()
         .copied()
         .unwrap_or_default();
     let clear_color = background_clear_color(style);
-    let prints: Vec<u64> = {
-        let content = loaded_content(world);
-        specs
-            .iter()
-            .map(|spec| fingerprint(spec, &content, clear_color, drape_zoom))
-            .collect()
-    };
     // A tile whose vector sources are finished but not yet in the buffer pool would drape
     // blank; it shows an ancestor's drape until they are.
     let strict = world
         .resources
         .get::<cohort::TextureCohort>()
         .is_some_and(|state| state.enabled);
-    let mut ready: Vec<bool> = specs
-        .iter()
-        .map(|spec| readiness::ready(spec, style, view_state.style_zoom().value(), world, strict))
-        .collect();
     let capacity = match world.resources.get::<Eventually<WgpuTileViewPattern>>() {
         Some(Initialized(pattern)) => pattern.remaining_metadata_capacity(),
         _ => 0,
     };
-    surface_covering::fit_metadata(specs, &mut ready, capacity);
+    let style_zoom = view_state.style_zoom().value();
+    let prep_key = world
+        .resources
+        .get::<spec_cache::DrapePrepareCache>()
+        .and_then(|cache| cache.specs_gen_for(specs))
+        .map(|specs_gen| spec_cache::DrapePrepKey {
+            specs_gen,
+            drape_paint_zoom_bits: crate::vector::upload_system::drape_paint_zoom(drape_zoom)
+                .to_bits(),
+            clear_color_bits: [
+                clear_color.r.to_bits(),
+                clear_color.g.to_bits(),
+                clear_color.b.to_bits(),
+                clear_color.a.to_bits(),
+            ],
+            strict,
+            capacity,
+            vector_pool_state: spec_cache::vector_pool_state(world),
+            vector_arrival_epoch: crate::vector::arrival_epoch(world),
+            target_tiles_digest: spec_cache::target_coords_vector_digest(
+                specs.iter().map(|spec| spec.coords),
+                world,
+            ),
+            tiles_len: world.tiles.tiles.len(),
+            raster_gen: spec_cache::raster_mutation_gen(world),
+            hillshade_fingerprint: spec_cache::hillshade_fingerprint(world),
+            style_rev: style.revision(),
+            style_vis_digest: spec_cache::style_visibility_digest(style, style_zoom),
+        });
+    let cached_prep = prep_key.as_ref().and_then(|key| {
+        world
+            .resources
+            .get::<spec_cache::DrapePrepareCache>()
+            .and_then(|cache| cache.get_prep(key))
+    });
+    let prep = if let Some(cached) = cached_prep {
+        cached
+    } else {
+        let prints: Vec<u64> = {
+            let content = loaded_content(world);
+            specs
+                .iter()
+                .map(|spec| fingerprint(spec, &content, clear_color, drape_zoom))
+                .collect()
+        };
+        let mut ready: Vec<bool> = specs
+            .iter()
+            .map(|spec| readiness::ready(spec, style, style_zoom, world, strict))
+            .collect();
+        surface_covering::fit_metadata(specs, &mut ready, capacity);
+        let built = std::sync::Arc::new(spec_cache::CachedPrep { prints, ready });
+        if let Some(key) = prep_key {
+            world
+                .resources
+                .get_or_init_mut::<spec_cache::DrapePrepareCache>()
+                .store_prep(key, std::sync::Arc::clone(&built));
+        }
+        built
+    };
+    let prints = prep.prints.as_slice();
+    let ready = prep.ready.as_slice();
     let prefetch: Vec<bool> = {
         let ahead = world.resources.get::<targets::PrefetchDrapes>();
         specs
@@ -159,7 +209,7 @@ pub(super) fn prepare_drapes(
         };
         let (redraw, drape_sources, deferred, states) = acquire_drapes(
             specs,
-            (&prints, &ready, &prefetch),
+            (prints, ready, &prefetch),
             (memory, view_textures),
             (budget, limit),
             terrain,
@@ -187,7 +237,7 @@ pub(super) fn prepare_drapes(
         &activity::FrameDrapes {
             specs,
             states: &states,
-            ready: &ready,
+            ready,
             prefetch: &prefetch,
             redraw: &redraw,
             sources: &drape_sources,

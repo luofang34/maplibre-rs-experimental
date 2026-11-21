@@ -66,6 +66,8 @@ pub fn queue_system(
         .projection
         .as_ref()
         .is_some_and(|specification| specification.projection_type.uses_globe_rendering(zoom));
+    let skip_draped =
+        style.terrain.is_some() && crate::terrain::source::dem_source(style).is_some();
 
     let layer_state_digest = scratch.sync_style_sets(style, style_zoom);
     let cache_key = VectorPhaseCacheKey {
@@ -74,6 +76,7 @@ pub fn queue_system(
         style_rev: style.revision(),
         layer_state_digest,
         uses_globe,
+        skip_draped,
     };
     if let Some(cached) = &scratch.cached_phases {
         if cached.key == cache_key {
@@ -92,6 +95,8 @@ pub fn queue_system(
         translucent_extrusion_layers,
         unclipped_3d_layers,
         zero_opacity_layers,
+        drapeable_layers,
+        has_visible_heatmap,
         active_unclipped_3d_shapes,
         queued_unclipped_3d,
         extrusion_colors,
@@ -131,26 +136,36 @@ pub fn queue_system(
         // draw tile normal or the source e.g. parent or children
         view_tile.render_kind(TileKind::Vector, |source_shape| {
             let shape_data = source_shape.draw_data();
-            if uses_globe {
-                mask_phase.add(TileMaskItem {
-                    projection: ProjectionBinding::View,
-                    draw_function: &DrawState::<TileMaskItem, DrawMasks>::INSTANCE,
-                    source_shape: shape_data,
-                    generate_borders: true,
-                    is_vector: true,
-                });
+            let mut mask_emitted = false;
+            let mut ensure_mask = |mask_phase: &mut RenderPhase<TileMaskItem>| {
+                if !mask_emitted {
+                    mask_emitted = true;
+                    if uses_globe {
+                        mask_phase.add(TileMaskItem {
+                            projection: ProjectionBinding::View,
+                            draw_function: &DrawState::<TileMaskItem, DrawMasks>::INSTANCE,
+                            source_shape: shape_data,
+                            generate_borders: true,
+                            is_vector: true,
+                        });
+                    }
+                    mask_phase.add(TileMaskItem {
+                        projection: ProjectionBinding::View,
+                        draw_function: &DrawState::<TileMaskItem, DrawMasks>::INSTANCE,
+                        source_shape: shape_data,
+                        generate_borders: false,
+                        is_vector: true,
+                    });
+                }
+            };
+            if !skip_draped || *has_visible_heatmap {
+                ensure_mask(mask_phase);
             }
-            mask_phase.add(TileMaskItem {
-                projection: ProjectionBinding::View,
-                draw_function: &DrawState::<TileMaskItem, DrawMasks>::INSTANCE,
-                source_shape: shape_data,
-                generate_borders: false,
-                is_vector: true,
-            });
 
             if let Some(layer_entries) = buffer_pool_index.get_layers(source_shape.coords()) {
                 for (slot_idx, layer_entry) in layer_entries.iter().enumerate() {
-                    if zero_opacity_layers.contains(&layer_entry.style_layer_id)
+                    if (skip_draped && drapeable_layers.contains(&layer_entry.style_layer_id))
+                        || zero_opacity_layers.contains(&layer_entry.style_layer_id)
                         || missing_image_layers.contains(&layer_entry.style_layer_id)
                         || !layer_entry.style_layer.is_visible_at(style_zoom)
                     {
@@ -207,6 +222,7 @@ pub fn queue_system(
                                 &DrawState::<LayerItem, DrawExtrusionTranslucentBack>::INSTANCE
                             }
                             "fill-extrusion" => {
+                                ensure_mask(mask_phase);
                                 if !extrusion_clears
                                     .iter()
                                     .any(|item| item.style_layer == layer_id)
@@ -264,6 +280,7 @@ pub fn queue_system(
                         .then(|| buffer_pool.sort_runs_by_id(layer_entry.coords, layer_id))
                         .flatten();
                     if let Some(runs) = runs.filter(|runs| !runs.is_empty()) {
+                        ensure_mask(mask_phase);
                         for (key, range) in runs {
                             layer_item_phase.add(LayerItem {
                                 projection: ProjectionBinding::View,
@@ -285,6 +302,9 @@ pub fn queue_system(
                             });
                         }
                         continue;
+                    }
+                    if mask_group == MaskGroup::Vector {
+                        ensure_mask(mask_phase);
                     }
                     layer_item_phase.add(LayerItem {
                         projection: ProjectionBinding::View,

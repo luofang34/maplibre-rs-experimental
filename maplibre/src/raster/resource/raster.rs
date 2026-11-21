@@ -43,6 +43,8 @@ pub struct RasterResources {
     layer_paints: LayerPaintBindings,
     /// Advances whenever a texture is bound or updated, so cached renders of raster tiles refresh.
     revision: u64,
+    /// Advances on any texture insertion, replacement, removal, or source map change.
+    mutation_gen: u64,
 }
 
 impl RasterResources {
@@ -80,12 +82,17 @@ impl RasterResources {
             dem_bindings: Default::default(),
             layer_paints: Default::default(),
             revision: 0,
+            mutation_gen: 0,
         }
     }
 
     /// Wrapping generation advanced by each binding insertion or replacement; removal leaves it unchanged.
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    pub(crate) fn mutation_generation(&self) -> u64 {
+        self.mutation_gen
     }
 
     /// Allocates an uninitialized texture with this registry's sample count.
@@ -179,6 +186,7 @@ impl RasterResources {
         texture: Texture,
     ) {
         self.revision = self.revision.wrapping_add(1);
+        self.mutation_gen = self.mutation_gen.wrapping_add(1);
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &self.pipeline.get_bind_group_layout(1),
             entries: &[
@@ -226,6 +234,7 @@ impl RasterResources {
         dem_rev: DemRevision,
     ) {
         self.revision = self.revision.wrapping_add(1);
+        self.mutation_gen = self.mutation_gen.wrapping_add(1);
         let revision = self.revision;
         let same_texture = self
             .dem_bindings
@@ -300,6 +309,7 @@ impl RasterResources {
     pub(crate) fn forget_source(&mut self, source: &RasterSourceId) {
         self.bound_textures.remove(source);
         self.dem_bindings.remove(source);
+        self.mutation_gen = self.mutation_gen.wrapping_add(1);
     }
 
     /// Whether a layer of the style draws from the source, so its tiles need textures.
@@ -321,9 +331,11 @@ impl RasterResources {
         if let Some(bindings) = self.dem_bindings.get_mut(source) {
             bindings.remove(&coords);
         }
+        self.mutation_gen = self.mutation_gen.wrapping_add(1);
     }
 
     pub(crate) fn update_layer_sources(&mut self, style: &Style) {
+        self.mutation_gen = self.mutation_gen.wrapping_add(1);
         self.layer_sources.clear();
         self.dem_sources = style
             .sources
