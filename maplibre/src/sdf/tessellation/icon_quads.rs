@@ -83,14 +83,25 @@ fn apply_text_fit(icon: [f32; 4], stretch: &IconStretch, content: [f32; 4]) -> [
     [left, top, left + width, top + height]
 }
 
-/// The pieces of `icon` for a box `[left, top, right, bottom]` in layout pixels. Without
-/// `fitted` the icon is one piece. With it, the stretch zones grow to the box and the rest
-/// keeps its size, and a content area stands for the box itself.
-pub(super) fn icon_quads(icon: &AtlasEntry, boxed: [f32; 4], fitted: bool) -> Vec<IconQuad> {
+/// The pieces of `icon` for a box `[left, top, right, bottom]` in layout pixels. Non-stretchable
+/// icons emit a single quad. Stretchable icons slice along their stretch zones both when fitted
+/// to text (`fitted == true`, where `boxed` is the content box and fixed borders scale by
+/// `icon_size`) and when standalone (`fitted == false`, where `boxed` is the scaled outer box
+/// and fixed borders keep their unscaled pixel size).
+pub(super) fn icon_quads(
+    icon: &AtlasEntry,
+    boxed: [f32; 4],
+    fitted: bool,
+    icon_size: f32,
+) -> Vec<IconQuad> {
     let ratio = icon.metrics[3];
     let [x, y, width, height] = icon.rect;
     let (image_width, image_height) = (width as f32, height as f32);
-    let Some(stretch) = icon.stretch.as_deref().filter(|_| fitted) else {
+    let Some(stretch) = icon
+        .stretch
+        .as_deref()
+        .filter(|_| fitted || (icon_size - 1.0).abs() > 1e-4)
+    else {
         if fitted {
             return vec![IconQuad {
                 bounds: boxed,
@@ -130,32 +141,40 @@ pub(super) fn icon_quads(icon: &AtlasEntry, boxed: [f32; 4], fitted: bool) -> Ve
     let mut boxed = boxed;
     let mut offsets = ([0.0, 0.0], [stretch_width, stretch_height]);
     let mut fixed_offsets = ([0.0, 0.0], [fixed_width, fixed_height]);
-    if let Some(content) = stretch.content {
-        if stretch.text_fit_width.is_some() || stretch.text_fit_height.is_some() {
-            boxed = apply_text_fit(boxed, stretch, content);
+    if fitted {
+        if let Some(content) = stretch.content {
+            if stretch.text_fit_width.is_some() || stretch.text_fit_height.is_some() {
+                boxed = apply_text_fit(boxed, stretch, content);
+            }
+            let stretch_before = [
+                within(&stretch_x, 0.0, content[0]),
+                within(&stretch_y, 0.0, content[1]),
+            ];
+            let stretch_inside = [
+                within(&stretch_x, content[0], content[2]),
+                within(&stretch_y, content[1], content[3]),
+            ];
+            offsets = (stretch_before, stretch_inside);
+            fixed_offsets = (
+                [
+                    content[0] - stretch_before[0],
+                    content[1] - stretch_before[1],
+                ],
+                [
+                    content[2] - content[0] - stretch_inside[0],
+                    content[3] - content[1] - stretch_inside[1],
+                ],
+            );
         }
-        let stretch_before = [
-            within(&stretch_x, 0.0, content[0]),
-            within(&stretch_y, 0.0, content[1]),
-        ];
-        let stretch_inside = [
-            within(&stretch_x, content[0], content[2]),
-            within(&stretch_y, content[1], content[3]),
-        ];
-        offsets = (stretch_before, stretch_inside);
-        fixed_offsets = (
-            [
-                content[0] - stretch_before[0],
-                content[1] - stretch_before[1],
-            ],
-            [
-                content[2] - content[0] - stretch_inside[0],
-                content[3] - content[1] - stretch_inside[1],
-            ],
-        );
     }
     let [left, top, right, bottom] = boxed;
     let (icon_width, icon_height) = (right - left, bottom - top);
+
+    let fixed_scale = if fitted {
+        icon_size / ratio
+    } else {
+        1.0 / ratio
+    };
 
     // A position along an axis: the stretched share of the box plus the fixed pixels.
     let place = |cut: Cut, axis: usize| {
@@ -174,8 +193,8 @@ pub(super) fn icon_quads(icon: &AtlasEntry, boxed: [f32; 4], fitted: bool) -> Ve
             - fixed_offsets.1[axis] * cut.stretch / stretch_total;
         // A box smaller than the pixels that cannot stretch grows to hold them: the stretched
         // share never scales below the fixed content.
-        let at_least = (fixed_offsets.1[axis] / ratio / span).max(1.0);
-        em * at_least + px / ratio
+        let at_least = (fixed_offsets.1[axis] * fixed_scale / span).max(1.0);
+        em * at_least + px * fixed_scale
     };
     let x_cuts = cuts(&stretch_x, fixed_width, stretch_width);
     let y_cuts = cuts(&stretch_y, fixed_height, stretch_height);

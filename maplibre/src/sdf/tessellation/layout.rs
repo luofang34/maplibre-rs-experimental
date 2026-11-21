@@ -126,55 +126,64 @@ pub(super) fn append(
             paint.height_offset("icon", &symbol.properties, zoom)
         };
         let icon_size = paint.number("icon-size", &symbol.properties, zoom, 1.0);
-        // An image whose anchor is not its centre, such as a shield with a banner above its
-        // body, is moved so that the anchor stands where the centre would.
-        let recentre = [icon.metrics[0] / ratio, icon.metrics[1] / ratio];
-        let placed = [
-            -width * fractions[0] + offset[0] - recentre[0],
-            -height * fractions[1] + offset[1] - recentre[1],
-            width * (1.0 - fractions[0]) + offset[0] - recentre[0],
-            height * (1.0 - fractions[1]) + offset[1] - recentre[1],
-        ];
-        let fitted = fit_to_text(
-            paint,
-            symbol,
-            zoom,
-            text_block.as_ref(),
-            [width, height],
-            offset,
-        );
-        let shift = crate::sdf::translation::tile_translation(paint, "icon", zoom);
-        let anchor = Point::new(symbol.anchor.x() + shift[0], symbol.anchor.y() + shift[1]);
-        let rotation = paint
-            .number("icon-rotate", &symbol.properties, zoom, 0.0)
-            .to_radians()
-            + if text_block.as_ref().is_some_and(|b| b.vertical) {
-                std::f32::consts::FRAC_PI_2
-            } else {
-                0.0
-            };
-        // Layout pixels are drawn scaled by icon-size, which a fitted icon does not take.
-        let undo_size = if fitted.is_some() {
-            1.0 / icon_size
-        } else {
-            1.0
-        };
-        for piece in super::icon_quads::icon_quads(icon, fitted.unwrap_or(placed), fitted.is_some())
-        {
-            icon_padding = icon_padding.max(piece.padding * undo_size);
-            let part = AtlasEntry {
-                rect: piece.rect,
-                ..icon.clone()
-            };
-            quad(
-                buffer,
-                anchor,
-                piece.bounds.map(|edge| edge * undo_size),
-                &part,
-                height_offset,
-                symbol.angle,
-                rotation,
+        if icon_size > 0.0 {
+            // An image whose anchor is not its centre, such as a shield with a banner above its
+            // body, is moved so that the anchor stands where the centre would.
+            let recentre = [icon.metrics[0] / ratio, icon.metrics[1] / ratio];
+            let placed = [
+                -width * fractions[0] + offset[0] - recentre[0],
+                -height * fractions[1] + offset[1] - recentre[1],
+                width * (1.0 - fractions[0]) + offset[0] - recentre[0],
+                height * (1.0 - fractions[1]) + offset[1] - recentre[1],
+            ];
+            let fitted = fit_to_text(
+                paint,
+                symbol,
+                zoom,
+                text_block.as_ref(),
+                [width * icon_size, height * icon_size],
+                offset,
             );
+            let shift = crate::sdf::translation::tile_translation(paint, "icon", zoom);
+            let anchor = Point::new(symbol.anchor.x() + shift[0], symbol.anchor.y() + shift[1]);
+            let rotation = paint
+                .number("icon-rotate", &symbol.properties, zoom, 0.0)
+                .to_radians()
+                + if text_block.as_ref().is_some_and(|b| b.vertical) {
+                    std::f32::consts::FRAC_PI_2
+                } else {
+                    0.0
+                };
+            // The vertex shader scales icon quads by `icon_size`. Fitted icons and standalone
+            // stretchable icons compute their exact screen-pixel bounds in `icon_quads`, so we
+            // divide by `icon_size` here so the shader's multiplication recovers those bounds.
+            let pre_scaled = fitted.is_some() || icon.stretch.is_some();
+            let undo_size = if pre_scaled { 1.0 / icon_size } else { 1.0 };
+            let boxed = fitted.unwrap_or_else(|| {
+                if icon.stretch.is_some() {
+                    placed.map(|edge| edge * icon_size)
+                } else {
+                    placed
+                }
+            });
+            for piece in
+                super::icon_quads::icon_quads(icon, boxed, fitted.is_some(), icon_size)
+            {
+                icon_padding = icon_padding.max(piece.padding * undo_size);
+                let part = AtlasEntry {
+                    rect: piece.rect,
+                    ..icon.clone()
+                };
+                quad(
+                    buffer,
+                    anchor,
+                    piece.bounds.map(|edge| edge * undo_size),
+                    &part,
+                    height_offset,
+                    symbol.angle,
+                    rotation,
+                );
+            }
         }
     }
     let first_glyph_index = buffer.indices.len();
