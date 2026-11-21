@@ -91,10 +91,13 @@ fn main(in: FragmentInput) -> Output {
             log2(clamped_progress * 1048576.0 + 1.0) / 20.0,
             stepped,
         );
-        let ramp = textureSample(ramp_texture, ramp_sampler, vec2<f32>(ramp_position, 0.5));
-        out_rgb = ramp.rgb;
+        let ramp_width = f32(textureDimensions(ramp_texture).x);
+        let ramp_u = (ramp_position * (ramp_width - 1.0) + 0.5) / ramp_width;
+        let ramp = textureSample(ramp_texture, ramp_sampler, vec2<f32>(ramp_u, 0.5));
+        out_rgb = ramp.rgb / max(ramp.a, 1e-4);
         coverage *= ramp.a;
     }
-    let final_alpha = select(0.0, coverage, visible && coverage >= 0.01);
+    let is_gradient = dash_period.y > 0.5 && dash_period.y <= 1.5;
+    let final_alpha = select(0.0, coverage, visible && (is_gradient || coverage >= 0.01));
     return Output(vec4<f32>(out_rgb, final_alpha));
 }

@@ -35,7 +35,8 @@ pub fn is_stepped(gradient: &StyleProperty<Color>) -> bool {
 }
 
 /// The colour of each of [`RAMP_TEXELS`] positions along the line, or [`STEP_RAMP_TEXELS`] for
-/// steps, straight-alpha 8-bit RGBA. A position whose colour cannot be evaluated is transparent.
+/// steps, premultiplied 8-bit RGBA so linear GPU filtering does not fringe transparent stops.
+/// A position whose colour cannot be evaluated is transparent.
 pub fn ramp(gradient: &StyleProperty<Color>) -> Vec<[u8; 4]> {
     let texels = if is_stepped(gradient) {
         STEP_RAMP_TEXELS
@@ -64,7 +65,7 @@ pub fn ramp(gradient: &StyleProperty<Color>) -> Vec<[u8; 4]> {
                 }
                 StyleProperty::Unsupported(_) => None,
             };
-            let [r, g, b, a] = color.map_or([0.0; 4], |color| color.straight());
+            let [r, g, b, a] = color.map_or([0.0; 4], |color| color.premultiplied());
             [r, g, b, a].map(|channel| (channel * 255.0).round() as u8)
         })
         .collect()

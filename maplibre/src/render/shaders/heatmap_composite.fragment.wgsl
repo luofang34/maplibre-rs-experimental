@@ -20,6 +20,8 @@ var<uniform> heatmap: HeatmapUniforms;
 fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
     let density = textureSample(t_density, s_linear, uv).r;
     // Densities beyond the ramp saturate at its last colour.
-    let color = textureSample(t_ramp, s_linear, vec2<f32>(clamp(density, 0.0, 1.0), 0.5));
+    let ramp_width = f32(textureDimensions(t_ramp).x);
+    let ramp_u = (clamp(density, 0.0, 1.0) * (ramp_width - 1.0) + 0.5) / ramp_width;
+    let color = textureSample(t_ramp, s_linear, vec2<f32>(ramp_u, 0.5));
     return color * heatmap.opacity;
 }

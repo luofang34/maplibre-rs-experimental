@@ -54,3 +54,24 @@ fn a_stepped_ramp_reaches_a_step_at_a_millionth_of_the_line() {
     let at = stepped_progress(first_blue as f64 / (STEP_RAMP_TEXELS - 1) as f64);
     assert!((at - 1e-6).abs() < 1e-8, "the step lands at {at}");
 }
+
+#[test]
+fn translucent_stops_are_stored_premultiplied() {
+    let ramp = ramp(&gradient(serde_json::json!([
+        "interpolate",
+        ["linear"],
+        ["line-progress"],
+        0,
+        "rgba(255, 255, 255, 0)",
+        1,
+        "rgba(255, 255, 255, 1)"
+    ])));
+    assert_eq!(ramp[0], [0, 0, 0, 0]);
+    assert_eq!(ramp[RAMP_TEXELS - 1], [255, 255, 255, 255]);
+    // At the midpoint (alpha ~ 0.5), premultiplied RGB matches alpha (~128).
+    let mid = ramp[128];
+    assert!((i32::from(mid[3]) - 128).abs() <= 2);
+    assert_eq!(mid[0], mid[3]);
+    assert_eq!(mid[1], mid[3]);
+    assert_eq!(mid[2], mid[3]);
+}
