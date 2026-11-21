@@ -184,7 +184,7 @@ fn wrap_shaped_paragraphs(
             continue;
         }
         let any_rtl = para_glyphs.iter().any(|sg| sg.rtl);
-        if max_width <= 0.0 || any_rtl {
+        if max_width < 0.0 || any_rtl {
             let line_start = out_glyphs.len();
             out_glyphs.extend(para_glyphs.into_iter().cloned());
             out_lines.push(line_start..out_glyphs.len());
@@ -258,5 +258,34 @@ fn wrap_ltr_paragraph(
         let start = out_glyphs.len();
         out_glyphs.append(&mut current);
         out_lines.push(start..out_glyphs.len());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fake_glyph(cluster: u32) -> ShapedGlyph {
+        ShapedGlyph {
+            glyph_id: cluster,
+            face_id: 0,
+            x_advance: 10.0,
+            y_advance: 0.0,
+            x_offset: 0.0,
+            y_offset: 0.0,
+            cluster,
+            rtl: false,
+        }
+    }
+
+    #[test]
+    fn max_width_zero_wraps_every_breakable_word_on_shaped_path() {
+        let raw = "one two three";
+        let shaped: Vec<ShapedGlyph> = raw
+            .char_indices()
+            .map(|(byte_idx, _)| fake_glyph(byte_idx as u32))
+            .collect();
+        let (_glyphs, lines) = wrap_shaped_paragraphs(raw, &shaped, 0.0, 0.0);
+        assert_eq!(lines.len(), 3, "each word should wrap onto its own line");
     }
 }

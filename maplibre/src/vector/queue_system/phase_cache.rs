@@ -61,6 +61,7 @@ impl CompiledLayerRule {
         let is_heatmap = layer.type_ == "heatmap";
         let raw_pattern = match &layer.paint {
             Some(LayerPaint::Fill(fill)) => fill.fill_pattern.as_ref(),
+            Some(LayerPaint::Line(line)) => line.line_pattern.as_ref(),
             Some(LayerPaint::FillExtrusion(extrusion)) => extrusion.fill_extrusion_pattern.as_ref(),
             Some(LayerPaint::Background(background)) => background.background_pattern.as_ref(),
             _ => None,

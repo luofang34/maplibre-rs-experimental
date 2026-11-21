@@ -203,29 +203,91 @@ pub(super) fn build_drape_phase(
 /// Color the drape textures start from: the constant background paint, a neutral cartographic
 /// terrain tone when terrain is active without a background layer, or transparent.
 pub(super) fn background_clear_color(style: &Style) -> wgpu::Color {
-    style
+    let Some(layer) = style
         .layers
         .iter()
         .find(|layer| layer.type_ == "background" && !layer.is_hidden())
-        .and_then(|layer| layer.paint.as_ref()?.get_color())
+    else {
+        return if style.terrain.is_some() {
+            wgpu::Color {
+                r: 0.91,
+                g: 0.89,
+                b: 0.85,
+                a: 1.0,
+            }
+        } else {
+            wgpu::Color::TRANSPARENT
+        };
+    };
+    if crate::vector::pattern::names_missing_image(
+        layer.paint.as_ref(),
+        style,
+        style.zoom.unwrap_or(0.0),
+    ) {
+        return wgpu::Color::TRANSPARENT;
+    }
+    layer
+        .paint
+        .as_ref()
+        .and_then(|paint| paint.get_color())
         .map(|color| wgpu::Color {
             r: f64::from(color.color.r),
             g: f64::from(color.color.g),
             b: f64::from(color.color.b),
             a: f64::from(color.alpha),
         })
-        .unwrap_or_else(|| {
-            if style.terrain.is_some() {
-                wgpu::Color {
-                    r: 0.91,
-                    g: 0.89,
-                    b: 0.85,
-                    a: 1.0,
+        .unwrap_or(wgpu::Color::TRANSPARENT)
+}
+
+#[cfg(test)]
+mod background_pattern_tests {
+    use super::background_clear_color;
+    use crate::style::Style;
+
+    #[test]
+    fn flat_terrain_missing_background_pattern_clears_transparent() {
+        let style: Style = serde_json::from_value(serde_json::json!({
+            "version": 8,
+            "sources": {
+                "dem": { "type": "raster-dem", "tiles": ["https://example.test/{z}/{x}/{y}.png"] }
+            },
+            "terrain": { "source": "dem" },
+            "layers": [{
+                "id": "bg",
+                "type": "background",
+                "paint": {
+                    "background-color": "#ff0000",
+                    "background-pattern": ""
                 }
-            } else {
-                wgpu::Color::TRANSPARENT
-            }
-        })
+            }]
+        }))
+        .unwrap_or_else(|_| Style::empty());
+        assert_eq!(background_clear_color(&style), wgpu::Color::TRANSPARENT);
+    }
+
+    #[test]
+    fn missing_line_pattern_is_detected_by_names_missing_image() {
+        let style: Style = serde_json::from_value(serde_json::json!({
+            "version": 8,
+            "sources": {},
+            "layers": [{
+                "id": "road",
+                "type": "line",
+                "source": "s",
+                "paint": {
+                    "line-color": "#ff0000",
+                    "line-dasharray": [2, 2],
+                    "line-pattern": "nonexistent"
+                }
+            }]
+        }))
+        .unwrap_or_else(|_| Style::empty());
+        assert!(crate::vector::pattern::names_missing_image(
+            style.layers[0].paint.as_ref(),
+            &style,
+            5.0,
+        ));
+    }
 }
 
 pub(super) fn encode_drapes(

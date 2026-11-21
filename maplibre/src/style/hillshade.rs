@@ -123,13 +123,17 @@ impl HillshadePaint {
             property
                 .as_ref()
                 .and_then(|property| property.evaluate_at_zoom(zoom))
-                .map_or(vec![default], |list| list.0)
+                .map(|list| list.0)
+                .filter(|list| !list.is_empty())
+                .unwrap_or_else(|| vec![default])
         };
         let colors = |property: &Option<StyleProperty<ColorList>>, default: Color| {
             property
                 .as_ref()
                 .and_then(|property| property.evaluate_at_zoom(zoom))
-                .map_or(vec![default], |list| list.0)
+                .map(|list| list.0)
+                .filter(|list| !list.is_empty())
+                .unwrap_or_else(|| vec![default])
         };
         let mut directions = numbers(&self.hillshade_illumination_direction, 335.0);
         let mut altitudes = numbers(&self.hillshade_illumination_altitude, 45.0);
@@ -144,10 +148,10 @@ impl HillshadePaint {
             .max(shadows.len())
             .max(highlights.len())
             .clamp(1, MAX_LIGHTS);
-        pad(&mut directions, count);
-        pad(&mut altitudes, count);
-        pad(&mut shadows, count);
-        pad(&mut highlights, count);
+        pad(&mut directions, count, 335.0);
+        pad(&mut altitudes, count, 45.0);
+        pad(&mut shadows, count, Color::new(0.0, 0.0, 0.0, 1.0));
+        pad(&mut highlights, count, Color::new(1.0, 1.0, 1.0, 1.0));
         let turn = match self.hillshade_illumination_anchor {
             IlluminationAnchor::Viewport => bearing_radians,
             IlluminationAnchor::Map => 0.0,
@@ -190,7 +194,10 @@ impl HillshadePaint {
     }
 }
 
-fn pad<T: Clone>(list: &mut Vec<T>, count: usize) {
+fn pad<T: Clone>(list: &mut Vec<T>, count: usize, default: T) {
+    if list.is_empty() {
+        list.push(default);
+    }
     list.truncate(count);
     while list.len() < count {
         let last = list[list.len() - 1].clone();

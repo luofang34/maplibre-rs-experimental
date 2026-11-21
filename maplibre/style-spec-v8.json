@@ -5814,8 +5814,8 @@
   },
   "paint_hillshade": {
     "hillshade-illumination-direction": {
-      "type": "number",
-      "default": 335,
+      "type": "numberArray",
+      "default": [335],
       "minimum": 0,
       "maximum": 359,
       "doc": "The direction of the light source used to generate the hillshading with 0 as the top of the viewport if `hillshade-illumination-anchor` is set to `viewport` and due north if `hillshade-illumination-anchor` is set to `map`.",
@@ -5828,6 +5828,21 @@
           "macos": "0.7.0"
         }
       },
+      "expression": {
+        "interpolated": true,
+        "parameters": [
+          "zoom"
+        ]
+      },
+      "property-type": "data-constant"
+    },
+    "hillshade-illumination-altitude": {
+      "type": "numberArray",
+      "default": [45],
+      "minimum": 0,
+      "maximum": 90,
+      "doc": "The altitude of the light source in degrees above the horizon.",
+      "transition": false,
       "expression": {
         "interpolated": true,
         "parameters": [
@@ -5888,8 +5903,8 @@
       "property-type": "data-constant"
     },
     "hillshade-shadow-color": {
-      "type": "color",
-      "default": "#000000",
+      "type": "colorArray",
+      "default": ["#000000"],
       "doc": "The shading color of areas that face away from the light source.",
       "transition": true,
       "sdk-support": {
@@ -5909,8 +5924,8 @@
       "property-type": "data-constant"
     },
     "hillshade-highlight-color": {
-      "type": "color",
-      "default": "#FFFFFF",
+      "type": "colorArray",
+      "default": ["#FFFFFF"],
       "doc": "The shading color of areas that faces towards the light source.",
       "transition": true,
       "sdk-support": {

@@ -152,3 +152,53 @@ fn geometry_across_the_antimeridian_is_far_from_a_feature_beside_it() {
         179.5 * metres_per_degree(-1.0)[0],
     );
 }
+
+#[test]
+fn within_line_inside_one_of_overlapping_polygons_succeeds() {
+    let overlapping_fc = json!({
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[
+                        [0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0], [0.0, 0.0]
+                    ]]
+                }
+            },
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[
+                        [5.0, 0.0], [15.0, 0.0], [15.0, 10.0], [5.0, 10.0], [5.0, 0.0]
+                    ]]
+                }
+            }
+        ]
+    });
+    let area = Geometry::from_geojson(&overlapping_fc).expect("valid FeatureCollection");
+    // Completely inside polygon 1 ([0..10]), even though it crosses polygon 2's boundary at x=5.
+    let line_in_poly1 = Geometry::from_geojson(&json!({
+        "type": "LineString",
+        "coordinates": [[2.0, 5.0], [8.0, 5.0]]
+    }))
+    .expect("valid LineString");
+    assert!(line_in_poly1.is_within(&area));
+
+    // Spans outside any single polygon (x=2..12): must NOT be within.
+    let line_spanning = Geometry::from_geojson(&json!({
+        "type": "LineString",
+        "coordinates": [[2.0, 5.0], [12.0, 5.0]]
+    }))
+    .expect("valid LineString");
+    assert!(!line_spanning.is_within(&area));
+
+    // Distance to a multi-feature FeatureCollection measures the nearest feature.
+    let pt = Geometry::from_geojson(&point_json(16.0, 5.0)).expect("valid Point");
+    assert_metres(
+        pt.distance_to(&area).expect("distance"),
+        1.0 * metres_per_degree(5.0)[0],
+    );
+}

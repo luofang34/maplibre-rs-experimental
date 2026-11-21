@@ -104,14 +104,11 @@ pub(in crate::sdf) fn symbol_elevation(
     zoom: f64,
 ) -> f32 {
     let terrain = elevation(world, layer, feature);
-    if !paint.uses_shared_height() {
+    let follows_ground = paint.height_follows_ground("text");
+    if !paint.uses_shared_height() && follows_ground {
         return terrain;
     }
-    let base = if paint.height_follows_ground("text") {
-        terrain
-    } else {
-        0.0
-    };
+    let base = if follows_ground { terrain } else { 0.0 };
     base + paint.height_offset("text", &feature.data.properties, zoom)
 }
 

@@ -104,6 +104,7 @@ pub(crate) fn per_feature_pattern(paint: &LayerPaint) -> Option<StyleProperty<Pa
 pub(crate) fn names_missing_image(paint: Option<&LayerPaint>, style: &Style, zoom: f64) -> bool {
     let value = match paint {
         Some(LayerPaint::Fill(fill)) => fill.fill_pattern.as_ref(),
+        Some(LayerPaint::Line(line)) => line.line_pattern.as_ref(),
         Some(LayerPaint::FillExtrusion(extrusion)) => extrusion.fill_extrusion_pattern.as_ref(),
         Some(LayerPaint::Background(background)) => background.background_pattern.as_ref(),
         _ => None,

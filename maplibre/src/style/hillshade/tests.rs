@@ -126,3 +126,24 @@ fn hillshade_and_color_relief_resampling_support_constant_stops_and_mutation() {
         other => panic!("expected hillshade paint, got {other:?}"),
     }
 }
+
+#[test]
+fn hillshade_empty_arrays_fall_back_to_defaults_without_panicking() {
+    let hs = hillshade(serde_json::json!({
+        "id": "h",
+        "type": "hillshade",
+        "source": "dem",
+        "paint": {
+            "hillshade-illumination-direction": [],
+            "hillshade-illumination-altitude": [],
+            "hillshade-shadow-color": [],
+            "hillshade-highlight-color": []
+        }
+    }));
+    let illum = hs.illumination(5.0, 0.0);
+    assert_eq!(illum.azimuths.len(), 1);
+    assert!((illum.azimuths[0] - 335.0_f32.to_radians()).abs() < 1e-5);
+    assert!((illum.altitudes[0] - 45.0_f32.to_radians()).abs() < 1e-5);
+    assert_eq!(illum.shadows, vec![[0.0, 0.0, 0.0, 1.0]]);
+    assert_eq!(illum.highlights, vec![[1.0, 1.0, 1.0, 1.0]]);
+}

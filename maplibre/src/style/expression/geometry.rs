@@ -104,11 +104,14 @@ impl Geometry {
                 .any(|polygon| polygon_contains(polygon, *point) == Containment::Inside)
         };
         let line_inside = |line: &Vec<[f64; 2]>| {
-            line.iter().all(inside)
-                && !area.polygons.iter().flatten().any(|ring| {
-                    line.windows(2)
-                        .any(|pair| crosses_ring(ring, pair[0], pair[1]))
-                })
+            area.polygons.iter().any(|polygon| {
+                line.iter()
+                    .all(|point| polygon_contains(polygon, *point) == Containment::Inside)
+                    && !polygon.iter().any(|ring| {
+                        line.windows(2)
+                            .any(|pair| crosses_ring(ring, pair[0], pair[1]))
+                    })
+            })
         };
         self.points.iter().all(inside) && self.lines.iter().all(line_inside)
     }
