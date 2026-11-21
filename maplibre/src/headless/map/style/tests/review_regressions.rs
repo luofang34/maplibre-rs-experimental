@@ -446,7 +446,9 @@ fn line_offset_sharp_corners_render_across_joins_and_signs() {
                 .expect("readback");
 
             let red_pixels = pixels
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .filter(|px| px[0] > 180 && px[1] < 40 && px[2] < 40)
                 .count();
             assert!(

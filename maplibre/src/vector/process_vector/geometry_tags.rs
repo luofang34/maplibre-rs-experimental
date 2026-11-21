@@ -49,7 +49,7 @@ pub(super) fn add_identity_tags(layer: &mut tile::Layer, promote_property: Optio
         feature.tags.extend([type_key, type_value]);
         if promote_property.is_some() {
             if let Some(pk) = promote_key {
-                let promoted_val = feature.tags.chunks_exact(2).find_map(|pair| {
+                let promoted_val = feature.tags.as_chunks::<2>().0.iter().find_map(|pair| {
                     if pair[0] != pk {
                         return None;
                     }
@@ -74,58 +74,6 @@ pub(super) fn add_identity_tags(layer: &mut tile::Layer, promote_property: Optio
             let value = u32::try_from(layer.values.len() - 1).unwrap_or(u32::MAX);
             feature.tags.extend([id_key, value]);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use geozero::mvt::tile;
-
-    use super::*;
-
-    #[test]
-    fn add_identity_tags_uses_promoted_string_id_and_omits_missing() {
-        let mut layer = tile::Layer {
-            version: 2,
-            name: "parks".to_owned(),
-            keys: vec!["slug".to_owned()],
-            values: vec![tile::Value {
-                string_value: Some("central".to_owned()),
-                ..Default::default()
-            }],
-            features: vec![
-                tile::Feature {
-                    id: Some(7),
-                    tags: vec![0, 0],
-                    r#type: Some(3),
-                    geometry: vec![],
-                },
-                tile::Feature {
-                    id: Some(8),
-                    tags: vec![],
-                    r#type: Some(3),
-                    geometry: vec![],
-                },
-            ],
-            extent: Some(4096),
-        };
-        add_identity_tags(&mut layer, Some("slug"));
-        let id_key = layer
-            .keys
-            .iter()
-            .position(|k| k == ID_PROPERTY)
-            .expect("id key") as u32;
-        let f0_id = layer.features[0]
-            .tags
-            .chunks_exact(2)
-            .find_map(|pair| (pair[0] == id_key).then_some(pair[1]))
-            .and_then(|idx| layer.values[idx as usize].string_value.as_deref());
-        assert_eq!(f0_id, Some("central"));
-        let f1_id = layer.features[1]
-            .tags
-            .chunks_exact(2)
-            .find_map(|pair| (pair[0] == id_key).then_some(pair[1]));
-        assert_eq!(f1_id, None, "missing promoted property must not fall back to feature.id");
     }
 }
 
@@ -192,5 +140,64 @@ fn collect(
         }
         Geo::Rect(rect) => out.polygons.push(polygon(&rect.to_polygon())),
         Geo::Triangle(triangle) => out.polygons.push(polygon(&triangle.to_polygon())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use geozero::mvt::tile;
+
+    use super::*;
+
+    #[test]
+    fn add_identity_tags_uses_promoted_string_id_and_omits_missing() {
+        let mut layer = tile::Layer {
+            version: 2,
+            name: "parks".to_owned(),
+            keys: vec!["slug".to_owned()],
+            values: vec![tile::Value {
+                string_value: Some("central".to_owned()),
+                ..Default::default()
+            }],
+            features: vec![
+                tile::Feature {
+                    id: Some(7),
+                    tags: vec![0, 0],
+                    r#type: Some(3),
+                    geometry: vec![],
+                },
+                tile::Feature {
+                    id: Some(8),
+                    tags: vec![],
+                    r#type: Some(3),
+                    geometry: vec![],
+                },
+            ],
+            extent: Some(4096),
+        };
+        add_identity_tags(&mut layer, Some("slug"));
+        let id_key = layer
+            .keys
+            .iter()
+            .position(|k| k == ID_PROPERTY)
+            .expect("id key") as u32;
+        let f0_id = layer.features[0]
+            .tags
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .find_map(|pair| (pair[0] == id_key).then_some(pair[1]))
+            .and_then(|idx| layer.values[idx as usize].string_value.as_deref());
+        assert_eq!(f0_id, Some("central"));
+        let f1_id = layer.features[1]
+            .tags
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .find_map(|pair| (pair[0] == id_key).then_some(pair[1]));
+        assert_eq!(
+            f1_id, None,
+            "missing promoted property must not fall back to feature.id"
+        );
     }
 }

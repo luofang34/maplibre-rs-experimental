@@ -67,16 +67,28 @@ pub(crate) fn offset_polyline(
         return (polyline.to_vec(), anchor_distance);
     }
 
+    struct OffsetSegment {
+        start: [f32; 2],
+        end: [f32; 2],
+        tangent: [f32; 2],
+        normal: [f32; 2],
+    }
+
     // Collect non-degenerate segment tangents and unit normals.
-    let mut segs: Vec<([f32; 2], [f32; 2], [f32; 2], [f32; 2])> = Vec::with_capacity(polyline.len());
+    let mut segs: Vec<OffsetSegment> = Vec::with_capacity(polyline.len());
     for pair in polyline.windows(2) {
         let dx = pair[1][0] - pair[0][0];
         let dy = pair[1][1] - pair[0][1];
         let len = dx.hypot(dy);
         if len > 1e-6 {
-            let t = [dx / len, dy / len];
-            let n = [-t[1], t[0]];
-            segs.push((pair[0], pair[1], t, n));
+            let tangent = [dx / len, dy / len];
+            let normal = [-tangent[1], tangent[0]];
+            segs.push(OffsetSegment {
+                start: pair[0],
+                end: pair[1],
+                tangent,
+                normal,
+            });
         }
     }
     if segs.is_empty() {
@@ -84,7 +96,7 @@ pub(crate) fn offset_polyline(
     }
 
     // Original anchor point in tile coordinates, so we can project it onto the offset polyline.
-    let mut anchor_pt = segs[0].0;
+    let mut anchor_pt = segs[0].start;
     {
         let mut walker = LineWalker::new(polyline);
         if let Some((pt, _)) = walker.point_at(anchor_distance.max(0.0)) {
@@ -95,13 +107,13 @@ pub(crate) fn offset_polyline(
     let miter_limit = offset.abs() * 6.0;
     let mut out: Vec<[f32; 2]> = Vec::with_capacity(segs.len() + 2);
     out.push([
-        segs[0].0[0] + segs[0].3[0] * offset,
-        segs[0].0[1] + segs[0].3[1] * offset,
+        segs[0].start[0] + segs[0].normal[0] * offset,
+        segs[0].start[1] + segs[0].normal[1] * offset,
     ]);
 
     for pair in segs.windows(2) {
-        let (_, vertex, t0, n0) = pair[0];
-        let (_, _, t1, n1) = pair[1];
+        let (vertex, t0, n0) = (pair[0].end, pair[0].tangent, pair[0].normal);
+        let (t1, n1) = (pair[1].tangent, pair[1].normal);
         let det = t0[0] * t1[1] - t0[1] * t1[0];
         if det.abs() < 1e-5 {
             out.push([vertex[0] + n1[0] * offset, vertex[1] + n1[1] * offset]);
@@ -121,8 +133,11 @@ pub(crate) fn offset_polyline(
         }
     }
 
-    if let Some(&(_, end, _, n_last)) = segs.last() {
-        out.push([end[0] + n_last[0] * offset, end[1] + n_last[1] * offset]);
+    if let Some(last) = segs.last() {
+        out.push([
+            last.end[0] + last.normal[0] * offset,
+            last.end[1] + last.normal[1] * offset,
+        ]);
     }
 
     // Project `anchor_pt` onto the offset polyline to obtain the matching anchor arc length.
