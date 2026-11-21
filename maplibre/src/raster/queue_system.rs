@@ -109,11 +109,16 @@ pub fn queue_system(
             let Some(source) = raster_resources.layer_source(&style_layer.id) else {
                 continue;
             };
+            let default_fade = if style.terrain.is_some() {
+                0
+            } else {
+                crate::raster::cross_fade::DEFAULT_RASTER_FADE_DURATION_MS
+            };
             let fade_duration = match &style_layer.paint {
-                Some(LayerPaint::Raster(paint)) => paint
-                    .raster_fade_duration
-                    .unwrap_or(crate::raster::cross_fade::DEFAULT_RASTER_FADE_DURATION_MS),
-                _ => crate::raster::cross_fade::DEFAULT_RASTER_FADE_DURATION_MS,
+                Some(LayerPaint::Raster(paint)) => {
+                    paint.raster_fade_duration.unwrap_or(default_fade)
+                }
+                _ => default_fade,
             };
             view_tile.render_raster_source(source, |source_shape| {
                 if raster_resources
