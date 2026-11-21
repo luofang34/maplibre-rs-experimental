@@ -39,6 +39,7 @@ impl Default for Style {
             feature_state: Default::default(),
             state_templates: Default::default(),
             light_template: None,
+            projection_template: None,
             images: Default::default(),
             revision_state: Default::default(),
             zoom: Some(13.0),

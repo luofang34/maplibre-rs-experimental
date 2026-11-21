@@ -339,3 +339,50 @@ fn fill_extrusion_pitched_acute_linestring_renders_transparent() {
         );
     })
 }
+
+#[test]
+fn projection_global_state_switches_projection_live() {
+    crate::headless::map::test_async::run_async(async {
+        let mut map = vector_map(json!({
+            "version": 8,
+            "center": [0.0, 0.0],
+            "zoom": 0.0,
+            "state": { "proj": { "default": "mercator" } },
+            "projection": { "type": ["global-state", "proj"] },
+            "sources": {
+                "parks": {
+                    "type": "geojson",
+                    "data": {
+                        "type": "FeatureCollection",
+                        "features": [world_box_feature(json!({"kind": "park"}))]
+                    }
+                }
+            },
+            "layers": [
+                {"id": "bg", "type": "background", "paint": {"background-color": "#000000"}},
+                {"id": "park-fill", "type": "fill", "source": "parks",
+                 "paint": {"fill-color": "#00ff00"}}
+            ]
+        }))
+        .await;
+
+        assert_eq!(
+            map.map_context
+                .style
+                .projection
+                .as_ref()
+                .map(|p| &p.projection_type),
+            Some(&ProjectionType::Mercator)
+        );
+        map.map_context.set_global_state("proj", json!("globe"));
+        map.run_frame().expect("frame after projection switch");
+        assert_eq!(
+            map.map_context
+                .style
+                .projection
+                .as_ref()
+                .map(|p| &p.projection_type),
+            Some(&ProjectionType::Globe)
+        );
+    })
+}

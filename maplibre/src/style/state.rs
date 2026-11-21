@@ -72,6 +72,7 @@ impl Style {
     /// layers that share an id are left alone, and templates of layers that are gone are dropped.
     pub fn resolve_global_state(&mut self) -> Vec<String> {
         self.resolve_light();
+        self.resolve_projection();
         let mut counts: HashMap<&str, usize> = HashMap::default();
         for layer in &self.layers {
             *counts.entry(layer.id.as_str()).or_default() += 1;
@@ -180,6 +181,39 @@ impl Style {
             Err(error) => tracing::warn!(%error, "light is invalid once global state is applied"),
         }
     }
+
+    /// Substitutes the current state into the projection specification when it reads global state.
+    fn resolve_projection(&mut self) {
+        let Some(template) = self.projection_template.as_ref() else {
+            return;
+        };
+        let resolved = resolve_projection_json(template, &|key| self.global_state_value(key));
+        if self.projection != resolved {
+            self.projection = resolved;
+            self.bump_revision();
+        }
+    }
+}
+
+/// Resolves a raw `projection` JSON object containing `global-state` references.
+pub(super) fn resolve_projection_json(
+    raw: &Value,
+    lookup: &dyn Fn(&str) -> Value,
+) -> Option<crate::projection::ProjectionSpecification> {
+    let Value::Object(declared) = raw else {
+        return None;
+    };
+    let resolved = declared
+        .iter()
+        .map(|(name, property)| (name.clone(), substitute(property, lookup, true)))
+        .collect();
+    match crate::projection::ProjectionSpecification::from_json_value(&Value::Object(resolved)) {
+        Ok(projection) => Some(projection),
+        Err(error) => {
+            tracing::warn!(%error, "projection is invalid once global state is applied");
+            None
+        }
+    }
 }
 
 /// A layer as declared, with the resolved form it produced, so a later edit is noticed.
@@ -190,7 +224,7 @@ pub struct StateTemplate {
     resolved: Value,
 }
 
-fn reads_global_state(value: &Value) -> bool {
+pub(super) fn reads_global_state(value: &Value) -> bool {
     match value {
         Value::Array(items) => {
             is_global_state_reference(items) || items.iter().any(reads_global_state)

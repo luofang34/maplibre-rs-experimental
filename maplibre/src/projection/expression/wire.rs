@@ -50,13 +50,53 @@ pub(crate) fn parse_projection(value: &Value) -> Result<ProjectionType, Projecti
     let values = value
         .as_array()
         .ok_or_else(|| unsupported("projection must be a name or expression array"))?;
-    if values.len() == 3 && values.first().and_then(Value::as_str) != Some("step") {
-        return parse_transition(values);
-    }
-    match values.first().and_then(Value::as_str) {
-        Some("interpolate") => parse_interpolate(values),
-        Some("step") => parse_step(values),
-        _ => Err(unsupported("unknown projection expression operator")),
+    let fast = if values.len() == 3 && values.first().and_then(Value::as_str) != Some("step") {
+        parse_transition(values)
+    } else {
+        match values.first().and_then(Value::as_str) {
+            Some("interpolate") => parse_interpolate(values),
+            Some("step") => parse_step(values),
+            _ => Err(unsupported("unknown projection expression operator")),
+        }
+    };
+    fast.or_else(|fast_err| parse_dynamic_projection(value).map_err(|_| fast_err))
+}
+
+fn parse_dynamic_projection(value: &Value) -> Result<ProjectionType, ProjectionExpressionError> {
+    use crate::style::{
+        expression::{Expression, ProjectionDefinition},
+        property::PropertyValue,
+    };
+
+    let expression = Expression::parse_property(value, &ProjectionDefinition::spec())
+        .map_err(|error| unsupported(&error.message))?;
+    match expression {
+        Expression::Literal(folded) | Expression::Folded { value: folded, .. } => {
+            let Some(definition) = ProjectionDefinition::from_value(&folded) else {
+                return Err(unsupported("expression did not evaluate to a projection"));
+            };
+            match definition {
+                ProjectionDefinition::Named(name) => parse_projection_type(&name),
+                ProjectionDefinition::Tuple {
+                    from,
+                    to,
+                    transition,
+                }
+                | ProjectionDefinition::Interpolated {
+                    from,
+                    to,
+                    transition,
+                } => ProjectionType::transition(
+                    parse_named(&Value::String(from))?,
+                    parse_named(&Value::String(to))?,
+                    transition,
+                ),
+            }
+        }
+        other => Ok(ProjectionType::Expression(ProjectionExpression::dynamic(
+            value.clone(),
+            other,
+        ))),
     }
 }
 
@@ -212,6 +252,7 @@ fn expression_value(expression: &ProjectionExpression) -> Value {
             append_stops(&mut values, stops);
             Value::Array(values)
         }
+        ProjectionExpressionKind::Dynamic { source, .. } => source.clone(),
     }
 }
 

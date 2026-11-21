@@ -90,7 +90,7 @@ pub struct ProjectionExpression {
     kind: ProjectionExpressionKind,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 enum ProjectionExpressionKind {
     Transition {
         from: NamedProjection,
@@ -105,6 +105,51 @@ enum ProjectionExpressionKind {
         default: NamedProjection,
         stops: Vec<ProjectionStop>,
     },
+    Dynamic {
+        source: serde_json::Value,
+        expression: Box<crate::style::expression::Expression>,
+    },
+}
+
+impl PartialEq for ProjectionExpressionKind {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Transition {
+                    from: a_from,
+                    to: a_to,
+                    transition: a_t,
+                },
+                Self::Transition {
+                    from: b_from,
+                    to: b_to,
+                    transition: b_t,
+                },
+            ) => a_from == b_from && a_to == b_to && a_t == b_t,
+            (
+                Self::Interpolate {
+                    curve: a_curve,
+                    stops: a_stops,
+                },
+                Self::Interpolate {
+                    curve: b_curve,
+                    stops: b_stops,
+                },
+            ) => a_curve == b_curve && a_stops == b_stops,
+            (
+                Self::Step {
+                    default: a_default,
+                    stops: a_stops,
+                },
+                Self::Step {
+                    default: b_default,
+                    stops: b_stops,
+                },
+            ) => a_default == b_default && a_stops == b_stops,
+            (Self::Dynamic { source: a, .. }, Self::Dynamic { source: b, .. }) => a == b,
+            _ => false,
+        }
+    }
 }
 
 impl ProjectionExpression {
@@ -148,6 +193,18 @@ impl ProjectionExpression {
         })
     }
 
+    pub(crate) fn dynamic(
+        source: serde_json::Value,
+        expression: crate::style::expression::Expression,
+    ) -> Self {
+        Self {
+            kind: ProjectionExpressionKind::Dynamic {
+                source,
+                expression: Box::new(expression),
+            },
+        }
+    }
+
     pub(crate) fn globe_transition(&self, zoom: f64) -> f32 {
         if !zoom.is_finite() {
             return 0.0;
@@ -162,6 +219,9 @@ impl ProjectionExpression {
                 interpolate_stops(*curve, stops, zoom)
             }
             ProjectionExpressionKind::Step { default, stops } => step_stops(*default, stops, zoom),
+            ProjectionExpressionKind::Dynamic { expression, .. } => {
+                evaluate_dynamic(expression, zoom)
+            }
         };
         weight as f32
     }
@@ -198,6 +258,41 @@ fn validate_stops(
     Ok(())
 }
 
+fn evaluate_dynamic(expression: &crate::style::expression::Expression, zoom: f64) -> f64 {
+    let context = crate::style::expression::EvaluationContext::at_zoom(zoom);
+    let Ok(value) = expression.evaluate(&context) else {
+        return 0.0;
+    };
+    let Some(definition) = crate::style::expression::ProjectionDefinition::from_value(&value)
+    else {
+        return 0.0;
+    };
+    match definition {
+        crate::style::expression::ProjectionDefinition::Named(name) => globe_weight_of_name(&name),
+        crate::style::expression::ProjectionDefinition::Tuple {
+            from,
+            to,
+            transition,
+        }
+        | crate::style::expression::ProjectionDefinition::Interpolated {
+            from,
+            to,
+            transition,
+        } => {
+            let w0 = globe_weight_of_name(&from);
+            let w1 = globe_weight_of_name(&to);
+            w0 + (w1 - w0) * transition.clamp(0.0, 1.0)
+        }
+    }
+}
+
+fn globe_weight_of_name(name: &str) -> f64 {
+    match name {
+        "globe" | "vertical-perspective" => 1.0,
+        _ => 0.0,
+    }
+}
+
 fn mix_weights(from: NamedProjection, to: NamedProjection, transition: f64) -> f64 {
     from.globe_weight() + (to.globe_weight() - from.globe_weight()) * transition
 }
@@ -211,11 +306,10 @@ fn interpolate_stops(curve: InterpolationCurve, stops: &[ProjectionStop], zoom: 
     }
     for pair in stops.windows(2) {
         if zoom <= pair[1].zoom {
-            let linear = (zoom - pair[0].zoom) / (pair[1].zoom - pair[0].zoom);
             return mix_weights(
                 pair[0].projection,
                 pair[1].projection,
-                interpolation_factor(curve, linear),
+                interpolation_factor(curve, zoom, pair[0].zoom, pair[1].zoom),
             );
         }
     }
@@ -235,11 +329,16 @@ fn step_stops(default: NamedProjection, stops: &[ProjectionStop], zoom: f64) -> 
         )
 }
 
-fn interpolation_factor(curve: InterpolationCurve, linear: f64) -> f64 {
+fn interpolation_factor(curve: InterpolationCurve, zoom: f64, z0: f64, z1: f64) -> f64 {
+    let span = z1 - z0;
+    if span <= 0.0 {
+        return 0.0;
+    }
+    let linear = (zoom - z0) / span;
     match curve {
         InterpolationCurve::Linear => linear,
         InterpolationCurve::Exponential(base) if (base - 1.0).abs() > f64::EPSILON => {
-            (base.powf(linear) - 1.0) / (base - 1.0)
+            (base.powf(zoom - z0) - 1.0) / (base.powf(span) - 1.0)
         }
         InterpolationCurve::Exponential(_) => linear,
         InterpolationCurve::CubicBezier(x1, y1, x2, y2) => {

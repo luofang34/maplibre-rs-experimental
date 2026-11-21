@@ -225,6 +225,23 @@ impl Style {
         let state = parse_state_decl_map(map)?;
         #[cfg(not(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl")))]
         let state = HashMap::default();
+        let global_state = json_value_map_or_empty(map, "globalState")?;
+        let (projection, projection_template) = match map.get("projection") {
+            Some(raw) if !raw.is_null() && super::state::reads_global_state(raw) => {
+                let resolved = super::state::resolve_projection_json(raw, &|key| {
+                    global_state
+                        .get(key)
+                        .or_else(|| state.get(key)?.default.as_ref())
+                        .cloned()
+                        .unwrap_or(Value::Null)
+                });
+                (resolved, Some(raw.clone()))
+            }
+            _ => (
+                parse_opt_section(map, "projection", ProjectionSpecification::from_json_value)?,
+                None,
+            ),
+        };
         Ok(Self {
             version,
             name,
@@ -241,21 +258,18 @@ impl Style {
             bearing: json_opt_f64(map, "bearing")?,
             pitch: json_opt_f64(map, "pitch")?,
             roll: json_opt_f64(map, "roll")?,
-            projection: parse_opt_section(
-                map,
-                "projection",
-                ProjectionSpecification::from_json_value,
-            )?,
+            projection,
             light,
             sky,
             terrain: parse_opt_section(map, "terrain", TerrainSpecification::from_json_value)?,
             transition,
             active_transitions: Default::default(),
             state,
-            global_state: json_value_map_or_empty(map, "globalState")?,
+            global_state,
             feature_state,
             state_templates: HashMap::default(),
             light_template: None,
+            projection_template,
             images: parse_style_images(map)?,
             revision_state: Default::default(),
         })

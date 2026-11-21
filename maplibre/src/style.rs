@@ -148,6 +148,10 @@ pub struct Style {
     #[doc(hidden)]
     #[serde(skip)]
     pub light_template: Option<light::LightSpecification>,
+    /// The raw projection JSON as declared, kept while `global-state` is substituted.
+    #[doc(hidden)]
+    #[serde(skip)]
+    pub projection_template: Option<serde_json::Value>,
     /// Images a host added by name, which `icon-image` can use next to the sprite's own.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub images: HashMap<String, StyleImage>,
@@ -208,6 +212,7 @@ impl Style {
             feature_state: Default::default(),
             state_templates: Default::default(),
             light_template: None,
+            projection_template: None,
             images: Default::default(),
             revision_state: Default::default(),
         }
