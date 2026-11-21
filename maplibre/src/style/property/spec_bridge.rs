@@ -81,6 +81,15 @@ enum RawParsedProperty {
     Unsupported(Arc<UnsupportedProperty>),
 }
 
+fn value_is_finite(value: &Value) -> bool {
+    match value {
+        Value::Number(number) => number.is_finite(),
+        Value::NumberArray(numbers) => numbers.0.iter().all(|n| n.is_finite()),
+        Value::Array(items) => items.iter().all(value_is_finite),
+        _ => true,
+    }
+}
+
 #[inline(never)]
 fn parse_dynamic_property(
     json: &serde_json::Value,
@@ -92,7 +101,9 @@ fn parse_dynamic_property(
         _ => json.clone(),
     };
     match Expression::parse_property(&lowered, spec) {
-        Ok(Expression::Literal(value)) | Ok(Expression::Folded { value, .. }) => {
+        Ok(Expression::Literal(value)) | Ok(Expression::Folded { value, .. })
+            if value_is_finite(&value) =>
+        {
             RawParsedProperty::Value(value)
         }
         Ok(expression) => {

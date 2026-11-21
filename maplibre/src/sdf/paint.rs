@@ -242,4 +242,36 @@ mod tests {
         assert_eq!(uniforms.icon_color, [0.0, 0.0, 0.0, 1.0]);
         assert_eq!(uniforms.text_color, [0.0, 0.0, 0.0, 1.0]);
     }
+
+    #[test]
+    fn nan_text_size_and_numeric_paint_fall_back_to_spec_defaults() {
+        let paint: SymbolPaint = serde_json::from_value(serde_json::json!({
+            "text-size": ["sqrt", -1],
+            "text-opacity": ["sqrt", -1],
+            "icon-size": ["/", 0, 0]
+        }))
+        .unwrap_or_default();
+        let uniforms = SymbolUniforms::new(&paint, 5.0, [1, 1]);
+        assert_eq!(uniforms.text[0], 16.0);
+        assert_eq!(uniforms.text[3], 1.0);
+        assert_eq!(uniforms.icon[0], 1.0);
+
+        let data_paint: SymbolPaint = serde_json::from_value(serde_json::json!({
+            "text-size": ["sqrt", ["get", "x"]],
+            "text-opacity": ["/", 0, ["get", "z"]]
+        }))
+        .unwrap_or_default();
+        let mut props = FeatureProperties::default();
+        props.insert(
+            "x".to_string(),
+            crate::style::expression::Value::Number(-4.0),
+        );
+        props.insert(
+            "z".to_string(),
+            crate::style::expression::Value::Number(0.0),
+        );
+        let [_, _, numbers] = feature_style(&data_paint, "text", &props, 5.0);
+        assert_eq!(numbers[0], 16.0);
+        assert_eq!(numbers[3], 1.0);
+    }
 }

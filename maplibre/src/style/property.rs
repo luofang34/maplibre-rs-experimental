@@ -42,11 +42,15 @@ impl PropertyValue for NumberList {
 
     fn from_value(value: &Value) -> Option<Self> {
         match value {
-            Value::NumberArray(numbers) => Some(Self(numbers.0.clone())),
-            Value::Number(number) => Some(Self(vec![*number])),
+            Value::NumberArray(numbers) => numbers
+                .0
+                .iter()
+                .all(|n| n.is_finite())
+                .then(|| Self(numbers.0.clone())),
+            Value::Number(number) => number.is_finite().then(|| Self(vec![*number])),
             Value::Array(items) => items
                 .iter()
-                .map(Value::as_number)
+                .map(|item| item.as_number().filter(|n| n.is_finite()))
                 .collect::<Option<Vec<f64>>>()
                 .map(Self),
             _ => None,
@@ -112,7 +116,11 @@ impl PropertyValue for f32 {
     }
 
     fn from_value(value: &Value) -> Option<Self> {
-        value.as_number().map(|number| number as f32)
+        value
+            .as_number()
+            .filter(|number| number.is_finite())
+            .map(|number| number as f32)
+            .filter(|number| number.is_finite())
     }
 }
 
@@ -122,7 +130,7 @@ impl PropertyValue for f64 {
     }
 
     fn from_value(value: &Value) -> Option<Self> {
-        value.as_number()
+        value.as_number().filter(|number| number.is_finite())
     }
 }
 
@@ -170,9 +178,9 @@ impl PropertyValue for [f64; 3] {
     fn from_value(value: &Value) -> Option<Self> {
         match value {
             Value::Array(items) if items.len() == 3 => Some([
-                items[0].as_number()?,
-                items[1].as_number()?,
-                items[2].as_number()?,
+                items[0].as_number().filter(|n| n.is_finite())?,
+                items[1].as_number().filter(|n| n.is_finite())?,
+                items[2].as_number().filter(|n| n.is_finite())?,
             ]),
             _ => None,
         }
@@ -374,5 +382,57 @@ impl<'de, T: PropertyValue> Deserialize<'de> for StyleProperty<T> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let json = serde_json::Value::deserialize(deserializer)?;
         Ok(Self::parse(&json))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{NumberList, StyleProperty};
+    use crate::style::expression::{FeatureProperties, Value};
+
+    #[test]
+    fn non_finite_constant_folded_expressions_evaluate_to_none_and_stay_valid() {
+        let nan_f32 = StyleProperty::<f32>::parse(&json!(["sqrt", -1]));
+        assert!(
+            matches!(nan_f32, StyleProperty::Expression(_)),
+            "folded NaN must remain a valid Expression, not Constant(NaN) or Unsupported"
+        );
+        assert_eq!(nan_f32.evaluate_at_zoom(5.0), None);
+
+        let inf_f64 = StyleProperty::<f64>::parse(&json!(["/", 1, 0]));
+        assert!(matches!(inf_f64, StyleProperty::Expression(_)));
+        assert_eq!(inf_f64.evaluate_at_zoom(5.0), None);
+
+        let nan_vec3 = StyleProperty::<[f64; 3]>::parse(&json!(["literal", [1.0, 2.0, 3.0]]));
+        assert_eq!(nan_vec3.evaluate_at_zoom(5.0), Some([1.0, 2.0, 3.0]));
+        let nan_vec3_bad =
+            StyleProperty::<[f64; 3]>::parse(&json!(["array", "number", 3, ["get", "v"]]));
+        let mut props = FeatureProperties::default();
+        props.insert(
+            "v".to_string(),
+            Value::Array(vec![
+                Value::Number(1.0),
+                Value::Number(f64::NAN),
+                Value::Number(3.0),
+            ]),
+        );
+        assert_eq!(nan_vec3_bad.evaluate_for(&props, 5.0), None);
+
+        let nan_list = StyleProperty::<NumberList>::parse(&json!(["sqrt", -1]));
+        assert_eq!(nan_list.evaluate_at_zoom(5.0), None);
+    }
+
+    #[test]
+    fn data_driven_nan_falls_back_while_finite_values_succeed() {
+        let prop = StyleProperty::<f32>::parse(&json!(["sqrt", ["get", "x"]]));
+        let mut neg = FeatureProperties::default();
+        neg.insert("x".to_string(), Value::Number(-1.0));
+        assert_eq!(prop.evaluate_for(&neg, 5.0), None);
+
+        let mut pos = FeatureProperties::default();
+        pos.insert("x".to_string(), Value::Number(9.0));
+        assert_eq!(prop.evaluate_for(&pos, 5.0), Some(3.0));
     }
 }
