@@ -17,30 +17,36 @@ pub(super) fn reads_feature_inputs(layer: &StyleLayer) -> bool {
 }
 
 /// The GeoJSON with each feature's geometry, id and geometry type also written into its
-/// properties.
-pub(super) fn with_geometry_property(geojson: &Value) -> Value {
+/// properties, respecting `promoteId` and `generateId`.
+pub(super) fn with_geometry_property(
+    geojson: &Value,
+    promoted: Option<&str>,
+    generate_id: bool,
+) -> Value {
     match geojson.get("type").and_then(Value::as_str) {
         Some("FeatureCollection") => {
             let mut collection = geojson.clone();
             if let Some(features) = collection.get_mut("features").and_then(Value::as_array_mut) {
-                features.iter_mut().for_each(annotate);
+                for (index, feature) in features.iter_mut().enumerate() {
+                    annotate(feature, promoted, generate_id.then_some(index));
+                }
             }
             collection
         }
         Some("Feature") => {
             let mut feature = geojson.clone();
-            annotate(&mut feature);
+            annotate(&mut feature, promoted, generate_id.then_some(0));
             feature
         }
         _ => {
             let mut feature = json!({"type": "Feature", "properties": {}, "geometry": geojson});
-            annotate(&mut feature);
+            annotate(&mut feature, promoted, generate_id.then_some(0));
             feature
         }
     }
 }
 
-fn annotate(feature: &mut Value) {
+fn annotate(feature: &mut Value, promoted: Option<&str>, generated: Option<usize>) {
     let Some(geometry) = feature.get("geometry") else {
         return;
     };
@@ -55,11 +61,22 @@ fn annotate(feature: &mut Value) {
             Value::from(GeometryType::from_geojson(kind).name()),
         ),
     ];
-    if let Some(id) = feature
-        .get("id")
-        .filter(|id| id.is_number() || id.is_string())
-    {
-        added.push((ID_PROPERTY, id.clone()));
+    let resolved_id = if let Some(prop) = promoted {
+        feature
+            .get("properties")
+            .and_then(|props| props.get(prop))
+            .filter(|id| id.is_number() || id.is_string())
+            .cloned()
+    } else if let Some(index) = generated {
+        Some(Value::from(index as u64))
+    } else {
+        feature
+            .get("id")
+            .filter(|id| id.is_number() || id.is_string())
+            .cloned()
+    };
+    if let Some(id) = resolved_id {
+        added.push((ID_PROPERTY, id));
     }
     if let Some(object) = feature.as_object_mut() {
         let properties = object.entry("properties").or_insert_with(|| json!({}));

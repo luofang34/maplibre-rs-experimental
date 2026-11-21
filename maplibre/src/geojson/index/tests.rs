@@ -121,7 +121,8 @@ fn identities_follow_id_promote_id_and_generate_id() {
     assert_eq!(ids(json!({})), [Some(7), None, None]);
     assert_eq!(
         ids(json!({"generateId": true})),
-        [Some(7), Some(1), Some(2)]
+        [Some(0), Some(1), Some(2)],
+        "generateId overwrites any existing feature.id per spec"
     );
     assert_eq!(
         ids(json!({"promoteId": "pid"})),
@@ -130,7 +131,8 @@ fn identities_follow_id_promote_id_and_generate_id() {
     );
     assert_eq!(
         ids(json!({"promoteId": {"_geojson": "pid"}, "generateId": true})),
-        [Some(40), Some(41), Some(2)]
+        [Some(40), Some(41), None],
+        "promoteId takes precedence and does not fall back to generateId when missing"
     );
     assert_eq!(
         source(json!({"promoteId": "pid"})).promote_id,

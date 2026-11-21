@@ -108,11 +108,13 @@ pub(crate) fn resolve_geojson_state_id(
             .and_then(FeatureId::from_json)
             .map(FeatureId::into_string);
     }
+    if let Some(idx) = generated {
+        return Some(idx.to_string());
+    }
     feature
         .get("id")
         .and_then(FeatureId::from_json)
         .map(FeatureId::into_string)
-        .or_else(|| generated.map(|idx| idx.to_string()))
 }
 
 /// Memoizes synchronized `Arc<FeatureProperties>` maps within a batch while keeping the original

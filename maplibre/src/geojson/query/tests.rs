@@ -4,7 +4,10 @@ use std::sync::Arc;
 use serde_json::{json, Value};
 
 use super::{SourceFeature, SourceQueryError, SourceQueryOptions};
-use crate::style::{source::GeoJsonData, Style};
+use crate::{
+    query::QueriedFeatureId,
+    style::{source::GeoJsonData, Style},
+};
 
 fn style(source: Value) -> Style {
     serde_json::from_value(json!({"version": 8,
@@ -32,8 +35,12 @@ fn places() -> Style {
     )
 }
 
-fn ids(found: &[SourceFeature]) -> Vec<Option<u64>> {
-    found.iter().map(|feature| feature.id).collect()
+fn ids(found: &[SourceFeature]) -> Vec<Option<QueriedFeatureId>> {
+    found.iter().map(|feature| feature.id.clone()).collect()
+}
+
+fn num(n: u64) -> Option<QueriedFeatureId> {
+    Some(QueriedFeatureId::Number(n))
 }
 
 #[test]
@@ -41,7 +48,7 @@ fn every_feature_comes_back_in_document_order_with_its_attributes() {
     let found = places()
         .query_source_features("places", &SourceQueryOptions::default())
         .expect("query");
-    assert_eq!(ids(&found), [Some(1), Some(2), Some(4)]);
+    assert_eq!(ids(&found), [num(1), num(2), num(4)]);
     assert_eq!(found[0].source, "places");
     assert_eq!(found[0].source_layer, "_geojson");
     assert_eq!(found[0].geometry_type, "Point");
@@ -63,10 +70,10 @@ fn filters_use_the_legacy_and_the_expression_syntax_and_geometry_type() {
             )
             .expect("query"))
     };
-    assert_eq!(query(json!(["==", "kind", "town"])), [Some(1), Some(4)]);
-    assert_eq!(query(json!([">", ["get", "rank"], 4])), [Some(2), Some(4)]);
-    assert_eq!(query(json!(["==", "$type", "LineString"])), [Some(2)]);
-    assert_eq!(query(json!(["==", "$id", 4])), [Some(4)]);
+    assert_eq!(query(json!(["==", "kind", "town"])), [num(1), num(4)]);
+    assert_eq!(query(json!([">", ["get", "rank"], 4])), [num(2), num(4)]);
+    assert_eq!(query(json!(["==", "$type", "LineString"])), [num(2)]);
+    assert_eq!(query(json!(["==", "$id", 4])), [num(4)]);
     assert!(query(json!(["==", "kind", "village"])).is_empty());
 }
 
@@ -91,20 +98,64 @@ fn only_the_geojson_layer_can_be_named_as_the_source_layer() {
 
 #[test]
 fn ids_follow_promote_id_and_generate_id() {
-    let style = style(
+    let style_promoted = style(
         json!({"type": "geojson", "promoteId": "code", "generateId": true,
         "data": {"type": "FeatureCollection", "features": [
-            {"type": "Feature", "properties": {"code": "a"}, "geometry": {"type": "Point", "coordinates": [0, 0]}},
-            {"type": "Feature", "properties": {}, "geometry": {"type": "Point", "coordinates": [1, 1]}}]}}),
+            {"type": "Feature", "id": 99, "properties": {"code": "a"}, "geometry": {"type": "Point", "coordinates": [0, 0]}},
+            {"type": "Feature", "id": 100, "properties": {}, "geometry": {"type": "Point", "coordinates": [1, 1]}}]}}),
     );
-    let found = style
+    let found = style_promoted
         .query_source_features("places", &SourceQueryOptions::default())
         .expect("query");
     assert_eq!(
         ids(&found),
-        [Some(0), Some(1)],
-        "a string id is not carried into tiles, so a source query reports the generated one"
+        [Some(QueriedFeatureId::String("a".into())), None],
+        "promoteId preserves string IDs and does not fall back to feature.id or generateId when missing"
     );
+
+    let style_gen = style(
+        json!({"type": "geojson", "generateId": true,
+        "data": {"type": "FeatureCollection", "features": [
+            {"type": "Feature", "id": 99, "properties": {}, "geometry": {"type": "Point", "coordinates": [0, 0]}},
+            {"type": "Feature", "properties": {}, "geometry": {"type": "Point", "coordinates": [1, 1]}}]}}),
+    );
+    let gen_found = style_gen
+        .query_source_features("places", &SourceQueryOptions::default())
+        .expect("query");
+    assert_eq!(
+        ids(&gen_found),
+        [num(0), num(1)],
+        "generateId overwrites existing feature.id per spec"
+    );
+}
+
+#[test]
+fn source_filter_is_applied_and_invalid_source_filter_returns_empty() {
+    let filtered = style(json!({
+        "type": "geojson",
+        "filter": ["==", ["get", "kind"], "town"],
+        "data": {"type": "FeatureCollection", "features": [
+            feature(1, "town", 2, point([0.0, 0.0])),
+            feature(2, "city", 9, point([1.0, 1.0])),
+            feature(4, "town", 5, point([2.0, 2.0]))
+        ]}
+    }));
+    let found = filtered
+        .query_source_features("places", &SourceQueryOptions::default())
+        .expect("query");
+    assert_eq!(ids(&found), [num(1), num(4)]);
+
+    let invalid = style(json!({
+        "type": "geojson",
+        "filter": 7,
+        "data": {"type": "FeatureCollection", "features": [
+            feature(1, "town", 2, point([0.0, 0.0]))
+        ]}
+    }));
+    let empty = invalid
+        .query_source_features("places", &SourceQueryOptions::default())
+        .expect("invalid source filter handled cleanly");
+    assert!(empty.is_empty());
 }
 
 #[test]

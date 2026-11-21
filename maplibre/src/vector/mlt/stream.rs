@@ -174,8 +174,12 @@ pub(super) fn props_for_style(
                     GEOMETRY_TYPE_PROPERTY.to_owned(),
                     Value::String(gtype.name().to_owned()),
                 );
-                if let Some(id) = feat.id() {
-                    map.insert(ID_PROPERTY.to_owned(), Value::Number(id as f64));
+                if let Some(id_val) = crate::query::resolve_effective_expr_id(
+                    feat.id(),
+                    &map,
+                    state_ctx.and_then(|c| c.promote_property.as_deref()),
+                ) {
+                    map.insert(ID_PROPERTY.to_owned(), id_val);
                 }
             }
             let text = lonlat_i32(feat.geometry(), coords, extent)
@@ -214,8 +218,12 @@ pub(super) fn props_for_style(
                 GEOMETRY_TYPE_PROPERTY.to_owned(),
                 Value::String(gtype.name().to_owned()),
             );
-            if let Some(id_val) = id {
-                map.insert(ID_PROPERTY.to_owned(), Value::Number(id_val as f64));
+            if let Some(id_val) = crate::query::resolve_effective_expr_id(
+                id,
+                &map,
+                state_ctx.and_then(|c| c.promote_property.as_deref()),
+            ) {
+                map.insert(ID_PROPERTY.to_owned(), id_val);
             }
         }
         if let Some(ctx) = state_ctx {

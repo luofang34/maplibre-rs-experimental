@@ -30,7 +30,7 @@ async fn a_rendered_polygon_is_found_under_the_screen_center_with_its_properties
     assert_eq!(found[0].layer, "area");
     assert_eq!(found[0].source.as_deref(), Some("shapes"));
     assert_eq!(found[0].geometry_type, "Polygon");
-    assert_eq!(found[0].id, Some(7));
+    assert_eq!(found[0].id, Some(crate::query::QueriedFeatureId::Number(7)));
     assert_eq!(found[0].properties["name"], "world");
 }
 

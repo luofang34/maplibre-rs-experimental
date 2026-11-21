@@ -67,11 +67,13 @@ fn resolve_numeric_id(
     promoted: Option<&str>,
     generated: Option<usize>,
 ) -> Option<u64> {
-    promoted
-        .and_then(|name| props.get(name))
-        .and_then(integer_id_expr)
-        .or_else(|| raw_id.as_u64())
-        .or_else(|| generated.map(|idx| idx as u64))
+    if let Some(name) = promoted {
+        return props.get(name).and_then(integer_id_expr);
+    }
+    if let Some(idx) = generated {
+        return Some(idx as u64);
+    }
+    raw_id.as_u64()
 }
 
 #[inline]

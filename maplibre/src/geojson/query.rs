@@ -10,14 +10,10 @@ use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
 
-use super::{
-    index::numeric_feature_id,
-    update::{feature_list, promoted_property},
-};
+use super::update::{feature_list, promoted_property};
 use crate::{
     context::MapContext,
     style::{
-        expression::Value as StyleValue,
         filter::{properties_from_json, FeatureContext, Filter, FilterError, GeometryType},
         source::{GeoJsonData, Source, GEOJSON_LAYER},
         Style,
@@ -40,9 +36,8 @@ pub struct SourceFeature {
     pub source: String,
     /// The `_geojson` layer name.
     pub source_layer: String,
-    /// The feature id as tiles carry it: a whole number from the promoted property or `id`, or
-    /// the position in the document with `generateId`.
-    pub id: Option<u64>,
+    /// The feature id (numeric or string, respecting `promoteId` and `generateId`).
+    pub id: Option<crate::query::QueriedFeatureId>,
     /// The feature's own properties.
     pub properties: BTreeMap<String, Value>,
     /// The geometry type name, such as `Point` or `MultiPolygon`.
@@ -129,6 +124,20 @@ impl Style {
         {
             return Ok(Vec::new());
         }
+        let source_filter = match source.filter.as_ref() {
+            Some(raw) => match Filter::parse(raw) {
+                Ok(parsed) => Some(parsed),
+                Err(error) => {
+                    tracing::warn!(
+                        source = source_name,
+                        %error,
+                        "invalid GeoJSON source filter; query returns no features"
+                    );
+                    return Ok(Vec::new());
+                }
+            },
+            None => None,
+        };
         let promoted = promoted_property(source);
         let features = feature_list(document);
         let mut found = Vec::new();
@@ -140,20 +149,30 @@ impl Style {
                 .get("type")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
-            let id = numeric_feature_id(
-                feature,
-                promoted.as_deref(),
-                source.generate_id.then_some(position),
-            );
-            if let Some(filter) = &filter {
+            let id = if let Some(prop) = promoted.as_deref() {
+                feature
+                    .get("properties")
+                    .and_then(|props| props.get(prop))
+                    .and_then(crate::query::QueriedFeatureId::from_json)
+            } else if source.generate_id {
+                Some(crate::query::QueriedFeatureId::Number(position as u64))
+            } else {
+                feature
+                    .get("id")
+                    .and_then(crate::query::QueriedFeatureId::from_json)
+            };
+            if source_filter.is_some() || filter.is_some() {
                 let properties = properties_from_json(feature.get("properties"));
-                let passes = filter.evaluate(&FeatureContext {
+                let ctx = FeatureContext {
                     properties: &properties,
                     geometry_type: GeometryType::from_geojson(geometry_type),
-                    id: id.map(|id| StyleValue::from_json(&Value::from(id))),
+                    id: id.as_ref().map(crate::query::QueriedFeatureId::to_expr_value),
                     zoom: 0.0,
-                });
-                if !passes {
+                };
+                if source_filter.as_ref().is_some_and(|sf| !sf.evaluate(&ctx)) {
+                    continue;
+                }
+                if filter.as_ref().is_some_and(|qf| !qf.evaluate(&ctx)) {
                     continue;
                 }
             }

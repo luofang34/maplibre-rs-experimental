@@ -39,7 +39,11 @@ pub(crate) fn process_layer<T: VectorTransferables, C: Context>(
         super::geometry_tags::add_geometry_tags(layer.to_mut(), request.coords);
     }
     if crate::style::expression::layer_reads_identity(style) && !layer.features.is_empty() {
-        super::geometry_tags::add_identity_tags(layer.to_mut());
+        let promote_prop = context
+            .promote_id
+            .as_ref()
+            .and_then(|p| p.property_for(Some(&layer.name)));
+        super::geometry_tags::add_identity_tags(layer.to_mut(), promote_prop);
     }
     if matches!(style.paint, Some(LayerPaint::FillExtrusion(_)))
         && layer.keys.iter().any(|key| key == "hide_3d")

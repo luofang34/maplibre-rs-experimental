@@ -217,6 +217,10 @@ pub struct GeoJsonTileRequest {
     /// Pixels of a 512-pixel tile that the geometry extends past the tile's edge, when the source
     /// sets it; without it the polygons of an extrusion are not clipped to the tile.
     pub buffer: Option<u32>,
+    /// Whether the GeoJSON source assigns sequential feature ids (`generateId: true`).
+    pub generate_id: bool,
+    /// Optional feature property promoted to feature id (`promoteId`).
+    pub promote_id: Option<String>,
 }
 
 impl GeoJsonTileRequest {
@@ -300,11 +304,14 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
     context: &C,
 ) -> Result<(), ProcessGeoJsonError> {
     let coords = request.coords;
+    let promoted = request.promote_id.as_deref();
     let with_geometry = request
         .layers
         .iter()
         .any(geometry_property::reads_feature_inputs)
-        .then(|| geometry_property::with_geometry_property(geojson_value));
+        .then(|| {
+            geometry_property::with_geometry_property(geojson_value, promoted, request.generate_id)
+        });
 
     for style_layer in &request.layers {
         let matches_source = style_layer
@@ -360,7 +367,8 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                     &request.projection,
                     (request.style_zoom(), request.overscaling(), request.buffer),
                 );
-                tessellator.source_ids = index::feature_ids(&filtered);
+                tessellator.source_ids =
+                    index::feature_ids_with(&filtered, promoted, request.generate_id);
                 let mut projecting = ProjectingTessellator::new(coords, tessellator);
 
                 if let Err(e) = value_reader::process_geojson_value(&filtered, &mut projecting) {
@@ -416,7 +424,8 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
                 let mut tessellator =
                     TextTessellator::with_assets(symbol_paint.clone(), zoom, atlas.clone());
                 tessellator.overscaling = request.overscaling();
-                tessellator.source_ids = index::feature_ids(&filtered);
+                tessellator.source_ids =
+                    index::feature_ids_with(&filtered, promoted, request.generate_id);
                 let mut projecting = ProjectingTessellator::new(coords, tessellator);
 
                 if let Err(e) = value_reader::process_geojson_value(&filtered, &mut projecting) {
@@ -465,7 +474,13 @@ pub fn process_geojson_features<T: VectorTransferables, C: Context>(
 
     query_index::send::<T, C>(
         geojson_value,
-        (coords, &request.source_name, request.buffer),
+        (
+            coords,
+            &request.source_name,
+            request.buffer,
+            promoted,
+            request.generate_id,
+        ),
         context,
     )?;
     context

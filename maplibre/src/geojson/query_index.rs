@@ -47,10 +47,16 @@ fn within_tile(
 /// fills, lines and extrusions as they find a vector tile's.
 pub(super) fn send<T: VectorTransferables, C: Context>(
     geojson_value: &serde_json::Value,
-    (coords, source, buffer): (WorldTileCoords, &str, Option<u32>),
+    (coords, source, buffer, promoted, generate_id): (
+        WorldTileCoords,
+        &str,
+        Option<u32>,
+        Option<&str>,
+        bool,
+    ),
     context: &C,
 ) -> Result<(), ProcessGeoJsonError> {
-    let ids = super::index::feature_ids(geojson_value);
+    let ids = super::index::feature_ids_with(geojson_value, promoted, generate_id);
     let mut index = IndexProcessor::new();
     index.begin_layer(GEOJSON_LAYER, ids);
     let mut projecting = ProjectingTessellator::new(coords, index);

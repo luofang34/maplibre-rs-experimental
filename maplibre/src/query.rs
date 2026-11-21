@@ -46,6 +46,117 @@ use tiles::{candidates_in, tiles_in, QueryTile};
 /// Deepest tile zoom a query looks at.
 const MAX_QUERY_ZOOM: i32 = 22;
 
+/// A feature identifier returned by [`query_rendered_features`] or source queries: a non-negative
+/// integer or a string (such as a string `promoteId` or GeoJSON string `id`).
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum QueriedFeatureId {
+    /// Whole-number feature identifier.
+    Number(u64),
+    /// String feature identifier.
+    String(String),
+}
+
+impl QueriedFeatureId {
+    /// Parses a JSON feature id or promoted property value.
+    pub fn from_json(value: &serde_json::Value) -> Option<Self> {
+        if let Some(n) = value.as_u64() {
+            return Some(Self::Number(n));
+        }
+        if let Some(n) = value.as_f64() {
+            if n >= 0.0 && n.fract() == 0.0 && n < 9.0e15 {
+                return Some(Self::Number(n as u64));
+            }
+            if n.is_finite() {
+                return Some(Self::String(crate::style::expression::js_number(n)));
+            }
+        }
+        value.as_str().map(|s| Self::String(s.to_owned()))
+    }
+
+    /// Parses an evaluated expression value into a feature identifier.
+    pub(crate) fn from_expr_value(value: &Value) -> Option<Self> {
+        match value {
+            Value::Number(n) if *n >= 0.0 && n.fract() == 0.0 && *n < 9.0e15 => {
+                Some(Self::Number(*n as u64))
+            }
+            Value::Number(n) if n.is_finite() => {
+                Some(Self::String(crate::style::expression::js_number(*n)))
+            }
+            Value::String(s) => Some(Self::String(s.clone())),
+            _ => None,
+        }
+    }
+
+    /// Converts this identifier into an expression [`Value`] for `["id"]` / `$id` filters.
+    pub(crate) fn to_expr_value(&self) -> Value {
+        match self {
+            Self::Number(n) => Value::Number(*n as f64),
+            Self::String(s) => Value::String(s.clone()),
+        }
+    }
+}
+
+impl From<u64> for QueriedFeatureId {
+    fn from(value: u64) -> Self {
+        Self::Number(value)
+    }
+}
+
+impl From<String> for QueriedFeatureId {
+    fn from(value: String) -> Self {
+        Self::String(value)
+    }
+}
+
+impl From<&str> for QueriedFeatureId {
+    fn from(value: &str) -> Self {
+        Self::String(value.to_owned())
+    }
+}
+
+impl PartialEq<u64> for QueriedFeatureId {
+    fn eq(&self, other: &u64) -> bool {
+        matches!(self, Self::Number(n) if n == other)
+    }
+}
+
+impl PartialEq<&str> for QueriedFeatureId {
+    fn eq(&self, other: &&str) -> bool {
+        matches!(self, Self::String(s) if s == other)
+    }
+}
+
+/// Resolves the effective expression `["id"]` / `$id` value for a feature, respecting `promoteId`.
+/// When `promote_property` is `Some`, it overrides `raw_id` without falling back to it.
+pub(crate) fn resolve_effective_expr_id(
+    raw_id: Option<u64>,
+    properties: &crate::style::expression::FeatureProperties,
+    promote_property: Option<&str>,
+) -> Option<Value> {
+    if let Some(prop) = promote_property {
+        return match properties.get(prop) {
+            Some(Value::String(s)) => Some(Value::String(s.clone())),
+            Some(Value::Number(n)) if n.is_finite() => Some(Value::Number(*n)),
+            _ => None,
+        };
+    }
+    raw_id.map(|id| Value::Number(id as f64))
+}
+
+fn source_promote_property<'a>(
+    style: &'a Style,
+    source: Option<&str>,
+    source_layer: &str,
+) -> Option<&'a str> {
+    let promote = match style.sources.get(source?)? {
+        crate::style::source::Source::Vector(v) => v.promote_id.as_ref()?,
+        crate::style::source::Source::GeoJson(g) => g.promote_id.as_ref()?,
+        _ => return None,
+    };
+    promote.property_for(Some(source_layer))
+}
+
 /// A feature drawn by a style layer, in the shape of GL JS `MapGeoJSONFeature`.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct QueriedFeature {
@@ -55,8 +166,8 @@ pub struct QueriedFeature {
     pub source: Option<String>,
     /// Layer inside the source.
     pub source_layer: String,
-    /// The feature's id, when the source assigned a whole-number one.
-    pub id: Option<u64>,
+    /// The feature's id (numeric or string, respecting `promoteId`).
+    pub id: Option<QueriedFeatureId>,
     /// The feature's attributes.
     pub properties: BTreeMap<String, serde_json::Value>,
     /// Runtime `feature-state` entries currently assigned to this feature.
@@ -73,7 +184,7 @@ impl From<RenderedSymbol> for QueriedFeature {
             layer: symbol.layer,
             source: symbol.source,
             source_layer: symbol.source_layer,
-            id: symbol.id,
+            id: symbol.id.map(QueriedFeatureId::Number),
             properties: symbol.properties,
             state: symbol.state,
             geometry_type: symbol.geometry_type.name(),
@@ -106,7 +217,18 @@ pub fn query_rendered_features(
                 .iter()
                 .find(|layer| layer.id == symbol.layer)
                 .map_or(0, |layer| layer.index);
-            (index, None, QueriedFeature::from(symbol))
+            let mut feature = QueriedFeature::from(symbol);
+            if let Some(prop) = source_promote_property(
+                style,
+                feature.source.as_deref(),
+                &feature.source_layer,
+            ) {
+                feature.id = feature
+                    .properties
+                    .get(prop)
+                    .and_then(QueriedFeatureId::from_json);
+            }
+            (index, None, feature)
         })
         .collect();
     found.extend(vector_features(
@@ -137,6 +259,7 @@ struct Search<'a> {
     /// Whether the query box surrounds the entire visible globe disc in space.
     whole_visible_hemisphere: bool,
     world: &'a World,
+    style: &'a Style,
     resolved: &'a ResolvedFrameView,
     terrain_index: Option<&'a TerrainCoverageIndex>,
 }
@@ -240,6 +363,7 @@ fn vector_features(
         ground,
         whole_visible_hemisphere,
         world,
+        style,
         resolved: &resolved,
         terrain_index: terrain_index.as_deref(),
     };
@@ -349,7 +473,16 @@ fn collect(
         ExactGeometry::LineString(_) => (GeometryType::LineString, "LineString"),
         ExactGeometry::Point(_) => (GeometryType::Point, "Point"),
     };
-    let id = geometry.id.map(|id| Value::Number(id as f64));
+    let promote_prop = source_promote_property(search.style, source, &geometry.source_layer);
+    let queried_id = if let Some(prop) = promote_prop {
+        geometry
+            .properties
+            .get(prop)
+            .and_then(QueriedFeatureId::from_expr_value)
+    } else {
+        geometry.id.map(QueriedFeatureId::Number)
+    };
+    let id = queried_id.as_ref().map(QueriedFeatureId::to_expr_value);
     let context = FeatureContext {
         properties: &geometry.properties,
         geometry_type: kind,
@@ -440,8 +573,8 @@ fn collect(
             _ if flat_hit(geometry, tile, candidate, zoom_val) && visible_check(candidate) => None,
             _ => continue,
         };
-        let identity = match geometry.id {
-            Some(id) => Identity::Id(id),
+        let identity = match &queried_id {
+            Some(id) => Identity::Id(id.clone()),
             None => Identity::Part(std::sync::Arc::as_ptr(&geometry.properties) as usize),
         };
         if !seen.insert((layer.id.clone(), tile.coords, identity)) {
@@ -463,7 +596,7 @@ fn collect(
                     layer: layer.id.clone(),
                     source: layer.source.clone(),
                     source_layer: geometry.source_layer.to_string(),
-                    id: geometry.id,
+                    id: queried_id.clone(),
                     properties: source_properties(&geometry.properties),
                     state: crate::style::feature_state::extract_feature_state(&geometry.properties),
                     geometry_type,
@@ -477,7 +610,7 @@ fn collect(
 /// What makes two parts one feature: their shared id, or the property map they share.
 #[derive(PartialEq, Eq, Hash)]
 enum Identity {
-    Id(u64),
+    Id(QueriedFeatureId),
     Part(usize),
 }
 

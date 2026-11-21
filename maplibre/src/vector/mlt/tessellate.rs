@@ -17,7 +17,7 @@ use crate::{
     },
     sdf::{assets::SymbolAtlas, tessellation::TextTessellator},
     style::{
-        expression::{empty_feature_properties, FeatureProperties, Value},
+        expression::{empty_feature_properties, FeatureProperties},
         filter::{FeatureContext, Filter, GeometryType},
         layer::{LayerPaint, StyleLayer},
         source::PromoteId,
@@ -192,12 +192,11 @@ fn process_columnar_style_layer<T: VectorTransferables, C: Context>(
                         .get(idx)
                         .copied()
                         .unwrap_or(GeometryType::Unknown);
-                    let id = col
-                        .ids
-                        .get(idx)
-                        .copied()
-                        .flatten()
-                        .map(|v| Value::Number(v as f64));
+                    let id = crate::query::resolve_effective_expr_id(
+                        col.ids.get(idx).copied().flatten(),
+                        prop,
+                        state_ctx.as_ref().and_then(|c| c.promote_property.as_deref()),
+                    );
                     if filter.evaluate(&FeatureContext {
                         properties: prop,
                         geometry_type: gtype,

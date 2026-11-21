@@ -317,6 +317,8 @@ pub fn process_geojson_layers_with_atlas(
             atlas,
             overscaled_zoom,
             buffer,
+            generate_id: false,
+            promote_id: None,
         },
         &context,
     )

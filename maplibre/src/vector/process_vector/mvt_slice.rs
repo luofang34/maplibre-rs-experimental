@@ -14,7 +14,7 @@ pub(super) use props::{decode_layer_properties, decode_layer_properties_bounded}
 
 use crate::{
     style::{
-        expression::{FeatureProperties, Value},
+        expression::FeatureProperties,
         filter::{FeatureContext, Filter, GeometryType},
     },
     vector::tessellation::feature_paint::FeatureStateSyncContext,
@@ -49,10 +49,15 @@ pub(super) fn select_filtered_features(
                 }
                 &scratch
             };
+        let id = crate::query::resolve_effective_expr_id(
+            feature.id,
+            props_ref,
+            state_ctx.and_then(|c| c.promote_property.as_deref()),
+        );
         if filter.evaluate(&FeatureContext {
             properties: props_ref,
             geometry_type: GeometryType::from_mvt(feature.r#type.unwrap_or_default()),
-            id: feature.id.map(|id| Value::Number(id as f64)),
+            id,
             zoom,
         }) {
             selected.push(index);

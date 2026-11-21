@@ -375,14 +375,21 @@ impl GeoJsonIndex {
 /// whole non-negative number, else its position in the document with `generateId`.
 /// The id of each feature of a collection, or of a bare feature, in the order a geometry
 /// processor meets them.
-pub(super) fn feature_ids(geojson: &Value) -> Vec<Option<u64>> {
+pub(super) fn feature_ids_with(
+    geojson: &Value,
+    promoted: Option<&str>,
+    generate_id: bool,
+) -> Vec<Option<u64>> {
     geojson
         .get("features")
         .and_then(Value::as_array)
         .map(Vec::as_slice)
         .unwrap_or(std::slice::from_ref(geojson))
         .iter()
-        .map(|feature| numeric_feature_id(feature, None, None))
+        .enumerate()
+        .map(|(position, feature)| {
+            numeric_feature_id(feature, promoted, generate_id.then_some(position))
+        })
         .collect()
 }
 
@@ -391,11 +398,16 @@ pub(super) fn numeric_feature_id(
     promoted: Option<&str>,
     generated: Option<usize>,
 ) -> Option<u64> {
-    promoted
-        .and_then(|name| feature.get("properties")?.get(name))
-        .and_then(integer_id)
-        .or_else(|| feature.get("id").and_then(integer_id))
-        .or(generated.map(|index| index as u64))
+    if let Some(name) = promoted {
+        return feature
+            .get("properties")
+            .and_then(|props| props.get(name))
+            .and_then(integer_id);
+    }
+    if let Some(index) = generated {
+        return Some(index as u64);
+    }
+    feature.get("id").and_then(integer_id)
 }
 
 fn integer_id(value: &Value) -> Option<u64> {

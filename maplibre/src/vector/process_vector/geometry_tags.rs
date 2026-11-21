@@ -14,8 +14,16 @@ use crate::{
 };
 
 /// Appends the id and geometry type tags to every feature of `layer`; a feature without an id
-/// gets none, so `["id"]` is null for it.
-pub(super) fn add_identity_tags(layer: &mut tile::Layer) {
+/// gets none, so `["id"]` is null for it. When `promote_property` is set, the promoted property
+/// replaces `feature.id` without falling back to it.
+pub(super) fn add_identity_tags(layer: &mut tile::Layer, promote_property: Option<&str>) {
+    let promote_key = promote_property.and_then(|prop| {
+        layer
+            .keys
+            .iter()
+            .position(|k| k == prop)
+            .and_then(|idx| u32::try_from(idx).ok())
+    });
     let key = |layer: &mut tile::Layer, name: &str| {
         layer.keys.push(name.to_owned());
         u32::try_from(layer.keys.len() - 1).unwrap_or(u32::MAX)
@@ -39,7 +47,26 @@ pub(super) fn add_identity_tags(layer: &mut tile::Layer) {
             .find(|(each, _)| *each == kind)
             .map_or(types[3].1, |(_, value)| *value);
         feature.tags.extend([type_key, type_value]);
-        if let Some(id) = feature.id {
+        if promote_property.is_some() {
+            if let Some(pk) = promote_key {
+                let promoted_val = feature.tags.chunks_exact(2).find_map(|pair| {
+                    if pair[0] != pk {
+                        return None;
+                    }
+                    let val = layer.values.get(pair[1] as usize)?;
+                    let is_valid_id = val.string_value.is_some()
+                        || val.int_value.is_some()
+                        || val.uint_value.is_some()
+                        || val.sint_value.is_some()
+                        || val.float_value.is_some()
+                        || val.double_value.is_some();
+                    is_valid_id.then_some(pair[1])
+                });
+                if let Some(val_idx) = promoted_val {
+                    feature.tags.extend([id_key, val_idx]);
+                }
+            }
+        } else if let Some(id) = feature.id {
             layer.values.push(tile::Value {
                 uint_value: Some(id),
                 ..Default::default()
@@ -47,6 +74,58 @@ pub(super) fn add_identity_tags(layer: &mut tile::Layer) {
             let value = u32::try_from(layer.values.len() - 1).unwrap_or(u32::MAX);
             feature.tags.extend([id_key, value]);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use geozero::mvt::tile;
+
+    use super::*;
+
+    #[test]
+    fn add_identity_tags_uses_promoted_string_id_and_omits_missing() {
+        let mut layer = tile::Layer {
+            version: 2,
+            name: "parks".to_owned(),
+            keys: vec!["slug".to_owned()],
+            values: vec![tile::Value {
+                string_value: Some("central".to_owned()),
+                ..Default::default()
+            }],
+            features: vec![
+                tile::Feature {
+                    id: Some(7),
+                    tags: vec![0, 0],
+                    r#type: Some(3),
+                    geometry: vec![],
+                },
+                tile::Feature {
+                    id: Some(8),
+                    tags: vec![],
+                    r#type: Some(3),
+                    geometry: vec![],
+                },
+            ],
+            extent: Some(4096),
+        };
+        add_identity_tags(&mut layer, Some("slug"));
+        let id_key = layer
+            .keys
+            .iter()
+            .position(|k| k == ID_PROPERTY)
+            .expect("id key") as u32;
+        let f0_id = layer.features[0]
+            .tags
+            .chunks_exact(2)
+            .find_map(|pair| (pair[0] == id_key).then_some(pair[1]))
+            .and_then(|idx| layer.values[idx as usize].string_value.as_deref());
+        assert_eq!(f0_id, Some("central"));
+        let f1_id = layer.features[1]
+            .tags
+            .chunks_exact(2)
+            .find_map(|pair| (pair[0] == id_key).then_some(pair[1]));
+        assert_eq!(f1_id, None, "missing promoted property must not fall back to feature.id");
     }
 }
 
