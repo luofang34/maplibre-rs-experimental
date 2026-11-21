@@ -113,12 +113,10 @@ fn ids_follow_promote_id_and_generate_id() {
         "promoteId preserves string IDs and does not fall back to feature.id or generateId when missing"
     );
 
-    let style_gen = style(
-        json!({"type": "geojson", "generateId": true,
+    let style_gen = style(json!({"type": "geojson", "generateId": true,
         "data": {"type": "FeatureCollection", "features": [
             {"type": "Feature", "id": 99, "properties": {}, "geometry": {"type": "Point", "coordinates": [0, 0]}},
-            {"type": "Feature", "properties": {}, "geometry": {"type": "Point", "coordinates": [1, 1]}}]}}),
-    );
+            {"type": "Feature", "properties": {}, "geometry": {"type": "Point", "coordinates": [1, 1]}}]}}));
     let gen_found = style_gen
         .query_source_features("places", &SourceQueryOptions::default())
         .expect("query");

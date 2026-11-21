@@ -161,7 +161,7 @@ flate2.workspace = true
 futures = { workspace = true, features = ["executor", "async-await"] }
 geozero = { workspace = true, features = ["with-geojson"] }
 # Shaders stay WGSL; a native render node gets them through naga's own backends.
-naga = { workspace = true, features = ["msl-out", "spv-out", "spv-in"] }
+naga = { workspace = true, features = ["msl-out", "spv-out", "spv-in", "glsl-out"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 env_logger.workspace = true

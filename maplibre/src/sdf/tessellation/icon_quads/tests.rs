@@ -61,8 +61,14 @@ fn standalone_stretchable_icon_scales_stretch_zones_and_keeps_fixed_corners() {
     let quads = icon_quads(&icon, [-40.0, -40.0, 40.0, 40.0], false, 2.0);
     assert_eq!(quads.len(), 9);
     let corner = |rect: [u32; 4]| quads.iter().find(|quad| quad.rect == rect).expect("piece");
-    assert_eq!(corner([100, 200, 10, 10]).bounds, [-40.0, -40.0, -30.0, -30.0]);
-    assert_eq!(corner([110, 210, 20, 20]).bounds, [-30.0, -30.0, 30.0, 30.0]);
+    assert_eq!(
+        corner([100, 200, 10, 10]).bounds,
+        [-40.0, -40.0, -30.0, -30.0]
+    );
+    assert_eq!(
+        corner([110, 210, 20, 20]).bounds,
+        [-30.0, -30.0, 30.0, 30.0]
+    );
     assert_eq!(corner([130, 230, 10, 10]).bounds, [30.0, 30.0, 40.0, 40.0]);
 }
 
@@ -77,6 +83,9 @@ fn fitted_stretchable_icon_scales_fixed_borders_by_icon_size_around_text_content
     assert_eq!(quads.len(), 9);
     let corner = |rect: [u32; 4]| quads.iter().find(|quad| quad.rect == rect).expect("piece");
     assert_eq!(corner([110, 210, 20, 20]).bounds, [-15.0, -6.0, 15.0, 6.0]);
-    assert_eq!(corner([100, 200, 10, 10]).bounds, [-35.0, -26.0, -15.0, -6.0]);
+    assert_eq!(
+        corner([100, 200, 10, 10]).bounds,
+        [-35.0, -26.0, -15.0, -6.0]
+    );
     assert_eq!(corner([130, 230, 10, 10]).bounds, [15.0, 6.0, 35.0, 26.0]);
 }

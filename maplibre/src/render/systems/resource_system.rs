@@ -66,6 +66,22 @@ impl System for ResourceSystem {
                     .get::<Eventually<crate::sdf::depth::SymbolDepth>>(),
                 Some(Eventually::Initialized(sd)) if !sd.skip_depth_copy
             );
+        let supports_transient = if let Some(cached) =
+            world.resources.get::<CachedDepthFormatFeatures>()
+            && cached.format == settings.depth_texture_format
+        {
+            cached.supports_transient
+        } else {
+            let supports_transient = adapter
+                .get_texture_format_features(settings.depth_texture_format)
+                .allowed_usages
+                .contains(wgpu::TextureUsages::TRANSIENT_ATTACHMENT);
+            world.resources.insert(CachedDepthFormatFeatures {
+                format: settings.depth_texture_format,
+                supports_transient,
+            });
+            supports_transient
+        };
         let Some((tile_view_pattern, mask_pipeline, projection_resources, depth_copy)) =
             world.resources.query_mut::<(
                 &mut Eventually<WgpuTileViewPattern>,
@@ -98,10 +114,6 @@ impl System for ResourceSystem {
         } else {
             Msaa { samples: 1 }
         };
-        let supports_transient = adapter
-            .get_texture_format_features(settings.depth_texture_format)
-            .allowed_usages
-            .contains(wgpu::TextureUsages::TRANSIENT_ATTACHMENT);
         let pitch_tilted = view_state.camera().get_pitch().0.abs() >= 1e-4;
         let needs_persistent_depth = settings.depth_readout
             || state.eye_depth_target.is_some()
@@ -285,6 +297,11 @@ impl System for ResourceSystem {
 
         Ok(())
     }
+}
+
+struct CachedDepthFormatFeatures {
+    format: wgpu::TextureFormat,
+    supports_transient: bool,
 }
 
 fn has_celestial_sun(world: &crate::tcs::world::World) -> bool {

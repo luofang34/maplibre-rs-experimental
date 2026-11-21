@@ -2,10 +2,7 @@
 
 use std::{ops::Range, sync::Arc};
 
-use geozero::{
-    mvt::{process_geom, tile},
-    FeatureProcessor,
-};
+use geozero::{mvt::tile, FeatureProcessor};
 
 use crate::{
     render::ShaderVertex,
@@ -93,7 +90,7 @@ fn tessellate_union(
             process_feature_properties(layer, feature, &mut tessellator)?;
         }
         tessellator.geometry_begin()?;
-        process_geom(feature, &mut tessellator)?;
+        super::super::mvt_slice::process_geom_safe(feature, &mut tessellator)?;
         tessellator.geometry_end()?;
         tessellator.feature_end(out_idx as u64)?;
         let vtx_count = (tessellator.buffer.vertices.len() - vtx_start) as u32;

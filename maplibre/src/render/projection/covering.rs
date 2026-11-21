@@ -1,7 +1,9 @@
 //! Visible requests and speculative coverage under the active projection.
 use std::collections::HashSet;
 
-use super::{globe_camera_for_view, ProjectionStateError};
+#[cfg(test)]
+use super::globe_camera_for_view;
+use super::ProjectionStateError;
 use crate::{
     coords::{ViewRegion, WorldTileCoords, ZoomLevel, TILE_SIZE},
     io::tile_sources::{covering_zoom, TileKind},
@@ -351,7 +353,9 @@ fn globe_view_region(
     history: Option<&LodHistory>,
 ) -> Result<Option<ViewRegion>, ProjectionStateError> {
     let visible_level = request.level;
-    let camera = globe_camera_for_view(view_state)?;
+    let camera = crate::render::resolved_view::ResolvedFrameView::globe_camera_for_frame(
+        world, style, view_state,
+    )?;
     let options = GlobeCoveringOptions {
         zoom: visible_level,
         requested_zoom: request.requested_zoom,

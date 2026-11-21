@@ -30,7 +30,7 @@ fn raster_granularity_matches_gl_js_policy() {
 }
 
 #[test]
-fn stencil_granularity_reaches_one() {
+fn stencil_granularity_matches_fill_minimum() {
     assert_eq!(
         mesh_key(coords(0, 0, 0), TileMeshUsage::Stencil, false).granularity,
         128
@@ -41,11 +41,11 @@ fn stencil_granularity_reaches_one() {
     );
     assert_eq!(
         mesh_key(coords(1, 1, 7), TileMeshUsage::Stencil, false).granularity,
-        1
+        2
     );
     assert_eq!(
         mesh_key(coords(1, 1, 31), TileMeshUsage::Stencil, false).granularity,
-        1
+        2
     );
 }
 

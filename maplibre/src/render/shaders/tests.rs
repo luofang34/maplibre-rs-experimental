@@ -276,6 +276,53 @@ fn every_shader_translates_to_msl_and_spirv() {
 }
 
 #[test]
+fn every_webgl2_shader_translates_to_glsl_es300() {
+    let options = naga::back::glsl::Options {
+        version: naga::back::glsl::Version::Embedded {
+            version: 300,
+            is_webgl: true,
+        },
+        writer_flags: naga::back::glsl::WriterFlags::ADJUST_COORDINATE_SPACE,
+        ..naga::back::glsl::Options::default()
+    };
+    for (name, source, entry) in stages() {
+        // Compute/multisampled depth shaders are WebGPU/native-only; WebGL2 runs 1x MSAA.
+        if source.contains("texture_multisampled_2d")
+            || source.contains("texture_depth_multisampled_2d")
+            || source.contains("@compute")
+        {
+            continue;
+        }
+        let (module, info) = validated(name, &source);
+        for point in module
+            .entry_points
+            .iter()
+            .filter(|point| entry.is_empty() || point.name == entry)
+        {
+            let pipeline_options = naga::back::glsl::PipelineOptions {
+                shader_stage: point.stage,
+                entry_point: point.name.clone(),
+                multiview: None,
+            };
+            let mut glsl = String::new();
+            let mut writer = naga::back::glsl::Writer::new(
+                &mut glsl,
+                &module,
+                &info,
+                &options,
+                &pipeline_options,
+                naga::proc::BoundsCheckPolicies::default(),
+            )
+            .unwrap_or_else(|error| panic!("{name} ({}): GLSL ES 300 init {error:?}", point.name));
+            writer
+                .write()
+                .unwrap_or_else(|error| panic!("{name} ({}): GLSL ES 300 {error:?}", point.name));
+            assert!(!glsl.is_empty(), "{name}: empty GLSL ES 300 output");
+        }
+    }
+}
+
+#[test]
 fn every_shader_spirv_roundtrips_with_strict_capabilities() {
     let spv_out = naga::back::spv::Options {
         flags: naga::back::spv::WriterFlags::LABEL_VARYINGS

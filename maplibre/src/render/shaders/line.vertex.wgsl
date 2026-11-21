@@ -213,7 +213,11 @@ fn main(
         }
         let offset = tangent * (moved * line_units / max(extent, 1e-6));
         let out_w = center.w + offset.w;
-        center = vec4<f32>(center.xy + offset.xy, horizon_distance * 0.5 * out_w, out_w);
+        center = vec4<f32>(
+            center.xy + offset.xy,
+            globe_clip_z(horizon_distance, out_w),
+            out_w,
+        );
     }
 
     let dash_scale = line_scale.y * select(

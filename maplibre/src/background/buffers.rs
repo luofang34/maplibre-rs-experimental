@@ -319,10 +319,18 @@ pub fn globe_tiles(world: &crate::tcs::world::World) -> Vec<WorldTileCoords> {
 
 /// Calculates tile metadata for globe background tiles.
 pub fn globe_tile_metadata(view_state: &ViewState, coords: WorldTileCoords) -> ShaderTileMetadata {
+    globe_tile_metadata_with_vp(view_state, &view_state.gpu_view_projection(), coords)
+}
+
+/// Calculates tile metadata for globe background tiles using a precomputed `gpu_vp`.
+pub fn globe_tile_metadata_with_vp(
+    view_state: &ViewState,
+    gpu_vp: &crate::render::camera::ViewProjection,
+    coords: WorldTileCoords,
+) -> ShaderTileMetadata {
     let scale = view_state.zoom().scale_to_tile(&coords) as f32;
     ShaderTileMetadata {
-        transform: view_state
-            .gpu_view_projection()
+        transform: gpu_vp
             .to_model_view_projection(coords.transform_for_zoom(view_state.zoom()))
             .downcast()
             .into(),
@@ -362,13 +370,23 @@ pub fn background_color(layer: &crate::style::layer::StyleLayer, zoom: f64) -> [
     color
 }
 
-/// The sky draw's values for the frame: colours at the zoom and the horizon line on screen,
-/// scaled to the physical frame height that `@builtin(position)` uses in the fragment shader.
+/// The sky draw's values for the frame, scaled to the physical frame height.
 pub fn sky_metadata(
     sky: &crate::style::sky::SkySpecification,
     view_state: &ViewState,
     projection_transition: f32,
     frame_height: f32,
+) -> SkyLayerMetadata {
+    sky_metadata_with_camera(sky, view_state, projection_transition, frame_height, None)
+}
+
+/// Same as [`sky_metadata`], reusing an already-resolved [`GlobeCameraState`] when available.
+pub fn sky_metadata_with_camera(
+    sky: &crate::style::sky::SkySpecification,
+    view_state: &ViewState,
+    projection_transition: f32,
+    frame_height: f32,
+    cached_globe_camera: Option<&crate::projection::globe::camera::GlobeCameraState>,
 ) -> SkyLayerMetadata {
     let zoom = view_state.zoom().value();
     let colors = sky.colors_at(zoom);
@@ -388,8 +406,12 @@ pub fn sky_metadata(
         projection_transition
     };
     let (inverse_projection, up_and_horizon) = if sky_blend > 0.0 {
-        crate::render::projection::globe_camera_for_view(view_state)
-            .ok()
+        let owned = cached_globe_camera
+            .is_none()
+            .then(|| crate::render::projection::globe_camera_for_view(view_state).ok())
+            .flatten();
+        cached_globe_camera
+            .or(owned.as_ref())
             .and_then(|camera| {
                 let mut inv: [[f32; 4]; 4] = camera.inverse_projection().cast::<f32>()?.into();
                 let globe_pos = camera.globe_center_in_view().cast::<f32>()?;

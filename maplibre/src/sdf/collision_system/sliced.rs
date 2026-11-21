@@ -380,6 +380,7 @@ impl ActiveEpoch {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)]
     pub(super) fn for_atomic_upload_test(
         view_state: ViewState,
         pending_uploads: Vec<(StyleLayerId, WorldTileCoords, Vec<SDFShaderFeatureMetadata>)>,

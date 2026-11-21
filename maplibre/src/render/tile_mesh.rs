@@ -285,7 +285,9 @@ fn mesh_key(coords: WorldTileCoords, usage: TileMeshUsage, generate_borders: boo
     let zoom = u32::from(u8::from(coords.z));
     let minimum = match usage {
         TileMeshUsage::Raster => 32,
-        TileMeshUsage::Stencil => 1,
+        // Match vector Fill minimum granularity (2) so globe stencil masks do not
+        // form flat 1x1 chords behind curved 2x2 fill geometry at z=7..11.
+        TileMeshUsage::Stencil => 2,
     };
     let granularity = 128_u32.checked_shr(zoom).unwrap_or(0).max(minimum);
     let last_row = i64::from(ZOOM_BOUNDS[usize::from(u8::from(coords.z))]) - 1;

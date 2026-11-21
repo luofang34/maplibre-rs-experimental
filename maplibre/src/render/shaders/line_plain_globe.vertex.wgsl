@@ -72,7 +72,7 @@ fn main(
     let out_w = projected.clip_position.w + offset.w;
     let out_pos = vec4<f32>(
         projected.clip_position.xy + offset.xy,
-        projected.horizon_distance * 0.5 * out_w,
+        globe_clip_z(projected.horizon_distance, out_w),
         out_w,
     );
 

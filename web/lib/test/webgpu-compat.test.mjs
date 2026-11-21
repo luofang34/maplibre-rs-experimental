@@ -213,3 +213,53 @@ test('tracks live GPUDevice createBuffer minus idempotent destroy bytes', () => 
     b2.destroy();
     assert.equal(getLiveGpuBufferBytes(scope), 0);
 });
+
+test('skips per-draw queue/pass wrappers when sharedMemory and traceGpuCalls are false (ST fast path)', () => {
+    class MockAdapterInfo {}
+    class MockQueue {
+        writeBuffer() {}
+        submit() {}
+        writeTexture() {}
+    }
+    class MockRenderPass {
+        setBindGroup() {}
+        setVertexBuffer() {}
+    }
+    class MockCommandEncoder {
+        beginRenderPass() {}
+    }
+    class MockDevice {
+        createBuffer() {
+            return { destroy() {} };
+        }
+    }
+
+    const origWriteBuffer = MockQueue.prototype.writeBuffer;
+    const origSetBindGroup = MockRenderPass.prototype.setBindGroup;
+    const origSetVertexBuffer = MockRenderPass.prototype.setVertexBuffer;
+    const origBeginRenderPass = MockCommandEncoder.prototype.beginRenderPass;
+
+    const scope = {
+        GPUAdapterInfo: MockAdapterInfo,
+        GPUQueue: MockQueue,
+        GPURenderPassEncoder: MockRenderPass,
+        GPUCommandEncoder: MockCommandEncoder,
+        GPUDevice: MockDevice,
+    };
+    ensureWebGpuCompatibility(scope, {sharedMemory: false, traceGpuCalls: false});
+
+    // Per-draw hot methods remain unwrapped in ST mode.
+    assert.equal(MockQueue.prototype.writeBuffer, origWriteBuffer);
+    assert.equal(MockRenderPass.prototype.setBindGroup, origSetBindGroup);
+    assert.equal(MockRenderPass.prototype.setVertexBuffer, origSetVertexBuffer);
+    assert.equal(MockCommandEncoder.prototype.beginRenderPass, origBeginRenderPass);
+
+    // GPUAdapterInfo polyfill and GPU buffer byte tracking remain active.
+    const info = new MockAdapterInfo();
+    assert.equal(info.subgroupMinSize, 0);
+    const device = new MockDevice();
+    const buf = device.createBuffer({size: 4096});
+    assert.equal(getLiveGpuBufferBytes(scope), 4096);
+    buf.destroy();
+    assert.equal(getLiveGpuBufferBytes(scope), 0);
+});

@@ -1,4 +1,8 @@
-//! Persistent single-buffer staging belt for `wasm32` WebGPU targets.
+//! Ring-buffered staging belt for `wasm32` WebGPU targets.
+//!
+//! Uses a 3-slot buffer ring so consecutive frames never overwrite or destroy a staging buffer
+//! still referenced by an in-flight command buffer (which can cause torn uniform reads on
+//! Firefox's `wgpu-core` WebGPU IPC layer).
 
 use super::{
     flush_copies_direct, StagedCopy, MAX_STAGING_BUFFER_CAPACITY, SHRINK_STAGING_BUFFER_CAPACITY,
@@ -6,17 +10,21 @@ use super::{
 
 const MIN_STAGING_BUFFER_CAPACITY: u64 = 64 * 1024;
 const QUIET_FRAMES_BEFORE_SHRINK: u8 = 4;
+const RING_SLOTS: usize = 3;
 
 #[derive(Debug, Default)]
 pub(super) struct WasmStagingBelt {
-    buffer: Option<(wgpu::Buffer, u64)>,
+    slots: [Option<(wgpu::Buffer, u64)>; RING_SLOTS],
+    next_slot: usize,
     quiet_frames: u8,
 }
 
 impl Drop for WasmStagingBelt {
     fn drop(&mut self) {
-        if let Some((buf, _)) = self.buffer.take() {
-            buf.destroy();
+        for slot in &mut self.slots {
+            if let Some((buf, _)) = slot.take() {
+                buf.destroy();
+            }
         }
     }
 }
@@ -30,22 +38,32 @@ impl WasmStagingBelt {
         payload: &mut Vec<u8>,
         copies: &mut Vec<StagedCopy>,
     ) -> bool {
+        let slot_index = self.next_slot;
+        self.next_slot = (self.next_slot + 1) % RING_SLOTS;
+
         if copies.is_empty() {
             payload.clear();
-            if self
-                .buffer
-                .as_ref()
-                .is_some_and(|(_, cap)| *cap > SHRINK_STAGING_BUFFER_CAPACITY)
-            {
+            let any_oversized = self.slots.iter().any(|slot| {
+                slot.as_ref()
+                    .is_some_and(|(_, cap)| *cap > SHRINK_STAGING_BUFFER_CAPACITY)
+            });
+            if any_oversized {
                 self.quiet_frames = self.quiet_frames.saturating_add(1);
                 if self.quiet_frames >= QUIET_FRAMES_BEFORE_SHRINK {
-                    if let Some((old_buf, _)) = self.buffer.take() {
-                        old_buf.destroy();
+                    // Release only the current ring slot (oldest in flight) per quiet period.
+                    if self.slots[slot_index]
+                        .as_ref()
+                        .is_some_and(|(_, cap)| *cap > SHRINK_STAGING_BUFFER_CAPACITY)
+                    {
+                        if let Some((old_buf, _)) = self.slots[slot_index].take() {
+                            old_buf.destroy();
+                        }
                     }
                     payload.shrink_to(SHRINK_STAGING_BUFFER_CAPACITY as usize);
                     copies.shrink_to(256);
-                    self.quiet_frames = 0;
                 }
+            } else {
+                self.quiet_frames = 0;
             }
             return false;
         }
@@ -65,19 +83,14 @@ impl WasmStagingBelt {
             return false;
         }
 
+        let slot = &mut self.slots[slot_index];
         let should_shrink = self.quiet_frames >= QUIET_FRAMES_BEFORE_SHRINK
-            && self
-                .buffer
+            && slot
                 .as_ref()
                 .is_some_and(|(_, cap)| *cap > SHRINK_STAGING_BUFFER_CAPACITY);
-        let need_alloc = should_shrink
-            || self
-                .buffer
-                .as_ref()
-                .is_none_or(|(_, cap)| *cap < payload_bytes);
+        let need_alloc = should_shrink || slot.as_ref().is_none_or(|(_, cap)| *cap < payload_bytes);
         if need_alloc {
             let next_cap = if should_shrink {
-                self.quiet_frames = 0;
                 SHRINK_STAGING_BUFFER_CAPACITY.min(max_buf)
             } else {
                 payload_bytes
@@ -86,7 +99,7 @@ impl WasmStagingBelt {
                     .unwrap_or(max_buf)
                     .min(max_buf)
             };
-            if let Some((old_buf, _)) = self.buffer.take() {
+            if let Some((old_buf, _)) = slot.take() {
                 old_buf.destroy();
             }
             let buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -95,10 +108,10 @@ impl WasmStagingBelt {
                 usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
-            self.buffer = Some((buf, next_cap));
+            *slot = Some((buf, next_cap));
         }
 
-        let Some((staging_buf, _)) = self.buffer.as_ref() else {
+        let Some((staging_buf, _)) = slot.as_ref() else {
             return false;
         };
         #[allow(clippy::disallowed_methods)]

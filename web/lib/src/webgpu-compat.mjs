@@ -39,7 +39,10 @@ const unshareByteSource = (data, dataOffset, size, sabCtor, getSabView, getScrat
     return -1;
 };
 
-export const ensureWebGpuCompatibility = (scope = globalThis) => {
+export const ensureWebGpuCompatibility = (
+    scope = globalThis,
+    { sharedMemory = true, traceGpuCalls = true } = {},
+) => {
     if (!scope || scope[COMPAT_APPLIED]) {
         return;
     }
@@ -127,22 +130,25 @@ export const ensureWebGpuCompatibility = (scope = globalThis) => {
         // Ignore non-extensible global objects.
     }
 
-    const queueProto = scope?.GPUQueue?.prototype;
+    const patchQueueAndPass = sharedMemory || traceGpuCalls;
+    const queueProto = patchQueueAndPass ? scope?.GPUQueue?.prototype : null;
     if (queueProto) {
         if (typeof queueProto.writeBuffer === "function") {
             const origWriteBuffer = queueProto.writeBuffer;
             queueProto.writeBuffer = function (buffer, bufferOffset, data, dataOffset, size) {
-                curWriteBufferCalls++;
-                const copiedLen = unshareByteSource(
-                    data,
-                    dataOffset,
-                    size,
-                    sabCtor,
-                    getSabView,
-                    getByteScratch,
-                );
+                if (traceGpuCalls) curWriteBufferCalls++;
+                const copiedLen = sharedMemory
+                    ? unshareByteSource(
+                          data,
+                          dataOffset,
+                          size,
+                          sabCtor,
+                          getSabView,
+                          getByteScratch,
+                      )
+                    : -1;
                 if (copiedLen >= 0) {
-                    curWriteBufferBytes += copiedLen;
+                    if (traceGpuCalls) curWriteBufferBytes += copiedLen;
                     return origWriteBuffer.call(
                         this,
                         buffer,
@@ -152,7 +158,7 @@ export const ensureWebGpuCompatibility = (scope = globalThis) => {
                         copiedLen,
                     );
                 }
-                if (data) {
+                if (traceGpuCalls && data) {
                     const bpe = ArrayBuffer.isView(data) ? (data.BYTES_PER_ELEMENT || 1) : 1;
                     const elemOff = dataOffset ?? 0;
                     const elemLen = size ?? (data.byteLength / bpe - elemOff);
@@ -166,7 +172,7 @@ export const ensureWebGpuCompatibility = (scope = globalThis) => {
             };
         }
 
-        if (typeof queueProto.submit === "function") {
+        if (traceGpuCalls && typeof queueProto.submit === "function") {
             const origSubmit = queueProto.submit;
             queueProto.submit = function (commandBuffers) {
                 if (curPasses > 0) {
@@ -183,7 +189,7 @@ export const ensureWebGpuCompatibility = (scope = globalThis) => {
             };
         }
 
-        if (typeof queueProto.writeTexture === "function") {
+        if (sharedMemory && typeof queueProto.writeTexture === "function") {
             const origWriteTexture = queueProto.writeTexture;
             queueProto.writeTexture = function (destination, data, dataLayout, size) {
                 if (data && (ArrayBuffer.isView(data) ? isSharedBuffer(data.buffer, sabCtor) : isSharedBuffer(data, sabCtor))) {
@@ -266,31 +272,35 @@ export const ensureWebGpuCompatibility = (scope = globalThis) => {
         };
     };
 
-    patchSetBindGroup(scope?.GPURenderPassEncoder?.prototype);
-    patchSetBindGroup(scope?.GPUComputePassEncoder?.prototype);
-    patchSetBindGroup(scope?.GPURenderBundleEncoder?.prototype);
-
-    const encProto = scope?.GPUCommandEncoder?.prototype;
-    if (encProto && typeof encProto.beginRenderPass === "function") {
-        const origBeginRenderPass = encProto.beginRenderPass;
-        encProto.beginRenderPass = function (descriptor) {
-            curPasses++;
-            return origBeginRenderPass.call(this, descriptor);
-        };
+    if (sharedMemory) {
+        patchSetBindGroup(scope?.GPURenderPassEncoder?.prototype);
+        patchSetBindGroup(scope?.GPUComputePassEncoder?.prototype);
+        patchSetBindGroup(scope?.GPURenderBundleEncoder?.prototype);
     }
-    const rpeProto = scope?.GPURenderPassEncoder?.prototype;
-    if (rpeProto && typeof rpeProto.setVertexBuffer === "function") {
-        const origSetVertexBuffer = rpeProto.setVertexBuffer;
-        rpeProto.setVertexBuffer = function (slot, buffer, offset, size) {
-            curSetVertexBuffers++;
-            if (arguments.length <= 2) {
-                return origSetVertexBuffer.call(this, slot, buffer);
-            }
-            if (arguments.length === 3) {
-                return origSetVertexBuffer.call(this, slot, buffer, offset);
-            }
-            return origSetVertexBuffer.call(this, slot, buffer, offset, size);
-        };
+
+    if (traceGpuCalls) {
+        const encProto = scope?.GPUCommandEncoder?.prototype;
+        if (encProto && typeof encProto.beginRenderPass === "function") {
+            const origBeginRenderPass = encProto.beginRenderPass;
+            encProto.beginRenderPass = function (descriptor) {
+                curPasses++;
+                return origBeginRenderPass.call(this, descriptor);
+            };
+        }
+        const rpeProto = scope?.GPURenderPassEncoder?.prototype;
+        if (rpeProto && typeof rpeProto.setVertexBuffer === "function") {
+            const origSetVertexBuffer = rpeProto.setVertexBuffer;
+            rpeProto.setVertexBuffer = function (slot, buffer, offset, size) {
+                curSetVertexBuffers++;
+                if (arguments.length <= 2) {
+                    return origSetVertexBuffer.call(this, slot, buffer);
+                }
+                if (arguments.length === 3) {
+                    return origSetVertexBuffer.call(this, slot, buffer, offset);
+                }
+                return origSetVertexBuffer.call(this, slot, buffer, offset, size);
+            };
+        }
     }
 
     let liveGpuBufferBytes = 0;

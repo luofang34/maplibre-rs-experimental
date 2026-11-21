@@ -77,7 +77,9 @@ fn scattering(
 
     for (var primary_index = 0u; primary_index < PRIMARY_STEPS; primary_index++) {
         let primary_position = ray_origin + ray_direction * primary_time;
-        let primary_height = length(primary_position) - body_radius;
+        // Clamp heights above the surface so grazing/chordal rays never evaluate `exp(+5300)`
+        // and propagate `Inf * 0.0 = NaN` into MSAA targets on Metal/OpenGL.
+        let primary_height = max(length(primary_position) - body_radius, 0.0);
         let depth_step_rayleigh = exp(-primary_height / RAYLEIGH_SCALE_HEIGHT)
             * primary_step_size;
         let depth_step_mie = exp(-primary_height / MIE_SCALE_HEIGHT) * primary_step_size;
@@ -96,7 +98,7 @@ fn scattering(
             secondary_index < SECONDARY_STEPS;
             secondary_index++) {
             let secondary_position = primary_position + sun_direction * secondary_time;
-            let secondary_height = length(secondary_position) - body_radius;
+            let secondary_height = max(length(secondary_position) - body_radius, 0.0);
             secondary_depth_rayleigh += exp(-secondary_height / RAYLEIGH_SCALE_HEIGHT)
                 * secondary_step_size;
             secondary_depth_mie += exp(-secondary_height / MIE_SCALE_HEIGHT)

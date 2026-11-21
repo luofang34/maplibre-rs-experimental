@@ -166,9 +166,7 @@ pub(super) fn append(
                     placed
                 }
             });
-            for piece in
-                super::icon_quads::icon_quads(icon, boxed, fitted.is_some(), icon_size)
-            {
+            for piece in super::icon_quads::icon_quads(icon, boxed, fitted.is_some(), icon_size) {
                 icon_padding = icon_padding.max(piece.padding * undo_size);
                 let part = AtlasEntry {
                     rect: piece.rect,

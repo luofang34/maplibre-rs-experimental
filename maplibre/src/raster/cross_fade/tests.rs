@@ -58,7 +58,10 @@ fn live_timed_fade_tracks_departing_descendants_and_decays_to_completion() {
     // Halfway through 300ms fade -> opacity ~0.5, still animating.
     let active_mid = fade.advance(t0 + Duration::from_millis(150));
     assert!(active_mid);
-    let mid_opacity = fade.departing(Some("sat")).map(|d| d.opacity).unwrap_or(0.0);
+    let mid_opacity = fade
+        .departing(Some("sat"))
+        .map(|d| d.opacity)
+        .unwrap_or(0.0);
     assert!((mid_opacity - 0.5).abs() < 1e-3, "got {mid_opacity}");
 
     // After 300ms -> fade finishes and departing tiles are cleared.

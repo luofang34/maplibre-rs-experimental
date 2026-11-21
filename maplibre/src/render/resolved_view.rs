@@ -197,6 +197,23 @@ impl ResolvedFrameView {
         }
     }
 
+    /// Borrows the cached [`GlobeCameraState`] from `world`'s [`ResolvedFrameView`] when it
+    /// matches `style` and `view_state`, avoiding redundant `f64` matrix inversions across stages.
+    pub fn globe_camera_for_frame<'a>(
+        world: &'a World,
+        style: &Style,
+        view_state: &ViewState,
+    ) -> Result<std::borrow::Cow<'a, GlobeCameraState>, ProjectionStateError> {
+        if let Some(resolved) = world.resources.get::<Self>() {
+            if resolved.matches(style, view_state) {
+                if let Some(camera) = resolved.globe_camera() {
+                    return Ok(std::borrow::Cow::Borrowed(camera));
+                }
+            }
+        }
+        globe_camera_for_view(view_state).map(std::borrow::Cow::Owned)
+    }
+
     /// Clip-space `w` of the view center in `f64`, blended across Mercator-to-globe transitions.
     #[inline]
     pub fn center_clip_w(&self) -> f64 {

@@ -144,7 +144,11 @@ pub fn resource_system(
             }
         }
     }
-    let needs_atmosphere = super::queue_system::atmosphere_blend(style, view_state, world) > 0.0;
+    let needs_atmosphere = world
+        .resources
+        .get::<Eventually<AtmosphereRenderPipeline>>()
+        .is_none_or(|p| matches!(p, Eventually::Uninitialized))
+        && super::queue_system::atmosphere_blend(style, view_state, world) > 0.0;
     let Some((
         background_pipeline,
         globe_background_pipeline,

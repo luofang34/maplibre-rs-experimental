@@ -54,24 +54,28 @@ fn tile_surface_point(
     let longitude = mercator.x * PROJECTION_TWO_PI + PROJECTION_PI;
     let sin_lon = sin(longitude);
     let cos_lon = cos(longitude);
-    let tangent_half_latitude = exp(PROJECTION_PI - mercator.y * PROJECTION_TWO_PI);
+    let is_north = is_north_pole_y(tile_position.y);
+    let is_south = is_south_pole_y(tile_position.y);
+    if is_north {
+        return GlobeSurfacePoint(vec3<f32>(0.0, 1.0, 0.0), sin_lon, cos_lon, 0.0, true, false);
+    }
+    if is_south {
+        return GlobeSurfacePoint(vec3<f32>(0.0, -1.0, 0.0), sin_lon, cos_lon, 0.0, false, true);
+    }
+    // Clamp the exponent so `tangent_half_latitude^2` stays well within finite f32 range
+    // (`exp(40)^2 ≈ 5.5e34 < 3.4e38`) and never produces `Inf / Inf = NaN` on Metal/OpenGL.
+    let exp_arg = clamp(PROJECTION_PI - mercator.y * PROJECTION_TWO_PI, -40.0, 40.0);
+    let tangent_half_latitude = exp(exp_arg);
     let tangent_half_latitude_squared = tangent_half_latitude * tangent_half_latitude;
     let denominator = tangent_half_latitude_squared + 1.0;
     let sin_latitude = (tangent_half_latitude_squared - 1.0) / denominator;
     let cos_latitude = 2.0 * tangent_half_latitude / denominator;
-    let is_north = is_north_pole_y(tile_position.y);
-    let is_south = is_south_pole_y(tile_position.y);
-    var surface = vec3<f32>(
+    let surface = vec3<f32>(
         sin_lon * cos_latitude,
         sin_latitude,
         cos_lon * cos_latitude,
     );
-    if is_north {
-        surface = vec3<f32>(0.0, 1.0, 0.0);
-    } else if is_south {
-        surface = vec3<f32>(0.0, -1.0, 0.0);
-    }
-    return GlobeSurfacePoint(surface, sin_lon, cos_lon, cos_latitude, is_north, is_south);
+    return GlobeSurfacePoint(surface, sin_lon, cos_lon, cos_latitude, false, false);
 }
 
 fn tile_position_on_unit_sphere(
@@ -97,7 +101,7 @@ fn unit_sphere_offset(base: vec2<f32>, delta: vec2<f32>) -> vec3<f32> {
     let longitude = base.x * PROJECTION_TWO_PI + PROJECTION_PI;
     let d_longitude = delta.x * PROJECTION_TWO_PI;
     // Latitude from the Mercator row: lat = 2 atan(t) - pi/2 with t = exp(pi - 2 pi y).
-    let t0 = exp(PROJECTION_PI - base.y * PROJECTION_TWO_PI);
+    let t0 = exp(clamp(PROJECTION_PI - base.y * PROJECTION_TWO_PI, -40.0, 40.0));
     let grow = projection_expm1(-delta.y * PROJECTION_TWO_PI);
     let d_latitude = 2.0 * atan(t0 * grow / (1.0 + t0 * t0 * (1.0 + grow)));
     let denominator = t0 * t0 + 1.0;
@@ -157,9 +161,19 @@ fn globe_circumference_ratio_at_tile_y(
     tile_mercator_coords: vec4<f32>,
 ) -> f32 {
     let mercator_y = tile_mercator_coords.y + tile_mercator_coords.w * tile_y;
-    let tangent_half_latitude = exp(PROJECTION_PI - mercator_y * PROJECTION_TWO_PI);
+    let exp_arg = clamp(PROJECTION_PI - mercator_y * PROJECTION_TWO_PI, -40.0, 40.0);
+    let tangent_half_latitude = exp(exp_arg);
     return (2.0 * tangent_half_latitude) /
         (tangent_half_latitude * tangent_half_latitude + 1.0);
+}
+
+// Compute reversed-Z clip depth from `horizon_distance`, preventing back-of-globe vertices
+// behind the camera (`horizon_distance < 0` and `clip_w < 0`) from flipping sign to `+z`.
+fn globe_clip_z(horizon_distance: f32, clip_w: f32) -> f32 {
+    if horizon_distance < 0.0 && clip_w < 0.0 {
+        return horizon_distance * 0.5 * abs(clip_w);
+    }
+    return horizon_distance * 0.5 * clip_w;
 }
 
 fn project_symbol_scale_from_cos_lat(cos_lat: f32) -> f32 {

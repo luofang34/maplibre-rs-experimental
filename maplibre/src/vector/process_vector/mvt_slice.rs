@@ -5,7 +5,7 @@ use std::sync::Arc;
 use geozero::{
     error::Result as GeoResult,
     mvt::{process_geom, tile, Message, MvtError},
-    ColumnValue, FeatureProcessor, GeozeroGeometry, ProcessorSink,
+    ColumnValue, FeatureProcessor, ProcessorSink,
 };
 
 mod props;
@@ -108,13 +108,24 @@ pub(super) fn process_mvt_slice(
     processor: &mut impl FeatureProcessor,
 ) -> GeoResult<()> {
     match (selected, skip_properties) {
-        (None, false) => geozero::mvt::process(layer, processor),
+        (None, false) => {
+            processor.dataset_begin(Some(&layer.name))?;
+            for (out_idx, feature) in layer.features.iter().enumerate() {
+                processor.feature_begin(out_idx as u64)?;
+                process_feature_properties(layer, feature, processor)?;
+                processor.geometry_begin()?;
+                process_geom_safe(feature, processor)?;
+                processor.geometry_end()?;
+                processor.feature_end(out_idx as u64)?;
+            }
+            processor.dataset_end()
+        }
         (None, true) => {
             processor.dataset_begin(Some(&layer.name))?;
             for (out_idx, feature) in layer.features.iter().enumerate() {
                 processor.feature_begin(out_idx as u64)?;
                 processor.geometry_begin()?;
-                process_geom(feature, processor)?;
+                process_geom_safe(feature, processor)?;
                 processor.geometry_end()?;
                 processor.feature_end(out_idx as u64)?;
             }
@@ -131,7 +142,7 @@ pub(super) fn process_mvt_slice(
                     process_feature_properties(layer, feature, processor)?;
                 }
                 processor.geometry_begin()?;
-                process_geom(feature, processor)?;
+                process_geom_safe(feature, processor)?;
                 processor.geometry_end()?;
                 processor.feature_end(out_idx as u64)?;
             }
@@ -180,6 +191,56 @@ pub(super) fn process_feature_properties(
     processor.properties_end()
 }
 
+/// Pre-validates an MVT 2.1 command stream so `geozero-0.15`'s unchecked `geom[3]` / `split_at`
+/// calls cannot panic on malformed or truncated tiles.
+pub(super) fn has_valid_mvt_geometry(feature: &tile::Feature) -> bool {
+    let mut geom: &[u32] = &feature.geometry;
+    if geom.is_empty() {
+        return false;
+    }
+    match feature.r#type {
+        Some(1) => {
+            let count = (geom[0] >> 3) as usize;
+            (geom[0] & 0x7) == 1
+                && count > 0
+                && count.checked_mul(2).and_then(|n| n.checked_add(1)) == Some(geom.len())
+        }
+        Some(kind @ (2 | 3)) => {
+            let extra = if kind == 3 { 5 } else { 4 };
+            while !geom.is_empty() {
+                if geom.len() < extra || geom[0] != (1 | (1 << 3)) || (geom[3] & 0x7) != 2 {
+                    return false;
+                }
+                let count = (geom[3] >> 3) as usize;
+                let Some(slice_size) = count.checked_mul(2).and_then(|n| n.checked_add(extra))
+                else {
+                    return false;
+                };
+                if count == 0
+                    || slice_size > geom.len()
+                    || (kind == 3 && (geom[slice_size - 1] & 0x7) != 7)
+                {
+                    return false;
+                }
+                geom = &geom[slice_size..];
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Decodes `feature`'s MVT geometry via `geozero` after bounds-checking its command stream.
+pub(super) fn process_geom_safe(
+    feature: &tile::Feature,
+    processor: &mut impl geozero::GeomProcessor,
+) -> GeoResult<()> {
+    if !has_valid_mvt_geometry(feature) {
+        return Err(MvtError::GeometryFormat.into());
+    }
+    process_geom(feature, processor)
+}
+
 /// Filters `selected` (or `0..layer.features.len()`) down to features whose geometry decodes
 /// cleanly, returning `(readable_indices, dropped_count)`.
 pub(super) fn retain_readable_indices(
@@ -194,7 +255,7 @@ pub(super) fn retain_readable_indices(
                 if layer
                     .features
                     .get(idx)
-                    .is_some_and(|feature| feature.process_geom(&mut ProcessorSink).is_ok())
+                    .is_some_and(|feature| process_geom_safe(feature, &mut ProcessorSink).is_ok())
                 {
                     readable.push(idx);
                 }
@@ -202,7 +263,7 @@ pub(super) fn retain_readable_indices(
         }
         None => {
             for (idx, feature) in layer.features.iter().enumerate() {
-                if feature.process_geom(&mut ProcessorSink).is_ok() {
+                if process_geom_safe(feature, &mut ProcessorSink).is_ok() {
                     readable.push(idx);
                 }
             }

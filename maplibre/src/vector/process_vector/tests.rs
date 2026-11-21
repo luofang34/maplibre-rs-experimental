@@ -479,3 +479,5 @@ fn a_tile_magnified_past_its_source_zoom_reports_its_overscaling() {
 
 mod shared_properties;
 mod unreadable;
+
+mod malformed;

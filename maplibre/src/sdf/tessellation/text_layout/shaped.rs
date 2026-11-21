@@ -353,10 +353,7 @@ fn wrap_vertical_paragraphs(
         let mut cur_len = 0.0_f32;
         for (i, &sg) in para_glyphs.iter().enumerate() {
             let adv = vertical_advance(sg);
-            if i > 0
-                && out_glyphs.len() > line_start
-                && cur_len + spacing + adv > max_width
-            {
+            if i > 0 && out_glyphs.len() > line_start && cur_len + spacing + adv > max_width {
                 out_lines.push(line_start..out_glyphs.len());
                 line_start = out_glyphs.len();
                 cur_len = 0.0;

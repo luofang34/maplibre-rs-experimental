@@ -184,7 +184,13 @@ pub fn shape_slice_with_font_vertical(
         Feature::new(Tag::new(b"vert"), 1, ..),
         Feature::new(Tag::new(b"vrt2"), 1, ..),
     ];
-    if harfrust::shape(&shaper, &mut buffer, ShapeOptions::new().features(&features)).is_err() {
+    if harfrust::shape(
+        &shaper,
+        &mut buffer,
+        ShapeOptions::new().features(&features),
+    )
+    .is_err()
+    {
         return Vec::new();
     }
 
@@ -244,13 +250,8 @@ where
                 face_runs.push((face_id, font, rel_idx..char_end));
             }
             for (face_id, font, sub_range) in face_runs {
-                let shaped = shape_slice_with_font_vertical(
-                    &font,
-                    face_id,
-                    raw_para,
-                    sub_range,
-                    para_start,
-                );
+                let shaped =
+                    shape_slice_with_font_vertical(&font, face_id, raw_para, sub_range, para_start);
                 output.extend(shaped);
             }
         }

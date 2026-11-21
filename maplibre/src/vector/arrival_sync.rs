@@ -104,7 +104,7 @@ pub(crate) fn sync_arriving_vector_bucket_for_layer(
     any_state_changed && layer_geometry_reads_feature_state(style_layer)
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(feature = "headless")]
 pub(crate) fn sync_arriving_vector_bucket(
     style: &Style,
     overscaled_zoom: u8,
@@ -166,7 +166,7 @@ pub(crate) fn sync_arriving_symbol_bucket_for_layer(
 /// Synchronizes an arriving symbol bucket's per-feature properties against live
 /// `style.feature_state`, returning `true` when a layout/geometry-affecting `feature-state` value
 /// changed while the tile was in flight.
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(feature = "headless")]
 pub(crate) fn sync_arriving_symbol_bucket(
     style: &Style,
     bucket: &mut SymbolLayerData,

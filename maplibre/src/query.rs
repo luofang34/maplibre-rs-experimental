@@ -218,11 +218,9 @@ pub fn query_rendered_features(
                 .find(|layer| layer.id == symbol.layer)
                 .map_or(0, |layer| layer.index);
             let mut feature = QueriedFeature::from(symbol);
-            if let Some(prop) = source_promote_property(
-                style,
-                feature.source.as_deref(),
-                &feature.source_layer,
-            ) {
+            if let Some(prop) =
+                source_promote_property(style, feature.source.as_deref(), &feature.source_layer)
+            {
                 feature.id = feature
                     .properties
                     .get(prop)

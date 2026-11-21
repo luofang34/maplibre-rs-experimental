@@ -46,7 +46,8 @@ type RenderWorkerMessage =
     | { type: "destroy" }
 
 if (!WEBGL) {
-    ensureWebGpuCompatibility(self);
+    // Single-threaded WASM never uses SharedArrayBuffer; skip per-draw JS prototype wrappers.
+    ensureWebGpuCompatibility(self, {sharedMemory: false, traceGpuCalls: false});
 }
 
 let runner: any = null;

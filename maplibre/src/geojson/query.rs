@@ -166,7 +166,9 @@ impl Style {
                 let ctx = FeatureContext {
                     properties: &properties,
                     geometry_type: GeometryType::from_geojson(geometry_type),
-                    id: id.as_ref().map(crate::query::QueriedFeatureId::to_expr_value),
+                    id: id
+                        .as_ref()
+                        .map(crate::query::QueriedFeatureId::to_expr_value),
                     zoom: 0.0,
                 };
                 if source_filter.as_ref().is_some_and(|sf| !sf.evaluate(&ctx)) {

@@ -76,7 +76,9 @@ fn view_and_sky(
     world: &crate::tcs::world::World,
 ) -> ([[f32; 4]; 3], [[f32; 4]; 3]) {
     let disabled = AtmosphereLayerMetadata::disabled().sky_inputs();
-    let Ok(camera) = crate::render::projection::globe_camera_for_view(view_state) else {
+    let Ok(camera) = crate::render::resolved_view::ResolvedFrameView::globe_camera_for_frame(
+        world, style, view_state,
+    ) else {
         return (
             [
                 [1.0, 0.0, 0.0, 0.0],

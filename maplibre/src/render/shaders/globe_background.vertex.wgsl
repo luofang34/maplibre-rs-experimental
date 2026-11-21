@@ -29,5 +29,10 @@ fn main(
     if viewport.y > 0.5 {
         position.z = max(position.z, 0.0) * 1.0e-6;
     }
+    // Keep front-facing globe background strictly above `0.0` (at least ~16 ULPs on
+    // 24-bit WebGL2 `Depth24PlusStencil8`) so atmosphere/sky at `z = 0.0` cannot punch through.
+    if position.w > 0.0 && position.z > 0.0 {
+        position.z = max(position.z, position.w * 1.0e-6);
+    }
     return VertexOutput(color, position);
 }

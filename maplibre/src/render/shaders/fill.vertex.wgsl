@@ -29,7 +29,7 @@ fn main(
         tile_mercator_coords,
     );
     var final_position = projected.clip_position;
-    final_position.z = projected.horizon_distance * 0.5 * final_position.w;
+    final_position.z = globe_clip_z(projected.horizon_distance, final_position.w);
 
     return VertexOutput(color, final_position);
 }

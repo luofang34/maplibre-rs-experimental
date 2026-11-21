@@ -3,7 +3,9 @@
 pub(crate) use super::buffers::globe_tiles;
 pub use super::buffers::{BackgroundBuffers, BackgroundGpuBuffers};
 use super::{
-    buffers::{background_color, globe_tile_metadata, sky_metadata, world_rows},
+    buffers::{
+        background_color, globe_tile_metadata_with_vp, sky_metadata_with_camera, world_rows,
+    },
     globe_sky::{draws_globe_sky, globe_sky_metadata},
     render_commands::{
         DrawAtmosphere, DrawBackground, DrawBackgroundPattern, DrawGlobeBackground,
@@ -13,8 +15,8 @@ use super::{
 use crate::{
     context::MapContext,
     render::{
-        projection::globe_camera_for_view,
         render_phase::{DrawState, LayerItem, ProjectionBinding, RenderPhase, TranslucentItem},
+        resolved_view::ResolvedFrameView,
         shaders::{AtmosphereLayerMetadata, BackgroundLayerMetadata, ShaderTileMetadata},
         view_state::ViewState,
     },
@@ -76,9 +78,10 @@ pub fn atmosphere_blend(
             .is_some_and(|l| l.atmosphere),
     ));
     let sky_faded = if sky_blend > 0.0 {
-        let altitude_blend = globe_camera_for_view(view_state).map_or(0.0, |camera| {
-            super::altitude::altitude_blend_for_camera(&camera)
-        });
+        let altitude_blend = ResolvedFrameView::globe_camera_for_frame(world, style, view_state)
+            .map_or(0.0, |camera| {
+                super::altitude::altitude_blend_for_camera(&camera)
+            });
         sky_blend * altitude_blend
     } else {
         0.0
@@ -119,6 +122,11 @@ pub fn queue_system(
     let external_or_free = view_state.has_external_view()
         || view_state.navigation_mode() == crate::render::view_state::NavigationMode::FreeGlobe;
     let globe_sky = draws_globe_sky(view_state, projection_transition, atmosphere_blend);
+    let cached_globe_camera = if uses_globe || atmosphere_blend > 0.0 {
+        ResolvedFrameView::globe_camera_for_frame(world, style, view_state).ok()
+    } else {
+        None
+    };
     let sky_metadata = style
         .sky
         .as_ref()
@@ -132,7 +140,15 @@ pub fn queue_system(
             globe_sky
                 .then(|| globe_sky_metadata(sky, view_state))
                 .flatten()
-                .unwrap_or_else(|| sky_metadata(sky, view_state, projection_transition, frame[1]))
+                .unwrap_or_else(|| {
+                    sky_metadata_with_camera(
+                        sky,
+                        view_state,
+                        projection_transition,
+                        frame[1],
+                        cached_globe_camera.as_deref(),
+                    )
+                })
         });
 
     if let Some(gpu) = world
@@ -281,15 +297,22 @@ pub fn queue_system(
         } else {
             Vec::new()
         };
+        let gpu_vp = world
+            .resources
+            .get::<ResolvedFrameView>()
+            .filter(|resolved| resolved.matches(style, view_state))
+            .map(|resolved| resolved.gpu_view_projection)
+            .unwrap_or_else(|| view_state.gpu_view_projection());
         let tile_metadata: Vec<ShaderTileMetadata> = globe_tiles
             .iter()
-            .map(|coords| globe_tile_metadata(view_state, *coords))
+            .map(|coords| globe_tile_metadata_with_vp(view_state, &gpu_vp, *coords))
             .collect();
         let atmosphere_metadata = if atmosphere_blend > 0.0 {
-            let camera = globe_camera_for_view(view_state).map_err(|error| {
-                tracing::error!(?error, "failed to build atmosphere globe camera");
-                SystemError::Setup
-            })?;
+            let camera = ResolvedFrameView::globe_camera_for_frame(world, style, view_state)
+                .map_err(|error| {
+                    tracing::error!(?error, "failed to build atmosphere globe camera");
+                    SystemError::Setup
+                })?;
             let light = style.light.clone().unwrap_or_default();
             let scene_lighting = world
                 .resources

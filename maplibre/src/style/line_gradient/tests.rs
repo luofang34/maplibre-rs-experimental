@@ -55,7 +55,10 @@ fn narrow_interpolate_and_nested_step_use_high_res_linear_ramp() {
     ])));
     assert_eq!(narrow.len(), HIGH_RES_RAMP_TEXELS);
     let mid = narrow[HIGH_RES_RAMP_TEXELS / 2];
-    assert!(mid[1] > 200, "narrow green band at 0.5 must be resolved: {mid:?}");
+    assert!(
+        mid[1] > 200,
+        "narrow green band at 0.5 must be resolved: {mid:?}"
+    );
 
     let nested = ramp(&gradient(serde_json::json!([
         "case",

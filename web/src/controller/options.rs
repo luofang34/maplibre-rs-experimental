@@ -372,7 +372,7 @@ pub(crate) struct Feature {
     #[serde(rename = "type")]
     kind: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    id: Option<u64>,
+    id: Option<maplibre::query::QueriedFeatureId>,
     properties: std::collections::BTreeMap<String, serde_json::Value>,
     state: std::collections::BTreeMap<String, serde_json::Value>,
     layer: LayerRef,

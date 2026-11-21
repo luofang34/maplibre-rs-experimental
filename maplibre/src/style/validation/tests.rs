@@ -106,7 +106,9 @@ fn raster_fade_duration_is_accepted_and_unknown_layer_types_are_reported() {
         .validate()
         .expect_err("unimplemented rendering must be reported");
     assert!(
-        errors.iter().any(|error| error.to_string().contains("model")),
+        errors
+            .iter()
+            .any(|error| error.to_string().contains("model")),
         "{errors:?}"
     );
 }

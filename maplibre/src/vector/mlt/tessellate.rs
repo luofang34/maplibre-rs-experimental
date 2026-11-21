@@ -195,7 +195,9 @@ fn process_columnar_style_layer<T: VectorTransferables, C: Context>(
                     let id = crate::query::resolve_effective_expr_id(
                         col.ids.get(idx).copied().flatten(),
                         prop,
-                        state_ctx.as_ref().and_then(|c| c.promote_property.as_deref()),
+                        state_ctx
+                            .as_ref()
+                            .and_then(|c| c.promote_property.as_deref()),
                     );
                     if filter.evaluate(&FeatureContext {
                         properties: prop,
