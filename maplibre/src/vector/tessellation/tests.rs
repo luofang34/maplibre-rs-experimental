@@ -194,6 +194,67 @@ fn later_extrusion_polygons_leave_both_poles_exact() {
     }
 }
 
+#[test]
+fn extrusion_skips_linestring_and_multilinestring_geometries() {
+    let mut tessellator =
+        ZeroTessellator::<IndexDataType>::default().with_extrusion(super::ExtrusionOptions {
+            height: Some(crate::style::layer::StyleProperty::Constant(100.0)),
+            base: None,
+            base_datum: None,
+            height_datum: None,
+            part: None,
+            translucent: false,
+            clip_buffer: None,
+            rounded_corner_distance: None,
+            has_pattern: false,
+            overscale: 0,
+        });
+
+    // Acute-angle (< 83.6 deg) LineString that previously emitted degenerate extrusion spikes.
+    tessellator.feature_begin(0).expect("feature begins");
+    tessellator
+        .linestring_begin(true, 3, 0)
+        .expect("line begins");
+    tessellator.xy(1000.0, 1000.0, 0).expect("xy");
+    tessellator.xy(2000.0, 2000.0, 1).expect("xy");
+    tessellator.xy(1100.0, 1000.0, 2).expect("xy");
+    tessellator.linestring_end(true, 0).expect("line ends");
+    tessellator.feature_end(0).expect("feature ends");
+
+    // Acute-angle MultiLineString.
+    tessellator.feature_begin(1).expect("feature begins");
+    tessellator
+        .multilinestring_begin(1, 0)
+        .expect("multiline begins");
+    tessellator
+        .linestring_begin(false, 3, 0)
+        .expect("line begins");
+    tessellator.xy(500.0, 500.0, 0).expect("xy");
+    tessellator.xy(1500.0, 1500.0, 1).expect("xy");
+    tessellator.xy(600.0, 500.0, 2).expect("xy");
+    tessellator.linestring_end(false, 0).expect("line ends");
+    tessellator.multilinestring_end(0).expect("multiline ends");
+    tessellator.feature_end(1).expect("feature ends");
+
+    assert!(
+        tessellator.buffer.vertices.is_empty(),
+        "fill-extrusion must emit zero vertices for LineString/MultiLineString"
+    );
+    assert!(
+        tessellator.buffer.indices.is_empty(),
+        "fill-extrusion must emit zero indices for LineString/MultiLineString"
+    );
+
+    // Polygons on the same extrusion tessellator must still tessellate normally.
+    tessellator.feature_begin(2).expect("feature begins");
+    tessellate_reference_triangle(&mut tessellator);
+    tessellator.feature_end(2).expect("feature ends");
+    assert!(
+        !tessellator.buffer.vertices.is_empty() && !tessellator.buffer.indices.is_empty(),
+        "fill-extrusion must still tessellate Polygon geometries"
+    );
+}
+
 fn tessellate_reference_line(tessellator: &mut ZeroTessellator<IndexDataType>) {
     tessellator
         .linestring_begin(true, 2, 0)

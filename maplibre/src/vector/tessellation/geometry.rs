@@ -13,7 +13,7 @@ where
         let coordinate = [(x * scale) as f32, (y * scale) as f32];
         if self.circle.is_some() {
             self.emit_circle(coordinate[0], coordinate[1]);
-        } else if !self.is_point {
+        } else if !self.is_point && (self.extrusion.is_none() || self.in_polygon) {
             self.append_coordinate(coordinate)?;
         }
         Ok(())
@@ -42,7 +42,7 @@ where
     }
 
     fn linestring_end(&mut self, tagged: bool, _idx: usize) -> GeoResult<()> {
-        if self.circle.is_some() {
+        if self.circle.is_some() || (self.extrusion.is_some() && !self.in_polygon) {
             return Ok(());
         }
         self.end(false)?;
@@ -58,7 +58,7 @@ where
     }
 
     fn multilinestring_end(&mut self, _idx: usize) -> GeoResult<()> {
-        if self.circle.is_some() {
+        if self.circle.is_some() || self.extrusion.is_some() {
             return Ok(());
         }
         self.tessellate_strokes()?;

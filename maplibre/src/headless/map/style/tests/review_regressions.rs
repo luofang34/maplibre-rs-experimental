@@ -284,3 +284,58 @@ fn recolouring_a_constant_fill_beside_its_outline_keeps_the_tile() {
         assert_eq!(center_rgba(&map), [0, 255, 0, 255]);
     })
 }
+
+#[test]
+fn fill_extrusion_pitched_acute_linestring_renders_transparent() {
+    use crate::headless::map::readback::{FrameReadback, PixelLayout};
+
+    crate::headless::map::test_async::run_async(async {
+        let map = vector_map(json!({
+            "version": 8,
+            "center": [0.0, 0.0],
+            "zoom": 0.0,
+            "pitch": 60.0,
+            "sources": {
+                "parks": {
+                    "type": "geojson",
+                    "data": {
+                        "type": "FeatureCollection",
+                        "features": [{
+                            "type": "Feature",
+                            "geometry": {
+                                "type": "LineString",
+                                "coordinates": [[-20.0, -20.0], [20.0, 20.0], [-18.0, -20.0]]
+                            }
+                        }]
+                    }
+                }
+            },
+            "layers": [{
+                "id": "extrusion",
+                "type": "fill-extrusion",
+                "source": "parks",
+                "paint": {
+                    "fill-extrusion-color": "#ff0000",
+                    "fill-extrusion-height": 50000
+                }
+            }]
+        }))
+        .await;
+
+        let mut readback = FrameReadback::new(&map, 64, 64);
+        let mut pixels = vec![0_u8; readback.frame_len(PixelLayout::Rgba8)];
+        readback
+            .read_into_blocking(
+                &map,
+                map.head_texture().expect("head texture"),
+                PixelLayout::Rgba8,
+                &mut pixels,
+            )
+            .expect("readback");
+
+        assert!(
+            pixels.iter().all(|&channel| channel == 0),
+            "pitched acute LineString on fill-extrusion must render completely transparent"
+        );
+    })
+}
