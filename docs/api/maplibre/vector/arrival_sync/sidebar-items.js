@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["sync_arriving_symbol_bucket","sync_arriving_tile_index","sync_arriving_vector_bucket"]};
+window.SIDEBAR_ITEMS = {"fn":["sync_arriving_symbol_bucket","sync_arriving_symbol_bucket_for_layer","sync_arriving_tile_index","sync_arriving_vector_bucket","sync_arriving_vector_bucket_for_layer"]};

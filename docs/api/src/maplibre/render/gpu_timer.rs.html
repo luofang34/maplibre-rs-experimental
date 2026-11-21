@@ -148,12 +148,12 @@
 <a href=#148 id=148 data-nosnippet>148</a>        <span class="kw">if </span><span class="self">self</span>.state.load(Ordering::Acquire) != MAPPED {
 <a href=#149 id=149 data-nosnippet>149</a>            <span class="kw">return </span><span class="prelude-val">None</span>;
 <a href=#150 id=150 data-nosnippet>150</a>        }
-<a href=#151 id=151 data-nosnippet>151</a>        <span class="comment">// A pass that draws nothing may never reach the stage that writes its end on GPUs that
-<a href=#152 id=152 data-nosnippet>152</a>        // sample at stage boundaries, so an end not after the start measures nothing.
+<a href=#151 id=151 data-nosnippet>151</a>        <span class="comment">// A pass that draws nothing or drops its end timestamp (`MTLCounterErrorValue` / stale
+<a href=#152 id=152 data-nosnippet>152</a>        // counter on Metal) measures nothing.
 <a href=#153 id=153 data-nosnippet>153</a>        </span><span class="kw">let </span>elapsed = <span class="self">self</span>.readback.get_mapped_range(..).ok().and_then(|bytes| {
 <a href=#154 id=154 data-nosnippet>154</a>            <span class="kw">let </span>start = u64::from_le_bytes(bytes[..<span class="number">8</span>].try_into().unwrap_or_default());
 <a href=#155 id=155 data-nosnippet>155</a>            <span class="kw">let </span>end = u64::from_le_bytes(bytes[<span class="number">8</span>..<span class="number">16</span>].try_into().unwrap_or_default());
-<a href=#156 id=156 data-nosnippet>156</a>            (end &gt; start).then(|| {
+<a href=#156 id=156 data-nosnippet>156</a>            (start != u64::MAX &amp;&amp; end != u64::MAX &amp;&amp; end &gt; start).then(|| {
 <a href=#157 id=157 data-nosnippet>157</a>                Duration::from_nanos(((end - start) <span class="kw">as </span>f64 * f64::from(period_nanos)) <span class="kw">as </span>u64)
 <a href=#158 id=158 data-nosnippet>158</a>            })
 <a href=#159 id=159 data-nosnippet>159</a>        });

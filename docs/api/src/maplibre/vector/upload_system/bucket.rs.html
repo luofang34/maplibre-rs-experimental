@@ -10,7 +10,7 @@
 <a href=#10 id=10 data-nosnippet>10</a>    paint, DynPoints, VectorPaintFrame,
 <a href=#11 id=11 data-nosnippet>11</a>};
 <a href=#12 id=12 data-nosnippet>12</a><span class="kw">use crate</span>::{
-<a href=#13 id=13 data-nosnippet>13</a>    render::shaders::{FillShaderFeatureMetadata, Vec4f32},
+<a href=#13 id=13 data-nosnippet>13</a>    render::shaders::{FillShaderFeatureMetadata, ShaderLayerMetadata, Vec4f32},
 <a href=#14 id=14 data-nosnippet>14</a>    style::{layer::StyleLayer, Style},
 <a href=#15 id=15 data-nosnippet>15</a>    vector::{AvailableVectorLayerBucket, VectorBufferPool},
 <a href=#16 id=16 data-nosnippet>16</a>};
@@ -38,7 +38,7 @@
 <a href=#38 id=38 data-nosnippet>38</a>}
 <a href=#39 id=39 data-nosnippet>39</a>
 <a href=#40 id=40 data-nosnippet>40</a><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">enum </span>UploadOutcome {
-<a href=#41 id=41 data-nosnippet>41</a>    Uploaded,
+<a href=#41 id=41 data-nosnippet>41</a>    Uploaded(<span class="prelude-ty">Option</span>&lt;((u16, u64), ShaderLayerMetadata)&gt;),
 <a href=#42 id=42 data-nosnippet>42</a>    PoolSaturated,
 <a href=#43 id=43 data-nosnippet>43</a>    Failed,
 <a href=#44 id=44 data-nosnippet>44</a>}
@@ -78,7 +78,7 @@
 <a href=#78 id=78 data-nosnippet>78</a>    <span class="kw">let </span>color: <span class="prelude-ty">Option</span>&lt;Vec4f32&gt; = style_layer
 <a href=#79 id=79 data-nosnippet>79</a>        .paint
 <a href=#80 id=80 data-nosnippet>80</a>        .as_ref()
-<a href=#81 id=81 data-nosnippet>81</a>        .and_then(|paint| paint.get_color())
+<a href=#81 id=81 data-nosnippet>81</a>        .and_then(|paint| paint.color_at(f64::from(zoom)))
 <a href=#82 id=82 data-nosnippet>82</a>        .map(|color| color.into());
 <a href=#83 id=83 data-nosnippet>83</a>
 <a href=#84 id=84 data-nosnippet>84</a>    <span class="kw">let </span>fallback_color = color.unwrap_or([<span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1.0</span>]);
@@ -209,16 +209,29 @@
 <a href=#209 id=209 data-nosnippet>209</a>            !feature_metadata.is_empty() &amp;&amp; feature_metadata.iter().all(|fm| fm.color[<span class="number">3</span>] == <span class="number">255</span>)
 <a href=#210 id=210 data-nosnippet>210</a>        };
 <a href=#211 id=211 data-nosnippet>211</a>    buffer_pool.set_layer_opaque_color(coords, <span class="kw-2">&amp;</span>style_layer.id, opaque_fill);
-<a href=#212 id=212 data-nosnippet>212</a>    <span class="attr">#[cfg(feature = <span class="string">"geojson"</span>)]
-<a href=#213 id=213 data-nosnippet>213</a>    </span><span class="kw">if </span>is_dynamic_circle {
-<a href=#214 id=214 data-nosnippet>214</a>        <span class="kw">crate</span>::geojson::update::dynamic_points::record_uploaded_dynamic_circle(
-<a href=#215 id=215 data-nosnippet>215</a>            <span class="prelude-val">Some</span>(dyn_points),
-<a href=#216 id=216 data-nosnippet>216</a>            buffer_pool,
-<a href=#217 id=217 data-nosnippet>217</a>            coords,
-<a href=#218 id=218 data-nosnippet>218</a>            style_layer,
-<a href=#219 id=219 data-nosnippet>219</a>            dynamic_seq,
-<a href=#220 id=220 data-nosnippet>220</a>        );
-<a href=#221 id=221 data-nosnippet>221</a>    }
-<a href=#222 id=222 data-nosnippet>222</a>    UploadOutcome::Uploaded
-<a href=#223 id=223 data-nosnippet>223</a>}
+<a href=#212 id=212 data-nosnippet>212</a>    <span class="kw">let </span>slot = buffer_pool
+<a href=#213 id=213 data-nosnippet>213</a>        .index()
+<a href=#214 id=214 data-nosnippet>214</a>        .get_layers(coords)
+<a href=#215 id=215 data-nosnippet>215</a>        .and_then(|layers| {
+<a href=#216 id=216 data-nosnippet>216</a>            layers
+<a href=#217 id=217 data-nosnippet>217</a>                .iter()
+<a href=#218 id=218 data-nosnippet>218</a>                .rev()
+<a href=#219 id=219 data-nosnippet>219</a>                .find(|entry| entry.style_layer_id == style_layer.layer_id())
+<a href=#220 id=220 data-nosnippet>220</a>        })
+<a href=#221 id=221 data-nosnippet>221</a>        .and_then(|entry| {
+<a href=#222 id=222 data-nosnippet>222</a>            <span class="kw">let </span>range = entry.layer_metadata_buffer_range();
+<a href=#223 id=223 data-nosnippet>223</a>            (range.end &gt; range.start).then_some((entry.page(), range.start))
+<a href=#224 id=224 data-nosnippet>224</a>        });
+<a href=#225 id=225 data-nosnippet>225</a>    <span class="attr">#[cfg(feature = <span class="string">"geojson"</span>)]
+<a href=#226 id=226 data-nosnippet>226</a>    </span><span class="kw">if </span>is_dynamic_circle {
+<a href=#227 id=227 data-nosnippet>227</a>        <span class="kw">crate</span>::geojson::update::dynamic_points::record_uploaded_dynamic_circle(
+<a href=#228 id=228 data-nosnippet>228</a>            <span class="prelude-val">Some</span>(dyn_points),
+<a href=#229 id=229 data-nosnippet>229</a>            buffer_pool,
+<a href=#230 id=230 data-nosnippet>230</a>            coords,
+<a href=#231 id=231 data-nosnippet>231</a>            style_layer,
+<a href=#232 id=232 data-nosnippet>232</a>            dynamic_seq,
+<a href=#233 id=233 data-nosnippet>233</a>        );
+<a href=#234 id=234 data-nosnippet>234</a>    }
+<a href=#235 id=235 data-nosnippet>235</a>    UploadOutcome::Uploaded(slot.map(|slot| (slot, layer_metadata)))
+<a href=#236 id=236 data-nosnippet>236</a>}
 </code></pre></div></section></main></body></html>

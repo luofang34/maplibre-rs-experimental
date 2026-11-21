@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["upload_system"],"struct":["GlobeMeshPrepareMemo"]};
+window.SIDEBAR_ITEMS = {"fn":["globe_tiles_match","upload_system"],"struct":["GlobeMeshPrepareMemo"]};

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["STATE_ID_PROPERTY"],"mod":["sync"],"struct":["FeatureId","FeatureStateStore","FeatureStateTarget","SourceFeatureState"]};
+window.SIDEBAR_ITEMS = {"constant":["STATE_ID_PROPERTY"],"fn":["ever_mutated"],"mod":["sync"],"static":["FEATURE_STATE_EVER_USED"],"struct":["FeatureId","FeatureStateStore","FeatureStateTarget","SourceFeatureState"]};

@@ -240,23 +240,38 @@
 <a href=#240 id=240 data-nosnippet>240</a>        <span class="self">self</span>.layers.get(layer_id).map(|binding| binding.fingerprint)
 <a href=#241 id=241 data-nosnippet>241</a>    }
 <a href=#242 id=242 data-nosnippet>242</a>
-<a href=#243 id=243 data-nosnippet>243</a>    <span class="doccomment">/// Whether `layer_id` requested `"nearest"` DEM resampling this frame.
-<a href=#244 id=244 data-nosnippet>244</a>    </span><span class="kw">pub fn </span>layer_nearest(<span class="kw-2">&amp;</span><span class="self">self</span>, layer_id: <span class="kw-2">&amp;</span>str) -&gt; bool {
-<a href=#245 id=245 data-nosnippet>245</a>        <span class="self">self</span>.layers
-<a href=#246 id=246 data-nosnippet>246</a>            .get(layer_id)
-<a href=#247 id=247 data-nosnippet>247</a>            .is_some_and(|binding| binding.nearest)
-<a href=#248 id=248 data-nosnippet>248</a>    }
-<a href=#249 id=249 data-nosnippet>249</a>
-<a href=#250 id=250 data-nosnippet>250</a>    <span class="doccomment">/// Kind and uniform bind group of a layer written this frame.
-<a href=#251 id=251 data-nosnippet>251</a>    </span><span class="kw">pub fn </span>layer(<span class="kw-2">&amp;</span><span class="self">self</span>, layer_id: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;(DemLayerKind, <span class="kw-2">&amp;</span>wgpu::BindGroup)&gt; {
-<a href=#252 id=252 data-nosnippet>252</a>        <span class="self">self</span>.layers
-<a href=#253 id=253 data-nosnippet>253</a>            .get(layer_id)
-<a href=#254 id=254 data-nosnippet>254</a>            .map(|binding| (binding.kind, <span class="kw-2">&amp;</span>binding.bind_group))
-<a href=#255 id=255 data-nosnippet>255</a>    }
-<a href=#256 id=256 data-nosnippet>256</a>
-<a href=#257 id=257 data-nosnippet>257</a>    <span class="doccomment">/// Drops the buffers of layers the style no longer has.
-<a href=#258 id=258 data-nosnippet>258</a>    </span><span class="kw">pub fn </span>retain_layers(<span class="kw-2">&amp;mut </span><span class="self">self</span>, layer_ids: <span class="kw-2">&amp;</span>HashSet&lt;<span class="kw-2">&amp;</span>str&gt;) {
-<a href=#259 id=259 data-nosnippet>259</a>        <span class="self">self</span>.layers.retain(|id, <span class="kw">_</span>| layer_ids.contains(id.as_str()));
-<a href=#260 id=260 data-nosnippet>260</a>    }
-<a href=#261 id=261 data-nosnippet>261</a>}
+<a href=#243 id=243 data-nosnippet>243</a>    <span class="doccomment">/// Combined digest across all loaded DEM-shaded layer uniform bindings.
+<a href=#244 id=244 data-nosnippet>244</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>fingerprint_all(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64 {
+<a href=#245 id=245 data-nosnippet>245</a>        <span class="kw">let </span><span class="kw-2">mut </span>hasher = rustc_hash::FxHasher::default();
+<a href=#246 id=246 data-nosnippet>246</a>        <span class="self">self</span>.layers.len().hash(<span class="kw-2">&amp;mut </span>hasher);
+<a href=#247 id=247 data-nosnippet>247</a>        <span class="kw">let </span><span class="kw-2">mut </span>acc = <span class="number">0_u64</span>;
+<a href=#248 id=248 data-nosnippet>248</a>        <span class="kw">for </span>(id, binding) <span class="kw">in </span><span class="kw-2">&amp;</span><span class="self">self</span>.layers {
+<a href=#249 id=249 data-nosnippet>249</a>            <span class="kw">let </span><span class="kw-2">mut </span>h = rustc_hash::FxHasher::default();
+<a href=#250 id=250 data-nosnippet>250</a>            id.hash(<span class="kw-2">&amp;mut </span>h);
+<a href=#251 id=251 data-nosnippet>251</a>            binding.fingerprint.hash(<span class="kw-2">&amp;mut </span>h);
+<a href=#252 id=252 data-nosnippet>252</a>            acc ^= h.finish();
+<a href=#253 id=253 data-nosnippet>253</a>        }
+<a href=#254 id=254 data-nosnippet>254</a>        acc.hash(<span class="kw-2">&amp;mut </span>hasher);
+<a href=#255 id=255 data-nosnippet>255</a>        hasher.finish()
+<a href=#256 id=256 data-nosnippet>256</a>    }
+<a href=#257 id=257 data-nosnippet>257</a>
+<a href=#258 id=258 data-nosnippet>258</a>    <span class="doccomment">/// Whether `layer_id` requested `"nearest"` DEM resampling this frame.
+<a href=#259 id=259 data-nosnippet>259</a>    </span><span class="kw">pub fn </span>layer_nearest(<span class="kw-2">&amp;</span><span class="self">self</span>, layer_id: <span class="kw-2">&amp;</span>str) -&gt; bool {
+<a href=#260 id=260 data-nosnippet>260</a>        <span class="self">self</span>.layers
+<a href=#261 id=261 data-nosnippet>261</a>            .get(layer_id)
+<a href=#262 id=262 data-nosnippet>262</a>            .is_some_and(|binding| binding.nearest)
+<a href=#263 id=263 data-nosnippet>263</a>    }
+<a href=#264 id=264 data-nosnippet>264</a>
+<a href=#265 id=265 data-nosnippet>265</a>    <span class="doccomment">/// Kind and uniform bind group of a layer written this frame.
+<a href=#266 id=266 data-nosnippet>266</a>    </span><span class="kw">pub fn </span>layer(<span class="kw-2">&amp;</span><span class="self">self</span>, layer_id: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;(DemLayerKind, <span class="kw-2">&amp;</span>wgpu::BindGroup)&gt; {
+<a href=#267 id=267 data-nosnippet>267</a>        <span class="self">self</span>.layers
+<a href=#268 id=268 data-nosnippet>268</a>            .get(layer_id)
+<a href=#269 id=269 data-nosnippet>269</a>            .map(|binding| (binding.kind, <span class="kw-2">&amp;</span>binding.bind_group))
+<a href=#270 id=270 data-nosnippet>270</a>    }
+<a href=#271 id=271 data-nosnippet>271</a>
+<a href=#272 id=272 data-nosnippet>272</a>    <span class="doccomment">/// Drops the buffers of layers the style no longer has.
+<a href=#273 id=273 data-nosnippet>273</a>    </span><span class="kw">pub fn </span>retain_layers(<span class="kw-2">&amp;mut </span><span class="self">self</span>, layer_ids: <span class="kw-2">&amp;</span>HashSet&lt;<span class="kw-2">&amp;</span>str&gt;) {
+<a href=#274 id=274 data-nosnippet>274</a>        <span class="self">self</span>.layers.retain(|id, <span class="kw">_</span>| layer_ids.contains(id.as_str()));
+<a href=#275 id=275 data-nosnippet>275</a>    }
+<a href=#276 id=276 data-nosnippet>276</a>}
 </code></pre></div></section></main></body></html>
