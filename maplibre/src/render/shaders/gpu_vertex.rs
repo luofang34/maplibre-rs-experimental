@@ -432,7 +432,7 @@ pub fn f32_to_f16_bits(val: f32) -> u16 {
         // Subnormal f16
         let exp = (abs_bits >> 23) as i32 - 127;
         let mant = (abs_bits & 0x7f_ffff) | 0x80_0000;
-        let shift = (14 - exp) as u32 + 13;
+        let shift = (-14 - exp) as u32 + 13;
         let rounded = (mant + (1 << (shift - 1)) - 1 + ((mant >> shift) & 1)) >> shift;
         return sign | (rounded as u16);
     }
