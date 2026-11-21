@@ -8,7 +8,9 @@
 use std::ops::Range;
 
 #[cfg(feature = "font-shaping")]
-use harfrust::{Buffer, BufferFlags, Direction, Font as HbFont, ShapeOptions, ShaperFont};
+use harfrust::{
+    Buffer, BufferFlags, Direction, Feature, Font as HbFont, ShapeOptions, ShaperFont, Tag,
+};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "font-shaping")]
 use unicode_bidi::BidiInfo;
@@ -134,6 +136,127 @@ pub fn shape_slice_with_font(
             rtl,
         })
         .collect()
+}
+
+/// Shapes a vertical top-to-bottom run with OpenType `vert` and `vrt2` features enabled.
+#[cfg(feature = "font-shaping")]
+pub fn shape_slice_with_font_vertical(
+    font: &HbFont,
+    face_id: u64,
+    full_text: &str,
+    byte_range: Range<usize>,
+    cluster_base: usize,
+) -> Vec<ShapedGlyph> {
+    let Some(slice) = full_text.get(byte_range.clone()) else {
+        return Vec::new();
+    };
+    if slice.is_empty() {
+        return Vec::new();
+    }
+
+    let shaper = ShaperFont::new(font);
+    let upem = f32::from(font.units_per_em().max(1));
+    let scale = SDF_EM_SIZE / upem;
+
+    let mut buffer = Buffer::new();
+    buffer.set_flags(BufferFlags::BEGINNING_OF_TEXT | BufferFlags::END_OF_TEXT);
+    if let Some(pre) = full_text.get(..byte_range.start) {
+        buffer.set_pre_context(pre);
+    }
+    if let Some(post) = full_text.get(byte_range.end..) {
+        buffer.set_post_context(post);
+    }
+    for (rel_idx, ch) in slice.char_indices() {
+        if is_bidi_isolate_or_override(ch) {
+            continue;
+        }
+        let cluster = (cluster_base + byte_range.start + rel_idx) as u32;
+        buffer.push(u32::from(ch), cluster);
+    }
+    if buffer.glyph_infos().is_empty() {
+        return Vec::new();
+    }
+
+    buffer.set_direction(Direction::TopToBottom);
+    buffer.guess_segment_properties();
+
+    let features = [
+        Feature::new(Tag::new(b"vert"), 1, ..),
+        Feature::new(Tag::new(b"vrt2"), 1, ..),
+    ];
+    if harfrust::shape(&shaper, &mut buffer, ShapeOptions::new().features(&features)).is_err() {
+        return Vec::new();
+    }
+
+    let infos = buffer.glyph_infos();
+    let positions = buffer.glyph_positions();
+    infos
+        .iter()
+        .zip(positions.iter())
+        .map(|(info, pos)| {
+            let y_advance = if pos.y_advance == 0 {
+                -SDF_EM_SIZE
+            } else {
+                pos.y_advance as f32 * scale
+            };
+            ShapedGlyph {
+                face_id,
+                glyph_id: info.glyph_id,
+                cluster: info.cluster,
+                x_advance: pos.x_advance as f32 * scale,
+                y_advance,
+                x_offset: pos.x_offset as f32 * scale,
+                y_offset: pos.y_offset as f32 * scale,
+                rtl: false,
+            }
+        })
+        .collect()
+}
+
+/// Shapes `text` vertically (`Direction::TopToBottom` with `vert`/`vrt2`) across newline-separated
+/// paragraphs and per-character font fallback resolved by `resolve_face`.
+#[cfg(feature = "font-shaping")]
+pub fn shape_text_runs_vertical<F>(text: &str, mut resolve_face: F) -> Option<Vec<ShapedGlyph>>
+where
+    F: FnMut(char) -> Option<(u64, HbFont)>,
+{
+    if text.is_empty() {
+        return None;
+    }
+    let mut output = Vec::new();
+    let mut para_start = 0usize;
+    for raw_para in text.split('\n') {
+        let para_len = raw_para.len();
+        if !raw_para.is_empty() {
+            let mut face_runs: Vec<(u64, HbFont, Range<usize>)> = Vec::new();
+            for (rel_idx, ch) in raw_para.char_indices() {
+                if is_bidi_isolate_or_override(ch) {
+                    continue;
+                }
+                let char_end = rel_idx + ch.len_utf8();
+                let (face_id, font) = resolve_face(ch)?;
+                if let Some((last_id, _, last_range)) = face_runs.last_mut() {
+                    if *last_id == face_id && last_range.end == rel_idx {
+                        last_range.end = char_end;
+                        continue;
+                    }
+                }
+                face_runs.push((face_id, font, rel_idx..char_end));
+            }
+            for (face_id, font, sub_range) in face_runs {
+                let shaped = shape_slice_with_font_vertical(
+                    &font,
+                    face_id,
+                    raw_para,
+                    sub_range,
+                    para_start,
+                );
+                output.extend(shaped);
+            }
+        }
+        para_start += para_len + 1;
+    }
+    (!output.is_empty()).then_some(output)
 }
 
 /// Shapes `text` across newline-separated paragraphs, BiDi visual runs, and per-character font

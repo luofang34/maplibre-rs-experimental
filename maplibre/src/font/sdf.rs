@@ -108,6 +108,37 @@ pub fn rasterize_glyph_sdf(
     }
 }
 
+/// Reads vertical advance and vertical origin Y from `vmtx`/`VORG` tables, falling back to the
+/// 24px em-box metrics when the font omits vertical tables.
+#[cfg(feature = "font-shaping")]
+#[allow(dead_code)]
+pub(crate) fn vertical_metrics_from_ref(font: &FontRef<'_>, glyph_id: GlyphId) -> (f32, f32) {
+    use read_fonts::TableProvider;
+
+    let upem = font
+        .head()
+        .map(|h| f32::from(h.units_per_em().max(1)))
+        .unwrap_or(1000.0);
+    let scale = SDF_EM_SIZE / upem;
+
+    let advance = font
+        .vmtx()
+        .ok()
+        .and_then(|vmtx| vmtx.advance(glyph_id))
+        .map(|adv| f32::from(adv) * scale)
+        .filter(|adv| adv.is_finite() && *adv > 0.0)
+        .unwrap_or(SDF_EM_SIZE);
+
+    let origin_y = font
+        .vorg()
+        .ok()
+        .map(|vorg| f32::from(vorg.vertical_origin_y(glyph_id)) * scale)
+        .filter(|y| y.is_finite())
+        .unwrap_or(PBF_BASELINE_TOP as f32);
+
+    (advance, origin_y)
+}
+
 #[cfg(feature = "font-shaping")]
 pub(crate) fn rasterize_glyph_from_ref(
     font: &FontRef<'_>,

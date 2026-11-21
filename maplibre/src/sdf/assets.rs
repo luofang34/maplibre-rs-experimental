@@ -91,6 +91,10 @@ pub struct SymbolAtlas {
     /// Pre-shaped OpenType glyph runs keyed by font stack and plain transformed label text.
     #[serde(default)]
     pub shaped_runs: HashMap<String, HashMap<String, Vec<crate::font::ShapedGlyph>>>,
+    /// Pre-shaped vertical OpenType glyph runs (`Direction::TopToBottom` + `vert`/`vrt2`) keyed
+    /// by font stack and plain transformed label text.
+    #[serde(default)]
+    pub vertical_shaped_runs: HashMap<String, HashMap<String, Vec<crate::font::ShapedGlyph>>>,
     /// Sprite names to atlas entries.
     pub icons: HashMap<String, AtlasEntry>,
 }

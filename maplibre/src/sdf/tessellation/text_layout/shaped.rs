@@ -27,18 +27,24 @@ pub(in crate::sdf::tessellation) fn build_shaped_block<'a>(
         && symbol
             .vertical
             .unwrap_or_else(|| super::vertical::prefers_vertical(paint));
-    if vertical_requested {
-        return None;
-    }
     let raw = paint.raw_label_among(&symbol.properties, zoom, Some(&atlas.icons))?;
-    let shaped = atlas.shaped_runs.get(&paint.font_stack())?.get(&raw)?;
+    let shaped = if vertical_requested {
+        atlas
+            .vertical_shaped_runs
+            .get(&paint.font_stack())?
+            .get(&raw)?
+    } else {
+        atlas.shaped_runs.get(&paint.font_stack())?.get(&raw)?
+    };
     if shaped.is_empty() {
         return None;
     }
 
     let spacing = paint.number("text-letter-spacing", &symbol.properties, zoom, 0.0) * 24.0;
     let max_width = paint.number("text-max-width", &symbol.properties, zoom, 10.0) * 24.0;
-    let (flat_glyphs, lines) = if super::super::is_line_placed(paint) {
+    let (flat_glyphs, lines) = if vertical_requested {
+        wrap_vertical_paragraphs(&raw, shaped, max_width, spacing)
+    } else if super::super::is_line_placed(paint) {
         (shaped.clone(), std::iter::once(0..shaped.len()).collect())
     } else {
         wrap_shaped_paragraphs(&raw, shaped, max_width, spacing)
@@ -50,7 +56,13 @@ pub(in crate::sdf::tessellation) fn build_shaped_block<'a>(
     let line_height = paint.number("text-line-height", &symbol.properties, zoom, 1.2) * 24.0;
     let max_line = lines
         .iter()
-        .map(|range| shaped_line_width(&flat_glyphs[range.clone()], spacing))
+        .map(|range| {
+            if vertical_requested {
+                shaped_vertical_length(&flat_glyphs[range.clone()], spacing)
+            } else {
+                shaped_line_width(&flat_glyphs[range.clone()], spacing)
+            }
+        })
         .fold(0.0_f32, f32::max);
     let line_count = lines.len();
     let line_scales = vec![1.0_f32; line_count];
@@ -68,6 +80,7 @@ pub(in crate::sdf::tessellation) fn build_shaped_block<'a>(
         .text("text-justify", &symbol.properties, zoom)
         .unwrap_or_else(|| "center".into());
     let justify = match justify_prop.as_str() {
+        _ if vertical_requested => 0.0,
         "left" => 0.0,
         "right" => 1.0,
         "auto" => fractions[0],
@@ -90,7 +103,7 @@ pub(in crate::sdf::tessellation) fn build_shaped_block<'a>(
         fractions,
         justify,
         offset,
-        vertical: false,
+        vertical: vertical_requested,
         shaped: Some(ShapedBlock {
             atlas,
             glyphs: flat_glyphs,
@@ -125,6 +138,27 @@ pub(super) fn place_shaped_line(
         return;
     };
     let slice = &shaped.glyphs[range.clone()];
+    if block.vertical {
+        let col_x = block.height * (1.0 - block.fractions[0])
+            - (line_index as f32 + 0.5) * block.line_height
+            + block.offset[0];
+        let mut pen_y = -block.max_line * block.fractions[1] + block.offset[1];
+        for (idx, sg) in slice.iter().enumerate() {
+            let adv = vertical_advance(sg);
+            if let Some(entry) = shaped.atlas.face_glyphs.get(&sg.atlas_key()) {
+                if entry.rect[2] > 0 && entry.rect[3] > 0 {
+                    let w = entry.rect[2] as f32;
+                    let h = entry.rect[3] as f32;
+                    let x = col_x - w * 0.5 + sg.x_offset;
+                    let y = pen_y + (adv - h) * 0.5 - sg.y_offset;
+                    emit.quad(entry, [x, y, x + w, y + h], pen_y + adv * 0.5);
+                }
+            }
+            let add_spacing = idx + 1 < slice.len() && slice[idx + 1].cluster != sg.cluster;
+            pen_y += adv + if add_spacing { block.spacing } else { 0.0 };
+        }
+        return;
+    }
     let width = shaped_line_width(slice, block.spacing);
     let mut pen =
         -block.max_line * block.fractions[0] + (block.max_line - width) * justify + block.offset[0];
@@ -261,6 +295,79 @@ fn wrap_ltr_paragraph(
     }
 }
 
+fn vertical_advance(sg: &ShapedGlyph) -> f32 {
+    let adv = sg.y_advance.abs();
+    if adv > 0.0 {
+        adv
+    } else {
+        24.0
+    }
+}
+
+fn shaped_vertical_length(glyphs: &[ShapedGlyph], spacing: f32) -> f32 {
+    let mut length = 0.0_f32;
+    for (idx, sg) in glyphs.iter().enumerate() {
+        length += vertical_advance(sg);
+        if idx + 1 < glyphs.len() && glyphs[idx + 1].cluster != sg.cluster {
+            length += spacing;
+        }
+    }
+    length
+}
+
+fn wrap_vertical_paragraphs(
+    raw: &str,
+    shaped: &[ShapedGlyph],
+    max_width: f32,
+    spacing: f32,
+) -> (Vec<ShapedGlyph>, Vec<Range<usize>>) {
+    let mut out_glyphs = Vec::with_capacity(shaped.len());
+    let mut out_lines = Vec::new();
+    let mut para_start = 0usize;
+    for raw_para in raw.split('\n') {
+        let para_end = para_start + raw_para.len();
+        let para_glyphs: Vec<&ShapedGlyph> = shaped
+            .iter()
+            .filter(|sg| {
+                let c = sg.cluster as usize;
+                c >= para_start && c < para_end
+            })
+            .collect();
+        para_start = para_end + 1;
+        if para_glyphs.is_empty() {
+            continue;
+        }
+        if max_width < 0.0 {
+            let start = out_glyphs.len();
+            out_glyphs.extend(para_glyphs.into_iter().cloned());
+            out_lines.push(start..out_glyphs.len());
+            continue;
+        }
+        let mut line_start = out_glyphs.len();
+        let mut cur_len = 0.0_f32;
+        for (i, &sg) in para_glyphs.iter().enumerate() {
+            let adv = vertical_advance(sg);
+            if i > 0
+                && out_glyphs.len() > line_start
+                && cur_len + spacing + adv > max_width
+            {
+                out_lines.push(line_start..out_glyphs.len());
+                line_start = out_glyphs.len();
+                cur_len = 0.0;
+            }
+            if out_glyphs.len() > line_start {
+                cur_len += spacing;
+            }
+            out_glyphs.push(sg.clone());
+            cur_len += adv;
+        }
+        if out_glyphs.len() > line_start {
+            out_lines.push(line_start..out_glyphs.len());
+        }
+    }
+    (out_glyphs, out_lines)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -287,5 +394,69 @@ mod tests {
             .collect();
         let (_glyphs, lines) = wrap_shaped_paragraphs(raw, &shaped, 0.0, 0.0);
         assert_eq!(lines.len(), 3, "each word should wrap onto its own line");
+    }
+
+    #[test]
+    fn vertical_shaped_block_lays_out_top_to_bottom_columns() {
+        let mut atlas = SymbolAtlas::default();
+        let entry = crate::sdf::assets::AtlasEntry {
+            rect: [0, 0, 20, 20],
+            metrics: [0.0, 17.0, 24.0, 1.0],
+            kind: 0,
+            stretch: None,
+        };
+        let glyphs = vec![
+            ShapedGlyph {
+                face_id: 1,
+                glyph_id: 10,
+                cluster: 0,
+                x_advance: 0.0,
+                y_advance: -24.0,
+                x_offset: 0.0,
+                y_offset: 0.0,
+                rtl: false,
+            },
+            ShapedGlyph {
+                face_id: 1,
+                glyph_id: 11,
+                cluster: 3,
+                x_advance: 0.0,
+                y_advance: -24.0,
+                x_offset: 0.0,
+                y_offset: 0.0,
+                rtl: false,
+            },
+        ];
+        for g in &glyphs {
+            atlas.face_glyphs.insert(g.atlas_key(), entry.clone());
+        }
+        atlas
+            .vertical_shaped_runs
+            .entry("VertFont".to_owned())
+            .or_default()
+            .insert("一二".to_owned(), glyphs);
+
+        let paint: SymbolPaint = serde_json::from_value(serde_json::json!({
+            "text-field": "一二",
+            "text-font": ["VertFont"],
+            "text-writing-mode": ["vertical"]
+        }))
+        .unwrap_or_default();
+        let symbol = CollectedSymbol {
+            anchor: geo_types::Point::new(0.0, 0.0),
+            properties: Default::default(),
+            angle: 0.0,
+            line: None,
+            vertical: Some(true),
+            source: Default::default(),
+            fallback: false,
+            repeat_key: None,
+        };
+        let block = build_shaped_block(&symbol, &paint, 5.0, &atlas);
+        assert!(block.is_some(), "vertical shaped block should build");
+        let block = block.unwrap_or_else(|| unreachable!());
+        assert!(block.vertical);
+        assert_eq!(block.lines.len(), 1);
+        assert_eq!(block.max_line, 48.0);
     }
 }

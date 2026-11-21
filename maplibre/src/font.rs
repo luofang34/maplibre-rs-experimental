@@ -33,7 +33,10 @@ pub use sdf::{
 };
 pub use shaper::{face_glyph_atlas_key, GlyphKey, ShapedGlyph};
 #[cfg(feature = "font-shaping")]
-pub use shaper::{shape_slice_with_font, shape_text_runs};
+pub use shaper::{
+    shape_slice_with_font, shape_slice_with_font_vertical, shape_text_runs,
+    shape_text_runs_vertical,
+};
 pub use spec::{
     default_local_ideograph_font_family, deserialize_local_ideograph_font_family,
     is_default_local_ideograph_font_family, parse_font_stack_entry,

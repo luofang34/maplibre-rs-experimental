@@ -18,7 +18,7 @@ use self::metadata::stack_style_suffix;
 #[cfg(feature = "font-shaping")]
 use super::container::unpack_font_container;
 #[cfg(feature = "font-shaping")]
-use super::shaper::shape_text_runs;
+use super::shaper::{shape_text_runs, shape_text_runs_vertical};
 use super::{
     sdf::{rasterize_char_sdf, rasterize_glyph_sdf, RasterizedGlyph},
     shaper::ShapedGlyph,
@@ -328,6 +328,37 @@ impl FontSystem {
         #[cfg(feature = "font-shaping")]
         {
             shape_text_runs(text, |ch| {
+                if ch.is_whitespace() {
+                    if let Some((id, face)) =
+                        self.resolve_face_for_char(font_stack, ' ', allow_system_fallback)
+                    {
+                        if ch == ' ' || face.covers_char(ch) {
+                            return Some((id, face.hb_font.clone()));
+                        }
+                    }
+                }
+                self.resolve_face_for_char(font_stack, ch, allow_system_fallback)
+                    .map(|(id, face)| (id, face.hb_font.clone()))
+            })
+        }
+        #[cfg(not(feature = "font-shaping"))]
+        {
+            let _ = (font_stack, text, allow_system_fallback);
+            None
+        }
+    }
+
+    /// Shapes `text` vertically (`Direction::TopToBottom` with `vert`/`vrt2`) using OpenType faces
+    /// resolved from `font_stack`.
+    pub fn shape_text_vertical(
+        &mut self,
+        font_stack: &str,
+        text: &str,
+        allow_system_fallback: bool,
+    ) -> Option<Vec<ShapedGlyph>> {
+        #[cfg(feature = "font-shaping")]
+        {
+            shape_text_runs_vertical(text, |ch| {
                 if ch.is_whitespace() {
                     if let Some((id, face)) =
                         self.resolve_face_for_char(font_stack, ' ', allow_system_fallback)

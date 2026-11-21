@@ -357,6 +357,46 @@ fn shape_stack_labels(
                 .or_default()
                 .insert(label.clone(), shaped);
         }
+
+        if has_registered {
+            let v_shaped = {
+                let all_registered = label
+                    .chars()
+                    .filter(|ch| !ch.is_whitespace() && !ch.is_control())
+                    .all(|ch| fs.resolve_face_for_char(font, ch, false).is_some());
+                if all_registered {
+                    fs.shape_text_vertical(font, label, false)
+                } else if ideograph_family.is_some() {
+                    let stack = combined_stack(font, ideograph_family);
+                    fs.shape_text_vertical(&stack, label, true)
+                } else {
+                    None
+                }
+            };
+            if let Some(v_shaped) = v_shaped.filter(|s| !s.is_empty()) {
+                let mut v_all_packed = true;
+                for sg in &v_shaped {
+                    let key = sg.atlas_key();
+                    if !builder.atlas.face_glyphs.contains_key(&key) {
+                        if let Some(glyph) = fs.rasterize_face_glyph(sg.face_id, sg.glyph_id) {
+                            builder.pack_rasterized_face_glyph(key.clone(), &glyph);
+                        }
+                    }
+                    if !builder.atlas.face_glyphs.contains_key(&key) {
+                        v_all_packed = false;
+                        break;
+                    }
+                }
+                if v_all_packed {
+                    builder
+                        .atlas
+                        .vertical_shaped_runs
+                        .entry(font.to_owned())
+                        .or_default()
+                        .insert(label.clone(), v_shaped);
+                }
+            }
+        }
     }
 }
 
