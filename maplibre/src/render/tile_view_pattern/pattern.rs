@@ -32,7 +32,7 @@ pub const DEFAULT_TILE_VIEW_PATTERN_SIZE: wgpu::BufferAddress = 1024;
 #[cfg(not(target_arch = "wasm32"))]
 pub const DEFAULT_TILE_VIEW_PATTERN_SIZE: wgpu::BufferAddress = 2048;
 /// Maximum descendant depth used when no complete source coverage is loaded.
-pub const CHILDREN_SEARCH_DEPTH: usize = 4;
+pub const CHILDREN_SEARCH_DEPTH: usize = 6;
 /// How many zoom levels down a complete set of finer tiles is preferred over a coarser parent.
 pub const COMPLETE_CHILDREN_SEARCH_DEPTH: usize = 2;
 

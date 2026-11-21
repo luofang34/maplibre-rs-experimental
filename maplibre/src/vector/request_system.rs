@@ -210,15 +210,19 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                 &view_tiles,
                 (level, magnifies),
             );
+            let (coarse_fallbacks, lookahead_fallbacks): (Vec<_>, Vec<_>) = extra_fallbacks
+                .into_iter()
+                .partition(|coords| u8::from(coords.z) < level);
             let mut deferred = false;
             let mut issued_any = false;
             let mut frame_style = FrameStyle::new(style);
             for coords in overview
                 .into_iter()
                 .chain(drapes.iter().copied())
+                .chain(coarse_fallbacks)
                 .chain(view_tiles.into_iter().filter(|_| needs_view_tiles))
                 .chain(prefetch.iter().copied())
-                .chain(extra_fallbacks)
+                .chain(lookahead_fallbacks)
             {
                 // Past the deepest source zoom the ancestor tile is fetched once and the view
                 // pattern scales it into every descendant in view; a source that ends sooner

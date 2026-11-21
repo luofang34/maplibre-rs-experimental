@@ -50,13 +50,18 @@ pub(super) fn drop_gpu_data_with_queue(
 }
 
 pub(super) fn reclaim_pool_pages(world: &mut World, queue: Option<&UploadQueue>) {
+    let is_tight = world
+        .resources
+        .get::<crate::render::memory_budget::MemoryBudget>()
+        .is_some_and(crate::render::memory_budget::MemoryBudget::is_tight);
+    let keep_spare = usize::from(!is_tight);
     if let Some(Initialized(pool)) = world.resources.get_mut::<Eventually<VectorBufferPool>>() {
-        pool.reclaim_empty_pages_with_queue(0, queue);
+        pool.reclaim_empty_pages_with_queue(keep_spare, queue);
     }
     if let Some(Initialized(pool)) = world
         .resources
         .get_mut::<Eventually<crate::sdf::SymbolBufferPool>>()
     {
-        pool.reclaim_empty_pages_with_queue(0, queue);
+        pool.reclaim_empty_pages_with_queue(keep_spare, queue);
     }
 }

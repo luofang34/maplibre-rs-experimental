@@ -1,5 +1,7 @@
 //! Paint shared by every feature must use the view zoom, including overzoomed source tiles.
+mod uniform;
 use rustc_hash::{FxHashMap, FxHashSet};
+pub(crate) use uniform::uniform_color;
 
 use super::{
     metadata::{
@@ -12,7 +14,7 @@ use super::{
 use crate::{
     coords::WorldTileCoords,
     render::shaders::{FillShaderFeatureMetadata, ShaderLayerMetadata},
-    style::layer::{LayerPaint, StyleLayer, StyleProperty},
+    style::layer::{LayerPaint, StyleLayer},
     tcs::tiles::Tiles,
     vector::{
         feature_paint::{evaluate_bucket_colors, TileFeaturePaintComponent},
@@ -95,6 +97,7 @@ pub(super) fn feature_paint_depends_on_zoom(layer: &StyleLayer) -> bool {
 pub(super) struct PaintRefreshScratch {
     style_rev: Option<u64>,
     style_flags_union: u8,
+    needs_feature_zoom_settle: bool,
     layer_flags: FxHashMap<u32, u8>,
     prev_meta: FxHashMap<(u32, u8), (VectorPaintFrame, ShaderLayerMetadata)>,
     meta_memo: FxHashMap<(u32, u8), (ShaderLayerMetadata, bool)>,
@@ -107,6 +110,10 @@ pub(super) struct PaintRefreshScratch {
 }
 
 impl PaintRefreshScratch {
+    pub(super) fn needs_settle(&self) -> bool {
+        self.needs_feature_zoom_settle
+    }
+
     pub(super) fn sync_style(&mut self, style: &crate::style::Style) {
         let style_rev = style.revision();
         if self.style_rev != Some(style_rev) {
@@ -146,6 +153,17 @@ fn layer_paint_flags(layer: &StyleLayer) -> u8 {
         | (u8::from(uniform_color_depends_on_zoom(layer)) << 6)
 }
 
+pub(super) fn feature_zoom_threshold(moving: bool, zoom_delta: f32) -> f32 {
+    if !moving {
+        1.0 / 32.0
+    } else if zoom_delta >= 0.05 {
+        0.25
+    } else {
+        0.125
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(super) fn refresh_layer_paint(
     buffer_pool: &mut VectorBufferPool,
     queue: &crate::render::upload_queue::UploadQueue,
@@ -153,26 +171,37 @@ pub(super) fn refresh_layer_paint(
     source_tiles: &[WorldTileCoords],
     frame: VectorPaintFrame,
     previous: Option<VectorPaintFrame>,
+    moving: bool,
     scratch: &mut PaintRefreshScratch,
 ) {
     let VectorPaintFrame { zoom, .. } = frame;
     let zoom_changed = previous.is_none_or(|prev| prev.zoom != zoom);
     let bearing_changed = previous.is_none_or(|prev| prev.bearing != frame.bearing);
     let light_changed = previous.is_none_or(|prev| prev.light != frame.light);
-    if !zoom_changed && !bearing_changed && !light_changed {
+    let settle_pass = !moving && scratch.needs_feature_zoom_settle;
+    if !zoom_changed && !bearing_changed && !light_changed && !settle_pass {
         return;
     }
     let active_flags = (u8::from(zoom_changed) * (1 | 8 | 64))
         | (u8::from(bearing_changed) * 2)
-        | (u8::from(light_changed) * 4);
+        | (u8::from(light_changed) * 4)
+        | (u8::from(settle_pass) * 8);
     if previous.is_some() && (scratch.style_flags_union & active_flags) == 0 {
+        if settle_pass {
+            scratch.needs_feature_zoom_settle = false;
+        }
         return;
     }
-    let continuous_zoom =
-        previous.is_some_and(|prev| prev.zoom != zoom && (zoom - prev.zoom).abs() < 0.05);
-    let feature_zoom_threshold = if continuous_zoom { 0.125 } else { 1.0 / 32.0 };
+    if settle_pass {
+        scratch.needs_feature_zoom_settle = false;
+    }
+    let zoom_delta = previous.map_or(0.0, |prev| (zoom - prev.zoom).abs());
+    let feature_zoom_threshold = feature_zoom_threshold(moving, zoom_delta);
+    let paint_started = instant::Instant::now();
+    let mut updated_any_feature_layer = false;
     scratch.clear();
     let PaintRefreshScratch {
+        needs_feature_zoom_settle,
         layer_flags,
         prev_meta,
         meta_memo,
@@ -242,99 +271,114 @@ pub(super) fn refresh_layer_paint(
                     }
                 }
             }
-            if zoom_changed
+            if (zoom_changed || settle_pass)
                 && !entry.is_uniform_feature_metadata()
                 && !entry.is_dynamic_circle_metadata()
                 && (flags & 8) != 0
-                && entry
-                    .evaluated_zoom()
-                    .is_none_or(|evaluated| (zoom - evaluated).abs() >= feature_zoom_threshold)
             {
-                if let Some(evaluated) = entry.evaluated_zoom() {
-                    if (flags & 16) == 0
-                        && quantized_layer_opacity(&entry.style_layer, zoom)
-                            .zip(quantized_layer_opacity(&entry.style_layer, evaluated))
-                            .is_some_and(|(a, b)| a == b)
+                let delta = entry
+                    .evaluated_zoom()
+                    .map(|evaluated| (zoom - evaluated).abs());
+                if delta.is_some_and(|d| d < feature_zoom_threshold) {
+                    if moving && delta.is_some_and(|d| d >= 1.0 / 32.0) {
+                        *needs_feature_zoom_settle = true;
+                    }
+                } else {
+                    if let Some(evaluated) = entry.evaluated_zoom() {
+                        if (flags & 16) == 0
+                            && quantized_layer_opacity(&entry.style_layer, zoom)
+                                .zip(quantized_layer_opacity(&entry.style_layer, evaluated))
+                                .is_some_and(|(a, b)| a == b)
+                        {
+                            feature_zoom_only_updates.push((*coords, entry.style_layer.id.clone()));
+                            continue;
+                        }
+                    }
+                    if cfg!(target_arch = "wasm32")
+                        && (moving || settle_pass)
+                        && updated_any_feature_layer
+                        && paint_started.elapsed() >= std::time::Duration::from_micros(400)
                     {
-                        feature_zoom_only_updates.push((*coords, entry.style_layer.id.clone()));
+                        *needs_feature_zoom_settle = true;
                         continue;
                     }
-                }
-                if let Some((paint_store, buckets)) = tiles
-                    .query::<(&TileFeaturePaintComponent, &VectorLayerBucketComponent)>(*coords)
-                {
-                    let entries = paint_store.committed.get(&entry.style_layer.id);
-                    let bucket = buckets.layers.iter().find_map(|layer| match layer {
-                        VectorLayerBucket::AvailableLayer(avail)
-                            if avail.style_layer_id == entry.style_layer.id =>
-                        {
-                            Some(avail)
-                        }
-                        _ => None,
-                    });
-                    if let (Some(entries), Some(bucket)) = (entries, bucket) {
-                        if !bucket.feature_indices.is_empty() {
-                            let allocated_count = (entry.feature_metadata_buffer_range().end
-                                - entry.feature_metadata_buffer_range().start)
-                                as usize
-                                / size_of::<FillShaderFeatureMetadata>();
-                            let colors = evaluate_bucket_colors(
-                                &entry.style_layer,
-                                entries,
-                                f64::from(zoom),
-                            );
-                            let fallback_color: [f32; 4] = entry
-                                .style_layer
-                                .paint
-                                .as_ref()
-                                .and_then(LayerPaint::get_color)
-                                .map(Into::into)
-                                .unwrap_or([0.0, 0.0, 0.0, 1.0]);
-                            feature_metadata_into(
-                                feature_meta_scratch,
-                                &entry.style_layer,
-                                &bucket.feature_indices,
-                                &colors,
-                                fallback_color,
-                            );
-                            if feature_meta_scratch.len() == allocated_count {
-                                buffer_pool.update_feature_metadata(
-                                    queue,
-                                    entry,
-                                    feature_meta_scratch,
+                    if let Some((paint_store, buckets)) = tiles
+                        .query::<(&TileFeaturePaintComponent, &VectorLayerBucketComponent)>(*coords)
+                    {
+                        let entries = paint_store.committed.get(&entry.style_layer.id);
+                        let bucket = buckets.layers.iter().find_map(|layer| match layer {
+                            VectorLayerBucket::AvailableLayer(avail)
+                                if avail.style_layer_id == entry.style_layer.id =>
+                            {
+                                Some(avail)
+                            }
+                            _ => None,
+                        });
+                        if let (Some(entries), Some(bucket)) = (entries, bucket) {
+                            if !bucket.feature_indices.is_empty() {
+                                let allocated_count = (entry.feature_metadata_buffer_range().end
+                                    - entry.feature_metadata_buffer_range().start)
+                                    as usize
+                                    / size_of::<FillShaderFeatureMetadata>();
+                                let colors = evaluate_bucket_colors(
+                                    &entry.style_layer,
+                                    entries,
+                                    f64::from(zoom),
                                 );
-                                let runs = entry
+                                let fallback_color: [f32; 4] = entry
                                     .style_layer
                                     .paint
                                     .as_ref()
-                                    .and_then(crate::vector::pattern::per_feature_pattern)
-                                    .filter(|_| !bucket.buffer.buffer.indices.is_empty())
-                                    .map(|_| {
-                                        pattern_runs(
-                                            &bucket.feature_indices,
-                                            &colors,
-                                            &bucket.buffer.buffer.indices,
-                                        )
-                                    });
-                                feature_zoom_updates.push((
-                                    *coords,
-                                    entry.style_layer.id.clone(),
-                                    runs,
-                                ));
-                                if entry.style_layer.type_ == "fill"
-                                    && !matches!(
-                                        entry.style_layer.paint.as_ref(),
-                                        Some(LayerPaint::Fill(f)) if f.fill_pattern.is_some()
-                                    )
-                                {
-                                    opaque_updates.push((
+                                    .and_then(LayerPaint::get_color)
+                                    .map(Into::into)
+                                    .unwrap_or([0.0, 0.0, 0.0, 1.0]);
+                                feature_metadata_into(
+                                    feature_meta_scratch,
+                                    &entry.style_layer,
+                                    &bucket.feature_indices,
+                                    &colors,
+                                    fallback_color,
+                                );
+                                if feature_meta_scratch.len() == allocated_count {
+                                    buffer_pool.update_feature_metadata(
+                                        queue,
+                                        entry,
+                                        feature_meta_scratch,
+                                    );
+                                    updated_any_feature_layer = true;
+                                    let runs = entry
+                                        .style_layer
+                                        .paint
+                                        .as_ref()
+                                        .and_then(crate::vector::pattern::per_feature_pattern)
+                                        .filter(|_| !bucket.buffer.buffer.indices.is_empty())
+                                        .map(|_| {
+                                            pattern_runs(
+                                                &bucket.feature_indices,
+                                                &colors,
+                                                &bucket.buffer.buffer.indices,
+                                            )
+                                        });
+                                    feature_zoom_updates.push((
                                         *coords,
-                                        entry.style_layer_id,
-                                        !feature_meta_scratch.is_empty()
-                                            && feature_meta_scratch
-                                                .iter()
-                                                .all(|fm| fm.color[3] == 255),
+                                        entry.style_layer.id.clone(),
+                                        runs,
                                     ));
+                                    if entry.style_layer.type_ == "fill"
+                                        && !matches!(
+                                            entry.style_layer.paint.as_ref(),
+                                            Some(LayerPaint::Fill(f)) if f.fill_pattern.is_some()
+                                        )
+                                    {
+                                        opaque_updates.push((
+                                            *coords,
+                                            entry.style_layer_id,
+                                            !feature_meta_scratch.is_empty()
+                                                && feature_meta_scratch
+                                                    .iter()
+                                                    .all(|fm| fm.color[3] == 255),
+                                        ));
+                                    }
                                 }
                             }
                         }
@@ -380,88 +424,6 @@ pub(super) fn refresh_layer_paint(
     for (coords, layer_id, opaque) in opaque_updates.drain(..) {
         buffer_pool.set_layer_opaque_color_by_id(coords, layer_id, opaque);
     }
-}
-
-/// White with the opacity of a fill that repeats an image, unless the opacity varies by feature.
-fn pattern_color(opacity: Option<&StyleProperty<f32>>, zoom: f64) -> Option<[f32; 4]> {
-    if opacity.is_some_and(|opacity| !opacity.is_feature_constant()) {
-        return None;
-    }
-    let opacity = opacity
-        .and_then(|opacity| opacity.evaluate_at_zoom(zoom))
-        .unwrap_or(1.0)
-        .clamp(0.0, 1.0);
-    Some([1.0, 1.0, 1.0, opacity])
-}
-
-pub(crate) fn uniform_color(layer: &StyleLayer, zoom: f64) -> Option<[f32; 4]> {
-    let Some(layer_paint) = layer.paint.as_ref() else {
-        return uses_layer_metadata_uniform_color(layer).then_some([0.0, 0.0, 0.0, 1.0]);
-    };
-    let (color, opacity) = match layer_paint {
-        // A pattern takes only the opacity of the fill.
-        LayerPaint::Fill(paint) if paint.fill_pattern.is_some() => {
-            // A pattern that varies by feature rides in the feature colours.
-            if super::super::pattern::per_feature_pattern(layer_paint).is_some() {
-                return None;
-            }
-            return pattern_color(paint.fill_opacity.as_ref(), zoom);
-        }
-        // The outline is a feature of its own, with its own colour.
-        LayerPaint::Fill(paint) if paint.fill_outline_color.is_some() => return None,
-        LayerPaint::Fill(paint) => (&paint.fill_color, &paint.fill_opacity),
-        // A gradient's colour comes from its ramp, so the feature colours carry the length.
-        LayerPaint::Line(paint) if paint.line_gradient.is_some() => return None,
-        // A pattern that varies by feature rides in the feature colours.
-        LayerPaint::Line(paint) if paint.line_pattern.is_some() => {
-            if super::super::pattern::per_feature_pattern(layer_paint).is_some() {
-                return None;
-            }
-            (&paint.line_color, &paint.line_opacity)
-        }
-        LayerPaint::Line(paint) => (&paint.line_color, &paint.line_opacity),
-        LayerPaint::FillExtrusion(paint) if paint.fill_extrusion_pattern.is_some() => {
-            if super::super::pattern::per_feature_pattern(layer_paint).is_some() {
-                return None;
-            }
-            return if paint.fill_extrusion_translucent == Some(true) {
-                pattern_color(paint.fill_extrusion_opacity.as_ref(), zoom)
-            } else {
-                Some([1.0, 1.0, 1.0, 1.0])
-            };
-        }
-        LayerPaint::FillExtrusion(paint) => {
-            let opacity = if paint.fill_extrusion_translucent == Some(true) {
-                &paint.fill_extrusion_opacity
-            } else {
-                &None
-            };
-            (&paint.fill_extrusion_color, opacity)
-        }
-        LayerPaint::Circle(paint) => {
-            if paint.stroke_color_per_feature().is_some() {
-                return None;
-            }
-            (&paint.circle_color, &paint.circle_opacity)
-        }
-        LayerPaint::Heatmap(_) => return Some([0.0, 0.0, 0.0, 1.0]),
-        _ => return None,
-    };
-    if color.as_ref().is_some_and(|v| !v.is_feature_constant())
-        || opacity.as_ref().is_some_and(|v| !v.is_feature_constant())
-    {
-        return None;
-    }
-    let color = color
-        .as_ref()
-        .and_then(|v| v.evaluate_at_zoom(zoom))
-        .unwrap_or_default();
-    let opacity = opacity
-        .as_ref()
-        .and_then(|v| v.evaluate_at_zoom(zoom))
-        .unwrap_or(1.0)
-        .clamp(0.0, 1.0);
-    Some([color.r, color.g, color.b, color.a * opacity])
 }
 
 #[cfg(test)]

@@ -49,10 +49,12 @@ pub(super) fn source_shapes_bounded<T: HasTile>(
             })
     };
     match cover.or_else(|| {
-        container.get_available_children(coords, world, CHILDREN_SEARCH_DEPTH.min(max_child_depth))
+        container
+            .get_available_children(coords, world, CHILDREN_SEARCH_DEPTH.min(max_child_depth))
+            .filter(|tiles| !tiles.is_empty())
     }) {
-        Some(tiles) => selected_shapes(coords, tiles, zoom, used_parents),
-        None => SourceShapes::None,
+        Some(tiles) if !tiles.is_empty() => selected_shapes(coords, tiles, zoom, used_parents),
+        _ => SourceShapes::None,
     }
 }
 

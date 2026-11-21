@@ -24,36 +24,43 @@ pub const DRAPE_TEXTURES_WHEN_LOW: usize = 32;
 pub const DRAPE_TEXTURES_WHEN_CRITICAL: usize = 12;
 /// Tiles in flight while memory is low.
 pub const TILES_IN_FLIGHT_WHEN_LOW: usize = 4;
+const WASM_UPLOADS_PER_FRAME: usize = 24;
+const NATIVE_UPLOADS_PER_FRAME: usize = 8;
+const WASM_MOVING_UPLOADS_PER_FRAME: usize = 1;
+const NATIVE_MOVING_UPLOADS_PER_FRAME: usize = 2;
+const WASM_MOVING_UNCOVERED_UPLOADS_PER_FRAME: usize = 2;
+const WASM_MOVING_GEOMETRY_UPLOAD_BYTES: usize = 512 << 10;
+const NATIVE_MOVING_GEOMETRY_UPLOAD_BYTES: usize = 2 << 20;
+const WASM_MOVING_UNCOVERED_GEOMETRY_UPLOAD_BYTES: usize = 1 << 20;
+const WASM_POST_BOOT_UPLOADS_PER_FRAME: usize = 2;
+const WASM_POST_BOOT_GEOMETRY_UPLOAD_BYTES: usize = 1 << 20;
+
 /// Tiles whose geometry is uploaded in one frame; the rest wait for the next, so a burst of
 /// arrivals does not stage a hundred tiles' geometry at once.
 #[cfg(target_arch = "wasm32")]
-pub const UPLOADS_PER_FRAME: usize = 24;
+pub const UPLOADS_PER_FRAME: usize = WASM_UPLOADS_PER_FRAME;
 /// Tiles whose geometry is uploaded in one frame; the rest wait for the next, so a burst of
 /// arrivals does not stage a hundred tiles' geometry at once.
 #[cfg(not(target_arch = "wasm32"))]
-pub const UPLOADS_PER_FRAME: usize = 8;
+pub const UPLOADS_PER_FRAME: usize = NATIVE_UPLOADS_PER_FRAME;
 /// Geometry tiles uploaded per frame while the camera is actively moving on `wasm32`, pacing
 /// multi-tile bursts across consecutive vsyncs to keep p95/p99 frame CPU flat.
-#[cfg(target_arch = "wasm32")]
-const MOVING_UPLOADS_PER_FRAME: usize = 1;
-#[cfg(not(target_arch = "wasm32"))]
-const MOVING_UPLOADS_PER_FRAME: usize = 2;
+#[cfg(all(test, target_arch = "wasm32"))]
+const MOVING_UPLOADS_PER_FRAME: usize = WASM_MOVING_UPLOADS_PER_FRAME;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+const MOVING_UPLOADS_PER_FRAME: usize = NATIVE_MOVING_UPLOADS_PER_FRAME;
 /// Uncovered viewport tiles (with no loaded ancestor stand-in on the GPU) admitted per moving
 /// frame so visible pan holes fill immediately on arrival.
-#[cfg(target_arch = "wasm32")]
-const MOVING_UNCOVERED_UPLOADS_PER_FRAME: usize = 2;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(test, target_arch = "wasm32"))]
+const MOVING_UNCOVERED_UPLOADS_PER_FRAME: usize = WASM_MOVING_UNCOVERED_UPLOADS_PER_FRAME;
+#[cfg(all(test, not(target_arch = "wasm32")))]
 const MOVING_UNCOVERED_UPLOADS_PER_FRAME: usize = UPLOADS_PER_FRAME;
 /// Geometry bytes uploaded per frame while the camera is actively moving (the first geometry
 /// upload of a frame is always admitted even when larger).
-#[cfg(target_arch = "wasm32")]
-const MOVING_GEOMETRY_UPLOAD_BYTES: usize = 512 << 10;
-#[cfg(not(target_arch = "wasm32"))]
-const MOVING_GEOMETRY_UPLOAD_BYTES: usize = 2 << 20;
-#[cfg(target_arch = "wasm32")]
-const MOVING_UNCOVERED_GEOMETRY_UPLOAD_BYTES: usize = 1536 << 10;
-#[cfg(not(target_arch = "wasm32"))]
-const MOVING_UNCOVERED_GEOMETRY_UPLOAD_BYTES: usize = FRAME_UPLOAD_BYTES - IMAGE_UPLOAD_FLOOR_BYTES;
+#[cfg(all(test, target_arch = "wasm32"))]
+const MOVING_GEOMETRY_UPLOAD_BYTES: usize = WASM_MOVING_GEOMETRY_UPLOAD_BYTES;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+const MOVING_GEOMETRY_UPLOAD_BYTES: usize = NATIVE_MOVING_GEOMETRY_UPLOAD_BYTES;
 /// Bytes of tile geometry, labels and textures one frame uploads; the rest wait for the next
 /// frame, so a burst of arrivals is spread over frames instead of stalling one.
 pub const FRAME_UPLOAD_BYTES: usize = 32 << 20;
@@ -169,6 +176,48 @@ pub(crate) enum UploadKind {
     Image,
 }
 
+pub(super) const fn geometry_limits_for_platform(
+    moving: bool,
+    post_boot: bool,
+    uncovered: bool,
+    is_wasm: bool,
+) -> (usize, usize) {
+    let full_bytes = FRAME_UPLOAD_BYTES - IMAGE_UPLOAD_FLOOR_BYTES;
+    if is_wasm {
+        if moving {
+            if uncovered {
+                (
+                    WASM_MOVING_UNCOVERED_UPLOADS_PER_FRAME,
+                    WASM_MOVING_UNCOVERED_GEOMETRY_UPLOAD_BYTES,
+                )
+            } else {
+                (
+                    WASM_MOVING_UPLOADS_PER_FRAME,
+                    WASM_MOVING_GEOMETRY_UPLOAD_BYTES,
+                )
+            }
+        } else if post_boot {
+            (
+                WASM_POST_BOOT_UPLOADS_PER_FRAME,
+                WASM_POST_BOOT_GEOMETRY_UPLOAD_BYTES,
+            )
+        } else {
+            (WASM_UPLOADS_PER_FRAME, full_bytes)
+        }
+    } else if moving {
+        if uncovered {
+            (NATIVE_UPLOADS_PER_FRAME, full_bytes)
+        } else {
+            (
+                NATIVE_MOVING_UPLOADS_PER_FRAME,
+                NATIVE_MOVING_GEOMETRY_UPLOAD_BYTES,
+            )
+        }
+    } else {
+        (NATIVE_UPLOADS_PER_FRAME, full_bytes)
+    }
+}
+
 /// The bytes the tile uploads of one frame share, across vector, label, raster and DEM
 /// tiles. [`crate::render::frame_input`] resets it when a new host frame starts.
 ///
@@ -182,17 +231,34 @@ pub(crate) struct FrameUploads {
     image_started: bool,
     geometry_tiles: usize,
     moving: bool,
+    post_boot: bool,
 }
 
 impl FrameUploads {
     /// Marks whether this frame is part of active continuous camera movement.
     pub(crate) fn set_moving(&mut self, moving: bool) {
         self.moving = moving;
+        if moving {
+            self.post_boot = true;
+        }
     }
 
-    /// Returns `true` if `bytes` of geometry fits in this frame's remaining allowance, granting
-    /// uncovered hole-filling tiles a higher ceiling while moving.
-    pub(crate) fn can_take_geometry(&self, bytes: usize, uncovered: bool) -> bool {
+    /// Whether the current frame is actively moving.
+    pub(crate) fn is_moving(&self) -> bool {
+        self.moving
+    }
+
+    /// Whether the camera has moved at least once since startup.
+    pub(crate) fn is_post_boot(&self) -> bool {
+        self.post_boot
+    }
+
+    pub(super) fn can_take_geometry_for_platform(
+        &self,
+        bytes: usize,
+        uncovered: bool,
+        is_wasm: bool,
+    ) -> bool {
         if bytes == 0 {
             return true;
         }
@@ -200,17 +266,16 @@ impl FrameUploads {
         let stationary_cap = FRAME_UPLOAD_BYTES
             .saturating_sub(IMAGE_UPLOAD_FLOOR_BYTES.saturating_sub(self.image_bytes))
             .saturating_sub(used);
-        let cap = if self.moving {
-            let moving_limit = if uncovered {
-                MOVING_UNCOVERED_GEOMETRY_UPLOAD_BYTES
-            } else {
-                MOVING_GEOMETRY_UPLOAD_BYTES
-            };
-            stationary_cap.min(moving_limit.saturating_sub(self.geometry_bytes))
-        } else {
-            stationary_cap
-        };
+        let (_, byte_limit) =
+            geometry_limits_for_platform(self.moving, self.post_boot, uncovered, is_wasm);
+        let cap = stationary_cap.min(byte_limit.saturating_sub(self.geometry_bytes));
         !self.geometry_started || bytes <= cap
+    }
+
+    /// Returns `true` if `bytes` of geometry fits in this frame's remaining allowance, granting
+    /// uncovered hole-filling tiles a higher ceiling while moving.
+    pub(crate) fn can_take_geometry(&self, bytes: usize, uncovered: bool) -> bool {
+        self.can_take_geometry_for_platform(bytes, uncovered, cfg!(target_arch = "wasm32"))
     }
 
     /// Returns `true` if `bytes` of `kind` fits in this frame's remaining upload allowance without
@@ -265,19 +330,20 @@ impl FrameUploads {
         self.geometry_tiles += 1;
     }
 
+    pub(super) fn geometry_tiles_exhausted_for_platform(
+        &self,
+        uncovered: bool,
+        is_wasm: bool,
+    ) -> bool {
+        let (limit, _) =
+            geometry_limits_for_platform(self.moving, self.post_boot, uncovered, is_wasm);
+        self.geometry_tiles >= limit
+    }
+
     /// Whether this frame's geometry tile allowance is used up for a tile (`uncovered` tiles have
     /// higher moving headroom so visible holes never stall behind covered refinements).
     pub(crate) fn geometry_tiles_exhausted_for(&self, uncovered: bool) -> bool {
-        let limit = if self.moving {
-            if uncovered {
-                MOVING_UNCOVERED_UPLOADS_PER_FRAME
-            } else {
-                MOVING_UPLOADS_PER_FRAME
-            }
-        } else {
-            UPLOADS_PER_FRAME
-        };
-        self.geometry_tiles >= limit
+        self.geometry_tiles_exhausted_for_platform(uncovered, cfg!(target_arch = "wasm32"))
     }
 
     /// Bytes admitted this frame.
@@ -288,6 +354,8 @@ impl FrameUploads {
 
     /// Starts the next frame's allowance.
     pub(crate) fn reset(&mut self) {
+        let post_boot = self.post_boot;
         *self = Self::default();
+        self.post_boot = post_boot;
     }
 }

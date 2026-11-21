@@ -23,6 +23,46 @@ use crate::{
     },
 };
 
+#[derive(Default)]
+struct SymbolStyleIndex {
+    style_rev: Option<u64>,
+    by_id: rustc_hash::FxHashMap<String, usize>,
+    symbol_indices: Vec<usize>,
+}
+
+impl SymbolStyleIndex {
+    fn sync(&mut self, style: &Style) {
+        let rev = style.revision();
+        if self.style_rev == Some(rev) {
+            return;
+        }
+        self.style_rev = Some(rev);
+        self.by_id.clear();
+        self.symbol_indices.clear();
+        for (idx, layer) in style.layers.iter().enumerate() {
+            if !layer.is_hidden() && layer.type_ == "symbol" {
+                self.by_id.insert(layer.id.clone(), idx);
+                self.symbol_indices.push(idx);
+            }
+        }
+    }
+}
+
+pub(super) fn atlas_zoom_target(zoom: f32, moving: bool) -> (i32, i32, f32) {
+    let exact_zoom_q32 = (zoom * 32.0).round() as i32;
+    let target_zoom_q32 = if moving {
+        ((zoom * 8.0).round() as i32) * 4
+    } else {
+        exact_zoom_q32
+    };
+    let atlas_zoom = if moving {
+        target_zoom_q32 as f32 / 32.0
+    } else {
+        zoom
+    };
+    (exact_zoom_q32, target_zoom_q32, atlas_zoom)
+}
+
 pub fn upload_system(
     MapContext {
         world,
@@ -48,13 +88,23 @@ pub fn upload_system(
     }
     let visible = super::covering::upload_tiles(world);
     world.resources.get_or_init_mut::<FrameUploads>();
-    let Some((Initialized(symbol_buffer_pool), textures, Initialized(pipeline), budget)) =
-        world.resources.query_mut::<(
-            &mut Eventually<SymbolBufferPool>,
-            &mut SymbolTextures,
-            &Eventually<SymbolPipeline>,
-            &mut FrameUploads,
-        )>()
+    world
+        .resources
+        .get_or_init_mut::<SymbolStyleIndex>()
+        .sync(style);
+    let Some((
+        Initialized(symbol_buffer_pool),
+        textures,
+        Initialized(pipeline),
+        budget,
+        symbol_style,
+    )) = world.resources.query_mut::<(
+        &mut Eventually<SymbolBufferPool>,
+        &mut SymbolTextures,
+        &Eventually<SymbolPipeline>,
+        &mut FrameUploads,
+        &SymbolStyleIndex,
+    )>()
     else {
         return Err(SystemError::Dependencies);
     };
@@ -62,7 +112,7 @@ pub fn upload_system(
     textures.retain(&world.tiles);
     let zoom = view_state.style_zoom().level();
 
-    let (deferred, needs_refetch) = upload_symbol_layer(
+    let (deferred, needs_refetch, needs_atlas_settle) = upload_symbol_layer(
         symbol_buffer_pool,
         textures,
         &TextureContext {
@@ -71,11 +121,11 @@ pub fn upload_system(
             atlas_layout: &pipeline.atlas_layout,
         },
         &mut world.tiles,
-        (style, &visible, zoom),
+        (style, symbol_style, &visible, zoom),
         budget,
     );
     let bound = textures.take_bound();
-    if deferred {
+    if deferred || needs_atlas_settle {
         crate::render::frame_signals::keep_animating(world);
     }
     if needs_refetch {
@@ -92,17 +142,23 @@ pub fn upload_system(
 }
 
 /// Uploads the labels of `visible` tiles that the frame's budget admits; returns
-/// `(deferred, needs_refetch)`.
+/// `(deferred, needs_refetch, needs_atlas_settle)`.
 fn upload_symbol_layer(
     symbol_buffer_pool: &mut SymbolBufferPool,
     textures: &mut SymbolTextures,
     gpu: &TextureContext<'_>,
     tiles: &mut Tiles,
-    (style, visible, zoom): (&Style, &[crate::coords::WorldTileCoords], f32),
+    (style, symbol_style, visible, zoom): (
+        &Style,
+        &SymbolStyleIndex,
+        &[crate::coords::WorldTileCoords],
+        f32,
+    ),
     budget: &mut FrameUploads,
-) -> (bool, bool) {
+) -> (bool, bool, bool) {
     let stamp = (style.revision(), symbol_buffer_pool.eviction_generation());
-    let zoom_q32 = (zoom * 32.0).round() as i32;
+    let moving = budget.is_moving();
+    let (exact_zoom_q32, target_zoom_q32, atlas_zoom) = atlas_zoom_target(zoom, moving);
     if visible.iter().all(|&coords| {
         tiles
             .query::<(
@@ -113,14 +169,33 @@ fn upload_symbol_layer(
                 !layers.pending_assets
                     && pending.symbols.is_empty()
                     && layers.uploaded_stamp == Some(stamp)
-                    && layers.atlas_zoom_q32 == Some(zoom_q32)
+                    && layers.atlas_zoom_q32 == Some(target_zoom_q32)
             })
     }) {
-        return (false, false);
+        let needs_settle = moving
+            && target_zoom_q32 != exact_zoom_q32
+            && visible.iter().any(|&coords| {
+                tiles
+                    .query::<&SymbolLayersDataComponent>(coords)
+                    .is_some_and(|layers| !layers.layers.is_empty())
+            });
+        return (false, false, needs_settle);
     }
 
     let visible_set: rustc_hash::FxHashSet<_> = visible.iter().copied().collect();
     let mut needs_refetch = false;
+    let mut needs_atlas_settle = false;
+    let upload_started = instant::Instant::now();
+    let mut did_gpu_work = false;
+    let sdf_time_budget = if cfg!(target_arch = "wasm32") && budget.is_post_boot() {
+        Some(if moving {
+            std::time::Duration::from_micros(350)
+        } else {
+            std::time::Duration::from_micros(450)
+        })
+    } else {
+        None
+    };
     for &coords in visible {
         crate::vector::content::ensure(tiles, coords);
         let Some((layers, pending)) = tiles.query_mut::<(
@@ -133,31 +208,33 @@ fn upload_symbol_layer(
             && pending.symbols.is_empty()
             && layers.uploaded_stamp == Some(stamp)
         {
-            if layers.atlas_zoom_q32 == Some(zoom_q32) {
+            if moving && target_zoom_q32 != exact_zoom_q32 && !layers.layers.is_empty() {
+                needs_atlas_settle = true;
+            }
+            if layers.atlas_zoom_q32 == Some(target_zoom_q32) {
                 continue;
             }
-            for style_layer in style.layers.iter().filter(|layer| !layer.is_hidden()) {
-                if let Some(committed) = layers
-                    .layers
-                    .iter()
-                    .find(|layer| layer.style_layer_id == style_layer.id)
-                {
-                    prepare_atlas(textures, gpu, committed, style_layer, zoom);
+            if sdf_time_budget
+                .is_some_and(|limit| did_gpu_work && upload_started.elapsed() >= limit)
+            {
+                return (true, needs_refetch, needs_atlas_settle);
+            }
+            for committed in &layers.layers {
+                if let Some(&idx) = symbol_style.by_id.get(committed.style_layer_id.as_str()) {
+                    prepare_atlas(textures, gpu, committed, &style.layers[idx], atlas_zoom);
+                    did_gpu_work = true;
                 }
             }
-            layers.atlas_zoom_q32 = Some(zoom_q32);
+            layers.atlas_zoom_q32 = Some(target_zoom_q32);
             continue;
+        }
+        if sdf_time_budget.is_some_and(|limit| did_gpu_work && upload_started.elapsed() >= limit) {
+            return (true, needs_refetch, needs_atlas_settle);
         }
         let mut tile_incomplete = false;
         let loaded = symbol_buffer_pool.loaded_style_layer_ids_at(coords);
-        for style_layer in style.layers.iter().filter(|layer| !layer.is_hidden()) {
-            if let Some(committed) = layers
-                .layers
-                .iter()
-                .find(|layer| layer.style_layer_id == style_layer.id)
-            {
-                prepare_atlas(textures, gpu, committed, style_layer, zoom);
-            }
+        for &idx in &symbol_style.symbol_indices {
+            let style_layer = &style.layers[idx];
             let replacement = pending
                 .symbols
                 .iter()
@@ -194,7 +271,21 @@ fn upload_symbol_layer(
                         + size_of::<SDFShaderFeatureMetadata>())
                     + buffer.buffer.indices.len() * index_stride;
                 if !budget.can_take(UploadKind::Geometry, size) {
-                    return (true, needs_refetch);
+                    if replacement.is_some() {
+                        if let Some(committed) = layers
+                            .layers
+                            .iter()
+                            .find(|item| item.style_layer_id == style_layer.id)
+                        {
+                            prepare_atlas(textures, gpu, committed, style_layer, atlas_zoom);
+                        }
+                    }
+                    return (true, needs_refetch, needs_atlas_settle);
+                }
+                if sdf_time_budget
+                    .is_some_and(|limit| did_gpu_work && upload_started.elapsed() >= limit)
+                {
+                    return (true, needs_refetch, needs_atlas_settle);
                 }
                 if !upload_geometry(
                     symbol_buffer_pool,
@@ -205,6 +296,15 @@ fn upload_symbol_layer(
                     &visible_set,
                 ) {
                     tile_incomplete = true;
+                    if replacement.is_some() {
+                        if let Some(committed) = layers
+                            .layers
+                            .iter()
+                            .find(|item| item.style_layer_id == style_layer.id)
+                        {
+                            prepare_atlas(textures, gpu, committed, style_layer, atlas_zoom);
+                        }
+                    }
                     continue;
                 }
                 budget.take(UploadKind::Geometry, size);
@@ -212,7 +312,9 @@ fn upload_symbol_layer(
             } else {
                 false
             };
-            prepare_atlas(textures, gpu, layer, style_layer, zoom);
+            prepare_atlas(textures, gpu, layer, style_layer, atlas_zoom);
+            did_gpu_work |= did_upload
+                || (layer.atlas.is_some() && layers.atlas_zoom_q32 != Some(target_zoom_q32));
             if let Some(index) = replacement {
                 let mut committed = pending.symbols.remove(index);
                 committed.buffer.release_uploaded_symbol_vertices();
@@ -230,10 +332,13 @@ fn upload_symbol_layer(
         if !tile_incomplete && !layers.pending_assets && pending.symbols.is_empty() {
             layers.uploaded_stamp =
                 Some((style.revision(), symbol_buffer_pool.eviction_generation()));
-            layers.atlas_zoom_q32 = Some(zoom_q32);
+            layers.atlas_zoom_q32 = Some(target_zoom_q32);
+            if moving && target_zoom_q32 != exact_zoom_q32 && !layers.layers.is_empty() {
+                needs_atlas_settle = true;
+            }
         }
     }
-    (false, needs_refetch)
+    (false, needs_refetch, needs_atlas_settle)
 }
 
 fn prepare_atlas(

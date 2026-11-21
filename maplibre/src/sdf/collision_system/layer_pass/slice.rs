@@ -12,6 +12,9 @@ use crate::{
     },
 };
 
+#[cfg(target_arch = "wasm32")]
+const FEATURE_BATCH_CHECK: usize = 16;
+#[cfg(not(target_arch = "wasm32"))]
 const FEATURE_BATCH_CHECK: usize = 32;
 
 /// In-progress placement state across a style layer's visible tiles.

@@ -127,6 +127,8 @@ fn upload(context: &mut MapContext, zoom: f32) {
     else {
         panic!("GPU resources");
     };
+    let mut symbol_style = super::SymbolStyleIndex::default();
+    symbol_style.sync(&context.style);
     upload_symbol_layer(
         pool,
         textures,
@@ -136,7 +138,12 @@ fn upload(context: &mut MapContext, zoom: f32) {
             atlas_layout: &pipeline.atlas_layout,
         },
         &mut context.world.tiles,
-        (&context.style, &[WorldTileCoords::default()], zoom),
+        (
+            &context.style,
+            &symbol_style,
+            &[WorldTileCoords::default()],
+            zoom,
+        ),
         &mut FrameUploads::default(),
     );
 }

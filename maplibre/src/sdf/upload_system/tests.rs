@@ -53,3 +53,9 @@ fn a_layer_already_in_the_pool_is_not_uploaded_again() {
 
     assert!(pending_layer_data(&layers, &loaded, &style_layer("place_city")).is_none());
 }
+
+#[test]
+fn atlas_zoom_target_quantizes_to_eighth_steps_when_moving() {
+    assert_eq!(super::atlas_zoom_target(14.10, true), (451, 452, 14.125));
+    assert_eq!(super::atlas_zoom_target(14.10, false), (451, 451, 14.10));
+}

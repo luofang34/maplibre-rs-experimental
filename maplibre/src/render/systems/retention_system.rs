@@ -44,18 +44,18 @@ pub(crate) use ancestors::finish_tiles_in_use;
 const CACHE_TILES_PER_VIEW_TILE: usize = 2;
 /// Smallest cache, so a tiny viewport still keeps some history for panning back.
 #[cfg(target_arch = "wasm32")]
-const MIN_CACHE_TILES: usize = 2;
+const MIN_CACHE_TILES: usize = 6;
 #[cfg(not(target_arch = "wasm32"))]
 const MIN_CACHE_TILES: usize = 8;
 /// Hard ceiling on out-of-view cached tiles so wide oblique/globe coverings cannot accumulate
 /// hundreds of multi-megabyte raster/DEM tiles along a corridor.
 #[cfg(target_arch = "wasm32")]
-const MAX_CACHE_TILES: usize = 2;
+const MAX_CACHE_TILES: usize = 16;
 #[cfg(not(target_arch = "wasm32"))]
 const MAX_CACHE_TILES: usize = 24;
 /// Tessellated geometry the out-of-view cache may hold.
 #[cfg(target_arch = "wasm32")]
-const CACHE_BYTES: usize = 1 << 20;
+const CACHE_BYTES: usize = 24 << 20;
 #[cfg(not(target_arch = "wasm32"))]
 const CACHE_BYTES: usize = 12 << 20;
 /// Frames between resident-memory summaries for hosts driving the map from an eye, which
@@ -84,9 +84,8 @@ fn run_eviction(
     style: &Style,
     view_state: &ViewState,
     queue: Option<&crate::render::upload_queue::UploadQueue>,
-    cancel_unwanted: bool,
-    include_drawn: bool,
-    tight_tile_requests: bool,
+    (cancel_unwanted, include_drawn, tight_tile_requests): (bool, bool, bool),
+    extra_in_use: &[WorldTileCoords],
 ) -> (FxHashSet<WorldTileCoords>, usize) {
     let floor = world
         .resources
@@ -125,7 +124,7 @@ fn run_eviction(
         };
         (single, drawn)
     };
-    let _ = &mut in_use;
+    in_use.extend(extra_in_use.iter().copied());
     if cancel_unwanted {
         drop_cancelled(world, &in_use, queue);
     }
@@ -145,15 +144,15 @@ pub(crate) fn evict_before_upload(
     view_state: &ViewState,
     queue: &crate::render::upload_queue::UploadQueue,
     tight_tile_requests: bool,
+    extra_in_use: &[WorldTileCoords],
 ) {
     let _ = run_eviction(
         world,
         style,
         view_state,
         Some(queue),
-        false,
-        false,
-        tight_tile_requests,
+        (false, true, tight_tile_requests),
+        extra_in_use,
     );
 }
 
@@ -175,9 +174,8 @@ pub fn retention_system(
         style,
         view_state,
         Some(&renderer.queue),
-        true,
-        true,
-        renderer.settings.tight_tile_requests,
+        (true, true, renderer.settings.tight_tile_requests),
+        &[],
     );
     if view_state.has_external_view() {
         summary::summarize_residency(world, drawn, in_use.len(), view_state.eye_settled());
@@ -431,7 +429,8 @@ pub(crate) fn evict_beyond<S: BuildHasher>(
     evicted
 }
 
-/// Drops the tiles whose requests no one wants any more, freeing their slots for tiles in view.
+/// Drops the tiles whose requests no one wants any more, preserving tiles that already hold
+/// committed geometry as fallback/cache stand-ins while clearing only their pending refresh.
 fn drop_cancelled<S: BuildHasher>(
     world: &mut World,
     in_use: &HashSet<WorldTileCoords, S>,
@@ -445,14 +444,23 @@ fn drop_cancelled<S: BuildHasher>(
         count = cancelled.len(),
         "cancelled requests for tiles out of view"
     );
+    let (kept, to_drop): (Vec<_>, Vec<_>) = cancelled
+        .into_iter()
+        .partition(|&coords| crate::vector::content::has_committed_resident_layers(world, coords));
+    for coords in kept {
+        crate::vector::content::discard_pending_refresh(world, coords);
+    }
+    if to_drop.is_empty() {
+        return;
+    }
     let retention = world.resources.get_or_init_mut::<TileRetention>();
-    for coords in &cancelled {
+    for coords in &to_drop {
         retention.last_used.remove(coords);
     }
-    for coords in &cancelled {
+    for coords in &to_drop {
         world.tiles.remove(*coords);
     }
-    gpu::drop_gpu_data_with_queue(world, &cancelled, queue);
+    gpu::drop_gpu_data_with_queue(world, &to_drop, queue);
 }
 
 #[cfg(test)]

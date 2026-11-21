@@ -82,18 +82,22 @@ impl DrawSort {
 
     /// Rewrites the indices of the `layers` that sort by height and were sorted for another
     /// bearing bucket; an upload that has not been sorted yet holds the unrotated (`0`) order.
+    /// Returns `true` when `budget` stopped work early with more buckets still needing sorting.
     pub(super) fn follow_bearing(
         &mut self,
         world: &crate::tcs::world::World,
         queue: &crate::render::upload_queue::UploadQueue,
         (bearing, zoom): (f64, f64),
         layers: &[(u32, &SymbolLayerData, &SymbolPaint)],
-    ) {
+        budget: Option<(std::time::Duration, usize)>,
+    ) -> bool {
         let Some(Initialized(pool)) = world.resources.get::<Eventually<SymbolBufferPool>>() else {
-            return;
+            return false;
         };
         let bucket = bearing_bucket(bearing);
         let sort_bearing = bucket_angle_rad(bucket);
+        let started = instant::Instant::now();
+        let mut sorted_this_call = 0_usize;
         // Uploads that left the pool take their entries with them.
         self.sorted
             .retain(|(coords, _), _| pool.index().get_layers(*coords).is_some());
@@ -116,12 +120,21 @@ impl DrawSort {
                 .filter(|(allocation, _)| *allocation == entry.allocation_id())
                 .map_or(0_u16, |(_, b)| *b);
             if sorted_for != bucket {
+                if let Some((max_time, max_buckets)) = budget {
+                    if sorted_this_call > 0
+                        && (sorted_this_call >= max_buckets || started.elapsed() >= max_time)
+                    {
+                        return true;
+                    }
+                }
                 if let Some(indices) = indices_in_order(layer, sort_bearing) {
                     pool.update_indices(queue, entry, &indices);
                 }
+                sorted_this_call += 1;
             }
             self.sorted.insert(key, (entry.allocation_id(), bucket));
         }
+        false
     }
 }
 

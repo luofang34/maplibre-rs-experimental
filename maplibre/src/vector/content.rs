@@ -85,6 +85,36 @@ pub(crate) fn drop_undelivered(world: &mut World, coords: WorldTileCoords) {
     }
 }
 
+/// Whether `coords` already holds committed resident layers usable if a refresh is cancelled.
+pub(crate) fn has_committed_resident_layers(world: &World, coords: WorldTileCoords) -> bool {
+    world
+        .tiles
+        .query::<&VectorLayerBucketComponent>(coords)
+        .is_some_and(|v| v.done && !v.failed && !v.layers.is_empty())
+        && world
+            .tiles
+            .query::<&SymbolLayersDataComponent>(coords)
+            .is_none_or(|s| !s.pending_assets || !s.layers.is_empty())
+}
+
+/// Discards staged refresh data at `coords` after cancellation while preserving committed layers.
+pub(crate) fn discard_pending_refresh(world: &mut World, coords: WorldTileCoords) {
+    if let Some(pending) = world.tiles.query_mut::<&mut LayerReplacements>(coords) {
+        pending.vector.clear();
+        pending.symbols.clear();
+        pending.requested.clear();
+        pending.delivered.clear();
+        pending.keep_vector = false;
+        pending.keep_symbols = false;
+    }
+    if let Some(paint_store) = world
+        .tiles
+        .query_mut::<&mut TileFeaturePaintComponent>(coords)
+    {
+        paint_store.pending.clear();
+    }
+}
+
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn accept_vector(world: &mut World, bucket: AvailableVectorLayerBucket) {
     accept_vector_with_paint(world, bucket, None);

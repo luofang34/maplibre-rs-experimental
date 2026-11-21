@@ -237,3 +237,42 @@ fn a_vector_cover_takes_the_children_that_loaded_when_nothing_else_has() {
         "one child of four still draws its own part"
     );
 }
+
+#[test]
+fn empty_available_children_yield_none_and_depth_six_children_stand_in() {
+    let target_z8 = tile(227, 100, 8);
+    let mut sources = ViewTileSources::default();
+    sources.add::<LoadedVector>(TileKind::Vector);
+    let pattern: TileViewPattern<TestQueue, TestBuffer> =
+        TileViewPattern::new(BackingBufferDescriptor::new(TestBuffer, 0));
+
+    // Empty pyramid -> `get_available_children` returns `Some([])`, which must map to `SourceShapes::None`.
+    LOADED_VECTOR.with(|loaded| loaded.borrow_mut().clear());
+    let empty_tiles = pattern.generate_pattern(
+        &ViewRegion::from_tiles(vec![target_z8], ZoomLevel::new(8), 8),
+        &sources,
+        &[],
+        Zoom::new(8.0),
+        &World::default(),
+    );
+    assert!(
+        matches!(empty_tiles[0].vector, SourceShapes::None),
+        "empty child list must yield SourceShapes::None rather than SourceShapes::Children(vec![])"
+    );
+
+    // Depth-6 descendant (z14 from z8) stands in cleanly during fast zoom-outs.
+    let descendant_z14 = tile(target_z8.x << 6, target_z8.y << 6, 14);
+    LOADED_VECTOR.with(|loaded| {
+        let mut loaded = loaded.borrow_mut();
+        loaded.clear();
+        loaded.insert(descendant_z14);
+    });
+    let deep_tiles = pattern.generate_pattern(
+        &ViewRegion::from_tiles(vec![target_z8], ZoomLevel::new(8), 8),
+        &sources,
+        &[],
+        Zoom::new(8.0),
+        &World::default(),
+    );
+    assert_eq!(shape_coords(&deep_tiles[0].vector), vec![descendant_z14]);
+}

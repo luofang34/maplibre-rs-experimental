@@ -6,7 +6,7 @@
 //! a consistent `(ViewState, ShaderProjectionData)` snapshot, then commits `PlacedSymbols` and
 //! dirty GPU `SDFShaderFeatureMetadata` runs atomically when the final group completes.
 
-use std::time::Duration;
+use std::{collections::VecDeque, time::Duration};
 
 use rustc_hash::{FxHashMap, FxHashMap as HashMap, FxHashSet as HashSet};
 
@@ -34,13 +34,14 @@ use crate::{
     tcs::world::World,
 };
 
+#[cfg(target_arch = "wasm32")]
+const SLICE_BUDGET_SETTLED: Duration = Duration::from_micros(1000);
+#[cfg(not(target_arch = "wasm32"))]
 const SLICE_BUDGET_SETTLED: Duration = Duration::from_micros(1800);
 #[cfg(target_arch = "wasm32")]
-const SLICE_BUDGET_MOVING: Duration = Duration::from_micros(650);
+const SLICE_BUDGET_MOVING: Duration = Duration::from_micros(500);
 #[cfg(not(target_arch = "wasm32"))]
 const SLICE_BUDGET_MOVING: Duration = Duration::from_micros(550);
-
-type BucketMetadataList = Vec<(WorldTileCoords, Vec<SDFShaderFeatureMetadata>)>;
 
 struct EpochGroup {
     style_layer_id: String,
@@ -64,8 +65,8 @@ pub(super) struct ActiveEpoch {
     group_idx: usize,
     active_group: Option<LayerSliceProgress>,
     outcomes: HashMap<String, (Vec<WorldTileCoords>, family::Outcomes)>,
-    mirrored: Vec<(String, String, Vec<WorldTileCoords>)>,
-    placed_layers: Vec<(String, BucketMetadataList)>,
+    mirrored: VecDeque<(String, String, Vec<WorldTileCoords>)>,
+    pending_uploads: VecDeque<(StyleLayerId, WorldTileCoords, Vec<SDFShaderFeatureMetadata>)>,
 }
 
 impl ActiveEpoch {
@@ -132,8 +133,8 @@ impl ActiveEpoch {
             group_idx: 0,
             active_group: None,
             outcomes: HashMap::default(),
-            mirrored: Vec::new(),
-            placed_layers: Vec::new(),
+            mirrored: VecDeque::new(),
+            pending_uploads: VecDeque::new(),
         }
     }
 
@@ -169,7 +170,7 @@ impl ActiveEpoch {
             }
             let group = &mut self.groups[self.group_idx];
             if let Some(leader) = &group.leader_of {
-                self.mirrored.push((
+                self.mirrored.push_back((
                     leader.clone(),
                     group.style_layer_id.clone(),
                     std::mem::take(&mut group.coords),
@@ -235,16 +236,19 @@ impl ActiveEpoch {
                     (coords.clone(), progress.outcomes),
                 );
             }
-            let paired = coords.into_iter().zip(progress.metadata).collect();
-            self.placed_layers
-                .push((group.style_layer_id.clone(), paired));
+            let layer_id = StyleLayerId::intern(&group.style_layer_id);
+            for (c, meta) in coords.into_iter().zip(progress.metadata) {
+                self.pending_uploads.push_back((layer_id, c, meta));
+            }
             self.group_idx += 1;
         }
 
-        self.finish_mirrored_and_upload(world, style, queue, uploaded, scratch);
-        true
+        self.finish_mirrored_and_upload(
+            world, style, queue, uploaded, scratch, sliced, started, budget, did_work,
+        )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn finish_mirrored_and_upload(
         &mut self,
         world: &World,
@@ -255,8 +259,18 @@ impl ActiveEpoch {
             upload_diff::CachedBucketMetadata,
         >,
         scratch: &mut upload_diff::MetadataScratchPool,
-    ) {
-        for (leader_id, follower_id, follower_coords) in std::mem::take(&mut self.mirrored) {
+        sliced: bool,
+        started: instant::Instant,
+        budget: Duration,
+        mut did_work: bool,
+    ) -> bool {
+        while !self.mirrored.is_empty() {
+            if sliced && did_work && started.elapsed() >= budget {
+                return false;
+            }
+            let Some((leader_id, follower_id, follower_coords)) = self.mirrored.pop_front() else {
+                break;
+            };
             let (Some((leader_coords, outcome)), Some(paint)) = (
                 self.outcomes.get(&leader_id),
                 resolve_paint(style, &follower_id),
@@ -284,41 +298,49 @@ impl ActiveEpoch {
                 (paint, self.zoom),
                 &mut self.placed,
             );
-            let paired = live_follower_coords.into_iter().zip(metadata).collect();
-            self.placed_layers.push((follower_id, paired));
+            did_work = true;
+            let layer_id = StyleLayerId::intern(&follower_id);
+            for (c, meta) in live_follower_coords.into_iter().zip(metadata) {
+                self.pending_uploads.push_back((layer_id, c, meta));
+            }
         }
 
         if let Some(Initialized(pool)) = world.resources.get::<Eventually<SymbolBufferPool>>() {
-            for (style_layer_id, buckets) in std::mem::take(&mut self.placed_layers) {
-                let layer_id = StyleLayerId::intern(&style_layer_id);
-                for (coords, metadata) in buckets {
-                    let Some(entry) = pool.index().get_layers(coords).and_then(|entries| {
-                        entries
-                            .iter()
-                            .find(|entry| entry.style_layer_id == layer_id)
-                    }) else {
-                        scratch.recycle(metadata);
-                        continue;
-                    };
-                    let key = (coords, layer_id);
-                    let prev = uploaded.remove(&key);
-                    let next_cached = upload_diff::diff_and_upload_bucket_with_scratch(
-                        pool,
-                        queue,
-                        entry,
-                        prev.as_ref(),
-                        metadata,
-                        scratch,
-                    );
-                    if let Some(prev) = prev {
-                        scratch.recycle(prev.quads);
-                    }
-                    uploaded.insert(key, next_cached);
+            while !self.pending_uploads.is_empty() {
+                if sliced && did_work && started.elapsed() >= budget {
+                    return false;
                 }
+                let Some((layer_id, coords, metadata)) = self.pending_uploads.pop_front() else {
+                    break;
+                };
+                let Some(entry) = pool.index().get_layers(coords).and_then(|entries| {
+                    entries
+                        .iter()
+                        .find(|entry| entry.style_layer_id == layer_id)
+                }) else {
+                    scratch.recycle(metadata);
+                    continue;
+                };
+                did_work = true;
+                let key = (coords, layer_id);
+                let prev = uploaded.remove(&key);
+                let next_cached = upload_diff::diff_and_upload_bucket_with_scratch(
+                    pool,
+                    queue,
+                    entry,
+                    prev.as_ref(),
+                    metadata,
+                    scratch,
+                );
+                if let Some(prev) = prev {
+                    scratch.recycle(prev.quads);
+                }
+                uploaded.insert(key, next_cached);
             }
         } else {
-            self.recycle_placed_layers(scratch);
+            self.recycle_pending_uploads(scratch);
         }
+        true
     }
 
     pub(super) fn take_placed(&mut self) -> PlacedSymbols {
@@ -329,14 +351,12 @@ impl ActiveEpoch {
         if let Some(group) = self.active_group.take() {
             group.recycle(scratch);
         }
-        self.recycle_placed_layers(scratch);
+        self.recycle_pending_uploads(scratch);
     }
 
-    fn recycle_placed_layers(&mut self, scratch: &mut upload_diff::MetadataScratchPool) {
-        for (_, buckets) in std::mem::take(&mut self.placed_layers) {
-            for (_, metadata) in buckets {
-                scratch.recycle(metadata);
-            }
+    fn recycle_pending_uploads(&mut self, scratch: &mut upload_diff::MetadataScratchPool) {
+        while let Some((_, _, metadata)) = self.pending_uploads.pop_front() {
+            scratch.recycle(metadata);
         }
     }
 }

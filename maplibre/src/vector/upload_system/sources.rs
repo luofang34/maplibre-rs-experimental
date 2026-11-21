@@ -8,7 +8,10 @@ use crate::{
     render::{
         eventually::{Eventually, Eventually::Initialized},
         projection::view_region_for_projection,
-        tile_view_pattern::{coverage::loaded_cover, HasTile, ViewTileSources, DEFAULT_TILE_SIZE},
+        tile_view_pattern::{
+            coverage::loaded_cover, HasTile, ViewTileSources, CHILDREN_SEARCH_DEPTH,
+            DEFAULT_TILE_SIZE,
+        },
         view_state::{ViewState, ViewStatePadding},
     },
     style::Style,
@@ -18,8 +21,6 @@ use crate::{
         request_system::DrapeRequests, resources::TerrainResources,
     },
 };
-
-const CHILDREN_SEARCH_DEPTH: usize = 4;
 
 /// Coarse overview and settled 1-ring prefetch tiles requested by `vector_request` so
 /// `upload_system` uploads and retains them in `VectorBufferPool` against pan holes.
@@ -114,7 +115,7 @@ pub(super) fn frame_sources_and_painted(
                     || loaded_cover(&gpu_vector, coords, world).is_some()
                     || gpu_vector
                         .get_available_children(coords, world, CHILDREN_SEARCH_DEPTH)
-                        .is_some();
+                        .is_some_and(|children| !children.is_empty());
                 if has_gpu_stand_in {
                     covered_targets.push(coords);
                 } else {
@@ -122,7 +123,9 @@ pub(super) fn frame_sources_and_painted(
                 }
                 for ready in loaded_cover(&cpu_vector, coords, world)
                     .or_else(|| {
-                        cpu_vector.get_available_children(coords, world, CHILDREN_SEARCH_DEPTH)
+                        cpu_vector
+                            .get_available_children(coords, world, CHILDREN_SEARCH_DEPTH)
+                            .filter(|children| !children.is_empty())
                     })
                     .into_iter()
                     .flatten()
@@ -141,7 +144,7 @@ pub(super) fn frame_sources_and_painted(
             }
         }
         let all_view_painted = uncovered_targets.is_empty() && covered_targets.is_empty();
-        for coords in uncovered_targets {
+        for &coords in &uncovered_targets {
             uncovered_set.insert(coords);
             if seen.insert(coords) {
                 uncovered_list.push(coords);
@@ -153,14 +156,35 @@ pub(super) fn frame_sources_and_painted(
             }
         }
         let mut painted = Vec::with_capacity(uncovered_list.len() + covered_list.len());
-        painted.extend_from_slice(&uncovered_list);
-        painted.extend_from_slice(&covered_list);
+        let mut coarse_uncovered = Vec::new();
         if let Some(fallbacks) = world.resources.get::<VectorFallbackTiles>() {
             for &coords in &fallbacks.0 {
-                if seen.insert(coords) {
+                let covers_uncovered = !uncovered_targets.is_empty()
+                    && uncovered_targets.iter().any(|&target| {
+                        coords.z < target.z && {
+                            let shift = u32::from(u8::from(target.z) - u8::from(coords.z));
+                            target.x >> shift == coords.x && target.y >> shift == coords.y
+                        }
+                    });
+                if covers_uncovered
+                    && cpu_vector.has_tile(coords, world)
+                    && !gpu_vector.has_tile(coords, world)
+                {
+                    if seen.insert(coords) {
+                        uncovered_set.insert(coords);
+                        coarse_uncovered.push(coords);
+                    }
+                } else if seen.insert(coords) {
                     covered_list.push(coords);
                 }
             }
+        }
+        painted.extend_from_slice(&coarse_uncovered);
+        painted.extend_from_slice(&uncovered_list);
+        painted.extend_from_slice(&covered_list);
+        if !coarse_uncovered.is_empty() {
+            coarse_uncovered.extend(uncovered_list);
+            uncovered_list = coarse_uncovered;
         }
         uncovered_list.extend(covered_list);
         (uncovered_list, painted, uncovered_set, all_view_painted)
@@ -177,7 +201,9 @@ pub(super) fn frame_sources_and_painted(
                 }
                 for stand_in in loaded_cover(&gpu_vector, coords, world)
                     .or_else(|| {
-                        gpu_vector.get_available_children(coords, world, CHILDREN_SEARCH_DEPTH)
+                        gpu_vector
+                            .get_available_children(coords, world, CHILDREN_SEARCH_DEPTH)
+                            .filter(|children| !children.is_empty())
                     })
                     .into_iter()
                     .flatten()
@@ -246,3 +272,6 @@ pub(super) fn terrain_sources(
     uncovered_list.extend(covered_list);
     (uncovered_list, uncovered_set)
 }
+
+#[cfg(test)]
+mod tests;

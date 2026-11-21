@@ -40,3 +40,12 @@ fn opacity_beyond_the_unit_range_is_clamped_in_the_layer_colour() {
         );
     }
 }
+
+#[test]
+fn feature_zoom_threshold_coarsens_during_motion_and_snaps_when_settled() {
+    assert_eq!(super::feature_zoom_threshold(false, 0.5), 1.0 / 32.0);
+    assert_eq!(super::feature_zoom_threshold(false, 0.0), 1.0 / 32.0);
+    assert_eq!(super::feature_zoom_threshold(true, 0.02), 0.125);
+    assert_eq!(super::feature_zoom_threshold(true, 0.05), 0.25);
+    assert_eq!(super::feature_zoom_threshold(true, 0.4), 0.25);
+}

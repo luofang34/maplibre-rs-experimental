@@ -153,5 +153,57 @@ fn uncovered_tiles_get_emergency_moving_upload_headroom_past_soft_cap() {
     assert_eq!(frame.geometry_tiles, MOVING_UNCOVERED_UPLOADS_PER_FRAME);
 }
 
+#[test]
+fn wasm_post_boot_pacing_preserves_flag_across_reset_while_cold_boot_keeps_full_throughput() {
+    use super::{
+        geometry_limits_for_platform, FrameUploads, FRAME_UPLOAD_BYTES, IMAGE_UPLOAD_FLOOR_BYTES,
+    };
+
+    let full_geom = FRAME_UPLOAD_BYTES - IMAGE_UPLOAD_FLOOR_BYTES;
+    assert_eq!(
+        geometry_limits_for_platform(false, false, false, true),
+        (24, full_geom)
+    );
+    assert_eq!(
+        geometry_limits_for_platform(false, true, false, true),
+        (2, 1 << 20)
+    );
+    assert_eq!(
+        geometry_limits_for_platform(true, true, false, true),
+        (1, 512 << 10)
+    );
+    assert_eq!(
+        geometry_limits_for_platform(true, true, true, true),
+        (2, 1 << 20)
+    );
+
+    let mut frame = FrameUploads::default();
+    // Cold boot: full 24-tile wasm throughput.
+    for _ in 0..23 {
+        frame.count_geometry_tile();
+    }
+    assert!(!frame.geometry_tiles_exhausted_for_platform(false, true));
+    frame.count_geometry_tile();
+    assert!(frame.geometry_tiles_exhausted_for_platform(false, true));
+
+    // Once camera moves, `post_boot` persists across `reset()` and caps stationary bursts to 2 tiles / 1 MiB.
+    frame.set_moving(true);
+    assert!(frame.is_post_boot());
+    frame.reset();
+    assert!(!frame.is_moving());
+    assert!(frame.is_post_boot());
+    for _ in 0..2 {
+        assert!(!frame.geometry_tiles_exhausted_for_platform(false, true));
+        frame.count_geometry_tile();
+    }
+    assert!(frame.geometry_tiles_exhausted_for_platform(false, true));
+    assert!(frame.can_take_geometry_for_platform(512 << 10, false, true));
+    frame.take_geometry(512 << 10, false);
+    frame.set_moving(false);
+    // Remaining 512 KiB fits in 1 MiB (`512 KiB + 512 KiB`), 512 KiB + 1 does not.
+    assert!(frame.can_take_geometry_for_platform(512 << 10, false, true));
+    assert!(!frame.can_take_geometry_for_platform((512 << 10) + 1, false, true));
+}
+
 #[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 mod uploads;

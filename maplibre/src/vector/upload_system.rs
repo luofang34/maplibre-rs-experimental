@@ -16,6 +16,7 @@ use crate::{
 };
 
 mod bucket;
+mod frame_state;
 mod metadata;
 pub(crate) mod paint;
 mod shared_fallback;
@@ -23,6 +24,8 @@ pub(crate) mod sources;
 pub(crate) mod style_refresh;
 
 use bucket::{upload_bucket, SharedStyleLayers, UploadOutcome};
+pub(crate) use frame_state::drape_paint_zoom;
+use frame_state::{frame_paint, VectorPaintFrame};
 use metadata::upload_size;
 #[cfg(test)]
 use metadata::{metadata_for_layer, pattern_runs, sort_runs};
@@ -44,18 +47,6 @@ fn layer_is_dynamic_circle(style: &Style, style_layer: &crate::style::layer::Sty
         let _ = (style, style_layer);
         false
     }
-}
-
-pub(crate) fn drape_paint_zoom(zoom: f64) -> f64 {
-    (zoom * 8.0).round() / 8.0
-}
-
-#[derive(Clone, Copy, PartialEq)]
-pub(super) struct VectorPaintFrame {
-    zoom: f32,
-    bearing: f32,
-    /// The root light as extruded polygons are shaded with it.
-    light: crate::style::light::ExtrusionLight,
 }
 
 pub fn upload_system(
@@ -116,6 +107,7 @@ pub fn upload_system(
             view_state,
             queue,
             settings.tight_tile_requests,
+            &painted_tiles,
         );
     }
     let (spatial, changed) = super::structures::for_frame(world, style, &painted_tiles);
@@ -143,7 +135,8 @@ pub fn upload_system(
     else {
         return Err(SystemError::Dependencies);
     };
-    if refresh_paint {
+    let moving = budget.is_moving();
+    if refresh_paint || (!moving && paint_scratch.needs_settle()) {
         paint_scratch.sync_style(style);
         paint::refresh_layer_paint(
             buffer_pool,
@@ -152,9 +145,11 @@ pub fn upload_system(
             &painted_tiles,
             paint_frame,
             previous_paint,
+            moving,
             paint_scratch,
         );
     }
+    let paint_settle_pending = paint_scratch.needs_settle();
     if changed {
         super::structures::refresh_gpu(buffer_pool, queue, &spatial, &world.tiles);
     }
@@ -183,7 +178,7 @@ pub fn upload_system(
         queue,
         &painted_tiles,
     );
-    if deferred {
+    if deferred || paint_settle_pending {
         crate::render::frame_signals::keep_animating(world);
     }
     super::request_system::reconcile_upload_permits(
@@ -196,39 +191,6 @@ pub fn upload_system(
         crate::render::frame_signals::mark_dirty(world);
     }
     Ok(())
-}
-
-fn frame_paint(
-    world: &mut crate::tcs::world::World,
-    style: &Style,
-    view_state: &crate::render::view_state::ViewState,
-) -> (VectorPaintFrame, Option<VectorPaintFrame>) {
-    let zoom = if style.terrain.is_some() {
-        paint::stabilize_zoom(world, view_state.style_zoom().value()) as f32
-    } else {
-        (view_state.style_zoom().level() * 256.0).round() / 256.0
-    };
-    let bearing = ((view_state.camera().get_bearing().0.to_degrees() * 4.0).round() * 0.25)
-        .to_radians() as f32;
-    let light = style
-        .light
-        .as_ref()
-        .map_or_else(
-            || {
-                crate::style::light::LightSpecification::default()
-                    .extrusion_light(view_state.style_zoom().value(), f64::from(bearing))
-            },
-            |light| light.extrusion_light(view_state.style_zoom().value(), f64::from(bearing)),
-        )
-        .unwrap_or_default();
-    let paint_frame = VectorPaintFrame {
-        zoom,
-        bearing,
-        light,
-    };
-    let previous_paint = world.resources.get::<VectorPaintFrame>().copied();
-    world.resources.insert(paint_frame);
-    (paint_frame, previous_paint)
 }
 
 #[cfg(test)]
@@ -292,6 +254,17 @@ fn upload_tessellated_layer_with_uncovered(
     let mut feature_meta_scratch = Vec::new();
     let mut needs_refetch = false;
     let mut any_deferred = false;
+    let upload_started = instant::Instant::now();
+    let mut uploaded_any_bucket = false;
+    let time_budget = if cfg!(target_arch = "wasm32") && budget.is_post_boot() {
+        Some(if budget.is_moving() {
+            std::time::Duration::from_micros(700)
+        } else {
+            std::time::Duration::from_micros(800)
+        })
+    } else {
+        None
+    };
     let protected: rustc_hash::FxHashSet<_> = source_tiles.iter().copied().collect();
     for coords in source_tiles {
         let is_uncovered = uncovered_sources.contains(&coords);
@@ -383,7 +356,9 @@ fn upload_tessellated_layer_with_uncovered(
                         continue;
                     }
                     let bytes = upload_size(style_layer, bucket, is_uniform, is_dynamic_circle);
-                    if budget.geometry_tiles_exhausted_for(is_uncovered)
+                    if time_budget.is_some_and(|limit| {
+                        uploaded_any_bucket && upload_started.elapsed() >= limit
+                    }) || budget.geometry_tiles_exhausted_for(is_uncovered)
                         || !budget.can_take_geometry(bytes, is_uncovered)
                     {
                         Step::Exhausted
@@ -452,6 +427,7 @@ fn upload_tessellated_layer_with_uncovered(
                     release_cpu,
                 } => {
                     uploaded |= did_upload;
+                    uploaded_any_bucket |= did_upload;
                     if let Some(index) = replacement {
                         super::content::commit_pending_vector(tiles, coords, index);
                     }

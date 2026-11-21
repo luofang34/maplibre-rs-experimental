@@ -5,7 +5,9 @@ use rustc_hash::FxHashSet;
 
 use crate::{
     coords::{OverscaledTileId, WorldTileCoords, ZoomLevel},
-    io::tile_sources::{outside_source_bounds, source_max_zoom, source_min_zoom, TileKind},
+    io::tile_sources::{
+        clamp_to_max_zoom, outside_source_bounds, source_max_zoom, source_min_zoom, TileKind,
+    },
     render::{
         eventually::Eventually,
         memory_budget::MemoryBudget,
@@ -21,7 +23,7 @@ use crate::{
 };
 
 /// Maximum coarse `z - 3` ancestor cover tiles requested alongside the tight viewport during motion.
-const MAX_COARSE_ANCESTORS: usize = 1;
+const MAX_COARSE_ANCESTORS: usize = 2;
 /// Maximum `PrefetchView` pan lookahead tiles requested on `wasm32` during camera motion.
 const MAX_PAN_LOOKAHEAD_TILES: usize = 6;
 
@@ -73,6 +75,8 @@ fn plan_non_terrain_fallbacks_for_platform(
     let visible_level = ZoomLevel::new(level);
     let mut extra_requests = Vec::new();
     let max_zoom = source_max_zoom(style, TileKind::Vector);
+    let min_zoom = source_min_zoom(style, TileKind::Vector);
+    let mut handoff_parents = Vec::new();
 
     if is_web && !view_state.has_external_view() {
         let source_z = max_zoom.map_or(level, |m| level.min(m));
@@ -105,9 +109,9 @@ fn plan_non_terrain_fallbacks_for_platform(
             }
             let mut view_set: Option<FxHashSet<WorldTileCoords>> = None;
 
-            // 1. Single coarse `z - 3` ancestor cover (covers an 8x8 tile block): never requested on
-            // stationary cold boot or gentle continuous spin, requested only during rapid pan/zoom
-            // or lookahead when child viewport tiles lack GPU geometry, and retained once spawned.
+            // 1. Coarse `z - 3` ancestor cover (covers an 8x8 tile block, up to `MAX_COARSE_ANCESTORS`
+            // across seams): prioritized for uncovered ancestors, keeping `coarse_z - 1` alive during
+            // zoom handoffs until the new `coarse_z` finishes uploading to the GPU.
             if source_z >= 3 {
                 let coarse_z = source_z - 3;
                 let all_children_uploaded = |world: &World, ancestor: WorldTileCoords| {
@@ -125,18 +129,21 @@ fn plan_non_terrain_fallbacks_for_platform(
                         let Some((wrapped, _)) = child.wrapped() else {
                             continue;
                         };
-                        let cz = u8::from(wrapped.z);
+                        let source_child = clamp_to_max_zoom(wrapped, max_zoom);
+                        let cz = u8::from(source_child.z);
                         if cz <= az {
                             continue;
                         }
                         let shift = u32::from(cz - az);
-                        if wrapped.x >> shift == ancestor.x && wrapped.y >> shift == ancestor.y {
+                        if source_child.x >> shift == ancestor.x
+                            && source_child.y >> shift == ancestor.y
+                        {
                             any_covered = true;
                             if world
                                 .tiles
-                                .query::<&VectorLayerBucketComponent>(child)
+                                .query::<&VectorLayerBucketComponent>(source_child)
                                 .is_none_or(|b| !b.done)
-                                || !crate::vector::geometry_uploaded(child, world)
+                                || !crate::vector::geometry_uploaded(source_child, world)
                             {
                                 return false;
                             }
@@ -144,7 +151,8 @@ fn plan_non_terrain_fallbacks_for_platform(
                     }
                     any_covered
                 };
-                let mut coarse_count = 0;
+                let mut candidates = Vec::new();
+                let mut seen_ancestors = FxHashSet::default();
                 for &coords in view_tiles {
                     let Some((wrapped, _)) = coords.wrapped() else {
                         continue;
@@ -159,15 +167,36 @@ fn plan_non_terrain_fallbacks_for_platform(
                         y: wrapped.y >> shift,
                         z: ZoomLevel::new(coarse_z),
                     };
-                    let spawned = tile_spawned(world, ancestor);
-                    if !spawned && (!allow_new_coarse || all_children_uploaded(world, ancestor)) {
+                    if !seen_ancestors.insert(ancestor) {
                         continue;
                     }
-                    if ensure_seen(&mut view_set, view_tiles).insert(ancestor) {
+                    let spawned = tile_spawned(world, ancestor);
+                    let uncovered = !all_children_uploaded(world, ancestor);
+                    if !spawned && (!allow_new_coarse || !uncovered) {
+                        continue;
+                    }
+                    candidates.push((ancestor, uncovered));
+                }
+                candidates.sort_by_key(|(_, uncovered)| !*uncovered);
+                let selected_ancestors: Vec<_> = candidates
+                    .into_iter()
+                    .map(|(ancestor, _)| ancestor)
+                    .take(MAX_COARSE_ANCESTORS)
+                    .collect();
+                let seen_extra = ensure_seen(&mut view_set, view_tiles);
+                for ancestor in selected_ancestors {
+                    if seen_extra.insert(ancestor) {
                         extra_requests.push(ancestor);
-                        coarse_count += 1;
-                        if coarse_count >= MAX_COARSE_ANCESTORS {
-                            break;
+                    }
+                    if !tile_spawned(world, ancestor)
+                        || !crate::vector::geometry_uploaded(ancestor, world)
+                    {
+                        if let Some(parent) = ancestor.get_parent() {
+                            if min_zoom.is_none_or(|m| u8::from(parent.z) >= m)
+                                && tile_spawned(world, parent)
+                            {
+                                handoff_parents.push(parent);
+                            }
                         }
                     }
                 }
@@ -203,7 +232,7 @@ fn plan_non_terrain_fallbacks_for_platform(
     // Record canonical source coordinates for all retained non-tight tiles (both native `Loose`
     // ring tiles already in `view_tiles` and `wasm32` `extra_requests`) so `upload_system`
     // uploads and retains them in `VectorBufferPool`.
-    if tight_covering && extra_requests.is_empty() {
+    if tight_covering && extra_requests.is_empty() && handoff_parents.is_empty() {
         if world
             .resources
             .get::<VectorFallbackTiles>()
@@ -213,7 +242,6 @@ fn plan_non_terrain_fallbacks_for_platform(
         }
         return extra_requests;
     }
-    let min_zoom = source_min_zoom(style, TileKind::Vector);
     let non_tight: Vec<WorldTileCoords> = if tight_covering {
         Vec::new()
     } else {
@@ -237,7 +265,11 @@ fn plan_non_terrain_fallbacks_for_platform(
 
     let mut fallback_canonical = Vec::new();
     let mut seen_canonical = FxHashSet::default();
-    for &coords in non_tight.iter().chain(extra_requests.iter()) {
+    for &coords in non_tight
+        .iter()
+        .chain(extra_requests.iter())
+        .chain(handoff_parents.iter())
+    {
         if min_zoom.is_some_and(|m| u8::from(coords.z) < m) {
             continue;
         }
@@ -339,5 +371,75 @@ mod tests {
             y: 5386 >> 3,
             z: ZoomLevel::new(11),
         }));
+    }
+
+    #[test]
+    fn coarse_fallback_covers_two_seam_ancestors_and_retains_parent_during_handoff() {
+        let style: Style = serde_json::from_str(
+            r#"{
+                "version": 8,
+                "sources": { "v": { "type": "vector", "tiles": ["https://example.invalid/{z}/{x}/{y}.pbf"], "maxzoom": 14 } },
+                "layers": []
+            }"#,
+        )
+        .expect("valid style");
+        let mut world = World::default();
+        let size = PhysicalSize::new(800, 600).expect("valid");
+        let zoom = Zoom::new(14.5);
+        let view_state = ViewState::new(
+            size,
+            WorldCoords::from_lat_lon(LatLon::new(35.6812, 139.75), zoom),
+            zoom,
+            cgmath::Deg(0.0),
+            cgmath::Deg(0.0),
+        );
+        // Two z14 tiles crossing a z11 seam: x=14543 (z11 x=1817) and x=14544 (z11 x=1818).
+        let left_z14 = WorldTileCoords {
+            x: 1817 << 3 | 7,
+            y: 6450,
+            z: ZoomLevel::new(14),
+        };
+        let right_z14 = WorldTileCoords {
+            x: 1818 << 3,
+            y: 6450,
+            z: ZoomLevel::new(14),
+        };
+        let parent_z10 = WorldTileCoords {
+            x: 1817 >> 1,
+            y: (6450 >> 3) >> 1,
+            z: ZoomLevel::new(10),
+        };
+        world.tiles.spawn_mut(parent_z10).expect("valid parent");
+        let ahead = ViewState::new(
+            size,
+            WorldCoords::from_lat_lon(LatLon::new(35.6812, 139.74), zoom),
+            zoom,
+            cgmath::Deg(0.0),
+            cgmath::Deg(0.0),
+        );
+        world.resources.insert(crate::render::xr::PrefetchView {
+            view_state: Some(ahead),
+            placement: None,
+        });
+
+        let extra = plan_non_terrain_fallbacks_for_platform(
+            &style,
+            &view_state,
+            &mut world,
+            (false, false, true),
+            &[left_z14, right_z14],
+            (14, false),
+            true,
+        );
+        assert_eq!(extra.len(), 2, "seam requires 2 coarse z11 ancestors");
+        let retained = world
+            .resources
+            .get::<VectorFallbackTiles>()
+            .expect("fallbacks");
+        assert!(
+            retained.0.contains(&parent_z10),
+            "spawned z10 parent stays retained while z11 coarse ancestor has not uploaded"
+        );
+        assert!(!extra.contains(&parent_z10));
     }
 }

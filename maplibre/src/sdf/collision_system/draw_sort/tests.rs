@@ -74,3 +74,96 @@ fn quantized_bearing_buckets_absorb_sub_degree_jitter_and_preserve_cardinal_angl
     );
     assert_ne!(bearing_bucket(0.0), bearing_bucket(4.0_f64.to_radians()));
 }
+
+#[cfg(all(feature = "headless", feature = "thread-safe-futures"))]
+#[tokio::test]
+async fn budgeted_follow_bearing_caps_buckets_per_frame_until_complete() {
+    use std::time::Duration;
+
+    use crate::{
+        coords::ZoomLevel,
+        headless::create_headless_renderer,
+        render::{
+            eventually::Eventually, settings::BufferPoolSizes, shaders::SDFShaderFeatureMetadata,
+        },
+        sdf::SymbolBufferPool,
+        style::layer::{LayerPaint, StyleLayer},
+        tcs::world::World,
+    };
+
+    let (_, renderer) = create_headless_renderer(64, 64, None)
+        .await
+        .expect("renderer");
+    let mut pool = SymbolBufferPool::from_device_with_sizes(
+        &renderer.device,
+        BufferPoolSizes {
+            vertices: 64,
+            indices: 128,
+            feature_metadata: 64,
+            layer_metadata: 16,
+        },
+    );
+    let style_layer: StyleLayer = serde_json::from_value(serde_json::json!({
+        "id": "labels",
+        "type": "symbol",
+        "source": "openmaptiles",
+        "source-layer": "places",
+        "layout": {
+            "text-field": "A",
+            "symbol-z-order": "viewport-y",
+            "text-allow-overlap": true
+        }
+    }))
+    .expect("style layer");
+    let Some(LayerPaint::Symbol(paint)) = &style_layer.paint else {
+        panic!("symbol paint");
+    };
+
+    let buckets: Vec<SymbolLayerData> = (0..5)
+        .map(|x| {
+            let coords = WorldTileCoords {
+                x,
+                y: 0,
+                z: ZoomLevel::new(10),
+            };
+            let buffer = OverAlignedVertexBuffer::<ShaderSymbolVertex, u32>::from_iters(
+                vec![ShaderSymbolVertex::default(); 6],
+                vec![0, 1, 2, 3, 4, 5],
+                6,
+            );
+            pool.allocate_layer_geometry(
+                &renderer.queue,
+                coords,
+                style_layer.clone(),
+                &buffer,
+                crate::render::shaders::EmptyLayerMetadata([0; 0]),
+                &[SDFShaderFeatureMetadata::default(); 6],
+            )
+            .expect("allocate");
+            SymbolLayerData {
+                atlas: None,
+                coords,
+                source_layer: "places".into(),
+                style_layer_id: "labels".into(),
+                buffer,
+                features: vec![label([0.0, 100.0], 0..3), label([0.0, 0.0], 3..6)],
+            }
+        })
+        .collect();
+
+    let mut world = World::default();
+    world.resources.insert(Eventually::Initialized(pool));
+    let layers: Vec<(u32, &SymbolLayerData, &SymbolPaint)> =
+        buckets.iter().map(|b| (0, b, paint)).collect();
+    let target = (std::f64::consts::FRAC_PI_2, 14.0);
+    let mut sort = DrawSort::default();
+
+    let budget = Some((Duration::from_secs(1), 2));
+    assert!(sort.needs_bearing_sort(&world, target, &layers));
+    assert!(sort.follow_bearing(&world, &renderer.queue, target, &layers, budget));
+    assert!(sort.needs_bearing_sort(&world, target, &layers));
+    assert!(sort.follow_bearing(&world, &renderer.queue, target, &layers, budget));
+    assert!(sort.needs_bearing_sort(&world, target, &layers));
+    assert!(!sort.follow_bearing(&world, &renderer.queue, target, &layers, budget));
+    assert!(!sort.needs_bearing_sort(&world, target, &layers));
+}

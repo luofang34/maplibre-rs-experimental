@@ -13,7 +13,7 @@ pub use availability::{HasTile, KindSources, QueryHasTile, ViewTileSources};
 use cgmath::Matrix4;
 pub use pattern::{
     covering_shapes_for, RasterCoverings, TileMetadataOverflow, TileViewPattern,
-    COMPLETE_CHILDREN_SEARCH_DEPTH, DEFAULT_TILE_VIEW_PATTERN_SIZE,
+    CHILDREN_SEARCH_DEPTH, COMPLETE_CHILDREN_SEARCH_DEPTH, DEFAULT_TILE_VIEW_PATTERN_SIZE,
 };
 
 use crate::{

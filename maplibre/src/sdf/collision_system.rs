@@ -6,20 +6,14 @@ use controller::{PlacementController, PlacementTriggers};
 use rustc_hash::{FxHashMap, FxHashSet};
 #[cfg(test)]
 use signatures::obstructed_grid;
-use signatures::{
-    content_signature, has_symbol_depth_occluders, terrain_signature, visible_layers, VisibleLayer,
-};
+use signatures::{content_signature, terrain_signature, visible_layers, VisibleLayer};
 
 #[cfg(test)]
 use super::placement::canonical_tile;
 use crate::{
     context::MapContext,
     coords::WorldTileCoords,
-    render::{
-        eventually::{Eventually, Eventually::Initialized},
-        projection::projection_data_for_view,
-    },
-    sdf::SymbolBufferPool,
+    render::projection::projection_data_for_view,
     tcs::system::{System, SystemError, SystemResult},
 };
 
@@ -31,6 +25,7 @@ mod repeat_spacing;
 mod rules;
 mod signatures;
 mod sliced;
+mod sync;
 mod temporal;
 mod upload_diff;
 
@@ -118,13 +113,13 @@ impl System for CollisionSystem {
             .unwrap_or_default();
         let caller_immediate = config.fade_duration.is_zero();
         if crate::render::eye_covering::EyeInFrame::reuses_content(world) {
-            sync_symbol_depth_fade(
+            sync::sync_symbol_depth_fade(
                 world,
                 renderer,
                 &self.history,
                 view_state.camera().get_pitch().0,
             );
-            self.prune_inactive_symbol_draws(world);
+            sync::prune_inactive_symbol_draws(world, &self.history, &self.uploaded);
             return Ok(());
         }
 
@@ -216,6 +211,24 @@ impl System for CollisionSystem {
                 }
                 self.placed_view = None;
                 self.last_content_signature = None;
+                if stale_camera
+                    && moving_this_frame
+                    && !caller_immediate
+                    && !triggers.obstructed
+                    && view_valid
+                {
+                    self.controller.advance_clock(now);
+                    self.controller.note_aborted_motion(zoom);
+                    sync::sync_symbol_depth_fade(
+                        world,
+                        renderer,
+                        &self.history,
+                        view_state.camera().get_pitch().0,
+                    );
+                    sync::prune_inactive_symbol_draws(world, &self.history, &self.uploaded);
+                    crate::render::frame_signals::keep_animating(world);
+                    return Ok(());
+                }
             } else {
                 self.controller.advance_clock(now);
                 self.controller.note_background_dirty(zoom, triggers);
@@ -233,17 +246,17 @@ impl System for CollisionSystem {
                     && earlier_stage_spent > std::time::Duration::from_micros(2_000)
                 {
                     self.active_epoch = Some(epoch);
-                    sync_symbol_depth_fade(
+                    sync::sync_symbol_depth_fade(
                         world,
                         renderer,
                         &self.history,
                         view_state.camera().get_pitch().0,
                     );
-                    self.prune_inactive_symbol_draws(world);
+                    sync::prune_inactive_symbol_draws(world, &self.history, &self.uploaded);
                     crate::render::frame_signals::keep_animating(world);
                     return Ok(());
                 }
-                if epoch.step(
+                let sort_pending = if epoch.step(
                     world,
                     style,
                     &renderer.queue,
@@ -257,37 +270,48 @@ impl System for CollisionSystem {
                         self.history.repeats.yielded_to_previous() || epoch.saw_background_change;
                     self.controller
                         .record_commit(epoch.zoom, epoch.has_symbols, followup);
-                    if !moving_this_frame
+                    let sort_budget = (!caller_immediate && self.controller.last_dt_non_zero())
+                        .then_some((std::time::Duration::from_micros(400), 3));
+                    let sort_pending = if !moving_this_frame
                         && self.draw_sort.needs_bearing_sort(
                             world,
                             (view_state.camera().get_bearing().0, zoom),
                             &layers,
-                        )
-                    {
+                        ) {
                         self.draw_sort.follow_bearing(
                             world,
                             &renderer.queue,
                             (view_state.camera().get_bearing().0, zoom),
                             &layers,
-                        );
+                            sort_budget,
+                        )
+                    } else {
+                        false
+                    };
+                    if self.initial_boot_loading && in_flight == 0 && !followup && !sort_pending {
+                        self.initial_boot_finished = true;
+                        self.initial_boot_loading = false;
                     }
                     world.resources.insert(epoch.take_placed());
                     world
                         .resources
                         .insert(super::query::PlacementBearing(epoch.bearing));
+                    sort_pending
                 } else {
                     self.active_epoch = Some(epoch);
-                }
-                sync_symbol_depth_fade(
+                    false
+                };
+                sync::sync_symbol_depth_fade(
                     world,
                     renderer,
                     &self.history,
                     view_state.camera().get_pitch().0,
                 );
-                self.prune_inactive_symbol_draws(world);
+                sync::prune_inactive_symbol_draws(world, &self.history, &self.uploaded);
                 if self.active_epoch.is_some()
                     || self.history.is_fading()
                     || self.controller.is_pending()
+                    || sort_pending
                 {
                     crate::render::frame_signals::keep_animating(world);
                 }
@@ -304,25 +328,34 @@ impl System for CollisionSystem {
             })
         {
             self.controller.advance_clock(now);
-            sync_symbol_depth_fade(
+            sync::sync_symbol_depth_fade(
                 world,
                 renderer,
                 &self.history,
                 view_state.camera().get_pitch().0,
             );
-            self.prune_inactive_symbol_draws(world);
+            sync::prune_inactive_symbol_draws(world, &self.history, &self.uploaded);
             return Ok(());
         }
 
         let bearing = view_state.camera().get_bearing().0;
-        if !moving_this_frame
+        let pre_sort_budget = (!caller_immediate && self.controller.last_dt_non_zero())
+            .then_some((std::time::Duration::from_micros(400), 3));
+        let mut sort_pending = if !moving_this_frame
             && self
                 .draw_sort
                 .needs_bearing_sort(world, (bearing, zoom), &layers)
         {
-            self.draw_sort
-                .follow_bearing(world, &renderer.queue, (bearing, zoom), &layers);
-        }
+            self.draw_sort.follow_bearing(
+                world,
+                &renderer.queue,
+                (bearing, zoom),
+                &layers,
+                pre_sort_budget,
+            )
+        } else {
+            false
+        };
 
         let controller_wants = self.controller.should_place(now, zoom, config, triggers);
         let boot_final_settle = self.initial_boot_loading
@@ -337,14 +370,14 @@ impl System for CollisionSystem {
                 && earlier_stage_spent > std::time::Duration::from_micros(2_200)
                 && self.controller.defer_for_frame_budget(triggers))
         {
-            sync_symbol_depth_fade(
+            sync::sync_symbol_depth_fade(
                 world,
                 renderer,
                 &self.history,
                 view_state.camera().get_pitch().0,
             );
-            self.prune_inactive_symbol_draws(world);
-            if self.history.is_fading() || self.controller.is_pending() {
+            sync::prune_inactive_symbol_draws(world, &self.history, &self.uploaded);
+            if self.history.is_fading() || self.controller.is_pending() || sort_pending {
                 crate::render::frame_signals::keep_animating(world);
             } else if self.initial_boot_loading && in_flight == 0 {
                 self.initial_boot_finished = true;
@@ -361,13 +394,16 @@ impl System for CollisionSystem {
         self.last_terrain_signature = Some(terrain_sig);
         self.last_external_view = Some(external_view);
 
-        let use_slicing = self.controller.is_initialized()
+        let use_slicing = !caller_immediate
             && self.controller.last_dt_non_zero()
-            && !effective_fade_duration.is_zero()
-            && !triggers.obstructed;
-        if !moving_this_frame || !use_slicing {
+            && !triggers.obstructed
+            && (self.initial_boot_loading
+                || self.controller.has_ever_placed()
+                || self.controller.is_initialized());
+        if !use_slicing && (moving_this_frame || sort_pending) {
             self.draw_sort
-                .follow_bearing(world, &renderer.queue, (bearing, zoom), &layers);
+                .follow_bearing(world, &renderer.queue, (bearing, zoom), &layers, None);
+            sort_pending = false;
         }
         layers.sort_by_key(|(index, layer, _)| {
             (
@@ -405,7 +441,7 @@ impl System for CollisionSystem {
             let followup_needed = self.history.repeats.yielded_to_previous();
             self.controller
                 .record_commit(zoom, has_symbols, followup_needed);
-            if self.initial_boot_loading && in_flight == 0 && !followup_needed {
+            if self.initial_boot_loading && in_flight == 0 && !followup_needed && !sort_pending {
                 self.initial_boot_finished = true;
                 self.initial_boot_loading = false;
             }
@@ -416,75 +452,20 @@ impl System for CollisionSystem {
         } else {
             self.active_epoch = Some(epoch);
         }
-        sync_symbol_depth_fade(
+        sync::sync_symbol_depth_fade(
             world,
             renderer,
             &self.history,
             view_state.camera().get_pitch().0,
         );
-        self.prune_inactive_symbol_draws(world);
-        if self.active_epoch.is_some() || self.history.is_fading() || self.controller.is_pending() {
+        sync::prune_inactive_symbol_draws(world, &self.history, &self.uploaded);
+        if self.active_epoch.is_some()
+            || self.history.is_fading()
+            || self.controller.is_pending()
+            || sort_pending
+        {
             crate::render::frame_signals::keep_animating(world);
         }
         Ok(())
-    }
-}
-
-fn sync_symbol_depth_fade(
-    world: &mut crate::tcs::world::World,
-    renderer: &crate::render::Renderer,
-    history: &temporal::PlacementHistory,
-    pitch: f64,
-) {
-    let time_ms = history.effective_shader_time_ms();
-    let duration_ms = history.fade_duration_ms();
-    let skip_depth_occlusion = !has_symbol_depth_occluders(world, &renderer.render_graph, pitch);
-    if let Some(Initialized(depth)) = world
-        .resources
-        .get_mut::<Eventually<super::depth::SymbolDepth>>()
-    {
-        depth.write_fade_time(
-            &renderer.device,
-            &renderer.queue,
-            time_ms,
-            duration_ms,
-            skip_depth_occlusion,
-        );
-    }
-}
-
-impl CollisionSystem {
-    fn prune_inactive_symbol_draws(&self, world: &mut crate::tcs::world::World) {
-        use crate::{
-            render::render_phase::{Draw, DrawState, RenderPhase, TranslucentItem},
-            sdf::render_commands::DrawSymbols,
-        };
-        let now_ms = self.history.effective_shader_time_ms();
-        let fade_duration_ms = self.history.fade_duration_ms();
-        let Some((phase, Initialized(pool))) = world.resources.query_mut::<(
-            &mut RenderPhase<TranslucentItem>,
-            &Eventually<SymbolBufferPool>,
-        )>() else {
-            return;
-        };
-        let symbol_draw: &dyn Draw<TranslucentItem> =
-            &DrawState::<TranslucentItem, DrawSymbols>::INSTANCE;
-        phase.retain(|item| {
-            if !std::ptr::addr_eq(item.draw_function, symbol_draw) {
-                return true;
-            }
-            let Some(entry) =
-                pool.index()
-                    .resolve_entry(item.tile.coords, item.style_layer, item.entry_slot)
-            else {
-                return false;
-            };
-            self.uploaded
-                .get(&(item.tile.coords, item.style_layer))
-                .is_some_and(|cached| {
-                    cached.allocation_id == entry.allocation_id()
-                        && cached.is_active_at(now_ms, fade_duration_ms)
-                })
-        });
     }
 }

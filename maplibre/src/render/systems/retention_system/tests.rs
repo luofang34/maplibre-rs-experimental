@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use super::{evict_beyond, evict_stale_tiles, CacheBudget, MIN_CACHE_TILES};
 
 mod terrain;
+mod zoom_fallback;
 
 #[test]
 fn offline_tiles_survive_a_view_with_no_loaded_coverage() {
