@@ -224,7 +224,7 @@ impl Style {
         #[cfg(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl"))]
         let state = parse_state_decl_map(map)?;
         #[cfg(not(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl")))]
-        let state = HashMap::default();
+        let state: HashMap<String, StateDeclaration> = HashMap::default();
         let global_state = json_value_map_or_empty(map, "globalState")?;
         let (projection, projection_template) = match map.get("projection") {
             Some(raw) if !raw.is_null() && super::state::reads_global_state(raw) => {
