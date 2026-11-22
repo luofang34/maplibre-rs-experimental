@@ -178,6 +178,10 @@ name = "headless_symbol_render"
 required-features = ["headless"]
 
 [[test]]
+name = "globe_polar_atmosphere"
+required-features = ["headless"]
+
+[[test]]
 name = "web_local_scheduler"
 required-features = ["headless"]
 

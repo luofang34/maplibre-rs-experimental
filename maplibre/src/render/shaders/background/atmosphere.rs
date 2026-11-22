@@ -92,6 +92,13 @@ impl AtmosphereLayerMetadata {
             ],
         })
     }
+
+    /// Sets the reversed-Z clip depth (`1.0` over globe surface for orbital style atmosphere,
+    /// `0.0` behind terrain/globe for low-altitude host atmosphere).
+    pub fn with_depth_z(mut self, depth_z: f32) -> Self {
+        self.radius_blend_padding[3] = depth_z.clamp(0.0, 1.0);
+        self
+    }
 }
 
 /// Invalid CPU inputs for the atmosphere shader.

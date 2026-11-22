@@ -45,6 +45,8 @@ fn atmosphere_metadata_matches_gpu_vertex_layout() {
             .expect("metadata should be valid");
 
     assert_eq!(metadata.radius_blend_padding[1], 0.75);
+    assert_eq!(metadata.radius_blend_padding[3], 0.0);
+    assert_eq!(metadata.with_depth_z(1.0).radius_blend_padding[3], 1.0);
     assert!(metadata.radius_blend_padding[0] > 0.0);
     assert!(metadata.globe_position[..3]
         .iter()

@@ -122,8 +122,13 @@ impl ActiveEpoch {
                     .layers
                     .iter()
                     .find(|l| l.id == id)
-                    .map(|l| [l.minzoom.unwrap_or(0.0), l.maxzoom.unwrap_or(24.0)])
-                    .unwrap_or([0.0, 24.0]);
+                    .map(|l| {
+                        [
+                            l.minzoom.filter(|&m| m > 0.0).unwrap_or(f64::NEG_INFINITY),
+                            l.maxzoom.unwrap_or(24.0),
+                        ]
+                    })
+                    .unwrap_or([f64::NEG_INFINITY, 24.0]);
                 EpochGroup {
                     style_layer_id: id,
                     zoom_limits,

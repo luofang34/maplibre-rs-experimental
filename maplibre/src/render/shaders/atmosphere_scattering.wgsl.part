@@ -98,10 +98,10 @@ fn scattering(
             secondary_index < SECONDARY_STEPS;
             secondary_index++) {
             let secondary_position = primary_position + sun_direction * secondary_time;
-            let secondary_height = max(length(secondary_position) - body_radius, 0.0);
-            secondary_depth_rayleigh += exp(-secondary_height / RAYLEIGH_SCALE_HEIGHT)
+            let secondary_height = length(secondary_position) - body_radius;
+            secondary_depth_rayleigh += exp(min(-secondary_height / RAYLEIGH_SCALE_HEIGHT, 80.0))
                 * secondary_step_size;
-            secondary_depth_mie += exp(-secondary_height / MIE_SCALE_HEIGHT)
+            secondary_depth_mie += exp(min(-secondary_height / MIE_SCALE_HEIGHT, 80.0))
                 * secondary_step_size;
             secondary_time += secondary_step_size;
         }

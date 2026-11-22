@@ -1,5 +1,7 @@
 //! Evaluates visible background paint and queues sky and atmosphere draws.
 
+use cgmath::InnerSpace;
+
 pub(crate) use super::buffers::globe_tiles;
 pub use super::buffers::{BackgroundBuffers, BackgroundGpuBuffers};
 use super::{
@@ -58,13 +60,13 @@ pub(crate) fn flat_viewport_covered(view_state: &ViewState, edges: bool, frame: 
     true
 }
 
-/// How strongly the atmosphere is drawn this frame: as the style's `sky` blends it, or in full
-/// where the host turned it on, faded with the projection's globe transition and camera altitude below 100 km.
-pub fn atmosphere_blend(
+const SKY_SPACE_CUTOFF_RATIO: f64 = 10.0 * (100_000.0 / 6_371_008.8);
+
+fn atmosphere_blend_state(
     style: &crate::style::Style,
     view_state: &crate::render::view_state::ViewState,
     world: &crate::tcs::world::World,
-) -> f32 {
+) -> (f32, bool) {
     let zoom = view_state.zoom().value();
     let transition = style.projection.as_ref().map_or(0.0, |specification| {
         specification.projection_type.globe_transition(zoom)
@@ -88,7 +90,18 @@ pub fn atmosphere_blend(
     } else {
         0.0
     };
-    sky_faded.max(host_blend) * transition
+    let over_globe = sky_faded > 0.0 && host_blend <= 0.0;
+    (sky_faded.max(host_blend) * transition, over_globe)
+}
+
+/// How strongly the atmosphere is drawn this frame: as the style's `sky` blends it, or in full
+/// where the host turned it on, faded with the projection's globe transition and camera altitude below 100 km.
+pub fn atmosphere_blend(
+    style: &crate::style::Style,
+    view_state: &crate::render::view_state::ViewState,
+    world: &crate::tcs::world::World,
+) -> f32 {
+    atmosphere_blend_state(style, view_state, world).0
 }
 
 /// Appends visible background, sky and atmosphere items and uploads their frame metadata.
@@ -123,7 +136,8 @@ pub fn queue_system(
     let uses_globe = projection_transition > 0.0;
     let world_rows = world_rows(view_state, !uses_globe && style.terrain.is_none());
     let horizon = view_state.horizon_line().to_shader();
-    let atmosphere_blend = atmosphere_blend(style, view_state, world);
+    let (atmosphere_blend, atmosphere_over_globe) =
+        atmosphere_blend_state(style, view_state, world);
     // Without an atmosphere a full globe still has a sky where the host wants the frame
     // covered; with one, the atmosphere draws the sky. Standard map views curve and fade
     // the sky across the globe horizon in `sky.fragment.wgsl` as GL JS does.
@@ -136,14 +150,21 @@ pub fn queue_system(
         } else {
             None
         };
+        let space_sky_culled = projection_transition >= 1.0
+            && !globe_sky
+            && cached_globe_camera.as_deref().is_some_and(|camera| {
+                camera.globe_radius_pixels() > 0.0
+                    && camera.camera_position().magnitude() - 1.0 >= SKY_SPACE_CUTOFF_RATIO
+            });
         let sky_metadata = style
             .sky
             .as_ref()
             .filter(|_| {
-                !external_or_free
-                    || projection_transition < 1.0
-                    || view_state.opaque_environment()
-                    || globe_sky
+                !space_sky_culled
+                    && (!external_or_free
+                        || projection_transition < 1.0
+                        || view_state.opaque_environment()
+                        || globe_sky)
             })
             .map(|sky| {
                 globe_sky
@@ -188,6 +209,7 @@ pub fn queue_system(
                 view_state.zoom().value(),
                 atmosphere_blend,
             )
+            .map(|metadata| metadata.with_depth_z(if atmosphere_over_globe { 1.0 } else { 0.0 }))
             .map_err(|error| {
                 tracing::error!(?error, "failed to build atmosphere shader metadata");
                 SystemError::Setup

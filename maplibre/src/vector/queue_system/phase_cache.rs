@@ -103,7 +103,8 @@ impl CompiledLayerRule {
 
     #[inline]
     fn is_visible_at(&self, zoom: f64) -> bool {
-        self.minzoom.is_none_or(|min| zoom >= min) && self.maxzoom.is_none_or(|max| zoom < max)
+        self.minzoom.is_none_or(|min| min <= 0.0 || zoom >= min)
+            && self.maxzoom.is_none_or(|max| zoom < max)
     }
 
     #[inline]

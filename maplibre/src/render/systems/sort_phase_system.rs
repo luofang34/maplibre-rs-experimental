@@ -1,6 +1,6 @@
 use crate::{
     context::MapContext,
-    render::render_phase::{LayerItem, RenderPhase, TileMaskItem},
+    render::render_phase::{LayerItem, RenderPhase, TileMaskItem, TranslucentItem},
     tcs::system::SystemResult,
 };
 
@@ -9,6 +9,11 @@ pub fn sort_phase_system(MapContext { world, .. }: &mut MapContext) -> SystemRes
     if let Some(layers) = world.resources.get_mut::<RenderPhase<LayerItem>>() {
         if !layers.is_sorted() {
             layers.sort();
+        }
+    }
+    if let Some(translucent) = world.resources.get_mut::<RenderPhase<TranslucentItem>>() {
+        if !translucent.is_sorted() {
+            translucent.sort();
         }
     }
     // Coarser masks first, so the masks of finer tiles lie over them.

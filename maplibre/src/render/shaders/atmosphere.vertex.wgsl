@@ -25,7 +25,7 @@ fn main(
     } else if vertex_index == 2u {
         position = vec2<f32>(-1.0, 3.0);
     }
-    let clip_position = vec4<f32>(position, 0.0, 1.0);
+    let ray_clip = vec4<f32>(position, 0.0, 1.0);
     let inverse_projection = mat4x4<f32>(
         inverse_projection_0,
         inverse_projection_1,
@@ -34,7 +34,7 @@ fn main(
     );
     // The inverse perspective matrix already returns a ray vector. Dividing by W would
     // introduce far-plane cancellation at high globe zooms and differs from the GL JS shader.
-    let view = inverse_projection * clip_position;
+    let view = inverse_projection * ray_clip;
     return VertexOutput(
         view.xyz,
         globe_position.xyz,
@@ -42,6 +42,6 @@ fn main(
         radius_blend_padding.x,
         radius_blend_padding.y,
         radius_blend_padding.z,
-        clip_position,
+        vec4<f32>(position, radius_blend_padding.w, 1.0),
     );
 }

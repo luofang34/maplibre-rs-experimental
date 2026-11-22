@@ -7,10 +7,10 @@ use crate::{
     coords::WorldTileCoords,
     render::{
         eventually::{Eventually, Eventually::Initialized},
-        render_phase::{Draw, DrawState, RenderPhase, TranslucentItem},
+        render_phase::{RenderPhase, TranslucentItem},
         Renderer,
     },
-    sdf::{depth::SymbolDepth, render_commands::DrawSymbols, SymbolBufferPool},
+    sdf::{depth::SymbolDepth, SymbolBufferPool},
     style::StyleLayerId,
     tcs::world::World,
 };
@@ -48,10 +48,8 @@ pub(super) fn prune_inactive_symbol_draws(
     )>() else {
         return;
     };
-    let symbol_draw: &dyn Draw<TranslucentItem> =
-        &DrawState::<TranslucentItem, DrawSymbols>::INSTANCE;
     phase.retain(|item| {
-        if !std::ptr::addr_eq(item.draw_function, symbol_draw) {
+        if item.style_layer == StyleLayerId::ATMOSPHERE || item.index == u32::MAX {
             return true;
         }
         let Some(entry) =
