@@ -79,7 +79,9 @@ pub(crate) fn draw_contents<'w>(
             .chunk_by(super::main_pass::same_layer)
             .peekable();
         for item in mask_items {
-            while let Some(group) = groups.next_if(|group| group[0].index < item.index) {
+            while let Some(group) =
+                groups.next_if(|group| group.first().is_some_and(|first| first.index < item.index))
+            {
                 super::main_pass::draw_group(render_pass, world, &mut stencil_state, group);
             }
             item.draw_function.draw(render_pass, world, item);
@@ -98,6 +100,80 @@ pub(crate) fn draw_contents<'w>(
     }
 }
 
+fn copy_symbol_depth_if_needed(
+    render_context: &mut RenderContext,
+    depth_texture: &wgpu::Texture,
+    world: &World,
+) {
+    if !needs_symbol_depth_copy(world) {
+        return;
+    }
+    if let Some(Initialized(symbol_depth)) = world
+        .resources
+        .get::<crate::render::eventually::Eventually<crate::sdf::depth::SymbolDepth>>()
+    {
+        if let Some(copy) = &symbol_depth.copy {
+            copy.copy(
+                render_context.device,
+                &mut render_context.command_encoder,
+                depth_texture,
+                &symbol_depth.view,
+            );
+        }
+    }
+}
+
+fn translucent_color_attachment<'a>(
+    render_target: &'a crate::render::resource::TextureView,
+    multisampling_texture: &'a Option<crate::render::resource::Texture>,
+) -> wgpu::RenderPassColorAttachment<'a> {
+    if let Some(texture) = multisampling_texture {
+        wgpu::RenderPassColorAttachment {
+            depth_slice: None,
+            view: &texture.view,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                // Resolved into `render_target`; discarding the transient MSAA surface avoids
+                // writing multisampled tile memory back to DRAM on mobile TBDR GPUs.
+                store: StoreOp::Discard,
+            },
+            resolve_target: Some(render_target.deref()),
+        }
+    } else {
+        wgpu::RenderPassColorAttachment {
+            depth_slice: None,
+            view: render_target.deref(),
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                store: StoreOp::Store,
+            },
+            resolve_target: None,
+        }
+    }
+}
+
+fn translucent_depth_attachment(
+    depth_view: &wgpu::TextureView,
+    needs_depth_after_pass: bool,
+) -> wgpu::RenderPassDepthStencilAttachment<'_> {
+    let store = if needs_depth_after_pass {
+        StoreOp::Store
+    } else {
+        StoreOp::Discard
+    };
+    wgpu::RenderPassDepthStencilAttachment {
+        view: depth_view,
+        depth_ops: Some(wgpu::Operations {
+            load: wgpu::LoadOp::Load,
+            store,
+        }),
+        stencil_ops: Some(wgpu::Operations {
+            load: wgpu::LoadOp::Load,
+            store,
+        }),
+    }
+}
+
 impl Node for TranslucentPassNode {
     fn writes_custom_scene_depth(&self) -> bool {
         false
@@ -111,58 +187,24 @@ impl Node for TranslucentPassNode {
         if render_context.inline_translucent_pass || !has_work(world) {
             return;
         }
-        let Initialized(render_target) = &state.render_target else {
+        let (
+            Initialized(render_target),
+            Initialized(multisampling_texture),
+            Initialized(depth_texture),
+        ) = (
+            &state.render_target,
+            &state.multisampling_texture,
+            &state.depth_texture,
+        )
+        else {
             return;
         };
-        let Initialized(multisampling_texture) = &state.multisampling_texture else {
-            return;
-        };
-
-        let Initialized(depth_texture) = &state.depth_texture else {
-            return;
-        };
-        if needs_symbol_depth_copy(world) {
-            if let Some(Initialized(symbol_depth)) =
-                world
-                    .resources
-                    .get::<crate::render::eventually::Eventually<crate::sdf::depth::SymbolDepth>>()
-            {
-                if let Some(copy) = &symbol_depth.copy {
-                    copy.copy(
-                        render_context.device,
-                        &mut render_context.command_encoder,
-                        &depth_texture.texture,
-                        &symbol_depth.view,
-                    );
-                }
-            }
-        }
-        let color_attachment = if let Some(texture) = multisampling_texture {
-            wgpu::RenderPassColorAttachment {
-                depth_slice: None,
-                view: &texture.view,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    // Resolved into `render_target`; discarding the transient MSAA surface avoids
-                    // writing multisampled tile memory back to DRAM on mobile TBDR GPUs.
-                    store: StoreOp::Discard,
-                },
-                resolve_target: Some(render_target.deref()),
-            }
-        } else {
-            wgpu::RenderPassColorAttachment {
-                depth_slice: None,
-                view: render_target.deref(),
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: StoreOp::Store,
-                },
-                resolve_target: None,
-            }
-        };
-
+        copy_symbol_depth_if_needed(render_context, &depth_texture.texture, world);
+        let color_attachment = translucent_color_attachment(render_target, multisampling_texture);
         let needs_depth_after_pass = state.eye_depth_target.is_some()
             || matches!(state.depth_readout_texture, Initialized(_));
+        let depth_stencil_attachment =
+            translucent_depth_attachment(&depth_texture.view, needs_depth_after_pass);
         let render_pass =
             render_context
                 .command_encoder
@@ -170,25 +212,7 @@ impl Node for TranslucentPassNode {
                     multiview_mask: None,
                     label: Some("translucent_pass"),
                     color_attachments: &[Some(color_attachment)],
-                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: &depth_texture.view,
-                        depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: if needs_depth_after_pass {
-                                StoreOp::Store
-                            } else {
-                                StoreOp::Discard
-                            },
-                        }),
-                        stencil_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: if needs_depth_after_pass {
-                                StoreOp::Store
-                            } else {
-                                StoreOp::Discard
-                            },
-                        }),
-                    }),
+                    depth_stencil_attachment: Some(depth_stencil_attachment),
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });

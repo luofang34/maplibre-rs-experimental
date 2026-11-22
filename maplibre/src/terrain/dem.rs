@@ -138,11 +138,16 @@ impl DemTile {
             max: f64::NEG_INFINITY,
         };
         let source = image.as_raw();
+        let row_bytes = (dim * 4) as usize;
         for y in 0..dim {
-            let source_row = (y * dim * 4) as usize;
+            let source_row = y as usize * row_bytes;
             let target_row = tile.byte_index(0, i64::from(y));
-            tile.pixels[target_row..target_row + (dim * 4) as usize]
-                .copy_from_slice(&source[source_row..source_row + (dim * 4) as usize]);
+            if let (Some(dst), Some(src)) = (
+                tile.pixels.get_mut(target_row..target_row + row_bytes),
+                source.get(source_row..source_row + row_bytes),
+            ) {
+                dst.copy_from_slice(src);
+            }
         }
         if let Some(sample_metres) = sample_metres {
             let replaced = tile.remove_spikes(sample_metres);
@@ -194,10 +199,10 @@ impl DemTile {
         let y = y.clamp(-2, i64::from(self.dim) + 1);
         let index = self.byte_index(x, y);
         let [red, green, blue, base] = self.unpack;
-        f64::from(self.pixels[index]) * red
-            + f64::from(self.pixels[index + 1]) * green
-            + f64::from(self.pixels[index + 2]) * blue
-            - base
+        let Some(&[r, g, b, _]) = self.pixels.get(index..index + 4) else {
+            return -base;
+        };
+        f64::from(r) * red + f64::from(g) * green + f64::from(b) * blue - base
     }
 
     /// Bilinear elevation in sample space, clamped to `-1..=dim`.
@@ -262,7 +267,9 @@ impl DemTile {
         for y in y_range {
             for x in x_range.clone() {
                 let index = self.byte_index(x - i64::from(dx) * dim, y - i64::from(dy) * dim);
-                samples.extend_from_slice(&self.pixels[index..index + 4]);
+                if let Some(pixel) = self.pixels.get(index..index + 4) {
+                    samples.extend_from_slice(pixel);
+                }
             }
         }
         Ok(samples)
@@ -288,7 +295,7 @@ impl DemTile {
             .zip(samples.as_chunks::<4>().0.iter())
             .all(|((x, y), pixel)| {
                 let index = self.byte_index(x, y);
-                &self.pixels[index..index + 4] == pixel
+                self.pixels.get(index..index + 4) == Some(pixel.as_slice())
             }))
     }
 
@@ -312,9 +319,10 @@ impl DemTile {
         let positions = y_range.flat_map(|y| x_range.clone().map(move |x| (x, y)));
         for ((x, y), pixel) in positions.zip(samples.as_chunks::<4>().0.iter()) {
             let index = self.byte_index(x, y);
-            let target = &mut self.pixels[index..index + 4];
-            changed |= target != pixel;
-            target.copy_from_slice(pixel);
+            if let Some(target) = self.pixels.get_mut(index..index + 4) {
+                changed |= target != pixel;
+                target.copy_from_slice(pixel);
+            }
         }
         Ok(changed)
     }
@@ -357,8 +365,12 @@ impl DemTile {
         for y in 0..self.dim {
             let src_row = self.byte_index(0, i64::from(y));
             let dst_row = y as usize * row_bytes;
-            raw[dst_row..dst_row + row_bytes]
-                .copy_from_slice(&self.pixels[src_row..src_row + row_bytes]);
+            if let (Some(dst), Some(src)) = (
+                raw.get_mut(dst_row..dst_row + row_bytes),
+                self.pixels.get(src_row..src_row + row_bytes),
+            ) {
+                dst.copy_from_slice(src);
+            }
         }
         RgbaImage::from_raw(self.dim, self.dim, raw).unwrap_or_else(|| RgbaImage::new(0, 0))
     }

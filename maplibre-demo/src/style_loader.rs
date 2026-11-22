@@ -116,7 +116,9 @@ pub(crate) fn parent_uri_base(uri: &str) -> Option<String> {
     let clean = uri.split(['?', '#']).next().unwrap_or(uri);
     let idx = clean.rfind('/')?;
     let scheme_end = clean.find("://").map(|i| i + 3)?;
-    (idx >= scheme_end).then(|| clean[..=idx].to_owned())
+    (idx >= scheme_end)
+        .then(|| clean.get(..=idx).map(str::to_owned))
+        .flatten()
 }
 
 pub(crate) fn resolve_uri_against_base(base_uri: &str, raw: &str) -> String {
@@ -136,12 +138,11 @@ fn join_uri(base_uri: &str, rel: &str) -> String {
     let (origin, base_path) = if let Some(rest) = base_uri.strip_prefix("file://") {
         ("file://", rest)
     } else if let Some(scheme_pos) = base_uri.find("://") {
-        let after_scheme = &base_uri[scheme_pos + 3..];
+        let after_scheme = base_uri.get(scheme_pos + 3..).unwrap_or("");
         match after_scheme.find('/') {
-            Some(slash) => {
-                let split_at = scheme_pos + 3 + slash;
-                (&base_uri[..split_at], &base_uri[split_at..])
-            }
+            Some(slash) => base_uri
+                .split_at_checked(scheme_pos + 3 + slash)
+                .unwrap_or((base_uri, "/")),
             None => (base_uri, "/"),
         }
     } else {
@@ -149,7 +150,7 @@ fn join_uri(base_uri: &str, rel: &str) -> String {
     };
 
     let (rel_path, suffix) = match rel.find(['?', '#']) {
-        Some(pos) => (&rel[..pos], &rel[pos..]),
+        Some(pos) => rel.split_at_checked(pos).unwrap_or((rel, "")),
         None => (rel, ""),
     };
 

@@ -299,110 +299,114 @@ fn msl_shelf_stays_at_sea_level_while_agl_volume_rises_with_terrain() {
     })
 }
 
+fn dashed_rim_style() -> Style {
+    serde_json::from_value(serde_json::json!({
+        "version": 8,
+        "projection": {"type": "globe"},
+        "terrain": {"source": "dem"},
+        "sources": {
+            "volumes": {"type": "vector", "tiles": ["https://volumes.example/{z}/{x}/{y}.pbf"]},
+            "dem": {"type": "raster-dem", "tiles": ["https://dem.example/{z}/{x}/{y}.png"], "encoding": "terrarium"}
+        },
+        "layers": [
+            {"id": "bg", "type": "background", "paint": {"background-color": "#770000"}},
+            {
+                "id": "rim",
+                "type": "line",
+                "source": "volumes",
+                "source-layer": "volumes",
+                "paint": {
+                    "line-color": "#00ff44",
+                    "line-width": 4,
+                    "line-dasharray": [2, 2],
+                    "line-elevation": ["get", "alt_m"],
+                    "line-elevation-datum": "msl"
+                }
+            }
+        ]
+    }))
+    .expect("style")
+}
+
+async fn assert_dashed_rim_views(map: &mut HeadlessMap, alt_m: f64, expect_visible: bool) {
+    render_at_anchor(
+        map,
+        Matrix4::from_translation(Vector3::new(0.0, 0.0, 2500.0)),
+        ANCHOR,
+    );
+    let pixels = read_blocking(map);
+    let green_count = pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|p| p[1] > 140 && p[0] < 90)
+        .count();
+    assert_eq!(
+        green_count > 20,
+        expect_visible,
+        "alt_m={alt_m} top-down green pixels={green_count}"
+    );
+    if !expect_visible {
+        return;
+    }
+
+    let mut dash_runs = 0;
+    let mut in_dash = false;
+    for p in pixels.as_chunks::<4>().0.iter().skip(32 * 64).take(64) {
+        let green = p[1] > 140 && p[0] < 90;
+        if green && !in_dash {
+            dash_runs += 1;
+        }
+        in_dash = green;
+    }
+    assert!(
+        dash_runs >= 2,
+        "expected dashed rim gaps, got {dash_runs} runs"
+    );
+
+    // Pitched view from south (verifying no z=0 ground stencil clipping).
+    let pitched = Matrix4::from_translation(Vector3::new(0.0, -1400.0, 1900.0))
+        * Matrix4::from_angle_x(Rad(0.75));
+    render_at_anchor(map, pitched, ANCHOR);
+    let pitched_green = read_blocking(map)
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|p| p[1] > 140 && p[0] < 90)
+        .count();
+    assert!(
+        pitched_green > 15,
+        "pitched elevated rim disappeared: {pitched_green}"
+    );
+
+    // Upward view (35° above horizon) from z=750 m (above 500 m terrain, below 1200 m rim).
+    let below = Matrix4::from_translation(Vector3::new(0.0, -640.0, 750.0))
+        * Matrix4::from_angle_x(Rad(std::f64::consts::FRAC_PI_2 + 0.61));
+    render_at_anchor(map, below, ANCHOR);
+    let below_green = read_blocking(map)
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|p| p[1] > 140)
+        .count();
+    assert!(
+        below_green > 10,
+        "elevated rim vanished when viewed from below: {below_green}"
+    );
+}
+
 #[test]
 fn elevated_dashed_rim_renders_above_terrain_from_above_pitched_and_below() {
     futures::executor::block_on(async {
         for (alt_m, expect_visible) in [(200.0, false), (1200.0, true)] {
-            let style: Style = serde_json::from_value(serde_json::json!({
-            "version": 8,
-            "projection": {"type": "globe"},
-            "terrain": {"source": "dem"},
-            "sources": {
-                "volumes": {"type": "vector", "tiles": ["https://volumes.example/{z}/{x}/{y}.pbf"]},
-                "dem": {"type": "raster-dem", "tiles": ["https://dem.example/{z}/{x}/{y}.png"], "encoding": "terrarium"}
-            },
-            "layers": [
-                {"id": "bg", "type": "background", "paint": {"background-color": "#770000"}},
-                {
-                    "id": "rim",
-                    "type": "line",
-                    "source": "volumes",
-                    "source-layer": "volumes",
-                    "paint": {
-                        "line-color": "#00ff44",
-                        "line-width": 4,
-                        "line-dasharray": [2, 2],
-                        "line-elevation": ["get", "alt_m"],
-                        "line-elevation-datum": "msl"
-                    }
-                }
-            ]
-        }))
-        .expect("style");
             let line = serde_json::json!({
                 "type": "Feature",
                 "properties": {"alt_m": alt_m},
                 "geometry": {"type": "LineString", "coordinates": [[0.015, 0.044], [0.073, 0.044]]}
             });
-            let mut map = build_globe_map(style, PLATEAU_500M_DEM, &line, "volumes").await;
-
-            // Top-down view at 2500 m.
-            render_at_anchor(
-                &mut map,
-                Matrix4::from_translation(Vector3::new(0.0, 0.0, 2500.0)),
-                ANCHOR,
-            );
-            let pixels = read_blocking(&map);
-            let green_count = pixels
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .filter(|p| p[1] > 140 && p[0] < 90)
-                .count();
-            assert_eq!(
-                green_count > 20,
-                expect_visible,
-                "alt_m={alt_m} top-down green pixels={green_count}"
-            );
-            if !expect_visible {
-                continue;
-            }
-
-            // Verify dash gaps exist along row y=32.
-            let mut dash_runs = 0;
-            let mut in_dash = false;
-            for x in 0..64 {
-                let p = &pixels[(32 * 64 + x) * 4..][..4];
-                let green = p[1] > 140 && p[0] < 90;
-                if green && !in_dash {
-                    dash_runs += 1;
-                }
-                in_dash = green;
-            }
-            assert!(
-                dash_runs >= 2,
-                "expected dashed rim gaps, got {dash_runs} runs"
-            );
-
-            // Pitched view from south (verifying no z=0 ground stencil clipping).
-            let pitched = Matrix4::from_translation(Vector3::new(0.0, -1400.0, 1900.0))
-                * Matrix4::from_angle_x(Rad(0.75));
-            render_at_anchor(&mut map, pitched, ANCHOR);
-            let pitched_green = read_blocking(&map)
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .filter(|p| p[1] > 140 && p[0] < 90)
-                .count();
-            assert!(
-                pitched_green > 15,
-                "pitched elevated rim disappeared: {pitched_green}"
-            );
-
-            // Upward view (35° above horizon) from z=750 m (above 500 m terrain, below 1200 m rim).
-            let below = Matrix4::from_translation(Vector3::new(0.0, -640.0, 750.0))
-                * Matrix4::from_angle_x(Rad(std::f64::consts::FRAC_PI_2 + 0.61));
-            render_at_anchor(&mut map, below, ANCHOR);
-            let below_green = read_blocking(&map)
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .filter(|p| p[1] > 140)
-                .count();
-            assert!(
-                below_green > 10,
-                "elevated rim vanished when viewed from below: {below_green}"
-            );
+            let mut map =
+                build_globe_map(dashed_rim_style(), PLATEAU_500M_DEM, &line, "volumes").await;
+            assert_dashed_rim_views(&mut map, alt_m, expect_visible).await;
         }
     })
 }

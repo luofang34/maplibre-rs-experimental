@@ -87,7 +87,8 @@ pub(super) fn kind_to_i32(kind: ResourceKind) -> i32 {
 pub(super) fn encode_resource_blob(raw: &[u8]) -> (Vec<u8>, bool) {
     let already_compressed_image = raw.starts_with(b"\x89PNG\r\n\x1a\n")
         || raw.starts_with(&[0xff, 0xd8, 0xff])
-        || (raw.len() >= 12 && &raw[0..4] == b"RIFF" && &raw[8..12] == b"WEBP");
+        || (raw.get(0..4) == Some(b"RIFF".as_slice())
+            && raw.get(8..12) == Some(b"WEBP".as_slice()));
     if raw.len() < 128 || already_compressed_image {
         return (raw.to_vec(), false);
     }
@@ -253,27 +254,29 @@ pub(super) fn query_region_status(
     })
 }
 
-pub(super) fn merge_database_sync(
-    inner: &SqliteInner,
-    sideloaded_path: &Path,
-) -> Result<Vec<OfflineRegionId>, OfflineStoreError> {
+type SrcRegionRow = (i64, String, Vec<u8>, i64, i64);
+type SrcResourceRow = (String, i32, Vec<u8>, i64, i64, i64, i64);
+
+struct SideloadDump {
+    regions: Vec<SrcRegionRow>,
+    resources: Vec<SrcResourceRow>,
+    links: Vec<(i64, String)>,
+}
+
+fn read_sideload_dump(sideloaded_path: &Path) -> Result<SideloadDump, OfflineStoreError> {
     let src = Connection::open_with_flags(
         sideloaded_path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
     .map_err(sql_err)?;
-
-    type SrcRegionRow = (i64, String, Vec<u8>, i64, i64);
-    let src_regions: Vec<SrcRegionRow> = src
+    let regions = src
         .prepare("SELECT id, definition_json, metadata, complete, required_count FROM regions ORDER BY id ASC")
         .map_err(sql_err)?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
         .map_err(sql_err)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(sql_err)?;
-
-    type SrcResourceRow = (String, i32, Vec<u8>, i64, i64, i64, i64);
-    let src_resources: Vec<SrcResourceRow> = src
+    let resources = src
         .prepare(
             "SELECT url, kind, data, compressed, raw_size, stored_size, ambient FROM resources",
         )
@@ -292,34 +295,26 @@ pub(super) fn merge_database_sync(
         .map_err(sql_err)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(sql_err)?;
-
-    let src_links: Vec<(i64, String)> = src
+    let links = src
         .prepare("SELECT region_id, url FROM region_resources")
         .map_err(sql_err)?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
         .map_err(sql_err)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(sql_err)?;
+    Ok(SideloadDump {
+        regions,
+        resources,
+        links,
+    })
+}
 
-    let mut dst = inner.lock();
-    let tx = dst.transaction().map_err(sql_err)?;
-
-    if let Some(limit) = read_tile_limit(&tx)? {
-        let current_tiles = pinned_tile_count(&tx)?;
-        let tile_kind = kind_to_i32(ResourceKind::Tile);
-        let mut newly_pinned_tiles = 0_u64;
-        for (url, kind, ..) in &src_resources {
-            let linked_in_src = src_links.iter().any(|(_, u)| u == url);
-            if *kind == tile_kind && linked_in_src && !is_url_pinned(&tx, url)? {
-                newly_pinned_tiles += 1;
-            }
-        }
-        if current_tiles.saturating_add(newly_pinned_tiles) > limit {
-            return Err(OfflineStoreError::TileLimitExceeded { limit });
-        }
-    }
-
-    for (url, kind, data, compressed, raw_size, stored_size, ambient) in src_resources {
+fn apply_sideload_rows(
+    tx: &rusqlite::Transaction<'_>,
+    inner: &SqliteInner,
+    dump: SideloadDump,
+) -> Result<Vec<OfflineRegionId>, OfflineStoreError> {
+    for (url, kind, data, compressed, raw_size, stored_size, ambient) in dump.resources {
         let stamp = inner.next_stamp();
         tx.execute(
             "INSERT INTO resources (url, kind, data, compressed, raw_size, stored_size, ambient, accessed_at)
@@ -337,8 +332,8 @@ pub(super) fn merge_database_sync(
     }
 
     let mut id_map: HashMap<i64, OfflineRegionId> = HashMap::new();
-    let mut created_ids = Vec::with_capacity(src_regions.len());
-    for (old_id, def_json, metadata, complete, req_count) in src_regions {
+    let mut created_ids = Vec::with_capacity(dump.regions.len());
+    for (old_id, def_json, metadata, complete, req_count) in dump.regions {
         tx.execute(
             "INSERT INTO regions (definition_json, metadata, complete, required_count)
              VALUES (?1, ?2, ?3, ?4)",
@@ -350,7 +345,7 @@ pub(super) fn merge_database_sync(
         created_ids.push(new_id);
     }
 
-    for (old_reg_id, url) in src_links {
+    for (old_reg_id, url) in dump.links {
         if let Some(new_id) = id_map.get(&old_reg_id) {
             tx.execute(
                 "INSERT OR IGNORE INTO region_resources (region_id, url) VALUES (?1, ?2)",
@@ -359,7 +354,33 @@ pub(super) fn merge_database_sync(
             .map_err(sql_err)?;
         }
     }
+    Ok(created_ids)
+}
 
+pub(super) fn merge_database_sync(
+    inner: &SqliteInner,
+    sideloaded_path: &Path,
+) -> Result<Vec<OfflineRegionId>, OfflineStoreError> {
+    let dump = read_sideload_dump(sideloaded_path)?;
+    let mut dst = inner.lock();
+    let tx = dst.transaction().map_err(sql_err)?;
+
+    if let Some(limit) = read_tile_limit(&tx)? {
+        let current_tiles = pinned_tile_count(&tx)?;
+        let tile_kind = kind_to_i32(ResourceKind::Tile);
+        let mut newly_pinned_tiles = 0_u64;
+        for (url, kind, ..) in &dump.resources {
+            let linked_in_src = dump.links.iter().any(|(_, u)| u == url);
+            if *kind == tile_kind && linked_in_src && !is_url_pinned(&tx, url)? {
+                newly_pinned_tiles += 1;
+            }
+        }
+        if current_tiles.saturating_add(newly_pinned_tiles) > limit {
+            return Err(OfflineStoreError::TileLimitExceeded { limit });
+        }
+    }
+
+    let created_ids = apply_sideload_rows(&tx, inner, dump)?;
     enforce_ambient_budget(&tx)?;
     tx.commit().map_err(sql_err)?;
     Ok(created_ids)

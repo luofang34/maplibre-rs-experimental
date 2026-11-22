@@ -86,7 +86,7 @@ async fn cached_client_connect_or_dns_reqwest_error_in_middleware_is_retryable()
         .fetch("http://127.0.0.1:1/tiles/0/0/0.png")
         .await
         .expect_err("cached fetch against closed port must fail");
-    let _ = std::fs::remove_dir_all(&cache_dir);
+    drop(std::fs::remove_dir_all(&cache_dir));
     assert!(
         cached_err.is_retryable(),
         "http-cache-reqwest wrapped transport error must be retryable: {}",
@@ -175,7 +175,7 @@ async fn cached_range_requests_request_identity_encoding_and_preserve_distinct_s
         "maplibre-http-range-cache-test-{}",
         std::process::id()
     ));
-    let _ = std::fs::remove_dir_all(&cache_dir);
+    drop(std::fs::remove_dir_all(&cache_dir));
     let client = ReqwestHttpClient::new(Some(&cache_dir));
     let url = format!("http://{addr}/archive.pmtiles");
 
@@ -219,7 +219,7 @@ async fn cached_range_requests_request_identity_encoding_and_preserve_distinct_s
     server
         .await
         .expect("server task cleanly handled 2 requests");
-    let _ = std::fs::remove_dir_all(&cache_dir);
+    drop(std::fs::remove_dir_all(&cache_dir));
 }
 
 #[tokio::test]
@@ -296,7 +296,7 @@ async fn volatile_policy_bypasses_disk_and_memory_caches_while_offline_serves_ca
                 body.len(),
                 body
             );
-            let _ = stream.write_all(resp.as_bytes()).await;
+            drop(stream.write_all(resp.as_bytes()).await);
         }
     });
 
@@ -304,7 +304,7 @@ async fn volatile_policy_bypasses_disk_and_memory_caches_while_offline_serves_ca
         "maplibre-volatile-offline-cache-test-{}",
         std::process::id()
     ));
-    let _ = std::fs::remove_dir_all(&cache_dir);
+    drop(std::fs::remove_dir_all(&cache_dir));
 
     let normal_url = format!("http://{addr}/normal/0/0/0.pbf");
     let volatile_url = format!("http://{addr}/volatile/0/0/0.pbf");
@@ -375,7 +375,7 @@ async fn volatile_policy_bypasses_disk_and_memory_caches_while_offline_serves_ca
     assert_eq!(hits.load(Ordering::SeqCst), 4);
 
     server.abort();
-    let _ = std::fs::remove_dir_all(&cache_dir);
+    drop(std::fs::remove_dir_all(&cache_dir));
 }
 
 #[tokio::test]

@@ -81,7 +81,7 @@ impl StreamingPrepack {
                         if let Some(pending) = half.take() {
                             standard.push(unpack_compact_extrusion_word(pending));
                         }
-                        for rem in &vertices[idx..] {
+                        for rem in vertices.get(idx..).unwrap_or(&[]) {
                             standard.push(self.kind.encode(rem));
                         }
                         self.storage = PrepackStorage::Standard(standard);

@@ -148,7 +148,9 @@ pub fn tile_spherical_cap(tile: TileCoords) -> TileSphericalCap {
                 );
                 borrow.resize(CAP_CACHE_LEN, sentinel);
             }
-            borrow[slot] = (tile, computed);
+            if let Some(entry) = borrow.get_mut(slot) {
+                *entry = (tile, computed);
+            }
         });
         return computed;
     }

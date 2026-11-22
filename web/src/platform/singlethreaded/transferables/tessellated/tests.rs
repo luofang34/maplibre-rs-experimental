@@ -19,7 +19,7 @@ use maplibre::{
         apply_vector_worker_batch,
         feature_paint::{BucketEntryKind, BucketFeatureEntry, TileFeaturePaintComponent},
         tessellation::OverAlignedVertexBuffer,
-        LayerIndexed, LayerTessellated, VectorLayerBucketComponent,
+        LayerIndexed, LayerTessellated, TessellatedLayerPayload, VectorLayerBucketComponent,
     },
 };
 use serde_json::json;
@@ -55,18 +55,20 @@ fn layer_tessellated_preserves_all_shader_vertex_fields_and_feature_paint() {
         kind: BucketEntryKind::Feature,
     };
     let mut transferable = <FlatBufferTransferable as LayerTessellated>::build_from_with_paint(
-        WorldTileCoords {
-            x: 2,
-            y: 1,
-            z: ZoomLevel::new(2),
+        TessellatedLayerPayload {
+            coords: WorldTileCoords {
+                x: 2,
+                y: 1,
+                z: ZoomLevel::new(2),
+            },
+            buffer,
+            feature_indices: vec![3],
+            feature_colors: vec![[0.2, 0.4, 0.6, 1.0]],
+            feature_sort_keys: vec![],
+            layer_data: layer,
+            style_layer_id: "countries-boundary".into(),
+            entries: vec![entry],
         },
-        buffer,
-        vec![3],
-        vec![[0.2, 0.4, 0.6, 1.0]],
-        vec![],
-        layer,
-        "countries-boundary".into(),
-        vec![entry],
     );
     let paint = transferable
         .take_feature_paint()
@@ -162,24 +164,28 @@ fn batch_of_two_flatbuffer_messages_prevents_aba_and_shares_decoded_maps_across_
     ];
 
     let msg_fill = <FlatBufferTransferable as LayerTessellated>::build_from_with_paint(
-        coords,
-        buffer.clone(),
-        vec![3, 3],
-        vec![[0.0; 4]; 2],
-        vec![],
-        layer.clone(),
-        "countries-fill".into(),
-        entries.clone(),
+        TessellatedLayerPayload {
+            coords,
+            buffer: buffer.clone(),
+            feature_indices: vec![3, 3],
+            feature_colors: vec![[0.0; 4]; 2],
+            feature_sort_keys: vec![],
+            layer_data: layer.clone(),
+            style_layer_id: "countries-fill".into(),
+            entries: entries.clone(),
+        },
     );
     let msg_line = <FlatBufferTransferable as LayerTessellated>::build_from_with_paint(
-        coords,
-        buffer,
-        vec![3, 3],
-        vec![[0.0; 4]; 2],
-        vec![],
-        layer,
-        "countries-line".into(),
-        entries,
+        TessellatedLayerPayload {
+            coords,
+            buffer,
+            feature_indices: vec![3, 3],
+            feature_colors: vec![[0.0; 4]; 2],
+            feature_sort_keys: vec![],
+            layer_data: layer,
+            style_layer_id: "countries-line".into(),
+            entries,
+        },
     );
     let msg_indexed = <FlatBufferTransferable as LayerIndexed>::build_from(
         coords,
@@ -283,18 +289,20 @@ fn prepacked_wire_round_trips_u16_odd_even_and_u32_dense_fallback() {
         ..Default::default()
     };
     let mut odd_msg = <FlatBufferTransferable as LayerTessellated>::build_from_with_paint_typed(
-        coords,
-        odd_buf,
-        vec![3],
-        vec![[0.25, 0.5, 0.75, 1.0]],
-        Vec::new(),
-        odd_layer,
-        "road-primary".into(),
-        vec![BucketFeatureEntry {
-            raw_id: Some(7),
-            properties: Default::default(),
-            kind: BucketEntryKind::Feature,
-        }],
+        TessellatedLayerPayload {
+            coords,
+            buffer: odd_buf,
+            feature_indices: vec![3],
+            feature_colors: vec![[0.25, 0.5, 0.75, 1.0]],
+            feature_sort_keys: Vec::new(),
+            layer_data: odd_layer,
+            style_layer_id: "road-primary".into(),
+            entries: vec![BucketFeatureEntry {
+                raw_id: Some(7),
+                properties: Default::default(),
+                kind: BucketEntryKind::Feature,
+            }],
+        },
         "line",
         true,
     );
@@ -326,14 +334,16 @@ fn prepacked_wire_round_trips_u16_odd_even_and_u32_dense_fallback() {
         ..Default::default()
     };
     let dense_msg = <FlatBufferTransferable as LayerTessellated>::build_from_with_paint_typed(
-        coords,
-        dense_buf,
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        dense_layer,
-        "land-fill".into(),
-        Vec::new(),
+        TessellatedLayerPayload {
+            coords,
+            buffer: dense_buf,
+            feature_indices: Vec::new(),
+            feature_colors: Vec::new(),
+            feature_sort_keys: Vec::new(),
+            layer_data: dense_layer,
+            style_layer_id: "land-fill".into(),
+            entries: Vec::new(),
+        },
         "fill",
         true,
     );

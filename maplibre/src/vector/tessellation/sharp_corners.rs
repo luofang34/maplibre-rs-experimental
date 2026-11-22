@@ -58,12 +58,16 @@ fn emit(builder: &mut lyon::path::path::Builder, points: &[Point], close: bool, 
     builder.begin(*first);
     let mut last = *first;
     for index in 1..count + usize::from(close) {
-        let current = points[index % count];
-        let previous = points[index - 1];
+        let Some(&current) = points.get(index % count) else {
+            continue;
+        };
+        let Some(&previous) = points.get(index - 1) else {
+            continue;
+        };
         let next = if index + 1 < count + usize::from(close) {
-            Some(points[(index + 1) % count])
+            points.get((index + 1) % count).copied()
         } else if close && index + 1 == count + 1 {
-            Some(points[1 % count])
+            points.get(1 % count).copied()
         } else {
             None
         };

@@ -84,10 +84,12 @@ fn a_format_expression_gives_its_sections_their_own_size_and_colour() {
         [("name".to_string(), "small".into())].into_iter().collect();
     let sections = paint.label_sections(&properties, 0.0);
     assert_eq!(paint.label(&properties, 0.0).as_deref(), Some("Big\nsmall"));
-    assert_eq!(sections.len(), 3);
-    assert_eq!(sections[0].scale, Some(1.5));
-    assert_eq!(sections[0].color.map(|color| color[0]), Some(1.0));
-    assert_eq!(sections[2].length, "small".chars().count());
+    let [s0, _, s2] = sections.as_slice() else {
+        panic!("expected 3 sections, got {}", sections.len());
+    };
+    assert_eq!(s0.scale, Some(1.5));
+    assert_eq!(s0.color.map(|color| color[0]), Some(1.0));
+    assert_eq!(s2.length, "small".chars().count());
 }
 
 #[test]
@@ -115,12 +117,14 @@ fn an_image_in_a_format_is_a_placeholder_character_with_its_own_section() {
         paint.label(&properties, 0.0).as_deref(),
         Some("Stop \u{e000}")
     );
-    assert_eq!(sections.len(), 2);
-    assert_eq!(sections[0].image, None);
-    assert_eq!(sections[1].image.as_deref(), Some("bus"));
+    let [s0, s1] = sections.as_slice() else {
+        panic!("expected 2 sections, got {}", sections.len());
+    };
+    assert_eq!(s0.image, None);
+    assert_eq!(s1.image.as_deref(), Some("bus"));
     // As in GL JS, an image section keeps its own size; the font scale is for text.
-    assert_eq!(sections[1].scale, None);
-    assert_eq!(sections[1].length, 1);
+    assert_eq!(s1.scale, None);
+    assert_eq!(s1.length, 1);
 }
 
 #[test]

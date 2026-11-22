@@ -108,37 +108,6 @@ pub fn rasterize_glyph_sdf(
     }
 }
 
-/// Reads vertical advance and vertical origin Y from `vmtx`/`VORG` tables, falling back to the
-/// 24px em-box metrics when the font omits vertical tables.
-#[cfg(feature = "font-shaping")]
-#[allow(dead_code)]
-pub(crate) fn vertical_metrics_from_ref(font: &FontRef<'_>, glyph_id: GlyphId) -> (f32, f32) {
-    use read_fonts::TableProvider;
-
-    let upem = font
-        .head()
-        .map(|h| f32::from(h.units_per_em().max(1)))
-        .unwrap_or(1000.0);
-    let scale = SDF_EM_SIZE / upem;
-
-    let advance = font
-        .vmtx()
-        .ok()
-        .and_then(|vmtx| vmtx.advance(glyph_id))
-        .map(|adv| f32::from(adv) * scale)
-        .filter(|adv| adv.is_finite() && *adv > 0.0)
-        .unwrap_or(SDF_EM_SIZE);
-
-    let origin_y = font
-        .vorg()
-        .ok()
-        .map(|vorg| f32::from(vorg.vertical_origin_y(glyph_id)) * scale)
-        .filter(|y| y.is_finite())
-        .unwrap_or(PBF_BASELINE_TOP as f32);
-
-    (advance, origin_y)
-}
-
 #[cfg(feature = "font-shaping")]
 pub(crate) fn rasterize_glyph_from_ref(
     font: &FontRef<'_>,
@@ -170,48 +139,56 @@ pub(crate) fn rasterize_glyph_from_ref(
         || pen.max_x <= pen.min_x
         || pen.max_y <= pen.min_y
     {
-        return Some(RasterizedGlyph {
-            width: 0,
-            height: 0,
-            left: 0,
-            top: PBF_BASELINE_TOP,
-            advance,
-            bitmap: Vec::new(),
-        });
+        return Some(empty_rasterized_glyph(advance));
     }
 
     const MAX_OUTLINE_COORD: f32 = 4096.0;
-    let min_x = pen
-        .min_x
-        .clamp(-MAX_OUTLINE_COORD, MAX_OUTLINE_COORD)
-        .floor() as i32;
-    let min_y = pen
-        .min_y
-        .clamp(-MAX_OUTLINE_COORD, MAX_OUTLINE_COORD)
-        .floor() as i32;
-    let max_x = pen
-        .max_x
-        .clamp(-MAX_OUTLINE_COORD, MAX_OUTLINE_COORD)
-        .ceil() as i32;
-    let max_y = pen
-        .max_y
-        .clamp(-MAX_OUTLINE_COORD, MAX_OUTLINE_COORD)
-        .ceil() as i32;
+    let clamp_coord = |v: f32| v.clamp(-MAX_OUTLINE_COORD, MAX_OUTLINE_COORD);
+    let (min_x, min_y) = (
+        clamp_coord(pen.min_x).floor() as i32,
+        clamp_coord(pen.min_y).floor() as i32,
+    );
+    let (max_x, max_y) = (
+        clamp_coord(pen.max_x).ceil() as i32,
+        clamp_coord(pen.max_y).ceil() as i32,
+    );
     let raw_w = max_x.saturating_sub(min_x).clamp(0, MAX_GLYPH_DIM);
     let raw_h = max_y.saturating_sub(min_y).clamp(0, MAX_GLYPH_DIM);
     if raw_w == 0 || raw_h == 0 {
-        return Some(RasterizedGlyph {
-            width: 0,
-            height: 0,
-            left: 0,
-            top: PBF_BASELINE_TOP,
-            advance,
-            bitmap: Vec::new(),
-        });
+        return Some(empty_rasterized_glyph(advance));
     }
 
-    let width = raw_w as u32;
-    let height = raw_h as u32;
+    Some(rasterize_outline_commands(
+        &pen.commands,
+        min_x,
+        min_y,
+        raw_w as u32,
+        raw_h as u32,
+        advance,
+    ))
+}
+
+#[cfg(feature = "font-shaping")]
+fn empty_rasterized_glyph(advance: u32) -> RasterizedGlyph {
+    RasterizedGlyph {
+        width: 0,
+        height: 0,
+        left: 0,
+        top: PBF_BASELINE_TOP,
+        advance,
+        bitmap: Vec::new(),
+    }
+}
+
+#[cfg(feature = "font-shaping")]
+fn rasterize_outline_commands(
+    commands: &[Segment],
+    min_x: i32,
+    min_y: i32,
+    width: u32,
+    height: u32,
+    advance: u32,
+) -> RasterizedGlyph {
     let pad = SDF_BUFFER as usize;
     let padded_w = width as usize + pad * 2;
     let padded_h = height as usize + pad * 2;
@@ -219,7 +196,7 @@ pub(crate) fn rasterize_glyph_from_ref(
     let shift_y = pad as f32 - min_y as f32;
 
     let mut rasterizer = Rasterizer::new(padded_w, padded_h);
-    for cmd in &pen.commands {
+    for cmd in commands {
         let map_pt = |p: Point| point(p.x + shift_x, p.y + shift_y);
         match *cmd {
             Segment::Line(p0, p1) => rasterizer.draw_line(map_pt(p0), map_pt(p1)),
@@ -232,23 +209,21 @@ pub(crate) fn rasterize_glyph_from_ref(
         }
     }
 
-    let pixel_count = padded_w * padded_h;
-    let mut coverage = vec![0.0_f32; pixel_count];
+    let mut coverage = vec![0.0_f32; padded_w * padded_h];
     rasterizer.for_each_pixel(|idx, alpha| {
         if let Some(slot) = coverage.get_mut(idx) {
             *slot = alpha.clamp(0.0, 1.0);
         }
     });
 
-    let bitmap = coverage_to_sdf(&coverage, padded_w, padded_h);
-    Some(RasterizedGlyph {
+    RasterizedGlyph {
         width,
         height,
         left: min_x,
         top: PBF_BASELINE_TOP.saturating_sub(min_y),
         advance,
-        bitmap,
-    })
+        bitmap: coverage_to_sdf(&coverage, padded_w, padded_h),
+    }
 }
 
 #[cfg(feature = "font-shaping")]
@@ -360,22 +335,26 @@ pub(super) fn coverage_to_sdf(coverage: &[f32], width: usize, height: usize) -> 
     let total = width * height;
     let mut grid_outer = vec![EDT_INF; total];
     let mut grid_inner = vec![0.0_f64; total];
-    for (idx, &alpha) in coverage.iter().enumerate() {
+    for ((&alpha, outer), inner) in coverage
+        .iter()
+        .zip(grid_outer.iter_mut())
+        .zip(grid_inner.iter_mut())
+    {
         // Quantize to 8-bit coverage (matching Canvas 2D + TinySDF) so `f32` scanline prefix-sum
         // rounding residuals (`~1e-7` near `0.0` or `0.9999999` near `1.0`) never seed false
         // contour boundaries across empty padding or solid stroke interiors.
         let quantized = (alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
         if quantized == 0 {
-            grid_outer[idx] = EDT_INF;
-            grid_inner[idx] = 0.0;
+            *outer = EDT_INF;
+            *inner = 0.0;
         } else if quantized == u8::MAX {
-            grid_outer[idx] = 0.0;
-            grid_inner[idx] = EDT_INF;
+            *outer = 0.0;
+            *inner = EDT_INF;
         } else {
             let a = f64::from(quantized) / 255.0;
             let delta = 0.5 - a;
-            grid_outer[idx] = if delta > 0.0 { delta * delta } else { 0.0 };
-            grid_inner[idx] = if delta < 0.0 { delta * delta } else { 0.0 };
+            *outer = if delta > 0.0 { delta * delta } else { 0.0 };
+            *inner = if delta < 0.0 { delta * delta } else { 0.0 };
         }
     }
 
@@ -384,20 +363,25 @@ pub(super) fn coverage_to_sdf(coverage: &[f32], width: usize, height: usize) -> 
 
     let edge = f64::from(1.0 - SDF_CUTOFF);
     let radius = f64::from(SDF_RADIUS);
-    let mut out = Vec::with_capacity(total);
-    for idx in 0..total {
-        let dist = grid_outer[idx].sqrt() - grid_inner[idx].sqrt();
-        let encoded = ((edge - dist / radius) * 255.0).round().clamp(0.0, 255.0) as u8;
-        out.push(encoded);
-    }
-    out
+    grid_outer
+        .iter()
+        .zip(grid_inner.iter())
+        .map(|(&outer, &inner)| {
+            let dist = outer.sqrt() - inner.sqrt();
+            ((edge - dist / radius) * 255.0).round().clamp(0.0, 255.0) as u8
+        })
+        .collect()
 }
 
 /// In-place 2D squared Euclidean distance transform (Felzenszwalb & Huttenlocher 2012).
 #[cfg(any(feature = "font-shaping", target_arch = "wasm32"))]
+#[expect(
+    clippy::indexing_slicing,
+    reason = "2D EDT scratch buffers use max(width, height) and guard checks grid.len() >= width * height"
+)]
 fn edt_2d(grid: &mut [f64], width: usize, height: usize) {
     let max_len = width.max(height);
-    if max_len == 0 {
+    if max_len == 0 || grid.len() < width * height {
         return;
     }
     let mut f = vec![0.0_f64; max_len];
@@ -433,9 +417,13 @@ fn edt_2d(grid: &mut [f64], width: usize, height: usize) {
 }
 
 #[cfg(any(feature = "font-shaping", target_arch = "wasm32"))]
+#[expect(
+    clippy::indexing_slicing,
+    reason = "1D EDT hull stack enforces 0 <= k <= q < n with output/scratch lengths checked up front"
+)]
 fn edt_1d(f: &[f64], d: &mut [f64], v: &mut [usize], z: &mut [f64]) {
     let n = f.len();
-    if n == 0 {
+    if n == 0 || d.len() < n || v.len() < n || z.len() <= n {
         return;
     }
     v[0] = 0;

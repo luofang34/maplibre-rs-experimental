@@ -2,36 +2,25 @@ use std::{
     fs::File,
     io::BufWriter,
     path::Path,
-    sync::Arc,
     time::{Duration, Instant},
 };
 
 use cgmath::{Deg, Matrix3, Matrix4, Rad, SquareMatrix, Vector3};
 use maplibre::{
     coords::LatLon,
-    headless::{
-        create_headless_renderer_with_loader,
-        map::{
-            readback::{FrameReadback, PixelLayout},
-            resolve_tile_json_sources, HeadlessMap,
-        },
+    headless::map::{
+        readback::{FrameReadback, PixelLayout},
+        HeadlessMap,
     },
-    io::{
-        apc::AsyncProcedureCall,
-        resource_loader::SharedLoader,
-        source_client::{HttpSourceClient, SourceClient},
-    },
-    platform::native_http_client,
-    plugin::Plugin,
     render::{
         camera::EyeFrustum,
-        settings::{BufferPoolSizes, Msaa, RendererSettings},
         view_state::{CameraOptions, ExternalAnchor, NavigationMode},
         xr::{EyeTarget, ScenePlacement, XrEye, XrFrame},
-        RenderPlugin,
     },
-    style::{source::Source, Style},
+    style::Style,
 };
+
+use crate::headless_setup::build_headless_map_with_notify;
 
 pub struct SnapshotOptions<'a> {
     pub style: Style,
@@ -53,94 +42,11 @@ pub struct SnapshotOptions<'a> {
 pub async fn render_snapshot(
     mut opts: SnapshotOptions<'_>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let has_vector = opts.style.sources.is_empty()
-        || opts
-            .style
-            .sources
-            .values()
-            .any(|s| matches!(s, Source::Vector(_) | Source::GeoJson(_)));
-    let has_raster = opts.style.sources.values().any(|s| {
-        matches!(
-            s,
-            Source::Raster(_)
-                | Source::RasterDem(_)
-                | Source::Image(_)
-                | Source::Video(_)
-                | Source::Canvas(_)
-        )
-    });
-
-    let cache_dir = std::env::temp_dir()
-        .join("maplibre-rs-snapshot-cache")
-        .to_string_lossy()
-        .into_owned();
-    let loader = SharedLoader::new(native_http_client(Some(cache_dir)));
-    let source_client = SourceClient::new(HttpSourceClient::new(loader.clone()));
-
-    let mut settings = RendererSettings {
-        msaa: Msaa { samples: 1 },
-        tight_tile_requests: true,
-        ..RendererSettings::default()
-    };
-    if !has_vector {
-        settings.buffer_pools = BufferPoolSizes::EMPTY;
-        settings.symbol_pools = BufferPoolSizes::EMPTY;
-        settings.terrain_drape_size = 512;
-    }
-
-    let timeout_budget = Duration::from_secs(opts.timeout_secs);
-    let deadline = Instant::now() + timeout_budget;
-    let (renderer_res, tile_json_res) = tokio::join!(
-        create_headless_renderer_with_loader(opts.width, opts.height, settings, loader),
-        tokio::time::timeout(
-            timeout_budget,
-            resolve_tile_json_sources(&mut opts.style, &source_client),
-        ),
-    );
-    if tile_json_res.is_err() {
-        eprintln!(
-            "warning: TileJSON resolution timed out after {}s before snapshot frame loop",
-            opts.timeout_secs
-        );
-    }
-    let (kernel, renderer) = renderer_res?;
-
-    let notify = Arc::new(tokio::sync::Notify::new());
-    let wake_notify = notify.clone();
-    kernel.apc().set_waker(Arc::new(move || {
-        wake_notify.notify_one();
-    }));
-
-    let mut plugins: Vec<Box<dyn Plugin<_>>> = vec![
-        Box::new(RenderPlugin),
-        Box::new(maplibre::background::BackgroundPlugin),
-    ];
-    if has_vector {
-        plugins.push(Box::<
-            maplibre::vector::VectorPlugin<maplibre::vector::DefaultVectorTransferables>,
-        >::default());
-        plugins.push(Box::<
-            maplibre::sdf::SdfPlugin<maplibre::vector::DefaultVectorTransferables>,
-        >::default());
-        plugins.push(Box::new(maplibre::heatmap::HeatmapPlugin));
-    }
-    if has_raster {
-        plugins.push(Box::<
-            maplibre::raster::RasterPlugin<maplibre::raster::DefaultRasterTransferables>,
-        >::default());
-        plugins.push(Box::new(maplibre::hillshade::HillshadePlugin));
-    }
-    if opts.style.terrain.is_some() {
-        plugins.push(Box::<
-            maplibre::terrain::TerrainPlugin<maplibre::terrain::DefaultDemTransferables>,
-        >::default());
-    }
-
-    let is_globe = opts
-        .style
-        .projection
-        .as_ref()
-        .is_some_and(|p| p.projection_type != maplibre::projection::ProjectionType::Mercator);
+    let style = std::mem::take(&mut opts.style);
+    let (mut map, notify, deadline) =
+        build_headless_map_with_notify(style, opts.width, opts.height, opts.timeout_secs, true)
+            .await?;
+    configure_snapshot_camera(&mut map, &opts)?;
 
     let fp_camera = FirstPersonCamera {
         eye_alt_m: opts.eye_alt_m,
@@ -151,12 +57,29 @@ pub async fn render_snapshot(
         width: opts.width,
         height: opts.height,
     };
+    let (idle_streak, sim_time) =
+        await_snapshot_settled(&mut map, &fp_camera, &notify, opts.max_frames, deadline).await?;
+    if idle_streak < 2 {
+        step_snapshot_frame(&mut map, &fp_camera, sim_time)?;
+    }
 
-    let mut map = HeadlessMap::new(opts.style, renderer, kernel, plugins)?;
+    write_snapshot_png(&map, &opts)
+}
+
+fn configure_snapshot_camera(
+    map: &mut HeadlessMap,
+    opts: &SnapshotOptions<'_>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let is_globe = map
+        .context()
+        .style
+        .projection
+        .as_ref()
+        .is_some_and(|p| p.projection_type != maplibre::projection::ProjectionType::Mercator);
     map.set_max_pitch(Deg(88.0));
     map.set_opaque_environment(true);
     if is_globe {
-        let _ = map.set_navigation_mode(NavigationMode::FreeGlobe);
+        drop(map.set_navigation_mode(NavigationMode::FreeGlobe));
     }
 
     if opts.eye_alt_m.is_none() {
@@ -177,11 +100,20 @@ pub async fn render_snapshot(
             map.pin_center_elevation(elev_m);
         }
     }
+    Ok(())
+}
 
+async fn await_snapshot_settled(
+    map: &mut HeadlessMap,
+    fp_camera: &FirstPersonCamera,
+    notify: &tokio::sync::Notify,
+    max_frames: usize,
+    deadline: Instant,
+) -> Result<(u32, Duration), Box<dyn std::error::Error>> {
     let mut idle_streak = 0_u32;
     let mut sim_time = Duration::ZERO;
-    for frame in 0..opts.max_frames {
-        step_snapshot_frame(&mut map, &fp_camera, sim_time)?;
+    for frame in 0..max_frames {
+        step_snapshot_frame(map, fp_camera, sim_time)?;
         let reasons = map.redraw_reasons();
         let step_ms = if reasons.loading { 16 } else { 350 };
         sim_time += Duration::from_millis(step_ms);
@@ -211,20 +143,22 @@ pub async fn render_snapshot(
                 .next_retry_delay()
                 .unwrap_or(Duration::from_millis(50))
                 .min(deadline.saturating_duration_since(now));
-            let _ = tokio::time::timeout(max_wait, notified).await;
+            drop(tokio::time::timeout(max_wait, notified).await);
         }
     }
+    Ok((idle_streak, sim_time))
+}
 
-    if idle_streak < 2 {
-        step_snapshot_frame(&mut map, &fp_camera, sim_time)?;
-    }
-
+fn write_snapshot_png(
+    map: &HeadlessMap,
+    opts: &SnapshotOptions<'_>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let texture = map
         .head_texture()
         .ok_or("headless map has no offscreen color texture")?;
-    let mut readback = FrameReadback::new(&map, opts.width, opts.height);
+    let mut readback = FrameReadback::new(map, opts.width, opts.height);
     let mut pixels = vec![0_u8; readback.frame_len(PixelLayout::Rgba8)];
-    readback.read_into_blocking(&map, texture, PixelLayout::Rgba8, &mut pixels)?;
+    readback.read_into_blocking(map, texture, PixelLayout::Rgba8, &mut pixels)?;
 
     if let Some(parent) = opts.out_path.parent() {
         if !parent.as_os_str().is_empty() {

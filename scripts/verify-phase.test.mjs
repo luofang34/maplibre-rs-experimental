@@ -33,15 +33,16 @@ test('runs fast structural gates in parallel and emits compact JSON', () => {
       '--state-file', stateFile,
       '--json-out', jsonOut,
       '--reset',
-      '--only', 'fmt,file-length,panics,module-layout,release-version,immersive-stability',
+      '--only', 'fmt,evidence-gate,release-version,immersive-stability',
     ]);
     assert.equal(out.status, 0, out.stderr);
     assert.equal(out.json.status, 'pass');
     assert.equal(out.json.escalate, false);
     assert.equal(out.json.iteration, 1);
     assert.deepEqual(out.json.failedGates, []);
-    assert.equal(out.json.gates.length, 6);
-    assert.ok(out.json.parsedMetrics.panicLimit > 0);
+    assert.equal(out.json.gates.length, 4);
+    assert.equal(out.json.parsedMetrics.evidenceGatePassed, true);
+    assert.ok(out.json.parsedMetrics.evidenceGateChecks > 0);
     assert.ok(readFileSync(jsonOut, 'utf8').includes('"status": "pass"'));
   } finally {
     rmSync(work, { recursive: true, force: true });

@@ -142,63 +142,217 @@ fn scan_composite_components<'a>(
         }
     }
     let end = composite.position();
-    Ok((&composite.bytes[start..end], have_instructions))
+    let slice = composite
+        .bytes
+        .get(start..end)
+        .ok_or(FontError::InvalidContainer(
+            "WOFF2 composite glyph truncated",
+        ))?;
+    Ok((slice, have_instructions))
+}
+
+struct GlyfStreams<'a> {
+    num_glyphs: usize,
+    index_format: u16,
+    n_contours: Cursor<'a>,
+    n_points: Cursor<'a>,
+    flags: Cursor<'a>,
+    glyph_data: Cursor<'a>,
+    composites: Cursor<'a>,
+    bboxes: Cursor<'a>,
+    instructions: Cursor<'a>,
+    bbox_bitmap: &'a [u8],
+    overlap_bitmap: Option<&'a [u8]>,
+}
+
+fn open_glyf_streams(stream: &[u8]) -> Result<GlyfStreams<'_>, FontError> {
+    let mut header = Cursor::new(stream);
+    let _reserved = header.read_u16_be()?;
+    let option_flags = header.read_u16_be()?;
+    let num_glyphs = header.read_u16_be()? as usize;
+    let index_format = header.read_u16_be()?;
+    if index_format > 1 {
+        return Err(FontError::InvalidContainer("WOFF2 invalid indexFormat"));
+    }
+    let sizes = [
+        header.read_u32_be()? as usize,
+        header.read_u32_be()? as usize,
+        header.read_u32_be()? as usize,
+        header.read_u32_be()? as usize,
+        header.read_u32_be()? as usize,
+        header.read_u32_be()? as usize,
+        header.read_u32_be()? as usize,
+    ];
+    let n_contours = Cursor::new(header.read_slice(sizes[0])?);
+    let n_points = Cursor::new(header.read_slice(sizes[1])?);
+    let flags = Cursor::new(header.read_slice(sizes[2])?);
+    let glyph_data = Cursor::new(header.read_slice(sizes[3])?);
+    let composites = Cursor::new(header.read_slice(sizes[4])?);
+    let mut bboxes = Cursor::new(header.read_slice(sizes[5])?);
+    let instructions = Cursor::new(header.read_slice(sizes[6])?);
+    let bbox_bitmap = bboxes.read_slice(num_glyphs.div_ceil(32) * 4)?;
+    let overlap_bitmap = ((option_flags & 0x0001) != 0)
+        .then(|| header.read_slice(num_glyphs.div_ceil(8)))
+        .transpose()?;
+    Ok(GlyfStreams {
+        num_glyphs,
+        index_format,
+        n_contours,
+        n_points,
+        flags,
+        glyph_data,
+        composites,
+        bboxes,
+        instructions,
+        bbox_bitmap,
+        overlap_bitmap,
+    })
+}
+
+fn has_bitmap_bit(bitmap: &[u8], glyph_idx: usize) -> bool {
+    bitmap
+        .get(glyph_idx >> 3)
+        .is_some_and(|byte| (byte & (0x80 >> (glyph_idx & 7))) != 0)
+}
+
+fn reconstruct_simple_glyph(
+    s: &mut GlyfStreams<'_>,
+    contour_count: i16,
+    explicit_bbox: bool,
+    has_overlap: bool,
+    glyf: &mut Vec<u8>,
+) -> Result<i16, FontError> {
+    let contours = contour_count as usize;
+    let mut end_pts = Vec::with_capacity(contours);
+    let mut total_points = 0usize;
+    for _ in 0..contours {
+        let pts = usize::from(s.n_points.read_255_ushort()?);
+        if pts == 0 {
+            return Err(FontError::InvalidContainer(
+                "WOFF2 zero-point contour in simple glyph",
+            ));
+        }
+        total_points = total_points
+            .checked_add(pts)
+            .filter(|&sum| sum <= u16::MAX as usize + 1)
+            .ok_or(FontError::InvalidContainer(
+                "WOFF2 contour point count invalid",
+            ))?;
+        end_pts.push((total_points - 1) as u16);
+    }
+
+    let mut decoded_pts = Vec::with_capacity(total_points);
+    let (mut x, mut y) = (0_i32, 0_i32);
+    let (mut min_x, mut min_y) = (i32::MAX, i32::MAX);
+    let (mut max_x, mut max_y) = (i32::MIN, i32::MIN);
+    for _ in 0..total_points {
+        let raw_flag = s.flags.read_u8()?;
+        let (dx, dy, on_curve) = decode_triplet(raw_flag, &mut s.glyph_data)?;
+        x = x.saturating_add(dx);
+        y = y.saturating_add(dy);
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x);
+        max_y = max_y.max(y);
+        decoded_pts.push((dx, dy, on_curve));
+    }
+
+    let instr_len = s.glyph_data.read_255_ushort()?;
+    let instr_bytes = s.instructions.read_slice(usize::from(instr_len))?;
+    let (bx_min, by_min, bx_max, by_max) = if explicit_bbox {
+        (
+            s.bboxes.read_i16_be()?,
+            s.bboxes.read_i16_be()?,
+            s.bboxes.read_i16_be()?,
+            s.bboxes.read_i16_be()?,
+        )
+    } else {
+        (
+            i16::try_from(min_x).unwrap_or(i16::MIN),
+            i16::try_from(min_y).unwrap_or(i16::MIN),
+            i16::try_from(max_x).unwrap_or(i16::MAX),
+            i16::try_from(max_y).unwrap_or(i16::MAX),
+        )
+    };
+    glyf.extend_from_slice(&contour_count.to_be_bytes());
+    for v in [bx_min, by_min, bx_max, by_max] {
+        glyf.extend_from_slice(&v.to_be_bytes());
+    }
+    for end_pt in end_pts {
+        glyf.extend_from_slice(&end_pt.to_be_bytes());
+    }
+    glyf.extend_from_slice(&instr_len.to_be_bytes());
+    glyf.extend_from_slice(instr_bytes);
+    encode_truetype_points(&decoded_pts, has_overlap, glyf)?;
+    Ok(bx_min)
+}
+
+fn reconstruct_composite_glyph(
+    s: &mut GlyfStreams<'_>,
+    explicit_bbox: bool,
+    glyf: &mut Vec<u8>,
+) -> Result<i16, FontError> {
+    if !explicit_bbox {
+        return Err(FontError::InvalidContainer(
+            "WOFF2 composite glyph requires an explicit bbox",
+        ));
+    }
+    let bx_min = s.bboxes.read_i16_be()?;
+    let by_min = s.bboxes.read_i16_be()?;
+    let bx_max = s.bboxes.read_i16_be()?;
+    let by_max = s.bboxes.read_i16_be()?;
+    let (comp_bytes, have_instr) = scan_composite_components(&mut s.composites)?;
+    let instr_bytes = if have_instr {
+        let len = s.glyph_data.read_255_ushort()?;
+        Some((len, s.instructions.read_slice(usize::from(len))?))
+    } else {
+        None
+    };
+    for v in [-1_i16, bx_min, by_min, bx_max, by_max] {
+        glyf.extend_from_slice(&v.to_be_bytes());
+    }
+    glyf.extend_from_slice(comp_bytes);
+    if let Some((len, bytes)) = instr_bytes {
+        glyf.extend_from_slice(&len.to_be_bytes());
+        glyf.extend_from_slice(bytes);
+    }
+    Ok(bx_min)
+}
+
+fn encode_loca_offsets(offsets: &[usize], index_format: u16) -> Result<Vec<u8>, FontError> {
+    let mut loca = Vec::with_capacity(offsets.len() * if index_format == 0 { 2 } else { 4 });
+    if index_format == 0 {
+        for &off in offsets {
+            let word = u16::try_from(off / 2)
+                .map_err(|_| FontError::InvalidContainer("WOFF2 short loca overflow"))?;
+            loca.extend_from_slice(&word.to_be_bytes());
+        }
+    } else {
+        for &off in offsets {
+            let dword = u32::try_from(off)
+                .map_err(|_| FontError::InvalidContainer("WOFF2 long loca overflow"))?;
+            loca.extend_from_slice(&dword.to_be_bytes());
+        }
+    }
+    Ok(loca)
 }
 
 /// Reconstructs TrueType `glyf` and `loca` tables from a WOFF2 transformed `glyf` stream.
 pub(in crate::font) fn reconstruct_glyf_loca(
     stream: &[u8],
 ) -> Result<ReconstructedGlyf, FontError> {
-    let mut header = Cursor::new(stream);
-    let _reserved = header.read_u16_be()?;
-    let option_flags = header.read_u16_be()?;
-    let num_glyphs = header.read_u16_be()? as usize;
-    let mut index_format = header.read_u16_be()?;
-    if index_format > 1 {
-        return Err(FontError::InvalidContainer("WOFF2 invalid indexFormat"));
-    }
-    let n_contour_size = header.read_u32_be()? as usize;
-    let n_points_size = header.read_u32_be()? as usize;
-    let flag_size = header.read_u32_be()? as usize;
-    let glyph_size = header.read_u32_be()? as usize;
-    let composite_size = header.read_u32_be()? as usize;
-    let bbox_size = header.read_u32_be()? as usize;
-    let instruction_size = header.read_u32_be()? as usize;
-
-    let mut n_contours = Cursor::new(header.read_slice(n_contour_size)?);
-    let mut n_points = Cursor::new(header.read_slice(n_points_size)?);
-    let mut flags = Cursor::new(header.read_slice(flag_size)?);
-    let mut glyph_data = Cursor::new(header.read_slice(glyph_size)?);
-    let mut composites = Cursor::new(header.read_slice(composite_size)?);
-    let mut bboxes = Cursor::new(header.read_slice(bbox_size)?);
-    let mut instructions = Cursor::new(header.read_slice(instruction_size)?);
-
-    let bitmap_bytes = num_glyphs.div_ceil(32) * 4;
-    let bbox_bitmap = bboxes.read_slice(bitmap_bytes)?;
-    let overlap_bitmap = if (option_flags & 0x0001) != 0 {
-        Some(header.read_slice(num_glyphs.div_ceil(8))?)
-    } else {
-        None
-    };
-
-    let has_bit = |bitmap: &[u8], glyph_idx: usize| -> bool {
-        bitmap
-            .get(glyph_idx >> 3)
-            .is_some_and(|byte| (byte & (0x80 >> (glyph_idx & 7))) != 0)
-    };
-
+    let mut s = open_glyf_streams(stream)?;
     let mut glyf = Vec::new();
-    let mut offsets = Vec::with_capacity(num_glyphs + 1);
-    let mut x_mins = vec![0_i16; num_glyphs];
+    let mut offsets = Vec::with_capacity(s.num_glyphs + 1);
+    let mut x_mins = vec![0_i16; s.num_glyphs];
 
     for (glyph_idx, x_min_slot) in x_mins.iter_mut().enumerate() {
         offsets.push(glyf.len());
-        let contour_count = n_contours.read_i16_be()?;
+        let contour_count = s.n_contours.read_i16_be()?;
         if contour_count < -1 {
             return Err(FontError::InvalidContainer("WOFF2 invalid contour count"));
         }
-        let explicit_bbox = has_bit(bbox_bitmap, glyph_idx);
-
+        let explicit_bbox = has_bitmap_bit(s.bbox_bitmap, glyph_idx);
         if contour_count == 0 {
             if explicit_bbox {
                 return Err(FontError::InvalidContainer(
@@ -207,108 +361,14 @@ pub(in crate::font) fn reconstruct_glyf_loca(
             }
             continue;
         }
-
-        if contour_count > 0 {
-            let contours = contour_count as usize;
-            let mut end_pts = Vec::with_capacity(contours);
-            let mut total_points = 0usize;
-            for _ in 0..contours {
-                let pts = usize::from(n_points.read_255_ushort()?);
-                if pts == 0 {
-                    return Err(FontError::InvalidContainer(
-                        "WOFF2 zero-point contour in simple glyph",
-                    ));
-                }
-                total_points = total_points
-                    .checked_add(pts)
-                    .filter(|&sum| sum <= u16::MAX as usize + 1)
-                    .ok_or(FontError::InvalidContainer(
-                        "WOFF2 contour point count invalid",
-                    ))?;
-                end_pts.push((total_points - 1) as u16);
-            }
-
-            let mut decoded_pts = Vec::with_capacity(total_points);
-            let (mut x, mut y) = (0_i32, 0_i32);
-            let (mut min_x, mut min_y) = (i32::MAX, i32::MAX);
-            let (mut max_x, mut max_y) = (i32::MIN, i32::MIN);
-            for _ in 0..total_points {
-                let raw_flag = flags.read_u8()?;
-                let (dx, dy, on_curve) = decode_triplet(raw_flag, &mut glyph_data)?;
-                x = x.saturating_add(dx);
-                y = y.saturating_add(dy);
-                min_x = min_x.min(x);
-                min_y = min_y.min(y);
-                max_x = max_x.max(x);
-                max_y = max_y.max(y);
-                decoded_pts.push((dx, dy, on_curve));
-            }
-
-            let instr_len = glyph_data.read_255_ushort()?;
-            let instr_bytes = instructions.read_slice(usize::from(instr_len))?;
-
-            let (bx_min, by_min, bx_max, by_max) = if explicit_bbox {
-                (
-                    bboxes.read_i16_be()?,
-                    bboxes.read_i16_be()?,
-                    bboxes.read_i16_be()?,
-                    bboxes.read_i16_be()?,
-                )
-            } else {
-                (
-                    i16::try_from(min_x).unwrap_or(i16::MIN),
-                    i16::try_from(min_y).unwrap_or(i16::MIN),
-                    i16::try_from(max_x).unwrap_or(i16::MAX),
-                    i16::try_from(max_y).unwrap_or(i16::MAX),
-                )
-            };
-            *x_min_slot = bx_min;
-
-            glyf.extend_from_slice(&contour_count.to_be_bytes());
-            glyf.extend_from_slice(&bx_min.to_be_bytes());
-            glyf.extend_from_slice(&by_min.to_be_bytes());
-            glyf.extend_from_slice(&bx_max.to_be_bytes());
-            glyf.extend_from_slice(&by_max.to_be_bytes());
-            for end_pt in end_pts {
-                glyf.extend_from_slice(&end_pt.to_be_bytes());
-            }
-            glyf.extend_from_slice(&instr_len.to_be_bytes());
-            glyf.extend_from_slice(instr_bytes);
-
-            let has_overlap = overlap_bitmap.is_some_and(|bm| has_bit(bm, glyph_idx));
-            encode_truetype_points(&decoded_pts, has_overlap, &mut glyf)?;
+        *x_min_slot = if contour_count > 0 {
+            let has_overlap = s
+                .overlap_bitmap
+                .is_some_and(|bm| has_bitmap_bit(bm, glyph_idx));
+            reconstruct_simple_glyph(&mut s, contour_count, explicit_bbox, has_overlap, &mut glyf)?
         } else {
-            if !explicit_bbox {
-                return Err(FontError::InvalidContainer(
-                    "WOFF2 composite glyph requires an explicit bbox",
-                ));
-            }
-            let bx_min = bboxes.read_i16_be()?;
-            let by_min = bboxes.read_i16_be()?;
-            let bx_max = bboxes.read_i16_be()?;
-            let by_max = bboxes.read_i16_be()?;
-            *x_min_slot = bx_min;
-
-            let (comp_bytes, have_instr) = scan_composite_components(&mut composites)?;
-            let instr_bytes = if have_instr {
-                let len = glyph_data.read_255_ushort()?;
-                Some((len, instructions.read_slice(usize::from(len))?))
-            } else {
-                None
-            };
-
-            glyf.extend_from_slice(&(-1_i16).to_be_bytes());
-            glyf.extend_from_slice(&bx_min.to_be_bytes());
-            glyf.extend_from_slice(&by_min.to_be_bytes());
-            glyf.extend_from_slice(&bx_max.to_be_bytes());
-            glyf.extend_from_slice(&by_max.to_be_bytes());
-            glyf.extend_from_slice(comp_bytes);
-            if let Some((len, bytes)) = instr_bytes {
-                glyf.extend_from_slice(&len.to_be_bytes());
-                glyf.extend_from_slice(bytes);
-            }
-        }
-
+            reconstruct_composite_glyph(&mut s, explicit_bbox, &mut glyf)?
+        };
         // Pad each glyph to a 4-byte boundary so short `loca` (`offset / 2`) stays exact.
         let padded = (glyf.len() + 3) & !3;
         if padded > MAX_DECOMPRESSED_FONT_BYTES {
@@ -320,25 +380,11 @@ pub(in crate::font) fn reconstruct_glyf_loca(
     }
     offsets.push(glyf.len());
 
+    let mut index_format = s.index_format;
     if index_format == 0 && glyf.len() / 2 > u16::MAX as usize {
         index_format = 1;
     }
-
-    let mut loca = Vec::with_capacity(offsets.len() * if index_format == 0 { 2 } else { 4 });
-    if index_format == 0 {
-        for off in offsets {
-            let word = u16::try_from(off / 2)
-                .map_err(|_| FontError::InvalidContainer("WOFF2 short loca overflow"))?;
-            loca.extend_from_slice(&word.to_be_bytes());
-        }
-    } else {
-        for off in offsets {
-            let dword = u32::try_from(off)
-                .map_err(|_| FontError::InvalidContainer("WOFF2 long loca overflow"))?;
-            loca.extend_from_slice(&dword.to_be_bytes());
-        }
-    }
-
+    let loca = encode_loca_offsets(&offsets, index_format)?;
     Ok(ReconstructedGlyf {
         glyf,
         loca,
@@ -364,8 +410,16 @@ pub(in crate::font) fn reconstruct_hmtx(
         .ok_or(FontError::InvalidContainer(
             "WOFF2 transformed hmtx requires maxp table",
         ))?;
-    let num_h_metrics = usize::from(u16::from_be_bytes([hhea[34], hhea[35]]));
-    let num_glyphs = usize::from(u16::from_be_bytes([maxp[4], maxp[5]]));
+    let hhea_bytes: [u8; 2] = hhea
+        .get(34..36)
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or(FontError::InvalidContainer("WOFF2 hhea truncated"))?;
+    let maxp_bytes: [u8; 2] = maxp
+        .get(4..6)
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or(FontError::InvalidContainer("WOFF2 maxp truncated"))?;
+    let num_h_metrics = usize::from(u16::from_be_bytes(hhea_bytes));
+    let num_glyphs = usize::from(u16::from_be_bytes(maxp_bytes));
     if num_h_metrics == 0 {
         return Err(FontError::InvalidContainer(
             "WOFF2 hmtx numOfHMetrics is zero",

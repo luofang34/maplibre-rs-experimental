@@ -1,7 +1,7 @@
 //! A solar eclipse seen by an eye on the ground: as the moon covers the sun, the sky darkens
 //! overhead while the horizon keeps the glow of the air beyond the shadow, the ground dims to
 //! its night, the stars come out, and the moon's disc hides the part of the sun it covers.
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg_attr(test, allow(clippy::expect_used))]
 
 use cgmath::{InnerSpace, Matrix, Matrix3, Quaternion, Vector3};
 

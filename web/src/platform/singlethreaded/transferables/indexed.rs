@@ -63,12 +63,12 @@ type ParsedLazyMvtHeader<'a> = (
 );
 
 fn parse_lazy_mvt_header(payload: &[u8]) -> Option<ParsedLazyMvtHeader<'_>> {
-    if payload.len() < LAZY_MVT_HEADER_LEN || payload[..4] != LAZY_MVT_MAGIC {
+    if payload.len() < LAZY_MVT_HEADER_LEN || payload.get(..4) != Some(&LAZY_MVT_MAGIC) {
         return None;
     }
     let coords = read_coords_at(payload, 4)?;
-    let compressed = payload[13] != 0;
-    let has_rescale = payload[14] != 0;
+    let compressed = *payload.get(13)? != 0;
+    let has_rescale = *payload.get(14)? != 0;
     let source_len_tag = read_u32_le(payload, 16)?;
     let mut cursor = LAZY_MVT_HEADER_LEN;
     let rescale = if has_rescale {
@@ -162,11 +162,12 @@ fn encode_wire_index(
 }
 
 fn parse_wire_header(payload: &[u8]) -> Option<(WorldTileCoords, bool, Option<&str>, usize)> {
-    if payload.len() < WIRE_INDEX_HEADER_LEN || payload[..4] != WIRE_INDEX_MAGIC {
+    if payload.len() < WIRE_INDEX_HEADER_LEN || payload.get(..4) != Some(&WIRE_INDEX_MAGIC) {
         return None;
     }
     let coords = read_coords_at(payload, 4)?;
-    let has_source = payload[14] != 0;
+    let is_spatial = *payload.get(13)? != 0;
+    let has_source = *payload.get(14)? != 0;
     let source_len = read_u32_le(payload, 16)? as usize;
     let end = WIRE_INDEX_HEADER_LEN.checked_add(source_len)?;
     let source = if has_source {
@@ -175,7 +176,7 @@ fn parse_wire_header(payload: &[u8]) -> Option<(WorldTileCoords, bool, Option<&s
     } else {
         None
     };
-    Some((coords, payload[13] != 0, source, end))
+    Some((coords, is_spatial, source, end))
 }
 
 fn decode_wire_index(payload: &[u8]) -> Option<TileIndex> {
@@ -219,8 +220,8 @@ fn decode_wire_index(payload: &[u8]) -> Option<TileIndex> {
             ring_count: read_u32_le(g_slice, 24)?,
             coord_start: read_u32_le(g_slice, 28)?,
             coord_count: read_u32_le(g_slice, 32)?,
-            kind: g_slice[36],
-            has_id: g_slice[37] != 0,
+            kind: *g_slice.get(36)?,
+            has_id: *g_slice.get(37)? != 0,
         });
         cursor += WIRE_GEOM_BYTES;
     }
@@ -249,6 +250,73 @@ fn decode_wire_index(payload: &[u8]) -> Option<TileIndex> {
 }
 
 #[cfg(any(test, feature = "renderer"))]
+fn decode_lazy_mvt_from_js(
+    buffer: &js_sys::ArrayBuffer,
+    base_offset: u32,
+    byte_len: u32,
+    hdr: &[u8; LAZY_MVT_HEADER_LEN],
+) -> Option<FlatBufferTransferable> {
+    let coords = read_coords_at(hdr, 4)?;
+    let compressed = hdr[13] != 0;
+    let has_rescale = hdr[14] != 0;
+    let source_len_tag = read_u32_le(hdr, 16)?;
+    let mut cursor = LAZY_MVT_HEADER_LEN;
+    let rescale = if has_rescale {
+        let from_end = cursor.checked_add(9)?;
+        if from_end > byte_len as usize {
+            return None;
+        }
+        let mut from_buf = [0_u8; 9];
+        js_sys::Uint8Array::new_with_byte_offset_and_length(buffer, base_offset + cursor as u32, 9)
+            .copy_to(&mut from_buf);
+        cursor = from_end;
+        Some((read_coords_at(&from_buf, 0)?, coords))
+    } else {
+        None
+    };
+    let (source, mvt_off) = if source_len_tag == u32::MAX {
+        (None, cursor)
+    } else {
+        let len = usize::try_from(source_len_tag).ok()?;
+        let off_end = cursor.checked_add(len)?;
+        if off_end > byte_len as usize {
+            return None;
+        }
+        let mut src_buf = vec![0_u8; len];
+        if len > 0 {
+            js_sys::Uint8Array::new_with_byte_offset_and_length(
+                buffer,
+                base_offset + cursor as u32,
+                len as u32,
+            )
+            .copy_to(&mut src_buf);
+        }
+        (Some(String::from_utf8(src_buf).ok()?), off_end)
+    };
+    let mvt_len = (byte_len as usize).checked_sub(mvt_off)?;
+    let mut mvt = vec![0_u8; mvt_len];
+    if mvt_len > 0 {
+        js_sys::Uint8Array::new_with_byte_offset_and_length(
+            buffer,
+            base_offset + mvt_off as u32,
+            mvt_len as u32,
+        )
+        .copy_to(&mut mvt);
+    }
+    let index = TileIndex::LazyMvt(
+        LazyMvtIndex::from_packed(Arc::from(mvt), compressed).with_rescale(rescale),
+    );
+    Some(FlatBufferTransferable {
+        tag: WebMessageTag::LayerIndexed,
+        data: Vec::new(),
+        start: 0,
+        unpacked_vector: None,
+        unpacked_symbol: None,
+        unpacked_index: Some((coords, source, index)),
+    })
+}
+
+#[cfg(any(test, feature = "renderer"))]
 pub(super) fn decode_js_layer_indexed(
     buffer: &js_sys::ArrayBuffer,
     base_offset: u32,
@@ -266,68 +334,7 @@ pub(super) fn decode_js_layer_indexed(
     )
     .copy_to(&mut hdr);
     if hdr[..4] == LAZY_MVT_MAGIC {
-        let coords = read_coords_at(&hdr, 4)?;
-        let compressed = hdr[13] != 0;
-        let has_rescale = hdr[14] != 0;
-        let source_len_tag = read_u32_le(&hdr, 16)?;
-        let mut cursor = LAZY_MVT_HEADER_LEN;
-        let rescale = if has_rescale {
-            let from_end = cursor.checked_add(9)?;
-            if from_end > byte_len as usize {
-                return None;
-            }
-            let mut from_buf = [0_u8; 9];
-            js_sys::Uint8Array::new_with_byte_offset_and_length(
-                buffer,
-                base_offset + cursor as u32,
-                9,
-            )
-            .copy_to(&mut from_buf);
-            cursor = from_end;
-            Some((read_coords_at(&from_buf, 0)?, coords))
-        } else {
-            None
-        };
-        let (source, mvt_off) = if source_len_tag == u32::MAX {
-            (None, cursor)
-        } else {
-            let len = usize::try_from(source_len_tag).ok()?;
-            let off_end = cursor.checked_add(len)?;
-            if off_end > byte_len as usize {
-                return None;
-            }
-            let mut src_buf = vec![0_u8; len];
-            if len > 0 {
-                js_sys::Uint8Array::new_with_byte_offset_and_length(
-                    buffer,
-                    base_offset + cursor as u32,
-                    len as u32,
-                )
-                .copy_to(&mut src_buf);
-            }
-            (Some(String::from_utf8(src_buf).ok()?), off_end)
-        };
-        let mvt_len = (byte_len as usize).checked_sub(mvt_off)?;
-        let mut mvt = vec![0_u8; mvt_len];
-        if mvt_len > 0 {
-            js_sys::Uint8Array::new_with_byte_offset_and_length(
-                buffer,
-                base_offset + mvt_off as u32,
-                mvt_len as u32,
-            )
-            .copy_to(&mut mvt);
-        }
-        let index = TileIndex::LazyMvt(
-            LazyMvtIndex::from_packed(Arc::from(mvt), compressed).with_rescale(rescale),
-        );
-        return Some(FlatBufferTransferable {
-            tag: WebMessageTag::LayerIndexed,
-            data: Vec::new(),
-            start: 0,
-            unpacked_vector: None,
-            unpacked_symbol: None,
-            unpacked_index: Some((coords, source, index)),
-        });
+        return decode_lazy_mvt_from_js(buffer, base_offset, byte_len, &hdr);
     }
     let bytes =
         js_sys::Uint8Array::new_with_byte_offset_and_length(buffer, base_offset, byte_len).to_vec();

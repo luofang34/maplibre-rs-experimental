@@ -16,10 +16,12 @@ use crate::{
     tcs::world::World,
 };
 
+type SelectionKey = (u64, u64, u64, u64, u64);
+
 pub(crate) struct SymbolCovering {
     pub tiles: Vec<WorldTileCoords>,
     pub buffer: wgpu::Buffer,
-    selection_key: Option<(u64, u64, u64, u64, u64)>,
+    selection_key: Option<SelectionKey>,
     all_targets_ready: bool,
     metadata_scratch: Vec<ShaderTileMetadata>,
     last_uploaded_bytes: Vec<u8>,
@@ -165,6 +167,40 @@ pub(super) fn update(
     device: &wgpu::Device,
     queue: &crate::render::upload_queue::UploadQueue,
 ) {
+    let key = covering_selection_key(world, style, view);
+    let can_reuse = crate::render::eye_covering::EyeInFrame::reuses_content(world)
+        || world
+            .resources
+            .get::<SymbolCovering>()
+            .is_some_and(|c| c.all_targets_ready && c.selection_key == Some(key));
+    if can_reuse {
+        refresh_reused_covering(world, view, queue);
+        return;
+    }
+    let visible_layers = visible_symbol_ids(style, view.style_zoom().value());
+    let (tiles, all_targets_ready) = select_with_status(&targets(world), |coords| {
+        ready(world, &visible_layers, coords)
+    });
+    if tiles.is_empty() {
+        if let Some(covering) = world.resources.get_mut::<SymbolCovering>() {
+            covering.tiles.clear();
+            covering.selection_key = Some(key);
+            covering.all_targets_ready = false;
+        }
+        return;
+    }
+    upload_covering_tiles(
+        world,
+        view,
+        device,
+        queue,
+        tiles,
+        Some(key),
+        all_targets_ready,
+    );
+}
+
+fn covering_selection_key(world: &World, style: &Style, view: &ViewState) -> SelectionKey {
     let topology_gen = match world.resources.get::<Eventually<WgpuTileViewPattern>>() {
         Some(Initialized(pattern)) => pattern.topology_generation(),
         _ => 0,
@@ -173,55 +209,52 @@ pub(super) fn update(
         Some(Initialized(pool)) => (pool.revision(), pool.eviction_generation()),
         _ => (0, 0),
     };
-    let visible_hash = visible_symbol_hash(style, view.style_zoom().value());
-    let key = (
+    (
         topology_gen,
         pool_rev,
         pool_evict,
         style.revision(),
-        visible_hash,
-    );
-    let can_reuse = crate::render::eye_covering::EyeInFrame::reuses_content(world)
-        || world
-            .resources
-            .get::<SymbolCovering>()
-            .is_some_and(|c| c.all_targets_ready && c.selection_key == Some(key));
-    if can_reuse {
-        if let Some(covering) = world.resources.get_mut::<SymbolCovering>() {
-            if covering.tiles.is_empty() {
-                return;
-            }
-            let SymbolCovering {
-                tiles,
-                buffer,
-                metadata_scratch,
-                last_uploaded_bytes,
-                ..
-            } = covering;
-            metadata_scratch.clear();
-            metadata_scratch.extend(tiles.iter().map(|coords| metadata(*coords, view)));
-            let bytes = bytemuck::cast_slice(metadata_scratch.as_slice());
-            if !bytes.is_empty() && last_uploaded_bytes.as_slice() != bytes {
-                queue.write_buffer(buffer, 0, bytes);
-                last_uploaded_bytes.clear();
-                last_uploaded_bytes.extend_from_slice(bytes);
-            }
-        }
+        visible_symbol_hash(style, view.style_zoom().value()),
+    )
+}
+
+fn refresh_reused_covering(
+    world: &mut World,
+    view: &ViewState,
+    queue: &crate::render::upload_queue::UploadQueue,
+) {
+    let Some(covering) = world.resources.get_mut::<SymbolCovering>() else {
+        return;
+    };
+    if covering.tiles.is_empty() {
         return;
     }
-    let visible_layers = visible_symbol_ids(style, view.style_zoom().value());
-    let (tiles, all_targets_ready) = select_with_status(&targets(world), |coords| {
-        ready(world, &visible_layers, coords)
-    });
-    let next_key = Some(key);
-    if tiles.is_empty() {
-        if let Some(covering) = world.resources.get_mut::<SymbolCovering>() {
-            covering.tiles.clear();
-            covering.selection_key = next_key;
-            covering.all_targets_ready = false;
-        }
-        return;
+    let SymbolCovering {
+        tiles,
+        buffer,
+        metadata_scratch,
+        last_uploaded_bytes,
+        ..
+    } = covering;
+    metadata_scratch.clear();
+    metadata_scratch.extend(tiles.iter().map(|coords| metadata(*coords, view)));
+    let bytes = bytemuck::cast_slice(metadata_scratch.as_slice());
+    if !bytes.is_empty() && last_uploaded_bytes.as_slice() != bytes {
+        queue.write_buffer(buffer, 0, bytes);
+        last_uploaded_bytes.clear();
+        last_uploaded_bytes.extend_from_slice(bytes);
     }
+}
+
+fn upload_covering_tiles(
+    world: &mut World,
+    view: &ViewState,
+    device: &wgpu::Device,
+    queue: &crate::render::upload_queue::UploadQueue,
+    tiles: Vec<WorldTileCoords>,
+    selection_key: Option<SelectionKey>,
+    all_targets_ready: bool,
+) {
     let mut entries = world
         .resources
         .get_mut::<SymbolCovering>()
@@ -231,11 +264,11 @@ pub(super) fn update(
     entries.extend(tiles.iter().map(|coords| metadata(*coords, view)));
     let bytes = bytemuck::cast_slice(&entries);
     let required = (bytes.len() as u64).max(256);
-    let grow = world
+    if world
         .resources
         .get::<SymbolCovering>()
-        .is_none_or(|covering| covering.buffer.size() < required);
-    if grow {
+        .is_none_or(|covering| covering.buffer.size() < required)
+    {
         if let Some(old) = world.resources.remove::<SymbolCovering>() {
             queue.cancel_staged_buffer(&old.buffer);
             old.buffer.destroy();
@@ -262,7 +295,7 @@ pub(super) fn update(
             covering.last_uploaded_bytes.extend_from_slice(bytes);
         }
         covering.tiles = tiles;
-        covering.selection_key = next_key;
+        covering.selection_key = selection_key;
         covering.all_targets_ready = all_targets_ready;
         covering.metadata_scratch = entries;
     }

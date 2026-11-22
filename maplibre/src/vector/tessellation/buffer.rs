@@ -257,8 +257,10 @@ impl<I> OverAlignedVertexBuffer<crate::render::shaders::ShaderSymbolVertex, I> {
         let count = self.buffer.vertices.len();
         let mut bits = vec![0_u64; count.div_ceil(64)];
         for (i, vertex) in self.buffer.vertices.iter().enumerate() {
-            if matches!(vertex.kind(), 1 | 2) {
-                bits[i / 64] |= 1_u64 << (i % 64);
+            if matches!(vertex.kind(), 1 | 2)
+                && let Some(word) = bits.get_mut(i / 64)
+            {
+                *word |= 1_u64 << (i % 64);
             }
         }
         self.uploaded_vertices = u32::try_from(count).unwrap_or(u32::MAX);
@@ -292,14 +294,11 @@ impl<V: Pod, I: Pod> Align<V, I> for VertexBuffers<V, I> {
     fn align_vertices(&mut self) {
         let align = wgpu::COPY_BUFFER_ALIGNMENT;
         let stride = std::mem::size_of::<V>() as wgpu::BufferAddress;
-        let unpadded_bytes = self.vertices.len() as wgpu::BufferAddress * stride;
-        let padding_bytes = (align - unpadded_bytes % align) % align;
-
-        if padding_bytes != 0 {
-            panic!(
-                "vertices are always aligned to wgpu::COPY_BUFFER_ALIGNMENT \
-                    because GpuVertexUniform is aligned"
-            )
+        if stride == 0 {
+            return;
+        }
+        while !(self.vertices.len() as wgpu::BufferAddress * stride).is_multiple_of(align) {
+            self.vertices.push(V::zeroed());
         }
     }
 
@@ -313,5 +312,23 @@ impl<V: Pod, I: Pod> Align<V, I> for VertexBuffers<V, I> {
         for _ in 0..overpad {
             self.indices.push(I::zeroed());
         }
+    }
+}
+
+impl super::ZeroTessellator<crate::vector::IndexDataType> {
+    /// Finalizes tessellated geometry into an upload-ready [`OverAlignedVertexBuffer`].
+    pub(crate) fn into_over_aligned_buffer(
+        mut self,
+    ) -> OverAlignedVertexBuffer<crate::render::ShaderVertex, crate::vector::IndexDataType> {
+        if let Some(mut prepack) = self.streaming_prepack.take() {
+            if !self.buffer.vertices.is_empty() {
+                prepack.push_vertices(&self.buffer.vertices);
+                self.buffer.vertices = Vec::new();
+            }
+            return prepack.finish(self.buffer.indices);
+        }
+        self.buffer.vertices.shrink_to_fit();
+        self.buffer.indices.shrink_to_fit();
+        self.buffer.into()
     }
 }

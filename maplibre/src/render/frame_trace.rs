@@ -89,11 +89,11 @@ impl Percentiles {
             return None;
         }
         values.sort();
-        let rank = |percent: usize| values[(values.len() * percent).div_ceil(100).max(1) - 1];
+        let rank_idx = |percent: usize| (values.len() * percent).div_ceil(100).saturating_sub(1);
         Some(Self {
-            p50: rank(50),
-            p95: rank(95),
-            p99: rank(99),
+            p50: *values.get(rank_idx(50))?,
+            p95: *values.get(rank_idx(95))?,
+            p99: *values.get(rank_idx(99))?,
         })
     }
 }

@@ -12,6 +12,24 @@
 #![deny(dead_code, unused_imports)]
 // The uncounted wgpu upload methods listed in clippy.toml are errors, not warnings.
 #![deny(clippy::disallowed_methods)]
+#![cfg_attr(
+    not(test),
+    forbid(
+        clippy::unwrap_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented
+    )
+)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing
+    )
+)]
 
 extern crate core;
 

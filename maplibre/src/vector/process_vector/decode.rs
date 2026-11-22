@@ -29,7 +29,10 @@ fn decode_mvt(data: &[u8]) -> Result<geozero::mvt::Tile, Box<dyn std::error::Err
         if end == data.len() {
             return Err(error.into());
         }
-        geozero::mvt::Tile::decode(&data[..end]).map_err(|_| error.into())
+        let Some(slice) = data.get(..end) else {
+            return Err(error.into());
+        };
+        geozero::mvt::Tile::decode(slice).map_err(|_| error.into())
     })
 }
 

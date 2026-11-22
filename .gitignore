@@ -51,3 +51,6 @@ xcode/libs/*/**
 
 # Python bytecode cache
 **/__pycache__/
+
+# Cargo Evidence Tier 2 verification artifacts
+artifacts/

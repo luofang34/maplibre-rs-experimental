@@ -4,7 +4,10 @@
 //! global spinlock. By caching freed small blocks (`16..=8192` bytes, `align <= 8`) in per-thread
 //! freelists, the render worker and tile workers avoid contending with decode, tessellation, and
 //! eviction bursts on frequent small/medium `Vec`/hash-map churn while draining on worker idle.
-#![allow(unsafe_code)]
+#![expect(
+    unsafe_code,
+    reason = "thread-local magazine allocator implements GlobalAlloc and raw freelist pointers"
+)]
 
 use std::{
     alloc::{GlobalAlloc, Layout, System},
@@ -32,32 +35,42 @@ impl Magazine {
     }
 
     fn pop(&mut self, class_idx: usize) -> Option<*mut u8> {
-        let head = self.heads[class_idx];
+        let head_slot = self.heads.get_mut(class_idx)?;
+        let head = *head_slot;
         if head.is_null() {
             return None;
         }
         // SAFETY: `head` points to a free `class_layout(class_idx)` block (size >= 16 >= ptr size)
         // whose first pointer-sized word stores the next node address.
         let next = unsafe { *head.cast::<*mut u8>() };
-        self.heads[class_idx] = next;
-        self.counts[class_idx] = self.counts[class_idx].saturating_sub(1);
+        *head_slot = next;
+        if let Some(count) = self.counts.get_mut(class_idx) {
+            *count = count.saturating_sub(1);
+        }
         Some(head)
     }
 
     fn push(&mut self, class_idx: usize, ptr_raw: *mut u8) -> bool {
-        if self.counts[class_idx] >= CLASS_CAPS[class_idx] {
+        let cap = CLASS_CAPS.get(class_idx).copied().unwrap_or(0);
+        if self.counts.get(class_idx).copied().unwrap_or(0) >= cap {
             self.drain_half(class_idx);
         }
+        let Some(head_slot) = self.heads.get_mut(class_idx) else {
+            return false;
+        };
         // SAFETY: `ptr_raw` is a uniquely owned block of `class_layout(class_idx)` (`>= 16` bytes,
         // 8-byte aligned), large and aligned enough to store a `*mut u8` freelist link at offset 0.
-        unsafe { *ptr_raw.cast::<*mut u8>() = self.heads[class_idx] };
-        self.heads[class_idx] = ptr_raw;
-        self.counts[class_idx] = self.counts[class_idx].saturating_add(1);
+        unsafe { *ptr_raw.cast::<*mut u8>() = *head_slot };
+        *head_slot = ptr_raw;
+        if let Some(count) = self.counts.get_mut(class_idx) {
+            *count = count.saturating_add(1);
+        }
         true
     }
 
     fn drain_half(&mut self, class_idx: usize) {
-        self.drain_to(class_idx, self.counts[class_idx] / 2);
+        let target = self.counts.get(class_idx).copied().unwrap_or(0) / 2;
+        self.drain_to(class_idx, target);
     }
 
     fn drain_all(&mut self) {
@@ -68,17 +81,24 @@ impl Magazine {
 
     fn drain_to(&mut self, class_idx: usize, target: u16) {
         let layout = class_layout(class_idx);
-        while self.counts[class_idx] > target {
-            let head = self.heads[class_idx];
+        while self.counts.get(class_idx).copied().unwrap_or(0) > target {
+            let Some(head_slot) = self.heads.get_mut(class_idx) else {
+                break;
+            };
+            let head = *head_slot;
             if head.is_null() {
-                self.counts[class_idx] = 0;
+                if let Some(count) = self.counts.get_mut(class_idx) {
+                    *count = 0;
+                }
                 break;
             }
             // SAFETY: `head` was allocated from `System` with `class_layout(class_idx)` and stores
             // its next freelist link in word 0.
             unsafe {
-                self.heads[class_idx] = *head.cast::<*mut u8>();
-                self.counts[class_idx] = self.counts[class_idx].saturating_sub(1);
+                *head_slot = *head.cast::<*mut u8>();
+                if let Some(count) = self.counts.get_mut(class_idx) {
+                    *count = count.saturating_sub(1);
+                }
                 System.dealloc(head, layout);
             }
         }
@@ -86,7 +106,7 @@ impl Magazine {
 }
 
 pub(crate) fn drain_thread_magazine() {
-    let _ = MAG.try_with(|tm| tm.with_mut(Magazine::drain_all));
+    drop(MAG.try_with(|tm| tm.with_mut(Magazine::drain_all)));
 }
 
 struct ThreadMagazine {

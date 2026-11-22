@@ -4,6 +4,7 @@ use image::RgbaImage;
 
 use crate::{
     context::MapContext,
+    coords::WorldTileCoords,
     environment::Environment,
     io::{
         apc::{apply_worker_messages, AsyncProcedureCall, Message, MessageError},
@@ -12,7 +13,7 @@ use crate::{
     kernel::Kernel,
     raster::{
         resource::RasterResources,
-        transferables::{LayerRaster, LayerRasterMissing, RasterTransferables},
+        transferables::{LayerRaster, LayerRasterMissing, RasterTransferables, SharedRasterDem},
         AvailableRasterLayerData, EmptyRasterLayerData, MissingRasterLayerData, RasterLayerData,
         RasterLayersDataComponent,
     },
@@ -84,6 +85,70 @@ pub(crate) fn apply_raster_message<T: RasterTransferables>(
     )
 }
 
+fn build_raster_layer_from_payload(
+    world: &mut World,
+    style: Option<&Style>,
+    circumference_meters: f64,
+    coords: WorldTileCoords,
+    payload: Result<SharedRasterDem, AvailableRasterLayerData>,
+) -> RasterLayerData {
+    let source = match &payload {
+        Ok(shared) => shared.source.clone(),
+        Err(layer) => layer.source.clone(),
+    };
+    if let Some((style, unpack)) =
+        style.and_then(|s| dem_unpack_for_source(s, &source).map(|u| (s, u)))
+    {
+        let loaded = match payload {
+            Ok(shared)
+                if shared.tile.unpack() == unpack
+                    && (shared.circumference_meters - circumference_meters).abs() <= 1e-3 =>
+            {
+                Some(LoadedDem::from_shared(shared.tile))
+            }
+            Ok(shared) => {
+                let fallback = shared.tile.resolve_fallback_image(&shared.fallback);
+                decode_image_to_dem(coords, &fallback, unpack, circumference_meters)
+            }
+            Err(layer) => decode_image_to_dem(coords, &layer.image, unpack, circumference_meters),
+        };
+        return match loaded {
+            Some(dem) => {
+                ingest_source_dem_with_style(&mut world.tiles, Some(style), &source, coords, dem);
+                RasterLayerData::Available(AvailableRasterLayerData {
+                    coords,
+                    source,
+                    image: RgbaImage::new(0, 0),
+                })
+            }
+            None => RasterLayerData::Missing(MissingRasterLayerData { coords, source }),
+        };
+    }
+    let available = match payload {
+        Err(layer) => layer,
+        Ok(shared) => {
+            let image = if shared.fallback.width() == 0 || shared.fallback.height() == 0 {
+                shared.tile.to_rgba_image()
+            } else {
+                Arc::try_unwrap(shared.fallback).unwrap_or_else(|arc| (*arc).clone())
+            };
+            AvailableRasterLayerData {
+                coords: shared.coords,
+                source: shared.source,
+                image,
+            }
+        }
+    };
+    if available.image.is_empty() {
+        RasterLayerData::Empty(EmptyRasterLayerData {
+            coords: available.coords,
+            source: available.source,
+        })
+    } else {
+        RasterLayerData::Available(available)
+    }
+}
+
 /// Records a worker's raster or `raster-dem` result on its tile. `raster-dem` sources are stored
 /// once as 2-texel bordered [`LoadedDem`] tiles in [`DemLayersComponent`](crate::terrain::DemLayersComponent)
 /// and mirrored to 3D terrain when shared.
@@ -109,78 +174,14 @@ pub(crate) fn apply_raster_message_with_style<T: RasterTransferables>(
         {
             return Ok(());
         }
-        let payload = message.into_dem_or_layer();
-        let source = match &payload {
-            Ok(shared) => shared.source.clone(),
-            Err(layer) => layer.source.clone(),
-        };
-        if let Some((style, unpack)) =
-            style.and_then(|s| dem_unpack_for_source(s, &source).map(|u| (s, u)))
-        {
-            let loaded = match payload {
-                Ok(shared)
-                    if shared.tile.unpack() == unpack
-                        && (shared.circumference_meters - circumference_meters).abs() <= 1e-3 =>
-                {
-                    Some(LoadedDem::from_shared(shared.tile))
-                }
-                Ok(shared) => {
-                    let fallback = shared.tile.resolve_fallback_image(&shared.fallback);
-                    decode_image_to_dem(coords, &fallback, unpack, circumference_meters)
-                }
-                Err(layer) => {
-                    decode_image_to_dem(coords, &layer.image, unpack, circumference_meters)
-                }
-            };
-            match loaded {
-                Some(dem) => {
-                    ingest_source_dem_with_style(
-                        &mut world.tiles,
-                        Some(style),
-                        &source,
-                        coords,
-                        dem,
-                    );
-                    (
-                        coords,
-                        RasterLayerData::Available(AvailableRasterLayerData {
-                            coords,
-                            source,
-                            image: RgbaImage::new(0, 0),
-                        }),
-                    )
-                }
-                None => (
-                    coords,
-                    RasterLayerData::Missing(MissingRasterLayerData { coords, source }),
-                ),
-            }
-        } else {
-            let available = match payload {
-                Err(layer) => layer,
-                Ok(shared) => {
-                    let image = if shared.fallback.width() == 0 || shared.fallback.height() == 0 {
-                        shared.tile.to_rgba_image()
-                    } else {
-                        Arc::try_unwrap(shared.fallback).unwrap_or_else(|arc| (*arc).clone())
-                    };
-                    AvailableRasterLayerData {
-                        coords: shared.coords,
-                        source: shared.source,
-                        image,
-                    }
-                }
-            };
-            let layer = if available.image.is_empty() {
-                RasterLayerData::Empty(EmptyRasterLayerData {
-                    coords: available.coords,
-                    source: available.source,
-                })
-            } else {
-                RasterLayerData::Available(available)
-            };
-            (coords, layer)
-        }
+        let layer = build_raster_layer_from_payload(
+            world,
+            style,
+            circumference_meters,
+            coords,
+            message.into_dem_or_layer(),
+        );
+        (coords, layer)
     } else if message.has_tag(T::LayerRasterMissing::message_tag()) {
         let message = message.into_transferable::<T::LayerRasterMissing>()?;
         let coords = message.coords();

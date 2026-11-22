@@ -21,11 +21,18 @@ fn fractional_zoom_limits_survive_the_worker_style_roundtrip() {
     ]});
     let style: Style = serde_json::from_value(document).expect("style");
     let encoded = serde_json::to_value(&style).expect("worker payload");
-    assert_eq!(encoded["layers"][0]["minzoom"], 12.125);
-    assert_eq!(encoded["layers"][0]["maxzoom"], 12.15);
+    assert_eq!(
+        encoded.pointer("/layers/0/minzoom"),
+        Some(&serde_json::json!(12.125))
+    );
+    assert_eq!(
+        encoded.pointer("/layers/0/maxzoom"),
+        Some(&serde_json::json!(12.15))
+    );
     let decoded: Style = serde_json::from_value(encoded).expect("worker style");
-    assert!(decoded.layers[0].is_visible_at(12.14));
-    assert!(!decoded.layers[0].is_visible_at(12.15));
+    let first = decoded.layers.first().expect("decoded layer");
+    assert!(first.is_visible_at(12.14));
+    assert!(!first.is_visible_at(12.15));
 }
 
 #[test]
@@ -39,7 +46,7 @@ fn layer_metadata_preserves_nested_json_values_without_affecting_visibility() {
     }))
     .expect("JSON metadata");
     let encoded = serde_json::to_value(&layer).expect("layer document");
-    assert_eq!(encoded["metadata"], metadata);
+    assert_eq!(encoded.get("metadata"), Some(&metadata));
     let decoded: StyleLayer = serde_json::from_value(encoded).expect("layer roundtrip");
     for zoom in [0.0, 12.14, 24.0] {
         assert!(decoded.is_visible_at(zoom));

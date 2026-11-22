@@ -200,29 +200,41 @@ pub(super) fn has_valid_mvt_geometry(feature: &tile::Feature) -> bool {
     }
     match feature.r#type {
         Some(1) => {
-            let count = (geom[0] >> 3) as usize;
-            (geom[0] & 0x7) == 1
+            let Some(&cmd) = geom.first() else {
+                return false;
+            };
+            let count = (cmd >> 3) as usize;
+            (cmd & 0x7) == 1
                 && count > 0
                 && count.checked_mul(2).and_then(|n| n.checked_add(1)) == Some(geom.len())
         }
         Some(kind @ (2 | 3)) => {
             let extra = if kind == 3 { 5 } else { 4 };
             while !geom.is_empty() {
-                if geom.len() < extra || geom[0] != (1 | (1 << 3)) || (geom[3] & 0x7) != 2 {
+                if geom.len() < extra
+                    || geom.first().copied() != Some(1 | (1 << 3))
+                    || geom.get(3).is_none_or(|&w| (w & 0x7) != 2)
+                {
                     return false;
                 }
-                let count = (geom[3] >> 3) as usize;
+                let Some(&line_cmd) = geom.get(3) else {
+                    return false;
+                };
+                let count = (line_cmd >> 3) as usize;
                 let Some(slice_size) = count.checked_mul(2).and_then(|n| n.checked_add(extra))
                 else {
                     return false;
                 };
                 if count == 0
                     || slice_size > geom.len()
-                    || (kind == 3 && (geom[slice_size - 1] & 0x7) != 7)
+                    || (kind == 3 && geom.get(slice_size - 1).is_none_or(|&w| (w & 0x7) != 7))
                 {
                     return false;
                 }
-                geom = &geom[slice_size..];
+                let Some(rest) = geom.get(slice_size..) else {
+                    return false;
+                };
+                geom = rest;
             }
             true
         }
@@ -321,7 +333,7 @@ pub(super) fn index_decoded_mvt_tile(
         if let Some(props) = shared {
             index.set_shared_properties(props);
         }
-        let _ = process_mvt_slice(layer, None, skip_props, &mut index);
+        drop(process_mvt_slice(layer, None, skip_props, &mut index));
     }
     index.get_geometries()
 }
@@ -334,7 +346,7 @@ pub(crate) fn looks_like_mvt(data: &[u8]) -> bool {
         .iter()
         .rposition(|byte| *byte != 0)
         .map_or(0, |idx| idx + 1);
-    let bytes = &data[..end];
+    let bytes = data.get(..end).unwrap_or_default();
     if bytes.is_empty() {
         return true;
     }
@@ -388,7 +400,7 @@ pub(super) fn try_decode_mvt_filtered(
         .iter()
         .rposition(|byte| *byte != 0)
         .map_or(0, |idx| idx + 1);
-    let bytes = &data[..end];
+    let bytes = data.get(..end)?;
     if bytes.is_empty() {
         return None;
     }

@@ -2,6 +2,10 @@
 
 use cgmath::{InnerSpace, Point2, Vector3, Vector4};
 
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "proptests.rs"]
+mod proptests;
+
 use super::{
     closest_unit_sphere_point_on_tile, distance_to_tile_2d, globe_tile_bounding_volume,
     nearest_tile_wrap, tile_spherical_cap, GlobeTileBoundsError, TileElevationRange,

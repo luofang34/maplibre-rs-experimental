@@ -57,9 +57,13 @@ fn round_single_ring(
     let mut arc_normals = Vec::with_capacity(n * 4);
 
     for i in 0..n {
-        let p_prev = open[(i + n - 1) % n];
-        let p_curr = open[i];
-        let p_next = open[(i + 1) % n];
+        let (Some(&p_prev), Some(&p_curr), Some(&p_next)) = (
+            open.get((i + n - 1) % n),
+            open.get(i),
+            open.get((i + 1) % n),
+        ) else {
+            continue;
+        };
 
         if on_clipped_edge(p_prev, p_curr, suppress_tile_boundary)
             || on_clipped_edge(p_curr, p_next, suppress_tile_boundary)
@@ -213,12 +217,14 @@ pub(super) fn build_rounded_extrusion(
         if rounded.points.len() < 3 {
             continue;
         }
-        builder.begin(point(rounded.points[0][0], rounded.points[0][1]));
-        for pt in &rounded.points[1..] {
-            builder.line_to(point(pt[0], pt[1]));
+        if let Some((&first, rest)) = rounded.points.split_first() {
+            builder.begin(point(first[0], first[1]));
+            for pt in rest {
+                builder.line_to(point(pt[0], pt[1]));
+            }
+            builder.end(true);
+            out_rings.push((rounded, facing));
         }
-        builder.end(true);
-        out_rings.push((rounded, facing));
     }
 
     Some((builder.build(), out_rings))
@@ -263,8 +269,9 @@ pub(super) fn emit_rounded_walls<I: From<VertexId>>(
         let mut travelled = 0.0_f32;
         for i in 0..n {
             let j = (i + 1) % n;
-            let a = rounded.points[i];
-            let b = rounded.points[j];
+            let (Some(&a), Some(&b)) = (rounded.points.get(i), rounded.points.get(j)) else {
+                continue;
+            };
             let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
             let length = dx.hypot(dy);
             if on_clipped_edge(a, b, heights.suppress_tile_boundary_walls) || length <= 1e-5 {
@@ -276,7 +283,9 @@ pub(super) fn emit_rounded_walls<I: From<VertexId>>(
             let start = travelled;
             travelled += length;
             let flat_normal = [*facing * dy / length, -*facing * dx / length];
-            let (na, nb) = match (rounded.arc_normals[i], rounded.arc_normals[j]) {
+            let arc_a = rounded.arc_normals.get(i).copied().flatten();
+            let arc_b = rounded.arc_normals.get(j).copied().flatten();
+            let (na, nb) = match (arc_a, arc_b) {
                 (Some(na), Some(nb))
                     if na[0] * flat_normal[0] + na[1] * flat_normal[1] > 0.25
                         && nb[0] * flat_normal[0] + nb[1] * flat_normal[1] > 0.25 =>
@@ -325,7 +334,7 @@ pub(super) fn emit_rounded_walls<I: From<VertexId>>(
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::expect_used)]
+    #![cfg_attr(test, allow(clippy::expect_used))]
     use lyon::{math::point, path::Path, tessellation::VertexBuffers};
 
     use crate::{

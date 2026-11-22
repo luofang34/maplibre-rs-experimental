@@ -95,82 +95,14 @@ pub(super) fn prepare_drapes(
     device: &wgpu::Device,
     drape_zoom: f64,
 ) -> Result<PreparedDrapes, SystemError> {
-    use super::spec_cache;
     let memory = world
         .resources
         .get::<MemoryBudget>()
         .copied()
         .unwrap_or_default();
     let clear_color = background_clear_color(style);
-    // A tile whose vector sources are finished but not yet in the buffer pool would drape
-    // blank; it shows an ancestor's drape until they are.
-    let strict = world
-        .resources
-        .get::<cohort::TextureCohort>()
-        .is_some_and(|state| state.enabled);
-    let capacity = match world.resources.get::<Eventually<WgpuTileViewPattern>>() {
-        Some(Initialized(pattern)) => pattern.remaining_metadata_capacity(),
-        _ => 0,
-    };
-    let style_zoom = view_state.style_zoom().value();
-    let prep_key = world
-        .resources
-        .get::<spec_cache::DrapePrepareCache>()
-        .and_then(|cache| cache.specs_gen_for(specs))
-        .map(|specs_gen| spec_cache::DrapePrepKey {
-            specs_gen,
-            drape_paint_zoom_bits: crate::vector::upload_system::drape_paint_zoom(drape_zoom)
-                .to_bits(),
-            clear_color_bits: [
-                clear_color.r.to_bits(),
-                clear_color.g.to_bits(),
-                clear_color.b.to_bits(),
-                clear_color.a.to_bits(),
-            ],
-            strict,
-            capacity,
-            vector_pool_state: spec_cache::vector_pool_state(world),
-            vector_arrival_epoch: crate::vector::arrival_epoch(world),
-            target_tiles_digest: spec_cache::target_coords_vector_digest(
-                specs.iter().map(|spec| spec.coords),
-                world,
-            ),
-            tiles_len: world.tiles.tiles.len(),
-            raster_gen: spec_cache::raster_mutation_gen(world),
-            hillshade_fingerprint: spec_cache::hillshade_fingerprint(world),
-            style_rev: style.revision(),
-            style_vis_digest: spec_cache::style_visibility_digest(style, style_zoom),
-        });
-    let cached_prep = prep_key.as_ref().and_then(|key| {
-        world
-            .resources
-            .get::<spec_cache::DrapePrepareCache>()
-            .and_then(|cache| cache.get_prep(key))
-    });
-    let prep = if let Some(cached) = cached_prep {
-        cached
-    } else {
-        let prints: Vec<u64> = {
-            let content = loaded_content(world);
-            specs
-                .iter()
-                .map(|spec| fingerprint(spec, &content, clear_color, drape_zoom))
-                .collect()
-        };
-        let mut ready: Vec<bool> = specs
-            .iter()
-            .map(|spec| readiness::ready(spec, style, style_zoom, world, strict))
-            .collect();
-        surface_covering::fit_metadata(specs, &mut ready, capacity);
-        let built = std::sync::Arc::new(spec_cache::CachedPrep { prints, ready });
-        if let Some(key) = prep_key {
-            world
-                .resources
-                .get_or_init_mut::<spec_cache::DrapePrepareCache>()
-                .store_prep(key, std::sync::Arc::clone(&built));
-        }
-        built
-    };
+    let prep =
+        compute_or_reuse_drape_prep(specs, style, view_state, world, clear_color, drape_zoom);
     let prints = prep.prints.as_slice();
     let ready = prep.ready.as_slice();
     let prefetch: Vec<bool> = {
@@ -180,27 +112,7 @@ pub(super) fn prepare_drapes(
             .map(|spec| ahead.is_some_and(|ahead| ahead.0.contains(&spec.coords)))
             .collect()
     };
-    let budget = world
-        .resources
-        .get::<DrapeBudget>()
-        .copied()
-        .unwrap_or_default();
-    let limit = if view_state.has_external_view() {
-        budget.per_eye_frame
-    } else {
-        budget.per_frame
-    };
-    // A moving view draws what fits its time; the view at rest draws the rest at full pace.
-    let budget = if crate::render::frame_signals::camera_moved(world, view_state) {
-        world
-            .resources
-            .get::<crate::terrain::drape_timing::DrapeCost>()
-            .copied()
-            .unwrap_or_default()
-            .drapes_within(budget.moving_time, limit)
-    } else {
-        limit
-    };
+    let (budget, limit) = drape_frame_budget(world, view_state);
     let view_textures = crate::terrain::drape_share::textures(world, memory);
     let (redraw, drape_sources, deferred, states) = {
         let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>()
@@ -254,4 +166,107 @@ pub(super) fn prepare_drapes(
         sources: drape_sources,
         clear_color,
     })
+}
+
+fn compute_or_reuse_drape_prep(
+    specs: &[TargetSpec],
+    style: &Style,
+    view_state: &ViewState,
+    world: &mut World,
+    clear_color: wgpu::Color,
+    drape_zoom: f64,
+) -> std::sync::Arc<super::spec_cache::CachedPrep> {
+    use super::spec_cache;
+    // A tile whose vector sources are finished but not yet in the buffer pool would drape
+    // blank; it shows an ancestor's drape until they are.
+    let strict = world
+        .resources
+        .get::<cohort::TextureCohort>()
+        .is_some_and(|state| state.enabled);
+    let capacity = match world.resources.get::<Eventually<WgpuTileViewPattern>>() {
+        Some(Initialized(pattern)) => pattern.remaining_metadata_capacity(),
+        _ => 0,
+    };
+    let style_zoom = view_state.style_zoom().value();
+    let prep_key = world
+        .resources
+        .get::<spec_cache::DrapePrepareCache>()
+        .and_then(|cache| cache.specs_gen_for(specs))
+        .map(|specs_gen| spec_cache::DrapePrepKey {
+            specs_gen,
+            drape_paint_zoom_bits: crate::vector::upload_system::drape_paint_zoom(drape_zoom)
+                .to_bits(),
+            clear_color_bits: [
+                clear_color.r.to_bits(),
+                clear_color.g.to_bits(),
+                clear_color.b.to_bits(),
+                clear_color.a.to_bits(),
+            ],
+            strict,
+            capacity,
+            vector_pool_state: spec_cache::vector_pool_state(world),
+            vector_arrival_epoch: crate::vector::arrival_epoch(world),
+            target_tiles_digest: spec_cache::target_coords_vector_digest(
+                specs.iter().map(|spec| spec.coords),
+                world,
+            ),
+            tiles_len: world.tiles.tiles.len(),
+            raster_gen: spec_cache::raster_mutation_gen(world),
+            hillshade_fingerprint: spec_cache::hillshade_fingerprint(world),
+            style_rev: style.revision(),
+            style_vis_digest: spec_cache::style_visibility_digest(style, style_zoom),
+        });
+    if let Some(cached) = prep_key.as_ref().and_then(|key| {
+        world
+            .resources
+            .get::<spec_cache::DrapePrepareCache>()
+            .and_then(|cache| cache.get_prep(key))
+    }) {
+        return cached;
+    }
+    let prints: Vec<u64> = {
+        let content = loaded_content(world);
+        specs
+            .iter()
+            .map(|spec| fingerprint(spec, &content, clear_color, drape_zoom))
+            .collect()
+    };
+    let mut ready: Vec<bool> = specs
+        .iter()
+        .map(|spec| readiness::ready(spec, style, style_zoom, world, strict))
+        .collect();
+    surface_covering::fit_metadata(specs, &mut ready, capacity);
+    let built = std::sync::Arc::new(spec_cache::CachedPrep { prints, ready });
+    if let Some(key) = prep_key {
+        world
+            .resources
+            .get_or_init_mut::<spec_cache::DrapePrepareCache>()
+            .store_prep(key, std::sync::Arc::clone(&built));
+    }
+    built
+}
+
+fn drape_frame_budget(world: &World, view_state: &ViewState) -> (usize, usize) {
+    let budget = world
+        .resources
+        .get::<DrapeBudget>()
+        .copied()
+        .unwrap_or_default();
+    let limit = if view_state.has_external_view() {
+        budget.per_eye_frame
+    } else {
+        budget.per_frame
+    };
+    // A moving view draws what fits its time; the view at rest draws the rest at full pace.
+    let effective = if crate::render::frame_signals::camera_moved(world, view_state) {
+        world
+            .resources
+            .get::<crate::terrain::drape_timing::DrapeCost>()
+            .copied()
+            .unwrap_or_default()
+            .drapes_within(budget.moving_time, limit)
+    } else {
+        limit
+    };
+    (effective, limit)
 }

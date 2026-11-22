@@ -141,10 +141,28 @@ async fn sliced_epoch_commits_all_pending_uploads_atomically_in_one_frame() {
         Rad(0.75),
     );
     let meta_a = vec![SDFShaderFeatureMetadata::from_placement(
-        1.0, 0.0, 1.0, 0.0, [0.0; 2], [1.0; 4], [0.0; 4], [0.0; 4],
+        crate::render::shaders::SymbolPlacementMetadata {
+            target_opacity: 1.0,
+            elevation: 0.0,
+            start_opacity: 1.0,
+            start_time_ms: 0.0,
+            shift: [0.0; 2],
+            color: [1.0; 4],
+            halo: [0.0; 4],
+            params: [0.0; 4],
+        },
     )];
     let meta_b = vec![SDFShaderFeatureMetadata::from_placement(
-        1.0, 0.0, 1.0, 0.0, [0.0; 2], [1.0; 4], [0.0; 4], [0.0; 4],
+        crate::render::shaders::SymbolPlacementMetadata {
+            target_opacity: 1.0,
+            elevation: 0.0,
+            start_opacity: 1.0,
+            start_time_ms: 0.0,
+            shift: [0.0; 2],
+            color: [1.0; 4],
+            halo: [0.0; 4],
+            params: [0.0; 4],
+        },
     )];
     let mut epoch = super::sliced::ActiveEpoch::for_atomic_upload_test(
         view,
@@ -157,13 +175,15 @@ async fn sliced_epoch_commits_all_pending_uploads_atomically_in_one_frame() {
     // First step finishes mirrored work with Duration::ZERO: must defer BEFORE uploading either bucket.
     assert!(
         !epoch.step_with_budget(
-            &world,
-            &style,
-            &renderer.queue,
-            &mut history,
-            &mut uploaded,
-            &mut scratch,
-            true,
+            super::sliced::EpochStepContext {
+                world: &world,
+                style: &style,
+                queue: &renderer.queue,
+                history: &mut history,
+                uploaded: &mut uploaded,
+                scratch: &mut scratch,
+                sliced: true,
+            },
             Duration::ZERO,
         ),
         "must yield before committing pending_uploads once budget is spent"
@@ -175,13 +195,15 @@ async fn sliced_epoch_commits_all_pending_uploads_atomically_in_one_frame() {
 
     // Next step enters pending_uploads and must drain BOTH buckets atomically even with Duration::ZERO.
     assert!(epoch.step_with_budget(
-        &world,
-        &style,
-        &renderer.queue,
-        &mut history,
-        &mut uploaded,
-        &mut scratch,
-        true,
+        super::sliced::EpochStepContext {
+            world: &world,
+            style: &style,
+            queue: &renderer.queue,
+            history: &mut history,
+            uploaded: &mut uploaded,
+            scratch: &mut scratch,
+            sliced: true,
+        },
         Duration::ZERO,
     ));
     assert!(uploaded.contains_key(&(coords_a, layer_id)));

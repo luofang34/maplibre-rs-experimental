@@ -1,6 +1,9 @@
 //! Map lifecycle, camera, error reporting, and thread-safe handle C ABI exports.
 
-#![allow(unsafe_code)]
+#![expect(
+    unsafe_code,
+    reason = "C ABI lifecycle exports borrow and free opaque map and handle pointers"
+)]
 
 use std::ffi::{c_char, CString};
 
@@ -260,7 +263,7 @@ pub unsafe extern "C" fn maplibre_handle_set_camera(
         }
         let options = CameraState::from(*cam).to_options()?;
         handle_ref.handle.send_fire_and_forget(move |map| {
-            let _ = map.jump_to(options);
+            drop(map.jump_to(options));
         });
         Ok(())
     })
@@ -286,7 +289,7 @@ pub unsafe extern "C" fn maplibre_handle_set_style_json(
         }
         let parsed_style = parse_style_json(raw_style)?;
         handle_ref.handle.send_fire_and_forget(move |map| {
-            let _ = apply_whole_style(map, parsed_style);
+            drop(apply_whole_style(map, parsed_style));
         });
         Ok(())
     })

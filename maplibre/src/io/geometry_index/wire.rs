@@ -75,6 +75,76 @@ pub struct WireTileIndex {
 }
 
 impl WireTileIndex {
+    fn push_geometry(
+        &mut self,
+        geom: &IndexedGeometry<f64>,
+        layer_map: &mut FxHashMap<Arc<str>, u32>,
+        prop_map: &mut FxHashMap<usize, u32>,
+    ) {
+        let source_layer_idx = *layer_map
+            .entry(geom.source_layer.clone())
+            .or_insert_with(|| {
+                let idx = self.strings.len() as u32;
+                self.strings.push(geom.source_layer.as_ref().to_owned());
+                idx
+            });
+        let prop_ptr = Arc::as_ptr(&geom.properties) as usize;
+        let prop_group_idx = *prop_map.entry(prop_ptr).or_insert_with(|| {
+            let idx = (self.prop_offsets.len() - 1) as u32;
+            encode_properties(&geom.properties, &mut self.prop_blobs);
+            self.prop_offsets.push(self.prop_blobs.len() as u32);
+            idx
+        });
+
+        let coord_start = (self.xy.len() / 2) as u32;
+        let ring_start = self.ring_ends.len() as u32;
+        let (kind, ring_count, coord_count) = match &geom.exact {
+            ExactGeometry::Point(pt) => {
+                self.xy.push(pt.x());
+                self.xy.push(pt.y());
+                (KIND_POINT, 0, 1)
+            }
+            ExactGeometry::LineString(line) => {
+                for c in &line.0 {
+                    self.xy.push(c.x);
+                    self.xy.push(c.y);
+                }
+                (KIND_LINESTRING, 0, line.0.len() as u32)
+            }
+            ExactGeometry::Polygon(poly) => {
+                let mut rel_coords = 0_u32;
+                for c in &poly.exterior().0 {
+                    self.xy.push(c.x);
+                    self.xy.push(c.y);
+                    rel_coords += 1;
+                }
+                self.ring_ends.push(rel_coords);
+                for hole in poly.interiors() {
+                    for c in &hole.0 {
+                        self.xy.push(c.x);
+                        self.xy.push(c.y);
+                        rel_coords += 1;
+                    }
+                    self.ring_ends.push(rel_coords);
+                }
+                (KIND_POLYGON, 1 + poly.interiors().len() as u32, rel_coords)
+            }
+        };
+
+        self.geometries.push(WireGeometry {
+            id: geom.id.unwrap_or(0),
+            source_layer_idx,
+            prop_group_idx,
+            feature_index: geom.feature_index,
+            ring_start,
+            ring_count,
+            coord_start,
+            coord_count,
+            kind,
+            has_id: geom.id.is_some(),
+        });
+    }
+
     /// Packs `index` into contiguous flat arrays while preserving shared `Arc<FeatureProperties>`
     /// groups and interned `source_layer` names.
     pub fn from_tile_index(index: &TileIndex) -> Self {
@@ -111,84 +181,72 @@ impl WireTileIndex {
         };
         let mut layer_map: FxHashMap<Arc<str>, u32> = FxHashMap::default();
         let mut prop_map: FxHashMap<usize, u32> = FxHashMap::default();
-
-        let mut push = |geom: &IndexedGeometry<f64>| {
-            let source_layer_idx =
-                *layer_map
-                    .entry(geom.source_layer.clone())
-                    .or_insert_with(|| {
-                        let idx = wire.strings.len() as u32;
-                        wire.strings.push(geom.source_layer.as_ref().to_owned());
-                        idx
-                    });
-            let prop_ptr = Arc::as_ptr(&geom.properties) as usize;
-            let prop_group_idx = *prop_map.entry(prop_ptr).or_insert_with(|| {
-                let idx = (wire.prop_offsets.len() - 1) as u32;
-                encode_properties(&geom.properties, &mut wire.prop_blobs);
-                wire.prop_offsets.push(wire.prop_blobs.len() as u32);
-                idx
-            });
-
-            let coord_start = (wire.xy.len() / 2) as u32;
-            let ring_start = wire.ring_ends.len() as u32;
-            let (kind, ring_count, coord_count) = match &geom.exact {
-                ExactGeometry::Point(pt) => {
-                    wire.xy.push(pt.x());
-                    wire.xy.push(pt.y());
-                    (KIND_POINT, 0, 1)
-                }
-                ExactGeometry::LineString(line) => {
-                    for c in &line.0 {
-                        wire.xy.push(c.x);
-                        wire.xy.push(c.y);
-                    }
-                    (KIND_LINESTRING, 0, line.0.len() as u32)
-                }
-                ExactGeometry::Polygon(poly) => {
-                    let mut rel_coords = 0_u32;
-                    for c in &poly.exterior().0 {
-                        wire.xy.push(c.x);
-                        wire.xy.push(c.y);
-                        rel_coords += 1;
-                    }
-                    wire.ring_ends.push(rel_coords);
-                    for hole in poly.interiors() {
-                        for c in &hole.0 {
-                            wire.xy.push(c.x);
-                            wire.xy.push(c.y);
-                            rel_coords += 1;
-                        }
-                        wire.ring_ends.push(rel_coords);
-                    }
-                    (KIND_POLYGON, 1 + poly.interiors().len() as u32, rel_coords)
-                }
-            };
-
-            wire.geometries.push(WireGeometry {
-                id: geom.id.unwrap_or(0),
-                source_layer_idx,
-                prop_group_idx,
-                feature_index: geom.feature_index,
-                ring_start,
-                ring_count,
-                coord_start,
-                coord_count,
-                kind,
-                has_id: geom.id.is_some(),
-            });
-        };
-
         match index {
-            TileIndex::Spatial { tree } => tree.iter().for_each(&mut push),
-            TileIndex::Linear { list } => list.iter().for_each(&mut push),
+            TileIndex::Spatial { tree } => {
+                tree.iter()
+                    .for_each(|geom| wire.push_geometry(geom, &mut layer_map, &mut prop_map));
+            }
+            TileIndex::Linear { list } => {
+                list.iter()
+                    .for_each(|geom| wire.push_geometry(geom, &mut layer_map, &mut prop_map));
+            }
             TileIndex::LazyMvt(lazy) => {
                 lazy.materialized_slice()
                     .into_iter()
                     .flatten()
-                    .for_each(&mut push);
+                    .for_each(|geom| wire.push_geometry(geom, &mut layer_map, &mut prop_map));
             }
         }
         wire
+    }
+
+    fn decode_geometry(
+        g: &WireGeometry,
+        xy: &[f64],
+        ring_ends: &[u32],
+        meta: FeatureMeta,
+    ) -> Option<IndexedGeometry<f64>> {
+        let total_coords = xy.len() / 2;
+        let coord_start = g.coord_start as usize;
+        let coord_end = coord_start.saturating_add(g.coord_count as usize);
+        if coord_end > total_coords {
+            return None;
+        }
+        match g.kind {
+            KIND_POINT if g.coord_count == 1 => {
+                let x = *xy.get(2 * coord_start)?;
+                let y = *xy.get(2 * coord_start + 1)?;
+                IndexedGeometry::from_point(Point::new(x, y), meta)
+            }
+            KIND_LINESTRING => {
+                let line = slice_linestring(xy, coord_start, coord_end);
+                IndexedGeometry::from_linestring(line, meta)
+            }
+            KIND_POLYGON if g.ring_count >= 1 => {
+                let ring_start = g.ring_start as usize;
+                let ring_end = ring_start.saturating_add(g.ring_count as usize);
+                let ends = ring_ends.get(ring_start..ring_end)?;
+                let mut prev = 0_usize;
+                let mut rings = Vec::with_capacity(ends.len());
+                for &rel_end in ends {
+                    let rel_end = rel_end as usize;
+                    if rel_end < prev || coord_start + rel_end > coord_end {
+                        return None;
+                    }
+                    rings.push(slice_linestring(
+                        xy,
+                        coord_start + prev,
+                        coord_start + rel_end,
+                    ));
+                    prev = rel_end;
+                }
+                let mut iter = rings.into_iter();
+                let exterior = iter.next()?;
+                let interiors: Vec<LineString<f64>> = iter.collect();
+                IndexedGeometry::from_polygon(Polygon::new(exterior, interiors), meta)
+            }
+            _ => None,
+        }
     }
 
     /// Reconstructs a [`TileIndex`] from flat wire arrays, bulk-loading an [`RTree`] when
@@ -211,83 +269,37 @@ impl WireTileIndex {
             }
         }
         let layers: Vec<Arc<str>> = self.strings.into_iter().map(Arc::from).collect();
-        let mut props: Vec<Arc<FeatureProperties>> =
-            Vec::with_capacity(self.prop_offsets.len().saturating_sub(1));
-        for pair in self.prop_offsets.windows(2) {
-            let start = pair[0] as usize;
-            let end = pair[1] as usize;
-            let decoded = self
-                .prop_blobs
-                .get(start..end)
-                .and_then(decode_properties)
-                .unwrap_or_default();
-            props.push(Arc::new(decoded));
-        }
+        let props: Vec<Arc<FeatureProperties>> = self
+            .prop_offsets
+            .windows(2)
+            .filter_map(|pair| {
+                let [start, end] = pair else {
+                    return None;
+                };
+                let decoded = self
+                    .prop_blobs
+                    .get(*start as usize..*end as usize)
+                    .and_then(decode_properties)
+                    .unwrap_or_default();
+                Some(Arc::new(decoded))
+            })
+            .collect();
 
-        let total_coords = self.xy.len() / 2;
         let mut geometries = Vec::with_capacity(self.geometries.len());
         for g in self.geometries {
-            let Some(source_layer) = layers.get(g.source_layer_idx as usize).cloned() else {
+            let (Some(source_layer), Some(properties)) = (
+                layers.get(g.source_layer_idx as usize).cloned(),
+                props.get(g.prop_group_idx as usize).cloned(),
+            ) else {
                 continue;
             };
-            let Some(properties) = props.get(g.prop_group_idx as usize).cloned() else {
-                continue;
-            };
-            let coord_start = g.coord_start as usize;
-            let coord_end = coord_start.saturating_add(g.coord_count as usize);
-            if coord_end > total_coords {
-                continue;
-            }
             let meta = FeatureMeta {
                 properties,
                 source_layer,
                 id: g.has_id.then_some(g.id),
                 feature_index: g.feature_index,
             };
-            let indexed = match g.kind {
-                KIND_POINT if g.coord_count == 1 => {
-                    let pt = Point::new(self.xy[2 * coord_start], self.xy[2 * coord_start + 1]);
-                    IndexedGeometry::from_point(pt, meta)
-                }
-                KIND_LINESTRING => {
-                    let line = slice_linestring(&self.xy, coord_start, coord_end);
-                    IndexedGeometry::from_linestring(line, meta)
-                }
-                KIND_POLYGON if g.ring_count >= 1 => {
-                    let ring_start = g.ring_start as usize;
-                    let ring_end = ring_start.saturating_add(g.ring_count as usize);
-                    let Some(ends) = self.ring_ends.get(ring_start..ring_end) else {
-                        continue;
-                    };
-                    let mut prev = 0_usize;
-                    let mut rings = Vec::with_capacity(ends.len());
-                    let mut valid = true;
-                    for &rel_end in ends {
-                        let rel_end = rel_end as usize;
-                        if rel_end < prev || coord_start + rel_end > coord_end {
-                            valid = false;
-                            break;
-                        }
-                        rings.push(slice_linestring(
-                            &self.xy,
-                            coord_start + prev,
-                            coord_start + rel_end,
-                        ));
-                        prev = rel_end;
-                    }
-                    if !valid {
-                        continue;
-                    }
-                    let mut iter = rings.into_iter();
-                    let Some(exterior) = iter.next() else {
-                        continue;
-                    };
-                    let interiors: Vec<LineString<f64>> = iter.collect();
-                    IndexedGeometry::from_polygon(Polygon::new(exterior, interiors), meta)
-                }
-                _ => None,
-            };
-            if let Some(indexed) = indexed {
+            if let Some(indexed) = Self::decode_geometry(&g, &self.xy, &self.ring_ends, meta) {
                 geometries.push(indexed);
             }
         }
@@ -303,13 +315,13 @@ impl WireTileIndex {
 }
 
 fn slice_linestring(xy: &[f64], start_coord: usize, end_coord: usize) -> LineString<f64> {
-    let mut coords = Vec::with_capacity(end_coord.saturating_sub(start_coord));
-    for i in start_coord..end_coord {
-        coords.push(Coord {
-            x: xy[2 * i],
-            y: xy[2 * i + 1],
-        });
-    }
+    let slice = xy.get(start_coord * 2..end_coord * 2).unwrap_or(&[]);
+    let coords = slice
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&[x, y]| Coord { x, y })
+        .collect();
     LineString::new(coords)
 }
 

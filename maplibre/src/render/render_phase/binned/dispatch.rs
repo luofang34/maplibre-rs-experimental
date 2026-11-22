@@ -39,114 +39,103 @@ pub fn draw_binned_mesh<'w, BPI: BinnedPhaseItem>(
 ) -> RenderCommandResult {
     match item.extra_index() {
         PhaseItemExtraIndex::None | PhaseItemExtraIndex::DynamicOffset(_) => {
-            let instances = item.batch_range().clone();
-            if instances.is_empty() {
-                return RenderCommandResult::Success;
-            }
-            match geometry {
-                DirectDrawGeometry::Indexed {
-                    indices,
-                    base_vertex,
-                } => pass.draw_indexed(indices, base_vertex, instances),
-                DirectDrawGeometry::NonIndexed { vertices } => pass.draw(vertices, instances),
-            }
-            RenderCommandResult::Success
+            draw_direct_instances(pass, item.batch_range().clone(), geometry, true)
         }
         PhaseItemExtraIndex::VertexInstance => {
             let range = item.batch_range();
             let count = range.end.saturating_sub(range.start);
-            if count == 0 {
-                return RenderCommandResult::Success;
-            }
             let has_base_vertex = world
                 .resources
                 .get::<DrawCapabilities>()
                 .is_none_or(|caps| caps.base_vertex);
-            match geometry {
-                DirectDrawGeometry::Indexed {
-                    indices,
-                    base_vertex,
-                } => {
-                    let effective_base_vertex = if has_base_vertex { base_vertex } else { 0 };
-                    pass.draw_indexed(indices, effective_base_vertex, 0..count);
-                }
-                DirectDrawGeometry::NonIndexed { vertices } => pass.draw(vertices, 0..count),
-            }
-            RenderCommandResult::Success
+            draw_direct_instances(pass, 0..count, geometry, has_base_vertex)
         }
         PhaseItemExtraIndex::IndirectParametersIndex {
             range,
             batch_set_index,
-        } => {
-            if range.is_empty() {
-                return RenderCommandResult::Success;
-            }
-            let Some(indirect_buffers) = world.resources.get::<IndirectParametersBuffers>() else {
-                return RenderCommandResult::Failure;
-            };
-            let count = range.end.saturating_sub(range.start);
-            let use_gpu_count = batch_set_index.is_some()
-                && indirect_buffers.gpu_count_enabled()
-                && world
-                    .resources
-                    .get::<DrawCapabilities>()
-                    .is_some_and(|caps| caps.multi_draw_indirect_count);
-
-            match geometry {
-                DirectDrawGeometry::Indexed { .. } => {
-                    let Some(buffer) = indirect_buffers.indexed_buffer() else {
-                        return RenderCommandResult::Failure;
-                    };
-                    let offset = IndirectParametersBuffers::indexed_byte_offset(range.start);
-                    if let (true, Some(bs_idx), Some(count_buf)) = (
-                        use_gpu_count,
-                        batch_set_index,
-                        indirect_buffers.batch_sets_buffer(),
-                    ) {
-                        let count_offset =
-                            IndirectParametersBuffers::batch_set_count_byte_offset(bs_idx);
-                        pass.multi_draw_indexed_indirect_count(
-                            buffer,
-                            offset,
-                            count_buf,
-                            count_offset,
-                            count,
-                        );
-                    } else if count > 1 {
-                        pass.multi_draw_indexed_indirect(buffer, offset, count);
-                    } else {
-                        pass.draw_indexed_indirect(buffer, offset);
-                    }
-                }
-                DirectDrawGeometry::NonIndexed { .. } => {
-                    let Some(buffer) = indirect_buffers.non_indexed_buffer() else {
-                        return RenderCommandResult::Failure;
-                    };
-                    let offset = IndirectParametersBuffers::non_indexed_byte_offset(range.start);
-                    if let (true, Some(bs_idx), Some(count_buf)) = (
-                        use_gpu_count,
-                        batch_set_index,
-                        indirect_buffers.batch_sets_buffer(),
-                    ) {
-                        let count_offset =
-                            IndirectParametersBuffers::batch_set_count_byte_offset(bs_idx);
-                        pass.multi_draw_indirect_count(
-                            buffer,
-                            offset,
-                            count_buf,
-                            count_offset,
-                            count,
-                        );
-                    } else if count > 1 {
-                        pass.multi_draw_indirect(buffer, offset, count);
-                    } else {
-                        pass.draw_indirect(buffer, offset);
-                    }
-                }
-            }
-            RenderCommandResult::Success
-        }
+        } => draw_indirect_mesh(pass, world, range, batch_set_index, geometry),
     }
+}
+
+fn draw_direct_instances<'w>(
+    pass: &mut TrackedRenderPass<'w>,
+    instances: Range<u32>,
+    geometry: DirectDrawGeometry,
+    has_base_vertex: bool,
+) -> RenderCommandResult {
+    if instances.is_empty() {
+        return RenderCommandResult::Success;
+    }
+    match geometry {
+        DirectDrawGeometry::Indexed {
+            indices,
+            base_vertex,
+        } => {
+            let effective_base_vertex = if has_base_vertex { base_vertex } else { 0 };
+            pass.draw_indexed(indices, effective_base_vertex, instances);
+        }
+        DirectDrawGeometry::NonIndexed { vertices } => pass.draw(vertices, instances),
+    }
+    RenderCommandResult::Success
+}
+
+fn draw_indirect_mesh<'w>(
+    pass: &mut TrackedRenderPass<'w>,
+    world: &'w World,
+    range: Range<u32>,
+    batch_set_index: Option<std::num::NonZeroU32>,
+    geometry: DirectDrawGeometry,
+) -> RenderCommandResult {
+    if range.is_empty() {
+        return RenderCommandResult::Success;
+    }
+    let Some(indirect_buffers) = world.resources.get::<IndirectParametersBuffers>() else {
+        return RenderCommandResult::Failure;
+    };
+    let count = range.end.saturating_sub(range.start);
+    let use_gpu_count = batch_set_index.is_some()
+        && indirect_buffers.gpu_count_enabled()
+        && world
+            .resources
+            .get::<DrawCapabilities>()
+            .is_some_and(|caps| caps.multi_draw_indirect_count);
+    let indexed = matches!(geometry, DirectDrawGeometry::Indexed { .. });
+    let (Some(buffer), offset) = (if indexed {
+        (
+            indirect_buffers.indexed_buffer(),
+            IndirectParametersBuffers::indexed_byte_offset(range.start),
+        )
+    } else {
+        (
+            indirect_buffers.non_indexed_buffer(),
+            IndirectParametersBuffers::non_indexed_byte_offset(range.start),
+        )
+    }) else {
+        return RenderCommandResult::Failure;
+    };
+    if let (true, Some(bs_idx), Some(count_buf)) = (
+        use_gpu_count,
+        batch_set_index,
+        indirect_buffers.batch_sets_buffer(),
+    ) {
+        let count_offset = IndirectParametersBuffers::batch_set_count_byte_offset(bs_idx);
+        if indexed {
+            pass.multi_draw_indexed_indirect_count(buffer, offset, count_buf, count_offset, count);
+        } else {
+            pass.multi_draw_indirect_count(buffer, offset, count_buf, count_offset, count);
+        }
+    } else if count > 1 {
+        if indexed {
+            pass.multi_draw_indexed_indirect(buffer, offset, count);
+        } else {
+            pass.multi_draw_indirect(buffer, offset, count);
+        }
+    } else if indexed {
+        pass.draw_indexed_indirect(buffer, offset);
+    } else {
+        pass.draw_indirect(buffer, offset);
+    }
+    RenderCommandResult::Success
 }
 
 /// Convenience wrapper over [`draw_binned_mesh`] for indexed meshes.

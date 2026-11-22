@@ -5,6 +5,7 @@
 
 mod input;
 mod preinit;
+mod wake;
 mod window;
 
 use std::{
@@ -20,8 +21,8 @@ use maplibre::{
     map::{handle::MapCommands, Map},
     render::frame_input::FrameInput,
 };
-use wasm_bindgen::{closure::Closure, prelude::*, JsCast};
-use web_sys::{DedicatedWorkerGlobalScope, MessageChannel, MessagePort};
+use wasm_bindgen::{closure::Closure, prelude::*};
+use web_sys::{DedicatedWorkerGlobalScope, MessagePort};
 
 pub(crate) use self::window::OffscreenEnvironment;
 use self::window::{register_runner_waker, unregister_runner_waker, SharedWindowState, WorkerApc};
@@ -65,63 +66,6 @@ struct RunnerInner {
 }
 
 impl RunnerInner {
-    fn clear_wake_timer(&self) {
-        self.immediate_wake_pending.set(false);
-        if let Some((id, _)) = self.wake_timer.borrow_mut().take() {
-            self.scope.clear_timeout_with_handle(id);
-        }
-    }
-
-    fn schedule_raf(rc: &Rc<RefCell<Self>>) {
-        let should_schedule = {
-            let Ok(inner) = rc.try_borrow() else {
-                return;
-            };
-            if inner.closed.get() || inner.raf_pending.get() {
-                false
-            } else {
-                inner.raf_pending.set(true);
-                inner.clear_wake_timer();
-                true
-            }
-        };
-        if !should_schedule {
-            return;
-        }
-        let Ok(inner) = rc.try_borrow() else {
-            return;
-        };
-        if inner.raf_closure.borrow().is_none() {
-            let weak = Rc::downgrade(rc);
-            let closure = Closure::wrap(Box::new(move |_ts: f64| {
-                if let Some(strong) = weak.upgrade() {
-                    Self::run_frame(&strong);
-                }
-            }) as Box<dyn FnMut(f64)>);
-            *inner.raf_closure.borrow_mut() = Some(closure);
-        }
-        let borrow = inner.raf_closure.borrow();
-        let Some(closure) = borrow.as_ref() else {
-            return;
-        };
-        let raf_fn =
-            js_sys::Reflect::get(&inner.scope, &JsValue::from_str("requestAnimationFrame"))
-                .ok()
-                .and_then(|v| v.dyn_into::<js_sys::Function>().ok());
-        if let Some(raf) = raf_fn {
-            if let Ok(id) = raf.call1(&inner.scope, closure.as_ref().unchecked_ref()) {
-                inner.raf_handle.set(id.as_f64().map(|n| n as i32));
-                return;
-            }
-        }
-        let _ = inner
-            .scope
-            .set_timeout_with_callback_and_timeout_and_arguments_0(
-                closure.as_ref().unchecked_ref(),
-                16,
-            );
-    }
-
     fn schedule_commands(rc: &Rc<RefCell<Self>>) {
         let should_spawn = match rc.try_borrow() {
             Ok(inner) => {
@@ -180,123 +124,84 @@ impl RunnerInner {
         }
     }
 
-    fn cancel_raf(&self) {
-        self.raf_pending.set(false);
-        if let Some(raf_id) = self.raf_handle.take() {
-            if let Ok(cancel) =
-                js_sys::Reflect::get(&self.scope, &JsValue::from_str("cancelAnimationFrame"))
-            {
-                if let Ok(func) = cancel.dyn_into::<js_sys::Function>() {
-                    let _ = func.call1(&self.scope, &JsValue::from(raf_id));
-                }
-            }
+    fn compute_next_wakeup(&self, after: Instant) -> (Option<Duration>, bool) {
+        let map_ready = if apc_supports_waker(self.map.kernel().apc()) {
+            self.map.has_ready_work()
+        } else {
+            self.map.needs_redraw()
+        };
+        let arrivals = apc_has_arrivals(self.map.kernel().apc());
+        let input_moved = self.input.moved_view();
+        let in_flight =
+            <WorkerApc as AsyncProcedureCall<UsedOffscreenKernelEnvironment>>::in_flight_calls(
+                self.map.kernel().apc(),
+            );
+        let wait = match (self.input.next_wait(after), self.map.next_retry_delay()) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        };
+
+        if !self.initial_load_settled.get()
+            && !self.map.is_loading()
+            && !arrivals
+            && in_flight == 0
+            && wait.is_none()
+        {
+            self.initial_load_settled.set(true);
+            <WorkerApc as AsyncProcedureCall<UsedOffscreenKernelEnvironment>>::set_boot_unthrottled(
+                self.map.kernel().apc(),
+                false,
+            );
         }
+        let next_delay = if map_ready || arrivals || input_moved || wait == Some(Duration::ZERO) {
+            Some(Duration::ZERO)
+        } else {
+            wait
+        };
+        let boot_pump = next_delay == Some(Duration::ZERO) && self.take_boot_pump(arrivals);
+        (next_delay, boot_pump)
     }
 
-    fn schedule_wakeup(rc: &Rc<RefCell<Self>>) {
-        let pump_immediate = {
-            let Ok(inner) = rc.try_borrow() else {
-                return;
-            };
-            if inner.closed.get() || inner.immediate_wake_pending.get() {
-                return;
-            }
-            let arrivals = apc_has_arrivals(inner.map.kernel().apc());
-            if inner.raf_pending.get() {
-                if !inner.initial_load_settled.get() && arrivals && inner.take_boot_pump(true) {
-                    inner.cancel_raf();
-                    true
-                } else {
-                    return;
-                }
-            } else if !inner.map.has_ready_work() && !arrivals && !inner.input.moved_view() {
-                return;
-            } else {
-                inner.take_boot_pump(arrivals)
-            }
-        };
-        if pump_immediate {
-            Self::schedule_immediate_pump(rc);
-        } else {
-            Self::schedule_raf(rc);
+    fn step_frame(&mut self) -> Option<(Option<Duration>, bool)> {
+        self.raf_pending.set(false);
+        self.raf_handle.set(None);
+        self.clear_wake_timer();
+        if self.closed.get() || self.commands.is_closed() {
+            self.shutdown();
+            return None;
         }
+
+        self.commands.apply(&mut self.map);
+        if self.commands.is_closed() {
+            self.shutdown();
+            return None;
+        }
+
+        let now = Instant::now();
+        let elapsed = (now - self.last_render).min(MAX_INPUT_DT);
+        self.last_render = now;
+        if let Ok(context) = self.map.context_mut() {
+            context
+                .world
+                .resources
+                .get_or_init_mut::<FrameInput>()
+                .timestamp = now - self.started;
+            self.input.update_state(context, elapsed);
+        }
+        if let Err(err) = self.map.run_schedule() {
+            log::error!("offscreen map schedule error: {err}");
+        }
+        self.commands.observe(&mut self.map);
+        Some(self.compute_next_wakeup(Instant::now()))
     }
 
     fn run_frame(rc: &Rc<RefCell<Self>>) {
-        let (next_delay, boot_pump) = {
-            let Ok(mut inner) = rc.try_borrow_mut() else {
-                return;
-            };
-            inner.raf_pending.set(false);
-            inner.raf_handle.set(None);
-            inner.clear_wake_timer();
-            if inner.closed.get() || inner.commands.is_closed() {
-                inner.shutdown();
-                return;
-            }
-
-            let s = &mut *inner;
-            s.commands.apply(&mut s.map);
-            if s.commands.is_closed() {
-                s.shutdown();
-                return;
-            }
-
-            let now = Instant::now();
-            let elapsed = (now - s.last_render).min(MAX_INPUT_DT);
-            s.last_render = now;
-            if let Ok(context) = s.map.context_mut() {
-                context
-                    .world
-                    .resources
-                    .get_or_init_mut::<FrameInput>()
-                    .timestamp = now - s.started;
-                s.input.update_state(context, elapsed);
-            }
-            if let Err(err) = s.map.run_schedule() {
-                log::error!("offscreen map schedule error: {err}");
-            }
-            s.commands.observe(&mut s.map);
-
-            let after = Instant::now();
-            let map_ready = if apc_supports_waker(s.map.kernel().apc()) {
-                s.map.has_ready_work()
-            } else {
-                s.map.needs_redraw()
-            };
-            let arrivals = apc_has_arrivals(s.map.kernel().apc());
-            let input_moved = s.input.moved_view();
-            let in_flight =
-                <WorkerApc as AsyncProcedureCall<UsedOffscreenKernelEnvironment>>::in_flight_calls(
-                    s.map.kernel().apc(),
-                );
-            let wait = match (s.input.next_wait(after), s.map.next_retry_delay()) {
-                (Some(a), Some(b)) => Some(a.min(b)),
-                (Some(a), None) => Some(a),
-                (None, Some(b)) => Some(b),
-                (None, None) => None,
-            };
-
-            if !s.initial_load_settled.get()
-                && !s.map.is_loading()
-                && !arrivals
-                && in_flight == 0
-                && wait.is_none()
-            {
-                s.initial_load_settled.set(true);
-                <WorkerApc as AsyncProcedureCall<UsedOffscreenKernelEnvironment>>::set_boot_unthrottled(
-                    s.map.kernel().apc(),
-                    false,
-                );
-            }
-            let next_delay = if map_ready || arrivals || input_moved || wait == Some(Duration::ZERO)
-            {
-                Some(Duration::ZERO)
-            } else {
-                wait
-            };
-            let boot_pump = next_delay == Some(Duration::ZERO) && s.take_boot_pump(arrivals);
-            (next_delay, boot_pump)
+        let Some((next_delay, boot_pump)) =
+            rc.try_borrow_mut().ok().and_then(|mut s| s.step_frame())
+        else {
+            return;
         };
 
         match (next_delay, boot_pump) {
@@ -308,89 +213,6 @@ impl RunnerInner {
                     inner.clear_wake_timer();
                 }
             }
-        }
-    }
-
-    fn schedule_wake(rc: &Rc<RefCell<Self>>, delay: Duration) {
-        Self::schedule_timer(rc, delay, Self::schedule_raf);
-    }
-
-    fn schedule_immediate_pump(rc: &Rc<RefCell<Self>>) {
-        let should_post = {
-            let Ok(inner) = rc.try_borrow() else {
-                return;
-            };
-            if inner.closed.get() || inner.raf_pending.get() || inner.immediate_wake_pending.get() {
-                return;
-            }
-            inner.clear_wake_timer();
-            if inner.boot_wake_channel.borrow().is_none() {
-                if let Ok(channel) = MessageChannel::new() {
-                    let port1 = channel.port1();
-                    let port2 = channel.port2();
-                    let weak = Rc::downgrade(rc);
-                    let closure = Closure::wrap(Box::new(move || {
-                        if let Some(strong) = weak.upgrade() {
-                            let still_pending = strong
-                                .try_borrow()
-                                .is_ok_and(|s| !s.closed.get() && s.immediate_wake_pending.get());
-                            if still_pending {
-                                Self::run_frame(&strong);
-                            }
-                        }
-                    }) as Box<dyn FnMut()>);
-                    port2.set_onmessage(Some(closure.as_ref().unchecked_ref()));
-                    *inner.boot_wake_channel.borrow_mut() = Some((port1, port2, closure));
-                }
-            }
-            if let Some((port1, _, _)) = inner.boot_wake_channel.borrow().as_ref() {
-                if port1.post_message(&JsValue::UNDEFINED).is_ok() {
-                    inner.immediate_wake_pending.set(true);
-                    false
-                } else {
-                    true
-                }
-            } else {
-                true
-            }
-        };
-        if should_post {
-            Self::schedule_timer(rc, Duration::ZERO, Self::run_frame);
-            if let Ok(inner) = rc.try_borrow() {
-                if inner.wake_timer.borrow().is_some() {
-                    inner.immediate_wake_pending.set(true);
-                }
-            }
-        }
-    }
-
-    fn schedule_timer(
-        rc: &Rc<RefCell<Self>>,
-        delay: Duration,
-        callback_fn: fn(&Rc<RefCell<Self>>),
-    ) {
-        let Ok(inner) = rc.try_borrow() else {
-            return;
-        };
-        if inner.closed.get() || inner.raf_pending.get() {
-            return;
-        }
-        inner.clear_wake_timer();
-        let weak = Rc::downgrade(rc);
-        let callback = Closure::wrap(Box::new(move || {
-            if let Some(strong) = weak.upgrade() {
-                callback_fn(&strong);
-            }
-        }) as Box<dyn FnMut()>);
-        let millis = i32::try_from(delay.as_millis()).unwrap_or(i32::MAX);
-        if let Ok(id) = inner
-            .scope
-            .set_timeout_with_callback_and_timeout_and_arguments_0(
-                callback.as_ref().unchecked_ref(),
-                millis,
-            )
-        {
-            *inner.wake_timer.borrow_mut() = Some((id, callback));
         }
     }
 

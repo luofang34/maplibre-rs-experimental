@@ -1,5 +1,4 @@
 //! Shared immutable DEM and static raster tile decoding on top of [`AssetCache`].
-#![allow(dead_code, unused_imports)]
 
 use std::sync::{atomic::Ordering, Arc};
 
@@ -172,6 +171,7 @@ impl AssetCache {
     }
 
     /// Fetches and PNG/JPEG-decodes a static raster tile once across all maps sharing this cache.
+    #[cfg(feature = "raster")]
     pub(crate) async fn load_raster_tile<HC: HttpClient>(
         &self,
         client: &SourceClient<HC>,

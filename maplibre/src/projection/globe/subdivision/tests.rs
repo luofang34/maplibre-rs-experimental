@@ -62,7 +62,7 @@ fn fill_triangle_is_cut_on_both_grid_axes() {
         .vertices
         .iter()
         .any(|vertex| vertex.position == [0.0, 2048.0]));
-    let _: VertexId = 0_u32.into();
+    assert_eq!(VertexId::from(0_u32), VertexId(0));
 }
 
 #[test]

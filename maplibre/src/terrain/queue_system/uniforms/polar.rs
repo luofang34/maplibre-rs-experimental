@@ -174,9 +174,9 @@ fn pole_feature_color(
     let mut matched = None;
     for (index, &count) in bucket.feature_indices.iter().enumerate() {
         let end = start.saturating_add(count as usize).min(vertices.len());
-        if vertices[start..end]
-            .iter()
-            .any(|vertex| vertex.position[1] == pole_y)
+        if vertices
+            .get(start..end)
+            .is_some_and(|slice| slice.iter().any(|vertex| vertex.position[1] == pole_y))
         {
             matched = Some(uniform.unwrap_or_else(|| {
                 bucket

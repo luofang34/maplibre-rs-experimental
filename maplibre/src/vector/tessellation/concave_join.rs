@@ -39,25 +39,58 @@ pub(super) fn split_unclipped_concave_joins<I>(
     }
     let max_sq = max_normal * max_normal;
     let norm_sq = |n: [f32; 2]| n[0] * n[0] + n[1] * n[1];
-    if !buffer.vertices[vertex_start..vertex_end]
-        .iter()
-        .any(|v| norm_sq(v.normal) > max_sq)
-    {
+    let Some(range) = buffer.vertices.get(vertex_start..vertex_end) else {
+        return;
+    };
+    if !range.iter().any(|v| norm_sq(v.normal) > max_sq) {
         return;
     }
+    let mut is_spiky: Vec<bool> = range.iter().map(|v| norm_sq(v.normal) > max_sq).collect();
+    let mut splits = collect_concave_splits(
+        buffer,
+        vertex_start,
+        vertex_end - vertex_start,
+        index_start..index_end,
+        &is_spiky,
+    );
+    let back_next_for = emit_split_vertices(buffer, vertex_start, &splits, &mut is_spiky);
+    rewrite_split_indices(
+        buffer,
+        vertex_start,
+        index_start..index_end,
+        &mut splits,
+        &back_next_for,
+    );
+    if is_spiky.iter().any(|&flag| flag) {
+        recover_closed_start_normals(
+            buffer,
+            vertex_start,
+            index_start,
+            index_end,
+            max_normal,
+            &mut is_spiky,
+        );
+    }
+}
 
-    let mut is_spiky: Vec<bool> = buffer.vertices[vertex_start..vertex_end]
-        .iter()
-        .map(|v| norm_sq(v.normal) > max_sq)
-        .collect();
-    let spiky = |idx: usize, flags: &[bool]| -> bool {
+#[expect(
+    clippy::indexing_slicing,
+    reason = "triangle triplets and Lyon-emitted vertex indices are within validated range bounds"
+)]
+fn collect_concave_splits<I: Copy + Into<u32>>(
+    buffer: &VertexBuffers<ShaderVertex, I>,
+    vertex_start: usize,
+    vertex_span: usize,
+    index_range: std::ops::Range<usize>,
+    is_spiky: &[bool],
+) -> Vec<Option<SplitJoin>> {
+    let spiky = |idx: usize| -> bool {
         idx.checked_sub(vertex_start)
-            .and_then(|s| flags.get(s).copied())
+            .and_then(|s| is_spiky.get(s).copied())
             .unwrap_or(false)
     };
-
-    let mut splits: Vec<Option<SplitJoin>> = vec![None; vertex_end - vertex_start];
-    for tri_offset in (index_start..index_end).step_by(3) {
+    let mut splits = vec![None; vertex_span];
+    for tri_offset in index_range.step_by(3) {
         let i0 = buffer.indices[tri_offset].into() as usize;
         let i1 = buffer.indices[tri_offset + 1].into() as usize;
         let i2 = buffer.indices[tri_offset + 2].into() as usize;
@@ -65,11 +98,7 @@ pub(super) fn split_unclipped_concave_joins<I>(
         if p0 != buffer.vertices[i1].position || p0 != buffer.vertices[i2].position {
             continue;
         }
-        let (s0, s1, s2) = (
-            spiky(i0, &is_spiky),
-            spiky(i1, &is_spiky),
-            spiky(i2, &is_spiky),
-        );
+        let (s0, s1, s2) = (spiky(i0), spiky(i1), spiky(i2));
         if u8::from(s0) + u8::from(s1) + u8::from(s2) != 1 {
             continue;
         }
@@ -93,8 +122,20 @@ pub(super) fn split_unclipped_concave_joins<I>(
             back_is_positive,
         });
     }
+    splits
+}
 
-    let mut back_next_for = vec![0_usize; vertex_end - vertex_start];
+#[expect(
+    clippy::indexing_slicing,
+    reason = "split slots match vertex_span and reference valid Lyon vertex indices"
+)]
+fn emit_split_vertices<I>(
+    buffer: &mut VertexBuffers<ShaderVertex, I>,
+    _vertex_start: usize,
+    splits: &[Option<SplitJoin>],
+    is_spiky: &mut [bool],
+) -> Vec<usize> {
+    let mut back_next_for = vec![0_usize; splits.len()];
     for (slot, maybe_split) in splits.iter().enumerate() {
         let Some(split) = maybe_split else {
             continue;
@@ -111,8 +152,21 @@ pub(super) fn split_unclipped_concave_joins<I>(
         back_next_for[slot] = back_next_idx;
         is_spiky[slot] = false;
     }
+    back_next_for
+}
 
-    for tri_offset in (index_start..index_end).step_by(3) {
+#[expect(
+    clippy::indexing_slicing,
+    reason = "index_range steps by 3 over valid triangle indices emitted by Lyon"
+)]
+fn rewrite_split_indices<I: Copy + Into<u32> + From<VertexId>>(
+    buffer: &mut VertexBuffers<ShaderVertex, I>,
+    vertex_start: usize,
+    index_range: std::ops::Range<usize>,
+    splits: &mut [Option<SplitJoin>],
+    back_next_for: &[usize],
+) {
+    for tri_offset in index_range.step_by(3) {
         let tri = [
             buffer.indices[tri_offset].into() as usize,
             buffer.indices[tri_offset + 1].into() as usize,
@@ -143,7 +197,6 @@ pub(super) fn split_unclipped_concave_joins<I>(
             }
             continue;
         }
-
         for (corner, &idx) in tri.iter().enumerate() {
             let Some(slot) = idx.checked_sub(vertex_start) else {
                 continue;
@@ -162,19 +215,12 @@ pub(super) fn split_unclipped_concave_joins<I>(
             }
         }
     }
-
-    if is_spiky.iter().any(|&flag| flag) {
-        recover_closed_start_normals(
-            buffer,
-            vertex_start,
-            index_start,
-            index_end,
-            max_normal,
-            &mut is_spiky,
-        );
-    }
 }
 
+#[expect(
+    clippy::indexing_slicing,
+    reason = "triangle triplets and spiky-vertex offsets are bounded by vertex_start..index_end"
+)]
 fn recover_closed_start_normals<I>(
     buffer: &mut VertexBuffers<ShaderVertex, I>,
     vertex_start: usize,

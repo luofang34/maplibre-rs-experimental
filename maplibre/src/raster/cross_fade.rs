@@ -92,8 +92,8 @@ impl RasterCrossFade {
         active
     }
 
-    /// Compares `current_tiles` against the previous frame's tiles for `source` and starts a live
-    /// timed fade for any previously-shown descendants replaced by coarser ancestors.
+    /// Compares `current_tiles` against the prior frame's tiles for `source` and starts a live
+    /// timed fade for any already-shown descendants replaced by coarser ancestors.
     pub fn update_live_fades(
         &mut self,
         source: &str,

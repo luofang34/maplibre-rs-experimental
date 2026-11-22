@@ -43,10 +43,12 @@ fn mid_page_hole_coalesces_immediately_without_ring_wrap() {
     pool.allocate_layer_geometry_unless(
         &TestQueue,
         e,
-        style_layer("land"),
-        &geometry(3),
-        0,
-        &[0; 3],
+        LayerGeometryUpload {
+            style_layer: std::sync::Arc::new(style_layer("land")),
+            geometry: &geometry(3),
+            layer_metadata: 0,
+            feature_metadata: &[0; 3],
+        },
         |tile| tile == a || tile == d,
     )
     .expect("coalesced mid-buffer hole reused without evicting protected boundary tiles");
@@ -199,14 +201,16 @@ fn decoupled_pool_shares_vertex_allocation_and_uses_single_uniform_metadata_reco
     pool.replace_layer_geometry_uniform_shared_unless(
         &TestQueue,
         coords,
-        style_layer("road-casing"),
-        &primary_geom,
-        None,
-        1_u32,
-        UniformMeta {
-            rgba: [0.1, 0.2, 0.3, 1.0],
+        UniformLayerUpload {
+            style_layer: std::sync::Arc::new(style_layer("road-casing")),
+            geometry: &primary_geom,
+            layer_metadata: 1_u32,
+            uniform_feature: UniformMeta {
+                rgba: [0.1, 0.2, 0.3, 1.0],
+            },
+            records: 6,
         },
-        6,
+        None,
         |_| false,
     )
     .expect("primary shared upload");
@@ -217,14 +221,16 @@ fn decoupled_pool_shares_vertex_allocation_and_uses_single_uniform_metadata_reco
     pool.replace_layer_geometry_uniform_shared_unless(
         &TestQueue,
         coords,
-        style_layer("road-core"),
-        &secondary_geom,
-        Some(&primary_geom.buffer.vertices),
-        2_u32,
-        UniformMeta {
-            rgba: [0.9, 0.8, 0.1, 1.0],
+        UniformLayerUpload {
+            style_layer: std::sync::Arc::new(style_layer("road-core")),
+            geometry: &secondary_geom,
+            layer_metadata: 2_u32,
+            uniform_feature: UniformMeta {
+                rgba: [0.9, 0.8, 0.1, 1.0],
+            },
+            records: 6,
         },
-        6,
+        Some(&primary_geom.buffer.vertices),
         |_| false,
     )
     .expect("secondary shared upload");
@@ -297,12 +303,14 @@ fn shared_layer_metadata_reuses_one_slot_across_tiles_and_reserves_zero_feature_
     pool.replace_layer_geometry_layer_uniform_shared_unless(
         &TestQueue,
         t0,
-        style_layer("roads"),
-        &geometry(3),
+        UniformLayerUpload {
+            style_layer: std::sync::Arc::new(style_layer("roads")),
+            geometry: &geometry(3),
+            layer_metadata: meta,
+            uniform_feature: 0_u32,
+            records: 3,
+        },
         None,
-        meta,
-        0_u32,
-        3,
         |_| false,
     )
     .expect("first tile");
@@ -317,12 +325,14 @@ fn shared_layer_metadata_reuses_one_slot_across_tiles_and_reserves_zero_feature_
     pool.replace_layer_geometry_layer_uniform_shared_unless(
         &TestQueue,
         t1,
-        style_layer("roads"),
-        &geometry(3),
+        UniformLayerUpload {
+            style_layer: std::sync::Arc::new(style_layer("roads")),
+            geometry: &geometry(3),
+            layer_metadata: meta,
+            uniform_feature: 0_u32,
+            records: 3,
+        },
         None,
-        meta,
-        0_u32,
-        3,
         |_| false,
     )
     .expect("second tile at same zoom shares layer metadata");
@@ -389,10 +399,12 @@ fn eviction_skips_protected_front_tile_and_reclaims_unprotected_tail_tiles() {
     pool.allocate_layer_geometry_unless(
         &TestQueue,
         incoming_visible,
-        style_layer("buildings"),
-        &geometry(2),
-        0,
-        &[0; 2],
+        LayerGeometryUpload {
+            style_layer: std::sync::Arc::new(style_layer("buildings")),
+            geometry: &geometry(2),
+            layer_metadata: 0,
+            feature_metadata: &[0; 2],
+        },
         |tile| tile == front_protected || tile == incoming_visible,
     )
     .expect("eviction must skip protected front tile and reclaim unprotected tile behind it");
@@ -427,12 +439,14 @@ fn paged_pool_utilizes_vertex_budget_without_layer_metadata_starvation() {
         pool.replace_layer_geometry_layer_uniform_shared_unless(
             &TestQueue,
             coords,
-            style_layer("building"),
-            &dense_geom,
+            UniformLayerUpload {
+                style_layer: std::sync::Arc::new(style_layer("building")),
+                geometry: &dense_geom,
+                layer_metadata: [0_u32; 16],
+                uniform_feature: 0_u32,
+                records: 60_000,
+            },
             None,
-            [0_u32; 16],
-            0_u32,
-            60_000,
             |_| true,
         )
         .expect("layer_metadata page sizing must not starve multi-page vertex capacity");

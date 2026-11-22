@@ -211,6 +211,6 @@ fn malformed_mvt_and_mlt_mutations_never_panic() {
             SinkContext::default(),
         );
         // Must return Ok or clean Err without panicking.
-        let _ = process_vector_tile(&mutated, request, &mut context);
+        let _outcome = process_vector_tile(&mutated, request, &mut context);
     }
 }

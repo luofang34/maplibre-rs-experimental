@@ -79,7 +79,7 @@ impl Parser {
     #[inline(never)]
     pub(super) fn push_index_key(&mut self, index: usize) {
         use std::fmt::Write;
-        let _ = write!(self.key, "[{index}]");
+        if write!(self.key, "[{index}]").is_err() {}
     }
 
     /// Parses the element at `index` of the current array.
@@ -157,168 +157,149 @@ impl Parser {
         items: &[Json],
         expected: Option<&Type>,
     ) -> Result<Expression> {
-        let args = &items[1..];
+        let args = items.get(1..).unwrap_or(&[]);
         // The expected type seeds the output type of branches and ramps; `value` says nothing.
         let output = expected.filter(|expected| **expected != Type::Value);
-        match operator {
-            "literal" => {
-                if args.len() != 1 {
-                    return Err(self.error(format!(
-                        "'literal' expression requires exactly one argument, but found {} instead.",
-                        args.len()
-                    )));
-                }
-                Ok(Expression::Literal(Value::from_json(&args[0])))
-            }
-            "format" => self.parse_format(args),
-            "zoom" => self.nullary(args, Expression::Global(Global::Zoom)),
-            "elevation" => self.nullary(args, Expression::Global(Global::Elevation)),
-            "heatmap-density" => self.nullary(args, Expression::Global(Global::HeatmapDensity)),
-            "line-progress" => self.nullary(args, Expression::Global(Global::LineProgress)),
-            "accumulated" => self.nullary(args, Expression::Accumulated),
-            "id" => self.nullary(args, Expression::Feature(FeatureProperty::Id)),
-            "geometry-type" => {
-                self.nullary(args, Expression::Feature(FeatureProperty::GeometryType))
-            }
-            "properties" => self.nullary(args, Expression::Feature(FeatureProperty::Properties)),
-            "pi" => self.nullary(args, Expression::Literal(Value::Number(std::f64::consts::PI))),
-            "e" => self.nullary(args, Expression::Literal(Value::Number(std::f64::consts::E))),
-            "ln2" => self.nullary(
-                args,
-                Expression::Literal(Value::Number(std::f64::consts::LN_2)),
-            ),
-            "get" | "has" => self.parse_lookup(operator, args),
+        if let Some(expr) = self.parse_nullary_operator(operator, args)? {
+            return Ok(expr);
+        }
+        if let Some(expr) = self.parse_control_or_collection(operator, args, expected, output)? {
+            return Ok(expr);
+        }
+        self.parse_math_or_string_operator(operator, args)
+    }
+
+    fn parse_nullary_operator(&self, operator: &str, args: &[Json]) -> Result<Option<Expression>> {
+        let expr = match operator {
+            "zoom" => Expression::Global(Global::Zoom),
+            "elevation" => Expression::Global(Global::Elevation),
+            "heatmap-density" => Expression::Global(Global::HeatmapDensity),
+            "line-progress" => Expression::Global(Global::LineProgress),
+            "accumulated" => Expression::Accumulated,
+            "id" => Expression::Feature(FeatureProperty::Id),
+            "geometry-type" => Expression::Feature(FeatureProperty::GeometryType),
+            "properties" => Expression::Feature(FeatureProperty::Properties),
+            "pi" => Expression::Literal(Value::Number(std::f64::consts::PI)),
+            "e" => Expression::Literal(Value::Number(std::f64::consts::E)),
+            "ln2" => Expression::Literal(Value::Number(std::f64::consts::LN_2)),
+            _ => return Ok(None),
+        };
+        self.nullary(args, expr).map(Some)
+    }
+
+    fn parse_control_or_collection(
+        &mut self,
+        operator: &str,
+        args: &[Json],
+        expected: Option<&Type>,
+        output: Option<&Type>,
+    ) -> Result<Option<Expression>> {
+        let expr = match operator {
+            "literal" => self.parse_literal_expr(args)?,
+            "format" => self.parse_format(args)?,
+            "get" | "has" => self.parse_lookup(operator, args)?,
             // A feature's state is kept among its properties under a reserved name, so a
             // host that sets state writes properties and every property path reads it.
             "feature-state" => match args {
                 [Json::String(key)] => self.parse_lookup(
                     "get",
                     &[Json::String(format!("{FEATURE_STATE_PREFIX}{key}"))],
-                ),
-                _ => Err(self.error("Expected 1 string argument, but found a different shape.")),
+                )?,
+                _ => {
+                    return Err(
+                        self.error("Expected 1 string argument, but found a different shape.")
+                    )
+                }
             },
             "global-state" => match args {
-                [Json::String(key)] => Ok(Expression::GlobalState(key.clone())),
-                _ => Err(self.error("Expected 1 argument, but found a different shape.")),
+                [Json::String(key)] => Expression::GlobalState(key.clone()),
+                _ => return Err(self.error("Expected 1 argument, but found a different shape.")),
             },
-            "var" => self.parse_var(args),
-            "let" => self.parse_let(args, expected),
-            "case" => self.parse_case(args, output),
-            "match" => self.parse_match(args, output),
-            "coalesce" => self.parse_coalesce(args, output),
-            "step" => self.parse_step(args, output),
+            "var" => self.parse_var(args)?,
+            "let" => self.parse_let(args, expected)?,
+            "case" => self.parse_case(args, output)?,
+            "match" => self.parse_match(args, output)?,
+            "coalesce" => self.parse_coalesce(args, output)?,
+            "step" => self.parse_step(args, output)?,
             "interpolate" | "interpolate-lab" | "interpolate-hcl" => {
-                self.parse_interpolate(operator, args, output)
+                self.parse_interpolate(operator, args, output)?
             }
-            "==" | "!=" | "<" | "<=" | ">" | ">=" => self.parse_comparison(operator, args),
+            "==" | "!=" | "<" | "<=" | ">" | ">=" => self.parse_comparison(operator, args)?,
             "all" | "any" => {
                 let operands = self.parse_varargs(args, &Type::Boolean)?;
-                Ok(if operator == "all" {
+                if operator == "all" {
                     Expression::All(operands)
                 } else {
                     Expression::Any(operands)
-                })
+                }
             }
-            "!" => Ok(Expression::Not(Box::new(
-                self.parse_single(args, &Type::Boolean)?,
-            ))),
-            "collator" => self.parse_collator(args),
-            "within" => self.parse_geometry(args, true),
-            "distance" => self.parse_geometry(args, false),
-            "number-format" => self.parse_number_format(args),
-            "resolved-locale" => Ok(Expression::ResolvedLocale(Box::new(
-                self.parse_single(args, &Type::Collator)?,
-            ))),
-            "is-supported-script" => Ok(Expression::IsSupportedScript(Box::new(
-                self.parse_single(args, &Type::String)?,
-            ))),
-            "in" => self.parse_in(args),
-            "index-of" => self.parse_index_of(args),
-            "slice" => self.parse_slice(args),
-            "length" => self.parse_length(args),
-            "at" => self.parse_at_operator(args),
-            "split" => self.parse_split(args),
-            "join" => self.parse_join(args),
+            "!" => Expression::Not(Box::new(self.parse_single(args, &Type::Boolean)?)),
+            "collator" => self.parse_collator(args)?,
+            "within" => self.parse_geometry(args, true)?,
+            "distance" => self.parse_geometry(args, false)?,
+            "number-format" => self.parse_number_format(args)?,
+            "resolved-locale" => {
+                Expression::ResolvedLocale(Box::new(self.parse_single(args, &Type::Collator)?))
+            }
+            "is-supported-script" => {
+                Expression::IsSupportedScript(Box::new(self.parse_single(args, &Type::String)?))
+            }
+            "in" => self.parse_in(args)?,
+            "index-of" => self.parse_index_of(args)?,
+            "slice" => self.parse_slice(args)?,
+            "length" => self.parse_length(args)?,
+            "at" => self.parse_at_operator(args)?,
+            "split" => self.parse_split(args)?,
+            "join" => self.parse_join(args)?,
+            _ => return Ok(None),
+        };
+        Ok(Some(expr))
+    }
+
+    fn parse_literal_expr(&self, args: &[Json]) -> Result<Expression> {
+        let [first] = args else {
+            return Err(self.error(format!(
+                "'literal' expression requires exactly one argument, but found {} instead.",
+                args.len()
+            )));
+        };
+        Ok(Expression::Literal(Value::from_json(first)))
+    }
+
+    fn parse_math_or_string_operator(
+        &mut self,
+        operator: &str,
+        args: &[Json],
+    ) -> Result<Expression> {
+        const MATH_OPS: &[(&str, MathFunction)] = &[
+            ("sqrt", MathFunction::Sqrt),
+            ("ln", MathFunction::Ln),
+            ("log10", MathFunction::Log10),
+            ("log2", MathFunction::Log2),
+            ("sin", MathFunction::Sin),
+            ("cos", MathFunction::Cos),
+            ("tan", MathFunction::Tan),
+            ("asin", MathFunction::Asin),
+            ("acos", MathFunction::Acos),
+            ("atan", MathFunction::Atan),
+            ("abs", MathFunction::Abs),
+            ("round", MathFunction::Round),
+            ("floor", MathFunction::Floor),
+            ("ceil", MathFunction::Ceil),
+        ];
+        if let Some((_, function)) = MATH_OPS.iter().find(|&&(name, _)| name == operator) {
+            return Ok(Expression::Math {
+                function: *function,
+                operand: Box::new(self.parse_single(args, &Type::Number)?),
+            });
+        }
+        if let Some(result) = self.parse_arithmetic_or_coercion(operator, args) {
+            return result;
+        }
+        match operator {
             "error" => Ok(Expression::Error(Box::new(
                 self.parse_single(args, &Type::String)?,
             ))),
-            "+" => self.parse_arithmetic(Arithmetic::Add, args, None),
-            "*" => self.parse_arithmetic(Arithmetic::Multiply, args, None),
-            "-" => match args.len() {
-                1 | 2 => self.parse_arithmetic(Arithmetic::Subtract, args, None),
-                found => Err(self.error(format!(
-                    "Expected 1 or 2 arguments, but found {found} instead."
-                ))),
-            },
-            "/" => self.parse_arithmetic(Arithmetic::Divide, args, Some(2)),
-            "%" => self.parse_arithmetic(Arithmetic::Remainder, args, Some(2)),
-            "^" => self.parse_arithmetic(Arithmetic::Power, args, Some(2)),
-            "sqrt" | "ln" | "log10" | "log2" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan"
-            | "abs" | "round" | "floor" | "ceil" => {
-                let function = match operator {
-                    "sqrt" => MathFunction::Sqrt,
-                    "ln" => MathFunction::Ln,
-                    "log10" => MathFunction::Log10,
-                    "log2" => MathFunction::Log2,
-                    "sin" => MathFunction::Sin,
-                    "cos" => MathFunction::Cos,
-                    "tan" => MathFunction::Tan,
-                    "asin" => MathFunction::Asin,
-                    "acos" => MathFunction::Acos,
-                    "atan" => MathFunction::Atan,
-                    "abs" => MathFunction::Abs,
-                    "round" => MathFunction::Round,
-                    "floor" => MathFunction::Floor,
-                    _ => MathFunction::Ceil,
-                };
-                Ok(Expression::Math {
-                    function,
-                    operand: Box::new(self.parse_single(args, &Type::Number)?),
-                })
-            }
-            "min" | "max" => Ok(Expression::MinMax {
-                max: operator == "max",
-                operands: self.parse_varargs(args, &Type::Number)?,
-            }),
-            "typeof" => Ok(Expression::TypeOf(Box::new(
-                self.parse_single(args, &Type::Value)?,
-            ))),
-            "number" | "string" | "boolean" | "object" => {
-                let required = match operator {
-                    "number" => Type::Number,
-                    "string" => Type::String,
-                    "boolean" => Type::Boolean,
-                    _ => Type::Object,
-                };
-                let operands = self.parse_at_least_one(args, &Type::Value)?;
-                Ok(Expression::Assert { required, operands })
-            }
-            "array" => self.parse_array_assertion(args),
-            "to-number" | "to-color" => {
-                let operands = self.parse_at_least_one(args, &Type::Value)?;
-                Ok(Expression::Coerce {
-                    coercion: if operator == "to-number" {
-                        Coercion::Number
-                    } else {
-                        Coercion::Color
-                    },
-                    operands,
-                })
-            }
-            "to-string" | "to-boolean" => {
-                if args.len() != 1 {
-                    return Err(self.error("Expected one argument."));
-                }
-                let operands = vec![self.parse_at(&args[0], 1, Some(&Type::Value))?];
-                Ok(Expression::Coerce {
-                    coercion: if operator == "to-string" {
-                        Coercion::String
-                    } else {
-                        Coercion::Boolean
-                    },
-                    operands,
-                })
-            }
             "image" => Ok(Expression::Image(Box::new(
                 self.parse_single(args, &Type::String)?,
             ))),
@@ -342,6 +323,73 @@ impl Parser {
         }
     }
 
+    fn parse_arithmetic_or_coercion(
+        &mut self,
+        operator: &str,
+        args: &[Json],
+    ) -> Option<Result<Expression>> {
+        Some(match operator {
+            "+" => self.parse_arithmetic(Arithmetic::Add, args, None),
+            "*" => self.parse_arithmetic(Arithmetic::Multiply, args, None),
+            "-" => match args.len() {
+                1 | 2 => self.parse_arithmetic(Arithmetic::Subtract, args, None),
+                found => Err(self.error(format!(
+                    "Expected 1 or 2 arguments, but found {found} instead."
+                ))),
+            },
+            "/" => self.parse_arithmetic(Arithmetic::Divide, args, Some(2)),
+            "%" => self.parse_arithmetic(Arithmetic::Remainder, args, Some(2)),
+            "^" => self.parse_arithmetic(Arithmetic::Power, args, Some(2)),
+            "min" | "max" => {
+                self.parse_varargs(args, &Type::Number)
+                    .map(|operands| Expression::MinMax {
+                        max: operator == "max",
+                        operands,
+                    })
+            }
+            "typeof" => self
+                .parse_single(args, &Type::Value)
+                .map(|operand| Expression::TypeOf(Box::new(operand))),
+            "number" | "string" | "boolean" | "object" => {
+                let required = match operator {
+                    "number" => Type::Number,
+                    "string" => Type::String,
+                    "boolean" => Type::Boolean,
+                    _ => Type::Object,
+                };
+                self.parse_at_least_one(args, &Type::Value)
+                    .map(|operands| Expression::Assert { required, operands })
+            }
+            "array" => self.parse_array_assertion(args),
+            "to-number" | "to-color" => {
+                self.parse_at_least_one(args, &Type::Value)
+                    .map(|operands| Expression::Coerce {
+                        coercion: if operator == "to-number" {
+                            Coercion::Number
+                        } else {
+                            Coercion::Color
+                        },
+                        operands,
+                    })
+            }
+            "to-string" | "to-boolean" => {
+                let [first] = args else {
+                    return Some(Err(self.error("Expected one argument.")));
+                };
+                self.parse_at(first, 1, Some(&Type::Value))
+                    .map(|operand| Expression::Coerce {
+                        coercion: if operator == "to-string" {
+                            Coercion::String
+                        } else {
+                            Coercion::Boolean
+                        },
+                        operands: vec![operand],
+                    })
+            }
+            _ => return None,
+        })
+    }
+
     fn nullary(&self, args: &[Json], expression: Expression) -> Result<Expression> {
         if !args.is_empty() {
             return Err(self.error(format!(
@@ -353,13 +401,13 @@ impl Parser {
     }
 
     pub(super) fn parse_single(&mut self, args: &[Json], expected: &Type) -> Result<Expression> {
-        if args.len() != 1 {
+        let [first] = args else {
             return Err(self.error(format!(
                 "Expected 1 argument, but found {} instead.",
                 args.len()
             )));
-        }
-        self.parse_at(&args[0], 1, Some(expected))
+        };
+        self.parse_at(first, 1, Some(expected))
     }
 
     pub(super) fn parse_exactly(

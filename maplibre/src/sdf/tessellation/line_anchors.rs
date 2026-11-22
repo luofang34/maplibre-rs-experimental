@@ -40,11 +40,19 @@ fn distance(a: Point, b: Point) -> f64 {
 
 /// Arc length from the start of `line` to the anchor.
 pub(super) fn distance_to(line: &[Point], anchor: LineAnchor) -> f64 {
-    let before: f64 = line[..=anchor.segment]
+    let before: f64 = line
+        .get(..=anchor.segment)
+        .unwrap_or(&[])
         .windows(2)
-        .map(|segment| distance(segment[0], segment[1]))
+        .filter_map(|segment| match segment {
+            [a, b] => Some(distance(*a, *b)),
+            _ => None,
+        })
         .sum();
-    before + distance(line[anchor.segment], anchor.point)
+    let tail = line
+        .get(anchor.segment)
+        .map_or(0.0, |&start| distance(start, anchor.point));
+    before + tail
 }
 
 fn direction(from: Point, to: Point) -> f64 {
@@ -53,7 +61,10 @@ fn direction(from: Point, to: Point) -> f64 {
 
 fn length(line: &[Point]) -> f64 {
     line.windows(2)
-        .map(|segment| distance(segment[0], segment[1]))
+        .filter_map(|segment| match segment {
+            [a, b] => Some(distance(*a, *b)),
+            _ => None,
+        })
         .sum()
 }
 
@@ -64,19 +75,20 @@ pub(super) fn clip_to_tile(lines: &[Vec<Point>]) -> Vec<Vec<Point>> {
     for line in lines {
         let mut current: Option<usize> = None;
         for pair in line.windows(2) {
-            let (mut from, mut to) = (pair[0], pair[1]);
+            let [a, b] = pair else { continue };
+            let (mut from, mut to) = (*a, *b);
             if !clip_segment(&mut from, &mut to, extent) {
                 continue;
             }
             let continues = current
-                .and_then(|index| clipped[index].last())
+                .and_then(|index| clipped.get(index).and_then(|pts| pts.last()))
                 .is_some_and(|last| *last == from);
             if !continues {
                 clipped.push(vec![from]);
                 current = Some(clipped.len() - 1);
             }
-            if let Some(index) = current {
-                clipped[index].push(to);
+            if let Some(pts) = current.and_then(|index| clipped.get_mut(index)) {
+                pts.push(to);
             }
         }
     }
@@ -85,7 +97,8 @@ pub(super) fn clip_to_tile(lines: &[Vec<Point>]) -> Vec<Vec<Point>> {
 
 /// Trims a segment to the square `0..extent` in each axis; false when nothing remains.
 fn clip_segment(from: &mut Point, to: &mut Point, extent: f64) -> bool {
-    for axis in 0..2 {
+    for is_y in [false, true] {
+        let coord = |p: &Point| if is_y { p[1] } else { p[0] };
         for bound in [0.0, extent] {
             let inside = |value: f64| {
                 if bound == 0.0 {
@@ -94,12 +107,13 @@ fn clip_segment(from: &mut Point, to: &mut Point, extent: f64) -> bool {
                     value < bound
                 }
             };
-            let (a_in, b_in) = (inside(from[axis]), inside(to[axis]));
+            let (from_v, to_v) = (coord(from), coord(to));
+            let (a_in, b_in) = (inside(from_v), inside(to_v));
             if !a_in && !b_in {
                 return false;
             }
             if a_in != b_in {
-                let t = (bound - from[axis]) / (to[axis] - from[axis]);
+                let t = (bound - from_v) / (to_v - from_v);
                 let cut = |a: Point, b: Point| {
                     [
                         (a[0] + (b[0] - a[0]) * t).round(),
@@ -156,14 +170,16 @@ fn resample(
     let (mut travelled, mut marked) = (0.0, offset - spacing);
     let mut anchors = Vec::new();
     for (index, pair) in line.windows(2).enumerate() {
-        let segment = distance(pair[0], pair[1]);
-        let angle = direction(pair[0], pair[1]);
+        let [p0, p1] = pair else { continue };
+        let (p0, p1) = (*p0, *p1);
+        let segment = distance(p0, p1);
+        let angle = direction(p0, p1);
         while marked + spacing < travelled + segment {
             marked += spacing;
             let t = (marked - travelled) / segment;
             let point = [
-                (pair[0][0] + (pair[1][0] - pair[0][0]) * t).round(),
-                (pair[0][1] + (pair[1][1] - pair[0][1]) * t).round(),
+                (p0[0] + (p1[0] - p0[0]) * t).round(),
+                (p0[1] + (p1[1] - p0[1]) * t).round(),
             ];
             let fits = (0.0..extent).contains(&point[0])
                 && (0.0..extent).contains(&point[1])
@@ -194,15 +210,17 @@ pub(super) fn center_anchor(line: &[Point], params: AnchorSpacing) -> Option<Lin
     let total = length(line);
     let mut remaining = total / 2.0;
     for (index, pair) in line.windows(2).enumerate() {
-        let segment = distance(pair[0], pair[1]);
+        let [p0, p1] = pair else { continue };
+        let (p0, p1) = (*p0, *p1);
+        let segment = distance(p0, p1);
         if remaining <= segment && segment > 0.0 {
             let t = remaining / segment;
             let anchor = LineAnchor {
                 point: [
-                    (pair[0][0] + (pair[1][0] - pair[0][0]) * t).round(),
-                    (pair[0][1] + (pair[1][1] - pair[0][1]) * t).round(),
+                    (p0[0] + (p1[0] - p0[0]) * t).round(),
+                    (p0[1] + (p1[1] - p0[1]) * t).round(),
                 ],
-                angle: direction(pair[0], pair[1]),
+                angle: direction(p0, p1),
                 segment: index,
             };
             let window = if params.checks_bends {
@@ -246,11 +264,11 @@ fn bends_within_limit(
     // Walk back to the segment the label starts on.
     while anchor_distance > -label_length / 2.0 {
         index -= 1;
-        if index < 0 {
+        let Some(&prev_pt) = usize::try_from(index).ok().and_then(|idx| line.get(idx)) else {
             return false;
-        }
-        anchor_distance -= distance(line[index as usize], point);
-        point = line[index as usize];
+        };
+        anchor_distance -= distance(prev_pt, point);
+        point = prev_pt;
     }
     let mut index = index as usize;
     // A label without length walks nowhere and leaves the index on the anchor's own segment.

@@ -77,7 +77,6 @@ impl<T: RasterTransferables, C: Context> ProcessRasterContext<T, C> {
 
 impl<T: RasterTransferables, C: Context> ProcessRasterContext<T, C> {
     /// Delivers an already-decoded RGBA8 image for `(coords, source)`.
-    #[allow(dead_code)]
     pub fn finish_decoded(
         &mut self,
         coords: &WorldTileCoords,

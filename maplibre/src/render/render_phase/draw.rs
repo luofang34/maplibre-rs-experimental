@@ -61,7 +61,6 @@ pub enum RenderCommandResult {
 macro_rules! render_command_tuple_impl {
     ($($name: ident),*) => {
         impl<P, $($name: RenderCommand<P>),*> RenderCommand<P> for ($($name,)*) {
-            #[allow(non_snake_case)]
             fn render<'w>(
                 world: &'w World,
                 item: &P,
@@ -169,7 +168,7 @@ impl<P> DrawFunctions<P> {
         self.draw_functions.is_empty()
     }
 
-    /// Looks up the [`DrawFunctionId`] previously registered under key type `T`.
+    /// Looks up the [`DrawFunctionId`] registered under key type `T`.
     #[inline]
     pub fn id<T: 'static>(&self) -> Option<DrawFunctionId> {
         self.indices.get(&TypeId::of::<T>()).copied()

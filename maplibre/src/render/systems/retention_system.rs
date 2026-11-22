@@ -24,7 +24,6 @@ use crate::{
     render::{
         eventually::{Eventually, Eventually::Initialized},
         memory_budget::{MemoryBudget, MemoryPressure},
-        projection::view_region_for_projection,
         tile_view_pattern::{WgpuTileViewPattern, DEFAULT_TILE_SIZE},
         view_state::{ViewState, ViewStatePadding},
     },
@@ -270,7 +269,6 @@ fn tiles_in_use_inner(
         .resources
         .get::<crate::render::eye_covering::FrameLooseCovering>()
         .filter(|cache| cache.host_frame == host_frame);
-
     let request_padding = if tight_tile_requests
         || (cfg!(target_arch = "wasm32") && !view_state.has_external_view())
     {
@@ -280,53 +278,20 @@ fn tiles_in_use_inner(
     };
     let max_zoom = source_max_zoom(style, TileKind::Vector);
     let visible_level = view_state.zoom().zoom_level(DEFAULT_TILE_SIZE);
-    if let Some((cached_view, _, _)) = loose_cache
-        .and_then(|c| c.view_tiles.as_ref())
-        .filter(|(_, padding, _)| *padding == request_padding)
-    {
-        for &coords in cached_view.as_deref().into_iter().flatten() {
-            retain_loose_vector_tile(&mut in_use, coords, max_zoom);
-        }
-    } else if let Some(shared_tiles) = (request_padding == ViewStatePadding::Tight)
-        .then(|| {
-            crate::render::eye_covering::matching_tight_tiles(
-                world,
-                style,
-                view_state,
-                visible_level,
-            )
-        })
-        .flatten()
-    {
-        for &coords in shared_tiles {
-            retain_loose_vector_tile(&mut in_use, coords, max_zoom);
-        }
-    } else {
-        match view_region_for_projection(style, view_state, world, visible_level, request_padding) {
-            Ok(Some(requested)) => {
-                for coords in requested.iter() {
-                    retain_loose_vector_tile(&mut in_use, coords, max_zoom);
-                }
-            }
-            Ok(None) => {}
-            Err(error) => tracing::warn!(%error, "cannot select the requested tiles to keep"),
-        }
-    }
-
-    if let Some((cached_raster, _, _)) = loose_cache
-        .and_then(|c| c.raster_regions.as_ref())
-        .filter(|(_, padding, _)| *padding == request_padding)
-    {
-        for (_, tiles) in cached_raster {
-            in_use.extend(tiles.iter().copied());
-        }
-    } else if let Ok(regions) =
-        crate::render::projection::raster_source_regions(style, view_state, world, request_padding)
-    {
-        for (_, tiles) in regions {
-            in_use.extend(tiles);
-        }
-    }
+    ancestors::retain_requested_vector_tiles(
+        world,
+        style,
+        view_state,
+        (loose_cache, request_padding, max_zoom, visible_level),
+        &mut in_use,
+    );
+    ancestors::retain_requested_raster_tiles(
+        world,
+        style,
+        view_state,
+        (loose_cache, request_padding),
+        &mut in_use,
+    );
     ancestors::retain_terrain_region_if_needed(
         world,
         style,

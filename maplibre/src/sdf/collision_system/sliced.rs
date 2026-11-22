@@ -11,8 +11,10 @@ use std::{collections::VecDeque, time::Duration};
 use rustc_hash::{FxHashMap, FxHashMap as HashMap, FxHashSet as HashSet};
 
 use super::{
-    family, layer_pass::slice::LayerSliceProgress, signatures::obstructed_grid, temporal,
-    upload_diff, VisibleLayer,
+    family,
+    layer_pass::slice::{LayerSliceProgress, SlicePlacementState, SliceStepContext},
+    signatures::obstructed_grid,
+    temporal, upload_diff, VisibleLayer,
 };
 use crate::{
     coords::WorldTileCoords,
@@ -67,6 +69,18 @@ pub(super) struct ActiveEpoch {
     outcomes: HashMap<String, (Vec<WorldTileCoords>, family::Outcomes)>,
     mirrored: VecDeque<(String, String, Vec<WorldTileCoords>)>,
     pending_uploads: VecDeque<(StyleLayerId, WorldTileCoords, Vec<SDFShaderFeatureMetadata>)>,
+}
+
+/// Shared frame resources and caches used while stepping a sliced collision epoch.
+pub(super) struct EpochStepContext<'a> {
+    pub(super) world: &'a World,
+    pub(super) style: &'a Style,
+    pub(super) queue: &'a UploadQueue,
+    pub(super) history: &'a mut temporal::PlacementHistory,
+    pub(super) uploaded:
+        &'a mut FxHashMap<(WorldTileCoords, StyleLayerId), upload_diff::CachedBucketMetadata>,
+    pub(super) scratch: &'a mut upload_diff::MetadataScratchPool,
+    pub(super) sliced: bool,
 }
 
 impl ActiveEpoch {
@@ -142,54 +156,28 @@ impl ActiveEpoch {
     /// `SLICE_BUDGET_SETTLED` (`1.0 ms` on `wasm32` / `1.8 ms` native) when `sliced` is `true`
     /// (or runs all groups in one pass when `sliced` is `false`), returning `true` once all
     /// groups have been placed and uploaded atomically.
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn step(
-        &mut self,
-        world: &World,
-        style: &Style,
-        queue: &UploadQueue,
-        history: &mut temporal::PlacementHistory,
-        uploaded: &mut FxHashMap<
-            (WorldTileCoords, StyleLayerId),
-            upload_diff::CachedBucketMetadata,
-        >,
-        scratch: &mut upload_diff::MetadataScratchPool,
-        sliced: bool,
-        moving_this_frame: bool,
-    ) -> bool {
+    pub(super) fn step(&mut self, ctx: EpochStepContext<'_>, moving_this_frame: bool) -> bool {
         let budget = if moving_this_frame {
             SLICE_BUDGET_MOVING
         } else {
             SLICE_BUDGET_SETTLED
         };
-        self.step_with_budget(
-            world, style, queue, history, uploaded, scratch, sliced, budget,
-        )
+        self.step_with_budget(ctx, budget)
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn step_with_budget(
         &mut self,
-        world: &World,
-        style: &Style,
-        queue: &UploadQueue,
-        history: &mut temporal::PlacementHistory,
-        uploaded: &mut FxHashMap<
-            (WorldTileCoords, StyleLayerId),
-            upload_diff::CachedBucketMetadata,
-        >,
-        scratch: &mut upload_diff::MetadataScratchPool,
-        sliced: bool,
+        mut ctx: EpochStepContext<'_>,
         budget: Duration,
     ) -> bool {
         let started = instant::Instant::now();
         let mut did_work = false;
 
-        while self.group_idx < self.groups.len() {
-            if sliced && self.active_group.is_none() && did_work && started.elapsed() >= budget {
+        while let Some(group) = self.groups.get_mut(self.group_idx) {
+            if ctx.sliced && self.active_group.is_none() && did_work && started.elapsed() >= budget
+            {
                 return false;
             }
-            let group = &mut self.groups[self.group_idx];
             if let Some(leader) = &group.leader_of {
                 self.mirrored.push_back((
                     leader.clone(),
@@ -199,167 +187,213 @@ impl ActiveEpoch {
                 self.group_idx += 1;
                 continue;
             }
-            let Some(paint) = resolve_paint(style, &group.style_layer_id) else {
+            let Some(paint) = resolve_paint(ctx.style, &group.style_layer_id) else {
                 self.group_idx += 1;
                 continue;
             };
-
-            if self.active_group.is_none() {
-                let mut live_coords = Vec::with_capacity(group.coords.len());
-                let mut live_refs = Vec::with_capacity(group.coords.len());
-                for &coords in &group.coords {
-                    if let Some(layer) = resolve_layer(world, coords, &group.style_layer_id) {
-                        live_coords.push(coords);
-                        live_refs.push(layer);
-                    }
-                }
-                group.coords = live_coords;
-                self.active_group = Some(LayerSliceProgress::start(
-                    world,
-                    &self.view_state,
-                    &self.projection,
-                    &live_refs,
-                    paint,
-                    history,
-                ));
-                did_work = true;
-            }
-
-            let resolved: Vec<Option<&SymbolLayerData>> = group
-                .coords
-                .iter()
-                .map(|&coords| resolve_layer(world, coords, &group.style_layer_id))
-                .collect();
-            let Some(mut progress) = self.active_group.take() else {
-                self.group_idx += 1;
-                continue;
-            };
-            did_work = true;
-            let finished = progress.step(
-                world,
-                &self.view_state,
-                &self.projection,
-                &resolved,
-                paint,
-                group.zoom_limits,
-                (&mut self.boxes, &mut self.placed, history, scratch),
-                || sliced && started.elapsed() >= budget,
-            );
-            if !finished {
-                self.active_group = Some(progress);
+            did_work |= self.ensure_active_group(ctx.world, paint, ctx.history);
+            let Some(progress) = self.step_active_group(&mut ctx, paint, started, budget) else {
                 return false;
-            }
-
-            let coords = std::mem::take(&mut group.coords);
-            if group.is_leader {
-                self.outcomes.insert(
-                    group.style_layer_id.clone(),
-                    (coords.clone(), progress.outcomes),
-                );
-            }
-            let layer_id = StyleLayerId::intern(&group.style_layer_id);
-            for (c, meta) in coords.into_iter().zip(progress.metadata) {
-                self.pending_uploads.push_back((layer_id, c, meta));
+            };
+            if let Some(progress) = progress {
+                self.commit_finished_group(progress);
             }
             self.group_idx += 1;
         }
 
-        self.finish_mirrored_and_upload(
-            world, style, queue, uploaded, scratch, sliced, started, budget, did_work,
-        )
+        self.finish_mirrored_and_upload(ctx, started, budget, did_work)
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn finish_mirrored_and_upload(
+    fn ensure_active_group(
         &mut self,
         world: &World,
-        style: &Style,
-        queue: &UploadQueue,
-        uploaded: &mut FxHashMap<
-            (WorldTileCoords, StyleLayerId),
-            upload_diff::CachedBucketMetadata,
-        >,
-        scratch: &mut upload_diff::MetadataScratchPool,
-        sliced: bool,
+        paint: &SymbolPaint,
+        history: &temporal::PlacementHistory,
+    ) -> bool {
+        if self.active_group.is_some() {
+            return false;
+        }
+        let Some(group) = self.groups.get_mut(self.group_idx) else {
+            return false;
+        };
+        let mut live_coords = Vec::with_capacity(group.coords.len());
+        let mut live_refs = Vec::with_capacity(group.coords.len());
+        for &coords in &group.coords {
+            if let Some(layer) = resolve_layer(world, coords, &group.style_layer_id) {
+                live_coords.push(coords);
+                live_refs.push(layer);
+            }
+        }
+        group.coords = live_coords;
+        self.active_group = Some(LayerSliceProgress::start(
+            world,
+            &self.view_state,
+            &self.projection,
+            &live_refs,
+            paint,
+            history,
+        ));
+        true
+    }
+
+    fn step_active_group(
+        &mut self,
+        ctx: &mut EpochStepContext<'_>,
+        paint: &SymbolPaint,
+        started: instant::Instant,
+        budget: Duration,
+    ) -> Option<Option<LayerSliceProgress>> {
+        let Some(group) = self.groups.get(self.group_idx) else {
+            return Some(None);
+        };
+        let resolved: Vec<Option<&SymbolLayerData>> = group
+            .coords
+            .iter()
+            .map(|&coords| resolve_layer(ctx.world, coords, &group.style_layer_id))
+            .collect();
+        let Some(mut progress) = self.active_group.take() else {
+            return Some(None);
+        };
+        let sliced = ctx.sliced;
+        let finished = progress.step(
+            SliceStepContext {
+                world: ctx.world,
+                view_state: &self.view_state,
+                projection: &self.projection,
+                layers: &resolved,
+                paint,
+                zoom_limits: group.zoom_limits,
+            },
+            SlicePlacementState {
+                boxes: &mut self.boxes,
+                placed: &mut self.placed,
+                history: ctx.history,
+                scratch: ctx.scratch,
+            },
+            || sliced && started.elapsed() >= budget,
+        );
+        if !finished {
+            self.active_group = Some(progress);
+            return None;
+        }
+        Some(Some(progress))
+    }
+
+    fn commit_finished_group(&mut self, progress: LayerSliceProgress) {
+        let Some(group) = self.groups.get_mut(self.group_idx) else {
+            return;
+        };
+        let coords = std::mem::take(&mut group.coords);
+        if group.is_leader {
+            self.outcomes.insert(
+                group.style_layer_id.clone(),
+                (coords.clone(), progress.outcomes),
+            );
+        }
+        let layer_id = StyleLayerId::intern(&group.style_layer_id);
+        for (c, meta) in coords.into_iter().zip(progress.metadata) {
+            self.pending_uploads.push_back((layer_id, c, meta));
+        }
+    }
+
+    fn finish_mirrored_and_upload(
+        &mut self,
+        mut ctx: EpochStepContext<'_>,
         started: instant::Instant,
         budget: Duration,
         mut did_work: bool,
     ) -> bool {
         while !self.mirrored.is_empty() {
-            if sliced && did_work && started.elapsed() >= budget {
+            if ctx.sliced && did_work && started.elapsed() >= budget {
                 return false;
             }
-            let Some((leader_id, follower_id, follower_coords)) = self.mirrored.pop_front() else {
+            let Some(entry) = self.mirrored.pop_front() else {
                 break;
             };
-            let (Some((leader_coords, outcome)), Some(paint)) = (
-                self.outcomes.get(&leader_id),
-                resolve_paint(style, &follower_id),
-            ) else {
-                continue;
-            };
-            let leader_refs: Vec<&SymbolLayerData> = leader_coords
-                .iter()
-                .filter_map(|&c| resolve_layer(world, c, &leader_id))
-                .collect();
-            if leader_refs.len() != leader_coords.len() {
-                continue;
-            }
-            let mut live_follower_coords = Vec::with_capacity(follower_coords.len());
-            let mut follower_refs = Vec::with_capacity(follower_coords.len());
-            for c in follower_coords {
-                if let Some(layer) = resolve_layer(world, c, &follower_id) {
-                    live_follower_coords.push(c);
-                    follower_refs.push(layer);
-                }
-            }
-            let metadata = family::mirror(
-                (&leader_refs, outcome),
-                &follower_refs,
-                (paint, self.zoom),
-                &mut self.placed,
-            );
-            did_work = true;
-            let layer_id = StyleLayerId::intern(&follower_id);
-            for (c, meta) in live_follower_coords.into_iter().zip(metadata) {
-                self.pending_uploads.push_back((layer_id, c, meta));
-            }
+            did_work |= self.process_mirrored_group(ctx.world, ctx.style, entry);
         }
 
-        if let Some(Initialized(pool)) = world.resources.get::<Eventually<SymbolBufferPool>>() {
+        if let Some(Initialized(pool)) = ctx.world.resources.get::<Eventually<SymbolBufferPool>>() {
             // Defer before flushing so GPU updates across all tiles commit atomically in one frame.
-            if sliced && did_work && !self.pending_uploads.is_empty() && started.elapsed() >= budget
+            if ctx.sliced
+                && did_work
+                && !self.pending_uploads.is_empty()
+                && started.elapsed() >= budget
             {
                 return false;
             }
-            while let Some((layer_id, coords, metadata)) = self.pending_uploads.pop_front() {
-                let Some(entry) = pool.index().get_layers(coords).and_then(|entries| {
-                    entries
-                        .iter()
-                        .find(|entry| entry.style_layer_id == layer_id)
-                }) else {
-                    scratch.recycle(metadata);
-                    continue;
-                };
-                let key = (coords, layer_id);
-                let prev = uploaded.remove(&key);
-                let next_cached = upload_diff::diff_and_upload_bucket_with_scratch(
-                    pool,
-                    queue,
-                    entry,
-                    prev.as_ref(),
-                    metadata,
-                    scratch,
-                );
-                if let Some(prev) = prev {
-                    scratch.recycle(prev.quads);
-                }
-                uploaded.insert(key, next_cached);
-            }
+            self.flush_pending_uploads(pool, &mut ctx);
         } else {
-            self.recycle_pending_uploads(scratch);
+            self.recycle_pending_uploads(ctx.scratch);
         }
         true
+    }
+
+    fn process_mirrored_group(
+        &mut self,
+        world: &World,
+        style: &Style,
+        (leader_id, follower_id, follower_coords): (String, String, Vec<WorldTileCoords>),
+    ) -> bool {
+        let (Some((leader_coords, outcome)), Some(paint)) = (
+            self.outcomes.get(&leader_id),
+            resolve_paint(style, &follower_id),
+        ) else {
+            return false;
+        };
+        let leader_refs: Vec<&SymbolLayerData> = leader_coords
+            .iter()
+            .filter_map(|&c| resolve_layer(world, c, &leader_id))
+            .collect();
+        if leader_refs.len() != leader_coords.len() {
+            return false;
+        }
+        let mut live_follower_coords = Vec::with_capacity(follower_coords.len());
+        let mut follower_refs = Vec::with_capacity(follower_coords.len());
+        for c in follower_coords {
+            if let Some(layer) = resolve_layer(world, c, &follower_id) {
+                live_follower_coords.push(c);
+                follower_refs.push(layer);
+            }
+        }
+        let metadata = family::mirror(
+            (&leader_refs, outcome),
+            &follower_refs,
+            (paint, self.zoom),
+            &mut self.placed,
+        );
+        let layer_id = StyleLayerId::intern(&follower_id);
+        for (c, meta) in live_follower_coords.into_iter().zip(metadata) {
+            self.pending_uploads.push_back((layer_id, c, meta));
+        }
+        true
+    }
+
+    fn flush_pending_uploads(&mut self, pool: &SymbolBufferPool, ctx: &mut EpochStepContext<'_>) {
+        while let Some((layer_id, coords, metadata)) = self.pending_uploads.pop_front() {
+            let Some(entry) = pool.index().get_layers(coords).and_then(|entries| {
+                entries
+                    .iter()
+                    .find(|entry| entry.style_layer_id == layer_id)
+            }) else {
+                ctx.scratch.recycle(metadata);
+                continue;
+            };
+            let key = (coords, layer_id);
+            let prev = ctx.uploaded.remove(&key);
+            let next_cached = upload_diff::diff_and_upload_bucket_with_scratch(
+                pool,
+                ctx.queue,
+                entry,
+                prev.as_ref(),
+                metadata,
+                ctx.scratch,
+            );
+            if let Some(prev) = prev {
+                ctx.scratch.recycle(prev.quads);
+            }
+            ctx.uploaded.insert(key, next_cached);
+        }
     }
 
     pub(super) fn take_placed(&mut self) -> PlacedSymbols {
@@ -379,8 +413,7 @@ impl ActiveEpoch {
         }
     }
 
-    #[cfg(test)]
-    #[allow(dead_code)]
+    #[cfg(all(test, feature = "headless", feature = "thread-safe-futures"))]
     pub(super) fn for_atomic_upload_test(
         view_state: ViewState,
         pending_uploads: Vec<(StyleLayerId, WorldTileCoords, Vec<SDFShaderFeatureMetadata>)>,

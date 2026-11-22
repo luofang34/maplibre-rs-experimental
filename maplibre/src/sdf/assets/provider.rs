@@ -129,7 +129,7 @@ pub struct ImageProviderStats {
     pub absent: u64,
     /// Calls that failed for good.
     pub failed: u64,
-    /// Calls that failed for now.
+    /// Calls that were temporarily unavailable.
     pub unavailable: u64,
     /// Requests refused because the waiting queue was full.
     pub refused: u64,
@@ -390,7 +390,7 @@ impl ImageProviders {
     }
 
     /// The answer for `name`, asking its provider once however many tiles wait for it.
-    /// `Err` carries why it is unavailable for now.
+    /// `Err` carries why it is temporarily unavailable.
     pub(crate) async fn resolve(
         &self,
         name: &str,
@@ -465,7 +465,7 @@ impl ImageProviders {
             }
             Err(ImageProviderError::Unavailable(reason)) => {
                 Counters::add(&counters.unavailable);
-                tracing::warn!(%name, %reason, "provided image unavailable for now");
+                tracing::warn!(%name, %reason, "provided image temporarily unavailable");
                 Err(AssetFailure::Retryable(reason))
             }
         }

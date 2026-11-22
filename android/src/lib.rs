@@ -1,8 +1,17 @@
 //! Embeddable Android SDK, JNI `MapLibreSdk` / `NativeMap` bindings, C ABI re-exports, and
 //! `NativeActivity` demo entrypoints.
 
+#![cfg_attr(
+    not(test),
+    forbid(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented
+    )
+)]
 #![deny(unused_imports)]
-#![allow(unexpected_cfgs, unsafe_code)]
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 use jni::{objects::JClass, EnvUnowned};

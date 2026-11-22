@@ -137,6 +137,13 @@ export const startOffscreenController = async ({
         coalescer.rejectQueued(reason);
     };
 
+    const terminateAllWorkers = () => {
+        renderWorker.terminate();
+        for (const w of tileWorkers) {
+            w.terminate();
+        }
+    };
+
     renderWorker.onmessage = (event: MessageEvent<any>) => {
         const msg = event.data;
         if (!msg) return;
@@ -156,11 +163,16 @@ export const startOffscreenController = async ({
             cameraListener?.(msg.payload);
         } else if (msg.type === "telemetry") {
             telemetryListener?.(msg.payload);
+        } else if (msg.type === "destroyed") {
+            terminateAllWorkers();
         }
     };
 
     renderWorker.onerror = err => {
         rejectAll(err);
+        if (closed) {
+            terminateAllWorkers();
+        }
     };
 
     const callRpc = (method: string, args: unknown[]): Promise<any> => {
@@ -177,18 +189,17 @@ export const startOffscreenController = async ({
         for (const fn of cleanupFns.splice(0)) {
             fn();
         }
+        let destroyDispatched = false;
         try {
             renderWorker.postMessage({type: "destroy"});
+            destroyDispatched = true;
         } catch {
-            // Ignore if already terminated.
+            // Worker is unreachable or already terminated.
         }
         rejectAll(new Error("the map's host has stopped"));
-        setTimeout(() => {
-            renderWorker.terminate();
-            for (const w of tileWorkers) {
-                w.terminate();
-            }
-        }, 25);
+        if (!destroyDispatched) {
+            terminateAllWorkers();
+        }
     };
 
     try {

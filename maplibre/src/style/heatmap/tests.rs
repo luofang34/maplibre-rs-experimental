@@ -13,10 +13,14 @@ fn absent_properties_take_the_specification_defaults() {
     assert_eq!(paint.opacity_at(5.0), 1.0);
     let ramp = paint.ramp();
     assert_eq!(ramp.len(), RAMP_TEXELS);
-    assert_eq!(ramp[0], [0, 0, 0, 0], "zero density is transparent");
     assert_eq!(
-        ramp[RAMP_TEXELS - 1],
-        [255, 0, 0, 255],
+        ramp.first().copied(),
+        Some([0, 0, 0, 0]),
+        "zero density is transparent"
+    );
+    assert_eq!(
+        ramp.last().copied(),
+        Some([255, 0, 0, 255]),
         "full density is red"
     );
 }
@@ -40,19 +44,16 @@ fn a_ramp_reproduces_its_stops_and_a_step_keeps_its_edge() {
             0, "rgba(0, 0, 0, 0)", 1, "rgb(255, 0, 0)"]
     }))
     .ramp();
-    assert_eq!(interpolated[0], [0, 0, 0, 0]);
-    assert_eq!(interpolated[RAMP_TEXELS - 1], [255, 0, 0, 255]);
-    assert!(
-        interpolated[128][3] > 120 && interpolated[128][3] < 136,
-        "{:?}",
-        interpolated[128]
-    );
+    assert_eq!(interpolated.first().copied(), Some([0, 0, 0, 0]));
+    assert_eq!(interpolated.last().copied(), Some([255, 0, 0, 255]));
+    let mid = interpolated.get(128).copied();
+    assert!(mid.is_some_and(|px| px[3] > 120 && px[3] < 136), "{mid:?}");
     let stepped = paint(serde_json::json!({
         "heatmap-color": ["step", ["heatmap-density"], "rgb(0, 0, 255)", 0.5, "rgb(255, 0, 0)"]
     }))
     .ramp();
-    assert_eq!(stepped[100], [0, 0, 255, 255]);
-    assert_eq!(stepped[200], [255, 0, 0, 255]);
+    assert_eq!(stepped.get(100).copied(), Some([0, 0, 255, 255]));
+    assert_eq!(stepped.get(200).copied(), Some([255, 0, 0, 255]));
 }
 
 #[test]

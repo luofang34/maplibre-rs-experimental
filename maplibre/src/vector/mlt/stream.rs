@@ -150,98 +150,93 @@ pub(super) fn props_for_style(
     if state_ctx.is_none() && !reads_id && !reads_geom {
         return Ok(col.base_props.clone());
     }
-
-    let count = col.base_props.len();
-    let mut out = Vec::with_capacity(count);
-    let extent = f64::from(col.parsed.extent().get()).max(1.0);
-
     if reads_geom {
-        let mut iter = col.parsed.iter_features();
-        let mut idx = 0;
-        while let Some(feat_res) = iter.next() {
-            let feat = feat_res?;
-            let mut map = col
-                .base_props
-                .get(idx)
-                .map_or_else(FeatureProperties::default, |arc| (**arc).clone());
-            if reads_id {
-                let gtype = col
-                    .geom_types
-                    .get(idx)
-                    .copied()
-                    .unwrap_or(GeometryType::Unknown);
-                map.insert(
-                    GEOMETRY_TYPE_PROPERTY.to_owned(),
-                    Value::String(gtype.name().to_owned()),
-                );
-                if let Some(id_val) = crate::query::resolve_effective_expr_id(
-                    feat.id(),
-                    &map,
-                    state_ctx.and_then(|c| c.promote_property.as_deref()),
-                ) {
-                    map.insert(ID_PROPERTY.to_owned(), id_val);
-                }
-            }
-            let text = lonlat_i32(feat.geometry(), coords, extent)
-                .to_geojson()
-                .to_string();
-            map.insert(GEOMETRY_PROPERTY.to_owned(), Value::String(text));
-            if let Some(ctx) = state_ctx {
-                crate::style::feature_state::sync_properties_feature_state(
-                    &mut map,
-                    feat.id(),
-                    ctx.promote_property.as_deref(),
-                    ctx.source_state.as_deref(),
-                    ctx.source_layer.as_deref(),
-                );
-            }
-            out.push(Arc::new(map));
-            idx += 1;
-        }
-        return Ok(out);
+        return props_with_geometry(col, coords, state_ctx, reads_id);
     }
+    Ok(props_without_geometry(col, state_ctx, reads_id))
+}
 
-    let empty = empty_feature_properties();
-    for idx in 0..count {
-        let id = col.ids.get(idx).copied().flatten();
-        let mut map = col
-            .base_props
+fn build_feature_props(
+    col: &ColumnarLayer<'_>,
+    idx: usize,
+    id: Option<u64>,
+    state_ctx: Option<&FeatureStateSyncContext>,
+    reads_id: bool,
+) -> FeatureProperties {
+    let mut map = col
+        .base_props
+        .get(idx)
+        .map_or_else(FeatureProperties::default, |arc| (**arc).clone());
+    if reads_id {
+        let gtype = col
+            .geom_types
             .get(idx)
-            .map_or_else(FeatureProperties::default, |arc| (**arc).clone());
-        if reads_id {
-            let gtype = col
-                .geom_types
-                .get(idx)
-                .copied()
-                .unwrap_or(GeometryType::Unknown);
-            map.insert(
-                GEOMETRY_TYPE_PROPERTY.to_owned(),
-                Value::String(gtype.name().to_owned()),
-            );
-            if let Some(id_val) = crate::query::resolve_effective_expr_id(
-                id,
-                &map,
-                state_ctx.and_then(|c| c.promote_property.as_deref()),
-            ) {
-                map.insert(ID_PROPERTY.to_owned(), id_val);
-            }
+            .copied()
+            .unwrap_or(GeometryType::Unknown);
+        map.insert(
+            GEOMETRY_TYPE_PROPERTY.to_owned(),
+            Value::String(gtype.name().to_owned()),
+        );
+        if let Some(id_val) = crate::query::resolve_effective_expr_id(
+            id,
+            &map,
+            state_ctx.and_then(|c| c.promote_property.as_deref()),
+        ) {
+            map.insert(ID_PROPERTY.to_owned(), id_val);
         }
-        if let Some(ctx) = state_ctx {
-            crate::style::feature_state::sync_properties_feature_state(
-                &mut map,
-                id,
-                ctx.promote_property.as_deref(),
-                ctx.source_state.as_deref(),
-                ctx.source_layer.as_deref(),
-            );
-        }
-        if map.is_empty() {
-            out.push(Arc::clone(empty));
-        } else {
-            out.push(Arc::new(map));
-        }
+    }
+    if let Some(ctx) = state_ctx {
+        crate::style::feature_state::sync_properties_feature_state(
+            &mut map,
+            id,
+            ctx.promote_property.as_deref(),
+            ctx.source_state.as_deref(),
+            ctx.source_layer.as_deref(),
+        );
+    }
+    map
+}
+
+fn props_with_geometry(
+    col: &ColumnarLayer<'_>,
+    coords: WorldTileCoords,
+    state_ctx: Option<&FeatureStateSyncContext>,
+    reads_id: bool,
+) -> Result<Vec<Arc<FeatureProperties>>, MltError> {
+    let mut out = Vec::with_capacity(col.base_props.len());
+    let extent = f64::from(col.parsed.extent().get()).max(1.0);
+    let mut iter = col.parsed.iter_features();
+    let mut idx = 0;
+    while let Some(feat_res) = iter.next() {
+        let feat = feat_res?;
+        let mut map = build_feature_props(col, idx, feat.id(), state_ctx, reads_id);
+        let text = lonlat_i32(feat.geometry(), coords, extent)
+            .to_geojson()
+            .to_string();
+        map.insert(GEOMETRY_PROPERTY.to_owned(), Value::String(text));
+        out.push(Arc::new(map));
+        idx += 1;
     }
     Ok(out)
+}
+
+fn props_without_geometry(
+    col: &ColumnarLayer<'_>,
+    state_ctx: Option<&FeatureStateSyncContext>,
+    reads_id: bool,
+) -> Vec<Arc<FeatureProperties>> {
+    let empty = empty_feature_properties();
+    (0..col.base_props.len())
+        .map(|idx| {
+            let id = col.ids.get(idx).copied().flatten();
+            let map = build_feature_props(col, idx, id, state_ctx, reads_id);
+            if map.is_empty() {
+                Arc::clone(empty)
+            } else {
+                Arc::new(map)
+            }
+        })
+        .collect()
 }
 
 pub(super) fn stream_layer_slice(
@@ -268,11 +263,11 @@ pub(super) fn stream_layer_slice(
         Some(indices) => {
             let mut sel_pos = 0_usize;
             let mut feat_idx = 0_usize;
-            while sel_pos < indices.len() {
+            while let Some(&target_idx) = indices.get(sel_pos) {
                 let Some(feat_res) = iter.next() else {
                     break;
                 };
-                if indices[sel_pos] == feat_idx {
+                if target_idx == feat_idx {
                     let feat = feat_res
                         .map_err(|err| geozero::error::GeozeroError::Geometry(err.to_string()))?;
                     let out_idx = sel_pos as u64;
@@ -410,8 +405,9 @@ fn stream_ring(
         processor.xy(f64::from(c.x), f64::from(c.y), i)?;
     }
     if !already_closed {
-        let first = coords[0];
-        processor.xy(f64::from(first.x), f64::from(first.y), coords.len())?;
+        if let Some(first) = coords.first() {
+            processor.xy(f64::from(first.x), f64::from(first.y), coords.len())?;
+        }
     }
     processor.linestring_end(false, ring_idx)
 }

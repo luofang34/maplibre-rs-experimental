@@ -69,27 +69,33 @@ pub(crate) fn build_synthetic_sfnt() -> Result<Vec<u8>, FontError> {
     }
     loca.extend_from_slice(&((glyf.len() / 2) as u16).to_be_bytes());
 
+    let put = |buf: &mut [u8], offset: usize, bytes: &[u8]| {
+        if let Some(slot) = buf.get_mut(offset..offset + bytes.len()) {
+            slot.copy_from_slice(bytes);
+        }
+    };
+
     let mut head = vec![0_u8; 54];
-    head[0..4].copy_from_slice(&0x0001_0000_u32.to_be_bytes());
-    head[12..16].copy_from_slice(&0x5F0F_3CF5_u32.to_be_bytes());
-    head[16..18].copy_from_slice(&0x000B_u16.to_be_bytes());
-    head[18..20].copy_from_slice(&1000_u16.to_be_bytes());
-    head[38..40].copy_from_slice(&(-200_i16).to_be_bytes());
-    head[40..42].copy_from_slice(&1000_i16.to_be_bytes());
-    head[42..44].copy_from_slice(&850_i16.to_be_bytes());
+    put(&mut head, 0, &0x0001_0000_u32.to_be_bytes());
+    put(&mut head, 12, &0x5F0F_3CF5_u32.to_be_bytes());
+    put(&mut head, 16, &0x000B_u16.to_be_bytes());
+    put(&mut head, 18, &1000_u16.to_be_bytes());
+    put(&mut head, 38, &(-200_i16).to_be_bytes());
+    put(&mut head, 40, &1000_i16.to_be_bytes());
+    put(&mut head, 42, &850_i16.to_be_bytes());
 
     let mut hhea = vec![0_u8; 36];
-    hhea[0..4].copy_from_slice(&0x0001_0000_u32.to_be_bytes());
-    hhea[4..6].copy_from_slice(&820_i16.to_be_bytes());
-    hhea[6..8].copy_from_slice(&(-180_i16).to_be_bytes());
-    hhea[10..12].copy_from_slice(&1000_u16.to_be_bytes());
-    hhea[34..36].copy_from_slice(&(SYNTH_BOXES.len() as u16).to_be_bytes());
+    put(&mut hhea, 0, &0x0001_0000_u32.to_be_bytes());
+    put(&mut hhea, 4, &820_i16.to_be_bytes());
+    put(&mut hhea, 6, &(-180_i16).to_be_bytes());
+    put(&mut hhea, 10, &1000_u16.to_be_bytes());
+    put(&mut hhea, 34, &(SYNTH_BOXES.len() as u16).to_be_bytes());
 
     let mut maxp = vec![0_u8; 32];
-    maxp[0..4].copy_from_slice(&0x0001_0000_u32.to_be_bytes());
-    maxp[4..6].copy_from_slice(&(SYNTH_BOXES.len() as u16).to_be_bytes());
-    maxp[6..8].copy_from_slice(&8_u16.to_be_bytes());
-    maxp[8..10].copy_from_slice(&2_u16.to_be_bytes());
+    put(&mut maxp, 0, &0x0001_0000_u32.to_be_bytes());
+    put(&mut maxp, 4, &(SYNTH_BOXES.len() as u16).to_be_bytes());
+    put(&mut maxp, 6, &8_u16.to_be_bytes());
+    put(&mut maxp, 8, &2_u16.to_be_bytes());
 
     let mut hmtx = Vec::with_capacity(advances.len() * 4);
     for &(adv, lsb) in advances {
@@ -98,13 +104,13 @@ pub(crate) fn build_synthetic_sfnt() -> Result<Vec<u8>, FontError> {
     }
 
     let mut os2 = vec![0_u8; 78];
-    os2[0..2].copy_from_slice(&2_u16.to_be_bytes());
-    os2[4..6].copy_from_slice(&400_u16.to_be_bytes());
-    os2[6..8].copy_from_slice(&5_u16.to_be_bytes());
-    os2[62..64].copy_from_slice(&0x0040_u16.to_be_bytes());
+    put(&mut os2, 0, &2_u16.to_be_bytes());
+    put(&mut os2, 4, &400_u16.to_be_bytes());
+    put(&mut os2, 6, &5_u16.to_be_bytes());
+    put(&mut os2, 62, &0x0040_u16.to_be_bytes());
 
     let mut post = vec![0_u8; 32];
-    post[0..4].copy_from_slice(&0x0003_0000_u32.to_be_bytes());
+    put(&mut post, 0, &0x0003_0000_u32.to_be_bytes());
 
     assemble_sfnt(
         0x0001_0000,
@@ -258,15 +264,18 @@ fn build_gpos_kern() -> Vec<u8> {
 }
 
 pub(crate) fn encode_woff1(sfnt: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let num_tables = u16::from_be_bytes([sfnt[4], sfnt[5]]) as usize;
+    let nt: [u8; 2] = sfnt.get(4..6).ok_or("sfnt header")?.try_into()?;
+    let num_tables = u16::from_be_bytes(nt) as usize;
     let mut recs = Vec::with_capacity(num_tables);
     for idx in 0..num_tables {
         let base = 12 + idx * 16;
-        let tag: [u8; 4] = sfnt[base..base + 4].try_into()?;
-        let csum = u32::from_be_bytes(sfnt[base + 4..base + 8].try_into()?);
-        let off = u32::from_be_bytes(sfnt[base + 8..base + 12].try_into()?) as usize;
-        let len = u32::from_be_bytes(sfnt[base + 12..base + 16].try_into()?) as usize;
-        let orig = sfnt[off..off + len].to_vec();
+        let tag: [u8; 4] = sfnt.get(base..base + 4).ok_or("tag")?.try_into()?;
+        let csum = u32::from_be_bytes(sfnt.get(base + 4..base + 8).ok_or("csum")?.try_into()?);
+        let off =
+            u32::from_be_bytes(sfnt.get(base + 8..base + 12).ok_or("off")?.try_into()?) as usize;
+        let len =
+            u32::from_be_bytes(sfnt.get(base + 12..base + 16).ok_or("len")?.try_into()?) as usize;
+        let orig = sfnt.get(off..off + len).ok_or("orig table")?.to_vec();
         let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
         enc.write_all(&orig)?;
         let z = enc.finish()?;
@@ -283,7 +292,7 @@ pub(crate) fn encode_woff1(sfnt: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::E
     let total_len = dir_end + body_len;
     let mut out = Vec::with_capacity(total_len);
     out.extend_from_slice(b"wOFF");
-    out.extend_from_slice(&sfnt[0..4]);
+    out.extend_from_slice(sfnt.get(0..4).ok_or("flavor")?);
     out.extend_from_slice(&(total_len as u32).to_be_bytes());
     out.extend_from_slice(&(num_tables as u16).to_be_bytes());
     out.extend_from_slice(&0_u16.to_be_bytes());
@@ -353,14 +362,17 @@ pub(crate) fn encode_woff2_transformed(sfnt: &[u8]) -> Result<Vec<u8>, Box<dyn s
         xform_glyf.extend_from_slice(s);
     }
 
-    let num_tables = u16::from_be_bytes([sfnt[4], sfnt[5]]) as usize;
+    let nt: [u8; 2] = sfnt.get(4..6).ok_or("sfnt header")?.try_into()?;
+    let num_tables = u16::from_be_bytes(nt) as usize;
     let mut dir = Vec::new();
     let mut stream = Vec::new();
     for idx in 0..num_tables {
         let base = 12 + idx * 16;
-        let tag: [u8; 4] = sfnt[base..base + 4].try_into()?;
-        let off = u32::from_be_bytes(sfnt[base + 8..base + 12].try_into()?) as usize;
-        let len = u32::from_be_bytes(sfnt[base + 12..base + 16].try_into()?) as usize;
+        let tag: [u8; 4] = sfnt.get(base..base + 4).ok_or("tag")?.try_into()?;
+        let off =
+            u32::from_be_bytes(sfnt.get(base + 8..base + 12).ok_or("off")?.try_into()?) as usize;
+        let len =
+            u32::from_be_bytes(sfnt.get(base + 12..base + 16).ok_or("len")?.try_into()?) as usize;
         if &tag == b"glyf" {
             dir.push(10_u8);
             push_uint_base128(&mut dir, len as u32);
@@ -374,7 +386,7 @@ pub(crate) fn encode_woff2_transformed(sfnt: &[u8]) -> Result<Vec<u8>, Box<dyn s
             dir.push(63_u8);
             dir.extend_from_slice(&tag);
             push_uint_base128(&mut dir, len as u32);
-            stream.extend_from_slice(&sfnt[off..off + len]);
+            stream.extend_from_slice(sfnt.get(off..off + len).ok_or("table slice")?);
         }
     }
 
@@ -405,17 +417,15 @@ pub(crate) fn encode_woff2_transformed(sfnt: &[u8]) -> Result<Vec<u8>, Box<dyn s
 }
 
 fn push_uint_base128(out: &mut Vec<u8>, mut val: u32) {
-    let mut tmp = [0_u8; 5];
-    let mut len = 0usize;
+    let mut tmp = Vec::with_capacity(5);
     loop {
-        tmp[len] = (val & 0x7F) as u8;
+        tmp.push((val & 0x7F) as u8);
         val >>= 7;
-        len += 1;
         if val == 0 {
             break;
         }
     }
-    for i in (0..len).rev() {
-        out.push(tmp[i] | if i > 0 { 0x80 } else { 0x00 });
+    while let Some(byte) = tmp.pop() {
+        out.push(byte | if tmp.is_empty() { 0x00 } else { 0x80 });
     }
 }

@@ -180,8 +180,10 @@ impl<ET: 'static + Clone> WakeHost for ProxyWake<ET> {
                 // in winit 0.30 and starves rendering under external VSync command loops.
                 window.request_redraw();
             } else if !self.queued.replace(true) {
-                let _ = js_sys::Promise::resolve(&wasm_bindgen::JsValue::UNDEFINED)
-                    .then(&self.microtask);
+                drop(
+                    js_sys::Promise::resolve(&wasm_bindgen::JsValue::UNDEFINED)
+                        .then(&self.microtask),
+                );
             }
         }
         #[cfg(not(target_arch = "wasm32"))]

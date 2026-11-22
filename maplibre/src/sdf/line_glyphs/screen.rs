@@ -65,7 +65,8 @@ fn cut_at_eye(
 fn anchor_segment(polyline: &[[f32; 2]], anchor_distance: f32) -> Option<(usize, [f64; 2])> {
     let mut travelled = 0.0_f64;
     for (index, pair) in polyline.windows(2).enumerate() {
-        let (from, to) = (pair[0].map(f64::from), pair[1].map(f64::from));
+        let [p0, p1] = pair else { continue };
+        let (from, to) = (p0.map(f64::from), p1.map(f64::from));
         let length = (to[0] - from[0]).hypot(to[1] - from[1]);
         let distance = f64::from(anchor_distance);
         if length > 0.0 && distance <= travelled + length {
@@ -137,12 +138,16 @@ fn place_one(
     while walked + length <= wanted {
         index += direction;
         // The line ends, or was cut where it passes behind the eye, before the glyph.
-        if cut || index < 0 || index as usize >= polyline.len() {
+        if cut {
             return None;
         }
+        let tile = usize::try_from(index)
+            .ok()
+            .and_then(|idx| polyline.get(idx))
+            .copied()?
+            .map(f64::from);
         walked += length;
         previous = current;
-        let tile = polyline[index as usize].map(f64::from);
         current = match project(tile).filter(|at| at.w > NEAR_W) {
             Some(at) => Vertex { tile, at },
             None => {

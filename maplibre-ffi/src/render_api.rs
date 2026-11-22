@@ -1,6 +1,9 @@
 //! Frame rendering, redraw polling, and rendered-feature query C ABI exports.
 
-#![allow(unsafe_code)]
+#![expect(
+    unsafe_code,
+    reason = "C ABI render exports validate raw pointers and copy RGBA8 output slices"
+)]
 
 use std::ffi::{c_char, CString};
 

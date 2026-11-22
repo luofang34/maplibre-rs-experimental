@@ -28,8 +28,8 @@ impl Footprint {
         match corners {
             [] => None,
             [point] => Some(Self::Point(Point::new(point[0], point[1]))),
-            _ if corners.iter().all(|corner| corner == &corners[0]) => {
-                Some(Self::Point(Point::new(corners[0][0], corners[0][1])))
+            [first, rest @ ..] if rest.iter().all(|corner| corner == first) => {
+                Some(Self::Point(Point::new(first[0], first[1])))
             }
             _ => Some(Self::Polygon(Polygon::new(
                 LineString::from(corners.iter().map(|&[x, y]| (x, y)).collect::<Vec<_>>()),
@@ -100,14 +100,17 @@ fn offset_line(line: &LineString<f64>, offset: f64) -> LineString<f64> {
         // GL JS's perpendicular of (x, y) is (-y, x).
         [-dy / length, dx / length]
     };
-    let shifted = (0..points.len())
-        .map(|index| {
-            let before = index.checked_sub(1).map_or([0.0, 0.0], |previous| {
-                normal(points[previous], points[index])
-            });
+    let shifted = points
+        .iter()
+        .enumerate()
+        .map(|(index, &cur)| {
+            let before = index
+                .checked_sub(1)
+                .and_then(|previous| points.get(previous))
+                .map_or([0.0, 0.0], |&previous| normal(previous, cur));
             let after = points
                 .get(index + 1)
-                .map_or([0.0, 0.0], |&next| normal(points[index], next));
+                .map_or([0.0, 0.0], |&next| normal(cur, next));
             let sum = [before[0] + after[0], before[1] + after[1]];
             let length = sum[0].hypot(sum[1]);
             let mut bisector = if length > 0.0 {
@@ -120,8 +123,8 @@ fn offset_line(line: &LineString<f64>, offset: f64) -> LineString<f64> {
                 bisector = [bisector[0] / cos_half_angle, bisector[1] / cos_half_angle];
             }
             Coord {
-                x: points[index].x + bisector[0] * offset,
-                y: points[index].y + bisector[1] * offset,
+                x: cur.x + bisector[0] * offset,
+                y: cur.y + bisector[1] * offset,
             }
         })
         .collect();

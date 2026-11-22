@@ -32,10 +32,8 @@ pub(super) fn layer_allows_u16_chunks(style_layer: &StyleLayer) -> bool {
 /// Attempts to partition `u32_slice[..usable]` triangles into contiguous `(base_vertex_offset,
 /// index_range)` chunks whose local index span fits in `u16`.
 pub(super) fn plan_u16_chunks(u32_slice: &[u32], usable: usize) -> Option<U16Chunks> {
-    if usable == 0 || usable > u32_slice.len() {
-        return None;
-    }
-    let (tris, rem) = u32_slice[..usable].as_chunks::<3>();
+    let slice = (usable > 0).then(|| u32_slice.get(..usable)).flatten()?;
+    let (tris, rem) = slice.as_chunks::<3>();
     if !rem.is_empty() || tris.is_empty() {
         return None;
     }
@@ -88,7 +86,9 @@ pub(super) fn write_chunked_u16_indices(
         let start = range.start as usize;
         let end = range.end as usize;
         let off = *v_off;
-        scratch.extend(u32_slice[start..end].iter().map(|&idx| (idx - off) as u16));
+        if let Some(slice) = u32_slice.get(start..end) {
+            scratch.extend(slice.iter().map(|&idx| (idx - off) as u16));
+        }
     }
     if scratch.len() < padded {
         scratch.push(0);
@@ -96,7 +96,7 @@ pub(super) fn write_chunked_u16_indices(
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[cfg_attr(test, allow(clippy::expect_used))]
 mod tests {
     use super::*;
 

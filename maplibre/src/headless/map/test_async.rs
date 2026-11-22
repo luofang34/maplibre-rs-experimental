@@ -1,5 +1,5 @@
 //! Runtime-agnostic async coordination helpers for `headless::map` unit tests.
-#![allow(dead_code)]
+#![cfg_attr(test, allow(dead_code))]
 
 use std::{
     cell::Cell,

@@ -221,7 +221,9 @@ impl DrawnTerrain<'_> {
         }
         // Near a pole a short stretch sweeps across many sectors of the cap's fan; every sector
         // between the longitudes of its ends is tested.
-        if let Some(polar) = ends.iter().find(|end| end.polar) {
+        if let (Some(polar), Some(first), Some(second)) =
+            (ends.iter().find(|end| end.polar), ends.first(), ends.get(1))
+        {
             let edge = if polar.mercator.y < 0.5 {
                 0.0
             } else {
@@ -229,8 +231,8 @@ impl DrawnTerrain<'_> {
             };
             let sector =
                 1.0 / (2_f64.powi(i32::from(self.index.finest_zoom().unwrap_or(0))) * CELLS);
-            let from_x = ends[0].mercator.x;
-            let arc = (ends[1].mercator.x - from_x + 0.5).rem_euclid(1.0) - 0.5;
+            let from_x = first.mercator.x;
+            let arc = (second.mercator.x - from_x + 0.5).rem_euclid(1.0) - 0.5;
             let steps = (arc.abs() / (sector * 0.5)).ceil() as usize;
             for step in 0..=steps {
                 let x = from_x + arc * step as f64 / steps.max(1) as f64;

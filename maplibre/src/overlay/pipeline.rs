@@ -61,6 +61,101 @@ impl Drop for OverlayGpu {
     }
 }
 
+fn overlay_viewport_binding(
+    device: &wgpu::Device,
+    queue: &UploadQueue,
+) -> (wgpu::Buffer, wgpu::BindGroupLayout, wgpu::BindGroup) {
+    let viewport = queue.create_buffer_init(
+        device,
+        &BufferInitDescriptor {
+            label: Some("overlay viewport"),
+            contents: bytemuck::cast_slice(&[1.0_f32, 1.0, DEPTH_BIAS, 0.0]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        },
+    );
+    let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("overlay"),
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::VERTEX,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }],
+    });
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("overlay"),
+        layout: &layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: viewport.as_entire_binding(),
+        }],
+    });
+    (viewport, layout, bind_group)
+}
+
+fn overlay_render_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    format: wgpu::TextureFormat,
+    depth_format: wgpu::TextureFormat,
+    samples: u32,
+) -> wgpu::RenderPipeline {
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("overlay"),
+        bind_group_layouts: &[Some(layout)],
+        immediate_size: 0,
+    });
+    let module = crate::render::resource::shader_module::create_shader_module_from_wgsl(
+        device,
+        Some("overlay"),
+        SHADER,
+    );
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("overlay"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &module,
+            entry_point: Some("vs"),
+            compilation_options: Default::default(),
+            buffers: &[Some(wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<OverlayVertex>() as wgpu::BufferAddress,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32, 2 => Float32x4],
+            })],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &module,
+            entry_point: Some("fs"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        // Tested as the map's 3D geometry is (reversed Z), never written: content of the
+        // overlay does not hide other content of it.
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: depth_format,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState {
+            count: samples,
+            ..Default::default()
+        },
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
 impl OverlayGpu {
     fn new(
         device: &wgpu::Device,
@@ -69,85 +164,8 @@ impl OverlayGpu {
         depth_format: wgpu::TextureFormat,
         samples: u32,
     ) -> Self {
-        let viewport = queue.create_buffer_init(
-            device,
-            &BufferInitDescriptor {
-                label: Some("overlay viewport"),
-                contents: bytemuck::cast_slice(&[1.0_f32, 1.0, DEPTH_BIAS, 0.0]),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            },
-        );
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("overlay"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("overlay"),
-            layout: &layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: viewport.as_entire_binding(),
-            }],
-        });
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("overlay"),
-            bind_group_layouts: &[Some(&layout)],
-            immediate_size: 0,
-        });
-        let module = crate::render::resource::shader_module::create_shader_module_from_wgsl(
-            device,
-            Some("overlay"),
-            SHADER,
-        );
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("overlay"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &module,
-                entry_point: Some("vs"),
-                compilation_options: Default::default(),
-                buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: std::mem::size_of::<OverlayVertex>() as wgpu::BufferAddress,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32, 2 => Float32x4],
-                })],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("fs"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            // Tested as the map's 3D geometry is (reversed Z), never written: content of the
-            // overlay does not hide other content of it.
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: depth_format,
-                depth_write_enabled: Some(false),
-                depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState {
-                count: samples,
-                ..Default::default()
-            },
-            multiview_mask: None,
-            cache: None,
-        });
+        let (viewport, layout, bind_group) = overlay_viewport_binding(device, queue);
+        let pipeline = overlay_render_pipeline(device, &layout, format, depth_format, samples);
         Self {
             pipeline,
             bind_group,

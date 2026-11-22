@@ -13,13 +13,23 @@ pub fn is_expression_filter(filter: &Json) -> bool {
         return false;
     };
     match operator {
-        "has" => items.len() >= 2 && !matches!(items[1].as_str(), Some("$id") | Some("$type")),
-        "in" => items.len() >= 3 && (!items[1].is_string() || items[2].is_array()),
+        "has" => items
+            .get(1)
+            .is_some_and(|key| !matches!(key.as_str(), Some("$id" | "$type"))),
+        "in" => {
+            items.len() >= 3
+                && items
+                    .get(1)
+                    .zip(items.get(2))
+                    .is_some_and(|(a, b)| !a.is_string() || b.is_array())
+        }
         "!in" | "!has" | "none" => false,
         "==" | "!=" | ">" | ">=" | "<" | "<=" => {
-            items.len() != 3 || items[1].is_array() || items[2].is_array()
+            !matches!(items.as_slice(), [_, a, b] if !a.is_array() && !b.is_array())
         }
-        "any" | "all" => items[1..]
+        "any" | "all" => items
+            .get(1..)
+            .unwrap_or(&[])
             .iter()
             .all(|child| is_expression_filter(child) || child.is_boolean()),
         _ => true,
@@ -50,7 +60,9 @@ fn convert_filter_with(filter: &Json, expected_types: &mut Map<String, Json>) ->
             convert_comparison_op(property, &value, operator, Some(expected_types))
         }
         "any" => {
-            let children: Vec<Json> = items[1..]
+            let children: Vec<Json> = items
+                .get(1..)
+                .unwrap_or(&[])
                 .iter()
                 .map(|condition| {
                     let mut types = Map::new();
@@ -68,12 +80,14 @@ fn convert_filter_with(filter: &Json, expected_types: &mut Map<String, Json>) ->
             expression
         }
         "all" => {
-            let children: Vec<Json> = items[1..]
+            let children: Vec<Json> = items
+                .get(1..)
+                .unwrap_or(&[])
                 .iter()
                 .map(|condition| convert_filter_with(condition, expected_types))
                 .collect();
-            if children.len() == 1 {
-                return children[0].clone();
+            if let [only] = children.as_slice() {
+                return only.clone();
             }
             let mut expression = json!(["all"]);
             for child in children {
@@ -83,14 +97,14 @@ fn convert_filter_with(filter: &Json, expected_types: &mut Map<String, Json>) ->
         }
         "none" => {
             let mut any = json!(["any"]);
-            for condition in &items[1..] {
+            for condition in items.get(1..).unwrap_or(&[]) {
                 push(&mut any, condition.clone());
             }
             json!(["!", convert_filter_with(&any, &mut Map::new())])
         }
         "in" | "!in" => {
             let property = items.get(1).and_then(Json::as_str).unwrap_or("");
-            convert_in_op(property, &items[2..], operator == "!in")
+            convert_in_op(property, items.get(2..).unwrap_or(&[]), operator == "!in")
         }
         "has" => convert_has_op(items.get(1).and_then(Json::as_str).unwrap_or("")),
         "!has" => json!([
@@ -113,9 +127,9 @@ fn runtime_type_checks(expected_types: &Map<String, Json>) -> Json {
             json!(["==", ["typeof", get], kind])
         })
         .collect();
-    match conditions.len() {
-        0 => json!(true),
-        1 => conditions[0].clone(),
+    match conditions.as_slice() {
+        [] => json!(true),
+        [only] => only.clone(),
         _ => {
             let mut all = json!(["all"]);
             for condition in conditions {
@@ -166,14 +180,14 @@ fn convert_comparison_op(
 }
 
 fn convert_in_op(property: &str, values: &[Json], negate: bool) -> Json {
-    if values.is_empty() {
+    let Some(first) = values.first() else {
         return json!(negate);
-    }
+    };
     let get = property_getter(property);
     let uniform = values
         .iter()
-        .all(|value| std::mem::discriminant(value) == std::mem::discriminant(&values[0]));
-    if uniform && (values[0].is_string() || values[0].is_number()) {
+        .all(|value| std::mem::discriminant(value) == std::mem::discriminant(first));
+    if uniform && (first.is_string() || first.is_number()) {
         let mut unique: Vec<Json> = Vec::new();
         for value in values {
             if !unique.contains(value) {

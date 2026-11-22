@@ -280,17 +280,21 @@ pub(super) async fn frames_until(
     what: &str,
     drawn: impl Fn(&[u8]) -> bool,
 ) -> Vec<u8> {
+    let mut found = None;
     for _ in 0..2500 {
         map.frame().await;
         let pixels = map.read();
         if drawn(&pixels) {
-            return pixels;
+            found = Some(pixels);
+            break;
         }
     }
-    panic!(
+    assert!(
+        found.is_some(),
         "{what} never drawn; provider stats {:?}",
         map.map.image_providers().map(|p| p.stats())
     );
+    found.unwrap_or_default()
 }
 
 pub(super) fn shown(pixels: &[u8], color: [u8; 3]) -> usize {

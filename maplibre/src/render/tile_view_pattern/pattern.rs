@@ -16,7 +16,7 @@ use crate::{
         camera::ViewProjection,
         resource::{BackingBufferDescriptor, Queue},
         shaders::ShaderTileMetadata,
-        tile_view_pattern::{HasTile, SourceShapes, TileShape, ViewTile, ViewTileSources},
+        tile_view_pattern::{TileShape, ViewTile, ViewTileSources},
     },
     tcs::world::World,
 };
@@ -54,6 +54,20 @@ impl<B> BackingBuffer<B> {
 struct PatternScratch {
     vector_parents: FxHashMap<i32, FxHashSet<WorldTileCoords>>,
     raster_parents: FxHashMap<(RasterSourceId, i32), FxHashSet<WorldTileCoords>>,
+}
+
+impl PatternScratch {
+    fn reset(&mut self, clear_raster: bool) {
+        for set in self.vector_parents.values_mut() {
+            set.clear();
+        }
+        for set in self.raster_parents.values_mut() {
+            set.clear();
+        }
+        if clear_raster {
+            self.raster_parents.clear();
+        }
+    }
 }
 
 /// The tile mask pattern assigns each tile a value which can be used for stencil testing.
@@ -180,20 +194,11 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
         let mut view_tiles = Vec::with_capacity(self.view_tiles.len());
         // A parent stands in once for each copy of the world it is seen in.
         let mut scratch = self.scratch.lock().unwrap_or_else(|e| e.into_inner());
-        for set in scratch.vector_parents.values_mut() {
-            set.clear();
-        }
-        for set in scratch.raster_parents.values_mut() {
-            set.clear();
-        }
-        if raster_coverings.is_empty() {
-            scratch.raster_parents.clear();
-        }
+        scratch.reset(raster_coverings.is_empty());
         let PatternScratch {
             vector_parents,
             raster_parents,
         } = &mut *scratch;
-
         let vector_availability = (
             sources.of_kind(TileKind::Vector),
             crate::vector::UploadedVectorGeometry::for_world(world),
@@ -213,45 +218,20 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
                 vector_max_zoom,
             );
             vector.for_each_mut(&mut |shape| shape.wrapped(wrap, zoom));
-            let raster = if raster_coverings.is_empty() {
-                Vec::new()
-            } else {
-                raster_coverings
-                    .iter()
-                    .map(|(source, covering)| {
-                        let availability = super::SourceTiles {
-                            source,
-                            availability: sources.of_kind(TileKind::Raster),
-                        };
-                        let covered = covering_shapes_for(coords, covering)
-                            .into_iter()
-                            .filter(|tile| availability.has_tile(*tile, world))
-                            .collect();
-                        let mut shapes = raster_shapes(
-                            &availability,
-                            coords,
-                            covered,
-                            zoom,
-                            world,
-                            raster_parents.entry((source.clone(), wrap)).or_default(),
-                        );
-                        if let Some(faded) =
-                            with_departing((&availability, source, &shapes), zoom, world)
-                        {
-                            shapes = faded;
-                        }
-                        shapes.for_each_mut(&mut |shape| shape.wrapped(wrap, zoom));
-                        (source.clone(), shapes)
-                    })
-                    .collect()
-            };
+            let raster = raster::generate_raster_shapes(
+                raster_coverings,
+                sources,
+                coords,
+                (wrap, zoom),
+                world,
+                raster_parents,
+            );
             view_tiles.push(ViewTile {
                 target: coords,
                 vector,
                 raster,
             });
         }
-
         view_tiles
     }
 
@@ -288,90 +268,25 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
             as usize;
         let mut buffer = std::mem::take(&mut self.metadata_scratch);
         buffer.clear();
-        let mut skipped = 0_usize;
         let mut stencil_ids = std::mem::take(&mut self.stencil_ids);
         stencil_ids.clear();
-        let mut next_stencil = 0_u8;
-
-        let mut add_to_buffer = |shape: &mut TileShape| {
-            if buffer.len() >= capacity {
-                // A pitched view falling back to many small child tiles can exceed the
-                // buffer; shapes past the end stay unrendered until their own tiles load.
-                shape.clear_buffer_range();
-                skipped += 1;
-                return;
-            }
-            let stencil_coords = shape.stencil_coords();
-            let stencil_ref = *stencil_ids
-                .entry((shape.wrap, stencil_coords))
-                .or_insert_with(|| {
-                    if next_stencil < 124 {
-                        let assigned = next_stencil;
-                        next_stencil += 1;
-                        assigned
-                    } else {
-                        stencil_coords.stencil_reference_value_3d()
-                    }
-                });
-            shape.set_stencil_reference(stencil_ref);
-            shape.set_buffer_range(buffer.len() as u64);
-            let transform = view_proj
-                .to_model_view_projection(shape.transform)
-                .downcast()
-                .into();
-            buffer.push(ShaderTileMetadata {
-                transform,
-                zoom_factor: shape.zoom_factor as f32,
-                viewport_width,
-                viewport_height,
-                tile_mercator_coords: {
-                    let mut mercator = tile_mercator_coordinates(
-                        shape
-                            .coords()
-                            .into_tile(crate::style::source::TileAddressingScheme::XYZ),
-                    );
-                    // A copy of the world lies whole worlds over in Mercator units.
-                    mercator.x += shape.wrap as f32;
-                    mercator.into()
-                },
-                line_width_scale: 1.0,
-                line_units_per_pixel: 8.0 * style_zoom.scale_to_tile(&shape.coords()) as f32,
-                clip_antimeridian: u32::from(u8::from(shape.coords().z) == 0),
-                clip_region: clip_region(shape),
-                _pad: [0; 2],
-            });
+        let mut upload = PatternUpload {
+            capacity,
+            buffer: &mut buffer,
+            stencil_ids: &mut stencil_ids,
+            next_stencil: 0,
+            skipped: 0,
+            view_proj,
+            viewport: (viewport_width, viewport_height),
+            style_zoom,
         };
-
         let mut topo_hasher = rustc_hash::FxHasher::default();
         self.view_tiles.len().hash(&mut topo_hasher);
         for view_tile in &mut self.view_tiles {
-            view_tile.target.hash(&mut topo_hasher);
-            let mut v_count = 0usize;
-            view_tile.vector.for_each_mut(&mut |shape| {
-                add_to_buffer(shape);
-                v_count += 1;
-                hash_shape_topology(shape, &mut topo_hasher);
-            });
-            v_count.hash(&mut topo_hasher);
-            view_tile.raster.len().hash(&mut topo_hasher);
-            for (source_id, shapes) in &mut view_tile.raster {
-                source_id.hash(&mut topo_hasher);
-                let mut r_count = 0usize;
-                shapes.for_each_mut(&mut |shape| {
-                    add_to_buffer(shape);
-                    r_count += 1;
-                    hash_shape_topology(shape, &mut topo_hasher);
-                });
-                r_count.hash(&mut topo_hasher);
-            }
+            upload.push_view_tile(view_tile, &mut topo_hasher);
         }
-        drop(add_to_buffer);
-        let topology_hash = topo_hasher.finish();
-        if self.topology_generation == 0 || topology_hash != self.last_topology_hash {
-            self.last_topology_hash = topology_hash;
-            self.topology_generation = self.topology_generation.wrapping_add(1);
-        }
-
+        let skipped = upload.skipped;
+        self.record_topology_hash(topo_hasher.finish());
         if skipped > 0 {
             tracing::warn!(
                 skipped,
@@ -389,6 +304,97 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
         self.stencil_ids = stencil_ids;
         self.metadata_scratch = buffer;
     }
+
+    fn record_topology_hash(&mut self, topology_hash: u64) {
+        if self.topology_generation == 0 || topology_hash != self.last_topology_hash {
+            self.last_topology_hash = topology_hash;
+            self.topology_generation = self.topology_generation.wrapping_add(1);
+        }
+    }
+}
+
+struct PatternUpload<'a> {
+    capacity: usize,
+    buffer: &'a mut Vec<ShaderTileMetadata>,
+    stencil_ids: &'a mut FxHashMap<(i32, WorldTileCoords), u8>,
+    next_stencil: u8,
+    skipped: usize,
+    view_proj: &'a ViewProjection,
+    viewport: (f32, f32),
+    style_zoom: Zoom,
+}
+
+impl PatternUpload<'_> {
+    fn push_view_tile(&mut self, view_tile: &mut ViewTile, hasher: &mut rustc_hash::FxHasher) {
+        view_tile.target.hash(hasher);
+        let mut v_count = 0usize;
+        view_tile.vector.for_each_mut(&mut |shape| {
+            self.push_shape(shape);
+            v_count += 1;
+            hash_shape_topology(shape, hasher);
+        });
+        v_count.hash(hasher);
+        view_tile.raster.len().hash(hasher);
+        for (source_id, shapes) in &mut view_tile.raster {
+            source_id.hash(hasher);
+            let mut r_count = 0usize;
+            shapes.for_each_mut(&mut |shape| {
+                self.push_shape(shape);
+                r_count += 1;
+                hash_shape_topology(shape, hasher);
+            });
+            r_count.hash(hasher);
+        }
+    }
+
+    fn push_shape(&mut self, shape: &mut TileShape) {
+        if self.buffer.len() >= self.capacity {
+            // A pitched view falling back to many small child tiles can exceed the
+            // buffer; shapes past the end stay unrendered until their own tiles load.
+            shape.clear_buffer_range();
+            self.skipped += 1;
+            return;
+        }
+        let stencil_coords = shape.stencil_coords();
+        let stencil_ref = *self
+            .stencil_ids
+            .entry((shape.wrap, stencil_coords))
+            .or_insert_with(|| {
+                if self.next_stencil < 124 {
+                    let assigned = self.next_stencil;
+                    self.next_stencil += 1;
+                    assigned
+                } else {
+                    stencil_coords.stencil_reference_value_3d()
+                }
+            });
+        shape.set_stencil_reference(stencil_ref);
+        shape.set_buffer_range(self.buffer.len() as u64);
+        let transform = self
+            .view_proj
+            .to_model_view_projection(shape.transform)
+            .downcast()
+            .into();
+        let mut mercator = tile_mercator_coordinates(
+            shape
+                .coords()
+                .into_tile(crate::style::source::TileAddressingScheme::XYZ),
+        );
+        // A copy of the world lies whole worlds over in Mercator units.
+        mercator.x += shape.wrap as f32;
+        self.buffer.push(ShaderTileMetadata {
+            transform,
+            zoom_factor: shape.zoom_factor as f32,
+            viewport_width: self.viewport.0,
+            viewport_height: self.viewport.1,
+            tile_mercator_coords: mercator.into(),
+            line_width_scale: 1.0,
+            line_units_per_pixel: 8.0 * self.style_zoom.scale_to_tile(&shape.coords()) as f32,
+            clip_antimeridian: u32::from(u8::from(shape.coords().z) == 0),
+            clip_region: clip_region(shape),
+            _pad: [0; 2],
+        });
+    }
 }
 
 fn hash_shape_topology(shape: &TileShape, hasher: &mut rustc_hash::FxHasher) {
@@ -399,88 +405,9 @@ fn hash_shape_topology(shape: &TileShape, hasher: &mut rustc_hash::FxHasher) {
     shape.buffer_range().hash(hasher);
 }
 
-/// The shown tiles with the loaded descendants their source is fading out drawn over each of
-/// them, as GL JS draws departing tiles over the tile that replaces them until the fade ends;
-/// `None` when nothing under these shapes is departing.
-#[cfg(feature = "raster")]
-fn with_departing<T: HasTile>(
-    (availability, source, shapes): (&T, &RasterSourceId, &SourceShapes),
-    zoom: Zoom,
-    world: &World,
-) -> Option<SourceShapes> {
-    let shown: Vec<WorldTileCoords> = match shapes {
-        SourceShapes::SourceEqTarget(shape) => vec![shape.coords()],
-        SourceShapes::Children(shapes) => shapes.iter().map(TileShape::coords).collect(),
-        SourceShapes::Parent(_) | SourceShapes::None => return None,
-    };
-    let departing = world
-        .resources
-        .get::<crate::raster::cross_fade::RasterCrossFade>()?
-        .departing(source.name())?;
-    let mut tiles = Vec::new();
-    let mut any = false;
-    for tile in shown {
-        tiles.push(TileShape::new(tile, zoom));
-        let mut under: Vec<_> = departing
-            .tiles
-            .iter()
-            .copied()
-            .filter(|departed| {
-                departed.z > tile.z
-                    && cover::ancestor_at(*departed, tile.z) == Some(tile)
-                    && availability.has_tile(*departed, world)
-            })
-            .collect();
-        under.sort_by_key(|departed| (departed.z, departed.x, departed.y));
-        any |= !under.is_empty();
-        tiles.extend(
-            under
-                .into_iter()
-                .map(|departed| TileShape::new(departed, zoom).within(tile)),
-        );
-    }
-    any.then_some(SourceShapes::Children(tiles))
-}
-
-#[cfg(not(feature = "raster"))]
-fn with_departing<T: HasTile>(
-    _args: (&T, &RasterSourceId, &SourceShapes),
-    _zoom: Zoom,
-    _world: &World,
-) -> Option<SourceShapes> {
-    None
-}
-
-fn raster_shapes<T: HasTile>(
-    sources: &T,
-    coords: WorldTileCoords,
-    covered: Vec<WorldTileCoords>,
-    zoom: Zoom,
-    world: &World,
-    used_parents: &mut FxHashSet<WorldTileCoords>,
-) -> SourceShapes {
-    let covered = super::coverage::disjoint_tiles(coords, covered);
-    let complete = super::coverage::covers_target(coords, &covered).then(|| covered.clone());
-    if let Some(tiles) = complete {
-        selected_shapes(coords, tiles, zoom, used_parents)
-    } else if covered.is_empty() {
-        match super::coverage::loaded_cover(sources, coords, world) {
-            Some(tiles) => selected_shapes(coords, tiles, zoom, used_parents),
-            None => source_shapes(sources, coords, zoom, world, used_parents),
-        }
-    } else {
-        // What the view needs of this tile is loaded in part: the nearest loaded tile above or
-        // at it stays underneath, and the part's own tiles are drawn over it.
-        let mut tiles = super::coverage::loaded_cover(sources, coords, world).unwrap_or_default();
-        tiles.retain(|tile| !covered.contains(tile));
-        tiles.extend(covered);
-        tiles.sort_by_key(|tile| tile.z);
-        selected_shapes(coords, tiles, zoom, used_parents)
-    }
-}
-
 mod cover;
 mod memo;
+mod raster;
 pub use cover::covering_shapes_for;
-use cover::{clip_region, selected_shapes, source_shapes, source_shapes_bounded};
+use cover::{clip_region, source_shapes_bounded};
 pub use memo::TileViewPatternMemo;

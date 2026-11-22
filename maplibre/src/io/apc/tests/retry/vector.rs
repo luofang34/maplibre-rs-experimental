@@ -23,6 +23,7 @@ fn tile() -> Vec<u8> {
 mod geojson_data;
 mod render;
 mod rendered_query;
+mod style_mutation;
 mod tests;
 
 async fn manual(multiple: bool) -> (super::fixture::Fixture, render::Frames) {

@@ -1,6 +1,9 @@
 //! JNI exports for `org.maplibre_rs.MapLibreSdk` and `org.maplibre_rs.NativeMap`.
 
-#![allow(unsafe_code)]
+#![expect(
+    unsafe_code,
+    reason = "JNI C ABI entrypoints forward raw JNI pointers and native handles"
+)]
 
 use jni::{
     objects::{JByteArray, JClass, JDoubleArray, JString},

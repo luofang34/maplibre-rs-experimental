@@ -1,6 +1,6 @@
 //! A terrain map whose tiles have all landed, failed or been refused stops asking for frames
 //! once its camera rests.
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg_attr(test, allow(clippy::expect_used))]
 
 use std::sync::{
     atomic::{AtomicU64, AtomicUsize, Ordering},

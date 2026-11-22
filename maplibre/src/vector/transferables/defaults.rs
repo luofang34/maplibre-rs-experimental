@@ -164,6 +164,60 @@ impl IntoMessage for DefaultLayerTessellated {
     }
 }
 
+fn prepack_buffer(
+    mut buffer: OverAlignedVertexBuffer<ShaderVertex, IndexDataType>,
+    style_type: &str,
+    uniform_paint: bool,
+) -> OverAlignedVertexBuffer<ShaderVertex, IndexDataType> {
+    let logical_count = buffer.buffer.vertices.len();
+    let mut packed = Vec::new();
+    let compact_extrusion = uniform_paint
+        && buffer.shared_geometry_key().is_none()
+        && <ShaderVertex as crate::render::shaders::PoolVertex>::try_encode_compact_extrusion(
+            style_type,
+            &buffer.buffer.vertices,
+            &mut packed,
+        )
+        .is_some();
+    if !compact_extrusion {
+        <ShaderVertex as crate::render::shaders::PoolVertex>::encode_vertices(
+            style_type,
+            &buffer.buffer.vertices,
+            &mut packed,
+        );
+    }
+    let shared_key = buffer.shared_geometry_key();
+    let usable = buffer.usable_indices;
+    let raw_indices = std::mem::take(&mut buffer.buffer.indices);
+    let usable_len = (usable as usize).min(raw_indices.len());
+    let logical_vertex_count = u32::try_from(logical_count).unwrap_or(u32::MAX);
+    let can_u16 = logical_count <= 65_536
+        && raw_indices
+            .iter()
+            .take(usable_len)
+            .all(|&idx| idx <= u32::from(u16::MAX));
+    let (indices_u16, indices_u32) = if can_u16 {
+        let padded = usable_len.next_multiple_of(2);
+        let mut u16s = Vec::with_capacity(padded);
+        u16s.extend(raw_indices.iter().take(usable_len).map(|&idx| idx as u16));
+        if u16s.len() < padded {
+            u16s.push(0);
+        }
+        (Some(u16s), None)
+    } else {
+        (None, Some(raw_indices))
+    };
+    OverAlignedVertexBuffer::from_vecs(Vec::new(), Vec::new(), usable)
+        .with_prepacked_gpu(crate::vector::tessellation::PrepackedGpuGeometry {
+            vertices: packed,
+            indices_u16,
+            indices_u32,
+            compact_extrusion,
+            logical_vertex_count,
+        })
+        .with_shared_geometry_key(shared_key)
+}
+
 impl LayerTessellated for DefaultLayerTessellated {
     fn message_tag() -> &'static dyn MessageTag {
         &VectorMessageTag::LayerTessellated
@@ -192,83 +246,18 @@ impl LayerTessellated for DefaultLayerTessellated {
     }
 
     fn build_from_with_paint_typed(
-        coords: WorldTileCoords,
-        mut buffer: OverAlignedVertexBuffer<ShaderVertex, IndexDataType>,
-        feature_indices: Vec<u32>,
-        feature_colors: Vec<[f32; 4]>,
-        feature_sort_keys: Vec<f32>,
-        layer_data: Layer,
-        style_layer_id: String,
-        entries: Vec<BucketFeatureEntry>,
+        mut payload: crate::vector::transferables::TessellatedLayerPayload,
         style_type: &str,
         allow_prepack: bool,
     ) -> Self {
-        if allow_prepack && buffer.prepacked_gpu().is_none() && !buffer.buffer.vertices.is_empty() {
-            let logical_count = buffer.buffer.vertices.len();
-            let mut packed = Vec::new();
-            let compact_extrusion = feature_colors.is_empty()
-                && entries.is_empty()
-                && buffer.shared_geometry_key().is_none()
-                && <ShaderVertex as crate::render::shaders::PoolVertex>::try_encode_compact_extrusion(
-                    style_type,
-                    &buffer.buffer.vertices,
-                    &mut packed,
-                )
-                .is_some();
-            if !compact_extrusion {
-                let _ = <ShaderVertex as crate::render::shaders::PoolVertex>::encode_vertices(
-                    style_type,
-                    &buffer.buffer.vertices,
-                    &mut packed,
-                );
-            }
-            let shared_key = buffer.shared_geometry_key();
-            let usable = buffer.usable_indices;
-            let raw_indices = std::mem::take(&mut buffer.buffer.indices);
-            let usable_len = (usable as usize).min(raw_indices.len());
-            let logical_vertex_count = u32::try_from(logical_count).unwrap_or(u32::MAX);
-            let can_u16 = logical_count <= 65_536
-                && raw_indices[..usable_len]
-                    .iter()
-                    .all(|&idx| idx <= u32::from(u16::MAX));
-            buffer = if can_u16 {
-                let padded = usable_len.next_multiple_of(2);
-                let mut u16s = Vec::with_capacity(padded);
-                u16s.extend(raw_indices[..usable_len].iter().map(|&idx| idx as u16));
-                if u16s.len() < padded {
-                    u16s.push(0);
-                }
-                OverAlignedVertexBuffer::from_vecs(Vec::new(), Vec::new(), usable)
-                    .with_prepacked_gpu(crate::vector::tessellation::PrepackedGpuGeometry {
-                        vertices: packed,
-                        indices_u16: Some(u16s),
-                        indices_u32: None,
-                        compact_extrusion,
-                        logical_vertex_count,
-                    })
-                    .with_shared_geometry_key(shared_key)
-            } else {
-                OverAlignedVertexBuffer::from_vecs(Vec::new(), Vec::new(), usable)
-                    .with_prepacked_gpu(crate::vector::tessellation::PrepackedGpuGeometry {
-                        vertices: packed,
-                        indices_u16: None,
-                        indices_u32: Some(raw_indices),
-                        compact_extrusion,
-                        logical_vertex_count,
-                    })
-                    .with_shared_geometry_key(shared_key)
-            };
+        if allow_prepack
+            && payload.buffer.prepacked_gpu().is_none()
+            && !payload.buffer.buffer.vertices.is_empty()
+        {
+            let uniform_paint = payload.feature_colors.is_empty() && payload.entries.is_empty();
+            payload.buffer = prepack_buffer(payload.buffer, style_type, uniform_paint);
         }
-        Self::build_from_with_paint(
-            coords,
-            buffer,
-            feature_indices,
-            feature_colors,
-            feature_sort_keys,
-            layer_data,
-            style_layer_id,
-            entries,
-        )
+        Self::build_from_with_paint(payload)
     }
 
     fn with_overscaled_zoom(mut self, overscaled_zoom: u8) -> Self {

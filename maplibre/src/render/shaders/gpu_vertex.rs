@@ -351,8 +351,9 @@ pub fn encode_compact_extrusion_vertices(src: &[ShaderVertex], out: &mut Vec<Gpu
     out.clear();
     out.reserve(src.len().div_ceil(2));
     for chunk in src.chunks(2) {
-        let a = encode_compact_extrusion_words(&chunk[0]);
-        let b = chunk.get(1).map_or([0, 0], encode_compact_extrusion_words);
+        let [first, rest @ ..] = chunk else { continue };
+        let a = encode_compact_extrusion_words(first);
+        let b = rest.first().map_or([0, 0], encode_compact_extrusion_words);
         out.push(GpuShaderVertex([a[0], a[1], b[0], b[1]]));
     }
 }

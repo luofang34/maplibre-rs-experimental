@@ -1,9 +1,18 @@
 use std::{collections::BTreeMap, path::PathBuf};
 
 use super::{
-    build_updated_ignores, evaluate_ci, format_markdown_summary, parse_cli_args, IgnoreFile,
+    build_updated_ignores, evaluate_ci, evaluate_ci_for_options, format_markdown_summary,
+    parse_cli_args, CliOptions, IgnoreFile,
 };
-use crate::{comparison::Difference, CaseKind, TestOutcome, TestResult};
+use crate::{
+    artifacts::{
+        copy_fixture_artifacts, ensure_artifact_dir, write_lifecycle_json, FixtureTelemetry,
+    },
+    comparison::Difference,
+    paths::{filter_tests, workspace_tests_dir},
+    render_case::FrameCleanupGuard,
+    CaseKind, TestOutcome, TestResult,
+};
 
 fn sample_outcome(id: &str, kind: CaseKind, result: TestResult) -> TestOutcome {
     TestOutcome {
@@ -192,4 +201,223 @@ fn checked_in_ignores_json_loads_and_matches_existing_fixtures() {
             style_path.display()
         );
     }
+}
+
+#[test]
+fn cli_parser_handles_filter_lifecycle_and_artifact_flags() {
+    let parsed = parse_cli_args([
+        "--filter",
+        "basic-v9/",
+        "--filter",
+        "query/",
+        "--lifecycle-json",
+        "out/lifecycle.json",
+        "--artifact-dir",
+        "out/artifacts",
+    ])
+    .expect("valid flags");
+    assert_eq!(
+        parsed.filters,
+        vec!["basic-v9/".to_owned(), "query/".to_owned()]
+    );
+    assert_eq!(
+        parsed.lifecycle_json,
+        Some(PathBuf::from("out/lifecycle.json"))
+    );
+    assert_eq!(parsed.artifact_dir, Some(PathBuf::from("out/artifacts")));
+    assert!(parse_cli_args(["--filter"]).is_err());
+    assert!(parse_cli_args(["--lifecycle-json"]).is_err());
+    assert!(parse_cli_args(["--artifact-dir"]).is_err());
+}
+
+#[test]
+fn filter_tests_matches_prefixes_and_fails_fast_when_empty() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let first = root.path().join("basic-v9/z0");
+    let second = root.path().join("basic-v9/z1");
+    let third = root.path().join("query/point");
+    let kept = filter_tests(
+        vec![first.clone(), second.clone(), third.clone()],
+        root.path(),
+        &["basic-v9/".to_owned()],
+    )
+    .expect("matching prefix");
+    assert_eq!(kept, vec![first.clone(), second.clone()]);
+
+    let error = filter_tests(
+        vec![first, second, third],
+        root.path(),
+        &["missing/".to_owned()],
+    )
+    .expect_err("empty");
+    assert!(error.contains("No tests matched --filter"), "{error}");
+}
+
+#[test]
+fn evaluate_ci_skips_stale_ignores_when_filter_is_non_empty() {
+    let outcomes = vec![sample_outcome(
+        "fill-color/default",
+        CaseKind::Render,
+        TestResult::Pass(zero_diff()),
+    )];
+    let mut ignores = BTreeMap::new();
+    ignores.insert(
+        "deleted/fixture".to_owned(),
+        "Unvisited under filter".to_owned(),
+    );
+
+    let filtered_options = CliOptions {
+        test_root: workspace_tests_dir(),
+        ci: true,
+        filters: vec!["fill-color/".to_owned()],
+        ..CliOptions::default()
+    };
+    let filtered = evaluate_ci_for_options(&outcomes, &ignores, &filtered_options);
+    assert!(filtered.stale_ignores.is_empty());
+    assert!(filtered.ci_passed());
+
+    let full_options = CliOptions {
+        test_root: workspace_tests_dir(),
+        ci: true,
+        ..CliOptions::default()
+    };
+    let full = evaluate_ci_for_options(&outcomes, &ignores, &full_options);
+    assert_eq!(full.stale_ignores, vec!["deleted/fixture".to_owned()]);
+    assert!(!full.ci_passed());
+}
+
+#[test]
+fn lifecycle_json_is_sorted_and_contains_telemetry_fields() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let output_path = dir.path().join("nested/lifecycle.json");
+    let mut second = FixtureTelemetry::fallback("query/b".to_owned(), CaseKind::Query, true);
+    second.passed = true;
+    let first = FixtureTelemetry {
+        id: "basic-v9/a".to_owned(),
+        kind: "render",
+        center: Some([11.5, 48.1]),
+        zoom: Some(12.0),
+        pitch: Some(30.0),
+        bearing: Some(45.0),
+        fov_deg: Some(36.87),
+        center_elevation_m: Some(520.0),
+        required_tile_count: 4,
+        dem_tile_count: 2,
+        paused_source_count: 1,
+        frame_count: 24,
+        draws: 18,
+        state_changes: 9,
+        mean_diff: Some(0.001),
+        solid_diff: Some(0),
+        passed: true,
+        ignored: false,
+    };
+
+    write_lifecycle_json(&output_path, &[second, first]).expect("write lifecycle json");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&output_path).expect("read lifecycle json"))
+            .expect("valid json");
+    let fixtures = parsed
+        .get("fixtures")
+        .and_then(serde_json::Value::as_array)
+        .expect("fixtures array");
+    let first_entry = fixtures.first().expect("first fixture");
+    let second_entry = fixtures.get(1).expect("second fixture");
+    assert_eq!(
+        first_entry.get("id").and_then(serde_json::Value::as_str),
+        Some("basic-v9/a")
+    );
+    assert_eq!(
+        second_entry.get("id").and_then(serde_json::Value::as_str),
+        Some("query/b")
+    );
+    assert_eq!(
+        first_entry
+            .get("fov_deg")
+            .and_then(serde_json::Value::as_f64),
+        Some(36.87)
+    );
+    assert_eq!(
+        first_entry
+            .get("center_elevation_m")
+            .and_then(serde_json::Value::as_f64),
+        Some(520.0)
+    );
+    assert_eq!(
+        first_entry.get("draws").and_then(serde_json::Value::as_u64),
+        Some(18)
+    );
+    assert_eq!(
+        second_entry
+            .get("ignored")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+}
+
+#[test]
+fn artifact_dir_copies_render_outputs_with_slug_names_and_skips_queries() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let render_dir = dir.path().join("tests/basic-v9/z0");
+    let query_dir = dir.path().join("tests/query/point");
+    let missing_dir = dir.path().join("tests/canvas/default");
+    let artifact_dir = dir.path().join("artifacts/run-1");
+    std::fs::create_dir_all(&render_dir).expect("render dir");
+    std::fs::create_dir_all(&query_dir).expect("query dir");
+    std::fs::create_dir_all(&missing_dir).expect("missing dir");
+    std::fs::write(render_dir.join("actual.png"), b"actual-bytes").expect("actual");
+    std::fs::write(render_dir.join("diff.png"), b"diff-bytes").expect("diff");
+    std::fs::write(query_dir.join("actual.png"), b"should-not-copy").expect("query png");
+
+    ensure_artifact_dir(&artifact_dir).expect("create artifact dir");
+    copy_fixture_artifacts(&artifact_dir, &render_dir, "basic-v9/z0", CaseKind::Render)
+        .expect("copy render artifacts");
+    copy_fixture_artifacts(&artifact_dir, &query_dir, "query/point", CaseKind::Query)
+        .expect("skip query artifacts");
+    copy_fixture_artifacts(
+        &artifact_dir,
+        &missing_dir,
+        "canvas/default",
+        CaseKind::Render,
+    )
+    .expect("tolerate errored render without pngs");
+
+    assert_eq!(
+        std::fs::read(artifact_dir.join("basic-v9__z0-actual.png")).expect("copied actual"),
+        b"actual-bytes"
+    );
+    assert_eq!(
+        std::fs::read(artifact_dir.join("basic-v9__z0-diff.png")).expect("copied diff"),
+        b"diff-bytes"
+    );
+    assert!(!artifact_dir.join("query__point-actual.png").exists());
+}
+
+#[test]
+#[allow(clippy::panic)]
+fn frame_cleanup_guard_removes_frames_on_early_drop_and_panic() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let paths: Vec<PathBuf> = (0..=2)
+        .map(|idx| dir.path().join(format!("frame_{idx}.png")))
+        .collect();
+    for path in &paths {
+        std::fs::write(path, b"frame").expect("create frame");
+    }
+
+    let early_result: Result<(), &str> = {
+        let _guard = FrameCleanupGuard::new(paths.clone());
+        Err("simulated failure")
+    };
+    assert!(early_result.is_err());
+    assert!(paths.iter().all(|path| !path.exists()));
+
+    for path in &paths {
+        std::fs::write(path, b"frame").expect("recreate frame");
+    }
+    let panic_result = std::panic::catch_unwind(|| {
+        let _guard = FrameCleanupGuard::new(paths.clone());
+        panic!("simulated panic");
+    });
+    assert!(panic_result.is_err());
+    assert!(paths.iter().all(|path| !path.exists()));
 }

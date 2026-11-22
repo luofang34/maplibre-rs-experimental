@@ -51,7 +51,7 @@ pub(super) fn is_hole(index: usize, rings: &[Ring]) -> bool {
     if rings.len() <= 1 {
         return false;
     }
-    let Some(&point) = rings[index].first() else {
+    let Some(&point) = rings.get(index).and_then(|ring| ring.first()) else {
         return false;
     };
     rings
@@ -77,6 +77,22 @@ pub(super) fn on_clipped_edge(a: [f32; 2], b: [f32; 2], include_tile_boundary: b
     }
 }
 
+fn axis_coord(point: &[f32; 2], axis: usize) -> f32 {
+    if axis == 0 {
+        point[0]
+    } else {
+        point[1]
+    }
+}
+
+fn set_axis_coord(point: &mut [f32; 2], axis: usize, value: f32) {
+    if axis == 0 {
+        point[0] = value;
+    } else {
+        point[1] = value;
+    }
+}
+
 /// `ring` cut to the square from `low` to `high` on both axes, one edge of the square at a time.
 fn clip_ring(ring: &Ring, (low, high): (f32, f32)) -> Ring {
     let mut clipped = ring.clone();
@@ -85,9 +101,9 @@ fn clip_ring(ring: &Ring, (low, high): (f32, f32)) -> Ring {
             let bound = if keep_above { low } else { high };
             let inside = |point: &[f32; 2]| {
                 if keep_above {
-                    point[axis] >= bound
+                    axis_coord(point, axis) >= bound
                 } else {
-                    point[axis] <= bound
+                    axis_coord(point, axis) <= bound
                 }
             };
             let mut next = Ring::new();
@@ -96,9 +112,11 @@ fn clip_ring(ring: &Ring, (low, high): (f32, f32)) -> Ring {
                     next.push(*a);
                 }
                 if inside(a) != inside(b) {
-                    let t = (bound - a[axis]) / (b[axis] - a[axis]);
+                    let va = axis_coord(a, axis);
+                    let vb = axis_coord(b, axis);
+                    let t = (bound - va) / (vb - va);
                     let mut crossing = [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])];
-                    crossing[axis] = bound;
+                    set_axis_coord(&mut crossing, axis, bound);
                     next.push(crossing);
                 }
             }
@@ -130,8 +148,10 @@ pub(super) fn normalized_rings(rings: &[Ring]) -> Vec<Ring> {
         .filter(|(_, ring)| ring.len() >= 3 && signed_area(ring) != 0.0)
         .map(|(index, ring)| {
             let mut ring = ring.clone();
-            if (trapezoid_area(&ring) > 0.0) != is_hole(index, rings) {
-                ring[1..].reverse();
+            if (trapezoid_area(&ring) > 0.0) != is_hole(index, rings)
+                && let Some(tail) = ring.get_mut(1..)
+            {
+                tail.reverse();
             }
             ring
         })
@@ -141,8 +161,11 @@ pub(super) fn normalized_rings(rings: &[Ring]) -> Vec<Ring> {
 fn build_wound_rings(rings: &[Ring]) -> Path {
     let mut builder = Path::builder();
     for ring in normalized_rings(rings) {
-        builder.begin(lyon::math::point(ring[0][0], ring[0][1]));
-        for point in &ring[1..] {
+        let Some((&first, rest)) = ring.split_first() else {
+            continue;
+        };
+        builder.begin(lyon::math::point(first[0], first[1]));
+        for point in rest {
             builder.line_to(lyon::math::point(point[0], point[1]));
         }
         builder.end(true);

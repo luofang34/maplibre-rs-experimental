@@ -55,7 +55,9 @@ impl Style {
     /// The layer at `position` as declared: with its global-state references, unless it was
     /// edited since it was last resolved.
     pub(super) fn declared_layer_at(&self, position: usize) -> StyleLayer {
-        let layer = &self.layers[position];
+        let Some(layer) = self.layers.get(position) else {
+            return StyleLayer::default();
+        };
         let current = serde_json::to_value(layer).ok();
         match self.state_templates.get(&layer.id) {
             Some(template) if Some(&template.resolved) == current.as_ref() => {
@@ -87,59 +89,7 @@ impl Style {
         let mut changed = Vec::new();
         let mut scratch = Vec::with_capacity(4096);
         for position in 0..self.layers.len() {
-            let id = self.layers[position].id.clone();
-            if duplicated.contains(&id) {
-                tracing::warn!(layer = %id, "layers share an id, so global state is not applied to them");
-                self.state_templates.remove(&id);
-                continue;
-            }
-            scratch.clear();
-            if serde_json::to_writer(&mut scratch, &self.layers[position]).is_err() {
-                continue;
-            }
-            let has_template = self.state_templates.contains_key(&id);
-            if !has_template
-                && !scratch
-                    .windows(b"\"global-state\"".len())
-                    .any(|w| w == b"\"global-state\"")
-            {
-                continue;
-            }
-            let Ok(current) = serde_json::from_slice::<Value>(&scratch) else {
-                continue;
-            };
-            let (declared, document) = match self.state_templates.get(&id) {
-                Some(template) if template.resolved == current => {
-                    let declared = template.declared.clone();
-                    let Ok(document) = serde_json::to_value(&declared) else {
-                        continue;
-                    };
-                    (declared, document)
-                }
-                _ => (self.layers[position].clone(), current.clone()),
-            };
-            if !reads_global_state(&document) {
-                self.state_templates.remove(&id);
-                continue;
-            }
-            let resolved = substitute_layer(&document, &|key| self.global_state_value(key));
-            let Ok(mut layer) = StyleLayer::from_json_value(&resolved) else {
-                tracing::warn!(layer = %id, "layer is invalid once global state is applied");
-                continue;
-            };
-            layer.index = self.layers[position].index;
-            let Ok(after) = serde_json::to_value(&layer) else {
-                continue;
-            };
-            self.state_templates.insert(
-                id.clone(),
-                StateTemplate {
-                    declared,
-                    resolved: after.clone(),
-                },
-            );
-            if current != after {
-                self.layers[position] = layer;
+            if let Some(id) = self.resolve_layer_global_state(position, &duplicated, &mut scratch) {
                 changed.push(id);
             }
         }
@@ -147,6 +97,65 @@ impl Style {
             self.bump_revision();
         }
         changed
+    }
+
+    fn resolve_layer_global_state(
+        &mut self,
+        position: usize,
+        duplicated: &HashSet<String>,
+        scratch: &mut Vec<u8>,
+    ) -> Option<String> {
+        let layer_snapshot = self.layers.get(position)?;
+        let id = layer_snapshot.id.clone();
+        if duplicated.contains(&id) {
+            tracing::warn!(layer = %id, "layers share an id, so global state is not applied to them");
+            self.state_templates.remove(&id);
+            return None;
+        }
+        scratch.clear();
+        serde_json::to_writer(&mut *scratch, layer_snapshot).ok()?;
+        let has_template = self.state_templates.contains_key(&id);
+        if !has_template
+            && !scratch
+                .windows(b"\"global-state\"".len())
+                .any(|w| w == b"\"global-state\"")
+        {
+            return None;
+        }
+        let current = serde_json::from_slice::<Value>(scratch).ok()?;
+        let (declared, document) = match self.state_templates.get(&id) {
+            Some(template) if template.resolved == current => {
+                let declared = template.declared.clone();
+                let document = serde_json::to_value(&declared).ok()?;
+                (declared, document)
+            }
+            _ => (layer_snapshot.clone(), current.clone()),
+        };
+        if !reads_global_state(&document) {
+            self.state_templates.remove(&id);
+            return None;
+        }
+        let resolved = substitute_layer(&document, &|key| self.global_state_value(key));
+        let Ok(mut layer) = StyleLayer::from_json_value(&resolved) else {
+            tracing::warn!(layer = %id, "layer is invalid once global state is applied");
+            return None;
+        };
+        layer.index = self.layers.get(position)?.index;
+        let after = serde_json::to_value(&layer).ok()?;
+        self.state_templates.insert(
+            id.clone(),
+            StateTemplate {
+                declared,
+                resolved: after.clone(),
+            },
+        );
+        if current != after {
+            if let Some(slot) = self.layers.get_mut(position) {
+                *slot = layer;
+            }
+            return Some(id);
+        }
+        None
     }
 }
 

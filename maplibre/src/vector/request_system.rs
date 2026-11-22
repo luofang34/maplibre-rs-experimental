@@ -36,6 +36,7 @@ pub(crate) use limiter::{
 use memo::{
     display_pixel_ratio, resolve_view_tiles, update_loose_covering_cache,
     vector_eviction_generation, RequestMemo, RequestViewKey, ResolvedViewTiles,
+    ViewTileResolutionRequest,
 };
 pub use worker::fetch_vector_apc;
 
@@ -177,17 +178,17 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                     None,
                 )
             } else {
-                let resolved = resolve_view_tiles(
-                    self.memo.as_ref(),
-                    key.as_ref(),
+                let resolved = resolve_view_tiles(ViewTileResolutionRequest {
+                    memo: self.memo.as_ref(),
+                    key: key.as_ref(),
                     settled_unchanged,
                     style,
                     view_state,
                     world,
                     visible_level,
                     request_padding,
-                    renderer.settings.tight_tile_requests,
-                )?;
+                    tight_tile_requests: renderer.settings.tight_tile_requests,
+                })?;
                 let (computed, next_anchor) = match resolved {
                     ResolvedViewTiles::SettledReuse => {
                         let cached = self.memo.as_ref().and_then(|memo| memo.computed.as_ref());
@@ -301,7 +302,7 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                 issued_any = true;
 
                 let only_sources = if evicted_gpu {
-                    let _ = tile_retry::take_refresh_sources(world, coords);
+                    drop(tile_retry::take_refresh_sources(world, coords));
                     None
                 } else {
                     refresh_only(world, coords, laid_out_for)

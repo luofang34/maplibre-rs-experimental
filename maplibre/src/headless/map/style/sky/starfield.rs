@@ -1,6 +1,6 @@
 //! Stars sit at infinity behind the globe: the globe hides those beyond it, and the rest turn
 //! with the camera.
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg_attr(test, allow(clippy::expect_used))]
 
 use cgmath::{InnerSpace, Vector3, Vector4};
 

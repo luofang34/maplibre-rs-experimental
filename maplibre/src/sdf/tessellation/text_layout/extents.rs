@@ -42,7 +42,10 @@ pub(in crate::sdf::tessellation) fn variable_shifts_from_block(
             -block.height * fractions[1] + offset[1],
         ]
     };
-    let first = corner(&anchors[0]);
+    let Some(first_anchor) = anchors.first() else {
+        return Vec::new();
+    };
+    let first = corner(first_anchor);
     anchors
         .iter()
         .map(|anchor| {

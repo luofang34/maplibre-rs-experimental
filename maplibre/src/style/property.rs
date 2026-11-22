@@ -177,11 +177,14 @@ impl PropertyValue for [f64; 3] {
 
     fn from_value(value: &Value) -> Option<Self> {
         match value {
-            Value::Array(items) if items.len() == 3 => Some([
-                items[0].as_number().filter(|n| n.is_finite())?,
-                items[1].as_number().filter(|n| n.is_finite())?,
-                items[2].as_number().filter(|n| n.is_finite())?,
-            ]),
+            Value::Array(items) => match items.as_slice() {
+                [x, y, z] => Some([
+                    x.as_number().filter(|n| n.is_finite())?,
+                    y.as_number().filter(|n| n.is_finite())?,
+                    z.as_number().filter(|n| n.is_finite())?,
+                ]),
+                _ => None,
+            },
             _ => None,
         }
     }

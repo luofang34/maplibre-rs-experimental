@@ -5,7 +5,6 @@ use std::{any::TypeId, error::Error};
 use js_sys::{ArrayBuffer, Uint8Array};
 use maplibre::io::{
     apc::{Context, IntoMessage, SendError},
-    source_client::SourceClient,
     tile_retry::{RequestKind, TileRequestOutcome},
 };
 use wasm_bindgen_test::*;
@@ -52,11 +51,7 @@ fn foreign_tags_and_wrong_payloads_are_typed_errors() {
 
 #[wasm_bindgen_test]
 fn dem_reply_outside_a_worker_returns_a_transport_error() {
-    use maplibre::io::source_client::HttpSourceClient;
-
-    let context = wire::PassingContext::new(SourceClient::new(HttpSourceClient::new(
-        crate::platform::http_client::web_http_client(),
-    )));
+    let context = wire::PassingContext::new();
     let payload = FlatBufferTransferable::from_array_buffer(
         WebMessageTag::LayerDemMissing,
         ArrayBuffer::new(0),

@@ -86,9 +86,15 @@ fn foreshortened_glyphs_keep_their_pixel_spacing_and_lie_on_the_line() {
     // Equal pixel steps cover more of the line where it is farther away.
     let spans: Vec<f32> = poses
         .windows(2)
-        .map(|pair| pair[1].point[0] - pair[0].point[0])
+        .filter_map(|pair| match pair {
+            [a, b] => Some(b.point[0] - a.point[0]),
+            _ => None,
+        })
         .collect();
-    assert!(spans.windows(2).all(|pair| pair[1] > pair[0]), "{spans:?}");
+    assert!(
+        spans.windows(2).all(|pair| matches!(pair, [a, b] if b > a)),
+        "{spans:?}"
+    );
 }
 
 #[test]
@@ -98,13 +104,16 @@ fn a_flipped_label_walks_back_and_turns_half_way_around() {
         place_glyphs_on_screen(&line, 500.0, &[-10.0, 10.0], false, flat(1.0)).expect("fits");
     let flipped =
         place_glyphs_on_screen(&line, 500.0, &[-10.0, 10.0], true, flat(1.0)).expect("fits");
-    assert_eq!(forward[0].point, [490.0, 0.0]);
-    assert_eq!(flipped[0].point, [510.0, 0.0]);
+    let (Some(f0), Some(fl0)) = (forward.first(), flipped.first()) else {
+        panic!("expected forward and flipped first poses");
+    };
+    assert_eq!(f0.point, [490.0, 0.0]);
+    assert_eq!(fl0.point, [510.0, 0.0]);
     assert!(
-        (flipped[0].angle.cos() + 1.0).abs() < 1e-6,
+        (fl0.angle.cos() + 1.0).abs() < 1e-6,
         "turned half way around"
     );
-    assert!(forward[0].angle.abs() < 1e-6);
+    assert!(f0.angle.abs() < 1e-6);
 }
 
 #[test]

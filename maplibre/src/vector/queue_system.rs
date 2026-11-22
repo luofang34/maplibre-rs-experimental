@@ -42,7 +42,7 @@ pub fn queue_system(
     if renderer.settings.buffer_pools.is_empty() {
         return Ok(());
     }
-    let _ = world.resources.get_or_init_mut::<VectorQueueScratch>();
+    let _scratch = world.resources.get_or_init_mut::<VectorQueueScratch>();
     let Some((
         Initialized(tile_view_pattern),
         Initialized(buffer_pool),
@@ -362,8 +362,16 @@ pub fn queue_system(
     layer_item_phase.sort_tail(layer_start);
     scratch.cached_phases = Some(CachedVectorPhases {
         key: cache_key,
-        masks: mask_phase.items()[mask_start..].to_vec(),
-        layers: layer_item_phase.items()[layer_start..].to_vec(),
+        masks: mask_phase
+            .items()
+            .get(mask_start..)
+            .unwrap_or_default()
+            .to_vec(),
+        layers: layer_item_phase
+            .items()
+            .get(layer_start..)
+            .unwrap_or_default()
+            .to_vec(),
     });
 
     Ok(())

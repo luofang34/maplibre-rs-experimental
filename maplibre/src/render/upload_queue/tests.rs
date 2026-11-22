@@ -33,9 +33,9 @@ async fn readback_bytes(
     let slice = readback.slice(..);
     let (tx, rx) = std::sync::mpsc::channel();
     slice.map_async(wgpu::MapMode::Read, move |res| {
-        let _ = tx.send(res);
+        drop(tx.send(res));
     });
-    let _ = device.poll(wgpu::PollType::wait_indefinitely());
+    drop(device.poll(wgpu::PollType::wait_indefinitely()));
     rx.recv().expect("map recv").expect("map ok");
     let bytes = slice.get_mapped_range().expect("mapped range").to_vec();
     readback.unmap();
@@ -279,10 +279,10 @@ async fn consecutive_staged_frames_reuse_mapped_ring_chunks_after_poll() {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         assert!(queue.encode_staged_into(&device, &mut encoder));
         queue.submit([encoder.finish()]);
-        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        drop(device.poll(wgpu::PollType::wait_indefinitely()));
 
         let got = readback_bytes(&device, &queue, &dst, 128).await;
-        assert_eq!(&got[..64], &[round; 64][..]);
-        assert_eq!(&got[64..], &[round.wrapping_mul(3); 64][..]);
+        assert_eq!(got.get(..64), Some(&[round; 64][..]));
+        assert_eq!(got.get(64..), Some(&[round.wrapping_mul(3); 64][..]));
     }
 }

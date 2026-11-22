@@ -269,7 +269,6 @@ mod tests {
     use crate::render::graph::{EmptyNode, RenderGraph};
 
     #[test]
-    #[allow(clippy::expect_used)]
     fn surface_copy_waits_for_translucent_rendering() {
         let mut graph = RenderGraph::default();
         graph
@@ -287,7 +286,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::expect_used)]
     fn headless_maps_drop_only_the_request_stage() {
         futures::executor::block_on(async {
             use std::rc::Rc;

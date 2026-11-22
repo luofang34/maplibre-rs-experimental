@@ -9,10 +9,9 @@ pub(crate) fn parse_css_color(input: &str) -> Option<[f32; 4]> {
     if let Some(hex) = s.strip_prefix('#') {
         return parse_hex(hex);
     }
-    if let Some(open) = s.find('(') {
-        let close_body = s.strip_suffix(')')?;
-        let name = close_body[..open].trim();
-        let args = &close_body[open + 1..];
+    if s.contains('(') {
+        let (raw_name, args) = s.strip_suffix(')')?.split_once('(')?;
+        let name = raw_name.trim();
         if name.eq_ignore_ascii_case("rgb") || name.eq_ignore_ascii_case("rgba") {
             return parse_rgb(args);
         }
@@ -30,7 +29,7 @@ pub(crate) fn parse_css_color(input: &str) -> Option<[f32; 4]> {
     let idx = NAMED_COLORS
         .binary_search_by(|(candidate, _)| cmp_ascii_lower(candidate, s))
         .ok()?;
-    let [r, g, b] = NAMED_COLORS[idx].1;
+    let &(_, [r, g, b]) = NAMED_COLORS.get(idx)?;
     Some([
         f32::from(r) / 255.0,
         f32::from(g) / 255.0,
@@ -63,31 +62,30 @@ fn hex_byte(hi: u8, lo: u8) -> Option<u8> {
 }
 
 fn parse_hex(hex: &str) -> Option<[f32; 4]> {
-    let b = hex.as_bytes();
-    match b.len() {
-        3 => Some([
-            f32::from(hex_nibble(b[0])? * 17) / 255.0,
-            f32::from(hex_nibble(b[1])? * 17) / 255.0,
-            f32::from(hex_nibble(b[2])? * 17) / 255.0,
+    match *hex.as_bytes() {
+        [r, g, b] => Some([
+            f32::from(hex_nibble(r)? * 17) / 255.0,
+            f32::from(hex_nibble(g)? * 17) / 255.0,
+            f32::from(hex_nibble(b)? * 17) / 255.0,
             1.0,
         ]),
-        4 => Some([
-            f32::from(hex_nibble(b[0])? * 17) / 255.0,
-            f32::from(hex_nibble(b[1])? * 17) / 255.0,
-            f32::from(hex_nibble(b[2])? * 17) / 255.0,
-            f32::from(hex_nibble(b[3])? * 17) / 255.0,
+        [r, g, b, a] => Some([
+            f32::from(hex_nibble(r)? * 17) / 255.0,
+            f32::from(hex_nibble(g)? * 17) / 255.0,
+            f32::from(hex_nibble(b)? * 17) / 255.0,
+            f32::from(hex_nibble(a)? * 17) / 255.0,
         ]),
-        6 => Some([
-            f32::from(hex_byte(b[0], b[1])?) / 255.0,
-            f32::from(hex_byte(b[2], b[3])?) / 255.0,
-            f32::from(hex_byte(b[4], b[5])?) / 255.0,
+        [r0, r1, g0, g1, b0, b1] => Some([
+            f32::from(hex_byte(r0, r1)?) / 255.0,
+            f32::from(hex_byte(g0, g1)?) / 255.0,
+            f32::from(hex_byte(b0, b1)?) / 255.0,
             1.0,
         ]),
-        8 => Some([
-            f32::from(hex_byte(b[0], b[1])?) / 255.0,
-            f32::from(hex_byte(b[2], b[3])?) / 255.0,
-            f32::from(hex_byte(b[4], b[5])?) / 255.0,
-            f32::from(hex_byte(b[6], b[7])?) / 255.0,
+        [r0, r1, g0, g1, b0, b1, a0, a1] => Some([
+            f32::from(hex_byte(r0, r1)?) / 255.0,
+            f32::from(hex_byte(g0, g1)?) / 255.0,
+            f32::from(hex_byte(b0, b1)?) / 255.0,
+            f32::from(hex_byte(a0, a1)?) / 255.0,
         ]),
         _ => None,
     }

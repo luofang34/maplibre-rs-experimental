@@ -62,7 +62,10 @@ fn symbol_avoid_edges_drops_edge_crossing_point_and_line_labels_and_keeps_interi
         1,
         "left-edge and right-edge crossing point labels are suppressed"
     );
-    assert_eq!(with_avoid.features[0].text_anchor.x, 2048.0);
+    assert_eq!(
+        with_avoid.features.first().map(|f| f.text_anchor.x),
+        Some(2048.0)
+    );
     assert_eq!(with_avoid.quad_buffer.indices.len(), 4 * 6);
 
     // Variable anchor near left tile boundary: `right` crosses x < 0, `left` stays inside [0, 4096],

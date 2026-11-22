@@ -59,8 +59,13 @@ fn flush_copies_direct(queue: &wgpu::Queue, payload: &mut Vec<u8>, copies: &mut 
     for copy in copies.drain(..) {
         let start = copy.src_offset as usize;
         let end = start + copy.size as usize;
-        #[allow(clippy::disallowed_methods)]
-        queue.write_buffer(&copy.dst, copy.dst_offset, &payload[start..end]);
+        if let Some(slice) = payload.get(start..end) {
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "UploadQueue flushes staged writes here after counting bytes in write_buffer"
+            )]
+            queue.write_buffer(&copy.dst, copy.dst_offset, slice);
+        }
     }
     payload.clear();
 }
@@ -142,7 +147,9 @@ impl UploadQueue {
             if let Some(last) = copies.last_mut() {
                 if &last.dst == buffer && last.dst_offset == offset && last.size == size {
                     let start = last.src_offset as usize;
-                    payload[start..start + data.len()].copy_from_slice(data);
+                    if let Some(dst) = payload.get_mut(start..start + data.len()) {
+                        dst.copy_from_slice(data);
+                    }
                     return;
                 }
                 if &last.dst == buffer
@@ -171,7 +178,10 @@ impl UploadQueue {
         if self.staging_enabled {
             self.flush_staged_for_buffer(buffer);
         }
-        #[allow(clippy::disallowed_methods)] // The counted path itself.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "UploadQueue::write_buffer is the counted upload path"
+        )]
         self.queue.write_buffer(buffer, offset, data);
     }
 
@@ -271,9 +281,14 @@ impl UploadQueue {
             if &copy.dst == target {
                 let start = copy.src_offset as usize;
                 let end = start + copy.size as usize;
-                #[allow(clippy::disallowed_methods)]
-                self.queue
-                    .write_buffer(&copy.dst, copy.dst_offset, &payload[start..end]);
+                if let Some(slice) = payload.get(start..end) {
+                    #[expect(
+                        clippy::disallowed_methods,
+                        reason = "UploadQueue flushes staged writes for a target buffer after counting bytes"
+                    )]
+                    self.queue
+                        .write_buffer(&copy.dst, copy.dst_offset, slice);
+                }
                 false
             } else {
                 true
@@ -293,7 +308,10 @@ impl UploadQueue {
         size: wgpu::Extent3d,
     ) {
         self.written.fetch_add(data.len() as u64, Ordering::Relaxed);
-        #[allow(clippy::disallowed_methods)] // The counted path itself.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "UploadQueue::write_texture is the counted upload path"
+        )]
         self.queue.write_texture(texture, data, layout, size);
     }
 
@@ -305,7 +323,10 @@ impl UploadQueue {
     ) -> wgpu::Buffer {
         self.written
             .fetch_add(descriptor.contents.len() as u64, Ordering::Relaxed);
-        #[allow(clippy::disallowed_methods)] // The counted path itself.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "UploadQueue::create_buffer_init is the counted upload path"
+        )]
         device.create_buffer_init(descriptor)
     }
 
@@ -318,7 +339,10 @@ impl UploadQueue {
         data: &[u8],
     ) -> wgpu::Texture {
         self.written.fetch_add(data.len() as u64, Ordering::Relaxed);
-        #[allow(clippy::disallowed_methods)] // The counted path itself.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "UploadQueue::create_texture_with_data is the counted upload path"
+        )]
         device.create_texture_with_data(&self.queue, descriptor, order, data)
     }
 

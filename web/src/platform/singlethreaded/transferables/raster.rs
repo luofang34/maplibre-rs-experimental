@@ -38,7 +38,7 @@ fn parse_raw_raster_dem_header(
     let Some(coords) = read_coords_at(bytes, 0) else {
         return Err(empty());
     };
-    let has_name = bytes[9] != 0;
+    let has_name = bytes.get(9).is_some_and(|&b| b != 0);
     let (Some(dim), Some(stride), Some(name_len)) = (
         read_u32_le(bytes, 12),
         read_u32_le(bytes, 16),
@@ -101,7 +101,7 @@ fn decode_rgba_layer(transferable: FlatBufferTransferable) -> AvailableRasterLay
     let Some(coords) = read_coords_at(bytes, 0) else {
         return empty();
     };
-    let has_name = bytes[9] != 0;
+    let has_name = bytes.get(9).is_some_and(|&b| b != 0);
     let (Some(width), Some(height), Some(name_len)) = (
         read_u32_le(bytes, 12),
         read_u32_le(bytes, 16),

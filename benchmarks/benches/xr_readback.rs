@@ -4,6 +4,11 @@
 //! render floor of a terrain view plus the full readback cost; imagery and vector layers add
 //! to the render side only.
 
+#![expect(
+    clippy::panic,
+    reason = "benchmark setup and GPU readback abort on hardware/fixture failures"
+)]
+
 use std::time::{Duration, Instant};
 
 use cgmath::{Deg, Matrix4, Rad, SquareMatrix, Vector3};

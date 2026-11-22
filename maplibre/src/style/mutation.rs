@@ -346,24 +346,31 @@ impl Style {
                 source,
             }
         })?;
-        edited.index = self.layers[position].index;
+        edited.index = self.layers.get(position).map_or(edited.index, |l| l.index);
         self.ensure_supported(&edited)?;
         // Only the zoom range is checked: an edit does not change the layer's source, so a layer
         // loaded in a legacy shape stays editable.
         ensure_zoom_range(&edited)?;
-        let before_layer = self.layers[position].clone();
+        let Some(before_layer) = self.layers.get(position).cloned() else {
+            return Ok(StyleChange::default());
+        };
         let before = serde_json::to_value(&before_layer).ok();
-        self.layers[position] = edited;
+        if let Some(slot) = self.layers.get_mut(position) {
+            *slot = edited;
+        }
         self.state_templates.remove(id);
         self.resolve_global_state();
-        let after = serde_json::to_value(&self.layers[position]).ok();
+        let after_layer = self.layers.get(position);
+        let after = after_layer.and_then(|layer| serde_json::to_value(layer).ok());
+        let redraw_tiles =
+            after_layer.is_some_and(|layer| classify::needs_tile_redraw(&before_layer, layer));
         Ok(if before == after {
             StyleChange::default()
         } else {
             self.bump_revision();
             StyleChange {
                 layers: vec![id.to_owned()],
-                redraw_tiles: classify::needs_tile_redraw(&before_layer, &self.layers[position]),
+                redraw_tiles,
                 ..Default::default()
             }
         })

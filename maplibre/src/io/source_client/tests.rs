@@ -158,7 +158,7 @@ async fn data_urls_and_local_files_succeed_while_network_state_is_offline() {
         .fetch_url(&format!("file://{}", temp_file.display()))
         .await
         .expect("file:// URL while offline");
-    let _ = std::fs::remove_file(&temp_file);
+    drop(std::fs::remove_file(&temp_file));
     assert_eq!(file_bytes, br#"{"type":"Point","coordinates":[0,0]}"#);
 
     // Remote HTTP miss fails immediately with `OfflineError` (retryable).

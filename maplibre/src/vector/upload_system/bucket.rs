@@ -10,9 +10,17 @@ use super::{
     paint, DynPoints, VectorPaintFrame,
 };
 use crate::{
-    render::shaders::{FillShaderFeatureMetadata, ShaderLayerMetadata, Vec4f32},
+    coords::WorldTileCoords,
+    render::{
+        shaders::{FillShaderFeatureMetadata, ShaderLayerMetadata, Vec4f32},
+        upload_queue::UploadQueue,
+        ShaderVertex,
+    },
     style::{layer::StyleLayer, Style},
-    vector::{AvailableVectorLayerBucket, VectorBufferPool},
+    vector::{
+        feature_paint::BucketFeatureEntry, structures::SpatialBuffer, AllocationError,
+        AvailableVectorLayerBucket, LayerGeometryUpload, UniformLayerUpload, VectorBufferPool,
+    },
 };
 
 /// Caches one `Arc<StyleLayer>` per style layer for the active `style.revision()` so resident
@@ -43,164 +51,261 @@ pub(super) enum UploadOutcome {
     Failed,
 }
 
-#[allow(clippy::too_many_arguments)]
+pub(super) struct BucketUploadInput<'a> {
+    pub style_layer: &'a Arc<StyleLayer>,
+    pub bucket: &'a AvailableVectorLayerBucket,
+    pub fallback_vertices: Option<&'a [ShaderVertex]>,
+    pub paint_entries: Option<&'a [BucketFeatureEntry]>,
+    pub overscaled_zoom: u8,
+    pub is_dynamic_circle: bool,
+    pub spatial: &'a [SpatialBuffer],
+    pub paint: VectorPaintFrame,
+    pub protected: &'a rustc_hash::FxHashSet<WorldTileCoords>,
+}
+
+pub(super) struct BucketUploadScratch<'a> {
+    pub feature_metadata: &'a mut Vec<FillShaderFeatureMetadata>,
+    pub dyn_points: &'a mut DynPoints,
+}
+
 pub(super) fn upload_bucket(
     buffer_pool: &mut VectorBufferPool,
-    queue: &crate::render::upload_queue::UploadQueue,
-    style_layer: &Arc<StyleLayer>,
-    bucket: &AvailableVectorLayerBucket,
-    fallback_vertices: Option<&[crate::render::ShaderVertex]>,
-    (paint_entries, overscaled_zoom, is_dynamic_circle): (
-        Option<&[crate::vector::feature_paint::BucketFeatureEntry]>,
-        u8,
-        bool,
-    ),
-    (spatial, paint): (
-        &[crate::vector::structures::SpatialBuffer],
-        VectorPaintFrame,
-    ),
-    (protected, feature_metadata, dyn_points): (
-        &rustc_hash::FxHashSet<crate::coords::WorldTileCoords>,
-        &mut Vec<FillShaderFeatureMetadata>,
-        &mut DynPoints,
-    ),
+    queue: &UploadQueue,
+    input: BucketUploadInput<'_>,
+    scratch: BucketUploadScratch<'_>,
 ) -> UploadOutcome {
-    let VectorPaintFrame { zoom, .. } = paint;
-    let AvailableVectorLayerBucket {
-        coords,
+    let zoom = input.paint.zoom;
+    let uniform = (!input.is_dynamic_circle)
+        .then(|| paint::uniform_color(input.style_layer, f64::from(zoom)))
+        .flatten();
+    let (evaluated_colors, dynamic_seq) = prepare_feature_metadata(
+        &input,
+        uniform,
+        scratch.feature_metadata,
+        scratch.dyn_points,
+    );
+    let active_colors: &[[f32; 4]] = evaluated_colors
+        .as_deref()
+        .unwrap_or(&input.bucket.feature_colors);
+    let buffer = input
+        .spatial
+        .iter()
+        .find(|(tile, id, _)| *tile == input.bucket.coords && *id == input.style_layer.id)
+        .map_or(&input.bucket.buffer, |(_, _, spatial)| spatial);
+    let layer_metadata = metadata_for_layer(input.style_layer, input.bucket.coords, input.paint);
+    let runs = input
+        .style_layer
+        .paint
+        .as_ref()
+        .and_then(crate::vector::pattern::per_feature_pattern)
+        .map(|_| {
+            pattern_runs(
+                &input.bucket.feature_indices,
+                active_colors,
+                &buffer.buffer.indices,
+            )
+        });
+    let sort_runs = (input.style_layer.type_ == "circle"
+        && !input.bucket.feature_sort_keys.is_empty())
+    .then(|| {
+        sort_runs(
+            &input.bucket.feature_indices,
+            &input.bucket.feature_sort_keys,
+            &buffer.buffer.indices,
+        )
+    });
+
+    tracing::debug!(coords = %input.bucket.coords, "allocating vector geometry");
+    if let Err(error) = replace_bucket_in_pool(
+        buffer_pool,
+        queue,
+        &input,
         buffer,
-        feature_indices,
-        feature_colors,
-        feature_sort_keys,
-        ..
-    } = bucket;
-    let coords = *coords;
-    let color: Option<Vec4f32> = style_layer
+        layer_metadata,
+        uniform,
+        scratch.feature_metadata,
+    ) {
+        return handle_upload_error(input.bucket.coords, error);
+    }
+
+    finalize_uploaded_bucket(
+        buffer_pool,
+        &input,
+        BucketFinalizeMeta {
+            uniform,
+            feature_metadata: scratch.feature_metadata,
+            runs,
+            sort_runs,
+            layer_metadata,
+            dynamic_seq,
+        },
+        scratch.dyn_points,
+    )
+}
+
+fn prepare_feature_metadata(
+    input: &BucketUploadInput<'_>,
+    uniform: Option<Vec4f32>,
+    feature_metadata: &mut Vec<FillShaderFeatureMetadata>,
+    dyn_points: &mut DynPoints,
+) -> (Option<Vec<[f32; 4]>>, Option<u64>) {
+    let zoom = input.paint.zoom;
+    let color: Option<Vec4f32> = input
+        .style_layer
         .paint
         .as_ref()
         .and_then(|paint| paint.color_at(f64::from(zoom)))
-        .map(|color| color.into());
-
+        .map(Into::into);
     let fallback_color = color.unwrap_or([0.0, 0.0, 0.0, 1.0]);
-    let uniform = (!is_dynamic_circle)
-        .then(|| paint::uniform_color(style_layer, f64::from(zoom)))
-        .flatten();
-    let evaluated_colors;
-    let active_colors: &[[f32; 4]] = match (uniform, paint_entries) {
-        (None, Some(entries)) => {
-            evaluated_colors = crate::vector::feature_paint::evaluate_bucket_colors(
-                style_layer,
-                entries,
-                f64::from(zoom),
-            );
-            &evaluated_colors
-        }
-        _ => feature_colors,
+    let evaluated_colors = match (uniform, input.paint_entries) {
+        (None, Some(entries)) => Some(crate::vector::feature_paint::evaluate_bucket_colors(
+            input.style_layer,
+            entries,
+            f64::from(zoom),
+        )),
+        _ => None,
     };
+    let active_colors: &[[f32; 4]] = evaluated_colors
+        .as_deref()
+        .unwrap_or(&input.bucket.feature_colors);
 
     #[cfg(feature = "geojson")]
-    let dynamic_seq = if is_dynamic_circle {
+    let dynamic_seq = if input.is_dynamic_circle {
         crate::geojson::update::dynamic_points::populate_dynamic_circle_bucket(
-            Some(dyn_points),
-            style_layer,
-            bucket,
-            fallback_vertices,
-            active_colors,
-            fallback_color,
-            overscaled_zoom,
+            crate::geojson::update::dynamic_points::DynamicCircleBucketInput {
+                dyn_points: Some(dyn_points),
+                style_layer: input.style_layer,
+                bucket: input.bucket,
+                fallback_vertices: input.fallback_vertices,
+                active_colors,
+                fallback_color,
+                overscaled_zoom: input.overscaled_zoom,
+            },
             feature_metadata,
         )
     } else {
         None
     };
     #[cfg(not(feature = "geojson"))]
-    let _ = (dyn_points, overscaled_zoom);
+    let dynamic_seq: Option<u64> = {
+        let _ = dyn_points;
+        None
+    };
 
-    if !is_dynamic_circle && uniform.is_none() {
+    if !input.is_dynamic_circle && uniform.is_none() {
         feature_metadata_into(
             feature_metadata,
-            style_layer,
-            feature_indices,
+            input.style_layer,
+            &input.bucket.feature_indices,
             active_colors,
             fallback_color,
         );
     }
+    (evaluated_colors, dynamic_seq)
+}
 
-    let buffer = spatial
-        .iter()
-        .find(|(tile, id, _)| *tile == coords && *id == style_layer.id)
-        .map_or(buffer, |(_, _, spatial)| spatial);
-    let layer_metadata = metadata_for_layer(style_layer, coords, paint);
-    let runs = style_layer
-        .paint
-        .as_ref()
-        .and_then(crate::vector::pattern::per_feature_pattern)
-        .map(|_| pattern_runs(feature_indices, active_colors, &buffer.buffer.indices));
-
-    let sort_runs = (style_layer.type_ == "circle" && !feature_sort_keys.is_empty())
-        .then(|| sort_runs(feature_indices, feature_sort_keys, &buffer.buffer.indices));
-
-    tracing::debug!(%coords, "allocating vector geometry");
-    let upload_res = if let Some(color) = uniform {
-        let encoded = FillShaderFeatureMetadata::from_rgba(color);
-        let records = feature_indices.iter().map(|&c| c as usize).sum();
-        if uses_layer_metadata_uniform_color(style_layer) {
+fn replace_bucket_in_pool(
+    buffer_pool: &mut VectorBufferPool,
+    queue: &UploadQueue,
+    input: &BucketUploadInput<'_>,
+    geometry: &crate::vector::tessellation::OverAlignedVertexBuffer<
+        ShaderVertex,
+        crate::vector::tessellation::IndexDataType,
+    >,
+    layer_metadata: ShaderLayerMetadata,
+    uniform: Option<Vec4f32>,
+    feature_metadata: &[FillShaderFeatureMetadata],
+) -> Result<(), AllocationError> {
+    let coords = input.bucket.coords;
+    if let Some(color) = uniform {
+        let records = input
+            .bucket
+            .feature_indices
+            .iter()
+            .map(|&c| c as usize)
+            .sum();
+        let upload = UniformLayerUpload {
+            style_layer: Arc::clone(input.style_layer),
+            geometry,
+            layer_metadata,
+            uniform_feature: FillShaderFeatureMetadata::from_rgba(color),
+            records,
+        };
+        if uses_layer_metadata_uniform_color(input.style_layer) {
             buffer_pool.replace_layer_geometry_layer_uniform_shared_unless(
                 queue,
                 coords,
-                Arc::clone(style_layer),
-                buffer,
-                fallback_vertices,
-                layer_metadata,
-                encoded,
-                records,
-                |candidate| protected.contains(&candidate),
+                upload,
+                input.fallback_vertices,
+                |candidate| input.protected.contains(&candidate),
             )
         } else {
             buffer_pool.replace_layer_geometry_uniform_shared_unless(
                 queue,
                 coords,
-                Arc::clone(style_layer),
-                buffer,
-                fallback_vertices,
-                layer_metadata,
-                encoded,
-                records,
-                |candidate| protected.contains(&candidate),
+                upload,
+                input.fallback_vertices,
+                |candidate| input.protected.contains(&candidate),
             )
         }
     } else {
         buffer_pool.replace_layer_geometry_unless(
             queue,
             coords,
-            Arc::clone(style_layer),
-            buffer,
-            layer_metadata,
-            feature_metadata,
-            |candidate| protected.contains(&candidate),
+            LayerGeometryUpload {
+                style_layer: Arc::clone(input.style_layer),
+                geometry,
+                layer_metadata,
+                feature_metadata,
+            },
+            |candidate| input.protected.contains(&candidate),
         )
-    };
-    if let Err(error) = upload_res {
-        if matches!(
-            error,
-            crate::vector::resource::AllocationError::Capacity { .. }
-        ) {
-            tracing::debug!(
-                %coords,
-                %error,
-                "vector buffer pool saturated by higher-priority tiles; skipping peripheral upload"
-            );
-            return UploadOutcome::PoolSaturated;
-        }
-        tracing::error!(%coords, %error, "tile geometry upload failed");
-        return UploadOutcome::Failed;
     }
-    buffer_pool.set_pattern_runs(coords, &style_layer.id, runs);
-    buffer_pool.set_sort_runs(coords, &style_layer.id, sort_runs);
-    buffer_pool.set_layer_evaluated_zoom(coords, &style_layer.id, zoom);
-    let opaque_fill = style_layer.type_ == "fill"
+}
+
+fn handle_upload_error(coords: WorldTileCoords, error: AllocationError) -> UploadOutcome {
+    if matches!(error, AllocationError::Capacity { .. }) {
+        tracing::debug!(
+            %coords,
+            %error,
+            "vector buffer pool saturated by higher-priority tiles; skipping peripheral upload"
+        );
+        return UploadOutcome::PoolSaturated;
+    }
+    tracing::error!(%coords, %error, "tile geometry upload failed");
+    UploadOutcome::Failed
+}
+
+struct BucketFinalizeMeta<'a> {
+    uniform: Option<Vec4f32>,
+    feature_metadata: &'a [FillShaderFeatureMetadata],
+    runs: Option<crate::vector::resource::PatternRuns>,
+    sort_runs: Option<crate::vector::resource::SortRuns>,
+    layer_metadata: ShaderLayerMetadata,
+    dynamic_seq: Option<u64>,
+}
+
+fn finalize_uploaded_bucket(
+    buffer_pool: &mut VectorBufferPool,
+    input: &BucketUploadInput<'_>,
+    meta: BucketFinalizeMeta<'_>,
+    dyn_points: &mut DynPoints,
+) -> UploadOutcome {
+    let BucketFinalizeMeta {
+        uniform,
+        feature_metadata,
+        runs,
+        sort_runs,
+        layer_metadata,
+        dynamic_seq,
+    } = meta;
+    let coords = input.bucket.coords;
+    buffer_pool.set_pattern_runs(coords, &input.style_layer.id, runs);
+    buffer_pool.set_sort_runs(coords, &input.style_layer.id, sort_runs);
+    buffer_pool.set_layer_evaluated_zoom(coords, &input.style_layer.id, input.paint.zoom);
+    let opaque_fill = input.style_layer.type_ == "fill"
         && !matches!(
-            style_layer.paint.as_ref(),
+            input.style_layer.paint.as_ref(),
             Some(crate::style::layer::LayerPaint::Fill(f)) if f.fill_pattern.is_some()
         )
         && if let Some(color) = uniform {
@@ -208,7 +313,7 @@ pub(super) fn upload_bucket(
         } else {
             !feature_metadata.is_empty() && feature_metadata.iter().all(|fm| fm.color[3] == 255)
         };
-    buffer_pool.set_layer_opaque_color(coords, &style_layer.id, opaque_fill);
+    buffer_pool.set_layer_opaque_color(coords, &input.style_layer.id, opaque_fill);
     let slot = buffer_pool
         .index()
         .get_layers(coords)
@@ -216,21 +321,23 @@ pub(super) fn upload_bucket(
             layers
                 .iter()
                 .rev()
-                .find(|entry| entry.style_layer_id == style_layer.layer_id())
+                .find(|entry| entry.style_layer_id == input.style_layer.layer_id())
         })
         .and_then(|entry| {
             let range = entry.layer_metadata_buffer_range();
             (range.end > range.start).then_some((entry.page(), range.start))
         });
     #[cfg(feature = "geojson")]
-    if is_dynamic_circle {
+    if input.is_dynamic_circle {
         crate::geojson::update::dynamic_points::record_uploaded_dynamic_circle(
             Some(dyn_points),
             buffer_pool,
             coords,
-            style_layer,
+            input.style_layer,
             dynamic_seq,
         );
     }
+    #[cfg(not(feature = "geojson"))]
+    let _ = (dyn_points, dynamic_seq);
     UploadOutcome::Uploaded(slot.map(|slot| (slot, layer_metadata)))
 }

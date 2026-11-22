@@ -1,6 +1,6 @@
 //! The sun's disc stands on the sea horizon at sunrise: the ground hides the part of it below
 //! the horizon the eye sees, and the glare follows the part that shows.
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg_attr(test, allow(clippy::expect_used))]
 
 use cgmath::{InnerSpace, Vector3};
 

@@ -1,0 +1,485 @@
+# Tiered evidence configuration for maplibre-rs-experimental (`Tier 2: verify`).
+schema_version = 1
+
+[workspace]
+name = "maplibre-rs-experimental"
+exclude_paths = [
+    "target/**",
+    "docs/**",
+    "apple/visionos/**",
+    "web/lib/src/wasm/**",
+    "web/**/dist/**",
+    "web/**/node_modules/**",
+    "render-tests/src/tests/**",
+    "render-tests/src/templates/**",
+]
+
+[architecture]
+in_scope = [
+    "maplibre-build-tools",
+    "maplibre-coords",
+    "maplibre-tcs",
+    "maplibre",
+    "web-tile-worker",
+    "web",
+    "maplibre-winit",
+    "maplibre-ffi",
+    "apple",
+    "maplibre-android",
+    "maplibre-demo",
+    "benchmarks",
+    "render-tests",
+]
+no_out_of_scope_deps = true
+require_all_crates_layered = true
+
+[[architecture.layers]]
+name = "foundation"
+crates = ["maplibre-build-tools", "maplibre-coords", "maplibre-tcs"]
+allow_same_layer = true
+
+[[architecture.layers]]
+name = "core"
+crates = ["maplibre"]
+allow_same_layer = false
+
+[[architecture.layers]]
+name = "platforms"
+crates = [
+    "web-tile-worker",
+    "web",
+    "maplibre-winit",
+    "maplibre-ffi",
+    "apple",
+    "maplibre-android",
+]
+allow_same_layer = true
+
+[[architecture.layers]]
+name = "apps_and_tests"
+crates = ["maplibre-demo", "benchmarks", "render-tests"]
+allow_same_layer = false
+
+[[architecture.dep_closures]]
+id = "wasm-web-default"
+package = "web"
+target = "wasm32-unknown-unknown"
+features = []
+forbid_crates = { curl = "native curl is unsupported on wasm32; use browser fetch", "curl-sys" = "native curl C bindings cannot compile for wasm32", "http-cache-reqwest" = "disk HTTP cache is native-only (behind native-io)", hyper = "native HTTP stack is unsupported on wasm32", "hyper-util" = "native hyper utilities are unsupported on wasm32", "libsqlite3-sys" = "native SQLite C library is unsupported on wasm32", mio = "native OS event loop is unsupported on wasm32", openssl = "native OpenSSL cannot link on wasm32", "openssl-sys" = "native OpenSSL C bindings cannot link on wasm32", "reqwest-middleware" = "HTTP middleware stack belongs under native-io only", rusqlite = "native SQLite storage is unsupported on wasm32", rustls = "native TLS stack is unsupported on wasm32", socket2 = "native OS sockets are unsupported on wasm32", tokio = "native Tokio runtime belongs under not(target_arch = \"wasm32\") only", "tokio-util" = "native Tokio utilities are unsupported on wasm32" }
+
+[[architecture.dep_closures]]
+id = "wasm-web-webgl"
+package = "web"
+target = "wasm32-unknown-unknown"
+features = ["web-webgl"]
+forbid_crates = { curl = "native curl is unsupported on wasm32; use browser fetch", "curl-sys" = "native curl C bindings cannot compile for wasm32", "http-cache-reqwest" = "disk HTTP cache is native-only (behind native-io)", hyper = "native HTTP stack is unsupported on wasm32", "hyper-util" = "native hyper utilities are unsupported on wasm32", "libsqlite3-sys" = "native SQLite C library is unsupported on wasm32", mio = "native OS event loop is unsupported on wasm32", openssl = "native OpenSSL cannot link on wasm32", "openssl-sys" = "native OpenSSL C bindings cannot link on wasm32", "reqwest-middleware" = "HTTP middleware stack belongs under native-io only", rusqlite = "native SQLite storage is unsupported on wasm32", rustls = "native TLS stack is unsupported on wasm32", socket2 = "native OS sockets are unsupported on wasm32", tokio = "native Tokio runtime belongs under not(target_arch = \"wasm32\") only", "tokio-util" = "native Tokio utilities are unsupported on wasm32" }
+
+[[architecture.dep_closures]]
+id = "wasm-tile-worker"
+package = "web-tile-worker"
+target = "wasm32-unknown-unknown"
+features = []
+forbid_crates = { curl = "native curl is unsupported on wasm32; use browser fetch", "curl-sys" = "native curl C bindings cannot compile for wasm32", "http-cache-reqwest" = "disk HTTP cache is native-only (behind native-io)", hyper = "native HTTP stack is unsupported on wasm32", "hyper-util" = "native hyper utilities are unsupported on wasm32", "libsqlite3-sys" = "native SQLite C library is unsupported on wasm32", mio = "native OS event loop is unsupported on wasm32", openssl = "native OpenSSL cannot link on wasm32", "openssl-sys" = "native OpenSSL C bindings cannot link on wasm32", reqwest = "tile workers must use maplibre browser fetch transport, not reqwest", "reqwest-middleware" = "HTTP middleware stack belongs under native-io only", rusqlite = "native SQLite storage is unsupported on wasm32", rustls = "native TLS stack is unsupported on wasm32", socket2 = "native OS sockets are unsupported on wasm32", tokio = "native Tokio runtime belongs under not(target_arch = \"wasm32\") only", "tokio-util" = "native Tokio utilities are unsupported on wasm32" }
+
+[[architecture.dep_closures]]
+id = "wasm-maplibre-default"
+package = "maplibre"
+target = "wasm32-unknown-unknown"
+features = []
+forbid_crates = { curl = "native curl is unsupported on wasm32", "curl-sys" = "native curl C bindings cannot compile for wasm32", "http-cache-reqwest" = "disk HTTP cache is native-only", hyper = "native HTTP stack is unsupported on wasm32", "hyper-util" = "native hyper utilities are unsupported on wasm32", "libsqlite3-sys" = "native SQLite C library is unsupported on wasm32", mio = "native OS event loop is unsupported on wasm32", openssl = "native OpenSSL cannot link on wasm32", "openssl-sys" = "native OpenSSL C bindings cannot link on wasm32", reqwest = "core maplibre must use platform WebHttpClient on wasm32, not reqwest", "reqwest-middleware" = "HTTP middleware belongs under native-io only", rusqlite = "native SQLite storage is unsupported on wasm32", rustls = "native TLS stack is unsupported on wasm32", socket2 = "native OS sockets are unsupported on wasm32", tokio = "native Tokio runtime belongs under native-io only", "tokio-util" = "native Tokio utilities belong under native-io only" }
+
+[[architecture.dep_closures]]
+id = "wasm-maplibre-webgl"
+package = "maplibre"
+target = "wasm32-unknown-unknown"
+features = ["web-webgl"]
+forbid_crates = { curl = "native curl is unsupported on wasm32", "curl-sys" = "native curl C bindings cannot compile for wasm32", "http-cache-reqwest" = "disk HTTP cache is native-only", hyper = "native HTTP stack is unsupported on wasm32", "hyper-util" = "native hyper utilities are unsupported on wasm32", "libsqlite3-sys" = "native SQLite C library is unsupported on wasm32", mio = "native OS event loop is unsupported on wasm32", openssl = "native OpenSSL cannot link on wasm32", "openssl-sys" = "native OpenSSL C bindings cannot link on wasm32", reqwest = "core maplibre must use platform WebHttpClient on wasm32, not reqwest", "reqwest-middleware" = "HTTP middleware belongs under native-io only", rusqlite = "native SQLite storage is unsupported on wasm32", rustls = "native TLS stack is unsupported on wasm32", socket2 = "native OS sockets are unsupported on wasm32", tokio = "native Tokio runtime belongs under native-io only", "tokio-util" = "native Tokio utilities belong under native-io only" }
+
+[structure]
+enabled = true
+max_rs_lines = 500
+max_lib_rs_lines = 100
+max_fn_lines = 80
+require_lib_rs_doc = true
+forbid_mod_rs = true
+forbid_generic_filenames = ["utils.rs", "helpers.rs", "common.rs"]
+forbid_stray_artifacts = true
+
+[structure.file_size_allowlist]
+"maplibre/src/projection/globe/covering.rs" = 532
+"maplibre/src/style/expression/evaluate/dispatch.rs" = 509
+"maplibre/src/vector/line_dash.rs" = 510
+"maplibre/src/vector/process_vector/shared_geometry.rs" = 509
+
+[lints]
+require_workspace_lints_inheritance = true
+forbid_bare_allow = true
+allow_in_tests = true
+
+[comments]
+forbid_rot_markers = true
+forbid_excuse_comments = true
+forbid_sync_and_apology_comments = true
+max_consecutive_inline_comment_lines = 6
+max_inline_comment_ratio = 0.15
+inline_ratio_min_lines = 40
+allow_in_tests = true
+
+[[web_boundaries]]
+id = "web-workers-no-dom"
+from_glob = "web/lib/src/{singlethreaded,multithreaded}/**/*.{ts,js,mjs}"
+forbid_import_prefixes = []
+forbid_import_globs = [
+    "web/lib/src/browser*",
+    "web/lib/src/canvas*",
+    "web/lib/src/index*",
+    "web/lib/src/map*",
+    "web/lib/src/offscreen-client*",
+    "web/lib/src/offscreen-coalesce*",
+    "web/demo/**",
+    "web/xr/**",
+]
+reason = "Web Worker modules must stay DOM- and main-thread-free; communicate only through Worker postMessage/MessagePort channels and WASM worker bindings."
+
+[[web_boundaries]]
+id = "web-tile-worker-no-gpu"
+from_glob = "web/lib/src/{singlethreaded/pool.worker.ts,multithreaded/multithreaded-pool.worker.ts}"
+forbid_import_prefixes = []
+forbid_import_globs = [
+    "web/lib/src/webgpu-compat*",
+    "web/lib/src/singlethreaded/render.worker*",
+]
+reason = "Tile pool workers perform CPU decoding/tessellation only and must not import WebGPU compatibility or render-worker modules."
+
+[[web_boundaries]]
+id = "web-dom-no-direct-worker-internals"
+from_glob = "web/lib/src/{browser,canvas,map,offscreen-client,offscreen-coalesce}.{ts,mjs}"
+forbid_import_prefixes = []
+forbid_import_globs = [
+    "web/lib/src/singlethreaded/**",
+    "web/lib/src/multithreaded/**",
+]
+reason = "Main-thread DOM/client helpers must talk to workers through injected Worker handles from index.ts, never import worker bundles directly."
+
+[[banned_patterns]]
+id = "no-web-settimeout"
+pattern = "\\bsetTimeout\\s*\\("
+languages = ["ts", "js"]
+include_globs = ["web/**"]
+exclude_globs = [
+    "web/lib/build.mjs",
+    "web/**/dist/**",
+    "web/**/node_modules/**",
+    "web/lib/src/wasm/**",
+]
+context = "code"
+allow_in_tests = true
+reason = "Ban setTimeout polling/recovery workarounds in Web code; wire explicit Worker message/destroyed events or AbortSignal.timeout with structured cancellation."
+
+[[banned_patterns]]
+id = "no-web-adhoc-raf"
+pattern = "\\brequestAnimationFrame\\s*\\("
+languages = ["ts", "js"]
+include_globs = ["web/**"]
+exclude_globs = [
+    "web/lib/src/offscreen-coalesce.mjs",
+    "web/xr/src/main.ts",
+    "web/**/dist/**",
+    "web/**/node_modules/**",
+    "web/lib/src/wasm/**",
+]
+context = "code"
+allow_in_tests = true
+reason = "Ban ad-hoc requestAnimationFrame retries in Web modules; drive rendering via offscreen-coalesce.mjs or the canonical XR loop in web/xr/src/main.ts."
+
+[steering]
+enabled = true
+root_files = ["CLAUDE.md", "AGENTS.md"]
+root_max_lines = 60
+require_per_crate = false
+require_scoped_test_cmd = true
+
+[feature_map.coords_projection]
+description = "Coordinate spaces, tile math, zoom bounds, Mercator/Globe/VerticalPerspective projections"
+crates = ["maplibre-coords", "maplibre"]
+modules = ["crates/maplibre-coords/src", "maplibre/src/projection.rs"]
+verify_targets = ["maplibre-coords", "harness:proptest", "harness:native-nextest"]
+
+[feature_map.globe_terrain]
+description = "Globe subdivision, tile covering, raster-dem pipeline, height/drape uniforms"
+crates = ["maplibre"]
+modules = ["maplibre/src/terrain.rs", "maplibre/src/projection/globe.rs"]
+verify_targets = ["maplibre", "harness:proptest", "harness:render-tests"]
+
+[feature_map.vector_tessellation]
+description = "MVT/MLT/GeoJSON decoding, polygon/extrusion/line tessellation, vector GPU buffer pools"
+crates = ["maplibre"]
+modules = ["maplibre/src/vector.rs", "maplibre/src/geojson.rs"]
+verify_targets = ["maplibre", "harness:native-nextest"]
+
+[feature_map.sdf_symbols]
+description = "Font/WOFF2 shaping, glyph/sprite atlas packing, text/icon layout, collision placement"
+crates = ["maplibre"]
+modules = ["maplibre/src/sdf.rs", "maplibre/src/font.rs"]
+verify_targets = ["maplibre", "harness:proptest", "harness:native-nextest"]
+
+[feature_map.apc_io]
+description = "Async Procedure Call worker channels, retry state machines, geometry index wire, HTTP loaders"
+crates = ["maplibre", "web", "web-tile-worker"]
+modules = ["maplibre/src/io.rs", "web/src/platform.rs"]
+verify_targets = ["maplibre", "harness:proptest", "harness:wasm32-clippy"]
+
+[feature_map.web_platform]
+description = "WASM bindings, single/multi-threaded Web Workers, WebGPU/WebGL2 DOM shell, XR companion"
+crates = ["web", "web-tile-worker", "maplibre-winit"]
+modules = ["web", "crates/web-tile-worker"]
+verify_targets = [
+    "gate:wasm-web-default",
+    "gate:wasm-web-webgl",
+    "gate:wasm-tile-worker",
+    "harness:wasm32-clippy",
+    "harness:web-lib",
+]
+
+[feature_map.render_pipeline]
+description = "TCS World/Schedule stages, wgpu render graph/passes, headless readback, render conformance"
+crates = ["maplibre", "maplibre-tcs", "render-tests"]
+modules = ["maplibre/src/render.rs", "maplibre/src/headless.rs", "crates/maplibre-tcs/src", "render-tests"]
+verify_targets = ["render-tests", "harness:native-nextest", "harness:render-tests"]
+
+[floors]
+delta_ceilings = { new_library_panics = 0, new_unwraps = 0, new_dead_code_allows = 0 }
+
+[[floors.json_ceilings]]
+name = "render-tests-ignores"
+path = "render-tests/ignores.json"
+json_pointer = "/ignores"
+max = 70
+
+[floors.per_crate]
+maplibre-coords = { proptest_count = 4 }
+maplibre = { proptest_count = 12 }
+
+[floors.per_crate_ceilings]
+apple = { unwrap = 0, expect = 0, panic = 0, todo = 0, unimplemented = 0 }
+benchmarks = { unwrap = 5, expect = 44, panic = 15, todo = 0, unimplemented = 0 }
+maplibre = { unwrap = 0, expect = 624, panic = 0, todo = 0, unimplemented = 0 }
+maplibre-android = { unwrap = 0, expect = 0, panic = 0, todo = 0, unimplemented = 0 }
+maplibre-build-tools = { unwrap = 0, expect = 0, panic = 0, todo = 0, unimplemented = 0 }
+maplibre-coords = { unwrap = 0, expect = 0, panic = 0, todo = 0, unimplemented = 0 }
+maplibre-demo = { unwrap = 0, expect = 0, panic = 0, todo = 0, unimplemented = 0 }
+maplibre-ffi = { unwrap = 0, expect = 0, panic = 0, todo = 0, unimplemented = 0 }
+maplibre-tcs = { unwrap = 0, expect = 0, panic = 0, todo = 0, unimplemented = 0 }
+maplibre-winit = { unwrap = 0, expect = 0, panic = 0, todo = 0, unimplemented = 0 }
+render-tests = { unwrap = 0, expect = 0, panic = 0, todo = 0, unimplemented = 0 }
+web = { unwrap = 0, expect = 0, panic = 0, todo = 0, unimplemented = 0 }
+web-tile-worker = { unwrap = 0, expect = 0, panic = 0, todo = 0, unimplemented = 0 }
+
+[floors.per_file_ceilings]
+"apple/src/config.rs" = { unwrap = 0, expect = 0, panic = 0 }
+"apple/src/ffi.rs" = { unwrap = 0, expect = 0, panic = 0 }
+"apple/src/lib.rs" = { unwrap = 0, expect = 0, panic = 0 }
+"benchmarks/src/lib.rs" = { unwrap = 0, expect = 0, panic = 0 }
+"benchmarks/benches/buffer_pool.rs" = { expect = 6 }
+"benchmarks/benches/data.rs" = { unwrap = 4, expect = 2 }
+"benchmarks/benches/dem_pipeline.rs" = { expect = 9 }
+"benchmarks/benches/render.rs" = { unwrap = 1, expect = 2, panic = 3 }
+"benchmarks/benches/tile_pyramid.rs" = { expect = 1 }
+"benchmarks/benches/view_and_query.rs" = { expect = 24 }
+"benchmarks/benches/xr_readback.rs" = { panic = 12 }
+"maplibre/src/headless/map/injected_loader.rs" = { expect = 26 }
+"maplibre/src/headless/map/signals/terrain_idle.rs" = { expect = 13 }
+"maplibre/src/headless/map/style/sky/bright_moon.rs" = { expect = 13 }
+"maplibre/src/headless/map/style/sky/daylight.rs" = { expect = 13 }
+"maplibre/src/headless/map/style/sky/eclipse.rs" = { expect = 14 }
+"maplibre/src/headless/map/style/sky/eye_ground.rs" = { expect = 10 }
+"maplibre/src/headless/map/style/sky/globe_daylight.rs" = { expect = 11 }
+"maplibre/src/headless/map/style/sky/globe_sky.rs" = { expect = 8 }
+"maplibre/src/headless/map/style/sky/host_atmosphere.rs" = { expect = 20 }
+"maplibre/src/headless/map/style/sky/look_up.rs" = { expect = 15 }
+"maplibre/src/headless/map/style/sky/lunar_eclipse.rs" = { expect = 10 }
+"maplibre/src/headless/map/style/sky/moon.rs" = { expect = 9 }
+"maplibre/src/headless/map/style/sky/starfield.rs" = { expect = 16 }
+"maplibre/src/headless/map/style/sky/sun.rs" = { expect = 14 }
+"maplibre/src/headless/map/symbol_worker/anchor_depth/navigation.rs" = { expect = 5 }
+"maplibre/src/headless/map/symbol_worker/anchor_depth/ridge.rs" = { expect = 3 }
+"maplibre/src/headless/map/symbol_worker/anchor_depth.rs" = { expect = 3 }
+"maplibre/src/headless/map/symbol_worker/circle_stroke.rs" = { expect = 2 }
+"maplibre/src/headless/map/symbol_worker/curve.rs" = { expect = 7 }
+"maplibre/src/headless/map/symbol_worker/dem.rs" = { expect = 1 }
+"maplibre/src/headless/map/symbol_worker/geojson.rs" = { expect = 6 }
+"maplibre/src/headless/map/symbol_worker/globe_precision.rs" = { expect = 5 }
+"maplibre/src/headless/map/symbol_worker/horizon.rs" = { expect = 2 }
+"maplibre/src/headless/map/symbol_worker/line_ground/slope.rs" = { expect = 2 }
+"maplibre/src/headless/map/symbol_worker/line_ground.rs" = { expect = 5 }
+"maplibre/src/headless/map/symbol_worker/motion.rs" = { expect = 3 }
+"maplibre/src/headless/map/symbol_worker/mvt.rs" = { expect = 3 }
+"maplibre/src/headless/map/symbol_worker/provided/arrival.rs" = { expect = 8 }
+"maplibre/src/headless/map/symbol_worker/provided/cost.rs" = { expect = 3 }
+"maplibre/src/headless/map/symbol_worker/provided/formatted.rs" = { expect = 7 }
+"maplibre/src/headless/map/symbol_worker/provided/groups.rs" = { expect = 8 }
+"maplibre/src/headless/map/symbol_worker/provided/placement.rs" = { expect = 3 }
+"maplibre/src/headless/map/symbol_worker/provided.rs" = { expect = 9 }
+"maplibre/src/headless/map/symbol_worker/retry.rs" = { expect = 2 }
+"maplibre/src/headless/map/symbol_worker.rs" = { expect = 17 }
+"maplibre/src/headless/map/terrain_coverage/alpha/fill_opacity.rs" = { expect = 2 }
+"maplibre/src/headless/map/terrain_coverage/alpha/globe.rs" = { expect = 1 }
+"maplibre/src/headless/map/terrain_coverage/alpha.rs" = { expect = 10 }
+"maplibre/src/headless/map/terrain_coverage/drag.rs" = { expect = 7 }
+"maplibre/src/headless/map/terrain_coverage/faults.rs" = { expect = 2 }
+"maplibre/src/headless/map/terrain_coverage/heatmap.rs" = { expect = 16 }
+"maplibre/src/headless/map/terrain_coverage/hillshade.rs" = { expect = 4 }
+"maplibre/src/headless/map/terrain_coverage/reload.rs" = { expect = 5 }
+"maplibre/src/headless/map/terrain_coverage/source_identity.rs" = { expect = 11 }
+"maplibre/src/headless/map/terrain_coverage/stencil.rs" = { expect = 6 }
+"maplibre/src/headless/map/terrain_coverage/unified_dem.rs" = { expect = 11 }
+"maplibre/src/headless/map/terrain_coverage/uniforms.rs" = { expect = 10 }
+"maplibre/src/headless/map/terrain_coverage.rs" = { expect = 12 }
+"maplibre/src/headless/map/vertical_perspective/ground.rs" = { expect = 3 }
+"maplibre/src/headless/map/vertical_perspective/occlusion.rs" = { expect = 6 }
+"maplibre/src/headless/map/vertical_perspective/poles.rs" = { expect = 6 }
+"maplibre/src/headless/map/vertical_perspective/sight.rs" = { expect = 8 }
+"maplibre/src/headless/map/vertical_perspective/unclamped.rs" = { expect = 30 }
+"maplibre/src/headless/map/vertical_perspective/zoom.rs" = { expect = 7 }
+"maplibre/src/headless/map/vertical_perspective.rs" = { expect = 18 }
+"maplibre/src/headless/map/xr/poles/caps.rs" = { expect = 7 }
+"maplibre/src/headless/map/xr/regression/binned_phase.rs" = { expect = 14 }
+"maplibre/src/headless/map/xr/surface/ocean.rs" = { expect = 6 }
+"maplibre/src/platform/noweb/trace.rs" = { expect = 1 }
+"maplibre/src/platform/noweb.rs" = { expect = 1 }
+"maplibre/src/sdf/pixels/line_labels.rs" = { expect = 2 }
+"maplibre/src/sdf/pixels/loaded_assets.rs" = { expect = 8 }
+"maplibre/src/sdf/pixels/navigation.rs" = { expect = 10 }
+"maplibre/src/sdf/pixels/queries.rs" = { expect = 17 }
+"maplibre/src/sdf/pixels/query_visibility.rs" = { expect = 2 }
+"maplibre/src/sdf/pixels/stability.rs" = { expect = 4 }
+"maplibre/src/sdf/pixels/variable_anchors.rs" = { expect = 7 }
+"maplibre/src/sdf/upload_system/retry.rs" = { expect = 6 }
+"maplibre/src/terrain/dem/gpu_readback.rs" = { expect = 3 }
+"maplibre/src/terrain/gpu_dem_pool.rs" = { expect = 2 }
+"maplibre/src/terrain/mesh/pixels/seams.rs" = { expect = 5 }
+"maplibre/src/terrain/mesh/pixels.rs" = { expect = 17 }
+"maplibre/src/terrain/sightline/synthetic.rs" = { expect = 3 }
+"maplibre/src/vector/resource/buffer_pool.rs" = { expect = 1 }
+"maplibre/src/vector/structures/pixels/circle.rs" = { expect = 9 }
+"maplibre/src/vector/structures/pixels/overlay.rs" = { expect = 7 }
+"maplibre/src/vector/structures/pixels/volumetric.rs" = { expect = 9 }
+"maplibre/src/vector/structures/pixels.rs" = { expect = 12 }
+
+[verify]
+fail_fast = true
+max_parallel = 3
+artifact_manifest = "artifacts/manifest.json"
+
+[[verify.harnesses]]
+name = "wasm32-clippy"
+kind = "artifact-cmd"
+env = { CARGO_TARGET_DIR = "target/verify-wasm" }
+command = [
+    "sh",
+    "-c",
+    "! cargo tree -p web-tile-worker --target wasm32-unknown-unknown -e normal | grep -Eq '(^|[[:space:]])winit[[:space:]]+v' && cargo clippy --target wasm32-unknown-unknown -p web -p web-tile-worker --all-targets -- -D warnings && cargo clippy --target wasm32-unknown-unknown -p web --lib --no-default-features --features renderer,web-webgl -- -D warnings",
+]
+timeout_secs = 300
+
+[[verify.harnesses]]
+name = "web-lib"
+kind = "artifact-cmd"
+cwd = "web/lib"
+command = ["sh", "-c", "npx tsc --noEmit && node --test test/*.test.mjs"]
+timeout_secs = 120
+
+[[verify.harnesses]]
+name = "native-nextest"
+kind = "rust-test"
+command = [
+    "sh",
+    "-c",
+    "if command -v cargo-nextest >/dev/null 2>&1; then cargo nextest run --workspace --exclude web --exclude web-tile-worker --exclude maplibre-android --no-fail-fast; else cargo test --workspace --exclude web --exclude web-tile-worker --exclude maplibre-android --no-fail-fast; fi",
+]
+timeout_secs = 600
+
+[[verify.harnesses]]
+name = "proptest"
+kind = "proptest"
+depends_on = ["native-nextest"]
+packages = ["maplibre-coords", "maplibre"]
+min_proptests = 16
+command = [
+    "cargo",
+    "test",
+    "--no-fail-fast",
+    "-p",
+    "maplibre-coords",
+    "-p",
+    "maplibre",
+    "--lib",
+    "proptests::",
+]
+timeout_secs = 300
+
+[[verify.harnesses]]
+name = "render-tests"
+kind = "artifact-cmd"
+depends_on = ["proptest"]
+command = [
+    "cargo",
+    "run",
+    "-p",
+    "render-tests",
+    "--",
+    "--ci",
+    "--filter",
+    "basic-v9/z0",
+    "--filter",
+    "projection-globe/fill-planet-tiles",
+    "--filter",
+    "terrain/default",
+    "--summary-json",
+    "artifacts/render-summary.json",
+    "--lifecycle-json",
+    "artifacts/camera-tile-lifecycle.json",
+    "--artifact-dir",
+    "artifacts/render",
+]
+timeout_secs = 300
+
+[[verify.harnesses.expected_artifacts]]
+path = "artifacts/render-summary.json"
+kind = "telemetry_summary"
+label = "Render test conformance summary"
+
+[[verify.harnesses.expected_artifacts]]
+path = "artifacts/camera-tile-lifecycle.json"
+kind = "telemetry_summary"
+label = "Per-fixture camera and tile lifecycle telemetry"
+
+[[verify.harnesses.expected_artifacts]]
+path = "artifacts/render/basic-v9__z0-actual.png"
+kind = "screenshot"
+label = "Rendered basic-v9/z0 actual frame"
+
+[[verify.harnesses.expected_artifacts]]
+path = "artifacts/render/basic-v9__z0-diff.png"
+kind = "pixel_diff"
+label = "Rendered basic-v9/z0 golden pixel diff"
+
+[[verify.harnesses.expected_artifacts]]
+path = "artifacts/render/projection-globe__fill-planet-tiles-actual.png"
+kind = "screenshot"
+label = "Rendered projection-globe/fill-planet-tiles actual frame"
+
+[[verify.harnesses.expected_artifacts]]
+path = "artifacts/render/projection-globe__fill-planet-tiles-diff.png"
+kind = "pixel_diff"
+label = "Rendered projection-globe/fill-planet-tiles golden pixel diff"
+
+[[verify.harnesses.expected_artifacts]]
+path = "artifacts/render/terrain__default-actual.png"
+kind = "screenshot"
+label = "Rendered terrain/default actual frame"
+
+[[verify.harnesses.expected_artifacts]]
+path = "artifacts/render/terrain__default-diff.png"
+kind = "pixel_diff"
+label = "Rendered terrain/default golden pixel diff"

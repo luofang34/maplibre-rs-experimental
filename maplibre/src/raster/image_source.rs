@@ -70,7 +70,7 @@ fn fill(
     for py in y0 as u32..y1 as u32 {
         for px in x0 as u32..x1 as u32 {
             let index = (py * IMAGE_TILE_SIZE + px) as usize;
-            if drawn[index] {
+            if drawn.get(index).copied().unwrap_or(true) {
                 continue;
             }
             let (x, y) = (f64::from(px) + 0.5, f64::from(py) + 0.5);
@@ -80,7 +80,14 @@ fn fill(
             if l0 < 0.0 || l1 < 0.0 || l2 < 0.0 {
                 continue;
             }
-            let texture = [0, 1, 2].map(|i| l0 * ta[i] + l1 * tb[i] + l2 * tc[i]);
+            let [ta0, ta1, ta2] = ta;
+            let [tb0, tb1, tb2] = tb;
+            let [tc0, tc1, tc2] = tc;
+            let texture = [
+                l0 * ta0 + l1 * tb0 + l2 * tc0,
+                l0 * ta1 + l1 * tb1 + l2 * tc1,
+                l0 * ta2 + l1 * tb2 + l2 * tc2,
+            ];
             let [r, g, blue, alpha] =
                 sample(image, texture[0] / texture[2], texture[1] / texture[2]);
             if alpha > 0.0 {
@@ -92,7 +99,9 @@ fn fill(
                             .map(|c| (c * 255.0).round() as u8),
                     ),
                 );
-                drawn[index] = true;
+                if let Some(slot) = drawn.get_mut(index) {
+                    *slot = true;
+                }
             }
         }
     }
@@ -242,12 +251,10 @@ pub(crate) fn reload(
 fn render_tile_bounds_reach(coordinates: [[f64; 2]; 4], tile: WorldTileCoords) -> bool {
     let tile_count = 2_f64.powi(i32::from(u8::from(tile.z)));
     let corners = coordinates.map(mercator);
-    let fold = |axis: usize| {
-        corners.iter().fold((f64::MAX, f64::MIN), |(lo, hi), c| {
-            (lo.min(c[axis]), hi.max(c[axis]))
-        })
-    };
-    let ((west, east), (north, south)) = (fold(0), fold(1));
+    let ((west, east), (north, south)) = corners.iter().fold(
+        ((f64::MAX, f64::MIN), (f64::MAX, f64::MIN)),
+        |((w, e), (n, s)), &[x, y]| ((w.min(x), e.max(x)), (n.min(y), s.max(y))),
+    );
     let (left, top) = (
         f64::from(tile.x) / tile_count,
         f64::from(tile.y) / tile_count,

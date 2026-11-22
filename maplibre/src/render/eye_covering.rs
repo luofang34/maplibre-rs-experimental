@@ -255,6 +255,77 @@ pub(crate) fn terrain_index_key(world: &World) -> (u64, u64, usize) {
         })
 }
 
+type DrawnCoveringKey = (
+    Option<EyeInFrame>,
+    u64,
+    u64,
+    ZoomLevel,
+    [[u64; 4]; 4],
+    (u64, u64, usize),
+);
+
+fn cached_drawn_covering(
+    world: &World,
+    (eye, host_frame, style_rev, level, view_proj_bits, terrain_key): DrawnCoveringKey,
+) -> Option<(Option<ViewRegion>, RasterCoverings)> {
+    world
+        .resources
+        .get::<SharedCovering>()
+        .filter(|shared| {
+            shared.frame == eye.map(|e| e.frame)
+                && shared.host_frame == host_frame
+                && shared.style_rev == style_rev
+                && shared.level == level
+                && shared.view_proj_bits == view_proj_bits
+                && shared.terrain_key == terrain_key
+        })
+        .map(|shared| (shared.region(), shared.raster.clone()))
+}
+
+fn tight_cached_region(
+    world: &World,
+    host_frame: u64,
+    level: ZoomLevel,
+    can_use_cache: bool,
+) -> Option<Option<ViewRegion>> {
+    if !can_use_cache {
+        return None;
+    }
+    world
+        .resources
+        .get::<FrameLooseCovering>()
+        .filter(|cache| cache.host_frame == host_frame)
+        .and_then(|cache| cache.view_tiles.as_ref())
+        .filter(|(_, padding, cached_level)| {
+            *padding == ViewStatePadding::Tight && *cached_level == level
+        })
+        .map(|(tiles, _, _)| {
+            tiles
+                .as_ref()
+                .map(|tiles| ViewRegion::from_tiles(tiles.to_vec(), level, tiles.len().max(1)))
+        })
+}
+
+fn tight_cached_raster(
+    world: &World,
+    host_frame: u64,
+    terrain_key: (u64, u64, usize),
+    can_use_cache: bool,
+) -> Option<RasterCoverings> {
+    if !can_use_cache {
+        return None;
+    }
+    world
+        .resources
+        .get::<FrameLooseCovering>()
+        .filter(|cache| cache.host_frame == host_frame)
+        .and_then(|cache| cache.raster_regions.as_ref())
+        .filter(|(_, padding, cached_terrain)| {
+            *padding == ViewStatePadding::Tight && *cached_terrain == terrain_key
+        })
+        .map(|(regions, _, _)| regions.clone())
+}
+
 /// The tiles the frame draws at `level`, with the raster tiles each raster source draws:
 /// the first eye's selection when the schedule runs for a later eye of the same frame, and
 /// otherwise this view's own, kept as the next frame's level history.
@@ -282,55 +353,29 @@ pub(crate) fn drawn_covering(
     let view_proj_bits = frame_view_proj_bits(world, style, view_state);
     let style_rev = style.revision();
     let terrain_key = terrain_index_key(world);
-    if !multi_active && eye.is_none_or(|e| e.index == 0) {
-        if let Some(shared) = world.resources.get::<SharedCovering>().filter(|shared| {
-            shared.frame == eye.map(|e| e.frame)
-                && shared.host_frame == host_frame
-                && shared.style_rev == style_rev
-                && shared.level == level
-                && shared.view_proj_bits == view_proj_bits
-                && shared.terrain_key == terrain_key
-        }) {
-            return Ok((shared.region(), shared.raster.clone()));
+    let can_use_cache = !multi_active && eye.is_none_or(|e| e.index == 0);
+    if can_use_cache {
+        if let Some(cached) = cached_drawn_covering(
+            world,
+            (
+                eye,
+                host_frame,
+                style_rev,
+                level,
+                view_proj_bits,
+                terrain_key,
+            ),
+        ) {
+            return Ok(cached);
         }
     }
-    let cached_tight_region = if !multi_active && eye.is_none_or(|eye| eye.index == 0) {
-        world
-            .resources
-            .get::<FrameLooseCovering>()
-            .filter(|cache| cache.host_frame == host_frame)
-            .and_then(|cache| cache.view_tiles.as_ref())
-            .filter(|(_, padding, cached_level)| {
-                *padding == ViewStatePadding::Tight && *cached_level == level
-            })
-            .map(|(tiles, _, _)| {
-                tiles
-                    .as_ref()
-                    .map(|tiles| ViewRegion::from_tiles(tiles.to_vec(), level, tiles.len().max(1)))
-            })
-    } else {
-        None
-    };
-    let region = match cached_tight_region {
+    let region = match tight_cached_region(world, host_frame, level, can_use_cache) {
         Some(cached) => cached,
         None => {
             view_region_for_projection(style, view_state, world, level, ViewStatePadding::Tight)?
         }
     };
-    let cached_raster = if !multi_active && eye.is_none_or(|eye| eye.index == 0) {
-        world
-            .resources
-            .get::<FrameLooseCovering>()
-            .filter(|cache| cache.host_frame == host_frame)
-            .and_then(|cache| cache.raster_regions.as_ref())
-            .filter(|(_, padding, cached_terrain)| {
-                *padding == ViewStatePadding::Tight && *cached_terrain == terrain_key
-            })
-            .map(|(regions, _, _)| regions.clone())
-    } else {
-        None
-    };
-    let raster = match cached_raster {
+    let raster = match tight_cached_raster(world, host_frame, terrain_key, can_use_cache) {
         Some(cached) => cached,
         None => raster_source_regions(style, view_state, world, ViewStatePadding::Tight)?,
     };

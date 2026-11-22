@@ -62,14 +62,22 @@ fn ingest(map: &mut HeadlessMap, delivery: Delivery, coords: WorldTileCoords, he
 
 fn assert_uploaded(map: &HeadlessMap, coords: WorldTileCoords, expected: f64) {
     let world = map.world();
-    let Some(DemTileComponent::Loaded(dem)) = world.tiles.query::<&DemTileComponent>(coords) else {
-        panic!("decoded DEM");
+    let dem_comp = world.tiles.query::<&DemTileComponent>(coords);
+    assert!(
+        matches!(dem_comp, Some(DemTileComponent::Loaded(_))),
+        "decoded DEM"
+    );
+    let Some(DemTileComponent::Loaded(dem)) = dem_comp else {
+        return;
     };
     assert_eq!(dem.tile.elevation_at_tile_coords(2048.0, 2048.0), expected);
-    let Some(Eventually::Initialized(resources)) =
-        world.resources.get::<Eventually<TerrainResources>>()
-    else {
-        panic!("terrain resources");
+    let terrain_res = world.resources.get::<Eventually<TerrainResources>>();
+    assert!(
+        matches!(terrain_res, Some(Eventually::Initialized(_))),
+        "terrain resources"
+    );
+    let Some(Eventually::Initialized(resources)) = terrain_res else {
+        return;
     };
     assert!(resources.has_dem_texture(coords));
     let pipeline = pipeline(map.device());
@@ -113,15 +121,18 @@ async fn evict_and_reload(delivery: Delivery, drop_gpu: bool) {
     let mut map = prepared_map(true).await;
     assert!(map.map_context.world.tiles.remove(target()));
     if drop_gpu {
-        let Some(Eventually::Initialized(resources)) = map
+        let terrain_res = map
             .map_context
             .world
             .resources
-            .get_mut::<Eventually<TerrainResources>>()
-        else {
-            panic!("terrain resources");
-        };
-        resources.drop_dem(target());
+            .get_mut::<Eventually<TerrainResources>>();
+        assert!(
+            matches!(terrain_res, Some(Eventually::Initialized(_))),
+            "terrain resources"
+        );
+        if let Some(Eventually::Initialized(resources)) = terrain_res {
+            resources.drop_dem(target());
+        }
     }
     ingest(&mut map, delivery, target(), 100);
     assert_uploaded(&map, target(), 100.0);

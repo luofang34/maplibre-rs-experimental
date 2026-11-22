@@ -36,11 +36,9 @@ fn arabic_with_its_digits_reads_letters_from_the_right_and_digits_from_the_left(
     let shaped = crate::style::arabic_shaping::shape("سلام۳۹");
     let letters: Vec<char> = shaped.chars().filter(|c| !c.is_numeric()).collect();
     let drawn: Vec<char> = reordered(&shaped).chars().collect();
-    assert_eq!(drawn[..2], ['۳', '۹']);
-    assert_eq!(
-        drawn[2..],
-        letters.iter().rev().copied().collect::<Vec<_>>()[..]
-    );
+    assert_eq!(drawn.get(..2), Some(&['۳', '۹'][..]));
+    let expected_letters: Vec<char> = letters.iter().rev().copied().collect();
+    assert_eq!(drawn.get(2..), Some(expected_letters.as_slice()));
     assert!(
         letters
             .iter()
@@ -108,8 +106,8 @@ fn paragraph_base_level_persists_across_wrapped_lines() {
     let wrapped = vec![0..5, 6..chars.len()];
     reorder_lines(&mut chars, &mut tags, &wrapped);
     // Line 1 ("אב ab") reads RTL as "ab בא"; line 2 ("cd") keeps LTR order within its run.
-    let line1: String = chars[0..5].iter().collect();
-    let line2: String = chars[6..8].iter().collect();
+    let line1: String = chars.get(0..5).unwrap_or(&[]).iter().collect();
+    let line2: String = chars.get(6..8).unwrap_or(&[]).iter().collect();
     assert_eq!(line1, "ab בא");
     assert_eq!(line2, "cd");
 

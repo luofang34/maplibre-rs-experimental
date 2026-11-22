@@ -5,7 +5,10 @@
 /// # Panics
 /// Panics if a global subscriber is already installed.
 #[cfg(feature = "trace")]
-#[allow(clippy::expect_used)]
+#[expect(
+    clippy::expect_used,
+    reason = "process-wide subscriber installer panics if already initialized"
+)]
 pub fn enable_tracing() {
     use tracing_subscriber::{layer::SubscriberExt, Registry};
 

@@ -108,6 +108,120 @@ fn read_gesture_rotation(event: &web_sys::Event) -> f64 {
         .unwrap_or(0.0)
 }
 
+fn install_focus_and_mouse_hooks(canvas: &web_sys::HtmlCanvasElement) {
+    use wasm_bindgen::{closure::Closure, JsCast};
+    drop(canvas.style().set_property("touch-action", "none"));
+    drop(canvas.focus());
+
+    let target = canvas.clone();
+    let on_wheel =
+        Closure::<dyn FnMut(web_sys::WheelEvent)>::new(move |_event: web_sys::WheelEvent| {
+            drop(target.focus());
+        });
+    drop(canvas.add_event_listener_with_callback_and_bool(
+        "wheel",
+        on_wheel.as_ref().unchecked_ref(),
+        true,
+    ));
+    on_wheel.forget();
+
+    let target_mouse = canvas.clone();
+    let on_mouse =
+        Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
+            drop(target_mouse.focus());
+            if event.button() == 1 {
+                event.prevent_default();
+            }
+        });
+    drop(canvas.add_event_listener_with_callback_and_bool(
+        "mousedown",
+        on_mouse.as_ref().unchecked_ref(),
+        true,
+    ));
+    drop(canvas.add_event_listener_with_callback_and_bool(
+        "auxclick",
+        on_mouse.as_ref().unchecked_ref(),
+        true,
+    ));
+    on_mouse.forget();
+}
+
+fn handle_safari_gesture_change(
+    event: &web_sys::Event,
+    weak_window: &std::sync::Weak<RawWinitWindow>,
+) {
+    event.prevent_default();
+    let scale = read_gesture_scale(event).max(1e-4);
+    let rotation = read_gesture_rotation(event);
+    let prev_scale = LAST_SAFARI_SCALE.with(|c| c.replace(scale)).max(1e-4);
+    let prev_rot = LAST_SAFARI_ROTATION_DEG.with(|c| c.replace(rotation));
+
+    let zoom_delta = (scale / prev_scale).ln();
+    let rot_delta = ((rotation - prev_rot) + 540.0).rem_euclid(360.0) - 180.0;
+
+    let mut changed = false;
+    if zoom_delta.abs() > 1e-5 {
+        PENDING_SAFARI_PINCH_DELTA.with(|c| c.set(c.get() + zoom_delta));
+        changed = true;
+    }
+    if rot_delta.abs() > 1e-4 {
+        // WebKit GestureEvent.rotation is clockwise-positive; process_trackpad_rotate
+        // expects counter-clockwise-positive (matching winit RotationGesture).
+        PENDING_SAFARI_ROTATION_DEG.with(|c| c.set(c.get() - rot_delta));
+        changed = true;
+    }
+    if changed && let Some(w) = weak_window.upgrade() {
+        w.request_redraw();
+    }
+}
+
+fn install_safari_gesture_hooks(canvas: &web_sys::HtmlCanvasElement, window: &Arc<RawWinitWindow>) {
+    use wasm_bindgen::{closure::Closure, JsCast};
+    let on_gesture_start =
+        Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+            event.prevent_default();
+            let scale = read_gesture_scale(&event).max(1e-4);
+            let rotation = read_gesture_rotation(&event);
+            SAFARI_GESTURE_ACTIVE.with(|c| c.set(true));
+            LAST_SAFARI_SCALE.with(|c| c.set(scale));
+            LAST_SAFARI_ROTATION_DEG.with(|c| c.set(rotation));
+        });
+    drop(canvas.add_event_listener_with_callback_and_bool(
+        "gesturestart",
+        on_gesture_start.as_ref().unchecked_ref(),
+        false,
+    ));
+    on_gesture_start.forget();
+
+    let weak_window = Arc::downgrade(window);
+    let on_gesture_change =
+        Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+            handle_safari_gesture_change(&event, &weak_window);
+        });
+    drop(canvas.add_event_listener_with_callback_and_bool(
+        "gesturechange",
+        on_gesture_change.as_ref().unchecked_ref(),
+        false,
+    ));
+    on_gesture_change.forget();
+
+    let on_gesture_end = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+        event.prevent_default();
+        SAFARI_GESTURE_ACTIVE.with(|c| c.set(false));
+    });
+    drop(canvas.add_event_listener_with_callback_and_bool(
+        "gestureend",
+        on_gesture_end.as_ref().unchecked_ref(),
+        false,
+    ));
+    drop(canvas.add_event_listener_with_callback_and_bool(
+        "gesturecancel",
+        on_gesture_end.as_ref().unchecked_ref(),
+        false,
+    ));
+    on_gesture_end.forget();
+}
+
 /// Installs browser-specific input hooks on the canvas:
 /// - Sets `touch-action: none` so multi-finger touch gestures are delivered to `winit`.
 /// - Focuses the canvas before `winit`'s bubble-phase `wheel` listener runs so `ctrlKey + wheel`
@@ -120,110 +234,8 @@ fn install_canvas_gesture_and_input_hooks(
     canvas: &web_sys::HtmlCanvasElement,
     window: &Arc<RawWinitWindow>,
 ) {
-    use wasm_bindgen::{closure::Closure, JsCast};
-    let _ = canvas.style().set_property("touch-action", "none");
-    let _ = canvas.focus();
-
-    let target = canvas.clone();
-    let on_wheel =
-        Closure::<dyn FnMut(web_sys::WheelEvent)>::new(move |_event: web_sys::WheelEvent| {
-            let _ = target.focus();
-        });
-    let _ = canvas.add_event_listener_with_callback_and_bool(
-        "wheel",
-        on_wheel.as_ref().unchecked_ref(),
-        true,
-    );
-    on_wheel.forget();
-
-    let target_mouse = canvas.clone();
-    let on_mouse =
-        Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |event: web_sys::MouseEvent| {
-            let _ = target_mouse.focus();
-            if event.button() == 1 {
-                event.prevent_default();
-            }
-        });
-    let _ = canvas.add_event_listener_with_callback_and_bool(
-        "mousedown",
-        on_mouse.as_ref().unchecked_ref(),
-        true,
-    );
-    let _ = canvas.add_event_listener_with_callback_and_bool(
-        "auxclick",
-        on_mouse.as_ref().unchecked_ref(),
-        true,
-    );
-    on_mouse.forget();
-
-    let on_gesture_start =
-        Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
-            event.prevent_default();
-            let scale = read_gesture_scale(&event).max(1e-4);
-            let rotation = read_gesture_rotation(&event);
-            SAFARI_GESTURE_ACTIVE.with(|c| c.set(true));
-            LAST_SAFARI_SCALE.with(|c| c.set(scale));
-            LAST_SAFARI_ROTATION_DEG.with(|c| c.set(rotation));
-        });
-    let _ = canvas.add_event_listener_with_callback_and_bool(
-        "gesturestart",
-        on_gesture_start.as_ref().unchecked_ref(),
-        false,
-    );
-    on_gesture_start.forget();
-
-    let weak_window = Arc::downgrade(window);
-    let on_gesture_change =
-        Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
-            event.prevent_default();
-            let scale = read_gesture_scale(&event).max(1e-4);
-            let rotation = read_gesture_rotation(&event);
-            let prev_scale = LAST_SAFARI_SCALE.with(|c| c.replace(scale)).max(1e-4);
-            let prev_rot = LAST_SAFARI_ROTATION_DEG.with(|c| c.replace(rotation));
-
-            let zoom_delta = (scale / prev_scale).ln();
-            let mut rot_delta = rotation - prev_rot;
-            rot_delta = (rot_delta + 540.0).rem_euclid(360.0) - 180.0;
-
-            let mut changed = false;
-            if zoom_delta.abs() > 1e-5 {
-                PENDING_SAFARI_PINCH_DELTA.with(|c| c.set(c.get() + zoom_delta));
-                changed = true;
-            }
-            if rot_delta.abs() > 1e-4 {
-                // WebKit GestureEvent.rotation is clockwise-positive; process_trackpad_rotate
-                // expects counter-clockwise-positive (matching winit RotationGesture).
-                PENDING_SAFARI_ROTATION_DEG.with(|c| c.set(c.get() - rot_delta));
-                changed = true;
-            }
-            if changed {
-                if let Some(w) = weak_window.upgrade() {
-                    w.request_redraw();
-                }
-            }
-        });
-    let _ = canvas.add_event_listener_with_callback_and_bool(
-        "gesturechange",
-        on_gesture_change.as_ref().unchecked_ref(),
-        false,
-    );
-    on_gesture_change.forget();
-
-    let on_gesture_end = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
-        event.prevent_default();
-        SAFARI_GESTURE_ACTIVE.with(|c| c.set(false));
-    });
-    let _ = canvas.add_event_listener_with_callback_and_bool(
-        "gestureend",
-        on_gesture_end.as_ref().unchecked_ref(),
-        false,
-    );
-    let _ = canvas.add_event_listener_with_callback_and_bool(
-        "gesturecancel",
-        on_gesture_end.as_ref().unchecked_ref(),
-        false,
-    );
-    on_gesture_end.forget();
+    install_focus_and_mouse_hooks(canvas);
+    install_safari_gesture_hooks(canvas, window);
 }
 
 /// Resolves the configured canvas, preserving its ID in DOM selection errors.

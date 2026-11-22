@@ -144,15 +144,25 @@ fn parse_interpolate(values: &[Value]) -> Result<ProjectionType, ProjectionExpre
             .get(1)
             .ok_or_else(|| unsupported("missing interpolation curve"))?,
     )?;
-    ProjectionType::interpolate(curve, parse_stops(&values[3..])?)
+    let stops = values
+        .get(3..)
+        .ok_or_else(|| unsupported("invalid interpolate expression shape"))?;
+    ProjectionType::interpolate(curve, parse_stops(stops)?)
 }
 
 fn parse_step(values: &[Value]) -> Result<ProjectionType, ProjectionExpressionError> {
     if values.len() < 5 || values.len().is_multiple_of(2) || !is_zoom_input(values.get(1)) {
         return Err(unsupported("invalid step expression shape"));
     }
-    let default = parse_named(&values[2])?;
-    ProjectionType::step(default, parse_stops(&values[3..])?)
+    let default = parse_named(
+        values
+            .get(2)
+            .ok_or_else(|| unsupported("invalid step expression shape"))?,
+    )?;
+    let stops = values
+        .get(3..)
+        .ok_or_else(|| unsupported("invalid step expression shape"))?;
+    ProjectionType::step(default, parse_stops(stops)?)
 }
 
 fn parse_stops(values: &[Value]) -> Result<Vec<ProjectionStop>, ProjectionExpressionError> {
@@ -160,11 +170,11 @@ fn parse_stops(values: &[Value]) -> Result<Vec<ProjectionStop>, ProjectionExpres
         .as_chunks::<2>()
         .0
         .iter()
-        .map(|pair| {
-            let zoom = pair[0]
+        .map(|[zoom_val, proj_val]| {
+            let zoom = zoom_val
                 .as_f64()
                 .ok_or_else(|| invalid_number("zoom stop must be numeric"))?;
-            Ok(ProjectionStop::new(zoom, parse_named(&pair[1])?))
+            Ok(ProjectionStop::new(zoom, parse_named(proj_val)?))
         })
         .collect()
 }
@@ -175,8 +185,9 @@ fn parse_curve(value: &Value) -> Result<InterpolationCurve, ProjectionExpression
         .ok_or_else(|| unsupported("interpolation curve must be an array"))?;
     match parts.first().and_then(Value::as_str) {
         Some("linear") if parts.len() == 1 => Ok(InterpolationCurve::Linear),
-        Some("exponential") if parts.len() == 2 => parts[1]
-            .as_f64()
+        Some("exponential") if parts.len() == 2 => parts
+            .get(1)
+            .and_then(Value::as_f64)
             .map(InterpolationCurve::Exponential)
             .ok_or_else(|| invalid_number("exponential base must be numeric")),
         Some("cubic-bezier") if parts.len() == 5 => Ok(InterpolationCurve::CubicBezier(

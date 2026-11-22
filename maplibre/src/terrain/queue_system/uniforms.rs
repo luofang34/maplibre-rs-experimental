@@ -292,24 +292,13 @@ pub(super) fn prepare_tiles(
     tiles: &crate::tcs::tiles::Tiles,
     ctx: SurfaceContext<'_>,
 ) -> PreparedTerrain {
-    let SurfaceContext {
-        style,
-        view_state,
-        dem,
-        skirts,
-        poles,
-        lighting,
-        paint_zoom,
-        clear_color,
-        globe_camera,
-    } = ctx;
     let (specs, drape_sources) = targets;
-    let zoom = view_state.zoom();
-    let gpu_view_projection = view_state.gpu_view_projection();
-    let fog = terrain_fog(style, view_state);
-    let skirt_length = match skirts {
+    let zoom = ctx.view_state.zoom();
+    let gpu_view_projection = ctx.view_state.gpu_view_projection();
+    let fog = terrain_fog(ctx.style, ctx.view_state);
+    let skirt_length = match ctx.skirts {
         crate::terrain::TerrainSkirts::Auto => {
-            view_state.body().circumference_meters()
+            ctx.view_state.body().circumference_meters()
                 / 2_f64.powf(zoom.value().max(0.0))
                 / super::SKIRT_DIVISOR
         }
@@ -318,54 +307,78 @@ pub(super) fn prepare_tiles(
     };
     let mut uniforms = Vec::with_capacity(specs.len());
     let mut sources = Vec::with_capacity(specs.len());
-    for (spec, drape_source) in specs.iter().zip(drape_sources) {
-        let drape_source = *drape_source;
-        let dem_coords = loaded_dem_tile(spec.coords, dem, terrain);
-        let Some(mut block) = tile_uniforms(
-            spec.coords,
-            TileTextures {
-                dem: dem_coords,
-                drape: drape_source,
-            },
-            terrain,
-            dem,
-            &gpu_view_projection
-                .to_model_view_projection(spec.coords.transform_for_zoom(zoom))
-                .downcast(),
-            skirt_length as f32,
-            &fog,
-        ) else {
-            continue;
-        };
-        let [north_cap, south_cap] = polar::cap_colors_with_base(
+    for (spec, &drape_source) in specs.iter().zip(drape_sources) {
+        if let Some((block, tile_source)) = prepare_single_tile(
             spec.coords,
             drape_source,
-            style,
+            terrain,
             tiles,
-            paint_zoom,
-            clear_color,
-        );
-        let z = u8::from(spec.coords.z);
-        let max_row = 1_i32.checked_shl(u32::from(z)).unwrap_or(1) - 1;
-        let pole_elev = if spec.coords.y == 0 {
-            poles.north_meters * dem.exaggeration
-        } else if spec.coords.y == max_row {
-            poles.south_meters * dem.exaggeration
-        } else {
-            0.0
-        };
-        block.edge_index = [0, north_cap, south_cap, pole_elev.to_bits()];
-        surface_uniforms(
-            &mut block,
-            spec.coords,
-            (clear_color, lighting, terrain.drape_mode()),
-            view_state,
-            globe_camera.as_ref(),
-        );
-        uniforms.push(block);
-        sources.push((dem_coords, spec.coords, drape_source));
+            &ctx,
+            (&gpu_view_projection, skirt_length as f32, &fog),
+        ) {
+            uniforms.push(block);
+            sources.push(tile_source);
+        }
     }
     PreparedTerrain { uniforms, sources }
+}
+
+fn prepare_single_tile(
+    coords: WorldTileCoords,
+    drape_source: Option<WorldTileCoords>,
+    terrain: &TerrainResources,
+    tiles: &crate::tcs::tiles::Tiles,
+    ctx: &SurfaceContext<'_>,
+    (gpu_view_projection, skirt_length, fog): (
+        &crate::render::camera::ViewProjection,
+        f32,
+        &TerrainFog,
+    ),
+) -> Option<(TerrainTileUniforms, TileSources)> {
+    let zoom = ctx.view_state.zoom();
+    let dem_coords = loaded_dem_tile(coords, ctx.dem, terrain);
+    let mut block = tile_uniforms(
+        coords,
+        TileTextures {
+            dem: dem_coords,
+            drape: drape_source,
+        },
+        terrain,
+        ctx.dem,
+        &gpu_view_projection
+            .to_model_view_projection(coords.transform_for_zoom(zoom))
+            .downcast(),
+        skirt_length,
+        fog,
+    )?;
+    let [north_cap, south_cap] = polar::cap_colors_with_base(
+        coords,
+        drape_source,
+        ctx.style,
+        tiles,
+        ctx.paint_zoom,
+        ctx.clear_color,
+    );
+    let max_row = 1_i32
+        .checked_shl(u32::from(u8::from(coords.z)))
+        .unwrap_or(1)
+        - 1;
+    let pole_elev = if coords.y == 0 {
+        ctx.poles.north_meters * ctx.dem.exaggeration
+    } else if coords.y == max_row {
+        ctx.poles.south_meters * ctx.dem.exaggeration
+    } else {
+        0.0
+    };
+    block.edge_index = [0, north_cap, south_cap, pole_elev.to_bits()];
+    surface_uniforms(
+        &mut block,
+        coords,
+        (ctx.clear_color, ctx.lighting, terrain.drape_mode()),
+        ctx.view_state,
+        ctx.globe_camera.as_ref(),
+    );
+    Some((block, (dem_coords, coords, drape_source)))
 }
 
 /// Adds a draw of each surface tile for every copy of the world that shows it, shifted over by
@@ -384,25 +397,34 @@ pub(super) fn with_world_copies(
     };
     let projection = view.gpu_view_projection();
     let zoom = view.zoom();
-    for index in 0..all.len() {
-        let coords = all[index].1;
+    let base_len = all.len();
+    for index in 0..base_len {
+        let (Some(entry), Some(base_block)) =
+            (all.get(index).copied(), uniforms.get(index).copied())
+        else {
+            continue;
+        };
+        let coords = entry.1;
         let Some(wraps) = copies.get(&coords) else {
             continue;
         };
-        let bounds = crate::coords::ZOOM_BOUNDS[usize::from(u8::from(coords.z))] as i32;
+        let bounds = crate::coords::ZOOM_BOUNDS
+            .get(usize::from(u8::from(coords.z)))
+            .copied()
+            .unwrap_or(1) as i32;
         for wrap in wraps {
             let shifted = WorldTileCoords {
                 x: coords.x + wrap * bounds,
                 ..coords
             };
-            let mut block = uniforms[index];
+            let mut block = base_block;
             block.transform = projection
                 .to_model_view_projection(shifted.transform_for_zoom(zoom))
                 .downcast()
                 .into();
             block.tile_mercator_coords[0] += *wrap as f32;
             uniforms.push(block);
-            all.push(all[index]);
+            all.push(entry);
             placed.push(shifted);
         }
     }

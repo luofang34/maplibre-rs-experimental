@@ -79,14 +79,18 @@ pub(super) fn index_of(needle: &Value, haystack: &Value, from: i64) -> Result<i6
             if needle_chars.is_empty() {
                 return Ok(start as i64);
             }
-            Ok(characters[start..]
+            Ok(characters
+                .get(start..)
+                .unwrap_or(&[])
                 .windows(needle_chars.len())
                 .position(|window| window == needle_chars.as_slice())
                 .map_or(-1, |position| (position + start) as i64))
         }
         Value::Array(items) => {
             let start = clamp_index(from, items.len());
-            Ok(items[start..]
+            Ok(items
+                .get(start..)
+                .unwrap_or(&[])
                 .iter()
                 .position(|item| item == needle)
                 .map_or(-1, |position| (position + start) as i64))
@@ -113,13 +117,19 @@ pub(super) fn slice(input: Value, from: i64, to: Option<i64>) -> Result<Value> {
             let start = clamp_index(from, characters.len());
             let end = to.map_or(characters.len(), |to| clamp_index(to, characters.len()));
             Ok(Value::String(
-                characters[start..end.max(start)].iter().collect(),
+                characters
+                    .get(start..end.max(start))
+                    .unwrap_or(&[])
+                    .iter()
+                    .collect(),
             ))
         }
         Value::Array(items) => {
             let start = clamp_index(from, items.len());
             let end = to.map_or(items.len(), |to| clamp_index(to, items.len()));
-            Ok(Value::Array(items[start..end.max(start)].to_vec()))
+            Ok(Value::Array(
+                items.get(start..end.max(start)).unwrap_or(&[]).to_vec(),
+            ))
         }
         other => Err(EvaluationError::NotIndexable {
             found: other.type_of(),
@@ -175,9 +185,18 @@ pub(super) fn arithmetic(operator: Arithmetic, numbers: &[f64]) -> f64 {
             [first, second, ..] => first - second,
             [] => 0.0,
         },
-        Arithmetic::Divide => numbers[0] / numbers[1],
-        Arithmetic::Remainder => numbers[0] % numbers[1],
-        Arithmetic::Power => numbers[0].powf(numbers[1]),
+        Arithmetic::Divide => match numbers {
+            [a, b, ..] => a / b,
+            _ => 0.0,
+        },
+        Arithmetic::Remainder => match numbers {
+            [a, b, ..] => a % b,
+            _ => 0.0,
+        },
+        Arithmetic::Power => match numbers {
+            [a, b, ..] => a.powf(*b),
+            _ => 1.0,
+        },
     }
 }
 
@@ -283,7 +302,7 @@ pub(super) fn eval_at(
             ),
         });
     }
-    Ok(items[index as usize].clone())
+    Ok(items.get(index as usize).cloned().unwrap_or(Value::Null))
 }
 
 pub(super) fn eval_split(

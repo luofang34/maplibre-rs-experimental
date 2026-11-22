@@ -58,6 +58,13 @@ fn slice_layer(layer: &tile::Layer, scale: i64, column: i64, row: i64) -> tile::
         };
     }
 
+    compact_sliced_layer(layer, kept_raw)
+}
+
+fn compact_sliced_layer(
+    layer: &tile::Layer,
+    kept_raw: Vec<(&tile::Feature, Vec<u32>)>,
+) -> tile::Layer {
     let mut keys: Vec<String> = Vec::new();
     let mut values: Vec<tile::Value> = Vec::new();
     let mut key_remap: FxHashMap<u32, u32> = FxHashMap::default();
@@ -122,8 +129,7 @@ impl Frame {
         let mut has_point = false;
         let (mut min_x, mut max_x) = (i64::MAX, i64::MIN);
         let (mut min_y, mut max_y) = (i64::MAX, i64::MIN);
-        while index < geometry.len() {
-            let word = geometry[index];
+        while let Some(&word) = geometry.get(index) {
             index += 1;
             let (id, count) = (word & 7, (word >> 3) as usize);
             match id {

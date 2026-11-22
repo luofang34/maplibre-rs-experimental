@@ -3,14 +3,106 @@
 
 use super::*;
 
+fn mercator_to_lat_lon(mercator: Point2<f64>) -> crate::coords::LatLon {
+    crate::coords::LatLon::new(
+        (std::f64::consts::PI * (1.0 - 2.0 * mercator.y))
+            .sinh()
+            .atan()
+            .to_degrees(),
+        mercator.x * 360.0 - 180.0,
+    )
+}
+
+fn globe_distance_to(
+    camera: &crate::projection::globe::camera::GlobeCameraState,
+    at: crate::coords::LatLon,
+    meters: f64,
+) -> f64 {
+    let pt =
+        crate::projection::globe::lat_lon_to_unit_sphere(at) * camera.body().unit_radius_at(meters);
+    (pt - camera.camera_position()).magnitude()
+}
+
+fn pick_middle_ground_hits(
+    camera: &crate::projection::globe::camera::GlobeCameraState,
+    terrain: crate::terrain::sightline::DrawnTerrain<'_>,
+) -> Vec<crate::terrain::interaction::TerrainHit> {
+    (HEIGHT / 3..HEIGHT)
+        .step_by(3)
+        .filter_map(|y| {
+            let pixel = Point2::new(f64::from(WIDTH / 2) + 0.5, f64::from(y) + 0.5);
+            match crate::terrain::sightline::pick_globe_terrain(camera, terrain, pixel) {
+                crate::terrain::sightline::TerrainPick::Ground(hit) => Some(hit),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+fn verify_picked_ridge_visibility(
+    camera: &crate::projection::globe::camera::GlobeCameraState,
+    terrain: crate::terrain::sightline::DrawnTerrain<'_>,
+    picks: &[crate::coords::LatLon],
+) {
+    use crate::terrain::sightline::{
+        pick_globe_terrain, target_view, TargetAltitude, TerrainPick, Visibility,
+    };
+    let (lat, lon) = picks.iter().fold(
+        ((f64::MAX, f64::MIN), (f64::MAX, f64::MIN)),
+        |((a, b), (c, d)), p| {
+            (
+                (a.min(p.latitude), b.max(p.latitude)),
+                (c.min(p.longitude), d.max(p.longitude)),
+            )
+        },
+    );
+    let (mut agree, mut checked, mut hidden) = (0, 0, 0);
+    for i in 0..60 {
+        for j in 0..60 {
+            let at = crate::coords::LatLon::new(
+                lat.0 + (lat.1 - lat.0) * f64::from(i) / 59.0,
+                lon.0 + (lon.1 - lon.0) * f64::from(j) / 59.0,
+            );
+            let view = target_view(camera, Some(terrain), at, TargetAltitude::OnGround);
+            let (Some(pixel), Some(elevation)) = (view.pixel, view.elevation) else {
+                continue;
+            };
+            if view.visibility == Visibility::OutsideFrustum {
+                continue;
+            }
+            let TerrainPick::Ground(hit) = pick_globe_terrain(camera, terrain, pixel) else {
+                continue;
+            };
+            let picked = mercator_to_lat_lon(hit.mercator);
+            let own = globe_distance_to(camera, at, elevation);
+            let first = globe_distance_to(camera, picked, hit.elevation);
+            if (first / own - 1.0).abs() < 2e-3 {
+                continue;
+            }
+            let covered = first < own;
+            checked += 1;
+            hidden += usize::from(covered);
+            let said = match view.visibility {
+                Visibility::Visible => Some(false),
+                Visibility::BehindTerrain => Some(true),
+                _ => None,
+            };
+            agree += usize::from(said == Some(covered));
+        }
+    }
+    assert!(hidden > 50, "{hidden} of {checked} points behind hills");
+    assert!(
+        agree == checked,
+        "line of sight agrees with the picks for {agree} of {checked} points"
+    );
+}
+
 /// Through [`HeadlessMap::drawn_terrain`], ground the frame draws is in sight of the camera,
 /// and ground nearer drawn ground covers on the screen is not.
 #[test]
 fn drawn_terrain_sees_the_picked_ground_and_not_what_ridges_cover() {
     crate::headless::map::test_async::run_async(async {
-        use crate::terrain::sightline::{
-            pick_globe_terrain, target_view, TargetAltitude, TerrainPick, Visibility,
-        };
+        use crate::terrain::sightline::{target_view, TargetAltitude, Visibility};
         let scene = Scene {
             meters: 1500.0,
             relief: 600.0,
@@ -26,94 +118,24 @@ fn drawn_terrain_sees_the_picked_ground_and_not_what_ridges_cover() {
             .context()
             .drawn_terrain(camera.body())
             .expect("terrain drawn");
-        let mut picks = Vec::new();
-        for y in (HEIGHT / 3..HEIGHT).step_by(3) {
-            let pixel = Point2::new(f64::from(WIDTH / 2) + 0.5, f64::from(y) + 0.5);
-            if let TerrainPick::Ground(hit) = pick_globe_terrain(&camera, terrain, pixel) {
-                picks.push(crate::coords::LatLon::new(
-                    (std::f64::consts::PI * (1.0 - 2.0 * hit.mercator.y))
-                        .sinh()
-                        .atan()
-                        .to_degrees(),
-                    hit.mercator.x * 360.0 - 180.0,
-                ));
-            }
-        }
+        let picks: Vec<_> = pick_middle_ground_hits(&camera, terrain)
+            .into_iter()
+            .map(|hit| mercator_to_lat_lon(hit.mercator))
+            .collect();
         assert!(picks.len() > 100, "{} ground picks", picks.len());
-        let seen =
-            |at| target_view(&camera, Some(terrain), at, TargetAltitude::OnGround).visibility;
         let visible = picks
             .iter()
-            .filter(|&&at| seen(at) == Visibility::Visible)
+            .filter(|&&at| {
+                target_view(&camera, Some(terrain), at, TargetAltitude::OnGround).visibility
+                    == Visibility::Visible
+            })
             .count();
         assert!(
             visible * 100 >= picks.len() * 98,
             "{visible} of {} picked points in sight",
             picks.len()
         );
-        // Over the picked region, ground is hidden exactly when the pick through its pixel lands
-        // nearer the camera than it.
-        let (lat, lon) = picks.iter().fold(
-            ((f64::MAX, f64::MIN), (f64::MAX, f64::MIN)),
-            |((a, b), (c, d)), p| {
-                (
-                    (a.min(p.latitude), b.max(p.latitude)),
-                    (c.min(p.longitude), d.max(p.longitude)),
-                )
-            },
-        );
-        let eye = camera.camera_position();
-        let (mut agree, mut checked, mut hidden) = (0, 0, 0);
-        for i in 0..60 {
-            for j in 0..60 {
-                let at = crate::coords::LatLon::new(
-                    lat.0 + (lat.1 - lat.0) * f64::from(i) / 59.0,
-                    lon.0 + (lon.1 - lon.0) * f64::from(j) / 59.0,
-                );
-                let view = target_view(&camera, Some(terrain), at, TargetAltitude::OnGround);
-                let (Some(pixel), Some(elevation)) = (view.pixel, view.elevation) else {
-                    continue;
-                };
-                // Off the screen no pick describes the point.
-                if view.visibility == Visibility::OutsideFrustum {
-                    continue;
-                }
-                let TerrainPick::Ground(hit) = pick_globe_terrain(&camera, terrain, pixel) else {
-                    continue;
-                };
-                let unit = |at, meters| {
-                    crate::projection::globe::lat_lon_to_unit_sphere(at)
-                        * camera.body().unit_radius_at(meters)
-                };
-                let picked = crate::coords::LatLon::new(
-                    (std::f64::consts::PI * (1.0 - 2.0 * hit.mercator.y))
-                        .sinh()
-                        .atan()
-                        .to_degrees(),
-                    hit.mercator.x * 360.0 - 180.0,
-                );
-                let own = (unit(at, elevation) - eye).magnitude();
-                let first = (unit(picked, hit.elevation) - eye).magnitude();
-                // Too close to call: the pick and the point lie on the same patch of ground.
-                if (first / own - 1.0).abs() < 2e-3 {
-                    continue;
-                }
-                let covered = first < own;
-                checked += 1;
-                hidden += usize::from(covered);
-                let said = match view.visibility {
-                    Visibility::Visible => Some(false),
-                    Visibility::BehindTerrain => Some(true),
-                    _ => None,
-                };
-                agree += usize::from(said == Some(covered));
-            }
-        }
-        assert!(hidden > 50, "{hidden} of {checked} points behind hills");
-        assert!(
-            agree == checked,
-            "line of sight agrees with the picks for {agree} of {checked} points"
-        );
+        verify_picked_ridge_visibility(&camera, terrain, &picks);
     })
 }
 
@@ -136,10 +158,88 @@ impl Mark {
     }
 }
 
+fn ground_bounds_from_picks(
+    camera: &crate::projection::globe::camera::GlobeCameraState,
+    terrain: crate::terrain::sightline::DrawnTerrain<'_>,
+) -> (f64, f64, f64, f64) {
+    let picked: Vec<_> = pick_middle_ground_hits(camera, terrain)
+        .into_iter()
+        .map(|hit| hit.mercator)
+        .collect();
+    let (y0, y1) = picked
+        .iter()
+        .fold((f64::MAX, f64::MIN), |(a, b), m| (a.min(m.y), b.max(m.y)));
+    let (x0, x1) = picked
+        .iter()
+        .fold((f64::MAX, f64::MIN), |(a, b), m| (a.min(m.x), b.max(m.x)));
+    let lat = |y: f64| {
+        (std::f64::consts::PI * (1.0 - 2.0 * y))
+            .sinh()
+            .atan()
+            .to_degrees()
+    };
+    (lat(y1), lat(y0), x0 * 360.0 - 180.0, x1 * 360.0 - 180.0)
+}
+
+fn sample_grid_mark(
+    camera: &crate::projection::globe::camera::GlobeCameraState,
+    terrain: crate::terrain::sightline::DrawnTerrain<'_>,
+    at: crate::coords::LatLon,
+    taken: &mut Vec<(f64, f64)>,
+) -> Option<Mark> {
+    use crate::terrain::sightline::{
+        pick_globe_terrain, target_view, TargetAltitude, TerrainPick, Visibility,
+    };
+    let seen = target_view(camera, Some(terrain), at, TargetAltitude::OnGround);
+    let (Some(elevation), true) = (
+        seen.elevation,
+        matches!(
+            seen.visibility,
+            Visibility::Visible | Visibility::BehindTerrain
+        ),
+    ) else {
+        return None;
+    };
+    let bare = target_view(
+        camera,
+        None,
+        at,
+        TargetAltitude::Drawn { meters: elevation },
+    );
+    let (Some(pixel), Some(depth)) = (bare.pixel, bare.depth) else {
+        return None;
+    };
+    let (x, y) = (pixel.x, pixel.y);
+    if x < 4.0 || y < 4.0 || x > f64::from(WIDTH) - 4.0 || y > f64::from(HEIGHT) - 4.0 {
+        return None;
+    }
+    if taken
+        .iter()
+        .any(|&(u, v)| (u - x).abs() < 8.0 && (v - y).abs() < 8.0)
+    {
+        return None;
+    }
+    taken.push((x, y));
+    let own = globe_distance_to(camera, at, elevation);
+    let covered_by = match pick_globe_terrain(camera, terrain, pixel) {
+        TerrainPick::Ground(hit) => {
+            let first = mercator_to_lat_lon(hit.mercator);
+            1.0 - globe_distance_to(camera, first, hit.elevation) / own
+        }
+        _ => 0.0,
+    };
+    Some(Mark {
+        x,
+        y,
+        depth: depth as f32,
+        in_sight: seen.visibility == Visibility::Visible,
+        covered_by,
+    })
+}
+
 /// Hills seen at 80° pitch, and ground points on a grid over the ground down the middle of
 /// the screen, out to where hills hide part of it, kept 8 px apart.
 pub(super) async fn ground_marks() -> (LevelMap, Vec<Mark>) {
-    use crate::terrain::sightline::{target_view, TargetAltitude, Visibility};
     let scene = Scene {
         meters: 1500.0,
         relief: 600.0,
@@ -156,29 +256,7 @@ pub(super) async fn ground_marks() -> (LevelMap, Vec<Mark>) {
         .context()
         .drawn_terrain(camera.body())
         .expect("terrain");
-    let picked: Vec<_> = (HEIGHT / 3..HEIGHT)
-        .step_by(3)
-        .filter_map(|y| {
-            let pixel = Point2::new(f64::from(WIDTH / 2) + 0.5, f64::from(y) + 0.5);
-            match crate::terrain::sightline::pick_globe_terrain(&camera, terrain, pixel) {
-                crate::terrain::sightline::TerrainPick::Ground(hit) => Some(hit.mercator),
-                _ => None,
-            }
-        })
-        .collect();
-    let lat = |y: f64| {
-        (std::f64::consts::PI * (1.0 - 2.0 * y))
-            .sinh()
-            .atan()
-            .to_degrees()
-    };
-    let (y0, y1) = picked
-        .iter()
-        .fold((f64::MAX, f64::MIN), |(a, b), m| (a.min(m.y), b.max(m.y)));
-    let (x0, x1) = picked
-        .iter()
-        .fold((f64::MAX, f64::MIN), |(a, b), m| (a.min(m.x), b.max(m.x)));
-    let (lat0, lat1, lon0, lon1) = (lat(y1), lat(y0), x0 * 360.0 - 180.0, x1 * 360.0 - 180.0);
+    let (lat0, lat1, lon0, lon1) = ground_bounds_from_picks(&camera, terrain);
     let span = (lat1 - lat0).max(lon1 - lon0);
     // Marks on a grid of ground points, kept apart so none covers another, each a square
     // of 3 px at the depth of its ground; the ground's height comes from the terrain, its
@@ -191,65 +269,9 @@ pub(super) async fn ground_marks() -> (LevelMap, Vec<Mark>) {
                 lat0 + (lat1 - lat0) * f64::from(i) / 79.0,
                 (lon0 + lon1) / 2.0 + span * (f64::from(j) / 79.0 - 0.5),
             );
-            let seen = target_view(&camera, Some(terrain), at, TargetAltitude::OnGround);
-            let (Some(elevation), true) = (
-                seen.elevation,
-                matches!(
-                    seen.visibility,
-                    Visibility::Visible | Visibility::BehindTerrain
-                ),
-            ) else {
-                continue;
-            };
-            let bare = target_view(
-                &camera,
-                None,
-                at,
-                TargetAltitude::Drawn { meters: elevation },
-            );
-            let (Some(pixel), Some(depth)) = (bare.pixel, bare.depth) else {
-                continue;
-            };
-            let (x, y) = (pixel.x, pixel.y);
-            if x < 4.0 || y < 4.0 || x > f64::from(WIDTH) - 4.0 || y > f64::from(HEIGHT) - 4.0 {
-                continue;
+            if let Some(mark) = sample_grid_mark(&camera, terrain, at, &mut taken) {
+                marks.push(mark);
             }
-            if taken
-                .iter()
-                .any(|&(u, v)| (u - x).abs() < 8.0 && (v - y).abs() < 8.0)
-            {
-                continue;
-            }
-            taken.push((x, y));
-            // How much nearer than the point the ground drawn at its pixel is: a share of
-            // its distance, zero where it is in sight.
-            let unit = |at, meters| {
-                crate::projection::globe::lat_lon_to_unit_sphere(at)
-                    * camera.body().unit_radius_at(meters)
-            };
-            let eye = camera.camera_position();
-            let own = (unit(at, elevation) - eye).magnitude();
-            let covered_at = |dx: f64, dy: f64| {
-                let p = Point2::new(pixel.x + dx, pixel.y + dy);
-                match crate::terrain::sightline::pick_globe_terrain(&camera, terrain, p) {
-                    crate::terrain::sightline::TerrainPick::Ground(hit) => {
-                        let first = crate::coords::LatLon::new(
-                            lat(hit.mercator.y),
-                            hit.mercator.x * 360.0 - 180.0,
-                        );
-                        1.0 - (unit(first, hit.elevation) - eye).magnitude() / own
-                    }
-                    _ => 0.0,
-                }
-            };
-            let covered_by = covered_at(0.0, 0.0);
-            marks.push(Mark {
-                x,
-                y,
-                depth: depth as f32,
-                in_sight: seen.visibility == Visibility::Visible,
-                covered_by,
-            });
         }
     }
     let in_sight = marks.iter().filter(|m| m.in_sight).count();

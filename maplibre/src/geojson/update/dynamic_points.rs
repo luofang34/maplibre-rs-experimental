@@ -19,7 +19,7 @@ pub(crate) use eligibility::{source_supports_dynamic_points, uses_dynamic_circle
 use fast_scan::{collect_fast_ramp_keys, try_fast_scan_stationary_bytes, FastColumnStore};
 pub(crate) use gpu::{
     ensure_seeded_for_style, populate_dynamic_circle_bucket, record_uploaded_dynamic_circle,
-    refresh_dynamic_point_layers,
+    refresh_dynamic_point_layers, DynamicCircleBucketInput,
 };
 use rustc_hash::FxHashMap;
 use serde_json::Value as JsonValue;
@@ -383,8 +383,11 @@ pub(crate) fn try_apply_stationary_inline(
         {
             return false;
         }
+        let Some(slot) = src_state.scratch_props.get_mut(idx) else {
+            return false;
+        };
         fill_properties_from_json(
-            &mut src_state.scratch_props[idx],
+            slot,
             feature.get("properties"),
             &expected.0,
             src_state.promoted.as_deref(),

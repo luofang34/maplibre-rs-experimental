@@ -109,11 +109,11 @@ fn ensure_scratch(
             let init_h = min_h.max(384);
             let canvas = OffscreenCanvas::new(init_w, init_h).ok()?;
             let opts = js_sys::Object::new();
-            let _ = js_sys::Reflect::set(
+            drop(js_sys::Reflect::set(
                 &opts,
                 &JsValue::from_str("willReadFrequently"),
                 &JsValue::TRUE,
-            );
+            ));
             let ctx_obj = canvas
                 .get_context_with_context_options("2d", &opts)
                 .ok()
@@ -300,37 +300,11 @@ fn rasterize_grid_chunk(
 ) {
     let cols = chunk.len().min(BATCH_COLS);
     let rows = chunk.len().div_ceil(cols);
-    let grid_w = cols * BATCH_CELL_SIZE;
-    let grid_h = rows * BATCH_CELL_SIZE;
+    let (grid_w, grid_h) = (cols * BATCH_CELL_SIZE, rows * BATCH_CELL_SIZE);
     let Some((_, ctx)) = ensure_scratch(grid_w as u32, grid_h as u32) else {
         return;
     };
-    ctx.clear_rect(0.0, 0.0, grid_w as f64, grid_h as f64);
-    ctx.set_font(css_font);
-    ctx.set_text_baseline("alphabetic");
-    ctx.set_text_align("left");
-    let _ = js_sys::Reflect::set(
-        ctx.as_ref(),
-        &JsValue::from_str("fillStyle"),
-        &JsValue::from_str("#ffffff"),
-    );
-
-    let mut buf = [0u8; 4];
-    for (idx, m) in chunk.iter().enumerate() {
-        let col = idx % cols;
-        let row = idx / cols;
-        let cell_x = (col * BATCH_CELL_SIZE) as f64;
-        let cell_y = (row * BATCH_CELL_SIZE) as f64;
-        ctx.save();
-        ctx.begin_path();
-        ctx.rect(cell_x, cell_y, m.padded_w as f64, m.padded_h as f64);
-        ctx.clip();
-        let draw_x = cell_x + f64::from(SDF_BUFFER) - f64::from(m.min_x);
-        let draw_y = cell_y + f64::from(SDF_BUFFER) - f64::from(m.min_y);
-        let _ = ctx.fill_text(m.ch.encode_utf8(&mut buf), draw_x, draw_y);
-        ctx.restore();
-    }
-
+    draw_grid_chunk(&ctx, css_font, chunk, cols, grid_w, grid_h);
     let Ok(image_data) = get_image_data(&ctx, grid_w as i32, grid_h as i32) else {
         return;
     };
@@ -338,24 +312,66 @@ fn rasterize_grid_chunk(
     if rgba.len() < grid_w * grid_h * 4 {
         return;
     }
+    let chunk_cache = collect_grid_chunk_glyphs(chunk, &rgba, cols, grid_w, out);
+    with_glyph_cache(|cache| cache.insert_batch(css_font, chunk_cache));
+}
 
+fn draw_grid_chunk(
+    ctx: &OffscreenCanvasRenderingContext2d,
+    css_font: &str,
+    chunk: &[MeasuredChar],
+    cols: usize,
+    grid_w: usize,
+    grid_h: usize,
+) {
+    ctx.clear_rect(0.0, 0.0, grid_w as f64, grid_h as f64);
+    ctx.set_font(css_font);
+    ctx.set_text_baseline("alphabetic");
+    ctx.set_text_align("left");
+    drop(js_sys::Reflect::set(
+        ctx.as_ref(),
+        &JsValue::from_str("fillStyle"),
+        &JsValue::from_str("#ffffff"),
+    ));
+    let mut buf = [0u8; 4];
+    for (idx, m) in chunk.iter().enumerate() {
+        let (cell_x, cell_y) = (
+            ((idx % cols) * BATCH_CELL_SIZE) as f64,
+            ((idx / cols) * BATCH_CELL_SIZE) as f64,
+        );
+        ctx.save();
+        ctx.begin_path();
+        ctx.rect(cell_x, cell_y, m.padded_w as f64, m.padded_h as f64);
+        ctx.clip();
+        let draw_x = cell_x + f64::from(SDF_BUFFER) - f64::from(m.min_x);
+        let draw_y = cell_y + f64::from(SDF_BUFFER) - f64::from(m.min_y);
+        drop(ctx.fill_text(m.ch.encode_utf8(&mut buf), draw_x, draw_y));
+        ctx.restore();
+    }
+}
+
+fn collect_grid_chunk_glyphs(
+    chunk: &[MeasuredChar],
+    rgba: &[u8],
+    cols: usize,
+    grid_w: usize,
+    out: &mut Vec<(u32, Arc<RasterizedGlyph>)>,
+) -> Vec<(char, Option<Arc<RasterizedGlyph>>)> {
     let mut coverage = Vec::new();
     let mut chunk_cache = Vec::with_capacity(chunk.len());
     for (idx, m) in chunk.iter().enumerate() {
-        let col = idx % cols;
-        let row = idx / cols;
-        let base_x = col * BATCH_CELL_SIZE;
-        let base_y = row * BATCH_CELL_SIZE;
+        let (base_x, base_y) = (
+            (idx % cols) * BATCH_CELL_SIZE,
+            (idx / cols) * BATCH_CELL_SIZE,
+        );
         coverage.clear();
         coverage.reserve(m.padded_w * m.padded_h);
         let mut has_ink = false;
         for py in 0..m.padded_h {
             let row_start = ((base_y + py) * grid_w + base_x) * 4;
             for px in 0..m.padded_w {
-                let alpha = rgba[row_start + px * 4 + 3];
-                if alpha > 0 {
-                    has_ink = true;
-                }
+                let alpha = rgba.get(row_start + px * 4 + 3).copied().unwrap_or(0);
+                has_ink |= alpha > 0;
                 coverage.push(f32::from(alpha) / 255.0);
             }
         }
@@ -374,7 +390,7 @@ fn rasterize_grid_chunk(
             out.push((m.code, arc));
         }
     }
-    with_glyph_cache(|cache| cache.insert_batch(css_font, chunk_cache));
+    chunk_cache
 }
 
 fn rasterize_single_measured(css_font: &str, m: &MeasuredChar) -> Option<RasterizedGlyph> {
@@ -383,15 +399,15 @@ fn rasterize_single_measured(css_font: &str, m: &MeasuredChar) -> Option<Rasteri
     ctx.set_font(css_font);
     ctx.set_text_baseline("alphabetic");
     ctx.set_text_align("left");
-    let _ = js_sys::Reflect::set(
+    drop(js_sys::Reflect::set(
         ctx.as_ref(),
         &JsValue::from_str("fillStyle"),
         &JsValue::from_str("#ffffff"),
-    );
+    ));
     let mut buf = [0u8; 4];
     let draw_x = f64::from(SDF_BUFFER) - f64::from(m.min_x);
     let draw_y = f64::from(SDF_BUFFER) - f64::from(m.min_y);
-    let _ = ctx.fill_text(m.ch.encode_utf8(&mut buf), draw_x, draw_y);
+    drop(ctx.fill_text(m.ch.encode_utf8(&mut buf), draw_x, draw_y));
     let image_data = get_image_data(&ctx, m.padded_w as i32, m.padded_h as i32).ok()?;
     let rgba = image_data.data();
     let total = m.padded_w * m.padded_h;
@@ -401,7 +417,7 @@ fn rasterize_single_measured(css_font: &str, m: &MeasuredChar) -> Option<Rasteri
     let mut has_ink = false;
     let mut coverage = Vec::with_capacity(total);
     for idx in 0..total {
-        let alpha = rgba[idx * 4 + 3];
+        let alpha = rgba.get(idx * 4 + 3).copied().unwrap_or(0);
         if alpha > 0 {
             has_ink = true;
         }

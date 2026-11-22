@@ -150,54 +150,91 @@ fn ground_center_smoothed(
         return true;
     }
 
-    let current = view_state.center_elevation();
-    let mut keep_anim = false;
-    {
+    let keep_anim = {
         let state = world.resources.get_or_init_mut::<CenterDemSmoothing>();
-        let dt = match (state.last_timestamp, now_ts) {
-            (Some(prev), Some(now)) if now > prev => now - prev,
-            _ => Duration::ZERO,
-        };
-        let moved_px = (mercator[0] - state.last_mercator[0])
-            .hypot(mercator[1] - state.last_mercator[1])
-            * world_size;
-        let camera_moved =
-            !state.initialized || moved_px > 0.5 || (zoom_val - state.last_zoom).abs() > 1e-3;
-        let dem_refined_only = !camera_moved
-            && state.last_dem_zoom.is_some()
-            && state.last_dem_zoom != dem_zoom
-            && (target - current).abs() > 1.0;
-
-        if camera_moved || dt.is_zero() || dt > Duration::from_millis(250) {
-            state.smoothing_active = false;
-        } else if dem_refined_only {
-            state.smoothing_active = true;
-        }
-
-        if state.smoothing_active {
-            let alpha = (1.0 - (-dt.as_secs_f64() * 14.0).exp()).clamp(0.10, 1.0);
-            let next = current + (target - current) * alpha;
-            if (target - next).abs() <= 0.2 {
-                view_state.set_center_elevation(target);
-                state.smoothing_active = false;
-            } else {
-                view_state.set_center_elevation(next);
-                keep_anim = true;
-            }
-        } else {
-            view_state.set_center_elevation(target);
-        }
-
-        state.last_mercator = mercator;
-        state.last_zoom = zoom_val;
-        state.last_dem_zoom = dem_zoom;
-        state.last_timestamp = now_ts;
-        state.initialized = true;
-    }
+        step_center_smoothing(
+            view_state,
+            state,
+            SmoothingSample {
+                target,
+                dem_zoom,
+                mercator,
+                zoom_val,
+                world_size,
+                now_ts,
+            },
+        )
+    };
     if keep_anim {
         crate::render::frame_signals::keep_animating(world);
     }
     true
+}
+
+struct SmoothingSample {
+    target: f64,
+    dem_zoom: Option<u8>,
+    mercator: [f64; 2],
+    zoom_val: f64,
+    world_size: f64,
+    now_ts: Option<Duration>,
+}
+
+fn step_center_smoothing(
+    view_state: &mut ViewState,
+    state: &mut CenterDemSmoothing,
+    sample: SmoothingSample,
+) -> bool {
+    let SmoothingSample {
+        target,
+        dem_zoom,
+        mercator,
+        zoom_val,
+        world_size,
+        now_ts,
+    } = sample;
+    let current = view_state.center_elevation();
+    let dt = match (state.last_timestamp, now_ts) {
+        (Some(prev), Some(now)) if now > prev => now - prev,
+        _ => Duration::ZERO,
+    };
+    let [mx, my] = mercator;
+    let [lx, ly] = state.last_mercator;
+    let moved_px = (mx - lx).hypot(my - ly) * world_size;
+    let camera_moved =
+        !state.initialized || moved_px > 0.5 || (zoom_val - state.last_zoom).abs() > 1e-3;
+    let dem_refined_only = !camera_moved
+        && state.last_dem_zoom.is_some()
+        && state.last_dem_zoom != dem_zoom
+        && (target - current).abs() > 1.0;
+
+    if camera_moved || dt.is_zero() || dt > Duration::from_millis(250) {
+        state.smoothing_active = false;
+    } else if dem_refined_only {
+        state.smoothing_active = true;
+    }
+
+    let mut keep_anim = false;
+    if state.smoothing_active {
+        let alpha = (1.0 - (-dt.as_secs_f64() * 14.0).exp()).clamp(0.10, 1.0);
+        let next = current + (target - current) * alpha;
+        if (target - next).abs() <= 0.2 {
+            view_state.set_center_elevation(target);
+            state.smoothing_active = false;
+        } else {
+            view_state.set_center_elevation(next);
+            keep_anim = true;
+        }
+    } else {
+        view_state.set_center_elevation(target);
+    }
+
+    state.last_mercator = mercator;
+    state.last_zoom = zoom_val;
+    state.last_dem_zoom = dem_zoom;
+    state.last_timestamp = now_ts;
+    state.initialized = true;
+    keep_anim
 }
 
 /// Stands the center on the loaded ground under it, where terrain holds the center and no

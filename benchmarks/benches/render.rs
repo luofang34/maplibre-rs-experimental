@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "benchmark setup and error handlers abort on renderer/tile failures"
+)]
 
 use std::time::{Duration, Instant};
 

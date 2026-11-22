@@ -115,11 +115,11 @@ impl Collation {
             (true, true) => "variant",
         };
         let opts = js_sys::Object::new();
-        let _ = js_sys::Reflect::set(
+        drop(js_sys::Reflect::set(
             &opts,
             &JsValue::from_str("sensitivity"),
             &JsValue::from_str(sensitivity),
-        );
+        ));
         let locales = js_sys::Array::of1(&JsValue::from_str(&loc));
         let cmp_res = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("Intl"))
             .and_then(|intl| js_sys::Reflect::get(&intl, &JsValue::from_str("Collator")))

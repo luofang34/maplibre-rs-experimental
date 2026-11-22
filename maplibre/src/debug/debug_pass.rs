@@ -51,7 +51,7 @@ impl Node for DebugPassNode {
             depth_slice: None,
             view: render_target.deref(),
             ops: wgpu::Operations {
-                // Draws on-top of previously rendered data
+                // Draws on top of rendered data in the target
                 load: wgpu::LoadOp::Load,
                 store: StoreOp::Store,
             },

@@ -62,11 +62,9 @@ impl DrapeShares {
         let floors: Vec<usize> = needs.iter().map(|need| FLOOR_TEXTURES.min(*need)).collect();
         let mut left = allowed;
         self.grants.clear();
-        for (index, view) in views.iter().enumerate() {
+        for (index, ((view, &need), &floor)) in views.iter().zip(&needs).zip(&floors).enumerate() {
             let after: usize = floors.iter().skip(index + 1).sum();
-            let granted = needs[index]
-                .min(left.saturating_sub(after))
-                .max(floors[index].min(left));
+            let granted = need.min(left.saturating_sub(after)).max(floor.min(left));
             left -= granted;
             self.grants.insert(*view, granted);
         }

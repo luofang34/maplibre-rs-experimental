@@ -120,9 +120,13 @@ pub(super) fn line_width(
     line: Range<usize>,
     spacing: f32,
 ) -> f32 {
-    let advances: Vec<f32> = line
-        .filter(|index| styles[*index].is_drawn(chars[*index]))
-        .map(|index| styles[index].advance(chars[index]) + spacing)
+    let advances: Vec<f32> = styles
+        .get(line.clone())
+        .into_iter()
+        .flatten()
+        .zip(chars.get(line).into_iter().flatten())
+        .filter(|(style, ch)| style.is_drawn(**ch))
+        .map(|(style, ch)| style.advance(*ch) + spacing)
         .collect();
     if advances.is_empty() {
         0.0

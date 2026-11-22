@@ -69,9 +69,7 @@ const handleMessage = async (message: MessageEvent<MessageData>) => {
 
     if (message.data.type === 'image_provider_modules') {
         providersRegistered = registerProviders(message.data.urls).catch(err => {
-            setTimeout(() => {
-                throw err;
-            });
+            globalThis.reportError?.(err);
         })
         return
     }
@@ -92,10 +90,8 @@ const handleMessage = async (message: MessageEvent<MessageData>) => {
             }
             return out;
         }).catch(err => {
-            // Propagate to main `onerror`:
-            setTimeout(() => {
-                throw err;
-            });
+            // Propagate failure to host `onerror`:
+            globalThis.reportError?.(err);
             // Rethrow to keep promise rejected and prevent execution of further commands:
             throw err;
         });

@@ -2,6 +2,7 @@ use super::{
     edge_heights::{edge_row_capacity, edge_texture_size, EDGE_TEXELS_PER_TILE},
     *,
 };
+use crate::terrain::mesh::TERRAIN_MESH_SIZE;
 
 #[test]
 fn terrain_bindings_need_no_storage_buffers_webgl2_lacks() {

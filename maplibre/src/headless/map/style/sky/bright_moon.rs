@@ -1,7 +1,7 @@
 //! A full moon is by far the brightest thing in the night sky: a near-white disc well above the
 //! brightest star, a halo that falls off with angle and follows its phase, and a sky around it
 //! bright enough to hide the stars beside it.
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg_attr(test, allow(clippy::expect_used))]
 
 use cgmath::{InnerSpace, Vector3, Vector4};
 
@@ -237,16 +237,16 @@ fn stars_beside_a_full_moon_fade() {
             let lit = frame(&mut map);
             rises.push(value(&lit, star_pixel).saturating_sub(value(&plain, star_pixel)));
         }
-        let [near, far] = rises[..] else {
-            panic!("two frames");
-        };
-        assert!(
-            far > 150,
-            "the star shows away from the moon: {far} at {star_pixel:?}"
-        );
-        assert!(
-            near * 3 < far,
-            "beside the moon it fades: {near} against {far}"
-        );
+        assert_eq!(rises.len(), 2, "two frames");
+        if let [near, far] = rises[..] {
+            assert!(
+                far > 150,
+                "the star shows away from the moon: {far} at {star_pixel:?}"
+            );
+            assert!(
+                near * 3 < far,
+                "beside the moon it fades: {near} against {far}"
+            );
+        }
     })
 }

@@ -134,7 +134,7 @@ impl MapController {
                 if last_rev != Some(rev) {
                     last_rev = Some(rev);
                     if let Ok(value) = write_js(&CameraState::of(context)) {
-                        let _ = callback.call1(&JsValue::NULL, &value);
+                        drop(callback.call1(&JsValue::NULL, &value));
                     }
                 }
                 None
@@ -214,7 +214,7 @@ impl MapController {
                             .collect(),
                     };
                     if let Ok(value) = write_js(&payload) {
-                        let _ = callback.call1(&JsValue::NULL, &value);
+                        drop(callback.call1(&JsValue::NULL, &value));
                     }
                 }
                 None

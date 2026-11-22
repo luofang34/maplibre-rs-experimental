@@ -97,7 +97,7 @@ impl TileImages {
     }
 
     /// Waits for the images the labels lack, lays out again the labels of each source that
-    /// gained one, and reports whether some provider was unavailable for now.
+    /// gained one, and reports whether any provider remains unavailable.
     pub(super) async fn lay_out_again<
         T: VectorTransferables,
         C: Context + Clone + Send,
@@ -134,7 +134,7 @@ impl TileImages {
 }
 
 /// Waits for the images `sources` lack and lays out again the labels of each source that
-/// gained one. Returns whether some provider was unavailable for now.
+/// gained one. Returns whether any provider remains unavailable.
 async fn lay_out_sources<T: VectorTransferables, C: Context + Clone + Send, H: HttpClient>(
     client: &SourceClient<H>,
     style: &Style,
@@ -142,6 +142,25 @@ async fn lay_out_sources<T: VectorTransferables, C: Context + Clone + Send, H: H
     context: C,
     sources: &[Symbols],
 ) -> Result<bool, ProcessVectorError> {
+    let (mut unavailable, gained) = resolve_missing_images(client, coords, sources).await;
+    for source in sources {
+        if source
+            .awaiting
+            .iter()
+            .any(|name| gained.contains(name.as_str()))
+        {
+            unavailable |=
+                relayout_source::<T, C, H>(client, style, coords, context.clone(), source).await?;
+        }
+    }
+    Ok(unavailable)
+}
+
+async fn resolve_missing_images<H: HttpClient>(
+    client: &SourceClient<H>,
+    coords: WorldTileCoords,
+    sources: &[Symbols],
+) -> (bool, HashSet<String>) {
     let providers = client.image_providers();
     let mut wanted: Vec<(&str, f32)> = sources
         .iter()
@@ -159,7 +178,7 @@ async fn lay_out_sources<T: VectorTransferables, C: Context + Clone + Send, H: H
     let answers = crate::util::async_join::join_all_concurrent(
         wanted
             .iter()
-            .map(|(name, pixel_ratio)| providers.resolve(name, *pixel_ratio)),
+            .map(|(name, ratio)| providers.resolve(name, *ratio)),
     )
     .await;
     let mut unavailable = false;
@@ -167,7 +186,7 @@ async fn lay_out_sources<T: VectorTransferables, C: Context + Clone + Send, H: H
     for ((name, _), answer) in wanted.iter().zip(answers) {
         match answer.as_deref() {
             Ok(Resolved::Image(_)) => {
-                gained.insert(*name);
+                gained.insert((*name).to_owned());
             }
             Ok(Resolved::None) => {}
             Err(reason) => {
@@ -176,55 +195,55 @@ async fn lay_out_sources<T: VectorTransferables, C: Context + Clone + Send, H: H
             }
         }
     }
-    for source in sources {
-        let Some((tile, request)) = &source.again else {
-            continue;
-        };
-        if !source
-            .awaiting
-            .iter()
-            .any(|name| gained.contains(name.as_str()))
-        {
-            continue;
-        }
-        let assets = load_symbol_assets_awaiting_from_tile(
-            client,
-            SymbolAssetConfig {
-                pixel_ratio: source.pixel_ratio,
-                ..SymbolAssetConfig::of(style)
-            },
-            &request.layers,
-            tile,
-            f64::from(request.overscaled_zoom.max(u8::from(coords.z))),
-        )
-        .await
-        .map_err(ProcessVectorError::SymbolAssets)?;
-        // An answer the cache dropped since it arrived is drawn as the fallback for now and
-        // asked for again when the tile is retried.
-        unavailable |= !assets.awaiting.is_empty();
-        // The tile was completed already; these labels replace the ones it was drawn with.
-        let source_state = request
-            .layers
-            .iter()
-            .find_map(|l| l.source.as_deref())
-            .map_or((None, None), |name| {
-                (
-                    style.source_promote_id(name).cloned(),
-                    style.feature_state.source(name).cloned(),
-                )
-            });
-        let (tile, request, atlas) = (tile.clone(), request.clone(), assets.atlas);
-        run_cpu_bound_replying(context.clone(), move |context| {
-            let mut processor = ProcessVectorContext::<T, _>::new(context)
-                .without_completion()
-                .without_indexing()
-                .with_source_feature_state(source_state.0, source_state.1);
-            process_decoded_vector_tile_with_assets(&tile, request, &mut processor, atlas)
-        })
-        .await
-        .map_err(ProcessVectorError::CpuWork)??;
-        providers.count_relaid();
-        tracing::debug!(%coords, images = gained.len(), "labels laid out again with provided images");
-    }
-    Ok(unavailable)
+    (unavailable, gained)
+}
+
+async fn relayout_source<T: VectorTransferables, C: Context + Clone + Send, H: HttpClient>(
+    client: &SourceClient<H>,
+    style: &Style,
+    coords: WorldTileCoords,
+    context: C,
+    source: &Symbols,
+) -> Result<bool, ProcessVectorError> {
+    let Some((tile, request)) = &source.again else {
+        return Ok(false);
+    };
+    let assets = load_symbol_assets_awaiting_from_tile(
+        client,
+        SymbolAssetConfig {
+            pixel_ratio: source.pixel_ratio,
+            ..SymbolAssetConfig::of(style)
+        },
+        &request.layers,
+        tile,
+        f64::from(request.overscaled_zoom.max(u8::from(coords.z))),
+    )
+    .await
+    .map_err(ProcessVectorError::SymbolAssets)?;
+    // An answer evicted from the cache falls back to the placeholder until the tile is retried.
+    let still_awaiting = !assets.awaiting.is_empty();
+    // The tile was completed already; these labels replace the ones it was drawn with.
+    let source_state = request
+        .layers
+        .iter()
+        .find_map(|l| l.source.as_deref())
+        .map_or((None, None), |name| {
+            (
+                style.source_promote_id(name).cloned(),
+                style.feature_state.source(name).cloned(),
+            )
+        });
+    let (tile, request, atlas) = (tile.clone(), request.clone(), assets.atlas);
+    run_cpu_bound_replying(context, move |context| {
+        let mut processor = ProcessVectorContext::<T, _>::new(context)
+            .without_completion()
+            .without_indexing()
+            .with_source_feature_state(source_state.0, source_state.1);
+        process_decoded_vector_tile_with_assets(&tile, request, &mut processor, atlas)
+    })
+    .await
+    .map_err(ProcessVectorError::CpuWork)??;
+    client.image_providers().count_relaid();
+    tracing::debug!(%coords, "labels laid out again with provided images");
+    Ok(still_awaiting)
 }

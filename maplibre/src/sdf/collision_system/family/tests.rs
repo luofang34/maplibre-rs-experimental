@@ -9,8 +9,8 @@ fn symbol(id: &str, filter: Option<serde_json::Value>, color: &str) -> serde_jso
     let mut layer = serde_json::json!({"id": id, "type": "symbol", "source": "s",
         "source-layer": "places", "layout": {"text-field": "{name}"},
         "paint": {"text-color": color}});
-    if let Some(filter) = filter {
-        layer["filter"] = filter;
+    if let (Some(obj), Some(filter)) = (layer.as_object_mut(), filter) {
+        obj.insert("filter".to_owned(), filter);
     }
     layer
 }

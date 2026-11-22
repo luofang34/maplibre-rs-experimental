@@ -8,11 +8,8 @@ use crate::{
         Renderer,
     },
     style::Style,
-    tcs::{
-        system::{SystemError, SystemResult},
-        tiles::Tiles,
-    },
-    vector::{VectorBufferPool, VectorLayerBucket, VectorLayerBucketComponent},
+    tcs::system::{SystemError, SystemResult},
+    vector::{VectorBufferPool, VectorLayerBucketComponent},
 };
 
 mod bucket;
@@ -22,13 +19,18 @@ pub(crate) mod paint;
 mod shared_fallback;
 pub(crate) mod sources;
 pub(crate) mod style_refresh;
+mod tile_pass;
 
-use bucket::{upload_bucket, SharedStyleLayers, UploadOutcome};
+use bucket::SharedStyleLayers;
 pub(crate) use frame_state::drape_paint_zoom;
 use frame_state::{frame_paint, VectorPaintFrame};
-use metadata::upload_size;
 #[cfg(test)]
 use metadata::{metadata_for_layer, pattern_runs, sort_runs};
+#[cfg(all(test, feature = "headless"))]
+use tile_pass::upload_tessellated_layer;
+use tile_pass::{
+    upload_tessellated_layer_with_uncovered, TessellatedUploadPlan, TessellatedUploadState,
+};
 
 #[cfg(feature = "geojson")]
 type DynPoints = crate::geojson::update::dynamic_points::DynamicPointGeoJson;
@@ -76,23 +78,7 @@ pub fn upload_system(
     let refresh_paint = previous_paint != Some(paint_frame);
     let (source_tiles, painted_tiles, uncovered_sources) =
         sources::frame_sources_and_painted(world, style, view_state)?;
-    let has_pending_uploads = {
-        let stamp = match world.resources.get::<Eventually<VectorBufferPool>>() {
-            Some(Initialized(pool)) => (style.revision(), pool.eviction_generation()),
-            _ => return Err(SystemError::Dependencies),
-        };
-        !source_tiles.iter().all(|&coords| {
-            world
-                .tiles
-                .query::<(
-                    &VectorLayerBucketComponent,
-                    &super::content::LayerReplacements,
-                )>(coords)
-                .is_some_and(|(layers, pending)| {
-                    layers.done && pending.vector.is_empty() && layers.uploaded_stamp == Some(stamp)
-                })
-        })
-    };
+    let has_pending_uploads = has_pending_vector_uploads(world, style, &source_tiles)?;
     let permit_source_set =
         super::request_system::snapshot_permit_sources(world, has_pending_uploads, &source_tiles);
     let terrain_booting = style.terrain.is_some()
@@ -111,12 +97,7 @@ pub fn upload_system(
         );
     }
     let (spatial, changed) = super::structures::for_frame(world, style, &painted_tiles);
-    world.resources.get_or_init_mut::<FrameUploads>();
-    world.resources.get_or_init_mut::<DynPoints>();
-    world
-        .resources
-        .get_or_init_mut::<paint::PaintRefreshScratch>();
-    world.resources.get_or_init_mut::<SharedStyleLayers>();
+    init_upload_resources(world);
     #[cfg(feature = "geojson")]
     crate::geojson::update::dynamic_points::ensure_seeded_for_style(world, style);
     let dirty_style_applied = style_refresh::apply_dirty_style(world, style, queue, paint_frame);
@@ -152,12 +133,14 @@ pub fn upload_system(
         paint::refresh_layer_paint(
             buffer_pool,
             queue,
-            &world.tiles,
-            &painted_tiles,
-            paint_frame,
-            previous_paint,
-            moving,
-            tiles_changed,
+            paint::PaintRefreshContext {
+                tiles: &world.tiles,
+                source_tiles: &painted_tiles,
+                frame: paint_frame,
+                previous: previous_paint,
+                moving,
+                tiles_changed,
+            },
             paint_scratch,
         );
     }
@@ -174,16 +157,20 @@ pub fn upload_system(
             buffer_pool,
             queue,
             &mut world.tiles,
-            style,
-            shared_style_layers,
-            (source_tiles, &uncovered_sources),
-            (&spatial, paint_frame),
-            (
-                budget,
+            TessellatedUploadPlan {
+                style,
+                shared_style_layers,
+                source_tiles,
+                uncovered_sources: &uncovered_sources,
+                spatial: &spatial,
+                paint: paint_frame,
                 allow_cpu_release,
+            },
+            TessellatedUploadState {
+                budget,
                 dyn_points,
-                Some(&mut paint_scratch.slots),
-            ),
+                paint_slots: Some(&mut paint_scratch.slots),
+            },
         )
     } else {
         (false, false)
@@ -210,58 +197,18 @@ pub fn upload_system(
     Ok(())
 }
 
-#[cfg(test)]
-#[allow(dead_code)]
-fn upload_tessellated_layer(
-    buffer_pool: &mut VectorBufferPool,
-    queue: &crate::render::upload_queue::UploadQueue,
-    tiles: &mut Tiles,
+fn has_pending_vector_uploads(
+    world: &crate::tcs::world::World,
     style: &Style,
-    source_tiles: Vec<crate::coords::WorldTileCoords>,
-    (spatial, paint): (&[super::structures::SpatialBuffer], VectorPaintFrame),
-    (budget, allow_cpu_release, dyn_points): (&mut FrameUploads, bool, &mut DynPoints),
-) -> (bool, bool) {
-    let empty = rustc_hash::FxHashSet::default();
-    let shared: Vec<_> = style
-        .layers
-        .iter()
-        .cloned()
-        .map(std::sync::Arc::new)
-        .collect();
-    upload_tessellated_layer_with_uncovered(
-        buffer_pool,
-        queue,
-        tiles,
-        style,
-        &shared,
-        (source_tiles, &empty),
-        (spatial, paint),
-        (budget, allow_cpu_release, dyn_points, None),
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn upload_tessellated_layer_with_uncovered(
-    buffer_pool: &mut VectorBufferPool,
-    queue: &crate::render::upload_queue::UploadQueue,
-    tiles: &mut Tiles,
-    style: &Style,
-    shared_style_layers: &[std::sync::Arc<crate::style::layer::StyleLayer>],
-    (source_tiles, uncovered_sources): (
-        Vec<crate::coords::WorldTileCoords>,
-        &rustc_hash::FxHashSet<crate::coords::WorldTileCoords>,
-    ),
-    (spatial, paint): (&[super::structures::SpatialBuffer], VectorPaintFrame),
-    (budget, allow_cpu_release, dyn_points, mut paint_slots): (
-        &mut FrameUploads,
-        bool,
-        &mut DynPoints,
-        Option<&mut paint::SlotMetaCache>,
-    ),
-) -> (bool, bool) {
-    let stamp = (style.revision(), buffer_pool.eviction_generation());
-    if source_tiles.iter().all(|&coords| {
-        tiles
+    source_tiles: &[crate::coords::WorldTileCoords],
+) -> Result<bool, SystemError> {
+    let stamp = match world.resources.get::<Eventually<VectorBufferPool>>() {
+        Some(Initialized(pool)) => (style.revision(), pool.eviction_generation()),
+        _ => return Err(SystemError::Dependencies),
+    };
+    Ok(!source_tiles.iter().all(|&coords| {
+        world
+            .tiles
             .query::<(
                 &VectorLayerBucketComponent,
                 &super::content::LayerReplacements,
@@ -269,219 +216,16 @@ fn upload_tessellated_layer_with_uncovered(
             .is_some_and(|(layers, pending)| {
                 layers.done && pending.vector.is_empty() && layers.uploaded_stamp == Some(stamp)
             })
-    }) {
-        return (false, false);
-    }
-    let has_dem_source = crate::terrain::source::dem_source(style).is_some();
-    let mut feature_meta_scratch = Vec::new();
-    let mut needs_refetch = false;
-    let mut any_deferred = false;
-    let upload_started = instant::Instant::now();
-    let mut uploaded_any_bucket = false;
-    let time_budget = budget.vector_upload_time_budget();
-    let protected: rustc_hash::FxHashSet<_> = source_tiles.iter().copied().collect();
-    for coords in source_tiles {
-        let is_uncovered = uncovered_sources.contains(&coords);
-        super::content::ensure(tiles, coords);
-        let Some((layers, pending)) = tiles.query::<(
-            &VectorLayerBucketComponent,
-            &super::content::LayerReplacements,
-        )>(coords) else {
-            continue;
-        };
-        if layers.done && pending.vector.is_empty() && layers.uploaded_stamp == Some(stamp) {
-            continue;
-        }
-        let mut tile_incomplete = false;
-        let mut uploaded = false;
-        let mut pending_cpu_releases: Vec<(String, Option<u64>, bool)> = Vec::new();
-        for style_layer in shared_style_layers {
-            enum Step {
-                Skip,
-                Exhausted,
-                Saturated,
-                Commit {
-                    replacement: Option<usize>,
-                    did_upload: bool,
-                    release_cpu: Option<Option<u64>>,
-                },
-            }
-            let step = {
-                let Some((layers, pending)) = tiles.query::<(
-                    &VectorLayerBucketComponent,
-                    &super::content::LayerReplacements,
-                )>(coords) else {
-                    break;
-                };
-                let replacement = pending
-                    .vector
-                    .iter()
-                    .position(|layer| layer.style_layer_id == style_layer.id);
-                let bucket = replacement.map(|index| &pending.vector[index]).or_else(|| {
-                    layers.layers.iter().find_map(|layer| match layer {
-                        VectorLayerBucket::AvailableLayer(layer)
-                            if layer.style_layer_id == style_layer.id =>
-                        {
-                            Some(layer)
-                        }
-                        _ => None,
-                    })
-                });
-                let Some(bucket) = bucket else {
-                    continue;
-                };
-                if replacement.is_none() && buffer_pool.has_layer(coords, &style_layer.id) {
-                    continue;
-                }
-                let is_dynamic_circle = layer_is_dynamic_circle(style, style_layer);
-                let is_uniform = !is_dynamic_circle
-                    && paint::uniform_color(style_layer, f64::from(paint.zoom)).is_some();
-                if !bucket.buffer.has_drawable_geometry() {
-                    buffer_pool.remove_layer(coords, &style_layer.id);
-                    Step::Commit {
-                        replacement,
-                        did_upload: false,
-                        release_cpu: None,
-                    }
-                } else if !bucket.buffer.has_cpu_indices() {
-                    if !style_layer.is_hidden() {
-                        needs_refetch = true;
-                    }
-                    tile_incomplete = true;
-                    continue;
-                } else {
-                    let fallback_vertices = shared_fallback::find_shared_fallback_vertices(
-                        bucket,
-                        layers,
-                        pending,
-                        replacement.is_some(),
-                    );
-                    if shared_fallback::missing_shared_vertices(
-                        buffer_pool,
-                        coords,
-                        style_layer,
-                        bucket,
-                        fallback_vertices,
-                    ) {
-                        if !style_layer.is_hidden() {
-                            needs_refetch = true;
-                        }
-                        tile_incomplete = true;
-                        continue;
-                    }
-                    let bytes = upload_size(style_layer, bucket, is_uniform, is_dynamic_circle);
-                    if time_budget.is_some_and(|limit| {
-                        uploaded_any_bucket && upload_started.elapsed() >= limit
-                    }) || budget.geometry_tiles_exhausted_for(is_uncovered)
-                        || !budget.can_take_geometry(bytes, is_uncovered)
-                    {
-                        Step::Exhausted
-                    } else {
-                        let release_cpu = (allow_cpu_release
-                            && shared_fallback::can_release_cpu_geometry(
-                                style_layer,
-                                bucket,
-                                has_dem_source,
-                            ))
-                        .then(|| bucket.buffer.shared_geometry_key());
-                        let paint_store =
-                            tiles.query::<&super::feature_paint::TileFeaturePaintComponent>(coords);
-                        let paint_entries = if replacement.is_some() {
-                            paint_store
-                                .and_then(|s| s.pending.get(&style_layer.id))
-                                .map(Vec::as_slice)
-                        } else {
-                            paint_store
-                                .and_then(|s| s.committed.get(&style_layer.id))
-                                .map(Vec::as_slice)
-                        };
-                        match upload_bucket(
-                            buffer_pool,
-                            queue,
-                            style_layer,
-                            bucket,
-                            fallback_vertices,
-                            (paint_entries, layers.overscaled_zoom, is_dynamic_circle),
-                            (spatial, paint),
-                            (&protected, &mut feature_meta_scratch, dyn_points),
-                        ) {
-                            UploadOutcome::Uploaded(uploaded_slot) => {
-                                if let (Some(slots), Some((slot, slot_meta))) =
-                                    (paint_slots.as_deref_mut(), uploaded_slot)
-                                {
-                                    slots.record(slot, slot_meta);
-                                }
-                                budget.take_geometry(bytes, is_uncovered);
-                                Step::Commit {
-                                    replacement,
-                                    did_upload: true,
-                                    release_cpu,
-                                }
-                            }
-                            UploadOutcome::PoolSaturated => Step::Saturated,
-                            UploadOutcome::Failed => Step::Skip,
-                        }
-                    }
-                }
-            };
-            match step {
-                Step::Skip | Step::Saturated => {
-                    tile_incomplete = true;
-                    continue;
-                }
-                Step::Exhausted => {
-                    shared_fallback::flush_safe_cpu_releases(
-                        tiles,
-                        buffer_pool,
-                        coords,
-                        &pending_cpu_releases,
-                    );
-                    any_deferred = true;
-                    tile_incomplete = true;
-                    break;
-                }
-                Step::Commit {
-                    replacement,
-                    did_upload,
-                    release_cpu,
-                } => {
-                    uploaded |= did_upload;
-                    uploaded_any_bucket |= did_upload;
-                    if let Some(index) = replacement {
-                        super::content::commit_pending_vector(tiles, coords, index);
-                    }
-                    if let Some(shared_key) = release_cpu {
-                        let release_colors =
-                            !crate::style::feature_state::layer_paint_reads_feature_state(
-                                style_layer,
-                            ) && !paint::feature_paint_depends_on_zoom(style_layer);
-                        pending_cpu_releases.push((
-                            style_layer.id.clone(),
-                            shared_key,
-                            release_colors,
-                        ));
-                    }
-                }
-            }
-        }
-        shared_fallback::flush_safe_cpu_releases(tiles, buffer_pool, coords, &pending_cpu_releases);
-        if !tile_incomplete {
-            let end_stamp = (style.revision(), buffer_pool.eviction_generation());
-            if let Some((layers, pending)) = tiles.query_mut::<(
-                &mut VectorLayerBucketComponent,
-                &super::content::LayerReplacements,
-            )>(coords)
-            {
-                if layers.done && pending.vector.is_empty() {
-                    layers.uploaded_stamp = Some(end_stamp);
-                }
-            }
-        }
-        if uploaded {
-            budget.count_geometry_tile();
-        }
-    }
-    (any_deferred, needs_refetch)
+    }))
+}
+
+fn init_upload_resources(world: &mut crate::tcs::world::World) {
+    world.resources.get_or_init_mut::<FrameUploads>();
+    world.resources.get_or_init_mut::<DynPoints>();
+    world
+        .resources
+        .get_or_init_mut::<paint::PaintRefreshScratch>();
+    world.resources.get_or_init_mut::<SharedStyleLayers>();
 }
 
 #[cfg(test)]

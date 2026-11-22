@@ -114,16 +114,20 @@ async fn font_faces_woff2_loads_and_shapes_ligatures_and_indic_without_pbf_reque
         .get("Wave5Woff2Face")
         .expect("shaped runs for Wave5Woff2Face");
     let fi_run = runs.get("fi").expect("fi shaped run");
-    assert_eq!(fi_run.len(), 1);
-    assert_eq!(fi_run[0].glyph_id, 6);
-    assert!(atlas.face_glyphs.contains_key(&fi_run[0].atlas_key()));
+    let [fi0] = fi_run.as_slice() else {
+        panic!("expected 1 fi glyph, got {}", fi_run.len());
+    };
+    assert_eq!(fi0.glyph_id, 6);
+    assert!(atlas.face_glyphs.contains_key(&fi0.atlas_key()));
 
     let ksha_run = runs
         .get("\u{0915}\u{094D}\u{0937}")
         .expect("Devanagari ksha shaped run");
-    assert_eq!(ksha_run.len(), 1);
-    assert_eq!(ksha_run[0].glyph_id, 10);
-    assert!(atlas.face_glyphs.contains_key(&ksha_run[0].atlas_key()));
+    let [ksha0] = ksha_run.as_slice() else {
+        panic!("expected 1 ksha glyph, got {}", ksha_run.len());
+    };
+    assert_eq!(ksha0.glyph_id, 10);
+    assert!(atlas.face_glyphs.contains_key(&ksha0.atlas_key()));
 }
 
 #[tokio::test]

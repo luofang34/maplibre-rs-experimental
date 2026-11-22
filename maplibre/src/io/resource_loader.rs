@@ -356,8 +356,8 @@ impl Inner {
 
         let stripped = raw_path.strip_prefix("localhost").unwrap_or(raw_path);
         #[cfg(windows)]
-        let stripped = if stripped.as_bytes().get(2) == Some(&b':') && stripped.starts_with('/') {
-            &stripped[1..]
+        let stripped = if stripped.as_bytes().get(2) == Some(&b':') {
+            stripped.strip_prefix('/').unwrap_or(stripped)
         } else {
             stripped
         };
@@ -414,24 +414,8 @@ impl Inner {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn percent_decode_path(input: &str) -> std::path::PathBuf {
-    let bytes = input.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut idx = 0;
-    while idx < bytes.len() {
-        if bytes[idx] == b'%' && idx + 2 < bytes.len() {
-            if let (Some(hi), Some(lo)) = (
-                (bytes[idx + 1] as char).to_digit(16),
-                (bytes[idx + 2] as char).to_digit(16),
-            ) {
-                out.push(((hi << 4) | lo) as u8);
-                idx += 3;
-                continue;
-            }
-        }
-        out.push(bytes[idx]);
-        idx += 1;
-    }
-    std::path::PathBuf::from(String::from_utf8_lossy(&out).into_owned())
+    let decoded = crate::io::source_client::request::percent_decode_bytes(input);
+    std::path::PathBuf::from(String::from_utf8_lossy(&decoded).into_owned())
 }
 
 #[cfg(test)]

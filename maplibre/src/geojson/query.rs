@@ -89,28 +89,8 @@ impl Style {
         inline_override: Option<&Value>,
         options: &SourceQueryOptions,
     ) -> Result<Vec<SourceFeature>, SourceQueryError> {
-        let source = match self.sources.get(source_name) {
-            Some(Source::GeoJson(source)) => source,
-            Some(_) => {
-                return Err(SourceQueryError::NotGeoJson {
-                    source_name: source_name.to_owned(),
-                })
-            }
-            None => {
-                return Err(SourceQueryError::UnknownSource {
-                    source_name: source_name.to_owned(),
-                })
-            }
-        };
-        let document: &Value = match (inline_override, &source.data) {
-            (Some(doc), _) => doc,
-            (None, GeoJsonData::Inline(document)) => document,
-            (None, GeoJsonData::Url(_)) => {
-                return Err(SourceQueryError::NotLoaded {
-                    source_name: source_name.to_owned(),
-                });
-            }
-        };
+        let source = resolve_geojson_source(&self.sources, source_name)?;
+        let document = resolve_source_document(source_name, source, inline_override)?;
         let filter = options
             .filter
             .as_ref()
@@ -124,75 +104,133 @@ impl Style {
         {
             return Ok(Vec::new());
         }
-        let source_filter = match source.filter.as_ref() {
-            Some(raw) => match Filter::parse(raw) {
-                Ok(parsed) => Some(parsed),
-                Err(error) => {
-                    tracing::warn!(
-                        source = source_name,
-                        %error,
-                        "invalid GeoJSON source filter; query returns no features"
-                    );
-                    return Ok(Vec::new());
-                }
-            },
-            None => None,
+        let source_filter = match parse_source_filter(source_name, source) {
+            Some(parsed) => parsed,
+            None => return Ok(Vec::new()),
         };
         let promoted = promoted_property(source);
-        let features = feature_list(document);
-        let mut found = Vec::new();
-        for (position, feature) in features.iter().enumerate() {
-            let Some(geometry) = feature.get("geometry").filter(|value| !value.is_null()) else {
-                continue;
-            };
-            let geometry_type = geometry
-                .get("type")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            let id = if let Some(prop) = promoted.as_deref() {
-                feature
-                    .get("properties")
-                    .and_then(|props| props.get(prop))
-                    .and_then(crate::query::QueriedFeatureId::from_json)
-            } else if source.generate_id {
-                Some(crate::query::QueriedFeatureId::Number(position as u64))
-            } else {
-                feature
-                    .get("id")
-                    .and_then(crate::query::QueriedFeatureId::from_json)
-            };
-            if source_filter.is_some() || filter.is_some() {
-                let properties = properties_from_json(feature.get("properties"));
-                let ctx = FeatureContext {
-                    properties: &properties,
-                    geometry_type: GeometryType::from_geojson(geometry_type),
-                    id: id
-                        .as_ref()
-                        .map(crate::query::QueriedFeatureId::to_expr_value),
-                    zoom: 0.0,
-                };
-                if source_filter.as_ref().is_some_and(|sf| !sf.evaluate(&ctx)) {
-                    continue;
-                }
-                if filter.as_ref().is_some_and(|qf| !qf.evaluate(&ctx)) {
-                    continue;
-                }
-            }
-            found.push(SourceFeature {
-                source: source_name.to_owned(),
-                source_layer: GEOJSON_LAYER.to_owned(),
-                id,
-                properties: feature
-                    .get("properties")
-                    .and_then(Value::as_object)
-                    .map(|map| map.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-                    .unwrap_or_default(),
-                geometry_type: geometry_type.to_owned(),
-                geometry: geometry.clone(),
-            });
-        }
-        Ok(found)
+        Ok(feature_list(document)
+            .iter()
+            .enumerate()
+            .filter_map(|(position, feature)| {
+                match_source_feature(
+                    source_name,
+                    feature,
+                    position,
+                    promoted.as_deref(),
+                    source.generate_id,
+                    source_filter.as_ref(),
+                    filter.as_ref(),
+                )
+            })
+            .collect())
     }
+}
+
+fn resolve_geojson_source<'a>(
+    sources: &'a rustc_hash::FxHashMap<String, Source>,
+    source_name: &str,
+) -> Result<&'a crate::style::source::GeoJsonSource, SourceQueryError> {
+    match sources.get(source_name) {
+        Some(Source::GeoJson(source)) => Ok(source),
+        Some(_) => Err(SourceQueryError::NotGeoJson {
+            source_name: source_name.to_owned(),
+        }),
+        None => Err(SourceQueryError::UnknownSource {
+            source_name: source_name.to_owned(),
+        }),
+    }
+}
+
+fn resolve_source_document<'a>(
+    source_name: &str,
+    source: &'a crate::style::source::GeoJsonSource,
+    inline_override: Option<&'a Value>,
+) -> Result<&'a Value, SourceQueryError> {
+    match (inline_override, &source.data) {
+        (Some(doc), _) => Ok(doc),
+        (None, GeoJsonData::Inline(document)) => Ok(document),
+        (None, GeoJsonData::Url(_)) => Err(SourceQueryError::NotLoaded {
+            source_name: source_name.to_owned(),
+        }),
+    }
+}
+
+fn parse_source_filter(
+    source_name: &str,
+    source: &crate::style::source::GeoJsonSource,
+) -> Option<Option<Filter>> {
+    match source.filter.as_ref() {
+        Some(raw) => match Filter::parse(raw) {
+            Ok(parsed) => Some(Some(parsed)),
+            Err(error) => {
+                tracing::warn!(
+                    source = source_name,
+                    %error,
+                    "invalid GeoJSON source filter; query returns no features"
+                );
+                None
+            }
+        },
+        None => Some(None),
+    }
+}
+
+fn match_source_feature(
+    source_name: &str,
+    feature: &Value,
+    position: usize,
+    promoted: Option<&str>,
+    generate_id: bool,
+    source_filter: Option<&Filter>,
+    query_filter: Option<&Filter>,
+) -> Option<SourceFeature> {
+    let geometry = feature.get("geometry").filter(|value| !value.is_null())?;
+    let geometry_type = geometry
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let id = if let Some(prop) = promoted {
+        feature
+            .get("properties")
+            .and_then(|props| props.get(prop))
+            .and_then(crate::query::QueriedFeatureId::from_json)
+    } else if generate_id {
+        Some(crate::query::QueriedFeatureId::Number(position as u64))
+    } else {
+        feature
+            .get("id")
+            .and_then(crate::query::QueriedFeatureId::from_json)
+    };
+    if source_filter.is_some() || query_filter.is_some() {
+        let properties = properties_from_json(feature.get("properties"));
+        let ctx = FeatureContext {
+            properties: &properties,
+            geometry_type: GeometryType::from_geojson(geometry_type),
+            id: id
+                .as_ref()
+                .map(crate::query::QueriedFeatureId::to_expr_value),
+            zoom: 0.0,
+        };
+        if source_filter.is_some_and(|sf| !sf.evaluate(&ctx)) {
+            return None;
+        }
+        if query_filter.is_some_and(|qf| !qf.evaluate(&ctx)) {
+            return None;
+        }
+    }
+    Some(SourceFeature {
+        source: source_name.to_owned(),
+        source_layer: GEOJSON_LAYER.to_owned(),
+        id,
+        properties: feature
+            .get("properties")
+            .and_then(Value::as_object)
+            .map(|map| map.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+            .unwrap_or_default(),
+        geometry_type: geometry_type.to_owned(),
+        geometry: geometry.clone(),
+    })
 }
 
 impl MapContext {

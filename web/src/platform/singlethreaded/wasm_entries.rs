@@ -7,10 +7,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use futures::future::{Abortable, Aborted};
 use maplibre::{
-    benchmarking::io::{
-        apc::{AsyncProcedure, Input, ProcedureTag},
-        source_client::{HttpSourceClient, SourceClient},
-    },
+    benchmarking::io::apc::{AsyncProcedure, Input, ProcedureTag},
     environment::{OffscreenKernel, OffscreenKernelConfig},
     io::apc::CallError,
 };
@@ -26,7 +23,6 @@ use crate::{
     error::{JSError, WebError},
     platform::{
         self,
-        http_client::web_http_client,
         singlethreaded::{
             apc::{post_call_finished, set_worker_reply_port},
             PassingContext, UsedContext,
@@ -139,15 +135,14 @@ impl TileWorkerCalls {
             CallError::DeserializeInput(Box::new(e))
         })?;
         let attempt = input.attempt;
-        let context =
-            PassingContext::new(SourceClient::new(HttpSourceClient::new(web_http_client())));
+        let context = PassingContext::new();
         let Some(style) = self.styles.get(style_revision) else {
             for kind in [
                 maplibre::io::tile_retry::RequestKind::Vector,
                 maplibre::io::tile_retry::RequestKind::Raster,
                 maplibre::io::tile_retry::RequestKind::Dem,
             ] {
-                let _ = maplibre::io::apc::Context::send_back(
+                drop(maplibre::io::apc::Context::send_back(
                     &context,
                     maplibre::io::tile_retry::TileRequestOutcome {
                         coords: input.coords,
@@ -155,9 +150,9 @@ impl TileWorkerCalls {
                         attempt: Some(attempt),
                         disposition: maplibre::io::tile_retry::RequestDisposition::Retry,
                     },
-                );
+                ));
             }
-            let _ = post_call_finished(attempt);
+            drop(post_call_finished(attempt));
             return Err(WebError::StyleRevisionMissing(style_revision).into());
         };
         input.style = style;
@@ -185,7 +180,7 @@ impl TileWorkerCalls {
         Ok(wasm_bindgen_futures::future_to_promise(async move {
             let result = Abortable::new(call, registration).await;
             if matches!(result, Ok(Ok(()))) {
-                let _ = flush_context.flush();
+                drop(flush_context.flush());
             }
             running.borrow_mut().finish(attempt);
             if let Err(error) = post_call_finished(attempt) {
@@ -210,7 +205,7 @@ impl TileWorkerCalls {
     /// Releases host assignment tracking when a call failed before starting its future.
     pub fn finish_failed(&self, attempt: u64) {
         self.running.borrow_mut().finish(attempt);
-        let _ = post_call_finished(attempt);
+        drop(post_call_finished(attempt));
     }
 }
 
@@ -265,7 +260,10 @@ pub(crate) fn deliver_received_data(
 /// to the renderer.
 #[cfg(feature = "renderer")]
 #[wasm_bindgen]
-#[allow(unsafe_code)]
+#[expect(
+    unsafe_code,
+    reason = "borrows ReceivedType from raw pointer passed by JS worker glue"
+)]
 pub fn singlethreaded_receive_data(
     received_ptr: *const ReceivedType,
     tag: u32,

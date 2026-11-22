@@ -1,4 +1,4 @@
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#![cfg_attr(test, allow(clippy::expect_used))]
 
 mod downlevel;
 mod multidraw;
@@ -23,7 +23,10 @@ use crate::{
         RenderStageLabel, Renderer,
     },
     schedule::Schedule,
-    tcs::{system::stage::SystemStage, world::World},
+    tcs::{
+        system::{stage::SystemStage, SystemError, SystemResult},
+        world::World,
+    },
     window::{MapWindow, PhysicalSize},
 };
 
@@ -277,7 +280,7 @@ pub(super) async fn make_context() -> MapContext {
     }
 }
 
-pub(super) fn make_base_schedule() -> Schedule {
+pub(super) fn make_base_schedule() -> Result<Schedule, Box<dyn std::error::Error>> {
     let mut schedule = Schedule::default();
     for stage in [
         RenderStageLabel::Prepare,
@@ -286,12 +289,10 @@ pub(super) fn make_base_schedule() -> Schedule {
         RenderStageLabel::Render,
         RenderStageLabel::Cleanup,
     ] {
-        schedule.add_stage(stage, SystemStage::default()).unwrap();
+        schedule.add_stage(stage, SystemStage::default())?;
     }
-    schedule
-        .run_after_failure(RenderStageLabel::Cleanup)
-        .unwrap();
-    schedule
+    schedule.run_after_failure(RenderStageLabel::Cleanup)?;
+    Ok(schedule)
 }
 
 pub(super) fn create_slab(
@@ -402,13 +403,13 @@ pub(super) fn create_slab(
 
 pub(super) fn submit_pass(
     c: &mut MapContext,
-    record: impl for<'w> FnOnce(&mut TrackedRenderPass<'w>, &'w World),
-) {
+    record: impl for<'w> FnOnce(&mut TrackedRenderPass<'w>, &'w World) -> SystemResult,
+) -> SystemResult {
     let view = c
         .world
         .resources
         .get::<SlabResources>()
-        .unwrap()
+        .ok_or(SystemError::Dependencies)?
         .target_view
         .clone();
     let mut encoder = c
@@ -430,8 +431,26 @@ pub(super) fn submit_pass(
             multiview_mask: None,
         });
         let mut pass = TrackedRenderPass::new(raw_pass);
-        record(&mut pass, &c.world);
+        record(&mut pass, &c.world)?;
         pass.finish(&c.world);
     }
     c.renderer.queue.submit([encoder.finish()]);
+    Ok(())
+}
+
+pub(super) fn render_both_phases<'w>(
+    pass: &mut TrackedRenderPass<'w>,
+    world: &'w World,
+) -> SystemResult {
+    world
+        .resources
+        .get::<super::BinnedRenderPhase<PrimaryBinnedItem>>()
+        .ok_or(SystemError::Dependencies)?
+        .render(pass, world);
+    world
+        .resources
+        .get::<super::BinnedRenderPhase<SecondaryBinnedItem>>()
+        .ok_or(SystemError::Dependencies)?
+        .render(pass, world);
+    Ok(())
 }

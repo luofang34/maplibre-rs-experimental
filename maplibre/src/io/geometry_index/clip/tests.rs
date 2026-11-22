@@ -83,11 +83,14 @@ fn a_hole_reaching_out_of_the_area_is_cut_with_it() {
     let parts = IndexedGeometry::from_polygon(Polygon::new(outer, vec![hole]), meta())
         .unwrap()
         .clipped_to(area());
-    let ExactGeometry::Polygon(polygon) = &parts[0].exact else {
-        panic!("a polygon stays a polygon");
-    };
-    assert_eq!(polygon.interiors().len(), 1);
-    assert!(polygon.interiors()[0].coords().all(|c| c.x <= 10.0));
+    assert!(matches!(
+        parts.first().map(|part| &part.exact),
+        Some(ExactGeometry::Polygon(_))
+    ));
+    if let Some(ExactGeometry::Polygon(polygon)) = parts.first().map(|part| &part.exact) {
+        assert_eq!(polygon.interiors().len(), 1);
+        assert!(polygon.interiors()[0].coords().all(|c| c.x <= 10.0));
+    }
 }
 
 #[test]
@@ -97,10 +100,13 @@ fn a_ring_crossing_the_area_with_one_segment_keeps_both_crossings() {
     let parts = IndexedGeometry::from_polygon(wedge, meta())
         .unwrap()
         .clipped_to(area());
-    let ExactGeometry::Polygon(polygon) = &parts[0].exact else {
-        panic!("a polygon stays a polygon");
-    };
-    let xs: Vec<f64> = polygon.exterior().coords().map(|c| c.x).collect();
-    assert!(xs.contains(&0.0) && xs.contains(&10.0), "{xs:?}");
-    assert!(polygon.exterior().is_closed());
+    assert!(matches!(
+        parts.first().map(|part| &part.exact),
+        Some(ExactGeometry::Polygon(_))
+    ));
+    if let Some(ExactGeometry::Polygon(polygon)) = parts.first().map(|part| &part.exact) {
+        let xs: Vec<f64> = polygon.exterior().coords().map(|c| c.x).collect();
+        assert!(xs.contains(&0.0) && xs.contains(&10.0), "{xs:?}");
+        assert!(polygon.exterior().is_closed());
+    }
 }

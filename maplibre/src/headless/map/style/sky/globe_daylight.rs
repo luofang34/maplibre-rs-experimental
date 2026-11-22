@@ -1,6 +1,6 @@
 //! A globe drawn without terrain turns from day to night under the host's sun, as terrain does,
 //! and an eclipse takes its day side toward its night; the sky around it is left alone.
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg_attr(test, allow(clippy::expect_used))]
 
 use crate::{
     celestial::{EcefDirection, VisibleFraction},

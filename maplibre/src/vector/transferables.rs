@@ -99,6 +99,26 @@ pub trait LayerMissing: IntoMessage + Debug + Send {
     fn to_bucket(self) -> MissingVectorLayerBucket;
 }
 
+/// Tessellated vector geometry payload together with per-feature paint attributes.
+pub struct TessellatedLayerPayload {
+    /// Tile-grid coordinates whose local space contains the geometry.
+    pub coords: WorldTileCoords,
+    /// Padded geometry buffer ready for GPU upload or pre-packing.
+    pub buffer: OverAlignedVertexBuffer<ShaderVertex, IndexDataType>,
+    /// Vertex count per feature in tessellation order.
+    pub feature_indices: Vec<u32>,
+    /// Per-feature RGBA colors in geometry feature order.
+    pub feature_colors: Vec<[f32; 4]>,
+    /// Per-feature sort keys in geometry feature order.
+    pub feature_sort_keys: Vec<f32>,
+    /// Decoded source layer header metadata.
+    pub layer_data: Layer,
+    /// Style layer identifier whose paint produced this bucket.
+    pub style_layer_id: String,
+    /// Per-entry feature attributes for in-place GPU paint and `feature-state` refresh.
+    pub entries: Vec<BucketFeatureEntry>,
+}
+
 /// Tessellated vector geometry for one style layer, ready for renderer upload.
 pub trait LayerTessellated: IntoMessage + Debug + Send {
     /// Identifies this backend's vector-geometry payload for message dispatch.
@@ -121,60 +141,33 @@ pub trait LayerTessellated: IntoMessage + Debug + Send {
 
     /// Builds a tessellated layer payload together with its per-entry feature attributes in one
     /// step so single-threaded wire formats can pack everything into a single buffer.
-    #[allow(clippy::too_many_arguments)]
-    fn build_from_with_paint(
-        coords: WorldTileCoords,
-        buffer: OverAlignedVertexBuffer<ShaderVertex, IndexDataType>,
-        feature_indices: Vec<u32>,
-        feature_colors: Vec<[f32; 4]>,
-        feature_sort_keys: Vec<f32>,
-        layer_data: Layer,
-        style_layer_id: String,
-        entries: Vec<BucketFeatureEntry>,
-    ) -> Self
+    fn build_from_with_paint(payload: TessellatedLayerPayload) -> Self
     where
         Self: Sized,
     {
         Self::build_from(
-            coords,
-            buffer,
-            feature_indices,
-            feature_colors,
-            feature_sort_keys,
-            layer_data,
-            style_layer_id,
+            payload.coords,
+            payload.buffer,
+            payload.feature_indices,
+            payload.feature_colors,
+            payload.feature_sort_keys,
+            payload.layer_data,
+            payload.style_layer_id,
         )
-        .with_feature_paint(entries)
+        .with_feature_paint(payload.entries)
     }
 
     /// Builds a tessellated layer payload with optional worker pre-packing using `style_type`
     /// (`"fill"`, `"line"`, `"fill-extrusion"`, etc.) when `allow_prepack` is enabled.
-    #[allow(clippy::too_many_arguments)]
     fn build_from_with_paint_typed(
-        coords: WorldTileCoords,
-        buffer: OverAlignedVertexBuffer<ShaderVertex, IndexDataType>,
-        feature_indices: Vec<u32>,
-        feature_colors: Vec<[f32; 4]>,
-        feature_sort_keys: Vec<f32>,
-        layer_data: Layer,
-        style_layer_id: String,
-        entries: Vec<BucketFeatureEntry>,
+        payload: TessellatedLayerPayload,
         _style_type: &str,
         _allow_prepack: bool,
     ) -> Self
     where
         Self: Sized,
     {
-        Self::build_from_with_paint(
-            coords,
-            buffer,
-            feature_indices,
-            feature_colors,
-            feature_sort_keys,
-            layer_data,
-            style_layer_id,
-            entries,
-        )
+        Self::build_from_with_paint(payload)
     }
 
     /// Attaches per-entry feature attributes for in-place GPU paint and `feature-state` refresh.

@@ -17,7 +17,7 @@ pub(crate) fn process_layer<T: VectorTransferables, C: Context>(
     style: &StyleLayer,
     request: &VectorTileRequest,
     context: &mut ProcessVectorContext<T, C>,
-    atlases: (
+    (layout_atlas, gpu_atlas): (
         &std::sync::Arc<crate::sdf::assets::SymbolAtlas>,
         &std::sync::Arc<crate::sdf::assets::SymbolAtlas>,
     ),
@@ -35,44 +35,14 @@ pub(crate) fn process_layer<T: VectorTransferables, C: Context>(
             Cow::Borrowed(&empty_layer)
         }
     };
-    if crate::style::expression::layer_reads_geometry(style) && !layer.features.is_empty() {
-        super::geometry_tags::add_geometry_tags(layer.to_mut(), request.coords);
-    }
-    if crate::style::expression::layer_reads_identity(style) && !layer.features.is_empty() {
-        let promote_prop = context
-            .promote_id
-            .as_ref()
-            .and_then(|p| p.property_for(Some(&layer.name)));
-        super::geometry_tags::add_identity_tags(layer.to_mut(), promote_prop);
-    }
-    if matches!(style.paint, Some(LayerPaint::FillExtrusion(_)))
-        && layer.keys.iter().any(|key| key == "hide_3d")
-    {
-        unhide_unreplaced_building_bases(&mut layer);
-    }
+    inject_layer_tags(&mut layer, style, request.coords, context);
     let shared_props = matches!(layer, Cow::Borrowed(_))
         .then_some(predecoded_props)
         .flatten();
-    let selected = match &style.filter {
-        Some(raw_filter) => match Filter::parse(raw_filter) {
-            Ok(filter) => {
-                let state_ctx = context.state_context_for_layer(&layer.name);
-                Some(select_filtered_features(
-                    layer.as_ref(),
-                    &filter,
-                    request.style_zoom(),
-                    state_ctx.as_ref(),
-                    shared_props,
-                ))
-            }
-            Err(error) => {
-                // Rendering either all features or none silently would conceal an invalid style.
-                tracing::error!(layer = %style.id,%error,"unsupported filter; the layer renders nothing");
-                context.layer_missing(&request.coords, &layer.name)?;
-                return Ok(());
-            }
-        },
-        None => None,
+    let Some(selected) =
+        filter_layer_features(layer.as_ref(), style, request, shared_props, context)?
+    else {
+        return Ok(());
     };
     match style.paint.as_ref() {
         Some(
@@ -91,14 +61,17 @@ pub(crate) fn process_layer<T: VectorTransferables, C: Context>(
             context,
         ),
         Some(LayerPaint::Symbol(paint)) => symbol_layer(
-            layer.as_ref(),
-            selected.as_deref(),
-            shared_props,
-            style,
-            paint,
-            request,
+            SymbolLayerInput {
+                layer: layer.as_ref(),
+                selected: selected.as_deref(),
+                shared_props,
+                style,
+                paint,
+                request,
+                layout_atlas,
+                gpu_atlas,
+            },
             context,
-            atlases,
         ),
         _ => {
             tracing::warn!(layer = %style.id,"unhandled vector style layer type");
@@ -107,105 +80,61 @@ pub(crate) fn process_layer<T: VectorTransferables, C: Context>(
     }
 }
 
-pub(crate) fn tessellator(
-    paint: &LayerPaint,
-    request: &VectorTileRequest,
-) -> ZeroTessellator<IndexDataType> {
-    let zoom = u8::from(request.coords.z);
-    let style_zoom = request.style_zoom();
-    let granularity = match paint {
-        LayerPaint::Fill(_) => granularity_for_zoom(128, 2, zoom),
-        LayerPaint::Line(_) => granularity_for_zoom(128, 0, zoom),
-        _ => 1,
-    };
-    let mut tessellator = match paint {
-        LayerPaint::Circle(circle) => ZeroTessellator::default().with_circles(CircleOptions {
-            // A circle lying on the map follows the globe's curve.
-            grid: request.projection.uses_globe_rendering(style_zoom)
-                && circle.circle_pitch_alignment == crate::style::circle::CirclePitchAlignment::Map,
-            ..CircleOptions::for_paint(circle, style_zoom)
-        }),
-        LayerPaint::Heatmap(heatmap) => ZeroTessellator::default().with_circles(CircleOptions {
-            grid: request.projection.uses_globe_rendering(style_zoom),
-            ..CircleOptions::for_heatmap(heatmap, style_zoom)
-        }),
-        LayerPaint::FillExtrusion(extrusion) => {
-            let tessellator = ZeroTessellator::default().with_extrusion(
-                ExtrusionOptions::for_paint(extrusion, request.overscaling()),
-            );
-            let min_grid = if extrusion.may_use_vertex_agl() {
-                32
-            } else {
-                2
-            };
-            if request.projection.uses_globe_rendering(style_zoom) {
-                // Roofs and the edges of walls follow the sphere as fills and lines do.
-                let last_tile = i64::from(crate::coords::ZOOM_BOUNDS[usize::from(zoom)]) - 1;
-                tessellator.with_globe_subdivision(
-                    granularity_for_zoom(128, min_grid, zoom),
-                    zoom == 0,
-                    request.coords.y == 0,
-                    i64::from(request.coords.y) == last_tile,
-                )
-            } else if extrusion.may_use_vertex_agl() {
-                tessellator.with_globe_subdivision(32, false, false, false)
-            } else {
-                tessellator
-            }
-        }
-        _ if request.projection.uses_globe_rendering(style_zoom) => {
-            let last_tile = i64::from(crate::coords::ZOOM_BOUNDS[usize::from(zoom)]) - 1;
-            ZeroTessellator::default().with_globe_subdivision(
-                granularity,
-                zoom == 0,
-                request.coords.y == 0,
-                i64::from(request.coords.y) == last_tile,
-            )
-        }
-        _ => ZeroTessellator::default(),
+fn inject_layer_tags<T: VectorTransferables, C: Context>(
+    layer: &mut Cow<'_, tile::Layer>,
+    style: &StyleLayer,
+    coords: WorldTileCoords,
+    context: &ProcessVectorContext<T, C>,
+) {
+    if crate::style::expression::layer_reads_geometry(style) && !layer.features.is_empty() {
+        super::geometry_tags::add_geometry_tags(layer.to_mut(), coords);
     }
-    .with_feature_opacity(paint.opacity(), style_zoom);
-    match paint {
-        // An image repeated over a fill takes nothing from the fill's colour but its opacity.
-        LayerPaint::Fill(paint) if paint.fill_pattern.is_some() => {
-            tessellator.fallback_color = [1.0; 4];
-            tessellator.pattern_property =
-                crate::vector::pattern::per_feature_pattern(&LayerPaint::Fill(paint.clone()));
-        }
-        LayerPaint::Fill(paint) => {
-            tessellator.style_property = paint.fill_color.clone();
-            tessellator.outline_property = paint.outline_color();
-        }
-        LayerPaint::FillExtrusion(paint) if paint.fill_extrusion_pattern.is_some() => {
-            tessellator.fallback_color = [1.0; 4];
-            tessellator.pattern_property = crate::vector::pattern::per_feature_pattern(
-                &LayerPaint::FillExtrusion(paint.clone()),
-            );
-        }
-        LayerPaint::FillExtrusion(paint) => {
-            tessellator.style_property = paint.fill_extrusion_color.clone()
-        }
-        LayerPaint::Circle(paint) => tessellator.style_property = paint.circle_color.clone(),
-        LayerPaint::Line(paint) => {
-            tessellator.pattern_property =
-                crate::vector::pattern::per_feature_pattern(&LayerPaint::Line(paint.clone()));
-            tessellator.style_property = paint.line_color.clone();
-            tessellator.is_line_layer = true;
-            tessellator.line_gradient = paint.line_gradient.is_some();
-            tessellator.sharp_corner_offset =
-                crate::vector::tessellation::sharp_corner_offset(request.overscaling());
-            tessellator.split_corners = paint.line_gradient.is_some()
-                || paint.line_pattern.is_some()
-                || paint.line_dasharray.is_some();
-            tessellator.line_feature_style =
-                super::super::tessellation::LineFeatureStyle::for_paint(paint, style_zoom);
-            tessellator.line_elevation =
-                super::super::tessellation::LineElevationOptions::for_paint(paint, style_zoom);
-        }
-        _ => {}
+    if crate::style::expression::layer_reads_identity(style) && !layer.features.is_empty() {
+        let promote_prop = context
+            .promote_id
+            .as_ref()
+            .and_then(|p| p.property_for(Some(&layer.name)));
+        super::geometry_tags::add_identity_tags(layer.to_mut(), promote_prop);
     }
-    tessellator
+    if matches!(style.paint, Some(LayerPaint::FillExtrusion(_)))
+        && layer.keys.iter().any(|key| key == "hide_3d")
+    {
+        unhide_unreplaced_building_bases(layer);
+    }
 }
+
+fn filter_layer_features<T: VectorTransferables, C: Context>(
+    layer: &tile::Layer,
+    style: &StyleLayer,
+    request: &VectorTileRequest,
+    shared_props: Option<&[Arc<FeatureProperties>]>,
+    context: &mut ProcessVectorContext<T, C>,
+) -> Result<Option<Option<Vec<usize>>>, ProcessVectorError> {
+    let Some(raw_filter) = &style.filter else {
+        return Ok(Some(None));
+    };
+    match Filter::parse(raw_filter) {
+        Ok(filter) => {
+            let state_ctx = context.state_context_for_layer(&layer.name);
+            Ok(Some(Some(select_filtered_features(
+                layer,
+                &filter,
+                request.style_zoom(),
+                state_ctx.as_ref(),
+                shared_props,
+            ))))
+        }
+        Err(error) => {
+            // Rendering either all features or none silently would conceal an invalid style.
+            tracing::error!(layer = %style.id,%error,"unsupported filter; the layer renders nothing");
+            context.layer_missing(&request.coords, &layer.name)?;
+            Ok(None)
+        }
+    }
+}
+
+mod tessellator;
+pub(crate) use tessellator::tessellator;
 
 fn allow_prepack_for_style_inner(
     coords: WorldTileCoords,
@@ -349,20 +278,31 @@ fn tessellate_readable<Tessellator>(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+struct SymbolLayerInput<'a> {
+    layer: &'a tile::Layer,
+    selected: Option<&'a [usize]>,
+    shared_props: Option<&'a [Arc<FeatureProperties>]>,
+    style: &'a StyleLayer,
+    paint: &'a crate::style::layer::SymbolPaint,
+    request: &'a VectorTileRequest,
+    layout_atlas: &'a std::sync::Arc<crate::sdf::assets::SymbolAtlas>,
+    gpu_atlas: &'a std::sync::Arc<crate::sdf::assets::SymbolAtlas>,
+}
+
 fn symbol_layer<T: VectorTransferables, C: Context>(
-    layer: &tile::Layer,
-    selected: Option<&[usize]>,
-    shared_props: Option<&[Arc<FeatureProperties>]>,
-    style: &StyleLayer,
-    paint: &crate::style::layer::SymbolPaint,
-    request: &VectorTileRequest,
+    input: SymbolLayerInput<'_>,
     context: &mut ProcessVectorContext<T, C>,
-    (layout_atlas, gpu_atlas): (
-        &std::sync::Arc<crate::sdf::assets::SymbolAtlas>,
-        &std::sync::Arc<crate::sdf::assets::SymbolAtlas>,
-    ),
 ) -> Result<(), ProcessVectorError> {
+    let SymbolLayerInput {
+        layer,
+        selected,
+        shared_props,
+        style,
+        paint,
+        request,
+        layout_atlas,
+        gpu_atlas,
+    } = input;
     let zoom = request.style_zoom();
     let state_ctx = context.state_context_for_layer(&layer.name);
     let promote_prop = state_ctx

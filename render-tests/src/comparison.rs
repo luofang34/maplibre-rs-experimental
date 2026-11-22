@@ -1,22 +1,25 @@
 //! Image normalization and comparison for render tests.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use image::{ImageBuffer, Rgba, RgbaImage};
+
+use crate::TestMeta;
 
 pub(super) fn composite_opaque_background(path: &Path, background: [u8; 3]) -> Result<(), String> {
     let mut image = image::open(path)
         .map_err(|error| format!("Cannot open actual for compositing: {error}"))?
         .to_rgba8();
     for pixel in image.pixels_mut() {
-        let alpha = u16::from(pixel.0[3]);
+        let [red, green, blue, alpha_byte] = &mut pixel.0;
+        let alpha = u16::from(*alpha_byte);
         let inverse_alpha = 255 - alpha;
-        for (channel, background_channel) in pixel.0[..3].iter_mut().zip(background) {
-            let blended =
-                u16::from(*channel) * alpha + u16::from(background_channel) * inverse_alpha;
+        let [bg_red, bg_green, bg_blue] = background;
+        for (channel, bg_channel) in [(red, bg_red), (green, bg_green), (blue, bg_blue)] {
+            let blended = u16::from(*channel) * alpha + u16::from(bg_channel) * inverse_alpha;
             *channel = (blended / 255) as u8;
         }
-        pixel.0[3] = 255;
+        *alpha_byte = 255;
     }
     image
         .save(path)
@@ -30,11 +33,12 @@ pub(super) fn unpremultiply(path: &Path) -> Result<(), String> {
         .map_err(|error| format!("Cannot open actual for unpremultiplying: {error}"))?
         .to_rgba8();
     for pixel in image.pixels_mut() {
-        let alpha = u32::from(pixel.0[3]);
+        let [red, green, blue, alpha_byte] = &mut pixel.0;
+        let alpha = u32::from(*alpha_byte);
         if alpha == 0 || alpha == 255 {
             continue;
         }
-        for channel in &mut pixel.0[..3] {
+        for channel in [red, green, blue] {
             *channel = ((u32::from(*channel) * 255 + alpha / 2) / alpha).min(255) as u8;
         }
     }
@@ -129,9 +133,14 @@ fn compare_equal_dimensions(
     let mut wrong = Vec::with_capacity(width as usize * height as usize);
     for (x, y, actual_pixel) in actual.enumerate_pixels() {
         let expected_pixel = expected.get_pixel(x, y);
-        let channel_diffs: [u8; 4] = std::array::from_fn(|channel| {
-            actual_pixel.0[channel].abs_diff(expected_pixel.0[channel])
-        });
+        let [ar, ag, ab, aa] = actual_pixel.0;
+        let [er, eg, eb, ea] = expected_pixel.0;
+        let channel_diffs = [
+            ar.abs_diff(er),
+            ag.abs_diff(eg),
+            ab.abs_diff(eb),
+            aa.abs_diff(ea),
+        ];
         let max_channel = channel_diffs.iter().copied().max().unwrap_or(0);
         wrong.push(max_channel >= WRONG_PIXEL_CHANNEL_DIFFERENCE);
         total_diff += channel_diffs
@@ -167,25 +176,100 @@ fn solid_pixels(wrong: &[bool], width: usize, radius: usize) -> u64 {
     // Wrong pixels above and left of each corner, so any square's count is four lookups.
     let stride = width + 1;
     let mut sums = vec![0_u32; stride * (height + 1)];
-    for y in 0..height {
+    for (y, wrong_row) in wrong.chunks_exact(width).enumerate() {
         let mut row = 0_u32;
-        for x in 0..width {
-            row += u32::from(wrong[y * width + x]);
-            sums[(y + 1) * stride + x + 1] = sums[y * stride + x + 1] + row;
+        for (x, &is_wrong) in wrong_row.iter().enumerate() {
+            row += u32::from(is_wrong);
+            let above = sums.get(y * stride + x + 1).copied().unwrap_or(0);
+            if let Some(cell) = sums.get_mut((y + 1) * stride + x + 1) {
+                *cell = above + row;
+            }
         }
     }
+    let sum_at = |r: usize, c: usize| sums.get(r * stride + c).copied().unwrap_or(0);
     let full = (side * side) as u32;
     let mut solid = 0_u64;
     for top in 0..=height - side {
         for left in 0..=width - side {
             let (bottom, right) = (top + side, left + side);
-            let count = sums[bottom * stride + right] + sums[top * stride + left]
-                - sums[top * stride + right]
-                - sums[bottom * stride + left];
+            let count = sum_at(bottom, right) + sum_at(top, left)
+                - sum_at(top, right)
+                - sum_at(bottom, left);
             solid += u64::from(count == full);
         }
     }
     solid
+}
+
+/// Moves the final rendered frame to `actual.png`, normalizes it, and compares against references.
+pub(super) fn compare_frame_blocking(
+    frame: &Path,
+    test_dir: &Path,
+    meta: &TestMeta,
+) -> Result<Difference, String> {
+    if !frame.exists() {
+        return Err("Renderer did not produce the requested final frame".into());
+    }
+    let actual = test_dir.join("actual.png");
+    std::fs::rename(frame, &actual)
+        .map_err(|error| format!("Cannot move rendered frame into test output: {error}"))?;
+    unpremultiply(&actual)?;
+    if meta.show_padding {
+        crate::camera_options::draw_overlay(
+            &actual,
+            meta.padding,
+            (meta.width, meta.height),
+            meta.pixel_ratio,
+        )?;
+    }
+    if let Some(background) = meta.comparison_background {
+        composite_opaque_background(&actual, background)?;
+    }
+    // GL JS fixtures carry alternative reference images for platform or precision variants
+    // (`expected-half-float.png`, `expected-macos.png`, ...); matching any one passes.
+    let mut references = expected_images(test_dir)?;
+    if references.is_empty() {
+        return Err(format!(
+            "expected.png not found: {}",
+            test_dir.join("expected.png").display()
+        ));
+    }
+    let diff_path = test_dir.join("diff.png");
+    let mut best: Option<(Difference, PathBuf)> = None;
+    for reference in references.drain(..) {
+        let difference = compare_and_diff(&actual, &reference, &diff_path, meta.pixel_ratio)
+            .map_err(|error| format!("Image comparison failed: {error}"))?;
+        if best
+            .as_ref()
+            .is_none_or(|(closest, _)| difference.mean < closest.mean)
+        {
+            best = Some((difference, reference));
+        }
+    }
+    let Some((difference, reference)) = best else {
+        return Err("no reference image".into());
+    };
+    // Leave the difference image of the closest reference.
+    compare_and_diff(&actual, &reference, &diff_path, meta.pixel_ratio)
+        .map_err(|error| format!("Image comparison failed: {error}"))?;
+    Ok(difference)
+}
+
+/// Every reference image of a fixture, `expected.png` first.
+fn expected_images(test_dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let entries = std::fs::read_dir(test_dir)
+        .map_err(|error| format!("Cannot list {}: {error}", test_dir.display()))?;
+    let mut references: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("expected") && name.ends_with(".png"))
+        })
+        .collect();
+    references.sort();
+    Ok(references)
 }
 
 #[cfg(test)]

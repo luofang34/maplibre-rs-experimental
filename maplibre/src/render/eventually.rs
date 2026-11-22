@@ -67,7 +67,9 @@ impl<T> Eventually<T> {
 
         match self {
             Eventually::Initialized(data) => data,
-            Eventually::Uninitialized => panic!("not initialized"),
+            Eventually::Uninitialized => {
+                unreachable!("Eventually::Initialized matched after initialization check")
+            }
         }
     }
 
@@ -76,14 +78,11 @@ impl<T> Eventually<T> {
         mem::replace(self, Eventually::Uninitialized)
     }
 
-    /// Borrows the resource mutably when the caller has already established initialization.
-    ///
-    /// # Panics
-    /// Panics with `message` if this wrapper is uninitialized.
-    pub fn expect_initialized_mut(&mut self, message: &str) -> &mut T {
+    /// Borrows the resource mutably when initialized, or returns `None`.
+    pub fn initialized_mut(&mut self) -> Option<&mut T> {
         match self {
-            Eventually::Initialized(value) => value,
-            Eventually::Uninitialized => panic!("{message}"),
+            Eventually::Initialized(value) => Some(value),
+            Eventually::Uninitialized => None,
         }
     }
 }

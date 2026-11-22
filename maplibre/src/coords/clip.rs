@@ -43,7 +43,9 @@ impl Slab {
     fn ring(&self, ring: &[Coord<f64>]) -> Vec<Coord<f64>> {
         let mut kept = Vec::with_capacity(ring.len());
         for pair in ring.windows(2) {
-            let (a, b) = (pair[0], pair[1]);
+            let &[a, b] = pair else {
+                continue;
+            };
             let (from, to) = (Self::of(a, self.axis), Self::of(b, self.axis));
             let inside = |value: f64| (self.min..=self.max).contains(&value);
             if inside(from) {
@@ -72,8 +74,7 @@ impl Slab {
         let mut runs = Vec::new();
         let mut run: Vec<Coord<f64>> = Vec::new();
         for (index, &point) in line.iter().enumerate() {
-            if index > 0 {
-                let a = line[index - 1];
+            if let Some(&a) = index.checked_sub(1).and_then(|prev| line.get(prev)) {
                 let (from, to) = (Self::of(a, self.axis), Self::of(point, self.axis));
                 let mut crossings = [self.min, self.max]
                     .into_iter()

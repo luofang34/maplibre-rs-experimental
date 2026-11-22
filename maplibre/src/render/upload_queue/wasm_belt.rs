@@ -30,60 +30,55 @@ impl Drop for WasmStagingBelt {
 }
 
 impl WasmStagingBelt {
-    pub(super) fn encode_into(
+    fn handle_quiet_frame(
         &mut self,
-        queue: &wgpu::Queue,
-        device: &wgpu::Device,
-        encoder: &mut wgpu::CommandEncoder,
+        slot_index: usize,
         payload: &mut Vec<u8>,
         copies: &mut Vec<StagedCopy>,
-    ) -> bool {
-        let slot_index = self.next_slot;
-        self.next_slot = (self.next_slot + 1) % RING_SLOTS;
-
-        if copies.is_empty() {
-            payload.clear();
-            let any_oversized = self.slots.iter().any(|slot| {
-                slot.as_ref()
-                    .is_some_and(|(_, cap)| *cap > SHRINK_STAGING_BUFFER_CAPACITY)
-            });
-            if any_oversized {
-                self.quiet_frames = self.quiet_frames.saturating_add(1);
-                if self.quiet_frames >= QUIET_FRAMES_BEFORE_SHRINK {
-                    // Release only the current ring slot (oldest in flight) per quiet period.
-                    if self.slots[slot_index]
-                        .as_ref()
-                        .is_some_and(|(_, cap)| *cap > SHRINK_STAGING_BUFFER_CAPACITY)
-                    {
-                        if let Some((old_buf, _)) = self.slots[slot_index].take() {
-                            old_buf.destroy();
-                        }
-                    }
-                    payload.shrink_to(SHRINK_STAGING_BUFFER_CAPACITY as usize);
-                    copies.shrink_to(256);
-                }
-            } else {
-                self.quiet_frames = 0;
-            }
-            return false;
+    ) {
+        payload.clear();
+        let any_oversized = self.slots.iter().any(|slot| {
+            slot.as_ref()
+                .is_some_and(|(_, cap)| *cap > SHRINK_STAGING_BUFFER_CAPACITY)
+        });
+        if !any_oversized {
+            self.quiet_frames = 0;
+            return;
         }
+        self.quiet_frames = self.quiet_frames.saturating_add(1);
+        if self.quiet_frames < QUIET_FRAMES_BEFORE_SHRINK {
+            return;
+        }
+        // Release only the current ring slot (oldest in flight) per quiet period.
+        if let Some(slot) = self.slots.get_mut(slot_index) {
+            if slot
+                .as_ref()
+                .is_some_and(|(_, cap)| *cap > SHRINK_STAGING_BUFFER_CAPACITY)
+            {
+                if let Some((old_buf, _)) = slot.take() {
+                    old_buf.destroy();
+                }
+            }
+        }
+        payload.shrink_to(SHRINK_STAGING_BUFFER_CAPACITY as usize);
+        copies.shrink_to(256);
+    }
 
-        let payload_bytes = payload.len() as u64;
+    fn ensure_staging_slot(
+        &mut self,
+        device: &wgpu::Device,
+        slot_index: usize,
+        payload_bytes: u64,
+        max_buf: u64,
+    ) -> bool {
         if payload_bytes <= SHRINK_STAGING_BUFFER_CAPACITY {
             self.quiet_frames = self.quiet_frames.saturating_add(1);
         } else {
             self.quiet_frames = 0;
         }
-        let max_buf = device
-            .limits()
-            .max_buffer_size
-            .min(MAX_STAGING_BUFFER_CAPACITY);
-        if payload_bytes > max_buf {
-            flush_copies_direct(queue, payload, copies);
+        let Some(slot) = self.slots.get_mut(slot_index) else {
             return false;
-        }
-
-        let slot = &mut self.slots[slot_index];
+        };
         let should_shrink = self.quiet_frames >= QUIET_FRAMES_BEFORE_SHRINK
             && slot
                 .as_ref()
@@ -110,11 +105,40 @@ impl WasmStagingBelt {
             });
             *slot = Some((buf, next_cap));
         }
+        should_shrink
+    }
 
-        let Some((staging_buf, _)) = slot.as_ref() else {
+    pub(super) fn encode_into(
+        &mut self,
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        payload: &mut Vec<u8>,
+        copies: &mut Vec<StagedCopy>,
+    ) -> bool {
+        let slot_index = self.next_slot;
+        self.next_slot = (self.next_slot + 1) % RING_SLOTS;
+        if copies.is_empty() {
+            self.handle_quiet_frame(slot_index, payload, copies);
+            return false;
+        }
+        let payload_bytes = payload.len() as u64;
+        let max_buf = device
+            .limits()
+            .max_buffer_size
+            .min(MAX_STAGING_BUFFER_CAPACITY);
+        if payload_bytes > max_buf {
+            flush_copies_direct(queue, payload, copies);
+            return false;
+        }
+        let should_shrink = self.ensure_staging_slot(device, slot_index, payload_bytes, max_buf);
+        let Some((staging_buf, _)) = self.slots.get(slot_index).and_then(Option::as_ref) else {
             return false;
         };
-        #[allow(clippy::disallowed_methods)]
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "WasmStagingBelt writes directly into its internal staging buffer without re-entering UploadQueue counting"
+        )]
         queue.write_buffer(staging_buf, 0, payload);
         for copy in copies.drain(..) {
             encoder.copy_buffer_to_buffer(

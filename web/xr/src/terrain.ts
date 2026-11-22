@@ -27,10 +27,18 @@ export async function loadTerrain(track: Track, style: StyleSpecification, repor
   try {
     report('Preparing the map surface…');
     await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => finish(new Error('Map surface timed out. Check tile access and retry.')), 45000);
-      const abort = () => finish(new DOMException('Cancelled', 'AbortError'));
-      const finish = (error?: Error) => { clearTimeout(timeout); signal.removeEventListener('abort', abort); error ? reject(error) : resolve(); };
-      signal.addEventListener('abort', abort, { once: true });
+      const timeoutSignal = AbortSignal.timeout(45000);
+      const waitSignal = AbortSignal.any([signal, timeoutSignal]);
+      const onAbort = () => {
+        finish(signal.aborted
+          ? new DOMException('Cancelled', 'AbortError')
+          : new Error('Map surface timed out. Check tile access and retry.'));
+      };
+      const finish = (error?: Error) => {
+        waitSignal.removeEventListener('abort', onAbort);
+        error ? reject(error) : resolve();
+      };
+      waitSignal.addEventListener('abort', onAbort, { once: true });
       baker.once('load', () => {
         baker.fitBounds(bounds(track), { padding: 260, pitch: 0, bearing: 0, animate: false, maxZoom: 12 });
         baker.once('idle', () => finish());

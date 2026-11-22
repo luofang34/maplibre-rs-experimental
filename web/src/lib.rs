@@ -1,5 +1,24 @@
 //! Browser map initialization and worker transports.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented
+    )
+)]
 #![deny(unused_imports)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing
+    )
+)]
 
 #[cfg(not(any(no_pendantic_os_check, target_arch = "wasm32")))]
 compile_error!("web works only on wasm32.");

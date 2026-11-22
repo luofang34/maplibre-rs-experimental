@@ -25,7 +25,7 @@ impl HeadlessMap {
         self.map_context.on_event(listener)
     }
 
-    /// Removes a callback listener previously registered via [`Self::on_event`].
+    /// Removes a callback listener registered via [`Self::on_event`].
     pub fn remove_event_listener(&mut self, id: ListenerId) -> bool {
         self.map_context.event_bus().remove_listener(id)
     }

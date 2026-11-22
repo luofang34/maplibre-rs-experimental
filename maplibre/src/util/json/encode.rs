@@ -8,6 +8,7 @@ use crate::style::expression::js_number;
 
 fn write_json_str(text: &str, out: &mut Vec<u8>) {
     out.push(b'"');
+    let bytes = text.as_bytes();
     let mut start = 0;
     for (idx, byte) in text.bytes().enumerate() {
         let esc: &[u8] = match byte {
@@ -19,26 +20,27 @@ fn write_json_str(text: &str, out: &mut Vec<u8>) {
             b'\r' => b"\\r",
             b'\t' => b"\\t",
             0..=0x1f => {
-                out.extend_from_slice(&text.as_bytes()[start..idx]);
-                let hex = b"0123456789abcdef";
-                out.extend_from_slice(&[
-                    b'\\',
-                    b'u',
-                    b'0',
-                    b'0',
-                    hex[(byte >> 4) as usize],
-                    hex[(byte & 0xf) as usize],
-                ]);
+                if let Some(prefix) = bytes.get(start..idx) {
+                    out.extend_from_slice(prefix);
+                }
+                const HEX: &[u8; 16] = b"0123456789abcdef";
+                let hi = HEX.get((byte >> 4) as usize).copied().unwrap_or(b'0');
+                let lo = HEX.get((byte & 0xf) as usize).copied().unwrap_or(b'0');
+                out.extend_from_slice(&[b'\\', b'u', b'0', b'0', hi, lo]);
                 start = idx + 1;
                 continue;
             }
             _ => continue,
         };
-        out.extend_from_slice(&text.as_bytes()[start..idx]);
+        if let Some(prefix) = bytes.get(start..idx) {
+            out.extend_from_slice(prefix);
+        }
         out.extend_from_slice(esc);
         start = idx + 1;
     }
-    out.extend_from_slice(&text.as_bytes()[start..]);
+    if let Some(tail) = bytes.get(start..) {
+        out.extend_from_slice(tail);
+    }
     out.push(b'"');
 }
 
@@ -50,9 +52,9 @@ pub(crate) fn write_json_bytes(value: &Value, out: &mut Vec<u8>) {
         Value::Bool(false) => out.extend_from_slice(b"false"),
         Value::Number(n) => {
             if let Some(i) = n.as_i64() {
-                let _ = write!(out, "{i}");
+                drop(write!(out, "{i}"));
             } else if let Some(u) = n.as_u64() {
-                let _ = write!(out, "{u}");
+                drop(write!(out, "{u}"));
             } else if let Some(f) = n.as_f64() {
                 if f.is_finite() {
                     let s = js_number(f);

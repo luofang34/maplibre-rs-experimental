@@ -58,22 +58,28 @@ fn harfrust_shapes_ligatures_indic_conjuncts_and_kerning() -> TestResult {
     let shaped_fi = sys
         .shape_text("TestSans", "fi", false)
         .ok_or("shaping 'fi' failed")?;
-    assert_eq!(shaped_fi.len(), 1);
-    assert_eq!(shaped_fi[0].glyph_id, 6);
+    let [fi0] = shaped_fi.as_slice() else {
+        return Err(format!("expected 1 ligature glyph, got {}", shaped_fi.len()).into());
+    };
+    assert_eq!(fi0.glyph_id, 6);
     let lig_sdf = sys
-        .rasterize_face_glyph(shaped_fi[0].face_id, shaped_fi[0].glyph_id)
+        .rasterize_face_glyph(fi0.face_id, fi0.glyph_id)
         .ok_or("ligature glyph 6 failed to rasterise")?;
     assert!(lig_sdf.width > 0 && !lig_sdf.bitmap.is_empty());
 
     let shaped_indic = sys
         .shape_text("TestSans", "\u{0915}\u{094D}\u{0937}", false)
         .ok_or("shaping Devanagari conjunct failed")?;
-    assert_eq!(shaped_indic.len(), 1);
-    assert_eq!(shaped_indic[0].glyph_id, 10);
+    let [indic0] = shaped_indic.as_slice() else {
+        return Err(format!("expected 1 conjunct glyph, got {}", shaped_indic.len()).into());
+    };
+    assert_eq!(indic0.glyph_id, 10);
 
     let shaped_aa = sys.shape_text("TestSans", "AA", false).ok_or("AA failed")?;
     let shaped_av = sys.shape_text("TestSans", "AV", false).ok_or("AV failed")?;
-    assert!(shaped_av[0].x_advance < shaped_aa[0].x_advance - 1.5);
+    let aa0 = shaped_aa.first().ok_or("missing AA glyph")?;
+    let av0 = shaped_av.first().ok_or("missing AV glyph")?;
+    assert!(av0.x_advance < aa0.x_advance - 1.5);
     Ok(())
 }
 
@@ -92,7 +98,7 @@ fn sdf_rasterizer_matches_pbf_baseline_and_interior_threshold() -> TestResult {
         "interior SDF must exceed 0.75 edge threshold (192)"
     );
     assert!(
-        glyph_a.bitmap[0] < 192,
+        glyph_a.bitmap.first().copied().ok_or("empty bitmap")? < 192,
         "outer corner must be outside contour"
     );
 
@@ -113,10 +119,12 @@ fn classifies_cjk_sip_and_parses_font_faces_and_unicode_ranges() -> TestResult {
     assert!(is_complex_shaping_codepoint('پ'));
 
     let ranges = UnicodeRange::parse_list("U+0020-007F, U+09??, U+2A6A5");
-    assert_eq!(ranges.len(), 3);
-    assert!(ranges[0].contains(u32::from('A')));
-    assert!(ranges[1].contains(0x0915) && !ranges[1].contains(0x0A00));
-    assert!(ranges[2].contains(u32::from('𪚥')));
+    let [r0, r1, r2] = ranges.as_slice() else {
+        return Err(format!("expected 3 ranges, got {}", ranges.len()).into());
+    };
+    assert!(r0.contains(u32::from('A')));
+    assert!(r1.contains(0x0915) && !r1.contains(0x0A00));
+    assert!(r2.contains(u32::from('𪚥')));
 
     let (fam, weight, style) = parse_font_stack_entry("Open Sans Semibold Italic");
     assert_eq!(fam, "Open Sans");
@@ -132,11 +140,13 @@ fn classifies_cjk_sip_and_parses_font_faces_and_unicode_ranges() -> TestResult {
             "unicode-range": "U+0000-00FF"
         }
     ]))?;
-    assert_eq!(parsed.0.len(), 1);
-    assert_eq!(parsed.0[0].family, "Custom Sans");
-    assert_eq!(parsed.0[0].urls, vec!["https://example.com/custom.woff2"]);
-    assert_eq!(parsed.0[0].weight, FontWeight(700));
-    assert_eq!(parsed.0[0].style, FontStyle::Italic);
+    let [face0] = parsed.0.as_slice() else {
+        return Err(format!("expected 1 face, got {}", parsed.0.len()).into());
+    };
+    assert_eq!(face0.family, "Custom Sans");
+    assert_eq!(face0.urls, vec!["https://example.com/custom.woff2"]);
+    assert_eq!(face0.weight, FontWeight(700));
+    assert_eq!(face0.style, FontStyle::Italic);
     Ok(())
 }
 

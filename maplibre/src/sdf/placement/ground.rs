@@ -13,7 +13,8 @@ use crate::{
 };
 
 pub(in crate::sdf) fn canonical_tile(coords: WorldTileCoords) -> Option<TileCoords> {
-    let count = i32::try_from(ZOOM_BOUNDS[usize::from(u8::from(coords.z))]).ok()?;
+    let bound = ZOOM_BOUNDS.get(usize::from(u8::from(coords.z))).copied()?;
+    let count = i32::try_from(bound).ok()?;
     (coords.y >= 0 && coords.y < count).then_some(TileCoords {
         x: coords.x.rem_euclid(count) as u32,
         y: coords.y as u32,

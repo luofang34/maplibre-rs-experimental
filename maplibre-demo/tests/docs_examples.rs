@@ -2,7 +2,7 @@
 //! quickstart API calls compile natively and build valid `Style` documents; browser-only entry
 //! points are additionally checked under `wasm32-unknown-unknown` in `web/tests/docs_examples.rs`.
 
-#![allow(clippy::expect_used)]
+#![allow(clippy::expect_used, clippy::indexing_slicing)]
 
 #[allow(dead_code)]
 mod display_a_map {

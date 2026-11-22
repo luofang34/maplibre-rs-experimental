@@ -12,13 +12,15 @@ use super::{
         classify::{needs_tile_redraw, push_unique},
         from_vector_tiles,
     },
-    source::{fresh_generation, CanvasSource, GeoJsonSource, ImageSource, Source, VideoSource},
+    source::{CanvasSource, GeoJsonSource, ImageSource, Source, VideoSource},
     transitions::{
         default_paint_json, interpolate_paint_value, is_transitionable_property, ActiveTransition,
         TransitionSpec,
     },
     Style,
 };
+
+mod sources;
 
 /// Minimal update plan produced when replacing one [`Style`] with another via [`Style::diff_and_replace`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -135,248 +137,140 @@ impl Style {
         next.active_transitions =
             super::transitions::ActiveTransitions::with_clock(self.active_transitions.clock_ms());
 
-        let mut diff = StyleReplacementDiff {
-            terrain_changed: self.terrain != next.terrain,
-            sky_changed: serde_json::to_value(&self.sky).ok()
-                != serde_json::to_value(&next.sky).ok(),
-            light_changed: serde_json::to_value(&self.light).ok()
-                != serde_json::to_value(&next.light).ok(),
-            projection_changed: self.projection != next.projection,
-            sprite_changed: self.sprite != next.sprite || self.images != next.images,
-            glyphs_changed: self.glyphs != next.glyphs
-                || self.font_faces != next.font_faces
-                || self.local_ideograph_font_family != next.local_ideograph_font_family,
-            transition_changed: self.transition != next.transition,
-            global_state_changed: self.global_state_values() != next.global_state_values(),
-            ..Default::default()
-        };
-
-        let mut changed_vector_sources = HashSet::default();
-
-        for (name, old_source) in &self.sources {
-            if !next.sources.contains_key(name) {
-                diff.removed_sources.push(name.clone());
-                if is_raster_like(old_source) {
-                    diff.removed_raster_sources.push(name.clone());
-                }
-            }
-        }
-
-        for (name, new_source) in &mut next.sources {
-            let Some(old_source) = self.sources.get(name) else {
-                match new_source {
-                    Source::GeoJson(g) => g.generation = fresh_generation(),
-                    Source::Image(i) => i.generation = fresh_generation(),
-                    Source::Video(v) => v.generation = fresh_generation(),
-                    Source::Canvas(c) => c.generation = fresh_generation(),
-                    Source::Raster(_) | Source::RasterDem(_) => {
-                        diff.redraw_raster_tiles = true;
-                    }
-                    Source::Vector(_) => {}
-                }
-                diff.added_sources.push(name.clone());
-                continue;
-            };
-
-            match (old_source, new_source) {
-                (Source::Vector(a), Source::Vector(b)) => {
-                    if a != b {
-                        diff.updated_sources.push(name.clone());
-                        changed_vector_sources.insert(name.clone());
-                    }
-                }
-                (Source::Raster(a), Source::Raster(b)) => {
-                    if a != b {
-                        diff.updated_sources.push(name.clone());
-                        push_unique(&mut diff.removed_raster_sources, name);
-                        diff.redraw_raster_tiles = true;
-                    }
-                }
-                (Source::RasterDem(a), Source::RasterDem(b)) => {
-                    if a != b {
-                        diff.updated_sources.push(name.clone());
-                        push_unique(&mut diff.removed_raster_sources, name);
-                        diff.redraw_raster_tiles = true;
-                    }
-                }
-                (Source::GeoJson(a), Source::GeoJson(b)) => {
-                    if geojson_definition_eq(a, b) {
-                        b.generation = a.generation;
-                    } else {
-                        b.generation = fresh_generation();
-                        diff.updated_sources.push(name.clone());
-                    }
-                }
-                (Source::Image(a), Source::Image(b)) => {
-                    if image_definition_eq(a, b) {
-                        b.generation = a.generation;
-                    } else {
-                        b.generation = fresh_generation();
-                        diff.updated_sources.push(name.clone());
-                        push_unique(&mut diff.reloaded_image_sources, name);
-                    }
-                }
-                (Source::Video(a), Source::Video(b)) => {
-                    if video_definition_eq(a, b) {
-                        if b.frame.is_none() {
-                            b.frame = a.frame.clone();
-                        }
-                        b.generation = a.generation;
-                    } else {
-                        if b.frame.is_none() && a.urls == b.urls {
-                            b.frame = a.frame.clone();
-                        }
-                        b.generation = fresh_generation();
-                        diff.updated_sources.push(name.clone());
-                        push_unique(&mut diff.reloaded_image_sources, name);
-                    }
-                }
-                (Source::Canvas(a), Source::Canvas(b)) => {
-                    if canvas_definition_eq(a, b) {
-                        if b.frame.is_none() {
-                            b.frame = a.frame.clone();
-                        }
-                        b.generation = a.generation;
-                    } else {
-                        if b.frame.is_none() && a.canvas == b.canvas {
-                            b.frame = a.frame.clone();
-                        }
-                        b.generation = fresh_generation();
-                        diff.updated_sources.push(name.clone());
-                        push_unique(&mut diff.reloaded_image_sources, name);
-                    }
-                }
-                (old_other, new_other) => {
-                    diff.updated_sources.push(name.clone());
-                    if is_raster_like(old_other) {
-                        push_unique(&mut diff.removed_raster_sources, name);
-                    }
-                    match new_other {
-                        Source::GeoJson(g) => g.generation = fresh_generation(),
-                        Source::Image(i) => {
-                            i.generation = fresh_generation();
-                            push_unique(&mut diff.reloaded_image_sources, name);
-                        }
-                        Source::Video(v) => {
-                            v.generation = fresh_generation();
-                            push_unique(&mut diff.reloaded_image_sources, name);
-                        }
-                        Source::Canvas(c) => {
-                            c.generation = fresh_generation();
-                            push_unique(&mut diff.reloaded_image_sources, name);
-                        }
-                        Source::Raster(_) | Source::RasterDem(_) => {
-                            diff.redraw_raster_tiles = true;
-                        }
-                        Source::Vector(_) => {
-                            changed_vector_sources.insert(name.clone());
-                        }
-                    }
-                }
-            }
-        }
-
-        diff.added_sources.sort();
-        diff.removed_sources.sort();
-        diff.updated_sources.sort();
-        diff.removed_raster_sources.sort();
-        diff.reloaded_image_sources.sort();
-
-        // Preserve runtime feature-state for sources that remain unchanged unless `next` supplied its own.
-        if next.feature_state.is_empty() && !self.feature_state.is_empty() {
-            let mut preserved = self.feature_state.clone();
-            for removed in &diff.removed_sources {
-                let target = super::FeatureStateTarget {
-                    source: removed.clone(),
-                    source_layer: None,
-                };
-                preserved.remove(&target, None, None);
-            }
-            next.feature_state = preserved;
-        }
-
-        let old_layers: HashMap<&str, &StyleLayer> = self
-            .layers
-            .iter()
-            .map(|layer| (layer.id.as_str(), layer))
-            .collect();
-        let next_layer_ids: HashSet<&str> =
-            next.layers.iter().map(|layer| layer.id.as_str()).collect();
-
-        for old_layer in &self.layers {
-            if !next_layer_ids.contains(old_layer.id.as_str()) {
-                diff.removed_layers.push(old_layer.id.clone());
-            }
-        }
-
-        let mut pending_transitions: Vec<ActiveTransition> = Vec::new();
-        for new_layer in &next.layers {
-            let Some(old_layer) = old_layers.get(new_layer.id.as_str()).copied() else {
-                diff.added_layers.push(new_layer.id.clone());
-                if from_vector_tiles(new_layer) && !new_layer.is_hidden() {
-                    diff.redraw_tiles = true;
-                }
-                continue;
-            };
-
-            if old_layer.index != new_layer.index {
-                diff.reordered_layers.push(new_layer.id.clone());
-            }
-
-            let source_changed = new_layer
-                .source
-                .as_deref()
-                .is_some_and(|src| changed_vector_sources.contains(src));
-            if source_changed || needs_tile_redraw(old_layer, new_layer) {
-                diff.redraw_tiles = true;
-                diff.updated_layers.push(new_layer.id.clone());
-                continue;
-            }
-
-            let paint_changed = !old_layer.same_paint(new_layer);
-            let meta_or_bounds_changed = old_layer.visibility != new_layer.visibility
-                || old_layer.minzoom != new_layer.minzoom
-                || old_layer.maxzoom != new_layer.maxzoom
-                || old_layer.metadata != new_layer.metadata;
-
-            if paint_changed || meta_or_bounds_changed {
-                diff.updated_layers.push(new_layer.id.clone());
-            }
-
-            if paint_changed && old_layer.type_ == new_layer.type_ {
-                collect_layer_transitions(
-                    old_layer,
-                    new_layer,
-                    next.transition,
-                    &mut pending_transitions,
-                );
-            }
-        }
-
-        if diff.projection_changed && next.layers.iter().any(from_vector_tiles) {
-            diff.redraw_tiles = true;
-        }
-        if (diff.glyphs_changed || diff.sprite_changed)
-            && next
-                .layers
-                .iter()
-                .any(|layer| !layer.is_hidden() && layer.type_ == "symbol")
-        {
-            diff.redraw_tiles = true;
-        }
+        let mut diff = init_root_diff(self, &next);
+        let changed_vector_sources =
+            sources::diff_sources(&self.sources, &mut next.sources, &mut diff);
+        preserve_feature_state(self, &mut next, &diff.removed_sources);
+        let pending_transitions =
+            diff_layers(&self.layers, &next, &changed_vector_sources, &mut diff);
+        mark_global_redraws(&next, &mut diff);
 
         // Start any active paint transitions collected for retained layers at progress 0.
         for entry in pending_transitions {
             if let Some(initial) = interpolate_paint_value(&entry.from, &entry.to, 0.0) {
-                let _ = next.set_paint_property_immediate(&entry.layer, &entry.property, initial);
+                if next
+                    .set_paint_property_immediate(&entry.layer, &entry.property, initial)
+                    .is_err()
+                {
+                    continue;
+                }
                 push_unique(&mut diff.updated_layers, &entry.layer);
-                let _ = next.apply_paint_with_transition(&entry.layer, &entry.property, entry.to);
+                if next
+                    .apply_paint_with_transition(&entry.layer, &entry.property, entry.to)
+                    .is_err()
+                {
+                    continue;
+                }
             }
         }
 
         next.bump_revision();
         *self = next;
         diff
+    }
+}
+
+fn init_root_diff(old: &Style, next: &Style) -> StyleReplacementDiff {
+    StyleReplacementDiff {
+        terrain_changed: old.terrain != next.terrain,
+        sky_changed: serde_json::to_value(&old.sky).ok() != serde_json::to_value(&next.sky).ok(),
+        light_changed: serde_json::to_value(&old.light).ok()
+            != serde_json::to_value(&next.light).ok(),
+        projection_changed: old.projection != next.projection,
+        sprite_changed: old.sprite != next.sprite || old.images != next.images,
+        glyphs_changed: old.glyphs != next.glyphs
+            || old.font_faces != next.font_faces
+            || old.local_ideograph_font_family != next.local_ideograph_font_family,
+        transition_changed: old.transition != next.transition,
+        global_state_changed: old.global_state_values() != next.global_state_values(),
+        ..Default::default()
+    }
+}
+
+fn preserve_feature_state(old: &Style, next: &mut Style, removed_sources: &[String]) {
+    // Preserve runtime feature-state for sources that remain unchanged unless `next` supplied its own.
+    if next.feature_state.is_empty() && !old.feature_state.is_empty() {
+        let mut preserved = old.feature_state.clone();
+        for removed in removed_sources {
+            let target = super::FeatureStateTarget {
+                source: removed.clone(),
+                source_layer: None,
+            };
+            preserved.remove(&target, None, None);
+        }
+        next.feature_state = preserved;
+    }
+}
+
+fn diff_layers(
+    old_list: &[StyleLayer],
+    next: &Style,
+    changed_vector_sources: &HashSet<String>,
+    diff: &mut StyleReplacementDiff,
+) -> Vec<ActiveTransition> {
+    let old_layers: HashMap<&str, &StyleLayer> = old_list
+        .iter()
+        .map(|layer| (layer.id.as_str(), layer))
+        .collect();
+    let next_layer_ids: HashSet<&str> = next.layers.iter().map(|layer| layer.id.as_str()).collect();
+    for old_layer in old_list {
+        if !next_layer_ids.contains(old_layer.id.as_str()) {
+            diff.removed_layers.push(old_layer.id.clone());
+        }
+    }
+
+    let mut pending_transitions = Vec::new();
+    for new_layer in &next.layers {
+        let Some(old_layer) = old_layers.get(new_layer.id.as_str()).copied() else {
+            diff.added_layers.push(new_layer.id.clone());
+            if from_vector_tiles(new_layer) && !new_layer.is_hidden() {
+                diff.redraw_tiles = true;
+            }
+            continue;
+        };
+        if old_layer.index != new_layer.index {
+            diff.reordered_layers.push(new_layer.id.clone());
+        }
+        let source_changed = new_layer
+            .source
+            .as_deref()
+            .is_some_and(|src| changed_vector_sources.contains(src));
+        if source_changed || needs_tile_redraw(old_layer, new_layer) {
+            diff.redraw_tiles = true;
+            diff.updated_layers.push(new_layer.id.clone());
+            continue;
+        }
+        let paint_changed = !old_layer.same_paint(new_layer);
+        let meta_or_bounds_changed = old_layer.visibility != new_layer.visibility
+            || old_layer.minzoom != new_layer.minzoom
+            || old_layer.maxzoom != new_layer.maxzoom
+            || old_layer.metadata != new_layer.metadata;
+        if paint_changed || meta_or_bounds_changed {
+            diff.updated_layers.push(new_layer.id.clone());
+        }
+        if paint_changed && old_layer.type_ == new_layer.type_ {
+            collect_layer_transitions(
+                old_layer,
+                new_layer,
+                next.transition,
+                &mut pending_transitions,
+            );
+        }
+    }
+    pending_transitions
+}
+
+fn mark_global_redraws(next: &Style, diff: &mut StyleReplacementDiff) {
+    if diff.projection_changed && next.layers.iter().any(from_vector_tiles) {
+        diff.redraw_tiles = true;
+    }
+    if (diff.glyphs_changed || diff.sprite_changed)
+        && next
+            .layers
+            .iter()
+            .any(|layer| !layer.is_hidden() && layer.type_ == "symbol")
+    {
+        diff.redraw_tiles = true;
     }
 }
 

@@ -122,7 +122,7 @@ mod native_sqlite_tests {
             "maplibre-offline-{tag}-{}-{seq}.sqlite",
             std::process::id()
         ));
-        let _ = std::fs::remove_file(&p);
+        drop(std::fs::remove_file(&p));
         p
     }
 
@@ -237,8 +237,8 @@ mod native_sqlite_tests {
                             "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                             body.len()
                         );
-                        let _ = stream.write_all(hdr.as_bytes()).await;
-                        let _ = stream.write_all(&body).await;
+                        drop(stream.write_all(hdr.as_bytes()).await);
+                        drop(stream.write_all(&body).await);
                     }
                 });
                 (
@@ -339,7 +339,7 @@ mod native_sqlite_tests {
             "zero origin hits while offline"
         );
 
-        let _ = std::fs::remove_file(&db_path);
+        drop(std::fs::remove_file(&db_path));
     }
 
     #[tokio::test]
@@ -487,7 +487,7 @@ mod native_sqlite_tests {
         assert!(merged_status.complete);
         assert_eq!(merged_status.completed_tile_count, 2);
 
-        let _ = std::fs::remove_file(&main_path);
-        let _ = std::fs::remove_file(&side_path);
+        drop(std::fs::remove_file(&main_path));
+        drop(std::fs::remove_file(&side_path));
     }
 }

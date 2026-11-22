@@ -113,7 +113,8 @@ fn poses_along_line(
 /// label's vertices at their ground and lays its glyphs between them.
 fn rise_along(ground: &LabelGround, polyline: &[[f32; 2]], point: [f32; 2]) -> f32 {
     let on_segment = |pair: &[[f32; 2]]| {
-        let ([ax, ay], [bx, by]) = (pair[0], pair[1]);
+        let [a, b] = pair else { return None };
+        let ([ax, ay], [bx, by]) = (*a, *b);
         let [dx, dy] = [bx - ax, by - ay];
         let length = dx * dx + dy * dy;
         let t = if length > 0.0 {
@@ -122,12 +123,12 @@ fn rise_along(ground: &LabelGround, polyline: &[[f32; 2]], point: [f32; 2]) -> f
             0.0
         };
         let off = (ax + dx * t - point[0]).hypot(ay + dy * t - point[1]);
-        (pair[0], pair[1], t, off)
+        Some((*a, *b, t, off))
     };
     let rise = |[x, y]: [f32; 2]| ground.rise_at([f64::from(x), f64::from(y)]);
     polyline
         .windows(2)
-        .map(on_segment)
+        .filter_map(on_segment)
         .min_by(|a, b| a.3.total_cmp(&b.3))
         .map_or_else(
             || rise(point),
@@ -150,26 +151,13 @@ fn map_plane_poses(
     ground: &LabelGround,
     (view, projection, uniforms): (&ViewState, &ShaderProjectionData, &SymbolUniforms),
 ) -> LinePoses {
-    let alignment = uniforms.text_layout;
-    let placement = Placement {
-        coords: layer.coords,
-        anchor: [
-            f64::from(feature.text_anchor.x),
-            f64::from(feature.text_anchor.y),
-        ],
-        elevation: f64::from(ground.elevation),
-        anchor_clip: None,
-        view,
-        projection,
-        uniforms,
-    };
-    let height = f64::from(ground.elevation) * f64::from(alignment[3]);
-    let Some(clip) = project(layer.coords, placement.anchor, height, view, projection) else {
+    let placement = line_placement(layer, feature, ground, view, projection, uniforms);
+    let height = f64::from(ground.elevation) * f64::from(uniforms.text_layout[3]);
+    let Some(clip) = project(layer.coords, placement.anchor, height, view, projection)
+        .filter(|clip| clip.w > 0.0)
+    else {
         return LinePoses::DoesNotFit;
     };
-    if clip.w <= 0.0 {
-        return LinePoses::DoesNotFit;
-    }
     let ratio = if fixed_symbol_scale(view) {
         1.0
     } else {
@@ -198,32 +186,59 @@ fn map_plane_poses(
     let Some(mut poses) = place(false) else {
         return LinePoses::DoesNotFit;
     };
-    if uniforms.placement[2] > 0.5 {
-        let screen = |pose: &GlyphPose| {
-            let point = [f64::from(pose.point[0]), f64::from(pose.point[1])];
-            project(
-                layer.coords,
-                point,
-                height_at(ground, uniforms, point),
-                view,
-                projection,
-            )
-            .filter(|clip| clip.w > 0.0)
-            .map(|clip| placement.screen(clip))
-        };
-        if let (Some(first), Some(last)) = (
-            poses.first().and_then(screen),
-            poses.last().and_then(screen),
-        ) {
-            if reads_backwards(first, last) {
-                match place(true) {
-                    Some(flipped) => poses = flipped,
-                    None => return LinePoses::DoesNotFit,
-                }
-            }
+    if uniforms.placement[2] > 0.5 && map_poses_read_backwards(layer, ground, &placement, &poses) {
+        match place(true) {
+            Some(flipped) => poses = flipped,
+            None => return LinePoses::DoesNotFit,
         }
     }
     LinePoses::Poses(poses)
+}
+
+fn line_placement<'a>(
+    layer: &SymbolLayerData,
+    feature: &Feature,
+    ground: &LabelGround,
+    view: &'a ViewState,
+    projection: &'a ShaderProjectionData,
+    uniforms: &'a SymbolUniforms,
+) -> Placement<'a> {
+    Placement {
+        coords: layer.coords,
+        anchor: [
+            f64::from(feature.text_anchor.x),
+            f64::from(feature.text_anchor.y),
+        ],
+        elevation: f64::from(ground.elevation),
+        anchor_clip: None,
+        view,
+        projection,
+        uniforms,
+    }
+}
+
+fn map_poses_read_backwards(
+    layer: &SymbolLayerData,
+    ground: &LabelGround,
+    placement: &Placement<'_>,
+    poses: &[GlyphPose],
+) -> bool {
+    let screen = |pose: &GlyphPose| {
+        let point = [f64::from(pose.point[0]), f64::from(pose.point[1])];
+        project(
+            layer.coords,
+            point,
+            height_at(ground, placement.uniforms, point),
+            placement.view,
+            placement.projection,
+        )
+        .filter(|clip| clip.w > 0.0)
+        .map(|clip| placement.screen(clip))
+    };
+    matches!(
+        (poses.first().and_then(screen), poses.last().and_then(screen)),
+        (Some(first), Some(last)) if reads_backwards(first, last)
+    )
 }
 
 /// One square per glyph of a line label, as tall as the text and centred on the glyph, so a
@@ -304,18 +319,7 @@ fn viewport_poses(
     ground: &LabelGround,
     (view, projection, uniforms): (&ViewState, &ShaderProjectionData, &SymbolUniforms),
 ) -> LinePoses {
-    let placement = Placement {
-        coords: layer.coords,
-        anchor: [
-            f64::from(feature.text_anchor.x),
-            f64::from(feature.text_anchor.y),
-        ],
-        elevation: f64::from(ground.elevation),
-        anchor_clip: None,
-        view,
-        projection,
-        uniforms,
-    };
+    let placement = line_placement(layer, feature, ground, view, projection, uniforms);
     let on_screen = |point: [f64; 2]| {
         let height = height_at(ground, uniforms, point);
         project(layer.coords, point, height, view, projection).map(|clip| OnScreen {
@@ -361,31 +365,33 @@ fn viewport_poses(
     let Some(poses) = place(false) else {
         return LinePoses::DoesNotFit;
     };
-    let backwards = match (poses.first(), poses.last()) {
-        _ if uniforms.placement[2] <= 0.5 => false,
-        (Some(first), Some(last)) if poses.len() > 1 => {
-            let at = |pose: &GlyphPose| {
-                on_screen([f64::from(pose.point[0]), f64::from(pose.point[1])])
-                    .map_or([0.0; 2], |point| point.screen)
-            };
-            reads_backwards(at(first), at(last))
-        }
+    if uniforms.placement[2] > 0.5 && viewport_poses_read_backwards(&poses, on_screen) {
+        return place(true).map_or(LinePoses::DoesNotFit, LinePoses::Poses);
+    }
+    LinePoses::Poses(poses)
+}
+
+fn viewport_poses_read_backwards(
+    poses: &[GlyphPose],
+    on_screen: impl Fn([f64; 2]) -> Option<OnScreen>,
+) -> bool {
+    let at = |point| on_screen(point).map_or([0.0; 2], |point| point.screen);
+    match (poses.first(), poses.last()) {
+        (Some(first), Some(last)) if poses.len() > 1 => reads_backwards(
+            at([f64::from(first.point[0]), f64::from(first.point[1])]),
+            at([f64::from(last.point[0]), f64::from(last.point[1])]),
+        ),
         // A lone glyph reads backwards when its line runs leftward on the screen.
         (Some(only), _) => {
             let along = [
                 f64::from(only.point[0]) + f64::from(only.angle.cos()),
                 f64::from(only.point[1]) + f64::from(only.angle.sin()),
             ];
-            let at = |point| on_screen(point).map_or([0.0; 2], |point| point.screen);
             reads_backwards(
                 at([f64::from(only.point[0]), f64::from(only.point[1])]),
                 at(along),
             )
         }
         _ => false,
-    };
-    if !backwards {
-        return LinePoses::Poses(poses);
     }
-    place(true).map_or(LinePoses::DoesNotFit, LinePoses::Poses)
 }

@@ -237,7 +237,9 @@ pub(crate) fn coarsen_with_focus(
         }
     }
     let focus = focus.unwrap_or_else(|| {
-        let first = tiles[0];
+        let Some(&first) = tiles.first() else {
+            return CoveringFocus::Spherical(Vector3::unit_z());
+        };
         if world_copies == 0 {
             let count = 1_i64 << u32::from(u8::from(first.z));
             let canonical = TileCoords::from((

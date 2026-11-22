@@ -1,6 +1,6 @@
 //! The vertical-perspective globe orbits the terrain under its center: drawn terrain, the
 //! camera and the depth buffer agree on where the ground is in every view.
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg_attr(test, allow(clippy::expect_used))]
 
 use cgmath::{InnerSpace, Point2};
 
@@ -135,6 +135,7 @@ impl LevelMap {
     /// one still loading.
     async fn settle(&mut self, expected_center: Option<f64>) -> Vec<f32> {
         let mut previous: Option<Vec<f32>> = None;
+        let mut settled = None;
         for _ in 0..40 {
             for _ in 0..4 {
                 self.map.run_frame().expect("frame");
@@ -147,14 +148,17 @@ impl LevelMap {
             let centered =
                 expected_center.map_or(center != 0.0, |expected| (center - expected).abs() < 0.5);
             if centered && previous.as_ref() == Some(&depth) {
-                return depth;
+                settled = Some(depth);
+                break;
             }
             previous = Some(depth);
         }
-        panic!(
+        assert!(
+            settled.is_some(),
             "the frame never settled: center at {} m, expected {expected_center:?} m",
             self.map.view_state().center_elevation()
         );
+        settled.unwrap_or_default()
     }
 
     /// The frame's colour as RGBA bytes, row by row.

@@ -152,7 +152,8 @@ fn indices_in_order(layer: &SymbolLayerData, bearing: f64) -> Option<Vec<u32>> {
     }
     let mut indices = Vec::with_capacity(source.len());
     for index in drawn_order(&layer.features, bearing) {
-        indices.extend_from_slice(source.get(layer.features[index].indices.clone())?);
+        let feature = layer.features.get(index)?;
+        indices.extend_from_slice(source.get(feature.indices.clone())?);
     }
     Some(indices)
 }

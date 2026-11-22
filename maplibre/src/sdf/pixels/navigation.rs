@@ -1,4 +1,4 @@
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg_attr(test, allow(clippy::expect_used))]
 use cgmath::{Deg, Matrix4, Rad, SquareMatrix, Vector3};
 
 use super::*;
@@ -11,13 +11,24 @@ use crate::{
     },
 };
 
+type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+
+fn symbol_paint_mut(style: &mut Style) -> TestResult<&mut crate::style::layer::SymbolPaint> {
+    match style
+        .layers
+        .get_mut(2)
+        .and_then(|layer| layer.paint.as_mut())
+    {
+        Some(LayerPaint::Symbol(paint)) => Ok(paint),
+        _ => Err("expected symbol paint at layer 2".into()),
+    }
+}
+
 #[test]
-fn map_aligned_symbols_crossing_the_eye_plane_cannot_stretch_into_spikes() {
+fn map_aligned_symbols_crossing_the_eye_plane_cannot_stretch_into_spikes() -> TestResult {
     futures::executor::block_on(async {
         let mut style = style(0.0, "ground");
-        let Some(LayerPaint::Symbol(paint)) = &mut style.layers[2].paint else {
-            panic!("paint");
-        };
+        let paint = symbol_paint_mut(&mut style)?;
         for prefix in ["text", "icon"] {
             paint
                 .properties
@@ -69,16 +80,15 @@ fn map_aligned_symbols_crossing_the_eye_plane_cannot_stretch_into_spikes() {
             0,
             "a map label spanning the eye plane must be hidden as a whole"
         );
+        Ok(())
     })
 }
 
 #[test]
-fn collision_priority_and_queries_keep_the_original_feature_id_and_properties() {
+fn collision_priority_and_queries_keep_the_original_feature_id_and_properties() -> TestResult {
     futures::executor::block_on(async {
         let mut style = style(0.0, "ground");
-        let Some(LayerPaint::Symbol(paint)) = &mut style.layers[2].paint else {
-            panic!("paint");
-        };
+        let paint = symbol_paint_mut(&mut style)?;
         paint
             .properties
             .insert("text-allow-overlap".into(), false.into());
@@ -128,8 +138,10 @@ fn collision_priority_and_queries_keep_the_original_feature_id_and_properties() 
         let map = fixture_map(style, processed, 1).await;
         let hits = map.query_rendered_symbols([256.0, 256.0], None);
         assert_eq!(hits.len(), 1, "overlapping labels must have one winner");
-        assert_eq!(hits[0].id, Some(93));
-        assert_eq!(hits[0].properties["rank"], 1.0);
+        let first_hit = hits.first().ok_or("missing hit")?;
+        assert_eq!(first_hit.id, Some(93));
+        assert_eq!(first_hit.properties["rank"], 1.0);
+        Ok(())
     })
 }
 
@@ -157,12 +169,10 @@ fn ranked_label(id: u64, rank: f64, x: i32, y: i32) -> Vec<u8> {
 }
 
 #[test]
-fn sort_key_decides_between_labels_of_neighbouring_tiles() {
+fn sort_key_decides_between_labels_of_neighbouring_tiles() -> TestResult {
     futures::executor::block_on(async {
         let mut style = style(0.0, "ground");
-        let Some(LayerPaint::Symbol(paint)) = &mut style.layers[2].paint else {
-            panic!("paint");
-        };
+        let paint = symbol_paint_mut(&mut style)?;
         paint
             .properties
             .insert("text-allow-overlap".into(), false.into());
@@ -201,7 +211,12 @@ fn sort_key_decides_between_labels_of_neighbouring_tiles() {
         let map = fixture_map(style, processed, 1).await;
         let hits = map.query_rendered_symbols([256.0, 256.0], None);
         assert_eq!(hits.len(), 1, "overlapping labels must have one winner");
-        assert_eq!(hits[0].id, Some(2), "the better rank wins across tiles");
+        assert_eq!(
+            hits.first().and_then(|hit| hit.id),
+            Some(2),
+            "the better rank wins across tiles"
+        );
+        Ok(())
     })
 }
 
@@ -252,12 +267,10 @@ fn external_eye_roll_preserves_world_label_orientation_and_readability() {
 }
 
 #[test]
-fn head_pitch_does_not_resize_cartographic_labels() {
+fn head_pitch_does_not_resize_cartographic_labels() -> TestResult {
     futures::executor::block_on(async {
         let mut style = style(0.0, "ground");
-        let Some(LayerPaint::Symbol(paint)) = &mut style.layers[2].paint else {
-            panic!("paint");
-        };
+        let paint = symbol_paint_mut(&mut style)?;
         paint.properties.insert(
             "text-size".into(),
             serde_json::json!(["interpolate", ["linear"], ["zoom"], 8, 12, 18, 36]),
@@ -290,9 +303,11 @@ fn head_pitch_does_not_resize_cartographic_labels() {
             assert!(count > 70, "label must remain visible at pitch {pitch}");
             widths.push(bounds[2] - bounds[0]);
         }
+        let first_width = widths.first().copied().ok_or("missing width")?;
         assert!(
-            widths.iter().all(|w| w.abs_diff(widths[0]) <= 2),
+            widths.iter().all(|w| w.abs_diff(first_width) <= 2),
             "pixel widths: {widths:?}"
         );
+        Ok(())
     })
 }

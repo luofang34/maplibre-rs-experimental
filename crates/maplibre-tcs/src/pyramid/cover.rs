@@ -54,7 +54,11 @@ impl<T> TilePyramid<T> {
             let shift = (z - az) as u32;
             let ax = (coords.x >> shift) as u32;
             let ay = (coords.y >> shift) as u32;
-            if let Some(entry) = self.levels[az].get(&morton_xy(ax, ay)) {
+            if let Some(entry) = self
+                .levels
+                .get(az)
+                .and_then(|level| level.get(&morton_xy(ax, ay)))
+            {
                 return Some((entry.coords, &entry.value));
             }
             mask &= !(1_u32 << az);
@@ -99,7 +103,11 @@ impl<T> TilePyramid<T> {
         while active != 0 {
             let dz = active.trailing_zeros() as usize;
             let (first, last) = subtree_morton_range(code, (dz - z) as u32);
-            if self.levels[dz].range(first..=last).next().is_some() {
+            if self
+                .levels
+                .get(dz)
+                .is_some_and(|level| level.range(first..=last).next().is_some())
+            {
                 return true;
             }
             active &= active - 1;
@@ -122,7 +130,7 @@ impl<T> TilePyramid<T> {
                     return None;
                 }
                 let (first, last) = subtree_morton_range(code, u32::from(depth));
-                Some(self.levels[dz].range(first..=last))
+                Some(self.levels.get(dz)?.range(first..=last))
             });
         slice
             .into_iter()

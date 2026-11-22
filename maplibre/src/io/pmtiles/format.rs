@@ -78,16 +78,29 @@ pub struct Header {
     pub center: (f64, f64, u8),
 }
 
-fn u64_at(bytes: &[u8], at: usize) -> u64 {
+fn u64_at(bytes: &[u8], at: usize) -> Result<u64, PmtilesFormatError> {
+    let slice = bytes
+        .get(at..at + 8)
+        .ok_or(PmtilesFormatError::Truncated("header"))?;
     let mut word = [0; 8];
-    word.copy_from_slice(&bytes[at..at + 8]);
-    u64::from_le_bytes(word)
+    word.copy_from_slice(slice);
+    Ok(u64::from_le_bytes(word))
 }
 
-fn degrees_at(bytes: &[u8], at: usize) -> f64 {
+fn degrees_at(bytes: &[u8], at: usize) -> Result<f64, PmtilesFormatError> {
+    let slice = bytes
+        .get(at..at + 4)
+        .ok_or(PmtilesFormatError::Truncated("header"))?;
     let mut word = [0; 4];
-    word.copy_from_slice(&bytes[at..at + 4]);
-    f64::from(i32::from_le_bytes(word)) / 1e7
+    word.copy_from_slice(slice);
+    Ok(f64::from(i32::from_le_bytes(word)) / 1e7)
+}
+
+fn byte_at(bytes: &[u8], at: usize) -> Result<u8, PmtilesFormatError> {
+    bytes
+        .get(at)
+        .copied()
+        .ok_or(PmtilesFormatError::Truncated("header"))
 }
 
 impl Header {
@@ -96,25 +109,29 @@ impl Header {
         if bytes.len() < HEADER_BYTES as usize {
             return Err(PmtilesFormatError::Truncated("header"));
         }
-        if &bytes[..7] != b"PMTiles" || bytes[7] != 3 {
+        if bytes.get(..7) != Some(b"PMTiles".as_slice()) || byte_at(bytes, 7)? != 3 {
             return Err(PmtilesFormatError::NotPmtiles);
         }
         Ok(Self {
-            root: (u64_at(bytes, 8), u64_at(bytes, 16)),
-            metadata: (u64_at(bytes, 24), u64_at(bytes, 32)),
-            leaves_offset: u64_at(bytes, 40),
-            tiles_offset: u64_at(bytes, 56),
-            internal_compression: bytes[97],
-            tile_compression: bytes[98],
-            tile_type: bytes[99],
-            zooms: (bytes[100], bytes[101]),
+            root: (u64_at(bytes, 8)?, u64_at(bytes, 16)?),
+            metadata: (u64_at(bytes, 24)?, u64_at(bytes, 32)?),
+            leaves_offset: u64_at(bytes, 40)?,
+            tiles_offset: u64_at(bytes, 56)?,
+            internal_compression: byte_at(bytes, 97)?,
+            tile_compression: byte_at(bytes, 98)?,
+            tile_type: byte_at(bytes, 99)?,
+            zooms: (byte_at(bytes, 100)?, byte_at(bytes, 101)?),
             bounds: [
-                degrees_at(bytes, 102),
-                degrees_at(bytes, 106),
-                degrees_at(bytes, 110),
-                degrees_at(bytes, 114),
+                degrees_at(bytes, 102)?,
+                degrees_at(bytes, 106)?,
+                degrees_at(bytes, 110)?,
+                degrees_at(bytes, 114)?,
             ],
-            center: (degrees_at(bytes, 119), degrees_at(bytes, 123), bytes[118]),
+            center: (
+                degrees_at(bytes, 119)?,
+                degrees_at(bytes, 123)?,
+                byte_at(bytes, 118)?,
+            ),
         })
     }
 }
@@ -289,13 +306,16 @@ pub fn parse_directory(bytes: &[u8]) -> Result<Vec<Entry>, PmtilesFormatError> {
     for entry in &mut entries {
         entry.length = varint(bytes, &mut at)?;
     }
-    for index in 0..count {
+    let mut prev_end = None;
+    for entry in &mut entries {
         let value = varint(bytes, &mut at)?;
-        entries[index].offset = match (value, index.checked_sub(1)) {
+        let offset = match (value, prev_end) {
             // Zero continues right after the previous entry's bytes.
-            (0, Some(previous)) => entries[previous].offset + entries[previous].length,
+            (0, Some(end)) => end,
             (value, _) => value.saturating_sub(1),
         };
+        entry.offset = offset;
+        prev_end = Some(offset + entry.length);
     }
     Ok(entries)
 }
@@ -314,7 +334,7 @@ pub fn find(entries: &[Entry], tile_id: u64) -> Option<Found> {
     let index = entries
         .partition_point(|entry| entry.tile_id <= tile_id)
         .checked_sub(1)?;
-    let entry = entries[index];
+    let entry = *entries.get(index)?;
     if entry.run_length == 0 {
         return Some(Found::Leaf(entry));
     }

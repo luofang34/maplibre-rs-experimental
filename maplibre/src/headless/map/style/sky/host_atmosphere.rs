@@ -1,5 +1,5 @@
 //! A host draws the globe's atmosphere without a style `sky`, lit from the sun it sets.
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg_attr(test, allow(clippy::expect_used))]
 
 use cgmath::InnerSpace;
 

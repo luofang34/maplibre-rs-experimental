@@ -14,7 +14,7 @@ mod build_wgsl;
 
 type BuildResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
-#[cfg(feature = "embed-static-tiles")]
+#[cfg(all(feature = "embed-static-tiles", not(target_arch = "wasm32")))]
 fn embed_tiles_statically_blocking() -> BuildResult {
     use maplibre_build_tools::mbtiles::extract_blocking;
 
@@ -266,6 +266,7 @@ fn emit_property_table_and_enum(
     writeln!(
         out,
         "    }} }}\n    /// Static style-spec descriptor for this property.\n\
+         \x20   #[expect(clippy::indexing_slicing, reason = \"generated match arm index matches const table\")]\n\
          \x20   pub fn metadata(self) -> &'static SpecPropertyMeta {{ match self {{"
     )?;
     for (idx, (_, variant)) in variants.iter().enumerate() {
@@ -288,44 +289,31 @@ fn emit_property_table_and_enum(
     Ok(())
 }
 
-fn generate_style_spec_blocking() -> BuildResult {
-    writeln!(
-        io::stdout().lock(),
-        "cargo:rerun-if-changed=style-spec-v8.json"
-    )?;
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
-    let root_val: Value = serde_json::from_str(&fs::read_to_string(
-        manifest_dir.join("style-spec-v8.json"),
-    )?)?;
-    let root = root_val
-        .as_object()
-        .ok_or("style-spec-v8.json root must be an object")?;
+fn load_v8_layer_names(root: &Map<String, Value>) -> BuildResult<Vec<(String, String)>> {
     let v8_layer_values = root
         .get("layer")
         .and_then(|l| l.get("type"))
         .and_then(|t| t.get("values"))
         .and_then(Value::as_object)
         .ok_or("missing `layer.type.values` in style-spec-v8.json")?;
-
-    let v8_layers: Vec<(String, String)> = v8_layer_values
+    Ok(v8_layer_values
         .keys()
         .map(|name| (name.clone(), to_pascal_case(name)))
-        .collect();
-    let mut all_layers = v8_layers.clone();
-    for ext in ["color-relief", "custom"] {
-        if !all_layers.iter().any(|(name, _)| name == ext) {
-            all_layers.push((ext.to_owned(), to_pascal_case(ext)));
-        }
-    }
+        .collect())
+}
 
-    let mut code = String::with_capacity(64 * 1024);
+fn emit_spec_layer_type(
+    code: &mut String,
+    v8_layers: &[(String, String)],
+    all_layers: &[(String, String)],
+) -> BuildResult {
     writeln!(
         code,
         "/// Style-spec layer `type` discriminator generated from `style-spec-v8.json`.\n\
          #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]\n\
          pub enum SpecLayerType {{"
     )?;
-    for (name, variant) in &all_layers {
+    for (name, variant) in all_layers {
         writeln!(
             code,
             "    /// The `{name}` style layer type.\n    {variant},"
@@ -343,51 +331,59 @@ fn generate_style_spec_blocking() -> BuildResult {
          \x20   pub const fn as_str(self) -> &'static str {{ match self {{",
         all_variants.join(", ")
     )?;
-    for (name, variant) in &all_layers {
+    for (name, variant) in all_layers {
         writeln!(code, "        Self::{variant} => {name:?},")?;
     }
-    writeln!(
-        code,
-        "    }} }}\n    /// Paint property metadata slice for this layer type.\n\
-         \x20   pub fn paint_properties(self) -> &'static [SpecPropertyMeta] {{ match self {{"
-    )?;
-    for (name, variant) in &v8_layers {
+    emit_spec_layer_type_methods_and_traits(code, v8_layers, all_layers)
+}
+
+fn emit_spec_layer_type_methods_and_traits(
+    code: &mut String,
+    v8_layers: &[(String, String)],
+    all_layers: &[(String, String)],
+) -> BuildResult {
+    for (label, suffix) in [("Paint", "PAINT"), ("Layout", "LAYOUT")] {
+        let lower = label.to_ascii_lowercase();
         writeln!(
             code,
-            "        Self::{variant} => {}_PAINT_PROPERTIES,",
-            to_screaming_snake_case(name)
+            "    }} }}\n    /// {label} property metadata slice for this layer type.\n\
+             \x20   pub fn {lower}_properties(self) -> &'static [SpecPropertyMeta] {{ match self {{"
+        )?;
+        for (name, variant) in v8_layers {
+            writeln!(
+                code,
+                "        Self::{variant} => {}_{suffix}_PROPERTIES,",
+                to_screaming_snake_case(name)
+            )?;
+        }
+        writeln!(
+            code,
+            "        Self::ColorRelief => COLOR_RELIEF_{suffix}_PROPERTIES,\n        Self::Custom => &[],",
         )?;
     }
     writeln!(
         code,
-        "        Self::ColorRelief => COLOR_RELIEF_PAINT_PROPERTIES,\n        Self::Custom => &[],\n    }} }}\n\
-         \x20   /// Layout property metadata slice for this layer type.\n\
-         \x20   pub fn layout_properties(self) -> &'static [SpecPropertyMeta] {{ match self {{"
-    )?;
-    for (name, variant) in &v8_layers {
-        writeln!(
-            code,
-            "        Self::{variant} => {}_LAYOUT_PROPERTIES,",
-            to_screaming_snake_case(name)
-        )?;
-    }
-    writeln!(
-        code,
-        "        Self::ColorRelief => COLOR_RELIEF_LAYOUT_PROPERTIES,\n        Self::Custom => &[],\n    }} }}\n}}\n\n\
-         impl std::fmt::Display for SpecLayerType {{\n\
+        "    }} }}\n}}\n\nimpl std::fmt::Display for SpecLayerType {{\n\
          \x20   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{ f.write_str(self.as_str()) }}\n\
          }}\n\nimpl std::str::FromStr for SpecLayerType {{\n    type Err = UnknownSpecIdentifier;\n\
          \x20   fn from_str(s: &str) -> Result<Self, Self::Err> {{ match s {{"
     )?;
-    for (name, variant) in &all_layers {
+    for (name, variant) in all_layers {
         writeln!(code, "        {name:?} => Ok(Self::{variant}),")?;
     }
     writeln!(
         code,
         "        _ => Err(UnknownSpecIdentifier(s.to_owned())),\n    }} }}\n}}\n"
     )?;
+    Ok(())
+}
 
-    for (layer_name, layer_variant) in &v8_layers {
+fn emit_v8_layer_property_tables(
+    code: &mut String,
+    root: &Map<String, Value>,
+    v8_layers: &[(String, String)],
+) -> BuildResult {
+    for (layer_name, layer_variant) in v8_layers {
         for (prefix, label, variant) in
             [("paint", "paint", "Paint"), ("layout", "layout", "Layout")]
         {
@@ -396,39 +392,57 @@ fn generate_style_spec_blocking() -> BuildResult {
                 .get(&key)
                 .and_then(Value::as_object)
                 .ok_or_else(|| format!("missing `{key}` table in style-spec-v8.json"))?;
-            emit_property_table_and_enum(
-                &mut code,
-                layer_name,
-                layer_variant,
-                label,
-                variant,
-                table,
-            )?;
+            emit_property_table_and_enum(code, layer_name, layer_variant, label, variant, table)?;
+        }
+    }
+    Ok(())
+}
+
+fn emit_color_relief_property_tables(code: &mut String) -> BuildResult {
+    let tables = [
+        (
+            "paint",
+            "Paint",
+            r#"{"color-relief-color":{"type":"color","transition":false,"expression":{"interpolated":true,"parameters":["elevation"]},"doc":"Elevation-driven color ramp."},"color-relief-opacity":{"type":"number","default":1,"transition":true,"expression":{"interpolated":true,"parameters":["zoom"]},"doc":"Layer opacity."}}"#,
+        ),
+        (
+            "layout",
+            "Layout",
+            r#"{"visibility":{"type":"enum","values":{"visible":{},"none":{}},"default":"visible","doc":"Whether this layer is displayed."}}"#,
+        ),
+    ];
+    for (label, variant, raw) in tables {
+        let map: Map<String, Value> = serde_json::from_str(raw)?;
+        emit_property_table_and_enum(code, "color-relief", "ColorRelief", label, variant, &map)?;
+    }
+    Ok(())
+}
+
+fn generate_style_spec_blocking() -> BuildResult {
+    writeln!(
+        io::stdout().lock(),
+        "cargo:rerun-if-changed=style-spec-v8.json"
+    )?;
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
+    let root_val: Value = serde_json::from_str(&fs::read_to_string(
+        manifest_dir.join("style-spec-v8.json"),
+    )?)?;
+    let root = root_val
+        .as_object()
+        .ok_or("style-spec-v8.json root must be an object")?;
+
+    let v8_layers = load_v8_layer_names(root)?;
+    let mut all_layers = v8_layers.clone();
+    for ext in ["color-relief", "custom"] {
+        if !all_layers.iter().any(|(name, _)| name == ext) {
+            all_layers.push((ext.to_owned(), to_pascal_case(ext)));
         }
     }
 
-    let color_relief_paint: Map<String, Value> = serde_json::from_str(
-        r#"{"color-relief-color":{"type":"color","transition":false,"expression":{"interpolated":true,"parameters":["elevation"]},"doc":"Elevation-driven color ramp."},"color-relief-opacity":{"type":"number","default":1,"transition":true,"expression":{"interpolated":true,"parameters":["zoom"]},"doc":"Layer opacity."}}"#,
-    )?;
-    emit_property_table_and_enum(
-        &mut code,
-        "color-relief",
-        "ColorRelief",
-        "paint",
-        "Paint",
-        &color_relief_paint,
-    )?;
-    let color_relief_layout: Map<String, Value> = serde_json::from_str(
-        r#"{"visibility":{"type":"enum","values":{"visible":{},"none":{}},"default":"visible","doc":"Whether this layer is displayed."}}"#,
-    )?;
-    emit_property_table_and_enum(
-        &mut code,
-        "color-relief",
-        "ColorRelief",
-        "layout",
-        "Layout",
-        &color_relief_layout,
-    )?;
+    let mut code = String::with_capacity(64 * 1024);
+    emit_spec_layer_type(&mut code, &v8_layers, &all_layers)?;
+    emit_v8_layer_property_tables(&mut code, root, &v8_layers)?;
+    emit_color_relief_property_tables(&mut code)?;
 
     fs::write(
         Path::new(&env::var("OUT_DIR")?).join("style_spec_v8.rs"),
@@ -447,7 +461,7 @@ fn main() -> BuildResult {
         "cargo:rustc-check-cfg=cfg(web_sys_unstable_apis)"
     )?;
     validate_project_wgsl_blocking()?;
-    #[cfg(feature = "embed-static-tiles")]
+    #[cfg(all(feature = "embed-static-tiles", not(target_arch = "wasm32")))]
     embed_tiles_statically_blocking()?;
     generate_protobuf_blocking()?;
     build_wgsl::generate_minified_wgsl_blocking()?;

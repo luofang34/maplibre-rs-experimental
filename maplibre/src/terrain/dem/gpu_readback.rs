@@ -1,5 +1,5 @@
 //! Test readback through the production terrain elevation sampling shader.
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg_attr(test, allow(clippy::expect_used))]
 
 use bytemuck::Zeroable;
 

@@ -20,8 +20,7 @@ use wasm_bindgen_futures::JsFuture;
 ///
 /// An image is `{width, height, data, pixelRatio?, anchor?}` with `data` straight-alpha RGBA
 /// bytes and `anchor` an `[x, y]` in image pixels; `null`, `undefined` or `{status: "absent"}`
-/// has no image; `{status: "unavailable" | "failed", reason?}` cannot be drawn for now or at
-/// all.
+/// has no image; `{status: "unavailable" | "failed", reason?}` is temporarily unavailable or failed.
 struct JsImageProvider {
     draw: Function,
     generation: String,
@@ -29,10 +28,16 @@ struct JsImageProvider {
 
 // SAFETY: this module is built without atomics, so it runs on one thread and the function is
 // never reached from another.
-#[allow(unsafe_code)]
+#[expect(
+    unsafe_code,
+    reason = "single-threaded wasm build never sends JsImageProvider across threads"
+)]
 unsafe impl Send for JsImageProvider {}
 // SAFETY: as for `Send`.
-#[allow(unsafe_code)]
+#[expect(
+    unsafe_code,
+    reason = "single-threaded wasm build never shares JsImageProvider across threads"
+)]
 unsafe impl Sync for JsImageProvider {}
 
 impl StyleImageProvider for JsImageProvider {

@@ -10,9 +10,9 @@ fn cjk_sdf_rasterization_enforces_buffer_symmetry_and_empty_glyph_safety(
     let ph = (glyph.height + SDF_BUFFER * 2) as usize;
     assert_eq!(glyph.bitmap.len(), pw * ph);
     // Border corners are strictly outside the glyph contour (< 192 inside cutoff).
-    assert!(glyph.bitmap[0] < 128);
-    assert!(glyph.bitmap[pw - 1] < 128);
-    assert!(glyph.bitmap[pw * ph - 1] < 128);
+    assert!(glyph.bitmap.first().copied().ok_or("first px")? < 128);
+    assert!(glyph.bitmap.get(pw - 1).copied().ok_or("top-right px")? < 128);
+    assert!(glyph.bitmap.last().copied().ok_or("last px")? < 128);
 
     // .notdef (gid 0) or space produces empty/zero bitmap without panic.
     let space = rasterize_char_sdf(&sfnt, 0, ' ').ok_or("space")?;

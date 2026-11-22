@@ -149,7 +149,9 @@ where
     if options.granularity < 2 {
         return Ok(());
     }
-    let slice = &buffer.indices[index_start..];
+    let Some(slice) = buffer.indices.get(index_start..) else {
+        return Ok(());
+    };
     let can_truncate = slice
         .iter()
         .all(|&index| (index.into() as usize) >= vertex_start);
@@ -272,7 +274,7 @@ impl InlinePolygon {
 
     #[inline]
     pub(crate) fn as_slice(&self) -> &[[f32; 2]] {
-        &self.vertices[..self.len]
+        self.vertices.get(..self.len).unwrap_or(&self.vertices)
     }
 
     #[inline]
@@ -282,8 +284,8 @@ impl InlinePolygon {
 
     #[inline]
     pub(crate) fn push(&mut self, point: [f32; 2]) {
-        if self.len < MAX_CLIPPED_POLYGON_VERTICES {
-            self.vertices[self.len] = point;
+        if let Some(slot) = self.vertices.get_mut(self.len) {
+            *slot = point;
             self.len += 1;
         }
     }
@@ -394,8 +396,10 @@ pub(crate) fn clip_axis_into(
         return;
     };
     for &current in slice {
-        let previous_inside = (previous[axis] >= boundary) == keep_greater;
-        let current_inside = (current[axis] >= boundary) == keep_greater;
+        let prev_val = previous.get(axis).copied().unwrap_or(0.0);
+        let curr_val = current.get(axis).copied().unwrap_or(0.0);
+        let previous_inside = (prev_val >= boundary) == keep_greater;
+        let current_inside = (curr_val >= boundary) == keep_greater;
         if previous_inside != current_inside {
             output.push(axis_intersection(previous, current, axis, boundary));
         }
@@ -407,17 +411,21 @@ pub(crate) fn clip_axis_into(
 }
 
 fn axis_intersection(start: [f32; 2], end: [f32; 2], axis: usize, boundary: f32) -> [f32; 2] {
-    let (a, b) = if start[axis] <= end[axis] {
-        (start, end)
+    let start_val = start.get(axis).copied().unwrap_or(0.0);
+    let end_val = end.get(axis).copied().unwrap_or(0.0);
+    let (a, b, a_val, b_val) = if start_val <= end_val {
+        (start, end, start_val, end_val)
     } else {
-        (end, start)
+        (end, start, end_val, start_val)
     };
-    let fraction = (boundary - a[axis]) / (b[axis] - a[axis]);
+    let fraction = (boundary - a_val) / (b_val - a_val);
     let mut point = [
         (a[0] + (b[0] - a[0]) * fraction).round(),
         (a[1] + (b[1] - a[1]) * fraction).round(),
     ];
-    point[axis] = boundary;
+    if let Some(coord) = point.get_mut(axis) {
+        *coord = boundary;
+    }
     point
 }
 
@@ -435,10 +443,16 @@ fn append_polygon<I: From<VertexId>>(
     {
         return;
     }
-    let first = vertex_index(buffer, polygon[0], cache);
-    for edge in 1..polygon.len() - 1 {
-        let second = vertex_index(buffer, polygon[edge], cache);
-        let third = vertex_index(buffer, polygon[edge + 1], cache);
+    let Some(&first_pt) = polygon.first() else {
+        return;
+    };
+    let first = vertex_index(buffer, first_pt, cache);
+    for pair in polygon.get(1..).unwrap_or(&[]).windows(2) {
+        let &[p1, p2] = pair else {
+            continue;
+        };
+        let second = vertex_index(buffer, p1, cache);
+        let third = vertex_index(buffer, p2, cache);
         if first != second && second != third && third != first {
             buffer
                 .indices

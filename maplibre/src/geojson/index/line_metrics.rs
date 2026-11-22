@@ -23,7 +23,10 @@ pub(super) fn clip_line_with_metrics(line: &[Point], bounds: [f64; 4]) -> Vec<Me
     cumulative.push(0.0_f64);
     let mut running = 0.0_f64;
     for pair in line.windows(2) {
-        running += central_angle(pair[0], pair[1]);
+        let [p0, p1] = pair else {
+            continue;
+        };
+        running += central_angle(*p0, *p1);
         cumulative.push(running);
     }
     let total = running;
@@ -34,14 +37,14 @@ pub(super) fn clip_line_with_metrics(line: &[Point], bounds: [f64; 4]) -> Vec<Me
     let mut out = Vec::new();
     let mut current: Option<(MetricClippedLine, bool)> = None;
 
-    for (index, pair) in line.windows(2).enumerate() {
-        let a = pair[0];
-        let b = pair[1];
+    for (pair, dists) in line.windows(2).zip(cumulative.windows(2)) {
+        let ([a, b], [d0, d1]) = (pair, dists) else {
+            continue;
+        };
+        let (a, b, d0, d1) = (*a, *b, *d0, *d1);
         if a == b {
             continue;
         }
-        let d0 = cumulative[index];
-        let d1 = cumulative[index + 1];
         match clip_segment(a, b, bounds) {
             None => flush_run(&mut out, &mut current),
             Some((t0, t1)) => {

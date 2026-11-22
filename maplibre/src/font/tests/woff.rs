@@ -2,11 +2,15 @@ use super::synth_font::{build_synthetic_sfnt, encode_woff1, encode_woff2_transfo
 use crate::font::{unpack_font_container, FontError};
 
 fn set_be_u32(buf: &mut [u8], offset: usize, val: u32) {
-    buf[offset..offset + 4].copy_from_slice(&val.to_be_bytes());
+    if let Some(slot) = buf.get_mut(offset..offset + 4) {
+        slot.copy_from_slice(&val.to_be_bytes());
+    }
 }
 
 fn set_be_u16(buf: &mut [u8], offset: usize, val: u16) {
-    buf[offset..offset + 2].copy_from_slice(&val.to_be_bytes());
+    if let Some(slot) = buf.get_mut(offset..offset + 2) {
+        slot.copy_from_slice(&val.to_be_bytes());
+    }
 }
 
 #[test]
@@ -33,7 +37,12 @@ fn woff1_rejects_malformed_headers_checksums_and_oversize() -> Result<(), Box<dy
 
     // Corrupted table origChecksum must be rejected.
     let mut bad_csum = woff1.clone();
-    let old_csum = u32::from_be_bytes(bad_csum[44 + 16..44 + 20].try_into()?);
+    let old_csum = u32::from_be_bytes(
+        bad_csum
+            .get(44 + 16..44 + 20)
+            .ok_or("checksum bytes")?
+            .try_into()?,
+    );
     set_be_u32(&mut bad_csum, 44 + 16, old_csum ^ 1);
     assert!(matches!(
         unpack_font_container(&bad_csum),
@@ -74,14 +83,16 @@ fn woff2_rejects_invalid_header_transform_versions_and_stream_mismatches(
 
     // Invalid transform version bits (bits 6..7 set to 1 on first table) must fail.
     let mut bad_xform = woff2.clone();
-    bad_xform[48] |= 0x40;
+    if let Some(byte) = bad_xform.get_mut(48) {
+        *byte |= 0x40;
+    }
     assert!(matches!(
         unpack_font_container(&bad_xform),
         Err(FontError::InvalidContainer(_))
     ));
 
     // Truncated / empty stream or corrupted brotli must fail cleanly without panic.
-    let mut truncated = woff2[..48].to_vec();
+    let mut truncated = woff2.get(..48).ok_or("woff2 header")?.to_vec();
     set_be_u16(&mut truncated, 12, 1);
     assert!(unpack_font_container(&truncated).is_err());
     Ok(())
@@ -105,8 +116,12 @@ fn woff2_reconstruct_rejects_invalid_index_format_contours_and_hmtx_flags() {
     set_be_u32(&mut zero_pts, 8, 2); // nContourSize = 2
     set_be_u32(&mut zero_pts, 12, 1); // nPointsSize = 1
     set_be_u32(&mut zero_pts, 28, 4); // bboxSize = 4
-    zero_pts[36..38].copy_from_slice(&1_i16.to_be_bytes()); // contourCount = 1
-    zero_pts[38] = 0; // pts = 0
+    if let Some(slot) = zero_pts.get_mut(36..38) {
+        slot.copy_from_slice(&1_i16.to_be_bytes()); // contourCount = 1
+    }
+    if let Some(pts) = zero_pts.get_mut(38) {
+        *pts = 0; // pts = 0
+    }
     assert!(matches!(
         reconstruct_glyf_loca(&zero_pts),
         Err(FontError::InvalidContainer(
@@ -116,7 +131,9 @@ fn woff2_reconstruct_rejects_invalid_index_format_contours_and_hmtx_flags() {
 
     // contourCount < -1 must fail cleanly.
     let mut neg_contour = zero_pts.clone();
-    neg_contour[36..38].copy_from_slice(&(-2_i16).to_be_bytes());
+    if let Some(slot) = neg_contour.get_mut(36..38) {
+        slot.copy_from_slice(&(-2_i16).to_be_bytes());
+    }
     assert!(matches!(
         reconstruct_glyf_loca(&neg_contour),
         Err(FontError::InvalidContainer("WOFF2 invalid contour count"))

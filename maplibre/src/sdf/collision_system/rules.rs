@@ -59,19 +59,21 @@ impl PlacementRules {
             })
         };
         let allow = read(["text-allow-overlap", "icon-allow-overlap"]);
+        let overlap_for = |name: &str, fallback: bool| {
+            // Layout follows the integer zoom a tile is laid out at, not the view's fraction.
+            match paint.layout_enum(name, zoom.floor()).as_deref() {
+                Some("always") => Overlap::Always,
+                Some("cooperative") => Overlap::Cooperative,
+                Some(_) => Overlap::Never,
+                None if fallback => Overlap::Always,
+                None => Overlap::Never,
+            }
+        };
         // The newer property replaces the boolean when a style sets both.
-        let overlap_names = ["text-overlap", "icon-overlap"];
-        // Layout follows the integer zoom a tile is laid out at, not the view's fraction.
-        let overlap =
-            [0, 1].map(
-                |i| match paint.layout_enum(overlap_names[i], zoom.floor()).as_deref() {
-                    Some("always") => Overlap::Always,
-                    Some("cooperative") => Overlap::Cooperative,
-                    Some(_) => Overlap::Never,
-                    None if allow[i] => Overlap::Always,
-                    None => Overlap::Never,
-                },
-            );
+        let overlap = [
+            overlap_for("text-overlap", allow[0]),
+            overlap_for("icon-overlap", allow[1]),
+        ];
         Self {
             overlap,
             ignore: read(["text-ignore-placement", "icon-ignore-placement"]),
@@ -100,25 +102,24 @@ impl PlacementRules {
         viewport: [f64; 2],
     ) -> [bool; 2] {
         let visible = self.visible(rectangles, glyph_boxes, grid, viewport);
-        for (i, shown) in visible.into_iter().enumerate() {
-            if shown && !self.ignore[i] {
-                for part in Self::collision_boxes(i, rectangles, glyph_boxes) {
-                    grid.insert_as(part, self.overlap[i] == Overlap::Cooperative);
-                }
+        if visible[0] && !self.ignore[0] {
+            for part in Self::text_collision_boxes(rectangles[0], glyph_boxes) {
+                grid.insert_as(part, self.overlap[0] == Overlap::Cooperative);
+            }
+        }
+        if visible[1] && !self.ignore[1] {
+            if let Some(part) = rectangles[1] {
+                grid.insert_as(part, self.overlap[1] == Overlap::Cooperative);
             }
         }
         visible
     }
 
-    fn collision_boxes(
-        i: usize,
-        rectangles: [Option<[f64; 4]>; 2],
-        glyph_boxes: &[[f64; 4]],
-    ) -> Vec<[f64; 4]> {
-        if i == 0 && !glyph_boxes.is_empty() {
+    fn text_collision_boxes(rect: Option<[f64; 4]>, glyph_boxes: &[[f64; 4]]) -> Vec<[f64; 4]> {
+        if !glyph_boxes.is_empty() {
             glyph_boxes.to_vec()
         } else {
-            rectangles[i].into_iter().collect()
+            rect.into_iter().collect()
         }
     }
 
@@ -154,25 +155,34 @@ impl PlacementRules {
         grid: &CollisionGrid,
         viewport: [f64; 2],
     ) -> [bool; 2] {
-        let accepted = [0, 1].map(|i| {
-            rectangles[i].is_some_and(|rect| {
+        let accepts = |rect: Option<[f64; 4]>, boxes: Vec<[f64; 4]>, mode: Overlap| {
+            rect.is_some_and(|rect| {
                 rect.iter().all(|v| v.is_finite())
                     && rect[2] >= -VIEWPORT_PADDING
                     && rect[3] >= -VIEWPORT_PADDING
                     && rect[0] < viewport[0] + VIEWPORT_PADDING
                     && rect[1] < viewport[1] + VIEWPORT_PADDING
-                    && Self::collision_boxes(i, rectangles, glyph_boxes)
-                        .iter()
-                        .all(|part| match overlap[i] {
-                            Overlap::Always => true,
-                            Overlap::Never => !grid.overlaps(*part),
-                            Overlap::Cooperative => !grid.overlaps_non_cooperative(*part),
-                        })
+                    && boxes.iter().all(|part| match mode {
+                        Overlap::Always => true,
+                        Overlap::Never => !grid.overlaps(*part),
+                        Overlap::Cooperative => !grid.overlaps_non_cooperative(*part),
+                    })
             })
-        });
-        [0, 1].map(|i| {
-            accepted[i] && (rectangles[1 - i].is_none() || accepted[1 - i] || self.optional[1 - i])
-        })
+        };
+        let text_ok = accepts(
+            rectangles[0],
+            Self::text_collision_boxes(rectangles[0], glyph_boxes),
+            overlap[0],
+        );
+        let icon_ok = accepts(
+            rectangles[1],
+            rectangles[1].into_iter().collect(),
+            overlap[1],
+        );
+        [
+            text_ok && (rectangles[1].is_none() || icon_ok || self.optional[1]),
+            icon_ok && (rectangles[0].is_none() || text_ok || self.optional[0]),
+        ]
     }
 }
 

@@ -26,12 +26,14 @@ async fn gpu_pool_uses_u16_indices_and_spills_gt_65k_buckets_to_u32_without_drop
     pool.replace_layer_geometry_layer_uniform_shared_unless(
         &renderer.queue,
         small_coords,
-        style_layer("building"),
-        &small_geom,
+        UniformLayerUpload {
+            style_layer: std::sync::Arc::new(style_layer("building")),
+            geometry: &small_geom,
+            layer_metadata: ShaderLayerMetadata::new(0.0, 1.0, [0.0; 2]),
+            uniform_feature: FillShaderFeatureMetadata::default(),
+            records: 100,
+        },
         None,
-        ShaderLayerMetadata::new(0.0, 1.0, [0.0; 2]),
-        FillShaderFeatureMetadata::default(),
-        100,
         |_| false,
     )
     .expect("small bucket uploads into u16 index slab");
@@ -72,12 +74,14 @@ async fn gpu_pool_uses_u16_indices_and_spills_gt_65k_buckets_to_u32_without_drop
     pool.replace_layer_geometry_layer_uniform_shared_unless(
         &renderer.queue,
         dense_coords,
-        style_layer("building"),
-        &dense_geom,
+        UniformLayerUpload {
+            style_layer: std::sync::Arc::new(style_layer("building")),
+            geometry: &dense_geom,
+            layer_metadata: ShaderLayerMetadata::new(0.0, 1.0, [0.0; 2]),
+            uniform_feature: FillShaderFeatureMetadata::default(),
+            records: 70_000,
+        },
         None,
-        ShaderLayerMetadata::new(0.0, 1.0, [0.0; 2]),
-        FillShaderFeatureMetadata::default(),
-        70_000,
         |_| false,
     )
     .expect("dense >65k vertex bucket falls back to u32 index slab cleanly");
@@ -111,10 +115,12 @@ async fn symbol_pool_with_empty_layer_metadata_allocates_zero_layer_and_standalo
         .replace_layer_geometry_unless(
             &renderer.queue,
             coords,
-            style_layer("place-label"),
-            &geom,
-            EmptyLayerMetadata([0; 0]),
-            &[],
+            LayerGeometryUpload {
+                style_layer: std::sync::Arc::new(style_layer("place-label")),
+                geometry: &geom,
+                layer_metadata: EmptyLayerMetadata([0; 0]),
+                feature_metadata: &[],
+            },
             |_| false,
         )
         .expect("symbol upload");

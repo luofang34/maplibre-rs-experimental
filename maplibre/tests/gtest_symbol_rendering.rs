@@ -161,7 +161,10 @@ fn ink_in_rect(
     for y in y0..y1 {
         for x in x0..x1 {
             let idx = ((y * SIZE + x) * 4) as usize;
-            let min_rgb = pixels[idx].min(pixels[idx + 1]).min(pixels[idx + 2]);
+            let r = pixels.get(idx).copied().expect("r byte");
+            let g = pixels.get(idx + 1).copied().expect("g byte");
+            let b = pixels.get(idx + 2).copied().expect("b byte");
+            let min_rgb = r.min(g).min(b);
             sum += u64::from(255 - min_rgb);
         }
     }

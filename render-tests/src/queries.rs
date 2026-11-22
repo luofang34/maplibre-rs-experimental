@@ -87,7 +87,7 @@ fn theirs(expected: &Value, actual: &Value) -> Value {
             .get("layer")
             .and_then(|layer| layer.get("id"))
             .cloned()
-            .unwrap_or_else(|| actual["layer"].clone()),
+            .unwrap_or_else(|| actual.get("layer").cloned().unwrap_or(Value::Null)),
         "source": field("source"),
         "sourceLayer": field("sourceLayer"),
         "id": expected.get("id").cloned().unwrap_or(Value::Null),

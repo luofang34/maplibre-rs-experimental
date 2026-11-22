@@ -33,12 +33,14 @@ pub fn entry_distances(path: &Path) -> Vec<f32> {
                 if !entered {
                     if let Some(at) = entry_parameter(from, to) {
                         let origin = travelled + at * length;
-                        origins[sub_path_start..].fill(origin);
+                        if let Some(tail) = origins.get_mut(sub_path_start..) {
+                            tail.fill(origin);
+                        }
                         entered = true;
                     }
                 }
                 travelled += length;
-                origins.push(origins[sub_path_start]);
+                origins.push(origins.get(sub_path_start).copied().unwrap_or(0.0));
             }
             _ => {}
         }

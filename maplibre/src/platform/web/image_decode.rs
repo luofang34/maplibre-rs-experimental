@@ -57,11 +57,11 @@ pub(crate) async fn decode_rgba_bytes(bytes: &[u8]) -> Result<RgbaImage, String>
         .map_err(|_| "createImageBitmap is unavailable in this JS global scope".to_owned())?;
 
     let options = Object::new();
-    let _ = Reflect::set(
+    drop(Reflect::set(
         &options,
         &JsValue::from_str("colorSpaceConversion"),
         &JsValue::from_str("none"),
-    );
+    ));
 
     let promise = create_fn
         .call2(&global, &blob, &options)
@@ -94,11 +94,11 @@ pub(crate) async fn decode_rgba_bytes(bytes: &[u8]) -> Result<RgbaImage, String>
         }
     };
     let ctx_opts = Object::new();
-    let _ = Reflect::set(
+    drop(Reflect::set(
         &ctx_opts,
         &JsValue::from_str("willReadFrequently"),
         &JsValue::TRUE,
-    );
+    ));
     let ctx = canvas
         .get_context_with_context_options("2d", &ctx_opts)
         .ok()

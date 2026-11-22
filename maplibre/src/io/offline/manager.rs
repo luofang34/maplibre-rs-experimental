@@ -152,7 +152,7 @@ impl<HC: HttpClient, S: OfflineStore> OfflineManager<HC, S> {
         progress_tx: mpsc::UnboundedSender<OfflineDownloadProgress>,
     ) -> Result<OfflineRegionSummary, OfflineDownloadError> {
         self.download_region(definition, cancel, move |prog| {
-            let _ = progress_tx.unbounded_send(prog);
+            drop(progress_tx.unbounded_send(prog));
         })
         .await
     }
@@ -181,6 +181,102 @@ impl<HC: HttpClient, S: OfflineStore> OfflineManager<HC, S> {
             .await
     }
 
+    async fn fetch_and_store_descriptor(
+        client: &SourceClient<HC>,
+        store: &S,
+        region_id: OfflineRegionId,
+        desc: super::region::OfflineResourceDescriptor,
+        cancel: &OfflineCancellationToken,
+    ) -> Result<(ResourceKind, u64, bool), OfflineDownloadError> {
+        if cancel.is_cancelled() {
+            return Err(OfflineDownloadError::Cancelled(region_id));
+        }
+        let transformed = client
+            .http_client()
+            .apply_transform(HttpRequest::new(&desc.url, desc.kind));
+        let store_key = transformed.url.clone();
+
+        if store.link_existing_resource(region_id, &store_key).await? {
+            let sz = store
+                .get_resource(&store_key)
+                .await?
+                .map_or(0_u64, |b| b.len() as u64);
+            return Ok((desc.kind, sz, true));
+        }
+
+        match client
+            .fetch_request(HttpRequest::new(&desc.url, desc.kind))
+            .await
+        {
+            Ok(bytes) => {
+                let len = bytes.len() as u64;
+                store
+                    .put_region_resource(region_id, &store_key, desc.kind, &bytes)
+                    .await?;
+                Ok((desc.kind, len, true))
+            }
+            Err(err) if desc.optional_on_404 && err.is_not_found() => Ok((desc.kind, 0, false)),
+            Err(source) => Err(OfflineDownloadError::Fetch {
+                url: desc.url,
+                source,
+            }),
+        }
+    }
+
+    async fn stream_region_descriptors(
+        &self,
+        region_id: OfflineRegionId,
+        descriptors: Vec<super::region::OfflineResourceDescriptor>,
+        required_total: u64,
+        counts: &mut (u64, u64, u64),
+        (cancel, on_progress): (
+            &OfflineCancellationToken,
+            &mut (impl FnMut(OfflineDownloadProgress) + Send),
+        ),
+    ) -> Result<(), OfflineDownloadError> {
+        let mut stream = futures::stream::iter(descriptors)
+            .map(|desc| {
+                let client = self.source_client.clone();
+                let store = Arc::clone(&self.store);
+                let token = cancel.clone();
+                async move {
+                    Self::fetch_and_store_descriptor(&client, &store, region_id, desc, &token).await
+                }
+            })
+            .buffer_unordered(self.concurrency);
+
+        while let Some(item_result) = stream.next().await {
+            if cancel.is_cancelled() {
+                on_progress(OfflineDownloadProgress {
+                    region_id,
+                    completed_resources: counts.0,
+                    required_resources: required_total,
+                    completed_bytes: counts.1,
+                    completed_tiles: counts.2,
+                    state: OfflineDownloadState::Cancelled,
+                });
+                return Err(OfflineDownloadError::Cancelled(region_id));
+            }
+            let (kind, byte_len, stored) = item_result?;
+            counts.0 += 1;
+            if stored {
+                counts.1 = counts.1.saturating_add(byte_len);
+                if kind == ResourceKind::Tile {
+                    counts.2 += 1;
+                }
+            }
+            on_progress(OfflineDownloadProgress {
+                region_id,
+                completed_resources: counts.0,
+                required_resources: required_total,
+                completed_bytes: counts.1,
+                completed_tiles: counts.2,
+                state: OfflineDownloadState::Active,
+            });
+        }
+        Ok(())
+    }
+
     async fn populate_region(
         &self,
         region_id: OfflineRegionId,
@@ -204,7 +300,6 @@ impl<HC: HttpClient, S: OfflineStore> OfflineManager<HC, S> {
         let mut style = self
             .load_and_store_style(region_id, &definition, &mut pre_stored)
             .await?;
-
         self.resolve_and_store_tilejsons(region_id, &mut style, &mut pre_stored)
             .await?;
 
@@ -215,101 +310,30 @@ impl<HC: HttpClient, S: OfflineStore> OfflineManager<HC, S> {
             .await?;
 
         let initial_status = self.store.region_status(region_id).await?;
-        let mut completed_resources = pre_stored;
-        let mut completed_bytes = initial_status.completed_resource_bytes;
-        let mut completed_tiles = initial_status.completed_tile_count;
-
+        let mut counts = (
+            pre_stored,
+            initial_status.completed_resource_bytes,
+            initial_status.completed_tile_count,
+        );
         on_progress(OfflineDownloadProgress {
             region_id,
-            completed_resources,
+            completed_resources: counts.0,
             required_resources: required_total,
-            completed_bytes,
-            completed_tiles,
+            completed_bytes: counts.1,
+            completed_tiles: counts.2,
             state: OfflineDownloadState::Active,
         });
 
-        let client = self.source_client.clone();
-        let store = Arc::clone(&self.store);
-        let cancel_ref = cancel.clone();
+        self.stream_region_descriptors(
+            region_id,
+            descriptors,
+            required_total,
+            &mut counts,
+            (&cancel, &mut on_progress),
+        )
+        .await?;
 
-        let mut stream = futures::stream::iter(descriptors)
-            .map(|desc| {
-                let client = client.clone();
-                let store = Arc::clone(&store);
-                let token = cancel_ref.clone();
-                async move {
-                    if token.is_cancelled() {
-                        return Err(OfflineDownloadError::Cancelled(region_id));
-                    }
-                    let transformed = client
-                        .http_client()
-                        .apply_transform(HttpRequest::new(&desc.url, desc.kind));
-                    let store_key = transformed.url.clone();
-
-                    if store.link_existing_resource(region_id, &store_key).await? {
-                        let sz = store
-                            .get_resource(&store_key)
-                            .await?
-                            .map_or(0_u64, |b| b.len() as u64);
-                        return Ok((desc.kind, sz, true));
-                    }
-
-                    match client
-                        .fetch_request(HttpRequest::new(&desc.url, desc.kind))
-                        .await
-                    {
-                        Ok(bytes) => {
-                            let len = bytes.len() as u64;
-                            store
-                                .put_region_resource(region_id, &store_key, desc.kind, &bytes)
-                                .await?;
-                            Ok((desc.kind, len, true))
-                        }
-                        Err(err) if desc.optional_on_404 && err.is_not_found() => {
-                            Ok((desc.kind, 0, false))
-                        }
-                        Err(source) => Err(OfflineDownloadError::Fetch {
-                            url: desc.url,
-                            source,
-                        }),
-                    }
-                }
-            })
-            .buffer_unordered(self.concurrency);
-
-        while let Some(item_result) = stream.next().await {
-            if cancel.is_cancelled() {
-                on_progress(OfflineDownloadProgress {
-                    region_id,
-                    completed_resources,
-                    required_resources: required_total,
-                    completed_bytes,
-                    completed_tiles,
-                    state: OfflineDownloadState::Cancelled,
-                });
-                return Err(OfflineDownloadError::Cancelled(region_id));
-            }
-            let (kind, byte_len, stored) = item_result?;
-            completed_resources += 1;
-            if stored {
-                completed_bytes = completed_bytes.saturating_add(byte_len);
-                if kind == ResourceKind::Tile {
-                    completed_tiles += 1;
-                }
-            }
-            on_progress(OfflineDownloadProgress {
-                region_id,
-                completed_resources,
-                required_resources: required_total,
-                completed_bytes,
-                completed_tiles,
-                state: OfflineDownloadState::Active,
-            });
-        }
-
-        self.store
-            .mark_region_complete(region_id, completed_resources)
-            .await?;
+        self.store.mark_region_complete(region_id, counts.0).await?;
         let final_status = self.store.region_status(region_id).await?;
         on_progress(OfflineDownloadProgress {
             region_id,

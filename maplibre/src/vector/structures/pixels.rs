@@ -1,4 +1,4 @@
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg_attr(test, allow(clippy::expect_used, clippy::panic))]
 use std::time::Duration;
 
 use cgmath::{Matrix4, Rad, SquareMatrix, Vector3};

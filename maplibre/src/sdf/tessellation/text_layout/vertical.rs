@@ -153,9 +153,13 @@ pub(super) fn line_length(
     line: Range<usize>,
     spacing: f32,
 ) -> f32 {
-    let advances: Vec<f32> = line
-        .filter(|index| styles[*index].is_drawn(chars[*index]))
-        .map(|index| advance(&styles[index], chars[index]) + spacing)
+    let advances: Vec<f32> = styles
+        .get(line.clone())
+        .into_iter()
+        .flatten()
+        .zip(chars.get(line).into_iter().flatten())
+        .filter(|(style, ch)| style.is_drawn(**ch))
+        .map(|(style, ch)| advance(style, *ch) + spacing)
         .collect();
     if advances.is_empty() {
         0.0
@@ -203,9 +207,12 @@ pub(super) fn place_line(
     let mut pen = placed.pen;
     // How far the line shifts its glyphs sideways, as GL JS keeps the column centred.
     let column_offset = ((placed.largest - 1.0) * 24.0).max(placed.extra);
-    for index in line {
-        let style = &styles[index];
-        let c = chars[index];
+    for (style, &c) in styles
+        .get(line.clone())
+        .into_iter()
+        .flatten()
+        .zip(chars.get(line).into_iter().flatten())
+    {
         if let Some((entry, size, hang)) = style.image {
             let entry = AtlasEntry {
                 kind: 3,

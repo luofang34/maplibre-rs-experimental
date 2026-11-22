@@ -28,7 +28,6 @@ pub(super) fn metadata_for_layer(
         bearing,
         light,
     } = frame;
-    // Extract line-width from style paint (default 1.0px)
     let line_width = match &style_layer.paint {
         Some(LayerPaint::Line(paint)) => paint
             .line_width
@@ -45,39 +44,53 @@ pub(super) fn metadata_for_layer(
             layer_metadata.uniform_color = color;
         }
     }
-    if let Some(LayerPaint::Heatmap(paint)) = &style_layer.paint {
-        let zoom = f64::from(zoom);
-        // Radius and intensity are one value per layer, taken at the view zoom.
-        layer_metadata.line_width = if paint.radius_per_feature() {
-            1.0
-        } else {
-            paint.radius_at(zoom)
-        };
-        layer_metadata.circle_params = [paint.intensity_at(zoom), 1.0, 0.0, 0.0];
-    }
-    if let Some(LayerPaint::Line(paint)) = &style_layer.paint {
-        let value = |property: &Option<crate::style::layer::StyleProperty<f32>>| {
-            property
-                .as_ref()
-                .and_then(|property| property.evaluate_at_zoom(f64::from(zoom)))
-                .unwrap_or(0.0)
-        };
-        let flags = u8::from(paint.line_gradient.is_some())
-            | (u8::from(paint.line_elevation.is_some()) << 1);
-        layer_metadata.circle_params = [
-            value(&paint.line_offset),
-            value(&paint.line_gap_width).max(0.0),
-            value(&paint.line_blur).max(0.0),
-            f32::from(flags),
-        ];
-    }
+    apply_paint_metadata(style_layer, zoom, translate, light, &mut layer_metadata);
+    layer_metadata
+}
+
+fn apply_paint_metadata(
+    style_layer: &StyleLayer,
+    zoom: f32,
+    translate: [f32; 2],
+    light: crate::style::light::ExtrusionLight,
+    layer_metadata: &mut ShaderLayerMetadata,
+) {
+    let zoom_f64 = f64::from(zoom);
     match &style_layer.paint {
+        Some(LayerPaint::Heatmap(paint)) => {
+            // Radius and intensity are one value per layer, taken at the view zoom.
+            layer_metadata.line_width = if paint.radius_per_feature() {
+                1.0
+            } else {
+                paint.radius_at(zoom_f64)
+            };
+            layer_metadata.circle_params = [paint.intensity_at(zoom_f64), 1.0, 0.0, 0.0];
+        }
+        Some(LayerPaint::Line(paint)) => {
+            let value = |property: &Option<crate::style::layer::StyleProperty<f32>>| {
+                property
+                    .as_ref()
+                    .and_then(|property| property.evaluate_at_zoom(zoom_f64))
+                    .unwrap_or(0.0)
+            };
+            let flags = u8::from(paint.line_gradient.is_some())
+                | (u8::from(paint.line_elevation.is_some()) << 1);
+            layer_metadata.circle_params = [
+                value(&paint.line_offset),
+                value(&paint.line_gap_width).max(0.0),
+                value(&paint.line_blur).max(0.0),
+                f32::from(flags),
+            ];
+        }
         Some(LayerPaint::Circle(paint)) => {
-            let zoom = f64::from(zoom);
-            layer_metadata.stroke_color = paint.stroke_color_at(zoom);
+            layer_metadata.stroke_color = paint.stroke_color_at(zoom_f64);
             // Fill opacity is already folded into each feature's colour alpha.
-            layer_metadata.circle_params =
-                [1.0, paint.stroke_opacity_at(zoom), paint.blur_at(zoom), 0.0];
+            layer_metadata.circle_params = [
+                1.0,
+                paint.stroke_opacity_at(zoom_f64),
+                paint.blur_at(zoom_f64),
+                0.0,
+            ];
             layer_metadata.circle_flags = [
                 f32::from(paint.circle_pitch_scale == CirclePitchScale::Map),
                 f32::from(paint.circle_pitch_alignment == CirclePitchAlignment::Map),
@@ -90,45 +103,49 @@ pub(super) fn metadata_for_layer(
             layer_metadata.circle_params = [1.0, 1.0, 0.0, 0.0];
             layer_metadata.circle_flags = [1.0, 0.0, translate[0], translate[1]];
         }
+        Some(LayerPaint::FillExtrusion(paint)) => {
+            apply_extrusion_metadata(paint, zoom_f64, light, layer_metadata);
+        }
         _ => {}
     }
+}
 
-    if let Some(LayerPaint::FillExtrusion(paint)) = &style_layer.paint {
-        let zoom = f64::from(zoom);
-        // Translucent volumes fold `fill-extrusion-opacity` into each feature's colour alpha.
-        let opacity = if paint.fill_extrusion_translucent == Some(true) {
-            1.0
-        } else {
-            paint
-                .fill_extrusion_opacity
-                .as_ref()
-                .and_then(|opacity| opacity.evaluate_at_zoom(zoom))
-                .unwrap_or(1.0)
-                .clamp(0.0, 1.0)
-        };
-        let gradient = paint.fill_extrusion_vertical_gradient.unwrap_or(true);
-        let height_blend = paint
-            .fill_extrusion_height
+fn apply_extrusion_metadata(
+    paint: &crate::style::layer::FillExtrusionPaint,
+    zoom: f64,
+    light: crate::style::light::ExtrusionLight,
+    layer_metadata: &mut ShaderLayerMetadata,
+) {
+    // Translucent volumes fold `fill-extrusion-opacity` into each feature's colour alpha.
+    let opacity = if paint.fill_extrusion_translucent == Some(true) {
+        1.0
+    } else {
+        paint
+            .fill_extrusion_opacity
             .as_ref()
-            .and_then(|height| height.zoom_interpolation_factor(zoom))
-            .map_or(0.0, |factor| 1.0 + factor);
-        let base_blend = paint
-            .fill_extrusion_base
-            .as_ref()
-            .and_then(|base| base.zoom_interpolation_factor(zoom))
-            .map_or(0.0, |factor| 1.0 + factor);
-        layer_metadata.stroke_color = [light.color[0], light.color[1], light.color[2], 1.0];
-        layer_metadata.circle_params =
-            [opacity, f32::from(gradient), light.intensity, height_blend];
-        layer_metadata.circle_flags = [
-            light.position[0],
-            light.position[1],
-            light.position[2],
-            base_blend,
-        ];
-    }
-
-    layer_metadata
+            .and_then(|opacity| opacity.evaluate_at_zoom(zoom))
+            .unwrap_or(1.0)
+            .clamp(0.0, 1.0)
+    };
+    let gradient = paint.fill_extrusion_vertical_gradient.unwrap_or(true);
+    let height_blend = paint
+        .fill_extrusion_height
+        .as_ref()
+        .and_then(|height| height.zoom_interpolation_factor(zoom))
+        .map_or(0.0, |factor| 1.0 + factor);
+    let base_blend = paint
+        .fill_extrusion_base
+        .as_ref()
+        .and_then(|base| base.zoom_interpolation_factor(zoom))
+        .map_or(0.0, |factor| 1.0 + factor);
+    layer_metadata.stroke_color = [light.color[0], light.color[1], light.color[2], 1.0];
+    layer_metadata.circle_params = [opacity, f32::from(gradient), light.intensity, height_blend];
+    layer_metadata.circle_flags = [
+        light.position[0],
+        light.position[1],
+        light.position[2],
+        base_blend,
+    ];
 }
 
 pub(super) fn feature_metadata(

@@ -27,7 +27,7 @@ pub(crate) enum LoadState {
     Reloading,
     /// The last request brought its result.
     Loaded,
-    /// The last request failed for now and is retried later.
+    /// The last request failed temporarily and is scheduled for retry later.
     Errored,
 }
 
@@ -39,18 +39,40 @@ impl LoadState {
 
 /// A tile's load state per request family.
 #[derive(Debug, Default)]
-pub(crate) struct TileLoad([LoadState; 3]);
+pub(crate) struct TileLoad {
+    raster: LoadState,
+    dem: LoadState,
+    vector: LoadState,
+}
 impl TileComponent for TileLoad {}
 
 impl TileLoad {
+    fn slot(&self, kind: RequestKind) -> LoadState {
+        match kind {
+            RequestKind::Raster => self.raster,
+            RequestKind::Dem => self.dem,
+            RequestKind::Vector => self.vector,
+        }
+    }
+
+    fn slot_mut(&mut self, kind: RequestKind) -> &mut LoadState {
+        match kind {
+            RequestKind::Raster => &mut self.raster,
+            RequestKind::Dem => &mut self.dem,
+            RequestKind::Vector => &mut self.vector,
+        }
+    }
+
     /// The state of the family's request.
     pub(crate) fn state(&self, kind: RequestKind) -> LoadState {
-        self.0[kind.index()]
+        self.slot(kind)
     }
 
     /// Whether some family's request is in flight.
     pub(crate) fn is_loading(&self) -> bool {
-        self.0.iter().any(|state| state.is_loading())
+        [self.raster, self.dem, self.vector]
+            .into_iter()
+            .any(LoadState::is_loading)
     }
 }
 
@@ -72,7 +94,7 @@ pub(crate) fn issued(world: &mut World, coords: WorldTileCoords, kind: RequestKi
         tile.insert(TileLoad::default());
     }
     if let Some(load) = world.tiles.query_mut::<&mut TileLoad>(coords) {
-        let state = &mut load.0[kind.index()];
+        let state = load.slot_mut(kind);
         *state = match *state {
             LoadState::Loaded | LoadState::Reloading => LoadState::Reloading,
             LoadState::Unloaded | LoadState::Loading | LoadState::Errored => LoadState::Loading,
@@ -117,7 +139,7 @@ pub(crate) fn abandoned(world: &mut World, coords: WorldTileCoords, kind: Reques
 
 fn set(world: &mut World, coords: WorldTileCoords, kind: RequestKind, state: LoadState) {
     if let Some(load) = world.tiles.query_mut::<&mut TileLoad>(coords) {
-        load.0[kind.index()] = state;
+        *load.slot_mut(kind) = state;
     }
 }
 

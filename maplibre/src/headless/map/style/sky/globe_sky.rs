@@ -1,7 +1,7 @@
 //! A globe without atmosphere, drawn where the host asked for an opaque environment, has an
 //! analytic sky: horizon colour on the limb easing to the sky colour above it, the same at
 //! every heading and altitude, and the background's ground below the limb.
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg_attr(test, allow(clippy::expect_used))]
 
 use cgmath::{InnerSpace, Matrix, Matrix3, Quaternion, Vector3};
 

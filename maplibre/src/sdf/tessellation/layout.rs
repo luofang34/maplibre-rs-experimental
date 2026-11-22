@@ -14,6 +14,7 @@ use crate::{
 };
 
 mod avoid_edges;
+mod icon;
 
 /// A polyline in tile units and the arc length from its start to a label's anchor.
 pub(super) type LineContext = (std::sync::Arc<[[f32; 2]]>, f32);
@@ -102,91 +103,13 @@ pub(super) fn append(
 ) {
     let start = buffer.indices.len();
     let first_vertex = buffer.vertices.len();
-    let mut icon_padding = 0.0_f32;
     let text = paint
         .label_among(&symbol.properties, zoom, Some(&atlas.icons))
         .unwrap_or_default();
     let text_block = super::text_layout::block(symbol, paint, zoom, atlas);
-    if let Some(icon) = paint
-        .text_among_images("icon-image", &symbol.properties, zoom, &atlas.icons)
-        .and_then(|name| atlas.icons.get(&name))
-    {
-        let ratio = icon.metrics[3];
-        let width = icon.rect[2] as f32 / ratio;
-        let height = icon.rect[3] as f32 / ratio;
-        let offset = offset(paint, "icon-offset", 1.0, (&symbol.properties, zoom));
-        let fractions = anchor_fractions(
-            &paint
-                .text("icon-anchor", &symbol.properties, zoom)
-                .unwrap_or_else(|| "center".into()),
-        );
-        let height_offset = if paint.uses_shared_height() {
-            0.0
-        } else {
-            paint.height_offset("icon", &symbol.properties, zoom)
-        };
-        let icon_size = paint.number("icon-size", &symbol.properties, zoom, 1.0);
-        if icon_size > 0.0 {
-            // An image whose anchor is not its centre, such as a shield with a banner above its
-            // body, is moved so that the anchor stands where the centre would.
-            let recentre = [icon.metrics[0] / ratio, icon.metrics[1] / ratio];
-            let placed = [
-                -width * fractions[0] + offset[0] - recentre[0],
-                -height * fractions[1] + offset[1] - recentre[1],
-                width * (1.0 - fractions[0]) + offset[0] - recentre[0],
-                height * (1.0 - fractions[1]) + offset[1] - recentre[1],
-            ];
-            let fitted = fit_to_text(
-                paint,
-                symbol,
-                zoom,
-                text_block.as_ref(),
-                [width * icon_size, height * icon_size],
-                offset,
-            );
-            let shift = crate::sdf::translation::tile_translation(paint, "icon", zoom);
-            let anchor = Point::new(symbol.anchor.x() + shift[0], symbol.anchor.y() + shift[1]);
-            let rotation = paint
-                .number("icon-rotate", &symbol.properties, zoom, 0.0)
-                .to_radians()
-                + if text_block.as_ref().is_some_and(|b| b.vertical) {
-                    std::f32::consts::FRAC_PI_2
-                } else {
-                    0.0
-                };
-            // The vertex shader scales icon quads by `icon_size`. Fitted icons and standalone
-            // stretchable icons compute their exact screen-pixel bounds in `icon_quads`, so we
-            // divide by `icon_size` here so the shader's multiplication recovers those bounds.
-            let pre_scaled = fitted.is_some() || icon.stretch.is_some();
-            let undo_size = if pre_scaled { 1.0 / icon_size } else { 1.0 };
-            let boxed = fitted.unwrap_or_else(|| {
-                if icon.stretch.is_some() {
-                    placed.map(|edge| edge * icon_size)
-                } else {
-                    placed
-                }
-            });
-            for piece in super::icon_quads::icon_quads(icon, boxed, fitted.is_some(), icon_size) {
-                icon_padding = icon_padding.max(piece.padding * undo_size);
-                let part = AtlasEntry {
-                    rect: piece.rect,
-                    ..icon.clone()
-                };
-                quad(
-                    buffer,
-                    anchor,
-                    piece.bounds.map(|edge| edge * undo_size),
-                    &part,
-                    height_offset,
-                    symbol.angle,
-                    rotation,
-                );
-            }
-        }
-    }
+    let icon_padding = icon::append_icon(symbol, paint, zoom, atlas, text_block.as_ref(), buffer);
     let first_glyph_index = buffer.indices.len();
     let laid = super::text_layout::append_block(symbol, paint, zoom, text_block.as_ref(), buffer);
-    let glyph_offsets = laid.centres;
     if start == buffer.indices.len() {
         return;
     }
@@ -200,16 +123,50 @@ pub(super) fn append(
         (symbol.anchor.x() + shift[0]) as f32,
         (symbol.anchor.y() + shift[1]) as f32,
     );
-    let bbox = bounds(
-        &buffer.vertices,
-        &buffer.indices[start..],
-        paint,
-        &symbol.properties,
-        zoom,
+    let parts = measure_symbol_parts(
+        symbol,
+        buffer,
+        first_vertex,
+        icon_padding,
+        text_block.as_ref(),
     );
-    let mut parts = crate::sdf::placement_geometry::measure(&mut buffer.vertices[first_vertex..]);
+    let anchor_shifts =
+        super::text_layout::variable_shifts_from_block(symbol, paint, zoom, text_block.as_ref());
+    if !avoid_edges::keep_symbol_within_tile(
+        symbol,
+        (paint, zoom, overscaling),
+        anchor,
+        &parts,
+        &anchor_shifts,
+        &laid.centres,
+    ) {
+        buffer.vertices.truncate(first_vertex);
+        buffer.indices.truncate(start);
+        return;
+    }
+    let indices = buffer.indices.get(start..).unwrap_or(&[]);
+    let bbox = bounds(&buffer.vertices, indices, paint, &symbol.properties, zoom);
+    push_symbol_feature(
+        features,
+        symbol,
+        (paint, zoom, start, buffer.indices.len(), first_glyph_index),
+        (parts, bbox, anchor, anchor_shifts, text, laid),
+        text_block.as_ref().map_or(0.0, |b| b.line_offset_y),
+    );
+}
+
+fn measure_symbol_parts(
+    symbol: &CollectedSymbol,
+    buffer: &mut VertexBuffers<ShaderSymbolVertex, u32>,
+    first_vertex: usize,
+    icon_padding: f32,
+    text_block: Option<&super::text_layout::Block<'_>>,
+) -> [Option<crate::sdf::placement_geometry::SymbolBounds>; 3] {
+    let slice = buffer.vertices.get_mut(first_vertex..).unwrap_or(&mut []);
+    let mut parts = crate::sdf::placement_geometry::measure(slice);
     // An icon collides by its image, not by the clear border its quad reaches into.
-    for part in parts[1..].iter_mut().flatten() {
+    let (_, rest_parts) = parts.split_at_mut(1);
+    for part in rest_parts.iter_mut().flatten() {
         let pad = f64::from(icon_padding);
         part.bounds = [
             part.bounds[0] + pad,
@@ -219,14 +176,11 @@ pub(super) fn append(
         ];
     }
     // Text collides by the box of its lines, not by the bitmaps of its glyphs, which reach
-    // a few pixels beyond it.
-    // A label of images alone, such as a row of road shields along a road, has no glyphs to
-    // measure, so its box is the layout's.
-    let block_extent = super::text_layout::extent_from_block(text_block.as_ref());
+    // a few pixels beyond it. A label of images alone has no glyphs to measure, so its box is
+    // the layout's.
+    let block_extent = super::text_layout::extent_from_block(text_block);
     if parts[0].is_none() {
-        let image = buffer.vertices[first_vertex..]
-            .iter()
-            .find(|vertex| vertex.kind() == 3);
+        let image = slice.iter().find(|vertex| vertex.kind() == 3);
         if let (Some(vertex), Some(extent)) = (image, block_extent) {
             parts[0] = Some(crate::sdf::placement_geometry::SymbolBounds {
                 bounds: extent.map(f64::from),
@@ -241,20 +195,26 @@ pub(super) fn append(
             text_part.bounds = [left, top, right, bottom].map(f64::from);
         }
     }
-    let anchor_shifts =
-        super::text_layout::variable_shifts_from_block(symbol, paint, zoom, text_block.as_ref());
-    if !avoid_edges::keep_symbol_within_tile(
-        symbol,
-        (paint, zoom, overscaling),
-        anchor,
-        &parts,
-        &anchor_shifts,
-        &glyph_offsets,
-    ) {
-        buffer.vertices.truncate(first_vertex);
-        buffer.indices.truncate(start);
-        return;
-    }
+    parts
+}
+
+type SymbolFeatureGeometry = (
+    [Option<crate::sdf::placement_geometry::SymbolBounds>; 3],
+    Box2D<f32, crate::sdf::TileSpace>,
+    Point2D<f32, crate::sdf::TileSpace>,
+    Vec<[f32; 2]>,
+    String,
+    super::text_layout::Laid,
+);
+
+fn push_symbol_feature(
+    features: &mut Vec<Feature>,
+    symbol: &CollectedSymbol,
+    (paint, zoom, start, end, first_glyph_index): (&SymbolPaint, f64, usize, usize, usize),
+    (parts, bbox, anchor, anchor_shifts, text, laid): SymbolFeatureGeometry,
+    text_offset_y: f32,
+) {
+    let glyph_offsets = laid.centres;
     features.push(Feature {
         parts,
         data: crate::sdf::SymbolFeatureData {
@@ -265,7 +225,7 @@ pub(super) fn append(
             source_feature_index: symbol.source.feature_index,
         },
         bbox,
-        indices: start..buffer.indices.len(),
+        indices: start..end,
         text_anchor: anchor,
         anchor_shifts,
         text_sets: laid.sets,
@@ -284,62 +244,9 @@ pub(super) fn append(
                 glyph_offsets,
                 image_sizes: laid.image_sizes,
                 first_glyph_index,
-                text_offset_y: text_block.as_ref().map_or(0.0, |b| b.line_offset_y),
+                text_offset_y,
             }),
     });
-}
-
-/// The icon box `[left, top, right, bottom]` that `icon-text-fit` stretches around the text,
-/// in text-size pixels, or `None` when the icon keeps its own size.
-fn fit_to_text(
-    paint: &SymbolPaint,
-    symbol: &CollectedSymbol,
-    zoom: f64,
-    text_block: Option<&super::text_layout::Block<'_>>,
-    [icon_width, icon_height]: [f32; 2],
-    offset: [f32; 2],
-) -> Option<[f32; 4]> {
-    let fit = paint.text("icon-text-fit", &symbol.properties, zoom)?;
-    if fit == "none" {
-        return None;
-    }
-    let text_size = paint
-        .text_size
-        .as_ref()
-        .and_then(|value| value.evaluate_for(&symbol.properties, zoom))
-        .unwrap_or(16.0);
-    let scale = text_size / 24.0;
-    // A vertical label's icon is fitted before the symbol turns.
-    let [left, top, right, bottom] =
-        super::text_layout::layout_extent_from_block(text_block)?.map(|edge| edge * scale);
-    let padding = paint
-        .properties
-        .get("icon-text-fit-padding")
-        .and_then(|value| value.as_array())
-        .filter(|values| values.len() == 4)
-        .map_or([0.0; 4], |values| {
-            let read = |index: usize| values[index].as_f64().unwrap_or(0.0) as f32;
-            [read(0), read(1), read(2), read(3)]
-        });
-    let (min_x, max_x) = if matches!(fit.as_str(), "width" | "both") {
-        (
-            offset[0] + left - padding[3],
-            offset[0] + right + padding[1],
-        )
-    } else {
-        let min = offset[0] + (left + right - icon_width) / 2.0;
-        (min, min + icon_width)
-    };
-    let (min_y, max_y) = if matches!(fit.as_str(), "height" | "both") {
-        (
-            offset[1] + top - padding[0],
-            offset[1] + bottom + padding[2],
-        )
-    } else {
-        let min = offset[1] + (top + bottom - icon_height) / 2.0;
-        (min, min + icon_height)
-    };
-    Some([min_x, min_y, max_x, max_y])
 }
 
 /// The `[x, y]` offset a layout property gives one symbol, times `scale`; zero without one.
@@ -444,7 +351,9 @@ fn bounds(
         Point2D::new(f32::NEG_INFINITY, f32::NEG_INFINITY),
     );
     for index in indices {
-        let vertex = &vertices[*index as usize];
+        let Some(vertex) = vertices.get(*index as usize) else {
+            continue;
+        };
         let scale = if matches!(vertex.kind(), 0 | 3) {
             text_size / 24.0
         } else {

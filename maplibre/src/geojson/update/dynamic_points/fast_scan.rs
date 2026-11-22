@@ -204,7 +204,10 @@ fn scan_feature(
     let mut is_feature = false;
     let mut geom_ok = false;
     let mut id_ok = matches!(expected_id, RawFeatureId::None);
-    store.values[idx] = [None; MAX_FAST_COLS];
+    let Some(row) = store.values.get_mut(idx) else {
+        return false;
+    };
+    *row = [None; MAX_FAST_COLS];
 
     loop {
         let Some(key) = s.next_simple_str() else {
@@ -335,7 +338,9 @@ fn check_coords(
         return false;
     }
     let coords_start = s.pos;
-    let (cached_off, cached_len) = store.coord_spans[idx];
+    let Some(&(cached_off, cached_len)) = store.coord_spans.get(idx) else {
+        return false;
+    };
     if cached_len > 0 {
         let off = cached_off as usize;
         let len = cached_len as usize;
@@ -365,13 +370,16 @@ fn check_coords(
         return false;
     }
     if cached_len == 0 {
-        let slice = &s.bytes[coords_start..coords_end];
-        if let (Ok(off), Ok(len)) = (
-            u32::try_from(store.coord_bytes.len()),
-            u16::try_from(slice.len()),
-        ) {
-            store.coord_bytes.extend_from_slice(slice);
-            store.coord_spans[idx] = (off, len);
+        if let Some(slice) = s.bytes.get(coords_start..coords_end) {
+            if let (Ok(off), Ok(len)) = (
+                u32::try_from(store.coord_bytes.len()),
+                u16::try_from(slice.len()),
+            ) {
+                store.coord_bytes.extend_from_slice(slice);
+                if let Some(span) = store.coord_spans.get_mut(idx) {
+                    *span = (off, len);
+                }
+            }
         }
     }
     true
@@ -404,12 +412,16 @@ fn scan_properties(s: &mut Scanner<'_>, idx: usize, store: &mut FastColumnStore)
             if !s.consume_lit(b"null") {
                 return false;
             }
-            store.values[idx][col] = None;
+            if let Some(slot) = store.values.get_mut(idx).and_then(|row| row.get_mut(col)) {
+                *slot = None;
+            }
         } else {
             let Some(val) = s.next_f64_fast() else {
                 return false;
             };
-            store.values[idx][col] = Some(val);
+            if let Some(slot) = store.values.get_mut(idx).and_then(|row| row.get_mut(col)) {
+                *slot = Some(val);
+            }
         }
         if s.consume(b',') {
             continue;

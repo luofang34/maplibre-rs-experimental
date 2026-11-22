@@ -14,7 +14,7 @@ pub fn set_pitch_keeping_center(view_state: &mut ViewState, pitch: impl Into<Rad
     if view_state.navigation_mode() == crate::render::view_state::NavigationMode::FreeGlobe {
         if let Some(pose) = view_state.globe_pose() {
             let current = view_state.camera().get_pitch();
-            let _ = view_state.orbit_globe_pose(pose, Rad(0.0), pitch - current);
+            drop(view_state.orbit_globe_pose(pose, Rad(0.0), pitch - current));
             return;
         }
     }
@@ -46,7 +46,7 @@ pub fn rotate_bearing_around_cursor(
 ) {
     if view_state.navigation_mode() == crate::render::view_state::NavigationMode::FreeGlobe {
         if let Some(pose) = view_state.globe_pose() {
-            let _ = view_state.orbit_globe_pose(pose, delta, Rad(0.0));
+            drop(view_state.orbit_globe_pose(pose, delta, Rad(0.0)));
         }
         return;
     }
@@ -102,19 +102,22 @@ pub(super) fn base_auto_tilt_degrees(zoom: f64) -> f64 {
         (14.0, 73.0),
         (16.0, 76.0),
     ];
-    if zoom <= STOPS[0].0 {
-        return STOPS[0].1;
+    if let Some(&(z0, p0)) = STOPS.first() {
+        if zoom <= z0 {
+            return p0;
+        }
     }
     for window in STOPS.windows(2) {
-        let (z0, p0) = window[0];
-        let (z1, p1) = window[1];
+        let &[(z0, p0), (z1, p1)] = window else {
+            continue;
+        };
         if zoom <= z1 {
             let t = ((zoom - z0) / (z1 - z0)).clamp(0.0, 1.0);
             let s = t * t * (3.0 - 2.0 * t);
             return p0 + (p1 - p0) * s;
         }
     }
-    STOPS[STOPS.len() - 1].1
+    STOPS.last().map_or(0.0, |&(_, p)| p)
 }
 
 /// Normalizes an angle in radians to `[-PI, PI]`.

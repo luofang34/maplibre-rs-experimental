@@ -28,32 +28,11 @@ pub(super) fn prepare(
     visible: &[WorldTileCoords],
     (memory, drape_targets): (MemoryBudget, usize),
 ) {
-    if world
-        .resources
-        .get::<crate::render::settings::TightTileRequests>()
-        .is_some_and(|tight| tight.0)
-    {
+    let Some(limit) = prefetch_limit(view, world, memory) else {
         world.resources.insert(DrapePrefetchRequests::default());
         return;
-    }
-    let limit = match memory.pressure() {
-        MemoryPressure::Comfortable => 8,
-        MemoryPressure::Low => 4,
-        MemoryPressure::Critical => 0,
     };
-    if limit == 0 {
-        world.resources.insert(DrapePrefetchRequests::default());
-        return;
-    }
-    let has_ahead = world
-        .resources
-        .get::<PrefetchView>()
-        .is_some_and(|prefetch| prefetch.view_state.is_some());
-    if cfg!(target_arch = "wasm32") && !view.has_external_view() && !has_ahead {
-        world.resources.insert(DrapePrefetchRequests::default());
-        return;
-    }
-    let min_interval = if !view.has_external_view() && has_ahead {
+    let min_interval = if !view.has_external_view() && has_ahead_view(world) {
         Duration::from_millis(32)
     } else {
         Duration::from_millis(100)
@@ -70,6 +49,52 @@ pub(super) fn prepare(
         return;
     }
     cadence.0 = Some(time);
+    let candidates = collect_prefetch_candidates(style, view, world, drape_targets);
+    let max_bytes = if view.has_external_view() {
+        PREFETCH_BYTES
+    } else {
+        STANDARD_PREFETCH_BYTES
+    };
+    let candidates = select_with_budget(candidates, visible, limit, max_bytes, |tile| {
+        tile_bytes(&world.tiles, tile)
+    });
+    world.resources.insert(DrapePrefetchRequests(candidates));
+}
+
+fn has_ahead_view(world: &World) -> bool {
+    world
+        .resources
+        .get::<PrefetchView>()
+        .is_some_and(|prefetch| prefetch.view_state.is_some())
+}
+
+fn prefetch_limit(view: &ViewState, world: &World, memory: MemoryBudget) -> Option<usize> {
+    if world
+        .resources
+        .get::<crate::render::settings::TightTileRequests>()
+        .is_some_and(|tight| tight.0)
+    {
+        return None;
+    }
+    let limit = match memory.pressure() {
+        MemoryPressure::Comfortable => 8,
+        MemoryPressure::Low => 4,
+        MemoryPressure::Critical => 0,
+    };
+    if limit == 0
+        || (cfg!(target_arch = "wasm32") && !view.has_external_view() && !has_ahead_view(world))
+    {
+        return None;
+    }
+    Some(limit)
+}
+
+fn collect_prefetch_candidates(
+    style: &Style,
+    view: &ViewState,
+    world: &World,
+    drape_targets: usize,
+) -> Vec<WorldTileCoords> {
     let ahead = world
         .resources
         .get::<PrefetchView>()
@@ -86,37 +111,26 @@ pub(super) fn prepare(
     } else {
         (view, ViewStatePadding::Loose)
     };
-    let candidates = {
-        let region = crate::terrain::source::dem_source(style)
-            .map(|dem| {
-                crate::render::projection::terrain_region(
-                    style,
-                    request_view,
-                    world,
-                    dem.tile_size,
-                    padding,
-                )
-            })
-            .transpose()
-            .map(Option::flatten)
-            .map_err(|error| {
-                tracing::warn!(%error, "cannot prepare terrain margin");
-            })
-            .ok()
-            .flatten();
-        let tiles = region.map_or_else(Vec::new, |region| region.iter().collect());
-        let focus = super::covering::focus_for_view(style, request_view);
-        super::covering::bounded_covering_with_focus(tiles.into_iter(), drape_targets, focus)
-    };
-    let max_bytes = if view.has_external_view() {
-        PREFETCH_BYTES
-    } else {
-        STANDARD_PREFETCH_BYTES
-    };
-    let candidates = select_with_budget(candidates, visible, limit, max_bytes, |tile| {
-        tile_bytes(&world.tiles, tile)
-    });
-    world.resources.insert(DrapePrefetchRequests(candidates));
+    let region = crate::terrain::source::dem_source(style)
+        .map(|dem| {
+            crate::render::projection::terrain_region(
+                style,
+                request_view,
+                world,
+                dem.tile_size,
+                padding,
+            )
+        })
+        .transpose()
+        .map(Option::flatten)
+        .map_err(|error| {
+            tracing::warn!(%error, "cannot prepare terrain margin");
+        })
+        .ok()
+        .flatten();
+    let tiles = region.map_or_else(Vec::new, |region| region.iter().collect());
+    let focus = super::covering::focus_for_view(style, request_view);
+    super::covering::bounded_covering_with_focus(tiles.into_iter(), drape_targets, focus)
 }
 
 #[cfg(test)]

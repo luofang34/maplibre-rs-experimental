@@ -189,6 +189,70 @@ fn template_of(source: &VectorSource) -> Option<(&str, TileAddressingScheme)> {
     Some((template.as_str(), source.scheme.unwrap_or_default()))
 }
 
+fn resolve_layer_source<'a>(
+    style: &'a Style,
+    kind: TileKind,
+    layer: &crate::style::layer::StyleLayer,
+) -> Option<(Option<String>, SourceType, Option<&'a Source>)> {
+    let named = layer
+        .source
+        .as_ref()
+        .map(|name| (name, style.sources.get(name)));
+    let declared = named.and_then(|(_, source)| source);
+    let (key, source) = match named {
+        Some((name, Some(Source::GeoJson(geojson)))) if kind == TileKind::Vector => (
+            Some(name.clone()),
+            SourceType::GeoJson(Box::new(GeoJsonTileSource {
+                name: name.clone(),
+                source: geojson.clone(),
+            })),
+        ),
+        Some((name, Some(Source::Image(image)))) if kind == TileKind::Raster => (
+            Some(name.clone()),
+            SourceType::Image(ImageTileSource {
+                source: image.clone(),
+            }),
+        ),
+        Some((name, Some(Source::Video(video)))) if kind == TileKind::Raster => (
+            Some(name.clone()),
+            SourceType::Image(ImageTileSource {
+                source: crate::style::source::ImageSource {
+                    url: String::new(),
+                    coordinates: video.coordinates,
+                    generation: video.generation,
+                },
+            }),
+        ),
+        Some((name, Some(Source::Canvas(canvas)))) if kind == TileKind::Raster => (
+            Some(name.clone()),
+            SourceType::Image(ImageTileSource {
+                source: crate::style::source::ImageSource {
+                    url: String::new(),
+                    coordinates: canvas.coordinates,
+                    generation: canvas.generation,
+                },
+            }),
+        ),
+        Some((name, Some(source))) => match kind.template_of(source) {
+            Some((template, scheme)) => (
+                Some(name.clone()),
+                kind.source_from_template(&template, scheme, source.is_volatile()),
+            ),
+            None if matches!(
+                (kind, source),
+                (TileKind::Vector, Source::Vector(_))
+                    | (TileKind::Raster, Source::Raster(_) | Source::RasterDem(_))
+            ) =>
+            {
+                (None, kind.default_source())
+            }
+            None => return None,
+        },
+        Some((_, None)) | None => (None, kind.default_source()),
+    };
+    Some((key, source, declared))
+}
+
 /// Groups the style layers of one tile kind by the source they read from.
 ///
 /// Layers that name no source, or a source without tile URLs, share the crate default source so
@@ -201,61 +265,8 @@ pub fn source_layer_groups(style: &Style, kind: TileKind) -> Vec<SourceLayerGrou
         .iter()
         .filter(|layer| kind.accepts_layer(layer) && !layer.is_hidden())
     {
-        let named = layer
-            .source
-            .as_ref()
-            .map(|name| (name, style.sources.get(name)));
-        let declared = named.and_then(|(_, source)| source);
-        let (key, source) = match named {
-            Some((name, Some(Source::GeoJson(geojson)))) if kind == TileKind::Vector => (
-                Some(name.clone()),
-                SourceType::GeoJson(Box::new(GeoJsonTileSource {
-                    name: name.clone(),
-                    source: geojson.clone(),
-                })),
-            ),
-            Some((name, Some(Source::Image(image)))) if kind == TileKind::Raster => (
-                Some(name.clone()),
-                SourceType::Image(ImageTileSource {
-                    source: image.clone(),
-                }),
-            ),
-            Some((name, Some(Source::Video(video)))) if kind == TileKind::Raster => (
-                Some(name.clone()),
-                SourceType::Image(ImageTileSource {
-                    source: crate::style::source::ImageSource {
-                        url: String::new(),
-                        coordinates: video.coordinates,
-                        generation: video.generation,
-                    },
-                }),
-            ),
-            Some((name, Some(Source::Canvas(canvas)))) if kind == TileKind::Raster => (
-                Some(name.clone()),
-                SourceType::Image(ImageTileSource {
-                    source: crate::style::source::ImageSource {
-                        url: String::new(),
-                        coordinates: canvas.coordinates,
-                        generation: canvas.generation,
-                    },
-                }),
-            ),
-            Some((name, Some(source))) => match kind.template_of(source) {
-                Some((template, scheme)) => (
-                    Some(name.clone()),
-                    kind.source_from_template(&template, scheme, source.is_volatile()),
-                ),
-                None if matches!(
-                    (kind, source),
-                    (TileKind::Vector, Source::Vector(_))
-                        | (TileKind::Raster, Source::Raster(_) | Source::RasterDem(_))
-                ) =>
-                {
-                    (None, kind.default_source())
-                }
-                None => continue,
-            },
-            Some((_, None)) | None => (None, kind.default_source()),
+        let Some((key, source, declared)) = resolve_layer_source(style, kind, layer) else {
+            continue;
         };
         let mut layer = layer.clone();
         if matches!(source, SourceType::GeoJson(_)) && layer.source_layer.is_none() {

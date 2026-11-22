@@ -121,38 +121,7 @@ impl InputController {
             WindowEvent::DoubleTapGesture { .. } => {
                 self.inner.handle_event(InputEvent::DoubleTapGesture)
             }
-            WindowEvent::MouseWheel { delta, .. } => {
-                #[cfg(target_arch = "wasm32")]
-                if let winit::event::MouseScrollDelta::PixelDelta(pos) = delta {
-                    let dx = pos.x / scale;
-                    let dy = pos.y / scale;
-                    let is_discrete_wheel = dx == 0.0 && dy != 0.0 && {
-                        let steps = dy / 4.000244140625;
-                        (steps - steps.round()).abs() <= 1e-6 * steps.abs().max(1.0)
-                            || (dy.abs() >= 40.0 && (dy % 10.0).abs() <= 1e-6)
-                    };
-                    if !is_discrete_wheel
-                        && self.inner.navigation_state().ctrl_held
-                        && crate::web::is_safari_gesture_active()
-                    {
-                        self.inner.navigation_state_mut().on_manual_pan_or_zoom();
-                        return true;
-                    }
-                }
-                let translated = match delta {
-                    winit::event::MouseScrollDelta::LineDelta(x, y) => {
-                        CoreScrollDelta::LineDelta { x: *x, y: *y }
-                    }
-                    winit::event::MouseScrollDelta::PixelDelta(pos) => {
-                        CoreScrollDelta::PixelDelta {
-                            x: pos.x / scale,
-                            y: pos.y / scale,
-                        }
-                    }
-                };
-                self.inner
-                    .handle_event(InputEvent::MouseWheel { delta: translated })
-            }
+            WindowEvent::MouseWheel { delta, .. } => self.handle_mouse_wheel(delta, scale),
             WindowEvent::MouseInput { button, state, .. } => {
                 self.inner.handle_event(InputEvent::PointerButton {
                     button: translate_mouse_button(*button),
@@ -161,6 +130,37 @@ impl InputController {
             }
             _ => false,
         }
+    }
+
+    fn handle_mouse_wheel(&mut self, delta: &winit::event::MouseScrollDelta, scale: f64) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        if let winit::event::MouseScrollDelta::PixelDelta(pos) = delta {
+            let dx = pos.x / scale;
+            let dy = pos.y / scale;
+            let is_discrete_wheel = dx == 0.0 && dy != 0.0 && {
+                let steps = dy / 4.000244140625;
+                (steps - steps.round()).abs() <= 1e-6 * steps.abs().max(1.0)
+                    || (dy.abs() >= 40.0 && (dy % 10.0).abs() <= 1e-6)
+            };
+            if !is_discrete_wheel
+                && self.inner.navigation_state().ctrl_held
+                && crate::web::is_safari_gesture_active()
+            {
+                self.inner.navigation_state_mut().on_manual_pan_or_zoom();
+                return true;
+            }
+        }
+        let translated = match delta {
+            winit::event::MouseScrollDelta::LineDelta(x, y) => {
+                CoreScrollDelta::LineDelta { x: *x, y: *y }
+            }
+            winit::event::MouseScrollDelta::PixelDelta(pos) => CoreScrollDelta::PixelDelta {
+                x: pos.x / scale,
+                y: pos.y / scale,
+            },
+        };
+        self.inner
+            .handle_event(InputEvent::MouseWheel { delta: translated })
     }
 }
 

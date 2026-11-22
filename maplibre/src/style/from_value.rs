@@ -4,17 +4,10 @@ use rustc_hash::FxHashMap as HashMap;
 use serde::de;
 use serde_json::{Map, Value};
 
-#[cfg(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl"))]
-use super::light::LightSpecification;
-#[cfg(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl"))]
-use super::sky::SkySpecification;
-#[cfg(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl"))]
-use super::state::StateDeclaration;
-#[cfg(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl"))]
-use super::transitions::TransitionSpec;
 use super::{
-    feature_state::FeatureStateStore, layer_order::parse_layers_from_values, source::Source,
-    terrain::TerrainSpecification, Style, StyleImage,
+    feature_state::FeatureStateStore, layer_order::parse_layers_from_values,
+    light::LightSpecification, sky::SkySpecification, source::Source, state::StateDeclaration,
+    terrain::TerrainSpecification, transitions::TransitionSpec, Style, StyleImage,
 };
 use crate::{
     font::{default_local_ideograph_font_family, parse_local_ideograph_font_family, FontFaces},
@@ -172,86 +165,36 @@ impl Style {
             .ok_or_else(|| missing_field_err("version"))?;
         let version = u16::try_from(value_as_u64(version_val, "version")?)
             .map_err(|_| field_err("version", "u16 out of range"))?;
-
         let layers_arr = map
             .get("layers")
             .ok_or_else(|| missing_field_err("layers"))?
             .as_array()
             .ok_or_else(|| field_err("layers", "expected array"))?;
 
-        let font_faces = map
-            .get("font-faces")
-            .or_else(|| map.get("fontFaces"))
-            .filter(|v| !v.is_null())
-            .map(FontFaces::from_json_value);
-
-        let local_ideograph_font_family = match map
-            .get("localIdeographFontFamily")
-            .or_else(|| map.get("local-ideograph-font-family"))
-        {
-            None => default_local_ideograph_font_family(),
-            Some(v) => parse_local_ideograph_font_family(Some(v)).map_err(de::Error::custom)?,
-        };
-
-        let feature_state = match map.get("featureState") {
-            Some(v) if !v.is_null() => FeatureStateStore::from_json_value(v)?,
-            _ => FeatureStateStore::default(),
-        };
-
-        #[cfg(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl"))]
-        let light = parse_opt_section(map, "light", LightSpecification::from_json_value)?;
-        #[cfg(not(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl")))]
-        let light = None;
-
-        #[cfg(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl"))]
-        let sky = parse_opt_section(map, "sky", SkySpecification::from_json_value)?;
-        #[cfg(not(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl")))]
-        let sky = None;
-
-        #[cfg(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl"))]
-        let transition = parse_opt_section(map, "transition", TransitionSpec::from_json_value)?;
-        #[cfg(not(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl")))]
-        let transition = None;
-
-        let name = json_opt_string(map, "name")?;
-        let glyphs = json_opt_string(map, "glyphs")?;
-        let sprite = map.get("sprite").filter(|v| !v.is_null()).cloned();
-
-        #[cfg(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl"))]
-        let metadata = json_value_map_or_empty(map, "metadata")?;
-        #[cfg(not(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl")))]
-        let metadata = HashMap::default();
-        #[cfg(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl"))]
-        let state = parse_state_decl_map(map)?;
-        #[cfg(not(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl")))]
-        let state: HashMap<String, super::state::StateDeclaration> = HashMap::default();
+        let (light, sky, transition, metadata, state) = parse_optional_root_sections(map)?;
         let global_state = json_value_map_or_empty(map, "globalState")?;
-        let (projection, projection_template) = match map.get("projection") {
-            Some(raw) if !raw.is_null() && super::state::reads_global_state(raw) => {
-                let resolved = super::state::resolve_projection_json(raw, &|key| {
-                    global_state
-                        .get(key)
-                        .or_else(|| state.get(key)?.default.as_ref())
-                        .cloned()
-                        .unwrap_or(Value::Null)
-                });
-                (resolved, Some(raw.clone()))
-            }
-            _ => (
-                parse_opt_section(map, "projection", ProjectionSpecification::from_json_value)?,
-                None,
-            ),
-        };
+        let (projection, projection_template) = parse_root_projection(map, &global_state, &state)?;
+
         Ok(Self {
             version,
-            name,
+            name: json_opt_string(map, "name")?,
             metadata,
             sources: parse_sources(map)?,
             layers: parse_layers_from_values(layers_arr)?,
-            glyphs,
-            font_faces,
-            local_ideograph_font_family,
-            sprite,
+            glyphs: json_opt_string(map, "glyphs")?,
+            font_faces: map
+                .get("font-faces")
+                .or_else(|| map.get("fontFaces"))
+                .filter(|v| !v.is_null())
+                .map(FontFaces::from_json_value),
+            local_ideograph_font_family: match map
+                .get("localIdeographFontFamily")
+                .or_else(|| map.get("local-ideograph-font-family"))
+            {
+                None => default_local_ideograph_font_family(),
+                Some(v) => parse_local_ideograph_font_family(Some(v)).map_err(de::Error::custom)?,
+            },
+            sprite: map.get("sprite").filter(|v| !v.is_null()).cloned(),
             center: json_opt_f64_pair(map, "center")?,
             center_altitude: json_opt_f64(map, "centerAltitude")?,
             zoom: json_opt_f64(map, "zoom")?,
@@ -266,12 +209,66 @@ impl Style {
             active_transitions: Default::default(),
             state,
             global_state,
-            feature_state,
+            feature_state: match map.get("featureState") {
+                Some(v) if !v.is_null() => FeatureStateStore::from_json_value(v)?,
+                _ => FeatureStateStore::default(),
+            },
             state_templates: HashMap::default(),
             light_template: None,
             projection_template,
             images: parse_style_images(map)?,
             revision_state: Default::default(),
         })
+    }
+}
+
+type RootSections = (
+    Option<LightSpecification>,
+    Option<SkySpecification>,
+    Option<TransitionSpec>,
+    HashMap<String, Value>,
+    HashMap<String, StateDeclaration>,
+);
+
+fn parse_optional_root_sections(
+    map: &Map<String, Value>,
+) -> Result<RootSections, serde_json::Error> {
+    #[cfg(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl"))]
+    {
+        Ok((
+            parse_opt_section(map, "light", LightSpecification::from_json_value)?,
+            parse_opt_section(map, "sky", SkySpecification::from_json_value)?,
+            parse_opt_section(map, "transition", TransitionSpec::from_json_value)?,
+            json_value_map_or_empty(map, "metadata")?,
+            parse_state_decl_map(map)?,
+        ))
+    }
+    #[cfg(not(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl")))]
+    {
+        let _ = map;
+        Ok((None, None, None, HashMap::default(), HashMap::default()))
+    }
+}
+
+fn parse_root_projection(
+    map: &Map<String, Value>,
+    global_state: &HashMap<String, Value>,
+    state: &HashMap<String, super::state::StateDeclaration>,
+) -> Result<(Option<ProjectionSpecification>, Option<Value>), serde_json::Error> {
+    match map.get("projection") {
+        Some(raw) if !raw.is_null() && super::state::reads_global_state(raw) => {
+            let resolved = super::state::resolve_projection_json(raw, &|key| {
+                global_state
+                    .get(key)
+                    .or_else(|| state.get(key)?.default.as_ref())
+                    .cloned()
+                    .unwrap_or(Value::Null)
+            });
+            Ok((resolved, Some(raw.clone())))
+        }
+        _ => Ok((
+            parse_opt_section(map, "projection", ProjectionSpecification::from_json_value)?,
+            None,
+        )),
     }
 }

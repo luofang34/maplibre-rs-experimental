@@ -67,14 +67,15 @@ fn signed_distance(x: f64, y: f64, rings: &[Ring]) -> f64 {
     let mut inside = false;
     let mut nearest = f64::INFINITY;
     for ring in rings {
-        let mut previous = ring.len().saturating_sub(1);
-        for (index, a) in ring.iter().enumerate() {
-            let b = ring[previous];
+        let Some(mut b) = ring.last().copied() else {
+            continue;
+        };
+        for &a in ring {
             if (a[1] > y) != (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0] {
                 inside = !inside;
             }
-            nearest = nearest.min(segment_distance_squared(x, y, *a, b));
-            previous = index;
+            nearest = nearest.min(segment_distance_squared(x, y, a, b));
+            b = a;
         }
     }
     if nearest == 0.0 {
@@ -88,19 +89,23 @@ fn signed_distance(x: f64, y: f64, rings: &[Ring]) -> f64 {
 
 /// The cell at the centroid of the outer ring, a good first guess.
 fn centroid_cell(rings: &[Ring]) -> Cell {
-    let ring = &rings[0];
+    let Some(ring) = rings.first() else {
+        return Cell::new(0.0, 0.0, 0.0, rings);
+    };
+    let Some(mut b) = ring.last().copied() else {
+        return Cell::new(0.0, 0.0, 0.0, rings);
+    };
     let (mut area, mut x, mut y) = (0.0, 0.0, 0.0);
-    let mut previous = ring.len() - 1;
-    for (index, a) in ring.iter().enumerate() {
-        let b = ring[previous];
+    for &a in ring {
         let f = a[0] * b[1] - b[0] * a[1];
         x += (a[0] + b[0]) * f;
         y += (a[1] + b[1]) * f;
         area += f * 3.0;
-        previous = index;
+        b = a;
     }
     if area == 0.0 {
-        return Cell::new(ring[0][0], ring[0][1], 0.0, rings);
+        let first = ring.first().copied().unwrap_or([0.0, 0.0]);
+        return Cell::new(first[0], first[1], 0.0, rings);
     }
     Cell::new(x / area, y / area, 0.0, rings)
 }

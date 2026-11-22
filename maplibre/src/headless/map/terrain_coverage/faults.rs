@@ -46,30 +46,34 @@ fn inject(context: &mut MapContext) -> SystemResult {
     let resources = &mut context.world.resources;
     let mut faults = std::mem::take(resources.get_mut::<Faults>().expect("fault controls"));
     if let Some(coords) = faults.missing_upload {
-        let Some(Eventually::Initialized(raster)) =
-            resources.get_mut::<Eventually<RasterResources>>()
-        else {
-            panic!("raster resources");
-        };
+        let raster_res = resources.get_mut::<Eventually<RasterResources>>();
         assert!(
-            raster.get_bound_texture(&"paint".into(), &coords).is_some(),
-            "evict a real upload"
+            matches!(raster_res, Some(Eventually::Initialized(_))),
+            "raster resources"
         );
-        raster.remove_texture(coords);
-        faults.applied = true;
+        if let Some(Eventually::Initialized(raster)) = raster_res {
+            assert!(
+                raster.get_bound_texture(&"paint".into(), &coords).is_some(),
+                "evict a real upload"
+            );
+            raster.remove_texture(coords);
+            faults.applied = true;
+        }
     }
     if let Some(capacity) = faults.metadata_capacity {
-        let Some(Eventually::Initialized(pattern)) =
-            resources.get_mut::<Eventually<WgpuTileViewPattern>>()
-        else {
-            panic!("tile pattern");
-        };
-        let limited = WgpuTileViewPattern::new(BackingBufferDescriptor::new(
-            pattern.buffer().clone(),
-            (capacity * std::mem::size_of::<ShaderTileMetadata>()) as u64,
-        ));
-        faults.saved_pattern = Some(std::mem::replace(pattern, limited));
-        faults.applied = true;
+        let pattern_res = resources.get_mut::<Eventually<WgpuTileViewPattern>>();
+        assert!(
+            matches!(pattern_res, Some(Eventually::Initialized(_))),
+            "tile pattern"
+        );
+        if let Some(Eventually::Initialized(pattern)) = pattern_res {
+            let limited = WgpuTileViewPattern::new(BackingBufferDescriptor::new(
+                pattern.buffer().clone(),
+                (capacity * std::mem::size_of::<ShaderTileMetadata>()) as u64,
+            ));
+            faults.saved_pattern = Some(std::mem::replace(pattern, limited));
+            faults.applied = true;
+        }
     }
     resources.insert(faults);
     Ok(())

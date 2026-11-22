@@ -109,7 +109,7 @@ impl FlatBufferTransferable {
     }
 
     pub fn data(&self) -> &[u8] {
-        &self.data[self.start..]
+        self.data.get(self.start..).unwrap_or_default()
     }
 
     pub(super) fn into_tail_vec(mut self, payload_offset: usize) -> Vec<u8> {

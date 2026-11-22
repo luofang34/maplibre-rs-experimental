@@ -26,7 +26,11 @@ fn anchors_repeat_at_the_spacing_from_the_first_offset() {
 fn labels_longer_than_the_spacing_push_the_repeats_apart() {
     let line = vec![[0.0, 2000.0], [4000.0, 2000.0]];
     let anchors = line_anchors(&line, params(300.0, 600.0));
-    let gap = anchors[1].point[0] - anchors[0].point[0];
+    let (Some(a0), Some(a1)) = (anchors.first(), anchors.get(1)) else {
+        assert!(anchors.len() >= 2);
+        return;
+    };
+    let gap = a1.point[0] - a0.point[0];
     assert_eq!(
         gap,
         600.0 + 300.0 / 4.0,
@@ -38,7 +42,11 @@ fn labels_longer_than_the_spacing_push_the_repeats_apart() {
 fn a_line_continuing_across_the_tile_edge_starts_on_its_own_rhythm() {
     let starts_on_edge = vec![[0.0, 2000.0], [4000.0, 2000.0]];
     let anchors = line_anchors(&starts_on_edge, params(1000.0, 200.0));
-    assert_eq!(anchors[0].point[0], 500.0, "offset is half the spacing");
+    assert_eq!(
+        anchors.first().map(|a| a.point[0]),
+        Some(500.0),
+        "offset is half the spacing"
+    );
 }
 
 #[test]
@@ -71,8 +79,11 @@ fn a_sharp_corner_under_the_label_refuses_it_until_the_limit_allows_it() {
 fn a_short_line_gets_one_label_in_the_middle_when_the_rhythm_misses() {
     let line = vec![[1000.0, 2000.0], [1250.0, 2000.0]];
     let anchors = line_anchors(&line, params(1000.0, 200.0));
-    assert_eq!(anchors.len(), 1);
-    assert_eq!(anchors[0].point, [1125.0, 2000.0]);
+    let [a0] = anchors.as_slice() else {
+        assert_eq!(anchors.len(), 1);
+        return;
+    };
+    assert_eq!(a0.point, [1125.0, 2000.0]);
 }
 
 #[test]
@@ -144,6 +155,6 @@ fn a_magnified_tile_starts_its_repeats_where_the_tile_it_magnifies_would() {
         },
     );
     // (100 + 2 * 100) * 4 % 1000 = 200 puts the first anchor at 300 rather than 400.
-    assert_eq!(plain[0].point[0], 400.0);
-    assert_eq!(magnified[0].point[0], 300.0);
+    assert_eq!(plain.first().map(|a| a.point[0]), Some(400.0));
+    assert_eq!(magnified.first().map(|a| a.point[0]), Some(300.0));
 }

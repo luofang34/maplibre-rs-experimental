@@ -26,24 +26,26 @@ fn line_style(layout: serde_json::Value) -> Style {
     .expect("line label style")
 }
 
-async fn line_map(style: Style, line: &[[f64; 2]]) -> HeadlessMap {
+type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+
+async fn line_map(style: Style, line: &[[f64; 2]]) -> TestResult<HeadlessMap> {
     let coords = WorldTileCoords {
         x: 2048,
         y: 2048,
         z: ZoomLevel::from(12),
     };
-    let Some(LayerPaint::Symbol(paint)) = &style.layers[2].paint else {
-        panic!("symbol paint");
+    let Some(LayerPaint::Symbol(paint)) = style.layers.get(2).and_then(|l| l.paint.as_ref()) else {
+        return Err("expected symbol paint at layer 2".into());
     };
     let atlas = atlas();
     let mut layout = TextTessellator::default();
     layout.configure(paint.clone(), atlas.clone());
-    layout.linestring_begin(true, line.len(), 0).expect("begin");
+    layout.linestring_begin(true, line.len(), 0)?;
     for (index, point) in line.iter().enumerate() {
-        layout.xy(point[0], point[1], index).expect("vertex");
+        layout.xy(point[0], point[1], index)?;
     }
-    layout.linestring_end(true, 0).expect("end");
-    layout.feature_end(0).expect("feature");
+    layout.linestring_end(true, 0)?;
+    layout.feature_end(0)?;
     layout.finish();
     // A vector layer on the tile makes it available, so its symbols are placed.
     let base = geozero::mvt::Tile {
@@ -60,8 +62,8 @@ async fn line_map(style: Style, line: &[[f64; 2]]) -> HeadlessMap {
         }],
     }
     .encode_to_vec();
-    let mut layers =
-        process_tile_layers(&base, &style.layers[1], coords, Default::default()).expect("base");
+    let base_layer = style.layers.get(1).ok_or("missing base style layer")?;
+    let mut layers = process_tile_layers(&base, base_layer, coords, Default::default())?;
     if !layout.quad_buffer.indices.is_empty() {
         layers
             .symbols
@@ -79,7 +81,7 @@ async fn line_map(style: Style, line: &[[f64; 2]]) -> HeadlessMap {
                 "label".into(),
             )));
     }
-    fixture_map(style, layers, 1).await
+    Ok(fixture_map(style, layers, 1).await)
 }
 
 /// Red text pixels as distances from a screen point.
@@ -113,7 +115,7 @@ fn arc(centre: [f64; 2], radius: f64, from: f64, to: f64) -> Vec<[f64; 2]> {
 }
 
 #[test]
-fn a_label_on_an_arc_bends_with_it() {
+fn a_label_on_an_arc_bends_with_it() -> TestResult {
     futures::executor::block_on(async {
         // A 60 px circle whose top arc carries the label; the centre is at screen (381, 381).
         let centre_units = [1000.0, 1000.0];
@@ -123,7 +125,7 @@ fn a_label_on_an_arc_bends_with_it() {
             256.0 + centre_units[1] * PIXELS_PER_UNIT,
         ];
         let line = arc(centre_units, radius_units, 200.0, 340.0);
-        let map = line_map(line_style(serde_json::json!({})), &line).await;
+        let map = line_map(line_style(serde_json::json!({})), &line).await?;
         let distances = distances_from(&read_blocking(&map), screen_centre);
         assert!(
             distances.len() > 100,
@@ -141,6 +143,7 @@ fn a_label_on_an_arc_bends_with_it() {
             nearest > radius - 20.0 && farthest < radius + 14.0,
             "text spans {nearest:.1}..{farthest:.1} px from the centre of a {radius} px arc"
         );
+        Ok(())
     })
 }
 
@@ -162,15 +165,15 @@ fn top_arc() -> Vec<[f64; 2]> {
 }
 
 #[test]
-fn a_line_drawn_backwards_still_reads_upright() {
+fn a_line_drawn_backwards_still_reads_upright() -> TestResult {
     futures::executor::block_on(async {
         let forward = red_mask(&read_blocking(
-            &line_map(line_style(serde_json::json!({})), &top_arc()).await,
+            &line_map(line_style(serde_json::json!({})), &top_arc()).await?,
         ));
         let mut reversed_line = top_arc();
         reversed_line.reverse();
         let reversed = red_mask(&read_blocking(
-            &line_map(line_style(serde_json::json!({})), &reversed_line).await,
+            &line_map(line_style(serde_json::json!({})), &reversed_line).await?,
         ));
         let ink = forward.iter().filter(|red| **red).count();
         assert!(ink > 100, "the label drew {ink} pixels");
@@ -180,27 +183,28 @@ fn a_line_drawn_backwards_still_reads_upright() {
             differing(&forward, &reversed)
         );
         let unturned = line_style(serde_json::json!({"text-keep-upright": false}));
-        let backwards = red_mask(&read_blocking(&line_map(unturned, &reversed_line).await));
+        let backwards = red_mask(&read_blocking(&line_map(unturned, &reversed_line).await?));
         assert!(
             differing(&forward, &backwards) * 2 > ink,
             "without keep-upright the reversed line writes the text upside down"
         );
+        Ok(())
     })
 }
 
 #[test]
-fn a_sharp_bend_under_the_label_refuses_it_until_max_angle_allows_it() {
+fn a_sharp_bend_under_the_label_refuses_it_until_max_angle_allows_it() -> TestResult {
     futures::executor::block_on(async {
         let corner = [[900.0, 1000.0], [1400.0, 1000.0], [1400.0, 1500.0]];
         // The corner lies at the middle of this line, under the centre of the label.
         let refuses = line_style(serde_json::json!({"text-max-angle": 45}));
-        let map = line_map(refuses, &corner).await;
+        let map = line_map(refuses, &corner).await?;
         assert!(
             !red_mask(&read_blocking(&map)).iter().any(|red| *red),
             "a 90 degree corner under the label leaves it out"
         );
         let allows = line_style(serde_json::json!({"text-max-angle": 100}));
-        let map = line_map(allows, &corner).await;
+        let map = line_map(allows, &corner).await?;
         assert!(
             red_mask(&read_blocking(&map))
                 .iter()
@@ -208,20 +212,21 @@ fn a_sharp_bend_under_the_label_refuses_it_until_max_angle_allows_it() {
                 .count()
                 > 100
         );
+        Ok(())
     })
 }
 
 #[test]
-fn a_curved_label_is_selectable_on_its_glyphs_but_not_under_the_curve() {
+fn a_curved_label_is_selectable_on_its_glyphs_but_not_under_the_curve() -> TestResult {
     futures::executor::block_on(async {
-        let map = line_map(line_style(serde_json::json!({})), &top_arc()).await;
+        let map = line_map(line_style(serde_json::json!({})), &top_arc()).await?;
         let pixels = read_blocking(&map);
         let index = pixels
             .as_chunks::<4>()
             .0
             .iter()
             .position(|p| p[0] > 180 && p[1] < 80 && p[2] < 80)
-            .expect("the label draws");
+            .ok_or("the label draws")?;
         let on_glyph = [
             (index % SIZE as usize) as f64 + 0.5,
             (index / SIZE as usize) as f64 + 0.5,
@@ -235,18 +240,19 @@ fn a_curved_label_is_selectable_on_its_glyphs_but_not_under_the_curve() {
             map.query_rendered_symbols([381.0, 340.0], None).is_empty(),
             "the space under a curve is not part of the label"
         );
+        Ok(())
     })
 }
 
 #[test]
-fn a_viewport_aligned_line_label_keeps_its_straight_layout() {
+fn a_viewport_aligned_line_label_keeps_its_straight_layout() -> TestResult {
     futures::executor::block_on(async {
         // Such text is not placed glyph by glyph; it must still sit centred on its anchor.
         let straight = [[500.0, 1000.0], [1900.0, 1000.0]];
         let style = line_style(serde_json::json!({
             "text-rotation-alignment": "viewport", "text-pitch-alignment": "viewport"
         }));
-        let pixels = read_blocking(&line_map(style, &straight).await);
+        let pixels = read_blocking(&line_map(style, &straight).await?);
         let (count, bounds) = colored_bounds(&pixels, 0);
         assert!(count > 100, "the label drew {count} pixels");
         assert!(
@@ -260,5 +266,6 @@ fn a_viewport_aligned_line_label_keeps_its_straight_layout() {
             (middle - anchor).abs() < 6.0,
             "centred on the anchor {anchor}, not at {middle}"
         );
+        Ok(())
     })
 }

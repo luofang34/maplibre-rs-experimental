@@ -107,165 +107,204 @@ impl CompiledCircleRamps {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn evaluate_circle_metadata_into(
-    out: &mut Vec<FillShaderFeatureMetadata>,
+pub(super) struct CircleEvalInput<'a> {
+    pub(super) circle_paint: &'a CirclePaint,
+    pub(super) all_props: &'a [FeatureProperties],
+    pub(super) fast_columns: &'a FastColumnStore,
+    pub(super) hits: &'a [u32],
+    pub(super) verts_per_circle: usize,
+    pub(super) tile_zoom: f64,
+    pub(super) seq: u64,
+    pub(super) style_layer_id: StyleLayerId,
+}
+
+fn eval_fast_pairs(
+    pairs: &mut Vec<[FillShaderFeatureMetadata; 2]>,
+    ramps: &CompiledCircleRamps,
+    fast_columns: &FastColumnStore,
+) {
+    if let (Some(c_ramp), Some(c_col), Some(o_const), Some(r_ramp), Some(r_col)) = (
+        ramps.color_ramp.as_ref(),
+        ramps.color_col,
+        ramps.opacity_const,
+        ramps.radius_ramp.as_ref(),
+        ramps.radius_col,
+    ) {
+        for row in &fast_columns.values {
+            let mut rgba = c_ramp
+                .eval_f64(row.get(c_col).copied().flatten())
+                .unwrap_or([0.0, 0.0, 0.0, 1.0]);
+            rgba[3] *= o_const;
+            let r0 = r_ramp
+                .eval_f64(row.get(r_col).copied().flatten())
+                .unwrap_or(CirclePaint::DEFAULT_RADIUS)
+                .max(0.0);
+            pairs.push([
+                FillShaderFeatureMetadata::from_rgba(rgba),
+                pack_dynamic_circle_radii(r0, r0),
+            ]);
+        }
+        return;
+    }
+    for row in &fast_columns.values {
+        let mut rgba = ramps.color_const.unwrap_or_else(|| {
+            ramps
+                .color_ramp
+                .as_ref()
+                .and_then(|r| {
+                    r.eval_f64(ramps.color_col.and_then(|c| row.get(c).copied().flatten()))
+                })
+                .unwrap_or([0.0, 0.0, 0.0, 1.0])
+        });
+        let opacity = ramps.opacity_const.unwrap_or_else(|| {
+            ramps
+                .opacity_ramp
+                .as_ref()
+                .and_then(|r| {
+                    r.eval_f64(
+                        ramps
+                            .opacity_col
+                            .and_then(|c| row.get(c).copied().flatten()),
+                    )
+                })
+                .unwrap_or(1.0)
+                .clamp(0.0, 1.0)
+        });
+        rgba[3] *= opacity;
+        let radius_pair = if let Some(r) = ramps.radius_const {
+            (r, r)
+        } else {
+            let r0 = ramps
+                .radius_ramp
+                .as_ref()
+                .and_then(|r| {
+                    r.eval_f64(ramps.radius_col.and_then(|c| row.get(c).copied().flatten()))
+                })
+                .unwrap_or(CirclePaint::DEFAULT_RADIUS)
+                .max(0.0);
+            (r0, r0)
+        };
+        pairs.push([
+            FillShaderFeatureMetadata::from_rgba(rgba),
+            pack_dynamic_circle_radii(radius_pair.0, radius_pair.1),
+        ]);
+    }
+}
+
+fn eval_slow_pairs(
+    pairs: &mut Vec<[FillShaderFeatureMetadata; 2]>,
+    ramps: &CompiledCircleRamps,
     circle_paint: &CirclePaint,
     all_props: &[FeatureProperties],
-    fast_columns: &FastColumnStore,
-    hits: &[u32],
-    verts_per_circle: usize,
     tile_zoom: f64,
-    (seq, style_layer_id, cache): (u64, StyleLayerId, &mut EvalCache),
+) {
+    let radius_prop = circle_paint.radius();
+    let color_prop = circle_paint.circle_color.as_ref();
+    let opacity_prop = circle_paint.circle_opacity.as_ref();
+    for props in all_props {
+        let mut rgba = ramps.color_const.unwrap_or_else(|| {
+            ramps
+                .color_ramp
+                .as_ref()
+                .and_then(|r| r.eval(props))
+                .or_else(|| {
+                    color_prop
+                        .and_then(|p| p.evaluate_for(props, tile_zoom))
+                        .map(|c| c.to_array())
+                })
+                .unwrap_or([0.0, 0.0, 0.0, 1.0])
+        });
+        let opacity = ramps.opacity_const.unwrap_or_else(|| {
+            ramps
+                .opacity_ramp
+                .as_ref()
+                .and_then(|r| r.eval(props))
+                .or_else(|| opacity_prop.and_then(|p| p.evaluate_for(props, tile_zoom)))
+                .unwrap_or(1.0)
+                .clamp(0.0, 1.0)
+        });
+        rgba[3] *= opacity;
+        let (radius, radius_next) = if let Some(r) = ramps.radius_const {
+            (r, r)
+        } else {
+            let r0 = ramps
+                .radius_ramp
+                .as_ref()
+                .and_then(|r| r.eval(props))
+                .or_else(|| radius_prop.evaluate_for(props, tile_zoom))
+                .unwrap_or(CirclePaint::DEFAULT_RADIUS)
+                .max(0.0);
+            let r1 = if ramps.radius_zoom_const {
+                r0
+            } else {
+                radius_prop
+                    .evaluate_for(props, tile_zoom + 1.0)
+                    .unwrap_or(CirclePaint::DEFAULT_RADIUS)
+                    .max(0.0)
+            };
+            (r0, r1)
+        };
+        pairs.push([
+            FillShaderFeatureMetadata::from_rgba(rgba),
+            pack_dynamic_circle_radii(radius, radius_next),
+        ]);
+    }
+}
+
+fn populate_eval_cache(cache: &mut EvalCache, input: &CircleEvalInput<'_>, use_fast: bool) {
+    cache.pairs.clear();
+    cache.pairs.reserve(input.all_props.len());
+    let zoom_bits = input.tile_zoom.to_bits();
+    let needs_compile = cache.ramps.as_ref().is_none_or(|r| {
+        r.layer_id != input.style_layer_id
+            || r.tile_zoom_bits != zoom_bits
+            || r.use_fast != use_fast
+    });
+    if needs_compile {
+        cache.ramps = Some(CompiledCircleRamps::compile(
+            input.circle_paint,
+            input.style_layer_id,
+            input.tile_zoom,
+            &input.fast_columns.keys,
+            use_fast,
+        ));
+    }
+    let Some(ramps) = cache.ramps.as_ref() else {
+        return;
+    };
+    if use_fast {
+        eval_fast_pairs(&mut cache.pairs, ramps, input.fast_columns);
+    } else {
+        eval_slow_pairs(
+            &mut cache.pairs,
+            ramps,
+            input.circle_paint,
+            input.all_props,
+            input.tile_zoom,
+        );
+    }
+    cache.key = Some((input.seq, input.style_layer_id, zoom_bits));
+}
+
+pub(super) fn evaluate_circle_metadata_into(
+    out: &mut Vec<FillShaderFeatureMetadata>,
+    cache: &mut EvalCache,
+    input: CircleEvalInput<'_>,
 ) {
     out.clear();
-    let needed = hits.len() * verts_per_circle * 2;
+    let needed = input.hits.len() * input.verts_per_circle * 2;
     if out.capacity() < needed {
         out.reserve(needed - out.len());
     }
-
-    let use_fast =
-        fast_columns.active_seq == Some(seq) && fast_columns.values.len() == all_props.len();
-    let cache_key = (seq, style_layer_id, tile_zoom.to_bits());
-    if cache.key != Some(cache_key) || cache.pairs.len() != all_props.len() {
-        cache.pairs.clear();
-        cache.pairs.reserve(all_props.len());
-        let zoom_bits = tile_zoom.to_bits();
-        let needs_compile = cache.ramps.as_ref().is_none_or(|r| {
-            r.layer_id != style_layer_id || r.tile_zoom_bits != zoom_bits || r.use_fast != use_fast
-        });
-        if needs_compile {
-            cache.ramps = Some(CompiledCircleRamps::compile(
-                circle_paint,
-                style_layer_id,
-                tile_zoom,
-                &fast_columns.keys,
-                use_fast,
-            ));
-        }
-        let Some(ramps) = cache.ramps.as_ref() else {
-            return;
-        };
-
-        if use_fast {
-            let color_const = ramps.color_const;
-            let color_ramp = ramps.color_ramp.as_ref();
-            let color_col = ramps.color_col;
-            let opacity_const = ramps.opacity_const;
-            let opacity_ramp = ramps.opacity_ramp.as_ref();
-            let opacity_col = ramps.opacity_col;
-            let radius_const = ramps.radius_const;
-            let radius_ramp = ramps.radius_ramp.as_ref();
-            let radius_col = ramps.radius_col;
-            if let (Some(c_ramp), Some(c_col), Some(o_const), Some(r_ramp), Some(r_col)) = (
-                color_ramp,
-                color_col,
-                opacity_const,
-                radius_ramp,
-                radius_col,
-            ) {
-                for row in &fast_columns.values {
-                    let mut rgba = c_ramp.eval_f64(row[c_col]).unwrap_or([0.0, 0.0, 0.0, 1.0]);
-                    rgba[3] *= o_const;
-                    let r0 = r_ramp
-                        .eval_f64(row[r_col])
-                        .unwrap_or(CirclePaint::DEFAULT_RADIUS)
-                        .max(0.0);
-                    cache.pairs.push([
-                        FillShaderFeatureMetadata::from_rgba(rgba),
-                        pack_dynamic_circle_radii(r0, r0),
-                    ]);
-                }
-            } else {
-                for row in &fast_columns.values {
-                    let mut rgba = color_const.unwrap_or_else(|| {
-                        color_ramp
-                            .and_then(|r| r.eval_f64(color_col.and_then(|c| row[c])))
-                            .unwrap_or([0.0, 0.0, 0.0, 1.0])
-                    });
-                    let opacity = opacity_const.unwrap_or_else(|| {
-                        opacity_ramp
-                            .and_then(|r| r.eval_f64(opacity_col.and_then(|c| row[c])))
-                            .unwrap_or(1.0)
-                            .clamp(0.0, 1.0)
-                    });
-                    rgba[3] *= opacity;
-
-                    let (radius, radius_next) = if let Some(r) = radius_const {
-                        (r, r)
-                    } else {
-                        let r0 = radius_ramp
-                            .and_then(|r| r.eval_f64(radius_col.and_then(|c| row[c])))
-                            .unwrap_or(CirclePaint::DEFAULT_RADIUS)
-                            .max(0.0);
-                        (r0, r0)
-                    };
-                    cache.pairs.push([
-                        FillShaderFeatureMetadata::from_rgba(rgba),
-                        pack_dynamic_circle_radii(radius, radius_next),
-                    ]);
-                }
-            }
-        } else {
-            let radius_prop = circle_paint.radius();
-            let color_prop = circle_paint.circle_color.as_ref();
-            let opacity_prop = circle_paint.circle_opacity.as_ref();
-            for props in all_props {
-                let mut rgba = ramps.color_const.unwrap_or_else(|| {
-                    ramps
-                        .color_ramp
-                        .as_ref()
-                        .and_then(|r| r.eval(props))
-                        .or_else(|| {
-                            color_prop
-                                .and_then(|p| p.evaluate_for(props, tile_zoom))
-                                .map(|c| c.to_array())
-                        })
-                        .unwrap_or([0.0, 0.0, 0.0, 1.0])
-                });
-                let opacity = ramps.opacity_const.unwrap_or_else(|| {
-                    ramps
-                        .opacity_ramp
-                        .as_ref()
-                        .and_then(|r| r.eval(props))
-                        .or_else(|| opacity_prop.and_then(|p| p.evaluate_for(props, tile_zoom)))
-                        .unwrap_or(1.0)
-                        .clamp(0.0, 1.0)
-                });
-                rgba[3] *= opacity;
-
-                let (radius, radius_next) = if let Some(r) = ramps.radius_const {
-                    (r, r)
-                } else {
-                    let r0 = ramps
-                        .radius_ramp
-                        .as_ref()
-                        .and_then(|r| r.eval(props))
-                        .or_else(|| radius_prop.evaluate_for(props, tile_zoom))
-                        .unwrap_or(CirclePaint::DEFAULT_RADIUS)
-                        .max(0.0);
-                    let r1 = if ramps.radius_zoom_const {
-                        r0
-                    } else {
-                        radius_prop
-                            .evaluate_for(props, tile_zoom + 1.0)
-                            .unwrap_or(CirclePaint::DEFAULT_RADIUS)
-                            .max(0.0)
-                    };
-                    (r0, r1)
-                };
-                cache.pairs.push([
-                    FillShaderFeatureMetadata::from_rgba(rgba),
-                    pack_dynamic_circle_radii(radius, radius_next),
-                ]);
-            }
-        }
-        cache.key = Some(cache_key);
+    let use_fast = input.fast_columns.active_seq == Some(input.seq)
+        && input.fast_columns.values.len() == input.all_props.len();
+    let cache_key = (input.seq, input.style_layer_id, input.tile_zoom.to_bits());
+    if cache.key != Some(cache_key) || cache.pairs.len() != input.all_props.len() {
+        populate_eval_cache(cache, &input, use_fast);
     }
-
     let pairs = &cache.pairs;
-    if verts_per_circle == 4 {
-        for &feat_idx in hits {
+    if input.verts_per_circle == 4 {
+        for &feat_idx in input.hits {
             if let Some(&pair) = pairs.get(feat_idx as usize) {
                 out.extend_from_slice(&[
                     pair[0], pair[1], pair[0], pair[1], pair[0], pair[1], pair[0], pair[1],
@@ -273,9 +312,9 @@ pub(super) fn evaluate_circle_metadata_into(
             }
         }
     } else {
-        for &feat_idx in hits {
+        for &feat_idx in input.hits {
             if let Some(&pair) = pairs.get(feat_idx as usize) {
-                for _ in 0..verts_per_circle {
+                for _ in 0..input.verts_per_circle {
                     out.extend_from_slice(&pair);
                 }
             }
@@ -313,9 +352,7 @@ pub(super) fn fallback_dynamic_circle_from_vertices(
             ]);
         }
     }
-    while vert_cursor < vertices.len() {
-        let v = &vertices[vert_cursor];
-        vert_cursor += 1;
+    for v in vertices.get(vert_cursor..).unwrap_or(&[]) {
         out.extend_from_slice(&[
             FillShaderFeatureMetadata::from_rgba(fallback_color),
             pack_dynamic_circle_radii(v.normal[0], v.edge_distance),

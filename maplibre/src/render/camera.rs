@@ -410,8 +410,6 @@ impl Perspective {
         center_offset: Point2<f64>,
     ) -> Matrix4<f64> {
         let ymax = near_z * self.y_tan();
-
-        //TODO maybe just: let xmax = ymax * aspect;
         let xmax = near_z * self.x_tan(width, height);
 
         let offset_x = self.offset_x(center_offset, width);

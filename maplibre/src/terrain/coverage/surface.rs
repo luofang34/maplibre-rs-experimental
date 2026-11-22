@@ -153,17 +153,13 @@ impl TerrainCoverageIndex {
         })
     }
 
-    /// Evaluates `(bilinear_msl_m, cell_max_msl_m)` in unexaggerated metres at normalized
-    /// `[0, 1]` tile coordinates `(u, v)` on `tile`'s `128 × 128` terrain grid without
-    /// allocating or stitching the remaining `16,637` vertices.
     #[cfg(feature = "headless")]
-    pub(crate) fn sample_stitched_patch_cell_msl(
+    fn resolve_patch_dem_source(
         &self,
         tiles: &Tiles,
         tile: WorldTileCoords,
-        (u, v): (f64, f64),
         fallback_dem: Option<(u8, u8, f32)>,
-    ) -> Option<(f64, f64)> {
+    ) -> Option<(WorldTileCoords, f64)> {
         let (minzoom, maxzoom, exaggeration) = if self.exaggeration > 0.0 {
             (self.minzoom, self.maxzoom, self.exaggeration)
         } else {
@@ -188,6 +184,21 @@ impl TerrainCoverageIndex {
                     cur = cur.get_parent()?;
                 }
             })?;
+        Some((source, exaggeration))
+    }
+
+    /// Evaluates `(bilinear_msl_m, cell_max_msl_m)` in unexaggerated metres at normalized
+    /// `[0, 1]` tile coordinates `(u, v)` on `tile`'s `128 × 128` terrain grid without
+    /// allocating or stitching the remaining `16,637` vertices.
+    #[cfg(feature = "headless")]
+    pub(crate) fn sample_stitched_patch_cell_msl(
+        &self,
+        tiles: &Tiles,
+        tile: WorldTileCoords,
+        (u, v): (f64, f64),
+        fallback_dem: Option<(u8, u8, f32)>,
+    ) -> Option<(f64, f64)> {
+        let (source, exaggeration) = self.resolve_patch_dem_source(tiles, tile, fallback_dem)?;
         let Some(DemTileComponent::Loaded(loaded)) = tiles.query::<&DemTileComponent>(source)
         else {
             return None;
@@ -220,61 +231,81 @@ impl TerrainCoverageIndex {
             };
             (unscaled * exaggeration) as f32
         };
-
-        let gx = (u.clamp(0.0, 1.0) * f64::from(max_idx)) as f32;
-        let gy = (v.clamp(0.0, 1.0) * f64::from(max_idx)) as f32;
-        let x0 = (gx.floor().max(0.0) as u32).min(max_idx);
-        let y0 = (gy.floor().max(0.0) as u32).min(max_idx);
-        let x1 = x0.saturating_add(1).min(max_idx);
-        let y1 = y0.saturating_add(1).min(max_idx);
-        let tx = (gx - (x0 as f32)).clamp(0.0, 1.0);
-        let ty = (gy - (y0 as f32)).clamp(0.0, 1.0);
-
-        let h00 = vertex_exag_f32(x0, y0);
-        let h10 = if x1 == x0 {
-            h00
-        } else {
-            vertex_exag_f32(x1, y0)
-        };
-        let h01 = if y1 == y0 {
-            h00
-        } else {
-            vertex_exag_f32(x0, y1)
-        };
-        let h11 = if x1 == x0 {
-            h01
-        } else if y1 == y0 {
-            h10
-        } else {
-            vertex_exag_f32(x1, y1)
-        };
-        let exag = f64::from((exaggeration as f32).abs().max(1e-6));
-        let top = h00 + (h10 - h00) * tx;
-        let bot = h01 + (h11 - h01) * tx;
-        let bil_msl = f64::from(top + (bot - top) * ty) / exag;
-        let cell_max_msl = f64::from(h00.max(h10).max(h01).max(h11)) / exag;
-        Some((bil_msl, cell_max_msl))
+        Some(bilinear_cell_msl(
+            &vertex_exag_f32,
+            (u, v),
+            max_idx,
+            exaggeration,
+        ))
     }
 }
+
+#[cfg(feature = "headless")]
+fn bilinear_cell_msl(
+    vertex_exag_f32: &impl Fn(u32, u32) -> f32,
+    (u, v): (f64, f64),
+    max_idx: u32,
+    exaggeration: f64,
+) -> (f64, f64) {
+    let gx = (u.clamp(0.0, 1.0) * f64::from(max_idx)) as f32;
+    let gy = (v.clamp(0.0, 1.0) * f64::from(max_idx)) as f32;
+    let x0 = (gx.floor().max(0.0) as u32).min(max_idx);
+    let y0 = (gy.floor().max(0.0) as u32).min(max_idx);
+    let x1 = x0.saturating_add(1).min(max_idx);
+    let y1 = y0.saturating_add(1).min(max_idx);
+    let tx = (gx - (x0 as f32)).clamp(0.0, 1.0);
+    let ty = (gy - (y0 as f32)).clamp(0.0, 1.0);
+
+    let h00 = vertex_exag_f32(x0, y0);
+    let h10 = if x1 == x0 {
+        h00
+    } else {
+        vertex_exag_f32(x1, y0)
+    };
+    let h01 = if y1 == y0 {
+        h00
+    } else {
+        vertex_exag_f32(x0, y1)
+    };
+    let h11 = if x1 == x0 {
+        h01
+    } else if y1 == y0 {
+        h10
+    } else {
+        vertex_exag_f32(x1, y1)
+    };
+    let exag = f64::from((exaggeration as f32).abs().max(1e-6));
+    let top = h00 + (h10 - h00) * tx;
+    let bot = h01 + (h11 - h01) * tx;
+    let bil_msl = f64::from(top + (bot - top) * ty) / exag;
+    let cell_max_msl = f64::from(h00.max(h10).max(h01).max(h11)) / exag;
+    (bil_msl, cell_max_msl)
+}
+
 impl EdgeHeights {
-    pub(crate) fn height(&self, p: [f64; 2], raw: &impl Fn([f64; 2]) -> f64) -> f64 {
+    pub(crate) fn height(&self, [px, py]: [f64; 2], raw: &impl Fn([f64; 2]) -> f64) -> f64 {
         let edge = |t: f64, side: usize| {
             let i = (t / 32.0).round().clamp(0.0, 128.0) as usize;
-            f64::from(if i == 128 {
-                self.last[side]
+            let sample = if i == 128 {
+                self.last.get(side).copied().unwrap_or(0.0)
             } else {
-                self.samples[i][side]
-            })
+                self.samples
+                    .get(i)
+                    .and_then(|row| row.get(side))
+                    .copied()
+                    .unwrap_or(0.0)
+            };
+            f64::from(sample)
         };
-        let w = [p[1], EXTENT - p[1], p[0], EXTENT - p[0]].map(|d| {
+        let w = [py, EXTENT - py, px, EXTENT - px].map(|d| {
             let t = (d / 64.0).clamp(0.0, 1.0);
             1.0 - t * t * (3.0 - 2.0 * t)
         });
         let delta = [
-            edge(p[0], 0) - raw([p[0], 0.0]),
-            edge(p[0], 1) - raw([p[0], EXTENT]),
-            edge(p[1], 2) - raw([0.0, p[1]]),
-            edge(p[1], 3) - raw([EXTENT, p[1]]),
+            edge(px, 0) - raw([px, 0.0]),
+            edge(px, 1) - raw([px, EXTENT]),
+            edge(py, 2) - raw([0.0, py]),
+            edge(py, 3) - raw([EXTENT, py]),
         ];
         let corners = [
             edge(0.0, 0) - raw([0.0, 0.0]),
@@ -282,8 +313,9 @@ impl EdgeHeights {
             edge(0.0, 1) - raw([0.0, EXTENT]),
             edge(EXTENT, 1) - raw([EXTENT, EXTENT]),
         ];
-        let weights = [w[0] * w[2], w[0] * w[3], w[1] * w[2], w[1] * w[3]];
-        raw(p) + w.iter().zip(delta).map(|(a, b)| a * b).sum::<f64>()
+        let [w0, w1, w2, w3] = w;
+        let weights = [w0 * w2, w0 * w3, w1 * w2, w1 * w3];
+        raw([px, py]) + w.iter().zip(delta).map(|(a, b)| a * b).sum::<f64>()
             - weights.iter().zip(corners).map(|(a, b)| a * b).sum::<f64>()
     }
 }

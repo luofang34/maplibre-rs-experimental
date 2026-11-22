@@ -18,7 +18,7 @@ use styles::{char_styles, line_width, CharStyle};
 use super::{
     layout::{anchor_fractions, quad, CollectedSymbol},
     line_break::wrap,
-    text_offset::{anchored_offset, variable_anchors},
+    text_offset::{resolve_block_placement, variable_anchors},
 };
 use crate::{
     render::shaders::ShaderSymbolVertex,
@@ -65,14 +65,18 @@ fn line_sizes(
     let line_scales: Vec<f32> = lines
         .iter()
         .map(|line| {
-            styles[line.clone()]
+            styles
+                .get(line.clone())
+                .unwrap_or(&[])
                 .iter()
                 .map(|style| style.scale)
                 .fold(1.0, f32::max)
         })
         .collect();
     let tallest_image = |line: &Range<usize>| {
-        styles[line.clone()]
+        styles
+            .get(line.clone())
+            .unwrap_or(&[])
             .iter()
             .filter_map(|style| {
                 style
@@ -109,23 +113,8 @@ pub(super) fn block<'a>(
     let mut styles = char_styles(paint, symbol, zoom, atlas, chars.len())?;
     let spacing = paint.number("text-letter-spacing", &symbol.properties, zoom, 0.0) * 24.0;
     let max_width = paint.number("text-max-width", &symbol.properties, zoom, 10.0) * 24.0;
-    // Text along a line runs the whole line: it is never wrapped.
-    let lines = if super::is_line_placed(paint) {
-        std::iter::once(0..chars.len()).collect()
-    } else {
-        bidirectional::split_paragraphs(
-            &chars,
-            wrap(&chars, max_width, &|index| {
-                if bidirectional::is_bidi_control(chars[index]) {
-                    0.0
-                } else {
-                    styles[index].advance(chars[index]) + spacing
-                }
-            }),
-        )
-    };
+    let lines = wrap_and_reorder_lines(paint, spacing, max_width, &mut chars, &mut styles);
     let line_height = paint.number("text-line-height", &symbol.properties, zoom, 1.2) * 24.0;
-    let lines = bidirectional::reorder_and_strip_controls(&mut chars, &mut styles, lines);
     let vertical = !super::is_line_placed(paint)
         && symbol
             .vertical
@@ -142,38 +131,14 @@ pub(super) fn block<'a>(
         })
         .fold(0.0, f32::max);
     let (line_scales, line_extras, line_contents) = line_sizes(&styles, &lines, vertical);
-    let anchors = variable_anchors(paint);
-    let anchor = anchors.first().cloned().unwrap_or_else(|| {
-        paint
-            .text("text-anchor", &symbol.properties, zoom)
-            .unwrap_or_else(|| "center".into())
-    });
-    let fractions = anchor_fractions(&anchor);
-    let justify = paint
-        .text("text-justify", &symbol.properties, zoom)
-        .unwrap_or_else(|| "center".into());
-    let justify = match justify.as_str() {
-        // A vertical label is justified to the start of its line.
-        _ if vertical => 0.0,
-        "left" => 0.0,
-        "right" => 1.0,
-        "auto" => fractions[0],
-        _ => 0.5,
-    };
     let height = line_scales.iter().sum::<f32>() * line_height + line_extras.iter().sum::<f32>();
-    let mut fractions = fractions;
-    let mut offset = anchored_offset(paint, &anchors, &anchor, (&symbol.properties, zoom));
-    let line_offset_y = if super::is_line_placed(paint) {
-        std::mem::take(&mut offset[1])
-    } else {
-        0.0
-    };
-    if vertical && !anchors.is_empty() {
+    let mut placed = resolve_block_placement(paint, &symbol.properties, zoom, vertical);
+    if vertical && !placed.anchors.is_empty() {
         // A vertical label with variable anchors is laid out centred before it turns; each
         // anchor then moves the turned box, which the first one has done already.
-        let shift = vertical::anchor_shift(&anchor, [height, max_line], offset);
-        fractions = [0.5, 0.5];
-        offset = [shift[1], -shift[0]];
+        let shift = vertical::anchor_shift(&placed.anchor, [height, max_line], placed.offset);
+        placed.fractions = [0.5, 0.5];
+        placed.offset = [shift[1], -shift[0]];
     }
     Some(Block {
         // Every line takes a full line height, with the glyphs centred in it.
@@ -187,13 +152,43 @@ pub(super) fn block<'a>(
         spacing,
         line_height,
         max_line,
-        fractions,
-        justify,
-        offset,
-        line_offset_y,
+        fractions: placed.fractions,
+        justify: placed.justify,
+        offset: placed.offset,
+        line_offset_y: placed.line_offset_y,
         vertical,
         shaped: None,
     })
+}
+
+fn wrap_and_reorder_lines(
+    paint: &SymbolPaint,
+    spacing: f32,
+    max_width: f32,
+    chars: &mut Vec<char>,
+    styles: &mut Vec<CharStyle<'_>>,
+) -> Vec<Range<usize>> {
+    // Text along a line runs the whole line: it is never wrapped.
+    let lines = if super::is_line_placed(paint) {
+        std::iter::once(0..chars.len()).collect()
+    } else {
+        bidirectional::split_paragraphs(
+            chars,
+            wrap(chars, max_width, &|index| {
+                let Some(&ch) = chars.get(index) else {
+                    return 0.0;
+                };
+                if bidirectional::is_bidi_control(ch) {
+                    0.0
+                } else {
+                    styles
+                        .get(index)
+                        .map_or(0.0, |style| style.advance(ch) + spacing)
+                }
+            }),
+        )
+    };
+    bidirectional::reorder_and_strip_controls(chars, styles, lines)
 }
 
 /// The glyph quads of a label, and for text along a line the centre of each glyph; text that
@@ -314,9 +309,11 @@ impl Emitter<'_> {
         );
         if self.along_line {
             // The vertex carries where the centre lies in the straight layout, in 1/32 pixel.
-            let first = self.buffer.vertices.len() - 4;
-            for vertex in &mut self.buffer.vertices[first..] {
-                vertex.set_line_centre_q5((centre * 32.0).round() as i32);
+            let first = self.buffer.vertices.len().saturating_sub(4);
+            if let Some(vertices) = self.buffer.vertices.get_mut(first..) {
+                for vertex in vertices {
+                    vertex.set_line_centre_q5((centre * 32.0).round() as i32);
+                }
             }
             self.centres.push(centre);
             // An image in the text collides by its own size; a glyph by the text size.
@@ -361,8 +358,13 @@ fn place_line(
     (baseline, content): (f32, f32),
     mut pen: f32,
 ) {
-    for index in line {
-        let style = &block.styles[index];
+    for (style, &ch) in block
+        .styles
+        .get(line.clone())
+        .into_iter()
+        .flatten()
+        .zip(block.chars.get(line).into_iter().flatten())
+    {
         if let Some((entry, size, hang)) = style.image {
             // An image sits on the bottom of the line's content.
             let (x, y) = (pen + hang[0], baseline + content - size[1] + hang[1]);
@@ -378,7 +380,7 @@ fn place_line(
             pen += size[0] + block.spacing;
             continue;
         }
-        let Some(glyph) = style.glyphs.get(&(block.chars[index] as u32)) else {
+        let Some(glyph) = style.glyphs.get(&(ch as u32)) else {
             continue;
         };
         let scale = style.scale;
@@ -432,11 +434,13 @@ fn glyph_pass(
     let grown = block.line_extras.iter().any(|extra| *extra > 0.0);
     let mut line_top = 0.0;
     for (index, line) in block.lines.iter().enumerate() {
-        let (largest, extra, content) = (
-            block.line_scales[index],
-            block.line_extras[index],
-            block.line_contents[index],
-        );
+        let (Some(&largest), Some(&extra), Some(&content)) = (
+            block.line_scales.get(index),
+            block.line_extras.get(index),
+            block.line_contents.get(index),
+        ) else {
+            continue;
+        };
         // A block with a line taller than the line height is aligned by its whole height alone.
         let leading = if grown {
             0.0

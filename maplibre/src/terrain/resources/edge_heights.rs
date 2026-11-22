@@ -72,7 +72,7 @@ impl TerrainResources {
     }
 
     /// Writes the edge height blocks only when `generation == 0` (fallback) or `generation` differs
-    /// from the previously uploaded generation.
+    /// from the last uploaded generation.
     pub(crate) fn write_edges_if_stale(
         &mut self,
         queue: &crate::render::upload_queue::UploadQueue,
@@ -96,9 +96,12 @@ impl TerrainResources {
         if count == 0 {
             return;
         }
+        let Some(slice) = edges.get(..count) else {
+            return;
+        };
         queue.write_texture(
             self.edge_heights.texture.as_image_copy(),
-            bytemuck::cast_slice(&edges[..count]),
+            bytemuck::cast_slice(slice),
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(EDGE_BYTES_PER_TILE),

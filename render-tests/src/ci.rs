@@ -20,6 +20,9 @@ pub(super) struct CliOptions {
     pub(super) ignores_path: PathBuf,
     pub(super) summary_json: Option<PathBuf>,
     pub(super) summary_md: Option<PathBuf>,
+    pub(super) filters: Vec<String>,
+    pub(super) lifecycle_json: Option<PathBuf>,
+    pub(super) artifact_dir: Option<PathBuf>,
 }
 
 impl Default for CliOptions {
@@ -31,8 +34,20 @@ impl Default for CliOptions {
             ignores_path: workspace_ignores_path(),
             summary_json: None,
             summary_md: None,
+            filters: Vec::new(),
+            lifecycle_json: None,
+            artifact_dir: None,
         }
     }
+}
+
+fn next_arg_value(iter: &mut impl Iterator<Item = String>, flag: &str) -> Result<String, String> {
+    iter.next()
+        .ok_or_else(|| format!("Missing value after {flag}"))
+}
+
+fn next_path_arg(iter: &mut impl Iterator<Item = String>, flag: &str) -> Result<PathBuf, String> {
+    next_arg_value(iter, flag).map(PathBuf::from)
 }
 
 pub(super) fn parse_cli_args<I, S>(args: I) -> Result<CliOptions, String>
@@ -43,32 +58,25 @@ where
     let mut options = CliOptions::default();
     let mut positional_root: Option<PathBuf> = None;
     let mut iter = args.into_iter().map(|arg| arg.as_ref().to_owned());
-
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--ci" => options.ci = true,
             "--write-ignores" => options.write_ignores = true,
-            "--ignores" => {
-                let value = iter
-                    .next()
-                    .ok_or_else(|| "Missing path after --ignores".to_owned())?;
-                options.ignores_path = PathBuf::from(value);
-            }
+            "--ignores" => options.ignores_path = next_path_arg(&mut iter, "--ignores")?,
             "--summary-json" => {
-                let value = iter
-                    .next()
-                    .ok_or_else(|| "Missing path after --summary-json".to_owned())?;
-                options.summary_json = Some(PathBuf::from(value));
+                options.summary_json = Some(next_path_arg(&mut iter, "--summary-json")?)
             }
-            "--summary-md" => {
-                let value = iter
-                    .next()
-                    .ok_or_else(|| "Missing path after --summary-md".to_owned())?;
-                options.summary_md = Some(PathBuf::from(value));
+            "--summary-md" => options.summary_md = Some(next_path_arg(&mut iter, "--summary-md")?),
+            "--filter" => options.filters.push(next_arg_value(&mut iter, "--filter")?),
+            "--lifecycle-json" => {
+                options.lifecycle_json = Some(next_path_arg(&mut iter, "--lifecycle-json")?);
+            }
+            "--artifact-dir" => {
+                options.artifact_dir = Some(next_path_arg(&mut iter, "--artifact-dir")?);
             }
             flag if flag.starts_with('-') => {
                 return Err(format!(
-                    "Unknown flag `{flag}`. Supported: --ci, --write-ignores, --ignores <path>, --summary-json <path>, --summary-md <path> [test-dir]"
+                    "Unknown flag `{flag}`. Supported: --ci, --write-ignores, --ignores <path>, --summary-json <path>, --summary-md <path>, --filter <prefix>, --lifecycle-json <path>, --artifact-dir <dir> [test-dir]"
                 ));
             }
             path => {
@@ -79,7 +87,6 @@ where
             }
         }
     }
-
     if let Some(root) = positional_root {
         options.test_root = root;
     }
@@ -173,21 +180,60 @@ fn rate(passed: usize, total: usize) -> f64 {
     }
 }
 
+#[derive(Default)]
+struct CategoryCounts {
+    total: usize,
+    passed: usize,
+    ignored: usize,
+    unexpected_failures: usize,
+}
+
+impl CategoryCounts {
+    fn record(&mut self, passed: bool, ignored: bool) {
+        self.total += 1;
+        match (passed, ignored) {
+            (true, _) => self.passed += 1,
+            (false, true) => self.ignored += 1,
+            (false, false) => self.unexpected_failures += 1,
+        }
+    }
+
+    fn into_summary(self) -> CategorySummary {
+        CategorySummary {
+            total: self.total,
+            passed: self.passed,
+            ignored: self.ignored,
+            unexpected_failures: self.unexpected_failures,
+            pass_rate_percent: rate(self.passed, self.total),
+        }
+    }
+}
+
+fn failure_detail(id: &str, result: &TestResult) -> String {
+    match result {
+        TestResult::Fail(diff) => format!("{id} ({diff})"),
+        TestResult::Error(msg) => format!("{id}: {msg}"),
+        TestResult::Pass(_) => id.to_owned(),
+    }
+}
+
+pub(super) fn evaluate_ci_for_options(
+    outcomes: &[TestOutcome],
+    ignores: &BTreeMap<String, String>,
+    options: &CliOptions,
+) -> SuiteSummary {
+    let full_corpus = options.test_root == workspace_tests_dir();
+    let check_stale_ignores = options.ci && full_corpus && options.filters.is_empty();
+    evaluate_ci(outcomes, ignores, check_stale_ignores)
+}
+
 pub(super) fn evaluate_ci(
     outcomes: &[TestOutcome],
     ignores: &BTreeMap<String, String>,
     check_stale_ignores: bool,
 ) -> SuiteSummary {
-    let mut render_total = 0_usize;
-    let mut render_passed = 0_usize;
-    let mut render_ignored = 0_usize;
-    let mut render_unexpected_fail = 0_usize;
-
-    let mut query_total = 0_usize;
-    let mut query_passed = 0_usize;
-    let mut query_ignored = 0_usize;
-    let mut query_unexpected_fail = 0_usize;
-
+    let mut render = CategoryCounts::default();
+    let mut query = CategoryCounts::default();
     let mut unexpected_failures = Vec::new();
     let mut unexpected_passes = Vec::new();
     let mut seen_ids = BTreeSet::new();
@@ -196,40 +242,15 @@ pub(super) fn evaluate_ci(
         seen_ids.insert(outcome.id.as_str());
         let is_ignored = ignores.contains_key(&outcome.id);
         let passed = matches!(outcome.result, TestResult::Pass(_));
-
-        match outcome.kind {
-            CaseKind::Render => render_total += 1,
-            CaseKind::Query => query_total += 1,
-        }
-
-        match (passed, is_ignored) {
-            (true, false) => match outcome.kind {
-                CaseKind::Render => render_passed += 1,
-                CaseKind::Query => query_passed += 1,
-            },
-            (true, true) => {
-                match outcome.kind {
-                    CaseKind::Render => render_passed += 1,
-                    CaseKind::Query => query_passed += 1,
-                }
-                unexpected_passes.push(outcome.id.clone());
-            }
-            (false, true) => match outcome.kind {
-                CaseKind::Render => render_ignored += 1,
-                CaseKind::Query => query_ignored += 1,
-            },
-            (false, false) => {
-                match outcome.kind {
-                    CaseKind::Render => render_unexpected_fail += 1,
-                    CaseKind::Query => query_unexpected_fail += 1,
-                }
-                let detail = match &outcome.result {
-                    TestResult::Fail(diff) => format!("{} ({diff})", outcome.id),
-                    TestResult::Error(msg) => format!("{}: {msg}", outcome.id),
-                    TestResult::Pass(_) => outcome.id.clone(),
-                };
-                unexpected_failures.push(detail);
-            }
+        let counts = match outcome.kind {
+            CaseKind::Render => &mut render,
+            CaseKind::Query => &mut query,
+        };
+        counts.record(passed, is_ignored);
+        if passed && is_ignored {
+            unexpected_passes.push(outcome.id.clone());
+        } else if !passed && !is_ignored {
+            unexpected_failures.push(failure_detail(&outcome.id, &outcome.result));
         }
     }
 
@@ -242,37 +263,32 @@ pub(super) fn evaluate_ci(
     } else {
         Vec::new()
     };
-
-    let total_cases = render_total + query_total;
-    let total_passed = render_passed + query_passed;
-    let total_ignored = render_ignored + query_ignored;
-    let total_unexpected_fail = render_unexpected_fail + query_unexpected_fail;
+    let total = CategoryCounts {
+        total: render.total + query.total,
+        passed: render.passed + query.passed,
+        ignored: render.ignored + query.ignored,
+        unexpected_failures: render.unexpected_failures + query.unexpected_failures,
+    };
 
     SuiteSummary {
-        total: CategorySummary {
-            total: total_cases,
-            passed: total_passed,
-            ignored: total_ignored,
-            unexpected_failures: total_unexpected_fail,
-            pass_rate_percent: rate(total_passed, total_cases),
-        },
-        render: CategorySummary {
-            total: render_total,
-            passed: render_passed,
-            ignored: render_ignored,
-            unexpected_failures: render_unexpected_fail,
-            pass_rate_percent: rate(render_passed, render_total),
-        },
-        query: CategorySummary {
-            total: query_total,
-            passed: query_passed,
-            ignored: query_ignored,
-            unexpected_failures: query_unexpected_fail,
-            pass_rate_percent: rate(query_passed, query_total),
-        },
+        total: total.into_summary(),
+        render: render.into_summary(),
+        query: query.into_summary(),
         unexpected_failures,
         unexpected_passes,
         stale_ignores,
+    }
+}
+
+fn append_markdown_section(md: &mut String, heading: &str, items: &[String]) {
+    if items.is_empty() {
+        return;
+    }
+    md.push_str("\n### ");
+    md.push_str(heading);
+    md.push('\n');
+    for item in items {
+        md.push_str(&format!("- `{item}`\n"));
     }
 }
 
@@ -301,24 +317,17 @@ pub(super) fn format_markdown_summary(summary: &SuiteSummary) -> String {
         summary.total.total,
         summary.total.pass_rate_percent,
     );
-    if !summary.unexpected_failures.is_empty() {
-        md.push_str("\n### Unexpected Failures\n");
-        for item in &summary.unexpected_failures {
-            md.push_str(&format!("- `{item}`\n"));
-        }
-    }
-    if !summary.unexpected_passes.is_empty() {
-        md.push_str("\n### Unexpected Passes (remove from `render-tests/ignores.json`)\n");
-        for id in &summary.unexpected_passes {
-            md.push_str(&format!("- `{id}`\n"));
-        }
-    }
-    if !summary.stale_ignores.is_empty() {
-        md.push_str("\n### Stale Ignore Entries (missing fixture directory)\n");
-        for id in &summary.stale_ignores {
-            md.push_str(&format!("- `{id}`\n"));
-        }
-    }
+    append_markdown_section(&mut md, "Unexpected Failures", &summary.unexpected_failures);
+    append_markdown_section(
+        &mut md,
+        "Unexpected Passes (remove from `render-tests/ignores.json`)",
+        &summary.unexpected_passes,
+    );
+    append_markdown_section(
+        &mut md,
+        "Stale Ignore Entries (missing fixture directory)",
+        &summary.stale_ignores,
+    );
     md
 }
 
@@ -347,29 +356,28 @@ pub(super) fn build_updated_ignores(
     existing: Option<&IgnoreFile>,
 ) -> IgnoreFile {
     let mut ignores = BTreeMap::new();
-    let mut render_total = 0_usize;
-    let mut render_passed = 0_usize;
-    let mut query_total = 0_usize;
-    let mut query_passed = 0_usize;
+    let (mut render_total, mut render_passed) = (0_usize, 0_usize);
+    let (mut query_total, mut query_passed) = (0_usize, 0_usize);
 
     for outcome in outcomes {
+        let passed = matches!(outcome.result, TestResult::Pass(_));
         match outcome.kind {
-            CaseKind::Render => render_total += 1,
-            CaseKind::Query => query_total += 1,
-        }
-        match &outcome.result {
-            TestResult::Pass(_) => match outcome.kind {
-                CaseKind::Render => render_passed += 1,
-                CaseKind::Query => query_passed += 1,
-            },
-            failure => {
-                let reason = existing
-                    .and_then(|file| file.ignores.get(&outcome.id))
-                    .filter(|text| !text.trim().is_empty())
-                    .cloned()
-                    .unwrap_or_else(|| categorize_failure(&outcome.id, failure));
-                ignores.insert(outcome.id.clone(), reason);
+            CaseKind::Render => {
+                render_total += 1;
+                render_passed += usize::from(passed);
             }
+            CaseKind::Query => {
+                query_total += 1;
+                query_passed += usize::from(passed);
+            }
+        }
+        if !passed {
+            let reason = existing
+                .and_then(|file| file.ignores.get(&outcome.id))
+                .filter(|text| !text.trim().is_empty())
+                .cloned()
+                .unwrap_or_else(|| categorize_failure(&outcome.id, &outcome.result));
+            ignores.insert(outcome.id.clone(), reason);
         }
     }
 
@@ -388,30 +396,44 @@ pub(super) fn build_updated_ignores(
 }
 
 fn categorize_failure(id: &str, result: &TestResult) -> String {
+    const ERROR_REASONS: [(&str, &str); 7] = [
+        (
+            "unknown variant `canvas`",
+            "Canvas source (`type: \"canvas\"`) is not implemented",
+        ),
+        (
+            "unknown variant `video`",
+            "Video source (`type: \"video\"`) is not implemented",
+        ),
+        (
+            "addCustomLayer",
+            "Style-level JS `addCustomLayer` operation is not supported",
+        ),
+        (
+            "querySourceFeatures",
+            "`querySourceFeatures` harness operation is not implemented",
+        ),
+        (
+            "larger than the GPU limit of 8192",
+            "Physical render target exceeds the guaranteed 8192 px WebGPU texture limit",
+        ),
+        (
+            "render-tests/src/assets/styles/",
+            "External `local://styles/*.json` basemap asset is not vendored",
+        ),
+        (
+            "has no tile template",
+            "Remote Mapbox TileJSON source URL is not vendored offline",
+        ),
+    ];
     if let TestResult::Error(msg) = result {
-        if msg.contains("unknown variant `canvas`") {
-            return "Canvas source (`type: \"canvas\"`) is not implemented".to_owned();
-        }
-        if msg.contains("unknown variant `video`") {
-            return "Video source (`type: \"video\"`) is not implemented".to_owned();
-        }
-        if msg.contains("addCustomLayer") {
-            return "Style-level JS `addCustomLayer` operation is not supported".to_owned();
-        }
-        if msg.contains("querySourceFeatures") {
-            return "`querySourceFeatures` harness operation is not implemented".to_owned();
-        }
-        if msg.contains("larger than the GPU limit of 8192") {
-            return "Physical render target exceeds the guaranteed 8192 px WebGPU texture limit"
-                .to_owned();
-        }
-        if msg.contains("render-tests/src/assets/styles/") {
-            return "External `local://styles/*.json` basemap asset is not vendored".to_owned();
-        }
-        if msg.contains("has no tile template") {
-            return "Remote Mapbox TileJSON source URL is not vendored offline".to_owned();
-        }
-        return format!("Harness or engine error: {msg}");
+        return ERROR_REASONS
+            .iter()
+            .find(|(needle, _)| msg.contains(needle))
+            .map_or_else(
+                || format!("Harness or engine error: {msg}"),
+                |(_, reason)| (*reason).to_owned(),
+            );
     }
     if id.starts_with("query/") {
         return "`queryRenderedFeatures` hit-testing differs from GL JS under rotation, tilt, viewport translation, or symbol filtering".to_owned();

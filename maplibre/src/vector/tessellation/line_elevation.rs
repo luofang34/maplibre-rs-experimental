@@ -115,7 +115,7 @@ fn emit_clipped_subpath(
     let mut active: Vec<[f32; 2]> = Vec::new();
     let mut all_intact = closed;
     for pair in pts.windows(2) {
-        let (a, b) = (pair[0], pair[1]);
+        let [a, b] = *pair else { continue };
         if closed && is_polygon_tile_border(a, b, extent) {
             all_intact = false;
             flush_open(builder, &mut active);
@@ -142,20 +142,24 @@ fn emit_clipped_subpath(
     }
     if all_intact && active.len() >= 4 {
         active.pop();
-        builder.begin(point(active[0][0], active[0][1]));
-        for pt in &active[1..] {
-            builder.line_to(point(pt[0], pt[1]));
+        if let Some((&first, rest)) = active.split_first() {
+            builder.begin(point(first[0], first[1]));
+            for pt in rest {
+                builder.line_to(point(pt[0], pt[1]));
+            }
+            builder.end(true);
         }
-        builder.end(true);
     } else {
         flush_open(builder, &mut active);
     }
 }
 
 fn flush_open(builder: &mut lyon::path::path::Builder, active: &mut Vec<[f32; 2]>) {
-    if active.len() >= 2 {
-        builder.begin(point(active[0][0], active[0][1]));
-        for pt in &active[1..] {
+    if active.len() >= 2
+        && let Some((&first, rest)) = active.split_first()
+    {
+        builder.begin(point(first[0], first[1]));
+        for pt in rest {
             builder.line_to(point(pt[0], pt[1]));
         }
         builder.end(false);

@@ -6,11 +6,19 @@ use std::{
 };
 
 use maplibre::{
-    headless::{create_headless_renderer_with_settings, map::HeadlessMap, HeadlessPlugin},
+    headless::{
+        create_headless_renderer_with_settings,
+        map::{HeadlessMap, ProcessedLayers},
+        HeadlessPlugin,
+    },
     plugin::Plugin,
-    raster::{cross_fade::RasterCrossFade, DefaultRasterTransferables, RasterPlugin},
+    raster::{
+        cross_fade::RasterCrossFade, AvailableRasterLayerData, DefaultRasterTransferables,
+        RasterPlugin,
+    },
     render::{
         settings::{Msaa, RendererSettings},
+        tracked_pass::PassStats,
         RenderPlugin,
     },
     style::{layer::LayerPaint, source::Source, Style},
@@ -19,24 +27,105 @@ use maplibre::{
 };
 
 use crate::{
-    comparison::{compare_and_diff, composite_opaque_background, unpremultiply, Difference},
+    artifacts::FixtureTelemetry,
+    comparison::{compare_frame_blocking, Difference},
+    image_sources::PlacedImage,
     parse_test_meta,
     source_loading::{load_dem_tiles_blocking, load_sources_blocking, DepartingRasterTiles},
     TestMeta, TestResult,
 };
 
-pub(super) async fn run_test_inner(test_dir: &Path) -> TestResult {
-    match render_fixture(test_dir).await {
-        Ok((difference, limits)) if difference.within(limits) => TestResult::Pass(difference),
-        Ok((difference, _)) => TestResult::Fail(difference),
-        Err(error) => TestResult::Error(error),
+/// Removes temporary headless frame PNGs even if rendering or comparison fails or panics.
+pub(super) struct FrameCleanupGuard {
+    paths: Vec<PathBuf>,
+}
+
+impl FrameCleanupGuard {
+    pub(super) fn new(paths: Vec<PathBuf>) -> Self {
+        Self { paths }
+    }
+
+    pub(super) fn paths(&self) -> &[PathBuf] {
+        &self.paths
     }
 }
 
-async fn render_fixture(test_dir: &Path) -> Result<(Difference, Difference), String> {
-    let (mut style, meta) = load_style_blocking(test_dir)?;
-    let images = crate::image_sources::lower(&mut style)?;
-    let mut map = create_map(&style, &meta).await?;
+impl Drop for FrameCleanupGuard {
+    fn drop(&mut self) {
+        for path in &self.paths {
+            drop(std::fs::remove_file(path));
+        }
+    }
+}
+
+struct PreparedTiles {
+    layers: ProcessedLayers,
+    raster_layers: Vec<AvailableRasterLayerData>,
+    required_tile_count: usize,
+    dem_tile_count: usize,
+}
+
+pub(super) async fn run_test_with_telemetry(
+    test_dir: &Path,
+) -> (TestResult, Option<FixtureTelemetry>) {
+    match render_fixture(test_dir).await {
+        Ok((difference, limits, telemetry)) => {
+            let result = if difference.within(limits) {
+                TestResult::Pass(difference)
+            } else {
+                TestResult::Fail(difference)
+            };
+            (result, Some(telemetry))
+        }
+        Err(error) => (TestResult::Error(error), None),
+    }
+}
+
+#[cfg(test)]
+pub(super) async fn run_test_inner(test_dir: &Path) -> TestResult {
+    run_test_with_telemetry(test_dir).await.0
+}
+
+fn frame_paths(frame_count: u8) -> Vec<PathBuf> {
+    (0..=frame_count)
+        .map(|index| PathBuf::from(format!("frame_{index}.png")))
+        .collect()
+}
+
+fn remove_stale_frames(paths: &[PathBuf]) -> Result<(), String> {
+    for path in paths {
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("Cannot remove stale headless frame: {error}")),
+        }
+    }
+    Ok(())
+}
+
+fn latest_frame_path(paths: &[PathBuf]) -> Result<&Path, String> {
+    paths
+        .iter()
+        .rev()
+        .find(|path| path.exists())
+        .map(PathBuf::as_path)
+        .ok_or_else(|| "Renderer did not produce the requested final frame".to_owned())
+}
+
+fn fixture_frame_count(style: &Style) -> u8 {
+    // Labels fade in over 300 ms of 16 ms frames, so symbols need 24 frames to settle.
+    if style
+        .layers
+        .iter()
+        .any(|layer| matches!(layer.paint, Some(LayerPaint::Symbol(_))))
+    {
+        24
+    } else {
+        2
+    }
+}
+
+fn configure_map_view(map: &mut HeadlessMap, meta: &TestMeta) {
     map.set_padding(maplibre::render::camera::EdgeInsets {
         top: meta.padding.top,
         bottom: meta.padding.bottom,
@@ -50,11 +139,20 @@ async fn render_fixture(test_dir: &Path) -> Result<(Difference, Difference), Str
     if let Some(degrees) = meta.vertical_field_of_view {
         map.set_vertical_field_of_view(cgmath::Deg(degrees));
     }
+}
+
+async fn prepare_map_tiles(
+    map: &mut HeadlessMap,
+    style: &Style,
+    meta: &TestMeta,
+    images: &HashMap<String, PlacedImage>,
+) -> Result<PreparedTiles, String> {
     let mut coords = map
         .required_tile_coords()
         .map_err(|error| format!("Cannot select source tiles: {error}"))?;
     // Elevation changes which source tiles the view covers.
-    let dem_tiles = load_dem_tiles_blocking(&style, &coords)?;
+    let dem_tiles = load_dem_tiles_blocking(style, &coords)?;
+    let dem_tile_count = dem_tiles.len();
     if !dem_tiles.is_empty() {
         map.load_dem_tiles(dem_tiles)
             .map_err(|error| format!("Cannot load DEM tiles: {error}"))?;
@@ -62,13 +160,13 @@ async fn render_fixture(test_dir: &Path) -> Result<(Difference, Difference), Str
             .required_tile_coords()
             .map_err(|error| format!("Cannot select source tiles: {error}"))?;
     }
-    let paused = paused_coords(&style, &meta).await?;
-    let departing = departing_raster_tiles(&style, &meta).await?;
+    let paused = paused_coords(style, meta).await?;
+    let departing = departing_raster_tiles(style, meta).await?;
     let (layers, raster_layers) = load_sources_blocking(
-        &mut map,
-        &style,
+        map,
+        style,
         (&coords, &paused, &departing),
-        (&images, meta.pixel_ratio),
+        (images, meta.pixel_ratio),
     )?;
     if !departing.is_empty() {
         let mut fade = RasterCrossFade::default();
@@ -77,29 +175,94 @@ async fn render_fixture(test_dir: &Path) -> Result<(Difference, Difference), Str
         }
         map.set_raster_cross_fade(fade);
     }
-    // Labels fade in over 300 ms of 16 ms frames, so a frame settles only after about twenty;
-    // GL JS renders its references with the fade off. Other layers need two.
-    let frame_count: u8 = if style
-        .layers
-        .iter()
-        .any(|layer| matches!(layer.paint, Some(LayerPaint::Symbol(_))))
+    Ok(PreparedTiles {
+        layers,
+        raster_layers,
+        required_tile_count: coords.len(),
+        dem_tile_count,
+    })
+}
+
+fn evaluate_rendered_case(
+    map: &HeadlessMap,
+    meta: &TestMeta,
+    test_dir: &Path,
+    last_frame: &Path,
+) -> Result<(Difference, Difference, bool), String> {
+    if let Some(query) = meta
+        .query
+        .as_ref()
+        .map(crate::queries::of)
+        .transpose()?
+        .flatten()
     {
-        24
-    } else {
-        2
-    };
-    let frames: Vec<PathBuf> = (0..frame_count)
-        .map(|index| PathBuf::from(format!("frame_{index}.png")))
-        .collect();
-    for path in &frames {
-        match std::fs::remove_file(path) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(format!("Cannot remove stale headless frame: {error}")),
-        }
+        let matched = crate::queries::compare(map, &query, test_dir)?;
+        let mean = if matched { 0.0 } else { 1.0 };
+        return Ok((
+            Difference { mean, solid: 0 },
+            Difference {
+                mean: 0.5,
+                solid: 0,
+            },
+            true,
+        ));
     }
-    map.render_frames_with_terrain(layers, raster_layers, Vec::new(), frame_count)
-        .map_err(|error| format!("Cannot render source tiles: {error}"))?;
+    let difference = compare_frame_blocking(last_frame, test_dir, meta)?;
+    Ok((
+        difference,
+        Difference::limits(meta.max_diff, meta.pixel_ratio),
+        false,
+    ))
+}
+
+fn build_telemetry(
+    style: &Style,
+    meta: &TestMeta,
+    (required_tile_count, dem_tile_count): (usize, usize),
+    (frame_count, stats): (u8, PassStats),
+    (difference, limits, is_query): (Difference, Difference, bool),
+) -> FixtureTelemetry {
+    FixtureTelemetry {
+        id: String::new(),
+        kind: if is_query { "query" } else { "render" },
+        center: style.center,
+        zoom: style.zoom,
+        pitch: style.pitch,
+        bearing: style.bearing,
+        fov_deg: meta.vertical_field_of_view,
+        center_elevation_m: meta.center_elevation.or(style.center_altitude),
+        required_tile_count,
+        dem_tile_count,
+        paused_source_count: meta.paused_tiles.len(),
+        frame_count,
+        draws: u64::from(stats.draws),
+        state_changes: u64::from(stats.state_changes),
+        mean_diff: (!is_query).then_some(difference.mean),
+        solid_diff: (!is_query).then_some(difference.solid),
+        passed: difference.within(limits),
+        ignored: false,
+    }
+}
+
+async fn render_fixture(
+    test_dir: &Path,
+) -> Result<(Difference, Difference, FixtureTelemetry), String> {
+    let (mut style, meta) = load_style_blocking(test_dir)?;
+    let images = crate::image_sources::lower(&mut style)?;
+    let mut map = create_map(&style, &meta).await?;
+    configure_map_view(&mut map, &meta);
+    let frame_count = fixture_frame_count(&style);
+    let frame_guard = FrameCleanupGuard::new(frame_paths(frame_count));
+    remove_stale_frames(frame_guard.paths())?;
+    let prepared = prepare_map_tiles(&mut map, &style, &meta, &images).await?;
+    let tile_counts = (prepared.required_tile_count, prepared.dem_tile_count);
+    map.render_frames_with_terrain(
+        prepared.layers,
+        prepared.raster_layers,
+        Vec::new(),
+        frame_count,
+    )
+    .map_err(|error| format!("Cannot render source tiles: {error}"))?;
     let stats = map.take_render_stats();
     tracing::debug!(
         draws = stats.draws,
@@ -108,36 +271,17 @@ async fn render_fixture(test_dir: &Path) -> Result<(Difference, Difference), Str
         frames = frame_count,
         "render passes"
     );
-    let last = frames.last().ok_or("no frame requested")?;
-    if let Some(query) = meta
-        .query
-        .as_ref()
-        .map(crate::queries::of)
-        .transpose()?
-        .flatten()
-    {
-        let matched = crate::queries::compare(&map, &query, test_dir)?;
-        for path in &frames {
-            std::fs::remove_file(path).ok();
-        }
-        // A query either returns what GL JS returns or it does not.
-        let mean = if matched { 0.0 } else { 1.0 };
-        return Ok((
-            Difference { mean, solid: 0 },
-            Difference {
-                mean: 0.5,
-                solid: 0,
-            },
-        ));
-    }
-    let difference = compare_frame_blocking(last, test_dir, &meta)?;
-    for path in &frames {
-        std::fs::remove_file(path).ok();
-    }
-    Ok((
-        difference,
-        Difference::limits(meta.max_diff, meta.pixel_ratio),
-    ))
+    let last = latest_frame_path(frame_guard.paths())?;
+    let (difference, limits, is_query) = evaluate_rendered_case(&map, &meta, test_dir, last)?;
+    let telemetry = build_telemetry(
+        &style,
+        &meta,
+        tile_counts,
+        (frame_count, stats),
+        (difference, limits, is_query),
+    );
+    drop(frame_guard);
+    Ok((difference, limits, telemetry))
 }
 
 fn load_style_blocking(test_dir: &Path) -> Result<(Style, TestMeta), String> {
@@ -295,76 +439,6 @@ async fn create_map(style: &Style, meta: &TestMeta) -> Result<HeadlessMap, Strin
         map.set_max_pitch(cgmath::Deg(max_pitch));
     }
     Ok(map)
-}
-
-fn compare_frame_blocking(
-    frame: &Path,
-    test_dir: &Path,
-    meta: &TestMeta,
-) -> Result<Difference, String> {
-    if !frame.exists() {
-        return Err("Renderer did not produce the requested final frame".into());
-    }
-    let actual = test_dir.join("actual.png");
-    std::fs::rename(frame, &actual)
-        .map_err(|error| format!("Cannot move rendered frame into test output: {error}"))?;
-    unpremultiply(&actual)?;
-    if meta.show_padding {
-        crate::camera_options::draw_overlay(
-            &actual,
-            meta.padding,
-            (meta.width, meta.height),
-            meta.pixel_ratio,
-        )?;
-    }
-    if let Some(background) = meta.comparison_background {
-        composite_opaque_background(&actual, background)?;
-    }
-    // GL JS fixtures carry alternative reference images for platform or precision variants
-    // (`expected-half-float.png`, `expected-macos.png`, ...); matching any one passes.
-    let mut references = expected_images(test_dir)?;
-    if references.is_empty() {
-        return Err(format!(
-            "expected.png not found: {}",
-            test_dir.join("expected.png").display()
-        ));
-    }
-    let diff_path = test_dir.join("diff.png");
-    let mut best: Option<(Difference, PathBuf)> = None;
-    for reference in references.drain(..) {
-        let difference = compare_and_diff(&actual, &reference, &diff_path, meta.pixel_ratio)
-            .map_err(|error| format!("Image comparison failed: {error}"))?;
-        if best
-            .as_ref()
-            .is_none_or(|(closest, _)| difference.mean < closest.mean)
-        {
-            best = Some((difference, reference));
-        }
-    }
-    let Some((difference, reference)) = best else {
-        return Err("no reference image".into());
-    };
-    // Leave the difference image of the closest reference.
-    compare_and_diff(&actual, &reference, &diff_path, meta.pixel_ratio)
-        .map_err(|error| format!("Image comparison failed: {error}"))?;
-    Ok(difference)
-}
-
-/// Every reference image of a fixture, `expected.png` first.
-fn expected_images(test_dir: &Path) -> Result<Vec<PathBuf>, String> {
-    let entries = std::fs::read_dir(test_dir)
-        .map_err(|error| format!("Cannot list {}: {error}", test_dir.display()))?;
-    let mut references: Vec<PathBuf> = entries
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with("expected") && name.ends_with(".png"))
-        })
-        .collect();
-    references.sort();
-    Ok(references)
 }
 
 fn apply_harness_ideograph_setting(style: &mut Style, raw_style: &serde_json::Value) {

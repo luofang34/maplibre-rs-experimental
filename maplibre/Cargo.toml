@@ -165,6 +165,7 @@ naga = { workspace = true, features = ["msl-out", "spv-out", "spv-in", "glsl-out
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 env_logger.workspace = true
+proptest.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]

@@ -106,8 +106,13 @@ impl AtlasBuilder {
         for row in 0..height {
             let start = (((y + row) * atlas_width + x) * 4) as usize;
             let source = (row * width * 4) as usize;
-            self.atlas.pixels[start..start + row_bytes]
-                .copy_from_slice(&pixels[source..source + row_bytes]);
+            let (Some(dst), Some(src)) = (
+                self.atlas.pixels.get_mut(start..start + row_bytes),
+                pixels.get(source..source + row_bytes),
+            ) else {
+                return None;
+            };
+            dst.copy_from_slice(src);
         }
         Some([x, y, width, height])
     }
@@ -127,8 +132,12 @@ impl AtlasBuilder {
         for row in 0..height {
             let start = (((y + row) * atlas_width + x) * 4) as usize;
             let src_start = (row * width) as usize;
-            let src = &alpha[src_start..src_start + width as usize];
-            let dst = &mut self.atlas.pixels[start..start + row_bytes];
+            let (Some(src), Some(dst)) = (
+                alpha.get(src_start..src_start + width as usize),
+                self.atlas.pixels.get_mut(start..start + row_bytes),
+            ) else {
+                return None;
+            };
             for (&a, px) in src.iter().zip(dst.as_chunks_mut::<4>().0) {
                 *px = [a, a, a, 255];
             }
@@ -157,8 +166,12 @@ impl AtlasBuilder {
         for row in 0..height {
             let dst_start = (((y + row) * atlas_width + x) * 4) as usize;
             let src_start = (sy + row) as usize * img_stride + (sx * 4) as usize;
-            let src = &raw[src_start..src_start + row_bytes];
-            let dst = &mut self.atlas.pixels[dst_start..dst_start + row_bytes];
+            let (Some(src), Some(dst)) = (
+                raw.get(src_start..src_start + row_bytes),
+                self.atlas.pixels.get_mut(dst_start..dst_start + row_bytes),
+            ) else {
+                return None;
+            };
             if premul {
                 for (s, d) in src
                     .as_chunks::<4>()
@@ -299,8 +312,11 @@ impl AtlasBuilder {
                 for row in 0..h {
                     let src = row * old_w * 4;
                     let dst = row * new_w * 4;
-                    if let Some(slice) = self.atlas.pixels.get(src..src + new_w * 4) {
-                        compact[dst..dst + new_w * 4].copy_from_slice(slice);
+                    if let (Some(slice), Some(dst_slice)) = (
+                        self.atlas.pixels.get(src..src + new_w * 4),
+                        compact.get_mut(dst..dst + new_w * 4),
+                    ) {
+                        dst_slice.copy_from_slice(slice);
                     }
                 }
                 self.atlas.pixels = compact;

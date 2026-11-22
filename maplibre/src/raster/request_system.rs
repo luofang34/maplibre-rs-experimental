@@ -306,6 +306,96 @@ fn wanted_tiles(
     wanted_tiles_with_sources(regions, drape_targets, style, world).0
 }
 
+struct WantedTilesAcc {
+    stand_ins: Vec<WorldTileCoords>,
+    seen_stand_ins: FxHashSet<WorldTileCoords>,
+    wanted: Vec<WorldTileCoords>,
+    coarse_ancestors: Vec<WorldTileCoords>,
+    seen_coarse: FxHashSet<WorldTileCoords>,
+    needed_coarse: FxHashSet<WorldTileCoords>,
+    sources_by_coord: FxHashMap<WorldTileCoords, Vec<RasterSourceId>>,
+}
+
+type SourceTileConstraints = (u8, Option<(f64, f64, f64, f64)>, u8);
+
+fn source_tile_constraints(
+    source: &RasterSourceId,
+    style: &crate::style::Style,
+) -> SourceTileConstraints {
+    let minzoom = match source.name().and_then(|name| style.sources.get(name)) {
+        Some(crate::style::source::Source::Raster(source)) => source.minzoom,
+        Some(crate::style::source::Source::RasterDem(source)) => source.minzoom,
+        _ => None,
+    }
+    .unwrap_or(0);
+    let bounds = match source.name().and_then(|name| style.sources.get(name)) {
+        Some(crate::style::source::Source::Raster(source)) => source.bounds,
+        Some(crate::style::source::Source::Image(image)) => image_bounds(image),
+        _ => None,
+    };
+    let maxzoom = match source.name().and_then(|name| style.sources.get(name)) {
+        Some(crate::style::source::Source::Raster(source)) => source.maxzoom,
+        Some(crate::style::source::Source::RasterDem(source)) => source.maxzoom,
+        _ => None,
+    }
+    .unwrap_or(u8::MAX);
+    (minzoom, bounds, maxzoom)
+}
+
+fn collect_source_wanted_tiles(
+    acc: &mut WantedTilesAcc,
+    source: &RasterSourceId,
+    tiles: Vec<WorldTileCoords>,
+    drape_targets: &[WorldTileCoords],
+    style: &crate::style::Style,
+    world: &crate::tcs::world::World,
+) {
+    let is_terrain = style.terrain.is_some();
+    let (minzoom, bounds, maxzoom) = source_tile_constraints(source, style);
+    if !tiles.is_empty() {
+        for coords in drape_targets
+            .iter()
+            .filter_map(|target| stand_in_tile(*target, minzoom, maxzoom))
+            .filter(|coords| {
+                bounds.is_none_or(|bounds| crate::io::tile_sources::tile_in_bounds(*coords, bounds))
+            })
+        {
+            record_wanted_source(&mut acc.sources_by_coord, coords, source);
+            if acc.seen_stand_ins.insert(coords) {
+                acc.stand_ins.push(coords);
+            }
+        }
+    }
+    for coords in tiles {
+        // Tiles outside the source's declared bounds are never requested.
+        if bounds.is_some_and(|bounds| !crate::io::tile_sources::tile_in_bounds(coords, bounds)) {
+            continue;
+        }
+        if is_terrain {
+            if let Some(ancestor) = coarse_raster_ancestor(coords, minzoom) {
+                if acc.seen_coarse.insert(ancestor) {
+                    acc.coarse_ancestors.push(ancestor);
+                }
+                if !source_ready_at(world, source, coords) {
+                    acc.needed_coarse.insert(ancestor);
+                    record_wanted_source(&mut acc.sources_by_coord, ancestor, source);
+                }
+            }
+        }
+        record_wanted_source(&mut acc.sources_by_coord, coords, source);
+        acc.wanted.push(coords);
+        if let Some(parent) = missing_tile_fallback(coords, minzoom, |coords| {
+            world
+                .tiles
+                .query::<&RasterLayersDataComponent>(coords)
+                .is_some_and(|component| component.source_is_missing(source))
+        }) {
+            record_wanted_source(&mut acc.sources_by_coord, parent, source);
+            acc.wanted.push(parent);
+        }
+    }
+}
+
 fn wanted_tiles_with_sources(
     regions: Vec<(RasterSourceId, Vec<WorldTileCoords>)>,
     drape_targets: Vec<WorldTileCoords>,
@@ -315,91 +405,33 @@ fn wanted_tiles_with_sources(
     Vec<WorldTileCoords>,
     FxHashMap<WorldTileCoords, Vec<RasterSourceId>>,
 ) {
-    let mut stand_ins = Vec::new();
-    let mut seen_stand_ins = FxHashSet::default();
-    let mut wanted = Vec::new();
-    let mut coarse_ancestors = Vec::new();
-    let mut seen_coarse = FxHashSet::default();
-    let mut needed_coarse = FxHashSet::default();
-    let mut sources_by_coord: FxHashMap<WorldTileCoords, Vec<RasterSourceId>> =
-        FxHashMap::default();
-    let is_terrain = style.terrain.is_some();
+    let mut acc = WantedTilesAcc {
+        stand_ins: Vec::new(),
+        seen_stand_ins: FxHashSet::default(),
+        wanted: Vec::new(),
+        coarse_ancestors: Vec::new(),
+        seen_coarse: FxHashSet::default(),
+        needed_coarse: FxHashSet::default(),
+        sources_by_coord: FxHashMap::default(),
+    };
     for (source, tiles) in regions {
-        let minzoom = match source.name().and_then(|name| style.sources.get(name)) {
-            Some(crate::style::source::Source::Raster(source)) => source.minzoom,
-            Some(crate::style::source::Source::RasterDem(source)) => source.minzoom,
-            _ => None,
-        }
-        .unwrap_or(0);
-        let bounds = match source.name().and_then(|name| style.sources.get(name)) {
-            Some(crate::style::source::Source::Raster(source)) => source.bounds,
-            Some(crate::style::source::Source::Image(image)) => image_bounds(image),
-            _ => None,
-        };
-        let maxzoom = match source.name().and_then(|name| style.sources.get(name)) {
-            Some(crate::style::source::Source::Raster(source)) => source.maxzoom,
-            Some(crate::style::source::Source::RasterDem(source)) => source.maxzoom,
-            _ => None,
-        }
-        .unwrap_or(u8::MAX);
-        if !tiles.is_empty() {
-            for coords in drape_targets
-                .iter()
-                .filter_map(|target| stand_in_tile(*target, minzoom, maxzoom))
-                .filter(|coords| {
-                    bounds.is_none_or(|bounds| {
-                        crate::io::tile_sources::tile_in_bounds(*coords, bounds)
-                    })
-                })
-            {
-                record_wanted_source(&mut sources_by_coord, coords, &source);
-                if seen_stand_ins.insert(coords) {
-                    stand_ins.push(coords);
-                }
-            }
-        }
-        for coords in tiles {
-            // Tiles outside the source's declared bounds are never requested.
-            if bounds.is_some_and(|bounds| !crate::io::tile_sources::tile_in_bounds(coords, bounds))
-            {
-                continue;
-            }
-            if is_terrain {
-                if let Some(ancestor) = coarse_raster_ancestor(coords, minzoom) {
-                    if seen_coarse.insert(ancestor) {
-                        coarse_ancestors.push(ancestor);
-                    }
-                    if !source_ready_at(world, &source, coords) {
-                        needed_coarse.insert(ancestor);
-                        record_wanted_source(&mut sources_by_coord, ancestor, &source);
-                    }
-                }
-            }
-            record_wanted_source(&mut sources_by_coord, coords, &source);
-            wanted.push(coords);
-            if let Some(parent) = missing_tile_fallback(coords, minzoom, |coords| {
-                world
-                    .tiles
-                    .query::<&RasterLayersDataComponent>(coords)
-                    .is_some_and(|component| component.source_is_missing(&source))
-            }) {
-                record_wanted_source(&mut sources_by_coord, parent, &source);
-                wanted.push(parent);
-            }
-        }
+        collect_source_wanted_tiles(&mut acc, &source, tiles, &drape_targets, style, world);
     }
-    coarse_ancestors.retain(|ancestor| needed_coarse.contains(ancestor));
-    if !coarse_ancestors.is_empty() {
+    acc.coarse_ancestors
+        .retain(|ancestor| acc.needed_coarse.contains(ancestor));
+    if !acc.coarse_ancestors.is_empty() {
         // Bracket the local terrain with one coarse raster overview tile first, then fine
         // tiles, then any remaining coarse ancestors, matching DEM `request_order`.
-        let remaining = coarse_ancestors.split_off(coarse_ancestors.len().min(2));
-        coarse_ancestors.extend(wanted);
-        coarse_ancestors.extend(remaining);
-        stand_ins.extend(coarse_ancestors);
-        return (stand_ins, sources_by_coord);
+        let remaining = acc
+            .coarse_ancestors
+            .split_off(acc.coarse_ancestors.len().min(2));
+        acc.coarse_ancestors.extend(acc.wanted);
+        acc.coarse_ancestors.extend(remaining);
+        acc.stand_ins.extend(acc.coarse_ancestors);
+        return (acc.stand_ins, acc.sources_by_coord);
     }
-    stand_ins.extend(wanted);
-    (stand_ins, sources_by_coord)
+    acc.stand_ins.extend(acc.wanted);
+    (acc.stand_ins, acc.sources_by_coord)
 }
 
 /// The bounds `(west, south, east, north)` of an image's corners, so tiles it cannot reach are

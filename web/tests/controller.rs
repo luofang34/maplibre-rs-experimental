@@ -1,5 +1,5 @@
 //! A page starts a map and drives it through the controller `startMapLibre` resolves to.
-#![allow(clippy::expect_used, clippy::panic)]
+#![allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
 
 use serde_json::{json, Value};
 use wasm_bindgen::{JsCast, JsValue};

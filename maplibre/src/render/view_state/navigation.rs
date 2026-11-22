@@ -147,8 +147,14 @@ impl FreeGlobe {
             target.x.atan2(target.z).to_degrees(),
         );
         let rotation = Matrix3::from(self.orientation) * frame_at(center).transpose();
+        let cols: [[f64; 3]; 3] = rotation.into();
         // rotation = Rz(roll) Rx(-pitch) Rz(bearing); cgmath indexes [column][row].
-        let m = |row: usize, column: usize| rotation[column][row];
+        let m = |row: usize, column: usize| {
+            cols.get(column)
+                .and_then(|col| col.get(row))
+                .copied()
+                .unwrap_or(0.0)
+        };
         let tilt = m(2, 0).hypot(m(2, 1));
         let pitch = tilt.atan2(m(2, 2));
         let (bearing, roll) = if tilt > VERTICAL_TILT {

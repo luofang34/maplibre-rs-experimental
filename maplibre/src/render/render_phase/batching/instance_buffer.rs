@@ -213,7 +213,12 @@ impl<BD: bytemuck::Pod> BatchedInstanceBuffer<BD> {
         let offset_u32 = u32::try_from(byte_offset).unwrap_or(u32::MAX);
         let bytes = bytemuck::bytes_of(&value);
         self.aligned_uniform_bytes.resize(byte_offset + stride, 0u8);
-        self.aligned_uniform_bytes[byte_offset..byte_offset + bytes.len()].copy_from_slice(bytes);
+        if let Some(dst) = self
+            .aligned_uniform_bytes
+            .get_mut(byte_offset..byte_offset + bytes.len())
+        {
+            dst.copy_from_slice(bytes);
+        }
         self.instances.push(value);
         (index, offset_u32)
     }
@@ -230,77 +235,116 @@ impl<BD: bytemuck::Pod> BatchedInstanceBuffer<BD> {
             return;
         }
         if capabilities.vertex_storage_buffers {
-            let raw_bytes: &[u8] = bytemuck::cast_slice(&self.instances);
             let usages = wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::VERTEX
                 | wgpu::BufferUsages::COPY_DST;
-            upload_delta_bytes(
-                device,
-                queue,
-                "batched_instance_buffer",
-                usages,
-                raw_bytes,
-                &mut self.gpu_buffer,
-                &mut self.gpu_capacity_bytes,
-                Some(&mut self.gpu_usages),
-                &mut self.uploaded_bytes,
-                &mut self.padded_upload_scratch,
-                &mut self.retired_buffers,
-            );
+            self.upload_primary(device, queue, "batched_instance_buffer", usages, None);
             return;
         }
 
         if self.packed_end_len > 0 {
-            let raw_bytes: &[u8] = bytemuck::cast_slice(&self.instances[..self.packed_end_len]);
             let usages = wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST;
-            upload_delta_bytes(
+            self.upload_primary(
                 device,
                 queue,
                 "batched_instance_vertex_buffer",
                 usages,
-                raw_bytes,
-                &mut self.gpu_buffer,
-                &mut self.gpu_capacity_bytes,
-                Some(&mut self.gpu_usages),
-                &mut self.uploaded_bytes,
-                &mut self.padded_upload_scratch,
-                &mut self.retired_buffers,
+                Some(self.packed_end_len),
             );
         }
 
         if !self.aligned_uniform_bytes.is_empty() {
-            let usages = wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST;
-            upload_delta_bytes(
-                device,
-                queue,
-                "batched_instance_uniform_buffer",
-                usages,
-                &self.aligned_uniform_bytes,
-                &mut self.uniform_gpu_buffer,
-                &mut self.uniform_gpu_capacity_bytes,
-                None,
-                &mut self.uploaded_uniform_bytes,
-                &mut self.padded_upload_scratch,
-                &mut self.retired_buffers,
-            );
+            self.upload_uniform(device, queue);
         }
+    }
+
+    fn upload_primary(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &UploadQueue,
+        label: &'static str,
+        usages: wgpu::BufferUsages,
+        packed_len: Option<usize>,
+    ) {
+        let packed = packed_len
+            .and_then(|len| self.instances.get(..len))
+            .unwrap_or(&self.instances);
+        let raw_bytes: &[u8] = bytemuck::cast_slice(packed);
+        upload_delta_bytes(
+            device,
+            queue,
+            UploadBufferSpec {
+                label,
+                usages,
+                raw_bytes,
+            },
+            UploadBufferTarget {
+                gpu_buffer: &mut self.gpu_buffer,
+                gpu_capacity_bytes: &mut self.gpu_capacity_bytes,
+                tracked_usages: Some(&mut self.gpu_usages),
+                uploaded_bytes: &mut self.uploaded_bytes,
+                padded_upload_scratch: &mut self.padded_upload_scratch,
+                retired_buffers: &mut self.retired_buffers,
+            },
+        );
+    }
+
+    fn upload_uniform(&mut self, device: &wgpu::Device, queue: &UploadQueue) {
+        let usages = wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST;
+        upload_delta_bytes(
+            device,
+            queue,
+            UploadBufferSpec {
+                label: "batched_instance_uniform_buffer",
+                usages,
+                raw_bytes: &self.aligned_uniform_bytes,
+            },
+            UploadBufferTarget {
+                gpu_buffer: &mut self.uniform_gpu_buffer,
+                gpu_capacity_bytes: &mut self.uniform_gpu_capacity_bytes,
+                tracked_usages: None,
+                uploaded_bytes: &mut self.uploaded_uniform_bytes,
+                padded_upload_scratch: &mut self.padded_upload_scratch,
+                retired_buffers: &mut self.retired_buffers,
+            },
+        );
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+struct UploadBufferSpec<'a> {
+    label: &'static str,
+    usages: wgpu::BufferUsages,
+    raw_bytes: &'a [u8],
+}
+
+struct UploadBufferTarget<'a> {
+    gpu_buffer: &'a mut Option<wgpu::Buffer>,
+    gpu_capacity_bytes: &'a mut usize,
+    tracked_usages: Option<&'a mut wgpu::BufferUsages>,
+    uploaded_bytes: &'a mut usize,
+    padded_upload_scratch: &'a mut Vec<u8>,
+    retired_buffers: &'a mut Vec<wgpu::Buffer>,
+}
+
 fn upload_delta_bytes(
     device: &wgpu::Device,
     queue: &UploadQueue,
-    label: &'static str,
-    usages: wgpu::BufferUsages,
-    raw_bytes: &[u8],
-    gpu_buffer: &mut Option<wgpu::Buffer>,
-    gpu_capacity_bytes: &mut usize,
-    tracked_usages: Option<&mut wgpu::BufferUsages>,
-    uploaded_bytes: &mut usize,
-    padded_upload_scratch: &mut Vec<u8>,
-    retired_buffers: &mut Vec<wgpu::Buffer>,
+    spec: UploadBufferSpec<'_>,
+    target: UploadBufferTarget<'_>,
 ) {
+    let UploadBufferSpec {
+        label,
+        usages,
+        raw_bytes,
+    } = spec;
+    let UploadBufferTarget {
+        gpu_buffer,
+        gpu_capacity_bytes,
+        tracked_usages,
+        uploaded_bytes,
+        padded_upload_scratch,
+        retired_buffers,
+    } = target;
     if raw_bytes.len() <= *uploaded_bytes {
         return;
     }
@@ -336,14 +380,16 @@ fn upload_delta_bytes(
     } else {
         (*uploaded_bytes / copy_align) * copy_align
     };
-    let delta_raw = &raw_bytes[start_byte..];
+    let delta_raw = raw_bytes.get(start_byte..).unwrap_or(&[]);
     let write_bytes: &[u8] = if delta_raw.len().is_multiple_of(copy_align) {
         delta_raw
     } else {
         let padded_len = align_up(delta_raw.len(), copy_align);
         padded_upload_scratch.clear();
         padded_upload_scratch.resize(padded_len, 0u8);
-        padded_upload_scratch[..delta_raw.len()].copy_from_slice(delta_raw);
+        if let Some(dst) = padded_upload_scratch.get_mut(..delta_raw.len()) {
+            dst.copy_from_slice(delta_raw);
+        }
         padded_upload_scratch.as_slice()
     };
 

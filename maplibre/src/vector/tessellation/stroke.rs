@@ -136,6 +136,13 @@ where
     I: std::ops::Add + From<VertexId> + MaxIndex + Copy + Into<u32>,
 {
     pub(super) fn tessellate_strokes(&mut self) -> GeoResult<()> {
+        let Some((path, constructor)) = self.prepare_stroke_path_and_origins() else {
+            return Ok(());
+        };
+        self.tessellate_prepared_stroke(&path, constructor)
+    }
+
+    fn prepare_stroke_path_and_origins(&mut self) -> Option<(Path, line_origin::StrokeOrigins)> {
         let mut path = self.path_builder.replace(Path::builder()).build();
         if self.line_elevation.is_some() {
             path = line_elevation::clip_elevated_path(&path);
@@ -168,7 +175,7 @@ where
             let (clipped, bases) =
                 clip::clip_to_guardband(&path, &origins, self.line_gradient, gradient_offset);
             if bases.is_empty() {
-                return Ok(());
+                return None;
             }
             (clipped, Some(bases))
         } else {
@@ -198,10 +205,17 @@ where
                 .as_ref()
                 .map_or(PackedLine::LAYER, |style| style.pack(self.props())),
         };
+        Some((path, constructor))
+    }
 
+    fn tessellate_prepared_stroke(
+        &mut self,
+        path: &Path,
+        constructor: line_origin::StrokeOrigins,
+    ) -> GeoResult<()> {
         let declared_join = self.feature_join();
         let (effective_join, effective_miter_limit) = if declared_join == LineJoin::Round
-            && joins_within_round_limit(&path, self.stroke.round_limit)
+            && joins_within_round_limit(path, self.stroke.round_limit)
         {
             (LineJoin::Miter, self.stroke.round_limit.max(1.0))
         } else {
@@ -212,7 +226,7 @@ where
         let stroke_index_start = self.buffer.indices.len();
         self.stroke_tessellator
             .tessellate_path(
-                &path,
+                path,
                 &StrokeOptions::tolerance(DEFAULT_TOLERANCE)
                     .with_line_cap(match self.stroke.cap {
                         LineCap::Butt => lyon::tessellation::LineCap::Butt,
@@ -240,11 +254,9 @@ where
         );
         if let Some(options) = &self.line_elevation {
             let (metres, datum) = options.evaluate(self.props());
-            line_elevation::apply_elevation(
-                &mut self.buffer.vertices[vertex_start..],
-                metres,
-                datum,
-            );
+            if let Some(verts) = self.buffer.vertices.get_mut(vertex_start..) {
+                line_elevation::apply_elevation(verts, metres, datum);
+            }
         }
         self.flush_streaming_prepack(stroke_index_start);
         Ok(())
@@ -261,7 +273,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::expect_used)]
+    #![cfg_attr(test, allow(clippy::expect_used))]
     use geozero::GeomProcessor;
 
     use crate::{

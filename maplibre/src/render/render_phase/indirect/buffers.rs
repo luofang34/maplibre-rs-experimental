@@ -244,31 +244,37 @@ impl IndirectParametersBuffers {
             device,
             queue,
             &self.indexed_data,
-            &mut self.uploaded_indexed_len,
-            &mut self.indexed_gpu,
-            &mut self.retired_buffers,
-            usages,
-            "binned_indexed_indirect_buffer",
+            IndirectUploadTarget {
+                uploaded_len: &mut self.uploaded_indexed_len,
+                slot: &mut self.indexed_gpu,
+                retired_buffers: &mut self.retired_buffers,
+                usages,
+                label: "binned_indexed_indirect_buffer",
+            },
         );
         upload_delta(
             device,
             queue,
             &self.non_indexed_data,
-            &mut self.uploaded_non_indexed_len,
-            &mut self.non_indexed_gpu,
-            &mut self.retired_buffers,
-            usages,
-            "binned_non_indexed_indirect_buffer",
+            IndirectUploadTarget {
+                uploaded_len: &mut self.uploaded_non_indexed_len,
+                slot: &mut self.non_indexed_gpu,
+                retired_buffers: &mut self.retired_buffers,
+                usages,
+                label: "binned_non_indexed_indirect_buffer",
+            },
         );
         upload_delta(
             device,
             queue,
             &self.batch_sets_data,
-            &mut self.uploaded_batch_sets_len,
-            &mut self.batch_sets_gpu,
-            &mut self.retired_buffers,
-            usages,
-            "binned_indirect_batch_sets_buffer",
+            IndirectUploadTarget {
+                uploaded_len: &mut self.uploaded_batch_sets_len,
+                slot: &mut self.batch_sets_gpu,
+                retired_buffers: &mut self.retired_buffers,
+                usages,
+                label: "binned_indirect_batch_sets_buffer",
+            },
         );
     }
 }
@@ -321,29 +327,41 @@ fn ensure_indirect_buffer<'a, T: bytemuck::Pod>(
     (backing, needs_realloc)
 }
 
-#[allow(clippy::too_many_arguments)]
+struct IndirectUploadTarget<'a> {
+    uploaded_len: &'a mut usize,
+    slot: &'a mut Option<BackingIndirectBuffer>,
+    retired_buffers: &'a mut Vec<wgpu::Buffer>,
+    usages: wgpu::BufferUsages,
+    label: &'static str,
+}
+
 fn upload_delta<T: bytemuck::Pod>(
     device: &wgpu::Device,
     queue: &UploadQueue,
     data: &[T],
-    uploaded_len: &mut usize,
-    slot: &mut Option<BackingIndirectBuffer>,
-    retired_buffers: &mut Vec<wgpu::Buffer>,
-    usages: wgpu::BufferUsages,
-    label: &'static str,
+    target: IndirectUploadTarget<'_>,
 ) {
+    let IndirectUploadTarget {
+        uploaded_len,
+        slot,
+        retired_buffers,
+        usages,
+        label,
+    } = target;
     if data.len() <= *uploaded_len {
         return;
     }
     let prev_retired = retired_buffers.len();
     let (backing, reallocated) =
         ensure_indirect_buffer::<T>(device, slot, retired_buffers, data.len(), usages, label);
-    for retired in &retired_buffers[prev_retired..] {
+    for retired in retired_buffers.get(prev_retired..).into_iter().flatten() {
         queue.cancel_staged_buffer(retired);
     }
     let start = if reallocated { 0 } else { *uploaded_len };
     let byte_offset = (start * size_of::<T>()) as wgpu::BufferAddress;
-    let slice_bytes = bytemuck::cast_slice(&data[start..]);
-    queue.write_buffer(&backing.buffer, byte_offset, slice_bytes);
+    if let Some(tail) = data.get(start..) {
+        let slice_bytes = bytemuck::cast_slice(tail);
+        queue.write_buffer(&backing.buffer, byte_offset, slice_bytes);
+    }
     *uploaded_len = data.len();
 }

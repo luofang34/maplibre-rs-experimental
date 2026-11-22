@@ -1,6 +1,9 @@
 //! Cached texture bindings for terrain surfaces and their symbols, including edge heights.
 use super::*;
-use crate::render::resource::share_gpu;
+use crate::{
+    render::resource::share_gpu,
+    terrain::mesh::{create_terrain_mesh, TERRAIN_MESH_SIZE},
+};
 
 impl TerrainResources {
     /// Bind group layout of group one: uniforms, DEM texture, drape texture, sampler, edge heights.
@@ -125,5 +128,73 @@ impl TerrainResources {
         };
         self.bind_groups.insert(key, Arc::clone(&group));
         Some(group)
+    }
+}
+
+pub(super) struct TerrainGpuInit {
+    pub(super) vertex_buffer: wgpu::Buffer,
+    pub(super) index_buffer: wgpu::Buffer,
+    pub(super) index_count: u32,
+    pub(super) uniform_buffer: wgpu::Buffer,
+    pub(super) sampler: wgpu::Sampler,
+    pub(super) empty_dem: Texture,
+}
+
+pub(super) fn create_shared_gpu_resources(
+    device: &wgpu::Device,
+    queue: &crate::render::upload_queue::UploadQueue,
+) -> TerrainGpuInit {
+    let mesh = create_terrain_mesh(TERRAIN_MESH_SIZE);
+    let vertex_buffer = queue.create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("terrain mesh vertices"),
+            contents: bytemuck::cast_slice(&mesh.vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        },
+    );
+    let index_buffer = queue.create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("terrain mesh indices"),
+            contents: bytemuck::cast_slice(&mesh.indices),
+            usage: wgpu::BufferUsages::INDEX,
+        },
+    );
+    let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("terrain tile uniforms"),
+        size: UNIFORM_STRIDE * UNIFORM_CAPACITY,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        address_mode_w: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::MipmapFilterMode::Linear,
+        // Drapes are seen at grazing angles at the horizon; anisotropy keeps their
+        // detail along the view direction while the mip levels stop the shimmer.
+        anisotropy_clamp: 16,
+        ..Default::default()
+    });
+    // A fresh texture reads as zero, which decodes to sea level with a zero unpack vector.
+    let empty_dem = Texture::new(
+        Some("empty DEM"),
+        device,
+        wgpu::TextureFormat::Rgba8Unorm,
+        1,
+        1,
+        Msaa { samples: 1 },
+        wgpu::TextureUsages::TEXTURE_BINDING,
+    );
+    TerrainGpuInit {
+        vertex_buffer,
+        index_buffer,
+        index_count: mesh.indices.len() as u32,
+        uniform_buffer,
+        sampler,
+        empty_dem,
     }
 }

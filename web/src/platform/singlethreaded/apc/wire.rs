@@ -15,7 +15,6 @@ use maplibre::io::apc::CallError;
 use maplibre::{
     io::{
         apc::{Context, IntoMessage, Message, SendError},
-        source_client::SourceClient,
         tile_retry::{RequestDisposition, RequestKind, TileRequestOutcome},
     },
     sdf::provided::{ProvidedImagesReport, ProvidedImagesState},
@@ -26,10 +25,7 @@ use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{DedicatedWorkerGlobalScope, MessagePort};
 
 use super::WebMessageTag;
-use crate::{
-    error::WebError,
-    platform::singlethreaded::{transferables::FlatBufferTransferable, UsedHttpClient},
-};
+use crate::{error::WebError, platform::singlethreaded::transferables::FlatBufferTransferable};
 
 pub(crate) const BATCH_ITEM_HEADER_BYTES: usize = 20;
 
@@ -51,19 +47,14 @@ struct BufferedItem {
     payload: PayloadBytes,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct PassingContext {
-    #[allow(dead_code)]
-    pub source_client: SourceClient<UsedHttpClient>,
     pending: Arc<Mutex<Vec<BufferedItem>>>,
 }
 
 impl PassingContext {
-    pub fn new(source_client: SourceClient<UsedHttpClient>) -> Self {
-        Self {
-            source_client,
-            pending: Arc::new(Mutex::new(Vec::new())),
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub(crate) fn flush(&self) -> Result<(), SendError> {
@@ -375,28 +366,28 @@ fn encode_outcome(outcome: &TileRequestOutcome) -> Vec<u8> {
 
 #[cfg(any(test, feature = "renderer"))]
 fn decode_outcome(slice: &[u8]) -> Option<TileRequestOutcome> {
-    if slice.len() != 20 {
-        return None;
-    }
+    let bytes = <[u8; 20]>::try_from(slice).ok()?;
     let coords = WorldTileCoords {
-        x: i32::from_le_bytes(slice[0..4].try_into().ok()?),
-        y: i32::from_le_bytes(slice[4..8].try_into().ok()?),
-        z: ZoomLevel::new(slice[8]),
+        x: i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
+        y: i32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]),
+        z: ZoomLevel::new(bytes[8]),
     };
-    let kind = match slice[9] {
+    let kind = match bytes[9] {
         0 => RequestKind::Raster,
         1 => RequestKind::Dem,
         2 => RequestKind::Vector,
         _ => return None,
     };
-    let disposition = match slice[10] {
+    let disposition = match bytes[10] {
         0 => RequestDisposition::Complete,
         1 => RequestDisposition::Retry,
         _ => return None,
     };
-    let attempt = match slice[11] {
+    let attempt = match bytes[11] {
         0 => None,
-        1 => Some(u64::from_le_bytes(slice[12..20].try_into().ok()?)),
+        1 => Some(u64::from_le_bytes([
+            bytes[12], bytes[13], bytes[14], bytes[15], bytes[16], bytes[17], bytes[18], bytes[19],
+        ])),
         _ => return None,
     };
     Some(TileRequestOutcome {
@@ -431,38 +422,37 @@ fn encode_provided_report(report: &ProvidedImagesReport) -> Vec<u8> {
 
 #[cfg(any(test, feature = "renderer"))]
 fn decode_provided_report(slice: &[u8]) -> Option<ProvidedImagesReport> {
-    if slice.len() < 27 {
-        return None;
-    }
+    let (hdr, mut rest) = slice.split_first_chunk::<27>()?;
     let coords = WorldTileCoords {
-        x: i32::from_le_bytes(slice[0..4].try_into().ok()?),
-        y: i32::from_le_bytes(slice[4..8].try_into().ok()?),
-        z: ZoomLevel::new(slice[8]),
+        x: i32::from_le_bytes([hdr[0], hdr[1], hdr[2], hdr[3]]),
+        y: i32::from_le_bytes([hdr[4], hdr[5], hdr[6], hdr[7]]),
+        z: ZoomLevel::new(hdr[8]),
     };
-    let state = match slice[9] {
+    let state = match hdr[9] {
         0 => ProvidedImagesState::Awaiting,
         1 => ProvidedImagesState::Settled,
         2 => ProvidedImagesState::Retry,
         _ => return None,
     };
-    let attempt = match slice[10] {
+    let attempt = match hdr[10] {
         0 => None,
-        1 => Some(u64::from_le_bytes(slice[11..19].try_into().ok()?)),
+        1 => Some(u64::from_le_bytes([
+            hdr[11], hdr[12], hdr[13], hdr[14], hdr[15], hdr[16], hdr[17], hdr[18],
+        ])),
         _ => return None,
     };
-    let pixel_ratio = f32::from_le_bytes(slice[19..23].try_into().ok()?);
-    let count = u32::from_le_bytes(slice[23..27].try_into().ok()?) as usize;
-    let mut cursor = 27_usize;
+    let pixel_ratio = f32::from_le_bytes([hdr[19], hdr[20], hdr[21], hdr[22]]);
+    let count = u32::from_le_bytes([hdr[23], hdr[24], hdr[25], hdr[26]]) as usize;
     let mut names = Vec::with_capacity(count.min(256));
     for _ in 0..count {
-        let len_end = cursor.checked_add(4)?;
-        let len = u32::from_le_bytes(slice.get(cursor..len_end)?.try_into().ok()?) as usize;
-        let str_end = len_end.checked_add(len)?;
-        let name = std::str::from_utf8(slice.get(len_end..str_end)?).ok()?;
+        let (len_bytes, after_len) = rest.split_first_chunk::<4>()?;
+        let len = u32::from_le_bytes(*len_bytes) as usize;
+        let (name_bytes, after_name) = after_len.split_at_checked(len)?;
+        let name = std::str::from_utf8(name_bytes).ok()?;
         names.push(name.to_owned());
-        cursor = str_end;
+        rest = after_name;
     }
-    (cursor == slice.len()).then_some(ProvidedImagesReport {
+    rest.is_empty().then_some(ProvidedImagesReport {
         coords,
         attempt,
         names,

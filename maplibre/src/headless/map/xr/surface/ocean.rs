@@ -1,4 +1,4 @@
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg_attr(test, allow(clippy::expect_used))]
 use geozero::mvt::Message;
 
 use super::{read_back_blocking, SIZE};

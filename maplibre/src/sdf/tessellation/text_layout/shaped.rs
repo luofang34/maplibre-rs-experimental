@@ -3,10 +3,7 @@
 use std::ops::Range;
 
 use super::{
-    super::{
-        layout::{anchor_fractions, CollectedSymbol},
-        text_offset::{anchored_offset, variable_anchors},
-    },
+    super::{layout::CollectedSymbol, text_offset::resolve_block_placement},
     Block, Emitter,
 };
 use crate::{font::ShapedGlyph, sdf::assets::SymbolAtlas, style::layer::SymbolPaint};
@@ -42,79 +39,74 @@ pub(in crate::sdf::tessellation) fn build_shaped_block<'a>(
 
     let spacing = paint.number("text-letter-spacing", &symbol.properties, zoom, 0.0) * 24.0;
     let max_width = paint.number("text-max-width", &symbol.properties, zoom, 10.0) * 24.0;
-    let (flat_glyphs, lines) = if vertical_requested {
-        wrap_vertical_paragraphs(&raw, shaped, max_width, spacing)
-    } else if super::super::is_line_placed(paint) {
-        (shaped.clone(), std::iter::once(0..shaped.len()).collect())
-    } else {
-        wrap_shaped_paragraphs(&raw, shaped, max_width, spacing)
-    };
-    if lines.is_empty() {
-        return None;
-    }
-
+    let (flat_glyphs, lines) = wrap_shaped_block_lines(
+        &raw,
+        shaped,
+        vertical_requested,
+        super::super::is_line_placed(paint),
+        max_width,
+        spacing,
+    )?;
     let line_height = paint.number("text-line-height", &symbol.properties, zoom, 1.2) * 24.0;
     let max_line = lines
         .iter()
         .map(|range| {
+            let slice = flat_glyphs.get(range.clone()).unwrap_or(&[]);
             if vertical_requested {
-                shaped_vertical_length(&flat_glyphs[range.clone()], spacing)
+                shaped_vertical_length(slice, spacing)
             } else {
-                shaped_line_width(&flat_glyphs[range.clone()], spacing)
+                shaped_line_width(slice, spacing)
             }
         })
         .fold(0.0_f32, f32::max);
     let line_count = lines.len();
-    let line_scales = vec![1.0_f32; line_count];
-    let line_extras = vec![0.0_f32; line_count];
-    let line_contents = vec![24.0_f32; line_count];
-
-    let anchors = variable_anchors(paint);
-    let anchor = anchors.first().cloned().unwrap_or_else(|| {
-        paint
-            .text("text-anchor", &symbol.properties, zoom)
-            .unwrap_or_else(|| "center".into())
-    });
-    let fractions = anchor_fractions(&anchor);
-    let justify_prop = paint
-        .text("text-justify", &symbol.properties, zoom)
-        .unwrap_or_else(|| "center".into());
-    let justify = match justify_prop.as_str() {
-        _ if vertical_requested => 0.0,
-        "left" => 0.0,
-        "right" => 1.0,
-        "auto" => fractions[0],
-        _ => 0.5,
-    };
-    let height = line_count as f32 * line_height;
-    let mut offset = anchored_offset(paint, &anchors, &anchor, (&symbol.properties, zoom));
-    let line_offset_y = if super::super::is_line_placed(paint) {
-        std::mem::take(&mut offset[1])
-    } else {
-        0.0
-    };
+    let placed = resolve_block_placement(paint, &symbol.properties, zoom, vertical_requested);
 
     Some(Block {
         chars: Vec::new(),
         styles: Vec::new(),
         lines,
-        line_scales,
-        line_extras,
-        line_contents,
+        line_scales: vec![1.0_f32; line_count],
+        line_extras: vec![0.0_f32; line_count],
+        line_contents: vec![24.0_f32; line_count],
         spacing,
         line_height,
         max_line,
-        height,
-        fractions,
-        justify,
-        offset,
-        line_offset_y,
+        height: line_count as f32 * line_height,
+        fractions: placed.fractions,
+        justify: placed.justify,
+        offset: placed.offset,
+        line_offset_y: placed.line_offset_y,
         vertical: vertical_requested,
         shaped: Some(ShapedBlock {
             atlas,
             glyphs: flat_glyphs,
         }),
     })
+}
+
+fn wrap_shaped_block_lines(
+    raw: &str,
+    shaped: &[ShapedGlyph],
+    vertical_requested: bool,
+    line_placed: bool,
+    max_width: f32,
+    spacing: f32,
+) -> Option<(Vec<ShapedGlyph>, Vec<std::ops::Range<usize>>)> {
+    let result = if vertical_requested {
+        wrap_vertical_paragraphs(raw, shaped, max_width, spacing)
+    } else if line_placed {
+        (
+            shaped.to_vec(),
+            vec![std::ops::Range {
+                start: 0,
+                end: shaped.len(),
+            }],
+        )
+    } else {
+        wrap_shaped_paragraphs(raw, shaped, max_width, spacing)
+    };
+    (!result.1.is_empty()).then_some(result)
 }
 
 pub(in crate::sdf::tessellation) fn unwrapped_shaped_width(
@@ -143,7 +135,7 @@ pub(super) fn place_shaped_line(
     let Some(range) = block.lines.get(line_index) else {
         return;
     };
-    let slice = &shaped.glyphs[range.clone()];
+    let slice = shaped.glyphs.get(range.clone()).unwrap_or(&[]);
     if block.vertical {
         let col_x = block.height * (1.0 - block.fractions[0])
             - (line_index as f32 + 0.5) * block.line_height
@@ -160,7 +152,9 @@ pub(super) fn place_shaped_line(
                     emit.quad(entry, [x, y, x + w, y + h], pen_y + adv * 0.5);
                 }
             }
-            let add_spacing = idx + 1 < slice.len() && slice[idx + 1].cluster != sg.cluster;
+            let add_spacing = slice
+                .get(idx + 1)
+                .is_some_and(|next| next.cluster != sg.cluster);
             pen_y += adv + if add_spacing { block.spacing } else { 0.0 };
         }
         return;
@@ -177,10 +171,11 @@ pub(super) fn place_shaped_line(
                 emit.quad(entry, bounds, pen + sg.x_advance / 2.0);
             }
         }
-        let add_spacing = idx + 1 < slice.len()
-            && !sg.rtl
-            && slice[idx + 1].cluster != sg.cluster
-            && sg.x_advance > 0.0;
+        let add_spacing = !sg.rtl
+            && sg.x_advance > 0.0
+            && slice
+                .get(idx + 1)
+                .is_some_and(|next| next.cluster != sg.cluster);
         pen += sg.x_advance + if add_spacing { block.spacing } else { 0.0 };
     }
 }
@@ -191,10 +186,11 @@ fn shaped_line_width(slice: &[ShapedGlyph], spacing: f32) -> f32 {
     }
     let mut width = 0.0_f32;
     for (idx, sg) in slice.iter().enumerate() {
-        let add_spacing = idx + 1 < slice.len()
-            && !sg.rtl
-            && slice[idx + 1].cluster != sg.cluster
-            && sg.x_advance > 0.0;
+        let add_spacing = !sg.rtl
+            && sg.x_advance > 0.0
+            && slice
+                .get(idx + 1)
+                .is_some_and(|next| next.cluster != sg.cluster);
         width += sg.x_advance + if add_spacing { spacing } else { 0.0 };
     }
     width
@@ -314,7 +310,10 @@ fn shaped_vertical_length(glyphs: &[ShapedGlyph], spacing: f32) -> f32 {
     let mut length = 0.0_f32;
     for (idx, sg) in glyphs.iter().enumerate() {
         length += vertical_advance(sg);
-        if idx + 1 < glyphs.len() && glyphs[idx + 1].cluster != sg.cluster {
+        if glyphs
+            .get(idx + 1)
+            .is_some_and(|next| next.cluster != sg.cluster)
+        {
             length += spacing;
         }
     }

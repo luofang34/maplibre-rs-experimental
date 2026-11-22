@@ -109,6 +109,277 @@ pub(super) struct ZoomChange {
     pub at: f64,
 }
 
+struct ApplyContext<'a> {
+    transitions: &'a mut crate::transitions::Transitions,
+    paused_tiles: &'a mut std::collections::HashMap<String, f64>,
+    zoom_change: &'a mut Option<ZoomChange>,
+}
+
+fn arg_text(items: &[Value], index: usize) -> Option<&str> {
+    items.get(index).and_then(Value::as_str)
+}
+
+fn arg_value(items: &[Value], index: usize) -> Value {
+    items.get(index).cloned().unwrap_or(Value::Null)
+}
+
+fn apply_set_center(style: &mut Style, arg: Value) -> Result<(), String> {
+    match arg.as_array().map(Vec::as_slice) {
+        Some([longitude, latitude]) => match (longitude.as_f64(), latitude.as_f64()) {
+            (Some(longitude), Some(latitude)) => {
+                style.center = Some([longitude, latitude]);
+                Ok(())
+            }
+            _ => Err("setCenter needs numbers".to_owned()),
+        },
+        _ => Err("setCenter needs [longitude, latitude]".to_owned()),
+    }
+}
+
+fn apply_camera_op(
+    style: &mut Style,
+    name: &str,
+    items: &[Value],
+    ctx: &mut ApplyContext<'_>,
+) -> Option<Result<(), String>> {
+    match (name, arg_text(items, 1)) {
+        ("wait" | "idle" | "sleep", _) => {
+            ctx.transitions
+                .wait(items.get(1).and_then(Value::as_f64).unwrap_or(0.0));
+            Some(Ok(()))
+        }
+        ("pauseTiles", Some(source)) => {
+            ctx.paused_tiles
+                .insert(source.to_owned(), style.zoom.unwrap_or(0.0));
+            Some(Ok(()))
+        }
+        ("setZoom", _) => Some(number(items, 1).map(|zoom| {
+            *ctx.zoom_change = Some(ZoomChange {
+                previous_zoom: style.zoom.unwrap_or(0.0),
+                at: ctx.transitions.now(),
+            });
+            style.zoom = Some(zoom);
+        })),
+        ("setBearing", _) => Some(number(items, 1).map(|bearing| style.bearing = Some(bearing))),
+        ("setPitch", _) => Some(number(items, 1).map(|pitch| style.pitch = Some(pitch))),
+        ("setRoll", _) => Some(number(items, 1).map(|roll| style.roll = Some(roll))),
+        (
+            "setPadding"
+            | "setCenterClampedToGround"
+            | "setCenterElevation"
+            | "setVerticalFieldOfView",
+            _,
+        ) => Some(Ok(())),
+        ("easeTo", _) if crate::camera_options::eases_only_padding(&arg_value(items, 1)) => {
+            Some(Ok(()))
+        }
+        ("setCenter", _) => Some(apply_set_center(style, arg_value(items, 1))),
+        _ => None,
+    }
+}
+
+fn apply_style_op(
+    style: &mut Style,
+    name: &str,
+    items: &[Value],
+    transitions: &mut crate::transitions::Transitions,
+) -> Option<Result<(), String>> {
+    match (name, arg_text(items, 1)) {
+        ("addImage", Some(image_name)) => Some(add_image(
+            style,
+            image_name,
+            &arg_value(items, 2),
+            &arg_value(items, 3),
+        )),
+        ("removeImage", Some(image_name)) => {
+            style.remove_image(image_name);
+            Some(Ok(()))
+        }
+        ("setLight", _) => Some(
+            serde_json::from_value(arg_value(items, 1))
+                .map_err(|error| format!("setLight: invalid light: {error}"))
+                .map(|light| style.light = Some(light)),
+        ),
+        ("setTerrain", _) => Some(match arg_value(items, 1) {
+            Value::Null => {
+                style.terrain = None;
+                Ok(())
+            }
+            terrain => serde_json::from_value(terrain)
+                .map_err(|error| format!("setTerrain: invalid terrain: {error}"))
+                .map(|parsed| style.terrain = Some(parsed)),
+        }),
+        ("setGlobalStateProperty", Some(key)) => {
+            style.set_global_state(key, arg_value(items, 2));
+            Some(Ok(()))
+        }
+        ("setLayerZoomRange", Some(layer)) => Some(apply_layer_zoom_range(style, layer, items)),
+        ("setPaintProperty", Some(layer)) => {
+            Some(apply_paint_property(style, layer, items, transitions))
+        }
+        ("setLayoutProperty", Some(layer)) => Some(
+            arg_text(items, 2)
+                .ok_or_else(|| "setLayoutProperty needs a property".to_owned())
+                .and_then(|property| {
+                    style
+                        .set_layout_property(layer, property, arg_value(items, 3))
+                        .map(drop)
+                        .map_err(|error| error.to_string())
+                }),
+        ),
+        ("setFilter", Some(layer)) => {
+            let filter = arg_value(items, 2);
+            Some(
+                style
+                    .set_filter(layer, (!filter.is_null()).then_some(filter))
+                    .map(drop)
+                    .map_err(|error| error.to_string()),
+            )
+        }
+        _ => None,
+    }
+}
+
+fn apply_layer_zoom_range(style: &mut Style, layer: &str, items: &[Value]) -> Result<(), String> {
+    let (minzoom, maxzoom) = (number(items, 2)?, number(items, 3)?);
+    let target = style
+        .layers
+        .iter_mut()
+        .find(|candidate| candidate.id == layer)
+        .ok_or_else(|| format!("setLayerZoomRange: no layer `{layer}`"))?;
+    target.minzoom = Some(minzoom);
+    target.maxzoom = Some(maxzoom);
+    Ok(())
+}
+
+fn apply_paint_property(
+    style: &mut Style,
+    layer: &str,
+    items: &[Value],
+    transitions: &mut crate::transitions::Transitions,
+) -> Result<(), String> {
+    let property =
+        arg_text(items, 2).ok_or_else(|| "setPaintProperty needs a property".to_owned())?;
+    let val = arg_value(items, 3);
+    if property.ends_with("-transition") {
+        transitions.declare(layer, property, &val);
+        return Ok(());
+    }
+    transitions.before_change(style, layer, property, &val);
+    style
+        .set_paint_property(layer, property, val)
+        .map(drop)
+        .map_err(|error| error.to_string())
+}
+
+fn apply_set_style(style: &mut Style, arg: Value) -> Result<(), String> {
+    let mut replacement = match arg {
+        Value::String(url) => {
+            let path = crate::paths::local_style_path(&url)?;
+            let text = std::fs::read_to_string(&path)
+                .map_err(|error| format!("Cannot read {}: {error}", path.display()))?;
+            serde_json::from_str(&text)
+                .map_err(|error| format!("Cannot parse {}: {error}", path.display()))?
+        }
+        other => other,
+    };
+    crate::tilesets::resolve_sources(&mut replacement)?;
+    let mut replaced: Style = serde_json::from_value(replacement)
+        .map_err(|error| format!("setStyle: invalid style: {error}"))?;
+    // A style that does not place the camera leaves it where it is.
+    replaced.center = replaced.center.or(style.center);
+    replaced.zoom = replaced.zoom.or(style.zoom);
+    replaced.bearing = replaced.bearing.or(style.bearing);
+    replaced.pitch = replaced.pitch.or(style.pitch);
+    *style = replaced;
+    Ok(())
+}
+
+fn apply_query_source_features(style: &Style, items: &[Value]) -> Result<(), String> {
+    let source = arg_text(items, 1).or_else(|| {
+        items
+            .get(1)
+            .and_then(Value::as_array)
+            .and_then(|arr| arr.first())
+            .and_then(Value::as_str)
+    });
+    match source {
+        Some(source) if style.sources.contains_key(source) => Ok(()),
+        Some(source) => Err(format!("unknown source `{source}`")),
+        None => Err("needs a source".to_owned()),
+    }
+}
+
+fn apply_add_source(style: &mut Style, source: &str, mut declaration: Value) -> Result<(), String> {
+    crate::tilesets::resolve_source(&mut declaration)?;
+    let parsed = serde_json::from_value(declaration)
+        .map_err(|error| format!("addSource: invalid source: {error}"))?;
+    style
+        .add_source(source, parsed)
+        .map(drop)
+        .map_err(|error| error.to_string())
+}
+
+fn apply_source_layer_op(
+    style: &mut Style,
+    name: &str,
+    items: &[Value],
+) -> Option<Result<(), String>> {
+    match (name, arg_text(items, 1)) {
+        ("setFeatureState", _) => Some(feature_state(
+            style,
+            &arg_value(items, 1),
+            &arg_value(items, 2),
+            false,
+        )),
+        ("removeFeatureState", _) => Some(feature_state(
+            style,
+            &arg_value(items, 1),
+            &arg_value(items, 2),
+            true,
+        )),
+        ("getFeatureState", _) => Some(Ok(())),
+        ("querySourceFeatures", _) => Some(apply_query_source_features(style, items)),
+        ("setStyle", _) => Some(apply_set_style(style, arg_value(items, 1))),
+        ("removeLayer", Some(layer)) => Some(
+            style
+                .remove_layer(layer)
+                .map(drop)
+                .map_err(|error| error.to_string()),
+        ),
+        ("removeSource", Some(source)) => Some(
+            style
+                .remove_source(source)
+                .map(drop)
+                .map_err(|error| error.to_string()),
+        ),
+        ("addSource", Some(source)) => Some(apply_add_source(style, source, arg_value(items, 2))),
+        ("addLayer", _) => Some(
+            style
+                .add_layer(arg_value(items, 1), arg_text(items, 2))
+                .map(drop)
+                .map_err(|error| error.to_string()),
+        ),
+        _ => None,
+    }
+}
+
+fn apply_one(
+    style: &mut Style,
+    operation: &Value,
+    ctx: &mut ApplyContext<'_>,
+) -> Result<(), String> {
+    let Some(items) = operation.as_array() else {
+        return Err(format!("Malformed operation: {operation}"));
+    };
+    let name = arg_text(items, 0).unwrap_or_default();
+    let outcome = apply_camera_op(style, name, items, ctx)
+        .or_else(|| apply_style_op(style, name, items, ctx.transitions))
+        .or_else(|| apply_source_layer_op(style, name, items))
+        .unwrap_or_else(|| Err(format!("Unsupported operation: {name}")));
+    outcome.map_err(|error| format!("{name}: {error}"))
+}
+
 /// Applies every operation to `style`. An operation the mutation API has no counterpart for
 /// is an error, so its fixture is reported instead of compared against the wrong state.
 pub(super) fn apply(
@@ -120,188 +391,13 @@ pub(super) fn apply(
         &mut Option<ZoomChange>,
     ),
 ) -> Result<(), String> {
+    let mut ctx = ApplyContext {
+        transitions,
+        paused_tiles,
+        zoom_change,
+    };
     for operation in operations {
-        let Some(items) = operation.as_array() else {
-            return Err(format!("Malformed operation: {operation}"));
-        };
-        let name = items.first().and_then(Value::as_str).unwrap_or_default();
-        let text = |index: usize| items.get(index).and_then(Value::as_str);
-        let value = |index: usize| items.get(index).cloned().unwrap_or(Value::Null);
-        let outcome = match (name, text(1)) {
-            // Rendering is deterministic, so waiting for the map to settle changes nothing.
-            ("wait" | "idle" | "sleep", _) => {
-                transitions.wait(items.get(1).and_then(Value::as_f64).unwrap_or(0.0));
-                Ok(())
-            }
-            // The source keeps the tiles its view needed now, and later views draw those.
-            ("pauseTiles", Some(source)) => {
-                paused_tiles.insert(source.to_owned(), style.zoom.unwrap_or(0.0));
-                Ok(())
-            }
-            // Only the camera left by the last operation is drawn, so it becomes the style's.
-            ("setZoom", _) => number(items, 1).map(|zoom| {
-                *zoom_change = Some(ZoomChange {
-                    previous_zoom: style.zoom.unwrap_or(0.0),
-                    at: transitions.now(),
-                });
-                style.zoom = Some(zoom);
-            }),
-            ("setBearing", _) => number(items, 1).map(|bearing| style.bearing = Some(bearing)),
-            ("setPitch", _) => number(items, 1).map(|pitch| style.pitch = Some(pitch)),
-            ("setRoll", _) => number(items, 1).map(|roll| style.roll = Some(roll)),
-            // The padding is applied to the camera by the harness, not to the style.
-            // The harness applies these to the map's camera, not to the style.
-            (
-                "setPadding"
-                | "setCenterClampedToGround"
-                | "setCenterElevation"
-                | "setVerticalFieldOfView",
-                _,
-            ) => Ok(()),
-            ("easeTo", _) if crate::camera_options::eases_only_padding(&value(1)) => Ok(()),
-            ("addImage", Some(name)) => add_image(style, name, &value(2), &value(3)),
-            ("removeImage", Some(name)) => {
-                style.remove_image(name);
-                Ok(())
-            }
-            ("setLight", _) => {
-                style.light = Some(
-                    serde_json::from_value(value(1))
-                        .map_err(|error| format!("setLight: invalid light: {error}"))?,
-                );
-                Ok(())
-            }
-            ("setTerrain", _) => {
-                // Called without an argument, it removes the terrain.
-                style.terrain = match value(1) {
-                    Value::Null => None,
-                    terrain => Some(
-                        serde_json::from_value(terrain)
-                            .map_err(|error| format!("setTerrain: invalid terrain: {error}"))?,
-                    ),
-                };
-                Ok(())
-            }
-            ("setFeatureState", _) => feature_state(style, &value(1), &value(2), false),
-            ("removeFeatureState", _) => feature_state(style, &value(1), &value(2), true),
-            ("getFeatureState", _) => Ok(()),
-            ("querySourceFeatures", _) => {
-                let source = text(1).or_else(|| {
-                    items
-                        .get(1)
-                        .and_then(Value::as_array)
-                        .and_then(|arr| arr.first())
-                        .and_then(Value::as_str)
-                });
-                match source {
-                    Some(source) if style.sources.contains_key(source) => Ok(()),
-                    Some(source) => Err(format!("unknown source `{source}`")),
-                    None => Err("needs a source".to_owned()),
-                }
-            }
-            ("setGlobalStateProperty", Some(key)) => {
-                style.set_global_state(key, value(2));
-                Ok(())
-            }
-            ("setLayerZoomRange", Some(layer)) => {
-                let (minzoom, maxzoom) = (number(items, 2)?, number(items, 3)?);
-                let layer = style
-                    .layers
-                    .iter_mut()
-                    .find(|candidate| candidate.id == layer)
-                    .ok_or_else(|| format!("setLayerZoomRange: no layer `{layer}`"))?;
-                layer.minzoom = Some(minzoom);
-                layer.maxzoom = Some(maxzoom);
-                Ok(())
-            }
-            ("setCenter", _) => match value(1).as_array().map(Vec::as_slice) {
-                Some([longitude, latitude]) => match (longitude.as_f64(), latitude.as_f64()) {
-                    (Some(longitude), Some(latitude)) => {
-                        style.center = Some([longitude, latitude]);
-                        Ok(())
-                    }
-                    _ => Err("setCenter needs numbers".to_owned()),
-                },
-                _ => Err("setCenter needs [longitude, latitude]".to_owned()),
-            },
-            ("setStyle", _) => {
-                let replacement = match value(1) {
-                    Value::String(url) => {
-                        let path = crate::paths::local_style_path(&url)?;
-                        let text = std::fs::read_to_string(&path)
-                            .map_err(|error| format!("Cannot read {}: {error}", path.display()))?;
-                        serde_json::from_str(&text)
-                            .map_err(|error| format!("Cannot parse {}: {error}", path.display()))?
-                    }
-                    other => other,
-                };
-                let mut replacement = replacement;
-                crate::tilesets::resolve_sources(&mut replacement)?;
-                let mut replaced: Style = serde_json::from_value(replacement)
-                    .map_err(|error| format!("setStyle: invalid style: {error}"))?;
-                // A style that does not place the camera leaves it where it is.
-                replaced.center = replaced.center.or(style.center);
-                replaced.zoom = replaced.zoom.or(style.zoom);
-                replaced.bearing = replaced.bearing.or(style.bearing);
-                replaced.pitch = replaced.pitch.or(style.pitch);
-                *style = replaced;
-                Ok(())
-            }
-            ("setPaintProperty", Some(layer)) => text(2)
-                .ok_or_else(|| "setPaintProperty needs a property".to_owned())
-                .and_then(|property| {
-                    if property.ends_with("-transition") {
-                        transitions.declare(layer, property, &value(3));
-                        return Ok(());
-                    }
-                    transitions.before_change(style, layer, property, &value(3));
-                    style
-                        .set_paint_property(layer, property, value(3))
-                        .map(drop)
-                        .map_err(|error| error.to_string())
-                }),
-            ("setLayoutProperty", Some(layer)) => text(2)
-                .ok_or_else(|| "setLayoutProperty needs a property".to_owned())
-                .and_then(|property| {
-                    style
-                        .set_layout_property(layer, property, value(3))
-                        .map(drop)
-                        .map_err(|error| error.to_string())
-                }),
-            ("setFilter", Some(layer)) => {
-                let filter = value(2);
-                style
-                    .set_filter(layer, (!filter.is_null()).then_some(filter))
-                    .map(drop)
-                    .map_err(|error| error.to_string())
-            }
-            ("removeLayer", Some(layer)) => style
-                .remove_layer(layer)
-                .map(drop)
-                .map_err(|error| error.to_string()),
-            ("removeSource", Some(source)) => style
-                .remove_source(source)
-                .map(drop)
-                .map_err(|error| error.to_string()),
-            ("addSource", Some(source)) => {
-                let mut declaration = value(2);
-                crate::tilesets::resolve_source(&mut declaration)?;
-                serde_json::from_value(declaration)
-            }
-            .map_err(|error| format!("addSource: invalid source: {error}"))
-            .and_then(|parsed| {
-                style
-                    .add_source(source, parsed)
-                    .map(drop)
-                    .map_err(|error| error.to_string())
-            }),
-            ("addLayer", _) => style
-                .add_layer(value(1), text(2))
-                .map(drop)
-                .map_err(|error| error.to_string()),
-            _ => Err(format!("Unsupported operation: {name}")),
-        };
-        outcome.map_err(|error| format!("{name}: {error}"))?;
+        apply_one(style, operation, &mut ctx)?;
     }
     Ok(())
 }

@@ -225,7 +225,7 @@ impl Iterator for OverscaledChildren {
         if self.index >= self.len {
             return None;
         }
-        let item = self.items[usize::from(self.index)];
+        let item = self.items.get(usize::from(self.index)).copied()?;
         self.index += 1;
         Some(item)
     }
@@ -276,13 +276,13 @@ mod tests {
 
         let capped: Vec<_> = base.children(2).collect();
         assert_eq!(capped.len(), 1);
-        assert_eq!(capped[0].canonical, wt(1, 2, 2));
-        assert_eq!(capped[0].overscaled_z, 3);
-        assert!(capped[0].is_child_of(&base));
-        assert_eq!(capped[0].scaled_to(2), Some(base));
-        assert_eq!(
-            capped[0].scaled_to(1),
-            OverscaledTileId::new(1, 0, wt(0, 1, 1))
-        );
+        let Some(only) = capped.first() else {
+            unreachable!("assert_eq!(capped.len(), 1) guaranteed first item");
+        };
+        assert_eq!(only.canonical, wt(1, 2, 2));
+        assert_eq!(only.overscaled_z, 3);
+        assert!(only.is_child_of(&base));
+        assert_eq!(only.scaled_to(2), Some(base));
+        assert_eq!(only.scaled_to(1), OverscaledTileId::new(1, 0, wt(0, 1, 1)));
     }
 }

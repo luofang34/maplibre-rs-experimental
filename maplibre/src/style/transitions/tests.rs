@@ -7,18 +7,19 @@ use crate::style::{
     Style,
 };
 
-fn background_rgb8(style: &Style) -> [u8; 4] {
-    let Some(LayerPaint::Background(bg)) = &style.layers[0].paint else {
-        panic!("expected background layer");
+fn background_rgb8(style: &Style) -> Result<[u8; 4], &'static str> {
+    let Some(LayerPaint::Background(bg)) = style.layers.first().and_then(|l| l.paint.as_ref())
+    else {
+        return Err("expected background layer");
     };
     let Some(StyleProperty::Constant(color)) = &bg.background_color else {
-        panic!("expected constant background color");
+        return Err("expected constant background color");
     };
-    color.to_rgba8()
+    Ok(color.to_rgba8())
 }
 
 #[test]
-fn freshly_loaded_style_does_not_animate_initial_paint_values() {
+fn freshly_loaded_style_does_not_animate_initial_paint_values() -> Result<(), &'static str> {
     let style: Style = serde_json::from_value(json!({
         "version": 8,
         "transition": { "duration": 1000, "delay": 200 },
@@ -43,13 +44,16 @@ fn freshly_loaded_style_does_not_animate_initial_paint_values() {
         })
     );
     assert_eq!(
-        style.layers[0].transitions.get("background-color"),
+        style
+            .layers
+            .first()
+            .and_then(|l| l.transitions.get("background-color")),
         Some(&TransitionSpec {
             duration: 500.0,
             delay: 100.0
         })
     );
-    assert_eq!(background_rgb8(&style), [255, 0, 0, 255]);
+    assert_eq!(background_rgb8(&style)?, [255, 0, 0, 255]);
     assert!(
         style.validate().is_ok(),
         "*-transition declarations must validate cleanly"
@@ -59,16 +63,21 @@ fn freshly_loaded_style_does_not_animate_initial_paint_values() {
         serde_json::from_value(serde_json::to_value(&style).expect("serialize"))
             .expect("deserialize");
     assert_eq!(
-        round_trip.layers[0].transitions.get("background-color"),
+        round_trip
+            .layers
+            .first()
+            .and_then(|l| l.transitions.get("background-color")),
         Some(&TransitionSpec {
             duration: 500.0,
             delay: 100.0
         })
     );
+    Ok(())
 }
 
 #[test]
-fn layer_and_root_transitions_interpolate_colors_numbers_translations_and_arrays() {
+fn layer_and_root_transitions_interpolate_colors_numbers_translations_and_arrays(
+) -> Result<(), &'static str> {
     let mut style: Style = serde_json::from_value(json!({
         "version": 8,
         "transition": { "duration": 400, "delay": 100 },
@@ -113,12 +122,12 @@ fn layer_and_root_transitions_interpolate_colors_numbers_translations_and_arrays
         .expect("set fill translate");
 
     assert!(style.has_active_transitions());
-    assert_eq!(background_rgb8(&style), [255, 0, 0, 255]);
+    assert_eq!(background_rgb8(&style)?, [255, 0, 0, 255]);
 
     // Advance 100ms: bg-color at 10%, bg-opacity & fill-translate still at end of 100ms delay (0%).
     let step1 = style.advance_transitions(100.0);
     assert!(step1.layers.contains(&"bg".to_owned()));
-    let rgba_100 = background_rgb8(&style);
+    let rgba_100 = background_rgb8(&style)?;
     assert!((i16::from(rgba_100[0]) - 230).abs() <= 1);
     assert!((i16::from(rgba_100[2]) - 26).abs() <= 1);
 
@@ -127,8 +136,9 @@ fn layer_and_root_transitions_interpolate_colors_numbers_translations_and_arrays
     // - bg-opacity at (300 - 100)/400 = 50% -> 0.6
     // - fill-translate at 50% -> [0.0, 0.0]
     style.advance_transitions(200.0);
-    let Some(LayerPaint::Background(bg)) = &style.layers[0].paint else {
-        panic!("bg");
+    let Some(LayerPaint::Background(bg)) = style.layers.first().and_then(|l| l.paint.as_ref())
+    else {
+        return Err("expected bg layer");
     };
     let opacity = bg
         .background_opacity
@@ -137,8 +147,8 @@ fn layer_and_root_transitions_interpolate_colors_numbers_translations_and_arrays
         .expect("opacity");
     assert!((opacity - 0.6).abs() < 1e-4, "expected 0.6, got {opacity}");
 
-    let Some(LayerPaint::Fill(fill)) = &style.layers[1].paint else {
-        panic!("fill");
+    let Some(LayerPaint::Fill(fill)) = style.layers.get(1).and_then(|l| l.paint.as_ref()) else {
+        return Err("expected fill layer");
     };
     assert_eq!(
         fill.fill_translate.as_ref().map(|t| t.at_zoom(0.0)),
@@ -148,7 +158,7 @@ fn layer_and_root_transitions_interpolate_colors_numbers_translations_and_arrays
     // Advance past 1000ms: all transitions settle and clear.
     style.advance_transitions(800.0);
     assert!(!style.has_active_transitions());
-    assert_eq!(background_rgb8(&style), [0, 0, 255, 255]);
+    assert_eq!(background_rgb8(&style)?, [0, 0, 255, 255]);
 
     // Verify premultiplied alpha color interpolation and fixed-length array interpolation directly.
     let mid_pm = interpolate_paint_value(
@@ -173,10 +183,11 @@ fn layer_and_root_transitions_interpolate_colors_numbers_translations_and_arrays
     )
     .expect("color array");
     assert_eq!(colors.as_array().map(Vec::len), Some(2));
+    Ok(())
 }
 
 #[test]
-fn runtime_set_paint_property_accepts_transition_specs() {
+fn runtime_set_paint_property_accepts_transition_specs() -> Result<(), &'static str> {
     let mut style = Style::default();
     style
         .set_paint_property(
@@ -190,8 +201,9 @@ fn runtime_set_paint_property_accepts_transition_specs() {
         .expect("start transition");
     assert!(style.has_active_transitions());
     style.settle_transitions_at(300.0);
-    assert_eq!(background_rgb8(&style), [128, 128, 255, 255]);
+    assert_eq!(background_rgb8(&style)?, [128, 128, 255, 255]);
     style.settle_transitions_at(550.0);
     assert!(!style.has_active_transitions());
-    assert_eq!(background_rgb8(&style), [0, 0, 255, 255]);
+    assert_eq!(background_rgb8(&style)?, [0, 0, 255, 255]);
+    Ok(())
 }

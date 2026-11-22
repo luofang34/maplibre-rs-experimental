@@ -239,14 +239,19 @@ fn camera(context: &MapContext) -> [f64; 24] {
 fn camera_of(view_state: &crate::render::view_state::ViewState) -> [f64; 24] {
     let matrix: [[f64; 4]; 4] = view_state.view_projection().0.into();
     let mut flat = [0.0; 24];
-    for (column, values) in matrix.iter().enumerate() {
-        flat[column * 4..column * 4 + 4].copy_from_slice(values);
+    for (dst, src) in flat.as_chunks_mut::<4>().0.iter_mut().zip(matrix.iter()) {
+        dst.copy_from_slice(src);
     }
     // Over a cap the flat camera stops at the last row of tiles while a free pose moves on.
     if let Some(pose) = view_state.globe_pose() {
-        flat[16..19].copy_from_slice(&pose.target);
-        flat[19..23].copy_from_slice(&pose.orientation);
-        flat[23] = pose.distance_meters;
+        for (dst, &src) in flat.iter_mut().skip(16).zip(
+            pose.target
+                .iter()
+                .chain(pose.orientation.iter())
+                .chain(std::iter::once(&pose.distance_meters)),
+        ) {
+            *dst = src;
+        }
     }
     flat
 }
@@ -287,10 +292,11 @@ pub(crate) fn finish_frame(context: &mut MapContext) {
     if eye == 0 && signals.cameras.first() != Some(&drawn) {
         signals.camera_revision = signals.camera_revision.wrapping_add(1);
     }
-    if signals.cameras.len() <= eye {
+    if let Some(slot) = signals.cameras.get_mut(eye) {
+        *slot = drawn;
+    } else {
         signals.cameras.resize(eye + 1, drawn);
     }
-    signals.cameras[eye] = drawn;
     if let Some((signals, slot)) = context.world.resources.query_mut::<(
         &mut FrameSignals,
         &mut crate::render::frame_trace::FrameTraceSlot,

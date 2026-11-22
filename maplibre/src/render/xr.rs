@@ -103,7 +103,7 @@ impl ScenePlacement {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::expect_used, clippy::panic)]
+    #![cfg_attr(test, allow(clippy::expect_used))]
 
     use cgmath::{Deg, InnerSpace, Matrix4, Rad, SquareMatrix, Vector3};
 

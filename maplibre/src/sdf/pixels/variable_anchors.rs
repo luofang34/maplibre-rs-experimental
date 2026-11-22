@@ -1,6 +1,6 @@
 //! A label on a variable anchor keeps it from frame to frame while it still fits, as GL JS
 //! keeps a symbol's previous anchor, rather than jumping to an earlier one that frees up.
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg_attr(test, allow(clippy::expect_used))]
 use super::*;
 use crate::sdf::query::QueryOptions;
 
@@ -25,7 +25,7 @@ fn style(bearing: f64) -> Style {
 
 /// The label at the tile's centre and, 480 tile units (60 pixels at zoom 12) to its east, the
 /// obstacle a layer above it, which is placed first.
-fn layers(style: &Style) -> crate::headless::map::ProcessedLayers {
+fn layers(style: &Style) -> Result<crate::headless::map::ProcessedLayers, &'static str> {
     let coords = WorldTileCoords {
         x: 2048,
         y: 2048,
@@ -34,8 +34,9 @@ fn layers(style: &Style) -> crate::headless::map::ProcessedLayers {
     let atlas = atlas();
     let mut layers = crate::headless::map::ProcessedLayers::default();
     for (index, x) in [(0, 2048.0), (1, 2528.0)] {
-        let Some(LayerPaint::Symbol(paint)) = &style.layers[index].paint else {
-            panic!("symbol paint");
+        let layer = style.layers.get(index).ok_or("missing style layer")?;
+        let Some(LayerPaint::Symbol(paint)) = &layer.paint else {
+            return Err("expected symbol paint");
         };
         let mut layout = TextTessellator::default();
         layout.configure(paint.clone(), atlas.clone());
@@ -57,10 +58,10 @@ fn layers(style: &Style) -> crate::headless::map::ProcessedLayers {
                     extent: Some(4096),
                     ..Default::default()
                 },
-                style.layers[index].id.clone(),
+                layer.id.clone(),
             )));
     }
-    layers
+    Ok(layers)
 }
 
 fn label_at(map: &HeadlessMap, dx: f64) -> bool {
@@ -77,9 +78,9 @@ fn label_at(map: &HeadlessMap, dx: f64) -> bool {
 }
 
 #[test]
-fn a_label_keeps_its_anchor_while_it_still_fits() {
+fn a_label_keeps_its_anchor_while_it_still_fits() -> Result<(), &'static str> {
     futures::executor::block_on(async {
-        let mut map = fixture_map(style(0.0), layers(&style(0.0)), 1).await;
+        let mut map = fixture_map(style(0.0), layers(&style(0.0))?, 1).await;
         // The obstacle takes the space east of the point, so the label goes west of it.
         assert!(label_at(&map, -30.0), "the label takes its second anchor");
         assert!(!label_at(&map, 20.0), "nothing is east of the point");
@@ -98,7 +99,7 @@ fn a_label_keeps_its_anchor_while_it_still_fits() {
         }
 
         // A map that starts turned has no anchor to keep and takes the first.
-        let fresh = fixture_map(style(90.0), layers(&style(90.0)), 1).await;
+        let fresh = fixture_map(style(90.0), layers(&style(90.0))?, 1).await;
         assert!(
             label_at(&fresh, 20.0),
             "with no history the first anchor fits"
@@ -107,5 +108,6 @@ fn a_label_keeps_its_anchor_while_it_still_fits() {
             !label_at(&fresh, -30.0),
             "with no history the second is not needed"
         );
+        Ok(())
     })
 }

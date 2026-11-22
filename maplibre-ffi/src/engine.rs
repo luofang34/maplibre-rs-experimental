@@ -341,7 +341,7 @@ impl MapEngine {
         Ok(())
     }
 
-    /// Removes a previously registered [`CustomStyleLayer`] by `id`, returning whether one existed.
+    /// Removes an existing registered [`CustomStyleLayer`] by `id`, returning whether one existed.
     pub fn remove_custom_layer(&self, id: &str) -> Result<bool, FfiError> {
         let layer_id = id.to_owned();
         Ok(self

@@ -1,4 +1,8 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::mutable_key_type)]
+#![expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "benchmark fixture setup and processing unwrap errors"
+)]
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use maplibre::{
@@ -38,6 +42,10 @@ fn encode_mvt_as_mlt(mvt_bytes: &[u8]) -> Box<[u8]> {
     out.into_boxed_slice()
 }
 
+#[expect(
+    clippy::mutable_key_type,
+    reason = "StyleLayer Hash and Eq compare only immutable layer IDs"
+)]
 fn bench_process_vector_tile(c: &mut Criterion) {
     let fetcher = StaticTileFetcher::new();
     let mvt_data = fetcher

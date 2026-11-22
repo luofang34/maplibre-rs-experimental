@@ -9,7 +9,8 @@ pub use dispatch::{
     draw_binned_indexed, draw_binned_mesh, draw_binned_non_indexed, DirectDrawGeometry,
 };
 pub use keys::{
-    BinnedItemId, BinnedPhaseItem, BinnedRenderPhaseType, InputDataIndex, PhaseItemBatchSetKey,
+    BinnedExtraIndexEntry, BinnedItemId, BinnedPhaseItem, BinnedRenderPhaseType, InputDataIndex,
+    PhaseItemBatchSetKey,
 };
 
 use super::{
@@ -184,15 +185,15 @@ impl<BPI: BinnedPhaseItem> BinnedRenderPhase<BPI> {
         input_index: InputDataIndex,
         phase_type: BinnedRenderPhaseType,
     ) {
-        self.add_with_extra_index(
+        self.add_with_extra_index(BinnedExtraIndexEntry {
             batch_set_key,
             bin_key,
             item,
             input_index,
-            NonZeroU32::MIN,
-            PhaseItemExtraIndex::None,
+            instance_count: NonZeroU32::MIN,
+            extra_index: PhaseItemExtraIndex::None,
             phase_type,
-        );
+        });
     }
 
     /// Inserts a pre-aggregated contiguous block of `instance_count` instances (`input_index .. input_index + count`).
@@ -206,30 +207,29 @@ impl<BPI: BinnedPhaseItem> BinnedRenderPhase<BPI> {
         instance_count: NonZeroU32,
         phase_type: BinnedRenderPhaseType,
     ) {
-        self.add_with_extra_index(
+        self.add_with_extra_index(BinnedExtraIndexEntry {
             batch_set_key,
             bin_key,
             item,
             input_index,
             instance_count,
-            PhaseItemExtraIndex::None,
+            extra_index: PhaseItemExtraIndex::None,
             phase_type,
-        );
+        });
     }
 
     /// Inserts an item (or instance span) carrying an explicit [`PhaseItemExtraIndex`] such as
     /// [`PhaseItemExtraIndex::DynamicOffset`] for [`BinnedRenderPhaseType::UnbatchableMesh`].
-    #[allow(clippy::too_many_arguments)]
-    pub fn add_with_extra_index(
-        &mut self,
-        batch_set_key: BPI::BatchSetKey,
-        bin_key: BPI::BinKey,
-        item: BinnedItemId,
-        input_index: InputDataIndex,
-        instance_count: NonZeroU32,
-        extra_index: PhaseItemExtraIndex,
-        phase_type: BinnedRenderPhaseType,
-    ) {
+    pub fn add_with_extra_index(&mut self, entry: BinnedExtraIndexEntry<BPI>) {
+        let BinnedExtraIndexEntry {
+            batch_set_key,
+            bin_key,
+            item,
+            input_index,
+            instance_count,
+            extra_index,
+            phase_type,
+        } = entry;
         let generation = self.active_stamp_generation.unwrap_or(self.generation);
         let entry = BinEntry {
             item,
@@ -440,26 +440,17 @@ impl<BPI: BinnedPhaseItem> BinnedRenderPhase<BPI> {
                 }
             }
         }
-        for (batch_set_key, bin_key, range) in &self.prepared_unbatchable.groups {
-            for entry in &self.prepared_unbatchable.entries[range.clone()] {
-                visit(BPI::new(
-                    batch_set_key.clone(),
-                    bin_key.clone(),
-                    entry.item,
-                    entry.instance_range.clone(),
-                    entry.extra_index.clone(),
-                ));
-            }
-        }
-        for (batch_set_key, bin_key, range) in &self.prepared_non_mesh.groups {
-            for entry in &self.prepared_non_mesh.entries[range.clone()] {
-                visit(BPI::new(
-                    batch_set_key.clone(),
-                    bin_key.clone(),
-                    entry.item,
-                    entry.instance_range.clone(),
-                    entry.extra_index.clone(),
-                ));
+        for prepared in [&self.prepared_unbatchable, &self.prepared_non_mesh] {
+            for (batch_set_key, bin_key, range) in &prepared.groups {
+                for entry in prepared.entries.get(range.clone()).into_iter().flatten() {
+                    visit(BPI::new(
+                        batch_set_key.clone(),
+                        bin_key.clone(),
+                        entry.item,
+                        entry.instance_range.clone(),
+                        entry.extra_index.clone(),
+                    ));
+                }
             }
         }
     }

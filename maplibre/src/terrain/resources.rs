@@ -18,10 +18,7 @@ use crate::{
         resource::{MipmapGenerator, Texture},
         settings::{Msaa, TerrainDrapeMode},
     },
-    terrain::{
-        drape_cache::DrapeCache,
-        mesh::{create_terrain_mesh, TERRAIN_MESH_SIZE},
-    },
+    terrain::drape_cache::DrapeCache,
 };
 
 mod bindings;
@@ -224,62 +221,18 @@ impl TerrainResources {
                 (0, TerrainDrapeMode::ProceduralRelief(style), None)
             }
         };
-        let mesh = create_terrain_mesh(TERRAIN_MESH_SIZE);
-        let vertex_buffer = queue.create_buffer_init(
-            device,
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("terrain mesh vertices"),
-                contents: bytemuck::cast_slice(&mesh.vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            },
-        );
-        let index_buffer = queue.create_buffer_init(
-            device,
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("terrain mesh indices"),
-                contents: bytemuck::cast_slice(&mesh.indices),
-                usage: wgpu::BufferUsages::INDEX,
-            },
-        );
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("terrain tile uniforms"),
-            size: UNIFORM_STRIDE * UNIFORM_CAPACITY,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let gpu = bindings::create_shared_gpu_resources(device, queue);
         let edge_heights = edge_heights::EdgeHeightTexture::new(device);
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::MipmapFilterMode::Linear,
-            // Drapes are seen at grazing angles at the horizon; anisotropy keeps their
-            // detail along the view direction while the mip levels stop the shimmer.
-            anisotropy_clamp: 16,
-            ..Default::default()
-        });
-        // A fresh texture reads as zero, which decodes to sea level with a zero unpack vector.
-        let empty_dem = Texture::new(
-            Some("empty DEM"),
-            device,
-            wgpu::TextureFormat::Rgba8Unorm,
-            1,
-            1,
-            Msaa { samples: 1 },
-            wgpu::TextureUsages::TEXTURE_BINDING,
-        );
         Self {
             pipeline,
-            sampler,
+            sampler: gpu.sampler,
             mipmaps,
-            vertex_buffer,
-            index_buffer,
-            index_count: mesh.indices.len() as u32,
-            uniform_buffer,
+            vertex_buffer: gpu.vertex_buffer,
+            index_buffer: gpu.index_buffer,
+            index_count: gpu.index_count,
+            uniform_buffer: gpu.uniform_buffer,
             dem_textures: HashMap::new(),
-            empty_dem,
+            empty_dem: gpu.empty_dem,
             empty_dem_id: next_texture_id(),
             drapes: DrapeCache::default(),
             drape_view: None,
@@ -440,12 +393,10 @@ impl TerrainResources {
                 "more terrain tiles than uniform blocks; distant tiles are skipped"
             );
         }
-        if count > 0 {
-            queue.write_buffer(
-                &self.uniform_buffer,
-                0,
-                bytemuck::cast_slice(&uniforms[..count]),
-            );
+        if count > 0
+            && let Some(slice) = uniforms.get(..count)
+        {
+            queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(slice));
         }
         count
     }

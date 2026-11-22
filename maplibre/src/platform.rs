@@ -107,8 +107,7 @@ pub(crate) fn write_unpoisoned<T>(
     }
 }
 
-/// Minimum WebGPU buffer size
+/// Minimum WebGPU buffer size enforced by WebGL.
 ///
-/// FIXME: This limit is enforced by WebGL. Actually this makes sense!
-/// FIXME: This can also be achieved by _pad attributes in shader_ffi.rs
+/// This can also be achieved by `_pad` attributes in `shader_ffi.rs`.
 pub const MIN_WEBGL_BUFFER_SIZE: u64 = 32;

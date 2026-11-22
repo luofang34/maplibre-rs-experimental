@@ -1,6 +1,9 @@
 //! Web worker pool for shared-memory (`wasm32 + atomics`) execution with a shared work-stealing
 //! queue (`Arc<SharedWorkQueue>`) and coalesced cross-realm wake notifications.
-#![allow(unsafe_code)]
+#![expect(
+    unsafe_code,
+    reason = "frees boxed Work ticket when posting message to worker fails"
+)]
 
 use std::{
     cell::RefCell,
@@ -311,7 +314,7 @@ impl WorkerPool {
                         wake_pending.store(false, Ordering::SeqCst);
                     }
                 } else {
-                    let _ = post_worker_wake(&scope);
+                    drop(post_worker_wake(&scope));
                 }
             });
         })

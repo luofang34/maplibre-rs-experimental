@@ -141,16 +141,20 @@ fn build_tile_json_document(
     Ok(out)
 }
 
-async fn range<C: HttpClient>(
-    client: &C,
-    base: &HttpRequest,
+struct ArchiveRequest<'a, C> {
+    client: &'a C,
+    base: &'a HttpRequest,
     status: NetworkStatus,
-    url: &str,
+    archive: &'a str,
+}
+
+async fn range<C: HttpClient>(
+    ctx: &ArchiveRequest<'_, C>,
     offset: u64,
     length: u64,
 ) -> Result<Vec<u8>, SourceFetchError> {
-    let sub = build_range_request(base, url, offset, length);
-    client.fetch_request_with_status(&sub, status).await
+    let sub = build_range_request(ctx.base, ctx.archive, offset, length);
+    ctx.client.fetch_request_with_status(&sub, ctx.status).await
 }
 
 impl PmtilesReader {
@@ -175,21 +179,29 @@ impl PmtilesReader {
         request: PmtilesUrl,
     ) -> Result<Vec<u8>, SourceFetchError> {
         match request {
-            PmtilesUrl::Archive(archive) => self.tile_json(client, base, status, &archive).await,
-            PmtilesUrl::Tile { archive, z, x, y } => {
-                let id = tile_id(z, x, y).map_err(|error| failed(&archive, error))?;
-                let opened = self.open(client, base, status, &archive).await?;
-                let Some(entry) = self
-                    .locate(client, base, status, &archive, &opened, id)
-                    .await?
-                else {
-                    return Err(SourceFetchError::not_found(&base.url));
-                };
-                let bytes = range(
+            PmtilesUrl::Archive(archive) => {
+                let ctx = ArchiveRequest {
                     client,
                     base,
                     status,
-                    &archive,
+                    archive: &archive,
+                };
+                self.tile_json(&ctx).await
+            }
+            PmtilesUrl::Tile { archive, z, x, y } => {
+                let id = tile_id(z, x, y).map_err(|error| failed(&archive, error))?;
+                let ctx = ArchiveRequest {
+                    client,
+                    base,
+                    status,
+                    archive: &archive,
+                };
+                let opened = self.open(&ctx).await?;
+                let Some(entry) = self.locate(&ctx, &opened, id).await? else {
+                    return Err(SourceFetchError::not_found(&base.url));
+                };
+                let bytes = range(
+                    &ctx,
                     opened.header.tiles_offset + entry.offset,
                     entry.length,
                 )
@@ -203,30 +215,24 @@ impl PmtilesReader {
 
     async fn open<C: HttpClient>(
         &self,
-        client: &C,
-        base: &HttpRequest,
-        status: NetworkStatus,
-        archive: &str,
+        ctx: &ArchiveRequest<'_, C>,
     ) -> Result<Arc<Archive>, SourceFetchError> {
-        if !base.cache_policy.is_volatile() {
-            if let Some(opened) = self.cached(archive) {
+        if !ctx.base.cache_policy.is_volatile() {
+            if let Some(opened) = self.cached(ctx.archive) {
                 return Ok(opened);
             }
         }
-        let bytes = range(client, base, status, archive, 0, HEADER_BYTES).await?;
-        let header = parse_header(archive, &bytes)?;
+        let bytes = range(ctx, 0, HEADER_BYTES).await?;
+        let header = parse_header(ctx.archive, &bytes)?;
         let root = self
-            .directory(
-                client,
-                base,
-                status,
-                archive,
-                &header,
-                header.root.0,
-                header.root.1,
-            )
+            .directory(ctx, &header, header.root.0, header.root.1)
             .await?;
-        let opened = self.finish_open(archive, header, root, base.cache_policy.is_volatile());
+        let opened = self.finish_open(
+            ctx.archive,
+            header,
+            root,
+            ctx.base.cache_policy.is_volatile(),
+        );
         Ok(opened)
     }
 
@@ -274,30 +280,23 @@ impl PmtilesReader {
         find(entries, id)
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn directory<C: HttpClient>(
         &self,
-        client: &C,
-        base: &HttpRequest,
-        status: NetworkStatus,
-        archive: &str,
+        ctx: &ArchiveRequest<'_, C>,
         header: &Header,
         offset: u64,
         length: u64,
     ) -> Result<Vec<Entry>, SourceFetchError> {
-        let bytes = range(client, base, status, archive, offset, length).await?;
+        let bytes = range(ctx, offset, length).await?;
         let bytes = decompress_async(header.internal_compression, bytes, "directory")
             .await
-            .map_err(|error| failed(archive, error))?;
-        parse_dir(archive, &bytes)
+            .map_err(|error| failed(ctx.archive, error))?;
+        parse_dir(ctx.archive, &bytes)
     }
 
     async fn locate<C: HttpClient>(
         &self,
-        client: &C,
-        base: &HttpRequest,
-        status: NetworkStatus,
-        archive: &str,
+        ctx: &ArchiveRequest<'_, C>,
         opened: &Archive,
         id: u64,
     ) -> Result<Option<Entry>, SourceFetchError> {
@@ -312,16 +311,8 @@ impl PmtilesReader {
                         Some(entries) => entries,
                         None => {
                             let entries = Arc::new(
-                                self.directory(
-                                    client,
-                                    base,
-                                    status,
-                                    archive,
-                                    &opened.header,
-                                    offset,
-                                    leaf.length,
-                                )
-                                .await?,
+                                self.directory(ctx, &opened.header, offset, leaf.length)
+                                    .await?,
                             );
                             Self::store_leaf(opened, offset, entries.clone());
                             entries
@@ -330,33 +321,22 @@ impl PmtilesReader {
                 }
             }
         }
-        Err(failed(archive, PmtilesFormatError::TooDeep))
+        Err(failed(ctx.archive, PmtilesFormatError::TooDeep))
     }
 
     /// The TileJSON GL JS's protocol builds: zooms, bounds and centre from the header, the
     /// rest from the archive's metadata.
     async fn tile_json<C: HttpClient>(
         &self,
-        client: &C,
-        base: &HttpRequest,
-        status: NetworkStatus,
-        archive: &str,
+        ctx: &ArchiveRequest<'_, C>,
     ) -> Result<Vec<u8>, SourceFetchError> {
-        let opened = self.open(client, base, status, archive).await?;
+        let opened = self.open(ctx).await?;
         let header = &opened.header;
-        let metadata = range(
-            client,
-            base,
-            status,
-            archive,
-            header.metadata.0,
-            header.metadata.1,
-        )
-        .await?;
+        let metadata = range(ctx, header.metadata.0, header.metadata.1).await?;
         let metadata = decompress_async(header.internal_compression, metadata, "metadata")
             .await
-            .map_err(|error| failed(archive, error))?;
-        build_tile_json_document(header, archive, &metadata)
+            .map_err(|error| failed(ctx.archive, error))?;
+        build_tile_json_document(header, ctx.archive, &metadata)
     }
 }
 

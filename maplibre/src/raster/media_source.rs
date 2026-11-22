@@ -9,7 +9,7 @@ use crate::{
     coords::WorldTileCoords,
     raster::{
         image_source, resource::RasterResources, AvailableRasterLayerData, RasterLayerData,
-        RasterLayersDataComponent,
+        RasterLayersDataComponent, RasterSourceId,
     },
     render::{
         eventually::Eventually,
@@ -55,6 +55,75 @@ fn quad_bounds(coordinates: [[f64; 2]; 4]) -> Option<(f64, f64, f64, f64)> {
     (west >= -180.0 && east <= 180.0).then_some((west, south, east, north))
 }
 
+fn sync_media_source_entry(
+    style: &Style,
+    world: &mut World,
+    state: &mut DynamicMediaState,
+    source_id: RasterSourceId,
+    covering_tiles: Vec<WorldTileCoords>,
+) {
+    let Some(name) = source_id.name() else {
+        return;
+    };
+    let (frame, coordinates, generation) = match style.sources.get(name) {
+        Some(Source::Video(video)) => (video.frame.as_ref(), video.coordinates, video.generation),
+        Some(Source::Canvas(canvas)) => {
+            (canvas.frame.as_ref(), canvas.coordinates, canvas.generation)
+        }
+        _ => return,
+    };
+    let Some(frame) = frame else {
+        return;
+    };
+    let Some(picture) = cached_frame_image(state, name, frame, generation) else {
+        return;
+    };
+    let bounds = quad_bounds(coordinates);
+
+    for coords in covering_tiles {
+        if bounds.is_some_and(|bounds| !crate::io::tile_sources::tile_in_bounds(coords, bounds)) {
+            continue;
+        }
+        let has_tile_data = world
+            .tiles
+            .query::<&RasterLayersDataComponent>(coords)
+            .is_some_and(|component| component.has_source_image(&source_id));
+        let key = (name.to_owned(), coords);
+        if has_tile_data && state.tiles.get(&key) == Some(&generation) {
+            continue;
+        }
+
+        let resampled = image_source::render_tile(&picture, coordinates, coords)
+            .unwrap_or_else(|| RgbaImage::new(1, 1));
+        let exists = world
+            .tiles
+            .query::<&RasterLayersDataComponent>(coords)
+            .is_some();
+        let Some(mut tile) = world.tiles.spawn_mut(coords) else {
+            continue;
+        };
+        if !exists {
+            tile.insert(RasterLayersDataComponent::default());
+        }
+        if let Some(component) = world
+            .tiles
+            .query_mut::<&mut RasterLayersDataComponent>(coords)
+        {
+            component.record(RasterLayerData::Available(AvailableRasterLayerData {
+                coords,
+                source: source_id.clone(),
+                image: resampled,
+            }));
+        }
+        if let Some(Eventually::Initialized(raster)) =
+            world.resources.get_mut::<Eventually<RasterResources>>()
+        {
+            raster.tile_data_changed(&source_id, coords);
+        }
+        state.tiles.insert(key, generation);
+    }
+}
+
 /// Resamples any visible tiles of `"video"` and `"canvas"` sources whose frame or corner
 /// generation changed since they were last populated, marking their GPU bindings dirty for
 /// [`super::upload_system::upload_system`].
@@ -89,69 +158,7 @@ pub(crate) fn sync_media_sources(style: &Style, view_state: &ViewState, world: &
         .retain(|(name, _), _| is_media_source(style, Some(name.as_str())));
 
     for (source_id, covering_tiles) in regions {
-        let Some(name) = source_id.name() else {
-            continue;
-        };
-        let (frame, coordinates, generation) = match style.sources.get(name) {
-            Some(Source::Video(video)) => {
-                (video.frame.as_ref(), video.coordinates, video.generation)
-            }
-            Some(Source::Canvas(canvas)) => {
-                (canvas.frame.as_ref(), canvas.coordinates, canvas.generation)
-            }
-            _ => continue,
-        };
-        let Some(frame) = frame else {
-            continue;
-        };
-        let Some(picture) = cached_frame_image(&mut state, name, frame, generation) else {
-            continue;
-        };
-        let bounds = quad_bounds(coordinates);
-
-        for coords in covering_tiles {
-            if bounds.is_some_and(|bounds| !crate::io::tile_sources::tile_in_bounds(coords, bounds))
-            {
-                continue;
-            }
-            let has_tile_data = world
-                .tiles
-                .query::<&RasterLayersDataComponent>(coords)
-                .is_some_and(|component| component.has_source_image(&source_id));
-            let key = (name.to_owned(), coords);
-            if has_tile_data && state.tiles.get(&key) == Some(&generation) {
-                continue;
-            }
-
-            let resampled = image_source::render_tile(&picture, coordinates, coords)
-                .unwrap_or_else(|| RgbaImage::new(1, 1));
-            let exists = world
-                .tiles
-                .query::<&RasterLayersDataComponent>(coords)
-                .is_some();
-            let Some(mut tile) = world.tiles.spawn_mut(coords) else {
-                continue;
-            };
-            if !exists {
-                tile.insert(RasterLayersDataComponent::default());
-            }
-            if let Some(component) = world
-                .tiles
-                .query_mut::<&mut RasterLayersDataComponent>(coords)
-            {
-                component.record(RasterLayerData::Available(AvailableRasterLayerData {
-                    coords,
-                    source: source_id.clone(),
-                    image: resampled,
-                }));
-            }
-            if let Some(Eventually::Initialized(raster)) =
-                world.resources.get_mut::<Eventually<RasterResources>>()
-            {
-                raster.tile_data_changed(&source_id, coords);
-            }
-            state.tiles.insert(key, generation);
-        }
+        sync_media_source_entry(style, world, &mut state, source_id, covering_tiles);
     }
 
     world.resources.insert(state);

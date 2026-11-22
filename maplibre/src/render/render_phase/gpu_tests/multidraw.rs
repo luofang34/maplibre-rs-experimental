@@ -1,31 +1,27 @@
 use super::{
-    bin_geometry, create_slab, make_base_schedule, make_context, submit_pass, BindSharedSlab,
-    DrawSlabIndexed, DrawSlabNonIndexed, GpuBatchKey, GpuBatcher, GpuInputs, GpuInstance,
-    PrimaryBinnedItem, SecondaryBinnedItem, SlabResources,
+    bin_geometry, create_slab, make_base_schedule, make_context, render_both_phases, submit_pass,
+    BindSharedSlab, DrawSlabIndexed, DrawSlabNonIndexed, GpuBatchKey, GpuBatcher, GpuInputs,
+    GpuInstance, PrimaryBinnedItem, SecondaryBinnedItem, SlabResources,
 };
 use crate::{
     context::MapContext,
     render::{
         render_phase::{
             BatchedInstanceBuffer, BinnedItemId, BinnedRenderPhase, BinnedRenderPhasePlugin,
-            BinnedRenderPhaseType, DrawFunctions, IndirectMeshMetadata, IndirectParametersBuffers,
-            InputDataIndex,
+            BinnedRenderPhaseType, DrawFunctionId, DrawFunctions, IndirectMeshMetadata,
+            IndirectParametersBuffers, InputDataIndex,
         },
         tracked_pass::{DrawCapabilities, PassStats, RenderStats},
         RenderStageLabel,
     },
+    schedule::Schedule,
     tcs::system::{SystemError, SystemResult},
 };
 
-#[tokio::test]
-async fn closed_loop_storage_multidraw_single_and_failure_cleanup_pass_validation() {
-    let mut ctx = make_context().await;
-    let native_caps =
-        DrawCapabilities::from_adapter_and_device(&ctx.renderer.adapter, &ctx.renderer.device);
-    if !native_caps.vertex_storage_buffers {
-        return;
-    }
-
+fn setup_multidraw_resources(
+    ctx: &mut MapContext,
+    native_caps: DrawCapabilities,
+) -> wgpu::BindGroupLayout {
     let storage_shader = "
         @group(0) @binding(0) var<storage, read> instances: array<vec4<f32>>;
         @vertex fn vs(@location(0) pos: vec2<f32>, @builtin(instance_index) inst: u32) -> @builtin(position) vec4<f32> {
@@ -59,27 +55,6 @@ async fn closed_loop_storage_multidraw_single_and_failure_cleanup_pass_validatio
     ));
     ctx.world.resources.init::<RenderStats>();
 
-    let mut schedule = make_base_schedule();
-    BinnedRenderPhasePlugin::<PrimaryBinnedItem, GpuBatcher>::new()
-        .install(&mut schedule, &mut ctx.world)
-        .unwrap();
-    BinnedRenderPhasePlugin::<SecondaryBinnedItem, GpuBatcher>::new()
-        .install(&mut schedule, &mut ctx.world)
-        .unwrap();
-
-    let primary_draw = ctx
-        .world
-        .resources
-        .get_mut::<DrawFunctions<PrimaryBinnedItem>>()
-        .unwrap()
-        .add_with::<(BindSharedSlab, DrawSlabIndexed)>();
-    let secondary_draw = ctx
-        .world
-        .resources
-        .get_mut::<DrawFunctions<SecondaryBinnedItem>>()
-        .unwrap()
-        .add_with::<(BindSharedSlab, DrawSlabNonIndexed)>();
-
     let mut inputs = GpuInputs::default();
     for bin in 0..3u32 {
         let (index_range, base_vertex) = bin_geometry(bin, native_caps.base_vertex);
@@ -96,96 +71,180 @@ async fn closed_loop_storage_multidraw_single_and_failure_cleanup_pass_validatio
         Some(IndirectMeshMetadata::NonIndexed { vertex_range: 0..3 }),
     ));
     ctx.world.resources.insert(inputs);
+    bgl
+}
 
-    schedule
-        .add_system_to_stage(
-            RenderStageLabel::Queue,
-            move |c: &mut MapContext| -> SystemResult {
-                let p1 = c
-                    .world
-                    .resources
-                    .get_mut::<BinnedRenderPhase<PrimaryBinnedItem>>()
-                    .unwrap();
-                let key1 = GpuBatchKey {
-                    pipeline_id: 0,
-                    indexed: true,
-                    draw_fn: primary_draw,
-                };
-                for bin in [2u32, 0, 1] {
-                    p1.add(
-                        key1.clone(),
-                        bin,
-                        BinnedItemId(bin as u64),
-                        InputDataIndex(bin),
-                        BinnedRenderPhaseType::MultidrawableMesh,
-                    );
-                }
-                let p2 = c
-                    .world
-                    .resources
-                    .get_mut::<BinnedRenderPhase<SecondaryBinnedItem>>()
-                    .unwrap();
-                p2.add(
-                    GpuBatchKey {
-                        pipeline_id: 0,
-                        indexed: false,
-                        draw_fn: secondary_draw,
-                    },
-                    0,
-                    BinnedItemId(99),
-                    InputDataIndex(3),
-                    BinnedRenderPhaseType::BatchableMesh,
+fn register_multidraw_queue_system(
+    schedule: &mut Schedule,
+    primary_draw: DrawFunctionId,
+    secondary_draw: DrawFunctionId,
+) -> Result<(), Box<dyn std::error::Error>> {
+    schedule.add_system_to_stage(
+        RenderStageLabel::Queue,
+        move |c: &mut MapContext| -> SystemResult {
+            let p1 = c
+                .world
+                .resources
+                .get_mut::<BinnedRenderPhase<PrimaryBinnedItem>>()
+                .ok_or(SystemError::Dependencies)?;
+            let key1 = GpuBatchKey {
+                pipeline_id: 0,
+                indexed: true,
+                draw_fn: primary_draw,
+            };
+            for bin in [2u32, 0, 1] {
+                p1.add(
+                    key1.clone(),
+                    bin,
+                    BinnedItemId(bin as u64),
+                    InputDataIndex(bin),
+                    BinnedRenderPhaseType::MultidrawableMesh,
                 );
-                Ok(())
-            },
-        )
-        .unwrap();
+            }
+            let p2 = c
+                .world
+                .resources
+                .get_mut::<BinnedRenderPhase<SecondaryBinnedItem>>()
+                .ok_or(SystemError::Dependencies)?;
+            p2.add(
+                GpuBatchKey {
+                    pipeline_id: 0,
+                    indexed: false,
+                    draw_fn: secondary_draw,
+                },
+                0,
+                BinnedItemId(99),
+                InputDataIndex(3),
+                BinnedRenderPhaseType::BatchableMesh,
+            );
+            Ok(())
+        },
+    )?;
+    Ok(())
+}
 
-    let bgl_clone = bgl.clone();
-    schedule
-        .add_system_to_stage(
-            RenderStageLabel::Render,
-            move |c: &mut MapContext| -> SystemResult {
-                let inst_buf = c
-                    .world
-                    .resources
-                    .get::<BatchedInstanceBuffer<GpuInstance>>()
-                    .unwrap()
-                    .buffer()
-                    .unwrap()
-                    .clone();
-                let bg = c
-                    .renderer
-                    .device
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: None,
-                        layout: &bgl_clone,
-                        entries: &[wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: inst_buf.as_entire_binding(),
-                        }],
-                    });
-                c.world
-                    .resources
-                    .get_mut::<SlabResources>()
-                    .unwrap()
-                    .bind_group = Some(bg);
-                submit_pass(c, |pass, world| {
-                    world
-                        .resources
-                        .get::<BinnedRenderPhase<PrimaryBinnedItem>>()
-                        .unwrap()
-                        .render(pass, world);
-                    world
-                        .resources
-                        .get::<BinnedRenderPhase<SecondaryBinnedItem>>()
-                        .unwrap()
-                        .render(pass, world);
+fn register_multidraw_render_system(
+    schedule: &mut Schedule,
+    bgl: wgpu::BindGroupLayout,
+) -> Result<(), Box<dyn std::error::Error>> {
+    schedule.add_system_to_stage(
+        RenderStageLabel::Render,
+        move |c: &mut MapContext| -> SystemResult {
+            let inst_buf = c
+                .world
+                .resources
+                .get::<BatchedInstanceBuffer<GpuInstance>>()
+                .ok_or(SystemError::Dependencies)?
+                .buffer()
+                .ok_or(SystemError::Dependencies)?
+                .clone();
+            let bg = c
+                .renderer
+                .device
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: None,
+                    layout: &bgl,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: inst_buf.as_entire_binding(),
+                    }],
                 });
-                Ok(())
-            },
-        )
-        .unwrap();
+            c.world
+                .resources
+                .get_mut::<SlabResources>()
+                .ok_or(SystemError::Dependencies)?
+                .bind_group = Some(bg);
+            submit_pass(c, render_both_phases)?;
+            Ok(())
+        },
+    )?;
+    Ok(())
+}
+
+async fn verify_multidraw_and_cleanup(
+    ctx: &mut MapContext,
+    schedule: &mut Schedule,
+    native_caps: DrawCapabilities,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if native_caps.supports_multidraw_indirect(true) {
+        ctx.world.resources.insert(native_caps);
+        if native_caps.multi_draw_indirect_count {
+            ctx.world
+                .resources
+                .get_mut::<IndirectParametersBuffers>()
+                .ok_or("missing IndirectParametersBuffers")?
+                .set_gpu_count_enabled(true);
+        }
+        let scope_md = ctx
+            .renderer
+            .device
+            .push_error_scope(wgpu::ErrorFilter::Validation);
+        schedule.run_once(ctx)?;
+        assert!(scope_md.pop().await.is_none());
+        assert_eq!(
+            ctx.world
+                .resources
+                .get::<RenderStats>()
+                .ok_or("missing RenderStats")?
+                .take(),
+            PassStats {
+                draws: 2,
+                state_changes: 4,
+                redundant_state_changes: 3
+            }
+        );
+        assert_eq!(ctx.renderer.queue.take_written_bytes(), 64 + 60 + 8 + 16);
+    }
+
+    schedule.add_system_to_stage(
+        RenderStageLabel::PhaseSort,
+        |_c: &mut MapContext| -> SystemResult { Err(SystemError::Dependencies) },
+    )?;
+    assert!(schedule.run_once(ctx).is_err());
+    assert!(ctx
+        .world
+        .resources
+        .get::<BinnedRenderPhase<PrimaryBinnedItem>>()
+        .ok_or("missing PrimaryBinnedItem phase")?
+        .is_empty());
+    assert!(ctx
+        .world
+        .resources
+        .get::<BinnedRenderPhase<SecondaryBinnedItem>>()
+        .ok_or("missing SecondaryBinnedItem phase")?
+        .is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn closed_loop_storage_multidraw_single_and_failure_cleanup_pass_validation(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut ctx = make_context().await;
+    let native_caps =
+        DrawCapabilities::from_adapter_and_device(&ctx.renderer.adapter, &ctx.renderer.device);
+    if !native_caps.vertex_storage_buffers {
+        return Ok(());
+    }
+    let bgl = setup_multidraw_resources(&mut ctx, native_caps);
+    let mut schedule = make_base_schedule()?;
+    BinnedRenderPhasePlugin::<PrimaryBinnedItem, GpuBatcher>::new()
+        .install(&mut schedule, &mut ctx.world)?;
+    BinnedRenderPhasePlugin::<SecondaryBinnedItem, GpuBatcher>::new()
+        .install(&mut schedule, &mut ctx.world)?;
+    let primary_draw = ctx
+        .world
+        .resources
+        .get_mut::<DrawFunctions<PrimaryBinnedItem>>()
+        .ok_or("missing PrimaryBinnedItem DrawFunctions")?
+        .add_with::<(BindSharedSlab, DrawSlabIndexed)>();
+    let secondary_draw = ctx
+        .world
+        .resources
+        .get_mut::<DrawFunctions<SecondaryBinnedItem>>()
+        .ok_or("missing SecondaryBinnedItem DrawFunctions")?
+        .add_with::<(BindSharedSlab, DrawSlabNonIndexed)>();
+    register_multidraw_queue_system(&mut schedule, primary_draw, secondary_draw)?;
+    register_multidraw_render_system(&mut schedule, bgl)?;
 
     ctx.world.resources.insert(DrawCapabilities {
         multi_draw_indirect: false,
@@ -193,17 +252,25 @@ async fn closed_loop_storage_multidraw_single_and_failure_cleanup_pass_validatio
         ..native_caps
     });
     let _ = ctx.renderer.queue.take_written_bytes();
-    let _ = ctx.world.resources.get::<RenderStats>().unwrap().take();
+    let _ = ctx
+        .world
+        .resources
+        .get::<RenderStats>()
+        .ok_or("missing RenderStats")?
+        .take();
 
     let scope = ctx
         .renderer
         .device
         .push_error_scope(wgpu::ErrorFilter::Validation);
-    schedule.run_once(&mut ctx).unwrap();
+    schedule.run_once(&mut ctx)?;
     assert!(scope.pop().await.is_none());
-
     assert_eq!(
-        ctx.world.resources.get::<RenderStats>().unwrap().take(),
+        ctx.world
+            .resources
+            .get::<RenderStats>()
+            .ok_or("missing RenderStats")?
+            .take(),
         PassStats {
             draws: 4,
             state_changes: 4,
@@ -215,52 +282,8 @@ async fn closed_loop_storage_multidraw_single_and_failure_cleanup_pass_validatio
         .world
         .resources
         .get::<BinnedRenderPhase<PrimaryBinnedItem>>()
-        .unwrap()
+        .ok_or("missing PrimaryBinnedItem phase")?
         .is_empty());
 
-    if native_caps.supports_multidraw_indirect(true) {
-        ctx.world.resources.insert(native_caps);
-        if native_caps.multi_draw_indirect_count {
-            ctx.world
-                .resources
-                .get_mut::<IndirectParametersBuffers>()
-                .unwrap()
-                .set_gpu_count_enabled(true);
-        }
-        let scope_md = ctx
-            .renderer
-            .device
-            .push_error_scope(wgpu::ErrorFilter::Validation);
-        schedule.run_once(&mut ctx).unwrap();
-        assert!(scope_md.pop().await.is_none());
-        assert_eq!(
-            ctx.world.resources.get::<RenderStats>().unwrap().take(),
-            PassStats {
-                draws: 2,
-                state_changes: 4,
-                redundant_state_changes: 3
-            }
-        );
-        assert_eq!(ctx.renderer.queue.take_written_bytes(), 64 + 60 + 8 + 16);
-    }
-
-    schedule
-        .add_system_to_stage(
-            RenderStageLabel::PhaseSort,
-            |_c: &mut MapContext| -> SystemResult { Err(SystemError::Dependencies) },
-        )
-        .unwrap();
-    assert!(schedule.run_once(&mut ctx).is_err());
-    assert!(ctx
-        .world
-        .resources
-        .get::<BinnedRenderPhase<PrimaryBinnedItem>>()
-        .unwrap()
-        .is_empty());
-    assert!(ctx
-        .world
-        .resources
-        .get::<BinnedRenderPhase<SecondaryBinnedItem>>()
-        .unwrap()
-        .is_empty());
+    verify_multidraw_and_cleanup(&mut ctx, &mut schedule, native_caps).await
 }

@@ -97,6 +97,71 @@ pub(super) fn load_sources_blocking(
     Ok((all_layers, all_raster_layers))
 }
 
+fn read_geojson_url(url: &str) -> Result<Value, String> {
+    let path = local_data_path(url)?;
+    let text = std::fs::read_to_string(&path)
+        .map_err(|error| format!("Cannot read GeoJSON {}: {error}", path.display()))?;
+    serde_json::from_str::<Value>(&text)
+        .map_err(|error| format!("Cannot parse GeoJSON {}: {error}", path.display()))
+}
+
+fn geojson_symbol_layers(layers: &[StyleLayer]) -> Vec<StyleLayer> {
+    layers
+        .iter()
+        .cloned()
+        .map(|mut layer| {
+            layer
+                .source_layer
+                .get_or_insert_with(|| GEOJSON_LAYER.to_owned());
+            layer
+        })
+        .collect()
+}
+
+fn unique_clamped_tiles(target_coords: &[WorldTileCoords], max_zoom: u8) -> Vec<WorldTileCoords> {
+    let mut tiles: Vec<WorldTileCoords> = Vec::new();
+    for coords in target_coords {
+        let clamped = maplibre::io::tile_sources::clamp_to_max_zoom(*coords, Some(max_zoom));
+        if !tiles.contains(&clamped) {
+            tiles.push(clamped);
+        }
+    }
+    tiles
+}
+
+fn process_geojson_tile(
+    (style, name, source): (&Style, &str, &GeoJsonSource),
+    value: &Value,
+    (index, layers, symbol_layers): (&GeoJsonIndex, &[StyleLayer], &[StyleLayer]),
+    coords: WorldTileCoords,
+    (projection, level, pixel_ratio, paused): (&ProjectionType, u8, f64, bool),
+) -> Result<ProcessedLayers, String> {
+    let max_zoom = source.maxzoom.unwrap_or(GEOJSON_DEFAULT_MAXZOOM);
+    // A paused source keeps its tiles while the view moves on, so they use the view's zoom.
+    let magnified = if paused || u8::from(coords.z) >= max_zoom {
+        level.max(u8::from(coords.z))
+    } else {
+        0
+    };
+    let atlas = symbol_atlas(
+        style,
+        symbol_layers,
+        &index.tile(coords),
+        (coords, 0, pixel_ratio),
+    )?;
+    // A source that filters or clusters shows each tile its own version of the document.
+    let presented = index.source_document(value, source, coords);
+    process_geojson_layers_with_atlas(
+        presented.as_ref().unwrap_or(value),
+        name,
+        layers.to_vec(),
+        coords,
+        projection.clone(),
+        (atlas, magnified, Some(source.buffer.unwrap_or(128))),
+    )
+    .map_err(|error| format!("Cannot process GeoJSON source '{name}': {error}"))
+}
+
 fn load_geojson_blocking(
     map: &mut HeadlessMap,
     (style, name, source): (&Style, &str, &GeoJsonSource),
@@ -104,16 +169,11 @@ fn load_geojson_blocking(
     target_coords: &[WorldTileCoords],
     (projection, pixel_ratio, paused): (&ProjectionType, f64, bool),
 ) -> Result<ProcessedLayers, String> {
-    let data = &source.data;
     let loaded;
-    let raw_value = match data {
+    let raw_value = match &source.data {
         GeoJsonData::Inline(value) => value.as_ref(),
         GeoJsonData::Url(url) => {
-            let path = local_data_path(url)?;
-            let text = std::fs::read_to_string(&path)
-                .map_err(|error| format!("Cannot read GeoJSON {}: {error}", path.display()))?;
-            loaded = serde_json::from_str::<Value>(&text)
-                .map_err(|error| format!("Cannot parse GeoJSON {}: {error}", path.display()))?;
+            loaded = read_geojson_url(url)?;
             &loaded
         }
     };
@@ -127,60 +187,23 @@ fn load_geojson_blocking(
             return Ok(ProcessedLayers::default());
         }
     };
-    // The glyphs a tile needs are found in the same tile the worker path would build, whose
-    // one layer has a fixed name that the style's layers do not carry.
-    let symbol_layers: Vec<StyleLayer> = layers
-        .iter()
-        .cloned()
-        .map(|mut layer| {
-            layer
-                .source_layer
-                .get_or_insert_with(|| GEOJSON_LAYER.to_owned());
-            layer
-        })
-        .collect();
-    let mut processed = ProcessedLayers::default();
-    // Past its last zoom a GeoJSON source is drawn magnified from the tile of that zoom.
+    // Symbol layers need the fixed GeoJSON layer name to resolve glyph/sprite dependencies.
+    let symbol_layers = geojson_symbol_layers(layers);
     let max_zoom = source.maxzoom.unwrap_or(GEOJSON_DEFAULT_MAXZOOM);
     let level = u8::from(
         map.view_state()
             .zoom()
             .zoom_level(maplibre::render::tile_view_pattern::DEFAULT_TILE_SIZE),
     );
-    let mut tiles: Vec<WorldTileCoords> = Vec::new();
-    for coords in target_coords {
-        let coords = maplibre::io::tile_sources::clamp_to_max_zoom(*coords, Some(max_zoom));
-        if !tiles.contains(&coords) {
-            tiles.push(coords);
-        }
-    }
-    for coords in &tiles {
-        // A paused source keeps its tiles while the view moves on, so they are laid out at the
-        // zoom the view has.
-        let magnified = if paused || u8::from(coords.z) >= max_zoom {
-            level.max(u8::from(coords.z))
-        } else {
-            0
-        };
-        let atlas = symbol_atlas(
-            style,
-            &symbol_layers,
-            &index.tile(*coords),
-            (*coords, 0, pixel_ratio),
-        )?;
-        // A source that filters or clusters shows each tile its own version of the document.
-        let presented = index.source_document(value, source, *coords);
-        processed.append(
-            &mut process_geojson_layers_with_atlas(
-                presented.as_ref().unwrap_or(value),
-                name,
-                layers.to_vec(),
-                *coords,
-                projection.clone(),
-                (atlas, magnified, Some(source.buffer.unwrap_or(128))),
-            )
-            .map_err(|error| format!("Cannot process GeoJSON source '{name}': {error}"))?,
-        );
+    let mut processed = ProcessedLayers::default();
+    for coords in unique_clamped_tiles(target_coords, max_zoom) {
+        processed.append(&mut process_geojson_tile(
+            (style, name, source),
+            value,
+            (&index, layers, &symbol_layers),
+            coords,
+            (projection, level, pixel_ratio, paused),
+        )?);
     }
     Ok(processed)
 }

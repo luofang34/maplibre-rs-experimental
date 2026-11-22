@@ -37,55 +37,23 @@ impl StyleLayer {
             Some(_) => return Err(field_err("layout", "expected object")),
         };
         let paint_val = map.get("paint").filter(|v| !v.is_null());
-        let rounded_from_layout = if type_ == "fill-extrusion" {
-            layout_map.and_then(|l| l.get("fill-extrusion-rounded-corner-distance"))
-        } else {
-            None
-        };
         let input_flags = Some(compute_input_flags(
             &type_,
             filter.as_ref(),
             paint_val,
             layout_map,
         ));
-        #[cfg(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl"))]
-        let transitions = crate::style::transitions::extract_layer_transitions_ref(
-            &id,
-            paint_val.and_then(Value::as_object),
-        )
-        .map_err(de::Error::custom)?;
-        #[cfg(not(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl")))]
-        let transitions = Default::default();
+        let transitions = parse_layer_transitions(&id, paint_val)?;
+        let visibility = parse_layer_visibility(&id, layout_map)?;
         let mut unrecognized = LayerProperties::default();
-        let mut paint = super::paint_from_value::parse_layer_paint_from_value(
-            &type_,
-            paint_val,
-            rounded_from_layout,
-            &mut unrecognized.paint,
-        )
-        .map_err(|error| de::Error::custom(format!("layer `{id}` paint: {error}")))?;
-        let visibility = match layout_map
-            .and_then(|l| l.get("visibility"))
-            .filter(|v| !v.is_null())
-        {
-            Some(v) => super::paint_from_value::parse_visibility(v).map_err(|error| {
-                de::Error::custom(format!("layer `{id}` layout.visibility: {error}"))
-            })?,
-            None => LayerVisibility::Visible,
-        };
-        let skip_rounded = type_ == "fill-extrusion";
-        if let Some(LayerPaint::Symbol(symbol)) = &mut paint {
-            merge_symbol_layout_ref(symbol, layout_map, &mut unrecognized);
-        } else if let Some(layout) = layout_map {
-            for (k, v) in layout {
-                if k == "visibility"
-                    || (skip_rounded && k == "fill-extrusion-rounded-corner-distance")
-                {
-                    continue;
-                }
-                unrecognized.layout.insert(k.clone(), v.clone());
-            }
-        }
+        let mut paint =
+            parse_layer_paint(&id, &type_, paint_val, layout_map, &mut unrecognized.paint)?;
+        populate_layout_properties(
+            layout_map,
+            paint.as_mut(),
+            type_ == "fill-extrusion",
+            &mut unrecognized,
+        );
         let _ = crate::style::StyleLayerId::intern(&id);
         if let Some(source_layer) = &source_layer {
             let _ = crate::style::SourceLayerId::intern(source_layer);
@@ -106,6 +74,80 @@ impl StyleLayer {
             unrecognized,
             input_flags,
         })
+    }
+}
+
+fn parse_layer_transitions(
+    id: &str,
+    paint_val: Option<&Value>,
+) -> Result<
+    rustc_hash::FxHashMap<String, crate::style::transitions::TransitionSpec>,
+    serde_json::Error,
+> {
+    #[cfg(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl"))]
+    return crate::style::transitions::extract_layer_transitions_ref(
+        id,
+        paint_val.and_then(Value::as_object),
+    )
+    .map_err(de::Error::custom);
+    #[cfg(not(any(not(target_arch = "wasm32"), feature = "webgpu", feature = "web-webgl")))]
+    {
+        let _ = (id, paint_val);
+        Ok(Default::default())
+    }
+}
+
+fn parse_layer_paint(
+    id: &str,
+    type_: &str,
+    paint_val: Option<&Value>,
+    layout_map: Option<&Map<String, Value>>,
+    unrecognized_paint: &mut Map<String, Value>,
+) -> Result<Option<LayerPaint>, serde_json::Error> {
+    let rounded_from_layout = if type_ == "fill-extrusion" {
+        layout_map.and_then(|l| l.get("fill-extrusion-rounded-corner-distance"))
+    } else {
+        None
+    };
+    super::paint_from_value::parse_layer_paint_from_value(
+        type_,
+        paint_val,
+        rounded_from_layout,
+        unrecognized_paint,
+    )
+    .map_err(|error| de::Error::custom(format!("layer `{id}` paint: {error}")))
+}
+
+fn parse_layer_visibility(
+    id: &str,
+    layout_map: Option<&Map<String, Value>>,
+) -> Result<LayerVisibility, serde_json::Error> {
+    match layout_map
+        .and_then(|l| l.get("visibility"))
+        .filter(|v| !v.is_null())
+    {
+        Some(v) => super::paint_from_value::parse_visibility(v)
+            .map_err(|error| de::Error::custom(format!("layer `{id}` layout.visibility: {error}"))),
+        None => Ok(LayerVisibility::Visible),
+    }
+}
+
+fn populate_layout_properties(
+    layout_map: Option<&Map<String, Value>>,
+    paint: Option<&mut LayerPaint>,
+    skip_rounded: bool,
+    unrecognized: &mut LayerProperties,
+) {
+    if let Some(LayerPaint::Symbol(symbol)) = paint {
+        merge_symbol_layout_ref(symbol, layout_map, unrecognized);
+    } else if let Some(layout) = layout_map {
+        for (k, v) in layout {
+            if k == "visibility" || (skip_rounded && k == "fill-extrusion-rounded-corner-distance")
+            {
+                continue;
+            }
+            unrecognized.layout.insert(k.clone(), v.clone());
+        }
     }
 }
 
@@ -270,72 +312,73 @@ impl Serialize for StyleLayer {
     }
 }
 
+fn feed_json(hasher: &mut rustc_hash::FxHasher, value: &Value) {
+    use std::hash::Hash;
+    match value {
+        Value::Null => 0_u8.hash(hasher),
+        Value::Bool(b) => {
+            1_u8.hash(hasher);
+            b.hash(hasher);
+        }
+        Value::Number(n) => {
+            2_u8.hash(hasher);
+            if let Some(u) = n.as_u64() {
+                (0_u8, u).hash(hasher);
+            } else if let Some(i) = n.as_i64() {
+                (1_u8, i).hash(hasher);
+            } else if let Some(f) = n.as_f64() {
+                (2_u8, f.to_bits()).hash(hasher);
+            }
+        }
+        Value::String(s) => {
+            3_u8.hash(hasher);
+            s.hash(hasher);
+        }
+        Value::Array(items) => {
+            4_u8.hash(hasher);
+            items.len().hash(hasher);
+            for item in items {
+                feed_json(hasher, item);
+            }
+        }
+        Value::Object(entries) => {
+            5_u8.hash(hasher);
+            entries.len().hash(hasher);
+            for (k, v) in entries {
+                k.hash(hasher);
+                feed_json(hasher, v);
+            }
+        }
+    }
+}
+
+fn feed_style_prop<T, F: Fn(&T, &mut rustc_hash::FxHasher)>(
+    hasher: &mut rustc_hash::FxHasher,
+    prop: &StyleProperty<T>,
+    hash_const: F,
+) {
+    use std::hash::Hash;
+    match prop {
+        StyleProperty::Constant(v) => {
+            0_u8.hash(hasher);
+            hash_const(v, hasher);
+        }
+        StyleProperty::Expression(expr) => {
+            1_u8.hash(hasher);
+            feed_json(hasher, expr.source());
+        }
+        StyleProperty::Unsupported(raw) => {
+            2_u8.hash(hasher);
+            feed_json(hasher, &raw.source);
+        }
+    }
+}
+
 impl StyleLayer {
     /// What GL JS `groupByLayout` compares: layers equal in type, source, source layer, zoom
     /// range, filter and every layout property share one symbol bucket and one placement.
     pub(crate) fn layout_group_key(&self) -> Option<String> {
         use std::hash::{Hash, Hasher};
-
-        fn feed_json(hasher: &mut rustc_hash::FxHasher, value: &Value) {
-            match value {
-                Value::Null => 0_u8.hash(hasher),
-                Value::Bool(b) => {
-                    1_u8.hash(hasher);
-                    b.hash(hasher);
-                }
-                Value::Number(n) => {
-                    2_u8.hash(hasher);
-                    if let Some(u) = n.as_u64() {
-                        (0_u8, u).hash(hasher);
-                    } else if let Some(i) = n.as_i64() {
-                        (1_u8, i).hash(hasher);
-                    } else if let Some(f) = n.as_f64() {
-                        (2_u8, f.to_bits()).hash(hasher);
-                    }
-                }
-                Value::String(s) => {
-                    3_u8.hash(hasher);
-                    s.hash(hasher);
-                }
-                Value::Array(items) => {
-                    4_u8.hash(hasher);
-                    items.len().hash(hasher);
-                    for item in items {
-                        feed_json(hasher, item);
-                    }
-                }
-                Value::Object(entries) => {
-                    5_u8.hash(hasher);
-                    entries.len().hash(hasher);
-                    for (k, v) in entries {
-                        k.hash(hasher);
-                        feed_json(hasher, v);
-                    }
-                }
-            }
-        }
-
-        fn feed_style_prop<T, F: Fn(&T, &mut rustc_hash::FxHasher)>(
-            hasher: &mut rustc_hash::FxHasher,
-            prop: &StyleProperty<T>,
-            hash_const: F,
-        ) {
-            match prop {
-                StyleProperty::Constant(v) => {
-                    0_u8.hash(hasher);
-                    hash_const(v, hasher);
-                }
-                StyleProperty::Expression(expr) => {
-                    1_u8.hash(hasher);
-                    feed_json(hasher, expr.source());
-                }
-                StyleProperty::Unsupported(raw) => {
-                    2_u8.hash(hasher);
-                    feed_json(hasher, &raw.source);
-                }
-            }
-        }
-
         let mut h0 = rustc_hash::FxHasher::default();
         let mut h1 = rustc_hash::FxHasher::default();
         0x243f_6a88_85a3_08d3_u64.hash(&mut h0);

@@ -57,7 +57,7 @@ impl MetadataScratchPool {
         if self.zeros.len() < len {
             self.zeros.resize(len, SDFShaderFeatureMetadata::default());
         }
-        &self.zeros[..len]
+        self.zeros.get(..len).unwrap_or(&self.zeros)
     }
 }
 
@@ -150,19 +150,8 @@ pub(super) fn diff_and_upload_bucket_with_scratch<
     // Fast path 2: bucket became completely hidden after having visible symbols.
     if next.is_empty() {
         scratch.recycle(next);
-        let zero = SDFShaderFeatureMetadata::default();
-        let zero_bytes = bytemuck::bytes_of(&zero);
         let limit = prev_slice.len().min(allocated_quads);
-        for (start, end) in dirty_runs(limit, |i| bytemuck::bytes_of(&prev_slice[i]) != zero_bytes)
-        {
-            let mut cursor = start;
-            while cursor < end {
-                let chunk_end = (cursor + MAX_UPLOAD_QUADS_PER_CHUNK).min(end);
-                let zeros = scratch.zero_slice((chunk_end - cursor) * 4);
-                pool.update_feature_metadata_range(queue, entry, cursor * 4, zeros);
-                cursor = chunk_end;
-            }
-        }
+        zero_dirty_quads(pool, queue, entry, prev_slice, 0, limit, scratch);
         return CachedBucketMetadata::empty(allocation_id);
     }
 
@@ -174,29 +163,57 @@ pub(super) fn diff_and_upload_bucket_with_scratch<
     let limit = next.len();
     for (start, end) in dirty_runs(limit, |i| {
         let old = prev_slice.get(i).unwrap_or(&zero);
-        bytemuck::bytes_of(old) != bytemuck::bytes_of(&next[i])
+        next.get(i)
+            .is_some_and(|quad| bytemuck::bytes_of(old) != bytemuck::bytes_of(quad))
     }) {
-        write_quad_chunks(pool, queue, entry, &next[start..end], start, scratch);
+        if let Some(slice) = next.get(start..end) {
+            write_quad_chunks(pool, queue, entry, slice, start, scratch);
+        }
     }
     if prev_slice.len() > limit {
         let tail_end = prev_slice.len().min(allocated_quads);
-        let zero_bytes = bytemuck::bytes_of(&zero);
-        for (rel_start, rel_end) in dirty_runs(tail_end - limit, |i| {
-            bytemuck::bytes_of(&prev_slice[limit + i]) != zero_bytes
-        }) {
-            let mut cursor = rel_start;
-            while cursor < rel_end {
-                let chunk_end = (cursor + MAX_UPLOAD_QUADS_PER_CHUNK).min(rel_end);
-                let zeros = scratch.zero_slice((chunk_end - cursor) * 4);
-                pool.update_feature_metadata_range(queue, entry, (limit + cursor) * 4, zeros);
-                cursor = chunk_end;
-            }
-        }
+        zero_dirty_quads(pool, queue, entry, prev_slice, limit, tail_end, scratch);
     }
 
+    let (has_target_visible, latest_fade_start_ms) = summarize_bucket_fade(&next);
+    CachedBucketMetadata {
+        allocation_id,
+        has_target_visible,
+        latest_fade_start_ms,
+        quads: next,
+    }
+}
+
+fn zero_dirty_quads<Q: Queue<B>, B, V: crate::render::shaders::PoolVertex, I: Pod, TM: Pod>(
+    pool: &BufferPool<Q, B, V, I, TM, SDFShaderFeatureMetadata>,
+    queue: &Q,
+    entry: &IndexEntry,
+    prev_slice: &[SDFShaderFeatureMetadata],
+    base: usize,
+    end: usize,
+    scratch: &mut MetadataScratchPool,
+) {
+    let zero = SDFShaderFeatureMetadata::default();
+    let zero_bytes = bytemuck::bytes_of(&zero);
+    for (rel_start, rel_end) in dirty_runs(end.saturating_sub(base), |i| {
+        prev_slice
+            .get(base + i)
+            .is_some_and(|quad| bytemuck::bytes_of(quad) != zero_bytes)
+    }) {
+        let mut cursor = rel_start;
+        while cursor < rel_end {
+            let chunk_end = (cursor + MAX_UPLOAD_QUADS_PER_CHUNK).min(rel_end);
+            let zeros = scratch.zero_slice((chunk_end - cursor) * 4);
+            pool.update_feature_metadata_range(queue, entry, (base + cursor) * 4, zeros);
+            cursor = chunk_end;
+        }
+    }
+}
+
+fn summarize_bucket_fade(next: &[SDFShaderFeatureMetadata]) -> (bool, f32) {
     let mut has_target_visible = false;
     let mut latest_fade_start_ms = -1.0_f32;
-    for quad in &next {
+    for quad in next {
         if quad.has_target_opacity() {
             has_target_visible = true;
         }
@@ -204,13 +221,7 @@ pub(super) fn diff_and_upload_bucket_with_scratch<
             latest_fade_start_ms = latest_fade_start_ms.max(quad.start_time_ms());
         }
     }
-
-    CachedBucketMetadata {
-        allocation_id,
-        has_target_visible,
-        latest_fade_start_ms,
-        quads: next,
-    }
+    (has_target_visible, latest_fade_start_ms)
 }
 
 fn write_quad_chunks<Q: Queue<B>, B, V: crate::render::shaders::PoolVertex, I: Pod, TM: Pod>(
@@ -221,12 +232,14 @@ fn write_quad_chunks<Q: Queue<B>, B, V: crate::render::shaders::PoolVertex, I: P
     quad_offset: usize,
     scratch: &mut MetadataScratchPool,
 ) {
-    let mut cursor = 0;
-    while cursor < quads.len() {
-        let chunk_end = (cursor + MAX_UPLOAD_QUADS_PER_CHUNK).min(quads.len());
-        let expanded = scratch.expand_quads(&quads[cursor..chunk_end]);
-        pool.update_feature_metadata_range(queue, entry, (quad_offset + cursor) * 4, expanded);
-        cursor = chunk_end;
+    for (chunk_idx, chunk) in quads.chunks(MAX_UPLOAD_QUADS_PER_CHUNK).enumerate() {
+        let expanded = scratch.expand_quads(chunk);
+        pool.update_feature_metadata_range(
+            queue,
+            entry,
+            (quad_offset + chunk_idx * MAX_UPLOAD_QUADS_PER_CHUNK) * 4,
+            expanded,
+        );
     }
 }
 
@@ -269,8 +282,8 @@ pub(super) fn rebase_uploaded_metadata<
         let range = entry.feature_metadata_buffer_range();
         let allocated_quads = (((range.end - range.start) / stride) as usize) / 4;
         let limit = cached.quads.len().min(allocated_quads);
-        if limit > 0 {
-            write_quad_chunks(pool, queue, entry, &cached.quads[..limit], 0, scratch);
+        if let Some(slice) = cached.quads.get(..limit).filter(|s| !s.is_empty()) {
+            write_quad_chunks(pool, queue, entry, slice, 0, scratch);
         }
     }
 }
@@ -364,11 +377,13 @@ mod tests {
         pool.replace_layer_geometry_uniform_unless(
             &queue,
             coords,
-            style_layer,
-            &buffer,
-            ShaderLayerMetadata::new(0.0, 0.0, [0.0; 2]),
-            SDFShaderFeatureMetadata::default(),
-            vertex_count,
+            crate::vector::UniformLayerUpload {
+                style_layer: style_layer.into(),
+                geometry: &buffer,
+                layer_metadata: ShaderLayerMetadata::new(0.0, 0.0, [0.0; 2]),
+                uniform_feature: SDFShaderFeatureMetadata::default(),
+                records: vertex_count,
+            },
             |_| false,
         )
         .expect("allocate test symbol bucket");
@@ -379,12 +394,15 @@ mod tests {
     #[test]
     fn initial_sparse_placement_uploads_only_placed_quad_subrange() {
         let (pool, queue, coords) = test_pool_with_bucket(200);
-        let entry = &pool.index().get_layers(coords).expect("layers")[0];
+        let layers = pool.index().get_layers(coords).expect("layers");
+        let entry = layers.front().expect("entry");
         let stride = size_of::<SDFShaderFeatureMetadata>();
 
         // Only 1 quad (quad 25 => vertices 100..104) is placed out of 50 quads (200 vertices).
         let mut next = vec![SDFShaderFeatureMetadata::default(); 50];
-        next[25].set_target_opacity(1.0);
+        if let Some(q) = next.get_mut(25) {
+            q.set_target_opacity(1.0);
+        }
         let cached = diff_and_upload_bucket(&pool, &queue, entry, None, next.clone());
         assert_eq!(
             *queue.writes.borrow(),
@@ -408,14 +426,17 @@ mod tests {
     #[test]
     fn nearby_dirty_quads_coalesce_while_distant_quads_split() {
         let (pool, queue, coords) = test_pool_with_bucket(200);
-        let entry = &pool.index().get_layers(coords).expect("layers")[0];
+        let layers = pool.index().get_layers(coords).expect("layers");
+        let entry = layers.front().expect("entry");
         let stride = size_of::<SDFShaderFeatureMetadata>();
 
         let mut next = vec![SDFShaderFeatureMetadata::default(); 50];
         // Quads 2 (8..12) and 5 (20..24) are separated by 2 clean quads (<= 8) -> coalesced!
         // Quad 30 (120..124) is 24 clean quads away (> 8) -> separate sub-range!
         for idx in [2, 5, 30] {
-            next[idx].set_target_opacity(1.0);
+            if let Some(q) = next.get_mut(idx) {
+                q.set_target_opacity(1.0);
+            }
         }
         let _ = diff_and_upload_bucket(&pool, &queue, entry, None, next);
         assert_eq!(

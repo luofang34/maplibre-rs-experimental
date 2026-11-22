@@ -151,8 +151,10 @@ impl GpuTimer {
         // A pass that draws nothing or drops its end timestamp (`MTLCounterErrorValue` / stale
         // counter on Metal) measures nothing.
         let elapsed = self.readback.get_mapped_range(..).ok().and_then(|bytes| {
-            let start = u64::from_le_bytes(bytes[..8].try_into().unwrap_or_default());
-            let end = u64::from_le_bytes(bytes[8..16].try_into().unwrap_or_default());
+            let (start_bytes, rest) = bytes.split_first_chunk::<8>()?;
+            let (end_bytes, _) = rest.split_first_chunk::<8>()?;
+            let start = u64::from_le_bytes(*start_bytes);
+            let end = u64::from_le_bytes(*end_bytes);
             (start != u64::MAX && end != u64::MAX && end > start).then(|| {
                 Duration::from_nanos(((end - start) as f64 * f64::from(period_nanos)) as u64)
             })

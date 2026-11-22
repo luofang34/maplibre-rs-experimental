@@ -14,44 +14,6 @@ impl Expression {
             | Self::Within(_)
             | Self::Distance(_)
             | Self::GlobalState(_) => {}
-            Self::NumberFormat { input, options } => {
-                visit(input);
-                options.iter().for_each(|(_, option)| visit(option));
-            }
-            Self::Get { key, object } | Self::Has { key, object } => {
-                visit(key);
-                if let Some(object) = object {
-                    visit(object);
-                }
-            }
-            Self::Var { bound, .. } => visit(bound),
-            Self::Let { bindings, body } => {
-                for (_, bound) in bindings {
-                    visit(bound);
-                }
-                visit(body);
-            }
-            Self::Case {
-                branches, fallback, ..
-            } => {
-                for (condition, output) in branches {
-                    visit(condition);
-                    visit(output);
-                }
-                visit(fallback);
-            }
-            Self::Match {
-                input,
-                cases,
-                fallback,
-                ..
-            } => {
-                visit(input);
-                for (_, output) in cases {
-                    visit(output);
-                }
-                visit(fallback);
-            }
             Self::Coalesce { operands, .. }
             | Self::All(operands)
             | Self::Any(operands)
@@ -61,29 +23,6 @@ impl Expression {
             | Self::Coerce { operands, .. }
             | Self::Rgba(operands)
             | Self::Concat(operands) => operands.iter().for_each(visit),
-            Self::Compare {
-                left,
-                right,
-                collator,
-                ..
-            } => {
-                visit(left);
-                visit(right);
-                if let Some(collator) = collator {
-                    visit(collator);
-                }
-            }
-            Self::Collator {
-                case_sensitive,
-                diacritic_sensitive,
-                locale,
-            } => {
-                visit(case_sensitive);
-                visit(diacritic_sensitive);
-                if let Some(locale) = locale {
-                    visit(locale);
-                }
-            }
             Self::Not(operand)
             | Self::Error(operand)
             | Self::ResolvedLocale(operand)
@@ -114,33 +53,104 @@ impl Expression {
                 visit(left);
                 visit(right);
             }
-            Self::IndexOf {
-                needle,
-                haystack,
-                from,
-            } => {
-                visit(needle);
-                visit(haystack);
-                if let Some(from) = from {
-                    visit(from);
-                }
-            }
-            Self::Slice {
-                input, from, to, ..
-            } => {
-                visit(input);
-                visit(from);
-                if let Some(to) = to {
-                    visit(to);
-                }
-            }
-            Self::Interpolate { input, stops, .. } | Self::Step { input, stops, .. } => {
-                visit(input);
-                for (_, output) in stops {
-                    visit(output);
-                }
-            }
             Self::Format(sections) => sections.iter().for_each(|section| section.for_each(visit)),
+            other => for_each_structured_child(other, visit),
         }
+    }
+}
+
+fn for_each_structured_child<'a>(expr: &'a Expression, visit: &mut dyn FnMut(&'a Expression)) {
+    match expr {
+        Expression::NumberFormat { input, options } => {
+            visit(input);
+            options.iter().for_each(|(_, option)| visit(option));
+        }
+        Expression::Get { key, object } | Expression::Has { key, object } => {
+            visit(key);
+            if let Some(object) = object {
+                visit(object);
+            }
+        }
+        Expression::Var { bound, .. } => visit(bound),
+        Expression::Let { bindings, body } => {
+            bindings.iter().for_each(|(_, bound)| visit(bound));
+            visit(body);
+        }
+        Expression::Case {
+            branches, fallback, ..
+        } => {
+            for (condition, output) in branches {
+                visit(condition);
+                visit(output);
+            }
+            visit(fallback);
+        }
+        Expression::Match {
+            input,
+            cases,
+            fallback,
+            ..
+        } => {
+            visit(input);
+            cases.iter().for_each(|(_, output)| visit(output));
+            visit(fallback);
+        }
+        Expression::Compare {
+            left,
+            right,
+            collator,
+            ..
+        } => {
+            visit(left);
+            visit(right);
+            if let Some(collator) = collator {
+                visit(collator);
+            }
+        }
+        Expression::Interpolate { input, stops, .. } | Expression::Step { input, stops, .. } => {
+            visit(input);
+            stops.iter().for_each(|(_, output)| visit(output));
+        }
+        other => for_each_string_and_collator_child(other, visit),
+    }
+}
+
+fn for_each_string_and_collator_child<'a>(
+    expr: &'a Expression,
+    visit: &mut dyn FnMut(&'a Expression),
+) {
+    match expr {
+        Expression::Collator {
+            case_sensitive,
+            diacritic_sensitive,
+            locale,
+        } => {
+            visit(case_sensitive);
+            visit(diacritic_sensitive);
+            if let Some(locale) = locale {
+                visit(locale);
+            }
+        }
+        Expression::IndexOf {
+            needle,
+            haystack,
+            from,
+        } => {
+            visit(needle);
+            visit(haystack);
+            if let Some(from) = from {
+                visit(from);
+            }
+        }
+        Expression::Slice {
+            input, from, to, ..
+        } => {
+            visit(input);
+            visit(from);
+            if let Some(to) = to {
+                visit(to);
+            }
+        }
+        _ => {}
     }
 }

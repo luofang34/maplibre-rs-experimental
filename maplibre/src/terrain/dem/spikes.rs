@@ -83,11 +83,16 @@ fn median(samples: impl Iterator<Item = f64>) -> f64 {
         *slot = sample;
         len += 1;
     }
-    let window = &mut window[..len];
+    let Some(window) = window.get_mut(..len) else {
+        return f64::NAN;
+    };
     window.sort_unstable_by(f64::total_cmp);
     let middle = len / 2;
     match len % 2 {
-        0 if middle > 0 => (window[middle - 1] + window[middle]) / 2.0,
+        0 if middle > 0 => match (window.get(middle - 1), window.get(middle)) {
+            (Some(left), Some(right)) => (left + right) / 2.0,
+            _ => f64::NAN,
+        },
         _ => window.get(middle).copied().unwrap_or(f64::NAN),
     }
 }
@@ -114,7 +119,7 @@ struct Heights {
 
 impl Heights {
     fn at(&self, x: usize, y: usize) -> f64 {
-        self.samples[y * self.dim + x]
+        self.samples.get(y * self.dim + x).copied().unwrap_or(0.0)
     }
 
     fn window(&self, centre: usize) -> std::ops::RangeInclusive<usize> {
@@ -143,6 +148,10 @@ fn seam_rises(heights: &Heights, floor: f64) -> Vec<Option<f64>> {
 
 /// Whether each risen sample lies on a run of risen rows at least [`SEAM_ROWS`] long within
 /// [`SEAM_SLACK`] columns of it.
+#[expect(
+    clippy::indexing_slicing,
+    reason = "rises and seam are allocated with length dim * dim and x, y, column stay within 0..dim"
+)]
 fn seam_columns(rises: &[Option<f64>], dim: usize) -> Vec<bool> {
     let near = |x: usize, y: usize| {
         (x.saturating_sub(SEAM_SLACK)..=(x + SEAM_SLACK).min(dim - 1))
@@ -169,6 +178,10 @@ fn seam_columns(rises: &[Option<f64>], dim: usize) -> Vec<bool> {
 impl DemTile {
     /// Lowers the interior samples that are spikes for a ground sample distance of
     /// `sample_metres` and returns how many changed. Borders are left to the caller.
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "rises, seams, and self.pixels are sized for dim * dim samples"
+    )]
     pub(super) fn remove_spikes(&mut self, sample_metres: f64) -> usize {
         let Some(encoding) = Encoding::new(self.unpack) else {
             return 0;

@@ -190,13 +190,11 @@ pub(crate) fn decode_data_url(
     url: &str,
     range: Option<ByteRange>,
 ) -> Option<Result<Vec<u8>, SourceFetchError>> {
-    if !url
+    let rest = url
         .get(..5)
         .is_some_and(|prefix| prefix.eq_ignore_ascii_case("data:"))
-    {
-        return None;
-    }
-    let rest = &url[5..];
+        .then(|| url.get(5..))
+        .flatten()?;
     let Some((meta, payload)) = rest.split_once(',') else {
         return Some(Err(SourceFetchError(Box::new(DataUrlError {
             reason: "missing comma separator",
@@ -221,22 +219,22 @@ pub(crate) fn decode_data_url(
     }))
 }
 
-fn percent_decode_bytes(input: &str) -> Vec<u8> {
+pub(crate) fn percent_decode_bytes(input: &str) -> Vec<u8> {
     let raw = input.as_bytes();
     let mut out = Vec::with_capacity(raw.len());
     let mut idx = 0;
-    while idx < raw.len() {
-        if raw[idx] == b'%' && idx + 2 < raw.len() {
-            if let (Some(hi), Some(lo)) = (
-                (raw[idx + 1] as char).to_digit(16),
-                (raw[idx + 2] as char).to_digit(16),
-            ) {
-                out.push(((hi << 4) | lo) as u8);
-                idx += 3;
-                continue;
+    while let Some(&byte) = raw.get(idx) {
+        if byte == b'%' {
+            if let (Some(&b1), Some(&b2)) = (raw.get(idx + 1), raw.get(idx + 2)) {
+                if let (Some(hi), Some(lo)) = ((b1 as char).to_digit(16), (b2 as char).to_digit(16))
+                {
+                    out.push(((hi << 4) | lo) as u8);
+                    idx += 3;
+                    continue;
+                }
             }
         }
-        out.push(raw[idx]);
+        out.push(byte);
         idx += 1;
     }
     out

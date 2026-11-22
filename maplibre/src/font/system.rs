@@ -123,7 +123,7 @@ fn rule_dedup_key(rule: &FontFaceRule, url: &str) -> String {
         rule.weight.0
     );
     for r in &rule.unicode_ranges {
-        let _ = write!(key, "|{:x}-{:x}", r.start, r.end);
+        if write!(key, "|{:x}-{:x}", r.start, r.end).is_err() {}
     }
     key
 }

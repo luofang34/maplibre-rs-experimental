@@ -156,96 +156,126 @@ impl PinchHandler {
             return;
         }
 
-        if self.touches.len() >= 2 {
-            let p0 = self.touches[0].1;
-            let p1 = self.touches[1].1;
-            let midpoint = (p0 + p1) * 0.5;
-            let diff = p1 - p0;
-            let distance = diff.magnitude();
-            let angle = diff.y.atan2(diff.x);
+        let [(_, p0), (_, p1), ..] = self.touches.as_slice() else {
+            return;
+        };
+        let (p0, p1) = (*p0, *p1);
+        let midpoint = (p0 + p1) * 0.5;
+        let diff = p1 - p0;
+        let distance = diff.magnitude();
+        let angle = diff.y.atan2(diff.x);
 
-            if let (Some(prev_mid), Some(prev_dist), Some(prev_ang)) =
-                (self.prev_midpoint, self.prev_distance, self.prev_angle)
-            {
-                let delta_mid = midpoint - prev_mid;
-                let dist_change = (distance - prev_dist).abs();
-                let d_angle = normalize_angle_signed(angle - prev_ang);
-                let fingers_side_by_side = (p1.x - p0.x).abs() >= (p1.y - p0.y).abs() * 0.75;
-                let (dy0, dy1) = self
-                    .start_positions
-                    .map_or((0.0, 0.0), |(s0, s1)| (p0.y - s0.y, p1.y - s1.y));
-                let opposite_vertical = dy0 * dy1 < -4.0;
+        if let (Some(prev_mid), Some(prev_dist), Some(prev_ang)) =
+            (self.prev_midpoint, self.prev_distance, self.prev_angle)
+        {
+            self.apply_two_finger_delta(
+                (p0, p1, midpoint, distance, angle),
+                (prev_mid, prev_dist, prev_ang),
+                zoom_handler,
+                nav,
+                now,
+            );
+        }
 
-                if !nav.north_locked && distance > 24.0 {
-                    self.accumulated_twist_rad += d_angle;
-                    let both_moved = dy0.abs() > 2.0 && dy1.abs() > 2.0;
-                    let mut applied_bearing_delta = 0.0;
-                    if !self.twist_unlocked
-                        && self.accumulated_twist_rad.abs() >= 2.5_f64.to_radians()
-                        && (opposite_vertical
-                            || !fingers_side_by_side
-                            || (both_moved && (dy0 - dy1).abs() > (dy0 + dy1).abs() * 1.2))
-                    {
-                        self.twist_unlocked = true;
-                        self.pending_pitch_deg = 0.0;
-                        nav.on_manual_bearing();
-                        applied_bearing_delta = -self.accumulated_twist_rad;
-                        self.pending_bearing_rad += applied_bearing_delta;
-                    } else if self.twist_unlocked {
-                        nav.on_manual_bearing();
-                        applied_bearing_delta = -d_angle;
-                        self.pending_bearing_rad += applied_bearing_delta;
-                    }
-                    if self.twist_unlocked && d_angle.abs() > 1e-4 {
-                        let paused = self
-                            .last_twist_move
-                            .is_some_and(|t| now.saturating_duration_since(t) > TWIST_PAUSE_RESET);
-                        let dt = self
-                            .last_twist_move
-                            .map(|t| now.saturating_duration_since(t).as_secs_f64())
-                            .unwrap_or(1.0 / 60.0)
-                            .clamp(1.0 / 240.0, 0.15);
-                        let inst_vel = applied_bearing_delta / dt;
-                        self.twist_velocity = if self.last_twist_move.is_some() && !paused {
-                            0.3 * self.twist_velocity + 0.7 * inst_vel
-                        } else {
-                            inst_vel
-                        };
-                        self.last_twist_move = Some(now);
-                        self.inertia_midpoint = Some(midpoint);
-                    }
-                }
+        self.prev_midpoint = Some(midpoint);
+        self.prev_distance = Some(distance);
+        self.prev_angle = Some(angle);
+    }
 
-                // Two-finger parallel vertical drag tilts pitch (disengaging Auto-Tilt) only
-                // when both fingers move in the same vertical direction rather than twisting.
-                let parallel_vertical = !self.twist_unlocked
-                    && !opposite_vertical
-                    && fingers_side_by_side
-                    && delta_mid.y.abs() > 0.5
-                    && delta_mid.y.abs() > delta_mid.x.abs() * 1.35
-                    && delta_mid.y.abs() > dist_change * 1.25;
+    fn apply_two_finger_delta(
+        &mut self,
+        (p0, p1, midpoint, distance, angle): (Vector2<f64>, Vector2<f64>, Vector2<f64>, f64, f64),
+        (prev_mid, prev_dist, prev_ang): (Vector2<f64>, f64, f64),
+        zoom_handler: &mut ZoomHandler,
+        nav: &mut NavigationState,
+        now: Instant,
+    ) {
+        let delta_mid = midpoint - prev_mid;
+        let dist_change = (distance - prev_dist).abs();
+        let d_angle = normalize_angle_signed(angle - prev_ang);
+        let fingers_side_by_side = (p1.x - p0.x).abs() >= (p1.y - p0.y).abs() * 0.75;
+        let (dy0, dy1) = self
+            .start_positions
+            .map_or((0.0, 0.0), |(s0, s1)| (p0.y - s0.y, p1.y - s1.y));
+        let opposite_vertical = dy0 * dy1 < -4.0;
 
-                if parallel_vertical && nav.three_dimensional {
-                    nav.on_manual_tilt();
-                    self.pending_pitch_deg += -delta_mid.y * 0.42;
-                } else {
-                    // Midpoint pan + pinch zoom around the 2-finger midpoint.
-                    self.pending_midpoint_pan += midpoint - prev_mid;
-                    if distance > 12.0 && prev_dist > 12.0 {
-                        let scale = distance / prev_dist;
-                        let zoom_step = scale.log2();
-                        if zoom_step.abs() > 1e-4 {
-                            nav.on_manual_pan_or_zoom();
-                            zoom_handler.process_window_position(&midpoint, true);
-                            zoom_handler.update_zoom(zoom_step);
-                        }
-                    }
+        if !nav.north_locked && distance > 24.0 {
+            self.update_twist_gesture(
+                (d_angle, dy0, dy1, opposite_vertical, fingers_side_by_side),
+                midpoint,
+                nav,
+                now,
+            );
+        }
+
+        // Two-finger parallel vertical drag tilts pitch (disengaging Auto-Tilt) only
+        // when both fingers move in the same vertical direction rather than twisting.
+        let parallel_vertical = !self.twist_unlocked
+            && !opposite_vertical
+            && fingers_side_by_side
+            && delta_mid.y.abs() > 0.5
+            && delta_mid.y.abs() > delta_mid.x.abs() * 1.35
+            && delta_mid.y.abs() > dist_change * 1.25;
+
+        if parallel_vertical && nav.three_dimensional {
+            nav.on_manual_tilt();
+            self.pending_pitch_deg += -delta_mid.y * 0.42;
+        } else {
+            self.pending_midpoint_pan += midpoint - prev_mid;
+            if distance > 12.0 && prev_dist > 12.0 {
+                let zoom_step = (distance / prev_dist).log2();
+                if zoom_step.abs() > 1e-4 {
+                    nav.on_manual_pan_or_zoom();
+                    zoom_handler.process_window_position(&midpoint, true);
+                    zoom_handler.update_zoom(zoom_step);
                 }
             }
+        }
+    }
 
-            self.prev_midpoint = Some(midpoint);
-            self.prev_distance = Some(distance);
-            self.prev_angle = Some(angle);
+    fn update_twist_gesture(
+        &mut self,
+        (d_angle, dy0, dy1, opposite_vertical, fingers_side_by_side): (f64, f64, f64, bool, bool),
+        midpoint: Vector2<f64>,
+        nav: &mut NavigationState,
+        now: Instant,
+    ) {
+        self.accumulated_twist_rad += d_angle;
+        let both_moved = dy0.abs() > 2.0 && dy1.abs() > 2.0;
+        let mut applied_bearing_delta = 0.0;
+        if !self.twist_unlocked
+            && self.accumulated_twist_rad.abs() >= 2.5_f64.to_radians()
+            && (opposite_vertical
+                || !fingers_side_by_side
+                || (both_moved && (dy0 - dy1).abs() > (dy0 + dy1).abs() * 1.2))
+        {
+            self.twist_unlocked = true;
+            self.pending_pitch_deg = 0.0;
+            nav.on_manual_bearing();
+            applied_bearing_delta = -self.accumulated_twist_rad;
+            self.pending_bearing_rad += applied_bearing_delta;
+        } else if self.twist_unlocked {
+            nav.on_manual_bearing();
+            applied_bearing_delta = -d_angle;
+            self.pending_bearing_rad += applied_bearing_delta;
+        }
+        if self.twist_unlocked && d_angle.abs() > 1e-4 {
+            let paused = self
+                .last_twist_move
+                .is_some_and(|t| now.saturating_duration_since(t) > TWIST_PAUSE_RESET);
+            let dt = self
+                .last_twist_move
+                .map(|t| now.saturating_duration_since(t).as_secs_f64())
+                .unwrap_or(1.0 / 60.0)
+                .clamp(1.0 / 240.0, 0.15);
+            let inst_vel = applied_bearing_delta / dt;
+            self.twist_velocity = if self.last_twist_move.is_some() && !paused {
+                0.3 * self.twist_velocity + 0.7 * inst_vel
+            } else {
+                inst_vel
+            };
+            self.last_twist_move = Some(now);
+            self.inertia_midpoint = Some(midpoint);
         }
     }
 
@@ -268,14 +298,14 @@ impl PinchHandler {
                 self.rotate_inertia_velocity = 0.0;
             }
         }
-        match self.touches.len() {
-            0 => {
+        match self.touches.as_slice() {
+            [] => {
                 self.reset_two_finger_baseline();
                 pan_handler.process_touch_end_at(now);
             }
-            1 => {
+            [(_, remaining)] => {
+                let remaining = *remaining;
                 self.reset_two_finger_baseline();
-                let remaining = self.touches[0].1;
                 pan_handler.rebase_touch(remaining);
             }
             _ => {
@@ -343,9 +373,8 @@ impl PinchHandler {
     }
 
     fn capture_two_finger_baseline(&mut self) {
-        if self.touches.len() >= 2 {
-            let p0 = self.touches[0].1;
-            let p1 = self.touches[1].1;
+        if let [(_, p0), (_, p1), ..] = self.touches.as_slice() {
+            let (p0, p1) = (*p0, *p1);
             let diff = p1 - p0;
             let mid = (p0 + p1) * 0.5;
             self.start_positions = Some((p0, p1));

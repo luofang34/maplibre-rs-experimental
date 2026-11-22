@@ -180,7 +180,7 @@ pub(super) fn above_symbols(world: &World) -> Option<AboveSymbols<'_>> {
     let layers = world.resources.get::<RenderPhase<LayerItem>>()?;
     let items = layers.into_iter().as_slice();
     let split = items.partition_point(|item| item.index < cutoff);
-    let below = &items[..split];
+    let (below, above_items) = items.split_at_checked(split).unwrap_or((items, &[]));
     let masks = world
         .resources
         .get::<RenderPhase<TileMaskItem>>()
@@ -201,7 +201,7 @@ pub(super) fn above_symbols(world: &World) -> Option<AboveSymbols<'_>> {
     }
     Some(AboveSymbols {
         stencil_state,
-        items: &items[split..],
+        items: above_items,
     })
 }
 
@@ -255,8 +255,10 @@ fn draw_layers<'w>(
     if let Some(layers) = world.resources.get::<RenderPhase<LayerItem>>() {
         let mut stencil_state = StencilState::Cleared;
         let all = layers.into_iter().as_slice();
-        let drawn = all.len() - above.as_ref().map_or(0, |above| above.items.len());
-        for group in all[..drawn].chunk_by(same_layer) {
+        let drawn = all
+            .len()
+            .saturating_sub(above.as_ref().map_or(0, |above| above.items.len()));
+        for group in all.get(..drawn).unwrap_or(all).chunk_by(same_layer) {
             if let Some(masks) = masks {
                 apply_layer_masks(pass, world, masks, &mut stencil_state, group);
             }

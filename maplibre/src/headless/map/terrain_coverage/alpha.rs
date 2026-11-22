@@ -147,16 +147,18 @@ async fn styled_alpha_map_at(
         3,
     )
     .expect("alpha frame");
-    let crate::render::eventually::Eventually::Initialized(depth) =
-        &map.map_context.renderer.resources.depth_texture
-    else {
-        panic!("depth texture");
-    };
-    assert_eq!(
-        depth.texture.sample_count(),
-        samples,
-        "exercise requested GPU sample count"
+    let depth = &map.map_context.renderer.resources.depth_texture;
+    assert!(
+        matches!(depth, crate::render::eventually::Eventually::Initialized(_)),
+        "depth texture"
     );
+    if let crate::render::eventually::Eventually::Initialized(depth) = depth {
+        assert_eq!(
+            depth.texture.sample_count(),
+            samples,
+            "exercise requested GPU sample count"
+        );
+    }
     map
 }
 

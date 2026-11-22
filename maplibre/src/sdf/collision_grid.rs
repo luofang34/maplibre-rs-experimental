@@ -23,12 +23,15 @@ impl CollisionGrid {
         }
     }
 
-    fn cells_for(&self, rect: [f64; 4]) -> impl Iterator<Item = (i32, i32)> {
-        let [left, top, right, bottom] = std::array::from_fn(|i| {
-            (rect[i] / 64.0)
-                .floor()
-                .clamp(-1.0, f64::from(self.limit[i % 2])) as i32
-        });
+    fn cells_for(&self, [l, t, r, b]: [f64; 4]) -> impl Iterator<Item = (i32, i32)> {
+        let clamp =
+            |coord: f64, limit: i32| (coord / 64.0).floor().clamp(-1.0, f64::from(limit)) as i32;
+        let (left, top, right, bottom) = (
+            clamp(l, self.limit[0]),
+            clamp(t, self.limit[1]),
+            clamp(r, self.limit[0]),
+            clamp(b, self.limit[1]),
+        );
         (top..=bottom).flat_map(move |y| (left..=right).map(move |x| (x, y)))
     }
 
@@ -46,7 +49,13 @@ impl CollisionGrid {
         self.cells_for(rect).any(|cell| {
             self.cells.get(&cell).is_some_and(|indices| {
                 indices.iter().any(|&index| {
-                    intersects(rect, self.boxes[index]) && blocks(self.cooperative[index])
+                    self.boxes
+                        .get(index)
+                        .is_some_and(|&boxed| intersects(rect, boxed))
+                        && self
+                            .cooperative
+                            .get(index)
+                            .is_some_and(|&coop| blocks(coop))
                 })
             })
         })

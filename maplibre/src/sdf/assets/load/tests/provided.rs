@@ -70,7 +70,11 @@ async fn provided_images_are_packed_once_known_and_listed_until_then() {
     }
     let second = load().await.expect("assets");
     assert!(second.awaiting.is_empty());
-    let shield = &second.atlas.icons["shield:US:I=287"];
+    let shield = second
+        .atlas
+        .icons
+        .get("shield:US:I=287")
+        .expect("shield icon");
     assert_eq!(shield.kind, 1, "a colour image, not an SDF");
     assert_eq!(
         shield.metrics,
@@ -129,5 +133,8 @@ async fn an_image_the_style_supplies_wins_over_a_provider() {
     .await
     .expect("assets");
     assert_eq!(loaded.provided, ["shield:US:NJ:CR=609"]);
-    assert_eq!(loaded.atlas.icons["shield:US:I=287"].rect[2], 1);
+    assert_eq!(
+        loaded.atlas.icons.get("shield:US:I=287").map(|i| i.rect[2]),
+        Some(1)
+    );
 }

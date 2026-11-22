@@ -1,6 +1,9 @@
 //! Thread-local error storage and panic-catching boundary helpers for C FFI exports.
 
-#![allow(unsafe_code)]
+#![expect(
+    unsafe_code,
+    reason = "C ABI error helpers convert validated raw C string pointers via CStr"
+)]
 
 use std::{
     any::Any,

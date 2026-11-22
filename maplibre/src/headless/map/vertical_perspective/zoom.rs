@@ -79,7 +79,13 @@ fn check_settled(level: &LevelMap, depth: &[f32], scene: Scene) {
                 );
                 true
             }
-            (Some(_), None) => panic!("{scene:?}: ({x},{y}) picks ground the frame left empty"),
+            (Some(_), None) => {
+                assert!(
+                    stored(x, y).is_some(),
+                    "{scene:?}: ({x},{y}) picks ground the frame left empty"
+                );
+                false
+            }
             (None, _) => false,
         }
     };

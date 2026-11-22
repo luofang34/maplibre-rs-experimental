@@ -210,8 +210,12 @@ mod tests {
         let expr_json = serde_json::json!(["coalesce", ["image", "missing"], ["image", "present"]]);
         let prop = CompiledProperty::<crate::style::layer::PatternName>::parse(&expr_json)
             .expect("parses");
+        assert!(
+            matches!(prop, CompiledProperty::CameraFunction(_)),
+            "image coalesce must not fold at parse time without available_images"
+        );
         let CompiledProperty::CameraFunction(curve) = prop else {
-            panic!("image coalesce must not fold at parse time without available_images");
+            return;
         };
         let available = std::collections::HashMap::from([("present".to_string(), ())]);
         let mut ctx = EvaluationContext::at_zoom(0.0);

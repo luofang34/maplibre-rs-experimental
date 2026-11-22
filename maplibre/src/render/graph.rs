@@ -164,7 +164,7 @@ impl RenderGraph {
         };
         Ok(order
             .into_iter()
-            .map(|index| self.passes[index].name.as_ref())
+            .filter_map(|index| self.passes.get(index).map(|pass| pass.name.as_ref()))
             .collect())
     }
 
@@ -180,15 +180,21 @@ impl RenderGraph {
             None => Cow::Owned(self.resolve()?),
         };
         let main_pos = order.iter().position(|&idx| {
-            self.passes[idx].name.as_ref() == crate::render::draw_graph::node::MAIN_PASS
+            self.passes
+                .get(idx)
+                .is_some_and(|p| p.name.as_ref() == crate::render::draw_graph::node::MAIN_PASS)
         });
         let trans_pos = order.iter().position(|&idx| {
-            self.passes[idx].name.as_ref() == crate::render::draw_graph::node::TRANSLUCENT_PASS
+            self.passes.get(idx).is_some_and(|p| {
+                p.name.as_ref() == crate::render::draw_graph::node::TRANSLUCENT_PASS
+            })
         });
         let between_has_work = match (main_pos, trans_pos) {
-            (Some(m), Some(t)) if m < t => order[m + 1..t]
-                .iter()
-                .any(|&idx| self.passes[idx].node.has_active_work(resources, world)),
+            (Some(m), Some(t)) if m < t => order.get(m + 1..t).unwrap_or(&[]).iter().any(|&idx| {
+                self.passes
+                    .get(idx)
+                    .is_some_and(|p| p.node.has_active_work(resources, world))
+            }),
             _ => false,
         };
         render_context.between_main_and_translucent_has_work = between_has_work;
@@ -196,7 +202,9 @@ impl RenderGraph {
             && !between_has_work
             && !crate::render::translucent_pass::needs_symbol_depth_copy(world);
         for &index in order.iter() {
-            let pass = &self.passes[index];
+            let Some(pass) = self.passes.get(index) else {
+                continue;
+            };
             #[cfg(feature = "trace")]
             let _span = tracing::info_span!("render_pass", name = pass.name.as_ref()).entered();
             pass.node.run(render_context, resources, world);
@@ -216,25 +224,36 @@ impl RenderGraph {
     fn resolve(&self) -> Result<Vec<usize>, RenderGraphError> {
         let mut waiting_on = vec![0usize; self.passes.len()];
         for &(_, after) in &self.constraints {
-            waiting_on[after] += 1;
+            if let Some(slot) = waiting_on.get_mut(after) {
+                *slot += 1;
+            }
         }
-        let mut ready: BTreeSet<usize> = (0..self.passes.len())
-            .filter(|&index| waiting_on[index] == 0)
+        let mut ready: BTreeSet<usize> = waiting_on
+            .iter()
+            .enumerate()
+            .filter_map(|(index, &count)| (count == 0).then_some(index))
             .collect();
         let mut order = Vec::with_capacity(self.passes.len());
         while let Some(next) = ready.pop_first() {
             order.push(next);
             for &(_, after) in self.constraints.range((next, 0)..=(next, usize::MAX)) {
-                waiting_on[after] -= 1;
-                if waiting_on[after] == 0 {
-                    ready.insert(after);
+                if let Some(slot) = waiting_on.get_mut(after) {
+                    *slot -= 1;
+                    if *slot == 0 {
+                        ready.insert(after);
+                    }
                 }
             }
         }
         if order.len() < self.passes.len() {
-            let cycle = (0..self.passes.len())
-                .filter(|&index| waiting_on[index] > 0)
-                .map(|index| self.passes[index].name.clone())
+            let cycle = waiting_on
+                .iter()
+                .enumerate()
+                .filter_map(|(index, &count)| {
+                    (count > 0)
+                        .then(|| self.passes.get(index).map(|p| p.name.clone()))
+                        .flatten()
+                })
                 .collect();
             return Err(RenderGraphError::Cycle(cycle));
         }

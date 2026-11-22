@@ -29,63 +29,8 @@ impl LayerValidation<'_> {
                     Feature,
                 );
             }
-            LayerPaint::FillExtrusion(p) => {
-                let color = p.fill_extrusion_color.as_ref();
-                self.property("paint.fill-extrusion-color", color, Feature);
-                let height = p.fill_extrusion_height.as_ref();
-                self.property("paint.fill-extrusion-height", height, Feature);
-                let base = p.fill_extrusion_base.as_ref();
-                self.property("paint.fill-extrusion-base", base, Feature);
-                self.property(
-                    "paint.fill-extrusion-base-datum",
-                    p.fill_extrusion_base_datum.as_ref(),
-                    Feature,
-                );
-                self.property(
-                    "paint.fill-extrusion-height-datum",
-                    p.fill_extrusion_height_datum.as_ref(),
-                    Feature,
-                );
-                self.property(
-                    "paint.fill-extrusion-part",
-                    p.fill_extrusion_part.as_ref(),
-                    Feature,
-                );
-                self.property(
-                    "paint.fill-extrusion-rounded-corner-distance",
-                    p.fill_extrusion_rounded_corner_distance.as_ref(),
-                    Feature,
-                );
-                let opacity = p.fill_extrusion_opacity.as_ref();
-                let opacity_scope = if p.fill_extrusion_translucent == Some(true) {
-                    Feature
-                } else {
-                    Zoom
-                };
-                self.property("paint.fill-extrusion-opacity", opacity, opacity_scope);
-            }
-            LayerPaint::Line(p) => {
-                self.property("paint.line-color", p.line_color.as_ref(), Feature);
-                self.property("paint.line-opacity", p.line_opacity.as_ref(), Feature);
-                self.property("paint.line-gradient", p.line_gradient.as_ref(), Progress);
-                self.property("paint.line-offset", p.line_offset.as_ref(), Feature);
-                self.property("paint.line-gap-width", p.line_gap_width.as_ref(), Feature);
-                self.property("paint.line-blur", p.line_blur.as_ref(), Feature);
-                self.property("paint.line-width", p.line_width.as_ref(), Feature);
-                self.property("paint.line-elevation", p.line_elevation.as_ref(), Feature);
-                self.property(
-                    "paint.line-elevation-datum",
-                    p.line_elevation_datum.as_ref(),
-                    Feature,
-                );
-                if let Some(value) = &p.line_dasharray {
-                    self.property(
-                        "paint.line-dasharray",
-                        Some(&StyleProperty::<NumberList>::parse(value)),
-                        Zoom,
-                    );
-                }
-            }
+            LayerPaint::FillExtrusion(p) => self.fill_extrusion(p),
+            LayerPaint::Line(p) => self.line(p),
             LayerPaint::Circle(p) => self.circle(p),
             LayerPaint::Hillshade(p) => self.hillshade(p),
             LayerPaint::ColorRelief(p) => {
@@ -100,21 +45,94 @@ impl LayerValidation<'_> {
                     Elevation,
                 );
             }
-            LayerPaint::Heatmap(p) => {
-                self.property("paint.heatmap-radius", p.heatmap_radius.as_ref(), Feature);
-                self.property("paint.heatmap-weight", p.heatmap_weight.as_ref(), Feature);
-                self.property(
-                    "paint.heatmap-intensity",
-                    p.heatmap_intensity.as_ref(),
-                    Zoom,
-                );
-                self.property("paint.heatmap-opacity", p.heatmap_opacity.as_ref(), Zoom);
-                self.property("paint.heatmap-color", p.heatmap_color.as_ref(), Density);
-            }
+            LayerPaint::Heatmap(p) => self.heatmap(p),
             LayerPaint::Symbol(p) => self.symbol(p),
             LayerPaint::Raster(p) => self.raster(p),
             LayerPaint::Custom(_) => {}
         }
+    }
+
+    fn fill_extrusion(&mut self, p: &crate::style::layer::FillExtrusionPaint) {
+        self.property(
+            "paint.fill-extrusion-color",
+            p.fill_extrusion_color.as_ref(),
+            Feature,
+        );
+        self.property(
+            "paint.fill-extrusion-height",
+            p.fill_extrusion_height.as_ref(),
+            Feature,
+        );
+        self.property(
+            "paint.fill-extrusion-base",
+            p.fill_extrusion_base.as_ref(),
+            Feature,
+        );
+        self.property(
+            "paint.fill-extrusion-base-datum",
+            p.fill_extrusion_base_datum.as_ref(),
+            Feature,
+        );
+        self.property(
+            "paint.fill-extrusion-height-datum",
+            p.fill_extrusion_height_datum.as_ref(),
+            Feature,
+        );
+        self.property(
+            "paint.fill-extrusion-part",
+            p.fill_extrusion_part.as_ref(),
+            Feature,
+        );
+        self.property(
+            "paint.fill-extrusion-rounded-corner-distance",
+            p.fill_extrusion_rounded_corner_distance.as_ref(),
+            Feature,
+        );
+        let opacity_scope = if p.fill_extrusion_translucent == Some(true) {
+            Feature
+        } else {
+            Zoom
+        };
+        self.property(
+            "paint.fill-extrusion-opacity",
+            p.fill_extrusion_opacity.as_ref(),
+            opacity_scope,
+        );
+    }
+
+    fn line(&mut self, p: &crate::style::layer::LinePaint) {
+        self.property("paint.line-color", p.line_color.as_ref(), Feature);
+        self.property("paint.line-opacity", p.line_opacity.as_ref(), Feature);
+        self.property("paint.line-gradient", p.line_gradient.as_ref(), Progress);
+        self.property("paint.line-offset", p.line_offset.as_ref(), Feature);
+        self.property("paint.line-gap-width", p.line_gap_width.as_ref(), Feature);
+        self.property("paint.line-blur", p.line_blur.as_ref(), Feature);
+        self.property("paint.line-width", p.line_width.as_ref(), Feature);
+        self.property("paint.line-elevation", p.line_elevation.as_ref(), Feature);
+        self.property(
+            "paint.line-elevation-datum",
+            p.line_elevation_datum.as_ref(),
+            Feature,
+        );
+        if let Some(value) = &p.line_dasharray {
+            self.property(
+                "paint.line-dasharray",
+                Some(&StyleProperty::<NumberList>::parse(value)),
+                Zoom,
+            );
+        }
+    }
+
+    fn heatmap(&mut self, p: &crate::style::heatmap::HeatmapPaint) {
+        self.property("paint.heatmap-radius", p.heatmap_radius.as_ref(), Feature);
+        self.property("paint.heatmap-weight", p.heatmap_weight.as_ref(), Feature);
+        self.property(
+            "paint.heatmap-intensity",
+            p.heatmap_intensity.as_ref(),
+            Zoom,
+        );
+        self.property("paint.heatmap-opacity", p.heatmap_opacity.as_ref(), Zoom);
+        self.property("paint.heatmap-color", p.heatmap_color.as_ref(), Density);
     }
 
     fn circle(&mut self, p: &crate::style::circle::CirclePaint) {

@@ -313,7 +313,31 @@ pub(crate) fn collect_layer_specs(
     #[cfg(feature = "raster")]
     let raster = world.resources.get::<Eventually<RasterResources>>();
     #[cfg(feature = "raster")]
-    let raster_layers: Vec<_> = style
+    let raster_layers = visible_raster_layers(style, raster, zoom);
+    #[cfg(not(feature = "raster"))]
+    let _ = style;
+    targets
+        .into_iter()
+        .map(|(coords, shapes)| {
+            #[cfg(feature = "raster")]
+            let raster_ctx = (raster, raster_layers.as_slice());
+            #[cfg(not(feature = "raster"))]
+            let raster_ctx = ();
+            build_target_spec(coords, shapes, vector, raster_ctx, zoom)
+        })
+        .collect()
+}
+
+#[cfg(feature = "raster")]
+type RasterLayerRef = (String, u32, RasterSourceId, bool);
+
+#[cfg(feature = "raster")]
+fn visible_raster_layers(
+    style: &Style,
+    raster: Option<&Eventually<RasterResources>>,
+    zoom: f64,
+) -> Vec<RasterLayerRef> {
+    style
         .layers
         .iter()
         .filter(|layer| {
@@ -330,63 +354,81 @@ pub(crate) fn collect_layer_specs(
                 dem_layer_kind(&layer.type_).is_some(),
             ))
         })
-        .collect();
-    #[cfg(not(feature = "raster"))]
-    let _ = style;
-    targets
-        .into_iter()
-        .map(|(coords, shapes)| TargetSpec {
-            coords,
-            absent_sources: if shapes.iter().any(|shape| shape.absent) {
-                shapes
-                    .iter()
-                    .filter(|shape| shape.absent)
-                    .filter_map(|shape| shape.raster_source.clone())
-                    .collect()
-            } else {
-                Vec::new()
-            },
-            shapes: shapes
-                .into_iter()
-                .filter(|shape| !shape.absent)
-                .map(|shape| {
-                    #[cfg(feature = "raster")]
-                    let raster_layers = if raster_layers.is_empty() {
-                        Vec::new()
-                    } else {
-                        raster_layers
-                            .iter()
-                            .filter(|(_, _, source, _)| {
-                                shape.raster_source.as_ref() == Some(source)
-                            })
-                            .filter(|(id, _, _, _)| {
-                                matches!(
-                                    raster,
-                                    Some(Initialized(resources))
-                                        if resources.layer_texture(id, &shape.coords).is_some()
-                                )
-                            })
-                            .map(|(id, index, _, dem)| (id.clone(), *index, *dem))
-                            .collect()
-                    };
-                    #[cfg(not(feature = "raster"))]
-                    let raster_layers = Vec::new();
-                    ShapeSpec {
-                        view_complete: shape.view_complete,
-                        source: shape.coords,
-                        is_vector: shape.raster_source.is_none(),
-                        vector_layers: match (&shape.raster_source, vector) {
-                            (None, Some(Initialized(pool))) => {
-                                vector_layer_specs(pool, shape.coords, zoom)
-                            }
-                            _ => Vec::new(),
-                        },
-                        raster_layers,
-                    }
-                })
-                .collect(),
-        })
         .collect()
+}
+
+#[cfg(feature = "raster")]
+type RasterCtx<'a> = (
+    Option<&'a Eventually<RasterResources>>,
+    &'a [RasterLayerRef],
+);
+#[cfg(not(feature = "raster"))]
+type RasterCtx<'a> = ();
+
+#[cfg(feature = "raster")]
+fn shape_raster_layers(
+    shape: &ShapeSource,
+    (raster, raster_layers): RasterCtx<'_>,
+) -> Vec<(String, u32, bool)> {
+    if raster_layers.is_empty() {
+        return Vec::new();
+    }
+    raster_layers
+        .iter()
+        .filter(|(_, _, source, _)| shape.raster_source.as_ref() == Some(source))
+        .filter(|(id, _, _, _)| {
+            matches!(
+                raster,
+                Some(Initialized(resources)) if resources.layer_texture(id, &shape.coords).is_some()
+            )
+        })
+        .map(|(id, index, _, dem)| (id.clone(), *index, *dem))
+        .collect()
+}
+
+#[cfg(not(feature = "raster"))]
+fn shape_raster_layers(
+    _shape: &ShapeSource,
+    _raster_ctx: RasterCtx<'_>,
+) -> Vec<(String, u32, bool)> {
+    Vec::new()
+}
+
+fn build_target_spec(
+    coords: WorldTileCoords,
+    shapes: Vec<ShapeSource>,
+    vector: Option<&Eventually<VectorBufferPool>>,
+    raster_ctx: RasterCtx<'_>,
+    zoom: f64,
+) -> TargetSpec {
+    let absent_sources = if shapes.iter().any(|shape| shape.absent) {
+        shapes
+            .iter()
+            .filter(|shape| shape.absent)
+            .filter_map(|shape| shape.raster_source.clone())
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let specs = shapes
+        .into_iter()
+        .filter(|shape| !shape.absent)
+        .map(|shape| ShapeSpec {
+            view_complete: shape.view_complete,
+            source: shape.coords,
+            is_vector: shape.raster_source.is_none(),
+            vector_layers: match (&shape.raster_source, vector) {
+                (None, Some(Initialized(pool))) => vector_layer_specs(pool, shape.coords, zoom),
+                _ => Vec::new(),
+            },
+            raster_layers: shape_raster_layers(&shape, raster_ctx),
+        })
+        .collect();
+    TargetSpec {
+        coords,
+        shapes: specs,
+        absent_sources,
+    }
 }
 
 fn vector_layer_specs(

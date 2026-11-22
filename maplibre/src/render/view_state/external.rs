@@ -375,7 +375,8 @@ pub(super) struct EyeFrame {
 
 impl EyeFrame {
     fn of(view: &Matrix4<f64>) -> Result<Self, ExternalViewError> {
-        if (0..4).any(|column| (0..4).any(|row| !view[column][row].is_finite())) {
+        let cols: [[f64; 4]; 4] = (*view).into();
+        if cols.iter().flatten().any(|value| !value.is_finite()) {
             return Err(ExternalViewError::SingularView);
         }
         let inverse = view.invert().ok_or(ExternalViewError::SingularView)?;

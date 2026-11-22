@@ -28,11 +28,16 @@ struct Merged {
 }
 
 fn key(text: &str, chunks: &[Chunk], merged: &Merged, on_right: bool) -> String {
-    let points = &chunks[if on_right { merged.last } else { merged.first }].points;
-    let point = if on_right {
-        points[points.len() - 1]
+    let chunk_idx = if on_right { merged.last } else { merged.first };
+    let Some(points) = chunks.get(chunk_idx).map(|c| &c.points) else {
+        return String::new();
+    };
+    let Some(point) = (if on_right {
+        points.last()
     } else {
-        points[0]
+        points.first()
+    }) else {
+        return String::new();
     };
     format!("{text}:{}:{}", point[0], point[1])
 }
@@ -50,9 +55,13 @@ impl Lines {
         let (left_key, right_key) = keys;
         let i = self.right.remove(left_key).unwrap_or_default();
         self.right.insert(right_key.to_owned(), i);
-        let last = self.merged[i].last;
-        self.chunks[last].next = Some(line.0);
-        self.merged[i].last = line.1;
+        let Some(merged) = self.merged.get_mut(i) else {
+            return i;
+        };
+        if let Some(last_chunk) = self.chunks.get_mut(merged.last) {
+            last_chunk.next = Some(line.0);
+        }
+        merged.last = line.1;
         i
     }
 
@@ -61,18 +70,30 @@ impl Lines {
         let (left_key, right_key) = keys;
         let i = self.left.remove(right_key).unwrap_or_default();
         self.left.insert(left_key.to_owned(), i);
-        let first = self.merged[i].first;
-        self.chunks[line.1].next = Some(first);
-        self.merged[i].first = line.0;
+        let Some(merged) = self.merged.get_mut(i) else {
+            return i;
+        };
+        if let Some(chunk) = self.chunks.get_mut(line.1) {
+            chunk.next = Some(merged.first);
+        }
+        merged.first = line.0;
         i
     }
 
     fn joined(&self, merged: &Merged) -> Vec<[f64; 2]> {
-        let mut points = self.chunks[merged.first].points.clone();
-        let mut next = self.chunks[merged.first].next;
+        let Some(first_chunk) = self.chunks.get(merged.first) else {
+            return Vec::new();
+        };
+        let mut points = first_chunk.points.clone();
+        let mut next = first_chunk.next;
         while let Some(index) = next {
-            points.extend_from_slice(&self.chunks[index].points[1..]);
-            next = self.chunks[index].next;
+            let Some(chunk) = self.chunks.get(index) else {
+                break;
+            };
+            if let Some(tail) = chunk.points.get(1..) {
+                points.extend_from_slice(tail);
+            }
+            next = chunk.next;
         }
         points
     }
@@ -113,13 +134,18 @@ pub(super) fn merge_lines(features: Vec<PendingLine>) -> Vec<PendingLine> {
         if touches_both.is_some_and(|(right, left)| right != left) {
             // Lines with the same text meet both ends of this one: join all three.
             let j = lines.merge_from_left(keys, span);
-            let joined = (lines.merged[j].first, lines.merged[j].last);
-            let i = lines.merge_from_right(keys, joined);
-            lines.left.remove(&left_key);
-            lines.right.remove(&right_key);
-            let end = key(&text, &lines.chunks, &lines.merged[i], true);
-            lines.right.insert(end, i);
-            lines.merged[j].alive = false;
+            if let Some((first, last)) = lines.merged.get(j).map(|m| (m.first, m.last)) {
+                let i = lines.merge_from_right(keys, (first, last));
+                lines.left.remove(&left_key);
+                lines.right.remove(&right_key);
+                if let Some(merged_i) = lines.merged.get(i) {
+                    let end = key(&text, &lines.chunks, merged_i, true);
+                    lines.right.insert(end, i);
+                }
+                if let Some(merged_j) = lines.merged.get_mut(j) {
+                    merged_j.alive = false;
+                }
+            }
         } else if lines.right.contains_key(&left_key) {
             lines.merge_from_right(keys, span);
         } else if lines.left.contains_key(&right_key) {
@@ -137,7 +163,7 @@ pub(super) fn merge_lines(features: Vec<PendingLine>) -> Vec<PendingLine> {
         if !merged.alive {
             continue;
         }
-        let Some(mut feature) = slots[merged.feature].take() else {
+        let Some(mut feature) = slots.get_mut(merged.feature).and_then(Option::take) else {
             continue;
         };
         feature.line = lines.joined(merged);

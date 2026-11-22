@@ -28,18 +28,38 @@ struct WantedRequests([Option<FxHashSet<WorldTileCoords>>; 3]);
 #[derive(Default)]
 struct CancelledAttempts(Vec<u64>);
 
+fn slot<T>(arr: &[T; 3], kind: RequestKind) -> &T {
+    let [raster, dem, vector] = arr;
+    match kind {
+        RequestKind::Raster => raster,
+        RequestKind::Dem => dem,
+        RequestKind::Vector => vector,
+    }
+}
+
+fn slot_mut<T>(arr: &mut [T; 3], kind: RequestKind) -> &mut T {
+    let [raster, dem, vector] = arr;
+    match kind {
+        RequestKind::Raster => raster,
+        RequestKind::Dem => dem,
+        RequestKind::Vector => vector,
+    }
+}
+
+const REQUEST_KINDS: [RequestKind; 3] =
+    [RequestKind::Raster, RequestKind::Dem, RequestKind::Vector];
+
 impl RetryIndex {
     /// Whether `coords` is currently outside the most recent `want()` set for `kind`.
     pub(super) fn is_out_of_view(&self, kind: RequestKind, coords: WorldTileCoords) -> bool {
-        self.last_wanted[kind.index()]
+        slot(&self.last_wanted, kind)
             .as_ref()
             .is_some_and(|wanted| !wanted.contains(&coords))
     }
 
     pub(super) fn mark_pending(&mut self, kind: RequestKind, coords: WorldTileCoords) {
-        let idx = kind.index();
-        self.scheduled[idx].remove(&coords);
-        self.pending[idx].insert(coords);
+        slot_mut(&mut self.scheduled, kind).remove(&coords);
+        slot_mut(&mut self.pending, kind).insert(coords);
     }
 
     pub(super) fn finish_pending(
@@ -48,23 +68,22 @@ impl RetryIndex {
         coords: WorldTileCoords,
         has_deadline: bool,
     ) {
-        let idx = kind.index();
-        self.pending[idx].remove(&coords);
+        slot_mut(&mut self.pending, kind).remove(&coords);
+        let scheduled = slot_mut(&mut self.scheduled, kind);
         if has_deadline {
-            self.scheduled[idx].insert(coords);
+            scheduled.insert(coords);
         } else {
-            self.scheduled[idx].remove(&coords);
+            scheduled.remove(&coords);
         }
     }
 
     pub(super) fn mark_scheduled(&mut self, kind: RequestKind, coords: WorldTileCoords) {
-        self.scheduled[kind.index()].insert(coords);
+        slot_mut(&mut self.scheduled, kind).insert(coords);
     }
 
     pub(super) fn clear_kind(&mut self, kind: RequestKind, coords: WorldTileCoords) {
-        let idx = kind.index();
-        self.pending[idx].remove(&coords);
-        self.scheduled[idx].remove(&coords);
+        slot_mut(&mut self.pending, kind).remove(&coords);
+        slot_mut(&mut self.scheduled, kind).remove(&coords);
     }
 }
 
@@ -72,12 +91,12 @@ pub(super) fn needs_frame_indexed(world: &World) -> bool {
     let Some(index) = world.resources.get::<RetryIndex>() else {
         return false;
     };
-    for (kind_idx, pending) in index.pending.iter().enumerate() {
+    for (kind, pending) in REQUEST_KINDS.into_iter().zip(&index.pending) {
         for &coords in pending {
             if world
                 .tiles
                 .query::<&TileRequestRetries>(coords)
-                .is_some_and(|retries| retries.0[kind_idx].pending)
+                .is_some_and(|retries| retries.slot(kind).pending)
             {
                 return true;
             }
@@ -87,12 +106,12 @@ pub(super) fn needs_frame_indexed(world: &World) -> bool {
         return false;
     }
     let now = observed_now(world);
-    for (kind_idx, scheduled) in index.scheduled.iter().enumerate() {
+    for (kind, scheduled) in REQUEST_KINDS.into_iter().zip(&index.scheduled) {
         for &coords in scheduled {
             if world
                 .tiles
                 .query::<&TileRequestRetries>(coords)
-                .is_some_and(|retries| retries.0[kind_idx].retry_due(now))
+                .is_some_and(|retries| retries.slot(kind).retry_due(now))
             {
                 return true;
             }
@@ -108,12 +127,12 @@ pub(super) fn next_retry_delay_indexed(world: &World) -> Option<Duration> {
     }
     let now = observed_now(world);
     let mut shortest: Option<Duration> = None;
-    for (kind_idx, scheduled) in index.scheduled.iter().enumerate() {
+    for (kind, scheduled) in REQUEST_KINDS.into_iter().zip(&index.scheduled) {
         for &coords in scheduled {
             let Some(retries) = world.tiles.query::<&TileRequestRetries>(coords) else {
                 continue;
             };
-            let state = &retries.0[kind_idx];
+            let state = retries.slot(kind);
             if !state.out_of_view {
                 if let Some(due) = state.deadline {
                     let wait = due.saturating_sub(now);
@@ -131,21 +150,21 @@ pub(crate) fn want<S: std::hash::BuildHasher>(
     kind: RequestKind,
     coords: &HashSet<WorldTileCoords, S>,
 ) {
-    let idx = kind.index();
     let has_active = world
         .resources
         .get::<RetryIndex>()
         .is_some_and(|retry_idx| {
-            !retry_idx.pending[idx].is_empty() || !retry_idx.scheduled[idx].is_empty()
+            !slot(&retry_idx.pending, kind).is_empty()
+                || !slot(&retry_idx.scheduled, kind).is_empty()
         });
     if has_active {
         let active: Vec<WorldTileCoords> = world
             .resources
             .get::<RetryIndex>()
             .map(|retry_idx| {
-                retry_idx.pending[idx]
+                slot(&retry_idx.pending, kind)
                     .iter()
-                    .chain(retry_idx.scheduled[idx].iter())
+                    .chain(slot(&retry_idx.scheduled, kind).iter())
                     .copied()
                     .collect()
             })
@@ -153,7 +172,7 @@ pub(crate) fn want<S: std::hash::BuildHasher>(
         let mut missing = Vec::new();
         for held in active {
             if let Some(retries) = world.tiles.query_mut::<&mut TileRequestRetries>(held) {
-                retries.0[idx].out_of_view = !coords.contains(&held);
+                retries.slot_mut(kind).out_of_view = !coords.contains(&held);
             } else {
                 missing.push(held);
             }
@@ -168,28 +187,28 @@ pub(crate) fn want<S: std::hash::BuildHasher>(
     let retry_unchanged = world
         .resources
         .get::<RetryIndex>()
-        .and_then(|r| r.last_wanted[idx].as_ref())
+        .and_then(|r| slot(&r.last_wanted, kind).as_ref())
         .is_some_and(|prev| prev.len() == coords.len() && coords.iter().all(|c| prev.contains(c)));
     if !retry_unchanged {
         let retry_idx = world.resources.get_or_init_mut::<RetryIndex>();
-        let slot = retry_idx.last_wanted[idx].get_or_insert_with(|| {
+        let want_slot = slot_mut(&mut retry_idx.last_wanted, kind).get_or_insert_with(|| {
             FxHashSet::with_capacity_and_hasher(coords.len(), Default::default())
         });
-        slot.clear();
-        slot.extend(coords.iter().copied());
+        want_slot.clear();
+        want_slot.extend(coords.iter().copied());
     }
     let wanted_unchanged = world
         .resources
         .get::<WantedRequests>()
-        .and_then(|w| w.0[idx].as_ref())
+        .and_then(|w| slot(&w.0, kind).as_ref())
         .is_some_and(|prev| prev.len() == coords.len() && coords.iter().all(|c| prev.contains(c)));
     if !wanted_unchanged {
         let wanted = world.resources.get_or_init_mut::<WantedRequests>();
-        let slot = wanted.0[idx].get_or_insert_with(|| {
+        let want_slot = slot_mut(&mut wanted.0, kind).get_or_insert_with(|| {
             FxHashSet::with_capacity_and_hasher(coords.len(), Default::default())
         });
-        slot.clear();
-        slot.extend(coords.iter().copied());
+        want_slot.clear();
+        want_slot.extend(coords.iter().copied());
     }
 }
 

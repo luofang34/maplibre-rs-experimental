@@ -24,10 +24,12 @@ async fn test_render() {
         RendererSettings,
     };
 
-    let _ = env_logger::builder()
-        .filter_level(LevelFilter::Trace)
-        .is_test(true)
-        .try_init();
+    drop(
+        env_logger::builder()
+            .filter_level(LevelFilter::Trace)
+            .is_test(true)
+            .try_init(),
+    );
     let graph = RenderGraph::default();
 
     let backends = wgpu::Backends::from_env().unwrap_or(wgpu::Backends::all());

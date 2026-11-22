@@ -199,7 +199,9 @@ async fn futures_join<T>(
             if let Some(inner) = future {
                 match inner.as_mut().poll(context) {
                     std::task::Poll::Ready(value) => {
-                        slots[index] = Some(value);
+                        if let Some(slot) = slots.get_mut(index) {
+                            *slot = Some(value);
+                        }
                         *future = None;
                     }
                     std::task::Poll::Pending => done = false,

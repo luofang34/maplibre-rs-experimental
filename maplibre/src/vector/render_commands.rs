@@ -95,91 +95,118 @@ impl<const RUNS: bool> RenderCommand<LayerItem> for DrawVectorTile<RUNS> {
             return RenderCommandResult::Failure;
         };
 
-        let source_shape = &item.source_shape;
-
-        let reference = u32::from(source_shape.stencil_reference());
-
         tracing::trace!(
             "Drawing layer {:?} at {}",
             entry.style_layer.source_layer,
             entry.coords
         );
-
-        let index_range = entry.indices_buffer_range();
-
-        if index_range.is_empty() {
+        if entry.indices_buffer_range().is_empty() {
             tracing::error!("Tried to draw a vector tile without any vertices");
             return RenderCommandResult::Failure;
         }
 
-        pass.set_stencil_reference(reference);
+        let Some((first, base_vertex, instances)) =
+            bind_vector_tile_buffers(world, buffer_pool, tile_view_pattern, item, entry, pass)
+        else {
+            return RenderCommandResult::Failure;
+        };
+        draw_vector_tile_runs::<RUNS>(
+            world,
+            buffer_pool,
+            item,
+            entry,
+            pass,
+            (first, base_vertex, instances),
+        );
+        RenderCommandResult::Success
+    }
+}
 
+fn bind_vector_tile_buffers<'w>(
+    world: &'w World,
+    buffer_pool: &'w VectorBufferPool,
+    tile_view_pattern: &'w WgpuTileViewPattern,
+    item: &LayerItem,
+    entry: &'w crate::vector::resource::IndexEntry,
+    pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
+) -> Option<(u32, i32, std::ops::Range<u32>)> {
+    let source_shape = &item.source_shape;
+    pass.set_stencil_reference(u32::from(source_shape.stencil_reference()));
+    let whole = world
+        .resources
+        .get::<crate::render::tracked_pass::DrawCapabilities>()
+        .is_some_and(|capabilities| capabilities.base_vertex);
+    let (first, base_vertex) = buffer_pool.bind_layer(pass, entry, (3, whole));
+    let instances = if whole {
+        let tile_instance = source_shape.instance_index()?;
+        pass.set_vertex_buffer(1, tile_view_pattern.buffer().slice(..));
+        tile_instance..tile_instance + 1
+    } else {
+        let tile_view_pattern_buffer = source_shape.buffer_range()?;
+        pass.set_vertex_buffer(
+            1,
+            tile_view_pattern.buffer().slice(tile_view_pattern_buffer),
+        );
+        0..1
+    };
+    pass.set_vertex_buffer(
+        2,
+        buffer_pool
+            .metadata_for(entry)
+            .slice(entry.layer_metadata_buffer_range()),
+    );
+    Some((first, base_vertex, instances))
+}
+
+fn draw_vector_tile_runs<'w, const RUNS: bool>(
+    world: &'w World,
+    buffer_pool: &VectorBufferPool,
+    item: &LayerItem,
+    entry: &crate::vector::resource::IndexEntry,
+    pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
+    (first, base_vertex, instances): (u32, i32, std::ops::Range<u32>),
+) {
+    if let Some(run) = &item.run {
+        pass.draw_indexed(first + run.start..first + run.end, base_vertex, instances);
+        return;
+    }
+    let runs = RUNS
+        .then(|| buffer_pool.pattern_runs_by_id(item.tile.coords, item.style_layer))
+        .flatten();
+    let Some(runs) = runs else {
         let whole = world
             .resources
             .get::<crate::render::tracked_pass::DrawCapabilities>()
             .is_some_and(|capabilities| capabilities.base_vertex);
-        let (first, base_vertex) = buffer_pool.bind_layer(pass, entry, (3, whole));
-        let instances = if whole {
-            let Some(tile_instance) = source_shape.instance_index() else {
-                return RenderCommandResult::Failure;
-            };
-            pass.set_vertex_buffer(1, tile_view_pattern.buffer().slice(..));
-            tile_instance..tile_instance + 1
-        } else {
-            let Some(tile_view_pattern_buffer) = source_shape.buffer_range() else {
-                return RenderCommandResult::Failure;
-            };
-            pass.set_vertex_buffer(
-                1,
-                tile_view_pattern.buffer().slice(tile_view_pattern_buffer),
-            );
-            0..1
-        };
-        pass.set_vertex_buffer(
-            2,
-            buffer_pool
-                .metadata_for(entry)
-                .slice(entry.layer_metadata_buffer_range()),
-        );
-        if let Some(run) = &item.run {
-            pass.draw_indexed(first + run.start..first + run.end, base_vertex, instances);
-            return RenderCommandResult::Success;
-        }
-        let runs = RUNS
-            .then(|| buffer_pool.pattern_runs_by_id(item.tile.coords, item.style_layer))
-            .flatten();
-        let Some(runs) = runs else {
-            if whole {
-                if let Some(chunks) = entry.u16_chunks() {
-                    for (v_off, range) in chunks {
-                        pass.draw_indexed(
-                            first + range.start..first + range.end,
-                            base_vertex + (*v_off as i32),
-                            instances.clone(),
-                        );
-                    }
-                    return RenderCommandResult::Success;
+        if whole {
+            if let Some(chunks) = entry.u16_chunks() {
+                for (v_off, range) in chunks {
+                    pass.draw_indexed(
+                        first + range.start..first + range.end,
+                        base_vertex + (*v_off as i32),
+                        instances.clone(),
+                    );
                 }
+                return;
             }
-            pass.draw_indexed(
-                first..first + entry.indices_range().len() as u32,
-                base_vertex,
-                instances,
-            );
-            return RenderCommandResult::Success;
+        }
+        pass.draw_indexed(
+            first..first + entry.indices_range().len() as u32,
+            base_vertex,
+            instances,
+        );
+        return;
+    };
+    let patterns = world.resources.get::<super::pattern::PatternResources>();
+    let dashes = world.resources.get::<super::line_dash::LineDashResources>();
+    let is_line = entry.style_layer.type_ == "line";
+    for (key, range) in runs {
+        let image = if is_line {
+            dashes.and_then(|dashes| dashes.image_binding(*key))
+        } else {
+            patterns.and_then(|patterns| patterns.image_binding(*key))
         };
-        let patterns = world.resources.get::<super::pattern::PatternResources>();
-        let dashes = world.resources.get::<super::line_dash::LineDashResources>();
-        let is_line = entry.style_layer.type_ == "line";
-        for (key, range) in runs {
-            let image = if is_line {
-                dashes.and_then(|dashes| dashes.image_binding(*key))
-            } else {
-                patterns.and_then(|patterns| patterns.image_binding(*key))
-            };
-            let Some(image) = image else {
-                continue;
-            };
+        if let Some(image) = image {
             pass.set_bind_group(1, image, &[]);
             pass.draw_indexed(
                 first + range.start..first + range.end,
@@ -187,8 +214,6 @@ impl<const RUNS: bool> RenderCommand<LayerItem> for DrawVectorTile<RUNS> {
                 instances.clone(),
             );
         }
-
-        RenderCommandResult::Success
     }
 }
 

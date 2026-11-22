@@ -36,14 +36,6 @@ impl RequestKind {
             Self::Vector => &Self::Vector,
         }
     }
-
-    pub(crate) fn index(self) -> usize {
-        match self {
-            Self::Raster => 0,
-            Self::Dem => 1,
-            Self::Vector => 2,
-        }
-    }
 }
 
 /// Disposition after all sources in one tile request have completed.
@@ -110,6 +102,26 @@ impl RetryState {
 #[derive(Default)]
 pub(crate) struct TileRequestRetries([RetryState; 3]);
 impl TileComponent for TileRequestRetries {}
+
+impl TileRequestRetries {
+    fn slot(&self, kind: RequestKind) -> &RetryState {
+        let [raster, dem, vector] = &self.0;
+        match kind {
+            RequestKind::Raster => raster,
+            RequestKind::Dem => dem,
+            RequestKind::Vector => vector,
+        }
+    }
+
+    fn slot_mut(&mut self, kind: RequestKind) -> &mut RetryState {
+        let [raster, dem, vector] = &mut self.0;
+        match kind {
+            RequestKind::Raster => raster,
+            RequestKind::Dem => dem,
+            RequestKind::Vector => vector,
+        }
+    }
+}
 
 // Workers retain the map transport while reset replaces the world and its deadlines.
 #[derive(Clone, Default)]
@@ -228,7 +240,7 @@ fn refresh_due(world: &mut World, kind: RequestKind, tiles: &[WorldTileCoords]) 
         let Some(retries) = world.tiles.query_mut::<&mut TileRequestRetries>(*coords) else {
             continue;
         };
-        let state = &mut retries.0[kind.index()];
+        let state = retries.slot_mut(kind);
         if state.attempt.is_none() {
             continue;
         }
@@ -251,7 +263,7 @@ fn refresh_due(world: &mut World, kind: RequestKind, tiles: &[WorldTileCoords]) 
 }
 
 /// Requests a finished tile again after `delay`, because part of what its worker sent later
-/// was unavailable for now.
+/// was temporarily unavailable.
 pub(crate) fn retry_later(
     world: &mut World,
     coords: WorldTileCoords,
@@ -266,7 +278,7 @@ pub(crate) fn retry_later(
     let Some(retries) = world.tiles.query_mut::<&mut TileRequestRetries>(coords) else {
         return;
     };
-    let state = &mut retries.0[kind.index()];
+    let state = retries.slot_mut(kind);
     if state.pending || state.deadline.is_some() {
         return;
     }
@@ -286,7 +298,7 @@ pub(crate) fn due(world: &mut World, coords: WorldTileCoords, kind: RequestKind)
         .tiles
         .query::<&TileRequestRetries>(coords)
         .is_some_and(|retries| {
-            let state = &retries.0[kind.index()];
+            let state = retries.slot(kind);
             !state.pending && state.deadline.is_some_and(|deadline| now >= deadline)
         })
 }
@@ -295,7 +307,7 @@ pub(crate) fn is_pending(world: &World, coords: WorldTileCoords, kind: RequestKi
     world
         .tiles
         .query::<&TileRequestRetries>(coords)
-        .is_some_and(|retries| retries.0[kind.index()].pending)
+        .is_some_and(|retries| retries.slot(kind).pending)
 }
 
 #[cfg(all(test, feature = "headless", not(target_arch = "wasm32")))]
@@ -308,7 +320,7 @@ pub(crate) fn pending_attempt(
         .tiles
         .query::<&TileRequestRetries>(coords)
         .and_then(|retries| {
-            let state = &retries.0[kind.index()];
+            let state = retries.slot(kind);
             state.pending.then_some(state.attempt).flatten()
         })
 }
@@ -319,7 +331,7 @@ pub(crate) fn waiting(world: &World, coords: WorldTileCoords, kind: RequestKind)
         .tiles
         .query::<&TileRequestRetries>(coords)
         .is_some_and(|retries| {
-            let state = &retries.0[kind.index()];
+            let state = retries.slot(kind);
             state.pending || state.deadline.is_some()
         })
 }
@@ -333,7 +345,7 @@ pub(crate) fn is_waiting_or_pending(
     tiles
         .query::<&TileRequestRetries>(coords)
         .is_some_and(|retries| {
-            let state = &retries.0[kind.index()];
+            let state = retries.slot(kind);
             state.pending || state.deadline.is_some()
         })
 }
@@ -363,7 +375,7 @@ pub(crate) fn started(
         }
     }
     if let Some(retries) = world.tiles.query_mut::<&mut TileRequestRetries>(coords) {
-        let state = &mut retries.0[kind.index()];
+        let state = retries.slot_mut(kind);
         state.attempt = Some(attempt);
         state.pending = true;
         state.deadline = None;
@@ -386,7 +398,7 @@ pub(crate) fn completed(world: &mut World, outcome: TileRequestOutcome) {
     else {
         return;
     };
-    let state = &mut retries.0[outcome.kind.index()];
+    let state = retries.slot_mut(outcome.kind);
     // An evicted request can finish after the same coordinates have been requested again.
     if !state.pending || state.attempt != outcome.attempt {
         return;
@@ -405,7 +417,7 @@ pub(crate) fn completed(world: &mut World, outcome: TileRequestOutcome) {
             .clear_kind(outcome.kind, outcome.coords);
         return;
     };
-    let state = &mut retries.0[outcome.kind.index()];
+    let state = retries.slot_mut(outcome.kind);
     let mut retried_for = None;
     match outcome.disposition {
         RequestDisposition::Complete => {
@@ -447,7 +459,7 @@ pub(crate) fn accepts(
     world
         .tiles
         .query::<&TileRequestRetries>(coords)
-        .and_then(|retries| retries.0[kind.index()].attempt)
+        .and_then(|retries| retries.slot(kind).attempt)
         == attempt
 }
 

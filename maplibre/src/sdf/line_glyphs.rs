@@ -77,26 +77,27 @@ pub(crate) fn offset_polyline(
     // Collect non-degenerate segment tangents and unit normals.
     let mut segs: Vec<OffsetSegment> = Vec::with_capacity(polyline.len());
     for pair in polyline.windows(2) {
-        let dx = pair[1][0] - pair[0][0];
-        let dy = pair[1][1] - pair[0][1];
+        let [start, end] = pair else { continue };
+        let dx = end[0] - start[0];
+        let dy = end[1] - start[1];
         let len = dx.hypot(dy);
         if len > 1e-6 {
             let tangent = [dx / len, dy / len];
             let normal = [-tangent[1], tangent[0]];
             segs.push(OffsetSegment {
-                start: pair[0],
-                end: pair[1],
+                start: *start,
+                end: *end,
                 tangent,
                 normal,
             });
         }
     }
-    if segs.is_empty() {
+    let Some(first_seg) = segs.first() else {
         return (polyline.to_vec(), anchor_distance);
-    }
+    };
 
     // Original anchor point in tile coordinates, so we can project it onto the offset polyline.
-    let mut anchor_pt = segs[0].start;
+    let mut anchor_pt = first_seg.start;
     {
         let mut walker = LineWalker::new(polyline);
         if let Some((pt, _)) = walker.point_at(anchor_distance.max(0.0)) {
@@ -107,13 +108,14 @@ pub(crate) fn offset_polyline(
     let miter_limit = offset.abs() * 6.0;
     let mut out: Vec<[f32; 2]> = Vec::with_capacity(segs.len() + 2);
     out.push([
-        segs[0].start[0] + segs[0].normal[0] * offset,
-        segs[0].start[1] + segs[0].normal[1] * offset,
+        first_seg.start[0] + first_seg.normal[0] * offset,
+        first_seg.start[1] + first_seg.normal[1] * offset,
     ]);
 
     for pair in segs.windows(2) {
-        let (vertex, t0, n0) = (pair[0].end, pair[0].tangent, pair[0].normal);
-        let (t1, n1) = (pair[1].tangent, pair[1].normal);
+        let [prev, next] = pair else { continue };
+        let (vertex, t0, n0) = (prev.end, prev.tangent, prev.normal);
+        let (t1, n1) = (next.tangent, next.normal);
         let det = t0[0] * t1[1] - t0[1] * t1[0];
         if det.abs() < 1e-5 {
             out.push([vertex[0] + n1[0] * offset, vertex[1] + n1[1] * offset]);
@@ -145,18 +147,18 @@ pub(crate) fn offset_polyline(
     let mut best_arc = 0.0_f32;
     let mut travelled = 0.0_f32;
     for pair in out.windows(2) {
-        let dx = pair[1][0] - pair[0][0];
-        let dy = pair[1][1] - pair[0][1];
+        let [a, b] = pair else { continue };
+        let dx = b[0] - a[0];
+        let dy = b[1] - a[1];
         let len_sq = dx * dx + dy * dy;
         let len = len_sq.sqrt();
         let t = if len_sq > 1e-12 {
-            (((anchor_pt[0] - pair[0][0]) * dx + (anchor_pt[1] - pair[0][1]) * dy) / len_sq)
-                .clamp(0.0, 1.0)
+            (((anchor_pt[0] - a[0]) * dx + (anchor_pt[1] - a[1]) * dy) / len_sq).clamp(0.0, 1.0)
         } else {
             0.0
         };
-        let px = pair[0][0] + dx * t;
-        let py = pair[0][1] + dy * t;
+        let px = a[0] + dx * t;
+        let py = a[1] + dy * t;
         let d_sq = (px - anchor_pt[0]).powi(2) + (py - anchor_pt[1]).powi(2);
         if d_sq < best_dist_sq {
             best_dist_sq = d_sq;
@@ -189,21 +191,23 @@ pub(crate) fn place_glyphs(
         })
         .collect();
     // Glyphs are found in order of distance with one walk along the line.
-    let mut order: Vec<usize> = (0..distances.len()).collect();
-    order.sort_by(|a, b| distances[*a].total_cmp(&distances[*b]));
+    let mut order: Vec<(usize, f32)> = distances.iter().copied().enumerate().collect();
+    order.sort_by(|(_, a), (_, b)| a.total_cmp(b));
     let mut walker = LineWalker::new(polyline);
     let mut poses = vec![None; distances.len()];
-    for index in order {
-        let (point, angle) = walker.point_at(distances[index])?;
-        poses[index] = Some(GlyphPose {
-            point,
-            angle: if flip {
-                angle + std::f32::consts::PI
-            } else {
-                angle
-            },
-            rise: 0.0,
-        });
+    for (index, dist) in order {
+        let (point, angle) = walker.point_at(dist)?;
+        if let Some(slot) = poses.get_mut(index) {
+            *slot = Some(GlyphPose {
+                point,
+                angle: if flip {
+                    angle + std::f32::consts::PI
+                } else {
+                    angle
+                },
+                rise: 0.0,
+            });
+        }
     }
     poses.into_iter().collect()
 }

@@ -200,7 +200,7 @@ pub(crate) fn write_dem_pixels(queue: &UploadQueue, texture: &Texture, dem: &Dem
 
 #[cfg(all(test, feature = "headless", feature = "thread-safe-futures"))]
 mod tests {
-    #![allow(clippy::expect_used)]
+    #![cfg_attr(test, allow(clippy::expect_used))]
 
     use super::GpuDemPool;
     use crate::{

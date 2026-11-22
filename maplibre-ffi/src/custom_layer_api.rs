@@ -1,6 +1,9 @@
 //! Host custom style-layer registration and lifecycle C ABI exports.
 
-#![allow(unsafe_code)]
+#![expect(
+    unsafe_code,
+    reason = "C ABI custom layer callbacks, Send/Sync bounds, and raw pointer exports"
+)]
 
 use std::ffi::{c_char, c_void};
 

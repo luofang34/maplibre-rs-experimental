@@ -51,7 +51,7 @@ fn expr_needs_high_res(expr: &crate::style::expression::Expression) -> bool {
         Expression::Interpolate { stops, .. } => {
             stops
                 .windows(2)
-                .any(|pair| (pair[1].0 - pair[0].0).abs() < 0.02)
+                .any(|pair| matches!(pair, [(a, _), (b, _)] if (b - a).abs() < 0.02))
                 || stops.iter().any(|(_, out)| expr_needs_high_res(out))
         }
         Expression::Case {

@@ -146,18 +146,22 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             if TypeId::of::<I>() == TypeId::of::<u32>() {
                 if let Some(u16s) = pre.indices_u16.as_deref() {
                     let usable = (geometry.usable_indices as usize).min(u16s.len());
+                    let usable_u16s = u16s.get(..usable).unwrap_or(u16s);
                     if entry.index_u16 {
                         let padded = usable.next_multiple_of(2);
-                        if u16s.len() >= padded && padded * 2 == index_bytes as usize {
+                        if let Some(padded_slice) = (padded * 2 == index_bytes as usize)
+                            .then(|| u16s.get(..padded))
+                            .flatten()
+                        {
                             queue.write_buffer(
                                 self.indices_for(entry),
                                 entry.buffer_indices.start,
-                                bytemuck::cast_slice(&u16s[..padded]),
+                                bytemuck::cast_slice(padded_slice),
                             );
                         } else {
                             self.u16_index_scratch.clear();
                             self.u16_index_scratch.reserve(padded);
-                            self.u16_index_scratch.extend_from_slice(&u16s[..usable]);
+                            self.u16_index_scratch.extend_from_slice(usable_u16s);
                             if self.u16_index_scratch.len() < padded {
                                 self.u16_index_scratch.push(0);
                             }
@@ -169,8 +173,7 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
                             self.u16_index_scratch.clear();
                         }
                     } else {
-                        let wide: Vec<u32> =
-                            u16s[..usable].iter().copied().map(u32::from).collect();
+                        let wide: Vec<u32> = usable_u16s.iter().copied().map(u32::from).collect();
                         queue.write_buffer(
                             self.indices_for(entry),
                             entry.buffer_indices.start,

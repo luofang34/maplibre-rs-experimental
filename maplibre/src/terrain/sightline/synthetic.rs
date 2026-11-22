@@ -1,6 +1,6 @@
 //! Synthetic terrain for tests: rendered tiles and the DEM behind them, sampled from height
 //! functions of Mercator position, around a Himalayan scene.
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg_attr(test, allow(clippy::expect_used))]
 
 use cgmath::Point2;
 use image::{Rgba, RgbaImage};

@@ -36,7 +36,7 @@ impl SqliteOfflineStore {
     /// Opens or creates an offline SQLite database at `path`.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, OfflineStoreError> {
         let conn = Connection::open(path.as_ref()).map_err(sql_err)?;
-        let _ = conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;");
+        drop(conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;"));
         Self::from_connection(conn)
     }
 
@@ -227,10 +227,10 @@ impl OfflineStore for SqliteOfflineStore {
                 return Ok(None);
             };
             let stamp = inner.next_stamp();
-            let _ = conn.execute(
+            drop(conn.execute(
                 "UPDATE resources SET accessed_at = ?2 WHERE url = ?1",
                 params![url_owned, stamp],
-            );
+            ));
             decode_resource_blob(blob, compressed != 0).map(Some)
         })
         .await?

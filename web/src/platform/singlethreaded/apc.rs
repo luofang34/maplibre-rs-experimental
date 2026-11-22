@@ -178,25 +178,117 @@ pub(super) fn worker_message(
 }
 
 #[cfg(any(test, feature = "renderer"))]
+struct BatchBudget {
+    bytes: usize,
+    attempts: rustc_hash::FxHashSet<u64>,
+    msgs: usize,
+}
+
+#[cfg(any(test, feature = "renderer"))]
+impl BatchBudget {
+    const MAX_RAW_BYTES: usize = 768 * 1024;
+    const MAX_RAW_MESSAGES: usize = 16;
+    const MAX_RAW_ATTEMPTS: usize = 3;
+
+    fn from_buffer(buffer: &[QueuedMessage]) -> Self {
+        Self {
+            bytes: buffer.iter().map(QueuedMessage::raw_byte_len).sum(),
+            attempts: buffer.iter().filter_map(QueuedMessage::attempt).collect(),
+            msgs: buffer.len(),
+        }
+    }
+
+    fn try_admit(
+        &mut self,
+        item: &QueuedMessage,
+        attempt_totals: &rustc_hash::FxHashMap<u64, usize>,
+    ) -> bool {
+        let attempt = item.attempt();
+        let admit = match attempt {
+            None => {
+                self.attempts.is_empty()
+                    || (self.msgs < Self::MAX_RAW_MESSAGES && self.bytes < Self::MAX_RAW_BYTES)
+            }
+            Some(id) => {
+                self.attempts.contains(&id)
+                    || self.attempts.is_empty()
+                    || (self.attempts.len() < Self::MAX_RAW_ATTEMPTS
+                        && self.msgs < Self::MAX_RAW_MESSAGES
+                        && self
+                            .bytes
+                            .saturating_add(attempt_totals.get(&id).copied().unwrap_or(0))
+                            <= Self::MAX_RAW_BYTES)
+            }
+        };
+        if admit {
+            if let Some(id) = attempt {
+                self.attempts.insert(id);
+            }
+            self.msgs = self.msgs.saturating_add(1);
+            self.bytes = self.bytes.saturating_add(item.raw_byte_len());
+        }
+        admit
+    }
+}
+
+#[cfg(any(test, feature = "renderer"))]
+impl PassingAsyncProcedureCall {
+    fn drain_finished(&self, received: &mut Received) {
+        if !received.finished.is_empty() {
+            let mut assignments = self.assignments.borrow_mut();
+            for attempt in received.finished.drain(..) {
+                assignments.finished(attempt);
+            }
+        }
+    }
+
+    fn admit_throttled_queued<F: FnMut(&Message) -> bool>(
+        &self,
+        received: &mut Received,
+        buffer: &mut Vec<QueuedMessage>,
+        ret: &mut Vec<QueuedMessage>,
+        budget: &mut BatchBudget,
+        filter: &mut F,
+    ) {
+        let mut attempt_totals: rustc_hash::FxHashMap<u64, usize> =
+            rustc_hash::FxHashMap::default();
+        for item in &received.queued {
+            if let Some(id) = item.attempt() {
+                let entry = attempt_totals.entry(id).or_insert(0);
+                *entry = entry.saturating_add(item.raw_byte_len());
+            }
+        }
+        let mut deferred = Vec::new();
+        for item in received.queued.drain(..) {
+            if !budget.try_admit(&item, &attempt_totals) {
+                deferred.push(item);
+                continue;
+            }
+            if item.matches(filter) {
+                ret.push(item);
+            } else {
+                buffer.push(item);
+            }
+        }
+        if !deferred.is_empty() {
+            self.batch_open.set(false);
+        }
+        received.queued = deferred;
+    }
+}
+
+#[cfg(any(test, feature = "renderer"))]
 impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
     type Context = UsedContext;
     type ReceiveIterator<F: FnMut(&Message) -> bool> = PassingReceiveIter;
 
     fn receive<F: FnMut(&Message) -> bool>(&self, mut filter: F) -> Self::ReceiveIterator<F> {
-        const MAX_RAW_BYTES_PER_BATCH: usize = 768 * 1024;
-        const MAX_RAW_MESSAGES_PER_BATCH: usize = 16;
-        const MAX_RAW_ATTEMPTS_PER_BATCH: usize = 3;
         let mut buffer = self.buffer.borrow_mut();
         if buffer.is_empty() {
             let Ok(mut received) = self.received.try_borrow_mut() else {
                 return PassingReceiveIter::new(Vec::new());
             };
-            if !received.finished.is_empty() {
-                let mut assignments = self.assignments.borrow_mut();
-                for attempt in received.finished.drain(..) {
-                    assignments.finished(attempt);
-                }
-            }
+            self.drain_finished(&mut received);
             if received.messages.is_empty()
                 && (received.queued.is_empty()
                     || (!self.boot_unthrottled.get() && !self.batch_open.get()))
@@ -204,10 +296,7 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
                 return PassingReceiveIter::new(Vec::new());
             }
         }
-        let mut admitted_bytes: usize = buffer.iter().map(QueuedMessage::raw_byte_len).sum();
-        let mut admitted_attempts: rustc_hash::FxHashSet<u64> =
-            buffer.iter().filter_map(QueuedMessage::attempt).collect();
-        let mut admitted_msgs: usize = buffer.len();
+        let mut budget = BatchBudget::from_buffer(&buffer);
         // Partial and final tile completions must retain the worker's delivery order.
         let mut ret: Vec<QueuedMessage> = buffer
             .extract_if(.., |item| item.matches(&mut filter))
@@ -216,12 +305,7 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
         let Ok(mut received) = self.received.try_borrow_mut() else {
             return PassingReceiveIter::new(ret);
         };
-        if !received.finished.is_empty() {
-            let mut assignments = self.assignments.borrow_mut();
-            for attempt in received.finished.drain(..) {
-                assignments.finished(attempt);
-            }
-        }
+        self.drain_finished(&mut received);
         for message in received.messages.drain(..) {
             if filter(&message) {
                 ret.push(QueuedMessage::Decoded(message));
@@ -242,56 +326,15 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
             }
             return PassingReceiveIter::new(ret);
         }
-        if !self.batch_open.get() {
-            return PassingReceiveIter::new(ret);
+        if self.batch_open.get() {
+            self.admit_throttled_queued(
+                &mut received,
+                &mut buffer,
+                &mut ret,
+                &mut budget,
+                &mut filter,
+            );
         }
-        let mut attempt_totals: rustc_hash::FxHashMap<u64, usize> =
-            rustc_hash::FxHashMap::default();
-        for item in &received.queued {
-            if let Some(id) = item.attempt() {
-                let entry = attempt_totals.entry(id).or_insert(0);
-                *entry = entry.saturating_add(item.raw_byte_len());
-            }
-        }
-        let mut deferred = Vec::new();
-        for item in received.queued.drain(..) {
-            let attempt = item.attempt();
-            let admit = match attempt {
-                None => {
-                    admitted_attempts.is_empty()
-                        || (admitted_msgs < MAX_RAW_MESSAGES_PER_BATCH
-                            && admitted_bytes < MAX_RAW_BYTES_PER_BATCH)
-                }
-                Some(id) => {
-                    admitted_attempts.contains(&id)
-                        || admitted_attempts.is_empty()
-                        || (admitted_attempts.len() < MAX_RAW_ATTEMPTS_PER_BATCH
-                            && admitted_msgs < MAX_RAW_MESSAGES_PER_BATCH
-                            && admitted_bytes
-                                .saturating_add(attempt_totals.get(&id).copied().unwrap_or(0))
-                                <= MAX_RAW_BYTES_PER_BATCH)
-                }
-            };
-            if !admit {
-                deferred.push(item);
-                continue;
-            }
-            if let Some(id) = attempt {
-                admitted_attempts.insert(id);
-            }
-            admitted_msgs = admitted_msgs.saturating_add(1);
-            admitted_bytes = admitted_bytes.saturating_add(item.raw_byte_len());
-            if item.matches(&mut filter) {
-                ret.push(item);
-            } else {
-                buffer.push(item);
-            }
-        }
-        if !deferred.is_empty() {
-            self.batch_open.set(false);
-        }
-        received.queued = deferred;
-
         PassingReceiveIter::new(ret)
     }
 

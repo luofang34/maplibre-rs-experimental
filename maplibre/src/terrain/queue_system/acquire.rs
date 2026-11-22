@@ -20,12 +20,12 @@ pub(super) fn budget_redraws(states: &[DrapeState], budget: usize) -> Vec<bool> 
     let mut redraw = vec![false; states.len()];
     let mut drawn = 0;
     for wanted in [DrapeState::New, DrapeState::Changed] {
-        for (index, state) in states.iter().enumerate() {
+        for (slot, state) in redraw.iter_mut().zip(states) {
             if drawn >= budget {
                 return redraw;
             }
             if *state == wanted {
-                redraw[index] = true;
+                *slot = true;
                 drawn += 1;
             }
         }
@@ -135,22 +135,27 @@ fn choose_redraws(
     } else {
         limit
     };
-    for (index, (spec, state)) in specs.iter().zip(states).enumerate() {
+    for (((spec, state), &is_prefetch), slot) in specs
+        .iter()
+        .zip(states)
+        .zip(prefetch)
+        .zip(redraw.iter_mut())
+    {
         if drawn >= emergency_limit {
             break;
         }
-        if !prefetch[index]
+        if !is_prefetch
             && *state == DrapeState::New
-            && !redraw[index]
+            && !*slot
             && !has_present_ancestor(spec.coords, terrain)
         {
-            redraw[index] = true;
+            *slot = true;
             drawn += 1;
         }
     }
     let spare = budget.saturating_sub(drawn);
-    for (index, draw) in budget_redraws(&only(true), spare).into_iter().enumerate() {
-        redraw[index] |= draw;
+    for (slot, draw) in redraw.iter_mut().zip(budget_redraws(&only(true), spare)) {
+        *slot |= draw;
     }
     redraw
 }

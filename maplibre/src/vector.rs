@@ -7,7 +7,7 @@ use std::{marker::PhantomData, ops::Deref, rc::Rc};
 pub use process_vector::*;
 pub use transferables::{
     DefaultVectorTransferables, LayerIndexed, LayerMissing, LayerTessellated,
-    SymbolLayerTessellated, TileTessellated, VectorTransferables,
+    SymbolLayerTessellated, TessellatedLayerPayload, TileTessellated, VectorTransferables,
 };
 
 use crate::{
@@ -52,7 +52,10 @@ pub use request_system::{
     rescale::{into_descendant as rescale_into_descendant, slice_descendant},
 };
 pub(crate) mod resource;
-pub use resource::{AllocationError, BackingBufferType, BufferPool, IndexEntry, RingIndex};
+pub use resource::{
+    AllocationError, BackingBufferType, BufferPool, IndexEntry, LayerGeometryUpload, RingIndex,
+    UniformLayerUpload,
+};
 mod resource_system;
 pub(crate) mod structures;
 pub(crate) mod transferables;

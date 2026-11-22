@@ -172,12 +172,14 @@ async fn isolated_worker_shared_keys_remap_per_attempt_and_prune_on_outcome() {
     pool.replace_layer_geometry_layer_uniform_shared_unless(
         &renderer.queue,
         coords,
-        line_layer,
-        &primary_geom,
+        crate::vector::UniformLayerUpload {
+            style_layer: std::sync::Arc::new(line_layer),
+            geometry: &primary_geom,
+            layer_metadata: ShaderLayerMetadata::new(0.0, 1.0, [0.0; 2]),
+            uniform_feature: FillShaderFeatureMetadata::default(),
+            records: 6,
+        },
         None,
-        ShaderLayerMetadata::new(0.0, 1.0, [0.0; 2]),
-        FillShaderFeatureMetadata::default(),
-        6,
         |_| false,
     )
     .expect("resident upload road-a");
@@ -186,12 +188,14 @@ async fn isolated_worker_shared_keys_remap_per_attempt_and_prune_on_outcome() {
     pool.replace_layer_geometry_layer_uniform_shared_unless(
         &renderer.queue,
         coords,
-        line_layer_b,
-        &secondary_geom,
+        crate::vector::UniformLayerUpload {
+            style_layer: std::sync::Arc::new(line_layer_b),
+            geometry: &secondary_geom,
+            layer_metadata: ShaderLayerMetadata::new(0.0, 1.0, [0.0; 2]),
+            uniform_feature: FillShaderFeatureMetadata::default(),
+            records: 6,
+        },
         None,
-        ShaderLayerMetadata::new(0.0, 1.0, [0.0; 2]),
-        FillShaderFeatureMetadata::default(),
-        6,
         |_| false,
     )
     .expect("resident upload road-b");

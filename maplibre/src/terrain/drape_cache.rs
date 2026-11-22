@@ -232,7 +232,51 @@ impl<T, K: Copy + Eq + std::hash::Hash> DrapeCache<T, K> {
         if self.take_unshown().is_some() {
             return;
         }
-        let _ = self.parked.pop_back();
+        drop(self.parked.pop_back());
+    }
+
+    fn reuse_or_evict_existing(
+        &mut self,
+        coords: &K,
+        fingerprint: u64,
+        (may_create, shown): (bool, bool),
+        has_reusable_free: bool,
+        keep_existing: &impl Fn(&T) -> bool,
+    ) -> Option<DrapeState> {
+        if let Some(entry) = self.entries.get_mut(coords) {
+            if !shown && entry.has_content {
+                return Some(DrapeState::Unchanged);
+            }
+            if keep_existing(&entry.texture) || (!may_create && !has_reusable_free) {
+                entry.shown |= shown;
+                return Some(entry.acquire(fingerprint));
+            }
+            if let Some(old) = self.entries.remove(coords) {
+                self.recycle_to_free(old.texture);
+            }
+            return None;
+        }
+        let index = self
+            .parked
+            .iter()
+            .position(|(parked, _)| parked == coords)?;
+        let (_, mut entry) = self.parked.remove(index)?;
+        if keep_existing(&entry.texture) || (!may_create && !has_reusable_free) {
+            entry.shown |= shown;
+            let state = entry.acquire(fingerprint);
+            self.entries.insert(*coords, entry);
+            return Some(state);
+        }
+        self.recycle_to_free(entry.texture);
+        None
+    }
+
+    fn take_reusable_texture(&mut self, reusable: &impl Fn(&T) -> bool) -> Option<T> {
+        self.take_unshown_matching(reusable)
+            .or_else(|| self.take_parked_matching(reusable))
+            .or_else(|| self.free.pop())
+            .or_else(|| self.take_unshown())
+            .or_else(|| self.parked.pop_back().map(|(_, entry)| entry.texture))
     }
 
     fn acquire_as(
@@ -245,29 +289,15 @@ impl<T, K: Copy + Eq + std::hash::Hash> DrapeCache<T, K> {
         create: impl FnOnce() -> T,
     ) -> DrapeState {
         let has_reusable_free = self.free.iter().any(&reusable);
-        if let Some(entry) = self.entries.get_mut(&coords) {
-            if !shown && entry.has_content {
-                return DrapeState::Unchanged;
-            }
-            if keep_existing(&entry.texture) || (!may_create && !has_reusable_free) {
-                entry.shown |= shown;
-                return entry.acquire(fingerprint);
-            }
-            if let Some(old) = self.entries.remove(&coords) {
-                self.recycle_to_free(old.texture);
-            }
-        } else if let Some(index) = self.parked.iter().position(|(parked, _)| *parked == coords) {
-            if let Some((_, mut entry)) = self.parked.remove(index) {
-                if keep_existing(&entry.texture) || (!may_create && !has_reusable_free) {
-                    entry.shown |= shown;
-                    let state = entry.acquire(fingerprint);
-                    self.entries.insert(coords, entry);
-                    return state;
-                }
-                self.recycle_to_free(entry.texture);
-            }
+        if let Some(state) = self.reuse_or_evict_existing(
+            &coords,
+            fingerprint,
+            (may_create, shown),
+            has_reusable_free,
+            &keep_existing,
+        ) {
+            return state;
         }
-
         // A matching spare texture first, then a new one while the budget allows. Past the budget
         // a view takes the texture of a drape prepared ahead of it that none has shown, then the
         // one parked longest ago; a drape prepared ahead takes neither, and a tile that finds none
@@ -285,27 +315,14 @@ impl<T, K: Copy + Eq + std::hash::Hash> DrapeCache<T, K> {
                     create()
                 } else if !shown {
                     return DrapeState::Withheld;
+                } else if let Some(texture) = self.take_reusable_texture(&reusable) {
+                    texture
                 } else {
-                    match self
-                        .take_unshown_matching(&reusable)
-                        .or_else(|| self.take_parked_matching(&reusable))
-                        .or_else(|| self.free.pop())
-                        .or_else(|| self.take_unshown())
-                        .or_else(|| self.parked.pop_back().map(|(_, entry)| entry.texture))
-                    {
-                        Some(texture) => texture,
-                        None => return DrapeState::Withheld,
-                    }
+                    return DrapeState::Withheld;
                 }
             }
             None if !shown => return DrapeState::Withheld,
-            None => match self
-                .take_unshown_matching(&reusable)
-                .or_else(|| self.take_parked_matching(&reusable))
-                .or_else(|| self.free.pop())
-                .or_else(|| self.take_unshown())
-                .or_else(|| self.parked.pop_back().map(|(_, entry)| entry.texture))
-            {
+            None => match self.take_reusable_texture(&reusable) {
                 Some(texture) => texture,
                 None => return DrapeState::Withheld,
             },

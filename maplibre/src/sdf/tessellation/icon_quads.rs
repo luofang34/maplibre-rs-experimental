@@ -38,7 +38,10 @@ fn cuts(zones: &[[f32; 2]], fixed_size: f32, stretch_size: f32) -> Vec<Cut> {
         stretch: 0.0,
     }];
     for [start, end] in zones {
-        let last = cuts[cuts.len() - 1];
+        let last = cuts.last().copied().unwrap_or(Cut {
+            fixed: 0.0,
+            stretch: 0.0,
+        });
         cuts.push(Cut {
             fixed: start - last.stretch,
             stretch: last.stretch,
@@ -177,47 +180,53 @@ pub(super) fn icon_quads(
     };
 
     // A position along an axis: the stretched share of the box plus the fixed pixels.
-    let place = |cut: Cut, axis: usize| {
-        let (origin, span) = if axis == 0 {
-            (left, icon_width)
+    let place = |cut: Cut, y_axis: bool| {
+        let (origin, span, stretch_total, off0, off1, fix0, fix1) = if y_axis {
+            (
+                top,
+                icon_height,
+                stretch_height,
+                offsets.0[1],
+                offsets.1[1],
+                fixed_offsets.0[1],
+                fixed_offsets.1[1],
+            )
         } else {
-            (top, icon_height)
+            (
+                left,
+                icon_width,
+                stretch_width,
+                offsets.0[0],
+                offsets.1[0],
+                fixed_offsets.0[0],
+                fixed_offsets.1[0],
+            )
         };
-        let stretch_total = if axis == 0 {
-            stretch_width
-        } else {
-            stretch_height
-        };
-        let em = (cut.stretch - offsets.0[axis]) / offsets.1[axis] * span + origin;
-        let px = (cut.fixed - fixed_offsets.0[axis])
-            - fixed_offsets.1[axis] * cut.stretch / stretch_total;
+        let em = (cut.stretch - off0) / off1 * span + origin;
+        let px = (cut.fixed - fix0) - fix1 * cut.stretch / stretch_total;
         // A box smaller than the pixels that cannot stretch grows to hold them: the stretched
         // share never scales below the fixed content.
-        let at_least = (fixed_offsets.1[axis] * fixed_scale / span).max(1.0);
+        let at_least = (fix1 * fixed_scale / span).max(1.0);
         em * at_least + px * fixed_scale
     };
     let x_cuts = cuts(&stretch_x, fixed_width, stretch_width);
     let y_cuts = cuts(&stretch_y, fixed_height, stretch_height);
     let mut quads = Vec::new();
     for columns in x_cuts.windows(2) {
+        let [col0, col1] = columns else { continue };
         for rows in y_cuts.windows(2) {
-            let (x1, x2) = (
-                columns[0].stretch + columns[0].fixed,
-                columns[1].stretch + columns[1].fixed,
-            );
-            let (y1, y2) = (
-                rows[0].stretch + rows[0].fixed,
-                rows[1].stretch + rows[1].fixed,
-            );
+            let [row0, row1] = rows else { continue };
+            let (x1, x2) = (col0.stretch + col0.fixed, col1.stretch + col1.fixed);
+            let (y1, y2) = (row0.stretch + row0.fixed, row1.stretch + row1.fixed);
             if x2 <= x1 || y2 <= y1 {
                 continue;
             }
             quads.push(IconQuad {
                 bounds: [
-                    place(columns[0], 0),
-                    place(rows[0], 1),
-                    place(columns[1], 0),
-                    place(rows[1], 1),
+                    place(*col0, false),
+                    place(*row0, true),
+                    place(*col1, false),
+                    place(*row1, true),
                 ],
                 rect: [
                     x + x1 as u32,

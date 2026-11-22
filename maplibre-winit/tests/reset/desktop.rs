@@ -249,7 +249,7 @@ fn assert_green(map: &Map<Environment>) {
     let component = component(map);
     assert!(component.done && !component.failed);
     assert_eq!(component.layers.len(), 1);
-    let VectorLayerBucket::AvailableLayer(layer) = &component.layers[0] else {
+    let Some(VectorLayerBucket::AvailableLayer(layer)) = component.layers.first() else {
         panic!("successful vector geometry");
     };
     assert!(!layer.buffer.buffer.indices.is_empty());

@@ -166,14 +166,16 @@ fn clock_rebases_when_idle_past_one_million_ms_and_keeps_settled_state() {
 #[test]
 fn quantized_start_ticks_floor_and_settled_shader_time_clears_4ms_step() {
     let meta = crate::render::shaders::SDFShaderFeatureMetadata::from_placement(
-        0.0,
-        0.0,
-        1.0,
-        10.9,
-        [0.0, 0.0],
-        [1.0; 4],
-        [0.0; 4],
-        [12.0, 0.0, 0.0, 1.0],
+        crate::render::shaders::SymbolPlacementMetadata {
+            target_opacity: 0.0,
+            elevation: 0.0,
+            start_opacity: 1.0,
+            start_time_ms: 10.9,
+            shift: [0.0, 0.0],
+            color: [1.0; 4],
+            halo: [0.0; 4],
+            params: [12.0, 0.0, 0.0, 1.0],
+        },
     );
     assert_eq!(meta.start_time_ms(), 8.0, "floor(10.9 * 0.25) * 4 == 8.0");
 

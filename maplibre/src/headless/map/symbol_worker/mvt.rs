@@ -207,13 +207,13 @@ fn road_names_and_shields_draw_at_both_pixel_ratios_zoomed_and_rotated() {
             let pixels = map.settle().await;
             check(&map, (&pixels, pixel_ratio), &format!("{scene:?} rotated"));
         }
-        let [one, two] = heights[..] else {
-            panic!("two ratios");
-        };
-        assert!(
-            f64::from(two) / f64::from(one) > 1.7 && f64::from(two) / f64::from(one) < 2.3,
-            "a shield twice as dense is twice as tall: {one} px at 1, {two} px at 2"
-        );
+        assert_eq!(heights.len(), 2, "two ratios");
+        if let [one, two] = heights[..] {
+            assert!(
+                f64::from(two) / f64::from(one) > 1.7 && f64::from(two) / f64::from(one) < 2.3,
+                "a shield twice as dense is twice as tall: {one} px at 1, {two} px at 2"
+            );
+        }
     })
 }
 

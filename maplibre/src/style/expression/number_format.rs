@@ -93,57 +93,8 @@ pub(super) fn format(
     let currency_digits = currency_code.as_deref().map(default_currency_digits);
     let min_digits = min.or(currency_digits).unwrap_or(0).min(20);
     let max_digits = max.or(currency_digits).unwrap_or(3).max(min_digits).min(20);
-
-    let resolved_loc = locale_tag
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .and_then(|raw| {
-            use wasm_bindgen::JsCast;
-            let intl = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("Intl")).ok()?;
-            let func = js_sys::Reflect::get(&intl, &JsValue::from_str("getCanonicalLocales"))
-                .ok()?
-                .dyn_into::<js_sys::Function>()
-                .ok()?;
-            let arr = func
-                .call1(&intl, &JsValue::from_str(raw))
-                .ok()?
-                .dyn_into::<js_sys::Array>()
-                .ok()?;
-            arr.get(0).as_string()
-        })
-        .filter(|s| !s.starts_with("und"))
-        .unwrap_or_else(|| "en-US".to_owned());
-
-    let opts = js_sys::Object::new();
-    let _ = js_sys::Reflect::set(
-        &opts,
-        &JsValue::from_str("minimumFractionDigits"),
-        &JsValue::from_f64(min_digits as f64),
-    );
-    let _ = js_sys::Reflect::set(
-        &opts,
-        &JsValue::from_str("maximumFractionDigits"),
-        &JsValue::from_f64(max_digits as f64),
-    );
-    if let Some(code) = currency_code.as_deref() {
-        let _ = js_sys::Reflect::set(
-            &opts,
-            &JsValue::from_str("style"),
-            &JsValue::from_str("currency"),
-        );
-        let _ = js_sys::Reflect::set(
-            &opts,
-            &JsValue::from_str("currency"),
-            &JsValue::from_str(code),
-        );
-    } else {
-        let _ = js_sys::Reflect::set(
-            &opts,
-            &JsValue::from_str("style"),
-            &JsValue::from_str("decimal"),
-        );
-    }
-
+    let resolved_loc = resolve_wasm_locale(locale_tag);
+    let opts = build_wasm_format_options(min_digits, max_digits, currency_code.as_deref());
     let locales = js_sys::Array::of1(&JsValue::from_str(&resolved_loc));
     let fmt_res = {
         use wasm_bindgen::JsCast;
@@ -161,6 +112,68 @@ pub(super) fn format(
         .ok()
         .and_then(|v| v.as_string())
         .unwrap_or_else(|| format!("{value:.max_digits$}"))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn resolve_wasm_locale(locale_tag: Option<&str>) -> String {
+    use wasm_bindgen::{JsCast, JsValue};
+    locale_tag
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .and_then(|raw| {
+            let intl = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("Intl")).ok()?;
+            let func = js_sys::Reflect::get(&intl, &JsValue::from_str("getCanonicalLocales"))
+                .ok()?
+                .dyn_into::<js_sys::Function>()
+                .ok()?;
+            let arr = func
+                .call1(&intl, &JsValue::from_str(raw))
+                .ok()?
+                .dyn_into::<js_sys::Array>()
+                .ok()?;
+            arr.get(0).as_string()
+        })
+        .filter(|s| !s.starts_with("und"))
+        .unwrap_or_else(|| "en-US".to_owned())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn build_wasm_format_options(
+    min_digits: usize,
+    max_digits: usize,
+    currency_code: Option<&str>,
+) -> js_sys::Object {
+    use wasm_bindgen::JsValue;
+    let opts = js_sys::Object::new();
+    drop(js_sys::Reflect::set(
+        &opts,
+        &JsValue::from_str("minimumFractionDigits"),
+        &JsValue::from_f64(min_digits as f64),
+    ));
+    drop(js_sys::Reflect::set(
+        &opts,
+        &JsValue::from_str("maximumFractionDigits"),
+        &JsValue::from_f64(max_digits as f64),
+    ));
+    if let Some(code) = currency_code {
+        drop(js_sys::Reflect::set(
+            &opts,
+            &JsValue::from_str("style"),
+            &JsValue::from_str("currency"),
+        ));
+        drop(js_sys::Reflect::set(
+            &opts,
+            &JsValue::from_str("currency"),
+            &JsValue::from_str(code),
+        ));
+    } else {
+        drop(js_sys::Reflect::set(
+            &opts,
+            &JsValue::from_str("style"),
+            &JsValue::from_str("decimal"),
+        ));
+    }
+    opts
 }
 
 #[cfg(not(target_arch = "wasm32"))]

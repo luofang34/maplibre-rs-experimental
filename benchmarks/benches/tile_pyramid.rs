@@ -1,4 +1,7 @@
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![expect(
+    clippy::expect_used,
+    reason = "benchmark tile fixture construction aborts on invalid coordinates"
+)]
 
 use std::{collections::BTreeMap, hint::black_box};
 

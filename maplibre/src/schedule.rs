@@ -271,7 +271,9 @@ impl Schedule {
         label: impl StageLabel,
     ) -> Result<&mut Self, ScheduleError> {
         let index = self.existing(&label)?;
-        self.entries[index].after_failure = true;
+        if let Some(entry) = self.entries.get_mut(index) {
+            entry.after_failure = true;
+        }
         Ok(self)
     }
 

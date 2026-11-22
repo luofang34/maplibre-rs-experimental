@@ -143,8 +143,10 @@ impl AppleMapConfig {
 
 /// Initializes `env_logger` idempotently so repeated SDK calls never panic.
 pub fn init_apple_logging() {
-    let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
-        .try_init();
+    drop(
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+            .try_init(),
+    );
 }
 
 /// Validates `config` and runs a headed Apple (iOS / macOS) map window until exit.

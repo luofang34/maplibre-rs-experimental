@@ -51,23 +51,24 @@ fn base_style() -> Style {
     .expect("valid base style")
 }
 
-fn generation_of(style: &Style, name: &str) -> u64 {
+fn generation_of(style: &Style, name: &str) -> Result<u64, String> {
     match style.sources.get(name) {
-        Some(Source::GeoJson(g)) => g.generation,
-        Some(Source::Image(i)) => i.generation,
-        other => panic!("unexpected source {other:?}"),
+        Some(Source::GeoJson(g)) => Ok(g.generation),
+        Some(Source::Image(i)) => Ok(i.generation),
+        other => Err(format!("unexpected source {other:?}")),
     }
 }
 
 #[test]
-fn identical_sources_with_paint_only_edit_preserve_generations_without_tile_redraw() {
+fn identical_sources_with_paint_only_edit_preserve_generations_without_tile_redraw(
+) -> Result<(), String> {
     let mut current = base_style();
-    let parks_gen = generation_of(&current, "parks");
-    let overlay_gen = generation_of(&current, "overlay");
+    let parks_gen = generation_of(&current, "parks")?;
+    let overlay_gen = generation_of(&current, "overlay")?;
 
     // Re-parse from scratch so incoming GeoJson/Image start with brand-new random generations.
     let mut next = base_style();
-    assert_ne!(generation_of(&next, "parks"), parks_gen);
+    assert_ne!(generation_of(&next, "parks")?, parks_gen);
     next.set_paint_property("park-fill", "fill-color", json!("#00ff00"))
         .expect("edit paint");
 
@@ -81,36 +82,47 @@ fn identical_sources_with_paint_only_edit_preserve_generations_without_tile_redr
     assert!(diff.updated_sources.is_empty());
     assert_eq!(diff.updated_layers, vec!["park-fill"]);
     assert_eq!(
-        generation_of(&current, "parks"),
+        generation_of(&current, "parks")?,
         parks_gen,
         "unchanged GeoJSON source preserves its generation"
     );
     assert_eq!(
-        generation_of(&current, "overlay"),
+        generation_of(&current, "overlay")?,
         overlay_gen,
         "unchanged Image source preserves its generation"
     );
+    Ok(())
 }
 
 #[test]
-fn adding_removing_or_modifying_single_source_or_layer_marks_only_affected_items() {
+fn adding_removing_or_modifying_single_source_or_layer_marks_only_affected_items(
+) -> Result<(), String> {
     let mut current = base_style();
-    let parks_gen = generation_of(&current, "parks");
+    let parks_gen = generation_of(&current, "parks")?;
 
     let mut next: serde_json::Value = serde_json::to_value(&current).expect("serialize");
     // Modify `overlay` coordinates, remove `roads` + `road-line`, add `labels-bg`, leave `parks` intact.
-    next["sources"]["overlay"]["coordinates"] =
-        json!([[-2.0, 2.0], [2.0, 2.0], [2.0, -2.0], [-2.0, -2.0]]);
-    next["sources"]
-        .as_object_mut()
-        .expect("sources")
-        .remove("roads");
-    next["sources"]["extra"] = json!({
-        "type": "geojson",
-        "data": { "type": "FeatureCollection", "features": [] }
-    });
-    let layers = next["layers"].as_array_mut().expect("layers");
-    layers.retain(|l| l["id"] != "road-line");
+    let coords = next
+        .pointer_mut("/sources/overlay/coordinates")
+        .ok_or("overlay coordinates")?;
+    *coords = json!([[-2.0, 2.0], [2.0, 2.0], [2.0, -2.0], [-2.0, -2.0]]);
+    let sources = next
+        .pointer_mut("/sources")
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or("sources object")?;
+    sources.remove("roads");
+    sources.insert(
+        "extra".to_owned(),
+        json!({
+            "type": "geojson",
+            "data": { "type": "FeatureCollection", "features": [] }
+        }),
+    );
+    let layers = next
+        .pointer_mut("/layers")
+        .and_then(serde_json::Value::as_array_mut)
+        .ok_or("layers array")?;
+    layers.retain(|l| l.get("id").and_then(serde_json::Value::as_str) != Some("road-line"));
     layers.push(json!({
         "id": "top-bg",
         "type": "background",
@@ -129,25 +141,47 @@ fn adding_removing_or_modifying_single_source_or_layer_marks_only_affected_items
     assert!(diff.updated_layers.is_empty());
     assert!(!diff.redraw_tiles);
     assert_eq!(
-        generation_of(&current, "parks"),
+        generation_of(&current, "parks")?,
         parks_gen,
         "unmodified sibling source keeps its generation"
     );
+    Ok(())
 }
 
 #[test]
-fn root_terrain_projection_and_light_changes_are_detected_and_transitions_honored() {
+fn root_terrain_projection_and_light_changes_are_detected_and_transitions_honored(
+) -> Result<(), String> {
     let mut current = base_style();
     let mut doc: serde_json::Value = serde_json::to_value(&current).expect("serialize");
-    doc["sources"]["dem"] = json!({
-        "type": "raster-dem",
-        "tiles": ["https://dem.example/{z}/{x}/{y}.png"]
-    });
-    doc["terrain"] = json!({ "source": "dem", "exaggeration": 1.5 });
-    doc["projection"] = json!({ "type": "globe" });
-    doc["light"] = json!({ "anchor": "map", "intensity": 0.8 });
-    doc["transition"] = json!({ "duration": 400, "delay": 0 });
-    doc["layers"][0]["paint"]["background-color"] = json!("#ffffff");
+    let sources = doc
+        .pointer_mut("/sources")
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or("sources object")?;
+    sources.insert(
+        "dem".to_owned(),
+        json!({
+            "type": "raster-dem",
+            "tiles": ["https://dem.example/{z}/{x}/{y}.png"]
+        }),
+    );
+    let root = doc.as_object_mut().ok_or("root object")?;
+    root.insert(
+        "terrain".to_owned(),
+        json!({ "source": "dem", "exaggeration": 1.5 }),
+    );
+    root.insert("projection".to_owned(), json!({ "type": "globe" }));
+    root.insert(
+        "light".to_owned(),
+        json!({ "anchor": "map", "intensity": 0.8 }),
+    );
+    root.insert(
+        "transition".to_owned(),
+        json!({ "duration": 400, "delay": 0 }),
+    );
+    let bg_color = doc
+        .pointer_mut("/layers/0/paint/background-color")
+        .ok_or("background color")?;
+    *bg_color = json!("#ffffff");
 
     let next: Style = serde_json::from_value(doc).expect("deserialize next");
     let diff = current.diff_and_replace(next);
@@ -166,4 +200,5 @@ fn root_terrain_projection_and_light_changes_are_detected_and_transitions_honore
     );
     current.settle_transitions_at(400.0);
     assert!(!current.has_active_transitions());
+    Ok(())
 }

@@ -43,16 +43,20 @@ pub(super) fn coerce(
     operands: &[Expression],
     context: &EvaluationContext,
 ) -> Result<Value> {
+    let first_value = || {
+        operands
+            .first()
+            .ok_or(EvaluationError::Expected {
+                expected: Type::Value,
+                found: Type::Null,
+            })
+            .and_then(|op| op.evaluate(context))
+    };
     match coercion {
-        Coercion::Boolean => Ok(Value::Bool(operands[0].evaluate(context)?.truthy())),
-        Coercion::Formatted => Ok(super::images::to_formatted(operands[0].evaluate(context)?)),
-        Coercion::ResolvedImage => Ok(super::images::to_image(
-            operands[0].evaluate(context)?,
-            context,
-        )),
-        Coercion::String => Ok(Value::String(
-            operands[0].evaluate(context)?.to_display_string(),
-        )),
+        Coercion::Boolean => Ok(Value::Bool(first_value()?.truthy())),
+        Coercion::Formatted => Ok(super::images::to_formatted(first_value()?)),
+        Coercion::ResolvedImage => Ok(super::images::to_image(first_value()?, context)),
+        Coercion::String => Ok(Value::String(first_value()?.to_display_string())),
         Coercion::Padding => coerce_composite(
             "padding",
             operands,
@@ -88,71 +92,78 @@ pub(super) fn coerce(
             VariableAnchorOffsetCollection::from_value,
             Value::VariableAnchorOffsetCollection,
         ),
-        Coercion::Number => {
-            let mut last = Value::Null;
-            for operand in operands {
-                last = operand.evaluate(context)?;
-                if last.is_null() {
-                    return Ok(Value::Number(0.0));
-                }
-                let number = match &last {
-                    Value::Bool(flag) => Some(f64::from(u8::from(*flag))),
-                    Value::Number(number) => Some(*number),
-                    Value::String(text) => {
-                        let trimmed = text.trim();
-                        if trimmed.is_empty() {
-                            Some(0.0)
-                        } else {
-                            trimmed.parse::<f64>().ok()
-                        }
-                    }
-                    _ => None,
-                };
-                if let Some(number) = number {
-                    return Ok(Value::Number(number));
-                }
-            }
-            Err(EvaluationError::NotANumber {
-                value: crate::util::json::json_value_to_string(&last.to_json()),
-            })
+        Coercion::Number => coerce_number(operands, context),
+        Coercion::Color => coerce_color(operands, context),
+    }
+}
+
+fn coerce_number(operands: &[Expression], context: &EvaluationContext) -> Result<Value> {
+    let mut last = Value::Null;
+    for operand in operands {
+        last = operand.evaluate(context)?;
+        if last.is_null() {
+            return Ok(Value::Number(0.0));
         }
-        Coercion::Color => {
-            let mut error = None;
-            let mut last = Value::Null;
-            for operand in operands {
-                last = operand.evaluate(context)?;
-                error = None;
-                match &last {
-                    Value::Color(color) => return Ok(Value::Color(*color)),
-                    Value::String(text) => {
-                        if let Some(color) = Color::parse(text) {
-                            return Ok(Value::Color(color));
-                        }
-                    }
-                    Value::Array(items) => {
-                        let numbers: Vec<f64> = items.iter().filter_map(Value::as_number).collect();
-                        if numbers.len() != items.len() || !(3..=4).contains(&items.len()) {
-                            error = Some(EvaluationError::InvalidRgba {
-                                value: crate::util::json::json_value_to_string(&last.to_json()),
-                                reason: "expected an array containing either three or four numeric values"
-                                    .to_string(),
-                            });
-                        } else {
-                            match rgba(numbers[0], numbers[1], numbers[2], numbers.get(3).copied())
-                            {
-                                Ok(color) => return Ok(Value::Color(color)),
-                                Err(rgba_error) => error = Some(rgba_error),
-                            }
-                        }
-                    }
-                    _ => {}
+        let number = match &last {
+            Value::Bool(flag) => Some(f64::from(u8::from(*flag))),
+            Value::Number(number) => Some(*number),
+            Value::String(text) => {
+                let trimmed = text.trim();
+                if trimmed.is_empty() {
+                    Some(0.0)
+                } else {
+                    trimmed.parse::<f64>().ok()
                 }
             }
-            Err(error.unwrap_or_else(|| EvaluationError::InvalidColor {
-                value: format_invalid_value(&last),
-            }))
+            _ => None,
+        };
+        if let Some(number) = number {
+            return Ok(Value::Number(number));
         }
     }
+    Err(EvaluationError::NotANumber {
+        value: crate::util::json::json_value_to_string(&last.to_json()),
+    })
+}
+
+fn coerce_color(operands: &[Expression], context: &EvaluationContext) -> Result<Value> {
+    let mut error = None;
+    let mut last = Value::Null;
+    for operand in operands {
+        last = operand.evaluate(context)?;
+        error = None;
+        match &last {
+            Value::Color(color) => return Ok(Value::Color(*color)),
+            Value::String(text) => {
+                if let Some(color) = Color::parse(text) {
+                    return Ok(Value::Color(color));
+                }
+            }
+            Value::Array(items) => {
+                let numbers: Vec<f64> = items.iter().filter_map(Value::as_number).collect();
+                if let [Some(&r), Some(&g), Some(&b)] =
+                    [numbers.first(), numbers.get(1), numbers.get(2)]
+                {
+                    if numbers.len() == items.len() && (3..=4).contains(&items.len()) {
+                        match rgba(r, g, b, numbers.get(3).copied()) {
+                            Ok(color) => return Ok(Value::Color(color)),
+                            Err(rgba_error) => error = Some(rgba_error),
+                        }
+                        continue;
+                    }
+                }
+                error = Some(EvaluationError::InvalidRgba {
+                    value: crate::util::json::json_value_to_string(&last.to_json()),
+                    reason: "expected an array containing either three or four numeric values"
+                        .to_string(),
+                });
+            }
+            _ => {}
+        }
+    }
+    Err(error.unwrap_or_else(|| EvaluationError::InvalidColor {
+        value: format_invalid_value(&last),
+    }))
 }
 
 /// A colour from `0..=255` channels and an optional alpha, validated as GL JS does.

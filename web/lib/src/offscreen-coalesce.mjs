@@ -216,7 +216,7 @@ export const createOffscreenCoalescer = (post, rawRpc, isClosed) => {
             geoJsonChannel.port1.ref?.();
             geoJsonChannel.port2.postMessage(0);
         } else {
-            setTimeout(flushQueuedGeoJson, 0);
+            queueMicrotask(flushQueuedGeoJson);
         }
     };
 

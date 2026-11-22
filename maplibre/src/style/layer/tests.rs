@@ -151,11 +151,13 @@ fn test_symbol_text_field_from_layout() {
     }"#;
     let layer: StyleLayer = serde_json::from_str(json).unwrap();
     assert_eq!(layer.type_, "symbol");
-    match &layer.paint {
-        Some(LayerPaint::Symbol(sp)) => {
-            assert_eq!(text_of(sp, 3.0).as_deref(), Some("Berlin"));
-        }
-        other => panic!("expected Symbol paint, got {:?}", other),
+    assert!(
+        matches!(&layer.paint, Some(LayerPaint::Symbol(_))),
+        "expected Symbol paint, got {:?}",
+        layer.paint
+    );
+    if let Some(LayerPaint::Symbol(sp)) = &layer.paint {
+        assert_eq!(text_of(sp, 3.0).as_deref(), Some("Berlin"));
     }
 }
 
@@ -187,12 +189,14 @@ fn test_symbol_text_field_zoom_dependent() {
         "source-layer": "centroids"
     }"#;
     let layer: StyleLayer = serde_json::from_str(json).unwrap();
-    match &layer.paint {
-        Some(LayerPaint::Symbol(sp)) => {
-            assert_eq!(text_of(sp, 3.0).as_deref(), Some("BER"));
-            assert_eq!(text_of(sp, 5.0).as_deref(), Some("Berlin"));
-        }
-        other => panic!("expected Symbol paint, got {:?}", other),
+    assert!(
+        matches!(&layer.paint, Some(LayerPaint::Symbol(_))),
+        "expected Symbol paint, got {:?}",
+        layer.paint
+    );
+    if let Some(LayerPaint::Symbol(sp)) = &layer.paint {
+        assert_eq!(text_of(sp, 3.0).as_deref(), Some("BER"));
+        assert_eq!(text_of(sp, 5.0).as_deref(), Some("Berlin"));
     }
 }
 
@@ -201,15 +205,17 @@ fn test_demotiles_symbol_layers_have_text_field() {
     let style: crate::style::Style = Default::default();
     for layer in &style.layers {
         if layer.type_ == "symbol" {
-            match &layer.paint {
-                Some(LayerPaint::Symbol(sp)) => {
-                    assert!(
-                        sp.text_field.is_some(),
-                        "symbol layer '{}' should have text_field parsed from layout",
-                        layer.id
-                    );
-                }
-                _ => panic!("symbol layer '{}' has no Symbol paint", layer.id),
+            assert!(
+                matches!(&layer.paint, Some(LayerPaint::Symbol(_))),
+                "symbol layer '{}' has no Symbol paint",
+                layer.id
+            );
+            if let Some(LayerPaint::Symbol(sp)) = &layer.paint {
+                assert!(
+                    sp.text_field.is_some(),
+                    "symbol layer '{}' should have text_field parsed from layout",
+                    layer.id
+                );
             }
         }
     }
@@ -244,23 +250,33 @@ fn parses_fill_and_line_translation_properties() {
     )
     .unwrap();
 
-    let Some(LayerPaint::Fill(fill)) = style.layers[0].paint.as_ref() else {
-        panic!("first layer should be a fill");
+    let [first_layer, second_layer] = style.layers.as_slice() else {
+        assert_eq!(style.layers.len(), 2);
+        return;
     };
-    assert_eq!(
-        fill.fill_translate.as_ref().map(|t| t.at_zoom(0.0)),
-        Some([10.0, 50.0])
+    assert!(
+        matches!(&first_layer.paint, Some(LayerPaint::Fill(_))),
+        "first layer should be a fill"
     );
-    assert_eq!(fill.fill_translate_anchor, TranslateAnchor::Viewport);
+    if let Some(LayerPaint::Fill(fill)) = first_layer.paint.as_ref() {
+        assert_eq!(
+            fill.fill_translate.as_ref().map(|t| t.at_zoom(0.0)),
+            Some([10.0, 50.0])
+        );
+        assert_eq!(fill.fill_translate_anchor, TranslateAnchor::Viewport);
+    }
 
-    let Some(LayerPaint::Line(line)) = style.layers[1].paint.as_ref() else {
-        panic!("second layer should be a line");
-    };
-    assert_eq!(
-        line.line_translate.as_ref().map(|t| t.at_zoom(0.0)),
-        Some([2.0, 3.0])
+    assert!(
+        matches!(&second_layer.paint, Some(LayerPaint::Line(_))),
+        "second layer should be a line"
     );
-    assert_eq!(line.line_translate_anchor, TranslateAnchor::Map);
+    if let Some(LayerPaint::Line(line)) = second_layer.paint.as_ref() {
+        assert_eq!(
+            line.line_translate.as_ref().map(|t| t.at_zoom(0.0)),
+            Some([2.0, 3.0])
+        );
+        assert_eq!(line.line_translate_anchor, TranslateAnchor::Map);
+    }
 }
 
 mod document_contracts;

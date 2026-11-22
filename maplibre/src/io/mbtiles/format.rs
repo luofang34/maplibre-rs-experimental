@@ -13,33 +13,13 @@ pub(super) fn resolve_archive_path(archive: &str) -> PathBuf {
         .or_else(|| archive.strip_prefix("file://"))
         .unwrap_or(archive);
     #[cfg(windows)]
-    let stripped = if stripped.as_bytes().get(2) == Some(&b':') && stripped.starts_with('/') {
-        &stripped[1..]
+    let stripped = if stripped.as_bytes().get(2) == Some(&b':') {
+        stripped.strip_prefix('/').unwrap_or(stripped)
     } else {
         stripped
     };
-    percent_decode_path(stripped)
-}
-
-fn percent_decode_path(input: &str) -> PathBuf {
-    let bytes = input.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut idx = 0;
-    while idx < bytes.len() {
-        if bytes[idx] == b'%' && idx + 2 < bytes.len() {
-            if let (Some(hi), Some(lo)) = (
-                (bytes[idx + 1] as char).to_digit(16),
-                (bytes[idx + 2] as char).to_digit(16),
-            ) {
-                out.push(((hi << 4) | lo) as u8);
-                idx += 3;
-                continue;
-            }
-        }
-        out.push(bytes[idx]);
-        idx += 1;
-    }
-    PathBuf::from(String::from_utf8_lossy(&out).into_owned())
+    let decoded = crate::io::source_client::request::percent_decode_bytes(stripped);
+    PathBuf::from(String::from_utf8_lossy(&decoded).into_owned())
 }
 
 pub(super) fn decode_tile_payload(bytes: Vec<u8>) -> Result<Vec<u8>, MbtilesFormatError> {
@@ -74,15 +54,13 @@ pub(super) fn decode_tile_payload(bytes: Vec<u8>) -> Result<Vec<u8>, MbtilesForm
 fn is_raster_magic(bytes: &[u8]) -> bool {
     bytes.starts_with(b"\x89PNG\r\n\x1a\n")
         || bytes.starts_with(&[0xff, 0xd8, 0xff])
-        || (bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP")
+        || (bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP"))
 }
 
 fn is_zlib_header(bytes: &[u8]) -> bool {
-    if bytes.len() < 2 {
+    let [cmf, flg, ..] = *bytes else {
         return false;
-    }
-    let cmf = bytes[0];
-    let flg = bytes[1];
+    };
     cmf == 0x78 && ((u16::from(cmf) << 8) | u16::from(flg)).is_multiple_of(31)
 }
 

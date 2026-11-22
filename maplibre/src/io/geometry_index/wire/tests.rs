@@ -76,14 +76,14 @@ fn spatial_and_linear_roundtrip_preserve_holes_and_shared_property_identity() {
     assert_eq!(wire_linear.prop_offsets.len(), 3); // 2 unique property groups + sentinel
 
     let decoded_linear = wire_linear.into_tile_index();
-    let TileIndex::Linear { list } = &decoded_linear else {
-        panic!("expected Linear TileIndex");
-    };
-    assert_eq!(list.len(), 3);
-    assert!(Arc::ptr_eq(&list[0].properties, &list[1].properties));
-    assert!(!Arc::ptr_eq(&list[0].properties, &list[2].properties));
-    assert_eq!(list[2].id, Some(42));
-    assert_eq!(list[0].properties, part_a.properties);
+    assert!(matches!(decoded_linear, TileIndex::Linear { .. }));
+    if let TileIndex::Linear { list } = &decoded_linear {
+        assert_eq!(list.len(), 3);
+        assert!(Arc::ptr_eq(&list[0].properties, &list[1].properties));
+        assert!(!Arc::ptr_eq(&list[0].properties, &list[2].properties));
+        assert_eq!(list[2].id, Some(42));
+        assert_eq!(list[0].properties, part_a.properties);
+    }
 
     let spatial = TileIndex::Spatial {
         tree: RTree::bulk_load(vec![part_a, part_b, pt]),
@@ -180,22 +180,22 @@ fn wire_roundtrip_preserves_complex_values_and_feature_state_synchronization() {
         next_state,
     );
 
-    let TileIndex::Spatial { tree } = &mut decoded else {
-        panic!("expected spatial index");
-    };
-    let mut items: Vec<IndexedGeometry<f64>> = std::mem::take(tree).into_iter().collect();
-    let item_id = items[0].id;
-    assert!(sync_properties_feature_state(
-        Arc::make_mut(&mut items[0].properties),
-        item_id,
-        Some("osm_id"),
-        store.source("composite"),
-        Some("roads"),
-    ));
-    let state_after = extract_feature_state(&items[0].properties);
-    assert!(!state_after.contains_key("hover"));
-    assert_eq!(
-        state_after.get("selected"),
-        Some(&serde_json::json!("primary"))
-    );
+    assert!(matches!(decoded, TileIndex::Spatial { .. }));
+    if let TileIndex::Spatial { tree } = &mut decoded {
+        let mut items: Vec<IndexedGeometry<f64>> = std::mem::take(tree).into_iter().collect();
+        let item_id = items[0].id;
+        assert!(sync_properties_feature_state(
+            Arc::make_mut(&mut items[0].properties),
+            item_id,
+            Some("osm_id"),
+            store.source("composite"),
+            Some("roads"),
+        ));
+        let state_after = extract_feature_state(&items[0].properties);
+        assert!(!state_after.contains_key("hover"));
+        assert_eq!(
+            state_after.get("selected"),
+            Some(&serde_json::json!("primary"))
+        );
+    }
 }

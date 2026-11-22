@@ -36,7 +36,7 @@ impl Resources {
         make: fn() -> Box<dyn Resource>,
     ) -> &mut Box<dyn Resource> {
         let index = match self.index.get(&type_id).copied() {
-            Some(index) if index < self.resources.len() => index,
+            Some(index) if index < self.resources.len() && index < self.types.len() => index,
             _ => {
                 let index = self.resources.len();
                 self.resources.push(make());
@@ -45,27 +45,34 @@ impl Resources {
                 index
             }
         };
-        if self.types[index] != type_id {
-            self.resources[index] = make();
-            self.types[index] = type_id;
+        if self.types.get(index) != Some(&type_id) {
+            if let Some(slot) = self.resources.get_mut(index) {
+                *slot = make();
+            }
+            if let Some(ty) = self.types.get_mut(index) {
+                *ty = type_id;
+            }
         }
-        &mut self.resources[index]
+        let Some(slot) = self.resources.get_mut(index) else {
+            unreachable!("slot index is within bounds")
+        };
+        slot
     }
 
     #[inline(never)]
     fn insert_boxed(&mut self, type_id: TypeId, boxed: Box<dyn Resource>) {
-        match self.index.get(&type_id).copied() {
-            Some(index) => {
-                self.resources[index] = boxed;
-                self.types[index] = type_id;
-            }
-            None => {
-                let index = self.resources.len();
-                self.resources.push(boxed);
-                self.types.push(type_id);
-                self.index.insert(type_id, index);
-            }
+        if let Some(index) = self.index.get(&type_id).copied()
+            && let (Some(slot), Some(ty)) =
+                (self.resources.get_mut(index), self.types.get_mut(index))
+        {
+            *slot = boxed;
+            *ty = type_id;
+            return;
         }
+        let index = self.resources.len();
+        self.resources.push(boxed);
+        self.types.push(type_id);
+        self.index.insert(type_id, index);
     }
 
     #[inline(never)]

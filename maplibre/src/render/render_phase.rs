@@ -67,11 +67,10 @@ impl<I: PhaseItem> RenderPhase<I> {
 
     /// Sorts the suffix starting at `start` in place; used by cached phase builders.
     pub fn sort_tail(&mut self, start: usize) {
-        if start < self.items.len() {
-            let tail = &mut self.items[start..];
-            if !tail.is_sorted_by_key(|d| d.sort_key()) {
-                tail.sort_by_key(|d| d.sort_key());
-            }
+        if let Some(tail) = self.items.get_mut(start..)
+            && !tail.is_sorted_by_key(|d| d.sort_key())
+        {
+            tail.sort_by_key(|d| d.sort_key());
         }
     }
 

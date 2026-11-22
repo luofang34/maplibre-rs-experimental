@@ -163,6 +163,77 @@ impl<K: OffscreenKernel, S: Scheduler> SchedulerAsyncProcedureCall<K, S> {
     pub(super) fn running(&self) -> std::sync::MutexGuard<'_, HashMap<u64, AbortHandle>> {
         crate::platform::lock_unpoisoned(&self.running)
     }
+
+    #[cfg(target_arch = "wasm32")]
+    fn receive_wasm<F: FnMut(&Message) -> bool>(
+        &self,
+        mut filter: F,
+        ret: &mut Vec<Message>,
+        buffer: &mut Vec<Message>,
+    ) {
+        let mut queued = self.queued.borrow_mut();
+        if self.boot_unthrottled.get() {
+            while let Some(message) = queued.pop_front() {
+                push_filtered(message, &mut filter, ret, buffer);
+            }
+            while let Ok(message) = self.channel.1.try_recv() {
+                push_filtered(message, &mut filter, ret, buffer);
+            }
+            return;
+        }
+        if queued.is_empty() {
+            if let Ok(message) = self.channel.1.try_recv() {
+                queued.push_back(message);
+            } else {
+                return;
+            }
+        }
+        while let Ok(message) = self.channel.1.try_recv() {
+            queued.push_back(message);
+        }
+        let mut admitted_attempts = rustc_hash::FxHashSet::with_capacity_and_hasher(
+            MAX_ADMITTED_ATTEMPTS_PER_BATCH,
+            Default::default(),
+        );
+        for existing in buffer.iter().chain(ret.iter()) {
+            if let Some(id) = existing.attempt() {
+                admitted_attempts.insert(id);
+            }
+        }
+        let mut deferred = VecDeque::new();
+        while let Some(message) = queued.pop_front() {
+            let attempt = message.attempt();
+            let admit = attempt.is_none_or(|id| {
+                admitted_attempts.contains(&id)
+                    || admitted_attempts.len() < MAX_ADMITTED_ATTEMPTS_PER_BATCH
+            });
+            if !admit {
+                deferred.push_back(message);
+                continue;
+            }
+            if let Some(id) = attempt {
+                admitted_attempts.insert(id);
+            }
+            push_filtered(message, &mut filter, ret, buffer);
+        }
+        if !deferred.is_empty() {
+            self.batch_open.set(false);
+        }
+        *queued = deferred;
+    }
+}
+
+fn push_filtered<F: FnMut(&Message) -> bool>(
+    message: Message,
+    filter: &mut F,
+    ret: &mut Vec<Message>,
+    buffer: &mut Vec<Message>,
+) {
+    if filter(&message) {
+        ret.push(message);
+    } else {
+        buffer.push(message);
+    }
 }
 
 impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncProcedureCall<K, S> {
@@ -179,88 +250,17 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
         }
 
         #[cfg(target_arch = "wasm32")]
-        {
-            if self.boot_unthrottled.get() {
-                let mut queued = self.queued.borrow_mut();
-                while let Some(message) = queued.pop_front() {
-                    if filter(&message) {
-                        ret.push(message);
-                    } else {
-                        buffer.push(message);
-                    }
-                }
-                while let Ok(message) = self.channel.1.try_recv() {
-                    if filter(&message) {
-                        ret.push(message);
-                    } else {
-                        buffer.push(message);
-                    }
-                }
-                return ret.into_iter();
-            }
-            let mut queued = self.queued.borrow_mut();
-            if queued.is_empty() {
-                if let Ok(message) = self.channel.1.try_recv() {
-                    queued.push_back(message);
-                } else {
-                    return ret.into_iter();
-                }
-            }
-            while let Ok(message) = self.channel.1.try_recv() {
-                queued.push_back(message);
-            }
-            let mut admitted_attempts = rustc_hash::FxHashSet::with_capacity_and_hasher(
-                MAX_ADMITTED_ATTEMPTS_PER_BATCH,
-                Default::default(),
-            );
-            for existing in buffer.iter().chain(ret.iter()) {
-                if let Some(id) = existing.attempt() {
-                    admitted_attempts.insert(id);
-                }
-            }
-            let mut deferred = VecDeque::new();
-            while let Some(message) = queued.pop_front() {
-                let attempt = message.attempt();
-                let admit = attempt.is_none_or(|id| {
-                    admitted_attempts.contains(&id)
-                        || admitted_attempts.len() < MAX_ADMITTED_ATTEMPTS_PER_BATCH
-                });
-                if !admit {
-                    deferred.push_back(message);
-                    continue;
-                }
-                if let Some(id) = attempt {
-                    admitted_attempts.insert(id);
-                }
-                if filter(&message) {
-                    ret.push(message);
-                } else {
-                    buffer.push(message);
-                }
-            }
-            if !deferred.is_empty() {
-                self.batch_open.set(false);
-            }
-            *queued = deferred;
-        }
+        self.receive_wasm(filter, &mut ret, &mut buffer);
 
         #[cfg(not(target_arch = "wasm32"))]
         {
             let mut queued = self.queued.borrow_mut();
             while let Some(message) = queued.pop_front() {
-                if filter(&message) {
-                    ret.push(message);
-                } else {
-                    buffer.push(message);
-                }
+                push_filtered(message, &mut filter, &mut ret, &mut buffer);
             }
             while let Ok(message) = self.channel.1.try_recv() {
                 tracing::debug!("Data reached main thread: {message:?}");
-                if filter(&message) {
-                    ret.push(message);
-                } else {
-                    buffer.push(message);
-                }
+                push_filtered(message, &mut filter, &mut ret, &mut buffer);
             }
         }
 
@@ -309,7 +309,7 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
                 Ok(Err(error)) => tracing::warn!(?error, "procedure failed"),
                 Ok(Ok(())) => {
                     #[cfg(target_arch = "wasm32")]
-                    let _ = flush_context.flush();
+                    drop(flush_context.flush());
                 }
                 Err(Aborted) => tracing::debug!(attempt, "cancelled worker call stopped"),
             }

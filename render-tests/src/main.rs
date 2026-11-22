@@ -5,6 +5,17 @@
 //! generates `render-tests/src/templates/results.html`, and gates CI via
 //! `render-tests/ignores.json` when `--ci` is passed.
 
+#![cfg_attr(
+    not(test),
+    forbid(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented
+    )
+)]
+
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
@@ -15,6 +26,7 @@ use std::{
 use maplibre::platform::run_multithreaded;
 use serde_json::Value;
 
+mod artifacts;
 mod camera_options;
 mod ci;
 mod comparison;
@@ -31,11 +43,17 @@ mod symbol_assets;
 mod tilesets;
 mod transitions;
 
-use ci::{
-    build_updated_ignores, evaluate_ci, parse_cli_args, write_summaries, CliOptions, IgnoreFile,
+use artifacts::{
+    copy_fixture_artifacts, ensure_artifact_dir, write_lifecycle_json, FixtureTelemetry,
 };
-use paths::{collect_tests, fixture_id, workspace_templates_dir, workspace_tests_dir};
+use ci::{
+    build_updated_ignores, evaluate_ci_for_options, parse_cli_args, write_summaries, CliOptions,
+    IgnoreFile, SuiteSummary,
+};
+use paths::{collect_tests, filter_tests, fixture_id, workspace_templates_dir};
+#[cfg(test)]
 use render_case::run_test_inner;
+use render_case::run_test_with_telemetry;
 use report::generate_report;
 
 // ---------------------------------------------------------------------------
@@ -184,43 +202,56 @@ enum TestResult {
 
 /// Run one test in `test_dir`. Retries unexpected failures up to 3 times to filter out
 /// transient software-GPU hiccups while skipping redundant retries on known ignored cases.
-async fn run_test(test_dir: PathBuf, id: String, retry_on_fail: bool) -> TestOutcome {
+async fn run_test(
+    test_dir: PathBuf,
+    id: String,
+    retry_on_fail: bool,
+    ignored: bool,
+) -> (TestOutcome, FixtureTelemetry) {
     let kind = if test_dir.join("expected.json").is_file() {
         CaseKind::Query
     } else {
         CaseKind::Render
     };
-    let mut result = run_test_isolated(&test_dir);
+    let (mut result, mut telemetry) = run_test_isolated(&test_dir);
     let mut attempts = 1_u8;
     while retry_on_fail && matches!(result, TestResult::Fail(_)) && attempts < 3 {
         attempts = attempts.wrapping_add(1);
-        result = run_test_isolated(&test_dir);
+        (result, telemetry) = run_test_isolated(&test_dir);
     }
-    TestOutcome {
-        id,
-        kind,
-        result,
-        attempts,
-    }
+    let mut telemetry =
+        telemetry.unwrap_or_else(|| FixtureTelemetry::fallback(id.clone(), kind, ignored));
+    telemetry.id = id.clone();
+    telemetry.ignored = ignored;
+    telemetry.passed = matches!(result, TestResult::Pass(_));
+    (
+        TestOutcome {
+            id,
+            kind,
+            result,
+            attempts,
+        },
+        telemetry,
+    )
 }
 
 /// Runs one test on the current runtime and turns a panic into an error result, so one bad
 /// fixture cannot abort the whole corpus.
-fn run_test_isolated(test_dir: &Path) -> TestResult {
+fn run_test_isolated(test_dir: &Path) -> (TestResult, Option<FixtureTelemetry>) {
     let outcome = tokio::task::block_in_place(|| {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            tokio::runtime::Handle::current().block_on(run_test_inner(test_dir))
+            tokio::runtime::Handle::current().block_on(run_test_with_telemetry(test_dir))
         }))
     });
     match outcome {
-        Ok(result) => result,
+        Ok(pair) => pair,
         Err(payload) => {
             let message = payload
                 .downcast_ref::<&str>()
                 .map(|s| (*s).to_string())
                 .or_else(|| payload.downcast_ref::<String>().cloned())
                 .unwrap_or_else(|| "unknown panic".to_string());
-            TestResult::Error(format!("panicked: {message}"))
+            (TestResult::Error(format!("panicked: {message}")), None)
         }
     }
 }
@@ -239,10 +270,11 @@ fn run() -> Result<bool, String> {
         ));
     }
 
-    let tests = collect_tests(&options.test_root);
-    if tests.is_empty() {
+    let collected = collect_tests(&options.test_root);
+    if collected.is_empty() {
         return Err(format!("No tests found in {}", options.test_root.display()));
     }
+    let tests = filter_tests(collected, &options.test_root, &options.filters)?;
 
     let existing_ignores =
         if options.ci || (options.write_ignores && options.ignores_path.is_file()) {
@@ -252,6 +284,73 @@ fn run() -> Result<bool, String> {
         };
 
     run_multithreaded(run_tests(options, tests, existing_ignores))
+}
+
+fn log_case_outcome(
+    outcome: &TestOutcome,
+    id: &str,
+    ci_ignored: bool,
+    elapsed: std::time::Duration,
+) {
+    let tag = match (&outcome.result, ci_ignored) {
+        (TestResult::Pass(difference), false) => format!("PASS  ({difference})"),
+        (TestResult::Pass(difference), true) => format!("UPASS ({difference})"),
+        (TestResult::Fail(difference), true) => format!("IGN   ({difference})"),
+        (TestResult::Error(msg), true) => format!("IGN   {msg}"),
+        (TestResult::Fail(difference), false) => format!("FAIL  ({difference})"),
+        (TestResult::Error(msg), false) => format!("ERR   {msg}"),
+    };
+    let retry_label = if outcome.attempts > 1 {
+        format!(" [attempt {}]", outcome.attempts)
+    } else {
+        String::new()
+    };
+    tracing::info!("  {tag}  {id}{retry_label}  ({elapsed:.1?})");
+}
+
+async fn execute_tests(
+    options: &CliOptions,
+    tests: &[PathBuf],
+    active_ignores: &BTreeMap<String, String>,
+) -> Result<(Vec<TestOutcome>, Vec<FixtureTelemetry>), String> {
+    if let Some(artifact_dir) = options.artifact_dir.as_deref() {
+        ensure_artifact_dir(artifact_dir)?;
+    }
+    let mut outcomes = Vec::with_capacity(tests.len());
+    let mut telemetries = Vec::with_capacity(tests.len());
+    for test_dir in tests {
+        let id = fixture_id(test_dir, &options.test_root);
+        let is_ignored = active_ignores.contains_key(&id);
+        let retry_on_fail = !(options.ci && is_ignored);
+        let start = Instant::now();
+        let (outcome, telemetry) =
+            run_test(test_dir.clone(), id.clone(), retry_on_fail, is_ignored).await;
+        log_case_outcome(&outcome, &id, options.ci && is_ignored, start.elapsed());
+        if let Some(artifact_dir) = options.artifact_dir.as_deref() {
+            copy_fixture_artifacts(artifact_dir, test_dir, &id, outcome.kind)?;
+        }
+        outcomes.push(outcome);
+        telemetries.push(telemetry);
+    }
+    Ok((outcomes, telemetries))
+}
+
+fn log_ci_diagnostics(summary: &SuiteSummary, options: &CliOptions) {
+    for failure in &summary.unexpected_failures {
+        tracing::error!("Unexpected failure: {failure}");
+    }
+    for id in &summary.unexpected_passes {
+        tracing::error!(
+            "Unexpected pass on ignored fixture `{id}` — remove it from {}",
+            options.ignores_path.display()
+        );
+    }
+    for id in &summary.stale_ignores {
+        tracing::error!(
+            "Stale ignore entry `{id}` in {} does not match any fixture",
+            options.ignores_path.display()
+        );
+    }
 }
 
 async fn run_tests(
@@ -265,40 +364,11 @@ async fn run_tests(
         options.test_root.display()
     );
     tracing::info!("{}", "-".repeat(70));
-
-    let active_ignores: BTreeMap<String, String> = existing_ignores
+    let active_ignores = existing_ignores
         .as_ref()
         .map(|file| file.ignores.clone())
         .unwrap_or_default();
-
-    let mut outcomes: Vec<TestOutcome> = Vec::new();
-
-    for test_dir in &tests {
-        let id = fixture_id(test_dir, &options.test_root);
-        let is_ignored = active_ignores.contains_key(&id);
-        let retry_on_fail = !(options.ci && is_ignored);
-
-        let start = Instant::now();
-        let outcome = run_test(test_dir.clone(), id.clone(), retry_on_fail).await;
-        let elapsed = start.elapsed();
-
-        let tag = match (&outcome.result, options.ci && is_ignored) {
-            (TestResult::Pass(difference), false) => format!("PASS  ({difference})"),
-            (TestResult::Pass(difference), true) => format!("UPASS ({difference})"),
-            (TestResult::Fail(difference), true) => format!("IGN   ({difference})"),
-            (TestResult::Error(msg), true) => format!("IGN   {msg}"),
-            (TestResult::Fail(difference), false) => format!("FAIL  ({difference})"),
-            (TestResult::Error(msg), false) => format!("ERR   {msg}"),
-        };
-        let retry_label = if outcome.attempts > 1 {
-            format!(" [attempt {}]", outcome.attempts)
-        } else {
-            String::new()
-        };
-
-        tracing::info!("  {tag}  {id}{retry_label}  ({elapsed:.1?})");
-        outcomes.push(outcome);
-    }
+    let (outcomes, telemetries) = execute_tests(&options, &tests, &active_ignores).await?;
 
     let report_path = generate_report(&outcomes, &workspace_templates_dir())?;
     tracing::info!("Report written to: {}", report_path.display());
@@ -313,13 +383,15 @@ async fn run_tests(
         );
     }
 
-    let full_corpus = options.test_root == workspace_tests_dir();
-    let summary = evaluate_ci(&outcomes, &active_ignores, options.ci && full_corpus);
+    let summary = evaluate_ci_for_options(&outcomes, &active_ignores, &options);
     write_summaries(
         &summary,
         options.summary_json.as_deref(),
         options.summary_md.as_deref(),
     )?;
+    if let Some(lifecycle_path) = options.lifecycle_json.as_deref() {
+        write_lifecycle_json(lifecycle_path, &telemetries)?;
+    }
 
     tracing::info!("{}", "-".repeat(70));
     tracing::info!(
@@ -333,28 +405,12 @@ async fn run_tests(
     );
 
     if options.ci {
-        for failure in &summary.unexpected_failures {
-            tracing::error!("Unexpected failure: {failure}");
-        }
-        for id in &summary.unexpected_passes {
-            tracing::error!(
-                "Unexpected pass on ignored fixture `{id}` — remove it from {}",
-                options.ignores_path.display()
-            );
-        }
-        for id in &summary.stale_ignores {
-            tracing::error!(
-                "Stale ignore entry `{id}` in {} does not match any fixture",
-                options.ignores_path.display()
-            );
-        }
+        log_ci_diagnostics(&summary, &options);
         return Ok(summary.ci_passed());
     }
-
     if options.write_ignores {
         return Ok(true);
     }
-
     Ok(summary.total.ignored == 0 && summary.unexpected_failures.is_empty())
 }
 

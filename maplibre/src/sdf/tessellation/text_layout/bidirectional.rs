@@ -27,7 +27,11 @@ pub(super) fn split_paragraphs(chars: &[char], lines: Vec<Range<usize>>) -> Vec<
     for line in lines {
         let mut start = line.start;
         for index in line.clone() {
-            if index + 1 < line.end && bidi_class(chars[index]) == BidiClass::B {
+            if index + 1 < line.end
+                && chars
+                    .get(index)
+                    .is_some_and(|ch| bidi_class(*ch) == BidiClass::B)
+            {
                 split.push(start..index + 1);
                 start = index + 1;
             }
@@ -111,7 +115,11 @@ fn reverse_clusters_in_run(chars: &[char], indices: &[usize]) -> Vec<usize> {
     let mut start = 0;
     while start < indices.len() {
         let mut end = start + 1;
-        while end < indices.len() && is_combining_mark(chars[indices[end]]) {
+        while indices
+            .get(end)
+            .and_then(|&idx| chars.get(idx))
+            .is_some_and(|ch| is_combining_mark(*ch))
+        {
             end += 1;
         }
         clusters.push(start..end);
@@ -119,7 +127,9 @@ fn reverse_clusters_in_run(chars: &[char], indices: &[usize]) -> Vec<usize> {
     }
     let mut reversed = Vec::with_capacity(indices.len());
     for cluster in clusters.into_iter().rev() {
-        reversed.extend_from_slice(&indices[cluster]);
+        if let Some(slice) = indices.get(cluster) {
+            reversed.extend_from_slice(slice);
+        }
     }
     reversed
 }
@@ -132,13 +142,23 @@ fn visual_order_for_line(
     starts: &[usize],
 ) -> Vec<(usize, bool)> {
     let logical: Vec<(usize, bool)> = line.clone().map(|idx| (idx, false)).collect();
-    if info.paragraphs.is_empty() || line.is_empty() {
+    let Some(para) = info.paragraphs.first() else {
+        return logical;
+    };
+    if line.is_empty() {
         return logical;
     }
     let char_at = |byte: usize| starts.partition_point(|start| *start < byte);
-    let para = &info.paragraphs[0];
-    let byte_start = starts[line.start - para_start];
-    let byte_end = starts[line.end - para_start];
+    let Some(&byte_start) = line
+        .start
+        .checked_sub(para_start)
+        .and_then(|i| starts.get(i))
+    else {
+        return logical;
+    };
+    let Some(&byte_end) = line.end.checked_sub(para_start).and_then(|i| starts.get(i)) else {
+        return logical;
+    };
     let clamped = byte_start.max(para.range.start)..byte_end.min(para.range.end);
     if clamped.is_empty() {
         return logical;
@@ -146,7 +166,7 @@ fn visual_order_for_line(
     let (levels, runs) = info.visual_runs(para, clamped);
     let mut order = Vec::with_capacity(line.len());
     for run in runs {
-        let rtl = levels[run.start].is_rtl();
+        let rtl = levels.get(run.start).is_some_and(|lvl| lvl.is_rtl());
         let abs_indices: Vec<usize> = (char_at(run.start)..char_at(run.end))
             .map(|local_idx| para_start + local_idx)
             .collect();
@@ -174,17 +194,22 @@ pub(super) fn reorder_lines<T: Clone>(
     lines: &[Range<usize>],
 ) {
     let mut i = 0;
-    while i < lines.len() {
-        let para_start = lines[i].start;
+    while let Some(first_line) = lines.get(i) {
+        let para_start = first_line.start;
         let mut group_end = i + 1;
-        while group_end < lines.len() {
-            let prev_end = lines[group_end - 1].end;
-            let next_start = lines[group_end].start;
+        while let (Some(prev_line), Some(next_line)) =
+            (lines.get(group_end - 1), lines.get(group_end))
+        {
+            let prev_end = prev_line.end;
+            let next_start = next_line.start;
             let gap_has_break = next_start < prev_end
-                || chars[lines[group_end - 1].clone()]
-                    .last()
+                || chars
+                    .get(prev_line.clone())
+                    .and_then(|s| s.last())
                     .is_some_and(|c| *c == '\n' || bidi_class(*c) == BidiClass::B)
-                || chars[prev_end..next_start]
+                || chars
+                    .get(prev_end..next_start)
+                    .unwrap_or(&[])
                     .iter()
                     .any(|c| *c == '\n' || bidi_class(*c) == BidiClass::B);
             if gap_has_break {
@@ -192,29 +217,34 @@ pub(super) fn reorder_lines<T: Clone>(
             }
             group_end += 1;
         }
-        let para_end = lines[group_end - 1].end;
-        let slice = &chars[para_start..para_end];
+        let para_end = lines.get(group_end - 1).map_or(para_start, |l| l.end);
+        let slice = chars.get(para_start..para_end).unwrap_or(&[]);
         let has_rtl_or_ctrl = slice.iter().any(|c| is_rtl(*c) || is_bidi_control(*c));
         if has_rtl_or_ctrl {
             let text: String = slice.iter().collect();
             let mut starts: Vec<usize> = text.char_indices().map(|(at, _)| at).collect();
             starts.push(text.len());
             let info = BidiInfo::new(&text, None);
-            for line in &lines[i..group_end] {
+            for line in lines.get(i..group_end).unwrap_or(&[]) {
                 let order = visual_order_for_line(chars, para_start, line.clone(), &info, &starts);
                 let (reordered_chars, reordered_styles): (Vec<char>, Vec<T>) = order
                     .iter()
-                    .map(|&(index, rtl)| {
-                        let ch = if rtl {
-                            mirror_bidi_char(chars[index])
-                        } else {
-                            chars[index]
-                        };
-                        (ch, styles[index].clone())
+                    .filter_map(|&(index, rtl)| {
+                        let &raw = chars.get(index)?;
+                        let ch = if rtl { mirror_bidi_char(raw) } else { raw };
+                        let style = styles.get(index)?.clone();
+                        Some((ch, style))
                     })
                     .unzip();
-                chars[line.clone()].copy_from_slice(&reordered_chars);
-                styles[line.clone()].clone_from_slice(&reordered_styles);
+                if let (Some(c_dst), Some(s_dst)) =
+                    (chars.get_mut(line.clone()), styles.get_mut(line.clone()))
+                {
+                    if c_dst.len() == reordered_chars.len() && s_dst.len() == reordered_styles.len()
+                    {
+                        c_dst.copy_from_slice(&reordered_chars);
+                        s_dst.clone_from_slice(&reordered_styles);
+                    }
+                }
             }
         }
         i = group_end;
@@ -234,10 +264,15 @@ pub(super) fn reorder_and_strip_controls<T: Clone>(
     let mut new_lines = Vec::with_capacity(lines.len());
     for line in lines {
         let start = new_chars.len();
-        for idx in line {
-            if !is_bidi_control(chars[idx]) {
-                new_chars.push(chars[idx]);
-                new_styles.push(styles[idx].clone());
+        for (&ch, style) in chars
+            .get(line.clone())
+            .into_iter()
+            .flatten()
+            .zip(styles.get(line).into_iter().flatten())
+        {
+            if !is_bidi_control(ch) {
+                new_chars.push(ch);
+                new_styles.push(style.clone());
             }
         }
         let end = new_chars.len();

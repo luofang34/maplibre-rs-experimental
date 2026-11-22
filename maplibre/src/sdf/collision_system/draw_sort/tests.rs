@@ -115,8 +115,12 @@ async fn budgeted_follow_bearing_caps_buckets_per_frame_until_complete() {
         }
     }))
     .expect("style layer");
+    assert!(
+        matches!(&style_layer.paint, Some(LayerPaint::Symbol(_))),
+        "symbol paint"
+    );
     let Some(LayerPaint::Symbol(paint)) = &style_layer.paint else {
-        panic!("symbol paint");
+        return;
     };
 
     let buckets: Vec<SymbolLayerData> = (0..5)

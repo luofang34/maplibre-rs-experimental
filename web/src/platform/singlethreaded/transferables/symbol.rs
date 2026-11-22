@@ -28,7 +28,7 @@ pub(super) fn parse_symbol_header(bytes: &[u8], total_len: usize) -> Option<Symb
         return None;
     }
     let coords = read_coords_at(bytes, 0)?;
-    let has_atlas = bytes[9] != 0;
+    let has_atlas = *bytes.get(9)? != 0;
     let usable_indices = read_u32_le(bytes, 12)?;
     let vert_count = read_u32_le(bytes, 16)? as usize;
     let idx_count = read_u32_le(bytes, 20)? as usize;
@@ -143,69 +143,65 @@ impl SymbolLayerTessellated for FlatBufferTransferable {
         if let Some(sym) = self.unpacked_symbol.take() {
             return *sym;
         }
-        let bytes = self.data();
-        let Some(hdr) = parse_symbol_header(bytes, bytes.len()) else {
-            return SymbolLayerData {
-                coords: SymbolLayerTessellated::coords(&self),
-                source_layer: String::new(),
-                style_layer_id: String::new(),
-                buffer: OverAlignedVertexBuffer::empty(),
-                features: Vec::new(),
-                atlas: None,
-            };
-        };
-        let mut cursor = SYMBOL_HEADER_BYTES;
-        let vert_bytes_len = hdr.vert_count * std::mem::size_of::<ShaderSymbolVertex>();
-        let mut vertices = vec![ShaderSymbolVertex::zeroed(); hdr.vert_count];
-        bytemuck::cast_slice_mut(&mut vertices)
-            .copy_from_slice(&bytes[cursor..cursor + vert_bytes_len]);
-        cursor += vert_bytes_len;
-
-        let idx_bytes_len = hdr.idx_count * 4;
-        let mut indices = vec![0_u32; hdr.idx_count];
-        bytemuck::cast_slice_mut(&mut indices)
-            .copy_from_slice(&bytes[cursor..cursor + idx_bytes_len]);
-        cursor += idx_bytes_len;
-
-        let source_layer = std::str::from_utf8(&bytes[cursor..cursor + hdr.layer_name_len])
-            .unwrap_or_default()
-            .to_owned();
-        cursor += hdr.layer_name_len;
-
-        let style_layer_id = if hdr.style_id_len == 0 {
-            source_layer.clone()
-        } else {
-            std::str::from_utf8(&bytes[cursor..cursor + hdr.style_id_len])
-                .unwrap_or_default()
-                .to_owned()
-        };
-        cursor += hdr.style_id_len;
-
-        let features = maplibre::sdf::assets::wire::decode_symbol_features(
-            &bytes[cursor..cursor + hdr.feat_len],
-        )
-        .unwrap_or_else(|| {
-            tracing::error!("invalid symbol features");
-            Vec::new()
-        });
-        cursor += hdr.feat_len;
-
-        let atlas = hdr
-            .has_atlas
-            .then(|| {
-                decode_symbol_atlas_owned(hdr.coords, self.data, self.start + cursor, hdr.atlas_len)
-            })
-            .flatten();
-
-        SymbolLayerData {
-            coords: hdr.coords,
-            source_layer,
-            style_layer_id,
-            buffer: OverAlignedVertexBuffer::from_vecs(vertices, indices, hdr.usable_indices),
-            features,
-            atlas,
-        }
+        let coords = SymbolLayerTessellated::coords(&self);
+        decode_symbol_bucket(self.data, self.start).unwrap_or_else(|| SymbolLayerData {
+            coords,
+            source_layer: String::new(),
+            style_layer_id: String::new(),
+            buffer: OverAlignedVertexBuffer::empty(),
+            features: Vec::new(),
+            atlas: None,
+        })
     }
+}
+
+fn decode_symbol_bucket(owned_data: Vec<u8>, start: usize) -> Option<SymbolLayerData> {
+    let bytes = owned_data.get(start..)?;
+    let hdr = parse_symbol_header(bytes, bytes.len())?;
+    let mut cursor = SYMBOL_HEADER_BYTES;
+    let take = |cur: &mut usize, len: usize| -> Option<&[u8]> {
+        let slice = bytes.get(*cur..*cur + len)?;
+        *cur += len;
+        Some(slice)
+    };
+
+    let vert_bytes_len = hdr.vert_count * std::mem::size_of::<ShaderSymbolVertex>();
+    let mut vertices = vec![ShaderSymbolVertex::zeroed(); hdr.vert_count];
+    bytemuck::cast_slice_mut(&mut vertices).copy_from_slice(take(&mut cursor, vert_bytes_len)?);
+
+    let idx_bytes_len = hdr.idx_count * 4;
+    let mut indices = vec![0_u32; hdr.idx_count];
+    bytemuck::cast_slice_mut(&mut indices).copy_from_slice(take(&mut cursor, idx_bytes_len)?);
+
+    let source_layer = std::str::from_utf8(take(&mut cursor, hdr.layer_name_len)?)
+        .unwrap_or_default()
+        .to_owned();
+    let style_layer_id = if hdr.style_id_len == 0 {
+        source_layer.clone()
+    } else {
+        std::str::from_utf8(take(&mut cursor, hdr.style_id_len)?)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let features =
+        maplibre::sdf::assets::wire::decode_symbol_features(take(&mut cursor, hdr.feat_len)?)
+            .unwrap_or_else(|| {
+                tracing::error!("invalid symbol features");
+                Vec::new()
+            });
+    let atlas = hdr
+        .has_atlas
+        .then(|| decode_symbol_atlas_owned(hdr.coords, owned_data, start + cursor, hdr.atlas_len))
+        .flatten();
+
+    Some(SymbolLayerData {
+        coords: hdr.coords,
+        source_layer,
+        style_layer_id,
+        buffer: OverAlignedVertexBuffer::from_vecs(vertices, indices, hdr.usable_indices),
+        features,
+        atlas,
+    })
 }
 
 pub(super) const ATLAS_WIRE_MAGIC: u32 = u32::MAX;
@@ -268,16 +264,13 @@ pub(super) fn atlas_from_wire_bytes(
     coords: WorldTileCoords,
     bytes: &[u8],
 ) -> Option<std::sync::Arc<maplibre::sdf::assets::SymbolAtlas>> {
-    if bytes.len() < 8 {
-        return None;
-    }
-    let first_word = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+    let (hdr, pixels) = bytes.split_first_chunk::<8>()?;
+    let first_word = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], hdr[3]]);
     if first_word == ATLAS_WIRE_MAGIC {
         return None;
     }
     let width = first_word;
-    let height = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
-    let pixels = &bytes[8..];
+    let height = u32::from_le_bytes([hdr[4], hdr[5], hdr[6], hdr[7]]);
     if pixels.len()
         != (width as usize)
             .saturating_mul(height as usize)
@@ -356,16 +349,15 @@ fn decode_symbol_atlas_owned(
 ) -> Option<std::sync::Arc<maplibre::sdf::assets::SymbolAtlas>> {
     let end = offset.checked_add(len)?;
     let bytes = owned_data.get(offset..end)?;
-    if bytes.len() < 8 {
-        return None;
-    }
-    let first_word = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-    if first_word == ATLAS_WIRE_MAGIC && bytes.len() >= 24 {
-        let kind = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
-        let width = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
-        let height = u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]);
+    let (hdr8, pixels) = bytes.split_first_chunk::<8>()?;
+    let first_word = u32::from_le_bytes([hdr8[0], hdr8[1], hdr8[2], hdr8[3]]);
+    if first_word == ATLAS_WIRE_MAGIC {
+        let hdr24 = bytes.first_chunk::<24>()?;
+        let kind = u32::from_le_bytes([hdr24[4], hdr24[5], hdr24[6], hdr24[7]]);
+        let width = u32::from_le_bytes([hdr24[8], hdr24[9], hdr24[10], hdr24[11]]);
+        let height = u32::from_le_bytes([hdr24[12], hdr24[13], hdr24[14], hdr24[15]]);
         let ptr_id = u64::from_le_bytes([
-            bytes[16], bytes[17], bytes[18], bytes[19], bytes[20], bytes[21], bytes[22], bytes[23],
+            hdr24[16], hdr24[17], hdr24[18], hdr24[19], hdr24[20], hdr24[21], hdr24[22], hdr24[23],
         ]);
         let key = (coords, width, height, ptr_id);
         if let Some(hit) = check_atlas_cache(&key) {
@@ -385,12 +377,8 @@ fn decode_symbol_atlas_owned(
         owned_data.shrink_to_fit();
         return Some(insert_atlas_cache(key, [width, height], owned_data));
     }
-    if first_word == ATLAS_WIRE_MAGIC {
-        return None;
-    }
     let width = first_word;
-    let height = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
-    let pixels = &bytes[8..];
+    let height = u32::from_le_bytes([hdr8[4], hdr8[5], hdr8[6], hdr8[7]]);
     if pixels.len()
         != (width as usize)
             .saturating_mul(height as usize)

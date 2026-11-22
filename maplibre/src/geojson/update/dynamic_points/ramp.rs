@@ -48,7 +48,7 @@ impl<T: Copy> RampStops<T> {
     #[inline]
     fn as_slice(&self) -> &[(f64, T)] {
         match self {
-            Self::Inline { len, items } => &items[..usize::from(*len)],
+            Self::Inline { len, items } => items.get(..usize::from(*len)).unwrap_or(items),
             Self::Heap(items) => items.as_slice(),
         }
     }
@@ -104,17 +104,19 @@ impl ScalarRamp {
     pub(super) fn eval_f64(&self, raw: Option<f64>) -> Option<f32> {
         let x = raw.or(self.input.fallback)?;
         let stops = self.stops.as_slice();
-        if stops.len() == 1 || x <= stops[0].0 {
-            return Some(stops[0].1 as f32);
+        let &(first_x, first_y) = stops.first()?;
+        if stops.len() == 1 || x <= first_x {
+            return Some(first_y as f32);
         }
-        let last = stops.len() - 1;
-        if x >= stops[last].0 {
-            return Some(stops[last].1 as f32);
+        let &(last_x, last_y) = stops.last()?;
+        if x >= last_x {
+            return Some(last_y as f32);
         }
         for pair in stops.windows(2) {
-            let (x0, y0) = pair[0];
-            let (x1, y1) = pair[1];
-            if x <= x1 {
+            let [(x0, y0), (x1, y1)] = pair else {
+                continue;
+            };
+            if x <= *x1 {
                 let span = x1 - x0;
                 let t = if span > 0.0 {
                     ((x - x0) / span).clamp(0.0, 1.0)
@@ -124,7 +126,7 @@ impl ScalarRamp {
                 return Some((y0 + (y1 - y0) * t) as f32);
             }
         }
-        Some(stops[last].1 as f32)
+        Some(last_y as f32)
     }
 }
 
@@ -171,17 +173,19 @@ impl ColorRamp {
     pub(super) fn eval_f64(&self, raw: Option<f64>) -> Option<[f32; 4]> {
         let x = raw.or(self.input.fallback)?;
         let stops = self.stops.as_slice();
-        if stops.len() == 1 || x <= stops[0].0 {
-            return Some(stops[0].1);
+        let &(first_x, first_c) = stops.first()?;
+        if stops.len() == 1 || x <= first_x {
+            return Some(first_c);
         }
-        let last = stops.len() - 1;
-        if x >= stops[last].0 {
-            return Some(stops[last].1);
+        let &(last_x, last_c) = stops.last()?;
+        if x >= last_x {
+            return Some(last_c);
         }
         for pair in stops.windows(2) {
-            let (x0, c0) = pair[0];
-            let (x1, c1) = pair[1];
-            if x <= x1 {
+            let [(x0, c0), (x1, c1)] = pair else {
+                continue;
+            };
+            if x <= *x1 {
                 let span = x1 - x0;
                 let t = if span > 0.0 {
                     ((x - x0) / span).clamp(0.0, 1.0)
@@ -196,7 +200,7 @@ impl ColorRamp {
                 ]);
             }
         }
-        Some(stops[last].1)
+        Some(last_c)
     }
 }
 
@@ -206,13 +210,13 @@ fn compile_input(expr: &Expression) -> Option<PropertyInput> {
             key: literal_str(key)?.to_owned(),
             fallback: None,
         }),
-        Expression::Coalesce { operands, .. } if operands.len() == 2 => {
-            let Expression::Get { key, object: None } = &operands[0] else {
+        Expression::Coalesce { operands, .. } => {
+            let [Expression::Get { key, object: None }, fallback] = operands.as_slice() else {
                 return None;
             };
             Some(PropertyInput {
                 key: literal_str(key)?.to_owned(),
-                fallback: Some(stop_number(&operands[1])?),
+                fallback: Some(stop_number(fallback)?),
             })
         }
         _ => None,

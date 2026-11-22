@@ -42,8 +42,10 @@ where
             return;
         }
         let base = self.outline_prepack.len();
-        if base > 0 {
-            for idx in &mut self.outline.indices[index_start..] {
+        if base > 0
+            && let Some(indices) = self.outline.indices.get_mut(index_start..)
+        {
+            for idx in indices {
                 *idx = I::from(lyon::tessellation::VertexId::from_usize(
                     base + (*idx).into() as usize,
                 ));
@@ -64,75 +66,19 @@ where
             return false;
         }
         let Some(property) = &self.outline_property else {
-            self.outline.vertices.clear();
-            self.outline.indices.clear();
-            self.outline_prepack.clear();
+            self.clear_outline_buffers();
             return false;
         };
         let evaluated = if self.omit_feature_colors {
             None
         } else {
             let Some(colour) = property.evaluate_for(self.props(), self.zoom) else {
-                self.outline.vertices.clear();
-                self.outline.indices.clear();
-                self.outline_prepack.clear();
+                self.clear_outline_buffers();
                 return false;
             };
             Some(colour)
         };
-        let index_start = self.buffer.indices.len();
-        let using_prepack = self.streaming_prepack.is_some() && !self.outline_prepack.is_empty();
-        if using_prepack {
-            self.flush_streaming_prepack(index_start);
-            let base = self.total_vertex_count();
-            if base == 0 {
-                self.buffer.indices.extend_from_slice(&self.outline.indices);
-            } else {
-                self.buffer
-                    .indices
-                    .extend(self.outline.indices.iter().map(|&index| {
-                        I::from(lyon::tessellation::VertexId::from_usize(
-                            base + index.into() as usize,
-                        ))
-                    }));
-            }
-            self.outline.indices.clear();
-            if let Some(prepack) = &mut self.streaming_prepack {
-                prepack.push_encoded(&self.outline_prepack);
-            }
-            self.outline_prepack.clear();
-            if self.outline_prepack.capacity() > 16_384 {
-                self.outline_prepack = Vec::new();
-            }
-            if self.outline.indices.capacity() > 32_768 {
-                self.outline.indices = Vec::new();
-            }
-        } else {
-            let base = self.buffer.vertices.len();
-            self.buffer
-                .vertices
-                .extend_from_slice(&self.outline.vertices);
-            if base == 0 {
-                self.buffer.indices.extend_from_slice(&self.outline.indices);
-            } else {
-                self.buffer
-                    .indices
-                    .extend(self.outline.indices.iter().map(|&index| {
-                        I::from(lyon::tessellation::VertexId::from_usize(
-                            base + index.into() as usize,
-                        ))
-                    }));
-            }
-            self.outline.vertices.clear();
-            self.outline.indices.clear();
-            if self.outline.vertices.capacity() > 16_384 {
-                self.outline.vertices = Vec::new();
-            }
-            if self.outline.indices.capacity() > 32_768 {
-                self.outline.indices = Vec::new();
-            }
-            self.flush_streaming_prepack(index_start);
-        }
+        self.flush_outline_geometry();
         self.update_feature_indices();
         if self.record_outline_entries {
             self.outline_entries.push(true);
@@ -151,5 +97,57 @@ where
                 .push([colour.r, colour.g, colour.b, colour.a * opacity]);
         }
         true
+    }
+
+    fn clear_outline_buffers(&mut self) {
+        self.outline.vertices.clear();
+        self.outline.indices.clear();
+        self.outline_prepack.clear();
+    }
+
+    fn flush_outline_geometry(&mut self) {
+        let index_start = self.buffer.indices.len();
+        let using_prepack = self.streaming_prepack.is_some() && !self.outline_prepack.is_empty();
+        if using_prepack {
+            self.flush_streaming_prepack(index_start);
+            let base = self.total_vertex_count();
+            self.push_outline_indices(base);
+            if let Some(prepack) = &mut self.streaming_prepack {
+                prepack.push_encoded(&self.outline_prepack);
+            }
+            self.outline_prepack.clear();
+            if self.outline_prepack.capacity() > 16_384 {
+                self.outline_prepack = Vec::new();
+            }
+        } else {
+            let base = self.buffer.vertices.len();
+            self.buffer
+                .vertices
+                .extend_from_slice(&self.outline.vertices);
+            self.push_outline_indices(base);
+            self.outline.vertices.clear();
+            if self.outline.vertices.capacity() > 16_384 {
+                self.outline.vertices = Vec::new();
+            }
+            self.flush_streaming_prepack(index_start);
+        }
+        if self.outline.indices.capacity() > 32_768 {
+            self.outline.indices = Vec::new();
+        }
+    }
+
+    fn push_outline_indices(&mut self, base: usize) {
+        if base == 0 {
+            self.buffer.indices.extend_from_slice(&self.outline.indices);
+        } else {
+            self.buffer
+                .indices
+                .extend(self.outline.indices.iter().map(|&index| {
+                    I::from(lyon::tessellation::VertexId::from_usize(
+                        base + index.into() as usize,
+                    ))
+                }));
+        }
+        self.outline.indices.clear();
     }
 }

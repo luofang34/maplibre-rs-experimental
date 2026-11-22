@@ -35,14 +35,13 @@ impl ViewState {
     /// near plane, each ordered top-left, top-right, bottom-right, bottom-left on screen.
     pub fn frustum_corners(&self) -> Result<[Vector3<f64>; 8], ViewProjectionError> {
         let inverted = self.inverted_view_projection()?;
-        let corners = [
-            (0.0, 0.0),
-            (self.width, 0.0),
-            (self.width, self.height),
-            (0.0, self.height),
-        ];
         let points = std::array::from_fn(|index| {
-            let (x, y) = corners[index % 4];
+            let (x, y) = match index & 3 {
+                0 => (0.0, 0.0),
+                1 => (self.width, 0.0),
+                2 => (self.width, self.height),
+                _ => (0.0, self.height),
+            };
             let depth = if index < 4 { 1.0 } else { 0.0 };
             self.window_to_world(&Vector3::new(x, y, depth), &inverted)
         });

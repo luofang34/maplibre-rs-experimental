@@ -12,14 +12,18 @@ use crate::style::expression::{
 
 impl Parser {
     pub(super) fn parse_lookup(&mut self, operator: &str, args: &[Json]) -> Result<Expression> {
-        if args.is_empty() || args.len() > 2 {
-            return Err(self.error(format!(
-                "Expected 1 or 2 arguments, but found {} instead.",
-                args.len()
-            )));
-        }
-        let key = Box::new(self.parse_at(&args[0], 1, Some(&Type::String))?);
-        let object = match args.get(1) {
+        let (key_arg, object_arg) = match args {
+            [key] => (key, None),
+            [key, object] => (key, Some(object)),
+            _ => {
+                return Err(self.error(format!(
+                    "Expected 1 or 2 arguments, but found {} instead.",
+                    args.len()
+                )))
+            }
+        };
+        let key = Box::new(self.parse_at(key_arg, 1, Some(&Type::String))?);
+        let object = match object_arg {
             Some(object) => Some(Box::new(self.parse_at(object, 2, Some(&Type::Object))?)),
             None => None,
         };
@@ -71,15 +75,17 @@ impl Parser {
             ">" => Comparison::Greater,
             _ => Comparison::GreaterEqual,
         };
-        if args.len() != 2 && args.len() != 3 {
-            return Err(self.error("Expected two or three arguments."));
-        }
-        let collator = match args.get(2) {
+        let (left_arg, right_arg, collator_arg) = match args {
+            [left, right] => (left, right, None),
+            [left, right, collator] => (left, right, Some(collator)),
+            _ => return Err(self.error("Expected two or three arguments.")),
+        };
+        let collator = match collator_arg {
             Some(json) => Some(Box::new(self.parse_at(json, 3, Some(&Type::Collator))?)),
             None => None,
         };
-        let mut left = self.parse_at(&args[0], 1, Some(&Type::Value))?;
-        let mut right = self.parse_at(&args[1], 2, Some(&Type::Value))?;
+        let mut left = self.parse_at(left_arg, 1, Some(&Type::Value))?;
+        let mut right = self.parse_at(right_arg, 2, Some(&Type::Value))?;
         let (left_type, right_type) = (left.output_type(), right.output_type());
         for (index, side) in [(1, &left_type), (2, &right_type)] {
             let comparable = match operator_kind.is_ordering() {
@@ -200,14 +206,14 @@ impl Parser {
     }
 
     pub(super) fn parse_in(&mut self, args: &[Json]) -> Result<Expression> {
-        if args.len() != 2 {
+        let [needle_arg, haystack_arg] = args else {
             return Err(self.error(format!(
                 "Expected 2 arguments, but found {} instead.",
                 args.len()
             )));
-        }
-        let needle = self.parse_at(&args[0], 1, Some(&Type::Value))?;
-        let haystack = self.parse_at(&args[1], 2, Some(&Type::Value))?;
+        };
+        let needle = self.parse_at(needle_arg, 1, Some(&Type::Value))?;
+        let haystack = self.parse_at(haystack_arg, 2, Some(&Type::Value))?;
         self.check_searchable(&needle)?;
         Ok(Expression::In {
             needle: Box::new(needle),
@@ -229,16 +235,20 @@ impl Parser {
     }
 
     pub(super) fn parse_index_of(&mut self, args: &[Json]) -> Result<Expression> {
-        if args.len() != 2 && args.len() != 3 {
-            return Err(self.error(format!(
-                "Expected 2 or 3 arguments, but found {} instead.",
-                args.len()
-            )));
-        }
-        let needle = self.parse_at(&args[0], 1, Some(&Type::Value))?;
-        let haystack = self.parse_at(&args[1], 2, Some(&Type::Value))?;
+        let (needle_arg, haystack_arg, from_arg) = match args {
+            [needle, haystack] => (needle, haystack, None),
+            [needle, haystack, from] => (needle, haystack, Some(from)),
+            _ => {
+                return Err(self.error(format!(
+                    "Expected 2 or 3 arguments, but found {} instead.",
+                    args.len()
+                )))
+            }
+        };
+        let needle = self.parse_at(needle_arg, 1, Some(&Type::Value))?;
+        let haystack = self.parse_at(haystack_arg, 2, Some(&Type::Value))?;
         self.check_searchable(&needle)?;
-        let from = match args.get(2) {
+        let from = match from_arg {
             Some(from) => Some(Box::new(self.parse_at(from, 3, Some(&Type::Number))?)),
             None => None,
         };
@@ -250,21 +260,25 @@ impl Parser {
     }
 
     pub(super) fn parse_slice(&mut self, args: &[Json]) -> Result<Expression> {
-        if args.len() != 2 && args.len() != 3 {
-            return Err(self.error(format!(
-                "Expected 2 or 3 arguments, but found {} instead.",
-                args.len()
-            )));
-        }
-        let input = self.parse_at(&args[0], 1, Some(&Type::Value))?;
-        let from = self.parse_at(&args[1], 2, Some(&Type::Number))?;
+        let (input_arg, from_arg, to_arg) = match args {
+            [input, from] => (input, from, None),
+            [input, from, to] => (input, from, Some(to)),
+            _ => {
+                return Err(self.error(format!(
+                    "Expected 2 or 3 arguments, but found {} instead.",
+                    args.len()
+                )))
+            }
+        };
+        let input = self.parse_at(input_arg, 1, Some(&Type::Value))?;
+        let from = self.parse_at(from_arg, 2, Some(&Type::Number))?;
         let output = input.output_type();
         if !matches!(output, Type::String | Type::Value | Type::Array { .. }) {
             return Err(self.error(format!(
                 "Expected first argument to be of type array or string, but found {output} instead"
             )));
         }
-        let to = match args.get(2) {
+        let to = match to_arg {
             Some(to) => Some(Box::new(self.parse_at(to, 3, Some(&Type::Number))?)),
             None => None,
         };
@@ -277,13 +291,13 @@ impl Parser {
     }
 
     pub(super) fn parse_length(&mut self, args: &[Json]) -> Result<Expression> {
-        if args.len() != 1 {
+        let [input_arg] = args else {
             return Err(self.error(format!(
                 "Expected 1 argument, but found {} instead.",
                 args.len()
             )));
-        }
-        let input = self.parse_at(&args[0], 1, Some(&Type::Value))?;
+        };
+        let input = self.parse_at(input_arg, 1, Some(&Type::Value))?;
         let input_type = input.output_type();
         if !matches!(input_type, Type::String | Type::Value | Type::Array { .. }) {
             return Err(self.error(format!(
@@ -294,14 +308,14 @@ impl Parser {
     }
 
     pub(super) fn parse_at_operator(&mut self, args: &[Json]) -> Result<Expression> {
-        if args.len() != 2 {
+        let [index_arg, array_arg] = args else {
             return Err(self.error(format!(
                 "Expected 2 arguments, but found {} instead.",
                 args.len()
             )));
-        }
-        let index = self.parse_at(&args[0], 1, Some(&Type::Number))?;
-        let array = self.parse_at(&args[1], 2, Some(&Type::array(Type::Value, None)))?;
+        };
+        let index = self.parse_at(index_arg, 1, Some(&Type::Number))?;
+        let array = self.parse_at(array_arg, 2, Some(&Type::array(Type::Value, None)))?;
         let output = match array.output_type() {
             Type::Array { item, .. } => *item,
             _ => Type::Value,
@@ -314,14 +328,14 @@ impl Parser {
     }
 
     pub(super) fn parse_split(&mut self, args: &[Json]) -> Result<Expression> {
-        if args.len() != 2 {
+        let [input_arg, delimiter_arg] = args else {
             return Err(self.error(format!(
                 "Expected 2 arguments, but found {} instead.",
                 args.len()
             )));
-        }
-        let input = self.parse_at(&args[0], 1, Some(&Type::String))?;
-        let delimiter = self.parse_at(&args[1], 2, Some(&Type::String))?;
+        };
+        let input = self.parse_at(input_arg, 1, Some(&Type::String))?;
+        let delimiter = self.parse_at(delimiter_arg, 2, Some(&Type::String))?;
         Ok(Expression::Split {
             input: Box::new(input),
             delimiter: Box::new(delimiter),
@@ -329,14 +343,14 @@ impl Parser {
     }
 
     pub(super) fn parse_join(&mut self, args: &[Json]) -> Result<Expression> {
-        if args.len() != 2 {
+        let [input_arg, separator_arg] = args else {
             return Err(self.error(format!(
                 "Expected 2 arguments, but found {} instead.",
                 args.len()
             )));
-        }
-        let input = self.parse_at(&args[0], 1, Some(&Type::array(Type::Value, None)))?;
-        let separator = self.parse_at(&args[1], 2, Some(&Type::String))?;
+        };
+        let input = self.parse_at(input_arg, 1, Some(&Type::array(Type::Value, None)))?;
+        let separator = self.parse_at(separator_arg, 2, Some(&Type::String))?;
         Ok(Expression::Join {
             input: Box::new(input),
             separator: Box::new(separator),
@@ -364,7 +378,7 @@ impl Parser {
         let mut item = Type::Value;
         let mut length = None;
         if args.len() > 1 {
-            item = match args[0].as_str() {
+            item = match args.first().and_then(Json::as_str) {
                 Some("string") => Type::String,
                 Some("number") => Type::Number,
                 Some("boolean") => Type::Boolean,
@@ -374,8 +388,8 @@ impl Parser {
             };
             first_value = 1;
         }
-        if args.len() > 2 {
-            length = match &args[1] {
+        if let Some(len_arg) = (args.len() > 2).then(|| args.get(1)).flatten() {
+            length = match len_arg {
                 Json::Null => None,
                 Json::Number(number) => match number.as_u64() {
                     Some(count) if number.as_f64() == Some(count as f64) => Some(count as usize),
@@ -393,7 +407,9 @@ impl Parser {
             };
             first_value = 2;
         }
-        let operands = args[first_value..]
+        let operands = args
+            .get(first_value..)
+            .unwrap_or(&[])
             .iter()
             .enumerate()
             .map(|(offset, arg)| self.parse_at(arg, first_value + offset + 1, Some(&Type::Value)))

@@ -135,3 +135,53 @@ pub(super) fn anchored_offset(
         base[1] - (fractions[1] - 0.5) * 2.0 * gap,
     ]
 }
+
+/// Resolved anchor, justification, and offsets for a laid-out text block.
+pub(super) struct BlockPlacement {
+    pub anchor: String,
+    pub anchors: Vec<String>,
+    pub fractions: [f32; 2],
+    pub justify: f32,
+    pub offset: [f32; 2],
+    pub line_offset_y: f32,
+}
+
+/// Resolves a label's primary anchor, justification fraction, and pixel offset.
+pub(super) fn resolve_block_placement(
+    paint: &SymbolPaint,
+    properties: &FeatureProperties,
+    zoom: f64,
+    vertical: bool,
+) -> BlockPlacement {
+    let anchors = variable_anchors(paint);
+    let anchor = anchors.first().cloned().unwrap_or_else(|| {
+        paint
+            .text("text-anchor", properties, zoom)
+            .unwrap_or_else(|| "center".into())
+    });
+    let fractions = anchor_fractions(&anchor);
+    let justify = paint
+        .text("text-justify", properties, zoom)
+        .unwrap_or_else(|| "center".into());
+    let justify = match justify.as_str() {
+        _ if vertical => 0.0,
+        "left" => 0.0,
+        "right" => 1.0,
+        "auto" => fractions[0],
+        _ => 0.5,
+    };
+    let mut offset = anchored_offset(paint, &anchors, &anchor, (properties, zoom));
+    let line_offset_y = if super::is_line_placed(paint) {
+        std::mem::take(&mut offset[1])
+    } else {
+        0.0
+    };
+    BlockPlacement {
+        anchor,
+        anchors,
+        fractions,
+        justify,
+        offset,
+        line_offset_y,
+    }
+}

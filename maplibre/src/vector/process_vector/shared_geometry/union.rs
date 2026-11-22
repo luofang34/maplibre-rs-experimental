@@ -115,10 +115,10 @@ pub(super) fn intersect_spans<'a>(
 ) -> Vec<&'a FeatureSpan> {
     let mut out = Vec::with_capacity(sorted_indices.len().min(spans.len()));
     let (mut i, mut j) = (0, 0);
-    while i < spans.len() && j < sorted_indices.len() {
-        match spans[i].feat_idx.cmp(&sorted_indices[j]) {
+    while let (Some(span), Some(&target)) = (spans.get(i), sorted_indices.get(j)) {
+        match span.feat_idx.cmp(&target) {
             std::cmp::Ordering::Equal => {
-                out.push(&spans[i]);
+                out.push(span);
                 i += 1;
                 j += 1;
             }

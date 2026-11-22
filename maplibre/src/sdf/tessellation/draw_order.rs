@@ -33,13 +33,18 @@ pub(crate) fn drawn_order(features: &[Feature], bearing: f64) -> Vec<usize> {
             group
         })
         .collect();
-    let mut order: Vec<usize> = (0..features.len()).collect();
-    let height = |index: usize| {
-        let anchor = features[index].text_anchor;
-        rotated_height([anchor.x, anchor.y], bearing)
-    };
-    order.sort_by_key(|index| (height(*index), std::cmp::Reverse(groups[*index])));
-    order
+    let mut order: Vec<(usize, i64, usize)> = features
+        .iter()
+        .enumerate()
+        .map(|(index, feature)| {
+            let anchor = feature.text_anchor;
+            let height = rotated_height([anchor.x, anchor.y], bearing);
+            let grp = groups.get(index).copied().unwrap_or(0);
+            (index, height, grp)
+        })
+        .collect();
+    order.sort_by_key(|&(_, height, grp)| (height, std::cmp::Reverse(grp)));
+    order.into_iter().map(|(index, _, _)| index).collect()
 }
 
 /// Whether the layer draws its labels by screen height: `symbol-z-order: viewport-y`, or `auto`
@@ -88,7 +93,9 @@ pub(super) fn reorder(
         .collect();
     spans.sort_by_key(|span| span.start);
     let covered: usize = spans.iter().map(|span| span.len()).sum();
-    let contiguous = spans.windows(2).all(|pair| pair[0].end == pair[1].start);
+    let contiguous = spans
+        .windows(2)
+        .all(|pair| matches!(pair, [a, b] if a.end == b.start));
     if covered != buffer.indices.len() || !contiguous || features.len() < 2 {
         return;
     }
@@ -103,14 +110,26 @@ pub(super) fn reorder(
             group
         })
         .collect();
-    let mut order: Vec<usize> = (0..features.len()).collect();
-    let height = |index: usize| (features[index].text_anchor.y * 2.0).round() as i64;
-    order.sort_by_key(|index| (height(*index), std::cmp::Reverse(groups[*index])));
+    let mut order: Vec<(usize, i64, usize)> = features
+        .iter()
+        .enumerate()
+        .map(|(index, feature)| {
+            let height = (feature.text_anchor.y * 2.0).round() as i64;
+            let grp = groups.get(index).copied().unwrap_or(0);
+            (index, height, grp)
+        })
+        .collect();
+    order.sort_by_key(|&(_, height, grp)| (height, std::cmp::Reverse(grp)));
     let mut indices = Vec::with_capacity(buffer.indices.len());
-    for index in order {
-        let feature = &mut features[index];
+    for (index, _, _) in order {
+        let Some(feature) = features.get_mut(index) else {
+            continue;
+        };
+        let Some(slice) = buffer.indices.get(feature.indices.clone()) else {
+            continue;
+        };
         let start = indices.len();
-        indices.extend_from_slice(&buffer.indices[feature.indices.clone()]);
+        indices.extend_from_slice(slice);
         let (old, shift) = (
             feature.indices.start,
             start as isize - feature.indices.start as isize,

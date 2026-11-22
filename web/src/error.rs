@@ -31,10 +31,6 @@ pub enum WebError {
     /// A tile worker received a kernel configuration it cannot decode.
     #[error("decoding the tile worker's kernel configuration failed")]
     KernelConfigDecoding(#[source] serde_json::Error),
-    /// A tile worker received a second kernel configuration.
-    #[allow(dead_code)]
-    #[error("the tile worker already has a kernel configuration")]
-    KernelConfigAlreadySet,
     /// A tile worker received a style it cannot decode.
     #[error("decoding the tile worker's style failed")]
     StyleDecoding(#[source] serde_json::Error),

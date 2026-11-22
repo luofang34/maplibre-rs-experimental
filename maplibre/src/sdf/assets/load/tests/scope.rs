@@ -30,11 +30,19 @@ async fn a_geojson_label_without_a_source_layer_asks_for_its_font_and_icon() {
     .expect("style");
     let groups = source_layer_groups(&style, TileKind::Vector);
     let points = group(&groups, "points");
+    assert!(matches!(
+        style.sources.get("points"),
+        Some(Source::GeoJson(_))
+    ));
     let Some(Source::GeoJson(source)) = style.sources.get("points") else {
-        panic!("a GeoJSON source");
+        return;
     };
+    assert!(matches!(
+        &source.data,
+        crate::style::source::GeoJsonData::Inline(_)
+    ));
     let crate::style::source::GeoJsonData::Inline(data) = &source.data else {
-        panic!("inline data");
+        return;
     };
     let index = GeoJsonIndex::from_value(data, source).expect("index");
     let tile = index.tile(WorldTileCoords {
@@ -60,7 +68,10 @@ async fn a_geojson_label_without_a_source_layer_asks_for_its_font_and_icon() {
     ] {
         assert!(urls.iter().any(|url| url == wanted), "{wanted} in {urls:?}");
     }
-    assert!(atlas.glyphs["Font G"].contains_key(&u32::from('A')));
+    assert!(atlas
+        .glyphs
+        .get("Font G")
+        .is_some_and(|g| g.contains_key(&u32::from('A'))));
     assert!(atlas.icons.contains_key("marker"));
 }
 

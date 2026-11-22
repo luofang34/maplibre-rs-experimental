@@ -1,6 +1,9 @@
 //! Shared safe/checked JNI implementation helpers backing `MapLibreSdk` and `NativeMap`.
 
-#![allow(unsafe_code)]
+#![expect(
+    unsafe_code,
+    reason = "JNI helpers borrow and free validated native map handle pointers"
+)]
 
 use jni::{
     errors::ThrowRuntimeExAndDefault,
@@ -262,7 +265,13 @@ pub(crate) unsafe fn jni_render_rgba8(
                 }));
             }
             let pixels = map.render_rgba8_vec()?;
-            out_rgba.set_region(env, 0, bytemuck::cast_slice::<u8, i8>(&pixels[..expected]))?;
+            let Some(pixels_slice) = pixels.get(..expected) else {
+                return Err(AndroidSdkError::Ffi(FfiError::InvalidBufferLength {
+                    expected,
+                    actual: pixels.len(),
+                }));
+            };
+            out_rgba.set_region(env, 0, bytemuck::cast_slice::<u8, i8>(pixels_slice))?;
             Ok(true)
         })
         .resolve::<ThrowRuntimeExAndDefault>()

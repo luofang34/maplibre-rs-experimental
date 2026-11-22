@@ -16,6 +16,17 @@ mod line_labels;
 pub(super) use ground::{buried_in_terrain, canonical_tile, project, LabelGround};
 pub(super) use line_labels::{line_glyph_boxes, line_glyph_poses, LinePoses};
 
+struct ScreenBoxQuery<'a> {
+    layer: &'a SymbolLayerData,
+    feature: &'a Feature,
+    elevation: f32,
+    view: &'a ViewState,
+    projection: &'a ShaderProjectionData,
+    uniforms: &'a SymbolUniforms,
+    text_shift: [f32; 2],
+    anchor_clip: Option<(f64, Vector4<f64>)>,
+}
+
 pub(super) fn screen_boxes(
     layer: &SymbolLayerData,
     feature: &Feature,
@@ -25,16 +36,16 @@ pub(super) fn screen_boxes(
     uniforms: &SymbolUniforms,
     anchor_clip: Option<(f64, Vector4<f64>)>,
 ) -> Option<[Option<[f64; 4]>; 2]> {
-    screen_boxes_shifted_with_clip(
+    screen_boxes_shifted_with_clip(ScreenBoxQuery {
         layer,
         feature,
         elevation,
         view,
         projection,
         uniforms,
-        [0.0; 2],
+        text_shift: [0.0; 2],
         anchor_clip,
-    )
+    })
 }
 
 /// [`screen_boxes`] with the text moved by `text_shift` layout pixels along its own axes before
@@ -48,22 +59,29 @@ pub(super) fn screen_boxes_shifted(
     uniforms: &SymbolUniforms,
     text_shift: [f32; 2],
 ) -> Option<[Option<[f64; 4]>; 2]> {
-    screen_boxes_shifted_with_clip(
-        layer, feature, elevation, view, projection, uniforms, text_shift, None,
-    )
+    screen_boxes_shifted_with_clip(ScreenBoxQuery {
+        layer,
+        feature,
+        elevation,
+        view,
+        projection,
+        uniforms,
+        text_shift,
+        anchor_clip: None,
+    })
 }
 
-#[allow(clippy::too_many_arguments)]
-fn screen_boxes_shifted_with_clip(
-    layer: &SymbolLayerData,
-    feature: &Feature,
-    elevation: f32,
-    view: &ViewState,
-    projection: &ShaderProjectionData,
-    uniforms: &SymbolUniforms,
-    text_shift: [f32; 2],
-    anchor_clip: Option<(f64, Vector4<f64>)>,
-) -> Option<[Option<[f64; 4]>; 2]> {
+fn screen_boxes_shifted_with_clip(query: ScreenBoxQuery<'_>) -> Option<[Option<[f64; 4]>; 2]> {
+    let ScreenBoxQuery {
+        layer,
+        feature,
+        elevation,
+        view,
+        projection,
+        uniforms,
+        text_shift,
+        anchor_clip,
+    } = query;
     let mut result: [Option<[f64; 4]>; 2] = [None, None];
     for mut part in feature.parts.into_iter().flatten() {
         if part.text {
@@ -108,7 +126,11 @@ fn screen_boxes_shifted_with_clip(
         if view.has_external_view() && part.text && bounds[3] - bounds[1] - 2.0 * padding < 7.0 {
             continue;
         }
-        let slot = &mut result[usize::from(!part.text)];
+        let slot = if part.text {
+            &mut result[0]
+        } else {
+            &mut result[1]
+        };
         *slot = Some(slot.map_or(bounds, |previous| {
             [
                 previous[0].min(bounds[0]),

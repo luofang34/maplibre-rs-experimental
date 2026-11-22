@@ -69,7 +69,7 @@ pub(crate) struct GpuCounts {
 
 pub(crate) fn gpu_counts(map: &mut HeadlessMap) -> GpuCounts {
     map.queue().submit([]);
-    let _ = map.device().poll(wgpu::PollType::wait_indefinitely());
+    let _poll = map.device().poll(wgpu::PollType::wait_indefinitely());
     let report = map
         .context()
         .renderer
@@ -90,7 +90,7 @@ pub(crate) fn settle_frames(map: &mut HeadlessMap, frames: usize) {
     for _ in 0..frames {
         map.frame_input_mut().advance(Duration::from_millis(16));
         map.run_frame().expect("run frame");
-        let _ = map.device().poll(wgpu::PollType::wait_indefinitely());
+        let _poll = map.device().poll(wgpu::PollType::wait_indefinitely());
     }
 }
 

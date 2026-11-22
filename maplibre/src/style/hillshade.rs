@@ -199,9 +199,8 @@ fn pad<T: Clone>(list: &mut Vec<T>, count: usize, default: T) {
         list.push(default);
     }
     list.truncate(count);
-    while list.len() < count {
-        let last = list[list.len() - 1].clone();
-        list.push(last);
+    if let Some(last) = list.last().cloned() {
+        list.resize(count, last);
     }
 }
 

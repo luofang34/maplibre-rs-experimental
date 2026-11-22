@@ -129,20 +129,41 @@ pub struct SDFShaderFeatureMetadata {
     pub halo: [u8; 4],
 }
 
+/// Placement style and animation parameters packed into [`SDFShaderFeatureMetadata`].
+#[derive(Clone, Copy, Debug)]
+pub struct SymbolPlacementMetadata {
+    /// Final target opacity in `[0, 1]`.
+    pub target_opacity: f32,
+    /// Ground elevation in metres.
+    pub elevation: f32,
+    /// Fade-in start opacity in `[0, 1]`.
+    pub start_opacity: f32,
+    /// Fade-in start timestamp in milliseconds.
+    pub start_time_ms: f32,
+    /// Screen/anchor shift `[dx, dy]`.
+    pub shift: [f32; 2],
+    /// Primary fill or text RGBA color.
+    pub color: [f32; 4],
+    /// Halo RGBA color.
+    pub halo: [f32; 4],
+    /// Packed `[text_size, halo_width, halo_blur, style_opacity]`.
+    pub params: [f32; 4],
+}
+
 impl SDFShaderFeatureMetadata {
     /// Packs placement visibility, fade ramp, anchor shift, and paint style into 32 bytes.
     #[inline]
-    #[allow(clippy::too_many_arguments)]
-    pub fn from_placement(
-        target_opacity: f32,
-        elevation: f32,
-        start_opacity: f32,
-        start_time_ms: f32,
-        shift: [f32; 2],
-        color: [f32; 4],
-        halo: [f32; 4],
-        params: [f32; 4],
-    ) -> Self {
+    pub fn from_placement(spec: SymbolPlacementMetadata) -> Self {
+        let SymbolPlacementMetadata {
+            target_opacity,
+            elevation,
+            start_opacity,
+            start_time_ms,
+            shift,
+            color,
+            halo,
+            params,
+        } = spec;
         let u8_norm = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u32;
         let target_u8 = u8_norm(target_opacity);
         let start_u8 = u8_norm(start_opacity);

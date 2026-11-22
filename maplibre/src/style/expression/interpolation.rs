@@ -200,7 +200,12 @@ impl Color {
 }
 
 fn interpolate_array(from: [f64; 4], to: [f64; 4], t: f64) -> [f64; 4] {
-    std::array::from_fn(|index| interpolate_number(from[index], to[index], t))
+    [
+        interpolate_number(from[0], to[0], t),
+        interpolate_number(from[1], to[1], t),
+        interpolate_number(from[2], to[2], t),
+        interpolate_number(from[3], to[3], t),
+    ]
 }
 
 const XN: f64 = 0.96422;

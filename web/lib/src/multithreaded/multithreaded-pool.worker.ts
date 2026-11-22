@@ -21,10 +21,8 @@ const handleMessage = async (message: MessageEvent<MessageData>) => {
         const module = data.module;
         const memory = data.memory;
         initialised = initializeWasm(module, memory).catch(err => {
-            // Propagate to main `onerror`:
-            setTimeout(() => {
-                throw err;
-            });
+            // Propagate uncaught rejection without unhandled rejection races:
+            globalThis.reportError?.(err);
             // Rethrow to keep promise rejected and prevent execution of further commands:
             throw err;
         });

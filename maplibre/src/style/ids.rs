@@ -55,9 +55,9 @@ impl LocalInternerCache {
 
     fn sync_from(&mut self, global: &GlobalInterner) {
         let start = self.strings.len();
-        if start < global.strings.len() {
-            self.strings.reserve(global.strings.len() - start);
-            for (offset, &leaked) in global.strings[start..].iter().enumerate() {
+        if let Some(tail) = global.strings.get(start..) {
+            self.strings.reserve(tail.len());
+            for (offset, &leaked) in tail.iter().enumerate() {
                 let id = (start + offset) as u32;
                 self.strings.push(leaked);
                 self.ids.insert(leaked, id);

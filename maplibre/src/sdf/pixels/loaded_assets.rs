@@ -1,5 +1,5 @@
 //! Glyphs and a sprite fetched through the shared asset cache reach the screen.
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg_attr(test, allow(clippy::expect_used))]
 use std::sync::{Arc, Mutex};
 
 use geozero::mvt::Message;

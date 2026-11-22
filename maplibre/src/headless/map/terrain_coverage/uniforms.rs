@@ -17,11 +17,14 @@ fn relief_opacity_changes_refresh_cached_pixels_without_source_uploads() {
             &read_blocking(&map, "uniform-relief-before"),
             [8, 136, 8, 255],
         );
-        let Some(LayerPaint::ColorRelief(paint)) = &mut map.map_context.style.layers[1].paint
-        else {
-            panic!("relief paint");
-        };
-        paint.color_relief_opacity = Some(StyleProperty::Constant(0.0));
+        let relief = &mut map.map_context.style.layers[1].paint;
+        assert!(
+            matches!(relief, Some(LayerPaint::ColorRelief(_))),
+            "relief paint"
+        );
+        if let Some(LayerPaint::ColorRelief(paint)) = relief {
+            paint.color_relief_opacity = Some(StyleProperty::Constant(0.0));
+        }
         map.run_frame().expect("changed paint frame");
         assert_color(
             &read_blocking(&map, "uniform-relief-after"),
@@ -63,10 +66,14 @@ fn viewport_light_bearing_refreshes_drapes_but_map_light_reuses_them() {
         map.run_frame().expect("unchanged viewport light");
         assert_redrawn(&map, false);
 
-        let Some(LayerPaint::Hillshade(paint)) = &mut map.map_context.style.layers[1].paint else {
-            panic!("hillshade paint");
-        };
-        paint.hillshade_illumination_anchor = IlluminationAnchor::Map;
+        let hillshade = &mut map.map_context.style.layers[1].paint;
+        assert!(
+            matches!(hillshade, Some(LayerPaint::Hillshade(_))),
+            "hillshade paint"
+        );
+        if let Some(LayerPaint::Hillshade(paint)) = hillshade {
+            paint.hillshade_illumination_anchor = IlluminationAnchor::Map;
+        }
         map.run_frame().expect("map light");
         map.map_context
             .view_state

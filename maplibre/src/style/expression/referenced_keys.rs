@@ -147,6 +147,26 @@ fn collect_layer_paint_keys(paint: &LayerPaint, keys: &mut FxHashSet<String>) ->
                 && collect_opt_json(&p.fill_antialias, false, keys)
                 && collect_translation(&p.fill_translate, keys)
         }
+        LayerPaint::FillExtrusion(_) | LayerPaint::Line(_) | LayerPaint::Circle(_) => {
+            collect_vector_paint_keys(paint, keys)
+        }
+        LayerPaint::Heatmap(p) => {
+            collect_prop(&p.heatmap_radius, keys)
+                && collect_prop(&p.heatmap_weight, keys)
+                && collect_prop(&p.heatmap_intensity, keys)
+                && collect_prop(&p.heatmap_opacity, keys)
+                && collect_prop(&p.heatmap_color, keys)
+        }
+        LayerPaint::Symbol(_)
+        | LayerPaint::Raster(_)
+        | LayerPaint::Hillshade(_)
+        | LayerPaint::ColorRelief(_) => collect_symbol_or_raster_paint_keys(paint, keys),
+        LayerPaint::Custom(_) => true,
+    }
+}
+
+fn collect_vector_paint_keys(paint: &LayerPaint, keys: &mut FxHashSet<String>) -> bool {
+    match paint {
         LayerPaint::FillExtrusion(p) => {
             collect_prop(&p.fill_extrusion_color, keys)
                 && collect_opt_json(&p.fill_extrusion_pattern, true, keys)
@@ -183,13 +203,12 @@ fn collect_layer_paint_keys(paint: &LayerPaint, keys: &mut FxHashSet<String>) ->
                 && collect_prop(&p.circle_stroke_opacity, keys)
                 && collect_translation(&p.circle_translate, keys)
         }
-        LayerPaint::Heatmap(p) => {
-            collect_prop(&p.heatmap_radius, keys)
-                && collect_prop(&p.heatmap_weight, keys)
-                && collect_prop(&p.heatmap_intensity, keys)
-                && collect_prop(&p.heatmap_opacity, keys)
-                && collect_prop(&p.heatmap_color, keys)
-        }
+        _ => true,
+    }
+}
+
+fn collect_symbol_or_raster_paint_keys(paint: &LayerPaint, keys: &mut FxHashSet<String>) -> bool {
+    match paint {
         LayerPaint::Symbol(p) => {
             if !collect_prop(&p.text_field, keys) || !collect_prop(&p.text_size, keys) {
                 return false;
@@ -224,7 +243,7 @@ fn collect_layer_paint_keys(paint: &LayerPaint, keys: &mut FxHashSet<String>) ->
                 && collect_prop(&p.color_relief_color, keys)
                 && collect_resampling(&p.color_relief_resampling, keys)
         }
-        LayerPaint::Custom(_) => true,
+        _ => true,
     }
 }
 
@@ -344,20 +363,22 @@ fn walk_json(value: &serde_json::Value, is_token_key: bool, keys: &mut FxHashSet
             match op {
                 Some("properties") if items.len() == 1 => false,
                 Some("literal") => true,
-                Some("get" | "has") => {
-                    if items.len() == 2 {
-                        let Some(k) = items[1].as_str() else {
+                Some("get" | "has") => match items.as_slice() {
+                    [_, key] => {
+                        let Some(k) = key.as_str() else {
                             return false;
                         };
                         keys.insert(k.to_owned());
                         true
-                    } else if items.len() >= 3 {
-                        walk_json(&items[1], false, keys) && walk_json(&items[2], false, keys)
-                    } else {
-                        true
                     }
-                }
-                Some(_) => items[1..].iter().all(|item| walk_json(item, false, keys)),
+                    [_, key, obj, ..] => walk_json(key, false, keys) && walk_json(obj, false, keys),
+                    _ => true,
+                },
+                Some(_) => items
+                    .get(1..)
+                    .into_iter()
+                    .flatten()
+                    .all(|item| walk_json(item, false, keys)),
                 None => items.iter().all(|item| walk_json(item, false, keys)),
             }
         }

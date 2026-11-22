@@ -1,6 +1,9 @@
 //! Embeddable offscreen `NativeMap` engine backing Kotlin/Java `Bitmap` & `Surface` views.
 
-#![allow(unsafe_code)]
+#![expect(
+    unsafe_code,
+    reason = "JNI handle conversion borrows and frees boxed NativeMap pointers"
+)]
 
 use jni::sys::jlong;
 use maplibre::map::handle::SyncHeadlessHandle;
@@ -34,7 +37,7 @@ impl NativeMap {
     ///
     /// # Safety
     ///
-    /// `raw` must be `0` (which returns `Err(InvalidHandle)`) or a live pointer previously returned
+    /// `raw` must be `0` (which returns `Err(InvalidHandle)`) or a live pointer returned
     /// by [`Self::into_raw_handle`] that has not been destroyed.
     pub unsafe fn borrow_raw<'a>(raw: jlong) -> Result<&'a Self, AndroidSdkError> {
         if raw == 0 {
@@ -48,7 +51,7 @@ impl NativeMap {
         unsafe { ptr.as_ref() }.ok_or(AndroidSdkError::InvalidHandle)
     }
 
-    /// Destroys a [`NativeMap`] previously converted via [`Self::into_raw_handle`]; `0` is ignored.
+    /// Destroys a [`NativeMap`] created via [`Self::into_raw_handle`]; `0` is ignored.
     ///
     /// # Safety
     ///
@@ -156,7 +159,15 @@ impl NativeMap {
             }));
         }
         let pixels = self.engine.render_rgba8_vec()?;
-        out_rgba[..expected].copy_from_slice(&pixels[..expected]);
+        let Some((out_slice, pixels_slice)) =
+            out_rgba.get_mut(..expected).zip(pixels.get(..expected))
+        else {
+            return Err(AndroidSdkError::Ffi(FfiError::InvalidBufferLength {
+                expected,
+                actual: out_rgba.len().min(pixels.len()),
+            }));
+        };
+        out_slice.copy_from_slice(pixels_slice);
         Ok(())
     }
 }

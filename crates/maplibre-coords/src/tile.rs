@@ -1,5 +1,14 @@
 //! Canonical and wrapped tile coordinates and their map-space transforms.
-use super::*;
+
+use std::fmt::{self, Display, Formatter};
+
+use bytemuck_derive::Zeroable;
+use cgmath::{Matrix4, Vector3};
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    div_floor, Quadkey, TileAddressingScheme, Zoom, ZoomLevel, EXTENT, TILE_SIZE, ZOOM_BOUNDS,
+};
 
 /// Tile-local coordinates, where [`EXTENT`] spans one tile edge.
 /// Buffered geometry may extend beyond the tile boundary.
@@ -71,7 +80,6 @@ impl From<(u32, u32, ZoomLevel)> for TileCoords {
 /// # Coordinate System Origin
 ///
 /// The origin of the coordinate system is in the upper-left corner.
-// FIXME: does Zeroable make sense?
 #[derive(
     Clone,
     Copy,
@@ -124,18 +132,12 @@ impl WorldTileCoords {
     }
 
     /// Maps tile-local x/y units to world pixels at `zoom`, leaving the z coordinate unchanged.
-    /// Based on
+    ///
+    /// At `tile.z == zoom`, `tile_scale == 512`; lower `tile.z` scales larger than `512` and
+    /// higher `tile.z` scales smaller than `512`. Based on
     /// [Transform::calculatePosMatrix](https://github.com/maplibre/maplibre-gl-js/blob/80e232a64716779bfff841dbc18fddc1f51535ad/src/geo/transform.ts#L719-L731)
     #[tracing::instrument(skip_all)]
     pub fn transform_for_zoom(&self, zoom: Zoom) -> Matrix4<f64> {
-        /*
-           For tile.z = zoom:
-               => scale = 512
-           If tile.z < zoom:
-               => scale > 512
-           If tile.z > zoom:
-               => scale < 512
-        */
         let tile_scale = TILE_SIZE * Zoom::from(self.z).scale_delta(&zoom);
 
         let translate = Matrix4::from_translation(Vector3::new(

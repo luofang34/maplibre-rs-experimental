@@ -19,18 +19,23 @@ pub(super) fn simplify_points(points: &[Point], sq_tol: f64) -> Ring {
     }
     let len = points.len();
     let mut keep = vec![false; len];
-    keep[0] = true;
-    keep[len - 1] = true;
+    if let Some(first) = keep.first_mut() {
+        *first = true;
+    }
+    if let Some(last) = keep.last_mut() {
+        *last = true;
+    }
 
     let mut stack = vec![(0_usize, len - 1)];
     while let Some((first, last)) = stack.pop() {
         if last <= first + 1 {
             continue;
         }
+        let (Some(&a), Some(&b)) = (points.get(first), points.get(last)) else {
+            continue;
+        };
         let mut max_sq_dist = sq_tol;
         let mut split_index = None;
-        let a = points[first];
-        let b = points[last];
         for (index, &point) in points.iter().enumerate().take(last).skip(first + 1) {
             let sq_dist = sq_seg_dist(point, a, b);
             if sq_dist > max_sq_dist {
@@ -39,7 +44,9 @@ pub(super) fn simplify_points(points: &[Point], sq_tol: f64) -> Ring {
             }
         }
         if let Some(index) = split_index {
-            keep[index] = true;
+            if let Some(slot) = keep.get_mut(index) {
+                *slot = true;
+            }
             stack.push((first, index));
             stack.push((index, last));
         }

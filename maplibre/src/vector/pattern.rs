@@ -129,10 +129,14 @@ fn pattern_scale(zoom: f64) -> f32 {
 pub(super) fn premultiplied(data: &[u8]) -> Vec<u8> {
     let mut out = data.to_vec();
     for texel in out.as_chunks_mut::<4>().0 {
-        let alpha = u16::from(texel[3]);
-        for channel in &mut texel[..3] {
-            *channel = ((u16::from(*channel) * alpha + 127) / 255) as u8;
-        }
+        let [r, g, b, a] = *texel;
+        let alpha = u16::from(a);
+        *texel = [
+            ((u16::from(r) * alpha + 127) / 255) as u8,
+            ((u16::from(g) * alpha + 127) / 255) as u8,
+            ((u16::from(b) * alpha + 127) / 255) as u8,
+            a,
+        ];
     }
     out
 }

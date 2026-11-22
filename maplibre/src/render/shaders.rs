@@ -45,7 +45,7 @@ pub use texture::{tile_texture_vertex_buffers, DemShader, DemShading, RasterShad
 pub use tile_mask::{FlatTileMaskShader, TileMaskShader};
 pub use vertex::{
     FillShaderFeatureMetadata, SDFShaderFeatureMetadata, ShaderLayerMetadata, ShaderTileMetadata,
-    ShaderVertex, POSED_GLYPH, WHOLE_TILE,
+    ShaderVertex, SymbolPlacementMetadata, POSED_GLYPH, WHOLE_TILE,
 };
 
 use crate::render::resource::{FragmentState, VertexBufferLayout, VertexState};

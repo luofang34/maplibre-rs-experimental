@@ -270,10 +270,15 @@ fn normalize_pattern(pattern: Vec<f64>) -> Vec<f64> {
     let mut parts = pattern;
     if parts.len() % 2 == 1 {
         let last = parts.pop().unwrap_or(0.0);
-        parts[0] += last;
+        if let Some(first) = parts.first_mut() {
+            *first += last;
+        }
     }
-    let mut merged = vec![parts[0]];
-    for pair in parts[1..].chunks(2) {
+    let Some((&first, rest)) = parts.split_first() else {
+        return Vec::new();
+    };
+    let mut merged = vec![first];
+    for pair in rest.chunks(2) {
         match pair {
             [gap, dash] if *gap == 0.0 => {
                 if let Some(last) = merged.last_mut() {
@@ -291,7 +296,9 @@ fn normalize_pattern(pattern: Vec<f64>) -> Vec<f64> {
         }
         // The pattern ended on a dash that the first one continues.
         let last = merged.pop().unwrap_or(0.0);
-        merged[0] += last;
+        if let Some(first) = merged.first_mut() {
+            *first += last;
+        }
     }
     if merged.iter().sum::<f64>() <= 0.0 {
         merged.clear();
@@ -354,7 +361,12 @@ fn round_dash_pixels(pattern: &[f64]) -> (Vec<u8>, f32, u32) {
                 .copied()
                 .enumerate()
                 .find(|(_, (_, right))| x <= *right)
-                .unwrap_or((bounds.len() - 1, bounds[bounds.len() - 1]));
+                .unwrap_or_else(|| {
+                    (
+                        bounds.len().saturating_sub(1),
+                        bounds.last().copied().unwrap_or((0.0, 0.0)),
+                    )
+                });
             let nearest = (x - left).abs().min((x - right).abs());
             let signed = if index % 2 == 0 {
                 (nearest * nearest + (half - middle.abs()).powi(2)).sqrt()
@@ -374,19 +386,12 @@ fn dash_scale(zoom: f64) -> f32 {
     2.0_f64.powf(zoom - zoom.floor()) as f32
 }
 
-fn create_entry(
+fn create_dash_texture_view(
     device: &wgpu::Device,
     queue: &crate::render::upload_queue::UploadQueue,
-    layout: &wgpu::BindGroupLayout,
-    (pattern, round): (&[f64], bool),
-    (image, scale): (&LineImage, f32),
-) -> DashEntry {
-    let (pixels, period, rows) = if round {
-        round_dash_pixels(pattern)
-    } else {
-        let (pixels, period) = dash_pixels(pattern);
-        (pixels, period, 1)
-    };
+    pixels: &[u8],
+    rows: u32,
+) -> (wgpu::Texture, wgpu::TextureView, wgpu::Sampler) {
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("line dash distance"),
         size: wgpu::Extent3d {
@@ -403,7 +408,7 @@ fn create_entry(
     });
     queue.write_texture(
         texture.as_image_copy(),
-        &pixels,
+        pixels,
         wgpu::TexelCopyBufferLayout {
             offset: 0,
             bytes_per_row: Some(WIDTH * 4),
@@ -418,6 +423,60 @@ fn create_entry(
         min_filter: wgpu::FilterMode::Linear,
         ..Default::default()
     });
+    (texture, view, sampler)
+}
+
+fn create_dash_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    dash: (&wgpu::TextureView, &wgpu::Sampler),
+    uniform: &wgpu::Buffer,
+    ramp: (&wgpu::TextureView, &wgpu::Sampler),
+) -> wgpu::BindGroup {
+    use wgpu::BindingResource::{Sampler, TextureView};
+    let entries = [
+        wgpu::BindGroupEntry {
+            binding: 0,
+            resource: TextureView(dash.0),
+        },
+        wgpu::BindGroupEntry {
+            binding: 1,
+            resource: Sampler(dash.1),
+        },
+        wgpu::BindGroupEntry {
+            binding: 2,
+            resource: uniform.as_entire_binding(),
+        },
+        wgpu::BindGroupEntry {
+            binding: 3,
+            resource: TextureView(ramp.0),
+        },
+        wgpu::BindGroupEntry {
+            binding: 4,
+            resource: Sampler(ramp.1),
+        },
+    ];
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("line dash"),
+        layout,
+        entries: &entries,
+    })
+}
+
+fn create_entry(
+    device: &wgpu::Device,
+    queue: &crate::render::upload_queue::UploadQueue,
+    layout: &wgpu::BindGroupLayout,
+    (pattern, round): (&[f64], bool),
+    (image, scale): (&LineImage, f32),
+) -> DashEntry {
+    let (pixels, period, rows) = if round {
+        round_dash_pixels(pattern)
+    } else {
+        let (pixels, period) = dash_pixels(pattern);
+        (pixels, period, 1)
+    };
+    let (dash_texture, view, sampler) = create_dash_texture_view(device, queue, &pixels, rows);
     let uniform = queue.create_buffer_init(
         device,
         &wgpu::util::BufferInitDescriptor {
@@ -427,39 +486,20 @@ fn create_entry(
         },
     );
     let (ramp_texture, ramp_view, ramp_sampler) = ramp_texture(device, queue, image);
-    let binding = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("line dash"),
+    let binding = create_dash_bind_group(
+        device,
         layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::Sampler(&sampler),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: uniform.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: wgpu::BindingResource::TextureView(&ramp_view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 4,
-                resource: wgpu::BindingResource::Sampler(&ramp_sampler),
-            },
-        ],
-    });
+        (&view, &sampler),
+        &uniform,
+        (&ramp_view, &ramp_sampler),
+    );
     DashEntry {
         pattern: pattern.to_vec(),
         round,
         image: image.clone(),
         binding,
         uniform,
-        dash_texture: texture,
+        dash_texture,
         ramp_texture,
         period,
         scale,

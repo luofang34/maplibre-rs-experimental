@@ -138,6 +138,74 @@ pub(super) fn build_edges(tile: WorldTileCoords, sources: &Sources, dems: &Dems)
     result
 }
 
+struct SideOwnerGrid<'a> {
+    owner_tile: WorldTileCoords,
+    owner_scale: f64,
+    owner_x: f64,
+    owner_y: f64,
+    owner_dem: Option<ResolvedDem<'a>>,
+    sources: &'a Sources,
+    dems: &'a Dems<'a>,
+}
+
+impl<'a> SideOwnerGrid<'a> {
+    fn new(owner_tile: WorldTileCoords, sources: &'a Sources, dems: &'a Dems<'a>) -> Self {
+        Self {
+            owner_tile,
+            owner_scale: scale_of(u8::from(owner_tile.z)),
+            owner_x: f64::from(owner_tile.x),
+            owner_y: f64::from(owner_tile.y),
+            owner_dem: ResolvedDem::lookup(owner_tile, sources, dems),
+            sources,
+            dems,
+        }
+    }
+
+    fn eval_sample(&self, p: [f64; 2], interior: bool) -> f64 {
+        if interior {
+            return self.owner_dem.map_or(0.0, |d| d.sample(p));
+        }
+        let ep = owner(p, self.owner_tile, self.sources);
+        sample_source(p, self.sources.tiles.get(&ep).copied().flatten(), self.dems)
+    }
+
+    fn eval_horizontal_col(&self, gx: f64, (gy0, gy1): (f64, f64), single_row: bool) -> (f64, f64) {
+        let px = (self.owner_x + gx / N as f64) / self.owner_scale;
+        let interior = single_row && gx > 0.0 && gx < N as f64;
+        let top = self.eval_sample(
+            [px, (self.owner_y + gy0 / N as f64) / self.owner_scale],
+            interior,
+        );
+        let bot = if single_row {
+            top
+        } else {
+            self.eval_sample(
+                [px, (self.owner_y + gy1 / N as f64) / self.owner_scale],
+                false,
+            )
+        };
+        (top, bot)
+    }
+
+    fn eval_vertical_row(&self, gy: f64, (gx0, gx1): (f64, f64), single_col: bool) -> (f64, f64) {
+        let py = (self.owner_y + gy / N as f64) / self.owner_scale;
+        let interior = single_col && gy > 0.0 && gy < N as f64;
+        let left = self.eval_sample(
+            [(self.owner_x + gx0 / N as f64) / self.owner_scale, py],
+            interior,
+        );
+        let right = if single_col {
+            left
+        } else {
+            self.eval_sample(
+                [(self.owner_x + gx1 / N as f64) / self.owner_scale, py],
+                false,
+            )
+        };
+        (left, right)
+    }
+}
+
 fn fill_horizontal_side(
     result: &mut EdgeHeights,
     side: usize,
@@ -146,60 +214,29 @@ fn fill_horizontal_side(
     sources: &Sources,
     dems: &Dems,
 ) {
-    let owner_scale = scale_of(u8::from(side_owner.z));
-    let owner_x = f64::from(side_owner.x);
-    let owner_y = f64::from(side_owner.y);
-    let owner_dem = ResolvedDem::lookup(side_owner, sources, dems);
-    let y = (py * owner_scale - owner_y).clamp(0.0, 1.0) * N as f64;
-    let gy0 = y.floor();
-    let gy1 = y.ceil();
+    let grid = SideOwnerGrid::new(side_owner, sources, dems);
+    let y = (py * grid.owner_scale - grid.owner_y).clamp(0.0, 1.0) * N as f64;
+    let gy_pair = (y.floor(), y.ceil());
     let fy = y.fract();
     let single_row = fy == 0.0;
-
-    let mut cached_gx = -1_i32;
-    let mut cached_top = 0.0_f64;
-    let mut cached_bot = 0.0_f64;
-
-    let eval_col = |gx: f64| -> (f64, f64) {
-        let px = (owner_x + gx / N as f64) / owner_scale;
-        let interior = single_row && gx > 0.0 && gx < N as f64;
-        let top = if interior {
-            owner_dem.map_or(0.0, |d| {
-                d.sample([px, (owner_y + gy0 / N as f64) / owner_scale])
-            })
-        } else {
-            let p = [px, (owner_y + gy0 / N as f64) / owner_scale];
-            let ep = owner(p, side_owner, sources);
-            sample_source(p, sources.tiles.get(&ep).copied().flatten(), dems)
-        };
-        let bot = if single_row {
-            top
-        } else {
-            let p = [px, (owner_y + gy1 / N as f64) / owner_scale];
-            let ep = owner(p, side_owner, sources);
-            sample_source(p, sources.tiles.get(&ep).copied().flatten(), dems)
-        };
-        (top, bot)
-    };
+    let mut cached = (-1_i32, 0.0_f64, 0.0_f64);
 
     for (i, slot) in result.samples.iter_mut().enumerate().skip(1) {
         let px = (tx + i as f64 / N as f64) / tile_scale;
-        let x = (px * owner_scale - owner_x)
-            .rem_euclid(owner_scale)
+        let x = (px * grid.owner_scale - grid.owner_x)
+            .rem_euclid(grid.owner_scale)
             .min(1.0)
             * N as f64;
         let gx0 = x.floor();
         let fx = x.fract();
         let gx0_i = gx0 as i32;
-        let (t0, b0) = if gx0_i == cached_gx {
-            (cached_top, cached_bot)
+        let (t0, b0) = if gx0_i == cached.0 {
+            (cached.1, cached.2)
         } else {
-            eval_col(gx0)
+            grid.eval_horizontal_col(gx0, gy_pair, single_row)
         };
         let val = if fx == 0.0 {
-            cached_gx = gx0_i;
-            cached_top = t0;
-            cached_bot = b0;
+            cached = (gx0_i, t0, b0);
             if single_row {
                 t0
             } else {
@@ -207,19 +244,18 @@ fn fill_horizontal_side(
             }
         } else {
             let gx1 = x.ceil();
-            let (t1, b1) = eval_col(gx1);
-            cached_gx = gx1 as i32;
-            cached_top = t1;
-            cached_bot = b1;
+            let (t1, b1) = grid.eval_horizontal_col(gx1, gy_pair, single_row);
+            cached = (gx1 as i32, t1, b1);
             let top = t0 * (1.0 - fx) + t1 * fx;
             if single_row {
                 top
             } else {
-                let bot = b0 * (1.0 - fx) + b1 * fx;
-                top * (1.0 - fy) + bot * fy
+                top * (1.0 - fy) + (b0 * (1.0 - fx) + b1 * fx) * fy
             }
         };
-        slot[side] = val as f32;
+        if let Some(cell) = slot.get_mut(side) {
+            *cell = val as f32;
+        }
     }
 }
 
@@ -231,60 +267,29 @@ fn fill_vertical_side(
     sources: &Sources,
     dems: &Dems,
 ) {
-    let owner_scale = scale_of(u8::from(side_owner.z));
-    let owner_x = f64::from(side_owner.x);
-    let owner_y = f64::from(side_owner.y);
-    let owner_dem = ResolvedDem::lookup(side_owner, sources, dems);
-    let x = (px * owner_scale - owner_x)
-        .rem_euclid(owner_scale)
+    let grid = SideOwnerGrid::new(side_owner, sources, dems);
+    let x = (px * grid.owner_scale - grid.owner_x)
+        .rem_euclid(grid.owner_scale)
         .min(1.0)
         * N as f64;
-    let gx0 = x.floor();
-    let gx1 = x.ceil();
+    let gx_pair = (x.floor(), x.ceil());
     let fx = x.fract();
     let single_col = fx == 0.0;
-
-    let mut cached_gy = -1_i32;
-    let mut cached_left = 0.0_f64;
-    let mut cached_right = 0.0_f64;
-
-    let eval_row = |gy: f64| -> (f64, f64) {
-        let py = (owner_y + gy / N as f64) / owner_scale;
-        let interior = single_col && gy > 0.0 && gy < N as f64;
-        let left = if interior {
-            owner_dem.map_or(0.0, |d| {
-                d.sample([(owner_x + gx0 / N as f64) / owner_scale, py])
-            })
-        } else {
-            let p = [(owner_x + gx0 / N as f64) / owner_scale, py];
-            let ep = owner(p, side_owner, sources);
-            sample_source(p, sources.tiles.get(&ep).copied().flatten(), dems)
-        };
-        let right = if single_col {
-            left
-        } else {
-            let p = [(owner_x + gx1 / N as f64) / owner_scale, py];
-            let ep = owner(p, side_owner, sources);
-            sample_source(p, sources.tiles.get(&ep).copied().flatten(), dems)
-        };
-        (left, right)
-    };
+    let mut cached = (-1_i32, 0.0_f64, 0.0_f64);
 
     for (i, slot) in result.samples.iter_mut().enumerate().skip(1) {
         let py = (ty + i as f64 / N as f64) / tile_scale;
-        let y = (py * owner_scale - owner_y).clamp(0.0, 1.0) * N as f64;
+        let y = (py * grid.owner_scale - grid.owner_y).clamp(0.0, 1.0) * N as f64;
         let gy0 = y.floor();
         let fy = y.fract();
         let gy0_i = gy0 as i32;
-        let (l0, r0) = if gy0_i == cached_gy {
-            (cached_left, cached_right)
+        let (l0, r0) = if gy0_i == cached.0 {
+            (cached.1, cached.2)
         } else {
-            eval_row(gy0)
+            grid.eval_vertical_row(gy0, gx_pair, single_col)
         };
         let val = if fy == 0.0 {
-            cached_gy = gy0_i;
-            cached_left = l0;
-            cached_right = r0;
+            cached = (gy0_i, l0, r0);
             if single_col {
                 l0
             } else {
@@ -292,10 +297,8 @@ fn fill_vertical_side(
             }
         } else {
             let gy1 = y.ceil();
-            let (l1, r1) = eval_row(gy1);
-            cached_gy = gy1 as i32;
-            cached_left = l1;
-            cached_right = r1;
+            let (l1, r1) = grid.eval_vertical_row(gy1, gx_pair, single_col);
+            cached = (gy1 as i32, l1, r1);
             let top = if single_col {
                 l0
             } else {
@@ -308,7 +311,9 @@ fn fill_vertical_side(
             };
             top * (1.0 - fy) + bot * fy
         };
-        slot[side] = val as f32;
+        if let Some(cell) = slot.get_mut(side) {
+            *cell = val as f32;
+        }
     }
 }
 

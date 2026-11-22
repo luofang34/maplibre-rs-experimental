@@ -17,7 +17,7 @@ workspace = true
 [lib]
 bench = false
 
-[dependencies]
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 maplibre = { path = "../maplibre", features = ["headless", "raster", "embed-static-tiles", "thread-safe-futures"] }
 
 [dev-dependencies]

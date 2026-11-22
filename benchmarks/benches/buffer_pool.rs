@@ -1,4 +1,7 @@
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![expect(
+    clippy::expect_used,
+    reason = "benchmark setup aborts on fixture or allocator errors"
+)]
 
 use std::hint::black_box;
 

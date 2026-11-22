@@ -116,7 +116,9 @@ pub(super) fn sfnt_checksum(data: &[u8]) -> u32 {
     }
     if !rem.is_empty() {
         let mut tail = [0_u8; 4];
-        tail[..rem.len()].copy_from_slice(rem);
+        if let Some(dst) = tail.get_mut(..rem.len()) {
+            dst.copy_from_slice(rem);
+        }
         sum = sum.wrapping_add(u32::from_be_bytes(tail));
     }
     sum
@@ -156,20 +158,23 @@ pub(super) fn assemble_sfnt(flavor: u32, mut tables: Vec<SfntTable>) -> Result<V
         .filter(|&size| size <= MAX_DECOMPRESSED_FONT_BYTES)
         .ok_or(FontError::InvalidContainer("sfnt exceeds maximum size"))?;
 
-    let mut out = vec![0_u8; total_size];
-    out[0..4].copy_from_slice(&flavor.to_be_bytes());
-    out[4..6].copy_from_slice(&num_tables.to_be_bytes());
-    out[6..8].copy_from_slice(&search_range.to_be_bytes());
-    out[8..10].copy_from_slice(&entry_selector.to_be_bytes());
-    out[10..12].copy_from_slice(&range_shift.to_be_bytes());
+    let mut out = Vec::with_capacity(total_size);
+    out.extend_from_slice(&flavor.to_be_bytes());
+    out.extend_from_slice(&num_tables.to_be_bytes());
+    out.extend_from_slice(&search_range.to_be_bytes());
+    out.extend_from_slice(&entry_selector.to_be_bytes());
+    out.extend_from_slice(&range_shift.to_be_bytes());
 
     let mut head_offset: Option<usize> = None;
     let mut data_cursor = dir_size;
-    for (idx, mut table) in tables.into_iter().enumerate() {
-        if &table.tag == b"head" && table.data.len() >= 12 {
-            // Zero `checkSumAdjustment` before computing `head`'s table checksum.
-            table.data[8..12].copy_from_slice(&[0, 0, 0, 0]);
-            head_offset = Some(data_cursor);
+    let mut body = Vec::with_capacity(body_size);
+    for mut table in tables {
+        if &table.tag == b"head" {
+            if let Some(slot) = table.data.get_mut(8..12) {
+                // Zero `checkSumAdjustment` before computing `head`'s table checksum.
+                slot.copy_from_slice(&[0, 0, 0, 0]);
+                head_offset = Some(data_cursor);
+            }
         }
         let checksum = sfnt_checksum(&table.data);
         let offset_u32 = u32::try_from(data_cursor)
@@ -177,19 +182,23 @@ pub(super) fn assemble_sfnt(flavor: u32, mut tables: Vec<SfntTable>) -> Result<V
         let length_u32 = u32::try_from(table.data.len())
             .map_err(|_| FontError::InvalidContainer("table length overflow"))?;
 
-        let rec = 12 + idx * 16;
-        out[rec..rec + 4].copy_from_slice(&table.tag);
-        out[rec + 4..rec + 8].copy_from_slice(&checksum.to_be_bytes());
-        out[rec + 8..rec + 12].copy_from_slice(&offset_u32.to_be_bytes());
-        out[rec + 12..rec + 16].copy_from_slice(&length_u32.to_be_bytes());
+        out.extend_from_slice(&table.tag);
+        out.extend_from_slice(&checksum.to_be_bytes());
+        out.extend_from_slice(&offset_u32.to_be_bytes());
+        out.extend_from_slice(&length_u32.to_be_bytes());
 
-        out[data_cursor..data_cursor + table.data.len()].copy_from_slice(&table.data);
+        body.extend_from_slice(&table.data);
+        let padded_len = (body.len() + 3) & !3;
+        body.resize(padded_len, 0);
         data_cursor += (table.data.len() + 3) & !3;
     }
+    out.extend_from_slice(&body);
 
     if let Some(head_pos) = head_offset {
         let adjustment = 0xB1B0_AFBA_u32.wrapping_sub(sfnt_checksum(&out));
-        out[head_pos + 8..head_pos + 12].copy_from_slice(&adjustment.to_be_bytes());
+        if let Some(slot) = out.get_mut(head_pos + 8..head_pos + 12) {
+            slot.copy_from_slice(&adjustment.to_be_bytes());
+        }
     }
 
     Ok(out)

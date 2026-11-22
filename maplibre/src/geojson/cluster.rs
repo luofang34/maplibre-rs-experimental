@@ -225,19 +225,17 @@ impl Clusters {
             })
             .collect();
         let max_zoom = usize::from(options.max_zoom);
-        let mut levels: Vec<Option<Level>> = (0..=max_zoom + 1).map(|_| None).collect();
-        levels[max_zoom + 1] = Some(Level::new(items.clone()));
+        let mut levels: Vec<Level> = Vec::with_capacity(max_zoom + 2);
+        levels.push(Level::new(items.clone()));
         for zoom in (0..=max_zoom).rev() {
-            let Some(previous) = levels[zoom + 1].as_ref() else {
+            let Some(previous) = levels.last() else {
                 break;
             };
             items = Self::merge(previous, zoom, &options);
-            levels[zoom] = Some(Level::new(items.clone()));
+            levels.push(Level::new(items.clone()));
         }
-        Self {
-            options,
-            levels: levels.into_iter().flatten().collect(),
-        }
+        levels.reverse();
+        Self { options, levels }
     }
 
     fn merge(previous: &Level, zoom: usize, options: &ClusterOptions) -> Vec<Item> {
@@ -245,10 +243,13 @@ impl Clusters {
         let mut merged_at = vec![usize::MAX; previous.items.len()];
         let mut result = Vec::new();
         for (index, item) in previous.items.iter().enumerate() {
-            if merged_at[index] <= zoom {
+            let Some(slot) = merged_at.get_mut(index) else {
+                continue;
+            };
+            if *slot <= zoom {
                 continue;
             }
-            merged_at[index] = zoom;
+            *slot = zoom;
             let neighbours: Vec<usize> = previous
                 .tree
                 .locate_within_distance(item.position, radius * radius)
@@ -258,67 +259,30 @@ impl Clusters {
             let total = own
                 + neighbours
                     .iter()
-                    .filter(|neighbour| merged_at[**neighbour] > zoom)
-                    .map(|neighbour| previous.items[*neighbour].count.max(1))
+                    .filter(|neighbour| merged_at.get(**neighbour).is_some_and(|&m| m > zoom))
+                    .filter_map(|neighbour| previous.items.get(*neighbour))
+                    .map(|other| other.count.max(1))
                     .sum::<usize>();
             if total > own && total >= options.min_points {
-                let mut weighted = [item.position[0] * own as f64, item.position[1] * own as f64];
-                let mut values = item.values.clone();
-                for neighbour in neighbours {
-                    if merged_at[neighbour] <= zoom {
-                        continue;
-                    }
-                    merged_at[neighbour] = zoom;
-                    let other = &previous.items[neighbour];
-                    let weight = other.count.max(1) as f64;
-                    weighted[0] += other.position[0] * weight;
-                    weighted[1] += other.position[1] * weight;
-                    for (prop_idx, property) in options.properties.iter().enumerate() {
-                        if matches!(property.reduce, Reduce::Expression(_)) {
-                            let mut props = other.point_props.clone().unwrap_or_default();
-                            for (j, other_prop) in options.properties.iter().enumerate() {
-                                props.insert(other_prop.name.clone(), other.values[j].clone());
-                            }
-                            if let Some(src_key) = &property.source_key {
-                                props
-                                    .entry(src_key.clone())
-                                    .or_insert_with(|| other.values[prop_idx].clone());
-                            }
-                            props.insert(property.name.clone(), other.values[prop_idx].clone());
-                            let ctx = EvaluationContext {
-                                zoom: zoom as f64,
-                                properties: Some(&props),
-                                accumulated: Some(&values[prop_idx]),
-                                ..EvaluationContext::default()
-                            };
-                            values[prop_idx] = property.reduce.combine(
-                                &values[prop_idx],
-                                &other.values[prop_idx],
-                                &ctx,
-                            );
-                        } else {
-                            values[prop_idx] = property.reduce.combine(
-                                &values[prop_idx],
-                                &other.values[prop_idx],
-                                &EvaluationContext::default(),
-                            );
-                        }
-                    }
-                }
-                result.push(Item {
-                    position: [weighted[0] / total as f64, weighted[1] / total as f64],
-                    count: total,
-                    id: (index << 5) + zoom + 1 + previous.items.len(),
-                    point_props: None,
-                    values,
-                });
+                result.push(Self::build_merged_cluster(
+                    (index, item, own, total),
+                    &neighbours,
+                    &mut merged_at,
+                    previous,
+                    zoom,
+                    options,
+                ));
             } else {
                 result.push(item.clone());
                 if total > 1 {
                     for neighbour in neighbours {
-                        if merged_at[neighbour] > zoom {
-                            merged_at[neighbour] = zoom;
-                            result.push(previous.items[neighbour].clone());
+                        if let Some(m) = merged_at.get_mut(neighbour) {
+                            if *m > zoom {
+                                *m = zoom;
+                                if let Some(other) = previous.items.get(neighbour) {
+                                    result.push(other.clone());
+                                }
+                            }
                         }
                     }
                 }
@@ -327,10 +291,88 @@ impl Clusters {
         result
     }
 
+    fn build_merged_cluster(
+        (index, item, own, total): (usize, &Item, usize, usize),
+        neighbours: &[usize],
+        merged_at: &mut [usize],
+        previous: &Level,
+        zoom: usize,
+        options: &ClusterOptions,
+    ) -> Item {
+        let mut weighted = [item.position[0] * own as f64, item.position[1] * own as f64];
+        let mut values = item.values.clone();
+        for &neighbour in neighbours {
+            let Some(m) = merged_at.get_mut(neighbour) else {
+                continue;
+            };
+            if *m <= zoom {
+                continue;
+            }
+            *m = zoom;
+            let Some(other) = previous.items.get(neighbour) else {
+                continue;
+            };
+            let weight = other.count.max(1) as f64;
+            weighted[0] += other.position[0] * weight;
+            weighted[1] += other.position[1] * weight;
+            Self::combine_properties(&mut values, other, zoom, options);
+        }
+        Item {
+            position: [weighted[0] / total as f64, weighted[1] / total as f64],
+            count: total,
+            id: (index << 5) + zoom + 1 + previous.items.len(),
+            point_props: None,
+            values,
+        }
+    }
+
+    fn combine_properties(
+        values: &mut [Datum],
+        other: &Item,
+        zoom: usize,
+        options: &ClusterOptions,
+    ) {
+        for (prop_idx, property) in options.properties.iter().enumerate() {
+            let (Some(acc), Some(other_val)) =
+                (values.get_mut(prop_idx), other.values.get(prop_idx))
+            else {
+                continue;
+            };
+            *acc = if matches!(property.reduce, Reduce::Expression(_)) {
+                let mut props = other.point_props.clone().unwrap_or_default();
+                for (other_prop, val) in options.properties.iter().zip(&other.values) {
+                    props.insert(other_prop.name.clone(), val.clone());
+                }
+                if let Some(src_key) = &property.source_key {
+                    props
+                        .entry(src_key.clone())
+                        .or_insert_with(|| other_val.clone());
+                }
+                props.insert(property.name.clone(), other_val.clone());
+                let ctx = EvaluationContext {
+                    zoom: zoom as f64,
+                    properties: Some(&props),
+                    accumulated: Some(acc),
+                    ..EvaluationContext::default()
+                };
+                property.reduce.combine(acc, other_val, &ctx)
+            } else {
+                property
+                    .reduce
+                    .combine(acc, other_val, &EvaluationContext::default())
+            };
+        }
+    }
+
     /// The points and clusters inside `window` (`[west, north, east, south]` in world units)
     /// at a tile zoom, in the order they were made.
     pub fn within(&self, zoom: u8, window: [f64; 4]) -> Vec<Clustered> {
-        let level = &self.levels[usize::from(zoom).min(self.levels.len() - 1)];
+        let Some(level) = self
+            .levels
+            .get(usize::from(zoom).min(self.levels.len().saturating_sub(1)))
+        else {
+            return Vec::new();
+        };
         let corners = ([window[0], window[1]], [window[2], window[3]]);
         let mut hits: Vec<usize> = level
             .tree
@@ -339,10 +381,10 @@ impl Clusters {
             .collect();
         hits.sort_unstable();
         hits.into_iter()
-            .map(|index| {
-                let item = &level.items[index];
+            .filter_map(|index| {
+                let item = level.items.get(index)?;
                 if item.count == 0 {
-                    return Clustered::Point(item.id, item.position);
+                    return Some(Clustered::Point(item.id, item.position));
                 }
                 let mut properties = vec![
                     ("cluster".to_owned(), json!(true)),
@@ -356,7 +398,11 @@ impl Clusters {
                 for (property, value) in self.options.properties.iter().zip(&item.values) {
                     properties.push((property.name.clone(), value.to_json()));
                 }
-                Clustered::Cluster(item.position, item.id as u64, properties)
+                Some(Clustered::Cluster(
+                    item.position,
+                    item.id as u64,
+                    properties,
+                ))
             })
             .collect()
     }
@@ -383,85 +429,4 @@ pub fn unproject(position: [f64; 2]) -> [f64; 2] {
 }
 
 #[cfg(test)]
-mod tests {
-    #![allow(clippy::expect_used, clippy::panic)]
-
-    use super::*;
-
-    fn options() -> ClusterOptions {
-        ClusterOptions::new(Some(40.0), Some(4), None, None, None)
-    }
-
-    #[test]
-    fn points_within_the_radius_merge_at_low_zoom_and_part_at_high_zoom() {
-        let properties: [(String, Value); 0] = [];
-        let points = [
-            ([0.5, 0.5], &properties[..]),
-            ([0.5 + 0.0001, 0.5], &properties[..]),
-            ([0.9, 0.9], &properties[..]),
-        ];
-        let clusters = Clusters::new(&points, options());
-        let world = [0.0, 0.0, 1.0, 1.0];
-        let low = clusters.within(0, world);
-        assert_eq!(low.len(), 2, "the two close points merge");
-        assert!(low
-            .iter()
-            .any(|item| matches!(item, Clustered::Cluster(_, _, p)
-            if p.iter().any(|(name, value)| name == "point_count" && *value == json!(2)))));
-        assert_eq!(
-            clusters.within(5, world).len(),
-            3,
-            "past the cluster zoom nothing merges"
-        );
-    }
-
-    #[test]
-    fn counts_of_a_thousand_or_more_abbreviate() {
-        assert_eq!(abbreviated(999), json!(999));
-        assert_eq!(abbreviated(1234), json!("1.2k"));
-        assert_eq!(abbreviated(12_400), json!("12k"));
-    }
-
-    #[test]
-    fn cluster_properties_support_shorthand_and_arbitrary_accumulated_reduce_expressions() {
-        let prop_defs = json!({
-            "sum_short": ["+", ["get", "mag"]],
-            "max_legacy": ["max", ["accumulated"], ["get", "mag"]],
-            "sum_expr": [["+", ["accumulated"], ["get", "sum_expr"]], ["get", "mag"]],
-            "sum_by_field": [["+", ["accumulated"], ["get", "mag"]], ["get", "mag"]],
-            "capped_max": [
-                ["case", [">", ["get", "capped_max"], ["accumulated"]], ["get", "capped_max"], ["accumulated"]],
-                ["min", ["get", "mag"], 8]
-            ]
-        });
-        let opts = ClusterOptions::new(Some(60.0), Some(6), None, Some(&prop_defs), None);
-        let p1 = [("mag".to_owned(), json!(3))];
-        let p2 = [("mag".to_owned(), json!(10))];
-        let p3 = [("mag".to_owned(), json!(5))];
-        // p1 and p2 merge at zoom 4, then merge with p3 at zoom 0 (hierarchical multi-level merge!).
-        let points = [
-            ([0.5, 0.5], &p1[..]),
-            ([0.5001, 0.5], &p2[..]),
-            ([0.51, 0.5], &p3[..]),
-        ];
-        let clusters = Clusters::new(&points, opts);
-        let items = clusters.within(0, [0.0, 0.0, 1.0, 1.0]);
-        assert_eq!(items.len(), 1);
-        let Clustered::Cluster(_, _, cluster_props) = &items[0] else {
-            panic!("expected single merged cluster");
-        };
-        let lookup = |key: &str| {
-            cluster_props
-                .iter()
-                .find(|(k, _)| k == key)
-                .map(|(_, v)| v.clone())
-                .expect("cluster property present")
-        };
-        assert_eq!(lookup("point_count"), json!(3));
-        assert_eq!(lookup("sum_short"), json!(18));
-        assert_eq!(lookup("max_legacy"), json!(10));
-        assert_eq!(lookup("sum_expr"), json!(18));
-        assert_eq!(lookup("sum_by_field"), json!(18));
-        assert_eq!(lookup("capped_max"), json!(8));
-    }
-}
+mod tests;

@@ -37,8 +37,8 @@ fn a_hill_before_only_a_names_tail_leaves_every_glyph_drawn() {
             let reference = glyph_pixels(&open, &open_pixels, ratio);
             let mut behind = scene_map(view, &hill(40.0..450.0)).await;
             let pixels = behind.settle().await;
-            // Behind the hill the #808080 road is occluded, so antialiased glyph edges blend
-            // against #223344 terrain instead of the lighter road and lose a couple fringe px.
+            // Behind the hill the 0x808080 road is occluded, so antialiased glyph edges blend
+            // against 0x223344 terrain instead of the lighter road and lose a couple fringe px.
             failures.extend(incomplete_glyphs(
                 &format!("{ratio}x, a hill before the east half"),
                 &glyph_pixels(&behind, &pixels, ratio),

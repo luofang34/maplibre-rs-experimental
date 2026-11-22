@@ -25,7 +25,7 @@ use crate::{
     render::resource::{BackingBufferDescriptor, Queue},
     style::layer::StyleLayer,
     vector::{
-        resource::{BackingBufferType, BufferPool},
+        resource::{BackingBufferType, BufferPool, LayerGeometryUpload, UniformLayerUpload},
         tessellation::OverAlignedVertexBuffer,
     },
 };

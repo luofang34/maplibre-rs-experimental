@@ -23,6 +23,17 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
                 return Some((idx as u16, range));
             }
         }
+        self.grow_vertex_slab(queue, bytes, align, needs_paired_fm, strides)
+    }
+
+    fn grow_vertex_slab(
+        &mut self,
+        queue: Option<&Q>,
+        bytes: u64,
+        align: u64,
+        needs_paired_fm: bool,
+        strides: ElementStrides,
+    ) -> Option<(u16, Range<u64>)> {
         self.page_factory.as_ref()?;
         self.reclaim_empty_vertex_slabs(0, queue);
         if needs_paired_fm {
@@ -36,61 +47,38 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         let used = self.allocated_elements();
         let req_elems = elem_div(bytes, strides.vertex).max(u64::from(bytes == 0));
         let rem_v = self.max_elements.vertices.saturating_sub(used.vertices);
-        let rem_elems = if needs_paired_fm {
-            rem_v.min(
-                self.max_elements
-                    .feature_metadata
-                    .saturating_sub(used.feature_metadata),
+        let (rem_elems, max_v_page) = if needs_paired_fm {
+            (
+                rem_v.min(
+                    self.max_elements
+                        .feature_metadata
+                        .saturating_sub(used.feature_metadata),
+                ),
+                page_elem_limit(self.max_page_bytes, strides.vertex).min(page_elem_limit(
+                    self.max_page_bytes,
+                    strides.feature_metadata,
+                )),
             )
         } else {
-            rem_v
+            (rem_v, page_elem_limit(self.max_page_bytes, strides.vertex))
         };
-        if req_elems > rem_elems {
+        if req_elems > rem_elems || req_elems > max_v_page {
             return None;
         }
-        let max_v_page = if needs_paired_fm {
-            page_elem_limit(self.max_page_bytes, strides.vertex).min(page_elem_limit(
-                self.max_page_bytes,
-                strides.feature_metadata,
-            ))
-        } else {
-            page_elem_limit(self.max_page_bytes, strides.vertex)
-        };
-        if req_elems > max_v_page {
-            return None;
-        }
-        let is_oversize = req_elems > DEFAULT_PAGE_VERTICES;
-        let slab_elems = if is_oversize {
-            req_elems
-                .next_multiple_of(1024)
-                .min(max_v_page)
-                .min(rem_elems)
-                .max(req_elems)
-        } else {
-            let family_pages = self
-                .vertex_slabs
-                .iter()
-                .filter(|slot| {
-                    slot.as_ref().is_some_and(|slab| {
-                        !slab.dedicated_oversize && slab.paired_fm.is_some() == needs_paired_fm
-                    })
-                })
-                .count();
-            let (target_v, req_align) = (
-                match family_pages {
-                    0 => 2 * 1024,
-                    1 => 4 * 1024,
-                    2 => 16 * 1024,
-                    _ => DEFAULT_PAGE_VERTICES,
-                },
-                1024,
-            );
-            target_v
-                .min(max_v_page)
-                .max(req_elems.next_multiple_of(req_align).min(max_v_page))
-                .min(rem_elems)
-                .max(req_elems)
-        };
+        let family_pages = self
+            .vertex_slabs
+            .iter()
+            .flatten()
+            .filter(|s| !s.dedicated_oversize && s.paired_fm.is_some() == needs_paired_fm)
+            .count();
+        let (slab_elems, is_oversize) = choose_step_slab_elems(
+            req_elems,
+            rem_elems,
+            max_v_page,
+            DEFAULT_PAGE_VERTICES,
+            [2 * 1024, 4 * 1024, 16 * 1024],
+            family_pages,
+        );
         let v_bytes = fitting_buffer_size(strides.vertex as usize, slab_elems, self.max_page_bytes);
         let slot_idx = first_free_slot(&self.vertex_slabs);
         let page_id = u16::try_from(slot_idx).ok()?;
@@ -125,28 +113,34 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         strides: ElementStrides,
     ) -> Option<(u16, Range<u64>)> {
         let align = strides.active_index_align(use_u16);
-        let elem_stride = strides.active_index_stride(use_u16);
-        {
-            let target_slabs = if use_u16 {
-                &mut self.index_u16_slabs
-            } else {
-                &mut self.index_native_slabs
-            };
-            if bytes == 0 && target_slabs.iter().all(Option::is_none) && self.page_factory.is_some()
-            {
-                return Some((NO_SLAB, 0..0));
-            }
-            for (idx, slot) in target_slabs.iter_mut().enumerate() {
-                if let Some(slab) = slot.as_mut() {
-                    if !slab.dedicated_oversize {
-                        if let Some(range) = slab.alloc.allocate(bytes, align) {
-                            slab.live_entries += 1;
-                            return Some((idx as u16, range));
-                        }
+        let target_slabs = if use_u16 {
+            &mut self.index_u16_slabs
+        } else {
+            &mut self.index_native_slabs
+        };
+        if bytes == 0 && target_slabs.iter().all(Option::is_none) && self.page_factory.is_some() {
+            return Some((NO_SLAB, 0..0));
+        }
+        for (idx, slot) in target_slabs.iter_mut().enumerate() {
+            if let Some(slab) = slot.as_mut() {
+                if !slab.dedicated_oversize {
+                    if let Some(range) = slab.alloc.allocate(bytes, align) {
+                        slab.live_entries += 1;
+                        return Some((idx as u16, range));
                     }
                 }
             }
         }
+        self.grow_index_slab(queue, bytes, use_u16, strides)
+    }
+
+    fn grow_index_slab(
+        &mut self,
+        queue: Option<&Q>,
+        bytes: u64,
+        use_u16: bool,
+        strides: ElementStrides,
+    ) -> Option<(u16, Range<u64>)> {
         self.page_factory.as_ref()?;
         Self::reclaim_slab_vec(
             &mut self.index_u16_slabs,
@@ -160,6 +154,8 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             queue,
             self.slab_destroyer.as_ref(),
         );
+        let align = strides.active_index_align(use_u16);
+        let elem_stride = strides.active_index_stride(use_u16);
         let rem_i = self
             .max_elements
             .indices
@@ -169,42 +165,24 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         if req_elems > rem_i || req_elems > max_i_page {
             return None;
         }
-        let is_oversize = req_elems > DEFAULT_PAGE_INDICES;
-        let slab_elems = if is_oversize {
-            req_elems
-                .next_multiple_of(1024)
-                .min(max_i_page)
-                .min(rem_i)
-                .max(req_elems)
+        let target_slabs = if use_u16 {
+            &self.index_u16_slabs
         } else {
-            let existing_count = if use_u16 {
-                self.index_u16_slabs
-                    .iter()
-                    .flatten()
-                    .filter(|s| !s.dedicated_oversize)
-                    .count()
-            } else {
-                self.index_native_slabs
-                    .iter()
-                    .flatten()
-                    .filter(|s| !s.dedicated_oversize)
-                    .count()
-            };
-            let (target_i, req_align) = (
-                match existing_count {
-                    0 => 4 * 1024,
-                    1 => 16 * 1024,
-                    2 => 32 * 1024,
-                    _ => DEFAULT_PAGE_INDICES,
-                },
-                1024,
-            );
-            target_i
-                .min(max_i_page)
-                .max(req_elems.next_multiple_of(req_align).min(max_i_page))
-                .min(rem_i)
-                .max(req_elems)
+            &self.index_native_slabs
         };
+        let existing_count = target_slabs
+            .iter()
+            .flatten()
+            .filter(|s| !s.dedicated_oversize)
+            .count();
+        let (slab_elems, is_oversize) = choose_step_slab_elems(
+            req_elems,
+            rem_i,
+            max_i_page,
+            DEFAULT_PAGE_INDICES,
+            [4 * 1024, 16 * 1024, 32 * 1024],
+            existing_count,
+        );
         let i_bytes = fitting_buffer_size(elem_stride as usize, slab_elems, self.max_page_bytes);
         let factory = self.page_factory.as_ref()?;
         let i_buf = (factory.0)(BackingBufferType::Indices, i_bytes);
@@ -265,6 +243,16 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
                 }
             }
         }
+        self.grow_layer_slab(queue, bytes, strides, layer_meta_key)
+    }
+
+    fn grow_layer_slab(
+        &mut self,
+        queue: Option<&Q>,
+        bytes: u64,
+        strides: ElementStrides,
+        layer_meta_key: Option<(crate::style::StyleLayerId, u8)>,
+    ) -> Option<(u16, Range<u64>)> {
         self.page_factory.as_ref()?;
         Self::reclaim_slab_vec(
             &mut self.layer_slabs,
@@ -357,34 +345,20 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         if req_elems > rem_fm || req_elems > max_fm_page {
             return None;
         }
-        let is_oversize = req_elems > DEFAULT_PAGE_FEATURE_META;
-        let slab_elems = if is_oversize {
-            req_elems
-                .next_multiple_of(1024)
-                .min(max_fm_page)
-                .min(rem_fm)
-                .max(req_elems)
-        } else {
-            let count = self
-                .feature_slabs
-                .iter()
-                .flatten()
-                .filter(|s| !s.dedicated_oversize)
-                .count();
-            let (target_fm, min_req) = (
-                match count {
-                    0 => 2 * 1024,
-                    1 => 8 * 1024,
-                    _ => DEFAULT_PAGE_FEATURE_META,
-                },
-                req_elems.next_multiple_of(1024).min(max_fm_page),
-            );
-            target_fm
-                .min(max_fm_page)
-                .max(min_req)
-                .min(rem_fm)
-                .max(req_elems)
-        };
+        let count = self
+            .feature_slabs
+            .iter()
+            .flatten()
+            .filter(|s| !s.dedicated_oversize)
+            .count();
+        let (slab_elems, is_oversize) = choose_step_slab_elems(
+            req_elems,
+            rem_fm,
+            max_fm_page,
+            DEFAULT_PAGE_FEATURE_META,
+            [2 * 1024, 8 * 1024, DEFAULT_PAGE_FEATURE_META],
+            count,
+        );
         let fm_bytes = fitting_buffer_size(
             strides.feature_metadata as usize,
             slab_elems,
@@ -406,6 +380,36 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
     }
 }
 
+fn choose_step_slab_elems(
+    req_elems: u64,
+    rem_elems: u64,
+    max_page: u64,
+    default_page: u64,
+    small_steps: [u64; 3],
+    family_pages: usize,
+) -> (u64, bool) {
+    let is_oversize = req_elems > default_page;
+    let slab_elems = if is_oversize {
+        req_elems
+            .next_multiple_of(1024)
+            .min(max_page)
+            .min(rem_elems)
+            .max(req_elems)
+    } else {
+        let target = small_steps
+            .get(family_pages)
+            .copied()
+            .unwrap_or(default_page);
+        let min_req = req_elems.next_multiple_of(1024).min(max_page);
+        target
+            .min(max_page)
+            .max(min_req)
+            .min(rem_elems)
+            .max(req_elems)
+    };
+    (slab_elems, is_oversize)
+}
+
 fn first_free_slot<T>(slabs: &[Option<T>]) -> usize {
     slabs
         .iter()
@@ -414,10 +418,10 @@ fn first_free_slot<T>(slabs: &[Option<T>]) -> usize {
 }
 
 fn place_slot<T>(slabs: &mut Vec<Option<T>>, slot_idx: usize, slab: T) {
-    if slot_idx == slabs.len() {
-        slabs.push(Some(slab));
+    if let Some(slot) = slabs.get_mut(slot_idx) {
+        *slot = Some(slab);
     } else {
-        slabs[slot_idx] = Some(slab);
+        slabs.push(Some(slab));
     }
 }
 

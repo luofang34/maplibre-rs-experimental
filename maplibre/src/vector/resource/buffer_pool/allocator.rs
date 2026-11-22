@@ -116,7 +116,7 @@ impl RangeAllocator {
         Some(aligned_start..alloc_end)
     }
 
-    /// Releases a previously allocated `range`, immediately coalescing with adjacent free blocks.
+    /// Releases an allocated `range`, immediately coalescing with adjacent free blocks.
     pub(super) fn free(&mut self, range: Range<u64>) {
         if range.is_empty() {
             return;

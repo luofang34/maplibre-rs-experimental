@@ -19,7 +19,7 @@ Using `maplibre::tcs` (`World`, `Tiles`, `Resources`) instead of an external arc
 
 GPU applications in browsers, mobile apps, and XR headsets routinely face recoverable environment failures: lost GPU surfaces, suspended windows, invalid user styles, or exhausted memory budgets.
 
-- **No non-test panics**: production crates enforce `#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]` alongside `scripts/check-panics.mjs` in CI.
+- **No non-test panics**: production crates inherit `[workspace.lints]` (`unwrap_used`, `expect_used`, `panic`, `todo`, `unimplemented = "deny"`) and `#![cfg_attr(not(test), forbid(...))]`, enforced alongside ratcheted `[floors]` ceilings in `evidence.toml` (`cargo evidence gate`).
 - **Fallible `Plugin::build` and `Stage::run`**: plugin installation returns `Result<(), PluginError>` and frame execution returns `StageResult`.
 - **Guaranteed frame cleanup (`Schedule::run_after_failure`)**: `RenderStageLabel::Cleanup` runs even when an earlier stage errors, ensuring transient per-frame `RenderPhase` vectors and tile retention budgets never leak across frames.
 
@@ -55,4 +55,4 @@ Rather than maintaining separate renderers for 2D Mercator, 3D globes, terrain, 
 Correctness and architectural hygiene are enforced continuously in CI:
 
 - **MapLibre Style Spec Conformance**: `render-tests` runs 1,700+ pixel (`expected.png`) and query (`expected.json`) fixtures on software Vulkan (`lavapipe`) with a ratcheted `render-tests/ignores.json` baseline (any unexpected failure *or* unremoved newly-passing ignore fails CI), complemented by `maplibre/tests/expression_conformance.rs`.
-- **Static guards**: `scripts/check-file-length.mjs` (`<= 500` lines per `.rs` file), `scripts/check-module-layout.py` (no `mod.rs`), `scripts/check-panics.mjs`, `scripts/check-wasm-deps.py` (forbids native OS/runtime/TLS crates in `wasm32-unknown-unknown` trees), and `cargo-deny` (`deny.toml`) keep crate boundaries clean as the engine grows.
+- **Static & verification guards**: [`evidence.toml`](../../evidence.toml) (`cargo evidence gate --format=jsonl` and `cargo evidence check --tier=verify`) enforces crate layering DAGs, `wasm32` native-dependency closures, file/function size limits (`<= 500` lines/file, `<= 80` lines/fn, zero `mod.rs`), comment/pattern hygiene, Web worker/DOM isolation, ratcheted panic/ignore ceilings, and `cargo-deny` (`deny.toml`) as the engine grows. See [Agent Rules & Verification Gates](./agent-rules.md).

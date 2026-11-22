@@ -51,69 +51,24 @@ pub(super) async fn fetch_font_inputs<HC: HttpClient>(
 
     let mut pending_fonts = Vec::with_capacity(fonts.len());
     let mut range_jobs: Vec<(usize, u32)> = Vec::new();
-
     for (font, characters) in fonts {
-        let mut remote_chars = HashSet::default();
-        let mut local_cjk = Vec::new();
-        let mut registered_glyphs = Vec::new();
-        let has_registered = global_font_system().has_registered_stack(&font);
-
-        if has_registered {
-            let mut fs = global_font_system();
-            for &code in &characters {
-                let Some(ch) = char::from_u32(code) else {
-                    continue;
-                };
-                if let Some((_, face)) = fs.resolve_face_for_char(&font, ch, false) {
-                    if let Some(glyph) = face.rasterize_char(ch) {
-                        registered_glyphs.push((code, glyph));
-                        continue;
-                    }
-                }
-                if ideograph_family.is_some() && is_local_cjk_codepoint(ch) {
-                    local_cjk.push((code, ch));
-                } else {
-                    remote_chars.insert(code);
-                }
-            }
-        } else {
-            for &code in &characters {
-                let Some(ch) = char::from_u32(code) else {
-                    continue;
-                };
-                if ideograph_family.is_some() && is_local_cjk_codepoint(ch) {
-                    local_cjk.push((code, ch));
-                } else {
-                    remote_chars.insert(code);
-                }
-            }
-        }
-
-        let mut ranges: Vec<u32> = remote_chars.iter().map(|code| (code / 256) * 256).collect();
-        ranges.sort_unstable();
-        ranges.dedup();
         let font_idx = pending_fonts.len();
         let range_start = range_jobs.len();
+        let (pending, ranges) =
+            classify_font_chars(font, &characters, ideograph_family, range_start);
         for range in ranges {
             range_jobs.push((font_idx, range));
         }
-        let range_len = range_jobs.len() - range_start;
-        pending_fonts.push(PendingFont {
-            font,
-            has_registered,
-            registered_glyphs,
-            remote_chars,
-            local_cjk,
-            range_start,
-            range_len,
-        });
+        pending_fonts.push(pending);
     }
 
     let fetched_ranges = crate::util::async_join::try_join_all_concurrent(
         range_jobs
             .iter()
-            .map(|&(font_idx, range)| {
-                super::glyph_range(client, config.glyphs, &pending_fonts[font_idx].font, range)
+            .filter_map(|&(font_idx, range)| {
+                pending_fonts
+                    .get(font_idx)
+                    .map(|p| super::glyph_range(client, config.glyphs, &p.font, range))
             })
             .collect(),
     )
@@ -124,6 +79,53 @@ pub(super) async fn fetch_font_inputs<HC: HttpClient>(
         fetched_ranges,
         labels,
     })
+}
+
+fn classify_font_chars(
+    font: String,
+    characters: &HashSet<u32>,
+    ideograph_family: Option<&str>,
+    range_start: usize,
+) -> (PendingFont, Vec<u32>) {
+    let mut remote_chars = HashSet::default();
+    let mut local_cjk = Vec::new();
+    let mut registered_glyphs = Vec::new();
+    let has_registered = global_font_system().has_registered_stack(&font);
+    let mut fs = has_registered.then(global_font_system);
+
+    for &code in characters {
+        let Some(ch) = char::from_u32(code) else {
+            continue;
+        };
+        if let Some(fs) = fs.as_mut() {
+            if let Some(glyph) = fs
+                .resolve_face_for_char(&font, ch, false)
+                .and_then(|(_, face)| face.rasterize_char(ch))
+            {
+                registered_glyphs.push((code, glyph));
+                continue;
+            }
+        }
+        if ideograph_family.is_some() && is_local_cjk_codepoint(ch) {
+            local_cjk.push((code, ch));
+        } else {
+            remote_chars.insert(code);
+        }
+    }
+
+    let mut ranges: Vec<u32> = remote_chars.iter().map(|code| (code / 256) * 256).collect();
+    ranges.sort_unstable();
+    ranges.dedup();
+    let pending = PendingFont {
+        font,
+        has_registered,
+        registered_glyphs,
+        remote_chars,
+        local_cjk,
+        range_start,
+        range_len: ranges.len(),
+    };
+    (pending, ranges)
 }
 
 /// Packs fetched `.pbf` glyphs, local CJK SDF rasterizations, and shaped glyph runs into `builder`.
@@ -142,122 +144,123 @@ pub(super) fn pack_font_inputs(
     } = inputs;
 
     for pending in &pending_fonts {
-        for (code, glyph) in &pending.registered_glyphs {
-            builder.pack_rasterized_codepoint(&pending.font, *code, glyph);
-        }
-        if !pending.local_cjk.is_empty() {
-            #[cfg(target_arch = "wasm32")]
-            if pending.has_registered {
-                let mut fs = global_font_system();
-                for &(code, ch) in &pending.local_cjk {
-                    if let Some(glyph) =
-                        fs.rasterize_local_char(ideograph_family, &pending.font, ch)
-                    {
-                        builder.pack_rasterized_codepoint(&pending.font, code, &glyph);
-                    }
-                }
-            } else {
-                for (code, glyph) in crate::font::rasterize_canvas2d_chars_sdf(
-                    ideograph_family,
-                    &pending.font,
-                    &pending.local_cjk,
-                ) {
-                    builder.pack_rasterized_codepoint(&pending.font, code, &glyph);
-                }
-            }
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                let mut fs = global_font_system();
-                for &(code, ch) in &pending.local_cjk {
-                    if let Some(glyph) =
-                        fs.rasterize_local_char(ideograph_family, &pending.font, ch)
-                    {
-                        builder.pack_rasterized_codepoint(&pending.font, code, &glyph);
-                    }
-                }
-            }
-        }
+        pack_registered_and_cjk(pending, ideograph_family, builder);
     }
 
-    for PendingFont {
-        font,
-        has_registered,
-        remote_chars,
-        range_start,
-        range_len,
-        ..
-    } in pending_fonts
-    {
-        let mut had_any_pbf = false;
-        if let Some(slice) = fetched_ranges.get(range_start..range_start + range_len) {
-            for glyphs in slice.iter().flatten() {
-                had_any_pbf = true;
-                builder.glyph_subset(&font, glyphs, Some(&remote_chars));
-            }
-        }
-
-        #[cfg(target_arch = "wasm32")]
-        if (config.glyphs.is_none() || !had_any_pbf) && !remote_chars.is_empty() {
-            let fallback: Vec<(u32, char)> = remote_chars
-                .iter()
-                .filter_map(|&code| {
-                    let already = builder
-                        .atlas
-                        .glyphs
-                        .get(&font)
-                        .is_some_and(|map| map.contains_key(&code));
-                    (!already)
-                        .then(|| char::from_u32(code).map(|ch| (code, ch)))
-                        .flatten()
-                })
-                .collect();
-            if !fallback.is_empty() {
-                let family = ideograph_family.or(Some("sans-serif"));
-                for (code, glyph) in
-                    crate::font::rasterize_canvas2d_chars_sdf(family, &font, &fallback)
-                {
-                    builder.pack_rasterized_codepoint(&font, code, &glyph);
-                }
-            }
-        }
-        let _ = had_any_pbf;
-
-        let mut fallback_used = false;
-        if (has_registered || cfg!(not(target_arch = "wasm32")))
-            && ideograph_family.is_some()
-            && !remote_chars.is_empty()
-        {
-            let mut fs = global_font_system();
-            for &code in &remote_chars {
-                let already_packed = builder
-                    .atlas
-                    .glyphs
-                    .get(&font)
-                    .is_some_and(|map| map.contains_key(&code));
-                if already_packed {
-                    continue;
-                }
-                let Some(ch) = char::from_u32(code) else {
-                    continue;
-                };
-                if let Some(glyph) = fs.rasterize_local_char(ideograph_family, &font, ch) {
-                    builder.pack_rasterized_codepoint(&font, code, &glyph);
-                    fallback_used = true;
-                }
-            }
-        }
-
-        if let Some(stack_labels) = labels.get(&font) {
+    for pending in pending_fonts {
+        let slice = fetched_ranges
+            .get(pending.range_start..pending.range_start + pending.range_len)
+            .unwrap_or(&[]);
+        let fallback_used =
+            pack_pbf_and_local_fallback(config.glyphs, ideograph_family, &pending, slice, builder);
+        if let Some(stack_labels) = labels.get(&pending.font) {
             shape_stack_labels(
-                &font,
+                &pending.font,
                 ideograph_family,
-                has_registered,
+                pending.has_registered,
                 fallback_used,
                 stack_labels,
                 builder,
             );
         }
     }
+}
+
+fn pack_registered_and_cjk(
+    pending: &PendingFont,
+    ideograph_family: Option<&str>,
+    builder: &mut AtlasBuilder,
+) {
+    for (code, glyph) in &pending.registered_glyphs {
+        builder.pack_rasterized_codepoint(&pending.font, *code, glyph);
+    }
+    if pending.local_cjk.is_empty() {
+        return;
+    }
+    #[cfg(target_arch = "wasm32")]
+    if !pending.has_registered {
+        for (code, glyph) in crate::font::rasterize_canvas2d_chars_sdf(
+            ideograph_family,
+            &pending.font,
+            &pending.local_cjk,
+        ) {
+            builder.pack_rasterized_codepoint(&pending.font, code, &glyph);
+        }
+        return;
+    }
+    let mut fs = global_font_system();
+    for &(code, ch) in &pending.local_cjk {
+        if let Some(glyph) = fs.rasterize_local_char(ideograph_family, &pending.font, ch) {
+            builder.pack_rasterized_codepoint(&pending.font, code, &glyph);
+        }
+    }
+}
+
+fn pack_pbf_and_local_fallback(
+    glyphs_url: Option<&str>,
+    ideograph_family: Option<&str>,
+    pending: &PendingFont,
+    fetched_slice: &[Option<Arc<Glyphs>>],
+    builder: &mut AtlasBuilder,
+) -> bool {
+    let mut had_any_pbf = false;
+    for glyphs in fetched_slice.iter().flatten() {
+        had_any_pbf = true;
+        builder.glyph_subset(&pending.font, glyphs, Some(&pending.remote_chars));
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    if (glyphs_url.is_none() || !had_any_pbf) && !pending.remote_chars.is_empty() {
+        let fallback: Vec<(u32, char)> = pending
+            .remote_chars
+            .iter()
+            .filter_map(|&code| {
+                let already = builder
+                    .atlas
+                    .glyphs
+                    .get(&pending.font)
+                    .is_some_and(|map| map.contains_key(&code));
+                (!already)
+                    .then(|| char::from_u32(code).map(|ch| (code, ch)))
+                    .flatten()
+            })
+            .collect();
+        if !fallback.is_empty() {
+            let family = ideograph_family.or(Some("sans-serif"));
+            for (code, glyph) in
+                crate::font::rasterize_canvas2d_chars_sdf(family, &pending.font, &fallback)
+            {
+                builder.pack_rasterized_codepoint(&pending.font, code, &glyph);
+            }
+        }
+    }
+    let _ = (glyphs_url, had_any_pbf);
+
+    let mut fallback_used = false;
+    if (pending.has_registered || cfg!(not(target_arch = "wasm32")))
+        && ideograph_family.is_some()
+        && !pending.remote_chars.is_empty()
+    {
+        let mut fs = global_font_system();
+        for &code in &pending.remote_chars {
+            let already_packed = builder
+                .atlas
+                .glyphs
+                .get(&pending.font)
+                .is_some_and(|map| map.contains_key(&code));
+            if already_packed {
+                continue;
+            }
+            let Some(ch) = char::from_u32(code) else {
+                continue;
+            };
+            if let Some(glyph) = fs.rasterize_local_char(ideograph_family, &pending.font, ch) {
+                builder.pack_rasterized_codepoint(&pending.font, code, &glyph);
+                fallback_used = true;
+            }
+        }
+    }
+    fallback_used
 }
 
 async fn ensure_style_font_faces<HC: HttpClient>(
@@ -313,91 +316,79 @@ fn shape_stack_labels(
     }
     let mut fs = global_font_system();
     for label in stack_labels {
-        let shaped = if has_registered {
-            let all_registered = label
-                .chars()
-                .filter(|c| !c.is_whitespace())
-                .all(|ch| fs.resolve_face_for_char(font, ch, false).is_some());
-            if all_registered {
-                fs.shape_text(font, label, false)
-            } else if ideograph_family.is_some() {
-                let stack = combined_stack(font, ideograph_family);
-                fs.shape_text(&stack, label, true)
-            } else {
-                None
-            }
-        } else if label.chars().any(is_complex_shaping_codepoint) {
-            let stack = combined_stack(font, ideograph_family);
-            fs.shape_text(&stack, label, true)
+        shape_and_pack_direction(
+            &mut fs,
+            font,
+            ideograph_family,
+            has_registered,
+            label,
+            false,
+            builder,
+        );
+        if has_registered {
+            shape_and_pack_direction(&mut fs, font, ideograph_family, true, label, true, builder);
+        }
+    }
+}
+
+fn shape_and_pack_direction(
+    fs: &mut std::sync::MutexGuard<'_, crate::font::FontSystem>,
+    font: &str,
+    ideograph_family: Option<&str>,
+    has_registered: bool,
+    label: &str,
+    vertical: bool,
+    builder: &mut AtlasBuilder,
+) {
+    let shaped = if has_registered {
+        let all_registered = label
+            .chars()
+            .filter(|ch| !ch.is_whitespace() && (!vertical || !ch.is_control()))
+            .all(|ch| fs.resolve_face_for_char(font, ch, false).is_some());
+        let target = if all_registered {
+            Some((font.to_owned(), false))
+        } else if ideograph_family.is_some() {
+            Some((combined_stack(font, ideograph_family), true))
         } else {
             None
         };
-
-        let Some(shaped) = shaped.filter(|s| !s.is_empty()) else {
-            continue;
-        };
-        let mut all_packed = true;
-        for sg in &shaped {
-            let key = sg.atlas_key();
-            if !builder.atlas.face_glyphs.contains_key(&key) {
-                if let Some(glyph) = fs.rasterize_face_glyph(sg.face_id, sg.glyph_id) {
-                    builder.pack_rasterized_face_glyph(key.clone(), &glyph);
-                }
+        target.and_then(|(stack, allow_fallback)| {
+            if vertical {
+                fs.shape_text_vertical(&stack, label, allow_fallback)
+            } else {
+                fs.shape_text(&stack, label, allow_fallback)
             }
-            if !builder.atlas.face_glyphs.contains_key(&key) {
-                all_packed = false;
-                break;
+        })
+    } else if !vertical && label.chars().any(is_complex_shaping_codepoint) {
+        let stack = combined_stack(font, ideograph_family);
+        fs.shape_text(&stack, label, true)
+    } else {
+        None
+    };
+
+    let Some(shaped) = shaped.filter(|s| !s.is_empty()) else {
+        return;
+    };
+    for sg in &shaped {
+        let key = sg.atlas_key();
+        if !builder.atlas.face_glyphs.contains_key(&key) {
+            if let Some(glyph) = fs.rasterize_face_glyph(sg.face_id, sg.glyph_id) {
+                builder.pack_rasterized_face_glyph(key.clone(), &glyph);
             }
         }
-        if all_packed {
-            builder
-                .atlas
-                .shaped_runs
-                .entry(font.to_owned())
-                .or_default()
-                .insert(label.clone(), shaped);
-        }
-
-        if has_registered {
-            let v_shaped = {
-                let all_registered = label
-                    .chars()
-                    .filter(|ch| !ch.is_whitespace() && !ch.is_control())
-                    .all(|ch| fs.resolve_face_for_char(font, ch, false).is_some());
-                if all_registered {
-                    fs.shape_text_vertical(font, label, false)
-                } else if ideograph_family.is_some() {
-                    let stack = combined_stack(font, ideograph_family);
-                    fs.shape_text_vertical(&stack, label, true)
-                } else {
-                    None
-                }
-            };
-            if let Some(v_shaped) = v_shaped.filter(|s| !s.is_empty()) {
-                let mut v_all_packed = true;
-                for sg in &v_shaped {
-                    let key = sg.atlas_key();
-                    if !builder.atlas.face_glyphs.contains_key(&key) {
-                        if let Some(glyph) = fs.rasterize_face_glyph(sg.face_id, sg.glyph_id) {
-                            builder.pack_rasterized_face_glyph(key.clone(), &glyph);
-                        }
-                    }
-                    if !builder.atlas.face_glyphs.contains_key(&key) {
-                        v_all_packed = false;
-                        break;
-                    }
-                }
-                if v_all_packed {
-                    builder
-                        .atlas
-                        .vertical_shaped_runs
-                        .entry(font.to_owned())
-                        .or_default()
-                        .insert(label.clone(), v_shaped);
-                }
-            }
+        if !builder.atlas.face_glyphs.contains_key(&key) {
+            return;
         }
     }
+    let target = if vertical {
+        &mut builder.atlas.vertical_shaped_runs
+    } else {
+        &mut builder.atlas.shaped_runs
+    };
+    target
+        .entry(font.to_owned())
+        .or_default()
+        .insert(label.to_owned(), shaped);
 }
 
 fn combined_stack(font: &str, ideograph_family: Option<&str>) -> String {

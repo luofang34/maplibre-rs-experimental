@@ -97,12 +97,17 @@ fn a_removed_image_source_leaves_no_tile_or_texture_behind() {
 
 async fn vector_map(style_json: serde_json::Value) -> HeadlessMap {
     let style: Style = serde_json::from_value(style_json).expect("valid style");
-    let Some(Source::GeoJson(source)) = style.sources.get("parks") else {
-        panic!("expected inline parks geojson source");
-    };
-    let GeoJsonData::Inline(raw_geojson) = &source.data else {
-        panic!("expected inline geojson data");
-    };
+    let raw_geojson = style
+        .sources
+        .get("parks")
+        .and_then(|source| match source {
+            Source::GeoJson(source) => match &source.data {
+                GeoJsonData::Inline(raw) => Some(raw),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("expected inline parks geojson data");
     let annotated = style.apply_feature_state_to_geojson("parks", raw_geojson);
     let layers = style
         .layers

@@ -1,4 +1,7 @@
-#![allow(unsafe_code)]
+#![expect(
+    unsafe_code,
+    reason = "reconstructs Box<Work> from raw worker entry pointer"
+)]
 
 use wasm_bindgen::prelude::*;
 

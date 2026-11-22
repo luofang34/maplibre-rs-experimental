@@ -140,7 +140,11 @@ impl<T> TilePyramid<T> {
         let Some((z, code)) = canonical_key(coords) else {
             return false;
         };
-        (self.zoom_mask & (1_u32 << z)) != 0 && self.levels[z].contains_key(&code)
+        (self.zoom_mask & (1_u32 << z)) != 0
+            && self
+                .levels
+                .get(z)
+                .is_some_and(|level| level.contains_key(&code))
     }
 
     /// Borrows the value stored at canonical `coords`.
@@ -150,7 +154,7 @@ impl<T> TilePyramid<T> {
         if (self.zoom_mask & (1_u32 << z)) == 0 {
             return None;
         }
-        self.levels[z].get(&code).map(|entry| &entry.value)
+        self.levels.get(z)?.get(&code).map(|entry| &entry.value)
     }
 
     /// Mutably borrows the value stored at canonical `coords`.
@@ -160,16 +164,20 @@ impl<T> TilePyramid<T> {
         if (self.zoom_mask & (1_u32 << z)) == 0 {
             return None;
         }
-        self.levels[z].get_mut(&code).map(|entry| &mut entry.value)
+        self.levels
+            .get_mut(z)?
+            .get_mut(&code)
+            .map(|entry| &mut entry.value)
     }
 
     /// Inserts or replaces `value` at canonical `coords`, returning any previous value.
     /// Out-of-grid coordinates are ignored and return `None`.
     pub fn insert(&mut self, coords: WorldTileCoords, value: T) -> Option<T> {
         let (z, code) = canonical_key(coords)?;
+        let level = self.levels.get_mut(z)?;
         self.clock = self.clock.wrapping_add(1);
         let touched = self.clock;
-        let previous = self.levels[z].insert(
+        let previous = level.insert(
             code,
             PyramidEntry {
                 coords,
@@ -190,9 +198,10 @@ impl<T> TilePyramid<T> {
         if (self.zoom_mask & (1_u32 << z)) == 0 {
             return None;
         }
-        let removed = self.levels[z].remove(&code)?;
+        let level = self.levels.get_mut(z)?;
+        let removed = level.remove(&code)?;
         self.len -= 1;
-        if self.levels[z].is_empty() {
+        if level.is_empty() {
             self.zoom_mask &= !(1_u32 << z);
         }
         Some(removed.value)
@@ -203,7 +212,9 @@ impl<T> TilePyramid<T> {
         let mut mask = self.zoom_mask;
         while mask != 0 {
             let z = mask.trailing_zeros() as usize;
-            self.levels[z].clear();
+            if let Some(level) = self.levels.get_mut(z) {
+                level.clear();
+            }
             mask &= mask - 1;
         }
         self.zoom_mask = 0;
@@ -219,7 +230,11 @@ impl<T> TilePyramid<T> {
             return false;
         }
         let next_clock = self.clock.wrapping_add(1);
-        if let Some(entry) = self.levels[z].get_mut(&code) {
+        if let Some(entry) = self
+            .levels
+            .get_mut(z)
+            .and_then(|level| level.get_mut(&code))
+        {
             self.clock = next_clock;
             entry.last_touched = next_clock;
             true
@@ -242,9 +257,11 @@ impl<T> TilePyramid<T> {
         let mut mask = self.zoom_mask;
         while mask != 0 {
             let z = mask.trailing_zeros() as usize;
-            for entry in self.levels[z].values() {
-                if !is_protected(entry.coords, &entry.value) {
-                    candidates.push((entry.last_touched, entry.coords));
+            if let Some(level) = self.levels.get(z) {
+                for entry in level.values() {
+                    if !is_protected(entry.coords, &entry.value) {
+                        candidates.push((entry.last_touched, entry.coords));
+                    }
                 }
             }
             mask &= mask - 1;
@@ -265,19 +282,22 @@ impl<T> TilePyramid<T> {
     /// visiting only populated zoom levels without intermediate allocation or sorting.
     pub fn iter_coarse_to_fine(&self) -> impl Iterator<Item = (WorldTileCoords, &T)> + '_ {
         PopulatedLevels::new(self.zoom_mask)
-            .flat_map(move |z| self.levels[z].values().map(|e| (e.coords, &e.value)))
+            .filter_map(move |z| self.levels.get(z))
+            .flat_map(|level| level.values().map(|e| (e.coords, &e.value)))
     }
 
     /// Iterates `coords` from coarsest zoom to finest zoom in Morton spatial order.
     pub fn coords_coarse_to_fine(&self) -> impl Iterator<Item = WorldTileCoords> + '_ {
         PopulatedLevels::new(self.zoom_mask)
-            .flat_map(move |z| self.levels[z].values().map(|e| e.coords))
+            .filter_map(move |z| self.levels.get(z))
+            .flat_map(|level| level.values().map(|e| e.coords))
     }
 
     /// Iterates shared references to every stored value in coarse-to-fine Morton order.
     pub fn values(&self) -> impl Iterator<Item = &T> + '_ {
         PopulatedLevels::new(self.zoom_mask)
-            .flat_map(move |z| self.levels[z].values().map(|e| &e.value))
+            .filter_map(move |z| self.levels.get(z))
+            .flat_map(|level| level.values().map(|e| &e.value))
     }
 
     /// Iterates mutable references to every stored value in coarse-to-fine order.

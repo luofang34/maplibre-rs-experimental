@@ -49,6 +49,8 @@ pub(super) fn plan_non_terrain_fallbacks(
     )
 }
 
+mod web;
+
 fn plan_non_terrain_fallbacks_for_platform(
     style: &Style,
     view_state: &ViewState,
@@ -71,177 +73,63 @@ fn plan_non_terrain_fallbacks_for_platform(
         world.resources.insert(VectorFallbackTiles::default());
         return Vec::new();
     }
-
-    let visible_level = ZoomLevel::new(level);
-    let mut extra_requests = Vec::new();
     let max_zoom = source_max_zoom(style, TileKind::Vector);
     let min_zoom = source_min_zoom(style, TileKind::Vector);
-    let mut handoff_parents = Vec::new();
-
-    if is_web && !view_state.has_external_view() {
-        let source_z = max_zoom.map_or(level, |m| level.min(m));
-        let ahead_view = world
-            .resources
-            .get::<crate::render::xr::PrefetchView>()
-            .and_then(|pv| pv.view_state.clone());
-        if source_z < 3 && ahead_view.is_none() {
-            if tight_covering {
-                if world
-                    .resources
-                    .get::<VectorFallbackTiles>()
-                    .is_some_and(|f| !f.0.is_empty())
-                {
-                    world.resources.insert(VectorFallbackTiles::default());
-                }
-                return extra_requests;
-            }
-        } else {
-            let allow_new_coarse = super::velocity::should_request_coarse_fallback(
-                world,
-                view_state,
-                ahead_view.is_some(),
-            );
-            fn ensure_seen<'a>(
-                view_set: &'a mut Option<FxHashSet<WorldTileCoords>>,
-                view_tiles: &[WorldTileCoords],
-            ) -> &'a mut FxHashSet<WorldTileCoords> {
-                view_set.get_or_insert_with(|| view_tiles.iter().copied().collect())
-            }
-            let mut view_set: Option<FxHashSet<WorldTileCoords>> = None;
-
-            // 1. Coarse `z - 3` ancestor cover (covers an 8x8 tile block, up to `MAX_COARSE_ANCESTORS`
-            // across seams): prioritized for uncovered ancestors, keeping `coarse_z - 1` alive during
-            // zoom handoffs until the new `coarse_z` finishes uploading to the GPU.
-            if source_z >= 3 {
-                let coarse_z = source_z - 3;
-                let all_children_uploaded = |world: &World, ancestor: WorldTileCoords| {
-                    let Some(Eventually::Initialized(pool)) =
-                        world.resources.get::<Eventually<VectorBufferPool>>()
-                    else {
-                        return false;
-                    };
-                    if !pool.has_capacity() {
-                        return false;
-                    }
-                    let az = u8::from(ancestor.z);
-                    let mut any_covered = false;
-                    for &child in view_tiles {
-                        let Some((wrapped, _)) = child.wrapped() else {
-                            continue;
-                        };
-                        let source_child = clamp_to_max_zoom(wrapped, max_zoom);
-                        let cz = u8::from(source_child.z);
-                        if cz <= az {
-                            continue;
-                        }
-                        let shift = u32::from(cz - az);
-                        if source_child.x >> shift == ancestor.x
-                            && source_child.y >> shift == ancestor.y
-                        {
-                            any_covered = true;
-                            if world
-                                .tiles
-                                .query::<&VectorLayerBucketComponent>(source_child)
-                                .is_none_or(|b| !b.done)
-                                || !crate::vector::geometry_uploaded(source_child, world)
-                            {
-                                return false;
-                            }
-                        }
-                    }
-                    any_covered
-                };
-                let mut candidates = Vec::new();
-                let mut seen_ancestors = FxHashSet::default();
-                for &coords in view_tiles {
-                    let Some((wrapped, _)) = coords.wrapped() else {
-                        continue;
-                    };
-                    let cur_z = u8::from(wrapped.z);
-                    if cur_z <= coarse_z {
-                        continue;
-                    }
-                    let shift = u32::from(cur_z - coarse_z);
-                    let ancestor = WorldTileCoords {
-                        x: wrapped.x >> shift,
-                        y: wrapped.y >> shift,
-                        z: ZoomLevel::new(coarse_z),
-                    };
-                    if !seen_ancestors.insert(ancestor) {
-                        continue;
-                    }
-                    let spawned = tile_spawned(world, ancestor);
-                    let uncovered = !all_children_uploaded(world, ancestor);
-                    if !spawned && (!allow_new_coarse || !uncovered) {
-                        continue;
-                    }
-                    candidates.push((ancestor, uncovered));
-                }
-                candidates.sort_by_key(|(_, uncovered)| !*uncovered);
-                let selected_ancestors: Vec<_> = candidates
-                    .into_iter()
-                    .map(|(ancestor, _)| ancestor)
-                    .take(MAX_COARSE_ANCESTORS)
-                    .collect();
-                let seen_extra = ensure_seen(&mut view_set, view_tiles);
-                for ancestor in selected_ancestors {
-                    if seen_extra.insert(ancestor) {
-                        extra_requests.push(ancestor);
-                    }
-                    if !tile_spawned(world, ancestor)
-                        || !crate::vector::geometry_uploaded(ancestor, world)
-                    {
-                        if let Some(parent) = ancestor.get_parent() {
-                            if min_zoom.is_none_or(|m| u8::from(parent.z) >= m)
-                                && tile_spawned(world, parent)
-                            {
-                                handoff_parents.push(parent);
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 2. Active pan lookahead (`PrefetchView`) while the camera is moving.
-            // Settled 1-ring edge tiles (`MAX_SETTLED_RING_TILES = 0`) are intentionally omitted on web
-            // to eliminate second-wave boot fetches and save +25-80 MiB of off-screen urban tiles.
-            if let Some(ahead) = ahead_view {
-                if let Ok(Some(region)) = view_region_for_projection(
-                    style,
-                    &ahead,
-                    world,
-                    visible_level,
-                    ViewStatePadding::Tight,
-                ) {
-                    let seen_extra = ensure_seen(&mut view_set, view_tiles);
-                    let mut lookahead_count = 0;
-                    for coords in region.iter() {
-                        if seen_extra.insert(coords) {
-                            extra_requests.push(coords);
-                            lookahead_count += 1;
-                            if lookahead_count >= MAX_PAN_LOOKAHEAD_TILES {
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
+    let (extra_requests, handoff_parents) = if is_web && !view_state.has_external_view() {
+        let plan = web::plan_web_fallbacks(
+            style,
+            view_state,
+            world,
+            view_tiles,
+            (level, max_zoom, min_zoom, tight_covering),
+        );
+        if plan.skip_empty {
+            clear_fallback_tiles_if_non_empty(world);
+            return plan.extra_requests;
         }
-    }
-
-    // Record canonical source coordinates for all retained non-tight tiles (both native `Loose`
-    // ring tiles already in `view_tiles` and `wasm32` `extra_requests`) so `upload_system`
-    // uploads and retains them in `VectorBufferPool`.
+        (plan.extra_requests, plan.handoff_parents)
+    } else {
+        (Vec::new(), Vec::new())
+    };
     if tight_covering && extra_requests.is_empty() && handoff_parents.is_empty() {
-        if world
-            .resources
-            .get::<VectorFallbackTiles>()
-            .is_none_or(|f| !f.0.is_empty())
-        {
-            world.resources.insert(VectorFallbackTiles::default());
-        }
+        clear_fallback_tiles_if_non_empty(world);
         return extra_requests;
     }
+    record_fallback_canonical(
+        style,
+        view_state,
+        world,
+        view_tiles,
+        (&extra_requests, &handoff_parents),
+        (level, magnifies, tight_covering, max_zoom, min_zoom),
+    );
+    extra_requests
+}
+
+fn clear_fallback_tiles_if_non_empty(world: &mut World) {
+    if world
+        .resources
+        .get::<VectorFallbackTiles>()
+        .is_none_or(|f| !f.0.is_empty())
+    {
+        world.resources.insert(VectorFallbackTiles::default());
+    }
+}
+
+fn record_fallback_canonical(
+    style: &Style,
+    view_state: &ViewState,
+    world: &mut World,
+    view_tiles: &[WorldTileCoords],
+    (extra_requests, handoff_parents): (&[WorldTileCoords], &[WorldTileCoords]),
+    (level, magnifies, tight_covering, max_zoom, min_zoom): (
+        u8,
+        bool,
+        bool,
+        Option<u8>,
+        Option<u8>,
+    ),
+) {
     let non_tight: Vec<WorldTileCoords> = if tight_covering {
         Vec::new()
     } else {
@@ -288,8 +176,6 @@ fn plan_non_terrain_fallbacks_for_platform(
     world
         .resources
         .insert(VectorFallbackTiles(fallback_canonical));
-
-    extra_requests
 }
 
 fn tile_spawned(world: &World, coords: WorldTileCoords) -> bool {

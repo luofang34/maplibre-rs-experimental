@@ -34,8 +34,10 @@ fn labelled(placement: &str, extra: serde_json::Value, line: &[[f64; 2]]) -> Tex
         "text-field": "AAAA", "text-font": ["test"], "text-size": 16,
         "symbol-placement": placement, "symbol-spacing": 100, "text-max-width": 1
     });
-    for (key, value) in extra.as_object().expect("extra").clone() {
-        paint[key] = value;
+    if let Some(obj) = paint.as_object_mut() {
+        for (key, value) in extra.as_object().expect("extra").clone() {
+            obj.insert(key, value);
+        }
     }
     let paint: SymbolPaint = serde_json::from_value(paint).expect("paint");
     let mut tessellator = TextTessellator::default();
@@ -72,7 +74,11 @@ fn a_line_label_repeats_along_the_line_and_is_never_wrapped() {
         anchors_x(&tessellator),
         [400.0, 1200.0, 2000.0, 2800.0, 3600.0]
     );
-    let second = tessellator.features[1].line.as_ref().expect("a line label");
+    let second = tessellator
+        .features
+        .get(1)
+        .and_then(|f| f.line.as_ref())
+        .expect("a line label");
     assert_eq!(second.anchor_distance, 1200.0);
     assert_eq!(&*second.polyline, &[[0.0, 2048.0], [4000.0, 2048.0]]);
     assert_eq!(
@@ -154,8 +160,10 @@ fn every_part_of_a_multi_line_feature_is_labelled() {
 
 fn point_label(extra: serde_json::Value) -> TextTessellator {
     let mut paint = serde_json::json!({"text-field": "A", "text-font": ["test"], "text-size": 24});
-    for (key, value) in extra.as_object().expect("extra").clone() {
-        paint[key] = value;
+    if let Some(obj) = paint.as_object_mut() {
+        for (key, value) in extra.as_object().expect("extra").clone() {
+            obj.insert(key, value);
+        }
     }
     let paint: SymbolPaint = serde_json::from_value(paint).expect("paint");
     let mut tessellator = TextTessellator::default();
@@ -241,7 +249,11 @@ fn icon_text_fit_stretches_the_icon_around_the_text_and_padding() {
     tessellator.feature_end(0).expect("feature");
     tessellator.finish();
     let corner = |index: usize| {
-        let vertex = &tessellator.quad_buffer.vertices[index];
+        let vertex = tessellator
+            .quad_buffer
+            .vertices
+            .get(index)
+            .expect("quad vertex");
         [
             vertex.a_pos_offset[2] as f32 / 32.0,
             vertex.a_pos_offset[3] as f32 / 32.0,
@@ -283,7 +295,7 @@ fn auto_justification_lays_the_text_out_once_for_each_justification_its_anchors_
     assert!(feature
         .text_sets
         .windows(2)
-        .all(|pair| pair[0].end == pair[1].start));
+        .all(|pair| matches!(pair, [a, b] if a.end == b.start)));
 }
 
 #[test]
@@ -294,8 +306,9 @@ fn a_radial_offset_pushes_each_anchor_away_from_the_point() {
     let shifts = tessellator.features.remove(0).anchor_shifts;
     // Top sits 17 below the point (24 less the baseline); left sits 24 to its right and
     // centred; the padding adds 2 to the gap of each.
-    assert!((shifts[1][0] - 31.0).abs() < 1e-3, "{shifts:?}");
-    assert!((shifts[1][1] - -33.4).abs() < 1e-3);
+    let left_shift = shifts.get(1).expect("left shift");
+    assert!((left_shift[0] - 31.0).abs() < 1e-3, "{shifts:?}");
+    assert!((left_shift[1] - -33.4).abs() < 1e-3);
 }
 
 #[test]
@@ -306,8 +319,11 @@ fn polygon_rings_are_wound_clockwise_on_screen_outside_and_counter_clockwise_for
     let outer = LineString::from(vec![(0.0, 0.0), (0.0, 10.0), (10.0, 10.0), (10.0, 0.0)]);
     let hole = LineString::from(vec![(2.0, 2.0), (8.0, 2.0), (8.0, 8.0), (2.0, 8.0)]);
     let rings = super::line_anchors::polygon_rings(&Polygon::new(outer, vec![hole]));
+    let [outer_ring, hole_ring] = rings.as_slice() else {
+        panic!("expected 2 rings, got {}", rings.len());
+    };
     assert_eq!(
-        rings[0],
+        *outer_ring,
         [
             [0.0, 0.0],
             [10.0, 0.0],
@@ -318,7 +334,7 @@ fn polygon_rings_are_wound_clockwise_on_screen_outside_and_counter_clockwise_for
         "the outer ring is reversed"
     );
     assert_eq!(
-        rings[1],
+        *hole_ring,
         [[2.0, 2.0], [2.0, 8.0], [8.0, 8.0], [8.0, 2.0], [2.0, 2.0]],
         "the hole, clockwise as given, is reversed too"
     );

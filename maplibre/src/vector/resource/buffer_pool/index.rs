@@ -356,8 +356,10 @@ impl RingIndex {
         let mut removed = Vec::new();
         let mut i = 0;
         while i < entry.layers.len() {
-            let should_remove =
-                entry.layers[i].style_layer_id == id && keep != Some(entry.layers[i].allocation_id);
+            let should_remove = entry
+                .layers
+                .get(i)
+                .is_some_and(|l| l.style_layer_id == id && keep != Some(l.allocation_id));
             if should_remove {
                 if let Some(layer) = entry.layers.remove(i) {
                     self.order.remove(&layer.allocation_id);

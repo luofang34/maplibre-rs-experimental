@@ -36,7 +36,10 @@ pub fn native_http_client<P: Into<std::path::PathBuf>>(cache_path: Option<P>) ->
 ///
 /// # Panics
 /// Panics if runtime creation fails or if called from within an asynchronous runtime.
-#[allow(clippy::expect_used)]
+#[expect(
+    clippy::expect_used,
+    reason = "synchronous entry point panics if Tokio runtime fails to initialize"
+)]
 pub fn run_multithreaded<F: Future>(future: F) -> F::Output {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)

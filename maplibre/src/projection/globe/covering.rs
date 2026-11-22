@@ -37,7 +37,9 @@ pub(crate) struct CompactTileVolume {
 impl CompactTileVolume {
     #[inline]
     pub fn points_slice(&self) -> &[Vector3<f64>] {
-        &self.points[..usize::from(self.len)]
+        self.points
+            .get(..usize::from(self.len))
+            .unwrap_or(&self.points)
     }
 
     fn into_public(self) -> GlobeTileBoundingVolume {
@@ -212,7 +214,9 @@ pub(crate) fn compact_tile_volume(
                     );
                     borrow.resize(VOL_CACHE_LEN, sentinel);
                 }
-                borrow[slot] = (key, computed);
+                if let Some(entry) = borrow.get_mut(slot) {
+                    *entry = (key, computed);
+                }
             });
             Ok(computed)
         }
@@ -291,6 +295,13 @@ pub(crate) fn aabb_compact_volume(min: Vector3<f64>, max: Vector3<f64>) -> Compa
     }
 }
 
+fn push_vec<const N: usize>(buf: &mut [Vector3<f64>; N], len: &mut usize, point: Vector3<f64>) {
+    if let Some(slot) = buf.get_mut(*len) {
+        *slot = point;
+        *len += 1;
+    }
+}
+
 fn curved_tile_volume(
     tile: TileCoords,
     min_radius: f64,
@@ -300,20 +311,18 @@ fn curved_tile_volume(
     let mut extremes = [Vector3::new(0.0, 0.0, 0.0); 14];
     let mut ext_len = 0_usize;
     for corner in &corners {
-        extremes[ext_len] = *corner * max_radius;
-        ext_len += 1;
+        push_vec(&mut extremes, &mut ext_len, *corner * max_radius);
     }
     if min_radius != max_radius {
         for corner in &corners {
-            extremes[ext_len] = *corner * min_radius;
-            ext_len += 1;
+            push_vec(&mut extremes, &mut ext_len, *corner * min_radius);
         }
     }
     extend_pole_extremes(&mut extremes, &mut ext_len, tile, min_radius, max_radius);
-    let (min, max) = bounds(&extremes[..ext_len]);
+    let (min, max) = bounds(extremes.get(..ext_len).unwrap_or(&extremes));
     let axes = tile_axes(tile);
     extend_curved_edge_extremes(&mut extremes, &mut ext_len, tile, axes.center, max_radius);
-    let planes = tile_planes(&extremes[..ext_len], axes);
+    let planes = tile_planes(extremes.get(..ext_len).unwrap_or(&extremes), axes);
     let (points, len) = volume_points(tile, planes)?;
     Ok(CompactTileVolume {
         points,
@@ -347,11 +356,9 @@ fn extend_pole_extremes(
         (tile.y == tile_count - 1, -Vector3::unit_y()),
     ] {
         if matches_pole {
-            extremes[*ext_len] = pole * max_radius;
-            *ext_len += 1;
+            push_vec(extremes, ext_len, pole * max_radius);
             if min_radius != max_radius {
-                extremes[*ext_len] = pole * min_radius;
-                *ext_len += 1;
+                push_vec(extremes, ext_len, pole * min_radius);
             }
         }
     }
@@ -410,8 +417,7 @@ fn extend_curved_edge_extremes(
     center: Vector3<f64>,
     max_radius: f64,
 ) {
-    extremes[*ext_len] = center * max_radius;
-    *ext_len += 1;
+    push_vec(extremes, ext_len, center * max_radius);
     let tile_count = 1_u32 << u32::from(u8::from(tile.z));
     let edge_y = if tile.y >= tile_count / 2 {
         0.0
@@ -425,8 +431,7 @@ fn extend_curved_edge_extremes(
         EXTENT / 2.0,
         edge_y,
     );
-    extremes[*ext_len] = edge_midpoint * max_radius;
-    *ext_len += 1;
+    push_vec(extremes, ext_len, edge_midpoint * max_radius);
 }
 
 fn tile_planes(points: &[Vector3<f64>], axes: TileAxes) -> [Vector4<f64>; 6] {
@@ -459,40 +464,33 @@ fn volume_points(
     let tile_count = 1_u32 << u32::from(u8::from(tile.z));
     let mut points = [Vector3::new(0.0, 0.0, 0.0); 8];
     let mut len = 0_usize;
-    if tile.y == 0 {
-        points[len] = polar_axis_intersection(up).ok_or_else(|| bounds_error(tile))?;
-        len += 1;
-        points[len] = polar_axis_intersection(down).ok_or_else(|| bounds_error(tile))?;
-        len += 1;
-    } else {
-        for (first, second, third) in [
-            (north, east, up),
-            (north, east, down),
-            (north, west, up),
-            (north, west, down),
-        ] {
-            points[len] =
-                three_plane_intersection(first, second, third).ok_or_else(|| bounds_error(tile))?;
-            len += 1;
+    let push_band = |lat_plane: Vector4<f64>,
+                     at_pole: bool,
+                     pts: &mut [Vector3<f64>; 8],
+                     l: &mut usize|
+     -> Result<(), GlobeTileBoundsError> {
+        if at_pole {
+            push_vec(
+                pts,
+                l,
+                polar_axis_intersection(up).ok_or_else(|| bounds_error(tile))?,
+            );
+            push_vec(
+                pts,
+                l,
+                polar_axis_intersection(down).ok_or_else(|| bounds_error(tile))?,
+            );
+        } else {
+            for (lon, rad) in [(east, up), (east, down), (west, up), (west, down)] {
+                let pt = three_plane_intersection(lat_plane, lon, rad)
+                    .ok_or_else(|| bounds_error(tile))?;
+                push_vec(pts, l, pt);
+            }
         }
-    }
-    if tile.y == tile_count - 1 {
-        points[len] = polar_axis_intersection(up).ok_or_else(|| bounds_error(tile))?;
-        len += 1;
-        points[len] = polar_axis_intersection(down).ok_or_else(|| bounds_error(tile))?;
-        len += 1;
-    } else {
-        for (first, second, third) in [
-            (south, east, up),
-            (south, east, down),
-            (south, west, up),
-            (south, west, down),
-        ] {
-            points[len] =
-                three_plane_intersection(first, second, third).ok_or_else(|| bounds_error(tile))?;
-            len += 1;
-        }
-    }
+        Ok(())
+    };
+    push_band(north, tile.y == 0, &mut points, &mut len)?;
+    push_band(south, tile.y == tile_count - 1, &mut points, &mut len)?;
     Ok((points, len as u8))
 }
 

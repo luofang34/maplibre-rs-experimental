@@ -217,7 +217,7 @@ impl GlobeTileMeshCache {
         Ok(())
     }
 
-    /// Returns a previously prepared mesh variant.
+    /// Returns a prepared mesh variant, if cached.
     pub fn get(
         &self,
         coords: WorldTileCoords,
@@ -290,8 +290,12 @@ fn mesh_key(coords: WorldTileCoords, usage: TileMeshUsage, generate_borders: boo
         TileMeshUsage::Stencil => 2,
     };
     let granularity = 128_u32.checked_shr(zoom).unwrap_or(0).max(minimum);
-    let z_idx = usize::from(u8::from(coords.z)).min(ZOOM_BOUNDS.len() - 1);
-    let last_row = i64::from(ZOOM_BOUNDS[z_idx]) - 1;
+    let z_bound = ZOOM_BOUNDS
+        .get(usize::from(u8::from(coords.z)))
+        .or_else(|| ZOOM_BOUNDS.last())
+        .copied()
+        .unwrap_or(1);
+    let last_row = i64::from(z_bound) - 1;
     TileMeshKey {
         granularity,
         generate_borders,

@@ -66,8 +66,7 @@ impl NativeStagingRing {
 
     fn prune_oversized(&mut self) {
         let mut idx = 0;
-        while idx < self.ring.len() {
-            let chunk = &self.ring[idx];
+        while let Some(chunk) = self.ring.get(idx) {
             if chunk.capacity > STEADY_CHUNK_CAPACITY
                 && chunk.map_state.load(Ordering::Acquire) != IN_FLIGHT
             {
@@ -80,8 +79,8 @@ impl NativeStagingRing {
 
     fn drop_failed_chunks(&mut self) {
         let mut idx = 0;
-        while idx < self.ring.len() {
-            if self.ring[idx].map_state.load(Ordering::Acquire) == MAP_FAILED {
+        while let Some(chunk) = self.ring.get(idx) {
+            if chunk.map_state.load(Ordering::Acquire) == MAP_FAILED {
                 drop(self.ring.swap_remove(idx));
             } else {
                 idx += 1;

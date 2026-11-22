@@ -232,8 +232,9 @@ impl<'w> TrackedRenderPass<'w> {
             if self.bound.bind_groups.len() <= index {
                 self.bound.bind_groups.resize_with(index + 1, || None);
             }
-            self.bound.bind_groups[index] =
-                Some((bind_group.clone(), SmallVec::from_slice(offsets)));
+            if let Some(slot) = self.bound.bind_groups.get_mut(index) {
+                *slot = Some((bind_group.clone(), SmallVec::from_slice(offsets)));
+            }
             self.pass.set_bind_group(index as u32, bind_group, offsets);
         }
     }
@@ -252,7 +253,9 @@ impl<'w> TrackedRenderPass<'w> {
             if self.bound.vertex_buffers.len() <= slot_idx {
                 self.bound.vertex_buffers.resize_with(slot_idx + 1, || None);
             }
-            self.bound.vertex_buffers[slot_idx] = Some(BoundSlice::of(&slice));
+            if let Some(bound) = self.bound.vertex_buffers.get_mut(slot_idx) {
+                *bound = Some(BoundSlice::of(&slice));
+            }
             self.pass.set_vertex_buffer(slot, slice);
         }
     }

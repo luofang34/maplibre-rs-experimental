@@ -75,8 +75,7 @@ impl GlobeFrustum {
 
     pub(crate) fn from_camera(camera: &GlobeCameraState, far: FarPlane) -> Self {
         let inverse = camera.inverse_view_projection();
-        let mut points = std::array::from_fn(|index| {
-            let corner = CLIP_CORNERS[index];
+        let mut points = CLIP_CORNERS.map(|corner| {
             let projected = inverse * Vector4::new(corner[0], corner[1], -corner[2], corner[3]);
             projected.truncate() / projected.w
         });
@@ -190,11 +189,16 @@ pub(crate) fn plane_extrema(points: &[Vector3<f64>], plane: Vector4<f64>) -> (f6
 }
 
 fn plane_from_points(points: [Vector3<f64>; 8], index: usize) -> Vector4<f64> {
-    let indices = PLANE_POINT_INDICES[index];
-    let first = points[indices[0]] - points[indices[1]];
-    let second = points[indices[2]] - points[indices[1]];
+    let &[i0, i1, i2] = PLANE_POINT_INDICES
+        .get(index)
+        .unwrap_or(&PLANE_POINT_INDICES[0]);
+    let p0 = points.get(i0).copied().unwrap_or(points[0]);
+    let p1 = points.get(i1).copied().unwrap_or(points[0]);
+    let p2 = points.get(i2).copied().unwrap_or(points[0]);
+    let first = p0 - p1;
+    let second = p2 - p1;
     let normal = first.cross(second).normalize();
-    normal.extend(-normal.dot(points[indices[1]]))
+    normal.extend(-normal.dot(p1))
 }
 
 /// Pulls the far plane in to the sea-level horizon, as GL JS does, then out again by
@@ -203,15 +207,23 @@ fn adjust_far_plane(points: &mut [Vector3<f64>; 8], horizon: Vector4<f64>, beyon
     let mut directions = [Vector3::new(0.0, 0.0, 0.0); 4];
     let mut lengths = [0.0; 4];
     let mut maximum_distance: f64 = 0.0;
-    for index in 0..4 {
-        let ray = points[index] - points[index + 4];
-        lengths[index] = ray.magnitude();
-        directions[index] = ray / lengths[index];
-        maximum_distance = maximum_distance.max(
-            ray_plane_distance(points[index + 4], directions[index], horizon)
-                .filter(|distance| *distance >= 0.0)
-                .unwrap_or(lengths[index]),
-        );
+    {
+        let (far_corners, near_corners) = points.split_at_mut(4);
+        for (((far, &near), len), dir) in far_corners
+            .iter_mut()
+            .zip(near_corners.iter())
+            .zip(lengths.iter_mut())
+            .zip(directions.iter_mut())
+        {
+            let ray = *far - near;
+            *len = ray.magnitude();
+            *dir = ray / *len;
+            maximum_distance = maximum_distance.max(
+                ray_plane_distance(near, *dir, horizon)
+                    .filter(|distance| *distance >= 0.0)
+                    .unwrap_or(*len),
+            );
+        }
     }
     let near_plane = normalized_near_plane(*points);
     if let Some(ideal_distance) = ideal_far_distance(horizon, near_plane) {
@@ -222,19 +234,28 @@ fn adjust_far_plane(points: &mut [Vector3<f64>; 8], horizon: Vector4<f64>, beyon
         }
     }
     maximum_distance += beyond_horizon;
-    for index in 0..4 {
-        let min_length = (lengths[index] * 1e-6).max(1e-12);
-        let target = maximum_distance.clamp(min_length, lengths[index]);
-        points[index] = points[index + 4] + directions[index] * target;
+    let (far_corners, near_corners) = points.split_at_mut(4);
+    for (((far, &near), &len), &dir) in far_corners
+        .iter_mut()
+        .zip(near_corners.iter())
+        .zip(lengths.iter())
+        .zip(directions.iter())
+    {
+        let min_length = (len * 1e-6).max(1e-12);
+        let target = maximum_distance.clamp(min_length, len);
+        *far = near + dir * target;
     }
 }
 
 fn normalized_near_plane(points: [Vector3<f64>; 8]) -> Vector4<f64> {
-    let indices = PLANE_POINT_INDICES[0];
-    let first = points[indices[0]] - points[indices[1]];
-    let second = points[indices[2]] - points[indices[1]];
+    let [i0, i1, i2] = PLANE_POINT_INDICES[0];
+    let p0 = points.get(i0).copied().unwrap_or(points[0]);
+    let p1 = points.get(i1).copied().unwrap_or(points[0]);
+    let p2 = points.get(i2).copied().unwrap_or(points[0]);
+    let first = p0 - p1;
+    let second = p2 - p1;
     let normal = first.cross(second).normalize();
-    normal.extend(-normal.dot(points[indices[0]]))
+    normal.extend(-normal.dot(p0))
 }
 
 fn ray_plane_distance(

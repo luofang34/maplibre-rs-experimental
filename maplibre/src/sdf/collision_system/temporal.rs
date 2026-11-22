@@ -315,16 +315,21 @@ impl PlacementHistory {
         }) else {
             return [FadeRamp::default(); 2];
         };
-        let state = &mut states[index];
+        let Some(state) = states.get_mut(index) else {
+            return [FadeRamp::default(); 2];
+        };
         // A label repeated across tiles is drawn once, so a parent and child that are both
         // visible do not double up.
         if state.claimed == frame {
             return [FadeRamp::default(); 2];
         }
-        for (i, &visible) in target.iter().enumerate() {
+        let [ramp0, ramp1] = &mut state.ramp;
+        let [vis0, vis1] = target;
+        let [prev0, prev1] = state.target;
+        for (ramp_slot, visible, prev_visible) in [(ramp0, vis0, prev0), (ramp1, vis1, prev1)] {
             let new_target = if visible { 1.0 } else { 0.0 };
             if immediate {
-                state.ramp[i] = if visible {
+                *ramp_slot = if visible {
                     FadeRamp {
                         start: 1.0,
                         target: 1.0,
@@ -335,20 +340,20 @@ impl PlacementHistory {
                 };
                 continue;
             }
-            let current = state.ramp[i].at(now_ms, fade_duration_ms);
-            if state.target[i] != visible {
-                state.ramp[i] = FadeRamp {
+            let current = ramp_slot.at(now_ms, fade_duration_ms);
+            if prev_visible != visible {
+                *ramp_slot = FadeRamp {
                     start: current,
                     target: new_target,
                     start_time_ms: now_ms,
                 };
             } else if !visible && current <= 0.0 {
-                state.ramp[i] = FadeRamp::default();
+                *ramp_slot = FadeRamp::default();
             }
             if (current - new_target).abs() > 1e-4 {
                 self.fade_until_ms = self
                     .fade_until_ms
-                    .max(state.ramp[i].start_time_ms + fade_duration_ms);
+                    .max(ramp_slot.start_time_ms + fade_duration_ms);
             }
         }
         state.target = target;

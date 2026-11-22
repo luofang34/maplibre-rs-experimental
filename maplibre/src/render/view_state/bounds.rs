@@ -369,51 +369,23 @@ impl ViewState {
         let pad_right = clean_padding(padding.right);
         let pad_bottom = clean_padding(padding.bottom);
         let pad_left = clean_padding(padding.left);
-
         let avail_w = (self.width - pad_left - pad_right).max(1.0);
         let avail_h = (self.height - pad_top - pad_bottom).max(1.0);
-
         let bearing_deg = bearing.unwrap_or_else(|| self.camera().get_bearing().into());
         let max_pitch_deg = self.camera().max_pitch().0.to_degrees();
         let raw_pitch_deg = pitch.unwrap_or_else(|| self.camera().get_pitch().into()).0;
         let pitch_deg = Deg(clamp_ordered(raw_pitch_deg, -30.0, max_pitch_deg));
-
         let (min_m, max_m) = bounds.to_mercator_range();
         let mid_m = Point2::new((min_m.x + max_m.x) * 0.5, (min_m.y + max_m.y) * 0.5);
-        let half_w_m = (max_m.x - min_m.x) * 0.5;
-        let half_h_m = (max_m.y - min_m.y) * 0.5;
-
-        let b = Rad::from(bearing_deg).0;
-        let p = Rad::from(pitch_deg).0;
-        let (sin_b, cos_b) = b.sin_cos();
-        let (sin_p, cos_p) = p.sin_cos();
-
+        let (sin_b, cos_b) = Rad::from(bearing_deg).0.sin_cos();
+        let (sin_p, cos_p) = Rad::from(pitch_deg).0.sin_cos();
         let d_cam = self.camera_to_center_distance().max(1.0);
-        let half_avail_w = avail_w * 0.5;
-        let half_avail_h = avail_h * 0.5;
-
-        let corners = [
-            (-half_w_m, -half_h_m),
-            (half_w_m, -half_h_m),
-            (half_w_m, half_h_m),
-            (-half_w_m, half_h_m),
-        ];
-
-        let mut max_world_size = f64::INFINITY;
-        for (dx, dy) in corners {
-            let sx_m = dx * cos_b + dy * sin_b;
-            let sy_m = -dx * sin_b + dy * cos_b;
-
-            let denom_x = sx_m.abs() * d_cam + half_avail_w * sy_m * sin_p;
-            if denom_x > 1e-15 {
-                max_world_size = max_world_size.min(half_avail_w * d_cam / denom_x);
-            }
-            let denom_y = sy_m.abs() * cos_p * d_cam + half_avail_h * sy_m * sin_p;
-            if denom_y > 1e-15 {
-                max_world_size = max_world_size.min(half_avail_h * d_cam / denom_y);
-            }
-        }
-
+        let max_world_size = max_world_size_for_bounds(
+            ((max_m.x - min_m.x) * 0.5, (max_m.y - min_m.y) * 0.5),
+            (avail_w * 0.5, avail_h * 0.5),
+            (sin_b, cos_b, sin_p, cos_p),
+            d_cam,
+        );
         let unclamped_zoom = if max_world_size.is_finite() && max_world_size > 0.0 {
             (max_world_size / TILE_SIZE).log2().clamp(-2.0, 24.0)
         } else {
@@ -422,27 +394,15 @@ impl ViewState {
                 .unwrap_or_else(|| self.zoom().value().clamp(-2.0, 24.0))
         };
         let zoom = self.clamp_zoom(Zoom::new(unclamped_zoom)).value();
-        let world_size = TILE_SIZE * 2.0_f64.powf(zoom);
-
-        // Shift the orbit center so `mid_m` lands at the center of the padded box rather than the
-        // unpadded viewport center, accounting for perspective foreshortening and bearing.
-        let center_offset = self.center_offset();
-        let ox = (pad_left - pad_right) * 0.5 - center_offset.x;
-        let oy = (pad_top - pad_bottom) * 0.5 - center_offset.y;
-        let perspective_k = (cos_p + (oy / d_cam) * sin_p).max(0.05);
-        let gx = ox * cos_p / perspective_k;
-        let gy = oy / perspective_k;
-
-        let shift_m_x = (gx * cos_b - gy * sin_b) / world_size;
-        let shift_m_y = (gx * sin_b + gy * cos_b) / world_size;
-        let cam_m = Point2::new(
-            (mid_m.x - shift_m_x).rem_euclid(1.0),
-            clamp_ordered(mid_m.y - shift_m_y, 0.0, 1.0),
+        let cam_m = offset_mercator_center(
+            mid_m,
+            (pad_top, pad_right, pad_bottom, pad_left),
+            self.center_offset(),
+            (sin_b, cos_b, sin_p, cos_p),
+            (d_cam, TILE_SIZE * 2.0_f64.powf(zoom)),
         );
-        let center = self.clamp_center(lat_lon_at_mercator(cam_m));
-
         CameraFit {
-            center,
+            center: self.clamp_center(lat_lon_at_mercator(cam_m)),
             zoom,
             bearing: bearing_deg,
             pitch: pitch_deg,
@@ -464,3 +424,53 @@ impl ViewState {
 
 #[cfg(test)]
 mod tests;
+
+fn max_world_size_for_bounds(
+    (half_w_m, half_h_m): (f64, f64),
+    (half_avail_w, half_avail_h): (f64, f64),
+    (sin_b, cos_b, sin_p, cos_p): (f64, f64, f64, f64),
+    d_cam: f64,
+) -> f64 {
+    let corners = [
+        (-half_w_m, -half_h_m),
+        (half_w_m, -half_h_m),
+        (half_w_m, half_h_m),
+        (-half_w_m, half_h_m),
+    ];
+    let mut max_world_size = f64::INFINITY;
+    for (dx, dy) in corners {
+        let sx_m = dx * cos_b + dy * sin_b;
+        let sy_m = -dx * sin_b + dy * cos_b;
+        let denom_x = sx_m.abs() * d_cam + half_avail_w * sy_m * sin_p;
+        if denom_x > 1e-15 {
+            max_world_size = max_world_size.min(half_avail_w * d_cam / denom_x);
+        }
+        let denom_y = sy_m.abs() * cos_p * d_cam + half_avail_h * sy_m * sin_p;
+        if denom_y > 1e-15 {
+            max_world_size = max_world_size.min(half_avail_h * d_cam / denom_y);
+        }
+    }
+    max_world_size
+}
+
+fn offset_mercator_center(
+    mid_m: Point2<f64>,
+    (pad_top, pad_right, pad_bottom, pad_left): (f64, f64, f64, f64),
+    center_offset: Point2<f64>,
+    (sin_b, cos_b, sin_p, cos_p): (f64, f64, f64, f64),
+    (d_cam, world_size): (f64, f64),
+) -> Point2<f64> {
+    // Shift the orbit center so `mid_m` lands at the center of the padded box rather than the
+    // unpadded viewport center, accounting for perspective foreshortening and bearing.
+    let ox = (pad_left - pad_right) * 0.5 - center_offset.x;
+    let oy = (pad_top - pad_bottom) * 0.5 - center_offset.y;
+    let perspective_k = (cos_p + (oy / d_cam) * sin_p).max(0.05);
+    let gx = ox * cos_p / perspective_k;
+    let gy = oy / perspective_k;
+    let shift_m_x = (gx * cos_b - gy * sin_b) / world_size;
+    let shift_m_y = (gx * sin_b + gy * cos_b) / world_size;
+    Point2::new(
+        (mid_m.x - shift_m_x).rem_euclid(1.0),
+        clamp_ordered(mid_m.y - shift_m_y, 0.0, 1.0),
+    )
+}

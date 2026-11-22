@@ -121,12 +121,21 @@ async fn shared_layer_metadata_fill_syncs_opaque_flag_across_cached_tiles_and_re
     let outcome_a = upload_bucket(
         &mut pool,
         &renderer.queue,
-        &style_layer,
-        &bucket_a,
-        None,
-        (None, 0, false),
-        (&[], frame_opaque),
-        (&empty_set, &mut fm_scratch, &mut dyn_points),
+        crate::vector::upload_system::bucket::BucketUploadInput {
+            style_layer: &style_layer,
+            bucket: &bucket_a,
+            fallback_vertices: None,
+            paint_entries: None,
+            overscaled_zoom: 0,
+            is_dynamic_circle: false,
+            spatial: &[],
+            paint: frame_opaque,
+            protected: &empty_set,
+        },
+        crate::vector::upload_system::bucket::BucketUploadScratch {
+            feature_metadata: &mut fm_scratch,
+            dyn_points: &mut dyn_points,
+        },
     );
     if let crate::vector::upload_system::bucket::UploadOutcome::Uploaded(Some((slot, meta))) =
         outcome_a
@@ -143,12 +152,21 @@ async fn shared_layer_metadata_fill_syncs_opaque_flag_across_cached_tiles_and_re
     let outcome_b = upload_bucket(
         &mut pool,
         &renderer.queue,
-        &style_layer,
-        &bucket_b,
-        None,
-        (None, 0, false),
-        (&[], frame_translucent),
-        (&empty_set, &mut fm_scratch, &mut dyn_points),
+        crate::vector::upload_system::bucket::BucketUploadInput {
+            style_layer: &style_layer,
+            bucket: &bucket_b,
+            fallback_vertices: None,
+            paint_entries: None,
+            overscaled_zoom: 0,
+            is_dynamic_circle: false,
+            spatial: &[],
+            paint: frame_translucent,
+            protected: &empty_set,
+        },
+        crate::vector::upload_system::bucket::BucketUploadScratch {
+            feature_metadata: &mut fm_scratch,
+            dyn_points: &mut dyn_points,
+        },
     );
     if let crate::vector::upload_system::bucket::UploadOutcome::Uploaded(Some((slot, meta))) =
         outcome_b
@@ -170,12 +188,14 @@ async fn shared_layer_metadata_fill_syncs_opaque_flag_across_cached_tiles_and_re
     refresh_layer_paint(
         &mut pool,
         &renderer.queue,
-        &tiles,
-        &[tile_a, tile_b],
-        frame_translucent,
-        Some(frame_translucent),
-        false,
-        tiles_changed,
+        PaintRefreshContext {
+            tiles: &tiles,
+            source_tiles: &[tile_a, tile_b],
+            frame: frame_translucent,
+            previous: Some(frame_translucent),
+            moving: false,
+            tiles_changed,
+        },
         &mut scratch,
     );
     assert!(!pool.index().get_layers(tile_a).expect("tile A")[0].is_opaque_color());
@@ -189,12 +209,14 @@ async fn shared_layer_metadata_fill_syncs_opaque_flag_across_cached_tiles_and_re
     refresh_layer_paint(
         &mut pool,
         &renderer.queue,
-        &tiles,
-        &[tile_a, tile_b],
-        frame_high,
-        Some(frame_translucent),
-        false,
-        tiles_changed,
+        PaintRefreshContext {
+            tiles: &tiles,
+            source_tiles: &[tile_a, tile_b],
+            frame: frame_high,
+            previous: Some(frame_translucent),
+            moving: false,
+            tiles_changed,
+        },
         &mut scratch,
     );
     assert!(pool.index().get_layers(tile_a).expect("tile A")[0].is_opaque_color());
@@ -269,12 +291,21 @@ async fn translucent_outlined_fill_stays_blended_across_tile_and_zoom_refresh() 
             upload_bucket(
                 &mut pool,
                 &renderer.queue,
-                &style_layer,
-                &bucket,
-                None,
-                (None, 0, false),
-                (&[], frame_14_6),
-                (&empty_set, &mut fm_scratch, &mut dyn_points),
+                crate::vector::upload_system::bucket::BucketUploadInput {
+                    style_layer: &style_layer,
+                    bucket: &bucket,
+                    fallback_vertices: None,
+                    paint_entries: None,
+                    overscaled_zoom: 0,
+                    is_dynamic_circle: false,
+                    spatial: &[],
+                    paint: frame_14_6,
+                    protected: &empty_set,
+                },
+                crate::vector::upload_system::bucket::BucketUploadScratch {
+                    feature_metadata: &mut fm_scratch,
+                    dyn_points: &mut dyn_points,
+                },
             )
         {
             scratch.slots.record(slot, meta);
@@ -291,12 +322,14 @@ async fn translucent_outlined_fill_stays_blended_across_tile_and_zoom_refresh() 
     refresh_layer_paint(
         &mut pool,
         &renderer.queue,
-        &tiles,
-        &[tile_a, tile_b],
-        frame_14_6,
-        Some(frame_14_6),
-        false,
-        tiles_changed,
+        PaintRefreshContext {
+            tiles: &tiles,
+            source_tiles: &[tile_a, tile_b],
+            frame: frame_14_6,
+            previous: Some(frame_14_6),
+            moving: false,
+            tiles_changed,
+        },
         &mut scratch,
     );
     assert!(
@@ -317,12 +350,14 @@ async fn translucent_outlined_fill_stays_blended_across_tile_and_zoom_refresh() 
     refresh_layer_paint(
         &mut pool,
         &renderer.queue,
-        &tiles,
-        &[tile_a, tile_b],
-        frame_14_23,
-        Some(frame_14_6),
-        true,
-        tiles_changed,
+        PaintRefreshContext {
+            tiles: &tiles,
+            source_tiles: &[tile_a, tile_b],
+            frame: frame_14_23,
+            previous: Some(frame_14_6),
+            moving: true,
+            tiles_changed,
+        },
         &mut scratch,
     );
     assert!(

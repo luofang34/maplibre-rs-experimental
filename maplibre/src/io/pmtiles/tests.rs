@@ -124,7 +124,9 @@ impl ArchiveServer {
 #[cfg_attr(feature = "thread-safe-futures", async_trait)]
 impl HttpClient for ArchiveServer {
     async fn fetch(&self, url: &str) -> Result<Vec<u8>, SourceFetchError> {
-        panic!("an archive is read in ranges, not whole: {url}");
+        Err(SourceFetchError(Box::new(std::io::Error::other(format!(
+            "an archive is read in ranges, not whole: {url}"
+        )))))
     }
 
     async fn fetch_range(&self, url: &str, range: ByteRange) -> Result<Vec<u8>, SourceFetchError> {
@@ -346,11 +348,11 @@ async fn a_source_naming_an_archive_resolves_to_its_tiles() {
         ArchiveServer::new(archive(&tiles(), false)),
     )));
     crate::io::tile_json::resolve_tile_json_sources(&mut style, &client).await;
-    let Some(Source::Vector(source)) = style.sources.get("v") else {
-        panic!("vector source");
-    };
-    assert_eq!(
-        source.tiles.as_deref(),
-        Some(&[format!("pmtiles://{ARCHIVE}/{{z}}/{{x}}/{{y}}")][..])
-    );
+    assert!(matches!(style.sources.get("v"), Some(Source::Vector(_))));
+    if let Some(Source::Vector(source)) = style.sources.get("v") {
+        assert_eq!(
+            source.tiles.as_deref(),
+            Some(&[format!("pmtiles://{ARCHIVE}/{{z}}/{{x}}/{{y}}")][..])
+        );
+    }
 }

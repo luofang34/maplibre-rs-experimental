@@ -208,7 +208,7 @@ impl HeadlessRuntimeThread {
                 {
                     Ok(rt) => rt,
                     Err(err) => {
-                        let _ = startup_tx.send(Err(HeadlessRuntimeError::Runtime(err)));
+                        drop(startup_tx.send(Err(HeadlessRuntimeError::Runtime(err))));
                         return;
                     }
                 };
@@ -216,7 +216,7 @@ impl HeadlessRuntimeThread {
                 let mut map = match build(&runtime) {
                     Ok(map) => map,
                     Err(err) => {
-                        let _ = startup_tx.send(Err(err));
+                        drop(startup_tx.send(Err(err)));
                         return;
                     }
                 };
@@ -244,11 +244,11 @@ impl HeadlessRuntimeThread {
                 join_handle: Some(join_handle),
             }),
             Ok(Err(err)) => {
-                let _ = join_handle.join();
+                drop(join_handle.join());
                 Err(err)
             }
             Err(_) => {
-                let _ = join_handle.join();
+                drop(join_handle.join());
                 Err(HeadlessRuntimeError::Aborted)
             }
         }
@@ -278,7 +278,7 @@ impl HeadlessRuntimeThread {
         }
         if let Some(join_handle) = self.join_handle.take() {
             if join_handle.thread().id() != thread::current().id() {
-                let _ = join_handle.join();
+                drop(join_handle.join());
             }
         }
     }
@@ -315,7 +315,7 @@ fn run_worker_loop(
 
         if commands.has_watchers() && (map.has_ready_work() || map.needs_redraw()) {
             map.frame_input_mut().advance(FRAME_STEP);
-            let _ = map.run_frame();
+            drop(map.run_frame());
             commands.observe(map);
         }
 

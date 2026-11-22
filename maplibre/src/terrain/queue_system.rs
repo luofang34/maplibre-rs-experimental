@@ -322,14 +322,13 @@ fn queue_tiles(
         let mut draws = draws;
         draws.sort_by(|left, right| key(&left.coords).total_cmp(&key(&right.coords)));
         terrain.set_draws(draws);
-        if let Some(index) = world
-            .resources
-            .get_mut::<crate::terrain::TerrainCoverageIndex>()
-        {
-            index.set_surface_edges(
-                &sources[..written],
-                std::sync::Arc::clone(&edge_cache.samples),
-            );
+        if let (Some(index), Some(written_sources)) = (
+            world
+                .resources
+                .get_mut::<crate::terrain::TerrainCoverageIndex>(),
+            sources.get(..written),
+        ) {
+            index.set_surface_edges(written_sources, std::sync::Arc::clone(&edge_cache.samples));
         }
         let kept = placed.into_iter().zip(uniforms).take(written).collect();
         world.resources.insert(TerrainEyeFrame(kept));

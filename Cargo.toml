@@ -34,6 +34,13 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(no_pendantic_os_check)'] }
 [workspace.lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+indexing_slicing = "deny"
+await_holding_lock = "deny"
+let_underscore_must_use = "deny"
+let_underscore_future = "deny"
 collapsible_if = "allow"
 
 [workspace.dependencies]
@@ -59,7 +66,7 @@ geo-types = { version = "0.7.20", features = ["rstar_0_12"] }
 geozero = { version = "0.15.1", default-features = false, features = ["with-mvt", "with-geo"] }
 image = { version = "0.25.2", default-features = false }
 include_dir = "0.7.3"
-instant = { version = "0.1.12", features = ["wasm-bindgen"] }  # TODO: Untrusted dependency
+instant = { version = "0.1.12", features = ["wasm-bindgen"] }
 jni = "0.22.4"
 js-sys = "0.3"
 log = { version = "0.4.20", features = ["release_max_level_warn"] }
@@ -68,6 +75,7 @@ unicode-normalization = { version = "0.1.24", default-features = false }
 # Keep this dependency compatible with the workspace MSRV.
 mlt-core = "=0.22.1"
 naga = { version = "30.0.1", features = ["wgsl-in"] }
+proptest = "1.12.0"
 android_logger = "0.15.1"
 png = { version = "0.18.1" }
 reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls", "gzip"] }  # Use rusttls on android because cross compiling is difficult
@@ -83,7 +91,7 @@ tokio-util = { version = "0.7.9", features = ["rt"] }
 tracing = { version = "0.1.37", features = ["release_max_level_warn"] }
 tracing-subscriber = "0.3.17"
 tracing-tracy = "=0.12.0"
-tracing-wasm = "0.2.1"  # TODO: Low quality dependency (remove in a separate PR!)
+tracing-wasm = "0.2.1"
 walkdir = "2.4.0"
 wasm-bindgen = "=0.2.130" # Also change in flake.nix and CI scripts
 wasm-bindgen-futures = "0.4"

@@ -11,14 +11,13 @@ mod provider;
 mod sprite;
 pub mod wire;
 pub(super) use builder::AtlasBuilder;
-#[allow(unused_imports)]
-pub(crate) use cache::{fetch, tiles};
+#[cfg(feature = "raster")]
+pub(crate) use cache::fetch;
+pub(crate) use cache::tiles;
 pub use cache::{AssetCache, AssetFailure};
-#[allow(unused_imports)]
 pub(crate) use load::{
-    fetch_symbol_asset_inputs, load_symbol_assets_awaiting, load_symbol_assets_awaiting_from_tile,
-    load_symbol_assets_for_requests, pack_symbol_assets, spawn_style_symbol_prefetch,
-    symbol_requests_from_tile, SymbolRequests,
+    fetch_symbol_asset_inputs, load_symbol_assets_awaiting_from_tile, pack_symbol_assets,
+    spawn_style_symbol_prefetch, symbol_requests_from_tile,
 };
 pub use load::{
     load_symbol_assets, spawn_worker_symbol_prefetch, SymbolAssetConfig, SymbolAssetError,

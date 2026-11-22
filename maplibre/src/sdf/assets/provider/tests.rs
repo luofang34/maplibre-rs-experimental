@@ -129,7 +129,13 @@ async fn many_tiles_asking_for_one_name_call_its_provider_once() {
     );
     assert!(answers.iter().all(is_image), "{answers:?}");
     assert_eq!(fake.calls(), 1, "concurrent requests share one call");
-    let request = fake.requests.lock().expect("requests")[0].clone();
+    let request = fake
+        .requests
+        .lock()
+        .expect("requests")
+        .first()
+        .cloned()
+        .expect("recorded request");
     assert_eq!(request.id, "US:I=287");
     assert_eq!(request.name, "shield:US:I=287");
     assert_eq!(request.pixel_ratio, 2.0);

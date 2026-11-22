@@ -137,7 +137,10 @@ impl PrefetchPlan {
             }
             Ok::<(), ()>(())
         };
-        let _ = crate::util::async_join::try_join2(sprite_fut, glyph_fut).await;
+        if crate::util::async_join::try_join2(sprite_fut, glyph_fut)
+            .await
+            .is_err()
+        {}
     }
 }
 

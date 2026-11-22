@@ -124,49 +124,15 @@ impl InputController {
         self.query_handler.update_parts(style, view_state, world);
         self.debug_handler.update_parts(view_state, dt);
 
-        let before_pitch = view_state.camera().get_pitch().0;
-        let handlers_moved = view_snapshot(view_state) != before;
-
-        if handlers_moved {
-            let zoom_after_handlers = view_state.zoom().value();
-            let pitch_after_handlers = before_pitch.to_degrees();
-            if style.terrain.is_some()
-                && ((self.navigation_state.three_dimensional && self.navigation_state.auto_tilt)
-                    || view_state.center_elevation().abs() <= f64::EPSILON
-                    || !view_state.center_elevation_frozen())
-            {
-                let was_frozen = view_state.center_elevation_frozen();
-                if was_frozen {
-                    view_state.thaw_center_elevation();
-                }
-                crate::terrain::elevation::ground_center(view_state, world);
-                if was_frozen {
-                    view_state.freeze_center_elevation();
-                }
-            }
-            let pitch_clamped = clamp_pitch_above_terrain_keeping_zoom(style, view_state, world);
-            let lifted = keep_camera_above_terrain(style, view_state, world);
-            if pitch_clamped || lifted {
-                self.navigation_state.cancel_pitch_animation();
-                if (view_state.camera().get_pitch().0 - initial_pitch).abs() < 2e-3 {
-                    view_state.camera_mut().set_pitch(Rad(initial_pitch));
-                }
-            }
-            let zoom_final = view_state.zoom().value();
-            let pitch_final = view_state.camera().get_pitch().0.to_degrees();
-            let center_elev = view_state.center_elevation();
-            if view_snapshot(view_state) != before {
-                tracing::debug!(
-                    ?zoom_after_handlers,
-                    ?pitch_after_handlers,
-                    ?zoom_final,
-                    ?pitch_final,
-                    ?center_elev,
-                    pitch_clamped,
-                    lifted,
-                    "camera frame update"
-                );
-            }
+        if view_snapshot(view_state) != before {
+            self.clamp_after_handlers(
+                style,
+                view_state,
+                world,
+                initial_pitch,
+                &before,
+                view_snapshot,
+            );
         }
 
         let camera_moved = view_snapshot(view_state) != before;
@@ -179,6 +145,56 @@ impl InputController {
             world,
         );
         camera_moved
+    }
+
+    fn clamp_after_handlers<S: PartialEq>(
+        &mut self,
+        style: &Style,
+        view_state: &mut ViewState,
+        world: &mut World,
+        initial_pitch: f64,
+        before: &S,
+        snapshot: fn(&ViewState) -> S,
+    ) {
+        let zoom_after_handlers = view_state.zoom().value();
+        let pitch_after_handlers = view_state.camera().get_pitch().0.to_degrees();
+        if style.terrain.is_some()
+            && ((self.navigation_state.three_dimensional && self.navigation_state.auto_tilt)
+                || view_state.center_elevation().abs() <= f64::EPSILON
+                || !view_state.center_elevation_frozen())
+        {
+            let was_frozen = view_state.center_elevation_frozen();
+            if was_frozen {
+                view_state.thaw_center_elevation();
+            }
+            crate::terrain::elevation::ground_center(view_state, world);
+            if was_frozen {
+                view_state.freeze_center_elevation();
+            }
+        }
+        let pitch_clamped = clamp_pitch_above_terrain_keeping_zoom(style, view_state, world);
+        let lifted = keep_camera_above_terrain(style, view_state, world);
+        if pitch_clamped || lifted {
+            self.navigation_state.cancel_pitch_animation();
+            if (view_state.camera().get_pitch().0 - initial_pitch).abs() < 2e-3 {
+                view_state.camera_mut().set_pitch(Rad(initial_pitch));
+            }
+        }
+        let zoom_final = view_state.zoom().value();
+        let pitch_final = view_state.camera().get_pitch().0.to_degrees();
+        let center_elev = view_state.center_elevation();
+        if &snapshot(view_state) != before {
+            tracing::debug!(
+                ?zoom_after_handlers,
+                ?pitch_after_handlers,
+                ?zoom_final,
+                ?pitch_final,
+                ?center_elev,
+                pitch_clamped,
+                lifted,
+                "camera frame update"
+            );
+        }
     }
 }
 

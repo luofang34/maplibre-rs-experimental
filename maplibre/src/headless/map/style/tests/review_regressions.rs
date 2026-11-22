@@ -208,11 +208,11 @@ fn editing_one_style_layer_leaves_other_vector_entries_revisions_untouched() {
     .await;
 
         let entry_rev = |map: &HeadlessMap, id: &str| -> u64 {
-            let Some(Eventually::Initialized(pool)) =
-                map.world().resources.get::<Eventually<VectorBufferPool>>()
-            else {
-                panic!("initialized vector pool");
-            };
+            let pool = match map.world().resources.get::<Eventually<VectorBufferPool>>() {
+                Some(Eventually::Initialized(pool)) => Some(pool),
+                _ => None,
+            }
+            .expect("initialized vector pool");
             pool.index()
                 .get_layers(tile())
                 .expect("tile entries")

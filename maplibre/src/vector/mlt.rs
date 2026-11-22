@@ -169,11 +169,10 @@ fn encode_point(p: &geo_types::Point<i32>, out: &mut Vec<u32>, cursor: &mut (i32
 }
 
 fn encode_linestring(ls: &geo_types::LineString<i32>, out: &mut Vec<u32>, cursor: &mut (i32, i32)) {
-    if ls.0.is_empty() {
+    let Some(&first) = ls.0.first() else {
         return;
-    }
+    };
     out.push((1 << 3) | 1);
-    let first = ls.0[0];
     out.push(zigzag(first.x - cursor.0));
     out.push(zigzag(first.y - cursor.1));
     *cursor = (first.x, first.y);
@@ -181,7 +180,7 @@ fn encode_linestring(ls: &geo_types::LineString<i32>, out: &mut Vec<u32>, cursor
     let count = ls.0.len() - 1;
     if count > 0 {
         out.push(((count as u32) << 3) | 2);
-        for pt in &ls.0[1..] {
+        for pt in ls.0.iter().skip(1) {
             out.push(zigzag(pt.x - cursor.0));
             out.push(zigzag(pt.y - cursor.1));
             *cursor = (pt.x, pt.y);
@@ -197,22 +196,24 @@ fn encode_polygon(poly: &geo_types::Polygon<i32>, out: &mut Vec<u32>, cursor: &m
 }
 
 fn encode_ring(ring: &geo_types::LineString<i32>, out: &mut Vec<u32>, cursor: &mut (i32, i32)) {
-    let mut coords = ring.0.as_slice();
-    if coords.len() > 1 && coords.first() == coords.last() {
-        coords = &coords[..coords.len() - 1];
-    }
+    let coords = match ring.0.as_slice() {
+        [head @ .., tail] if !head.is_empty() && head.first() == Some(tail) => head,
+        full => full,
+    };
+    let Some(&first) = coords.first() else {
+        return;
+    };
     if coords.len() < 3 {
         return;
     }
     out.push((1 << 3) | 1);
-    let first = coords[0];
     out.push(zigzag(first.x - cursor.0));
     out.push(zigzag(first.y - cursor.1));
     *cursor = (first.x, first.y);
 
     let line_to_count = coords.len() - 1;
     out.push(((line_to_count as u32) << 3) | 2);
-    for pt in &coords[1..] {
+    for pt in coords.iter().skip(1) {
         out.push(zigzag(pt.x - cursor.0));
         out.push(zigzag(pt.y - cursor.1));
         *cursor = (pt.x, pt.y);
@@ -225,6 +226,26 @@ fn zigzag(n: i32) -> u32 {
     ((n << 1) ^ (n >> 31)) as u32
 }
 
+fn dict_sint(v: i64) -> (DictKey, geozero::mvt::tile::Value) {
+    (
+        DictKey::Sint(v),
+        geozero::mvt::tile::Value {
+            sint_value: Some(v),
+            ..Default::default()
+        },
+    )
+}
+
+fn dict_uint(v: u64) -> (DictKey, geozero::mvt::tile::Value) {
+    (
+        DictKey::Uint(v),
+        geozero::mvt::tile::Value {
+            uint_value: Some(v),
+            ..Default::default()
+        },
+    )
+}
+
 fn prop_to_dict_value(prop: &PropValue) -> Option<(DictKey, geozero::mvt::tile::Value)> {
     match prop {
         PropValue::Bool(Some(b)) => Some((
@@ -234,60 +255,12 @@ fn prop_to_dict_value(prop: &PropValue) -> Option<(DictKey, geozero::mvt::tile::
                 ..Default::default()
             },
         )),
-        PropValue::I8(Some(i)) => {
-            let v = i64::from(*i);
-            Some((
-                DictKey::Sint(v),
-                geozero::mvt::tile::Value {
-                    sint_value: Some(v),
-                    ..Default::default()
-                },
-            ))
-        }
-        PropValue::U8(Some(u)) => {
-            let v = u64::from(*u);
-            Some((
-                DictKey::Uint(v),
-                geozero::mvt::tile::Value {
-                    uint_value: Some(v),
-                    ..Default::default()
-                },
-            ))
-        }
-        PropValue::I32(Some(i)) => {
-            let v = i64::from(*i);
-            Some((
-                DictKey::Sint(v),
-                geozero::mvt::tile::Value {
-                    sint_value: Some(v),
-                    ..Default::default()
-                },
-            ))
-        }
-        PropValue::U32(Some(u)) => {
-            let v = u64::from(*u);
-            Some((
-                DictKey::Uint(v),
-                geozero::mvt::tile::Value {
-                    uint_value: Some(v),
-                    ..Default::default()
-                },
-            ))
-        }
-        PropValue::I64(Some(i)) => Some((
-            DictKey::Sint(*i),
-            geozero::mvt::tile::Value {
-                sint_value: Some(*i),
-                ..Default::default()
-            },
-        )),
-        PropValue::U64(Some(u)) => Some((
-            DictKey::Uint(*u),
-            geozero::mvt::tile::Value {
-                uint_value: Some(*u),
-                ..Default::default()
-            },
-        )),
+        PropValue::I8(Some(i)) => Some(dict_sint(i64::from(*i))),
+        PropValue::I32(Some(i)) => Some(dict_sint(i64::from(*i))),
+        PropValue::I64(Some(i)) => Some(dict_sint(*i)),
+        PropValue::U8(Some(u)) => Some(dict_uint(u64::from(*u))),
+        PropValue::U32(Some(u)) => Some(dict_uint(u64::from(*u))),
+        PropValue::U64(Some(u)) => Some(dict_uint(*u)),
         PropValue::F32(Some(f)) => Some((
             DictKey::F32(f.to_bits()),
             geozero::mvt::tile::Value {

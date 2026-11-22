@@ -154,138 +154,13 @@ impl InputController {
                 self.navigation_state.ctrl_held = modifiers.ctrl;
                 false
             }
-            InputEvent::PointerMoved { position } => {
-                let position = Vector2::new(position[0], position[1]);
-                let consumed_by_hud = self.navigation_state.process_cursor_moved(
-                    position,
-                    self.last_known_width,
-                    self.last_known_height,
-                );
-
-                if let Some(origin) = self.rts_right_press_origin {
-                    if !self.rts_right_panning && (position - origin).magnitude() >= 4.0 {
-                        self.rts_right_panning = true;
-                        self.navigation_state.on_manual_pan_or_zoom();
-                        self.pan_handler.begin_pan(Some(origin));
-                    }
-                }
-
-                if !consumed_by_hud {
-                    self.pan_handler.process_window_position(&position, false);
-                    self.query_handler.process_window_position(&position, false);
-                    self.zoom_handler.process_window_position(&position, false);
-                    self.camera_handler
-                        .process_window_position(&position, false);
-                }
-                true
-            }
-            InputEvent::Key { key, state } => {
-                if state == ButtonState::Pressed {
-                    match key {
-                        NavKey::TogglePointerProfile => {
-                            self.navigation_state.toggle_pointer_profile();
-                            return true;
-                        }
-                        NavKey::Cycle3dMode => {
-                            self.navigation_state.cycle_3d_mode(self.last_known_zoom);
-                            return true;
-                        }
-                        NavKey::Compass => {
-                            self.navigation_state
-                                .trigger_compass(self.last_known_bearing);
-                            return true;
-                        }
-                        NavKey::Home => {
-                            self.navigation_state.trigger_home();
-                            return true;
-                        }
-                        NavKey::ToggleHud => {
-                            self.navigation_state.show_hud = !self.navigation_state.show_hud;
-                            return true;
-                        }
-                        _ => {}
-                    }
-                }
-                self.shift_handler.process_key(key, state)
-                    || self.debug_handler.process_key(key, state)
-                    || self.zoom_handler.process_key(key, state)
-            }
+            InputEvent::PointerMoved { position } => self.handle_pointer_moved(position),
+            InputEvent::Key { key, state } => self.handle_key_event(key, state),
             InputEvent::Touch {
                 id,
                 phase,
                 position,
-            } => {
-                let position = Vector2::new(position[0], position[1]);
-                match phase {
-                    TouchPhase::Started => {
-                        self.zoom_handler.cancel_pinch_inertia();
-                        self.pinch_handler.cancel_rotate_inertia();
-                        if self.pinch_handler.touch_count() == 0
-                            && self.navigation_state.process_hud_press(
-                                position,
-                                self.last_known_width,
-                                self.last_known_height,
-                            )
-                        {
-                            self.hud_touch_id = Some(id);
-                            return true;
-                        }
-                        if self.pinch_handler.touch_count() == 0
-                            && self.navigation_state.check_double_click(now, position)
-                        {
-                            if let Some(delta) = self.navigation_state.take_pending_smooth_zoom() {
-                                self.zoom_handler.add_smooth_zoom(delta, Some(position));
-                            }
-                            return true;
-                        }
-                        self.navigation_state.on_manual_pan_or_zoom();
-                        self.pinch_handler
-                            .on_touch_start(id, position, &mut self.pan_handler);
-                        self.query_handler.process_touch_start();
-                        true
-                    }
-                    TouchPhase::Moved => {
-                        if self.hud_touch_id == Some(id) {
-                            self.navigation_state.process_cursor_moved(
-                                position,
-                                self.last_known_width,
-                                self.last_known_height,
-                            );
-                            return true;
-                        }
-                        self.pinch_handler.on_touch_move_at(
-                            id,
-                            position,
-                            &mut self.pan_handler,
-                            &mut self.zoom_handler,
-                            &mut self.navigation_state,
-                            now,
-                        );
-                        self.query_handler.process_window_position(&position, true);
-                        self.camera_handler.process_window_position(&position, true);
-                        true
-                    }
-                    TouchPhase::Ended | TouchPhase::Cancelled => {
-                        if self.hud_touch_id == Some(id) {
-                            self.hud_touch_id = None;
-                            self.navigation_state
-                                .process_hud_release(self.last_known_zoom, self.last_known_bearing);
-                            if let Some(delta) = self.navigation_state.take_pending_smooth_zoom() {
-                                let center = Vector2::new(
-                                    self.last_known_width * 0.5,
-                                    self.last_known_height * 0.5,
-                                );
-                                self.zoom_handler.add_smooth_zoom(delta, Some(center));
-                            }
-                            return true;
-                        }
-                        self.pinch_handler
-                            .on_touch_end_at(id, &mut self.pan_handler, now);
-                        self.query_handler.process_touch_end();
-                        true
-                    }
-                }
-            }
+            } => self.handle_touch_event(id, phase, position, now),
             InputEvent::PinchGesture { delta, phase } => {
                 self.navigation_state.on_manual_pan_or_zoom();
                 self.zoom_handler
@@ -315,40 +190,178 @@ impl InputController {
                 }
                 true
             }
-            InputEvent::MouseWheel { delta } => {
-                self.navigation_state.on_manual_pan_or_zoom();
-                if let MouseScrollDelta::PixelDelta { x: dx, y: dy } = delta {
-                    let is_discrete_wheel = dx == 0.0 && dy != 0.0 && {
-                        let steps = dy / 4.000244140625;
-                        (steps - steps.round()).abs() <= 1e-6 * steps.abs().max(1.0)
-                            || (dy.abs() >= 40.0 && (dy % 10.0).abs() <= 1e-6)
-                    };
-                    if !is_discrete_wheel {
-                        if self.navigation_state.ctrl_held {
-                            // Browsers encode trackpad two-finger pinch as ctrlKey + wheel
-                            // with deltaY = -magnification * 100.0 (negated into +dy).
-                            self.zoom_handler.process_web_pinch_wheel_at(dy * 0.01, now);
-                            return true;
-                        }
-                        self.zoom_handler.cancel_pinch_inertia();
-                        self.pinch_handler.cancel_rotate_inertia();
-                        if self.navigation_state.alt_held {
-                            self.camera_handler
-                                .process_trackpad_orbit_scroll(Vector2::new(dx, dy));
-                        } else {
-                            self.pan_handler
-                                .process_trackpad_scroll_pan(Vector2::new(dx, dy));
-                        }
-                        return true;
-                    }
-                }
-                self.zoom_handler.process_scroll_at(&delta, now);
-                true
-            }
+            InputEvent::MouseWheel { delta } => self.handle_mouse_wheel(delta, now),
             InputEvent::PointerButton { button, state } => {
                 self.handle_pointer_button(button, state, now)
             }
         }
+    }
+
+    fn handle_pointer_moved(&mut self, position: [f64; 2]) -> bool {
+        let position = Vector2::new(position[0], position[1]);
+        let consumed_by_hud = self.navigation_state.process_cursor_moved(
+            position,
+            self.last_known_width,
+            self.last_known_height,
+        );
+        if let Some(origin) = self.rts_right_press_origin {
+            if !self.rts_right_panning && (position - origin).magnitude() >= 4.0 {
+                self.rts_right_panning = true;
+                self.navigation_state.on_manual_pan_or_zoom();
+                self.pan_handler.begin_pan(Some(origin));
+            }
+        }
+        if !consumed_by_hud {
+            self.pan_handler.process_window_position(&position, false);
+            self.query_handler.process_window_position(&position, false);
+            self.zoom_handler.process_window_position(&position, false);
+            self.camera_handler
+                .process_window_position(&position, false);
+        }
+        true
+    }
+
+    fn handle_key_event(&mut self, key: NavKey, state: ButtonState) -> bool {
+        if state == ButtonState::Pressed {
+            match key {
+                NavKey::TogglePointerProfile => {
+                    self.navigation_state.toggle_pointer_profile();
+                    return true;
+                }
+                NavKey::Cycle3dMode => {
+                    self.navigation_state.cycle_3d_mode(self.last_known_zoom);
+                    return true;
+                }
+                NavKey::Compass => {
+                    self.navigation_state
+                        .trigger_compass(self.last_known_bearing);
+                    return true;
+                }
+                NavKey::Home => {
+                    self.navigation_state.trigger_home();
+                    return true;
+                }
+                NavKey::ToggleHud => {
+                    self.navigation_state.show_hud = !self.navigation_state.show_hud;
+                    return true;
+                }
+                _ => {}
+            }
+        }
+        self.shift_handler.process_key(key, state)
+            || self.debug_handler.process_key(key, state)
+            || self.zoom_handler.process_key(key, state)
+    }
+
+    fn handle_touch_event(
+        &mut self,
+        id: u64,
+        phase: TouchPhase,
+        position: [f64; 2],
+        now: Instant,
+    ) -> bool {
+        let position = Vector2::new(position[0], position[1]);
+        match phase {
+            TouchPhase::Started => {
+                self.zoom_handler.cancel_pinch_inertia();
+                self.pinch_handler.cancel_rotate_inertia();
+                if self.pinch_handler.touch_count() == 0
+                    && self.navigation_state.process_hud_press(
+                        position,
+                        self.last_known_width,
+                        self.last_known_height,
+                    )
+                {
+                    self.hud_touch_id = Some(id);
+                    return true;
+                }
+                if self.pinch_handler.touch_count() == 0
+                    && self.navigation_state.check_double_click(now, position)
+                {
+                    if let Some(delta) = self.navigation_state.take_pending_smooth_zoom() {
+                        self.zoom_handler.add_smooth_zoom(delta, Some(position));
+                    }
+                    return true;
+                }
+                self.navigation_state.on_manual_pan_or_zoom();
+                self.pinch_handler
+                    .on_touch_start(id, position, &mut self.pan_handler);
+                self.query_handler.process_touch_start();
+                true
+            }
+            TouchPhase::Moved => {
+                if self.hud_touch_id == Some(id) {
+                    self.navigation_state.process_cursor_moved(
+                        position,
+                        self.last_known_width,
+                        self.last_known_height,
+                    );
+                    return true;
+                }
+                self.pinch_handler.on_touch_move_at(
+                    id,
+                    position,
+                    &mut self.pan_handler,
+                    &mut self.zoom_handler,
+                    &mut self.navigation_state,
+                    now,
+                );
+                self.query_handler.process_window_position(&position, true);
+                self.camera_handler.process_window_position(&position, true);
+                true
+            }
+            TouchPhase::Ended | TouchPhase::Cancelled => {
+                if self.hud_touch_id == Some(id) {
+                    self.hud_touch_id = None;
+                    self.navigation_state
+                        .process_hud_release(self.last_known_zoom, self.last_known_bearing);
+                    self.flush_pending_hud_zoom();
+                    return true;
+                }
+                self.pinch_handler
+                    .on_touch_end_at(id, &mut self.pan_handler, now);
+                self.query_handler.process_touch_end();
+                true
+            }
+        }
+    }
+
+    fn flush_pending_hud_zoom(&mut self) {
+        if let Some(delta) = self.navigation_state.take_pending_smooth_zoom() {
+            let center = Vector2::new(self.last_known_width * 0.5, self.last_known_height * 0.5);
+            self.zoom_handler.add_smooth_zoom(delta, Some(center));
+        }
+    }
+
+    fn handle_mouse_wheel(&mut self, delta: MouseScrollDelta, now: Instant) -> bool {
+        self.navigation_state.on_manual_pan_or_zoom();
+        if let MouseScrollDelta::PixelDelta { x: dx, y: dy } = delta {
+            let is_discrete_wheel = dx == 0.0 && dy != 0.0 && {
+                let steps = dy / 4.000244140625;
+                (steps - steps.round()).abs() <= 1e-6 * steps.abs().max(1.0)
+                    || (dy.abs() >= 40.0 && (dy % 10.0).abs() <= 1e-6)
+            };
+            if !is_discrete_wheel {
+                if self.navigation_state.ctrl_held {
+                    // Browsers encode trackpad two-finger pinch as ctrlKey + wheel
+                    // with deltaY = -magnification * 100.0 (negated into +dy).
+                    self.zoom_handler.process_web_pinch_wheel_at(dy * 0.01, now);
+                    return true;
+                }
+                self.zoom_handler.cancel_pinch_inertia();
+                self.pinch_handler.cancel_rotate_inertia();
+                if self.navigation_state.alt_held {
+                    self.camera_handler
+                        .process_trackpad_orbit_scroll(Vector2::new(dx, dy));
+                } else {
+                    self.pan_handler
+                        .process_trackpad_scroll_pan(Vector2::new(dx, dy));
+                }
+                return true;
+            }
+        }
+        self.zoom_handler.process_scroll_at(&delta, now);
+        true
     }
 
     fn handle_pointer_button(
@@ -360,48 +373,14 @@ impl InputController {
         let cursor = self.navigation_state.cursor_position;
         match (button, state) {
             (PointerButton::Primary, ButtonState::Pressed) => {
-                self.zoom_handler.cancel_pinch_inertia();
-                self.pinch_handler.cancel_rotate_inertia();
-                if let Some(pos) = cursor {
-                    if self.navigation_state.process_hud_press(
-                        pos,
-                        self.last_known_width,
-                        self.last_known_height,
-                    ) {
-                        return true;
-                    }
-                    if self.navigation_state.check_double_click(now, pos) {
-                        if let Some(delta) = self.navigation_state.take_pending_smooth_zoom() {
-                            self.zoom_handler.add_smooth_zoom(delta, Some(pos));
-                        }
-                        return true;
-                    }
-                }
-                if self.navigation_state.alt_held || self.navigation_state.ctrl_held {
-                    self.camera_handler.begin_orbit(false);
-                } else if self.navigation_state.pointer_profile == PointerProfile::Rts
-                    || self.navigation_state.shift_held
-                {
-                    if let Some(pos) = cursor {
-                        self.navigation_state.selection_drag = Some((pos, pos));
-                    }
-                } else {
-                    self.navigation_state.on_manual_pan_or_zoom();
-                    self.pan_handler
-                        .process_pointer_button_at(button, state, now);
-                }
-                self.query_handler.process_pointer_button(button, state);
+                return self.handle_primary_press(cursor, now);
             }
             (PointerButton::Primary, ButtonState::Released) => {
                 if self
                     .navigation_state
                     .process_hud_release(self.last_known_zoom, self.last_known_bearing)
                 {
-                    if let Some(delta) = self.navigation_state.take_pending_smooth_zoom() {
-                        let center =
-                            Vector2::new(self.last_known_width * 0.5, self.last_known_height * 0.5);
-                        self.zoom_handler.add_smooth_zoom(delta, Some(center));
-                    }
+                    self.flush_pending_hud_zoom();
                     return true;
                 }
                 self.navigation_state.selection_drag = None;
@@ -449,6 +428,45 @@ impl InputController {
                 self.camera_handler.process_pointer_button(button, state);
             }
         }
+        true
+    }
+
+    fn handle_primary_press(&mut self, cursor: Option<Vector2<f64>>, now: Instant) -> bool {
+        self.zoom_handler.cancel_pinch_inertia();
+        self.pinch_handler.cancel_rotate_inertia();
+        if let Some(pos) = cursor {
+            if self.navigation_state.process_hud_press(
+                pos,
+                self.last_known_width,
+                self.last_known_height,
+            ) {
+                return true;
+            }
+            if self.navigation_state.check_double_click(now, pos) {
+                if let Some(delta) = self.navigation_state.take_pending_smooth_zoom() {
+                    self.zoom_handler.add_smooth_zoom(delta, Some(pos));
+                }
+                return true;
+            }
+        }
+        if self.navigation_state.alt_held || self.navigation_state.ctrl_held {
+            self.camera_handler.begin_orbit(false);
+        } else if self.navigation_state.pointer_profile == PointerProfile::Rts
+            || self.navigation_state.shift_held
+        {
+            if let Some(pos) = cursor {
+                self.navigation_state.selection_drag = Some((pos, pos));
+            }
+        } else {
+            self.navigation_state.on_manual_pan_or_zoom();
+            self.pan_handler.process_pointer_button_at(
+                PointerButton::Primary,
+                ButtonState::Pressed,
+                now,
+            );
+        }
+        self.query_handler
+            .process_pointer_button(PointerButton::Primary, ButtonState::Pressed);
         true
     }
 }

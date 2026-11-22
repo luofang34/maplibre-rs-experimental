@@ -21,9 +21,11 @@ export class BrowserMap {
     maplibregl.setWorkerCount(2);
     this.map = new maplibregl.Map({ container: 'map', style, center: [11.7, 47.35], zoom: 8.5, pitch: 50, maxPitch: 80, maxTileCacheSize: 128, canvasContextAttributes: { antialias: true }, attributionControl: false });
     this.ready = new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Map startup timed out. Check network access and reload.')), 45000);
-      this.map.once('style.load', () => { clearTimeout(timeout); resolve(); });
-      this.map.once('error', e => { clearTimeout(timeout); reject(e.error); });
+      const timeoutSignal = AbortSignal.timeout(45000);
+      const onTimeout = () => reject(new Error('Map startup timed out. Check network access and reload.'));
+      timeoutSignal.addEventListener('abort', onTimeout, { once: true });
+      this.map.once('style.load', () => { timeoutSignal.removeEventListener('abort', onTimeout); resolve(); });
+      this.map.once('error', e => { timeoutSignal.removeEventListener('abort', onTimeout); reject(e.error); });
     });
     const element = document.createElement('div'); element.className = 'ownship'; element.textContent = '▲';
     this.marker = new maplibregl.Marker({ element, rotationAlignment: 'map', pitchAlignment: 'map' });

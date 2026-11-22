@@ -59,131 +59,141 @@ impl TileBytesCache {
 /// Zero-allocation structural digest covering every component read by [`tile_bytes`].
 pub(super) fn tile_bytes_stamp(tiles: &Tiles, coords: WorldTileCoords) -> u64 {
     let mut h = FxHasher::default();
+    hash_vector_and_raster(tiles, coords, &mut h);
+    hash_dem_and_replacements(tiles, coords, &mut h);
+    hash_symbols_paint_and_index(tiles, coords, &mut h);
+    h.finish()
+}
+
+fn hash_vector_and_raster(tiles: &Tiles, coords: WorldTileCoords, h: &mut FxHasher) {
     if let Some(buckets) = tiles.query::<&VectorLayerBucketComponent>(coords) {
-        1_u8.hash(&mut h);
-        buckets.done.hash(&mut h);
-        buckets.failed.hash(&mut h);
-        buckets.uploaded_stamp.hash(&mut h);
-        buckets.layers.len().hash(&mut h);
-        (buckets.layers.as_ptr() as usize).hash(&mut h);
+        1_u8.hash(h);
+        buckets.done.hash(h);
+        buckets.failed.hash(h);
+        buckets.uploaded_stamp.hash(h);
+        buckets.layers.len().hash(h);
+        (buckets.layers.as_ptr() as usize).hash(h);
         for layer in &buckets.layers {
             match layer {
                 VectorLayerBucket::AvailableLayer(avail) => {
-                    1_u8.hash(&mut h);
-                    avail.buffer.buffer.vertices.capacity().hash(&mut h);
-                    avail.buffer.buffer.indices.capacity().hash(&mut h);
-                    avail.buffer.prepacked_bytes().hash(&mut h);
-                    avail.feature_indices.capacity().hash(&mut h);
-                    avail.feature_colors.capacity().hash(&mut h);
-                    avail.feature_sort_keys.capacity().hash(&mut h);
+                    1_u8.hash(h);
+                    avail.buffer.buffer.vertices.capacity().hash(h);
+                    avail.buffer.buffer.indices.capacity().hash(h);
+                    avail.buffer.prepacked_bytes().hash(h);
+                    avail.feature_indices.capacity().hash(h);
+                    avail.feature_colors.capacity().hash(h);
+                    avail.feature_sort_keys.capacity().hash(h);
                 }
-                VectorLayerBucket::Missing(_) => 0_u8.hash(&mut h),
+                VectorLayerBucket::Missing(_) => 0_u8.hash(h),
             }
         }
     }
     #[cfg(feature = "raster")]
     if let Some(raster) = tiles.query::<&RasterLayersDataComponent>(coords) {
-        2_u8.hash(&mut h);
-        raster.layers.len().hash(&mut h);
+        2_u8.hash(h);
+        raster.layers.len().hash(h);
         for layer in &raster.layers {
             match layer {
                 RasterLayerData::Available(avail) => {
-                    1_u8.hash(&mut h);
-                    avail.image.as_raw().capacity().hash(&mut h);
-                    (avail.image.as_raw().as_ptr() as usize).hash(&mut h);
+                    1_u8.hash(h);
+                    avail.image.as_raw().capacity().hash(h);
+                    (avail.image.as_raw().as_ptr() as usize).hash(h);
                 }
-                RasterLayerData::Missing(_) => 0_u8.hash(&mut h),
-                RasterLayerData::Empty(_) => 2_u8.hash(&mut h),
+                RasterLayerData::Missing(_) => 0_u8.hash(h),
+                RasterLayerData::Empty(_) => 2_u8.hash(h),
             }
         }
     }
+}
+
+fn hash_dem_and_replacements(tiles: &Tiles, coords: WorldTileCoords, h: &mut FxHasher) {
     if let Some(dem) = tiles.query::<&DemTileComponent>(coords) {
-        3_u8.hash(&mut h);
+        3_u8.hash(h);
         match dem {
-            DemTileComponent::Pending => 0_u8.hash(&mut h),
+            DemTileComponent::Pending => 0_u8.hash(h),
             DemTileComponent::Loaded(loaded) => {
-                1_u8.hash(&mut h);
-                (Arc::as_ptr(&loaded.tile) as usize).hash(&mut h);
+                1_u8.hash(h);
+                (Arc::as_ptr(&loaded.tile) as usize).hash(h);
             }
-            DemTileComponent::Missing => 2_u8.hash(&mut h),
+            DemTileComponent::Missing => 2_u8.hash(h),
         }
     }
     if let Some(dem_layers) = tiles.query::<&DemLayersComponent>(coords) {
-        4_u8.hash(&mut h);
+        4_u8.hash(h);
         let mut count = 0_usize;
         for (_, loaded) in dem_layers.iter() {
             count += 1;
-            (Arc::as_ptr(&loaded.tile) as usize).hash(&mut h);
+            (Arc::as_ptr(&loaded.tile) as usize).hash(h);
         }
-        count.hash(&mut h);
+        count.hash(h);
     }
     if let Some(pending) = tiles.query::<&LayerReplacements>(coords) {
-        5_u8.hash(&mut h);
-        pending.vector.len().hash(&mut h);
-        (pending.vector.as_ptr() as usize).hash(&mut h);
+        5_u8.hash(h);
+        pending.vector.len().hash(h);
+        (pending.vector.as_ptr() as usize).hash(h);
         for layer in &pending.vector {
-            layer.buffer.buffer.vertices.capacity().hash(&mut h);
-            layer.buffer.buffer.indices.capacity().hash(&mut h);
-            layer.buffer.prepacked_bytes().hash(&mut h);
-            layer.feature_colors.capacity().hash(&mut h);
+            layer.buffer.buffer.vertices.capacity().hash(h);
+            layer.buffer.buffer.indices.capacity().hash(h);
+            layer.buffer.prepacked_bytes().hash(h);
+            layer.feature_colors.capacity().hash(h);
         }
-        pending.symbols.len().hash(&mut h);
-        (pending.symbols.as_ptr() as usize).hash(&mut h);
+        pending.symbols.len().hash(h);
+        (pending.symbols.as_ptr() as usize).hash(h);
         for layer in &pending.symbols {
-            layer.buffer.buffer.vertices.capacity().hash(&mut h);
-            layer.features.capacity().hash(&mut h);
+            layer.buffer.buffer.vertices.capacity().hash(h);
+            layer.features.capacity().hash(h);
             layer
                 .atlas
                 .as_ref()
                 .map_or(0_usize, |a| Arc::as_ptr(a) as usize)
-                .hash(&mut h);
+                .hash(h);
         }
     }
+}
+
+fn hash_symbols_paint_and_index(tiles: &Tiles, coords: WorldTileCoords, h: &mut FxHasher) {
     if let Some(symbols) = tiles.query::<&SymbolLayersDataComponent>(coords) {
-        6_u8.hash(&mut h);
-        symbols.layers.len().hash(&mut h);
-        (symbols.layers.as_ptr() as usize).hash(&mut h);
+        6_u8.hash(h);
+        symbols.layers.len().hash(h);
+        (symbols.layers.as_ptr() as usize).hash(h);
         for layer in &symbols.layers {
-            layer.buffer.buffer.vertices.capacity().hash(&mut h);
-            layer.buffer.buffer.indices.capacity().hash(&mut h);
-            layer.buffer.icon_bits_bytes().hash(&mut h);
-            layer.features.capacity().hash(&mut h);
+            layer.buffer.buffer.vertices.capacity().hash(h);
+            layer.buffer.buffer.indices.capacity().hash(h);
+            layer.buffer.icon_bits_bytes().hash(h);
+            layer.features.capacity().hash(h);
             layer
                 .atlas
                 .as_ref()
                 .map_or(0_usize, |a| Arc::as_ptr(a) as usize)
-                .hash(&mut h);
+                .hash(h);
         }
     }
     if let Some(paint) = tiles.query::<&TileFeaturePaintComponent>(coords) {
-        7_u8.hash(&mut h);
-        paint.committed.len().hash(&mut h);
-        paint.pending.len().hash(&mut h);
+        7_u8.hash(h);
+        paint.committed.len().hash(h);
+        paint.pending.len().hash(h);
         for entries in paint.committed.values().chain(paint.pending.values()) {
-            entries.capacity().hash(&mut h);
-            (entries.as_ptr() as usize).hash(&mut h);
+            entries.capacity().hash(h);
+            (entries.as_ptr() as usize).hash(h);
         }
     }
-    tiles.geometry_index.tile_bytes(coords).hash(&mut h);
+    tiles.geometry_index.tile_bytes(coords).hash(h);
     if let Some(sources) = tiles.geometry_index.tile_indexes(&coords) {
         for (_, idx) in sources {
             match idx {
                 TileIndex::Spatial { tree } => {
-                    1_u8.hash(&mut h);
-                    tree.size().hash(&mut h);
+                    1_u8.hash(h);
+                    tree.size().hash(h);
                 }
                 TileIndex::Linear { list } => {
-                    2_u8.hash(&mut h);
-                    list.len().hash(&mut h);
+                    2_u8.hash(h);
+                    list.len().hash(h);
                 }
                 TileIndex::LazyMvt(lazy) => {
-                    3_u8.hash(&mut h);
-                    lazy.materialized_slice()
-                        .map_or(0, |s| s.len())
-                        .hash(&mut h);
+                    3_u8.hash(h);
+                    lazy.materialized_slice().map_or(0, |s| s.len()).hash(h);
                 }
             }
         }
     }
-    h.finish()
 }

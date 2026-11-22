@@ -14,16 +14,27 @@ const WOFF1_TABLE_DIR_ENTRY_SIZE: usize = 20;
 
 fn read_u16_be(bytes: &[u8], offset: usize) -> Option<u16> {
     let slice = bytes.get(offset..offset + 2)?;
-    Some(u16::from_be_bytes([slice[0], slice[1]]))
+    Some(u16::from_be_bytes([*slice.first()?, *slice.get(1)?]))
 }
 
 fn read_u32_be(bytes: &[u8], offset: usize) -> Option<u32> {
     let slice = bytes.get(offset..offset + 4)?;
-    Some(u32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]]))
+    Some(u32::from_be_bytes([
+        *slice.first()?,
+        *slice.get(1)?,
+        *slice.get(2)?,
+        *slice.get(3)?,
+    ]))
 }
 
-/// Unpacks a WOFF 1.0 (`wOFF`) buffer into a standard OpenType/TrueType `sfnt` byte buffer.
-pub(super) fn unpack_woff1(bytes: &[u8]) -> Result<Vec<u8>, FontError> {
+struct Woff1Header {
+    flavor: u32,
+    declared_len: usize,
+    num_tables: usize,
+    dir_end: usize,
+}
+
+fn parse_woff1_header(bytes: &[u8]) -> Result<Woff1Header, FontError> {
     if bytes.len() < WOFF1_HEADER_SIZE || bytes.get(..4) != Some(b"wOFF") {
         return Err(FontError::InvalidContainer(
             "truncated or invalid WOFF1 header",
@@ -50,83 +61,124 @@ pub(super) fn unpack_woff1(bytes: &[u8]) -> Result<Vec<u8>, FontError> {
     if total_sfnt_size > MAX_DECOMPRESSED_FONT_BYTES {
         return Err(FontError::InvalidContainer("WOFF1 totalSfntSize too large"));
     }
-
     let dir_end = WOFF1_HEADER_SIZE
         .checked_add(num_tables * WOFF1_TABLE_DIR_ENTRY_SIZE)
         .filter(|&end| end <= declared_len)
         .ok_or(FontError::InvalidContainer(
             "WOFF1 table directory truncated",
         ))?;
+    Ok(Woff1Header {
+        flavor,
+        declared_len,
+        num_tables,
+        dir_end,
+    })
+}
 
-    let mut tables = Vec::with_capacity(num_tables);
-    let mut cumulative_uncompressed = 0usize;
+fn decode_woff1_table(
+    bytes: &[u8],
+    header: &Woff1Header,
+    idx: usize,
+    cumulative_uncompressed: &mut usize,
+) -> Result<SfntTable, FontError> {
+    let base = WOFF1_HEADER_SIZE + idx * WOFF1_TABLE_DIR_ENTRY_SIZE;
+    let tag_slice = bytes
+        .get(base..base + 4)
+        .ok_or(FontError::InvalidContainer("WOFF1 table tag truncated"))?;
+    let tag: [u8; 4] = tag_slice
+        .try_into()
+        .map_err(|_| FontError::InvalidContainer("WOFF1 table tag truncated"))?;
+    let offset = read_u32_be(bytes, base + 4)
+        .ok_or(FontError::InvalidContainer("WOFF1 table offset truncated"))?
+        as usize;
+    let comp_length = read_u32_be(bytes, base + 8)
+        .ok_or(FontError::InvalidContainer("WOFF1 compLength truncated"))?
+        as usize;
+    let orig_length = read_u32_be(bytes, base + 12)
+        .ok_or(FontError::InvalidContainer("WOFF1 origLength truncated"))?
+        as usize;
+    let orig_checksum = read_u32_be(bytes, base + 16)
+        .ok_or(FontError::InvalidContainer("WOFF1 origChecksum truncated"))?;
 
-    for idx in 0..num_tables {
-        let base = WOFF1_HEADER_SIZE + idx * WOFF1_TABLE_DIR_ENTRY_SIZE;
-        let tag_slice = bytes
-            .get(base..base + 4)
-            .ok_or(FontError::InvalidContainer("WOFF1 table tag truncated"))?;
-        let tag = [tag_slice[0], tag_slice[1], tag_slice[2], tag_slice[3]];
-        let offset = read_u32_be(bytes, base + 4)
-            .ok_or(FontError::InvalidContainer("WOFF1 table offset truncated"))?
-            as usize;
-        let comp_length = read_u32_be(bytes, base + 8)
-            .ok_or(FontError::InvalidContainer("WOFF1 compLength truncated"))?
-            as usize;
-        let orig_length = read_u32_be(bytes, base + 12)
-            .ok_or(FontError::InvalidContainer("WOFF1 origLength truncated"))?
-            as usize;
-        let orig_checksum = read_u32_be(bytes, base + 16)
-            .ok_or(FontError::InvalidContainer("WOFF1 origChecksum truncated"))?;
-
-        if comp_length > orig_length || offset < dir_end {
-            return Err(FontError::InvalidContainer(
-                "WOFF1 table has invalid compressed length or offset",
-            ));
-        }
-        cumulative_uncompressed = cumulative_uncompressed
-            .checked_add(orig_length)
-            .filter(|&total| total <= MAX_DECOMPRESSED_FONT_BYTES)
-            .ok_or(FontError::InvalidContainer(
-                "WOFF1 uncompressed tables too large",
-            ))?;
-
-        let raw_end = offset
-            .checked_add(comp_length)
-            .filter(|&end| end <= declared_len)
-            .ok_or(FontError::InvalidContainer(
-                "WOFF1 table payload out of bounds",
-            ))?;
-        let payload = &bytes[offset..raw_end];
-
-        let data = if comp_length == orig_length {
-            payload.to_vec()
-        } else {
-            let mut decoded = Vec::with_capacity(orig_length.min(65_536));
-            let limit = u64::try_from(orig_length)
-                .map_err(|_| FontError::InvalidContainer("WOFF1 table too large"))?
-                .saturating_add(1);
-            ZlibDecoder::new(payload)
-                .take(limit)
-                .read_to_end(&mut decoded)
-                .map_err(|_| FontError::InvalidContainer("WOFF1 zlib decompression failed"))?;
-            if decoded.len() != orig_length {
-                return Err(FontError::InvalidContainer(
-                    "WOFF1 decompressed table length mismatch",
-                ));
-            }
-            decoded
-        };
-        let mut actual_checksum = sfnt_checksum(&data);
-        if &tag == b"head" && data.len() >= 12 {
-            let adj = u32::from_be_bytes([data[8], data[9], data[10], data[11]]);
-            actual_checksum = actual_checksum.wrapping_sub(adj);
-        }
-        if actual_checksum != orig_checksum {
-            return Err(FontError::InvalidContainer("WOFF1 table checksum mismatch"));
-        }
-        tables.push(SfntTable { tag, data });
+    if comp_length > orig_length || offset < header.dir_end {
+        return Err(FontError::InvalidContainer(
+            "WOFF1 table has invalid compressed length or offset",
+        ));
     }
+    *cumulative_uncompressed = cumulative_uncompressed
+        .checked_add(orig_length)
+        .filter(|&total| total <= MAX_DECOMPRESSED_FONT_BYTES)
+        .ok_or(FontError::InvalidContainer(
+            "WOFF1 uncompressed tables too large",
+        ))?;
 
-    assemble_sfnt(flavor, tables)
+    let raw_end = offset
+        .checked_add(comp_length)
+        .filter(|&end| end <= header.declared_len)
+        .ok_or(FontError::InvalidContainer(
+            "WOFF1 table payload out of bounds",
+        ))?;
+    let payload = bytes
+        .get(offset..raw_end)
+        .ok_or(FontError::InvalidContainer(
+            "WOFF1 table payload out of bounds",
+        ))?;
+    let data = decompress_woff1_payload(payload, comp_length, orig_length)?;
+    verify_woff1_checksum(&tag, &data, orig_checksum)?;
+    Ok(SfntTable { tag, data })
+}
+
+fn decompress_woff1_payload(
+    payload: &[u8],
+    comp_length: usize,
+    orig_length: usize,
+) -> Result<Vec<u8>, FontError> {
+    if comp_length == orig_length {
+        return Ok(payload.to_vec());
+    }
+    let mut decoded = Vec::with_capacity(orig_length.min(65_536));
+    let limit = u64::try_from(orig_length)
+        .map_err(|_| FontError::InvalidContainer("WOFF1 table too large"))?
+        .saturating_add(1);
+    ZlibDecoder::new(payload)
+        .take(limit)
+        .read_to_end(&mut decoded)
+        .map_err(|_| FontError::InvalidContainer("WOFF1 zlib decompression failed"))?;
+    if decoded.len() != orig_length {
+        return Err(FontError::InvalidContainer(
+            "WOFF1 decompressed table length mismatch",
+        ));
+    }
+    Ok(decoded)
+}
+
+fn verify_woff1_checksum(tag: &[u8; 4], data: &[u8], orig_checksum: u32) -> Result<(), FontError> {
+    let mut actual_checksum = sfnt_checksum(data);
+    if tag == b"head" {
+        if let Some(adj_slice) = data.get(8..12) {
+            if let Ok(arr) = <[u8; 4]>::try_from(adj_slice) {
+                actual_checksum = actual_checksum.wrapping_sub(u32::from_be_bytes(arr));
+            }
+        }
+    }
+    if actual_checksum != orig_checksum {
+        return Err(FontError::InvalidContainer("WOFF1 table checksum mismatch"));
+    }
+    Ok(())
+}
+
+/// Unpacks a WOFF 1.0 (`wOFF`) buffer into a standard OpenType/TrueType `sfnt` byte buffer.
+pub(super) fn unpack_woff1(bytes: &[u8]) -> Result<Vec<u8>, FontError> {
+    let header = parse_woff1_header(bytes)?;
+    let mut tables = Vec::with_capacity(header.num_tables);
+    let mut cumulative_uncompressed = 0usize;
+    for idx in 0..header.num_tables {
+        tables.push(decode_woff1_table(
+            bytes,
+            &header,
+            idx,
+            &mut cumulative_uncompressed,
+        )?);
+    }
+    assemble_sfnt(header.flavor, tables)
 }

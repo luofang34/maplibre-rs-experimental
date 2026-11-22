@@ -103,12 +103,18 @@ async fn style_assets_fetch_unicode_ranges_and_sprite_queries_without_hidden_lay
         "unused fonts must not delay tile loading: {urls:?}"
     );
     assert!(urls.contains(&"https://fonts.invalid/Font%20A/256-511.pbf".to_string()));
-    assert!(atlas.glyphs["Font A"].contains_key(&256));
-    let icon = &atlas.icons["marker"];
+    assert!(atlas
+        .glyphs
+        .get("Font A")
+        .is_some_and(|g| g.contains_key(&256)));
+    let icon = atlas.icons.get("marker").expect("marker icon");
     assert_eq!(icon.metrics[3], 2.0);
     let offset = ((icon.rect[1] * atlas.size[0] + icon.rect[0]) * 4) as usize;
     // Colour icons are stored premultiplied by their alpha.
-    assert_eq!(&atlas.pixels[offset..offset + 4], &[0, 191, 0, 191]);
+    assert_eq!(
+        atlas.pixels.get(offset..offset + 4),
+        Some(&[0, 191, 0, 191][..])
+    );
 }
 
 #[derive(Clone, Copy)]
@@ -212,7 +218,11 @@ async fn tiles_that_share_assets_fetch_and_decode_them_once() {
         3,
         "range, sprite json and png"
     );
-    assert_eq!(first.glyphs["Font A"].len(), second.glyphs["Font A"].len());
+    assert_eq!(
+        first.glyphs.get("Font A").map(rustc_hash::FxHashMap::len),
+        second.glyphs.get("Font A").map(rustc_hash::FxHashMap::len)
+    );
+    assert!(first.glyphs.contains_key("Font A"));
     assert!(second.icons.contains_key("marker"));
 }
 
@@ -290,7 +300,10 @@ async fn a_transient_glyph_failure_is_returned_so_the_tile_can_retry() {
     )
     .await
     .expect("retry");
-    assert!(atlas.glyphs["Font A"].contains_key(&65));
+    assert!(atlas
+        .glyphs
+        .get("Font A")
+        .is_some_and(|g| g.contains_key(&65)));
 }
 
 #[test]

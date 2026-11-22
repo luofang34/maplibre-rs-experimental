@@ -44,7 +44,7 @@ impl TempMbtiles {
             "maplibre-runtime-mbtiles-{}-{id}.mbtiles",
             std::process::id()
         ));
-        let _ = std::fs::remove_file(&path);
+        drop(std::fs::remove_file(&path));
         let conn = Connection::open(&path).expect("create temp mbtiles");
         conn.execute_batch(
             "CREATE TABLE metadata (name TEXT, value TEXT);
@@ -67,7 +67,7 @@ impl TempMbtiles {
 
 impl Drop for TempMbtiles {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
+        drop(std::fs::remove_file(&self.path));
     }
 }
 

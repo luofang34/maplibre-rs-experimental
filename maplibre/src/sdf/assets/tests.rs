@@ -11,12 +11,19 @@ fn glyph_subset_keeps_spaces_and_unicode_metrics_without_uploading_unused_letter
             .expect("font");
     builder.glyph_subset("test", &glyphs, Some(&[32, 65, 233].into_iter().collect()));
     let atlas = builder.finish();
-    let font = &atlas.glyphs["test"];
+    let font = atlas.glyphs.get("test").expect("test font");
     assert_eq!(font.len(), 3);
-    assert!(font[&32].metrics[2] > 0.0, "spaces must advance the pen");
-    assert!(font[&233].rect[2] > 0, "accented glyph must have pixels");
+    assert!(
+        font.get(&32).is_some_and(|g| g.metrics[2] > 0.0),
+        "spaces must advance the pen"
+    );
+    assert!(
+        font.get(&233).is_some_and(|g| g.rect[2] > 0),
+        "accented glyph must have pixels"
+    );
     assert_eq!(
-        font[&65].metrics[1], -6.0,
+        font.get(&65).map(|g| g.metrics[1]),
+        Some(-6.0),
         "PBF metrics use the map font baseline"
     );
 }
@@ -33,12 +40,12 @@ fn packing_a_short_sprite_does_not_erase_a_tall_glyph_and_borders_stay_clear() {
     assert!(builder.pack(u32::MAX, 1, &[]).is_none());
     let atlas = builder.finish();
     let pixel = |x, y| {
-        &atlas.pixels
-            [((y * atlas.size[0] + x) * 4) as usize..((y * atlas.size[0] + x) * 4 + 4) as usize]
+        let start = ((y * atlas.size[0] + x) * 4) as usize;
+        atlas.pixels.get(start..start + 4)
     };
-    assert_eq!(pixel(tall[0], tall[1] + 79), [255, 0, 0, 255]);
-    assert_eq!(pixel(short[0], short[1]), [0, 255, 0, 128]);
-    assert_eq!(pixel(short[0] - 1, short[1]), [0, 0, 0, 0]);
+    assert_eq!(pixel(tall[0], tall[1] + 79), Some(&[255, 0, 0, 255][..]));
+    assert_eq!(pixel(short[0], short[1]), Some(&[0, 255, 0, 128][..]));
+    assert_eq!(pixel(short[0] - 1, short[1]), Some(&[0, 0, 0, 0][..]));
 }
 
 #[test]

@@ -190,14 +190,15 @@ pub fn ingest_source_dem_with_style(
         component.insert(canonical.clone(), dem);
     }
     let updated_neighbours = backfill_source_neighbours(tiles, &canonical, coords);
+    let siblings = equiv.get(1..).unwrap_or(&[]);
     for at in std::iter::once(coords).chain(updated_neighbours.iter().copied()) {
-        mirror_canonical_to_siblings(tiles, &canonical, &equiv[1..], at);
+        mirror_canonical_to_siblings(tiles, &canonical, siblings, at);
         if sync_terrain {
             sync_coord_to_terrain_component(tiles, &canonical, at);
         }
     }
     for (neighbour, _) in neighbours(coords) {
-        mirror_canonical_to_siblings(tiles, &canonical, &equiv[1..], neighbour);
+        mirror_canonical_to_siblings(tiles, &canonical, siblings, neighbour);
     }
 }
 

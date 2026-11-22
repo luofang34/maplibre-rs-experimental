@@ -21,10 +21,19 @@ fn a_hillshade_layer_without_paint_takes_the_specification_defaults() {
         IlluminationAnchor::Viewport
     );
     assert_eq!(lights.azimuths.len(), 1);
-    assert!((lights.azimuths[0] - 335.0_f32.to_radians()).abs() < 1e-6);
-    assert!((lights.altitudes[0] - 45.0_f32.to_radians()).abs() < 1e-6);
-    assert_eq!(lights.shadows[0], [0.0, 0.0, 0.0, 1.0]);
-    assert_eq!(lights.highlights[0], [1.0, 1.0, 1.0, 1.0]);
+    assert!(lights
+        .azimuths
+        .first()
+        .is_some_and(|v| (*v - 335.0_f32.to_radians()).abs() < 1e-6));
+    assert!(lights
+        .altitudes
+        .first()
+        .is_some_and(|v| (*v - 45.0_f32.to_radians()).abs() < 1e-6));
+    assert_eq!(lights.shadows.first().copied(), Some([0.0, 0.0, 0.0, 1.0]));
+    assert_eq!(
+        lights.highlights.first().copied(),
+        Some([1.0, 1.0, 1.0, 1.0])
+    );
     assert_eq!(paint.exaggeration_at(11.0), 0.5);
 }
 
@@ -43,16 +52,23 @@ fn several_lights_pad_every_list_to_the_longest_and_turn_with_the_viewport() {
     assert_eq!(paint.hillshade_method, HillshadeMethod::Multidirectional);
     assert_eq!(lights.azimuths.len(), 4);
     assert!(
-        (lights.azimuths[2] - 0.5).abs() < 1e-6,
+        lights
+            .azimuths
+            .get(2)
+            .is_some_and(|v| (*v - 0.5).abs() < 1e-6),
         "north turned by the bearing"
     );
     assert_eq!(lights.highlights.len(), 4);
     assert_eq!(
-        lights.highlights[3], lights.highlights[1],
+        lights.highlights.get(3),
+        lights.highlights.get(1),
         "the last colour repeats"
     );
     assert_eq!(lights.shadows.len(), 4);
-    assert!((lights.shadows[0][2] - 1.0).abs() < 1e-6);
+    assert!(lights
+        .shadows
+        .first()
+        .is_some_and(|s| (s[2] - 1.0).abs() < 1e-6));
 }
 
 #[test]
@@ -77,8 +93,8 @@ fn a_relief_ramp_lists_the_elevation_stops_with_their_colours() {
     };
     let ramp = paint.ramp();
     assert_eq!(ramp.len(), 2);
-    assert_eq!(ramp[0], (400.0, [1.0, 0.0, 0.0, 1.0]));
-    assert_eq!(ramp[1], (800.0, [0.0, 0.0, 1.0, 1.0]));
+    assert_eq!(ramp.first().copied(), Some((400.0, [1.0, 0.0, 0.0, 1.0])));
+    assert_eq!(ramp.get(1).copied(), Some((800.0, [0.0, 0.0, 1.0, 1.0])));
     assert_eq!(paint.opacity_at(3.0), 1.0);
     assert!(!paint.is_nearest_at(3.0));
 }
@@ -112,7 +128,7 @@ fn hillshade_and_color_relief_resampling_support_constant_stops_and_mutation() {
         ]
     }))
     .expect("style parses");
-    match &style.layers[1].paint {
+    match style.layers.get(1).and_then(|l| l.paint.as_ref()) {
         Some(LayerPaint::ColorRelief(cr)) => assert!(cr.is_nearest_at(5.0)),
         other => panic!("expected color-relief paint, got {other:?}"),
     }
@@ -121,7 +137,7 @@ fn hillshade_and_color_relief_resampling_support_constant_stops_and_mutation() {
         .expect("hillshade-resampling mutates");
     assert_eq!(change.layers, vec!["hs".to_string()]);
     assert!(!change.redraw_tiles);
-    match &style.layers[0].paint {
+    match style.layers.first().and_then(|l| l.paint.as_ref()) {
         Some(LayerPaint::Hillshade(hs)) => assert!(hs.is_nearest_at(5.0)),
         other => panic!("expected hillshade paint, got {other:?}"),
     }
@@ -142,8 +158,14 @@ fn hillshade_empty_arrays_fall_back_to_defaults_without_panicking() {
     }));
     let illum = hs.illumination(5.0, 0.0);
     assert_eq!(illum.azimuths.len(), 1);
-    assert!((illum.azimuths[0] - 335.0_f32.to_radians()).abs() < 1e-5);
-    assert!((illum.altitudes[0] - 45.0_f32.to_radians()).abs() < 1e-5);
+    assert!(illum
+        .azimuths
+        .first()
+        .is_some_and(|v| (*v - 335.0_f32.to_radians()).abs() < 1e-5));
+    assert!(illum
+        .altitudes
+        .first()
+        .is_some_and(|v| (*v - 45.0_f32.to_radians()).abs() < 1e-5));
     assert_eq!(illum.shadows, vec![[0.0, 0.0, 0.0, 1.0]]);
     assert_eq!(illum.highlights, vec![[1.0, 1.0, 1.0, 1.0]]);
 }

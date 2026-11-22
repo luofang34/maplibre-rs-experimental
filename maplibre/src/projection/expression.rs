@@ -252,7 +252,10 @@ fn validate_stops(
     if stops.iter().any(|stop| !stop.zoom.is_finite()) {
         return Err(invalid_stops("zoom stops must be finite"));
     }
-    if stops.windows(2).any(|pair| pair[0].zoom >= pair[1].zoom) {
+    if stops
+        .windows(2)
+        .any(|pair| matches!(pair, [a, b] if a.zoom >= b.zoom))
+    {
         return Err(invalid_stops("zoom stops must be strictly increasing"));
     }
     Ok(())
@@ -305,11 +308,14 @@ fn interpolate_stops(curve: InterpolationCurve, stops: &[ProjectionStop], zoom: 
         return first.projection.globe_weight();
     }
     for pair in stops.windows(2) {
-        if zoom <= pair[1].zoom {
+        let [left, right] = pair else {
+            continue;
+        };
+        if zoom <= right.zoom {
             return mix_weights(
-                pair[0].projection,
-                pair[1].projection,
-                interpolation_factor(curve, zoom, pair[0].zoom, pair[1].zoom),
+                left.projection,
+                right.projection,
+                interpolation_factor(curve, zoom, left.zoom, right.zoom),
             );
         }
     }

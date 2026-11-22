@@ -4,34 +4,19 @@
 use std::{
     collections::BTreeMap,
     process::Command,
-    sync::Arc,
     time::{Duration, Instant},
 };
 
 use cgmath::Deg;
 use clap::ValueEnum;
 use maplibre::{
-    coords::LatLon,
-    headless::{
-        create_headless_renderer_with_loader,
-        map::{resolve_tile_json_sources, HeadlessMap},
-    },
-    io::{
-        apc::AsyncProcedureCall,
-        resource_loader::SharedLoader,
-        source_client::{HttpSourceClient, SourceClient},
-    },
-    platform::native_http_client,
-    plugin::Plugin,
-    render::{
-        settings::{BufferPoolSizes, Msaa, RendererSettings},
-        view_state::CameraOptions,
-        RenderPlugin,
-    },
-    style::{source::Source, Style},
+    coords::LatLon, headless::map::HeadlessMap, render::view_state::CameraOptions, style::Style,
 };
 
-use crate::style_loader::{load_style, BundledStyle};
+use crate::{
+    headless_setup::build_headless_map_with_notify,
+    style_loader::{load_style, BundledStyle},
+};
 
 const LIBERTY_STYLE_URL: &str = "https://tiles.openfreemap.org/styles/liberty";
 
@@ -228,102 +213,11 @@ pub fn run_bench(opts: &BenchOptions) -> Result<(), Box<dyn std::error::Error>> 
     Ok(())
 }
 
-async fn run_single_scenario(
-    spec: ScenarioSpec,
-    mut style: Style,
-    width: u32,
-    height: u32,
-    frames: usize,
-    timeout_secs: u64,
-) -> Result<ScenarioReport, Box<dyn std::error::Error>> {
-    let has_vector = style.sources.is_empty()
-        || style
-            .sources
-            .values()
-            .any(|s| matches!(s, Source::Vector(_) | Source::GeoJson(_)));
-    let has_raster = style.sources.values().any(|s| {
-        matches!(
-            s,
-            Source::Raster(_)
-                | Source::RasterDem(_)
-                | Source::Image(_)
-                | Source::Video(_)
-                | Source::Canvas(_)
-        )
-    });
-
-    let cache_dir = std::env::temp_dir()
-        .join("maplibre-rs-snapshot-cache")
-        .to_string_lossy()
-        .into_owned();
-    let loader = SharedLoader::new(native_http_client(Some(cache_dir)));
-    let source_client = SourceClient::new(HttpSourceClient::new(loader.clone()));
-
-    let mut settings = RendererSettings {
-        msaa: Msaa { samples: 1 },
-        tight_tile_requests: true,
-        ..RendererSettings::default()
-    };
-    if !has_vector {
-        settings.buffer_pools = BufferPoolSizes::EMPTY;
-        settings.symbol_pools = BufferPoolSizes::EMPTY;
-        settings.terrain_drape_size = 512;
-    }
-
-    let cold_t0 = Instant::now();
-    let timeout_budget = Duration::from_secs(timeout_secs);
-    let deadline = Instant::now() + timeout_budget;
-    let (renderer_res, _) = tokio::join!(
-        create_headless_renderer_with_loader(width, height, settings, loader),
-        tokio::time::timeout(
-            timeout_budget,
-            resolve_tile_json_sources(&mut style, &source_client)
-        ),
-    );
-    let (kernel, renderer) = renderer_res?;
-
-    let notify = Arc::new(tokio::sync::Notify::new());
-    let wake_notify = notify.clone();
-    kernel.apc().set_waker(Arc::new(move || {
-        wake_notify.notify_one();
-    }));
-
-    let mut plugins: Vec<Box<dyn Plugin<_>>> = vec![
-        Box::new(RenderPlugin),
-        Box::new(maplibre::background::BackgroundPlugin),
-    ];
-    if has_vector {
-        plugins.push(Box::<
-            maplibre::vector::VectorPlugin<maplibre::vector::DefaultVectorTransferables>,
-        >::default());
-        plugins.push(Box::<
-            maplibre::sdf::SdfPlugin<maplibre::vector::DefaultVectorTransferables>,
-        >::default());
-        plugins.push(Box::new(maplibre::heatmap::HeatmapPlugin));
-    }
-    if has_raster {
-        plugins.push(Box::<
-            maplibre::raster::RasterPlugin<maplibre::raster::DefaultRasterTransferables>,
-        >::default());
-        plugins.push(Box::new(maplibre::hillshade::HillshadePlugin));
-    }
-    if style.terrain.is_some() {
-        plugins.push(Box::<
-            maplibre::terrain::TerrainPlugin<maplibre::terrain::DefaultDemTransferables>,
-        >::default());
-    }
-
-    let mut map = HeadlessMap::new(style, renderer, kernel, plugins)?;
-    map.set_max_pitch(Deg(88.0));
-    map.set_opaque_environment(true);
-    map.jump_to(CameraOptions {
-        center: Some(LatLon::new(spec.lat, spec.lon)),
-        zoom: Some(spec.zoom),
-        pitch: Some(Deg(spec.pitch)),
-        bearing: Some(Deg(spec.bearing)),
-        ..CameraOptions::default()
-    })?;
-
+async fn warmup_bench_map(
+    map: &mut HeadlessMap,
+    notify: &tokio::sync::Notify,
+    deadline: Instant,
+) -> Result<(usize, Duration), Box<dyn std::error::Error>> {
     let mut sim_time = Duration::ZERO;
     let mut warmup_frames = 0_usize;
     let mut idle_streak = 0_u32;
@@ -355,16 +249,35 @@ async fn run_single_scenario(
             .next_retry_delay()
             .unwrap_or(Duration::from_millis(25))
             .min(deadline.saturating_duration_since(now));
-        let _ = tokio::time::timeout(wait, notify.notified()).await;
+        drop(tokio::time::timeout(wait, notify.notified()).await);
     }
+    Ok((warmup_frames, sim_time))
+}
+
+async fn run_single_scenario(
+    spec: ScenarioSpec,
+    style: Style,
+    width: u32,
+    height: u32,
+    frames: usize,
+    timeout_secs: u64,
+) -> Result<ScenarioReport, Box<dyn std::error::Error>> {
+    let cold_t0 = Instant::now();
+    let (mut map, notify, deadline) =
+        build_headless_map_with_notify(style, width, height, timeout_secs, false).await?;
+    map.set_max_pitch(Deg(88.0));
+    map.set_opaque_environment(true);
+    map.jump_to(CameraOptions {
+        center: Some(LatLon::new(spec.lat, spec.lon)),
+        zoom: Some(spec.zoom),
+        pitch: Some(Deg(spec.pitch)),
+        bearing: Some(Deg(spec.bearing)),
+        ..CameraOptions::default()
+    })?;
+    let (warmup_frames, mut sim_time) = warmup_bench_map(&mut map, &notify, deadline).await?;
 
     let cold_first_frame_ms = cold_t0.elapsed().as_secs_f64() * 1000.0;
-    let mut idle_redraws = 0_usize;
-    for _ in 0..60 {
-        if map.needs_redraw() {
-            idle_redraws += 1;
-        }
-    }
+    let idle_redraws = (0..60).filter(|_| map.needs_redraw()).count();
 
     let still = measure_phase(&mut map, &mut sim_time, frames, |_, _| Ok(()))?;
     let pan_throughput = measure_phase(&mut map, &mut sim_time, frames, |m, idx| {

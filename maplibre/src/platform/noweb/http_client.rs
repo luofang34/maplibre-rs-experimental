@@ -268,6 +268,53 @@ impl ReqwestHttpClient {
         self.in_process.as_ref()?.lookup(url)
     }
 
+    async fn send_network_or_in_process(
+        &self,
+        url: &str,
+        range: Option<ByteRange>,
+        header_map: HeaderMap,
+        volatile: bool,
+    ) -> Result<Result<reqwest::Response, Vec<u8>>, SourceFetchError> {
+        let send_result: Result<reqwest::Response, reqwest_middleware::Error> =
+            match (range, volatile) {
+                (Some(range), _) => SHARED_RANGE_CLIENT
+                    .get(url)
+                    .headers(header_map)
+                    .header(reqwest::header::RANGE, range.header())
+                    .header(reqwest::header::ACCEPT_ENCODING, "identity")
+                    .send()
+                    .await
+                    .map_err(Into::into),
+                (None, true) => {
+                    // Volatile sources bypass `CACacheManager` and `SharedCacheFrontend` completely.
+                    SHARED_DIRECT_CLIENT
+                        .get(url)
+                        .headers(header_map)
+                        .send()
+                        .await
+                        .map_err(Into::into)
+                }
+                (None, false) => {
+                    let _io_permit = match &self.frontend {
+                        Some(frontend) => frontend.io_gate.acquire().await.ok(),
+                        None => None,
+                    };
+                    self.cached_client()
+                        .get(url)
+                        .headers(header_map)
+                        .send()
+                        .await
+                }
+            };
+        match send_result {
+            Ok(response) => Ok(Ok(response)),
+            Err(err) => match self.lookup_in_process_handler(url) {
+                Some(handler) => handler(url, range).await.map(Err),
+                None => Err(err.into()),
+            },
+        }
+    }
+
     /// Executes `req` under `status`. A server that ignores `Range` answers with the whole body,
     /// sliced down here.
     async fn execute(
@@ -300,57 +347,13 @@ impl ReqwestHttpClient {
             return self.execute_offline(req, &header_map, &cache_key).await;
         }
 
-        let response = match (range, volatile) {
-            (Some(range), _) => {
-                let request_builder = SHARED_RANGE_CLIENT
-                    .get(url)
-                    .headers(header_map)
-                    .header(reqwest::header::RANGE, range.header())
-                    .header(reqwest::header::ACCEPT_ENCODING, "identity");
-                match request_builder.send().await {
-                    Ok(response) => response,
-                    Err(err) => match self.lookup_in_process_handler(url) {
-                        Some(handler) => return handler(url, Some(range)).await,
-                        None => return Err(err.into()),
-                    },
-                }
-            }
-            (None, true) => {
-                // Volatile sources bypass `CACacheManager` and `SharedCacheFrontend` completely.
-                match SHARED_DIRECT_CLIENT
-                    .get(url)
-                    .headers(header_map)
-                    .send()
-                    .await
-                {
-                    Ok(response) => response,
-                    Err(err) => match self.lookup_in_process_handler(url) {
-                        Some(handler) => return handler(url, None).await,
-                        None => return Err(err.into()),
-                    },
-                }
-            }
-            (None, false) => {
-                let _io_permit = match &self.frontend {
-                    Some(frontend) => frontend.io_gate.acquire().await.ok(),
-                    None => None,
-                };
-                match self
-                    .cached_client()
-                    .get(url)
-                    .headers(header_map)
-                    .send()
-                    .await
-                {
-                    Ok(response) => response,
-                    Err(err) => match self.lookup_in_process_handler(url) {
-                        Some(handler) => return handler(url, None).await,
-                        None => return Err(err.into()),
-                    },
-                }
-            }
+        let response = match self
+            .send_network_or_in_process(url, range, header_map, volatile)
+            .await?
+        {
+            Ok(response) => response,
+            Err(bytes) => return Ok(bytes),
         };
-
         self.decode_response(url, range, req.cache_policy, &cache_key, response)
             .await
     }

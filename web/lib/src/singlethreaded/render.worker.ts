@@ -193,6 +193,7 @@ onmessage = async (event: MessageEvent<RenderWorkerMessage>) => {
             runner.destroy();
             runner = null;
             controller = null;
+            postMessage({type: "destroyed"});
             break;
         case "rpc": {
             try {

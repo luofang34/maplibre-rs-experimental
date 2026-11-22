@@ -125,7 +125,12 @@ fn a_key_without_value_or_default_reads_as_null() {
     .expect("style");
     style.resolve_global_state();
     assert_eq!(style.global_state_value("flag"), Value::Null);
-    let filter = Filter::parse(style.layers[0].filter.as_ref().expect("filter")).expect("parses");
+    let first_filter = style
+        .layers
+        .first()
+        .and_then(|l| l.filter.as_ref())
+        .expect("filter");
+    let filter = Filter::parse(first_filter).expect("parses");
     let properties = Default::default();
     let feature = FeatureContext {
         properties: &properties,
@@ -135,7 +140,12 @@ fn a_key_without_value_or_default_reads_as_null() {
     };
     assert!(!filter.evaluate(&feature), "null is not true");
     style.set_global_state("flag", json!(true));
-    let filter = Filter::parse(style.layers[0].filter.as_ref().expect("filter")).expect("parses");
+    let first_filter = style
+        .layers
+        .first()
+        .and_then(|l| l.filter.as_ref())
+        .expect("filter");
+    let filter = Filter::parse(first_filter).expect("parses");
     assert!(filter.evaluate(&feature));
 }
 
@@ -144,9 +154,9 @@ fn global_state_lists_declared_and_set_keys() {
     let mut style = style();
     style.set_global_state("extra", json!([1, 2]));
     let values = style.global_state_values();
-    assert_eq!(values["color"], "magenta");
-    assert_eq!(values["minRank"], 5);
-    assert_eq!(values["extra"], json!([1, 2]));
+    assert_eq!(values.get("color"), Some(&json!("magenta")));
+    assert_eq!(values.get("minRank"), Some(&json!(5)));
+    assert_eq!(values.get("extra"), Some(&json!([1, 2])));
 }
 
 #[test]
@@ -168,7 +178,8 @@ fn resolved_layers_keep_their_position_and_survive_serialization() {
         Some(Color::from_rgba8(0, 255, 255, 255))
     );
     assert_eq!(
-        sent.global_state["color"], "cyan",
+        sent.global_state.get("color"),
+        Some(&json!("cyan")),
         "workers receive the values too"
     );
 }
@@ -182,8 +193,8 @@ fn array_values_are_wrapped_so_they_stay_data() {
     .expect("style");
     style.resolve_global_state();
     assert_eq!(
-        style.layers[0].filter,
-        Some(json!(["in", ["get", "kind"], ["literal", ["a", "b"]]]))
+        style.layers.first().and_then(|l| l.filter.as_ref()),
+        Some(&json!(["in", ["get", "kind"], ["literal", ["a", "b"]]]))
     );
 }
 
@@ -218,13 +229,13 @@ fn layers_that_share_an_id_are_left_alone_instead_of_clobbering_each_other() {
 fn a_replaced_or_edited_layer_is_not_resurrected_from_its_old_template() {
     let mut style = style();
     style.set_global_state("color", json!("cyan"));
-    let replacement: crate::style::layer::StyleLayer = serde_json::from_value(
+    let mut replacement: crate::style::layer::StyleLayer = serde_json::from_value(
         json!({"id": "tinted", "type": "fill", "paint": {"fill-color": "#123456"}}),
     )
     .expect("layer");
-    let index = style.layers[0].index;
-    style.layers[0] = replacement;
-    style.layers[0].index = index;
+    let first = style.layers.first_mut().expect("first layer");
+    replacement.index = first.index;
+    *first = replacement;
     assert!(style.set_global_state("color", json!("yellow")).is_empty());
     assert_eq!(
         fill_color(&style, "tinted"),
@@ -239,12 +250,12 @@ fn a_replaced_or_edited_layer_is_not_resurrected_from_its_old_template() {
 #[test]
 fn a_layer_that_reads_state_again_after_an_edit_is_tracked_from_the_new_declaration() {
     let mut style = style();
-    let edited: crate::style::layer::StyleLayer = serde_json::from_value(json!({"id": "plain",
+    let mut edited: crate::style::layer::StyleLayer = serde_json::from_value(json!({"id": "plain",
         "type": "fill", "paint": {"fill-color": ["global-state", "color"]}}))
     .expect("layer");
-    let index = style.layers[1].index;
-    style.layers[1] = edited;
-    style.layers[1].index = index;
+    let second = style.layers.get_mut(1).expect("second layer");
+    edited.index = second.index;
+    *second = edited;
     assert_eq!(style.resolve_global_state(), ["plain"]);
     assert_eq!(
         fill_color(&style, "plain"),

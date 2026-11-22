@@ -284,6 +284,62 @@ fn detect_extrusion_encodings(
     style_zoom: f64,
     terrain_needed: bool,
 ) -> (bool, bool) {
+    let (mut needs_compact, mut needs_standard) = scan_pool_extrusion_encodings(world, style_zoom);
+    if (needs_compact && needs_standard)
+        || world
+            .tiles
+            .pyramid_of::<crate::vector::VectorLayerBucketComponent>()
+            .is_empty()
+    {
+        return (needs_compact, needs_standard);
+    }
+    for tile in world.tiles.tiles.values() {
+        if let Some(buckets) = world
+            .tiles
+            .query::<&crate::vector::VectorLayerBucketComponent>(tile.coords)
+        {
+            for layer in &buckets.layers {
+                if let crate::vector::VectorLayerBucket::AvailableLayer(bucket) = layer {
+                    inspect_extrusion_bucket(
+                        bucket,
+                        prepared,
+                        style_zoom,
+                        terrain_needed,
+                        &mut needs_compact,
+                        &mut needs_standard,
+                    );
+                    if needs_compact && needs_standard {
+                        return (true, true);
+                    }
+                }
+            }
+        }
+        if let Some(pending) = world
+            .tiles
+            .query::<&crate::vector::content::LayerReplacements>(tile.coords)
+        {
+            for bucket in &pending.vector {
+                inspect_extrusion_bucket(
+                    bucket,
+                    prepared,
+                    style_zoom,
+                    terrain_needed,
+                    &mut needs_compact,
+                    &mut needs_standard,
+                );
+                if needs_compact && needs_standard {
+                    return (true, true);
+                }
+            }
+        }
+    }
+    (needs_compact, needs_standard)
+}
+
+fn scan_pool_extrusion_encodings(
+    world: &crate::tcs::world::World,
+    style_zoom: f64,
+) -> (bool, bool) {
     let mut needs_compact = false;
     let mut needs_standard = false;
     if let Some(Eventually::Initialized(pool)) =
@@ -304,72 +360,43 @@ fn detect_extrusion_encodings(
             }
         }
     }
-    if world
-        .tiles
-        .pyramid_of::<crate::vector::VectorLayerBucketComponent>()
-        .is_empty()
+    (needs_compact, needs_standard)
+}
+
+fn inspect_extrusion_bucket(
+    bucket: &crate::vector::AvailableVectorLayerBucket,
+    prepared: &VectorPreparedState,
+    style_zoom: f64,
+    terrain_needed: bool,
+    needs_compact: &mut bool,
+    needs_standard: &mut bool,
+) {
+    if !bucket.buffer.has_drawable_geometry()
+        || !prepared.is_visible_extrusion_layer(&bucket.style_layer_id, style_zoom)
     {
-        return (needs_compact, needs_standard);
+        return;
     }
-    let inspect_bucket = |bucket: &crate::vector::AvailableVectorLayerBucket,
-                          needs_compact: &mut bool,
-                          needs_standard: &mut bool| {
-        if !bucket.buffer.has_drawable_geometry()
-            || !prepared.is_visible_extrusion_layer(&bucket.style_layer_id, style_zoom)
-        {
-            return;
-        }
-        if let Some(pre) = bucket.buffer.prepacked_gpu() {
-            if pre.compact_extrusion {
-                *needs_compact = true;
-                if terrain_needed || !bucket.feature_colors.is_empty() {
-                    *needs_standard = true;
-                }
-            } else {
-                *needs_standard = true;
-            }
-        } else if !bucket.buffer.buffer.vertices.is_empty() {
-            if !terrain_needed
-                && !prepared.needs_extrusion_pattern
-                && bucket.feature_colors.is_empty()
-                && crate::render::shaders::can_encode_compact_extrusion(
-                    &bucket.buffer.buffer.vertices,
-                )
-            {
-                *needs_compact = true;
-            } else {
+    if let Some(pre) = bucket.buffer.prepacked_gpu() {
+        if pre.compact_extrusion {
+            *needs_compact = true;
+            if terrain_needed || !bucket.feature_colors.is_empty() {
                 *needs_standard = true;
             }
         } else {
-            *needs_compact = true;
             *needs_standard = true;
         }
-    };
-    for tile in world.tiles.tiles.values() {
-        if let Some(buckets) = world
-            .tiles
-            .query::<&crate::vector::VectorLayerBucketComponent>(tile.coords)
+    } else if !bucket.buffer.buffer.vertices.is_empty() {
+        if !terrain_needed
+            && !prepared.needs_extrusion_pattern
+            && bucket.feature_colors.is_empty()
+            && crate::render::shaders::can_encode_compact_extrusion(&bucket.buffer.buffer.vertices)
         {
-            for layer in &buckets.layers {
-                if let crate::vector::VectorLayerBucket::AvailableLayer(bucket) = layer {
-                    inspect_bucket(bucket, &mut needs_compact, &mut needs_standard);
-                    if needs_compact && needs_standard {
-                        return (true, true);
-                    }
-                }
-            }
+            *needs_compact = true;
+        } else {
+            *needs_standard = true;
         }
-        if let Some(pending) = world
-            .tiles
-            .query::<&crate::vector::content::LayerReplacements>(tile.coords)
-        {
-            for bucket in &pending.vector {
-                inspect_bucket(bucket, &mut needs_compact, &mut needs_standard);
-                if needs_compact && needs_standard {
-                    return (true, true);
-                }
-            }
-        }
+    } else {
+        *needs_compact = true;
+        *needs_standard = true;
     }
-    (needs_compact, needs_standard)
 }

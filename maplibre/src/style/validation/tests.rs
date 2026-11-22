@@ -19,9 +19,10 @@ fn unsupported_filters_are_reported_per_layer() {
 
     let errors = style.validate().expect_err("the within filter is rejected");
     assert_eq!(errors.len(), 1);
+    let first = errors.first().expect("one error");
     assert!(
         matches!(
-            &errors[0],
+            first,
             StyleValidationError::Filter { layer, source: FilterError::Invalid { .. } } if layer == "bad"
         ),
         "{errors:?}"
@@ -81,9 +82,10 @@ fn unsupported_property_expressions_include_the_layer_and_property() {
     let errors = style
         .validate()
         .expect_err("unsupported expression must be reported");
-    assert!(errors[0].to_string().contains("land"));
-    assert!(errors[0].to_string().contains("paint.fill-color"));
-    assert!(std::error::Error::source(&errors[0]).is_some());
+    let first = errors.first().expect("one error");
+    assert!(first.to_string().contains("land"));
+    assert!(first.to_string().contains("paint.fill-color"));
+    assert!(std::error::Error::source(first).is_some());
 }
 
 #[test]
@@ -137,16 +139,24 @@ fn unsupported_fields_and_hidden_symbols_survive_round_trips() {
         "layout": {"text-field": "{name}", "visibility": "none", "text-variable-anchor": ["top"]}
     }));
     let encoded = serde_json::to_value(&style).expect("style serializes");
-    let layer = &encoded["layers"][0];
-    assert_eq!(layer["layout"]["text-field"], "{name}");
-    assert_eq!(layer["layout"]["visibility"], "none");
     assert_eq!(
-        layer["layout"]["text-variable-anchor"],
-        serde_json::json!(["top"])
+        encoded.pointer("/layers/0/layout/text-field"),
+        Some(&serde_json::json!("{name}"))
     );
-    assert_eq!(layer["paint"]["text-translate"], serde_json::json!([2, 3]));
+    assert_eq!(
+        encoded.pointer("/layers/0/layout/visibility"),
+        Some(&serde_json::json!("none"))
+    );
+    assert_eq!(
+        encoded.pointer("/layers/0/layout/text-variable-anchor"),
+        Some(&serde_json::json!(["top"]))
+    );
+    assert_eq!(
+        encoded.pointer("/layers/0/paint/text-translate"),
+        Some(&serde_json::json!([2, 3]))
+    );
     let reloaded: Style = serde_json::from_value(encoded).expect("round trip parses");
-    assert!(reloaded.layers[0].is_hidden());
+    assert!(reloaded.layers.first().is_some_and(|l| l.is_hidden()));
     assert_eq!(style.validate(), reloaded.validate());
 }
 
@@ -157,7 +167,8 @@ fn validation_observes_programmatic_property_changes() {
         "id": "land", "type": "fill", "paint": {"fill-color": ["not-an-operator"]}
     }));
     assert!(style.validate().is_err());
-    let Some(LayerPaint::Fill(paint)) = &mut style.layers[0].paint else {
+    let Some(LayerPaint::Fill(paint)) = style.layers.first_mut().and_then(|l| l.paint.as_mut())
+    else {
         panic!("fill paint");
     };
     paint.fill_color = Some(StyleProperty::parse(&serde_json::json!("green")));
@@ -204,8 +215,8 @@ fn supported_symbol_expressions_and_literals_still_validate() {
     assert_eq!(style.validate(), Ok(()));
     let encoded = serde_json::to_value(&style).expect("style serializes");
     assert_eq!(
-        encoded["layers"][0]["layout"]["symbol-height-anchor"],
-        "absolute"
+        encoded.pointer("/layers/0/layout/symbol-height-anchor"),
+        Some(&serde_json::json!("absolute"))
     );
 }
 
@@ -268,7 +279,9 @@ fn feature_identity_is_read_where_features_are_evaluated() {
         .validate()
         .expect_err("a layer-wide value has no feature");
     assert_eq!(errors.len(), 1, "{errors:?}");
-    assert!(errors[0].to_string().contains("fill-extrusion-opacity"));
+    assert!(errors
+        .first()
+        .is_some_and(|e| e.to_string().contains("fill-extrusion-opacity")));
 }
 
 #[test]
@@ -279,7 +292,9 @@ fn symbol_font_expressions_are_not_mistaken_for_literal_font_stacks() {
     let errors = style
         .validate()
         .expect_err("font expressions are not evaluated");
-    assert!(errors[0].to_string().contains("layout.text-font"));
+    assert!(errors
+        .first()
+        .is_some_and(|e| e.to_string().contains("layout.text-font")));
 }
 
 #[test]
@@ -296,7 +311,9 @@ fn elevation_is_only_available_to_color_relief() {
     let errors = fill
         .validate()
         .expect_err("fill evaluation has no elevation");
-    assert!(errors[0].to_string().contains("paint.fill-opacity"));
+    assert!(errors
+        .first()
+        .is_some_and(|e| e.to_string().contains("paint.fill-opacity")));
 }
 
 #[test]

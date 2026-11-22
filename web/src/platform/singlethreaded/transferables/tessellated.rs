@@ -9,7 +9,7 @@ use maplibre::{
             wire::{decode_feature_paint, encode_feature_paint},
             BucketFeatureEntry,
         },
-        AvailableVectorLayerBucket, LayerTessellated,
+        AvailableVectorLayerBucket, LayerTessellated, TessellatedLayerPayload,
     },
 };
 
@@ -19,31 +19,10 @@ use crate::platform::singlethreaded::apc::WebMessageTag;
 pub(crate) mod js_wire;
 mod prepacked_wire;
 
-#[allow(clippy::too_many_arguments)]
 fn pack_flat_layer_tessellated(
-    coords: WorldTileCoords,
-    buffer: OverAlignedVertexBuffer<ShaderVertex, IndexDataType>,
-    feature_indices: Vec<u32>,
-    feature_colors: Vec<[f32; 4]>,
-    feature_sort_keys: Vec<f32>,
-    layer_name_str: &str,
-    style_layer_id: &str,
-    paint_bytes: Option<&[u8]>,
-    style_type: &str,
-    allow_prepack: bool,
+    input: js_wire::TessellatedEncodeInput<'_>,
 ) -> FlatBufferTransferable {
-    let data = js_wire::encode_layer_tessellated(
-        coords,
-        buffer,
-        feature_indices,
-        feature_colors,
-        feature_sort_keys,
-        layer_name_str,
-        style_layer_id,
-        paint_bytes,
-        style_type,
-        allow_prepack,
-    );
+    let data = js_wire::encode_layer_tessellated(input);
     FlatBufferTransferable::from_vec(WebMessageTag::LayerTessellated, data, 0)
 }
 
@@ -68,86 +47,59 @@ impl LayerTessellated for FlatBufferTransferable {
         layer_data: Layer,
         style_layer_id: String,
     ) -> Self {
-        pack_flat_layer_tessellated(
+        pack_flat_layer_tessellated(js_wire::TessellatedEncodeInput {
             coords,
             buffer,
             feature_indices,
             feature_colors,
             feature_sort_keys,
-            &layer_data.name,
-            &style_layer_id,
-            None,
-            "",
-            false,
-        )
+            source_layer: &layer_data.name,
+            style_layer_id: &style_layer_id,
+            paint_bytes: None,
+            style_type: "",
+            allow_prepack: false,
+        })
     }
 
-    fn build_from_with_paint(
-        coords: WorldTileCoords,
-        buffer: OverAlignedVertexBuffer<ShaderVertex, IndexDataType>,
-        feature_indices: Vec<u32>,
-        feature_colors: Vec<[f32; 4]>,
-        feature_sort_keys: Vec<f32>,
-        layer_data: Layer,
-        style_layer_id: String,
-        entries: Vec<BucketFeatureEntry>,
-    ) -> Self {
-        Self::build_from_with_paint_typed(
-            coords,
-            buffer,
-            feature_indices,
-            feature_colors,
-            feature_sort_keys,
-            layer_data,
-            style_layer_id,
-            entries,
-            "",
-            false,
-        )
+    fn build_from_with_paint(payload: TessellatedLayerPayload) -> Self {
+        Self::build_from_with_paint_typed(payload, "", false)
     }
 
     fn build_from_with_paint_typed(
-        coords: WorldTileCoords,
-        buffer: OverAlignedVertexBuffer<ShaderVertex, IndexDataType>,
-        feature_indices: Vec<u32>,
-        feature_colors: Vec<[f32; 4]>,
-        feature_sort_keys: Vec<f32>,
-        layer_data: Layer,
-        style_layer_id: String,
-        entries: Vec<BucketFeatureEntry>,
+        payload: TessellatedLayerPayload,
         style_type: &str,
         allow_prepack: bool,
     ) -> Self {
-        let encoded = (!entries.is_empty()).then(|| encode_feature_paint(&entries));
-        pack_flat_layer_tessellated(
-            coords,
-            buffer,
-            feature_indices,
-            feature_colors,
-            feature_sort_keys,
-            &layer_data.name,
-            &style_layer_id,
-            encoded.as_deref(),
+        let encoded = (!payload.entries.is_empty()).then(|| encode_feature_paint(&payload.entries));
+        pack_flat_layer_tessellated(js_wire::TessellatedEncodeInput {
+            coords: payload.coords,
+            buffer: payload.buffer,
+            feature_indices: payload.feature_indices,
+            feature_colors: payload.feature_colors,
+            feature_sort_keys: payload.feature_sort_keys,
+            source_layer: &payload.layer_data.name,
+            style_layer_id: &payload.style_layer_id,
+            paint_bytes: encoded.as_deref(),
             style_type,
             allow_prepack,
-        )
+        })
     }
 
     fn with_feature_paint(self, entries: Vec<BucketFeatureEntry>) -> Self {
         let encoded = (!entries.is_empty()).then(|| encode_feature_paint(&entries));
         let bucket = self.to_bucket();
-        pack_flat_layer_tessellated(
-            bucket.coords,
-            bucket.buffer,
-            bucket.feature_indices,
-            bucket.feature_colors,
-            bucket.feature_sort_keys,
-            &bucket.source_layer,
-            &bucket.style_layer_id,
-            encoded.as_deref(),
-            "",
-            false,
-        )
+        pack_flat_layer_tessellated(js_wire::TessellatedEncodeInput {
+            coords: bucket.coords,
+            buffer: bucket.buffer,
+            feature_indices: bucket.feature_indices,
+            feature_colors: bucket.feature_colors,
+            feature_sort_keys: bucket.feature_sort_keys,
+            source_layer: &bucket.source_layer,
+            style_layer_id: &bucket.style_layer_id,
+            paint_bytes: encoded.as_deref(),
+            style_type: "",
+            allow_prepack: false,
+        })
     }
 
     fn take_feature_paint(&mut self) -> Option<Vec<BucketFeatureEntry>> {

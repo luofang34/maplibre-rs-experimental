@@ -2,11 +2,11 @@
 
 pub(super) mod eval;
 
-use eval::{evaluate_circle_metadata_into, fallback_dynamic_circle_from_vertices};
+use eval::{evaluate_circle_metadata_into, fallback_dynamic_circle_from_vertices, CircleEvalInput};
 
 use super::{
     flush_deferred_geojson_bytes, seed_from_inline, source_supports_dynamic_points,
-    DynamicPointGeoJson,
+    DynamicPointGeoJson, DynamicPointSource,
 };
 use crate::{
     coords::WorldTileCoords,
@@ -80,19 +80,32 @@ pub(crate) fn ensure_seeded_for_style(world: &mut World, style: &Style) {
     }
 }
 
+/// Inputs needed to populate dynamic-point circle GPU metadata for a newly uploaded bucket.
+pub(crate) struct DynamicCircleBucketInput<'a> {
+    pub(crate) dyn_points: Option<&'a mut DynamicPointGeoJson>,
+    pub(crate) style_layer: &'a StyleLayer,
+    pub(crate) bucket: &'a AvailableVectorLayerBucket,
+    pub(crate) fallback_vertices: Option<&'a [crate::render::ShaderVertex]>,
+    pub(crate) active_colors: &'a [[f32; 4]],
+    pub(crate) fallback_color: [f32; 4],
+    pub(crate) overscaled_zoom: u8,
+}
+
 /// Builds `2 * vertices` `[fill_rgba8, dyn_radius_u32]` records for a newly uploaded bucket.
 /// Returns `Some(seq)` when populated directly from `DynamicPointGeoJson`.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn populate_dynamic_circle_bucket(
-    dyn_points: Option<&mut DynamicPointGeoJson>,
-    style_layer: &StyleLayer,
-    bucket: &AvailableVectorLayerBucket,
-    fallback_vertices: Option<&[crate::render::ShaderVertex]>,
-    active_colors: &[[f32; 4]],
-    fallback_color: [f32; 4],
-    overscaled_zoom: u8,
+    input: DynamicCircleBucketInput<'_>,
     out: &mut Vec<FillShaderFeatureMetadata>,
 ) -> Option<u64> {
+    let DynamicCircleBucketInput {
+        dyn_points,
+        style_layer,
+        bucket,
+        fallback_vertices,
+        active_colors,
+        fallback_color,
+        overscaled_zoom,
+    } = input;
     let coords = bucket.coords;
     let vertices = if bucket.buffer.buffer.vertices.is_empty() {
         fallback_vertices.unwrap_or(&[])
@@ -124,13 +137,17 @@ pub(crate) fn populate_dynamic_circle_bucket(
                 let tile_zoom = f64::from(overscaled_zoom.max(u8::from(coords.z)));
                 evaluate_circle_metadata_into(
                     out,
-                    circle_paint,
-                    &src_state.properties,
-                    &src_state.fast_columns,
-                    hits,
-                    verts_per_circle,
-                    tile_zoom,
-                    (seq, layer_id, &mut src_state.eval_cache),
+                    &mut src_state.eval_cache,
+                    CircleEvalInput {
+                        circle_paint,
+                        all_props: &src_state.properties,
+                        fast_columns: &src_state.fast_columns,
+                        hits,
+                        verts_per_circle,
+                        tile_zoom,
+                        seq,
+                        style_layer_id: layer_id,
+                    },
                 );
                 return Some(seq);
             }
@@ -182,6 +199,115 @@ pub(crate) fn record_uploaded_dynamic_circle(
         .insert((coords, style_layer_id), (seq, alloc_id));
 }
 
+fn refresh_tile_layer(
+    buffer_pool: &mut VectorBufferPool,
+    tiles: &crate::tcs::tiles::Tiles,
+    queue: &UploadQueue,
+    coords: WorldTileCoords,
+    (style_layer, circle_paint, has_terrain): (
+        &StyleLayer,
+        &crate::style::circle::CirclePaint,
+        bool,
+    ),
+    src_state: &mut DynamicPointSource,
+    gpu_scratch: &mut Vec<FillShaderFeatureMetadata>,
+) -> bool {
+    let style_layer_id = style_layer.layer_id();
+    let Some(entry) = buffer_pool.index().get_layers(coords).and_then(|layers| {
+        layers
+            .iter()
+            .find(|e| e.style_layer_id == style_layer_id && e.is_dynamic_circle_metadata())
+    }) else {
+        return true;
+    };
+    let seq = src_state.seq;
+    let alloc_id = entry.allocation_id();
+    if src_state.applied_seq.get(&(coords, style_layer_id)) == Some(&(seq, alloc_id)) {
+        return true;
+    }
+    let allocated_bytes =
+        entry.feature_metadata_buffer_range().end - entry.feature_metadata_buffer_range().start;
+    let allocated_records =
+        allocated_bytes as usize / std::mem::size_of::<FillShaderFeatureMetadata>();
+    let hits: &[u32] = src_state
+        .tile_hits
+        .entry(coords)
+        .or_insert_with(|| super::compute_tile_hits(&src_state.world_points, coords));
+    if hits.is_empty() && allocated_records == 0 {
+        src_state
+            .applied_seq
+            .insert((coords, style_layer_id), (seq, alloc_id));
+        return true;
+    }
+    let verts = allocated_records / 2;
+    if !allocated_records.is_multiple_of(2)
+        || hits.is_empty()
+        || !(verts == hits.len() * 4 || verts == hits.len() * 16)
+    {
+        return tile_retry::is_waiting_or_pending(tiles, coords, RequestKind::Vector)
+            || tiles
+                .query::<&crate::vector::content::LayerReplacements>(coords)
+                .is_some_and(|pending| !pending.vector.is_empty());
+    }
+    let verts_per_circle = verts / hits.len();
+    let overscaled_z = tiles
+        .query::<&VectorLayerBucketComponent>(coords)
+        .map_or(u8::from(coords.z), |b| {
+            b.overscaled_zoom.max(u8::from(coords.z))
+        });
+    evaluate_circle_metadata_into(
+        gpu_scratch,
+        &mut src_state.eval_cache,
+        CircleEvalInput {
+            circle_paint,
+            all_props: &src_state.properties,
+            fast_columns: &src_state.fast_columns,
+            hits,
+            verts_per_circle,
+            tile_zoom: f64::from(overscaled_z),
+            seq,
+            style_layer_id,
+        },
+    );
+    buffer_pool.update_feature_metadata(queue, entry, gpu_scratch);
+    if has_terrain {
+        buffer_pool.bump_layer_paint_revision(coords, &style_layer.id);
+    }
+    src_state
+        .applied_seq
+        .insert((coords, style_layer_id), (seq, alloc_id));
+    true
+}
+
+fn trigger_mismatched_source_refresh(
+    world: &mut World,
+    style: &mut Style,
+    mismatch_sources: &[String],
+) {
+    flush_deferred_geojson_bytes(style, world);
+    if let Some(state) = world.resources.get_mut::<DynamicPointGeoJson>() {
+        for name in mismatch_sources {
+            state.sources.remove(name);
+        }
+    }
+    let all_tiles: Vec<WorldTileCoords> = world.tiles.pyramid().coords_coarse_to_fine().collect();
+    for name in mismatch_sources {
+        if let Some(Source::GeoJson(src)) = style.sources.get_mut(name) {
+            src.generation = fresh_generation();
+        }
+        if !all_tiles.is_empty() {
+            tile_retry::refresh_tiles_for_sources(
+                world,
+                RequestKind::Vector,
+                &all_tiles,
+                std::slice::from_ref(name),
+            );
+        }
+    }
+    style.bump_revision();
+    crate::render::frame_signals::mark_dirty(world);
+}
+
 /// Updates stale visible `CircleDynamicRadiusShader` allocations in-place, self-healing via tile
 /// refresh if any resident tile's vertex count diverges from the stationary point index.
 pub(crate) fn refresh_dynamic_point_layers(
@@ -212,6 +338,7 @@ pub(crate) fn refresh_dynamic_point_layers(
             gpu_scratch,
             ..
         } = dyn_points;
+        let has_terrain = style.terrain.is_some();
 
         for (layer_idx, source_name) in circle_layers.iter() {
             let Some(style_layer) = style.layers.get(*layer_idx) else {
@@ -226,104 +353,26 @@ pub(crate) fn refresh_dynamic_point_layers(
             let Some(src_state) = sources.get_mut(source_name.as_str()) else {
                 continue;
             };
-            let seq = src_state.seq;
-            let style_layer_id = style_layer.layer_id();
-
             for &coords in painted_tiles {
-                let Some(entry) = buffer_pool.index().get_layers(coords).and_then(|layers| {
-                    layers.iter().find(|e| {
-                        e.style_layer_id == style_layer_id && e.is_dynamic_circle_metadata()
-                    })
-                }) else {
-                    continue;
-                };
-                let alloc_id = entry.allocation_id();
-                if src_state.applied_seq.get(&(coords, style_layer_id)) == Some(&(seq, alloc_id)) {
-                    continue;
-                }
-                let allocated_bytes = entry.feature_metadata_buffer_range().end
-                    - entry.feature_metadata_buffer_range().start;
-                let allocated_records =
-                    allocated_bytes as usize / std::mem::size_of::<FillShaderFeatureMetadata>();
-
-                let hits: &[u32] = src_state
-                    .tile_hits
-                    .entry(coords)
-                    .or_insert_with(|| super::compute_tile_hits(&src_state.world_points, coords));
-                if hits.is_empty() && allocated_records == 0 {
-                    src_state
-                        .applied_seq
-                        .insert((coords, style_layer_id), (seq, alloc_id));
-                    continue;
-                }
-                let verts = allocated_records / 2;
-                if !allocated_records.is_multiple_of(2)
-                    || hits.is_empty()
-                    || !(verts == hits.len() * 4 || verts == hits.len() * 16)
-                {
-                    if tile_retry::is_waiting_or_pending(tiles, coords, RequestKind::Vector)
-                        || tiles
-                            .query::<&crate::vector::content::LayerReplacements>(coords)
-                            .is_some_and(|pending| !pending.vector.is_empty())
-                    {
-                        continue;
-                    }
+                if !refresh_tile_layer(
+                    buffer_pool,
+                    tiles,
+                    queue,
+                    coords,
+                    (style_layer, circle_paint, has_terrain),
+                    src_state,
+                    gpu_scratch,
+                ) {
                     if !mismatch_sources.iter().any(|s| s == source_name) {
                         mismatch_sources.push(source_name.to_owned());
                     }
                     break;
                 }
-
-                let verts_per_circle = verts / hits.len();
-                let overscaled_z = tiles
-                    .query::<&VectorLayerBucketComponent>(coords)
-                    .map_or(u8::from(coords.z), |b| {
-                        b.overscaled_zoom.max(u8::from(coords.z))
-                    });
-                evaluate_circle_metadata_into(
-                    gpu_scratch,
-                    circle_paint,
-                    &src_state.properties,
-                    &src_state.fast_columns,
-                    hits,
-                    verts_per_circle,
-                    f64::from(overscaled_z),
-                    (seq, style_layer_id, &mut src_state.eval_cache),
-                );
-                buffer_pool.update_feature_metadata(queue, entry, gpu_scratch);
-                if style.terrain.is_some() {
-                    buffer_pool.bump_layer_paint_revision(coords, &style_layer.id);
-                }
-                src_state
-                    .applied_seq
-                    .insert((coords, style_layer_id), (seq, alloc_id));
             }
         }
     }
 
     if !mismatch_sources.is_empty() {
-        flush_deferred_geojson_bytes(style, world);
-        if let Some(state) = world.resources.get_mut::<DynamicPointGeoJson>() {
-            for name in &mismatch_sources {
-                state.sources.remove(name);
-            }
-        }
-        let all_tiles: Vec<WorldTileCoords> =
-            world.tiles.pyramid().coords_coarse_to_fine().collect();
-        for name in &mismatch_sources {
-            if let Some(Source::GeoJson(src)) = style.sources.get_mut(name) {
-                src.generation = fresh_generation();
-            }
-            if !all_tiles.is_empty() {
-                tile_retry::refresh_tiles_for_sources(
-                    world,
-                    RequestKind::Vector,
-                    &all_tiles,
-                    std::slice::from_ref(name),
-                );
-            }
-        }
-        style.bump_revision();
-        crate::render::frame_signals::mark_dirty(world);
+        trigger_mismatched_source_refresh(world, style, &mismatch_sources);
     }
 }

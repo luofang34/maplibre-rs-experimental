@@ -126,49 +126,58 @@ fn queue_xr_binned(context: &mut MapContext) -> SystemResult {
     Ok(())
 }
 
+async fn create_xr_binned_map() -> HeadlessMap {
+    let style: Style =
+        serde_json::from_str(r#"{"version":8,"sources":{},"layers":[]}"#).expect("style");
+    let (kernel, renderer) = create_headless_renderer(64, 64, None)
+        .await
+        .expect("renderer");
+    let mut map = HeadlessMap::new(
+        style,
+        renderer,
+        kernel,
+        vec![
+            Box::new(RenderPlugin),
+            Box::new(
+                BinnedRenderPhasePlugin::<XrBinnedItem, XrBinnedItem>::new()
+                    .with_max_inactive_generations(0),
+            ),
+        ],
+    )
+    .expect("map");
+    map.schedule
+        .add_system_to_stage(RenderStageLabel::Queue, queue_xr_binned)
+        .expect("schedule");
+    map
+}
+
+fn verify_stereo_bin_retention(map: &mut HeadlessMap) {
+    let mut expected_cap = None;
+    for ts in [16, 32, 48] {
+        map.run_xr_frame(frame(ts)).expect("stereo frame");
+        assert!(!map.world().resources.exists::<EyePassCount>());
+        let cap = map
+            .world()
+            .resources
+            .get::<BinnedRenderPhase<XrBinnedItem>>()
+            .expect("phase")
+            .bin_capacity(&XrBatchSetKey(1), &99, BinnedRenderPhaseType::BatchableMesh)
+            .expect("right-eye bin kept across stereo frames");
+        assert!(cap >= 8);
+        assert_eq!(*expected_cap.get_or_insert(cap), cap);
+    }
+}
+
 #[test]
 fn xr_frame_right_eye_bin_zero_inactive_retention_and_error_pass_count_cleanup() {
     crate::headless::map::test_async::run_async(async {
-        let style: Style =
-            serde_json::from_str(r#"{"version":8,"sources":{},"layers":[]}"#).expect("style");
-        let (kernel, renderer) = create_headless_renderer(64, 64, None)
-            .await
-            .expect("renderer");
-        let mut map = HeadlessMap::new(
-            style,
-            renderer,
-            kernel,
-            vec![
-                Box::new(RenderPlugin),
-                Box::new(
-                    BinnedRenderPhasePlugin::<XrBinnedItem, XrBinnedItem>::new()
-                        .with_max_inactive_generations(0),
-                ),
-            ],
-        )
-        .expect("map");
-        map.schedule
-            .add_system_to_stage(RenderStageLabel::Queue, queue_xr_binned)
-            .expect("schedule");
+        let mut map = create_xr_binned_map().await;
 
         map.map_context.world.resources.insert(XrBinnedControl {
             queue_right_eye: true,
             fail_eye_zero: false,
         });
-        let mut expected_cap = None;
-        for ts in [16, 32, 48] {
-            map.run_xr_frame(frame(ts)).expect("stereo frame");
-            assert!(!map.world().resources.exists::<EyePassCount>());
-            let cap = map
-                .world()
-                .resources
-                .get::<BinnedRenderPhase<XrBinnedItem>>()
-                .expect("phase")
-                .bin_capacity(&XrBatchSetKey(1), &99, BinnedRenderPhaseType::BatchableMesh)
-                .expect("right-eye bin kept across stereo frames");
-            assert!(cap >= 8);
-            assert_eq!(*expected_cap.get_or_insert(cap), cap);
-        }
+        verify_stereo_bin_retention(&mut map);
 
         map.map_context.world.resources.insert(XrBinnedControl {
             queue_right_eye: false,

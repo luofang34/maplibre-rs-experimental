@@ -71,39 +71,44 @@ fn binary_symbol_wire_roundtrips_and_shares_polylines_and_repeat_keys() {
     );
 
     let decoded = decode_symbol_features(&encoded).expect("valid binary symbol wire");
-    assert_eq!(decoded.len(), 2);
-    assert_eq!(decoded[0].str, "Prinsengracht");
-    assert_eq!(decoded[0].data.id, Some(42));
-    assert_eq!(decoded[0].data.source_feature_index, Some(13));
+    let [d0, d1] = decoded.as_slice() else {
+        panic!("expected 2 decoded features, got {}", decoded.len());
+    };
+    assert_eq!(d0.str, "Prinsengracht");
+    assert_eq!(d0.data.id, Some(42));
+    assert_eq!(d0.data.source_feature_index, Some(13));
     assert_eq!(
-        decoded[0].data.properties.get("name"),
+        d0.data.properties.get("name"),
         Some(&Value::String("Prinsengracht".into()))
     );
-    assert_eq!(decoded[0].data.geometry_type, GeometryType::LineString);
-    assert!(decoded[0].fallback);
-    assert_eq!(decoded[0].anchor_shifts, vec![[4.0, -4.0]]);
-    assert_eq!(decoded[0].text_sets, vec![0..6, 6..12]);
-    assert_eq!(decoded[0].anchor_sets, vec![0, 1]);
-    assert_eq!(decoded[0].text_colors, vec![(0..6, [0.1, 0.2, 0.3, 1.0])]);
+    assert_eq!(d0.data.geometry_type, GeometryType::LineString);
+    assert!(d0.fallback);
+    assert_eq!(d0.anchor_shifts, vec![[4.0, -4.0]]);
+    assert_eq!(d0.text_sets, vec![0..6, 6..12]);
+    assert_eq!(d0.anchor_sets, vec![0, 1]);
+    assert_eq!(d0.text_colors, vec![(0..6, [0.1, 0.2, 0.3, 1.0])]);
 
-    let poly0 = &decoded[0].line.as_ref().expect("line 0").polyline;
-    let poly1 = &decoded[1].line.as_ref().expect("line 1").polyline;
+    let poly0 = &d0.line.as_ref().expect("line 0").polyline;
+    let poly1 = &d1.line.as_ref().expect("line 1").polyline;
     assert!(
         Arc::ptr_eq(poly0, poly1),
         "repeated road labels must share one Arc polyline after decode"
     );
-    let rk0 = decoded[0].repeat_key.as_ref().expect("rk 0");
-    let rk1 = decoded[1].repeat_key.as_ref().expect("rk 1");
+    let rk0 = d0.repeat_key.as_ref().expect("rk 0");
+    let rk1 = d1.repeat_key.as_ref().expect("rk 1");
     assert!(
         Arc::ptr_eq(rk0, rk1),
         "repeated road labels must share one Arc repeat_key after decode"
     );
     assert!(
-        Arc::ptr_eq(&decoded[0].data.properties, &decoded[1].data.properties),
+        Arc::ptr_eq(&d0.data.properties, &d1.data.properties),
         "repeated road labels must share one Arc<FeatureProperties> after decode"
     );
 
     let legacy = decode_symbol_features(&json_bytes).expect("legacy JSON fallback");
     assert_eq!(legacy.len(), 2);
-    assert_eq!(legacy[0].str, "Prinsengracht");
+    assert_eq!(
+        legacy.first().map(|f| f.str.as_str()),
+        Some("Prinsengracht")
+    );
 }

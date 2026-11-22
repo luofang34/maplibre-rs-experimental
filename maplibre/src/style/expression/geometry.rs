@@ -109,7 +109,7 @@ impl Geometry {
                     .all(|point| polygon_contains(polygon, *point) == Containment::Inside)
                     && !polygon.iter().any(|ring| {
                         line.windows(2)
-                            .any(|pair| crosses_ring(ring, pair[0], pair[1]))
+                            .any(|pair| matches!(pair, [a, b] if crosses_ring(ring, *a, *b)))
                     })
             })
         };
@@ -191,7 +191,10 @@ impl Geometry {
     fn segments(&self) -> Vec<([f64; 2], [f64; 2])> {
         let mut segments: Vec<_> = self.points.iter().map(|p| (*p, *p)).collect();
         for line in self.lines.iter().chain(self.polygons.iter().flatten()) {
-            segments.extend(line.windows(2).map(|pair| (pair[0], pair[1])));
+            segments.extend(line.windows(2).filter_map(|pair| match pair {
+                [a, b] => Some((*a, *b)),
+                _ => None,
+            }));
             if let [only] = line.as_slice() {
                 segments.push((*only, *only));
             }
@@ -297,7 +300,8 @@ fn polygon_contains(polygon: &[Vec<[f64; 2]>], point: [f64; 2]) -> Containment {
     let mut inside = false;
     for ring in polygon {
         for pair in ring.windows(2) {
-            let (a, b) = (pair[0], pair[1]);
+            let [a, b] = pair else { continue };
+            let (a, b) = (*a, *b);
             if on_segment(a, b, point) {
                 return Containment::Boundary;
             }
@@ -339,7 +343,7 @@ fn segments_intersect(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> boo
 
 fn crosses_ring(ring: &[[f64; 2]], a: [f64; 2], b: [f64; 2]) -> bool {
     ring.windows(2)
-        .any(|edge| segments_intersect(a, b, edge[0], edge[1]))
+        .any(|edge| matches!(edge, [c, d] if segments_intersect(a, b, *c, *d)))
 }
 
 fn point_segment_distance(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {

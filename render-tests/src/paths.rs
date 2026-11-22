@@ -90,5 +90,30 @@ pub(super) fn collect_tests(test_root: &std::path::Path) -> Vec<PathBuf> {
     tests
 }
 
+/// Filters `tests` by canonical fixture-ID prefixes, failing fast if nothing matches.
+pub(super) fn filter_tests(
+    tests: Vec<PathBuf>,
+    test_root: &std::path::Path,
+    filters: &[String],
+) -> Result<Vec<PathBuf>, String> {
+    if filters.is_empty() {
+        return Ok(tests);
+    }
+    let filtered: Vec<PathBuf> = tests
+        .into_iter()
+        .filter(|dir| {
+            let id = fixture_id(dir, test_root);
+            filters.iter().any(|prefix| id.starts_with(prefix))
+        })
+        .collect();
+    if filtered.is_empty() {
+        return Err(format!(
+            "No tests matched --filter {filters:?} under {}",
+            test_root.display()
+        ));
+    }
+    Ok(filtered)
+}
+
 #[cfg(test)]
 mod tests;

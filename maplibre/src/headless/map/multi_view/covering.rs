@@ -89,23 +89,23 @@ pub(super) fn build_slot_view_state(
     Ok(state)
 }
 
-/// Computes the unioned [`MultiViewExtractCovering`], [`DrapeRequests`], and initial
-/// [`SlotResidencyFloor`] across all active `Independent` slots and skipped registered slots.
-pub(super) fn build_multi_view_coverings(
-    style: &Style,
+#[derive(Default)]
+struct CoveringAccum {
+    extract: MultiViewExtractCovering,
+    floor: SlotResidencyFloor,
+    vector_seen: FxHashSet<WorldTileCoords>,
+    terrain_seen: FxHashSet<WorldTileCoords>,
+    drape_requests_seen: FxHashSet<WorldTileCoords>,
+    drape_requests: Vec<WorldTileCoords>,
+    raster_by_source: BTreeMap<RasterSourceId, (FxHashSet<WorldTileCoords>, Vec<WorldTileCoords>)>,
+}
+
+fn grant_drape_shares(
     world: &mut World,
-    registry: &mut BTreeMap<ViewSlotId, SlotState>,
+    registry: &BTreeMap<ViewSlotId, SlotState>,
     active: &[(ViewSlotEntry, ViewState)],
-) -> (MultiViewExtractCovering, SlotResidencyFloor) {
-    let active_ids: FxHashSet<ViewSlotId> = active.iter().map(|(entry, _)| entry.slot).collect();
-    world
-        .resources
-        .remove::<crate::terrain::request_system::TerrainWantedDems>();
-    world.resources.remove::<DrapeRequests>();
-    let mut extract = MultiViewExtractCovering {
-        active: true,
-        ..Default::default()
-    };
+    active_ids: &FxHashSet<ViewSlotId>,
+) {
     // Every view that holds drapes is granted textures, the views the host ranks first before
     // the others: those drawn this frame with a covering of their own, and those left out of
     // it that keep what they last drew.
@@ -130,165 +130,221 @@ pub(super) fn build_multi_view_coverings(
         .resources
         .get_or_init_mut::<DrapeShares>()
         .grant(&draping, allowed);
-    let mut floor = SlotResidencyFloor::default();
-    let mut vector_seen = FxHashSet::default();
-    let mut terrain_seen = FxHashSet::default();
-    let mut drape_requests_seen = FxHashSet::default();
-    let mut drape_requests = Vec::new();
-    let mut raster_by_source: BTreeMap<
-        RasterSourceId,
-        (FxHashSet<WorldTileCoords>, Vec<WorldTileCoords>),
-    > = BTreeMap::new();
+}
 
-    for (slot_id, slot_state) in registry.iter() {
-        if !active_ids.contains(slot_id) {
-            floor.drawn_count = floor.drawn_count.max(slot_state.last_drawn_count);
-            floor
-                .retained_tiles
-                .extend(slot_state.last_retained_tiles.iter().copied());
-            floor
-                .retained_drapes
-                .extend(slot_state.last_retained_drapes.iter().copied());
-            extract
-                .skipped_wanted_vector
-                .extend(slot_state.last_wanted_vector.iter().copied());
-            extract
-                .skipped_wanted_raster
-                .extend(slot_state.last_wanted_raster.iter().copied());
-            extract
-                .skipped_wanted_dem
-                .extend(slot_state.last_wanted_dem.iter().copied());
+fn record_skipped_slot_residency(
+    registry: &BTreeMap<ViewSlotId, SlotState>,
+    active_ids: &FxHashSet<ViewSlotId>,
+    acc: &mut CoveringAccum,
+) {
+    for (slot_id, slot_state) in registry {
+        if active_ids.contains(slot_id) {
+            continue;
         }
+        acc.floor.drawn_count = acc.floor.drawn_count.max(slot_state.last_drawn_count);
+        acc.floor
+            .retained_tiles
+            .extend(slot_state.last_retained_tiles.iter().copied());
+        acc.floor
+            .retained_drapes
+            .extend(slot_state.last_retained_drapes.iter().copied());
+        acc.extract
+            .skipped_wanted_vector
+            .extend(slot_state.last_wanted_vector.iter().copied());
+        acc.extract
+            .skipped_wanted_raster
+            .extend(slot_state.last_wanted_raster.iter().copied());
+        acc.extract
+            .skipped_wanted_dem
+            .extend(slot_state.last_wanted_dem.iter().copied());
     }
+}
 
-    let dem_tile_size = dem_source(style).map(|dem| dem.tile_size);
-    let procedural_relief = world
+fn is_procedural_relief(world: &World) -> bool {
+    world
         .resources
         .get::<crate::render::settings::TerrainDrapeMode>()
         .copied()
         .or_else(|| {
             match world.resources.get::<crate::render::eventually::Eventually<
-                    crate::terrain::resources::TerrainResources,
-                >>() {
-                    Some(crate::render::eventually::Eventually::Initialized(terrain)) => {
-                        Some(terrain.drape_mode())
-                    }
-                    _ => None,
+                crate::terrain::resources::TerrainResources,
+            >>() {
+                Some(crate::render::eventually::Eventually::Initialized(terrain)) => {
+                    Some(terrain.drape_mode())
                 }
+                _ => None,
+            }
         })
-        .is_some_and(|mode| mode.is_procedural_relief());
+        .is_some_and(|mode| mode.is_procedural_relief())
+}
 
-    for (entry, slot_view) in active {
-        if matches!(entry.policy, CoveringPolicy::StereoReuse(_)) {
-            continue;
-        }
-        let lod_history = registry
-            .get(&entry.slot)
-            .map(|state| state.lod_history.clone())
-            .unwrap_or_default();
-        world.resources.insert(lod_history);
-        world.resources.insert(DrapeView(Some(entry.slot)));
-
-        let level = slot_view.zoom().zoom_level(DEFAULT_TILE_SIZE);
-        extract.max_view_level = extract.max_view_level.max(u8::from(level));
-
-        let mut slot_wanted_vec = FxHashSet::default();
-        if let Ok(Some(region)) =
-            view_region_for_projection(style, slot_view, world, level, ViewStatePadding::Loose)
-        {
+fn collect_slot_dem_and_drapes(
+    acc: &mut CoveringAccum,
+    style: &Style,
+    world: &mut World,
+    registry: &mut BTreeMap<ViewSlotId, SlotState>,
+    entry: &ViewSlotEntry,
+    slot_view: &ViewState,
+    dem_config: (Option<u32>, bool),
+) -> (
+    FxHashSet<WorldTileCoords>,
+    Option<crate::terrain::coverage::PreparedTerrainRegion>,
+    FxHashSet<WorldTileCoords>,
+) {
+    let (dem_tile_size, procedural_relief) = dem_config;
+    let mut slot_wanted_dem = FxHashSet::default();
+    let mut drape_wanted_vec = FxHashSet::default();
+    let mut prepared_for_slot = None;
+    let Some(tile_size) = dem_tile_size else {
+        return (slot_wanted_dem, prepared_for_slot, drape_wanted_vec);
+    };
+    if let Ok(region_opt) =
+        terrain_region(style, slot_view, world, tile_size, ViewStatePadding::Tight)
+    {
+        if let Some(region) = &region_opt {
             for coords in region.iter() {
-                slot_wanted_vec.insert(coords);
-                if vector_seen.insert(coords) {
-                    extract.vector_tiles.push(coords);
+                slot_wanted_dem.insert(coords);
+                if acc.terrain_seen.insert(coords) {
+                    acc.extract.terrain_tiles.push(coords);
                 }
             }
         }
-
-        let mut slot_wanted_ras = FxHashSet::default();
-        if let Ok(regions) = raster_source_regions(style, slot_view, world, ViewStatePadding::Loose)
-        {
-            for (source_id, tiles) in regions {
-                let (seen, list) = raster_by_source.entry(source_id).or_default();
-                for coords in tiles {
-                    slot_wanted_ras.insert(coords);
-                    if seen.insert(coords) {
-                        list.push(coords);
-                    }
+        if !procedural_relief {
+            let key =
+                crate::terrain::coverage::PreparedTerrainKey::capture(slot_view, world, tile_size);
+            let prepared = crate::terrain::coverage::PreparedTerrainRegion {
+                key,
+                region: region_opt,
+            };
+            prepared_for_slot = Some(prepared.clone());
+            world.resources.insert(prepared);
+        }
+    }
+    if !procedural_relief {
+        if let Ok(specs) = target_specs(style, slot_view, world) {
+            let mut slot_drapes = FxHashSet::default();
+            for spec in &specs {
+                slot_drapes.insert(spec.coords);
+                acc.floor.retained_drapes.insert(spec.coords);
+                drape_wanted_vec.insert(spec.coords);
+                slot_wanted_dem.insert(spec.coords);
+                if acc.drape_requests_seen.insert(spec.coords) {
+                    acc.drape_requests.push(spec.coords);
                 }
+            }
+            if let Some(state) = registry.get_mut(&entry.slot) {
+                state.last_retained_drapes = slot_drapes;
             }
         }
+    } else if let Some(state) = registry.get_mut(&entry.slot) {
+        state.last_retained_drapes.clear();
+    }
+    (slot_wanted_dem, prepared_for_slot, drape_wanted_vec)
+}
 
-        let mut slot_wanted_dem = FxHashSet::default();
-        let mut prepared_for_slot = None;
-        if let Some(tile_size) = dem_tile_size {
-            if let Ok(region_opt) =
-                terrain_region(style, slot_view, world, tile_size, ViewStatePadding::Tight)
-            {
-                if let Some(region) = &region_opt {
-                    for coords in region.iter() {
-                        slot_wanted_dem.insert(coords);
-                        if terrain_seen.insert(coords) {
-                            extract.terrain_tiles.push(coords);
-                        }
-                    }
-                }
-                if !procedural_relief {
-                    let key = crate::terrain::coverage::PreparedTerrainKey::capture(
-                        slot_view, world, tile_size,
-                    );
-                    let prepared = crate::terrain::coverage::PreparedTerrainRegion {
-                        key,
-                        region: region_opt,
-                    };
-                    prepared_for_slot = Some(prepared.clone());
-                    world.resources.insert(prepared);
-                }
-            }
-            if !procedural_relief {
-                if let Ok(specs) = target_specs(style, slot_view, world) {
-                    let mut slot_drapes = FxHashSet::default();
-                    for spec in &specs {
-                        slot_drapes.insert(spec.coords);
-                        floor.retained_drapes.insert(spec.coords);
-                        slot_wanted_vec.insert(spec.coords);
-                        slot_wanted_dem.insert(spec.coords);
-                        if drape_requests_seen.insert(spec.coords) {
-                            drape_requests.push(spec.coords);
-                        }
-                    }
-                    if let Some(state) = registry.get_mut(&entry.slot) {
-                        state.last_retained_drapes = slot_drapes;
-                    }
-                }
-            } else if let Some(state) = registry.get_mut(&entry.slot) {
-                state.last_retained_drapes.clear();
-            }
-        }
+fn collect_slot_covering(
+    acc: &mut CoveringAccum,
+    style: &Style,
+    world: &mut World,
+    registry: &mut BTreeMap<ViewSlotId, SlotState>,
+    entry: &ViewSlotEntry,
+    slot_view: &ViewState,
+    dem_config: (Option<u32>, bool),
+) {
+    let lod_history = registry
+        .get(&entry.slot)
+        .map(|state| state.lod_history.clone())
+        .unwrap_or_default();
+    world.resources.insert(lod_history);
+    world.resources.insert(DrapeView(Some(entry.slot)));
 
-        let slot_in_use = tiles_in_use_from_loose(
-            world,
-            style,
-            slot_wanted_vec.iter().copied(),
-            slot_wanted_ras.iter().copied(),
-        );
-        floor.retained_tiles.extend(slot_in_use.iter().copied());
-        if let Some(state) = registry.get_mut(&entry.slot) {
-            state.prepared_terrain = prepared_for_slot;
-            state.frame_loose_in_use = slot_in_use;
-            state.last_wanted_vector = slot_wanted_vec;
-            state.last_wanted_raster = slot_wanted_ras;
-            state.last_wanted_dem = slot_wanted_dem;
+    let level = slot_view.zoom().zoom_level(DEFAULT_TILE_SIZE);
+    acc.extract.max_view_level = acc.extract.max_view_level.max(u8::from(level));
+
+    let mut slot_wanted_vec = FxHashSet::default();
+    if let Ok(Some(region)) =
+        view_region_for_projection(style, slot_view, world, level, ViewStatePadding::Loose)
+    {
+        for coords in region.iter() {
+            slot_wanted_vec.insert(coords);
+            if acc.vector_seen.insert(coords) {
+                acc.extract.vector_tiles.push(coords);
+            }
         }
     }
 
-    extract.raster_regions = raster_by_source
+    let mut slot_wanted_ras = FxHashSet::default();
+    if let Ok(regions) = raster_source_regions(style, slot_view, world, ViewStatePadding::Loose) {
+        for (source_id, tiles) in regions {
+            let (seen, list) = acc.raster_by_source.entry(source_id).or_default();
+            for coords in tiles {
+                slot_wanted_ras.insert(coords);
+                if seen.insert(coords) {
+                    list.push(coords);
+                }
+            }
+        }
+    }
+
+    let (slot_wanted_dem, prepared_for_slot, drape_vec) =
+        collect_slot_dem_and_drapes(acc, style, world, registry, entry, slot_view, dem_config);
+    slot_wanted_vec.extend(drape_vec);
+
+    let slot_in_use = tiles_in_use_from_loose(
+        world,
+        style,
+        slot_wanted_vec.iter().copied(),
+        slot_wanted_ras.iter().copied(),
+    );
+    acc.floor.retained_tiles.extend(slot_in_use.iter().copied());
+    if let Some(state) = registry.get_mut(&entry.slot) {
+        state.prepared_terrain = prepared_for_slot;
+        state.frame_loose_in_use = slot_in_use;
+        state.last_wanted_vector = slot_wanted_vec;
+        state.last_wanted_raster = slot_wanted_ras;
+        state.last_wanted_dem = slot_wanted_dem;
+    }
+}
+
+/// Computes the unioned [`MultiViewExtractCovering`], [`DrapeRequests`], and initial
+/// [`SlotResidencyFloor`] across all active `Independent` slots and skipped registered slots.
+pub(super) fn build_multi_view_coverings(
+    style: &Style,
+    world: &mut World,
+    registry: &mut BTreeMap<ViewSlotId, SlotState>,
+    active: &[(ViewSlotEntry, ViewState)],
+) -> (MultiViewExtractCovering, SlotResidencyFloor) {
+    let active_ids: FxHashSet<ViewSlotId> = active.iter().map(|(entry, _)| entry.slot).collect();
+    world
+        .resources
+        .remove::<crate::terrain::request_system::TerrainWantedDems>();
+    world.resources.remove::<DrapeRequests>();
+    let mut acc = CoveringAccum::default();
+    acc.extract.active = true;
+    grant_drape_shares(world, registry, active, &active_ids);
+    record_skipped_slot_residency(registry, &active_ids, &mut acc);
+
+    let dem_config = (
+        dem_source(style).map(|dem| dem.tile_size),
+        is_procedural_relief(world),
+    );
+    for (entry, slot_view) in active {
+        if !matches!(entry.policy, CoveringPolicy::StereoReuse(_)) {
+            collect_slot_covering(
+                &mut acc, style, world, registry, entry, slot_view, dem_config,
+            );
+        }
+    }
+
+    acc.extract.raster_regions = acc
+        .raster_by_source
         .into_iter()
         .map(|(source_id, (_, list))| (source_id, list))
         .collect::<RasterCoverings>();
-    if !drape_requests.is_empty() {
-        world.resources.insert(DrapeRequests(drape_requests));
+    if !acc.drape_requests.is_empty() {
+        world.resources.insert(DrapeRequests(acc.drape_requests));
     }
-    (extract, floor)
+    (acc.extract, acc.floor)
 }
 
 /// Captures a slot's post-queue covering, LOD history, stereo snapshot, and residency sets.

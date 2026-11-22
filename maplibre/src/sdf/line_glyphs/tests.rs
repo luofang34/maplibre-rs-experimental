@@ -56,9 +56,15 @@ fn flipping_reads_the_text_the_other_way_and_turns_each_glyph() {
     let offsets = [-20.0, 20.0];
     let forward = place_glyphs(&line, 500.0, &offsets, false).expect("fits");
     let flipped = place_glyphs(&line, 500.0, &offsets, true).expect("fits");
-    assert_eq!(forward[0].point, flipped[1].point);
-    assert_eq!(forward[1].point, flipped[0].point);
-    assert!((flipped[0].angle - std::f32::consts::PI).abs() < 1e-6);
+    let [fw0, fw1] = forward.as_slice() else {
+        panic!("expected 2 forward poses");
+    };
+    let [fl0, fl1] = flipped.as_slice() else {
+        panic!("expected 2 flipped poses");
+    };
+    assert_eq!(fw0.point, fl1.point);
+    assert_eq!(fw1.point, fl0.point);
+    assert!((fl0.angle - std::f32::consts::PI).abs() < 1e-6);
 }
 
 #[test]
@@ -79,27 +85,34 @@ fn offset_polyline_shifts_horizontally_and_intersects_sharp_v_inside() {
     // Straight horizontal line offset by +20 shifts y by +20 while preserving anchor arc length.
     let straight = [[0.0_f32, 100.0], [200.0, 100.0]];
     let (shifted, anchor) = offset_polyline(&straight, 80.0, 20.0);
-    assert_eq!(shifted.len(), 2);
-    assert!((shifted[0][1] - 120.0).abs() < 1e-4);
-    assert!((shifted[1][1] - 120.0).abs() < 1e-4);
+    let [sh0, sh1] = shifted.as_slice() else {
+        panic!("expected 2 shifted vertices");
+    };
+    assert!((sh0[1] - 120.0).abs() < 1e-4);
+    assert!((sh1[1] - 120.0).abs() < 1e-4);
     assert!((anchor - 80.0).abs() < 1e-4);
 
     // Sharp V pointing downward (+Y): negative offset shifts inside the V so the interior corner
     // lies strictly above the original tip y = 200.
     let v = [[0.0_f32, 0.0], [100.0, 200.0], [200.0, 0.0]];
     let (inside, _) = offset_polyline(&v, 100.0, -20.0);
-    assert_eq!(inside.len(), 3);
+    let [_, in1, _] = inside.as_slice() else {
+        panic!("expected 3 inside vertices");
+    };
     assert!(
-        inside[1][1] < 200.0 - 20.0,
+        in1[1] < 200.0 - 20.0,
         "inside miter corner y={} should sit well above the tip y=200",
-        inside[1][1]
+        in1[1]
     );
-    assert!((inside[1][0] - 100.0).abs() < 1e-3);
+    assert!((in1[0] - 100.0).abs() < 1e-3);
 
     // Opposite offsets on the same line produce non-overlapping glyph centers (for collision).
     let (above, a_above) = offset_polyline(&straight, 100.0, -24.0);
     let (below, a_below) = offset_polyline(&straight, 100.0, 24.0);
     let p_above = place_glyphs(&above, a_above, &[0.0], false).expect("above pose");
     let p_below = place_glyphs(&below, a_below, &[0.0], false).expect("below pose");
-    assert!((p_below[0].point[1] - p_above[0].point[1] - 48.0).abs() < 1e-3);
+    let (Some(pa), Some(pb)) = (p_above.first(), p_below.first()) else {
+        panic!("expected poses");
+    };
+    assert!((pb.point[1] - pa.point[1] - 48.0).abs() < 1e-3);
 }

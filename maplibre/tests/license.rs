@@ -80,9 +80,12 @@ fn every_package_declares_the_licenses_of_its_code() {
             let path = format!("{package}/{file}");
             let json: serde_json::Value = serde_json::from_str(&read(&path)).expect(&path);
             let declared = if file == "package.json" {
-                &json["license"]
+                json.get("license").unwrap_or(&serde_json::Value::Null)
             } else {
-                &json["packages"][""]["license"]
+                json.get("packages")
+                    .and_then(|packages| packages.get(""))
+                    .and_then(|root| root.get("license"))
+                    .unwrap_or(&serde_json::Value::Null)
             };
             assert_eq!(declared, license, "{path}");
         }

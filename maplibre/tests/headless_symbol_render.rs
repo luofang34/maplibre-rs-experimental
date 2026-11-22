@@ -40,7 +40,11 @@ fn inked_centre_pixels(width: u32, pixels: &[u8]) -> usize {
     for y in centre - half..centre + half {
         for x in centre - half..centre + half {
             let offset = ((y * width + x) * 4) as usize;
-            let [r, g, b] = [pixels[offset], pixels[offset + 1], pixels[offset + 2]];
+            let [r, g, b] = [
+                pixels.get(offset).copied().unwrap_or(255),
+                pixels.get(offset + 1).copied().unwrap_or(255),
+                pixels.get(offset + 2).copied().unwrap_or(255),
+            ];
             if r < 200 || g < 200 || b < 200 {
                 inked += 1;
             }
@@ -200,7 +204,7 @@ async fn a_query_measures_in_logical_pixels_at_a_pixel_ratio_of_two() {
         ]
     }))
     .expect("style parses");
-    let label = style.layers[0].clone();
+    let label = style.layers.first().expect("label layer").clone();
     let (kernel, renderer) = create_headless_renderer(SIZE, SIZE, None)
         .await
         .expect("headless renderer");

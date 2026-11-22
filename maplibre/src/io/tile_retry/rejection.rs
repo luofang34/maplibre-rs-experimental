@@ -29,7 +29,7 @@ pub(crate) fn rejected(
     let Some(retries) = world.tiles.query_mut::<&mut TileRequestRetries>(coords) else {
         return;
     };
-    let state = &mut retries.0[kind.index()];
+    let state = retries.slot_mut(kind);
     state.pending = false;
     state.stale = false;
     state.out_of_view = out_of_view;
@@ -48,7 +48,7 @@ pub(crate) fn backing_off(world: &World, coords: WorldTileCoords, kind: RequestK
         .tiles
         .query::<&TileRequestRetries>(coords)
         .is_some_and(|retries| {
-            let state = &retries.0[kind.index()];
+            let state = retries.slot(kind);
             !state.pending && state.deadline.is_some_and(|due| due > now)
         })
 }

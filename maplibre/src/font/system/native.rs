@@ -99,59 +99,70 @@ impl FontSystem {
         let id = loaded_id?;
         self.faces.get(&id).map(|f| (id, Arc::clone(f)))
     }
+}
 
+fn to_db_style(style: FontStyle) -> fontdb::Style {
+    match style {
+        FontStyle::Normal => fontdb::Style::Normal,
+        FontStyle::Italic => fontdb::Style::Italic,
+        FontStyle::Oblique => fontdb::Style::Oblique,
+    }
+}
+
+fn db_face_has_char(db: &fontdb::Database, id: fontdb::ID, ch: char) -> bool {
+    if db.face(id).is_some_and(|info| {
+        info.post_script_name.contains("LastResort")
+            || info
+                .families
+                .iter()
+                .any(|(name, _)| name.contains("LastResort"))
+    }) {
+        return false;
+    }
+    db.with_face_data(id, |data, idx| {
+        FontRef::from_index(data, idx)
+            .ok()
+            .and_then(|f| f.charmap().map(ch))
+            .is_some_and(|gid| gid != skrifa::GlyphId::NOTDEF)
+    })
+    .unwrap_or(false)
+}
+
+fn query_preferred_fallbacks(
+    db: &fontdb::Database,
+    ch: char,
+    weight: super::FontWeight,
+    style: fontdb::Style,
+) -> Option<fontdb::ID> {
+    preferred_system_fallbacks(ch).iter().find_map(|name| {
+        let query = fontdb::Query {
+            families: &[fontdb::Family::Name(name)],
+            weight: fontdb::Weight(weight.0),
+            stretch: fontdb::Stretch::Normal,
+            style,
+        };
+        db.query(&query).filter(|&id| db_face_has_char(db, id, ch))
+    })
+}
+
+impl FontSystem {
     fn find_matching_db_face(&self, font_stack: &str, ch: char) -> Option<fontdb::ID> {
         let native = self.native.as_ref()?;
         let db = &native.db;
-        let face_has_char = |id: fontdb::ID| -> bool {
-            if db.face(id).is_some_and(|info| {
-                info.post_script_name.contains("LastResort")
-                    || info
-                        .families
-                        .iter()
-                        .any(|(name, _)| name.contains("LastResort"))
-            }) {
-                return false;
-            }
-            db.with_face_data(id, |data, idx| {
-                FontRef::from_index(data, idx)
-                    .ok()
-                    .and_then(|f| f.charmap().map(ch))
-                    .is_some_and(|gid| gid != skrifa::GlyphId::NOTDEF)
-            })
-            .unwrap_or(false)
-        };
-
         let (_, primary_weight, primary_style) =
             parse_font_stack_entry(font_stack.split(',').next().unwrap_or(font_stack));
-        let primary_db_style = match primary_style {
-            FontStyle::Normal => fontdb::Style::Normal,
-            FontStyle::Italic => fontdb::Style::Italic,
-            FontStyle::Oblique => fontdb::Style::Oblique,
-        };
+        let primary_db_style = to_db_style(primary_style);
 
         for raw_entry in font_stack.split(',') {
             let (family, weight, style) = parse_font_stack_entry(raw_entry);
-            let db_style = match style {
-                FontStyle::Normal => fontdb::Style::Normal,
-                FontStyle::Italic => fontdb::Style::Italic,
-                FontStyle::Oblique => fontdb::Style::Oblique,
-            };
+            let db_style = to_db_style(style);
             let lower = family.to_ascii_lowercase();
             if matches!(
                 lower.as_str(),
                 "sans-serif" | "system-ui" | "serif" | "monospace"
             ) {
-                for fallback_name in preferred_system_fallbacks(ch) {
-                    let query = fontdb::Query {
-                        families: &[fontdb::Family::Name(fallback_name)],
-                        weight: fontdb::Weight(weight.0),
-                        stretch: fontdb::Stretch::Normal,
-                        style: db_style,
-                    };
-                    if let Some(id) = db.query(&query).filter(|&id| face_has_char(id)) {
-                        return Some(id);
-                    }
+                if let Some(id) = query_preferred_fallbacks(db, ch, weight, db_style) {
+                    return Some(id);
                 }
             }
             let fam = match lower.as_str() {
@@ -166,24 +177,16 @@ impl FontSystem {
                 stretch: fontdb::Stretch::Normal,
                 style: db_style,
             };
-            if let Some(id) = db.query(&query).filter(|&id| face_has_char(id)) {
+            if let Some(id) = db.query(&query).filter(|&id| db_face_has_char(db, id, ch)) {
                 return Some(id);
             }
         }
 
-        for fallback_name in preferred_system_fallbacks(ch) {
-            let query = fontdb::Query {
-                families: &[fontdb::Family::Name(fallback_name)],
-                weight: fontdb::Weight(primary_weight.0),
-                stretch: fontdb::Stretch::Normal,
-                style: primary_db_style,
-            };
-            if let Some(id) = db.query(&query).filter(|&id| face_has_char(id)) {
-                return Some(id);
-            }
-        }
-
-        db.faces().map(|info| info.id).find(|&id| face_has_char(id))
+        query_preferred_fallbacks(db, ch, primary_weight, primary_db_style).or_else(|| {
+            db.faces()
+                .map(|info| info.id)
+                .find(|&id| db_face_has_char(db, id, ch))
+        })
     }
 
     fn materialize_db_face(&mut self, db_id: fontdb::ID) -> Option<u64> {
@@ -259,9 +262,7 @@ fn is_cjk_or_hangul_or_kana(ch: char) -> bool {
 fn load_existing_font_files(db: &mut fontdb::Database, paths: &[&str]) {
     for raw in paths {
         let p = Path::new(raw);
-        if p.is_file() {
-            let _ = db.load_font_file(p);
-        }
+        if p.is_file() && db.load_font_file(p).is_err() {}
     }
 }
 

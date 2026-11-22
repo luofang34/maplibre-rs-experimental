@@ -105,18 +105,32 @@ pub(super) enum ResolvedViewTiles {
     },
 }
 
-#[allow(clippy::too_many_arguments)]
+pub(super) struct ViewTileResolutionRequest<'a> {
+    pub(super) memo: Option<&'a RequestMemo>,
+    pub(super) key: Option<&'a RequestViewKey>,
+    pub(super) settled_unchanged: bool,
+    pub(super) style: &'a Style,
+    pub(super) view_state: &'a ViewState,
+    pub(super) world: &'a World,
+    pub(super) visible_level: ZoomLevel,
+    pub(super) request_padding: ViewStatePadding,
+    pub(super) tight_tile_requests: bool,
+}
+
 pub(super) fn resolve_view_tiles(
-    memo: Option<&RequestMemo>,
-    key: Option<&RequestViewKey>,
-    settled_unchanged: bool,
-    style: &Style,
-    view_state: &ViewState,
-    world: &World,
-    visible_level: ZoomLevel,
-    request_padding: ViewStatePadding,
-    tight_tile_requests: bool,
+    req: ViewTileResolutionRequest<'_>,
 ) -> Result<ResolvedViewTiles, ProjectionStateError> {
+    let ViewTileResolutionRequest {
+        memo,
+        key,
+        settled_unchanged,
+        style,
+        view_state,
+        world,
+        visible_level,
+        request_padding,
+        tight_tile_requests,
+    } = req;
     if let Some(memo) = memo.filter(|m| key == Some(&m.key)) {
         return Ok(ResolvedViewTiles::Computed {
             computed: memo.computed.clone(),

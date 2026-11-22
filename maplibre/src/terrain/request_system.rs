@@ -278,65 +278,8 @@ pub fn fetch_dem_apc<K: OffscreenKernel, T: DemTransferables, C: Context + Clone
         let Some(dem) = dem_source(&style) else {
             return Ok(());
         };
-        let client = kernel.source_client();
-        let mut retry = false;
-        use crate::{projection::body::Body, sdf::assets::tiles::CachedTileFailure};
-        let circumference = Body::EARTH.circumference_meters();
-        let claim = SharedTileClaim::default();
-        let (loaded, shared_slot) = match client
-            .assets()
-            .load_dem_tile(
-                &client,
-                &dem.source,
-                &coords,
-                dem.unpack,
-                circumference,
-                &claim,
-            )
-            .await
-        {
-            Ok((entry, slot)) => (Some(entry), slot),
-            Err(CachedTileFailure::NotFound) => {
-                tracing::debug!(%coords, source = %dem.name, "no DEM tile at the source; flat");
-                (None, SharedTileSlot::default())
-            }
-            Err(CachedTileFailure::Decode(error)) => {
-                tracing::warn!(%coords, source = %dem.name, %error, "DEM tile is not an image");
-                (None, SharedTileSlot::default())
-            }
-            Err(CachedTileFailure::Transport { retryable, message }) => {
-                retry = retryable;
-                if retryable {
-                    tracing::warn!(
-                        %coords,
-                        source = %dem.name,
-                        error = %message,
-                        "DEM tile fetch failed"
-                    );
-                } else {
-                    tracing::error!(
-                        %coords,
-                        source = %dem.name,
-                        error = %message,
-                        "DEM tile fetch failed"
-                    );
-                }
-                (None, SharedTileSlot::default())
-            }
-        };
-        match loaded {
-            Some(entry) => context
-                .send_back(T::LayerDem::build_from_cached_dem(
-                    coords,
-                    std::sync::Arc::clone(&entry.tile),
-                    entry.circumference_meters,
-                    std::sync::Arc::clone(&entry.image),
-                ))
-                .map_err(ProcedureError::Send),
-            None => context
-                .send_back(T::LayerDemMissing::build_from(coords))
-                .map_err(ProcedureError::Send),
-        }?;
+        let (context, shared_slot, retry) =
+            load_and_send_dem::<K, T, C>(kernel, context, dem, coords).await?;
         let outcome = IntoMessage::into(TileRequestOutcome {
             coords,
             kind: RequestKind::Dem,
@@ -351,6 +294,64 @@ pub fn fetch_dem_apc<K: OffscreenKernel, T: DemTransferables, C: Context + Clone
             .send_back(shared_slot.attach(outcome))
             .map_err(ProcedureError::Send)
     })
+}
+
+async fn load_and_send_dem<K: OffscreenKernel, T: DemTransferables, C: Context>(
+    kernel: K,
+    context: AttemptContext<C>,
+    dem: crate::terrain::source::DemSource,
+    coords: WorldTileCoords,
+) -> Result<(AttemptContext<C>, SharedTileSlot, bool), ProcedureError> {
+    use crate::{projection::body::Body, sdf::assets::tiles::CachedTileFailure};
+    let client = kernel.source_client();
+    let circumference = Body::EARTH.circumference_meters();
+    let claim = SharedTileClaim::default();
+    let mut retry = false;
+    let (loaded, shared_slot) = match client
+        .assets()
+        .load_dem_tile(
+            &client,
+            &dem.source,
+            &coords,
+            dem.unpack,
+            circumference,
+            &claim,
+        )
+        .await
+    {
+        Ok((entry, slot)) => (Some(entry), slot),
+        Err(CachedTileFailure::NotFound) => {
+            tracing::debug!(%coords, source = %dem.name, "no DEM tile at the source; flat");
+            (None, SharedTileSlot::default())
+        }
+        Err(CachedTileFailure::Decode(error)) => {
+            tracing::warn!(%coords, source = %dem.name, %error, "DEM tile is not an image");
+            (None, SharedTileSlot::default())
+        }
+        Err(CachedTileFailure::Transport { retryable, message }) => {
+            retry = retryable;
+            if retryable {
+                tracing::warn!(%coords, source = %dem.name, error = %message, "DEM tile fetch failed");
+            } else {
+                tracing::error!(%coords, source = %dem.name, error = %message, "DEM tile fetch failed");
+            }
+            (None, SharedTileSlot::default())
+        }
+    };
+    match loaded {
+        Some(entry) => context
+            .send_back(T::LayerDem::build_from_cached_dem(
+                coords,
+                std::sync::Arc::clone(&entry.tile),
+                entry.circumference_meters,
+                std::sync::Arc::clone(&entry.image),
+            ))
+            .map_err(ProcedureError::Send),
+        None => context
+            .send_back(T::LayerDemMissing::build_from(coords))
+            .map_err(ProcedureError::Send),
+    }?;
+    Ok((context, shared_slot, retry))
 }
 
 #[cfg(test)]

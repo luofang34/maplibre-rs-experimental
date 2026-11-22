@@ -161,7 +161,7 @@ fn emit_geometry<P: GeomProcessor>(
         "Point" => {
             processor.point_begin(idx)?;
             emit_point_coords(coords, 0, processor)?;
-            processor.point_end(idx)?;
+            processor.point_end(idx)
         }
         "MultiPoint" => {
             let pts = coords
@@ -169,7 +169,7 @@ fn emit_geometry<P: GeomProcessor>(
                 .ok_or_else(|| err("MultiPoint coordinates not array"))?;
             processor.multipoint_begin(pts.len(), idx)?;
             emit_coord_seq(pts, processor)?;
-            processor.multipoint_end(idx)?;
+            processor.multipoint_end(idx)
         }
         "LineString" => {
             let pts = coords
@@ -177,47 +177,58 @@ fn emit_geometry<P: GeomProcessor>(
                 .ok_or_else(|| err("LineString coordinates not array"))?;
             processor.linestring_begin(true, pts.len(), idx)?;
             emit_coord_seq(pts, processor)?;
-            processor.linestring_end(true, idx)?;
+            processor.linestring_end(true, idx)
         }
-        "MultiLineString" => {
-            let lines = coords
-                .as_array()
-                .ok_or_else(|| err("MultiLineString coordinates not array"))?;
-            processor.multilinestring_begin(lines.len(), idx)?;
-            for (li, line) in lines.iter().enumerate() {
-                let pts = line
-                    .as_array()
-                    .ok_or_else(|| err("MultiLineString element not array"))?;
-                processor.linestring_begin(false, pts.len(), li)?;
-                emit_coord_seq(pts, processor)?;
-                processor.linestring_end(false, li)?;
-            }
-            processor.multilinestring_end(idx)?;
-        }
+        "MultiLineString" => emit_multilinestring(coords, processor, idx),
         "Polygon" => {
             let rings = coords
                 .as_array()
                 .ok_or_else(|| err("Polygon coordinates not array"))?;
             processor.polygon_begin(true, rings.len(), idx)?;
             emit_rings(rings, processor)?;
-            processor.polygon_end(true, idx)?;
+            processor.polygon_end(true, idx)
         }
-        "MultiPolygon" => {
-            let polys = coords
-                .as_array()
-                .ok_or_else(|| err("MultiPolygon coordinates not array"))?;
-            processor.multipolygon_begin(polys.len(), idx)?;
-            for (pi, poly) in polys.iter().enumerate() {
-                let rings = poly
-                    .as_array()
-                    .ok_or_else(|| err("MultiPolygon element not array"))?;
-                processor.polygon_begin(false, rings.len(), pi)?;
-                emit_rings(rings, processor)?;
-                processor.polygon_end(false, pi)?;
-            }
-            processor.multipolygon_end(idx)?;
-        }
-        _ => return Err(err(format!("unsupported GeoJSON geometry type `{kind}`"))),
+        "MultiPolygon" => emit_multipolygon(coords, processor, idx),
+        _ => Err(err(format!("unsupported GeoJSON geometry type `{kind}`"))),
     }
-    Ok(())
+}
+
+fn emit_multilinestring<P: GeomProcessor>(
+    coords: &Value,
+    processor: &mut P,
+    idx: usize,
+) -> Result<(), GeozeroError> {
+    let lines = coords
+        .as_array()
+        .ok_or_else(|| err("MultiLineString coordinates not array"))?;
+    processor.multilinestring_begin(lines.len(), idx)?;
+    for (li, line) in lines.iter().enumerate() {
+        let pts = line
+            .as_array()
+            .ok_or_else(|| err("MultiLineString element not array"))?;
+        processor.linestring_begin(false, pts.len(), li)?;
+        emit_coord_seq(pts, processor)?;
+        processor.linestring_end(false, li)?;
+    }
+    processor.multilinestring_end(idx)
+}
+
+fn emit_multipolygon<P: GeomProcessor>(
+    coords: &Value,
+    processor: &mut P,
+    idx: usize,
+) -> Result<(), GeozeroError> {
+    let polys = coords
+        .as_array()
+        .ok_or_else(|| err("MultiPolygon coordinates not array"))?;
+    processor.multipolygon_begin(polys.len(), idx)?;
+    for (pi, poly) in polys.iter().enumerate() {
+        let rings = poly
+            .as_array()
+            .ok_or_else(|| err("MultiPolygon element not array"))?;
+        processor.polygon_begin(false, rings.len(), pi)?;
+        emit_rings(rings, processor)?;
+        processor.polygon_end(false, pi)?;
+    }
+    processor.multipolygon_end(idx)
 }

@@ -1,4 +1,4 @@
-#![allow(clippy::expect_used, clippy::panic)]
+#![allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
 
 use std::{
     fs,

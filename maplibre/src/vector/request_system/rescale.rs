@@ -28,7 +28,7 @@ pub fn into_descendant(tile: &mut Tile, from: WorldTileCoords, to: WorldTileCoor
         return;
     }
     for layer in &mut tile.layers {
-        let _ = into_descendant_layer(layer, from, to);
+        let _changed = into_descendant_layer(layer, from, to);
     }
 }
 
@@ -169,7 +169,8 @@ impl Frame {
         for part in parts {
             let mut current: Vec<Point> = Vec::new();
             for pair in part.windows(2) {
-                let Some((start, end, entered, left)) = self.clip_segment(pair[0], pair[1]) else {
+                let [p0, p1] = *pair else { continue };
+                let Some((start, end, entered, left)) = self.clip_segment(p0, p1) else {
                     flush(&mut out, &mut current);
                     continue;
                 };
@@ -259,8 +260,12 @@ impl Frame {
             let mut out: Vec<Point> = Vec::new();
             let count = ring.len();
             for index in 0..count {
-                let current = ring[index];
-                let previous = ring[(index + count - 1) % count];
+                let Some(&current) = ring.get(index) else {
+                    continue;
+                };
+                let Some(&previous) = ring.get((index + count - 1) % count) else {
+                    continue;
+                };
                 let (current_in, previous_in) =
                     (self.within(edge, current), self.within(edge, previous));
                 if current_in {
@@ -322,7 +327,9 @@ fn flush(out: &mut Vec<Vec<Point>>, current: &mut Vec<Point>) {
 fn signed_area(ring: &[Point]) -> i128 {
     let mut area = 0_i128;
     for (index, point) in ring.iter().enumerate() {
-        let next = ring[(index + 1) % ring.len()];
+        let Some(&next) = ring.get((index + 1) % ring.len()) else {
+            continue;
+        };
         area += i128::from(point.0) * i128::from(next.1) - i128::from(next.0) * i128::from(point.1);
     }
     area
@@ -344,8 +351,7 @@ fn decode(geometry: &[u32]) -> Option<Vec<Vec<Point>>> {
     let mut current: Vec<Point> = Vec::new();
     let mut cursor = (0_i64, 0_i64);
     let mut index = 0;
-    while index < geometry.len() {
-        let word = geometry[index];
+    while let Some(&word) = geometry.get(index) {
         index += 1;
         let (id, count) = (word & 7, (word >> 3) as usize);
         match id {

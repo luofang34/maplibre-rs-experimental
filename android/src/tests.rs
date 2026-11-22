@@ -139,12 +139,14 @@ fn native_map_renders_mutates_and_handles_multiple_instances_across_threads() {
     let mut rgba_a = vec![0_u8; 32 * 32 * 4];
     borrowed_a.render_rgba8_into(&mut rgba_a).unwrap();
     let center_a = (16 * 32 + 16) * 4;
-    assert!(rgba_a[center_a + 1] >= 240 && rgba_a[center_a] <= 15);
+    let px_a = rgba_a.get(center_a..center_a + 3).expect("center_a pixel");
+    assert!(px_a[1] >= 240 && px_a[0] <= 15);
 
     // Second embedded map renders independently in the same process.
     let rgba_b = map_b.render_rgba8_vec().unwrap();
     let center_b = (8 * 16 + 8) * 4;
-    assert!(rgba_b[center_b + 1] >= 240 && rgba_b[center_b + 2] >= 240 && rgba_b[center_b] <= 15);
+    let px_b = rgba_b.get(center_b..center_b + 3).expect("center_b pixel");
+    assert!(px_b[1] >= 240 && px_b[2] >= 240 && px_b[0] <= 15);
 
     // Camera and paint mutations on `borrowed_a`.
     borrowed_a

@@ -47,12 +47,12 @@ impl CoalescedCommands {
     pub(super) fn drain_waiters(&self) {
         if let Some(pending) = self.jump.borrow_mut().take() {
             for waiter in pending.waiters {
-                let _ = waiter.send(Ok(()));
+                drop(waiter.send(Ok(())));
             }
         }
         for (_, pending) in self.geojson.borrow_mut().drain() {
             for waiter in pending.waiters {
-                let _ = waiter.send(Ok(()));
+                drop(waiter.send(Ok(())));
             }
         }
     }
@@ -99,7 +99,7 @@ where
                             msg.clone().into(),
                         ))),
                     };
-                    let _ = waiter.send(res);
+                    drop(waiter.send(res));
                 }
             }
         }));
@@ -160,7 +160,7 @@ where
                             msg.clone().into(),
                         ))),
                     };
-                    let _ = waiter.send(res);
+                    drop(waiter.send(res));
                 }
             }
         }));
@@ -214,7 +214,7 @@ where
             {
                 map.set_max_pitch_degrees(parsed.pitch.unwrap_or(0.0).max(70.0));
             }
-            let _ = map.set_style(parsed);
+            drop(map.set_style(parsed));
             Ok::<_, JSError>(())
         })
         .await??;

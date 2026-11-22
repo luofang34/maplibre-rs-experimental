@@ -94,10 +94,11 @@ impl<HC: HttpClient, S: OfflineStore> HttpClient for OfflineHttpClient<HC, S> {
             && req.range.is_none()
             && is_remote_http_url(&req.url)
         {
-            let _ = self
-                .store
-                .put_ambient_resource(&req.url, req.resource_kind, &body)
-                .await;
+            drop(
+                self.store
+                    .put_ambient_resource(&req.url, req.resource_kind, &body)
+                    .await,
+            );
         }
         Ok(body)
     }

@@ -17,9 +17,11 @@ fn the_ramp_runs_from_the_first_stop_to_the_last() {
         "blue"
     ])));
     assert_eq!(ramp.len(), RAMP_TEXELS);
-    assert_eq!(ramp[0], [255, 0, 0, 255]);
-    assert_eq!(ramp[RAMP_TEXELS - 1], [0, 0, 255, 255]);
-    assert!((i32::from(ramp[128][0]) - 127).abs() <= 2);
+    assert_eq!(ramp.first().copied(), Some([255, 0, 0, 255]));
+    assert_eq!(ramp.last().copied(), Some([0, 0, 255, 255]));
+    assert!(ramp
+        .get(128)
+        .is_some_and(|px| (i32::from(px[0]) - 127).abs() <= 2));
 }
 
 #[test]
@@ -32,8 +34,11 @@ fn a_step_gradient_changes_colour_at_its_stop() {
         "blue"
     ])));
     assert_eq!(ramp.len(), HIGH_RES_RAMP_TEXELS);
-    assert_eq!(ramp[100], [255, 0, 0, 255]);
-    assert_eq!(ramp[HIGH_RES_RAMP_TEXELS - 100], [0, 0, 255, 255]);
+    assert_eq!(ramp.get(100).copied(), Some([255, 0, 0, 255]));
+    assert_eq!(
+        ramp.get(HIGH_RES_RAMP_TEXELS - 100).copied(),
+        Some([0, 0, 255, 255])
+    );
 }
 
 #[test]
@@ -54,9 +59,9 @@ fn narrow_interpolate_and_nested_step_use_high_res_linear_ramp() {
         "blue"
     ])));
     assert_eq!(narrow.len(), HIGH_RES_RAMP_TEXELS);
-    let mid = narrow[HIGH_RES_RAMP_TEXELS / 2];
+    let mid = narrow.get(HIGH_RES_RAMP_TEXELS / 2).copied();
     assert!(
-        mid[1] > 200,
+        mid.is_some_and(|px| px[1] > 200),
         "narrow green band at 0.5 must be resolved: {mid:?}"
     );
 
@@ -67,8 +72,14 @@ fn narrow_interpolate_and_nested_step_use_high_res_linear_ramp() {
         "black"
     ])));
     assert_eq!(nested.len(), HIGH_RES_RAMP_TEXELS);
-    assert_eq!(nested[HIGH_RES_RAMP_TEXELS / 2], [255, 0, 0, 255]);
-    assert_eq!(nested[HIGH_RES_RAMP_TEXELS - 10], [0, 0, 255, 255]);
+    assert_eq!(
+        nested.get(HIGH_RES_RAMP_TEXELS / 2).copied(),
+        Some([255, 0, 0, 255])
+    );
+    assert_eq!(
+        nested.get(HIGH_RES_RAMP_TEXELS - 10).copied(),
+        Some([0, 0, 255, 255])
+    );
 }
 
 #[test]
@@ -101,10 +112,10 @@ fn translucent_stops_are_stored_premultiplied() {
         1,
         "rgba(255, 255, 255, 1)"
     ])));
-    assert_eq!(ramp[0], [0, 0, 0, 0]);
-    assert_eq!(ramp[RAMP_TEXELS - 1], [255, 255, 255, 255]);
+    assert_eq!(ramp.first().copied(), Some([0, 0, 0, 0]));
+    assert_eq!(ramp.last().copied(), Some([255, 255, 255, 255]));
     // At the midpoint (alpha ~ 0.5), premultiplied RGB matches alpha (~128).
-    let mid = ramp[128];
+    let mid = ramp.get(128).copied().expect("midpoint texel");
     assert!((i32::from(mid[3]) - 128).abs() <= 2);
     assert_eq!(mid[0], mid[3]);
     assert_eq!(mid[1], mid[3]);

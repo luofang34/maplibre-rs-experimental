@@ -338,10 +338,7 @@ pub(super) fn surface_footprint(
     }
 
     let mut corners: Vec<[f64; 2]> = Vec::with_capacity(samples.len() + 4);
-    let n = samples.len();
-    for i in 0..n {
-        let (px, cur) = samples[i];
-        let (next_px, next) = samples[(i + 1) % n];
+    for (&(px, cur), &(next_px, next)) in samples.iter().zip(samples.iter().cycle().skip(1)) {
         match (cur, next) {
             (Some(w), Some(_)) => corners.push(w),
             (Some(w), None) => {
@@ -355,10 +352,10 @@ pub(super) fn surface_footprint(
         }
     }
 
-    if !corners.is_empty() {
+    if let Some((first, rest)) = corners.split_first_mut() {
         if resolved.globe_transition() > 0.0 {
-            let mut prev_x = corners[0][0];
-            for corner in &mut corners[1..] {
+            let mut prev_x = first[0];
+            for corner in rest {
                 corner[0] = unwrap_world_x(corner[0], prev_x, resolved.world_size);
                 prev_x = corner[0];
             }

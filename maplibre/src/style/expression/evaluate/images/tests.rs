@@ -113,9 +113,10 @@ fn coalesce_skips_an_image_the_map_lacks_and_names_the_first_when_all_are_missin
         panic!("formatted text");
     };
     assert_eq!(
-        formatted.sections[0]
-            .image
-            .as_ref()
+        formatted
+            .sections
+            .first()
+            .and_then(|s| s.image.as_ref())
             .map(|image| image.name.as_str()),
         Some("here")
     );
@@ -132,7 +133,7 @@ fn let_and_match_carry_an_image_into_format() {
     ) else {
         panic!("formatted text");
     };
-    let section = &formatted.sections[0];
+    let section = formatted.sections.first().expect("one section");
     assert_eq!(
         section.image.as_ref().map(|image| image.name.as_str()),
         Some("shield\nBAB\nA 115")

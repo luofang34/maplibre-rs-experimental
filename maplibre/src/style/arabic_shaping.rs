@@ -18,6 +18,10 @@ enum Joining {
 }
 
 /// Explicit `[isolated, final, initial, medial]` glyph codepoints and joining class for `c`.
+///
+/// Maps core Arabic (`U+0621..=U+064A`) to Presentation Forms-B (`U+FE80..=U+FEF4`), keeps
+/// Tatweel (`U+0640`) and ZWJ (`U+200D`) dual-joining, and maps extended Persian/Urdu/Kurdish/
+/// Sindhi/Uyghur/Pashto letters (`U+0671..=U+06D3`) to Presentation Forms-A (`U+FB50..=U+FBFF`).
 fn letter_forms(c: char) -> Option<([u32; 4], Joining)> {
     let cp = u32::from(c);
     let dual = |iso: u32| ([iso, iso + 1, iso + 2, iso + 3], Joining::Dual);
@@ -26,7 +30,6 @@ fn letter_forms(c: char) -> Option<([u32; 4], Joining)> {
     let self_right = |u: u32| ([u, u, u, u], Joining::Right);
 
     let entry = match cp {
-        // Core Arabic (U+0621..U+064A) -> Presentation Forms-B (U+FE80..U+FEF4)
         0x0621 => ([0xFE80; 4], Joining::None),
         0x0622 => right(0xFE81),
         0x0623 => right(0xFE83),
@@ -42,55 +45,52 @@ fn letter_forms(c: char) -> Option<([u32; 4], Joining)> {
         0x0631 => right(0xFEAD),
         0x0632 => right(0xFEAF),
         0x0633..=0x063A => dual(0xFEB1 + (cp - 0x0633) * 4),
-        // Tatweel / Kashida (U+0640) & ZWJ (U+200D) cause adjacent letters to join without changing codepoint.
         0x0640 | 0x200D => self_dual(cp),
         0x0641..=0x0646 => dual(0xFED1 + (cp - 0x0641) * 4),
         0x0647 => dual(0xFEE9),
         0x0648 => right(0xFEED),
         0x0649 => right(0xFEEF),
         0x064A => dual(0xFEF1),
-        // Persian, Urdu, Kurdish, Sindhi, Uyghur, Pashto -> Presentation Forms-A (U+FB50..U+FBFF)
-        0x0671 => right(0xFB50), // Alef Wasla (ٱ)
-        0x0679 => dual(0xFB66),  // Tteh (ٹ)
-        0x067A => dual(0xFB5E),  // Tteheh (ٺ)
-        0x067B => dual(0xFB52),  // Beeh (ٻ)
-        0x067E => dual(0xFB56),  // Peh (پ)
-        0x067F => dual(0xFB62),  // Teheh (ٿ)
-        0x0680 => dual(0xFB5A),  // Beheh (ڀ)
-        0x0683 => dual(0xFB76),  // Nyeh (ڃ)
-        0x0684 => dual(0xFB72),  // Dyeh (ڄ)
-        0x0686 => dual(0xFB7A),  // Tcheh (چ)
-        0x0687 => dual(0xFB7E),  // Tcheheh (ڇ)
-        0x0688 => right(0xFB88), // Ddal (ڈ)
-        0x068C => right(0xFB84), // Dahal (ڌ)
-        0x068D => right(0xFB82), // Ddahal (ڍ)
-        0x068E => right(0xFB86), // Dul (ڎ)
-        0x0691 => right(0xFB8C), // Rreh (ڑ)
-        0x0698 => right(0xFB8A), // Jeh (ژ)
-        0x06A4 => dual(0xFB6A),  // Veh (ڤ)
-        0x06A6 => dual(0xFB6E),  // Peheh (ڦ)
-        0x06A9 => dual(0xFB8E),  // Keheh (ک)
-        0x06AD => dual(0xFBD3),  // Ng (ڭ)
-        0x06AF => dual(0xFB92),  // Gaf (گ)
-        0x06B1 => dual(0xFB9A),  // Ngoeh (ڱ)
-        0x06B3 => dual(0xFB96),  // Gueh (ڳ)
-        // Urdu Noon Ghunna (ں): dotless in isolated/final, dotted Noon in initial/medial.
+        0x0671 => right(0xFB50),
+        0x0679 => dual(0xFB66),
+        0x067A => dual(0xFB5E),
+        0x067B => dual(0xFB52),
+        0x067E => dual(0xFB56),
+        0x067F => dual(0xFB62),
+        0x0680 => dual(0xFB5A),
+        0x0683 => dual(0xFB76),
+        0x0684 => dual(0xFB72),
+        0x0686 => dual(0xFB7A),
+        0x0687 => dual(0xFB7E),
+        0x0688 => right(0xFB88),
+        0x068C => right(0xFB84),
+        0x068D => right(0xFB82),
+        0x068E => right(0xFB86),
+        0x0691 => right(0xFB8C),
+        0x0698 => right(0xFB8A),
+        0x06A4 => dual(0xFB6A),
+        0x06A6 => dual(0xFB6E),
+        0x06A9 => dual(0xFB8E),
+        0x06AD => dual(0xFBD3),
+        0x06AF => dual(0xFB92),
+        0x06B1 => dual(0xFB9A),
+        0x06B3 => dual(0xFB96),
+        // Urdu Noon Ghunna uses dotless forms when isolated/final and dotted forms initially/medially.
         0x06BA => ([0xFB9E, 0xFB9F, 0xFEE7, 0xFEE8], Joining::Dual),
-        0x06BB => dual(0xFBA0),  // Rnoon (ڻ)
-        0x06BE => dual(0xFBAA),  // Heh Doachashmee (ھ)
-        0x06C0 => right(0xFBA4), // Heh with Yeh above (ۀ)
-        0x06C1 => dual(0xFBA6),  // Heh Goal (ہ)
+        0x06BB => dual(0xFBA0),
+        0x06BE => dual(0xFBAA),
+        0x06C0 => right(0xFBA4),
+        0x06C1 => dual(0xFBA6),
         0x06C5 => right(0xFBE0),
         0x06C6 => right(0xFBD9),
         0x06C7 => right(0xFBD7),
         0x06C8 => right(0xFBDB),
         0x06C9 => right(0xFBE2),
         0x06CB => right(0xFBDE),
-        0x06CC => dual(0xFBFC), // Farsi Yeh (ی)
+        0x06CC => dual(0xFBFC),
         0x06D0 => dual(0xFBE4),
-        0x06D2 => right(0xFBAE), // Yeh Barree (ے)
-        0x06D3 => right(0xFBB0), // Yeh Barree with Hamza above (ۓ)
-        // Remaining U+0600..U+06FF Arabic letters participate in contextual joining for neighbours.
+        0x06D2 => right(0xFBAE),
+        0x06D3 => right(0xFBB0),
         0x0672..=0x0677 | 0x0689..=0x0699 | 0x06C2..=0x06CD | 0x06D5 | 0x06EE..=0x06EF => {
             self_right(cp)
         }
@@ -143,7 +143,9 @@ pub fn needs_shaping(text: &str) -> bool {
 pub fn shape(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let joins_before = |index: usize| -> bool {
-        chars[..index]
+        chars
+            .get(..index)
+            .unwrap_or(&[])
             .iter()
             .rev()
             .find(|c| !is_transparent(**c))
@@ -151,7 +153,9 @@ pub fn shape(text: &str) -> String {
             .is_some_and(|(_, joining)| joining == Joining::Dual)
     };
     let joins_after = |index: usize| -> bool {
-        chars[index + 1..]
+        chars
+            .get(index + 1..)
+            .unwrap_or(&[])
             .iter()
             .find(|c| !is_transparent(**c))
             .and_then(|c| letter_forms(*c))
@@ -160,8 +164,7 @@ pub fn shape(text: &str) -> String {
 
     let mut shaped = String::with_capacity(text.len());
     let mut index = 0;
-    while index < chars.len() {
-        let c = chars[index];
+    while let Some(&c) = chars.get(index) {
         if c == '\u{200D}' {
             index += 1;
             continue;
@@ -176,13 +179,13 @@ pub fn shape(text: &str) -> String {
         // Lam + optional transparent tashkeel + Alef -> Lam-Alef ligature + preserved tashkeel.
         if u32::from(c) == 0x0644 {
             let mut look = index + 1;
-            while look < chars.len() && is_transparent(chars[look]) {
+            while chars.get(look).copied().is_some_and(is_transparent) {
                 look += 1;
             }
             if let Some((alone, joined)) = chars.get(look).and_then(|next| lam_alef(*next)) {
                 shaped.push(if before { joined } else { alone });
-                for &mark in &chars[index + 1..look] {
-                    shaped.push(mark);
+                if let Some(marks) = chars.get(index + 1..look) {
+                    shaped.extend(marks);
                 }
                 index = look + 1;
                 continue;
@@ -197,7 +200,13 @@ pub fn shape(text: &str) -> String {
             (Joining::Right, false, true) => 0,
             (Joining::Right, true, true) => 1,
         };
-        shaped.push(char::from_u32(table[slot]).unwrap_or(c));
+        shaped.push(
+            table
+                .get(slot)
+                .copied()
+                .and_then(char::from_u32)
+                .unwrap_or(c),
+        );
         index += 1;
     }
     shaped

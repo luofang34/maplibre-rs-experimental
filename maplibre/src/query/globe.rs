@@ -133,9 +133,15 @@ pub(super) fn project_clipped_ring_3d(
     let mut out = Vec::with_capacity(count + 2);
     for i in 0..count {
         let next = (i + 1) % count;
-        let (wa, ea) = ring[i];
-        let (wb, eb) = ring[next];
-        match (projected[i], projected[next]) {
+        let (Some(&(wa, ea)), Some(&(wb, eb)), Some(&proj_a), Some(&proj_b)) = (
+            ring.get(i),
+            ring.get(next),
+            projected.get(i),
+            projected.get(next),
+        ) else {
+            continue;
+        };
+        match (proj_a, proj_b) {
             (Some(pa), Some(_)) => out.push(pa),
             (Some(pa), None) => {
                 out.push(pa);
@@ -192,11 +198,18 @@ fn project_clipped_segments(
     let mut segments = Vec::with_capacity(edges);
     for i in 0..edges {
         let j = (i + 1) % world_pts.len();
-        let (wa, wb) = (world_pts[i], world_pts[j]);
+        let (Some(&wa), Some(&wb), Some(&proj_a), Some(&proj_b)) = (
+            world_pts.get(i),
+            world_pts.get(j),
+            projected.get(i),
+            projected.get(j),
+        ) else {
+            continue;
+        };
         if wa == wb {
             continue;
         }
-        match (projected[i], projected[j]) {
+        match (proj_a, proj_b) {
             (Some(a), Some(b)) => segments.push((a, b)),
             (Some(a), None) => {
                 if let Some(limb) = bisect_world_horizon(wa, 0.0, wb, 0.0, &project_pt) {
@@ -319,46 +332,37 @@ pub(super) fn visible_in_screen_box(
         }
         ExactGeometry::LineString(line) => ring_hits_line(line, false),
         ExactGeometry::Polygon(poly) => {
-            let ext_3d: Vec<([f64; 2], f64)> =
-                ring_world_coords(poly.exterior(), origin, world_per_unit, translate)
-                    .into_iter()
-                    .map(|pt| (pt, 0.0))
-                    .collect();
-            let clipped_ext = project_clipped_ring_3d(&ext_3d, &project_world);
+            let project_ring = |ring: &LineString<f64>| {
+                let r_3d: Vec<([f64; 2], f64)> =
+                    ring_world_coords(ring, origin, world_per_unit, translate)
+                        .into_iter()
+                        .map(|pt| (pt, 0.0))
+                        .collect();
+                project_clipped_ring_3d(&r_3d, &project_world)
+            };
+            let close_line = |clipped: &[ProjectedWindowPoint]| -> LineString<f64> {
+                let mut pts: Vec<(f64, f64)> =
+                    clipped.iter().map(|p| (p.window[0], p.window[1])).collect();
+                if let Some(&first) = pts.first().filter(|&f| pts.last() != Some(f)) {
+                    pts.push(first);
+                }
+                LineString::from(pts)
+            };
+            let clipped_ext = project_ring(poly.exterior());
             if clipped_ext.iter().any(|p| screen.reaches(p.window, 1e-3)) {
                 return true;
             }
             if clipped_ext.len() >= 3 {
-                let mut ext_pts: Vec<(f64, f64)> = clipped_ext
-                    .iter()
-                    .map(|p| (p.window[0], p.window[1]))
-                    .collect();
-                if ext_pts.first() != ext_pts.last() {
-                    ext_pts.push(ext_pts[0]);
-                }
+                let ext = close_line(&clipped_ext);
                 let holes: Vec<LineString<f64>> = poly
                     .interiors()
                     .iter()
                     .filter_map(|ring| {
-                        let r_3d: Vec<([f64; 2], f64)> =
-                            ring_world_coords(ring, origin, world_per_unit, translate)
-                                .into_iter()
-                                .map(|pt| (pt, 0.0))
-                                .collect();
-                        let clipped = project_clipped_ring_3d(&r_3d, &project_world);
-                        if clipped.len() < 3 {
-                            return None;
-                        }
-                        let mut pts: Vec<(f64, f64)> =
-                            clipped.iter().map(|p| (p.window[0], p.window[1])).collect();
-                        if pts.first() != pts.last() {
-                            pts.push(pts[0]);
-                        }
-                        Some(LineString::from(pts))
+                        let clipped = project_ring(ring);
+                        (clipped.len() >= 3).then(|| close_line(&clipped))
                     })
                     .collect();
-                let projected = Polygon::new(LineString::from(ext_pts), holes);
-                if screen.meets(&projected) {
+                if screen.meets(&Polygon::new(ext, holes)) {
                     return true;
                 }
             }
@@ -486,7 +490,9 @@ pub(super) fn circle_map_screen_hit(
         }
     }
     if ring.len() >= 3 {
-        ring.push(ring[0]);
+        if let Some(&first) = ring.first() {
+            ring.push(first);
+        }
         return screen.meets(&Polygon::new(LineString::from(ring), Vec::new()));
     }
     false

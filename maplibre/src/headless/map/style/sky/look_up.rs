@@ -1,6 +1,6 @@
 //! A free-globe pose standing on the ground and looking up at the moon, past 90 degrees of
 //! pitch, centres the moon in the frame and still draws the ground and the sky below it.
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg_attr(test, allow(clippy::expect_used))]
 
 use cgmath::{InnerSpace, Matrix, Matrix3, Quaternion, Vector3};
 
@@ -294,8 +294,8 @@ fn a_fly_in_to_an_eye_looking_up_draws_every_pose() {
             let t = f64::from(index) / f64::from(steps);
             let eye = start_eye * (1.0 - t) + standing_eye() * t;
             let forward = (start_forward * (1.0 - t) + moon_direction() * t).normalize();
-            map.restore_globe_pose(pose_at(eye, forward, 1000.0))
-                .unwrap_or_else(|error| panic!("pose {index}: {error}"));
+            let restored = map.restore_globe_pose(pose_at(eye, forward, 1000.0));
+            assert!(restored.is_ok(), "pose {index}: {restored:?}");
             for _ in 0..3 {
                 assert!(step(&mut map).await, "pose {index} draws");
             }

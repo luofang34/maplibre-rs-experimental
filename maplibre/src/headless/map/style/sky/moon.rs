@@ -1,5 +1,5 @@
 //! The moon's phase follows the sun and moon directions alone: the half facing the sun is lit.
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg_attr(test, allow(clippy::expect_used))]
 
 use cgmath::{InnerSpace, Vector3, Vector4};
 
@@ -109,18 +109,18 @@ fn the_half_of_the_moon_facing_the_sun_is_lit() {
             map.set_sun_direction(sun.map(ecef));
             lit.push(halves(&frame(&mut map), centre, radius));
         }
-        let [(left, right), (left_turned, right_turned), (left_full, right_full)] = lit[..] else {
-            panic!("three frames");
-        };
-        assert!(right > 3.0 * left, "the sun's side is lit: {lit:?}");
-        assert!(left > 0.0, "the night side keeps its earthshine: {lit:?}");
-        assert!(
-            left_turned > 3.0 * right_turned,
-            "turning the sun turns the phase: {lit:?}"
-        );
-        assert!(
-            left_full > right * 0.9 && (left_full - right_full).abs() < 10.0,
-            "with no sun the whole disc is lit: {lit:?}"
-        );
+        assert_eq!(lit.len(), 3, "three frames");
+        if let [(left, right), (left_turned, right_turned), (left_full, right_full)] = lit[..] {
+            assert!(right > 3.0 * left, "the sun's side is lit: {lit:?}");
+            assert!(left > 0.0, "the night side keeps its earthshine: {lit:?}");
+            assert!(
+                left_turned > 3.0 * right_turned,
+                "turning the sun turns the phase: {lit:?}"
+            );
+            assert!(
+                left_full > right * 0.9 && (left_full - right_full).abs() < 10.0,
+                "with no sun the whole disc is lit: {lit:?}"
+            );
+        }
     })
 }

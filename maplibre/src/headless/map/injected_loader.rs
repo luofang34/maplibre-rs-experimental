@@ -1,5 +1,5 @@
 //! A host's loader serves the map thread and the tile workers alike.
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg_attr(test, allow(clippy::expect_used))]
 
 use std::sync::{Arc, Mutex};
 
@@ -156,6 +156,7 @@ fn an_elevation_tile_fetched_through_the_loader_is_reported_ready() {
         )
         .expect("map");
         let mut ready = Vec::new();
+        let mut found = false;
         for _ in 0..40 {
             map.run_frame().expect("frame");
             ready.extend(map.take_ready_resources());
@@ -169,7 +170,8 @@ fn an_elevation_tile_fetched_through_the_loader_is_reported_ready() {
                     }
                 )
             }) {
-                return;
+                found = true;
+                break;
             }
             super::test_async::timeout(
                 std::time::Duration::from_millis(200),
@@ -178,7 +180,8 @@ fn an_elevation_tile_fetched_through_the_loader_is_reported_ready() {
             .await
             .ok();
         }
-        panic!(
+        assert!(
+            found,
             "no elevation tile was reported ready: {ready:?}, fetched {:?}",
             recorder.urls.lock().expect("urls")
         );

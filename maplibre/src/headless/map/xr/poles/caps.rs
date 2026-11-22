@@ -202,18 +202,18 @@ impl PolarMap {
             render::eventually::{Eventually, Eventually::Initialized},
             terrain::resources::TerrainResources,
         };
-        let Some(Initialized(terrain)) = self
+        let terrain_res = self
             .map
             .world()
             .resources
-            .get::<Eventually<TerrainResources>>()
-        else {
-            panic!("terrain");
-        };
-        assert!(!terrain.draws().is_empty(), "terrain is drawn");
-        for draw in terrain.draws() {
-            if let Some(texture) = terrain.drape_texture(draw.coords) {
-                clear_drape_white(&self.map, &texture.texture);
+            .get::<Eventually<TerrainResources>>();
+        assert!(matches!(terrain_res, Some(Initialized(_))), "terrain");
+        if let Some(Initialized(terrain)) = terrain_res {
+            assert!(!terrain.draws().is_empty(), "terrain is drawn");
+            for draw in terrain.draws() {
+                if let Some(texture) = terrain.drape_texture(draw.coords) {
+                    clear_drape_white(&self.map, &texture.texture);
+                }
             }
         }
     }

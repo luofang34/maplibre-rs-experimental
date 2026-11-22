@@ -101,7 +101,7 @@ impl LineFeatureStyle {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::expect_used)]
+    #![cfg_attr(test, allow(clippy::expect_used))]
     use super::*;
 
     fn paint(json: serde_json::Value) -> LinePaint {

@@ -7,7 +7,7 @@
 //! - Mixed z=1 quadrants (valid, 204 empty, 404 fallback, valid) render distinct quadrant colors.
 
 #![cfg(not(target_arch = "wasm32"))]
-#![allow(clippy::expect_used, clippy::panic)]
+#![allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
 
 #[path = "empty_tile/helpers.rs"]
 mod helpers;

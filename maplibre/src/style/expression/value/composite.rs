@@ -36,15 +36,15 @@ impl Padding {
             Value::Number(n) if n.is_finite() => Some(Self([*n, *n, *n, *n])),
             Value::Array(items) if (1..=4).contains(&items.len()) => {
                 let mut nums = [0.0; 4];
-                for (idx, item) in items.iter().enumerate() {
-                    let n = item.as_number().filter(|v| v.is_finite())?;
-                    nums[idx] = n;
+                for (slot, item) in nums.iter_mut().zip(items.iter()) {
+                    *slot = item.as_number().filter(|v| v.is_finite())?;
                 }
+                let [a, b, c, d] = nums;
                 Some(Self(match items.len() {
-                    1 => [nums[0], nums[0], nums[0], nums[0]],
-                    2 => [nums[0], nums[1], nums[0], nums[1]],
-                    3 => [nums[0], nums[1], nums[2], nums[1]],
-                    _ => nums,
+                    1 => [a, a, a, a],
+                    2 => [a, b, a, b],
+                    3 => [a, b, c, b],
+                    _ => [a, b, c, d],
                 }))
             }
             _ => None,
@@ -195,16 +195,19 @@ impl ProjectionDefinition {
         match value {
             Value::ProjectionDefinition(proj) => Some(proj.clone()),
             Value::String(name) if !name.is_empty() => Some(Self::Named(name.clone())),
-            Value::Array(items) if items.len() == 3 => {
-                let from = items[0].as_str().filter(|s| !s.is_empty())?;
-                let to = items[1].as_str().filter(|s| !s.is_empty())?;
-                let transition = items[2].as_number().filter(|n| n.is_finite())?;
-                Some(Self::Tuple {
-                    from: from.to_owned(),
-                    to: to.to_owned(),
-                    transition,
-                })
-            }
+            Value::Array(items) => match items.as_slice() {
+                [from, to, transition] => {
+                    let from = from.as_str().filter(|s| !s.is_empty())?;
+                    let to = to.as_str().filter(|s| !s.is_empty())?;
+                    let transition = transition.as_number().filter(|n| n.is_finite())?;
+                    Some(Self::Tuple {
+                        from: from.to_owned(),
+                        to: to.to_owned(),
+                        transition,
+                    })
+                }
+                _ => None,
+            },
             Value::Object(members) => {
                 let from = members.get("from")?.as_str().filter(|s| !s.is_empty())?;
                 let to = members.get("to")?.as_str().filter(|s| !s.is_empty())?;
@@ -277,11 +280,11 @@ impl VariableAnchorOffsetCollection {
                     let Value::Array(xy) = offset_val else {
                         return None;
                     };
-                    if xy.len() != 2 {
+                    let [x_val, y_val] = xy.as_slice() else {
                         return None;
-                    }
-                    let x = xy[0].as_number().filter(|n| n.is_finite())?;
-                    let y = xy[1].as_number().filter(|n| n.is_finite())?;
+                    };
+                    let x = x_val.as_number().filter(|n| n.is_finite())?;
+                    let y = y_val.as_number().filter(|n| n.is_finite())?;
                     pairs.push((anchor.to_owned(), [x, y]));
                 }
                 Some(Self(pairs))

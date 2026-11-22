@@ -44,7 +44,7 @@ impl<'a> Scanner<'a> {
         let start = self.pos;
         while let Some(&b) = self.bytes.get(self.pos) {
             if b == b'"' {
-                let slice = &self.bytes[start..self.pos];
+                let slice = self.bytes.get(start..self.pos)?;
                 self.pos += 1;
                 return std::str::from_utf8(slice).ok();
             }
@@ -66,7 +66,9 @@ impl<'a> Scanner<'a> {
                 break;
             }
         }
-        (self.pos > start).then_some(&self.bytes[start..self.pos])
+        (self.pos > start)
+            .then(|| self.bytes.get(start..self.pos))
+            .flatten()
     }
 
     #[inline]
@@ -178,12 +180,10 @@ const POW10: [f64; 16] = [
 
 #[inline]
 fn parse_fast_f64(tok: &[u8]) -> Option<f64> {
-    if tok.is_empty() {
-        return None;
-    }
-    let (neg, mut i) = if tok[0] == b'-' {
+    let (&first, _) = tok.split_first()?;
+    let (neg, mut i) = if first == b'-' {
         (true, 1)
-    } else if tok[0] == b'+' {
+    } else if first == b'+' {
         (false, 1)
     } else {
         (false, 0)
@@ -195,8 +195,7 @@ fn parse_fast_f64(tok: &[u8]) -> Option<f64> {
     let mut digits = 0_usize;
     let mut frac_digits = 0_usize;
     let mut seen_dot = false;
-    while i < tok.len() {
-        let b = tok[i];
+    while let Some(&b) = tok.get(i) {
         if b.is_ascii_digit() {
             digits += 1;
             if digits > 15 {
@@ -218,9 +217,10 @@ fn parse_fast_f64(tok: &[u8]) -> Option<f64> {
             return v.is_finite().then_some(v);
         }
     }
-    if digits == 0 || frac_digits >= POW10.len() {
+    if digits == 0 {
         return None;
     }
-    let val = (mant as f64) / POW10[frac_digits];
+    let scale = *POW10.get(frac_digits)?;
+    let val = (mant as f64) / scale;
     Some(if neg { -val } else { val })
 }

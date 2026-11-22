@@ -8,17 +8,20 @@ use crate::style::{
     property::{PropertyExpression, PropertyValue, StyleProperty},
 };
 
-fn worker_expr<T: PropertyValue>(expr: serde_json::Value) -> StyleProperty<T> {
+fn worker_expr<T: PropertyValue>(
+    expr: serde_json::Value,
+) -> Result<StyleProperty<T>, &'static str> {
     let StyleProperty::Expression(parsed) = StyleProperty::<T>::parse(&expr) else {
-        panic!("expected expression property");
+        return Err("expected expression property");
     };
-    StyleProperty::Expression(Arc::new(PropertyExpression::from_worker_expression(
-        parsed.expression().clone(),
+    Ok(StyleProperty::Expression(Arc::new(
+        PropertyExpression::from_worker_expression(parsed.expression().clone()),
     )))
 }
 
 #[test]
-fn walks_worker_ast_expressions_with_null_source_and_unrecognized_layout() {
+fn walks_worker_ast_expressions_with_null_source_and_unrecognized_layout(
+) -> Result<(), &'static str> {
     let mut layer = StyleLayer {
         id: "roads".to_owned(),
         type_: "line".to_owned(),
@@ -35,7 +38,7 @@ fn walks_worker_ast_expressions_with_null_source_and_unrecognized_layout() {
                 ["==", ["get", "tunnel"], 1],
                 "#00ff00",
                 "#0000ff"
-            ]))),
+            ]))?),
             ..Default::default()
         })),
         ..Default::default()
@@ -54,10 +57,11 @@ fn walks_worker_ast_expressions_with_null_source_and_unrecognized_layout() {
         assert!(keys.contains(expected), "missing key {expected}");
     }
     assert_eq!(keys.len(), 6);
+    Ok(())
 }
 
 #[test]
-fn handles_token_strings_legacy_functions_and_sub_object_gets() {
+fn handles_token_strings_legacy_functions_and_sub_object_gets() -> Result<(), &'static str> {
     let mut props = serde_json::Map::new();
     props.insert(
         "icon-image".to_owned(),
@@ -71,8 +75,8 @@ fn handles_token_strings_legacy_functions_and_sub_object_gets() {
         id: "labels".to_owned(),
         type_: "symbol".to_owned(),
         paint: Some(LayerPaint::Symbol(SymbolPaint {
-            text_field: Some(worker_expr(json!("{name:latin} ({code})"))),
-            text_size: Some(worker_expr(json!(["get", "sub", ["get", "meta"]]))),
+            text_field: Some(worker_expr(json!("{name:latin} ({code})"))?),
+            text_size: Some(worker_expr(json!(["get", "sub", ["get", "meta"]]))?),
             properties: props,
             ..Default::default()
         })),
@@ -95,10 +99,11 @@ fn handles_token_strings_legacy_functions_and_sub_object_gets() {
     assert!(!runtime.contains("name:latin"));
     assert!(!runtime.contains("code"));
     assert!(!runtime.contains("maki"));
+    Ok(())
 }
 
 #[test]
-fn bails_out_to_none_on_dynamic_get_or_properties_operator() {
+fn bails_out_to_none_on_dynamic_get_or_properties_operator() -> Result<(), &'static str> {
     let dynamic_layer = StyleLayer {
         id: "dyn".to_owned(),
         type_: "line".to_owned(),
@@ -107,7 +112,7 @@ fn bails_out_to_none_on_dynamic_get_or_properties_operator() {
                 "number",
                 ["get", ["get", "key_name"]],
                 1.0
-            ]))),
+            ]))?),
             ..Default::default()
         })),
         ..Default::default()
@@ -121,6 +126,7 @@ fn bails_out_to_none_on_dynamic_get_or_properties_operator() {
         ..Default::default()
     };
     assert!(collect_layer_referenced_keys(&[&props_layer], None).is_none());
+    Ok(())
 }
 
 #[test]

@@ -20,73 +20,8 @@ pub struct MipmapGenerator {
 impl MipmapGenerator {
     /// Builds the pipeline for textures of `format`.
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("mipmap"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("mipmap"),
-            bind_group_layouts: &[Some(&layout)],
-            immediate_size: 0,
-        });
-        let vertex = crate::render::resource::shader_module::create_shader_module_from_wgsl(
-            device,
-            Some("mipmap vertex"),
-            include_str!(concat!(
-                env!("OUT_DIR"),
-                "/wgsl/render/shaders/mipmap.vertex.wgsl"
-            )),
-        );
-        let fragment = crate::render::resource::shader_module::create_shader_module_from_wgsl(
-            device,
-            Some("mipmap fragment"),
-            include_str!(concat!(
-                env!("OUT_DIR"),
-                "/wgsl/render/shaders/mipmap.fragment.wgsl"
-            )),
-        );
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("mipmap"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &vertex,
-                entry_point: Some("main"),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &fragment,
-                entry_point: Some("main"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
+        let layout = create_mipmap_bind_group_layout(device);
+        let pipeline = create_mipmap_pipeline(device, &layout, format);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("mipmap"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -159,6 +94,83 @@ impl MipmapGenerator {
             pass.draw(0..3, 0..1);
         }
     }
+}
+
+fn create_mipmap_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("mipmap"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ],
+    })
+}
+
+fn create_mipmap_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    format: wgpu::TextureFormat,
+) -> wgpu::RenderPipeline {
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("mipmap"),
+        bind_group_layouts: &[Some(layout)],
+        immediate_size: 0,
+    });
+    let vertex = crate::render::resource::shader_module::create_shader_module_from_wgsl(
+        device,
+        Some("mipmap vertex"),
+        include_str!(concat!(
+            env!("OUT_DIR"),
+            "/wgsl/render/shaders/mipmap.vertex.wgsl"
+        )),
+    );
+    let fragment = crate::render::resource::shader_module::create_shader_module_from_wgsl(
+        device,
+        Some("mipmap fragment"),
+        include_str!(concat!(
+            env!("OUT_DIR"),
+            "/wgsl/render/shaders/mipmap.fragment.wgsl"
+        )),
+    );
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("mipmap"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &vertex,
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            buffers: &[],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &fragment,
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    })
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

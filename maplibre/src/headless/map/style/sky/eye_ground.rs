@@ -1,6 +1,6 @@
 //! A free-globe eye standing on a globe without terrain sees the globe's surface below its
 //! horizon, not the sky and the stars behind it.
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg_attr(test, allow(clippy::expect_used))]
 
 use cgmath::{InnerSpace, Matrix, Matrix3, Quaternion, Vector3};
 

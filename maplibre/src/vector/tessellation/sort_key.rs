@@ -91,8 +91,11 @@ where
             }
             return;
         }
-        self.entry_sort_keys = vec![0.0; self.feature_indices.len()];
-        if spans.windows(2).all(|pair| pair[0].key <= pair[1].key) {
+        if spans
+            .windows(2)
+            .all(|pair| matches!(pair, [a, b] if a.key <= b.key))
+        {
+            self.entry_sort_keys = vec![0.0; self.feature_indices.len()];
             for span in &spans {
                 for entry in span.entries.clone() {
                     if let Some(key) = self.entry_sort_keys.get_mut(entry) {
@@ -107,6 +110,10 @@ where
             .iter()
             .flat_map(|span| span.entries.clone().map(move |_| span.key))
             .collect();
+        self.reorder_by_sort_keys(&spans);
+    }
+
+    fn reorder_by_sort_keys(&mut self, spans: &[Span]) {
         let mut starts = Vec::with_capacity(self.feature_indices.len());
         let mut start = 0_u32;
         for count in &self.feature_indices {
@@ -120,30 +127,34 @@ where
         };
         // Each entry's vertices land contiguously, so the index shift is one number per entry.
         let mut shifts = vec![0_i64; self.feature_indices.len()];
-        for span in &spans {
+        for span in spans {
             for entry in span.entries.clone() {
-                let (first, count) = (starts[entry] as usize, self.feature_indices[entry] as usize);
-                shifts[entry] = out.vertices.len() as i64 - first as i64;
-                out.vertices
-                    .extend_from_slice(&self.buffer.vertices[first..first + count]);
+                let first = starts.get(entry).copied().unwrap_or(0) as usize;
+                let count = self.feature_indices.get(entry).copied().unwrap_or(0) as usize;
+                if let Some(slot) = shifts.get_mut(entry) {
+                    *slot = out.vertices.len() as i64 - first as i64;
+                }
+                if let Some(verts) = self.buffer.vertices.get(first..first + count) {
+                    out.vertices.extend_from_slice(verts);
+                }
                 out.entries.push((
                     count as u32,
                     self.feature_colors.get(entry).copied(),
                     self.feature_paint.get(entry).cloned(),
                 ));
             }
-            let entries = span.entries.clone();
-            let ranges: Vec<(u32, u32, i64)> = entries
+            let ranges: Vec<(u32, u32, i64)> = span
+                .entries
+                .clone()
                 .map(|entry| {
-                    (
-                        starts[entry],
-                        starts[entry] + self.feature_indices[entry],
-                        shifts[entry],
-                    )
+                    let s = starts.get(entry).copied().unwrap_or(0);
+                    let len = self.feature_indices.get(entry).copied().unwrap_or(0);
+                    let shift = shifts.get(entry).copied().unwrap_or(0);
+                    (s, s + len, shift)
                 })
                 .collect();
-            for index in &self.buffer.indices[span.indices.clone()] {
-                let index: u32 = (*index).into();
+            for &index in self.buffer.indices.get(span.indices.clone()).unwrap_or(&[]) {
+                let index: u32 = index.into();
                 let shift = ranges
                     .iter()
                     .find(|(from, to, _)| (*from..*to).contains(&index))
@@ -152,6 +163,10 @@ where
                     .push(I::from(VertexId((i64::from(index) + shift) as u32)));
             }
         }
+        self.commit_reordered(out);
+    }
+
+    fn commit_reordered(&mut self, out: Reordered<crate::render::ShaderVertex, I>) {
         self.buffer = VertexBuffers {
             vertices: out.vertices,
             indices: out.indices,

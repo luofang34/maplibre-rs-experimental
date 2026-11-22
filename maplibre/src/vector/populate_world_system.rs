@@ -72,121 +72,159 @@ pub fn apply_vector_worker_batch<T: VectorTransferables>(
     apply_worker_messages(messages, |message| {
         let attempt = message.attempt();
         if message.has_tag(RequestKind::Vector.message_tag()) {
-            #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
-            let mut message = message;
-            #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
-            let shared_permit = message.take_shared_permit();
-            let outcome = *message.into_transferable::<TileRequestOutcome>()?;
-            #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
-            let coords = outcome.coords;
-            tile_retry::completed(world, outcome);
-            if let Some(remap) = world
-                .resources
-                .get_mut::<shared_keys::SharedGeometryKeyRemap>()
-            {
-                remap.finish(outcome.coords, outcome.attempt);
-            }
-            #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
-            if let Some(permit) = shared_permit {
-                world
-                    .resources
-                    .get_or_init_mut::<super::request_system::PendingUploadPermits>()
-                    .push(coords, permit);
-            }
+            apply_request_outcome(world, message)?;
         } else if message.has_tag(T::TileTessellated::message_tag()) {
             let message = message.into_transferable::<T::TileTessellated>()?;
             if tile_retry::accepts(world, message.coords(), RequestKind::Vector, attempt) {
                 finish_tile(world, &*message);
             }
         } else if message.has_tag(T::LayerMissing::message_tag()) {
-            let message = message.into_transferable::<T::LayerMissing>()?;
-            if !tile_retry::accepts(world, message.coords(), RequestKind::Vector, attempt) {
-                return Ok(());
-            }
-            let Some(component) = world
-                .tiles
-                .query_mut::<&mut VectorLayerBucketComponent>(message.coords())
-            else {
-                return Ok(());
-            };
-
-            if !component.layers.iter().any(|layer| match layer {
-                VectorLayerBucket::AvailableLayer(layer) => {
-                    layer.source_layer == message.layer_name()
-                }
-                VectorLayerBucket::Missing(layer) => layer.source_layer == message.layer_name(),
-            }) {
-                component.uploaded_stamp = None;
-                component
-                    .layers
-                    .push(VectorLayerBucket::Missing(message.to_bucket()));
-            }
+            apply_layer_missing::<T>(world, message, attempt)?;
         } else if message.has_tag(T::LayerTessellated::message_tag()) {
-            let mut message = message.into_transferable::<T::LayerTessellated>()?;
-            // A layer removed while its tile was in flight must not come back with the reply.
-            let coords = message.coords();
-            let mut feature_paint = message.take_feature_paint();
-            let mut bucket = message.to_bucket();
-            if let Some(&style_layer) =
-                tile_retry::accepts(world, coords, RequestKind::Vector, attempt)
-                    .then(|| layer_by_id.get(bucket.style_layer_id.as_str()))
-                    .flatten()
-            {
-                let overscaled_zoom = world
-                    .tiles
-                    .query::<&VectorLayerBucketComponent>(coords)
-                    .map_or(0, |b| b.overscaled_zoom);
-                let retessellate = super::arrival_sync::sync_arriving_vector_bucket_for_layer(
-                    style,
-                    style_layer,
-                    overscaled_zoom,
-                    &mut bucket,
-                    &mut feature_paint,
-                    &mut memo,
-                );
-                if let Some(entries) = feature_paint.as_mut() {
-                    interner.intern_entries(&world.tiles, coords, entries);
-                }
-                if let Some(raw_key) = bucket.buffer.shared_geometry_key() {
-                    let host_key = world
-                        .resources
-                        .get_or_init_mut::<shared_keys::SharedGeometryKeyRemap>()
-                        .remap(coords, attempt, raw_key);
-                    bucket.buffer.set_shared_geometry_key(Some(host_key));
-                }
-                super::content::accept_vector_with_paint(world, bucket, feature_paint);
-                if retessellate {
-                    tile_retry::refresh_tiles(world, RequestKind::Vector, &[coords]);
-                }
-            }
-        } else if message.has_tag(T::LayerIndexed::message_tag()) {
-            let message = message.into_transferable::<T::LayerIndexed>()?;
-            if !tile_retry::accepts(world, message.coords(), RequestKind::Vector, attempt)
-                || world
-                    .tiles
-                    .query::<&VectorLayerBucketComponent>(message.coords())
-                    .is_none()
-            {
-                return Ok(());
-            }
-            let coords = message.coords();
-            let source = message.source();
-            let mut index = message.to_tile_index();
-            super::arrival_sync::sync_arriving_tile_index(
+            apply_layer_tessellated::<T>(
+                world,
                 style,
-                source.as_deref(),
-                &mut index,
+                &layer_by_id,
+                message,
+                attempt,
                 &mut memo,
-            );
-            interner.intern_tile_index(&world.tiles, coords, &mut index);
-            world
-                .tiles
-                .geometry_index
-                .index_tile(&coords, source, index);
+                &mut interner,
+            )?;
+        } else if message.has_tag(T::LayerIndexed::message_tag()) {
+            apply_layer_indexed::<T>(world, style, message, attempt, &mut memo, &mut interner)?;
         }
         Ok(())
     })?;
     super::bump_arrival_epoch(world);
+    Ok(())
+}
+
+fn apply_request_outcome(world: &mut World, message: Message) -> Result<(), MessageError> {
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+    let mut message = message;
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+    let shared_permit = message.take_shared_permit();
+    let outcome = *message.into_transferable::<TileRequestOutcome>()?;
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+    let coords = outcome.coords;
+    tile_retry::completed(world, outcome);
+    if let Some(remap) = world
+        .resources
+        .get_mut::<shared_keys::SharedGeometryKeyRemap>()
+    {
+        remap.finish(outcome.coords, outcome.attempt);
+    }
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+    if let Some(permit) = shared_permit {
+        world
+            .resources
+            .get_or_init_mut::<super::request_system::PendingUploadPermits>()
+            .push(coords, permit);
+    }
+    Ok(())
+}
+
+fn apply_layer_missing<T: VectorTransferables>(
+    world: &mut World,
+    message: Message,
+    attempt: Option<u64>,
+) -> Result<(), MessageError> {
+    let message = message.into_transferable::<T::LayerMissing>()?;
+    if !tile_retry::accepts(world, message.coords(), RequestKind::Vector, attempt) {
+        return Ok(());
+    }
+    let Some(component) = world
+        .tiles
+        .query_mut::<&mut VectorLayerBucketComponent>(message.coords())
+    else {
+        return Ok(());
+    };
+    if !component.layers.iter().any(|layer| match layer {
+        VectorLayerBucket::AvailableLayer(layer) => layer.source_layer == message.layer_name(),
+        VectorLayerBucket::Missing(layer) => layer.source_layer == message.layer_name(),
+    }) {
+        component.uploaded_stamp = None;
+        component
+            .layers
+            .push(VectorLayerBucket::Missing(message.to_bucket()));
+    }
+    Ok(())
+}
+
+fn apply_layer_tessellated<T: VectorTransferables>(
+    world: &mut World,
+    style: &Style,
+    layer_by_id: &rustc_hash::FxHashMap<&str, &crate::style::layer::StyleLayer>,
+    message: Message,
+    attempt: Option<u64>,
+    memo: &mut crate::style::feature_state::FeatureStateArcMemo,
+    interner: &mut super::feature_paint::intern::TilePropertyInterner,
+) -> Result<(), MessageError> {
+    let mut message = message.into_transferable::<T::LayerTessellated>()?;
+    // A layer removed while its tile was in flight must not come back with the reply.
+    let coords = message.coords();
+    let mut feature_paint = message.take_feature_paint();
+    let mut bucket = message.to_bucket();
+    if let Some(&style_layer) = tile_retry::accepts(world, coords, RequestKind::Vector, attempt)
+        .then(|| layer_by_id.get(bucket.style_layer_id.as_str()))
+        .flatten()
+    {
+        let overscaled_zoom = world
+            .tiles
+            .query::<&VectorLayerBucketComponent>(coords)
+            .map_or(0, |b| b.overscaled_zoom);
+        let retessellate = super::arrival_sync::sync_arriving_vector_bucket_for_layer(
+            style,
+            style_layer,
+            overscaled_zoom,
+            &mut bucket,
+            &mut feature_paint,
+            memo,
+        );
+        if let Some(entries) = feature_paint.as_mut() {
+            interner.intern_entries(&world.tiles, coords, entries);
+        }
+        if let Some(raw_key) = bucket.buffer.shared_geometry_key() {
+            let host_key = world
+                .resources
+                .get_or_init_mut::<shared_keys::SharedGeometryKeyRemap>()
+                .remap(coords, attempt, raw_key);
+            bucket.buffer.set_shared_geometry_key(Some(host_key));
+        }
+        super::content::accept_vector_with_paint(world, bucket, feature_paint);
+        if retessellate {
+            tile_retry::refresh_tiles(world, RequestKind::Vector, &[coords]);
+        }
+    }
+    Ok(())
+}
+
+fn apply_layer_indexed<T: VectorTransferables>(
+    world: &mut World,
+    style: &Style,
+    message: Message,
+    attempt: Option<u64>,
+    memo: &mut crate::style::feature_state::FeatureStateArcMemo,
+    interner: &mut super::feature_paint::intern::TilePropertyInterner,
+) -> Result<(), MessageError> {
+    let message = message.into_transferable::<T::LayerIndexed>()?;
+    if !tile_retry::accepts(world, message.coords(), RequestKind::Vector, attempt)
+        || world
+            .tiles
+            .query::<&VectorLayerBucketComponent>(message.coords())
+            .is_none()
+    {
+        return Ok(());
+    }
+    let coords = message.coords();
+    let source = message.source();
+    let mut index = message.to_tile_index();
+    super::arrival_sync::sync_arriving_tile_index(style, source.as_deref(), &mut index, memo);
+    interner.intern_tile_index(&world.tiles, coords, &mut index);
+    world
+        .tiles
+        .geometry_index
+        .index_tile(&coords, source, index);
     Ok(())
 }
 

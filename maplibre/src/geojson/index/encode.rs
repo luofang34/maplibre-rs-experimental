@@ -236,10 +236,13 @@ fn deduplicated(points: impl Iterator<Item = (i32, i32)>) -> Vec<(i32, i32)> {
 }
 
 fn path(out: &mut Vec<u32>, cursor: &mut (i32, i32), points: &[(i32, i32)], close: bool) {
+    let Some((&first, rest)) = points.split_first() else {
+        return;
+    };
     out.push(command(MOVE_TO, 1));
-    step(out, cursor, points[0]);
-    out.push(command(LINE_TO, points.len() as u32 - 1));
-    for point in &points[1..] {
+    step(out, cursor, first);
+    out.push(command(LINE_TO, rest.len() as u32));
+    for point in rest {
         step(out, cursor, *point);
     }
     if close {
@@ -250,8 +253,7 @@ fn path(out: &mut Vec<u32>, cursor: &mut (i32, i32), points: &[(i32, i32)], clos
 /// Twice the shoelace area in tile coordinates, positive for the clockwise rings of a y-down grid.
 fn signed_area(points: &[(i32, i32)]) -> i64 {
     let mut area = 0_i64;
-    for (index, point) in points.iter().enumerate() {
-        let next = points[(index + 1) % points.len()];
+    for (point, next) in points.iter().zip(points.iter().cycle().skip(1)) {
         area += i64::from(point.0) * i64::from(next.1) - i64::from(next.0) * i64::from(point.1);
     }
     area

@@ -283,56 +283,7 @@ impl Style {
         value: Value,
     ) -> Result<StyleChange, StyleMutationError> {
         if let Some(base) = name.strip_suffix("-transition") {
-            let position = self
-                .layers
-                .iter()
-                .position(|candidate| candidate.id == layer)
-                .ok_or_else(|| StyleMutationError::UnknownLayer {
-                    layer: layer.to_owned(),
-                })?;
-            if value.is_null() {
-                let removed = self.layers[position].transitions.remove(base).is_some();
-                return Ok(if removed {
-                    StyleChange {
-                        layers: vec![layer.to_owned()],
-                        ..Default::default()
-                    }
-                } else {
-                    StyleChange::default()
-                });
-            }
-            let spec: TransitionSpec =
-                TransitionSpec::from_json_value(&value).map_err(|source| {
-                    StyleMutationError::InvalidLayer {
-                        layer: layer.to_owned(),
-                        source,
-                    }
-                })?;
-            if !spec.is_valid() {
-                return Err(StyleMutationError::Unsupported {
-                    layer: layer.to_owned(),
-                    findings: vec![StyleValidationError::Property {
-                        layer: layer.to_owned(),
-                        property: format!("paint.{name}"),
-                        source: PropertyValidationError::Unsupported {
-                            reason:
-                                "transition duration and delay must be non-negative finite numbers",
-                        },
-                    }],
-                });
-            }
-            let unchanged = self.layers[position].transitions.get(base) == Some(&spec);
-            self.layers[position]
-                .transitions
-                .insert(base.to_owned(), spec);
-            return Ok(if unchanged {
-                StyleChange::default()
-            } else {
-                StyleChange {
-                    layers: vec![layer.to_owned()],
-                    ..Default::default()
-                }
-            });
+            return self.apply_transition_spec(layer, name, base, value);
         }
 
         let previous = self
@@ -386,6 +337,61 @@ impl Style {
             }
         }
         Ok(change)
+    }
+
+    fn apply_transition_spec(
+        &mut self,
+        layer: &str,
+        name: &str,
+        base: &str,
+        value: Value,
+    ) -> Result<StyleChange, StyleMutationError> {
+        let target_layer = self
+            .layers
+            .iter_mut()
+            .find(|candidate| candidate.id == layer)
+            .ok_or_else(|| StyleMutationError::UnknownLayer {
+                layer: layer.to_owned(),
+            })?;
+        if value.is_null() {
+            let removed = target_layer.transitions.remove(base).is_some();
+            return Ok(if removed {
+                StyleChange {
+                    layers: vec![layer.to_owned()],
+                    ..Default::default()
+                }
+            } else {
+                StyleChange::default()
+            });
+        }
+        let spec = TransitionSpec::from_json_value(&value).map_err(|source| {
+            StyleMutationError::InvalidLayer {
+                layer: layer.to_owned(),
+                source,
+            }
+        })?;
+        if !spec.is_valid() {
+            return Err(StyleMutationError::Unsupported {
+                layer: layer.to_owned(),
+                findings: vec![StyleValidationError::Property {
+                    layer: layer.to_owned(),
+                    property: format!("paint.{name}"),
+                    source: PropertyValidationError::Unsupported {
+                        reason: "transition duration and delay must be non-negative finite numbers",
+                    },
+                }],
+            });
+        }
+        let unchanged = target_layer.transitions.get(base) == Some(&spec);
+        target_layer.transitions.insert(base.to_owned(), spec);
+        Ok(if unchanged {
+            StyleChange::default()
+        } else {
+            StyleChange {
+                layers: vec![layer.to_owned()],
+                ..Default::default()
+            }
+        })
     }
 }
 

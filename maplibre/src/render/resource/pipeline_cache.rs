@@ -223,20 +223,7 @@ impl SharedPipelines {
         descriptor: &RenderPipelineDescriptor,
         prefix_layouts: &[&wgpu::BindGroupLayout],
     ) -> wgpu::RenderPipeline {
-        let key = PipelineCacheKey {
-            device: device.clone(),
-            label: descriptor.label.clone(),
-            prefix_layouts: prefix_layouts
-                .iter()
-                .map(|layout| (*layout).clone())
-                .collect(),
-            owned_layouts: descriptor.layout.clone(),
-            vertex: descriptor.vertex.clone(),
-            fragment: descriptor.fragment.clone(),
-            primitive: descriptor.primitive,
-            depth_stencil: descriptor.depth_stencil.as_ref().map(DepthStencilKey::from),
-            multisample: descriptor.multisample,
-        };
+        let key = pipeline_cache_key(device, descriptor, prefix_layouts);
         {
             let state = crate::platform::lock_unpoisoned(&self.0.state);
             if let Some(existing) = state.pipelines.get(&key) {
@@ -244,6 +231,19 @@ impl SharedPipelines {
                 return existing.clone();
             }
         }
+        let pipeline = self.compile_render_pipeline(device, descriptor, prefix_layouts);
+        self.0.pipeline_compiles.fetch_add(1, Ordering::Relaxed);
+        let mut state = crate::platform::lock_unpoisoned(&self.0.state);
+        state.pipelines.insert(key, pipeline.clone());
+        pipeline
+    }
+
+    fn compile_render_pipeline(
+        &self,
+        device: &wgpu::Device,
+        descriptor: &RenderPipelineDescriptor,
+        prefix_layouts: &[&wgpu::BindGroupLayout],
+    ) -> wgpu::RenderPipeline {
         let owned_layouts: Vec<wgpu::BindGroupLayout> = descriptor
             .layout
             .as_ref()
@@ -278,7 +278,7 @@ impl SharedPipelines {
                 })
             })
             .collect();
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: descriptor.label.as_deref(),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
@@ -298,11 +298,28 @@ impl SharedPipelines {
             multisample: descriptor.multisample,
             multiview_mask: None,
             cache: None,
-        });
-        self.0.pipeline_compiles.fetch_add(1, Ordering::Relaxed);
-        let mut state = crate::platform::lock_unpoisoned(&self.0.state);
-        state.pipelines.insert(key, pipeline.clone());
-        pipeline
+        })
+    }
+}
+
+fn pipeline_cache_key(
+    device: &wgpu::Device,
+    descriptor: &RenderPipelineDescriptor,
+    prefix_layouts: &[&wgpu::BindGroupLayout],
+) -> PipelineCacheKey {
+    PipelineCacheKey {
+        device: device.clone(),
+        label: descriptor.label.clone(),
+        prefix_layouts: prefix_layouts
+            .iter()
+            .map(|layout| (*layout).clone())
+            .collect(),
+        owned_layouts: descriptor.layout.clone(),
+        vertex: descriptor.vertex.clone(),
+        fragment: descriptor.fragment.clone(),
+        primitive: descriptor.primitive,
+        depth_stencil: descriptor.depth_stencil.as_ref().map(DepthStencilKey::from),
+        multisample: descriptor.multisample,
     }
 }
 

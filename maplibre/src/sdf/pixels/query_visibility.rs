@@ -1,6 +1,6 @@
 //! What a query finds is what placement shows: a label counts from the frame it is placed,
 //! and neither a label that lost a collision nor one behind the globe can be found.
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg_attr(test, allow(clippy::expect_used))]
 
 use geozero::{mvt::Message, FeatureProcessor, GeomProcessor, PropertyProcessor};
 
@@ -15,6 +15,8 @@ use crate::{
     style::{layer::LayerPaint, Style},
     vector::transferables::{DefaultSymbolLayerTessellated, SymbolLayerTessellated},
 };
+
+type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 fn style(center: [f64; 2], zoom: f64, overlap: bool, globe: bool) -> Style {
     let mut style: serde_json::Value = serde_json::json!({
@@ -37,7 +39,7 @@ fn style(center: [f64; 2], zoom: f64, overlap: bool, globe: bool) -> Style {
 }
 
 /// Labels with ids 1, 2, ... at `positions` in tile units of the world's single z0 tile.
-fn labels(style: &Style, positions: &[[u32; 2]]) -> ProcessedLayers {
+fn labels(style: &Style, positions: &[[u32; 2]]) -> TestResult<ProcessedLayers> {
     labels_in(
         style,
         WorldTileCoords {
@@ -50,7 +52,11 @@ fn labels(style: &Style, positions: &[[u32; 2]]) -> ProcessedLayers {
 }
 
 /// Labels with ids 1, 2, ... at `positions` in tile units of the tile at `coords`.
-fn labels_in(style: &Style, coords: WorldTileCoords, positions: &[[u32; 2]]) -> ProcessedLayers {
+fn labels_in(
+    style: &Style,
+    coords: WorldTileCoords,
+    positions: &[[u32; 2]],
+) -> TestResult<ProcessedLayers> {
     coloured_labels_in(style, coords, positions, &[])
 }
 
@@ -60,7 +66,7 @@ fn coloured_labels_in(
     coords: WorldTileCoords,
     positions: &[[u32; 2]],
     colors: &[&str],
-) -> ProcessedLayers {
+) -> TestResult<ProcessedLayers> {
     let source = geozero::mvt::tile::Layer {
         name: "places".into(),
         version: 2,
@@ -81,28 +87,24 @@ fn coloured_labels_in(
         layers: vec![source.clone()],
     }
     .encode_to_vec();
-    let mut layers =
-        process_tile_layers(&bytes, &style.layers[1], coords, Default::default()).expect("points");
+    let base_layer = style.layers.get(1).ok_or("missing point style layer")?;
+    let mut layers = process_tile_layers(&bytes, base_layer, coords, Default::default())?;
     let atlas = atlas();
     for style_layer in style.layers.iter().filter(|layer| layer.type_ == "symbol") {
         let Some(LayerPaint::Symbol(paint)) = &style_layer.paint else {
-            panic!("symbol paint");
+            return Err("expected symbol paint".into());
         };
         let mut layout = TextTessellator::default();
         layout.configure(paint.clone(), atlas.clone());
         layout.source_ids = source.features.iter().map(|feature| feature.id).collect();
         for (index, [x, y]) in positions.iter().enumerate() {
             if let Some(color) = colors.get(index) {
-                layout
-                    .property(0, "color", &geozero::ColumnValue::String(color))
-                    .expect("property");
+                layout.property(0, "color", &geozero::ColumnValue::String(color))?;
             }
-            layout.point_begin(0).expect("point begin");
-            layout
-                .xy(f64::from(*x), f64::from(*y), 0)
-                .expect("position");
-            layout.point_end(0).expect("point end");
-            layout.feature_end(index as u64).expect("feature");
+            layout.point_begin(0)?;
+            layout.xy(f64::from(*x), f64::from(*y), 0)?;
+            layout.point_end(0)?;
+            layout.feature_end(index as u64)?;
         }
         layout.finish();
         layers
@@ -116,7 +118,7 @@ fn coloured_labels_in(
                 style_layer.id.clone(),
             )));
     }
-    layers
+    Ok(layers)
 }
 
 fn found(map: &HeadlessMap) -> Vec<Option<u64>> {
@@ -145,26 +147,27 @@ fn drawn(map: &HeadlessMap) -> usize {
 }
 
 #[test]
-fn a_label_is_found_from_the_frame_it_is_placed() {
+fn a_label_is_found_from_the_frame_it_is_placed() -> TestResult {
     futures::executor::block_on(async {
         let style = style([0.0, 0.0], 2.0, false, false);
-        let layers = labels(&style, &[[2048, 2048]]);
+        let layers = labels(&style, &[[2048, 2048]])?;
         let map = fixture_map_after(style, layers, 1, 1).await;
         assert_eq!(
             found(&map),
             [Some(1)],
             "a label placed this frame is queryable while it starts fading in, as in GL JS"
         );
+        Ok(())
     })
 }
 
 #[test]
-fn of_two_colliding_labels_only_the_one_shown_is_found() {
+fn of_two_colliding_labels_only_the_one_shown_is_found() -> TestResult {
     futures::executor::block_on(async {
         let positions = [[2048, 2048], [2050, 2049]];
         for (overlap, expected) in [(false, vec![Some(1)]), (true, vec![Some(2), Some(1)])] {
             let style = style([0.0, 0.0], 2.0, overlap, false);
-            let layers = labels(&style, &positions);
+            let layers = labels(&style, &positions)?;
             let map = fixture_map_after(style, layers, 1, 16).await;
             let mut ids = found(&map);
             ids.sort();
@@ -172,15 +175,16 @@ fn of_two_colliding_labels_only_the_one_shown_is_found() {
             expected.sort();
             assert_eq!(ids, expected, "text-allow-overlap {overlap}");
         }
+        Ok(())
     })
 }
 
 #[test]
-fn a_label_behind_the_globe_is_neither_drawn_nor_found() {
+fn a_label_behind_the_globe_is_neither_drawn_nor_found() -> TestResult {
     futures::executor::block_on(async {
         for (center, expected) in [([0.0, 0.0], vec![Some(1)]), ([180.0, 0.0], Vec::new())] {
             let style = style(center, 1.0, false, true);
-            let layers = labels(&style, &[[2048, 2048]]);
+            let layers = labels(&style, &[[2048, 2048]])?;
             let map = fixture_map_after(style, layers, 1, 16).await;
             assert_eq!(found(&map), expected, "centre {center:?}");
             assert_eq!(
@@ -189,19 +193,23 @@ fn a_label_behind_the_globe_is_neither_drawn_nor_found() {
                 "the label is drawn exactly when it is found, centre {center:?}"
             );
         }
+        Ok(())
     })
 }
 
 #[test]
-fn layers_alike_in_layout_share_one_placement_and_are_found_in_each() {
+fn layers_alike_in_layout_share_one_placement_and_are_found_in_each() -> TestResult {
     futures::executor::block_on(async {
-        let mut value = serde_json::to_value(style([0.0, 0.0], 2.0, false, false)).expect("style");
+        let mut value = serde_json::to_value(style([0.0, 0.0], 2.0, false, false))?;
         let mut above = value["layers"][2].clone();
         above["id"] = "label-above".into();
         above["paint"] = serde_json::json!({"text-color": "#00ff00"});
-        value["layers"].as_array_mut().expect("layers").push(above);
-        let style: Style = serde_json::from_value(value).expect("style");
-        let layers = labels(&style, &[[2048, 2048]]);
+        value["layers"]
+            .as_array_mut()
+            .ok_or("layers array")?
+            .push(above);
+        let style: Style = serde_json::from_value(value)?;
+        let layers = labels(&style, &[[2048, 2048]])?;
         let map = fixture_map_after(style, layers, 1, 16).await;
         assert_eq!(
             found_in_layers(&map),
@@ -211,11 +219,12 @@ fn layers_alike_in_layout_share_one_placement_and_are_found_in_each() {
             ],
             "as GL JS buckets them together, neither hides the other"
         );
+        Ok(())
     })
 }
 
 #[test]
-fn a_label_held_by_a_parent_and_its_child_is_drawn_and_found_once() {
+fn a_label_held_by_a_parent_and_its_child_is_drawn_and_found_once() -> TestResult {
     futures::executor::block_on(async {
         // The north-west child of the world tile is loaded and its siblings are not, so the view
         // shows the child and, around it, the parent: both hold the label at the child's centre.
@@ -225,10 +234,10 @@ fn a_label_held_by_a_parent_and_its_child_is_drawn_and_found_once() {
             y: 0,
             z: ZoomLevel::from(1),
         };
-        let mut layers = labels(&style, &[[1024, 1024]]);
-        layers.append(&mut labels_in(&style, child, &[[2048, 2048]]));
+        let mut layers = labels(&style, &[[1024, 1024]])?;
+        layers.append(&mut labels_in(&style, child, &[[2048, 2048]])?);
         let both = fixture_map_after(style.clone(), layers, 1, 16).await;
-        let alone = fixture_map_after(style.clone(), labels(&style, &[[1024, 1024]]), 1, 16).await;
+        let alone = fixture_map_after(style.clone(), labels(&style, &[[1024, 1024]])?, 1, 16).await;
         assert_eq!(found(&both), [Some(1)], "one label is one hit");
         assert_eq!(found(&alone), [Some(1)]);
         let (drawn_both, drawn_alone) = (drawn(&both), drawn(&alone));
@@ -237,6 +246,7 @@ fn a_label_held_by_a_parent_and_its_child_is_drawn_and_found_once() {
             drawn_both <= drawn_alone + drawn_alone / 4,
             "the label is drawn once: {drawn_both} red pixels against {drawn_alone} alone"
         );
+        Ok(())
     })
 }
 
@@ -256,15 +266,14 @@ fn coloured(map: &HeadlessMap) -> [usize; 2] {
 }
 
 #[test]
-fn overlapping_labels_are_drawn_and_found_in_the_rotated_order() {
+fn overlapping_labels_are_drawn_and_found_in_the_rotated_order() -> TestResult {
     futures::executor::block_on(async {
         let mut on_top = Vec::new();
         for bearing in [0.0, 180.0] {
-            let mut value =
-                serde_json::to_value(style([0.0, 0.0], 2.0, true, false)).expect("style");
+            let mut value = serde_json::to_value(style([0.0, 0.0], 2.0, true, false))?;
             value["bearing"] = bearing.into();
             value["layers"][2]["paint"]["text-color"] = serde_json::json!(["get", "color"]);
-            let style: Style = serde_json::from_value(value).expect("style");
+            let style: Style = serde_json::from_value(value)?;
             let world = WorldTileCoords {
                 x: 0,
                 y: 0,
@@ -276,7 +285,7 @@ fn overlapping_labels_are_drawn_and_found_in_the_rotated_order() {
                 world,
                 &[[2048, 2048], [2052, 2051]],
                 &["#ff0000", "#00ff00"],
-            );
+            )?;
             let map = fixture_map_after(style, layers, 1, 16).await;
             let [red, green] = coloured(&map);
             assert!(
@@ -296,5 +305,6 @@ fn overlapping_labels_are_drawn_and_found_in_the_rotated_order() {
             [Some(2), Some(1)],
             "turning the map round puts the other label on top"
         );
+        Ok(())
     })
 }

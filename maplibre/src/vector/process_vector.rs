@@ -419,14 +419,16 @@ impl<T: VectorTransferables, C: Context> ProcessVectorContext<T, C> {
             buffer.shared_geometry_key().is_some(),
         );
         let msg = T::LayerTessellated::build_from_with_paint_typed(
-            *coords,
-            buffer,
-            feature_indices,
-            feature_colors,
-            feature_sort_keys,
-            layer_data,
-            style.id.clone(),
-            feature_paint,
+            crate::vector::transferables::TessellatedLayerPayload {
+                coords: *coords,
+                buffer,
+                feature_indices,
+                feature_colors,
+                feature_sort_keys,
+                layer_data,
+                style_layer_id: style.id.clone(),
+                entries: feature_paint,
+            },
             style.type_.as_str(),
             allow_prepack,
         )

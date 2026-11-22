@@ -40,12 +40,10 @@ const BILINEAR: Terms = Terms {
 /// The picture's corners, top left, top right, bottom right and bottom left, in Mercator units
 /// rounded as GL JS rounds them to the tile they are centred in.
 fn rounded_corners(corners: [[f64; 2]; 4]) -> [[f64; 2]; 4] {
-    let fold = |axis: usize| {
-        corners.iter().fold((f64::MAX, f64::MIN), |(lo, hi), c| {
-            (lo.min(c[axis]), hi.max(c[axis]))
-        })
-    };
-    let ((west, east), (north, south)) = (fold(0), fold(1));
+    let ((west, east), (north, south)) = corners.iter().fold(
+        ((f64::MAX, f64::MIN), (f64::MAX, f64::MIN)),
+        |((w, e), (n, s)), &[x, y]| ((w.min(x), e.max(x)), (n.min(y), s.max(y))),
+    );
     let largest = (east - west).max(south - north);
     let zoom = (-largest.log2()).floor().max(0.0);
     let tiles = 2_f64.powf(zoom);
@@ -113,23 +111,23 @@ fn terms(corners: [[f64; 2]; 4]) -> Terms {
 
 /// The vertex at `[s, t]` of the picture's unit square, as the raster vertex shader places it.
 fn vertex(corners: [[f64; 2]; 4], terms: Terms, [s, t]: [f64; 2]) -> Vertex {
-    let [top_left, top_right, bottom_right, bottom_left] = corners;
+    let [[tlx, tly], [trx, try_], [_brx, _bry], [blx, bly]] = corners;
     let mix = |a: f64, b: f64, by: f64| a + (b - a) * by;
-    let bilinear = [0, 1].map(|axis| {
-        mix(
-            mix(top_left[axis], top_right[axis], s),
-            mix(bottom_left[axis], bottom_right[axis], s),
-            t,
-        )
-    });
+    let [_, _, [brx, bry], _] = corners;
+    let bx = mix(mix(tlx, trx, s), mix(blx, brx, s), t);
+    let by = mix(mix(tly, try_, s), mix(bly, bry, s), t);
     let [px, py] = terms.perspective;
     let denominator = px * s + py * t + 1.0;
-    let projective = [0, 1].map(|axis| {
-        let across_top = top_right[axis] - top_left[axis] + px * top_right[axis];
-        let down_left = bottom_left[axis] - top_left[axis] + py * bottom_left[axis];
-        (across_top * s + down_left * t + top_left[axis]) / denominator
-    });
-    let position = [0, 1].map(|axis| mix(projective[axis], bilinear[axis], terms.blend));
+    let project_axis = |tl: f64, tr: f64, bl: f64, bil: f64| {
+        let across_top = tr - tl + px * tr;
+        let down_left = bl - tl + py * bl;
+        let proj = (across_top * s + down_left * t + tl) / denominator;
+        mix(proj, bil, terms.blend)
+    };
+    let position = [
+        project_axis(tlx, trx, blx, bx),
+        project_axis(tly, try_, bly, by),
+    ];
     let weight = mix(1.0 / denominator, 1.0, terms.blend);
     (position, [s * weight, t * weight, weight])
 }

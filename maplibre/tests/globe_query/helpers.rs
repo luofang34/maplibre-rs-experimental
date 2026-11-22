@@ -190,7 +190,12 @@ pub fn query(
 
 pub fn names(hits: &[QueriedFeature]) -> Vec<&str> {
     hits.iter()
-        .map(|f| f.properties["name"].as_str().expect("name"))
+        .map(|f| {
+            f.properties
+                .get("name")
+                .and_then(|v| v.as_str())
+                .expect("name")
+        })
         .collect()
 }
 

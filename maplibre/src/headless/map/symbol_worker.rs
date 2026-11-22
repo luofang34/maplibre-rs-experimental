@@ -1,6 +1,6 @@
 //! Labels drawn through the real tile worker from the glyphs, sprites and tiles a host's loader
 //! serves, so a test sees which assets a style's symbols asked for and what reached the screen.
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg_attr(test, allow(clippy::expect_used))]
 
 use std::sync::{Arc, Mutex};
 
@@ -269,6 +269,7 @@ impl SymbolMap {
     /// a request, a delivery or a fade, and returns the settled frame's RGBA pixels.
     pub(super) async fn settle(&mut self) -> Vec<u8> {
         let mut quiet = 0;
+        let mut settled = false;
         for _ in 0..2_000 {
             let requests = self.server.requested().len();
             let ready = self.frame().await;
@@ -277,7 +278,8 @@ impl SymbolMap {
                 && self.server.requested().len() == requests;
             quiet = if idle { quiet + 1 } else { 0 };
             if self.labels_ready && quiet >= 10 {
-                return self.read();
+                settled = true;
+                break;
             }
             for _ in 0..250 {
                 let reasons = self.map.redraw_reasons();
@@ -296,12 +298,14 @@ impl SymbolMap {
                 .await;
             }
         }
-        panic!(
+        assert!(
+            settled,
             "the labels never settled: labels ready {}, reasons {:?}, requested {:?}",
             self.labels_ready,
             self.map.redraw_reasons(),
             self.server.requested()
         );
+        self.read()
     }
 
     /// Draws one frame 16 ms after the last, lets the workers run, and returns what became

@@ -356,11 +356,7 @@ impl MapContext {
 }
 
 fn trim_ascii_start(bytes: &[u8]) -> &[u8] {
-    let idx = bytes
-        .iter()
-        .position(|b| !b.is_ascii_whitespace())
-        .unwrap_or(bytes.len());
-    &bytes[idx..]
+    bytes.trim_ascii_start()
 }
 
 fn parse_geojson_bytes_payload(

@@ -1,5 +1,5 @@
 //! Upload failures preserve the committed symbol geometry, atlas and placement features.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![cfg_attr(test, allow(clippy::expect_used))]
 use std::{rc::Rc, sync::Arc};
 
 use super::*;
@@ -11,7 +11,7 @@ use crate::{
         RenderPlugin,
     },
     schedule::{Schedule, Stage},
-    sdf::{assets::SymbolAtlas, SdfPlugin},
+    sdf::{assets::SymbolAtlas, SdfPlugin, SymbolLayersDataComponent},
     tcs::world::World,
     vector::{content, DefaultVectorTransferables, VectorPlugin},
 };
@@ -117,7 +117,7 @@ fn atlas(pixel: u8) -> Arc<SymbolAtlas> {
     })
 }
 
-fn upload(context: &mut MapContext, zoom: f32) {
+fn upload(context: &mut MapContext, zoom: f32) -> Result<(), &'static str> {
     let Some((Initialized(pool), textures, Initialized(pipeline))) =
         context.world.resources.query_mut::<(
             &mut Eventually<SymbolBufferPool>,
@@ -125,7 +125,7 @@ fn upload(context: &mut MapContext, zoom: f32) {
             &Eventually<SymbolPipeline>,
         )>()
     else {
-        panic!("GPU resources");
+        return Err("missing GPU resources");
     };
     let mut symbol_style = super::SymbolStyleIndex::default();
     symbol_style.sync(&context.style);
@@ -146,39 +146,41 @@ fn upload(context: &mut MapContext, zoom: f32) {
         ),
         &mut FrameUploads::default(),
     );
+    Ok(())
 }
 
-fn binding(context: &MapContext) -> &super::super::textures::DrawBinding {
+fn binding(context: &MapContext) -> Result<&super::super::textures::DrawBinding, &'static str> {
     context
         .world
         .resources
         .get::<SymbolTextures>()
-        .expect("textures")
+        .ok_or("missing textures")?
         .binding(Default::default(), "label")
-        .expect("binding")
+        .ok_or("missing binding")
 }
 
-fn allocation(context: &MapContext) -> u64 {
+fn allocation(context: &MapContext) -> Result<u64, &'static str> {
     let Some(Initialized(pool)) = context
         .world
         .resources
         .get::<Eventually<SymbolBufferPool>>()
     else {
-        panic!("pool");
+        return Err("missing symbol buffer pool");
     };
     pool.index()
         .get_layers(Default::default())
-        .expect("allocation")[0]
-        .allocation_id()
+        .and_then(|layers| layers.front())
+        .map(|entry| entry.allocation_id())
+        .ok_or("missing symbol allocation")
 }
 
-fn committed(context: &MapContext) -> &SymbolLayerData {
-    &context
+fn committed(context: &MapContext) -> Result<&SymbolLayerData, &'static str> {
+    context
         .world
         .tiles
         .query::<&SymbolLayersDataComponent>(Default::default())
-        .expect("symbols")
-        .layers[0]
+        .and_then(|component| component.layers.first())
+        .ok_or("missing committed symbol layer")
 }
 
 mod tests;

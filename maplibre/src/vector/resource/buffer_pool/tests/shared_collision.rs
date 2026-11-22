@@ -1,6 +1,6 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use super::{geometry, pool, style_layer, TestQueue, TestVertex};
+use super::{geometry, pool, style_layer, TestQueue, TestVertex, UniformLayerUpload};
 use crate::{
     coords::WorldTileCoords,
     vector::{resource::AllocationError, tessellation::OverAlignedVertexBuffer},
@@ -22,12 +22,14 @@ fn primary_upload_with_colliding_shared_key_allocates_fresh_vertices() {
     pool.replace_layer_geometry_layer_uniform_shared_unless(
         &TestQueue,
         coords,
-        shared_line_layer("road-a"),
-        &primary,
+        UniformLayerUpload {
+            style_layer: std::sync::Arc::new(shared_line_layer("road-a")),
+            geometry: &primary,
+            layer_metadata: 0u32,
+            uniform_feature: 0u32,
+            records: 6,
+        },
         None,
-        0u32,
-        0u32,
-        6,
         |_| false,
     )
     .expect("primary upload");
@@ -37,12 +39,14 @@ fn primary_upload_with_colliding_shared_key_allocates_fresh_vertices() {
     pool.replace_layer_geometry_layer_uniform_shared_unless(
         &TestQueue,
         coords,
-        shared_line_layer("road-b"),
-        &secondary,
+        UniformLayerUpload {
+            style_layer: std::sync::Arc::new(shared_line_layer("road-b")),
+            geometry: &secondary,
+            layer_metadata: 0u32,
+            uniform_feature: 0u32,
+            records: 6,
+        },
         None,
-        0u32,
-        0u32,
-        6,
         |_| false,
     )
     .expect("secondary aliases 6-vertex slot");
@@ -62,12 +66,14 @@ fn primary_upload_with_colliding_shared_key_allocates_fresh_vertices() {
     pool.replace_layer_geometry_layer_uniform_shared_unless(
         &TestQueue,
         coords,
-        shared_line_layer("road-a"),
-        &colliding_primary,
+        UniformLayerUpload {
+            style_layer: std::sync::Arc::new(shared_line_layer("road-a")),
+            geometry: &colliding_primary,
+            layer_metadata: 0u32,
+            uniform_feature: 0u32,
+            records: 12,
+        },
         None,
-        0u32,
-        0u32,
-        12,
         |_| false,
     )
     .expect("colliding primary allocates fresh vertices instead of aliasing");
@@ -109,12 +115,14 @@ fn empty_vertices_with_usable_indices_and_no_resident_slot_is_rejected() {
     let res = pool.replace_layer_geometry_layer_uniform_shared_unless(
         &TestQueue,
         coords,
-        shared_line_layer("road-b"),
-        &orphan,
+        UniformLayerUpload {
+            style_layer: std::sync::Arc::new(shared_line_layer("road-b")),
+            geometry: &orphan,
+            layer_metadata: 0u32,
+            uniform_feature: 0u32,
+            records: 0,
+        },
         None,
-        0u32,
-        0u32,
-        0,
         |_| false,
     );
     assert!(matches!(
@@ -139,12 +147,14 @@ fn mismatched_fallback_vertices_refuse_shared_slot_aliasing() {
     pool.replace_layer_geometry_layer_uniform_shared_unless(
         &TestQueue,
         coords,
-        shared_line_layer("road-a"),
-        &primary,
+        UniformLayerUpload {
+            style_layer: std::sync::Arc::new(shared_line_layer("road-a")),
+            geometry: &primary,
+            layer_metadata: 0u32,
+            uniform_feature: 0u32,
+            records: 6,
+        },
         None,
-        0u32,
-        0u32,
-        6,
         |_| false,
     )
     .expect("primary upload");
@@ -155,12 +165,14 @@ fn mismatched_fallback_vertices_refuse_shared_slot_aliasing() {
     pool.replace_layer_geometry_layer_uniform_shared_unless(
         &TestQueue,
         coords,
-        shared_line_layer("road-b"),
-        &secondary,
+        UniformLayerUpload {
+            style_layer: std::sync::Arc::new(shared_line_layer("road-b")),
+            geometry: &secondary,
+            layer_metadata: 0u32,
+            uniform_feature: 0u32,
+            records: 12,
+        },
         Some(&mismatch_vertices),
-        0u32,
-        0u32,
-        12,
         |_| false,
     )
     .expect("mismatched fallback uploads fresh slice");

@@ -197,7 +197,7 @@ fn unpad(staging: Staging) -> Result<Vec<u8>, ReadbackError> {
     let mapped = staging.buffer.slice(..).get_mapped_range()?;
     let bytes = mapped
         .chunks_exact(staging.padded)
-        .flat_map(|row| row[..staging.row].iter().copied())
+        .flat_map(|row| row.iter().take(staging.row).copied())
         .collect();
     drop(mapped);
     staging.buffer.unmap();
@@ -352,22 +352,28 @@ impl FrameReadback {
         };
         let row = self.width as usize * 4;
         let size = layout.bytes_per_pixel();
-        let (red, blue) = if bgra { (2, 0) } else { (0, 2) };
         for (source, target) in mapped
             .chunks_exact(self.padded as usize)
             .zip(out.chunks_exact_mut(self.width as usize * size))
         {
-            let source = &source[..row];
+            let Some(source) = source.get(..row) else {
+                continue;
+            };
             if layout == PixelLayout::Rgba8 && !bgra {
                 target.copy_from_slice(source);
                 continue;
             }
-            for (pixel, texel) in target.chunks_exact_mut(size).zip(source.as_chunks::<4>().0) {
-                pixel[0] = texel[red];
-                pixel[1] = texel[1];
-                pixel[2] = texel[blue];
-                if let Some(alpha) = pixel.get_mut(3) {
-                    *alpha = texel[3];
+            for (pixel, &[r, g, b, a]) in
+                target.chunks_exact_mut(size).zip(source.as_chunks::<4>().0)
+            {
+                let (c0, c2) = if bgra { (b, r) } else { (r, b) };
+                if let [p0, p1, p2, rest @ ..] = pixel {
+                    *p0 = c0;
+                    *p1 = g;
+                    *p2 = c2;
+                    if let Some(p3) = rest.first_mut() {
+                        *p3 = a;
+                    }
                 }
             }
         }

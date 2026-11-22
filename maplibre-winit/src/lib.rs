@@ -1,4 +1,24 @@
 //! Window, event-loop and platform adapters for maplibre.
+#![cfg_attr(
+    all(not(test), not(target_arch = "wasm32")),
+    forbid(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented
+    )
+)]
+#![cfg_attr(
+    all(not(test), target_arch = "wasm32"),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented
+    )
+)]
 #![deny(unused_imports)]
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 

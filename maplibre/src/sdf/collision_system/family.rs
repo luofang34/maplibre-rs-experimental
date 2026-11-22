@@ -88,7 +88,10 @@ pub(super) fn mirror(
             else {
                 return metadata;
             };
-            for (index, outcome) in outcomes[tile].iter().enumerate() {
+            let Some(tile_outcomes) = outcomes.get(tile) else {
+                return metadata;
+            };
+            for (index, outcome) in tile_outcomes.iter().enumerate() {
                 let (Some(outcome), Some(feature)) = (outcome, member.features.get(index)) else {
                     continue;
                 };

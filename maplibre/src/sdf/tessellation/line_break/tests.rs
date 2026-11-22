@@ -3,10 +3,16 @@ use super::wrap;
 /// The lines of `text` where every letter is 10 wide and a space 5.
 fn broken(text: &str, max_width: f32) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
-    let advance = |index: usize| if chars[index] == ' ' { 5.0 } else { 10.0 };
+    let advance = |index: usize| {
+        if chars.get(index) == Some(&' ') {
+            5.0
+        } else {
+            10.0
+        }
+    };
     wrap(&chars, max_width, &advance)
         .into_iter()
-        .map(|line| chars[line].iter().collect())
+        .map(|line| chars.get(line).unwrap_or(&[]).iter().collect())
         .collect()
 }
 

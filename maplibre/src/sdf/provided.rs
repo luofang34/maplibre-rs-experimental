@@ -34,7 +34,7 @@ pub enum ProvidedImagesState {
     Awaiting,
     /// Every image has an answer, and labels that gained one were sent again.
     Settled,
-    /// A provider was unavailable for now; the tile is requested again after a back-off.
+    /// A provider was temporarily unavailable; the tile is requested again after a back-off.
     Retry,
 }
 

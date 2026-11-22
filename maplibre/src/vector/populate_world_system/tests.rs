@@ -173,20 +173,21 @@ fn id_bearing_mvt_arrivals_without_feature_state_avoid_cloning_and_deduplicate_w
         ..Default::default()
     };
     let tri = OverAlignedVertexBuffer::from_iters([ShaderVertex::default(); 3], [0_u32, 1, 2], 3);
-    let msg = DefaultLayerTessellated::build_from_with_paint(
-        coords,
-        tri.clone(),
-        vec![3],
-        vec![[0.0, 1.0, 0.0, 1.0]],
-        vec![],
-        empty_mvt.clone(),
-        "park-fill".into(),
-        vec![BucketFeatureEntry {
-            raw_id: Some(42),
-            properties: worker_arc,
-            kind: BucketEntryKind::Feature,
-        }],
-    );
+    let msg =
+        DefaultLayerTessellated::build_from_with_paint(crate::vector::TessellatedLayerPayload {
+            coords,
+            buffer: tri.clone(),
+            feature_indices: vec![3],
+            feature_colors: vec![[0.0, 1.0, 0.0, 1.0]],
+            feature_sort_keys: vec![],
+            layer_data: empty_mvt.clone(),
+            style_layer_id: "park-fill".into(),
+            entries: vec![BucketFeatureEntry {
+                raw_id: Some(42),
+                properties: worker_arc,
+                kind: BucketEntryKind::Feature,
+            }],
+        });
     apply_vector_worker_batch::<DefaultVectorTransferables>(
         &mut world,
         &style,
@@ -246,26 +247,28 @@ fn id_bearing_mvt_arrivals_without_feature_state_avoid_cloning_and_deduplicate_w
         &decoded_line[0].properties
     ));
 
-    let msg_fill = DefaultLayerTessellated::build_from_with_paint(
-        coords,
-        tri.clone(),
-        vec![3, 6],
-        vec![[0.0; 4]; 2],
-        vec![],
-        empty_mvt.clone(),
-        "park-fill".into(),
-        decoded_fill,
-    );
-    let msg_line = DefaultLayerTessellated::build_from_with_paint(
-        coords,
-        tri,
-        vec![3, 6],
-        vec![[0.0; 4]; 2],
-        vec![],
-        empty_mvt,
-        "park-outline".into(),
-        decoded_line,
-    );
+    let msg_fill =
+        DefaultLayerTessellated::build_from_with_paint(crate::vector::TessellatedLayerPayload {
+            coords,
+            buffer: tri.clone(),
+            feature_indices: vec![3, 6],
+            feature_colors: vec![[0.0; 4]; 2],
+            feature_sort_keys: vec![],
+            layer_data: empty_mvt.clone(),
+            style_layer_id: "park-fill".into(),
+            entries: decoded_fill,
+        });
+    let msg_line =
+        DefaultLayerTessellated::build_from_with_paint(crate::vector::TessellatedLayerPayload {
+            coords,
+            buffer: tri,
+            feature_indices: vec![3, 6],
+            feature_colors: vec![[0.0; 4]; 2],
+            feature_sort_keys: vec![],
+            layer_data: empty_mvt,
+            style_layer_id: "park-outline".into(),
+            entries: decoded_line,
+        });
     let indexed = DefaultLayerIndexed::build_from(
         coords,
         Some("osm".into()),

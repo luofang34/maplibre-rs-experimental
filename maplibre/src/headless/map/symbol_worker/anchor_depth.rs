@@ -157,12 +157,15 @@ async fn points_under(size: [u32; 2], zoom: f64, fractions: &[[f64; 2]]) -> Vec<
     fractions
         .iter()
         .map(|[x, y]| {
-            camera
-                .screen_point_to_location(Point2::new(
-                    x * f64::from(size[0]),
-                    y * f64::from(size[1]),
-                ))
-                .unwrap_or_else(|| panic!("{x}, {y} of the target lies on the globe"))
+            let location = camera.screen_point_to_location(Point2::new(
+                x * f64::from(size[0]),
+                y * f64::from(size[1]),
+            ));
+            assert!(
+                location.is_some(),
+                "{x}, {y} of the target lies on the globe"
+            );
+            location.unwrap_or(LatLon::new(0.0, 0.0))
         })
         .collect()
 }

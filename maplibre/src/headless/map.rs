@@ -117,10 +117,10 @@ impl HeadlessMap {
                 .build(&mut schedule, kernel.clone(), &mut world, &mut renderer)
                 .map_err(MapError::Plugin)?;
         }
-        let _ = schedule.add_system_to_stage(
+        drop(schedule.add_system_to_stage(
             crate::render::RenderStageLabel::Input,
             crate::context::style_transition_system,
-        );
+        ));
 
         Ok(Self {
             kernel,

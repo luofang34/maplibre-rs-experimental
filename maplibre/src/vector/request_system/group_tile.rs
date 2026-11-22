@@ -53,31 +53,8 @@ pub(super) async fn fetch_raw_group_tile<H: HttpClient>(
     refetch: bool,
 ) -> Result<RawGroupTile, SourceFetchError> {
     let source_tile = group.source_tile(coords);
-    #[cfg(feature = "geojson")]
     if let SourceType::GeoJson(geojson) = &group.source {
-        let index = client
-            .assets()
-            .geojson_index(client, &geojson.name, &geojson.source)
-            .await
-            .map_err(|failure| fetch_failure(failure, &geojson.name))?;
-        let data = index.tile(source_tile);
-        return Ok(RawGroupTile {
-            source_tile,
-            payload: RawPayload::Owned {
-                bytes: data,
-                label: format!("geojson tile {}", geojson.name),
-            },
-        });
-    }
-    #[cfg(not(feature = "geojson"))]
-    if let SourceType::GeoJson(geojson) = &group.source {
-        return Err(fetch_failure(
-            AssetFailure::Terminal(format!(
-                "geojson source {} requires the `geojson` Cargo feature",
-                geojson.name
-            )),
-            &geojson.name,
-        ));
+        return fetch_geojson_group_tile(client, source_tile, geojson).await;
     }
     let Some(url) = group.source.format(&source_tile) else {
         let bytes = client.fetch(&source_tile, &group.source).await?;
@@ -99,6 +76,49 @@ pub(super) async fn fetch_raw_group_tile<H: HttpClient>(
             payload: RawPayload::Owned { bytes, label: url },
         });
     }
+    fetch_overscaled_cached_tile(client, source_tile, &group.source, url, refetch).await
+}
+
+async fn fetch_geojson_group_tile<H: HttpClient>(
+    client: &SourceClient<H>,
+    source_tile: WorldTileCoords,
+    geojson: &crate::io::source_type::GeoJsonTileSource,
+) -> Result<RawGroupTile, SourceFetchError> {
+    #[cfg(feature = "geojson")]
+    {
+        let index = client
+            .assets()
+            .geojson_index(client, &geojson.name, &geojson.source)
+            .await
+            .map_err(|failure| fetch_failure(failure, &geojson.name))?;
+        Ok(RawGroupTile {
+            source_tile,
+            payload: RawPayload::Owned {
+                bytes: index.tile(source_tile),
+                label: format!("geojson tile {}", geojson.name),
+            },
+        })
+    }
+    #[cfg(not(feature = "geojson"))]
+    {
+        let _ = (client, source_tile);
+        Err(fetch_failure(
+            AssetFailure::Terminal(format!(
+                "geojson source {} requires the `geojson` Cargo feature",
+                geojson.name
+            )),
+            &geojson.name,
+        ))
+    }
+}
+
+async fn fetch_overscaled_cached_tile<H: HttpClient>(
+    client: &SourceClient<H>,
+    source_tile: WorldTileCoords,
+    source: &SourceType,
+    url: String,
+    refetch: bool,
+) -> Result<RawGroupTile, SourceFetchError> {
     let key = format!("tile:{url}");
     if refetch {
         client.assets().forget(&key);
@@ -106,19 +126,16 @@ pub(super) async fn fetch_raw_group_tile<H: HttpClient>(
     let cached: Arc<CachedOverscaledTile> = client
         .assets()
         .load(key, || async {
-            let bytes = client
-                .fetch(&source_tile, &group.source)
-                .await
-                .map_err(|error| {
-                    tracing::warn!(%url, error = %error.describe(), "vector tile unavailable");
-                    if error.is_not_found() {
-                        AssetFailure::NotFound
-                    } else if error.is_retryable() {
-                        AssetFailure::Retryable(error.describe())
-                    } else {
-                        AssetFailure::Terminal(error.describe())
-                    }
-                })?;
+            let bytes = client.fetch(&source_tile, source).await.map_err(|error| {
+                tracing::warn!(%url, error = %error.describe(), "vector tile unavailable");
+                if error.is_not_found() {
+                    AssetFailure::NotFound
+                } else if error.is_retryable() {
+                    AssetFailure::Retryable(error.describe())
+                } else {
+                    AssetFailure::Terminal(error.describe())
+                }
+            })?;
             let (packed, compressed) = LazyMvtIndex::pack_vec(bytes);
             let stored_bytes = packed.len();
             Ok((CachedOverscaledTile { packed, compressed }, stored_bytes))
@@ -163,45 +180,18 @@ pub(super) fn decode_group_tile<H: HttpClient>(
         source_tile,
         payload,
     } = raw;
-    let keep_layer = |name: &str| {
-        layers
-            .iter()
-            .any(|sl| sl.source_layer.as_deref() == Some(name))
-    };
     let rescale = (source_tile != coords).then_some((source_tile, coords));
     let key_map = build_layer_key_map(layers, promote_id);
     match payload {
         RawPayload::Owned { bytes, label } => {
-            #[cfg(feature = "mlt")]
-            if source_tile == coords
-                && !looks_like_mvt(&bytes)
-                && crate::vector::mlt::is_valid_mlt(&bytes)
-            {
-                let raw_arc: Arc<[u8]> = Arc::from(bytes.as_slice());
-                let (mvt_bytes, mvt_compressed) = LazyMvtIndex::pack_vec(bytes);
-                return Ok(GroupTile {
-                    tile: Arc::new(DecodedVectorTile::Mlt(raw_arc)),
-                    mvt_bytes,
-                    mvt_compressed,
-                    mvt_rescale: None,
-                });
-            }
-            let mut tile = decode_tile_for_layers_with_keys_rescaled(&bytes, rescale, |name| {
-                key_map.get(name).map(|opt| opt.as_ref())
-            })
-            .map_err(|error| {
-                fetch_failure(
-                    AssetFailure::Terminal(format!("{label} cannot be decoded: {error}")),
-                    &label,
-                )
-            })?;
-            tile.layers.retain(|mvt| keep_layer(mvt.name.as_str()));
+            let decoded = decode_payload_bytes(&bytes, rescale, layers, &key_map, &label)?;
+            let is_mlt = decoded_is_mlt(&decoded);
             let (mvt_bytes, mvt_compressed) = LazyMvtIndex::pack_vec(bytes);
             Ok(GroupTile {
-                tile: Arc::new(DecodedVectorTile::Mvt(tile)),
+                tile: decoded,
                 mvt_bytes,
                 mvt_compressed,
-                mvt_rescale: rescale,
+                mvt_rescale: rescale.filter(|_| !is_mlt),
             })
         }
         RawPayload::Cached { cached, url } => {
@@ -219,37 +209,59 @@ pub(super) fn decode_group_tile<H: HttpClient>(
             } else {
                 &cached.packed
             };
-            #[cfg(feature = "mlt")]
-            if source_tile == coords
-                && !looks_like_mvt(bytes)
-                && crate::vector::mlt::is_valid_mlt(bytes)
-            {
-                return Ok(GroupTile {
-                    tile: Arc::new(DecodedVectorTile::Mlt(Arc::from(bytes))),
-                    mvt_bytes: Arc::clone(&cached.packed),
-                    mvt_compressed: cached.compressed,
-                    mvt_rescale: None,
-                });
-            }
-            let mut tile = decode_tile_for_layers_with_keys_rescaled(bytes, rescale, |name| {
-                key_map.get(name).map(|opt| opt.as_ref())
-            })
-            .map_err(|error| {
-                client.assets().forget(&format!("tile:{url}"));
-                fetch_failure(
-                    AssetFailure::Terminal(format!("vector tile {url} cannot be decoded: {error}")),
-                    &url,
-                )
-            })?;
-            tile.layers.retain(|mvt| keep_layer(mvt.name.as_str()));
+            let decoded = decode_payload_bytes(bytes, rescale, layers, &key_map, &url)
+                .inspect_err(|_| {
+                    client.assets().forget(&format!("tile:{url}"));
+                })?;
+            let is_mlt = decoded_is_mlt(&decoded);
             Ok(GroupTile {
-                tile: Arc::new(DecodedVectorTile::Mvt(tile)),
+                tile: decoded,
                 mvt_bytes: Arc::clone(&cached.packed),
                 mvt_compressed: cached.compressed,
-                mvt_rescale: rescale,
+                mvt_rescale: rescale.filter(|_| !is_mlt),
             })
         }
     }
+}
+
+fn decoded_is_mlt(tile: &DecodedVectorTile) -> bool {
+    #[cfg(feature = "mlt")]
+    {
+        matches!(tile, DecodedVectorTile::Mlt(_))
+    }
+    #[cfg(not(feature = "mlt"))]
+    {
+        let _ = tile;
+        false
+    }
+}
+
+fn decode_payload_bytes(
+    bytes: &[u8],
+    rescale: Option<(WorldTileCoords, WorldTileCoords)>,
+    layers: &[crate::style::layer::StyleLayer],
+    key_map: &rustc_hash::FxHashMap<&str, Option<rustc_hash::FxHashSet<String>>>,
+    label: &str,
+) -> Result<Arc<DecodedVectorTile>, SourceFetchError> {
+    #[cfg(feature = "mlt")]
+    if rescale.is_none() && !looks_like_mvt(bytes) && crate::vector::mlt::is_valid_mlt(bytes) {
+        return Ok(Arc::new(DecodedVectorTile::Mlt(Arc::from(bytes))));
+    }
+    let mut tile = decode_tile_for_layers_with_keys_rescaled(bytes, rescale, |name| {
+        key_map.get(name).map(|opt| opt.as_ref())
+    })
+    .map_err(|error| {
+        fetch_failure(
+            AssetFailure::Terminal(format!("vector tile {label} cannot be decoded: {error}")),
+            label,
+        )
+    })?;
+    tile.layers.retain(|mvt| {
+        layers
+            .iter()
+            .any(|sl| sl.source_layer.as_deref() == Some(mvt.name.as_str()))
+    });
+    Ok(Arc::new(DecodedVectorTile::Mvt(tile)))
 }
 
 /// The fetch error a failure to load `what` through the asset cache stands for.

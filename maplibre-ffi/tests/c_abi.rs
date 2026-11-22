@@ -1,6 +1,11 @@
 //! Integration tests for the `maplibre-ffi` C ABI (`include/maplibre.h`).
 
-#![allow(unsafe_code, clippy::unwrap_used, clippy::expect_used)]
+#![allow(
+    unsafe_code,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing
+)]
 
 use std::{
     ffi::{CStr, CString},

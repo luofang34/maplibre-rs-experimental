@@ -6,7 +6,7 @@
 //! tracked in a ratcheted `EXPECTED_FAILURES` list mapping `<group>/<case>` to an explicit
 //! reason: any unlisted failure OR any listed case that starts passing fails the test.
 
-#![allow(clippy::expect_used, clippy::panic)]
+#![allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},

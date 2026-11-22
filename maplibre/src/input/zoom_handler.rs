@@ -97,15 +97,7 @@ impl ZoomHandler {
         );
     }
 
-    pub(crate) fn update_parts_with_nav_at(
-        &mut self,
-        style: &crate::style::Style,
-        view_state: &mut crate::render::view_state::ViewState,
-        world: &mut crate::tcs::world::World,
-        dt: Duration,
-        nav: Option<&mut NavigationState>,
-        now: Instant,
-    ) {
+    fn step_zoom_inputs(&mut self, dt: Duration, now: Instant) {
         if self.web_pinch_wheel_active
             && self
                 .last_pinch_move
@@ -143,35 +135,34 @@ impl ZoomHandler {
             };
             self.update_zoom(step);
         }
-        let Some(zoom_delta) = self.zoom_delta.take() else {
-            let finished = self
-                .last_input
-                .is_some_and(|last| now.saturating_duration_since(last) >= GESTURE_END_DELAY);
-            if finished {
-                finish_gesture(style, view_state, world);
-                self.gesture_elevation = None;
-                self.globe_anchor = None;
-                self.last_input = None;
-            }
-            return;
-        };
-        if (self.gesture_elevation.is_some() || self.globe_anchor.is_some())
-            && self
-                .last_input
-                .is_some_and(|last| now.saturating_duration_since(last) >= GESTURE_END_DELAY)
+    }
+
+    fn finish_expired_gesture(
+        &mut self,
+        style: &crate::style::Style,
+        view_state: &mut crate::render::view_state::ViewState,
+        world: &mut crate::tcs::world::World,
+        now: Instant,
+    ) {
+        if self
+            .last_input
+            .is_some_and(|last| now.saturating_duration_since(last) >= GESTURE_END_DELAY)
         {
             finish_gesture(style, view_state, world);
             self.gesture_elevation = None;
             self.globe_anchor = None;
             self.last_input = None;
         }
-        let step = zoom_delta
-            .value()
-            .clamp(-MAX_ZOOM_STEP_PER_FRAME, MAX_ZOOM_STEP_PER_FRAME);
-        let remainder = zoom_delta.value() - step;
-        if remainder.abs() > f64::EPSILON {
-            self.zoom_delta = Some(Zoom::new(remainder));
-        }
+    }
+
+    fn apply_zoom_step(
+        &mut self,
+        style: &crate::style::Style,
+        view_state: &mut crate::render::view_state::ViewState,
+        world: &mut crate::tcs::world::World,
+        step: f64,
+        nav: Option<&mut NavigationState>,
+    ) {
         let auto_tilt_active = nav
             .as_ref()
             .is_some_and(|n| n.three_dimensional && n.auto_tilt);
@@ -208,14 +199,10 @@ impl ZoomHandler {
         let next_zoom = view_state.clamp_zoom(Zoom::new(
             (view_state.zoom().value() + step).clamp(0.0, 22.0),
         ));
-        let mut zoomed_globe_anchor = false;
-        if let Some(globe_anchor) = self.globe_anchor {
-            if zoom_globe_keeping_anchor(view_state, globe_anchor, anchor.pixel, next_zoom.value())
-            {
-                zoomed_globe_anchor = true;
-            }
-        }
-        if !zoomed_globe_anchor {
+        let zoomed_globe = self.globe_anchor.is_some_and(|globe_anchor| {
+            zoom_globe_keeping_anchor(view_state, globe_anchor, anchor.pixel, next_zoom.value())
+        });
+        if !zoomed_globe {
             let screen = Vector2::new(anchor.pixel.x, anchor.pixel.y);
             if !zoom_globe_around_pixel(style, view_state, screen, next_zoom) {
                 zoom_mercator_around(view_state, anchor, next_zoom);
@@ -235,6 +222,33 @@ impl ZoomHandler {
                 nav_state.cancel_pitch_animation();
             }
         }
+    }
+
+    pub(crate) fn update_parts_with_nav_at(
+        &mut self,
+        style: &crate::style::Style,
+        view_state: &mut crate::render::view_state::ViewState,
+        world: &mut crate::tcs::world::World,
+        dt: Duration,
+        nav: Option<&mut NavigationState>,
+        now: Instant,
+    ) {
+        self.step_zoom_inputs(dt, now);
+        let Some(zoom_delta) = self.zoom_delta.take() else {
+            self.finish_expired_gesture(style, view_state, world, now);
+            return;
+        };
+        if self.gesture_elevation.is_some() || self.globe_anchor.is_some() {
+            self.finish_expired_gesture(style, view_state, world, now);
+        }
+        let step = zoom_delta
+            .value()
+            .clamp(-MAX_ZOOM_STEP_PER_FRAME, MAX_ZOOM_STEP_PER_FRAME);
+        let remainder = zoom_delta.value() - step;
+        if remainder.abs() > f64::EPSILON {
+            self.zoom_delta = Some(Zoom::new(remainder));
+        }
+        self.apply_zoom_step(style, view_state, world, step, nav);
         self.last_input = Some(now);
     }
 

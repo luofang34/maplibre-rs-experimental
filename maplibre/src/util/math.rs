@@ -69,96 +69,32 @@ impl<S: BaseFloat> Plane<S> {
     /// Reference: <https://godotengine.org/qa/54688/camera-frustum-intersection-with-plane>.
     pub fn intersection_points_aabb3(&self, aabb: &Aabb3<S>) -> Vec<Vector3<S>> {
         let mut out_points: Vec<Vector3<S>> = Vec::new();
-        let aabb_min: Vector3<S> = aabb.min.to_vec();
-        let aabb_max: Vector3<S> = aabb.max.to_vec();
+        let min: Vector3<S> = aabb.min.to_vec();
+        let max: Vector3<S> = aabb.max.to_vec();
+        let dx = Vector3::new(max.x - min.x, S::zero(), S::zero());
+        let dy = Vector3::new(S::zero(), max.y - min.y, S::zero());
+        let dz = Vector3::new(S::zero(), S::zero(), max.z - min.z);
 
-        // Test edges along X axis, pointing right.
-        let mut dir: Vector3<S> = Vector3::new(aabb_max.x - aabb_min.x, S::zero(), S::zero());
-        let mut orig = aabb_min;
-        if let Some(t) = self.intersection_distance_ray(&orig, &dir) {
-            if t >= S::zero() && t <= S::one() {
-                out_points.push(orig + dir * t);
-            }
-        }
+        let edges = [
+            (min, dx),
+            (Vector3::new(min.x, max.y, min.z), dx),
+            (Vector3::new(min.x, min.y, max.z), dx),
+            (Vector3::new(min.x, max.y, max.z), dx),
+            (min, dy),
+            (Vector3::new(max.x, min.y, min.z), dy),
+            (Vector3::new(min.x, min.y, max.z), dy),
+            (Vector3::new(max.x, min.y, max.z), dy),
+            (min, dz),
+            (Vector3::new(max.x, min.y, min.z), dz),
+            (Vector3::new(min.x, max.y, min.z), dz),
+            (Vector3::new(max.x, max.y, min.z), dz),
+        ];
 
-        orig = Vector3::new(aabb_min.x, aabb_max.y, aabb_min.z);
-        if let Some(t) = self.intersection_distance_ray(&orig, &dir) {
-            if t >= S::zero() && t <= S::one() {
-                out_points.push(orig + dir * t);
-            }
-        }
-
-        orig = Vector3::new(aabb_min.x, aabb_min.y, aabb_max.z);
-        if let Some(t) = self.intersection_distance_ray(&orig, &dir) {
-            if t >= S::zero() && t <= S::one() {
-                out_points.push(orig + dir * t);
-            }
-        }
-
-        orig = Vector3::new(aabb_min.x, aabb_max.y, aabb_max.z);
-        if let Some(t) = self.intersection_distance_ray(&orig, &dir) {
-            if t >= S::zero() && t <= S::one() {
-                out_points.push(orig + dir * t);
-            }
-        }
-
-        // Test edges along Y axis, pointing up.
-        dir = Vector3::new(S::zero(), aabb_max.y - aabb_min.y, S::zero());
-        orig = Vector3::new(aabb_min.x, aabb_min.y, aabb_min.z);
-        if let Some(t) = self.intersection_distance_ray(&orig, &dir) {
-            if t >= S::zero() && t <= S::one() {
-                out_points.push(orig + dir * t);
-            }
-        }
-
-        orig = Vector3::new(aabb_max.x, aabb_min.y, aabb_min.z);
-        if let Some(t) = self.intersection_distance_ray(&orig, &dir) {
-            if t >= S::zero() && t <= S::one() {
-                out_points.push(orig + dir * t);
-            }
-        }
-
-        orig = Vector3::new(aabb_min.x, aabb_min.y, aabb_max.z);
-        if let Some(t) = self.intersection_distance_ray(&orig, &dir) {
-            if t >= S::zero() && t <= S::one() {
-                out_points.push(orig + dir * t);
-            }
-        }
-
-        orig = Vector3::new(aabb_max.x, aabb_min.y, aabb_max.z);
-        if let Some(t) = self.intersection_distance_ray(&orig, &dir) {
-            if t >= S::zero() && t <= S::one() {
-                out_points.push(orig + dir * t);
-            }
-        }
-
-        // Test edges along Z axis, pointing forward.
-        dir = Vector3::new(S::zero(), S::zero(), aabb_max.z - aabb_min.z);
-        orig = Vector3::new(aabb_min.x, aabb_min.y, aabb_min.z);
-        if let Some(t) = self.intersection_distance_ray(&orig, &dir) {
-            if t >= S::zero() && t <= S::one() {
-                out_points.push(orig + dir * t);
-            }
-        }
-
-        orig = Vector3::new(aabb_max.x, aabb_min.y, aabb_min.z);
-        if let Some(t) = self.intersection_distance_ray(&orig, &dir) {
-            if t >= S::zero() && t <= S::one() {
-                out_points.push(orig + dir * t);
-            }
-        }
-
-        orig = Vector3::new(aabb_min.x, aabb_max.y, aabb_min.z);
-        if let Some(t) = self.intersection_distance_ray(&orig, &dir) {
-            if t >= S::zero() && t <= S::one() {
-                out_points.push(orig + dir * t);
-            }
-        }
-
-        orig = Vector3::new(aabb_max.x, aabb_max.y, aabb_min.z);
-        if let Some(t) = self.intersection_distance_ray(&orig, &dir) {
-            if t >= S::zero() && t <= S::one() {
-                out_points.push(orig + dir * t);
+        for (orig, dir) in edges {
+            if let Some(t) = self.intersection_distance_ray(&orig, &dir) {
+                if t >= S::zero() && t <= S::one() {
+                    out_points.push(orig + dir * t);
+                }
             }
         }
 
@@ -171,12 +107,11 @@ impl<S: BaseFloat> Plane<S> {
     pub fn intersection_polygon_aabb3(&self, aabb: &Aabb3<S>) -> Vec<Vector3<S>> {
         let mut points = self.intersection_points_aabb3(aabb);
 
-        if points.is_empty() {
+        let Some(&origin) = points.first() else {
             return points;
         };
 
         let plane_normal = Vector3::new(self.n.x, self.n.y, self.n.z);
-        let origin = points[0];
 
         points.sort_by(|a, b| {
             let cmp = (a - origin).cross(b - origin).dot(plane_normal);
@@ -249,7 +184,7 @@ where
 /// A wrapper type that enables ordering floats. This is a work around for the famous "rust float
 /// ordering" problem. By using it, you acknowledge that sorting NaN is undefined according to spec.
 /// This implementation treats NaN as the "smallest" float.
-#[derive(Debug, Copy, Clone, PartialOrd)]
+#[derive(Debug, Copy, Clone)]
 pub struct FloatOrd(pub f32);
 
 impl PartialEq for FloatOrd {
@@ -264,7 +199,12 @@ impl PartialEq for FloatOrd {
 
 impl Eq for FloatOrd {}
 
-#[allow(clippy::derive_ord_xor_partial_ord)]
+impl PartialOrd for FloatOrd {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl Ord for FloatOrd {
     fn cmp(&self, other: &Self) -> Ordering {
         self.0.partial_cmp(&other.0).unwrap_or_else(|| {
@@ -284,9 +224,7 @@ impl Ord for FloatOrd {
 /// # Panics
 /// Panics if `rhs` is zero or negative.
 pub const fn div_away(lhs: i32, rhs: i32) -> i32 {
-    if rhs < 0 {
-        panic!("rhs must be positive")
-    }
+    assert!(rhs > 0, "rhs must be positive");
 
     if lhs < 0 {
         div_floor(lhs, rhs)

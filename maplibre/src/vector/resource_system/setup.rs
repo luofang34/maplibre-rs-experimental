@@ -169,151 +169,193 @@ impl PipelineSetup<'_> {
         dashes: Option<&wgpu::BindGroupLayout>,
         needs: VectorPipelineNeeds,
     ) {
-        if needs.flat_fill_opaque
+        self.init_fill_pipelines(vector, &needs);
+        self.init_line_pipelines(line, dashes, &needs);
+        self.init_circle_pipelines(circle, &needs);
+    }
+
+    fn init_fill_pipelines(
+        &self,
+        vector: &mut Eventually<VectorPipeline>,
+        needs: &VectorPipelineNeeds,
+    ) {
+        if !(needs.flat_fill_opaque
             || needs.flat_fill_blended
             || needs.globe_fill_opaque
-            || needs.globe_fill_blended
+            || needs.globe_fill_blended)
         {
-            let vp = vector.initialize(VectorPipeline::default);
-            if needs.flat_fill_opaque {
-                vp.flat_opaque
-                    .get_or_insert_with(|| self.create_fill("vector_flat_opaque", false, true));
-            }
-            if needs.flat_fill_blended {
-                vp.flat_blended
-                    .get_or_insert_with(|| self.create_fill("vector_flat_blended", false, false));
-            }
-            if needs.globe_fill_opaque {
-                vp.globe_opaque
-                    .get_or_insert_with(|| self.create_fill("vector_globe_opaque", true, true));
-            }
-            if needs.globe_fill_blended {
-                vp.globe_blended
-                    .get_or_insert_with(|| self.create_fill("vector_globe_blended", true, false));
-            }
+            return;
         }
-        if needs.plain_flat_lines
+        let vp = vector.initialize(VectorPipeline::default);
+        if needs.flat_fill_opaque {
+            vp.flat_opaque
+                .get_or_insert_with(|| self.create_fill("vector_flat_opaque", false, true));
+        }
+        if needs.flat_fill_blended {
+            vp.flat_blended
+                .get_or_insert_with(|| self.create_fill("vector_flat_blended", false, false));
+        }
+        if needs.globe_fill_opaque {
+            vp.globe_opaque
+                .get_or_insert_with(|| self.create_fill("vector_globe_opaque", true, true));
+        }
+        if needs.globe_fill_blended {
+            vp.globe_blended
+                .get_or_insert_with(|| self.create_fill("vector_globe_blended", true, false));
+        }
+    }
+
+    fn init_line_pipelines(
+        &self,
+        line: &mut Eventually<LinePipeline>,
+        dashes: Option<&wgpu::BindGroupLayout>,
+        needs: &VectorPipelineNeeds,
+    ) {
+        if !(needs.plain_flat_lines
             || needs.plain_globe_lines
             || needs.flat_lines
             || needs.terrain_lines
-            || needs.elevated_lines
+            || needs.elevated_lines)
         {
-            if let Some(dashes) = dashes {
-                let line_shader = shaders::LineShader {
-                    format: self.format,
-                };
-                let line = line.initialize(|| LinePipeline {
-                    flat_plain: None,
-                    globe_plain: None,
-                    flat: None,
-                    structure: None,
-                    elevated: None,
-                    terrain: None,
-                });
-                if needs.plain_flat_lines {
-                    line.flat_plain.get_or_insert_with(|| {
-                        self.create(
-                            "plain_line_flat_pipeline",
-                            &shaders::PlainLineShader {
-                                format: self.format,
-                                globe: false,
-                            },
-                            &[self.projection],
-                            false,
-                        )
-                    });
-                }
-                if needs.plain_globe_lines {
-                    line.globe_plain.get_or_insert_with(|| {
-                        self.create(
-                            "plain_line_globe_pipeline",
-                            &shaders::PlainLineShader {
-                                format: self.format,
-                                globe: true,
-                            },
-                            &[self.projection],
-                            false,
-                        )
-                    });
-                }
-                if needs.flat_lines {
-                    line.flat.get_or_insert_with(|| {
-                        self.create(
-                            "line_pipeline",
-                            &line_shader,
-                            &[self.projection, dashes],
-                            false,
-                        )
-                    });
-                }
-                if needs.terrain_lines {
-                    line.structure.get_or_insert_with(|| {
-                        self.create(
-                            "spatial_line_pipeline",
-                            &line_shader,
-                            &[self.projection, dashes],
-                            true,
-                        )
-                    });
-                    line.terrain
-                        .get_or_insert_with(|| self.create_terrain_line(dashes));
-                }
-                if needs.elevated_lines {
-                    line.elevated.get_or_insert_with(|| {
-                        self.create_with_clipping(
-                            "elevated_line_pipeline",
-                            &line_shader,
-                            &[self.projection, dashes],
-                            true,
-                            false,
-                        )
-                    });
-                }
-            }
+            return;
         }
-        if needs.circle {
-            let cp = circle.initialize(|| {
-                // Circles cross tile boundaries, as in GL JS, where each point belongs to one tile.
-                CirclePipeline {
-                    pair: self.create_with_clipping(
-                        "circle_pipeline",
-                        &shaders::CircleShader {
-                            format: self.format,
-                        },
-                        &[self.projection],
-                        false,
-                        false,
-                    ),
-                    feature_stroke: None,
-                    dynamic_radius: None,
-                }
+        let Some(dashes) = dashes else {
+            return;
+        };
+        let line = line.initialize(|| LinePipeline {
+            flat_plain: None,
+            globe_plain: None,
+            flat: None,
+            structure: None,
+            elevated: None,
+            terrain: None,
+        });
+        self.init_plain_line_pipelines(line, needs);
+        self.init_styled_line_pipelines(line, dashes, needs);
+    }
+
+    fn init_plain_line_pipelines(&self, line: &mut LinePipeline, needs: &VectorPipelineNeeds) {
+        if needs.plain_flat_lines {
+            line.flat_plain.get_or_insert_with(|| {
+                self.create(
+                    "plain_line_flat_pipeline",
+                    &shaders::PlainLineShader {
+                        format: self.format,
+                        globe: false,
+                    },
+                    &[self.projection],
+                    false,
+                )
             });
-            if needs.circle_feature_stroke {
-                cp.feature_stroke.get_or_insert_with(|| {
-                    self.describe(
-                        "circle_feature_stroke_pipeline",
-                        &shaders::CircleFeatureStrokeShader {
-                            format: self.format,
-                        },
-                        false,
-                        false,
-                    )
-                    .initialize_with_prefix_layouts(self.device, &[self.projection])
-                });
+        }
+        if needs.plain_globe_lines {
+            line.globe_plain.get_or_insert_with(|| {
+                self.create(
+                    "plain_line_globe_pipeline",
+                    &shaders::PlainLineShader {
+                        format: self.format,
+                        globe: true,
+                    },
+                    &[self.projection],
+                    false,
+                )
+            });
+        }
+    }
+
+    fn init_styled_line_pipelines(
+        &self,
+        line: &mut LinePipeline,
+        dashes: &wgpu::BindGroupLayout,
+        needs: &VectorPipelineNeeds,
+    ) {
+        let line_shader = shaders::LineShader {
+            format: self.format,
+        };
+        if needs.flat_lines {
+            line.flat.get_or_insert_with(|| {
+                self.create(
+                    "line_pipeline",
+                    &line_shader,
+                    &[self.projection, dashes],
+                    false,
+                )
+            });
+        }
+        if needs.terrain_lines {
+            line.structure.get_or_insert_with(|| {
+                self.create(
+                    "spatial_line_pipeline",
+                    &line_shader,
+                    &[self.projection, dashes],
+                    true,
+                )
+            });
+            line.terrain
+                .get_or_insert_with(|| self.create_terrain_line(dashes));
+        }
+        if needs.elevated_lines {
+            line.elevated.get_or_insert_with(|| {
+                self.create_with_clipping(
+                    "elevated_line_pipeline",
+                    &line_shader,
+                    &[self.projection, dashes],
+                    true,
+                    false,
+                )
+            });
+        }
+    }
+
+    fn init_circle_pipelines(
+        &self,
+        circle: &mut Eventually<CirclePipeline>,
+        needs: &VectorPipelineNeeds,
+    ) {
+        if !needs.circle {
+            return;
+        }
+        let cp = circle.initialize(|| {
+            // Circles cross tile boundaries, as in GL JS, where each point belongs to one tile.
+            CirclePipeline {
+                pair: self.create_with_clipping(
+                    "circle_pipeline",
+                    &shaders::CircleShader {
+                        format: self.format,
+                    },
+                    &[self.projection],
+                    false,
+                    false,
+                ),
+                feature_stroke: None,
+                dynamic_radius: None,
             }
-            if needs.circle_dynamic_radius {
-                cp.dynamic_radius.get_or_insert_with(|| {
-                    self.describe(
-                        "circle_dynamic_radius_pipeline",
-                        &shaders::CircleDynamicRadiusShader {
-                            format: self.format,
-                        },
-                        false,
-                        false,
-                    )
-                    .initialize_with_prefix_layouts(self.device, &[self.projection])
-                });
-            }
+        });
+        if needs.circle_feature_stroke {
+            cp.feature_stroke.get_or_insert_with(|| {
+                self.describe(
+                    "circle_feature_stroke_pipeline",
+                    &shaders::CircleFeatureStrokeShader {
+                        format: self.format,
+                    },
+                    false,
+                    false,
+                )
+                .initialize_with_prefix_layouts(self.device, &[self.projection])
+            });
+        }
+        if needs.circle_dynamic_radius {
+            cp.dynamic_radius.get_or_insert_with(|| {
+                self.describe(
+                    "circle_dynamic_radius_pipeline",
+                    &shaders::CircleDynamicRadiusShader {
+                        format: self.format,
+                    },
+                    false,
+                    false,
+                )
+                .initialize_with_prefix_layouts(self.device, &[self.projection])
+            });
         }
     }
 }

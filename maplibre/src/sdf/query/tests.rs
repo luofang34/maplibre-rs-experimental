@@ -91,7 +91,10 @@ fn placed(buckets: Vec<SymbolLayerData>) -> World {
         by_tile.entry(key).or_default().push(bucket);
     }
     for (_, layers) in by_tile {
-        let at = layers[0].coords;
+        let Some(first_layer) = layers.first() else {
+            continue;
+        };
+        let at = first_layer.coords;
         world
             .tiles
             .spawn_mut(at)
@@ -425,14 +428,16 @@ fn query_rendered_symbols_resolves_pruned_properties_and_filters_from_geometry_i
         &options,
     )
     .expect("query succeeds");
-    assert_eq!(found.len(), 1);
+    let [first] = found.as_slice() else {
+        panic!("expected 1 rendered symbol, got {}", found.len());
+    };
     assert_eq!(
-        found[0].properties.get("name"),
+        first.properties.get("name"),
         Some(&serde_json::json!("Zürich"))
     );
     assert_eq!(
-        found[0].properties.get("class"),
+        first.properties.get("class"),
         Some(&serde_json::json!("city"))
     );
-    assert_eq!(found[0].state.get("hover"), Some(&serde_json::json!(true)));
+    assert_eq!(first.state.get("hover"), Some(&serde_json::json!(true)));
 }

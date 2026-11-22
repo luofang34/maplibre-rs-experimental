@@ -24,7 +24,7 @@ fn parse_raw_dem_header(bytes: &[u8]) -> Option<RawDemHeader> {
     if bytes.len() < DEM_RAW_HEADER_BYTES || read_u32_le(bytes, 0) != Some(LAYER_DEM_RAW_MAGIC) {
         return None;
     }
-    let _ = read_coords_at(bytes, 4)?;
+    read_coords_at(bytes, 4)?;
     let dim = read_u32_le(bytes, 16)?;
     let stride = read_u32_le(bytes, 20)?;
     let unpack = [

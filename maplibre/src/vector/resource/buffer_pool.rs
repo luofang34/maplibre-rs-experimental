@@ -460,10 +460,14 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> HasTile
     }
 }
 
-#[allow(clippy::expect_used)]
+#[expect(
+    clippy::expect_used,
+    reason = "live IndexEntry always references an allocated slab"
+)]
 fn live_slab<T>(slabs: &[Option<T>], page: u16) -> &T {
-    slabs[usize::from(page)]
-        .as_ref()
+    slabs
+        .get(usize::from(page))
+        .and_then(Option::as_ref)
         .expect("live IndexEntry always references an allocated slab")
 }
 
@@ -482,5 +486,6 @@ mod updates;
 mod upload;
 pub use allocation_error::AllocationError;
 pub use index::{IndexEntry, RingIndex};
+pub use upload::{LayerGeometryUpload, UniformLayerUpload};
 #[cfg(test)]
 mod tests;

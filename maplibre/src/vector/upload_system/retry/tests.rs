@@ -125,7 +125,7 @@ fn first_x(world: &World, coords: WorldTileCoords) -> f32 {
         .tiles
         .query::<&VectorLayerBucketComponent>(coords)
         .expect("committed tile");
-    let VectorLayerBucket::AvailableLayer(bucket) = &component.layers[0] else {
+    let crate::vector::VectorLayerBucket::AvailableLayer(bucket) = &component.layers[0] else {
         panic!("geometry");
     };
     bucket.buffer.buffer.vertices[0].position[0]

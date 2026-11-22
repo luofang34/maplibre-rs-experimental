@@ -277,7 +277,7 @@ async fn file_urls_support_whole_and_byte_range_reads_without_network() {
         .await
         .expect_err("range past EOF");
     assert!(oob.describe().contains("past the end"));
-    let _ = std::fs::remove_file(&path);
+    drop(std::fs::remove_file(&path));
 
     let missing = loader
         .fetch(&format!("file://{}", path.display()))

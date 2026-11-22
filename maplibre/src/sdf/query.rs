@@ -174,104 +174,13 @@ pub fn query_rendered_symbols_in(
         .resources
         .get::<PlacementBearing>()
         .map_or(0.0, |bearing| bearing.0);
-    let mut matches = Vec::new();
-    for hit in &placed.0 {
-        if options
-            .layers
-            .as_ref()
-            .is_some_and(|layers| !layers.contains(&hit.layer))
-            || !hit.hit_areas().any(|r| {
-                r[0] <= bounds[2] && r[2] >= bounds[0] && r[1] <= bounds[3] && r[3] >= bounds[1]
-            })
-        {
-            continue;
-        }
-        let Some(layer) = world
-            .tiles
-            .query::<&SymbolLayersDataComponent>(hit.coords)
-            .and_then(|component| {
-                component
-                    .layers
-                    .iter()
-                    .find(|layer| layer.style_layer_id == hit.layer)
-            })
-        else {
-            continue;
-        };
-        let Some(feature) = layer.features.get(hit.feature) else {
-            continue;
-        };
-        let Some(style_layer) = style.layers.iter().find(|layer| layer.id == hit.layer) else {
-            continue;
-        };
-        if style_layer.is_hidden() {
-            continue;
-        }
-        let resolved_properties = resolve_symbol_properties(
-            world,
-            hit.coords,
-            style_layer.source.as_deref(),
-            &layer.source_layer,
-            &feature.data,
-        );
-        if let Some(filter) = &filter {
-            let id = feature
-                .data
-                .id
-                .map(|id| Value::from_json(&serde_json::json!(id)));
-            let passes = filter.evaluate(&FeatureContext {
-                properties: resolved_properties.as_ref(),
-                geometry_type: feature.data.geometry_type,
-                id,
-                zoom: f64::from(u8::from(hit.coords.z)),
-            });
-            if !passes {
-                continue;
-            }
-        }
-        let scale = 2_f64.powi(i32::from(u8::from(hit.coords.z)));
-        let x = (f64::from(hit.coords.x) + f64::from(feature.text_anchor.x) / 4096.0) / scale;
-        let y = (f64::from(hit.coords.y) + f64::from(feature.text_anchor.y) / 4096.0) / scale;
-        let zoom = f64::from(u8::from(hit.coords.z));
-        let draw_order = match &style_layer.paint {
-            Some(crate::style::layer::LayerPaint::Symbol(paint))
-                if crate::sdf::tessellation::sorts_by_height(paint, zoom) =>
-            {
-                // As GL JS `sortFeatures`: by height on the rotated screen, equal heights the
-                // later feature first.
-                let anchor = [feature.text_anchor.x, feature.text_anchor.y];
-                (
-                    crate::sdf::tessellation::rotated_height(anchor, bearing),
-                    -(hit.feature as i64),
-                )
-            }
-            _ => (0, hit.feature as i64),
-        };
-        matches.push((
-            style_layer.index,
-            (u8::from(hit.coords.z), hit.coords.y, hit.coords.x),
-            draw_order,
-            RenderedSymbol {
-                layer: hit.layer.clone(),
-                source: style_layer.source.clone(),
-                source_layer: layer.source_layer.clone(),
-                id: feature.data.id,
-                properties: crate::query::source_properties(resolved_properties.as_ref()),
-                state: crate::style::feature_state::extract_feature_state(
-                    resolved_properties.as_ref(),
-                ),
-                geometry_type: feature.data.geometry_type,
-                text: feature.str.clone(),
-                coordinates: [
-                    (x * 360.0 + 180.0).rem_euclid(360.0) - 180.0,
-                    (std::f64::consts::PI * (1.0 - 2.0 * y))
-                        .sinh()
-                        .atan()
-                        .to_degrees(),
-                ],
-            },
-        ));
-    }
+    let mut matches: Vec<_> = placed
+        .0
+        .iter()
+        .filter_map(|hit| {
+            evaluate_symbol_hit(world, style, bounds, options, filter.as_ref(), bearing, hit)
+        })
+        .collect();
     // As GL JS `queryRenderedSymbols`: the topmost layer first, its tiles from the lowest zoom
     // and then top to bottom, and in each tile the labels drawn last first. A tile's labels are
     // drawn by symbol-sort-key, or by height on the rotated screen where they may overlap.
@@ -280,6 +189,126 @@ pub fn query_rendered_symbols_in(
         .into_iter()
         .map(|(_, _, _, feature)| feature)
         .collect())
+}
+
+type SymbolHitMatch = (u32, (u8, i32, i32), (i64, i64), RenderedSymbol);
+
+fn evaluate_symbol_hit(
+    world: &World,
+    style: &Style,
+    bounds: [f64; 4],
+    options: &QueryOptions,
+    filter: Option<&Filter>,
+    bearing: f64,
+    hit: &PlacedSymbol,
+) -> Option<SymbolHitMatch> {
+    if options
+        .layers
+        .as_ref()
+        .is_some_and(|layers| !layers.contains(&hit.layer))
+        || !hit.hit_areas().any(|r| {
+            r[0] <= bounds[2] && r[2] >= bounds[0] && r[1] <= bounds[3] && r[3] >= bounds[1]
+        })
+    {
+        return None;
+    }
+    let layer = world
+        .tiles
+        .query::<&SymbolLayersDataComponent>(hit.coords)?
+        .layers
+        .iter()
+        .find(|layer| layer.style_layer_id == hit.layer)?;
+    let feature = layer.features.get(hit.feature)?;
+    let style_layer = style.layers.iter().find(|layer| layer.id == hit.layer)?;
+    if style_layer.is_hidden() {
+        return None;
+    }
+    let resolved_properties = resolve_symbol_properties(
+        world,
+        hit.coords,
+        style_layer.source.as_deref(),
+        &layer.source_layer,
+        &feature.data,
+    );
+    if let Some(filter) = filter {
+        let id = feature
+            .data
+            .id
+            .map(|id| Value::from_json(&serde_json::json!(id)));
+        let passes = filter.evaluate(&FeatureContext {
+            properties: resolved_properties.as_ref(),
+            geometry_type: feature.data.geometry_type,
+            id,
+            zoom: f64::from(u8::from(hit.coords.z)),
+        });
+        if !passes {
+            return None;
+        }
+    }
+    Some((
+        style_layer.index,
+        (u8::from(hit.coords.z), hit.coords.y, hit.coords.x),
+        symbol_draw_order(style_layer, feature, hit, bearing),
+        build_rendered_symbol(
+            hit,
+            style_layer,
+            &layer.source_layer,
+            feature,
+            resolved_properties.as_ref(),
+        ),
+    ))
+}
+
+fn symbol_draw_order(
+    style_layer: &crate::style::layer::StyleLayer,
+    feature: &crate::sdf::Feature,
+    hit: &PlacedSymbol,
+    bearing: f64,
+) -> (i64, i64) {
+    let zoom = f64::from(u8::from(hit.coords.z));
+    match &style_layer.paint {
+        Some(crate::style::layer::LayerPaint::Symbol(paint))
+            if crate::sdf::tessellation::sorts_by_height(paint, zoom) =>
+        {
+            // As GL JS `sortFeatures`: by height on the rotated screen, equal heights the
+            // later feature first.
+            let anchor = [feature.text_anchor.x, feature.text_anchor.y];
+            (
+                crate::sdf::tessellation::rotated_height(anchor, bearing),
+                -(hit.feature as i64),
+            )
+        }
+        _ => (0, hit.feature as i64),
+    }
+}
+
+fn build_rendered_symbol(
+    hit: &PlacedSymbol,
+    style_layer: &crate::style::layer::StyleLayer,
+    source_layer: &str,
+    feature: &crate::sdf::Feature,
+    resolved_properties: &crate::style::expression::FeatureProperties,
+) -> RenderedSymbol {
+    let scale = 2_f64.powi(i32::from(u8::from(hit.coords.z)));
+    let x = (f64::from(hit.coords.x) + f64::from(feature.text_anchor.x) / 4096.0) / scale;
+    let y = (f64::from(hit.coords.y) + f64::from(feature.text_anchor.y) / 4096.0) / scale;
+    RenderedSymbol {
+        layer: hit.layer.clone(),
+        source: style_layer.source.clone(),
+        source_layer: source_layer.to_owned(),
+        id: feature.data.id,
+        properties: crate::query::source_properties(resolved_properties),
+        state: crate::style::feature_state::extract_feature_state(resolved_properties),
+        geometry_type: feature.data.geometry_type,
+        text: feature.str.clone(),
+        coordinates: [
+            (x * 360.0 + 180.0).rem_euclid(360.0) - 180.0,
+            (std::f64::consts::PI * (1.0 - 2.0 * y))
+                .sinh()
+                .atan()
+                .to_degrees(),
+        ],
+    }
 }
 
 fn resolve_symbol_properties<'a>(

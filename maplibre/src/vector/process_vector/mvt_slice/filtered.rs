@@ -28,7 +28,7 @@ pub(in crate::vector::process_vector) fn try_decode_mvt_filtered_with_keys_resca
         .iter()
         .rposition(|byte| *byte != 0)
         .map_or(0, |idx| idx + 1);
-    let bytes = &data[..end];
+    let bytes = data.get(..end).unwrap_or(&[]);
     if bytes.is_empty() {
         return None;
     }
@@ -52,7 +52,7 @@ pub(in crate::vector::process_vector) fn try_decode_mvt_filtered_with_keys_resca
                     None => {
                         let mut layer = tile::Layer::decode(layer_bytes).ok()?;
                         if let Some((from, to)) = rescale {
-                            let _ = into_descendant_layer(&mut layer, from, to);
+                            let _changed = into_descendant_layer(&mut layer, from, to);
                         }
                         layer
                     }
@@ -103,11 +103,43 @@ fn scan_mvt_layer_extent(layer_bytes: &[u8]) -> Option<u32> {
     Some(extent.unwrap_or(4096))
 }
 
+struct PrunedLayerParts {
+    name: String,
+    version: u32,
+    extent: Option<u32>,
+    features: Vec<tile::Feature>,
+    compact_keys: Vec<String>,
+    key_remap: Vec<u32>,
+    value_spans: Vec<(usize, usize)>,
+}
+
 fn decode_layer_pruned(
     layer_bytes: &[u8],
     needed: &FxHashSet<String>,
     rescale: Option<(WorldTileCoords, WorldTileCoords)>,
 ) -> Option<tile::Layer> {
+    let mut parts = parse_pruned_layer_parts(layer_bytes, needed, rescale)?;
+    let (compact_values, val_remap) = compact_layer_tags_and_values(layer_bytes, &mut parts)?;
+    for feature in &mut parts.features {
+        for [_, v_slot] in feature.tags.as_chunks_mut::<2>().0 {
+            *v_slot = *val_remap.get(*v_slot as usize)?;
+        }
+    }
+    Some(tile::Layer {
+        version: parts.version,
+        name: parts.name,
+        features: parts.features,
+        keys: parts.compact_keys,
+        values: compact_values,
+        extent: parts.extent,
+    })
+}
+
+fn parse_pruned_layer_parts(
+    layer_bytes: &[u8],
+    needed: &FxHashSet<String>,
+    rescale: Option<(WorldTileCoords, WorldTileCoords)>,
+) -> Option<PrunedLayerParts> {
     let frame = match rescale {
         Some((from, to)) => {
             let layer_extent = scan_mvt_layer_extent(layer_bytes)?;
@@ -167,69 +199,54 @@ fn decode_layer_pruned(
                 pos = end;
                 value_spans.push((start, end));
             }
-            (5, 0) => {
-                extent = Some(u32::try_from(read_varint(layer_bytes, &mut pos)?).ok()?);
-            }
-            (15, 0) => {
-                version = Some(u32::try_from(read_varint(layer_bytes, &mut pos)?).ok()?);
-            }
+            (5, 0) => extent = Some(u32::try_from(read_varint(layer_bytes, &mut pos)?).ok()?),
+            (15, 0) => version = Some(u32::try_from(read_varint(layer_bytes, &mut pos)?).ok()?),
             (1 | 2 | 3 | 4 | 5 | 15, _) | (0, _) => return None,
-            _ => {
-                skip_wire_value(layer_bytes, &mut pos, wire_type)?;
-            }
+            _ => skip_wire_value(layer_bytes, &mut pos, wire_type)?,
         }
     }
+    Some(PrunedLayerParts {
+        name: name?,
+        version: version?,
+        extent,
+        features,
+        compact_keys,
+        key_remap,
+        value_spans,
+    })
+}
 
-    let name = name?;
-    let version = version?;
-
-    // First compact tags using remapped key indices, temporarily keeping original value indices.
-    let mut val_remap = vec![u32::MAX; value_spans.len()];
-    for feature in &mut features {
+fn compact_layer_tags_and_values(
+    layer_bytes: &[u8],
+    parts: &mut PrunedLayerParts,
+) -> Option<(Vec<tile::Value>, Vec<u32>)> {
+    let mut val_remap = vec![u32::MAX; parts.value_spans.len()];
+    for feature in &mut parts.features {
         if !feature.tags.len().is_multiple_of(2) {
             return None;
         }
-        let mut write = 0_usize;
-        for read in (0..feature.tags.len()).step_by(2) {
-            let k_idx = feature.tags[read] as usize;
-            let orig_v_idx = feature.tags[read + 1];
-            let &mapped_k = key_remap.get(k_idx)?;
+        let mut kept = Vec::with_capacity(feature.tags.len());
+        for &[raw_k, orig_v_idx] in feature.tags.as_chunks::<2>().0 {
+            let &mapped_k = parts.key_remap.get(raw_k as usize)?;
             let used_slot = val_remap.get_mut(orig_v_idx as usize)?;
             if mapped_k != u32::MAX {
                 *used_slot = 0;
-                feature.tags[write] = mapped_k;
-                feature.tags[write + 1] = orig_v_idx;
-                write += 2;
+                kept.push(mapped_k);
+                kept.push(orig_v_idx);
             }
         }
-        feature.tags.truncate(write);
+        feature.tags = kept;
     }
 
-    // Decode only the `tile::Value` entries actually referenced by retained tags.
     let mut compact_values = Vec::new();
-    for (orig_idx, (start, end)) in value_spans.into_iter().enumerate() {
-        if val_remap[orig_idx] == 0 {
-            val_remap[orig_idx] = u32::try_from(compact_values.len()).ok()?;
-            compact_values.push(tile::Value::decode(&layer_bytes[start..end]).ok()?);
+    for (remap, &(start, end)) in val_remap.iter_mut().zip(&parts.value_spans) {
+        if *remap == 0 {
+            *remap = u32::try_from(compact_values.len()).ok()?;
+            let raw = layer_bytes.get(start..end)?;
+            compact_values.push(tile::Value::decode(raw).ok()?);
         }
     }
-
-    // Rewrite kept value indices into the compacted value table.
-    for feature in &mut features {
-        for slot in (1..feature.tags.len()).step_by(2) {
-            let orig_v_idx = feature.tags[slot] as usize;
-            feature.tags[slot] = val_remap[orig_v_idx];
-        }
-    }
-
-    Some(tile::Layer {
-        version,
-        name,
-        features,
-        keys: compact_keys,
-        values: compact_values,
-        extent,
-    })
+    Some((compact_values, val_remap))
 }
 
 #[cfg(test)]

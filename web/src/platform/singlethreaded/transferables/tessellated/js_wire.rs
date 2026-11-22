@@ -10,15 +10,15 @@ use js_sys::{ArrayBuffer, Uint8Array};
 #[cfg(any(test, feature = "renderer"))]
 use maplibre::vector::feature_paint::{wire::decode_feature_paint, BucketFeatureEntry};
 use maplibre::{
-    benchmarking::tessellation::{IndexDataType, OverAlignedVertexBuffer},
     coords::{WorldTileCoords, ZoomLevel},
     render::ShaderVertex,
     vector::AvailableVectorLayerBucket,
 };
 
+pub(super) use super::prepacked_wire::TessellatedEncodeInput;
 use super::prepacked_wire::{
-    assemble_bucket, build_decoded_buffer, encode_prepacked_layer_tessellated, format_for_magic,
-    WireFormat, LAYER_TESSELLATED_RAW_MAGIC,
+    build_decoded_buffer, encode_prepacked_layer_tessellated, format_for_magic, WireFormat,
+    LAYER_TESSELLATED_RAW_MAGIC,
 };
 
 const HEADER_BYTES: usize = 60;
@@ -39,21 +39,21 @@ struct WireHeader {
 }
 
 fn read_u32_le(hdr: &[u8; HEADER_BYTES], offset: usize) -> u32 {
-    let mut buf = [0_u8; 4];
-    buf.copy_from_slice(&hdr[offset..offset + 4]);
-    u32::from_le_bytes(buf)
+    hdr.get(offset..offset + 4)
+        .and_then(|s| <[u8; 4]>::try_from(s).ok())
+        .map_or(0, u32::from_le_bytes)
 }
 
 fn read_u64_le(hdr: &[u8; HEADER_BYTES], offset: usize) -> u64 {
-    let mut buf = [0_u8; 8];
-    buf.copy_from_slice(&hdr[offset..offset + 8]);
-    u64::from_le_bytes(buf)
+    hdr.get(offset..offset + 8)
+        .and_then(|s| <[u8; 8]>::try_from(s).ok())
+        .map_or(0, u64::from_le_bytes)
 }
 
 fn read_i32_le(hdr: &[u8; HEADER_BYTES], offset: usize) -> i32 {
-    let mut buf = [0_u8; 4];
-    buf.copy_from_slice(&hdr[offset..offset + 4]);
-    i32::from_le_bytes(buf)
+    hdr.get(offset..offset + 4)
+        .and_then(|s| <[u8; 4]>::try_from(s).ok())
+        .map_or(0, i32::from_le_bytes)
 }
 
 fn parse_header(hdr: &[u8; HEADER_BYTES], total_len: usize) -> Option<WireHeader> {
@@ -104,79 +104,58 @@ fn parse_header(hdr: &[u8; HEADER_BYTES], total_len: usize) -> Option<WireHeader
     })
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn encode_layer_tessellated(
-    coords: WorldTileCoords,
-    buffer: OverAlignedVertexBuffer<ShaderVertex, IndexDataType>,
-    feature_indices: Vec<u32>,
-    feature_colors: Vec<[f32; 4]>,
-    feature_sort_keys: Vec<f32>,
-    layer_name_str: &str,
-    style_layer_id: &str,
-    paint_bytes: Option<&[u8]>,
-    style_type: &str,
-    allow_prepack: bool,
-) -> Vec<u8> {
-    if (allow_prepack && !style_type.is_empty() && !buffer.buffer.vertices.is_empty())
-        || buffer.prepacked_gpu().is_some()
+pub(super) fn encode_layer_tessellated(input: TessellatedEncodeInput<'_>) -> Vec<u8> {
+    if (input.allow_prepack
+        && !input.style_type.is_empty()
+        && !input.buffer.buffer.vertices.is_empty())
+        || input.buffer.prepacked_gpu().is_some()
     {
-        return encode_prepacked_layer_tessellated(
-            HEADER_BYTES,
-            coords,
-            buffer,
-            feature_indices,
-            feature_colors,
-            feature_sort_keys,
-            layer_name_str,
-            style_layer_id,
-            paint_bytes,
-            style_type,
-        );
+        return encode_prepacked_layer_tessellated(HEADER_BYTES, input);
     }
-    let shared_key = buffer.shared_geometry_key().unwrap_or(0);
-    let usable_indices = buffer.usable_indices;
-    let raw_vertices = buffer.buffer.vertices;
-    let raw_indices = buffer.buffer.indices;
-    let paint_slice = paint_bytes.unwrap_or_default();
+    let shared_key = input.buffer.shared_geometry_key().unwrap_or(0);
+    let usable_indices = input.buffer.usable_indices;
+    let raw_vertices = input.buffer.buffer.vertices;
+    let raw_indices = input.buffer.buffer.indices;
+    let paint_slice = input.paint_bytes.unwrap_or_default();
 
     let total_len = HEADER_BYTES
-        + layer_name_str.len()
-        + style_layer_id.len()
+        + input.source_layer.len()
+        + input.style_layer_id.len()
         + raw_vertices.len() * std::mem::size_of::<ShaderVertex>()
         + raw_indices.len() * 4
-        + feature_indices.len() * 4
-        + feature_colors.len() * 16
-        + feature_sort_keys.len() * 4
+        + input.feature_indices.len() * 4
+        + input.feature_colors.len() * 16
+        + input.feature_sort_keys.len() * 4
         + paint_slice.len();
 
     let mut out = Vec::with_capacity(total_len);
     out.extend_from_slice(&LAYER_TESSELLATED_RAW_MAGIC.to_le_bytes());
-    out.extend_from_slice(&coords.x.to_le_bytes());
-    out.extend_from_slice(&coords.y.to_le_bytes());
-    out.extend_from_slice(&u32::from(u8::from(coords.z)).to_le_bytes());
+    out.extend_from_slice(&input.coords.x.to_le_bytes());
+    out.extend_from_slice(&input.coords.y.to_le_bytes());
+    out.extend_from_slice(&u32::from(u8::from(input.coords.z)).to_le_bytes());
     out.extend_from_slice(&usable_indices.to_le_bytes());
-    out.extend_from_slice(&(layer_name_str.len() as u32).to_le_bytes());
-    out.extend_from_slice(&(style_layer_id.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(input.source_layer.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(input.style_layer_id.len() as u32).to_le_bytes());
     out.extend_from_slice(&(raw_vertices.len() as u32).to_le_bytes());
     out.extend_from_slice(&(raw_indices.len() as u32).to_le_bytes());
-    out.extend_from_slice(&(feature_indices.len() as u32).to_le_bytes());
-    out.extend_from_slice(&(feature_colors.len() as u32).to_le_bytes());
-    out.extend_from_slice(&(feature_sort_keys.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(input.feature_indices.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(input.feature_colors.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(input.feature_sort_keys.len() as u32).to_le_bytes());
     out.extend_from_slice(&(paint_slice.len() as u32).to_le_bytes());
     out.extend_from_slice(&shared_key.to_le_bytes());
 
-    out.extend_from_slice(layer_name_str.as_bytes());
-    out.extend_from_slice(style_layer_id.as_bytes());
+    out.extend_from_slice(input.source_layer.as_bytes());
+    out.extend_from_slice(input.style_layer_id.as_bytes());
     out.extend_from_slice(bytemuck::cast_slice(&raw_vertices));
     drop(raw_vertices);
     out.extend_from_slice(bytemuck::cast_slice(&raw_indices));
     drop(raw_indices);
-    out.extend_from_slice(bytemuck::cast_slice(&feature_indices));
-    drop(feature_indices);
-    out.extend_from_slice(bytemuck::cast_slice(&feature_colors));
-    drop(feature_colors);
-    out.extend_from_slice(bytemuck::cast_slice(&feature_sort_keys));
-    drop(feature_sort_keys);
+    out.extend_from_slice(bytemuck::cast_slice(&input.feature_indices));
+    drop(input.feature_indices);
+    out.extend_from_slice(bytemuck::cast_slice(&input.feature_colors));
+    drop(input.feature_colors);
+    out.extend_from_slice(bytemuck::cast_slice(&input.feature_sort_keys));
+    drop(input.feature_sort_keys);
     out.extend_from_slice(paint_slice);
     out
 }
@@ -263,15 +242,15 @@ pub(super) fn decode_bucket_from_bytes(bytes: &[u8]) -> Option<AvailableVectorLa
     bytemuck::cast_slice_mut(&mut feature_sort_keys)
         .copy_from_slice(take(&mut cur, h.feature_sort_key_count * 4)?);
 
-    Some(assemble_bucket(
-        h.coords,
+    Some(AvailableVectorLayerBucket {
+        coords: h.coords,
         source_layer,
         style_layer_id,
         buffer,
         feature_indices,
         feature_colors,
         feature_sort_keys,
-    ))
+    })
 }
 
 #[cfg(any(test, feature = "renderer"))]
@@ -341,15 +320,15 @@ pub(crate) fn decode_from_js_slice(
     };
 
     Some((
-        Box::new(assemble_bucket(
-            h.coords,
+        Box::new(AvailableVectorLayerBucket {
+            coords: h.coords,
             source_layer,
             style_layer_id,
             buffer,
             feature_indices,
             feature_colors,
             feature_sort_keys,
-        )),
+        }),
         paint,
     ))
 }

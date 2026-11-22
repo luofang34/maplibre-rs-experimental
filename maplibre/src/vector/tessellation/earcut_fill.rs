@@ -158,7 +158,10 @@ fn point_in_ring(ring: &[[f32; 2]], [x, y]: [f32; 2]) -> bool {
 }
 
 fn validate_ring_topology(rings: &[Vec<[f32; 2]>], even_odd: bool) -> bool {
-    let outer_area = signed_area(&rings[0]);
+    let Some(outer) = rings.first() else {
+        return false;
+    };
+    let outer_area = signed_area(outer);
     if !outer_area.is_finite() || outer_area.abs() < 1e-4 {
         return false;
     }
@@ -170,11 +173,14 @@ fn validate_ring_topology(rings: &[Vec<[f32; 2]>], even_odd: bool) -> bool {
         if !even_odd && outer_area * area > 0.0 {
             return false;
         }
-        if !point_in_ring(&rings[0], hole[0]) {
+        let Some(&hole_start) = hole.first() else {
+            return false;
+        };
+        if !point_in_ring(outer, hole_start) {
             return false;
         }
         for (j, other_hole) in rings.iter().enumerate().skip(1) {
-            if i != j && point_in_ring(other_hole, hole[0]) {
+            if i != j && point_in_ring(other_hole, hole_start) {
                 return false;
             }
         }
@@ -186,8 +192,9 @@ fn rings_have_intersections(rings: &[Vec<[f32; 2]>]) -> bool {
     for (r0, ring_a) in rings.iter().enumerate() {
         let len_a = ring_a.len();
         for e0 in 0..len_a {
-            let a0 = ring_a[e0];
-            let a1 = ring_a[(e0 + 1) % len_a];
+            let (Some(&a0), Some(&a1)) = (ring_a.get(e0), ring_a.get((e0 + 1) % len_a)) else {
+                continue;
+            };
             let ax_min = a0[0].min(a1[0]);
             let ax_max = a0[0].max(a1[0]);
             let ay_min = a0[1].min(a1[1]);
@@ -200,8 +207,10 @@ fn rings_have_intersections(rings: &[Vec<[f32; 2]>]) -> bool {
                     if r0 == r1 && (e1 == e0 + 1 || (e0 == 0 && e1 + 1 == len_b)) {
                         continue;
                     }
-                    let b0 = ring_b[e1];
-                    let b1 = ring_b[(e1 + 1) % len_b];
+                    let (Some(&b0), Some(&b1)) = (ring_b.get(e1), ring_b.get((e1 + 1) % len_b))
+                    else {
+                        continue;
+                    };
                     if ax_max < b0[0].min(b1[0])
                         || b0[0].max(b1[0]) < ax_min
                         || ay_max < b0[1].min(b1[1])

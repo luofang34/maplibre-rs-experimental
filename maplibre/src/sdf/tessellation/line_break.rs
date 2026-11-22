@@ -129,8 +129,11 @@ pub(super) fn wrap(
     let mut ends = vec![last.index];
     let mut prior = last.prior;
     while let Some(at) = prior {
-        ends.push(potential[at].index);
-        prior = potential[at].prior;
+        let Some(candidate) = potential.get(at) else {
+            break;
+        };
+        ends.push(candidate.index);
+        prior = candidate.prior;
     }
     ends.reverse();
     let mut lines = Vec::new();
@@ -146,10 +149,10 @@ pub(super) fn wrap(
 }
 
 fn trimmed(chars: &[char], Range { mut start, mut end }: Range<usize>) -> Range<usize> {
-    while start < end && chars[start].is_whitespace() {
+    while start < end && chars.get(start).is_some_and(|c| c.is_whitespace()) {
         start += 1;
     }
-    while end > start && chars[end - 1].is_whitespace() {
+    while end > start && chars.get(end - 1).is_some_and(|c| c.is_whitespace()) {
         end -= 1;
     }
     start..end

@@ -168,7 +168,7 @@ impl MapEventBus {
         id
     }
 
-    /// Removes a previously registered callback listener; returns whether it was present.
+    /// Removes an existing callback listener; returns whether it was present.
     pub fn remove_listener(&self, id: ListenerId) -> bool {
         let mut inner = self.inner.borrow_mut();
         let before = inner.listeners.len();

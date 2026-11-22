@@ -1,7 +1,18 @@
 //! Render-free single-threaded tile worker WASM entrypoints for `maplibre`.
 
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented
+    )
+)]
 #![forbid(unsafe_code)]
 #![deny(dead_code, unused_imports, missing_docs)]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 #[cfg(not(any(no_pendantic_os_check, target_arch = "wasm32")))]
 compile_error!("web-tile-worker works only on wasm32.");

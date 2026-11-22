@@ -127,8 +127,10 @@ fn ring_from_projected(pts: Vec<Projected>) -> Option<Vec<Projected>> {
         return None;
     }
     let mut ring = pts;
-    if ring.first().map(|p| (p.x, p.y)) != ring.last().map(|p| (p.x, p.y)) {
-        ring.push(ring[0]);
+    if let (Some(&first), Some(&last)) = (ring.first(), ring.last()) {
+        if (first.x, first.y) != (last.x, last.y) {
+            ring.push(first);
+        }
     }
     Some(ring)
 }
@@ -205,13 +207,11 @@ fn intersection_depth_part(
     }
     if matches!(part, ExtrusionPart::Full | ExtrusionPart::Walls) {
         for ring in rings {
-            for edge in 0..ring.len().saturating_sub(1) {
-                let quad = [
-                    (ring[edge], top),
-                    (ring[edge + 1], top),
-                    (ring[edge + 1], base),
-                    (ring[edge], base),
-                ];
+            for pair in ring.windows(2) {
+                let &[a, b] = pair else {
+                    continue;
+                };
+                let quad = [(a, top), (b, top), (b, base), (a, base)];
                 let clipped: Vec<Projected> =
                     super::globe::project_clipped_ring_3d(&quad, &project_wp)
                         .into_iter()
@@ -247,6 +247,72 @@ pub(super) fn intersection_depth(
     )
 }
 
+fn extrusion_rings(
+    polygon: &geo_types::Polygon<f64>,
+    tile: &QueryTile,
+    translate: [f64; 2],
+) -> Vec<Vec<[f64; 2]>> {
+    std::iter::once(polygon.exterior())
+        .chain(polygon.interiors())
+        .map(|ring| {
+            ring.coords()
+                .map(|point| {
+                    [
+                        tile.origin[0] + point.x * tile.world_per_unit + translate[0],
+                        tile.origin[1] + point.y * tile.world_per_unit + translate[1],
+                    ]
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn sample_extrusion_ground(
+    rings: &[Vec<[f64; 2]>],
+    world: &World,
+    resolved: &ResolvedFrameView,
+    terrain_index: Option<&TerrainCoverageIndex>,
+) -> f64 {
+    let Some(ext) = rings.first().filter(|ext| !ext.is_empty()) else {
+        return 0.0;
+    };
+    let count = ext.len().saturating_sub(1).max(1);
+    let sum = ext
+        .iter()
+        .take(count)
+        .fold([0.0, 0.0], |acc, pt| [acc[0] + pt[0], acc[1] + pt[1]]);
+    sample_ground_elevation(
+        world,
+        resolved,
+        terrain_index,
+        [sum[0] / count as f64, sum[1] / count as f64],
+    )
+}
+
+fn eval_extrusion_metres(
+    property: &Option<crate::style::property::StyleProperty<f32>>,
+    properties: &crate::style::expression::FeatureProperties,
+    zoom: f64,
+) -> f64 {
+    property
+        .as_ref()
+        .and_then(|value| value.evaluate_for(properties, zoom))
+        .map_or(0.0, f64::from)
+}
+
+fn eval_extrusion_datum(
+    property: &Option<crate::style::property::StyleProperty<String>>,
+    properties: &crate::style::expression::FeatureProperties,
+    zoom: f64,
+) -> ElevationDatum {
+    property
+        .as_ref()
+        .and_then(|value| value.evaluate_for(properties, zoom))
+        .map_or(ElevationDatum::CentroidAgl, |value| {
+            ElevationDatum::from_extrusion_str(&value)
+        })
+}
+
 /// Where a fill extrusion stands: its rings in world pixels and its base and top in metres.
 pub(super) fn extruded_depth(
     polygon: &geo_types::Polygon<f64>,
@@ -264,20 +330,6 @@ pub(super) fn extruded_depth(
         return None;
     };
     let zoom = resolved.zoom.value();
-    let metres = |property: &Option<crate::style::property::StyleProperty<f32>>| {
-        property
-            .as_ref()
-            .and_then(|value| value.evaluate_for(properties, zoom))
-            .map_or(0.0, f64::from)
-    };
-    let datum = |property: &Option<crate::style::property::StyleProperty<String>>| {
-        property
-            .as_ref()
-            .and_then(|value| value.evaluate_for(properties, zoom))
-            .map_or(ElevationDatum::CentroidAgl, |value| {
-                ElevationDatum::from_extrusion_str(&value)
-            })
-    };
     let part = paint
         .fill_extrusion_part
         .as_ref()
@@ -285,41 +337,18 @@ pub(super) fn extruded_depth(
         .map_or(ExtrusionPart::Full, |value| {
             ExtrusionPart::from_extrusion_str(&value)
         });
-    let world_ring = |ring: &geo_types::LineString<f64>| -> Vec<[f64; 2]> {
-        ring.coords()
-            .map(|point| {
-                [
-                    tile.origin[0] + point.x * tile.world_per_unit + candidate.translate[0],
-                    tile.origin[1] + point.y * tile.world_per_unit + candidate.translate[1],
-                ]
-            })
-            .collect()
-    };
-    let rings: Vec<Vec<[f64; 2]>> = std::iter::once(polygon.exterior())
-        .chain(polygon.interiors())
-        .map(world_ring)
-        .collect();
-    let base_datum = datum(&paint.fill_extrusion_base_datum);
-    let height_datum = datum(&paint.fill_extrusion_height_datum);
+    let rings = extrusion_rings(polygon, tile, candidate.translate);
+    let base_datum = eval_extrusion_datum(&paint.fill_extrusion_base_datum, properties, zoom);
+    let height_datum = eval_extrusion_datum(&paint.fill_extrusion_height_datum, properties, zoom);
     let ground = if terrain_index.is_some()
         && (base_datum != ElevationDatum::Msl || height_datum != ElevationDatum::Msl)
     {
-        let ext = &rings[0];
-        let count = ext.len().saturating_sub(1).max(1);
-        let sum = ext[..count]
-            .iter()
-            .fold([0.0, 0.0], |acc, pt| [acc[0] + pt[0], acc[1] + pt[1]]);
-        sample_ground_elevation(
-            world,
-            resolved,
-            terrain_index,
-            [sum[0] / count as f64, sum[1] / count as f64],
-        )
+        sample_extrusion_ground(&rings, world, resolved, terrain_index)
     } else {
         0.0
     };
-    let raw_base = metres(&paint.fill_extrusion_base);
-    let raw_top = metres(&paint.fill_extrusion_height);
+    let raw_base = eval_extrusion_metres(&paint.fill_extrusion_base, properties, zoom);
+    let raw_top = eval_extrusion_metres(&paint.fill_extrusion_height, properties, zoom);
     let base = raw_base
         + if base_datum == ElevationDatum::Msl {
             0.0

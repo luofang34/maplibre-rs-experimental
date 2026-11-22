@@ -40,104 +40,27 @@ impl VectorPreparedState {
             self.needs_terrain_lines = self.needs_flat_lines && terrain_needed;
             return false;
         }
-        let mut needs_fill = false;
-        let mut needs_fill_opaque = false;
-        let mut needs_fill_blended = false;
-        let mut has_flat_line = false;
-        let mut needs_elevated_lines = false;
-        let mut needs_circle = false;
-        let mut needs_circle_feature_stroke = false;
-        #[cfg_attr(not(feature = "geojson"), allow(unused_mut))]
-        let mut needs_circle_dynamic_radius = false;
-        let mut extrusion_minzoom: Option<f64> = None;
-        let mut needs_extrusion_opaque = false;
-        let mut needs_extrusion_pattern = false;
-        let mut needs_extrusion_translucent = false;
-        let mut extrusion_layers = Vec::new();
-        let mut has_pattern_paint = false;
-        let mut has_dash_or_pattern_line = false;
-        for layer in &style.layers {
-            if layer.type_ == "fill" {
-                needs_fill = true;
-                let (op, bl) = classify_fill_opacity(layer);
-                needs_fill_opaque |= op;
-                needs_fill_blended |= bl;
-            } else if layer.type_ == "line" {
-                if matches!(
-                    crate::vector::structures::kind(layer),
-                    Some(crate::vector::structures::StructureKind::ElevatedLine)
-                ) {
-                    needs_elevated_lines = true;
-                } else {
-                    has_flat_line = true;
-                }
-            } else if layer.type_ == "circle" {
-                needs_circle = true;
-                if !layer.is_hidden() {
-                    if let Some(LayerPaint::Circle(circle)) = layer.paint.as_ref() {
-                        if circle.stroke_color_per_feature().is_some() {
-                            needs_circle_feature_stroke = true;
-                        }
-                    }
-                    #[cfg(feature = "geojson")]
-                    if crate::geojson::update::dynamic_points::uses_dynamic_circle_metadata(
-                        style, layer,
-                    ) {
-                        needs_circle_dynamic_radius = true;
-                    }
-                }
-            } else if layer.type_ == "fill-extrusion" && !layer.is_hidden() {
-                let layer_minzoom = layer.minzoom.unwrap_or(0.0);
-                extrusion_minzoom =
-                    Some(extrusion_minzoom.map_or(layer_minzoom, |m| m.min(layer_minzoom)));
-                let mut is_translucent = false;
-                if let Some(paint) = layer.paint.as_ref() {
-                    if let LayerPaint::FillExtrusion(extrusion) = paint {
-                        if extrusion.fill_extrusion_pattern.is_some()
-                            || crate::vector::pattern::per_feature_pattern(paint).is_some()
-                        {
-                            needs_extrusion_pattern = true;
-                        }
-                        if extrusion.fill_extrusion_translucent == Some(true) {
-                            needs_extrusion_translucent = true;
-                            is_translucent = true;
-                        }
-                    }
-                }
-                if !is_translucent {
-                    needs_extrusion_opaque = true;
-                }
-                extrusion_layers.push((layer.id.clone(), layer.minzoom, layer.maxzoom));
-            }
-            if let Some(paint) = layer.paint.as_ref() {
-                if !has_pattern_paint && layer_uses_pattern(paint) {
-                    has_pattern_paint = true;
-                }
-                if !has_dash_or_pattern_line && line_uses_dash_or_pattern(layer, paint) {
-                    has_dash_or_pattern_line = true;
-                }
-            }
-        }
+        let scan = scan_style_layers(style);
         self.revision = Some(rev);
         self.terrain_active = terrain_active;
-        self.needs_fill = needs_fill;
-        self.needs_fill_opaque = needs_fill_opaque;
-        self.needs_fill_blended = needs_fill_blended;
-        self.needs_flat_lines = has_flat_line;
-        self.needs_terrain_lines = has_flat_line && terrain_needed;
-        self.needs_elevated_lines = needs_elevated_lines;
-        self.needs_circle = needs_circle;
-        self.needs_circle_feature_stroke = needs_circle_feature_stroke;
-        self.needs_circle_dynamic_radius = needs_circle_dynamic_radius;
-        self.extrusion_minzoom = extrusion_minzoom;
+        self.needs_fill = scan.needs_fill;
+        self.needs_fill_opaque = scan.needs_fill_opaque;
+        self.needs_fill_blended = scan.needs_fill_blended;
+        self.needs_flat_lines = scan.has_flat_line;
+        self.needs_terrain_lines = scan.has_flat_line && terrain_needed;
+        self.needs_elevated_lines = scan.needs_elevated_lines;
+        self.needs_circle = scan.needs_circle;
+        self.needs_circle_feature_stroke = scan.needs_circle_feature_stroke;
+        self.needs_circle_dynamic_radius = scan.needs_circle_dynamic_radius;
+        self.extrusion_minzoom = scan.extrusion_minzoom;
         self.initial_zoom_checked = false;
         self.eager_extrusion = false;
-        self.needs_extrusion_opaque = needs_extrusion_opaque;
-        self.needs_extrusion_pattern = needs_extrusion_pattern;
-        self.needs_extrusion_translucent = needs_extrusion_translucent;
-        self.extrusion_layers = extrusion_layers;
-        self.has_pattern_paint = has_pattern_paint;
-        self.has_dash_or_pattern_line = has_dash_or_pattern_line;
+        self.needs_extrusion_opaque = scan.needs_extrusion_opaque;
+        self.needs_extrusion_pattern = scan.needs_extrusion_pattern;
+        self.needs_extrusion_translucent = scan.needs_extrusion_translucent;
+        self.extrusion_layers = scan.extrusion_layers;
+        self.has_pattern_paint = scan.has_pattern_paint;
+        self.has_dash_or_pattern_line = scan.has_dash_or_pattern_line;
         true
     }
 
@@ -178,6 +101,109 @@ impl VectorPreparedState {
         let changed_rev = self.last_pattern_revision != Some(rev);
         self.last_pattern_revision = Some(rev);
         changed_rev || self.has_pattern_paint
+    }
+}
+
+#[derive(Default)]
+struct StyleLayerScan {
+    needs_fill: bool,
+    needs_fill_opaque: bool,
+    needs_fill_blended: bool,
+    has_flat_line: bool,
+    needs_elevated_lines: bool,
+    needs_circle: bool,
+    needs_circle_feature_stroke: bool,
+    needs_circle_dynamic_radius: bool,
+    extrusion_minzoom: Option<f64>,
+    needs_extrusion_opaque: bool,
+    needs_extrusion_pattern: bool,
+    needs_extrusion_translucent: bool,
+    extrusion_layers: Vec<(String, Option<f64>, Option<f64>)>,
+    has_pattern_paint: bool,
+    has_dash_or_pattern_line: bool,
+}
+
+fn scan_style_layers(style: &Style) -> StyleLayerScan {
+    let mut scan = StyleLayerScan::default();
+    for layer in &style.layers {
+        scan.visit_layer(style, layer);
+    }
+    scan
+}
+
+impl StyleLayerScan {
+    fn visit_layer(&mut self, _style: &Style, layer: &StyleLayer) {
+        match layer.type_.as_str() {
+            "fill" => {
+                self.needs_fill = true;
+                let (op, bl) = classify_fill_opacity(layer);
+                self.needs_fill_opaque |= op;
+                self.needs_fill_blended |= bl;
+            }
+            "line" => {
+                if matches!(
+                    crate::vector::structures::kind(layer),
+                    Some(crate::vector::structures::StructureKind::ElevatedLine)
+                ) {
+                    self.needs_elevated_lines = true;
+                } else {
+                    self.has_flat_line = true;
+                }
+            }
+            "circle" => {
+                self.needs_circle = true;
+                if !layer.is_hidden() {
+                    if let Some(LayerPaint::Circle(circle)) = layer.paint.as_ref()
+                        && circle.stroke_color_per_feature().is_some()
+                    {
+                        self.needs_circle_feature_stroke = true;
+                    }
+                    #[cfg(feature = "geojson")]
+                    if crate::geojson::update::dynamic_points::uses_dynamic_circle_metadata(
+                        _style, layer,
+                    ) {
+                        self.needs_circle_dynamic_radius = true;
+                    }
+                }
+            }
+            "fill-extrusion" if !layer.is_hidden() => self.visit_extrusion_layer(layer),
+            _ => {}
+        }
+        if let Some(paint) = layer.paint.as_ref() {
+            self.has_pattern_paint |= layer_uses_pattern(paint);
+            self.has_dash_or_pattern_line |= line_uses_dash_or_pattern(layer, paint);
+        }
+    }
+
+    fn visit_extrusion_layer(&mut self, layer: &StyleLayer) {
+        let layer_minzoom = layer.minzoom.unwrap_or(0.0);
+        self.extrusion_minzoom = Some(
+            self.extrusion_minzoom
+                .map_or(layer_minzoom, |m| m.min(layer_minzoom)),
+        );
+        let mut is_translucent = false;
+        if let Some(LayerPaint::FillExtrusion(extrusion)) = layer.paint.as_ref() {
+            if extrusion.fill_extrusion_pattern.is_some()
+                || crate::vector::pattern::per_feature_pattern(
+                    layer
+                        .paint
+                        .as_ref()
+                        .unwrap_or(&LayerPaint::Background(Default::default())),
+                )
+                .is_some()
+            {
+                self.needs_extrusion_pattern = true;
+            }
+            if extrusion.fill_extrusion_translucent == Some(true) {
+                self.needs_extrusion_translucent = true;
+                is_translucent = true;
+            }
+        }
+        if !is_translucent {
+            self.needs_extrusion_opaque = true;
+        }
+        self.extrusion_layers
+            .push((layer.id.clone(), layer.minzoom, layer.maxzoom));
     }
 }
 

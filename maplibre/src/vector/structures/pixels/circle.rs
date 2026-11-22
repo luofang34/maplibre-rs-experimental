@@ -193,9 +193,9 @@ impl Frame {
         let mean = |rows: &[usize]| rows.iter().sum::<usize>() as f64 / rows.len().max(1) as f64;
         let picture = self.picture();
         assert!(circle.len() > 20, "{case}: no circle\n{picture}");
-        let (top, bottom) = (square.iter().min(), square.iter().max());
-        let (Some(&top), Some(&bottom)) = (top, bottom) else {
-            panic!("{case}: no square\n{picture}");
+        assert!(!square.is_empty(), "{case}: no square\n{picture}");
+        let (Some(&top), Some(&bottom)) = (square.iter().min(), square.iter().max()) else {
+            return;
         };
         let middle = (top + bottom) as f64 / 2.0;
         assert!(

@@ -75,14 +75,16 @@ fn the_same_number_on_different_shields_is_placed_side_by_side() {
     let tile = layer("road_shield", 0);
     let interstate = shields("us-interstate");
     let highway = shields("us-highway");
-    assert!(!interstate.is_empty() && !highway.is_empty());
+    let (Some(i0), Some(h0)) = (interstate.first(), highway.first()) else {
+        panic!("expected both shields");
+    };
     let mut spacing = super::RepeatSpacing::default();
     spacing.begin();
     let placed = place(
         &mut spacing,
         &[
-            (&tile, &interstate[0], [400.0, 300.0], false),
-            (&tile, &highway[0], [440.0, 300.0], false),
+            (&tile, i0, [400.0, 300.0], false),
+            (&tile, h0, [440.0, 300.0], false),
         ],
     );
     assert_eq!(placed, [true, true]);
@@ -93,13 +95,16 @@ fn the_same_number_on_the_same_shield_too_close_is_placed_once() {
     let (left, right) = (layer("road_shield", 0), layer("road_shield", 1));
     let first = shields("us-interstate");
     let second = shields("us-interstate");
+    let (Some(f0), Some(s0)) = (first.first(), second.first()) else {
+        panic!("expected interstate shields");
+    };
     let mut spacing = super::RepeatSpacing::default();
     spacing.begin();
     let placed = place(
         &mut spacing,
         &[
-            (&left, &first[0], [400.0, 300.0], false),
-            (&right, &second[0], [440.0, 300.0], false),
+            (&left, f0, [400.0, 300.0], false),
+            (&right, s0, [440.0, 300.0], false),
         ],
     );
     assert_eq!(placed, [true, false]);

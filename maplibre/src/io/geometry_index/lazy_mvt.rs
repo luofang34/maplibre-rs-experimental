@@ -28,7 +28,7 @@ impl Clone for LazyMvtIndex {
     fn clone(&self) -> Self {
         let materialized = OnceLock::new();
         if let Some(list) = self.materialized.get() {
-            let _ = materialized.set(list.clone());
+            drop(materialized.set(list.clone()));
         }
         Self {
             mvt_bytes: Arc::clone(&self.mvt_bytes),
@@ -217,9 +217,10 @@ fn decompress_packed_bytes(packed: &[u8]) -> Option<Vec<u8>> {
     #[cfg(not(target_arch = "wasm32"))]
     if packed.starts_with(&DEFLATE_MAGIC) {
         use std::io::Read as _;
-        let len_bytes = packed.get(4..8)?;
-        let expected =
-            u32::from_le_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]) as usize;
+        let &[b0, b1, b2, b3] = packed.get(4..8)? else {
+            return None;
+        };
+        let expected = u32::from_le_bytes([b0, b1, b2, b3]) as usize;
         if expected > MAX_DECOMPRESSED_MVT_BYTES {
             return None;
         }
@@ -268,8 +269,14 @@ fn compress_lz4_block(raw: &[u8]) -> Option<Vec<u8>> {
         let b3 = *raw.get(ip + 3)?;
         let seq = u32::from_le_bytes([b0, b1, b2, b3]);
         let hash = (seq.wrapping_mul(2_654_435_761) >> 20) as usize;
-        let prev = table[hash];
-        table[hash] = (ip as u32).saturating_add(1);
+        let prev = match table.get_mut(hash) {
+            Some(slot) => {
+                let prev = *slot;
+                *slot = (ip as u32).saturating_add(1);
+                prev
+            }
+            None => 0,
+        };
         if prev > 0 {
             let ref_pos = (prev - 1) as usize;
             let offset = ip.saturating_sub(ref_pos);
@@ -327,8 +334,10 @@ fn read_lz4_extra(packed: &[u8], pos: &mut usize, base: usize) -> Option<usize> 
 }
 
 fn decompress_lz4_block(packed: &[u8]) -> Option<Vec<u8>> {
-    let hdr = packed.get(..4)?;
-    let expected = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], hdr[3]]) as usize;
+    let &[b0, b1, b2, b3] = packed.get(..4)? else {
+        return None;
+    };
+    let expected = u32::from_le_bytes([b0, b1, b2, b3]) as usize;
     if expected > MAX_DECOMPRESSED_MVT_BYTES {
         return None;
     }

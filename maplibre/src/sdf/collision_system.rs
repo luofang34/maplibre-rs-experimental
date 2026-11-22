@@ -30,6 +30,8 @@ mod sync;
 mod temporal;
 mod upload_diff;
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod proptests;
 #[cfg(test)]
 mod tests;
 
@@ -270,13 +272,15 @@ impl System for CollisionSystem {
                     return Ok(());
                 }
                 let sort_pending = if epoch.step(
-                    world,
-                    style,
-                    &renderer.queue,
-                    &mut self.history,
-                    &mut self.uploaded,
-                    &mut self.scratch,
-                    true,
+                    sliced::EpochStepContext {
+                        world,
+                        style,
+                        queue: &renderer.queue,
+                        history: &mut self.history,
+                        uploaded: &mut self.uploaded,
+                        scratch: &mut self.scratch,
+                        sliced: true,
+                    },
                     moving_this_frame,
                 ) {
                     let followup =
@@ -443,13 +447,15 @@ impl System for CollisionSystem {
         });
         let mut epoch = sliced::ActiveEpoch::begin(world, style, view_state, projection, layers);
         if epoch.step(
-            world,
-            style,
-            &renderer.queue,
-            &mut self.history,
-            &mut self.uploaded,
-            &mut self.scratch,
-            use_slicing,
+            sliced::EpochStepContext {
+                world,
+                style,
+                queue: &renderer.queue,
+                history: &mut self.history,
+                uploaded: &mut self.uploaded,
+                scratch: &mut self.scratch,
+                sliced: use_slicing,
+            },
             moving_this_frame,
         ) {
             let followup_needed = self.history.repeats.yielded_to_previous();

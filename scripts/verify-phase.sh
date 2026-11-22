@@ -65,26 +65,8 @@ def build_default_gates(root: Path, base_ref: str, include_actions: bool):
             "env": {},
         },
         {
-            "name": "file-length",
-            "cmd": f'node scripts/check-file-length.mjs "{base_ref}"',
-            "cwd": str(root),
-            "env": {},
-        },
-        {
-            "name": "panics",
-            "cmd": "node scripts/check-panics.mjs",
-            "cwd": str(root),
-            "env": {},
-        },
-        {
-            "name": "module-layout",
-            "cmd": f'python3 scripts/check-module-layout.py --base "{base_ref}"',
-            "cwd": str(root),
-            "env": {},
-        },
-        {
-            "name": "wasm-deps",
-            "cmd": "python3 scripts/check-wasm-deps.py",
+            "name": "evidence-gate",
+            "cmd": f'cargo evidence gate --format=jsonl --base "{base_ref}"',
             "cwd": str(root),
             "env": {},
         },
@@ -175,18 +157,24 @@ def extract_metrics(results: list, log_dir: Path) -> dict:
         if not log_path.is_file():
             continue
         text = log_path.read_text(encoding="utf-8", errors="replace")
-        if g["name"] == "panics":
-            m = re.search(r"\((\d+)\s*<=\s*(\d+)\s+total non-test panic sites\)", text)
-            if not m:
-                m = re.search(r"(\d+)\s+total non-test panic sites.*limit\s+(\d+)", text)
-            if m:
-                metrics["panicSites"] = int(m.group(1))
-                metrics["panicLimit"] = int(m.group(2))
-        elif g["name"] == "file-length":
-            m = re.search(r"Checked\s+(\d+)\s+changed files against the\s+(\d+)-line limit", text)
-            if m:
-                metrics["checkedFiles"] = int(m.group(1))
-                metrics["lineLimit"] = int(m.group(2))
+        if g["name"] == "evidence-gate":
+            passed_checks = 0
+            gate_ok = False
+            for line in text.splitlines():
+                line = line.strip()
+                if not line.startswith("{"):
+                    continue
+                try:
+                    ev = json.loads(line)
+                except ValueError:
+                    continue
+                if ev.get("code") == "GATE_CHECK_PASSED":
+                    passed_checks += 1
+                elif ev.get("code") == "GATE_OK":
+                    gate_ok = True
+            if passed_checks > 0 or gate_ok:
+                metrics["evidenceGateChecks"] = passed_checks
+                metrics["evidenceGatePassed"] = gate_ok
         elif g["name"] == "web-lib":
             mp = re.search(r"(?:ℹ|#)\s*pass\s+(\d+)", text)
             mf = re.search(r"(?:ℹ|#)\s*fail\s+(\d+)", text)

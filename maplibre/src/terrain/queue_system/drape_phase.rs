@@ -114,90 +114,112 @@ pub(super) fn build_drape_phase(
 ) -> DrapePhase {
     let mut phase = DrapePhase::default();
     for ((spec, redraw), target_slots) in specs.iter().zip(redraw).zip(slots) {
-        if !redraw {
-            continue;
+        if *redraw {
+            phase.targets.push(build_target_drape(
+                spec,
+                target_slots,
+                ranges,
+                zoom,
+                clear_color,
+            ));
         }
-        let mut target = DrapeTarget {
-            coords: spec.coords,
-            clear_color,
-            masks: Vec::new(),
-            layers: Vec::new(),
-        };
-        let mut stencil_ids: std::collections::HashMap<crate::coords::WorldTileCoords, u8> =
-            std::collections::HashMap::with_capacity(spec.shapes.len());
-        let mut next_stencil = 0_u8;
-        for (shape, slot) in spec.shapes.iter().zip(target_slots) {
-            let Some(range) = slot.and_then(|index| ranges.get(index)) else {
-                continue;
-            };
-            let mut source_shape = TileShape::with_buffer_range(shape.source, zoom, range.clone());
-            let stencil_ref = *stencil_ids.entry(shape.source).or_insert_with(|| {
-                if next_stencil < 124 {
-                    let assigned = next_stencil;
-                    next_stencil += 1;
-                    assigned
-                } else {
-                    shape.source.stencil_reference_value_3d()
-                }
-            });
-            source_shape.set_stencil_reference(stencil_ref);
-            let shape_data = source_shape.draw_data();
-            target.masks.push(TileMaskItem {
-                draw_function: &DrawState::<TileMaskItem, DrawMasks>::INSTANCE,
-                source_shape: shape_data,
-                generate_borders: false,
-                projection: ProjectionBinding::Flat,
-                is_vector: shape.is_vector,
-            });
-            for layer in &shape.vector_layers {
-                let draw_function: &'static dyn Draw<LayerItem> = if layer.is_line {
-                    &DrawState::<LayerItem, DrawLineTiles>::INSTANCE
-                } else {
-                    &DrawState::<LayerItem, DrawVectorTiles>::INSTANCE
-                };
-                target.layers.push(LayerItem {
-                    draw_function,
-                    index: layer.index,
-                    generate_borders: false,
-                    style_layer: layer.id,
-                    entry_slot: crate::render::render_phase::UNSET_ENTRY_SLOT,
-                    tile: Tile {
-                        coords: layer.coords,
-                    },
-                    source_shape: shape_data,
-                    projection: ProjectionBinding::Flat,
-                    mask_group: MaskGroup::Vector,
-                    run: None,
-                });
-            }
-            #[cfg(feature = "raster")]
-            for (id, index, dem) in &shape.raster_layers {
-                let draw_function: &'static dyn Draw<LayerItem> = if *dem {
-                    &DrawState::<LayerItem, DrawDemTiles>::INSTANCE
-                } else {
-                    &DrawState::<LayerItem, DrawRasterTiles>::INSTANCE
-                };
-                target.layers.push(LayerItem {
-                    draw_function,
-                    index: *index,
-                    generate_borders: false,
-                    style_layer: crate::style::StyleLayerId::intern(id),
-                    entry_slot: crate::render::render_phase::UNSET_ENTRY_SLOT,
-                    tile: Tile {
-                        coords: shape.source,
-                    },
-                    source_shape: shape_data,
-                    projection: ProjectionBinding::Flat,
-                    mask_group: MaskGroup::Mutating,
-                    run: None,
-                });
-            }
-        }
-        target.masks.sort_by_key(PhaseItem::sort_key);
-        target.layers.sort_by_key(|item| item.index);
-        phase.targets.push(target);
     }
     phase
+}
+
+fn build_target_drape(
+    spec: &TargetSpec,
+    target_slots: &TargetSlots,
+    ranges: &[std::ops::Range<wgpu::BufferAddress>],
+    zoom: Zoom,
+    clear_color: wgpu::Color,
+) -> DrapeTarget {
+    let mut target = DrapeTarget {
+        coords: spec.coords,
+        clear_color,
+        masks: Vec::new(),
+        layers: Vec::new(),
+    };
+    let mut stencil_ids: std::collections::HashMap<crate::coords::WorldTileCoords, u8> =
+        std::collections::HashMap::with_capacity(spec.shapes.len());
+    let mut next_stencil = 0_u8;
+    for (shape, slot) in spec.shapes.iter().zip(target_slots) {
+        let Some(range) = slot.and_then(|index| ranges.get(index)) else {
+            continue;
+        };
+        let mut source_shape = TileShape::with_buffer_range(shape.source, zoom, range.clone());
+        let stencil_ref = *stencil_ids.entry(shape.source).or_insert_with(|| {
+            if next_stencil < 124 {
+                let assigned = next_stencil;
+                next_stencil += 1;
+                assigned
+            } else {
+                shape.source.stencil_reference_value_3d()
+            }
+        });
+        source_shape.set_stencil_reference(stencil_ref);
+        push_shape_items(&mut target, shape, source_shape.draw_data());
+    }
+    target.masks.sort_by_key(PhaseItem::sort_key);
+    target.layers.sort_by_key(|item| item.index);
+    target
+}
+
+fn push_shape_items(
+    target: &mut DrapeTarget,
+    shape: &crate::terrain::drape_targets::ShapeSpec,
+    shape_data: crate::render::tile_view_pattern::ShapeDrawData,
+) {
+    target.masks.push(TileMaskItem {
+        draw_function: &DrawState::<TileMaskItem, DrawMasks>::INSTANCE,
+        source_shape: shape_data,
+        generate_borders: false,
+        projection: ProjectionBinding::Flat,
+        is_vector: shape.is_vector,
+    });
+    for layer in &shape.vector_layers {
+        let draw_function: &'static dyn Draw<LayerItem> = if layer.is_line {
+            &DrawState::<LayerItem, DrawLineTiles>::INSTANCE
+        } else {
+            &DrawState::<LayerItem, DrawVectorTiles>::INSTANCE
+        };
+        target.layers.push(LayerItem {
+            draw_function,
+            index: layer.index,
+            generate_borders: false,
+            style_layer: layer.id,
+            entry_slot: crate::render::render_phase::UNSET_ENTRY_SLOT,
+            tile: Tile {
+                coords: layer.coords,
+            },
+            source_shape: shape_data,
+            projection: ProjectionBinding::Flat,
+            mask_group: MaskGroup::Vector,
+            run: None,
+        });
+    }
+    #[cfg(feature = "raster")]
+    for (id, index, dem) in &shape.raster_layers {
+        let draw_function: &'static dyn Draw<LayerItem> = if *dem {
+            &DrawState::<LayerItem, DrawDemTiles>::INSTANCE
+        } else {
+            &DrawState::<LayerItem, DrawRasterTiles>::INSTANCE
+        };
+        target.layers.push(LayerItem {
+            draw_function,
+            index: *index,
+            generate_borders: false,
+            style_layer: crate::style::StyleLayerId::intern(id),
+            entry_slot: crate::render::render_phase::UNSET_ENTRY_SLOT,
+            tile: Tile {
+                coords: shape.source,
+            },
+            source_shape: shape_data,
+            projection: ProjectionBinding::Flat,
+            mask_group: MaskGroup::Mutating,
+            run: None,
+        });
+    }
 }
 
 /// Color the drape textures start from: the constant background paint, a neutral cartographic

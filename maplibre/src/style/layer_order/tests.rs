@@ -9,7 +9,7 @@ fn serialization_preserves_document_order_without_private_index_fields() {
         ]}))
         .expect("style");
     let document = serde_json::to_value(&style).expect("document");
-    assert!(document["layers"][2].get("index").is_none());
+    assert!(document.pointer("/layers/2/index").is_none());
     let roundtrip: Style = serde_json::from_value(document).expect("roundtrip");
     assert_eq!(
         roundtrip
@@ -36,7 +36,9 @@ fn a_layer_with_ref_takes_the_definition_of_the_layer_it_names() {
             {"id":"b","ref":"a","paint":{"icon-opacity":0.5}}
         ]}))
         .expect("style");
-    let (a, b) = (&style.layers[0], &style.layers[1]);
+    let [a, b] = style.layers.as_slice() else {
+        panic!("expected two layers");
+    };
     assert_eq!(b.type_, a.type_);
     assert_eq!(b.source, a.source);
     assert_eq!(b.source_layer, a.source_layer);

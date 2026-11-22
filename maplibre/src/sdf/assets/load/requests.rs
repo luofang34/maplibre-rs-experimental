@@ -179,17 +179,29 @@ fn compile_symbol_layers<'l, 's>(
     by_source_layer
 }
 
-#[allow(clippy::too_many_arguments)]
-fn record_feature_symbol_requests(
-    out: &mut SymbolRequests,
-    compiled_layers: &[CompiledSymbolLayer<'_, '_>],
-    source_name: &str,
+struct FeatureRequestContext<'a, 'l, 's> {
+    compiled_layers: &'a [CompiledSymbolLayer<'l, 's>],
+    source_name: &'a str,
     raw_id: Option<u64>,
     geometry_type: crate::style::filter::GeometryType,
-    base_properties: &crate::style::expression::FeatureProperties,
+    base_properties: &'a crate::style::expression::FeatureProperties,
     zoom: f64,
     has_registered_fonts: bool,
+}
+
+fn record_feature_symbol_requests(
+    out: &mut SymbolRequests,
+    ctx: FeatureRequestContext<'_, '_, '_>,
 ) {
+    let FeatureRequestContext {
+        compiled_layers,
+        source_name,
+        raw_id,
+        geometry_type,
+        base_properties,
+        zoom,
+        has_registered_fonts,
+    } = ctx;
     let feature_id = raw_id.map(|id| crate::style::expression::Value::Number(id as f64));
     let mut state_scratch: Option<crate::style::expression::FeatureProperties> = None;
 
@@ -287,13 +299,15 @@ fn symbol_requests_from_mvt<'l>(
                 crate::style::filter::GeometryType::from_mvt(feature.r#type.unwrap_or_default());
             record_feature_symbol_requests(
                 &mut out,
-                compiled_layers,
-                &source.name,
-                feature.id,
-                geometry_type,
-                base_properties,
-                zoom,
-                has_registered_fonts,
+                FeatureRequestContext {
+                    compiled_layers,
+                    source_name: &source.name,
+                    raw_id: feature.id,
+                    geometry_type,
+                    base_properties,
+                    zoom,
+                    has_registered_fonts,
+                },
             );
         }
     }
@@ -321,13 +335,15 @@ fn symbol_requests_from_mlt<'l>(
             if let Some(compiled_layers) = by_source_layer.get(source_name) {
                 record_feature_symbol_requests(
                     &mut out,
-                    compiled_layers,
-                    source_name,
-                    raw_id,
-                    geometry_type,
-                    base_properties,
-                    zoom,
-                    has_registered_fonts,
+                    FeatureRequestContext {
+                        compiled_layers,
+                        source_name,
+                        raw_id,
+                        geometry_type,
+                        base_properties,
+                        zoom,
+                        has_registered_fonts,
+                    },
                 );
             }
         },

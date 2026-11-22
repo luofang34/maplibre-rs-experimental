@@ -8,8 +8,8 @@ use self::bins::{
 };
 use super::{
     unbatched::{prepare_non_mesh_bins, prepare_unbatchable_bins},
-    BatchedInstanceBuffer, BinnedRenderPhaseBatch, BinnedRenderPhaseBatchSets,
-    FallbackInstanceBufferMode, GetBatchData,
+    BatchedInstanceBuffer, BinnedRenderPhaseBatch, BinnedRenderPhaseBatchSet,
+    BinnedRenderPhaseBatchSets, FallbackInstanceBufferMode, GetBatchData,
 };
 use crate::{
     context::MapContext,
@@ -74,141 +74,25 @@ pub fn batch_and_prepare_binned_render_phase_cpu<BPI, GBD>(
     let fallback_mode = phase
         .fallback_mode
         .unwrap_or_else(|| instance_buffer.fallback_mode());
-    let use_dynamic_uniforms = !capabilities.vertex_storage_buffers
-        && fallback_mode == FallbackInstanceBufferMode::DynamicUniform;
-    let use_vertex_instance = !capabilities.vertex_storage_buffers
-        && fallback_mode == FallbackInstanceBufferMode::VertexInstance;
-    let use_multidraw_mode = !use_dynamic_uniforms
-        && !use_vertex_instance
-        && capabilities.multi_draw_indirect
-        && capabilities.indirect_execution
-        && capabilities.indirect_first_instance;
-
-    {
-        let mut md_groups: Vec<BorrowedMdGroup<'_, BPI>> = Vec::new();
-        let mut single_bins: Vec<BorrowedSingleBin<'_, BPI>> = Vec::new();
-
-        for (bsk, bins_map) in &phase.multidrawable_meshes {
-            let mut active: Vec<(&BPI::BinKey, &RenderBin)> = bins_map
-                .iter()
-                .filter(|(_, bin)| !bin.entries.is_empty())
-                .collect();
-            if active.is_empty() {
-                continue;
-            }
-            active.sort_unstable_by(|a, b| a.0.cmp(b.0));
-            if use_multidraw_mode
-                && capabilities.supports_multidraw_indirect(bsk.indexed())
-                && can_group_multidraw::<BPI, GBD>(world, bsk.indexed(), &active)
-            {
-                md_groups.push((bsk, active));
-            } else {
-                for (bk, bin) in active {
-                    single_bins.push((bsk, bk, bin, 0));
-                }
-            }
-        }
-        md_groups.sort_unstable_by(|a, b| a.0.cmp(b.0));
-
-        for ((bsk, bk), bin) in &phase.batchable_meshes {
-            if !bin.entries.is_empty() {
-                single_bins.push((bsk, bk, bin, 1));
-            }
-        }
-        single_bins.sort_unstable_by(|a, b| (a.0, a.1, a.3).cmp(&(b.0, b.1, b.3)));
-
-        let mut md_idx = 0usize;
-        let mut ba_idx = 0usize;
-        let mut same_key_bins: Vec<&RenderBin> = Vec::new();
-
-        while md_idx < md_groups.len() || ba_idx < single_bins.len() {
-            let take_md = match (md_groups.get(md_idx), single_bins.get(ba_idx)) {
-                (Some((md_bsk, md_bins)), Some((ba_bsk, ba_bk, _, _))) => {
-                    match (*md_bsk).cmp(*ba_bsk) {
-                        Ordering::Less => true,
-                        Ordering::Greater => false,
-                        Ordering::Equal => md_bins[0].0 <= *ba_bk,
-                    }
-                }
-                (Some(_), None) => true,
-                (None, Some(_)) => false,
-                (None, None) => break,
-            };
-
-            if take_md {
-                let (bsk, sorted_bins) = &md_groups[md_idx];
-                md_idx += 1;
-                prepare_multidraw_group::<BPI, GBD>(
-                    world,
-                    bsk,
-                    sorted_bins,
-                    &mut instance_buffer,
-                    &mut indirect_buffers,
-                    &mut out_sets,
-                );
-            } else {
-                let (bsk, bk, first_bin, _) = single_bins[ba_idx];
-                ba_idx += 1;
-                same_key_bins.clear();
-                same_key_bins.push(first_bin);
-                while let Some(&(next_bsk, next_bk, next_bin, _)) = single_bins.get(ba_idx) {
-                    if next_bsk == bsk && next_bk == bk {
-                        same_key_bins.push(next_bin);
-                        ba_idx += 1;
-                    } else {
-                        break;
-                    }
-                }
-
-                if use_dynamic_uniforms {
-                    let mut batches = Vec::new();
-                    append_dynamic_uniform_bins::<BPI, GBD>(
-                        world,
-                        bk,
-                        &same_key_bins,
-                        &mut instance_buffer,
-                        min_uniform_alignment,
-                        &mut batches,
-                    );
-                    push_batches_coalesced(&mut out_sets, bsk, batches);
-                } else if let Some(info) = pack_contiguous_bins::<BPI, GBD>(
-                    world,
-                    bk,
-                    &same_key_bins,
-                    &mut instance_buffer,
-                ) {
-                    let extra_index = build_single_extra_index(
-                        bsk.indexed(),
-                        use_vertex_instance,
-                        capabilities,
-                        info.metadata.as_ref(),
-                        &info.instance_range,
-                        &mut indirect_buffers,
-                    );
-                    let batch = BinnedRenderPhaseBatch {
-                        representative_item: info.representative_item,
-                        instance_range: info.instance_range,
-                        extra_index,
-                    };
-                    push_batches_coalesced(&mut out_sets, bsk, vec![(info.bin_key, batch)]);
-                }
-            }
-        }
-    }
-
-    phase.batch_sets = if use_dynamic_uniforms {
+    let mode = BatchPrepMode::new(capabilities, fallback_mode, min_uniform_alignment);
+    prepare_batch_sets::<BPI, GBD>(
+        world,
+        &phase,
+        mode,
+        (&mut instance_buffer, &mut indirect_buffers, &mut out_sets),
+    );
+    phase.batch_sets = if mode.use_dynamic_uniforms {
         BinnedRenderPhaseBatchSets::DynamicUniforms(out_sets)
-    } else if use_multidraw_mode {
+    } else if mode.use_multidraw_mode {
         BinnedRenderPhaseBatchSets::MultidrawIndirect(out_sets)
     } else {
         BinnedRenderPhaseBatchSets::Single(out_sets)
     };
-
     prepare_unbatchable_bins::<BPI, GBD>(
         world,
         &phase.unbatchable_meshes,
-        use_dynamic_uniforms,
-        use_vertex_instance,
+        mode.use_dynamic_uniforms,
+        mode.use_vertex_instance,
         min_uniform_alignment,
         &mut instance_buffer,
         &mut phase.prepared_unbatchable,
@@ -216,8 +100,8 @@ pub fn batch_and_prepare_binned_render_phase_cpu<BPI, GBD>(
     prepare_non_mesh_bins::<BPI, GBD>(
         world,
         &phase.non_mesh_items,
-        use_dynamic_uniforms,
-        use_vertex_instance,
+        mode.use_dynamic_uniforms,
+        mode.use_vertex_instance,
         min_uniform_alignment,
         &mut instance_buffer,
         &mut phase.prepared_non_mesh,
@@ -226,6 +110,192 @@ pub fn batch_and_prepare_binned_render_phase_cpu<BPI, GBD>(
     world.resources.insert(phase);
     world.resources.insert(instance_buffer);
     world.resources.insert(indirect_buffers);
+}
+
+#[derive(Clone, Copy)]
+struct BatchPrepMode {
+    capabilities: DrawCapabilities,
+    min_uniform_alignment: u32,
+    use_dynamic_uniforms: bool,
+    use_vertex_instance: bool,
+    use_multidraw_mode: bool,
+}
+
+impl BatchPrepMode {
+    fn new(
+        capabilities: DrawCapabilities,
+        fallback_mode: FallbackInstanceBufferMode,
+        min_uniform_alignment: u32,
+    ) -> Self {
+        let use_dynamic_uniforms = !capabilities.vertex_storage_buffers
+            && fallback_mode == FallbackInstanceBufferMode::DynamicUniform;
+        let use_vertex_instance = !capabilities.vertex_storage_buffers
+            && fallback_mode == FallbackInstanceBufferMode::VertexInstance;
+        let use_multidraw_mode = !use_dynamic_uniforms
+            && !use_vertex_instance
+            && capabilities.multi_draw_indirect
+            && capabilities.indirect_execution
+            && capabilities.indirect_first_instance;
+        Self {
+            capabilities,
+            min_uniform_alignment,
+            use_dynamic_uniforms,
+            use_vertex_instance,
+            use_multidraw_mode,
+        }
+    }
+}
+
+fn collect_sorted_groups<'a, BPI: BinnedPhaseItem, GBD: GetBatchData<BPI>>(
+    world: &World,
+    phase: &'a BinnedRenderPhase<BPI>,
+    mode: BatchPrepMode,
+) -> (
+    Vec<BorrowedMdGroup<'a, BPI>>,
+    Vec<BorrowedSingleBin<'a, BPI>>,
+) {
+    let mut md_groups: Vec<BorrowedMdGroup<'a, BPI>> = Vec::new();
+    let mut single_bins: Vec<BorrowedSingleBin<'a, BPI>> = Vec::new();
+    for (bsk, bins_map) in &phase.multidrawable_meshes {
+        let mut active: Vec<(&BPI::BinKey, &RenderBin)> = bins_map
+            .iter()
+            .filter(|(_, bin)| !bin.entries.is_empty())
+            .collect();
+        if active.is_empty() {
+            continue;
+        }
+        active.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        if mode.use_multidraw_mode
+            && mode.capabilities.supports_multidraw_indirect(bsk.indexed())
+            && can_group_multidraw::<BPI, GBD>(world, bsk.indexed(), &active)
+        {
+            md_groups.push((bsk, active));
+        } else {
+            for (bk, bin) in active {
+                single_bins.push((bsk, bk, bin, 0));
+            }
+        }
+    }
+    md_groups.sort_unstable_by(|a, b| a.0.cmp(b.0));
+    for ((bsk, bk), bin) in &phase.batchable_meshes {
+        if !bin.entries.is_empty() {
+            single_bins.push((bsk, bk, bin, 1));
+        }
+    }
+    single_bins.sort_unstable_by(|a, b| (a.0, a.1, a.3).cmp(&(b.0, b.1, b.3)));
+    (md_groups, single_bins)
+}
+
+fn prepare_batch_sets<BPI: BinnedPhaseItem, GBD: GetBatchData<BPI>>(
+    world: &World,
+    phase: &BinnedRenderPhase<BPI>,
+    mode: BatchPrepMode,
+    (instance_buffer, indirect_buffers, out_sets): (
+        &mut BatchedInstanceBuffer<GBD::BufferData>,
+        &mut IndirectParametersBuffers,
+        &mut Vec<BinnedRenderPhaseBatchSet<BPI>>,
+    ),
+) {
+    let (md_groups, single_bins) = collect_sorted_groups::<BPI, GBD>(world, phase, mode);
+    let mut md_idx = 0usize;
+    let mut ba_idx = 0usize;
+    let mut same_key_bins: Vec<&RenderBin> = Vec::new();
+    loop {
+        let md_next = md_groups.get(md_idx);
+        let ba_next = single_bins.get(ba_idx);
+        let take_md = match (md_next, ba_next) {
+            (Some((md_bsk, md_bins)), Some((ba_bsk, ba_bk, _, _))) => {
+                match (*md_bsk).cmp(*ba_bsk) {
+                    Ordering::Less => true,
+                    Ordering::Greater => false,
+                    Ordering::Equal => md_bins.first().is_some_and(|(bk, _)| *bk <= *ba_bk),
+                }
+            }
+            (Some(_), None) => true,
+            (None, Some(_)) => false,
+            (None, None) => break,
+        };
+        if take_md {
+            let Some((bsk, sorted_bins)) = md_next else {
+                break;
+            };
+            md_idx += 1;
+            prepare_multidraw_group::<BPI, GBD>(
+                world,
+                bsk,
+                sorted_bins,
+                instance_buffer,
+                indirect_buffers,
+                out_sets,
+            );
+            continue;
+        }
+        let Some(&(bsk, bk, first_bin, _)) = ba_next else {
+            break;
+        };
+        ba_idx += 1;
+        same_key_bins.clear();
+        same_key_bins.push(first_bin);
+        while let Some(&(next_bsk, next_bk, next_bin, _)) = single_bins.get(ba_idx) {
+            if next_bsk == bsk && next_bk == bk {
+                same_key_bins.push(next_bin);
+                ba_idx += 1;
+            } else {
+                break;
+            }
+        }
+        prepare_single_key_bins::<BPI, GBD>(
+            world,
+            bsk,
+            bk,
+            &same_key_bins,
+            mode,
+            (instance_buffer, indirect_buffers, out_sets),
+        );
+    }
+}
+
+fn prepare_single_key_bins<BPI: BinnedPhaseItem, GBD: GetBatchData<BPI>>(
+    world: &World,
+    bsk: &BPI::BatchSetKey,
+    bk: &BPI::BinKey,
+    same_key_bins: &[&RenderBin],
+    mode: BatchPrepMode,
+    (instance_buffer, indirect_buffers, out_sets): (
+        &mut BatchedInstanceBuffer<GBD::BufferData>,
+        &mut IndirectParametersBuffers,
+        &mut Vec<BinnedRenderPhaseBatchSet<BPI>>,
+    ),
+) {
+    if mode.use_dynamic_uniforms {
+        let mut batches = Vec::new();
+        append_dynamic_uniform_bins::<BPI, GBD>(
+            world,
+            bk,
+            same_key_bins,
+            instance_buffer,
+            mode.min_uniform_alignment,
+            &mut batches,
+        );
+        push_batches_coalesced(out_sets, bsk, batches);
+    } else if let Some(info) =
+        pack_contiguous_bins::<BPI, GBD>(world, bk, same_key_bins, instance_buffer)
+    {
+        let extra_index = build_single_extra_index(
+            bsk.indexed(),
+            mode.use_vertex_instance,
+            mode.capabilities,
+            info.metadata.as_ref(),
+            &info.instance_range,
+            indirect_buffers,
+        );
+        let batch = BinnedRenderPhaseBatch {
+            representative_item: info.representative_item,
+            instance_range: info.instance_range,
+            extra_index,
+        };
+        push_batches_coalesced(out_sets, bsk, vec![(info.bin_key, batch)]);
+    }
 }
 
 /// Scheduled `PhaseSort` system that batches instances on the CPU and uploads instance and

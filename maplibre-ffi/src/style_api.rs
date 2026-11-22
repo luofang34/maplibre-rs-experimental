@@ -1,6 +1,9 @@
 //! Runtime style, GeoJSON, `feature-state`, and sprite image C ABI exports.
 
-#![allow(unsafe_code)]
+#![expect(
+    unsafe_code,
+    reason = "C ABI module borrows raw map pointers and NUL-terminated C strings"
+)]
 
 use std::ffi::c_char;
 
@@ -21,10 +24,13 @@ pub unsafe extern "C" fn maplibre_map_set_style_json(
     style_json: *const c_char,
 ) -> bool {
     ffi_try_bool(|| {
-        // SAFETY: Caller upholds `map` and `style_json` pointer validity.
-        let map_ref = unsafe { borrow_map_mut(map) }?;
-        // SAFETY: Validated against null; caller guarantees NUL-terminated string.
-        let style_str = unsafe { required_c_str(style_json, "style_json") }?;
+        // SAFETY: Caller guarantees `map` is live and `style_json` is NUL-terminated.
+        let (map_ref, style_str) = unsafe {
+            (
+                borrow_map_mut(map)?,
+                required_c_str(style_json, "style_json")?,
+            )
+        };
         map_ref.engine.set_style_json(style_str)
     })
 }
@@ -42,14 +48,15 @@ pub unsafe extern "C" fn maplibre_map_set_paint_property_json(
     value_json: *const c_char,
 ) -> bool {
     ffi_try_bool(|| {
-        // SAFETY: Caller upholds pointer validity for the duration of the call.
-        let map_ref = unsafe { borrow_map_mut(map) }?;
-        // SAFETY: Validated against null; caller guarantees NUL-terminated strings.
-        let layer = unsafe { required_c_str(layer_id, "layer_id") }?;
-        // SAFETY: Validated against null; caller guarantees NUL-terminated strings.
-        let prop = unsafe { required_c_str(property_name, "property_name") }?;
-        // SAFETY: Validated against null; caller guarantees NUL-terminated strings.
-        let value = unsafe { required_c_str(value_json, "value_json") }?;
+        // SAFETY: Caller guarantees `map` and string pointers remain valid for this call.
+        let (map_ref, layer, prop, value) = unsafe {
+            (
+                borrow_map_mut(map)?,
+                required_c_str(layer_id, "layer_id")?,
+                required_c_str(property_name, "property_name")?,
+                required_c_str(value_json, "value_json")?,
+            )
+        };
         map_ref.engine.set_paint_property_json(layer, prop, value)
     })
 }
@@ -67,14 +74,15 @@ pub unsafe extern "C" fn maplibre_map_set_layout_property_json(
     value_json: *const c_char,
 ) -> bool {
     ffi_try_bool(|| {
-        // SAFETY: Caller upholds pointer validity for the duration of the call.
-        let map_ref = unsafe { borrow_map_mut(map) }?;
-        // SAFETY: Validated against null; caller guarantees NUL-terminated strings.
-        let layer = unsafe { required_c_str(layer_id, "layer_id") }?;
-        // SAFETY: Validated against null; caller guarantees NUL-terminated strings.
-        let prop = unsafe { required_c_str(property_name, "property_name") }?;
-        // SAFETY: Validated against null; caller guarantees NUL-terminated strings.
-        let value = unsafe { required_c_str(value_json, "value_json") }?;
+        // SAFETY: Caller guarantees `map` and string pointers remain valid for this call.
+        let (map_ref, layer, prop, value) = unsafe {
+            (
+                borrow_map_mut(map)?,
+                required_c_str(layer_id, "layer_id")?,
+                required_c_str(property_name, "property_name")?,
+                required_c_str(value_json, "value_json")?,
+            )
+        };
         map_ref.engine.set_layout_property_json(layer, prop, value)
     })
 }
@@ -92,12 +100,14 @@ pub unsafe extern "C" fn maplibre_map_set_filter_json(
     filter_json: *const c_char,
 ) -> bool {
     ffi_try_bool(|| {
-        // SAFETY: Caller upholds pointer validity for the duration of the call.
-        let map_ref = unsafe { borrow_map_mut(map) }?;
-        // SAFETY: Validated against null; caller guarantees NUL-terminated string.
-        let layer = unsafe { required_c_str(layer_id, "layer_id") }?;
-        // SAFETY: Optional C string; `NULL` maps to `None`.
-        let filter = unsafe { optional_c_str(filter_json, "filter_json") }?;
+        // SAFETY: Caller guarantees `map` and string pointers (or null optional filter) remain valid.
+        let (map_ref, layer, filter) = unsafe {
+            (
+                borrow_map_mut(map)?,
+                required_c_str(layer_id, "layer_id")?,
+                optional_c_str(filter_json, "filter_json")?,
+            )
+        };
         map_ref.engine.set_filter_json(layer, filter)
     })
 }
@@ -114,10 +124,9 @@ pub unsafe extern "C" fn maplibre_map_set_layer_visibility(
     visible: bool,
 ) -> bool {
     ffi_try_bool(|| {
-        // SAFETY: Caller upholds pointer validity for the duration of the call.
-        let map_ref = unsafe { borrow_map_mut(map) }?;
-        // SAFETY: Validated against null; caller guarantees NUL-terminated string.
-        let layer = unsafe { required_c_str(layer_id, "layer_id") }?;
+        // SAFETY: Caller guarantees `map` and `layer_id` remain valid for this call.
+        let (map_ref, layer) =
+            unsafe { (borrow_map_mut(map)?, required_c_str(layer_id, "layer_id")?) };
         map_ref.engine.set_layer_visibility(layer, visible)
     })
 }
@@ -134,12 +143,14 @@ pub unsafe extern "C" fn maplibre_map_set_geojson_source_data(
     geojson_json: *const c_char,
 ) -> bool {
     ffi_try_bool(|| {
-        // SAFETY: Caller upholds pointer validity for the duration of the call.
-        let map_ref = unsafe { borrow_map_mut(map) }?;
-        // SAFETY: Validated against null; caller guarantees NUL-terminated strings.
-        let source = unsafe { required_c_str(source_id, "source_id") }?;
-        // SAFETY: Validated against null; caller guarantees NUL-terminated strings.
-        let geojson = unsafe { required_c_str(geojson_json, "geojson_json") }?;
+        // SAFETY: Caller guarantees `map` and string pointers remain valid for this call.
+        let (map_ref, source, geojson) = unsafe {
+            (
+                borrow_map_mut(map)?,
+                required_c_str(source_id, "source_id")?,
+                required_c_str(geojson_json, "geojson_json")?,
+            )
+        };
         map_ref.engine.set_geojson_source_data(source, geojson)
     })
 }
@@ -159,16 +170,16 @@ pub unsafe extern "C" fn maplibre_map_set_feature_state_json(
     state_json: *const c_char,
 ) -> bool {
     ffi_try_bool(|| {
-        // SAFETY: Caller upholds pointer validity for the duration of the call.
-        let map_ref = unsafe { borrow_map_mut(map) }?;
-        // SAFETY: Validated against null; caller guarantees NUL-terminated strings.
-        let src = unsafe { required_c_str(source, "source") }?;
-        // SAFETY: Optional C string; `NULL` maps to `None`.
-        let src_layer = unsafe { optional_c_str(source_layer, "source_layer") }?;
-        // SAFETY: Validated against null; caller guarantees NUL-terminated strings.
-        let feat_id = unsafe { required_c_str(feature_id, "feature_id") }?;
-        // SAFETY: Validated against null; caller guarantees NUL-terminated strings.
-        let state = unsafe { required_c_str(state_json, "state_json") }?;
+        // SAFETY: Caller guarantees `map` and string pointers (or null `source_layer`) remain valid.
+        let (map_ref, src, src_layer, feat_id, state) = unsafe {
+            (
+                borrow_map_mut(map)?,
+                required_c_str(source, "source")?,
+                optional_c_str(source_layer, "source_layer")?,
+                required_c_str(feature_id, "feature_id")?,
+                required_c_str(state_json, "state_json")?,
+            )
+        };
         map_ref
             .engine
             .set_feature_state_json(src, src_layer, feat_id, state)
@@ -190,16 +201,16 @@ pub unsafe extern "C" fn maplibre_map_remove_feature_state(
     state_key: *const c_char,
 ) -> bool {
     ffi_try_bool(|| {
-        // SAFETY: Caller upholds pointer validity for the duration of the call.
-        let map_ref = unsafe { borrow_map_mut(map) }?;
-        // SAFETY: Validated against null; caller guarantees NUL-terminated string.
-        let src = unsafe { required_c_str(source, "source") }?;
-        // SAFETY: Optional C strings; `NULL` maps to `None`.
-        let src_layer = unsafe { optional_c_str(source_layer, "source_layer") }?;
-        // SAFETY: Optional C strings; `NULL` maps to `None`.
-        let feat_id = unsafe { optional_c_str(feature_id, "feature_id") }?;
-        // SAFETY: Optional C strings; `NULL` maps to `None`.
-        let key = unsafe { optional_c_str(state_key, "state_key") }?;
+        // SAFETY: Caller guarantees `map`, `source`, and any non-null optional pointers remain valid.
+        let (map_ref, src, src_layer, feat_id, key) = unsafe {
+            (
+                borrow_map_mut(map)?,
+                required_c_str(source, "source")?,
+                optional_c_str(source_layer, "source_layer")?,
+                optional_c_str(feature_id, "feature_id")?,
+                optional_c_str(state_key, "state_key")?,
+            )
+        };
         map_ref
             .engine
             .remove_feature_state(src, src_layer, feat_id, key)
@@ -224,10 +235,6 @@ pub unsafe extern "C" fn maplibre_map_add_image_rgba8(
     sdf: bool,
 ) -> bool {
     ffi_try_bool(|| {
-        // SAFETY: Caller upholds pointer validity for the duration of the call.
-        let map_ref = unsafe { borrow_map_mut(map) }?;
-        // SAFETY: Validated against null; caller guarantees NUL-terminated string.
-        let id = unsafe { required_c_str(image_id, "image_id") }?;
         if width == 0 || height == 0 {
             return Err(FfiError::InvalidSize { width, height });
         }
@@ -248,9 +255,14 @@ pub unsafe extern "C" fn maplibre_map_add_image_rgba8(
                 actual: rgba_len,
             });
         }
-        // SAFETY: `rgba` is non-null, `expected == rgba_len <= isize::MAX`, and caller guarantees
-        // `rgba_len` readable bytes.
-        let bytes = unsafe { std::slice::from_raw_parts(rgba, expected) };
+        // SAFETY: `rgba` is non-null with `expected` readable bytes; caller guarantees pointer validity.
+        let (map_ref, id, bytes) = unsafe {
+            (
+                borrow_map_mut(map)?,
+                required_c_str(image_id, "image_id")?,
+                std::slice::from_raw_parts(rgba, expected),
+            )
+        };
         map_ref
             .engine
             .add_image_rgba8(id, width, height, bytes, pixel_ratio, sdf)

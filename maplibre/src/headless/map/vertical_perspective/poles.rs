@@ -19,10 +19,14 @@ fn ground_distance(
     terrain: DrawnTerrain<'_>,
     pixel: Point2<f64>,
 ) -> Option<f64> {
-    let hit = match pick_globe_terrain(camera, terrain, pixel) {
+    let pick = pick_globe_terrain(camera, terrain, pixel);
+    assert!(
+        !matches!(pick, TerrainPick::Unknown),
+        "{pixel:?} looks at ground without DEM"
+    );
+    let hit = match pick {
         TerrainPick::Ground(hit) | TerrainPick::PolarCap(hit) => hit,
-        TerrainPick::Sky => return None,
-        TerrainPick::Unknown => panic!("{pixel:?} looks at ground without DEM"),
+        TerrainPick::Sky | TerrainPick::Unknown => return None,
     };
     let point = crate::projection::globe::lat_lon_to_unit_sphere(hit.location)
         * camera.body().unit_radius_at(hit.elevation);

@@ -182,8 +182,10 @@ impl BufferedTextureHead {
             .into_stream_writer_with_size(self.buffer_dimensions.unpadded_bytes_per_row as usize)?;
 
         for chunk in padded_buffer.chunks(self.buffer_dimensions.padded_bytes_per_row as usize) {
-            png_writer
-                .write_all(&chunk[..self.buffer_dimensions.unpadded_bytes_per_row as usize])?
+            let row = chunk
+                .get(..self.buffer_dimensions.unpadded_bytes_per_row as usize)
+                .unwrap_or(chunk);
+            png_writer.write_all(row)?;
         }
         png_writer.finish()?;
         Ok(())

@@ -56,7 +56,21 @@ impl ShiftHandler {
             || self.held_orbit_cw
             || self.camera_translate.magnitude2() > 0.01
     }
+}
 
+fn pan_by(
+    style: &crate::style::Style,
+    view_state: &mut crate::render::view_state::ViewState,
+    delta: Vector2<f64>,
+) {
+    let center = center_pixel(view_state);
+    let plane = view_state.center_elevation();
+    if !pan_globe_by_pixels(style, view_state, center, delta) {
+        pan_plane_by_pixels(view_state, center, delta, plane);
+    }
+}
+
+impl ShiftHandler {
     pub(crate) fn update_state_with_nav(
         &mut self,
         state: &mut MapContext,
@@ -66,17 +80,7 @@ impl ShiftHandler {
         self.update_parts_with_nav(&state.style, &mut state.view_state, dt, nav);
     }
 
-    pub(crate) fn update_parts_with_nav(
-        &mut self,
-        style: &crate::style::Style,
-        view_state: &mut crate::render::view_state::ViewState,
-        dt: Duration,
-        nav: &mut NavigationState,
-    ) {
-        let dt_secs = dt.as_secs_f64();
-        let boost = if nav.shift_held { 1.85 } else { 1.0 };
-
-        // Continuous held-key velocity (panning or Alt+Arrow orbiting/tilting).
+    fn held_direction(&self) -> Vector2<f64> {
         let mut dir = Vector2::zero();
         if self.held_up {
             dir.y -= 1.0;
@@ -90,32 +94,50 @@ impl ShiftHandler {
         if self.held_right {
             dir.x += 1.0;
         }
+        dir
+    }
+
+    fn apply_alt_orbit_or_tilt(
+        &mut self,
+        view_state: &mut crate::render::view_state::ViewState,
+        nav: &mut NavigationState,
+        dir: Vector2<f64>,
+        boost: f64,
+        dt_secs: f64,
+    ) {
+        if dir.x != 0.0 && !nav.north_locked {
+            nav.on_manual_bearing();
+            let current = view_state.camera().get_bearing();
+            let delta = Rad::from(Deg(dir.x * 95.0 * boost * dt_secs));
+            view_state.camera_mut().set_bearing(current + delta);
+        }
+        if dir.y != 0.0 && nav.three_dimensional {
+            nav.on_manual_tilt();
+            let max_pitch: f64 = view_state.camera().max_pitch().0.to_degrees();
+            let current: f64 = view_state.camera().get_pitch().0.to_degrees();
+            let next = (current - dir.y * 55.0 * boost * dt_secs).clamp(0.0, max_pitch);
+            set_pitch_keeping_center(view_state, Deg(next));
+        }
+        self.camera_translate = Vector2::zero();
+    }
+
+    pub(crate) fn update_parts_with_nav(
+        &mut self,
+        style: &crate::style::Style,
+        view_state: &mut crate::render::view_state::ViewState,
+        dt: Duration,
+        nav: &mut NavigationState,
+    ) {
+        let dt_secs = dt.as_secs_f64();
+        let boost = if nav.shift_held { 1.85 } else { 1.0 };
+        let dir = self.held_direction();
 
         if nav.alt_held && (dir.x != 0.0 || dir.y != 0.0) {
-            if dir.x != 0.0 && !nav.north_locked {
-                nav.on_manual_bearing();
-                let current = view_state.camera().get_bearing();
-                let delta = Rad::from(Deg(dir.x * 95.0 * boost * dt_secs));
-                view_state.camera_mut().set_bearing(current + delta);
-            }
-            if dir.y != 0.0 && nav.three_dimensional {
-                nav.on_manual_tilt();
-                let max_pitch: f64 = view_state.camera().max_pitch().0.to_degrees();
-                let current: f64 = view_state.camera().get_pitch().0.to_degrees();
-                let dy: f64 = dir.y;
-                let next = (current - dy * 55.0 * boost * dt_secs).clamp(0.0, max_pitch);
-                set_pitch_keeping_center(view_state, Deg(next));
-            }
-            self.camera_translate = Vector2::zero();
+            self.apply_alt_orbit_or_tilt(view_state, nav, dir, boost, dt_secs);
         } else if dir.magnitude2() > 0.0 {
             nav.on_manual_pan_or_zoom();
-            let unit = dir.normalize();
-            let continuous_px = unit * (6.2 * self.sensitivity * boost * dt_secs);
-            let center = center_pixel(view_state);
-            let plane = view_state.center_elevation();
-            if !pan_globe_by_pixels(style, view_state, center, -continuous_px) {
-                pan_plane_by_pixels(view_state, center, -continuous_px, plane);
-            }
+            let delta = dir.normalize() * (6.2 * self.sensitivity * boost * dt_secs);
+            pan_by(style, view_state, -delta);
             self.camera_translate = Vector2::zero();
         } else {
             let decay = (dt_secs / self.speed).min(1.0);
@@ -125,22 +147,12 @@ impl ShiftHandler {
                 self.camera_translate = Vector2::zero();
             }
             if !delta.is_zero() {
-                let center = center_pixel(view_state);
-                let plane = view_state.center_elevation();
-                if !pan_globe_by_pixels(style, view_state, center, -delta) {
-                    pan_plane_by_pixels(view_state, center, -delta, plane);
-                }
+                pan_by(style, view_state, -delta);
             }
         }
 
         // Continuous Q / E bearing rotation.
-        let mut orbit_dir = 0.0;
-        if self.held_orbit_ccw {
-            orbit_dir -= 1.0;
-        }
-        if self.held_orbit_cw {
-            orbit_dir += 1.0;
-        }
+        let orbit_dir = f64::from(i8::from(self.held_orbit_cw) - i8::from(self.held_orbit_ccw));
         if orbit_dir != 0.0 && !nav.north_locked {
             nav.on_manual_bearing();
             let current = view_state.camera().get_bearing();

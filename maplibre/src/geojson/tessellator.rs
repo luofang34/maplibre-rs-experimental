@@ -10,9 +10,31 @@ use crate::{
     },
 };
 
-pub(super) fn build_tessellator(
+fn with_optional_globe_subdivision(
+    tessellator: ZeroTessellator<IndexDataType>,
+    use_globe_geometry: bool,
+    granularity: u32,
+    coords: WorldTileCoords,
+) -> ZeroTessellator<IndexDataType> {
+    if !use_globe_geometry {
+        return tessellator;
+    }
+    let zoom = u8::from(coords.z);
+    let bound = crate::coords::ZOOM_BOUNDS
+        .get(usize::from(zoom))
+        .copied()
+        .unwrap_or_else(|| 1_u32 << zoom);
+    let last_tile = i64::from(bound) - 1;
+    tessellator.with_globe_subdivision(
+        granularity,
+        zoom == 0,
+        coords.y == 0,
+        i64::from(coords.y) == last_tile,
+    )
+}
+
+fn build_base_tessellator(
     paint: &LayerPaint,
-    style_layer: &StyleLayer,
     coords: WorldTileCoords,
     projection: &ProjectionType,
     (style_zoom, overscaling, buffer): (f64, f64, Option<u32>),
@@ -24,7 +46,7 @@ pub(super) fn build_tessellator(
         _ => 1,
     };
     let use_globe_geometry = projection.uses_globe_rendering(f64::from(zoom));
-    let mut tessellator = match paint {
+    match paint {
         LayerPaint::Circle(circle) => {
             ZeroTessellator::<IndexDataType>::default().with_circles(CircleOptions {
                 grid: use_globe_geometry
@@ -55,12 +77,11 @@ pub(super) fn build_tessellator(
                 2
             };
             if use_globe_geometry {
-                let last_tile = i64::from(crate::coords::ZOOM_BOUNDS[usize::from(zoom)]) - 1;
-                tessellator.with_globe_subdivision(
+                with_optional_globe_subdivision(
+                    tessellator,
+                    true,
                     granularity_for_zoom(128, min_grid, zoom),
-                    zoom == 0,
-                    coords.y == 0,
-                    i64::from(coords.y) == last_tile,
+                    coords,
                 )
             } else if extrusion.may_use_vertex_agl() {
                 tessellator.with_globe_subdivision(32, false, false, false)
@@ -68,18 +89,25 @@ pub(super) fn build_tessellator(
                 tessellator
             }
         }
-        _ if use_globe_geometry => {
-            let last_tile = i64::from(crate::coords::ZOOM_BOUNDS[usize::from(zoom)]) - 1;
-            ZeroTessellator::<IndexDataType>::default().with_globe_subdivision(
-                granularity,
-                zoom == 0,
-                coords.y == 0,
-                i64::from(coords.y) == last_tile,
-            )
-        }
-        _ => ZeroTessellator::<IndexDataType>::default(),
+        _ => with_optional_globe_subdivision(
+            ZeroTessellator::<IndexDataType>::default(),
+            use_globe_geometry,
+            granularity,
+            coords,
+        ),
     }
-    .with_feature_opacity(paint.opacity(), style_zoom);
+    .with_feature_opacity(paint.opacity(), style_zoom)
+}
+
+pub(super) fn build_tessellator(
+    paint: &LayerPaint,
+    style_layer: &StyleLayer,
+    coords: WorldTileCoords,
+    projection: &ProjectionType,
+    (style_zoom, overscaling, buffer): (f64, f64, Option<u32>),
+) -> ZeroTessellator<IndexDataType> {
+    let mut tessellator =
+        build_base_tessellator(paint, coords, projection, (style_zoom, overscaling, buffer));
     tessellator.sort_key = SortKeys::by(sort_key_of(style_layer));
     tessellator.feature_paint_retention =
         crate::vector::feature_paint::feature_paint_retention(style_layer);

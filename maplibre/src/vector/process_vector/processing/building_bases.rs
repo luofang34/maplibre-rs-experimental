@@ -4,6 +4,18 @@ use std::borrow::Cow;
 
 use geozero::mvt::tile;
 
+struct BaseCandidate {
+    feature_index: usize,
+    bbox: [i32; 4],
+    rings: Vec<Vec<[i32; 2]>>,
+}
+
+struct PartInfo {
+    bbox: [i32; 4],
+    centroids: Vec<[f32; 2]>,
+    min_height: f64,
+}
+
 /// Clears `hide_3d` on building footprints whose interior `building:part` pieces all start
 /// above ground (`render_min_height > 0`), so stepped skyscrapers modeled with a `building`
 /// base podium and elevated `building:part` tiers do not float in mid-air.
@@ -11,35 +23,39 @@ use geozero::mvt::tile;
 /// Operates on `&mut Cow<'_, tile::Layer>` so tiles without elevated stepped podiums avoid
 /// cloning tens of thousands of `building` features.
 pub(super) fn unhide_unreplaced_building_bases(layer: &mut Cow<'_, tile::Layer>) {
-    let Some(hide_3d_key) = layer
-        .keys
-        .iter()
-        .position(|key| key == "hide_3d")
-        .and_then(|idx| u32::try_from(idx).ok())
+    let Some(hide_3d_key) = find_layer_key(layer, "hide_3d") else {
+        return;
+    };
+    let Some(min_height_key) = find_layer_key(layer, "render_min_height") else {
+        return;
+    };
+    let height_key = find_layer_key(layer, "render_height");
+    let (candidates, Some(union_bbox)) =
+        collect_base_candidates(layer, hide_3d_key, min_height_key)
     else {
         return;
     };
-    let Some(min_height_key) = layer
-        .keys
-        .iter()
-        .position(|key| key == "render_min_height")
-        .and_then(|idx| u32::try_from(idx).ok())
-    else {
+    let parts = collect_part_infos(layer, hide_3d_key, min_height_key, union_bbox);
+    if parts.is_empty() {
         return;
-    };
-    let height_key = layer
-        .keys
-        .iter()
-        .position(|key| key == "render_height")
-        .and_then(|idx| u32::try_from(idx).ok());
-
-    struct BaseCandidate {
-        feature_index: usize,
-        bbox: [i32; 4],
-        rings: Vec<Vec<[i32; 2]>>,
     }
+    apply_unhide_updates(layer, &candidates, &parts, hide_3d_key, height_key);
+}
 
-    let mut candidates: Vec<BaseCandidate> = Vec::new();
+fn find_layer_key(layer: &tile::Layer, name: &str) -> Option<u32> {
+    layer
+        .keys
+        .iter()
+        .position(|key| key == name)
+        .and_then(|idx| u32::try_from(idx).ok())
+}
+
+fn collect_base_candidates(
+    layer: &tile::Layer,
+    hide_3d_key: u32,
+    min_height_key: u32,
+) -> (Vec<BaseCandidate>, Option<[i32; 4]>) {
+    let mut candidates = Vec::new();
     let mut union_bbox: Option<[i32; 4]> = None;
     for (feature_index, feature) in layer.features.iter().enumerate() {
         if feature.r#type != Some(3)
@@ -67,16 +83,15 @@ pub(super) fn unhide_unreplaced_building_bases(layer: &mut Cow<'_, tile::Layer>)
             rings,
         });
     }
-    let Some(union_bbox) = union_bbox else {
-        return;
-    };
+    (candidates, union_bbox)
+}
 
-    struct PartInfo {
-        bbox: [i32; 4],
-        centroids: Vec<[f32; 2]>,
-        min_height: f64,
-    }
-
+fn collect_part_infos(
+    layer: &tile::Layer,
+    hide_3d_key: u32,
+    min_height_key: u32,
+    union_bbox: [i32; 4],
+) -> Vec<PartInfo> {
     let mut parts = Vec::new();
     for feature in &layer.features {
         if feature.r#type != Some(3)
@@ -115,15 +130,20 @@ pub(super) fn unhide_unreplaced_building_bases(layer: &mut Cow<'_, tile::Layer>)
             min_height,
         });
     }
-    if parts.is_empty() {
-        return;
-    }
+    parts
+}
 
-    for candidate in &candidates {
+fn apply_unhide_updates(
+    layer: &mut Cow<'_, tile::Layer>,
+    candidates: &[BaseCandidate],
+    parts: &[PartInfo],
+    hide_3d_key: u32,
+    height_key: Option<u32>,
+) {
+    for candidate in candidates {
         let bbox = candidate.bbox;
-        let rings = &candidate.rings;
         let mut min_part_base: Option<f64> = None;
-        for part in &parts {
+        for part in parts {
             if part.bbox[2] < bbox[0]
                 || part.bbox[0] > bbox[2]
                 || part.bbox[3] < bbox[1]
@@ -132,7 +152,8 @@ pub(super) fn unhide_unreplaced_building_bases(layer: &mut Cow<'_, tile::Layer>)
                 continue;
             }
             let inside = part.centroids.iter().any(|&point| {
-                rings
+                candidate
+                    .rings
                     .iter()
                     .filter(|ring| point_in_mvt_ring(ring, point))
                     .count()
@@ -148,19 +169,21 @@ pub(super) fn unhide_unreplaced_building_bases(layer: &mut Cow<'_, tile::Layer>)
             continue;
         };
         let owned = layer.to_mut();
-        let feature_index = candidate.feature_index;
-        remove_feature_tag(&mut owned.features[feature_index].tags, hide_3d_key);
+        let Some(feat) = owned.features.get_mut(candidate.feature_index) else {
+            continue;
+        };
+        remove_feature_tag(&mut feat.tags, hide_3d_key);
         if let Some(height_key) = height_key {
-            if let Some(height) =
-                feature_number_tag(&owned.features[feature_index], height_key, &owned.values)
-            {
+            if let Some(height) = feature_number_tag(feat, height_key, &owned.values) {
                 if height > min_base {
                     let val_idx = u32::try_from(owned.values.len()).unwrap_or(u32::MAX);
                     owned.values.push(tile::Value {
                         double_value: Some(min_base),
                         ..Default::default()
                     });
-                    set_feature_tag(&mut owned.features[feature_index].tags, height_key, val_idx);
+                    if let Some(feat) = owned.features.get_mut(candidate.feature_index) {
+                        set_feature_tag(&mut feat.tags, height_key, val_idx);
+                    }
                 }
             }
         }
@@ -212,21 +235,16 @@ fn set_feature_tag(tags: &mut [u32], key: u32, value_index: u32) {
 
 fn geometry_bbox(geometry: &[u32]) -> Option<[i32; 4]> {
     let (mut cx, mut cy) = (0_i32, 0_i32);
-    let mut idx = 0;
+    let mut iter = geometry.iter().copied();
     let mut has_ring = false;
     let mut bbox: Option<[i32; 4]> = None;
-    while idx < geometry.len() {
-        let cmd_int = geometry[idx];
-        idx += 1;
+    while let Some(cmd_int) = iter.next() {
         let (cmd, count) = (cmd_int & 7, (cmd_int >> 3) as usize);
         if cmd == 1 || cmd == 2 {
             for _ in 0..count {
-                if idx + 1 >= geometry.len() {
+                let (Some(raw_dx), Some(raw_dy)) = (iter.next(), iter.next()) else {
                     return bbox;
-                }
-                let raw_dx = geometry[idx];
-                let raw_dy = geometry[idx + 1];
-                idx += 2;
+                };
                 let dx = ((raw_dx >> 1) as i32) ^ -((raw_dx & 1) as i32);
                 let dy = ((raw_dy >> 1) as i32) ^ -((raw_dy & 1) as i32);
                 cx = cx.saturating_add(dx);
@@ -249,19 +267,14 @@ fn geometry_bbox(geometry: &[u32]) -> Option<[i32; 4]> {
 fn decode_mvt_rings(geometry: &[u32]) -> Vec<Vec<[i32; 2]>> {
     let mut rings: Vec<Vec<[i32; 2]>> = Vec::new();
     let (mut cx, mut cy) = (0_i32, 0_i32);
-    let mut idx = 0;
-    while idx < geometry.len() {
-        let cmd_int = geometry[idx];
-        idx += 1;
+    let mut iter = geometry.iter().copied();
+    while let Some(cmd_int) = iter.next() {
         let (cmd, count) = (cmd_int & 7, (cmd_int >> 3) as usize);
         if cmd == 1 || cmd == 2 {
             for _ in 0..count {
-                if idx + 1 >= geometry.len() {
+                let (Some(raw_dx), Some(raw_dy)) = (iter.next(), iter.next()) else {
                     return rings;
-                }
-                let raw_dx = geometry[idx];
-                let raw_dy = geometry[idx + 1];
-                idx += 2;
+                };
                 let dx = ((raw_dx >> 1) as i32) ^ -((raw_dx & 1) as i32);
                 let dy = ((raw_dy >> 1) as i32) ^ -((raw_dy & 1) as i32);
                 cx = cx.saturating_add(dx);

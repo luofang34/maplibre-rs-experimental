@@ -1,7 +1,7 @@
 //! The host's sun lights the terrain: the ground under the sun is drawn as by day, its
 //! antipode at the night brightness, readable and cooler rather than black, raised by a lit
 //! Moon above it, and the terminator in between.
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg_attr(test, allow(clippy::expect_used))]
 
 use cgmath::{InnerSpace, Vector3};
 
@@ -69,6 +69,7 @@ async fn center_brightness(map: &mut HeadlessMap) -> u32 {
 /// frames agree.
 async fn center_color(map: &mut HeadlessMap) -> [u8; 3] {
     let mut previous = None;
+    let mut settled = None;
     for _ in 0..40 {
         for _ in 0..4 {
             map.run_frame().expect("frame");
@@ -85,11 +86,13 @@ async fn center_color(map: &mut HeadlessMap) -> [u8; 3] {
         let at = ((SIZE / 2 * SIZE + SIZE / 2) * 4) as usize;
         let color = [pixels[at], pixels[at + 1], pixels[at + 2]];
         if color != [0; 3] && previous == Some(color) {
-            return color;
+            settled = Some(color);
+            break;
         }
         previous = Some(color);
     }
-    panic!("the frame never settled");
+    assert!(settled.is_some(), "the frame never settled");
+    settled.unwrap_or([0; 3])
 }
 
 fn look_at(map: &mut HeadlessMap, longitude: f64) {

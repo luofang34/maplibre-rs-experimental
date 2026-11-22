@@ -131,7 +131,8 @@ fn point_along_polyline(polyline: &[[f32; 2]], target_dist: f64) -> Option<[f64;
     }
     let mut walked = 0.0_f64;
     for seg in polyline.windows(2) {
-        let (p0, p1) = (seg[0], seg[1]);
+        let [p0, p1] = seg else { continue };
+        let (p0, p1) = (*p0, *p1);
         let dx = f64::from(p1[0]) - f64::from(p0[0]);
         let dy = f64::from(p1[1]) - f64::from(p0[1]);
         let seg_len = dx.hypot(dy);

@@ -188,7 +188,7 @@ pub(super) fn push_or_stream_symbol(
             );
             if let Some(needed) = maybe_needed {
                 let empty = empty_feature_properties();
-                for feature in &mut features[start_len..] {
+                for feature in features.get_mut(start_len..).into_iter().flatten() {
                     prune_single_feature(feature, needed, empty, None);
                 }
             }
@@ -216,16 +216,18 @@ pub(super) fn finish_collected(
                 )
             })
             .collect();
-        if !keyed.windows(2).all(|w| w[0].0 <= w[1].0) {
+        if !keyed.windows(2).all(|w| matches!(w, [a, b] if a.0 <= b.0)) {
             keyed.sort_by(|a, b| a.0.total_cmp(&b.0));
             for &(_, idx) in &keyed {
-                layout::append(
-                    &collected[idx],
-                    (paint, zoom, overscaling),
-                    atlas,
-                    quad_buffer,
-                    features,
-                );
+                if let Some(symbol) = collected.get(idx) {
+                    layout::append(
+                        symbol,
+                        (paint, zoom, overscaling),
+                        atlas,
+                        quad_buffer,
+                        features,
+                    );
+                }
             }
             return;
         }
@@ -320,21 +322,22 @@ mod tests {
         ];
 
         prune_symbol_features(&mut features, &style, None);
-        assert!(features[0].data.properties.is_empty());
-        assert!(Arc::ptr_eq(
-            &features[0].data.properties,
-            empty_feature_properties()
-        ));
-        assert_eq!(features[1].data.properties.len(), 2);
+        let [f0, f1] = features.as_slice() else {
+            assert_eq!(features.len(), 2);
+            return;
+        };
+        assert!(f0.data.properties.is_empty());
+        assert!(Arc::ptr_eq(&f0.data.properties, empty_feature_properties()));
+        assert_eq!(f1.data.properties.len(), 2);
         assert_eq!(
-            features[1].data.properties.get("tint"),
+            f1.data.properties.get("tint"),
             Some(&Value::String("#112233".into()))
         );
-        assert!(features[1]
+        assert!(f1
             .data
             .properties
             .contains_key(&format!("{FEATURE_STATE_PREFIX}hover")));
-        assert!(!features[1].data.properties.contains_key("name"));
+        assert!(!f1.data.properties.contains_key("name"));
     }
 
     #[test]
@@ -390,14 +393,14 @@ mod tests {
 
         let mut buffered = TextTessellator::with_assets(paint.clone(), 14.0, atlas.clone());
         buffered.source_ids = vec![Some(7)];
-        let _ = geozero::mvt::process(layer, &mut buffered);
+        assert!(geozero::mvt::process(layer, &mut buffered).is_ok());
         buffered.finish();
         prune_symbol_features(&mut buffered.features, &style, None);
 
         let mut streaming = TextTessellator::with_assets(paint.clone(), 14.0, atlas);
         streaming.source_ids = vec![Some(7)];
         streaming.enable_streaming_point_layout(runtime_keys);
-        let _ = geozero::mvt::process(layer, &mut streaming);
+        assert!(geozero::mvt::process(layer, &mut streaming).is_ok());
         streaming.finish();
 
         assert!(streaming.streamed_point_layout());
@@ -407,12 +410,13 @@ mod tests {
         );
         assert_eq!(buffered.quad_buffer.indices, streaming.quad_buffer.indices);
         assert_eq!(buffered.features.len(), streaming.features.len());
-        assert_eq!(buffered.features[0].str, streaming.features[0].str);
-        assert_eq!(buffered.features[0].bbox, streaming.features[0].bbox);
-        assert_eq!(
-            buffered.features[0].data.properties,
-            streaming.features[0].data.properties
-        );
-        assert!(!streaming.features[0].data.properties.contains_key("name"));
+        let (Some(bf), Some(sf)) = (buffered.features.first(), streaming.features.first()) else {
+            assert!(!buffered.features.is_empty());
+            return;
+        };
+        assert_eq!(bf.str, sf.str);
+        assert_eq!(bf.bbox, sf.bbox);
+        assert_eq!(bf.data.properties, sf.data.properties);
+        assert!(!sf.data.properties.contains_key("name"));
     }
 }

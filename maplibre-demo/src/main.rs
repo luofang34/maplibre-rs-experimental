@@ -1,5 +1,23 @@
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented
+    )
+)]
 #![deny(unused_imports)]
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing
+    )
+)]
 
 use std::path::PathBuf;
 
@@ -17,6 +35,8 @@ use maplibre_winit::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
 mod bench;
 #[cfg(feature = "headless")]
 mod headless;
+#[cfg(feature = "headless")]
+mod headless_setup;
 #[cfg(feature = "headless")]
 mod snapshot;
 mod style_loader;
@@ -51,41 +71,119 @@ impl From<ProjectionArg> for ProjectionType {
     }
 }
 
+#[derive(clap::Args)]
+struct HeadedArgs {
+    /// Local file path or `http(s)://` / `file://` URL to a MapLibre style JSON document.
+    #[clap(long, conflicts_with_all = ["globe", "terrain"])]
+    style: Option<String>,
+    /// Use the bundled world style rendered on the globe.
+    #[clap(long)]
+    globe: bool,
+    /// Use the bundled 3D terrain style: OpenStreetMap imagery draped over elevation tiles.
+    #[clap(long, conflicts_with = "globe")]
+    terrain: bool,
+    /// Override a style source's URL (`NAME=URL_OR_PATH`, repeatable).
+    #[clap(long = "source-url", value_name = "NAME=URL_OR_PATH")]
+    source_urls: Vec<String>,
+    /// Largest camera pitch in degrees. Defaults to 85 for 3D terrain/extrusion styles, else 60.
+    #[clap(long)]
+    max_pitch: Option<f64>,
+    /// Override the projection declared by the style.
+    #[clap(long, value_enum)]
+    projection: Option<ProjectionArg>,
+    /// Exit after rendering this many frames.
+    #[clap(long)]
+    frames: Option<u64>,
+    /// Outline every tile of the view pattern in red, to inspect tile selection.
+    #[clap(long)]
+    debug_tiles: bool,
+    /// Multiplier on scroll-wheel / trackpad zoom rate (`1.0` = default).
+    #[clap(long, default_value_t = 1.0)]
+    zoom_sensitivity: f64,
+}
+
+#[cfg(feature = "headless")]
+#[derive(clap::Args)]
+struct SnapshotArgs {
+    /// Local file path or `http(s)://` / `file://` URL to a MapLibre style JSON document.
+    #[clap(long, conflicts_with_all = ["globe", "terrain"])]
+    style: Option<String>,
+    /// Use the bundled world style rendered on the globe.
+    #[clap(long)]
+    globe: bool,
+    /// Use the bundled 3D terrain style.
+    #[clap(long, conflicts_with = "globe")]
+    terrain: bool,
+    /// Override a style source's URL (`NAME=URL_OR_PATH`, repeatable).
+    #[clap(long = "source-url", value_name = "NAME=URL_OR_PATH")]
+    source_urls: Vec<String>,
+    /// Override the projection declared by the style.
+    #[clap(long, value_enum)]
+    projection: Option<ProjectionArg>,
+    #[clap(long, default_value_t = 1280)]
+    width: u32,
+    #[clap(long, default_value_t = 800)]
+    height: u32,
+    #[clap(long, allow_hyphen_values = true)]
+    lat: Option<f64>,
+    #[clap(long, allow_hyphen_values = true)]
+    lon: Option<f64>,
+    #[clap(long)]
+    zoom: Option<f64>,
+    #[clap(long, allow_hyphen_values = true)]
+    pitch: Option<f64>,
+    #[clap(long, allow_hyphen_values = true)]
+    bearing: Option<f64>,
+    /// Pin orbital camera target center altitude in metres MSL (`centerClampedToGround = false`).
+    #[clap(long, allow_hyphen_values = true)]
+    center_elevation: Option<f64>,
+    /// First-person 6-DoF cockpit/XR camera altitude in metres MSL at `(lat, lon)`.
+    #[clap(long, allow_hyphen_values = true)]
+    eye_alt_m: Option<f64>,
+    /// First-person cockpit elevation angle in degrees (`0` = horizon, `+10` = nose up, `-10` = nose down).
+    #[clap(long, allow_hyphen_values = true, default_value_t = 0.0)]
+    cockpit_pitch: f64,
+    /// Vertical field of view in degrees for `--eye-alt-m` first-person rendering.
+    #[clap(long, default_value_t = 64.0)]
+    fov_deg: f64,
+    #[clap(long, default_value_t = 360)]
+    max_frames: usize,
+    #[clap(long, default_value_t = 30)]
+    timeout_secs: u64,
+    /// Output PNG path.
+    #[clap(long)]
+    out: PathBuf,
+}
+
+#[cfg(feature = "headless")]
+#[derive(clap::Args)]
+struct BenchArgs {
+    /// Benchmark scenario (`all`, `s1`, `s3`, `s5`).
+    #[clap(long, value_enum, default_value_t = bench::BenchScenario::All)]
+    scenario: bench::BenchScenario,
+    /// Optional custom MapLibre style JSON file path or URL.
+    #[clap(long)]
+    style: Option<String>,
+    #[clap(long, default_value_t = 1024)]
+    width: u32,
+    #[clap(long, default_value_t = 768)]
+    height: u32,
+    #[clap(long, default_value_t = 120)]
+    frames: usize,
+    #[clap(long, default_value_t = 30)]
+    timeout_secs: u64,
+    /// Emit structured JSON benchmark report to stdout.
+    #[clap(long)]
+    json: bool,
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Opens an interactive map window.
     ///
     /// Controls: left-drag pans, wheel or +/- zooms around the pointer, right-drag rotates and
     /// tilts, W/A/S/D or the arrow keys pan, Escape quits.
-    Headed {
-        /// Local file path or `http(s)://` / `file://` URL to a MapLibre style JSON document.
-        #[clap(long, conflicts_with_all = ["globe", "terrain"])]
-        style: Option<String>,
-        /// Use the bundled world style rendered on the globe.
-        #[clap(long)]
-        globe: bool,
-        /// Use the bundled 3D terrain style: OpenStreetMap imagery draped over elevation tiles.
-        #[clap(long, conflicts_with = "globe")]
-        terrain: bool,
-        /// Override a style source's URL (`NAME=URL_OR_PATH`, repeatable).
-        #[clap(long = "source-url", value_name = "NAME=URL_OR_PATH")]
-        source_urls: Vec<String>,
-        /// Largest camera pitch in degrees. Defaults to 85 for 3D terrain/extrusion styles, else 60.
-        #[clap(long)]
-        max_pitch: Option<f64>,
-        /// Override the projection declared by the style.
-        #[clap(long, value_enum)]
-        projection: Option<ProjectionArg>,
-        /// Exit after rendering this many frames.
-        #[clap(long)]
-        frames: Option<u64>,
-        /// Outline every tile of the view pattern in red, to inspect tile selection.
-        #[clap(long)]
-        debug_tiles: bool,
-        /// Multiplier on scroll-wheel / trackpad zoom rate (`1.0` = default).
-        #[clap(long, default_value_t = 1.0)]
-        zoom_sensitivity: f64,
-    },
+    Headed(HeadedArgs),
     #[cfg(feature = "headless")]
     Headless {
         #[clap(default_value_t = 400)]
@@ -103,77 +201,89 @@ enum Commands {
     },
     /// Renders a single high-resolution offscreen PNG frame once all view tiles settle.
     #[cfg(feature = "headless")]
-    Snapshot {
-        /// Local file path or `http(s)://` / `file://` URL to a MapLibre style JSON document.
-        #[clap(long, conflicts_with_all = ["globe", "terrain"])]
-        style: Option<String>,
-        /// Use the bundled world style rendered on the globe.
-        #[clap(long)]
-        globe: bool,
-        /// Use the bundled 3D terrain style.
-        #[clap(long, conflicts_with = "globe")]
-        terrain: bool,
-        /// Override a style source's URL (`NAME=URL_OR_PATH`, repeatable).
-        #[clap(long = "source-url", value_name = "NAME=URL_OR_PATH")]
-        source_urls: Vec<String>,
-        /// Override the projection declared by the style.
-        #[clap(long, value_enum)]
-        projection: Option<ProjectionArg>,
-        #[clap(long, default_value_t = 1280)]
-        width: u32,
-        #[clap(long, default_value_t = 800)]
-        height: u32,
-        #[clap(long, allow_hyphen_values = true)]
-        lat: Option<f64>,
-        #[clap(long, allow_hyphen_values = true)]
-        lon: Option<f64>,
-        #[clap(long)]
-        zoom: Option<f64>,
-        #[clap(long, allow_hyphen_values = true)]
-        pitch: Option<f64>,
-        #[clap(long, allow_hyphen_values = true)]
-        bearing: Option<f64>,
-        /// Pin orbital camera target center altitude in metres MSL (`centerClampedToGround = false`).
-        #[clap(long, allow_hyphen_values = true)]
-        center_elevation: Option<f64>,
-        /// First-person 6-DoF cockpit/XR camera altitude in metres MSL at `(lat, lon)`.
-        #[clap(long, allow_hyphen_values = true)]
-        eye_alt_m: Option<f64>,
-        /// First-person cockpit elevation angle in degrees (`0` = horizon, `+10` = nose up, `-10` = nose down).
-        #[clap(long, allow_hyphen_values = true, default_value_t = 0.0)]
-        cockpit_pitch: f64,
-        /// Vertical field of view in degrees for `--eye-alt-m` first-person rendering.
-        #[clap(long, default_value_t = 64.0)]
-        fov_deg: f64,
-        #[clap(long, default_value_t = 360)]
-        max_frames: usize,
-        #[clap(long, default_value_t = 30)]
-        timeout_secs: u64,
-        /// Output PNG path.
-        #[clap(long)]
-        out: PathBuf,
-    },
+    Snapshot(SnapshotArgs),
     /// Runs warm headless Metal/Vulkan frame-time, draw-call, and RSS benchmarks.
     #[cfg(feature = "headless")]
-    Bench {
-        /// Benchmark scenario (`all`, `s1`, `s3`, `s5`).
-        #[clap(long, value_enum, default_value_t = bench::BenchScenario::All)]
-        scenario: bench::BenchScenario,
-        /// Optional custom MapLibre style JSON file path or URL.
-        #[clap(long)]
-        style: Option<String>,
-        #[clap(long, default_value_t = 1024)]
-        width: u32,
-        #[clap(long, default_value_t = 768)]
-        height: u32,
-        #[clap(long, default_value_t = 120)]
-        frames: usize,
-        #[clap(long, default_value_t = 30)]
-        timeout_secs: u64,
-        /// Emit structured JSON benchmark report to stdout.
-        #[clap(long)]
-        json: bool,
-    },
+    Bench(BenchArgs),
+}
+
+fn run_headed_command(args: &HeadedArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let bundled = select_bundled(args.terrain, args.globe);
+    let loaded_style = load_style(
+        args.style.as_deref(),
+        bundled,
+        args.projection.map(Into::into),
+        &args.source_urls,
+    )?;
+    let default_max_pitch = if style_uses_3d_elevation(&loaded_style) {
+        ELEVATED_MAX_PITCH_DEGREES
+    } else {
+        HeadedMapOptions::default().max_pitch_degrees
+    };
+    run_headed_map(
+        Some(PathBuf::from("./maplibre-cache".to_string())),
+        WinitMapWindowConfig::new("maplibre".to_string()),
+        WgpuSettings {
+            backends: Some(maplibre::render::settings::Backends::all()),
+            ..WgpuSettings::default()
+        },
+        loaded_style,
+        HeadedMapOptions {
+            max_frames: args.frames,
+            max_pitch_degrees: args.max_pitch.unwrap_or(default_max_pitch),
+            debug_tiles: args.debug_tiles,
+            zoom_sensitivity: args.zoom_sensitivity,
+            ..HeadedMapOptions::default()
+        },
+    )?;
+    Ok(())
+}
+
+#[cfg(feature = "headless")]
+fn run_snapshot_command(args: &SnapshotArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let bundled = select_bundled(args.terrain, args.globe);
+    let loaded_style = load_style(
+        args.style.as_deref(),
+        bundled,
+        args.projection.map(Into::into),
+        &args.source_urls,
+    )?;
+    let center = match (args.lat, args.lon) {
+        (Some(lat), Some(lon)) => Some(LatLon::new(lat, lon)),
+        _ => None,
+    };
+    maplibre::platform::run_multithreaded(async {
+        snapshot::render_snapshot(snapshot::SnapshotOptions {
+            style: loaded_style,
+            width: args.width,
+            height: args.height,
+            center,
+            zoom: args.zoom,
+            pitch: args.pitch,
+            bearing: args.bearing,
+            center_elevation: args.center_elevation,
+            eye_alt_m: args.eye_alt_m,
+            cockpit_pitch: args.cockpit_pitch,
+            fov_deg: args.fov_deg,
+            max_frames: args.max_frames,
+            timeout_secs: args.timeout_secs,
+            out_path: &args.out,
+        })
+        .await
+    })
+}
+
+#[cfg(feature = "headless")]
+fn run_bench_command(args: &BenchArgs) -> Result<(), Box<dyn std::error::Error>> {
+    bench::run_bench(&bench::BenchOptions {
+        scenario: args.scenario,
+        style_override: args.style.clone(),
+        width: args.width,
+        height: args.height,
+        frames: args.frames,
+        timeout_secs: args.timeout_secs,
+        json: args.json,
+    })
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -192,131 +302,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     match &cli.command {
-        Commands::Headed {
-            style,
-            globe,
-            terrain,
-            source_urls,
-            max_pitch,
-            projection,
-            frames,
-            debug_tiles,
-            zoom_sensitivity,
-        } => {
-            let bundled = select_bundled(*terrain, *globe);
-            let loaded_style = load_style(
-                style.as_deref(),
-                bundled,
-                projection.map(Into::into),
-                source_urls,
-            )?;
-            let default_max_pitch = if style_uses_3d_elevation(&loaded_style) {
-                ELEVATED_MAX_PITCH_DEGREES
-            } else {
-                HeadedMapOptions::default().max_pitch_degrees
-            };
-            run_headed_map(
-                Some(PathBuf::from("./maplibre-cache".to_string())),
-                WinitMapWindowConfig::new("maplibre".to_string()),
-                WgpuSettings {
-                    backends: Some(maplibre::render::settings::Backends::all()),
-                    ..WgpuSettings::default()
-                },
-                loaded_style,
-                HeadedMapOptions {
-                    max_frames: *frames,
-                    max_pitch_degrees: max_pitch.unwrap_or(default_max_pitch),
-                    debug_tiles: *debug_tiles,
-                    zoom_sensitivity: *zoom_sensitivity,
-                    ..HeadedMapOptions::default()
-                },
-            )?;
-        }
+        Commands::Headed(args) => run_headed_command(args),
         #[cfg(feature = "headless")]
         Commands::Headless {
             tile_size,
             min,
             max,
-        } => {
-            maplibre::platform::run_multithreaded(async {
-                headless::run_headless(*tile_size, *min, *max).await
-            })?;
-        }
+        } => maplibre::platform::run_multithreaded(async {
+            headless::run_headless(*tile_size, *min, *max).await
+        }),
         #[cfg(feature = "headless")]
-        Commands::Snapshot {
-            style,
-            globe,
-            terrain,
-            source_urls,
-            projection,
-            width,
-            height,
-            lat,
-            lon,
-            zoom,
-            pitch,
-            bearing,
-            center_elevation,
-            eye_alt_m,
-            cockpit_pitch,
-            fov_deg,
-            max_frames,
-            timeout_secs,
-            out,
-        } => {
-            let bundled = select_bundled(*terrain, *globe);
-            let loaded_style = load_style(
-                style.as_deref(),
-                bundled,
-                projection.map(Into::into),
-                source_urls,
-            )?;
-            let center = match (*lat, *lon) {
-                (Some(lat), Some(lon)) => Some(LatLon::new(lat, lon)),
-                _ => None,
-            };
-            maplibre::platform::run_multithreaded(async {
-                snapshot::render_snapshot(snapshot::SnapshotOptions {
-                    style: loaded_style,
-                    width: *width,
-                    height: *height,
-                    center,
-                    zoom: *zoom,
-                    pitch: *pitch,
-                    bearing: *bearing,
-                    center_elevation: *center_elevation,
-                    eye_alt_m: *eye_alt_m,
-                    cockpit_pitch: *cockpit_pitch,
-                    fov_deg: *fov_deg,
-                    max_frames: *max_frames,
-                    timeout_secs: *timeout_secs,
-                    out_path: out,
-                })
-                .await
-            })?;
-        }
+        Commands::Snapshot(args) => run_snapshot_command(args),
         #[cfg(feature = "headless")]
-        Commands::Bench {
-            scenario,
-            style,
-            width,
-            height,
-            frames,
-            timeout_secs,
-            json,
-        } => {
-            bench::run_bench(&bench::BenchOptions {
-                scenario: *scenario,
-                style_override: style.clone(),
-                width: *width,
-                height: *height,
-                frames: *frames,
-                timeout_secs: *timeout_secs,
-                json: *json,
-            })?;
-        }
+        Commands::Bench(args) => run_bench_command(args),
     }
-    Ok(())
 }
 
 #[cfg(test)]

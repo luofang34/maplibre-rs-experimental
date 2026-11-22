@@ -47,31 +47,40 @@ pub(in crate::sdf::collision_system) fn write_feature_metadata(
             continue;
         };
         let v_idx = v_idx as usize;
-        let kind = usize::from(layer.buffer.is_icon_vertex(v_idx));
+        let is_icon = layer.buffer.is_icon_vertex(v_idx);
         if let Some(quad) = metadata.get_mut(v_idx / 4) {
-            let ramp = if kind == 0 && shown_set.is_some_and(|set| !set.contains(&index)) {
+            let ramp = if is_icon {
+                ramps[1]
+            } else if shown_set.is_some_and(|set| !set.contains(&index)) {
                 super::super::temporal::FadeRamp::default()
             } else {
-                ramps[kind]
+                ramps[0]
             };
-            let color = if kind == 0 {
+            let (shift, style) = if is_icon {
+                (shifts[1], styles[1])
+            } else {
+                (shifts[0], styles[0])
+            };
+            let color = if !is_icon {
                 feature
                     .text_colors
                     .iter()
                     .find(|(range, _)| range.contains(&index))
-                    .map_or(styles[0][0], |(_, color)| *color)
+                    .map_or(style[0], |(_, color)| *color)
             } else {
-                styles[kind][0]
+                style[0]
             };
             *quad = SDFShaderFeatureMetadata::from_placement(
-                ramp.target,
-                ground,
-                ramp.start,
-                ramp.start_time_ms,
-                shifts[kind],
-                color,
-                styles[kind][1],
-                styles[kind][2],
+                crate::render::shaders::SymbolPlacementMetadata {
+                    target_opacity: ramp.target,
+                    elevation: ground,
+                    start_opacity: ramp.start,
+                    start_time_ms: ramp.start_time_ms,
+                    shift,
+                    color,
+                    halo: style[1],
+                    params: style[2],
+                },
             );
         }
     }

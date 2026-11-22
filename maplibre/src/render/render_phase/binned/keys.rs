@@ -1,4 +1,4 @@
-use std::{fmt::Debug, hash::Hash, ops::Range};
+use std::{fmt::Debug, hash::Hash, num::NonZeroU32, ops::Range};
 
 use crate::render::render_phase::{
     draw::{DrawFunctionId, PhaseItemExtraIndex},
@@ -98,4 +98,22 @@ impl BinnedRenderPhaseType {
             (false, _) => Self::UnbatchableMesh,
         }
     }
+}
+
+/// Parameters for [`BinnedRenderPhase::add_with_extra_index`](super::BinnedRenderPhase::add_with_extra_index).
+pub struct BinnedExtraIndexEntry<BPI: BinnedPhaseItem> {
+    /// Batch-set key grouping compatible pipelines and draw parameters.
+    pub batch_set_key: BPI::BatchSetKey,
+    /// Bin key grouping items with matching geometry or bindings inside the batch set.
+    pub bin_key: BPI::BinKey,
+    /// Identifier of the queued item.
+    pub item: BinnedItemId,
+    /// Index into the phase's input data table.
+    pub input_index: InputDataIndex,
+    /// Contiguous instance count starting at `input_index`.
+    pub instance_count: NonZeroU32,
+    /// Explicit dynamic uniform offset or indirect parameter slot index.
+    pub extra_index: PhaseItemExtraIndex,
+    /// Bin category receiving the queued entry.
+    pub phase_type: BinnedRenderPhaseType,
 }

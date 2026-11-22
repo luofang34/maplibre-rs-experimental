@@ -349,10 +349,12 @@ pub(super) fn push(expression: &mut Json, value: Json) {
 
 fn fixup_degenerate_step_curve(expression: &mut Json) {
     if let Json::Array(items) = expression {
-        if items.first().and_then(Json::as_str) == Some("step") && items.len() == 3 {
-            let output = items[2].clone();
-            items.push(json!(0));
-            items.push(output);
+        if items.first().and_then(Json::as_str) == Some("step") {
+            if let [_, _, output] = items.as_slice() {
+                let output = output.clone();
+                items.push(json!(0));
+                items.push(output);
+            }
         }
     }
 }
@@ -361,7 +363,7 @@ fn append_stop_pair(curve: &mut Json, input: Json, output: Json, is_step: bool) 
     let Json::Array(items) = curve else {
         return;
     };
-    if items.len() > 3 && items[items.len() - 2] == input {
+    if items.len() > 3 && items.get(items.len() - 2) == Some(&input) {
         return;
     }
     if !(is_step && items.len() == 2) {
@@ -375,26 +377,31 @@ pub fn convert_token_string(text: &str) -> Json {
     let mut parts: Vec<Json> = Vec::new();
     let mut rest = text;
     while let Some(open) = rest.find('{') {
-        let Some(close) = rest[open..].find('}') else {
+        let Some(after_open) = rest.get(open..) else {
             break;
         };
-        let name = &rest[open + 1..open + close];
+        let Some(close) = after_open.find('}') else {
+            break;
+        };
+        let Some(name) = rest.get(open + 1..open + close) else {
+            break;
+        };
         if name.is_empty() || name.contains('{') {
             break;
         }
-        if open > 0 {
-            parts.push(Json::String(rest[..open].to_string()));
+        if let Some(prefix) = rest.get(..open).filter(|s| !s.is_empty()) {
+            parts.push(Json::String(prefix.to_string()));
         }
         parts.push(json!(["get", name]));
-        rest = &rest[open + close + 1..];
+        rest = rest.get(open + close + 1..).unwrap_or("");
     }
     if parts.is_empty() {
         return Json::String(text.to_string());
     }
     if !rest.is_empty() {
         parts.push(Json::String(rest.to_string()));
-    } else if parts.len() == 1 {
-        return json!(["to-string", parts[0]]);
+    } else if let [only] = parts.as_slice() {
+        return json!(["to-string", only]);
     }
     let mut expression = json!(["concat"]);
     for part in parts {

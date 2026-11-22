@@ -68,26 +68,17 @@ impl ProcessedLayers {
         self.vector.is_empty() && self.symbols.is_empty()
     }
 
-    pub(super) fn insert_into_tiles(
-        self,
+    fn insert_vector_layers(
+        vector: impl IntoIterator<Item = Box<VectorLayer>>,
         style: &Style,
         tiles: &mut Tiles,
-    ) -> Result<(), HeadlessMapOperationError> {
-        let mut memo = FeatureStateArcMemo::default();
-        let mut interner = TilePropertyInterner::default();
-        for index in self.indexes {
-            let coords = index.coords();
-            let source = index.source();
-            let mut tile_index = (*index).to_tile_index();
-            sync_arriving_tile_index(style, source.as_deref(), &mut tile_index, &mut memo);
-            interner.intern_tile_index(tiles, coords, &mut tile_index);
-            tiles.geometry_index.index_tile(&coords, source, tile_index);
-        }
-
+        memo: &mut FeatureStateArcMemo,
+        interner: &mut TilePropertyInterner,
+    ) -> Result<BTreeMap<WorldTileCoords, u8>, HeadlessMapOperationError> {
         let mut layers_by_tile = BTreeMap::new();
         let mut overscaled_by_tile: BTreeMap<WorldTileCoords, u8> = BTreeMap::new();
         let mut paint_by_tile: BTreeMap<_, TileFeaturePaintComponent> = BTreeMap::new();
-        for mut layer in self.vector {
+        for mut layer in vector {
             let coords = layer.coords;
             let overscaled_zoom = layer.overscaled_zoom();
             overscaled_by_tile
@@ -96,12 +87,12 @@ impl ProcessedLayers {
                 .or_insert(overscaled_zoom);
             let mut entries = layer.take_feature_paint();
             let mut bucket = (*layer).to_bucket();
-            let _ = sync_arriving_vector_bucket(
+            let _: bool = sync_arriving_vector_bucket(
                 style,
                 overscaled_zoom,
                 &mut bucket,
                 &mut entries,
-                &mut memo,
+                memo,
             );
             if let Some(mut entries) = entries.filter(|e| !e.is_empty()) {
                 interner.intern_entries(tiles, coords, &mut entries);
@@ -133,12 +124,23 @@ impl ProcessedLayers {
                 tile.insert(paint);
             }
         }
+        Ok(overscaled_by_tile)
+    }
 
+    fn insert_symbol_and_completed(
+        symbols: impl IntoIterator<Item = Box<SymbolLayer>>,
+        completed_tiles: Vec<WorldTileCoords>,
+        overscaled_by_tile: &BTreeMap<WorldTileCoords, u8>,
+        style: &Style,
+        tiles: &mut Tiles,
+        memo: &mut FeatureStateArcMemo,
+        interner: &mut TilePropertyInterner,
+    ) -> Result<(), HeadlessMapOperationError> {
         let mut symbols_by_tile = BTreeMap::new();
-        for layer in self.symbols {
+        for layer in symbols {
             let coords = layer.coords();
             let mut bucket = (*layer).to_bucket();
-            let _ = sync_arriving_symbol_bucket(style, &mut bucket, &mut memo);
+            let _: bool = sync_arriving_symbol_bucket(style, &mut bucket, memo);
             interner.intern_symbol_bucket(tiles, &mut bucket);
             symbols_by_tile
                 .entry(coords)
@@ -170,7 +172,7 @@ impl ProcessedLayers {
         }
         // Empty tiles (e.g. blank MVT or missing source-layer) emit `TileTessellated` without
         // layers; marking their bucket done suppresses parent fallback.
-        for coords in self.completed_tiles {
+        for coords in completed_tiles {
             let overscaled_zoom = overscaled_by_tile.get(&coords).copied().unwrap_or(0);
             if let Some(bucket) = tiles.query_mut::<&mut VectorLayerBucketComponent>(coords) {
                 bucket.done = true;
@@ -189,6 +191,35 @@ impl ProcessedLayers {
             }
         }
         Ok(())
+    }
+
+    pub(super) fn insert_into_tiles(
+        self,
+        style: &Style,
+        tiles: &mut Tiles,
+    ) -> Result<(), HeadlessMapOperationError> {
+        let mut memo = FeatureStateArcMemo::default();
+        let mut interner = TilePropertyInterner::default();
+        for index in self.indexes {
+            let coords = index.coords();
+            let source = index.source();
+            let mut tile_index = (*index).to_tile_index();
+            sync_arriving_tile_index(style, source.as_deref(), &mut tile_index, &mut memo);
+            interner.intern_tile_index(tiles, coords, &mut tile_index);
+            tiles.geometry_index.index_tile(&coords, source, tile_index);
+        }
+
+        let overscaled_by_tile =
+            Self::insert_vector_layers(self.vector, style, tiles, &mut memo, &mut interner)?;
+        Self::insert_symbol_and_completed(
+            self.symbols,
+            self.completed_tiles,
+            &overscaled_by_tile,
+            style,
+            tiles,
+            &mut memo,
+            &mut interner,
+        )
     }
 
     fn from_messages(messages: Vec<Message>) -> Result<Self, HeadlessMapOperationError> {

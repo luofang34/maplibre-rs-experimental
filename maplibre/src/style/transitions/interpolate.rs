@@ -61,10 +61,15 @@ fn parse_constant_color(value: &Value) -> Option<Color> {
 }
 
 fn interpolate_color(from: Color, to: Color, progress: f64) -> String {
-    let (from_pm, to_pm) = (from.premultiplied(), to.premultiplied());
-    let [red, green, blue, alpha] =
-        std::array::from_fn(|i| from_pm[i] + (to_pm[i] - from_pm[i]) * progress);
-    let alpha = alpha.clamp(0.0, 1.0);
+    let [fr, fg, fb, fa] = from.premultiplied();
+    let [tr, tg, tb, ta] = to.premultiplied();
+    let lerp = |a: f64, b: f64| a + (b - a) * progress;
+    let (red, green, blue, alpha) = (
+        lerp(fr, tr),
+        lerp(fg, tg),
+        lerp(fb, tb),
+        lerp(fa, ta).clamp(0.0, 1.0),
+    );
     let straight = |channel: f64| {
         if alpha > 0.0 {
             (channel / alpha).clamp(0.0, 1.0)

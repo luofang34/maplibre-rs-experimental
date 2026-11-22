@@ -12,8 +12,14 @@ fn alm_061c_is_ignored_during_shaping() -> Result<(), Box<dyn std::error::Error>
         .shape_text("TestSans", "A\u{061C}A", false)
         .ok_or("with_alm")?;
     assert_eq!(plain.len(), with_alm.len());
-    assert_eq!(plain[0].glyph_id, with_alm[0].glyph_id);
-    assert_eq!(plain[1].glyph_id, with_alm[1].glyph_id);
+    assert_eq!(
+        plain.first().map(|g| g.glyph_id),
+        with_alm.first().map(|g| g.glyph_id)
+    );
+    assert_eq!(
+        plain.get(1).map(|g| g.glyph_id),
+        with_alm.get(1).map(|g| g.glyph_id)
+    );
     Ok(())
 }
 
@@ -50,7 +56,7 @@ fn vertical_combining_mark_stays_in_base_face_run() -> Result<(), Box<dyn std::e
         .ok_or("vertical combining")?;
     assert!(!shaped.is_empty());
     let face_ids: Vec<u64> = shaped.iter().map(|g| g.face_id).collect();
-    assert!(face_ids.windows(2).all(|w| w[0] == w[1]));
+    assert!(face_ids.windows(2).all(|w| matches!(w, [a, b] if a == b)));
     Ok(())
 }
 

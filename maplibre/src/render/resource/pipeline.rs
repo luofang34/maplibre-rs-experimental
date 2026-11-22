@@ -112,79 +112,14 @@ impl RenderPipelineDescriptor {
         if let Some(cache) = super::pipeline_cache::SharedPipelines::active() {
             return cache.render_pipeline(device, self, prefix_layouts);
         }
-        let bind_group_layouts = if let Some(layout) = &self.layout {
-            layout
-                .iter()
-                .map(|entries| {
-                    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                        label: None,
-                        entries: entries.as_ref(),
-                    })
-                })
-                .collect::<Vec<_>>()
-        } else {
-            vec![]
-        };
-
-        let all_bind_group_layouts = prefix_layouts
-            .iter()
-            .copied()
-            .chain(bind_group_layouts.iter())
-            .map(Some)
-            .collect::<Vec<_>>();
-
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            bind_group_layouts: &all_bind_group_layouts,
-            ..Default::default()
-        });
-
-        let vertex_shader_module =
-            crate::render::resource::shader_module::create_shader_module_from_wgsl(
-                device,
-                None,
-                self.vertex.source,
-            );
-        let fragment_shader_module =
-            crate::render::resource::shader_module::create_shader_module_from_wgsl(
-                device,
-                None,
-                self.fragment.source,
-            );
-
-        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: self.label.as_ref().map(|label| label.as_ref()),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &vertex_shader_module,
-                entry_point: Some(self.vertex.entry_point),
-                compilation_options: Default::default(),
-                buffers: self
-                    .vertex
-                    .buffers
-                    .iter()
-                    .map(|layout| {
-                        Some(wgpu::VertexBufferLayout {
-                            array_stride: layout.array_stride,
-                            step_mode: layout.step_mode,
-                            attributes: layout.attributes.as_slice(),
-                        })
-                    })
-                    .collect::<Vec<_>>()
-                    .as_slice(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &fragment_shader_module,
-                entry_point: Some(self.fragment.entry_point),
-                compilation_options: Default::default(),
-                targets: self.fragment.targets.as_slice(),
-            }),
-            primitive: self.primitive,
-            depth_stencil: self.depth_stencil.clone(),
-            multisample: self.multisample,
-
-            multiview_mask: None,
-            cache: None,
-        })
+        let pipeline_layout = self.create_pipeline_layout(device, prefix_layouts);
+        let (vertex_module, fragment_module) = self.compile_shader_modules(device);
+        self.create_render_pipeline(
+            device,
+            &pipeline_layout,
+            (&vertex_module, &fragment_module),
+            self.label.as_deref(),
+        )
     }
 
     /// Compiles `(per_vertex, uniform)` render pipelines sharing one [`wgpu::PipelineLayout`] and
@@ -224,89 +159,117 @@ impl RenderPipelineDescriptor {
                 uniform,
             };
         }
+        let pipeline_layout = self.create_pipeline_layout(device, prefix_layouts);
+        let (vertex_module, fragment_module) = self.compile_shader_modules(device);
+        let per_vertex = self.create_render_pipeline(
+            device,
+            &pipeline_layout,
+            (&vertex_module, &fragment_module),
+            self.label.as_deref(),
+        );
+        binding.apply(&mut self.vertex);
+        let uniform_label = self.label.as_deref().map(|l| format!("{l}_uniform"));
+        let uniform = self.create_render_pipeline(
+            device,
+            &pipeline_layout,
+            (&vertex_module, &fragment_module),
+            uniform_label.as_deref(),
+        );
+        FeaturePipelinePair {
+            per_vertex,
+            uniform,
+        }
+    }
 
-        let bind_group_layouts = if let Some(layout) = &self.layout {
-            layout
-                .iter()
-                .map(|entries| {
-                    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                        label: None,
-                        entries: entries.as_ref(),
+    fn create_pipeline_layout(
+        &self,
+        device: &wgpu::Device,
+        prefix_layouts: &[&wgpu::BindGroupLayout],
+    ) -> wgpu::PipelineLayout {
+        let bind_group_layouts = self
+            .layout
+            .as_ref()
+            .map(|layout| {
+                layout
+                    .iter()
+                    .map(|entries| {
+                        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                            label: None,
+                            entries: entries.as_ref(),
+                        })
                     })
-                })
-                .collect::<Vec<_>>()
-        } else {
-            vec![]
-        };
-
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         let all_bind_group_layouts = prefix_layouts
             .iter()
             .copied()
             .chain(bind_group_layouts.iter())
             .map(Some)
             .collect::<Vec<_>>();
-
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             bind_group_layouts: &all_bind_group_layouts,
             ..Default::default()
-        });
+        })
+    }
 
-        let vertex_shader_module =
-            crate::render::resource::shader_module::create_shader_module_from_wgsl(
-                device,
-                None,
-                self.vertex.source,
-            );
-        let fragment_shader_module =
+    fn compile_shader_modules(
+        &self,
+        device: &wgpu::Device,
+    ) -> (wgpu::ShaderModule, wgpu::ShaderModule) {
+        let vertex_module = crate::render::resource::shader_module::create_shader_module_from_wgsl(
+            device,
+            None,
+            self.vertex.source,
+        );
+        let fragment_module =
             crate::render::resource::shader_module::create_shader_module_from_wgsl(
                 device,
                 None,
                 self.fragment.source,
             );
+        (vertex_module, fragment_module)
+    }
 
-        let build = |desc: &Self, label: Option<&str>| {
-            let buffers = desc
-                .vertex
-                .buffers
-                .iter()
-                .map(|layout| {
-                    Some(wgpu::VertexBufferLayout {
-                        array_stride: layout.array_stride,
-                        step_mode: layout.step_mode,
-                        attributes: layout.attributes.as_slice(),
-                    })
+    fn create_render_pipeline(
+        &self,
+        device: &wgpu::Device,
+        pipeline_layout: &wgpu::PipelineLayout,
+        (vertex_module, fragment_module): (&wgpu::ShaderModule, &wgpu::ShaderModule),
+        label: Option<&str>,
+    ) -> wgpu::RenderPipeline {
+        let buffers = self
+            .vertex
+            .buffers
+            .iter()
+            .map(|layout| {
+                Some(wgpu::VertexBufferLayout {
+                    array_stride: layout.array_stride,
+                    step_mode: layout.step_mode,
+                    attributes: layout.attributes.as_slice(),
                 })
-                .collect::<Vec<_>>();
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label,
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &vertex_shader_module,
-                    entry_point: Some(desc.vertex.entry_point),
-                    compilation_options: Default::default(),
-                    buffers: buffers.as_slice(),
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &fragment_shader_module,
-                    entry_point: Some(desc.fragment.entry_point),
-                    compilation_options: Default::default(),
-                    targets: desc.fragment.targets.as_slice(),
-                }),
-                primitive: desc.primitive,
-                depth_stencil: desc.depth_stencil.clone(),
-                multisample: desc.multisample,
-                multiview_mask: None,
-                cache: None,
             })
-        };
-
-        let per_vertex = build(&self, self.label.as_deref());
-        binding.apply(&mut self.vertex);
-        let uniform_label = self.label.as_deref().map(|l| format!("{l}_uniform"));
-        let uniform = build(&self, uniform_label.as_deref());
-        FeaturePipelinePair {
-            per_vertex,
-            uniform,
-        }
+            .collect::<Vec<_>>();
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label,
+            layout: Some(pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: vertex_module,
+                entry_point: Some(self.vertex.entry_point),
+                compilation_options: Default::default(),
+                buffers: buffers.as_slice(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: fragment_module,
+                entry_point: Some(self.fragment.entry_point),
+                compilation_options: Default::default(),
+                targets: self.fragment.targets.as_slice(),
+            }),
+            primitive: self.primitive,
+            depth_stencil: self.depth_stencil.clone(),
+            multisample: self.multisample,
+            multiview_mask: None,
+            cache: None,
+        })
     }
 }

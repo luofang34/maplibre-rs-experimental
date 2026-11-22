@@ -301,8 +301,10 @@ where
             return;
         }
         let base = prepack.logical_len();
-        if base > 0 {
-            for idx in &mut self.buffer.indices[index_start..] {
+        if base > 0
+            && let Some(indices) = self.buffer.indices.get_mut(index_start..)
+        {
+            for idx in indices {
                 *idx = I::from(lyon::tessellation::VertexId::from_usize(
                     base + (*idx).into() as usize,
                 ));
@@ -430,24 +432,6 @@ where
         .map_err(|error| GeozeroError::Geometry(error.to_string()))?;
         self.flush_streaming_prepack(index_start);
         Ok(())
-    }
-}
-
-impl ZeroTessellator<IndexDataType> {
-    /// Finalizes tessellated geometry into an upload-ready [`OverAlignedVertexBuffer`].
-    pub(crate) fn into_over_aligned_buffer(
-        mut self,
-    ) -> OverAlignedVertexBuffer<ShaderVertex, IndexDataType> {
-        if let Some(mut prepack) = self.streaming_prepack.take() {
-            if !self.buffer.vertices.is_empty() {
-                prepack.push_vertices(&self.buffer.vertices);
-                self.buffer.vertices = Vec::new();
-            }
-            return prepack.finish(self.buffer.indices);
-        }
-        self.buffer.vertices.shrink_to_fit();
-        self.buffer.indices.shrink_to_fit();
-        self.buffer.into()
     }
 }
 

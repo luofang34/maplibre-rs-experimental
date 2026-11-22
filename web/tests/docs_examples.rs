@@ -1,6 +1,6 @@
 //! The browser-side Rust examples of the book compile against the web crate and build valid
 //! styles; the native ones are checked by `maplibre-demo/tests/docs_examples.rs`.
-#![allow(clippy::expect_used)]
+#![allow(clippy::expect_used, clippy::indexing_slicing)]
 
 use maplibre::style::Style;
 use wasm_bindgen_test::*;

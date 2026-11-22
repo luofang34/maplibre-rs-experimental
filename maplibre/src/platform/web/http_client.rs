@@ -94,6 +94,16 @@ fn invalid_response(message: &'static str) -> SourceFetchError {
     SourceFetchError(Box::new(FetchError::InvalidResponse(message)))
 }
 
+struct AbortOnDrop(Option<web_sys::AbortController>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        if let Some(ctrl) = self.0.take() {
+            ctrl.abort();
+        }
+    }
+}
+
 struct WirePayload {
     bytes: Vec<u8>,
     status: u16,
@@ -116,29 +126,22 @@ impl WHATWGFetchHttpClient {
         &self.memory
     }
 
-    async fn fetch_wire(req: &HttpRequest) -> Result<WirePayload, SourceFetchError> {
+    fn build_wire_request(
+        req: &HttpRequest,
+        worker: Option<&WorkerGlobalScope>,
+    ) -> Result<(Request, AbortOnDrop), SourceFetchError> {
         let url = req.url.as_str();
         let opts = RequestInit::new();
         opts.set_method("GET");
         if req.cache_policy.is_volatile() {
             opts.set_cache(RequestCache::NoStore);
         }
-        struct AbortOnDrop(Option<web_sys::AbortController>);
-        impl Drop for AbortOnDrop {
-            fn drop(&mut self) {
-                if let Some(ctrl) = self.0.take() {
-                    ctrl.abort();
-                }
-            }
-        }
         let abort_controller = web_sys::AbortController::new().ok();
         if let Some(ctrl) = &abort_controller {
             opts.set_signal(Some(&ctrl.signal()));
         }
-        let mut abort_guard = AbortOnDrop(abort_controller);
-        let global = js_sys::global();
-        let worker = global.dyn_into::<WorkerGlobalScope>().ok();
-        if let Some(scope) = &worker {
+        let abort_guard = AbortOnDrop(abort_controller);
+        if let Some(scope) = worker {
             // A worker started from a `blob:` URL sends no `Referer`, and servers such as
             // OpenStreetMap's tile servers refuse requests without one. The page's origin is
             // what a main-thread fetch sends cross-origin, as GL JS's tile requests do.
@@ -156,25 +159,15 @@ impl WHATWGFetchHttpClient {
                 .set("Range", &range.header())
                 .map_err(rejected)?;
         }
+        Ok((request, abort_guard))
+    }
 
-        // Tile workers and the main-thread TileJSON loader use the same transport.
-        let promise = match worker {
-            Some(scope) => scope.fetch_with_request(&request),
-            None => web_sys::window()
-                .ok_or_else(|| invalid_response("no worker or window scope to fetch from"))?
-                .fetch_with_request(&request),
-        };
-        let response: Response = JsFuture::from(promise)
-            .await
-            .map_err(|error| {
-                // Retried like any transient failure; a CORS refusal costs a backed-off retry.
-                SourceFetchError::temporary(FetchError::Network {
-                    url: url.to_owned(),
-                    reason: js_message(&error),
-                })
-            })?
-            .dyn_into()
-            .map_err(|_| invalid_response("not a Response"))?;
+    async fn read_wire_response(
+        url: &str,
+        range: Option<ByteRange>,
+        response: Response,
+        mut abort_guard: AbortOnDrop,
+    ) -> Result<WirePayload, SourceFetchError> {
         let status = response.status();
         if status == 404 {
             return Err(SourceFetchError::not_found(url));
@@ -200,7 +193,7 @@ impl WHATWGFetchHttpClient {
             .map_err(|_| invalid_response("not an ArrayBuffer"))?;
         let raw_bytes = Uint8Array::new(&array_buffer).to_vec();
         // A server that ignores `Range` answers with `200 OK` and the whole body; slice it here.
-        let bytes = match req.range {
+        let bytes = match range {
             Some(range) if status != 206 => range.slice(url, &raw_bytes).map(<[u8]>::to_vec)?,
             _ => raw_bytes,
         };
@@ -209,6 +202,31 @@ impl WHATWGFetchHttpClient {
             status,
             cache_control,
         })
+    }
+
+    async fn fetch_wire(req: &HttpRequest) -> Result<WirePayload, SourceFetchError> {
+        let url = req.url.as_str();
+        let worker = js_sys::global().dyn_into::<WorkerGlobalScope>().ok();
+        let (request, abort_guard) = Self::build_wire_request(req, worker.as_ref())?;
+        // Tile workers and the main-thread TileJSON loader use the same transport.
+        let promise = match worker {
+            Some(scope) => scope.fetch_with_request(&request),
+            None => web_sys::window()
+                .ok_or_else(|| invalid_response("no worker or window scope to fetch from"))?
+                .fetch_with_request(&request),
+        };
+        let response: Response = JsFuture::from(promise)
+            .await
+            .map_err(|error| {
+                // Retried like any transient failure; a CORS refusal costs a backed-off retry.
+                SourceFetchError::temporary(FetchError::Network {
+                    url: url.to_owned(),
+                    reason: js_message(&error),
+                })
+            })?
+            .dyn_into()
+            .map_err(|_| invalid_response("not a Response"))?;
+        Self::read_wire_response(url, req.range, response, abort_guard).await
     }
 
     async fn execute(

@@ -145,8 +145,9 @@ fn xcframework_reexports_complete_c_abi_and_renders_offscreen() {
 
     let mut rgba = vec![0_u8; 32 * 32 * 4];
     assert!(unsafe { maplibre_map_render_rgba8(map, rgba.as_mut_ptr(), rgba.len()) });
-    let center = ((16 * 32 + 16) * 4) as usize;
-    assert!(rgba[center] >= 240 && rgba[center + 1] >= 240 && rgba[center + 2] <= 15);
+    let center = (16 * 32 + 16) * 4;
+    let px = rgba.get(center..center + 3).expect("center pixel");
+    assert!(px[0] >= 240 && px[1] >= 240 && px[2] <= 15);
 
     let mut cam = MaplibreCamera::default();
     assert!(unsafe { maplibre_map_get_camera(map, &mut cam) });

@@ -6,7 +6,7 @@
 //! 5. Repeated `set_style` layer/source churn: zero monotonic GPU object leaks.
 
 #![cfg(not(target_arch = "wasm32"))]
-#![allow(clippy::expect_used, clippy::panic)]
+#![allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
 
 #[path = "gpu_lifecycle/helpers.rs"]
 mod helpers;
@@ -216,7 +216,7 @@ async fn terrain_disable_resets_terrain_resources_and_drops_unused_dem_textures(
     for _ in 0..80 {
         map.frame_input_mut().advance(Duration::from_millis(16));
         map.run_frame().expect("frame");
-        let _ = map.device().poll(wgpu::PollType::wait_indefinitely());
+        let _poll = map.device().poll(wgpu::PollType::wait_indefinitely());
         tokio::time::sleep(Duration::from_millis(10)).await;
         let loaded = map
             .context()
@@ -307,28 +307,30 @@ async fn rapid_pan_and_zoom_evicts_tile_gpu_resources_within_budget() {
     map.set_available_memory(Some(8 * 1024 * 1024));
 
     for step in 0..8 {
-        let _ = map.jump_to(CameraOptions {
+        map.jump_to(CameraOptions {
             center: Some(LatLon::new(
                 -20.0 + step as f64 * 5.0,
                 -40.0 + step as f64 * 10.0,
             )),
             zoom: Some(4.0 + (step % 3) as f64),
             ..Default::default()
-        });
+        })
+        .expect("jump camera");
         settle_frames(&mut map, 2);
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
     let warm = gpu_counts(&mut map);
 
     for step in 8..32 {
-        let _ = map.jump_to(CameraOptions {
+        map.jump_to(CameraOptions {
             center: Some(LatLon::new(
                 -50.0 + (step % 15) as f64 * 6.0,
                 -160.0 + step as f64 * 11.0,
             )),
             zoom: Some(5.0 + (step % 3) as f64),
             ..Default::default()
-        });
+        })
+        .expect("jump camera");
         settle_frames(&mut map, 2);
         tokio::time::sleep(Duration::from_millis(5)).await;
     }

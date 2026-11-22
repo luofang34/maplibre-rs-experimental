@@ -1,4 +1,7 @@
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![expect(
+    clippy::expect_used,
+    reason = "benchmark DEM fixture generation and decoding abort on errors"
+)]
 
 use std::{collections::HashMap, hint::black_box, sync::Arc};
 
@@ -49,7 +52,22 @@ fn synthetic_terrarium_grid() -> Vec<(WorldTileCoords, Arc<RgbaImage>)> {
     out
 }
 
-/// Legacy main-thread 1-texel border assembly previously in `raster/dem_border.rs`, executed on
+fn legacy_pixel_of(tile: &RgbaImage, x: u32, y: u32) -> [u8; 4] {
+    let idx = ((y * tile.width() + x) * 4) as usize;
+    tile.as_raw()
+        .get(idx..idx + 4)
+        .and_then(|s| s.try_into().ok())
+        .unwrap_or([0; 4])
+}
+
+fn legacy_set_pixel(buf: &mut [u8], padded_w: u32, x: u32, y: u32, px: [u8; 4]) {
+    let idx = ((y * padded_w + x) * 4) as usize;
+    if let Some(dst) = buf.get_mut(idx..idx + 4) {
+        dst.copy_from_slice(&px);
+    }
+}
+
+/// Legacy main-thread 1-texel border assembly kept here as the historical baseline for `raster/dem_border.rs`, executed on
 /// the render thread for each newly arrived tile and every already-uploaded neighbour lacking its edge.
 fn legacy_with_border(image: &RgbaImage, grid: &[[Option<&RgbaImage>; 3]; 3]) -> RgbaImage {
     let (width, height) = image.dimensions();
@@ -63,18 +81,12 @@ fn legacy_with_border(image: &RgbaImage, grid: &[[Option<&RgbaImage>; 3]; 3]) ->
     for y in 0..height as usize {
         let s = y * row_bytes;
         let d = (y + 1) * dst_stride + 4;
-        out[d..d + row_bytes].copy_from_slice(&src[s..s + row_bytes]);
+        if let (Some(dst), Some(src_row)) =
+            (out.get_mut(d..d + row_bytes), src.get(s..s + row_bytes))
+        {
+            dst.copy_from_slice(src_row);
+        }
     }
-
-    let pixel_of = |tile: &RgbaImage, x: u32, y: u32| -> [u8; 4] {
-        let idx = ((y * tile.width() + x) * 4) as usize;
-        let raw = tile.as_raw();
-        [raw[idx], raw[idx + 1], raw[idx + 2], raw[idx + 3]]
-    };
-    let set_pixel = |buf: &mut [u8], x: u32, y: u32, px: [u8; 4]| {
-        let idx = ((y * padded_w + x) * 4) as usize;
-        buf[idx..idx + 4].copy_from_slice(&px);
-    };
 
     let north = grid[0][1].filter(|n| n.dimensions() == (width, height));
     let south = grid[2][1].filter(|n| n.dimensions() == (width, height));
@@ -82,18 +94,43 @@ fn legacy_with_border(image: &RgbaImage, grid: &[[Option<&RgbaImage>; 3]; 3]) ->
     let east = grid[1][2].filter(|n| n.dimensions() == (width, height));
 
     for x in 0..width {
-        let top = north.map_or_else(|| pixel_of(image, x, 0), |n| pixel_of(n, x, height - 1));
-        let bot = south.map_or_else(|| pixel_of(image, x, height - 1), |s| pixel_of(s, x, 0));
-        set_pixel(&mut out, x + 1, 0, top);
-        set_pixel(&mut out, x + 1, padded_h - 1, bot);
+        let top = north.map_or_else(
+            || legacy_pixel_of(image, x, 0),
+            |n| legacy_pixel_of(n, x, height - 1),
+        );
+        let bot = south.map_or_else(
+            || legacy_pixel_of(image, x, height - 1),
+            |s| legacy_pixel_of(s, x, 0),
+        );
+        legacy_set_pixel(&mut out, padded_w, x + 1, 0, top);
+        legacy_set_pixel(&mut out, padded_w, x + 1, padded_h - 1, bot);
     }
     for y in 0..height {
-        let l = west.map_or_else(|| pixel_of(image, 0, y), |w| pixel_of(w, width - 1, y));
-        let r = east.map_or_else(|| pixel_of(image, width - 1, y), |e| pixel_of(e, 0, y));
-        set_pixel(&mut out, 0, y + 1, l);
-        set_pixel(&mut out, padded_w - 1, y + 1, r);
+        let l = west.map_or_else(
+            || legacy_pixel_of(image, 0, y),
+            |w| legacy_pixel_of(w, width - 1, y),
+        );
+        let r = east.map_or_else(
+            || legacy_pixel_of(image, width - 1, y),
+            |e| legacy_pixel_of(e, 0, y),
+        );
+        legacy_set_pixel(&mut out, padded_w, 0, y + 1, l);
+        legacy_set_pixel(&mut out, padded_w, padded_w - 1, y + 1, r);
     }
+    fill_legacy_corners(&mut out, image, grid, width, height, padded_w, padded_h);
 
+    RgbaImage::from_raw(padded_w, padded_h, out).expect("valid dimensions")
+}
+
+fn fill_legacy_corners(
+    out: &mut [u8],
+    image: &RgbaImage,
+    grid: &[[Option<&RgbaImage>; 3]; 3],
+    width: u32,
+    height: u32,
+    padded_w: u32,
+    padded_h: u32,
+) {
     for (cx, cy, gx, gy, nx, ny, fx, fy) in [
         (0, 0, 0, 0, width - 1, height - 1, 0, 0),
         (padded_w - 1, 0, 2, 0, 0, height - 1, width - 1, 0),
@@ -109,13 +146,18 @@ fn legacy_with_border(image: &RgbaImage, grid: &[[Option<&RgbaImage>; 3]; 3]) ->
             height - 1,
         ),
     ] {
-        let px = grid[gy][gx]
+        let px = grid
+            .get(gy)
+            .and_then(|row| row.get(gx))
+            .copied()
+            .flatten()
             .filter(|n| n.dimensions() == (width, height))
-            .map_or_else(|| pixel_of(image, fx, fy), |n| pixel_of(n, nx, ny));
-        set_pixel(&mut out, cx, cy, px);
+            .map_or_else(
+                || legacy_pixel_of(image, fx, fy),
+                |n| legacy_pixel_of(n, nx, ny),
+            );
+        legacy_set_pixel(out, padded_w, cx, cy, px);
     }
-
-    RgbaImage::from_raw(padded_w, padded_h, out).expect("valid dimensions")
 }
 
 fn legacy_neighbour_grid<'a>(
@@ -124,7 +166,12 @@ fn legacy_neighbour_grid<'a>(
 ) -> [[Option<&'a RgbaImage>; 3]; 3] {
     let mut grid: [[Option<&'a RgbaImage>; 3]; 3] = Default::default();
     for (n, (dx, dy)) in neighbours(c) {
-        grid[(dy + 1) as usize][(dx + 1) as usize] = store.get(&n);
+        if let Some(cell) = grid
+            .get_mut((dy + 1) as usize)
+            .and_then(|row| row.get_mut((dx + 1) as usize))
+        {
+            *cell = store.get(&n);
+        }
     }
     grid
 }
@@ -137,24 +184,12 @@ fn encode_png(image: &RgbaImage) -> Vec<u8> {
     cursor.into_inner()
 }
 
-fn bench_dem_pipeline(c: &mut Criterion) {
-    let grid = synthetic_terrarium_grid();
-    let png_grid: Vec<(WorldTileCoords, Vec<u8>)> = grid
-        .iter()
-        .map(|(coords, img)| (*coords, encode_png(img)))
-        .collect();
-    let circumference = Body::EARTH.circumference_meters();
-    let source = RasterSourceId::from("dem");
-
-    let predecoded: Vec<(WorldTileCoords, Arc<DemTile>)> = grid
-        .iter()
-        .map(|(coords, image)| {
-            let loaded = decode_image_to_dem(*coords, image, UNPACK_TERRARIUM, circumference)
-                .expect("valid synthetic DEM");
-            (*coords, loaded.tile)
-        })
-        .collect();
-
+fn bench_dem_3x3_group(
+    c: &mut Criterion,
+    png_grid: &[(WorldTileCoords, Vec<u8>)],
+    source: &RasterSourceId,
+    circumference: f64,
+) {
     // Benchmark 1: End-to-end 3x3 viewport PNG decode + DEM ingestion + border assembly when
     // `terrain` and `hillshade`/`color-relief` share one `raster-dem` source.
     let mut full_group = c.benchmark_group("dem_3x3_shared_terrain_and_hillshade");
@@ -165,7 +200,7 @@ fn bench_dem_pipeline(c: &mut Criterion) {
             let mut uploaded_bordered: HashMap<WorldTileCoords, RgbaImage> =
                 HashMap::with_capacity(9);
 
-            for (coords, png_bytes) in &png_grid {
+            for (coords, png_bytes) in png_grid {
                 // 1. Terrain worker PNG decode + `DemTile` build + 2-texel backfill
                 let terrain_rgba = image::load_from_memory(png_bytes)
                     .expect("png")
@@ -191,9 +226,10 @@ fn bench_dem_pipeline(c: &mut Criterion) {
                     }
                 }
                 for target in dirty {
-                    let img = &raster_images[&target];
-                    let n_grid = legacy_neighbour_grid(&raster_images, target);
-                    uploaded_bordered.insert(target, legacy_with_border(img, &n_grid));
+                    if let Some(img) = raster_images.get(&target) {
+                        let n_grid = legacy_neighbour_grid(&raster_images, target);
+                        uploaded_bordered.insert(target, legacy_with_border(img, &n_grid));
+                    }
                 }
             }
             black_box((tiles.tiles.len(), uploaded_bordered.len()))
@@ -203,39 +239,52 @@ fn bench_dem_pipeline(c: &mut Criterion) {
     full_group.bench_function("unified_single_decode_and_shared_dem_store", |b| {
         b.iter(|| {
             let mut tiles = Tiles::default();
-            for (coords, png_bytes) in &png_grid {
+            for (coords, png_bytes) in png_grid {
                 let rgba = image::load_from_memory(png_bytes)
                     .expect("png")
                     .into_rgba8();
                 let dem = decode_image_to_dem(*coords, &rgba, UNPACK_TERRARIUM, circumference)
                     .expect("dem");
-                ingest_source_dem(&mut tiles, &source, *coords, dem, true);
+                ingest_source_dem(&mut tiles, source, *coords, dem, true);
             }
             black_box(tiles.tiles.len())
         });
     });
     full_group.finish();
+}
 
+fn bench_dem_centre_arrival_group(
+    c: &mut Criterion,
+    grid: &[(WorldTileCoords, Arc<RgbaImage>)],
+    predecoded: &[(WorldTileCoords, Arc<DemTile>)],
+    source: &RasterSourceId,
+) {
     // Benchmark 2: Main-thread render-frame cost when the centre DEM tile arrives after its 8
     // surrounding neighbours are already resident & uploaded.
-    let centre = grid[4].0;
-    let centre_image = (*grid[4].1).clone();
-    let centre_shared_dem = Arc::clone(&predecoded[4].1);
+    let Some((centre, centre_img_arc)) = grid.get(4) else {
+        return;
+    };
+    let Some((_, centre_dem_arc)) = predecoded.get(4) else {
+        return;
+    };
+    let centre = *centre;
+    let centre_image = (**centre_img_arc).clone();
+    let centre_shared_dem = Arc::clone(centre_dem_arc);
 
     let mut border_group = c.benchmark_group("dem_centre_arrival_main_thread_cost");
     border_group.bench_function("legacy_reborder_9_tiles_on_render_thread", |b| {
         let mut base_images: HashMap<WorldTileCoords, RgbaImage> = HashMap::with_capacity(9);
-        for (i, (c, img)) in grid.iter().enumerate() {
+        for (i, (coord, img)) in grid.iter().enumerate() {
             if i != 4 {
-                base_images.insert(*c, RgbaImage::clone(img));
+                base_images.insert(*coord, RgbaImage::clone(img));
             }
         }
         b.iter(|| {
             let mut images = base_images.clone();
             images.insert(centre, centre_image.clone());
             let mut uploads = 0_usize;
-            for (c, img) in &images {
-                let n_grid = legacy_neighbour_grid(&images, *c);
+            for (coord, img) in &images {
+                let n_grid = legacy_neighbour_grid(&images, *coord);
                 let bordered = legacy_with_border(img, &n_grid);
                 uploads += bordered.as_raw().len();
             }
@@ -245,12 +294,12 @@ fn bench_dem_pipeline(c: &mut Criterion) {
 
     border_group.bench_function("unified_in_place_2texel_strip_backfill", |b| {
         let mut base_tiles = Tiles::default();
-        for (i, (c, dem)) in predecoded.iter().enumerate() {
+        for (i, (coord, dem)) in predecoded.iter().enumerate() {
             if i != 4 {
                 ingest_source_dem(
                     &mut base_tiles,
-                    &source,
-                    *c,
+                    source,
+                    *coord,
                     LoadedDem::from_shared(Arc::clone(dem)),
                     true,
                 );
@@ -260,7 +309,7 @@ fn bench_dem_pipeline(c: &mut Criterion) {
             // Reset centre + backfill strips on already-decoded worker `Arc<DemTile>`
             ingest_source_dem(
                 &mut base_tiles,
-                &source,
+                source,
                 centre,
                 LoadedDem::from_shared(Arc::clone(&centre_shared_dem)),
                 true,
@@ -269,6 +318,28 @@ fn bench_dem_pipeline(c: &mut Criterion) {
         });
     });
     border_group.finish();
+}
+
+fn bench_dem_pipeline(c: &mut Criterion) {
+    let grid = synthetic_terrarium_grid();
+    let png_grid: Vec<(WorldTileCoords, Vec<u8>)> = grid
+        .iter()
+        .map(|(coords, img)| (*coords, encode_png(img)))
+        .collect();
+    let circumference = Body::EARTH.circumference_meters();
+    let source = RasterSourceId::from("dem");
+
+    let predecoded: Vec<(WorldTileCoords, Arc<DemTile>)> = grid
+        .iter()
+        .map(|(coords, image)| {
+            let loaded = decode_image_to_dem(*coords, image, UNPACK_TERRARIUM, circumference)
+                .expect("valid synthetic DEM");
+            (*coords, loaded.tile)
+        })
+        .collect();
+
+    bench_dem_3x3_group(c, &png_grid, &source, circumference);
+    bench_dem_centre_arrival_group(c, &grid, &predecoded, &source);
 }
 
 criterion_group!(benches, bench_dem_pipeline);

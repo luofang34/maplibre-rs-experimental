@@ -187,13 +187,16 @@ fn properties_filters_and_zoom_ranges_are_changed_and_invalid_ones_refused() {
         filter_change.redraw_tiles,
         "filter changes require worker evaluation"
     );
-    assert_eq!(style.layers[1].filter, Some(json!(["==", "kind", "park"])));
+    assert_eq!(
+        style.layers.get(1).and_then(|l| l.filter.as_ref()),
+        Some(&json!(["==", "kind", "park"]))
+    );
     assert!(matches!(
         style.set_filter("land", Some(json!(["within", {}]))),
         Err(StyleMutationError::Unsupported { .. })
     ));
     style.set_filter("land", None).expect("remove filter");
-    assert_eq!(style.layers[1].filter, None);
+    assert_eq!(style.layers.get(1).and_then(|l| l.filter.as_ref()), None);
 
     let zoom_change = style
         .set_layer_zoom_range("land", Some(3.0), Some(9.0))
@@ -203,8 +206,8 @@ fn properties_filters_and_zoom_ranges_are_changed_and_invalid_ones_refused() {
         "zoom range updates GPU pool visibility bounds in-place"
     );
     assert_eq!(
-        (style.layers[1].minzoom, style.layers[1].maxzoom),
-        (Some(3.0), Some(9.0))
+        style.layers.get(1).map(|l| (l.minzoom, l.maxzoom)),
+        Some((Some(3.0), Some(9.0)))
     );
     let hide_change = style
         .set_layout_property("land", "visibility", json!("none"))
@@ -213,7 +216,7 @@ fn properties_filters_and_zoom_ranges_are_changed_and_invalid_ones_refused() {
         !hide_change.redraw_tiles,
         "hiding a layer skips drawing in-place"
     );
-    assert!(style.layers[1].is_hidden());
+    assert!(style.layers.get(1).is_some_and(|l| l.is_hidden()));
     let show_change = style
         .set_layout_property("land", "visibility", Value::Null)
         .expect("show");
@@ -221,7 +224,7 @@ fn properties_filters_and_zoom_ranges_are_changed_and_invalid_ones_refused() {
         show_change.redraw_tiles,
         "showing a previously hidden layer requests missing tile geometry"
     );
-    assert!(!style.layers[1].is_hidden());
+    assert!(!style.layers.get(1).is_some_and(|l| l.is_hidden()));
 }
 
 #[test]
@@ -243,7 +246,7 @@ fn editing_a_layer_that_reads_global_state_keeps_it_reading_state() {
     style
         .set_layer_zoom_range("tinted", Some(2.0), None)
         .expect("edit an unrelated field");
-    assert_eq!(style.layers[2].minzoom, Some(2.0));
+    assert_eq!(style.layers.get(2).and_then(|l| l.minzoom), Some(2.0));
     let changed = style.set_global_state("tint", json!("#00ffff"));
     assert_eq!(changed, ["tinted"], "the dependency survived the edit");
     assert_eq!(

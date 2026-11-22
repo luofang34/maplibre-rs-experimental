@@ -213,6 +213,6 @@ pub fn build_feature_state_target(source: &str, source_layer: Option<&str>) -> F
 
 /// Replaces `map`'s entire [`Style`] via [`HeadlessMap::set_style`], diffing layers and sources in-place.
 pub fn apply_whole_style(map: &mut HeadlessMap, next_style: Style) -> Result<(), FfiError> {
-    let _ = map.set_style(next_style);
+    drop(map.set_style(next_style));
     Ok(())
 }

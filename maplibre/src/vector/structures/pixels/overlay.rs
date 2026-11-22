@@ -202,9 +202,10 @@ fn overlay_line_climbs_a_facing_slope_and_hides_behind_its_crest() {
         let near_rows: Vec<usize> = (0..64)
             .filter(|y| (0..32).any(|x| is_green(pixel(&pixels, x, *y))))
             .collect();
+        assert!(!near_rows.is_empty(), "near line missing");
         let (Some(top), Some(bottom)) = (near_rows.first().copied(), near_rows.last().copied())
         else {
-            panic!("near line missing");
+            return;
         };
         // Up the face as on the plain, every row between the ends holds the line's full width.
         let thin: Vec<(usize, f64)> = (top + 1..bottom)

@@ -8,11 +8,87 @@ use crate::{
         tile_backpressure::is_settled,
         tile_sources::{RasterSourceId, TileKind},
     },
-    render::eventually::{Eventually, Eventually::Initialized},
+    render::{
+        eventually::{Eventually, Eventually::Initialized},
+        eye_covering::FrameLooseCovering,
+        projection::view_region_for_projection,
+        view_state::{ViewState, ViewStatePadding},
+    },
     style::Style,
     tcs::{tiles::Tiles, world::World},
     terrain::{dem_tile_coords, resources::TerrainResources, source::dem_source},
 };
+
+pub(super) fn retain_requested_vector_tiles(
+    world: &World,
+    style: &Style,
+    view_state: &ViewState,
+    (loose_cache, request_padding, max_zoom, visible_level): (
+        Option<&FrameLooseCovering>,
+        ViewStatePadding,
+        Option<u8>,
+        crate::coords::ZoomLevel,
+    ),
+    in_use: &mut FxHashSet<WorldTileCoords>,
+) {
+    if let Some((cached_view, _, _)) = loose_cache
+        .and_then(|c| c.view_tiles.as_ref())
+        .filter(|(_, padding, _)| *padding == request_padding)
+    {
+        for &coords in cached_view.as_deref().into_iter().flatten() {
+            super::retain_loose_vector_tile(in_use, coords, max_zoom);
+        }
+        return;
+    }
+    if let Some(shared_tiles) = (request_padding == ViewStatePadding::Tight)
+        .then(|| {
+            crate::render::eye_covering::matching_tight_tiles(
+                world,
+                style,
+                view_state,
+                visible_level,
+            )
+        })
+        .flatten()
+    {
+        for &coords in shared_tiles {
+            super::retain_loose_vector_tile(in_use, coords, max_zoom);
+        }
+        return;
+    }
+    match view_region_for_projection(style, view_state, world, visible_level, request_padding) {
+        Ok(Some(requested)) => {
+            for coords in requested.iter() {
+                super::retain_loose_vector_tile(in_use, coords, max_zoom);
+            }
+        }
+        Ok(None) => {}
+        Err(error) => tracing::warn!(%error, "cannot select the requested tiles to keep"),
+    }
+}
+
+pub(super) fn retain_requested_raster_tiles(
+    world: &World,
+    style: &Style,
+    view_state: &ViewState,
+    (loose_cache, request_padding): (Option<&FrameLooseCovering>, ViewStatePadding),
+    in_use: &mut FxHashSet<WorldTileCoords>,
+) {
+    if let Some((cached_raster, _, _)) = loose_cache
+        .and_then(|c| c.raster_regions.as_ref())
+        .filter(|(_, padding, _)| *padding == request_padding)
+    {
+        for (_, tiles) in cached_raster {
+            in_use.extend(tiles.iter().copied());
+        }
+    } else if let Ok(regions) =
+        crate::render::projection::raster_source_regions(style, view_state, world, request_padding)
+    {
+        for (_, tiles) in regions {
+            in_use.extend(tiles);
+        }
+    }
+}
 
 /// Appends active drape requests, drape prefetch requests, terrain overview + wanted DEMs,
 /// non-terrain vector fallback tiles, and only the raster/DEM fallback ancestors actually needed

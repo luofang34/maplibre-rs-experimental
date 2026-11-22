@@ -103,7 +103,9 @@ where
         .map(|f| Some(Box::pin(f) as BoxFut<'a, Result<T, E>>))
         .collect();
     poll_all_dyn(pending, |results, idx, res| {
-        results[idx] = Some(res?);
+        if let Some(slot) = results.get_mut(idx) {
+            *slot = Some(res?);
+        }
         Ok(())
     })
     .await
@@ -120,7 +122,9 @@ where
         .map(|f| Some(Box::pin(f) as BoxFut<'a, T>))
         .collect();
     match poll_all_dyn::<T, T, Never>(pending, |results, idx, val| {
-        results[idx] = Some(val);
+        if let Some(slot) = results.get_mut(idx) {
+            *slot = Some(val);
+        }
         Ok(())
     })
     .await

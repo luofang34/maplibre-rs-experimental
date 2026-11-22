@@ -111,12 +111,18 @@ async fn translucent_fill_preserves_color_and_alpha_in_gpu_readback() {
     let mut style: serde_json::Value =
         serde_json::from_slice(&std::fs::read(fixture.join("style.json")).expect("fixture style"))
             .expect("valid style");
-    let paint = &mut style["layers"][0]["paint"];
-    paint["fill-color"] = serde_json::json!("rgba(128,0,0,0.5)");
-    paint
-        .as_object_mut()
-        .expect("paint object")
-        .remove("fill-opacity");
+    let paint = style
+        .get_mut("layers")
+        .and_then(serde_json::Value::as_array_mut)
+        .and_then(|layers| layers.first_mut())
+        .and_then(|layer| layer.get_mut("paint"))
+        .and_then(serde_json::Value::as_object_mut)
+        .expect("paint object");
+    paint.insert(
+        "fill-color".to_owned(),
+        serde_json::json!("rgba(128,0,0,0.5)"),
+    );
+    paint.remove("fill-opacity");
     std::fs::write(
         directory.path().join("style.json"),
         serde_json::to_vec(&style).expect("serialize style"),

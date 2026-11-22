@@ -104,7 +104,11 @@ impl LayerFrame<'_> {
                 })
             })
             .unwrap_or(0);
-        let shift = feature.anchor_shifts[index];
+        let shift = feature
+            .anchor_shifts
+            .get(index)
+            .copied()
+            .unwrap_or([0.0, 0.0]);
         (moved(&shift), shift, index)
     }
 }
@@ -191,15 +195,10 @@ pub(super) fn ordered_features<'a>(
                 .features
                 .iter()
                 .enumerate()
-                .map(move |(i, feature)| (position, i, feature))
+                .map(move |(i, feature)| (position, layer, i, feature))
         })
-        .map(|(position, i, feature)| {
-            (
-                position,
-                i,
-                feature,
-                history.was_visible(layers[position], feature),
-            )
+        .map(|(position, layer, i, feature)| {
+            (position, i, feature, history.was_visible(layer, feature))
         })
         .collect();
     features.sort_by(|(pa, _, a, _), (pb, _, b, _)| {

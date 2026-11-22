@@ -130,12 +130,16 @@ impl Shader for CircleFeatureStrokeShader {
             format: self.format,
         }
         .describe_vertex();
-        base.buffers[2] = circle_layer_layout(false, true);
-        base.buffers[3] = VertexBufferLayout {
-            array_stride: 2 * std::mem::size_of::<FillShaderFeatureMetadata>() as u64,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: wgpu::vertex_attr_array![8 => Unorm8x4, 3 => Unorm8x4].to_vec(),
-        };
+        if let Some(slot) = base.buffers.get_mut(2) {
+            *slot = circle_layer_layout(false, true);
+        }
+        if let Some(slot) = base.buffers.get_mut(3) {
+            *slot = VertexBufferLayout {
+                array_stride: 2 * std::mem::size_of::<FillShaderFeatureMetadata>() as u64,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: wgpu::vertex_attr_array![8 => Unorm8x4, 3 => Unorm8x4].to_vec(),
+            };
+        }
         base
     }
 
@@ -160,12 +164,16 @@ impl Shader for CircleDynamicRadiusShader {
             format: self.format,
         }
         .describe_vertex();
-        base.buffers[2] = circle_layer_layout(true, false);
-        base.buffers[3] = VertexBufferLayout {
-            array_stride: 2 * std::mem::size_of::<FillShaderFeatureMetadata>() as u64,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: wgpu::vertex_attr_array![8 => Unorm8x4, 15 => Uint32].to_vec(),
-        };
+        if let Some(slot) = base.buffers.get_mut(2) {
+            *slot = circle_layer_layout(true, false);
+        }
+        if let Some(slot) = base.buffers.get_mut(3) {
+            *slot = VertexBufferLayout {
+                array_stride: 2 * std::mem::size_of::<FillShaderFeatureMetadata>() as u64,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: wgpu::vertex_attr_array![8 => Unorm8x4, 15 => Uint32].to_vec(),
+            };
+        }
         base
     }
 

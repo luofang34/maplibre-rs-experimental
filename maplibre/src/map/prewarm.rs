@@ -76,6 +76,224 @@ pub(super) async fn prepare_io_and_prewarm<
     prewarm_initial_tiles(style, view_state, scale_factor, request_attempts, apc)
 }
 
+struct PrewarmContext<'a> {
+    style: &'a Style,
+    view_state: &'a ViewState,
+    empty_world: &'a World,
+    request_attempts: &'a RequestAttempts,
+}
+
+struct VectorDispatchState<'a, K: OffscreenKernel, A: AsyncProcedureCall<K>> {
+    ctx: &'a PrewarmContext<'a>,
+    apc: &'a A,
+    worker_style: &'a std::sync::Arc<Style>,
+    max_vector_tiles: usize,
+    out: &'a mut PrewarmedRequests,
+    _kernel: std::marker::PhantomData<fn() -> K>,
+}
+
+fn dispatch_vector_tile<K: OffscreenKernel, A: AsyncProcedureCall<K>>(
+    state: &mut VectorDispatchState<'_, K, A>,
+    coords: WorldTileCoords,
+    overscaled_zoom: u8,
+) {
+    if state.out.vectors.len() >= state.max_vector_tiles
+        || outside_source_bounds(state.ctx.style, TileKind::Vector, coords)
+        || !state.out.wanted_vectors.insert(coords)
+    {
+        return;
+    }
+    let attempt = state.ctx.request_attempts.next();
+    if state
+        .apc
+        .prewarm_call(
+            ProcedureTag::FetchVector,
+            Input {
+                coords,
+                style: state.worker_style.clone(),
+                attempt,
+                overscaled_zoom,
+                pixel_ratio: state.out.pixel_ratio,
+                only_sources: None,
+                refetch: false,
+            },
+        )
+        .is_ok()
+    {
+        state.out.vectors.push(PrewarmedVector {
+            coords,
+            attempt,
+            overscaled_zoom,
+        });
+    }
+}
+
+fn prewarm_vector_tiles<K: OffscreenKernel, A: AsyncProcedureCall<K>>(
+    ctx: &PrewarmContext<'_>,
+    frame_style: &mut FrameStyle,
+    apc: &A,
+    out: &mut PrewarmedRequests,
+) {
+    let worker_style = frame_style.filtered_worker_snapshot(false, false);
+    let has_vector = !worker_style.cached_vector_layer_ids().is_empty()
+        || worker_style
+            .layers
+            .iter()
+            .any(|l| l.type_ == "symbol" && crate::style::mutation::from_vector_tiles(l));
+    if !has_vector {
+        return;
+    }
+    let style = ctx.style;
+    let magnifies = depends_on_overscaling(style);
+    let min_zoom = source_min_zoom(style, TileKind::Vector);
+    let max_zoom = source_max_zoom(style, TileKind::Vector);
+    let visible_level = ctx.view_state.zoom().zoom_level(DEFAULT_TILE_SIZE);
+    let level = u8::from(visible_level);
+    let max_vector_tiles = if style.terrain.is_some() {
+        MAX_PREWARM_TERRAIN_VECTOR_TILES
+    } else {
+        MAX_PREWARM_VECTOR_TILES
+    };
+    out.requested_vector_layers = style.cached_vector_layer_ids().to_vec();
+    let mut state = VectorDispatchState {
+        ctx,
+        apc,
+        worker_style: &worker_style,
+        max_vector_tiles,
+        out,
+        _kernel: std::marker::PhantomData,
+    };
+    if style.terrain.is_some() && min_zoom.is_none_or(|min| min == 0) {
+        let root = WorldTileCoords {
+            x: 0,
+            y: 0,
+            z: ZoomLevel::new(0),
+        };
+        dispatch_vector_tile(&mut state, root, 0);
+    }
+    let Ok(Some(region)) = view_region_for_projection(
+        style,
+        ctx.view_state,
+        ctx.empty_world,
+        visible_level,
+        ViewStatePadding::Tight,
+    ) else {
+        return;
+    };
+    for raw in region.iter() {
+        if min_zoom.is_some_and(|min| u8::from(raw.z) < min) {
+            continue;
+        }
+        let Some(target) = OverscaledTileId::for_source(raw, level, max_zoom, magnifies) else {
+            continue;
+        };
+        let coords = target.canonical;
+        let overscaled_zoom = if magnifies && max_zoom.is_some_and(|m| u8::from(coords.z) >= m) {
+            target.overscaled_z
+        } else {
+            0
+        };
+        dispatch_vector_tile(&mut state, coords, overscaled_zoom);
+    }
+}
+
+fn prewarm_dem_tiles<K: OffscreenKernel, A: AsyncProcedureCall<K>>(
+    ctx: &PrewarmContext<'_>,
+    frame_style: &mut FrameStyle,
+    apc: &A,
+    out: &mut PrewarmedRequests,
+) {
+    let Some(dem) = dem_source(ctx.style) else {
+        return;
+    };
+    let Ok(Some(region)) = terrain_region(
+        ctx.style,
+        ctx.view_state,
+        ctx.empty_world,
+        dem.tile_size,
+        ViewStatePadding::Tight,
+    ) else {
+        return;
+    };
+    let mut ordered_dems = Vec::new();
+    let mut seen_dems = FxHashSet::default();
+    for tile in region.iter() {
+        if let Some(dem_coords) = dem_tile_coords(tile, dem.minzoom, dem.maxzoom) {
+            if let Some(ancestor) = dem_ancestor_coords(dem_coords, dem.minzoom) {
+                if seen_dems.insert(ancestor) {
+                    ordered_dems.push(ancestor);
+                }
+            }
+            if seen_dems.insert(dem_coords) {
+                ordered_dems.push(dem_coords);
+            }
+        }
+    }
+    let dem_style = frame_style.worker_snapshot();
+    for coords in ordered_dems.into_iter().take(MAX_PREWARM_DEM_TILES) {
+        if coords.build_quad_key().is_none() || !out.wanted_dems.insert(coords) {
+            continue;
+        }
+        let attempt = ctx.request_attempts.next();
+        if apc
+            .prewarm_call(
+                ProcedureTag::FetchDem,
+                Input::new(coords, dem_style.clone(), attempt),
+            )
+            .is_ok()
+        {
+            out.dems.push((coords, attempt));
+        }
+    }
+}
+
+#[cfg(feature = "raster")]
+fn prewarm_raster_tiles<K: OffscreenKernel, A: AsyncProcedureCall<K>>(
+    ctx: &PrewarmContext<'_>,
+    frame_style: &mut FrameStyle,
+    apc: &A,
+    out: &mut PrewarmedRequests,
+) {
+    let Ok(regions) = crate::render::projection::raster_source_regions(
+        ctx.style,
+        ctx.view_state,
+        ctx.empty_world,
+        ViewStatePadding::Tight,
+    ) else {
+        return;
+    };
+    let raster_style = frame_style.worker_snapshot();
+    'raster_loop: for (source, tiles) in regions {
+        if crate::raster::media_source::is_media_source(ctx.style, source.name()) {
+            continue;
+        }
+        let bounds = match source.name().and_then(|name| ctx.style.sources.get(name)) {
+            Some(crate::style::source::Source::Raster(r)) => r.bounds,
+            _ => None,
+        };
+        for coords in tiles {
+            if out.rasters.len() >= MAX_PREWARM_RASTER_TILES {
+                break 'raster_loop;
+            }
+            if bounds.is_some_and(|b| !crate::io::tile_sources::tile_in_bounds(coords, b))
+                || !out.wanted_rasters.insert(coords)
+            {
+                continue;
+            }
+            let attempt = ctx.request_attempts.next();
+            if apc
+                .prewarm_call(
+                    ProcedureTag::FetchRaster,
+                    Input::new(coords, raster_style.clone(), attempt),
+                )
+                .is_ok()
+            {
+                out.rasters.push((coords, attempt));
+            }
+        }
+    }
+}
+
 fn prewarm_initial_tiles<K: OffscreenKernel, A: AsyncProcedureCall<K>>(
     style: &Style,
     view_state: &ViewState,
@@ -90,175 +308,18 @@ fn prewarm_initial_tiles<K: OffscreenKernel, A: AsyncProcedureCall<K>>(
     if !apc.supports_prewarm() {
         return out;
     }
-
     let empty_world = World::default();
     let mut frame_style = FrameStyle::new(style);
-    let magnifies = depends_on_overscaling(style);
-    let min_zoom = source_min_zoom(style, TileKind::Vector);
-    let max_zoom = source_max_zoom(style, TileKind::Vector);
-    let worker_style = frame_style.filtered_worker_snapshot(false, false);
-    let has_vector = !worker_style.cached_vector_layer_ids().is_empty()
-        || worker_style
-            .layers
-            .iter()
-            .any(|l| l.type_ == "symbol" && crate::style::mutation::from_vector_tiles(l));
-
-    if has_vector {
-        let visible_level = view_state.zoom().zoom_level(DEFAULT_TILE_SIZE);
-        let level = u8::from(visible_level);
-        let max_vector_tiles = if style.terrain.is_some() {
-            MAX_PREWARM_TERRAIN_VECTOR_TILES
-        } else {
-            MAX_PREWARM_VECTOR_TILES
-        };
-        out.requested_vector_layers = style.cached_vector_layer_ids().to_vec();
-        let mut try_dispatch = |coords: WorldTileCoords, overscaled_zoom: u8| {
-            if out.vectors.len() >= max_vector_tiles
-                || outside_source_bounds(style, TileKind::Vector, coords)
-                || !out.wanted_vectors.insert(coords)
-            {
-                return;
-            }
-            let attempt = request_attempts.next();
-            if apc
-                .prewarm_call(
-                    ProcedureTag::FetchVector,
-                    Input {
-                        coords,
-                        style: worker_style.clone(),
-                        attempt,
-                        overscaled_zoom,
-                        pixel_ratio: out.pixel_ratio,
-                        only_sources: None,
-                        refetch: false,
-                    },
-                )
-                .is_ok()
-            {
-                out.vectors.push(PrewarmedVector {
-                    coords,
-                    attempt,
-                    overscaled_zoom,
-                });
-            }
-        };
-        if style.terrain.is_some() && min_zoom.is_none_or(|min| min == 0) {
-            try_dispatch(
-                WorldTileCoords {
-                    x: 0,
-                    y: 0,
-                    z: ZoomLevel::new(0),
-                },
-                0,
-            );
-        }
-        if let Ok(Some(region)) = view_region_for_projection(
-            style,
-            view_state,
-            &empty_world,
-            visible_level,
-            ViewStatePadding::Tight,
-        ) {
-            for raw in region.iter() {
-                if min_zoom.is_some_and(|min| u8::from(raw.z) < min) {
-                    continue;
-                }
-                let Some(target) = OverscaledTileId::for_source(raw, level, max_zoom, magnifies)
-                else {
-                    continue;
-                };
-                let coords = target.canonical;
-                let overscaled_zoom =
-                    if magnifies && max_zoom.is_some_and(|m| u8::from(coords.z) >= m) {
-                        target.overscaled_z
-                    } else {
-                        0
-                    };
-                try_dispatch(coords, overscaled_zoom);
-            }
-        }
-    }
-
-    if let Some(dem) = dem_source(style) {
-        if let Ok(Some(region)) = terrain_region(
-            style,
-            view_state,
-            &empty_world,
-            dem.tile_size,
-            ViewStatePadding::Tight,
-        ) {
-            let mut ordered_dems = Vec::new();
-            let mut seen_dems = FxHashSet::default();
-            for tile in region.iter() {
-                if let Some(dem_coords) = dem_tile_coords(tile, dem.minzoom, dem.maxzoom) {
-                    if let Some(ancestor) = dem_ancestor_coords(dem_coords, dem.minzoom) {
-                        if seen_dems.insert(ancestor) {
-                            ordered_dems.push(ancestor);
-                        }
-                    }
-                    if seen_dems.insert(dem_coords) {
-                        ordered_dems.push(dem_coords);
-                    }
-                }
-            }
-            let dem_style = frame_style.worker_snapshot();
-            for coords in ordered_dems.into_iter().take(MAX_PREWARM_DEM_TILES) {
-                if coords.build_quad_key().is_none() || !out.wanted_dems.insert(coords) {
-                    continue;
-                }
-                let attempt = request_attempts.next();
-                if apc
-                    .prewarm_call(
-                        ProcedureTag::FetchDem,
-                        Input::new(coords, dem_style.clone(), attempt),
-                    )
-                    .is_ok()
-                {
-                    out.dems.push((coords, attempt));
-                }
-            }
-        }
-    }
-
-    #[cfg(feature = "raster")]
-    if let Ok(regions) = crate::render::projection::raster_source_regions(
+    let ctx = PrewarmContext {
         style,
         view_state,
-        &empty_world,
-        ViewStatePadding::Tight,
-    ) {
-        let raster_style = frame_style.worker_snapshot();
-        'raster_loop: for (source, tiles) in regions {
-            if crate::raster::media_source::is_media_source(style, source.name()) {
-                continue;
-            }
-            let bounds = match source.name().and_then(|name| style.sources.get(name)) {
-                Some(crate::style::source::Source::Raster(r)) => r.bounds,
-                _ => None,
-            };
-            for coords in tiles {
-                if out.rasters.len() >= MAX_PREWARM_RASTER_TILES {
-                    break 'raster_loop;
-                }
-                if bounds.is_some_and(|b| !crate::io::tile_sources::tile_in_bounds(coords, b))
-                    || !out.wanted_rasters.insert(coords)
-                {
-                    continue;
-                }
-                let attempt = request_attempts.next();
-                if apc
-                    .prewarm_call(
-                        ProcedureTag::FetchRaster,
-                        Input::new(coords, raster_style.clone(), attempt),
-                    )
-                    .is_ok()
-                {
-                    out.rasters.push((coords, attempt));
-                }
-            }
-        }
-    }
-
+        empty_world: &empty_world,
+        request_attempts,
+    };
+    prewarm_vector_tiles(&ctx, &mut frame_style, apc, &mut out);
+    prewarm_dem_tiles(&ctx, &mut frame_style, apc, &mut out);
+    #[cfg(feature = "raster")]
+    prewarm_raster_tiles(&ctx, &mut frame_style, apc, &mut out);
     out
 }
 
@@ -281,7 +342,8 @@ impl PrewarmedRequests {
                     tile.overscaled_zoom = item.overscaled_zoom;
                 }
                 tile_retry::started(world, item.coords, RequestKind::Vector, item.attempt, None);
-                let _ = crate::sdf::provided::restarted(world, item.coords, self.pixel_ratio);
+                let _restarted =
+                    crate::sdf::provided::restarted(world, item.coords, self.pixel_ratio);
             }
             tile_retry::want(world, RequestKind::Vector, &self.wanted_vectors);
         }

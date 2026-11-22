@@ -58,11 +58,15 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             return;
         }
 
-        queue.write_buffer(
-            self.metadata_for(entry),
-            entry.buffer_layer_metadata.start,
-            &bytemuck::cast_slice(&[layer_metadata])[0..aligned_layer_metadata_bytes as usize],
-        );
+        if let Some(slice) =
+            bytemuck::cast_slice(&[layer_metadata]).get(..aligned_layer_metadata_bytes as usize)
+        {
+            queue.write_buffer(
+                self.metadata_for(entry),
+                entry.buffer_layer_metadata.start,
+                slice,
+            );
+        }
     }
 
     /// Rewrites a layer's per-vertex feature paint metadata in place.
@@ -93,11 +97,15 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
             return;
         }
 
-        queue.write_buffer(
-            self.feature_metadata_for(entry),
-            entry.buffer_feature_metadata.start,
-            &bytemuck::cast_slice(feature_metadata)[0..aligned_feature_metadata_bytes as usize],
-        );
+        if let Some(slice) =
+            bytemuck::cast_slice(feature_metadata).get(..aligned_feature_metadata_bytes as usize)
+        {
+            queue.write_buffer(
+                self.feature_metadata_for(entry),
+                entry.buffer_feature_metadata.start,
+                slice,
+            );
+        }
     }
 
     /// Rewrites a contiguous `[start_element..start_element + slice.len()]` sub-range of a
@@ -177,7 +185,9 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
                 return;
             }
             let mut u16_buf = Vec::with_capacity(padded);
-            u16_buf.extend(u32_slice[..usable].iter().map(|&idx| idx as u16));
+            if let Some(slice) = u32_slice.get(..usable) {
+                u16_buf.extend(slice.iter().map(|&idx| idx as u16));
+            }
             if u16_buf.len() < padded {
                 u16_buf.push(0);
             }

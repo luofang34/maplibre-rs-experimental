@@ -1,5 +1,5 @@
 //! Terrain readback with analytic planes and spheres independent of tile selection.
-#![allow(clippy::expect_used, clippy::panic)]
+#![cfg_attr(test, allow(clippy::expect_used))]
 
 use std::{
     path::PathBuf,
@@ -135,14 +135,16 @@ impl Harness {
             .map(metric_depth)
             .collect();
         let readback_ms = start.elapsed().as_secs_f64() * 1000.0;
-        let Some(Initialized(terrain)) = self
+        let terrain = self
             .map
             .world()
             .resources
             .get::<Eventually<TerrainResources>>()
-        else {
-            panic!("terrain resources")
-        };
+            .and_then(|res| match res {
+                Initialized(terrain) => Some(terrain),
+                Eventually::Uninitialized => None,
+            })
+            .expect("terrain resources");
         let tiles: Vec<_> = terrain.draws().iter().map(|draw| draw.coords).collect();
         let triangles = tiles.len()
             * super::create_terrain_mesh(super::TERRAIN_MESH_SIZE)

@@ -65,11 +65,26 @@ impl HillshadeUniforms {
             light_count: illumination.azimuths.len().min(MAX_LIGHTS) as u32,
             padding: 0,
         };
-        for light in 0..uniforms.light_count as usize {
-            uniforms.shadows[light] = illumination.shadows[light];
-            uniforms.highlights[light] = illumination.highlights[light];
-            uniforms.altitudes[light] = illumination.altitudes[light];
-            uniforms.azimuths[light] = illumination.azimuths[light];
+        for (light, (((dst_s, dst_h), dst_alt), dst_az)) in uniforms
+            .shadows
+            .iter_mut()
+            .zip(&mut uniforms.highlights)
+            .zip(&mut uniforms.altitudes)
+            .zip(&mut uniforms.azimuths)
+            .enumerate()
+            .take(uniforms.light_count as usize)
+        {
+            if let (Some(&s), Some(&h), Some(&alt), Some(&az)) = (
+                illumination.shadows.get(light),
+                illumination.highlights.get(light),
+                illumination.altitudes.get(light),
+                illumination.azimuths.get(light),
+            ) {
+                *dst_s = s;
+                *dst_h = h;
+                *dst_alt = alt;
+                *dst_az = az;
+            }
         }
         uniforms
     }
@@ -116,8 +131,16 @@ impl ColorReliefUniforms {
             colors: [[0.0; 4]; MAX_RAMP_STOPS],
         };
         for (index, (elevation, color)) in ramp.iter().take(MAX_RAMP_STOPS).enumerate() {
-            uniforms.elevations[index / 4][index % 4] = *elevation;
-            uniforms.colors[index] = *color;
+            if let Some(slot) = uniforms
+                .elevations
+                .get_mut(index / 4)
+                .and_then(|vec4| vec4.get_mut(index % 4))
+            {
+                *slot = *elevation;
+            }
+            if let Some(dst) = uniforms.colors.get_mut(index) {
+                *dst = *color;
+            }
         }
         uniforms
     }

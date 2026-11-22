@@ -106,7 +106,7 @@ fn assert_value(map: &Map<Environment>, dem: bool) {
             .expect("raster request")
             .layers;
         assert_eq!(layers.len(), 1);
-        let RasterLayerData::Available(layer) = &layers[0] else {
+        let Some(RasterLayerData::Available(layer)) = layers.first() else {
             panic!("valid pixels");
         };
         assert_eq!(
