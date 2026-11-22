@@ -20,6 +20,24 @@ const BATCH_CELL_SIZE: usize = 48;
 const BATCH_COLS: usize = 8;
 const BATCH_CHUNK: usize = 64;
 
+#[cfg(web_sys_unstable_apis)]
+fn get_image_data(
+    ctx: &OffscreenCanvasRenderingContext2d,
+    width: i32,
+    height: i32,
+) -> Result<web_sys::ImageData, JsValue> {
+    ctx.get_image_data(0, 0, width, height)
+}
+
+#[cfg(not(web_sys_unstable_apis))]
+fn get_image_data(
+    ctx: &OffscreenCanvasRenderingContext2d,
+    width: i32,
+    height: i32,
+) -> Result<web_sys::ImageData, JsValue> {
+    ctx.get_image_data(0.0, 0.0, f64::from(width), f64::from(height))
+}
+
 struct CanvasScratch {
     canvas: OffscreenCanvas,
     ctx: OffscreenCanvasRenderingContext2d,
@@ -313,7 +331,7 @@ fn rasterize_grid_chunk(
         ctx.restore();
     }
 
-    let Ok(image_data) = ctx.get_image_data(0, 0, grid_w as i32, grid_h as i32) else {
+    let Ok(image_data) = get_image_data(&ctx, grid_w as i32, grid_h as i32) else {
         return;
     };
     let rgba = image_data.data();
@@ -374,9 +392,7 @@ fn rasterize_single_measured(css_font: &str, m: &MeasuredChar) -> Option<Rasteri
     let draw_x = f64::from(SDF_BUFFER) - f64::from(m.min_x);
     let draw_y = f64::from(SDF_BUFFER) - f64::from(m.min_y);
     let _ = ctx.fill_text(m.ch.encode_utf8(&mut buf), draw_x, draw_y);
-    let image_data = ctx
-        .get_image_data(0, 0, m.padded_w as i32, m.padded_h as i32)
-        .ok()?;
+    let image_data = get_image_data(&ctx, m.padded_w as i32, m.padded_h as i32).ok()?;
     let rgba = image_data.data();
     let total = m.padded_w * m.padded_h;
     if rgba.len() < total * 4 {

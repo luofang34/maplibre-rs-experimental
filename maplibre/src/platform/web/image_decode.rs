@@ -19,6 +19,24 @@ fn js_error_text(err: &JsValue) -> String {
         .unwrap_or_else(|| "js error".to_owned())
 }
 
+#[cfg(web_sys_unstable_apis)]
+fn get_image_data(
+    ctx: &OffscreenCanvasRenderingContext2d,
+    width: i32,
+    height: i32,
+) -> Result<web_sys::ImageData, JsValue> {
+    ctx.get_image_data(0, 0, width, height)
+}
+
+#[cfg(not(web_sys_unstable_apis))]
+fn get_image_data(
+    ctx: &OffscreenCanvasRenderingContext2d,
+    width: i32,
+    height: i32,
+) -> Result<web_sys::ImageData, JsValue> {
+    ctx.get_image_data(0.0, 0.0, f64::from(width), f64::from(height))
+}
+
 /// Decodes encoded image bytes into straight-alpha RGBA8 pixels using the browser's image decoder.
 pub(crate) async fn decode_rgba_bytes(bytes: &[u8]) -> Result<RgbaImage, String> {
     if bytes.is_empty() {
@@ -95,9 +113,7 @@ pub(crate) async fn decode_rgba_bytes(bytes: &[u8]) -> Result<RgbaImage, String>
     bitmap.close();
     draw_res.map_err(|e| js_error_text(&e))?;
 
-    let image_data = ctx
-        .get_image_data(0, 0, w_i32, h_i32)
-        .map_err(|e| js_error_text(&e))?;
+    let image_data = get_image_data(&ctx, w_i32, h_i32).map_err(|e| js_error_text(&e))?;
     let raw = image_data.data().0;
     RgbaImage::from_raw(width, height, raw)
         .ok_or_else(|| "decoded RGBA8 byte length did not match width * height * 4".to_owned())

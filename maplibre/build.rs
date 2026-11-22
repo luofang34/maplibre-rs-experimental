@@ -442,6 +442,10 @@ fn main() -> BuildResult {
         io::stdout().lock(),
         "cargo:rustc-check-cfg=cfg(static_tiles_found)"
     )?;
+    writeln!(
+        io::stdout().lock(),
+        "cargo:rustc-check-cfg=cfg(web_sys_unstable_apis)"
+    )?;
     validate_project_wgsl_blocking()?;
     #[cfg(feature = "embed-static-tiles")]
     embed_tiles_statically_blocking()?;
