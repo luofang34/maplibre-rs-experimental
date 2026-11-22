@@ -152,7 +152,11 @@ fn finish_active_step(
         } else {
             false
         };
-        if sys.initial_boot_loading && env.in_flight == 0 && !followup && !sort_pending {
+        if sys.initial_boot_loading
+            && !followup
+            && !sort_pending
+            && can_finish_initial_boot(&ctx.world, env.in_flight)
+        {
             sys.initial_boot_finished = true;
             sys.initial_boot_loading = false;
         }
@@ -228,7 +232,11 @@ pub(super) fn finish_new_epoch(
         let followup_needed = sys.history.repeats.yielded_to_previous();
         sys.controller
             .record_commit(zoom, has_symbols, followup_needed);
-        if sys.initial_boot_loading && in_flight == 0 && !followup_needed && !sort_pending {
+        if sys.initial_boot_loading
+            && !followup_needed
+            && !sort_pending
+            && can_finish_initial_boot(&ctx.world, in_flight)
+        {
             sys.initial_boot_finished = true;
             sys.initial_boot_loading = false;
         }
@@ -255,4 +263,13 @@ pub(super) fn finish_new_epoch(
         crate::render::frame_signals::keep_animating(&mut ctx.world);
     }
     returned_grid
+}
+
+pub(super) fn can_finish_initial_boot(world: &crate::tcs::world::World, in_flight: usize) -> bool {
+    in_flight == 0
+        && !crate::io::tile_backpressure::has_unrequested_visible_tiles(world)
+        && !world
+            .resources
+            .get::<crate::sdf::upload_system::SdfUploadPending>()
+            .is_some_and(|p| p.0)
 }

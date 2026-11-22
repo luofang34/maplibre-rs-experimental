@@ -252,9 +252,21 @@ fn eval_slow_pairs(
 }
 
 fn populate_eval_cache(cache: &mut EvalCache, input: &CircleEvalInput<'_>, use_fast: bool) {
+    let zoom_bits = input.tile_zoom.to_bits();
+    let prev_key = cache.key;
+    if prev_key.is_some_and(|(_, old_layer, old_zoom)| {
+        old_layer == input.style_layer_id
+            && old_zoom == zoom_bits
+            && cache.pairs.len() == input.all_props.len()
+    }) {
+        std::mem::swap(&mut cache.pairs, &mut cache.prev_pairs);
+        cache.prev_key = prev_key;
+    } else {
+        cache.prev_key = None;
+        cache.prev_pairs.clear();
+    }
     cache.pairs.clear();
     cache.pairs.reserve(input.all_props.len());
-    let zoom_bits = input.tile_zoom.to_bits();
     let needs_compile = cache.ramps.as_ref().is_none_or(|r| {
         r.layer_id != input.style_layer_id
             || r.tile_zoom_bits != zoom_bits
@@ -284,6 +296,28 @@ fn populate_eval_cache(cache: &mut EvalCache, input: &CircleEvalInput<'_>, use_f
         );
     }
     cache.key = Some((input.seq, input.style_layer_id, zoom_bits));
+}
+
+pub(super) fn populate_and_check_unchanged(
+    cache: &mut EvalCache,
+    input: &CircleEvalInput<'_>,
+    prev_applied_seq: Option<u64>,
+) -> bool {
+    let use_fast = input.fast_columns.active_seq == Some(input.seq)
+        && input.fast_columns.values.len() == input.all_props.len();
+    let cache_key = (input.seq, input.style_layer_id, input.tile_zoom.to_bits());
+    if cache.key != Some(cache_key) || cache.pairs.len() != input.all_props.len() {
+        populate_eval_cache(cache, input, use_fast);
+    }
+    let Some(prev_seq) = prev_applied_seq else {
+        return false;
+    };
+    if cache.prev_key != Some((prev_seq, input.style_layer_id, input.tile_zoom.to_bits())) {
+        return false;
+    }
+    input.hits.iter().all(|&feat_idx| {
+        cache.pairs.get(feat_idx as usize) == cache.prev_pairs.get(feat_idx as usize)
+    })
 }
 
 pub(super) fn evaluate_circle_metadata_into(

@@ -18,11 +18,32 @@ use crate::{
 
 type SelectionKey = (u64, u64, u64, u64, u64);
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct CoveringViewKey {
+    gpu_vp_bits: [[u64; 4]; 4],
+    zoom_bits: u64,
+    style_zoom_bits: u64,
+    viewport_bits: (u64, u64),
+}
+
+impl CoveringViewKey {
+    fn of(view: &ViewState) -> Self {
+        let m: [[f64; 4]; 4] = view.gpu_view_projection().0.into();
+        Self {
+            gpu_vp_bits: m.map(|col| col.map(f64::to_bits)),
+            zoom_bits: view.zoom().value().to_bits(),
+            style_zoom_bits: view.style_zoom().value().to_bits(),
+            viewport_bits: (view.width().to_bits(), view.height().to_bits()),
+        }
+    }
+}
+
 pub(crate) struct SymbolCovering {
     pub tiles: Vec<WorldTileCoords>,
     pub buffer: wgpu::Buffer,
     selection_key: Option<SelectionKey>,
     all_targets_ready: bool,
+    last_upload_view: Option<CoveringViewKey>,
     metadata_scratch: Vec<ShaderTileMetadata>,
     last_uploaded_bytes: Vec<u8>,
 }
@@ -186,6 +207,7 @@ pub(super) fn update(
             covering.tiles.clear();
             covering.selection_key = Some(key);
             covering.all_targets_ready = false;
+            covering.last_upload_view = None;
         }
         return;
     }
@@ -229,9 +251,14 @@ fn refresh_reused_covering(
     if covering.tiles.is_empty() {
         return;
     }
+    let view_key = CoveringViewKey::of(view);
+    if covering.last_upload_view == Some(view_key) {
+        return;
+    }
     let SymbolCovering {
         tiles,
         buffer,
+        last_upload_view,
         metadata_scratch,
         last_uploaded_bytes,
         ..
@@ -244,6 +271,7 @@ fn refresh_reused_covering(
         last_uploaded_bytes.clear();
         last_uploaded_bytes.extend_from_slice(bytes);
     }
+    *last_upload_view = Some(view_key);
 }
 
 fn upload_covering_tiles(
@@ -284,10 +312,12 @@ fn upload_covering_tiles(
             buffer,
             selection_key: None,
             all_targets_ready: false,
+            last_upload_view: None,
             metadata_scratch: Vec::new(),
             last_uploaded_bytes: Vec::new(),
         });
     }
+    let view_key = CoveringViewKey::of(view);
     if let Some(covering) = world.resources.get_mut::<SymbolCovering>() {
         if !bytes.is_empty() && covering.last_uploaded_bytes.as_slice() != bytes {
             queue.write_buffer(&covering.buffer, 0, bytes);
@@ -297,6 +327,7 @@ fn upload_covering_tiles(
         covering.tiles = tiles;
         covering.selection_key = selection_key;
         covering.all_targets_ready = all_targets_ready;
+        covering.last_upload_view = Some(view_key);
         covering.metadata_scratch = entries;
     }
 }

@@ -103,6 +103,9 @@ impl<'a> Scanner<'a> {
                         }
                         b'{' | b'[' => {
                             depth += 1;
+                            if depth > 64 {
+                                return false;
+                            }
                             self.pos += 1;
                         }
                         b'}' | b']' => {

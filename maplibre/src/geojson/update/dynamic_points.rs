@@ -52,6 +52,8 @@ pub(super) struct EvalCache {
     pub key: Option<(u64, StyleLayerId, u64)>,
     pub ramps: Option<gpu::eval::CompiledCircleRamps>,
     pub pairs: Vec<[FillShaderFeatureMetadata; 2]>,
+    pub prev_key: Option<(u64, StyleLayerId, u64)>,
+    pub prev_pairs: Vec<[FillShaderFeatureMetadata; 2]>,
 }
 
 struct DynamicPointSource {
@@ -65,6 +67,8 @@ struct DynamicPointSource {
     seq: u64,
     tile_hits: FxHashMap<WorldTileCoords, Vec<u32>>,
     applied_seq: FxHashMap<(WorldTileCoords, StyleLayerId), (u64, u64)>,
+    slot_cache_state: Option<(u64, u64)>,
+    slot_cache: FxHashMap<(WorldTileCoords, StyleLayerId), Option<(usize, u8, u64, usize)>>,
     deferred_bytes: Option<Vec<u8>>,
     fast_ramp_keys_rev: Option<u64>,
     fast_ramp_keys_ok: bool,
@@ -244,6 +248,8 @@ fn build_source_from_value(
         seq: 1,
         tile_hits: FxHashMap::default(),
         applied_seq: FxHashMap::default(),
+        slot_cache_state: None,
+        slot_cache: FxHashMap::default(),
         deferred_bytes: None,
         fast_ramp_keys_rev: None,
         fast_ramp_keys_ok: false,

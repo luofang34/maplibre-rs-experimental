@@ -48,6 +48,68 @@ impl SymbolStyleIndex {
     }
 }
 
+#[derive(Default)]
+pub(crate) struct SdfUploadPending(pub bool);
+
+#[derive(Clone, PartialEq, Eq)]
+struct SdfUploadKey {
+    arrival_epoch: u64,
+    style_rev: u64,
+    tiles_len: usize,
+    topology_gen: u64,
+    covering_len: usize,
+    pool_rev: u64,
+    pool_evict: u64,
+    target_zoom_q32: i32,
+    exact_zoom_q32: i32,
+    moving: bool,
+}
+
+#[derive(Default)]
+struct SdfUploadCache {
+    last_key: Option<SdfUploadKey>,
+    last_deferred: bool,
+    last_needs_atlas_settle: bool,
+    last_needs_refetch: bool,
+}
+
+impl SdfUploadCache {
+    fn build_key(world: &crate::tcs::world::World, style: &Style, zoom: f32) -> SdfUploadKey {
+        let moving = world
+            .resources
+            .get::<FrameUploads>()
+            .is_some_and(FrameUploads::is_moving);
+        let (exact_zoom_q32, target_zoom_q32, _) = atlas_zoom_target(zoom, moving);
+        let topology_gen = match world
+            .resources
+            .get::<Eventually<crate::render::tile_view_pattern::WgpuTileViewPattern>>()
+        {
+            Some(Initialized(pattern)) => pattern.topology_generation(),
+            _ => 0,
+        };
+        let covering_len = world
+            .resources
+            .get::<super::covering::SymbolCovering>()
+            .map_or(0, |covering| covering.tiles.len());
+        let (pool_rev, pool_evict) = match world.resources.get::<Eventually<SymbolBufferPool>>() {
+            Some(Initialized(pool)) => (pool.revision(), pool.eviction_generation()),
+            _ => (0, 0),
+        };
+        SdfUploadKey {
+            arrival_epoch: crate::vector::arrival_epoch(world),
+            style_rev: style.revision(),
+            tiles_len: world.tiles.tiles.len(),
+            topology_gen,
+            covering_len,
+            pool_rev,
+            pool_evict,
+            target_zoom_q32,
+            exact_zoom_q32,
+            moving,
+        }
+    }
+}
+
 pub(super) fn atlas_zoom_target(zoom: f32, moving: bool) -> (i32, i32, f32) {
     let exact_zoom_q32 = (zoom * 32.0).round() as i32;
     let target_zoom_q32 = if moving {
@@ -78,9 +140,11 @@ pub fn upload_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
-    if settings.symbol_pools.is_empty()
-        || crate::render::eye_covering::EyeInFrame::reuses_content(world)
-    {
+    if crate::render::eye_covering::EyeInFrame::reuses_content(world) {
+        return Ok(());
+    }
+    if settings.symbol_pools.is_empty() {
+        world.resources.insert(SdfUploadPending(false));
         return Ok(());
     }
     if !super::style_has_symbol_layers(style) {
@@ -88,8 +152,19 @@ pub fn upload_system(
             textures.clear();
         }
         if super::symbol_pool_empty(world) {
+            world.resources.insert(SdfUploadPending(false));
             return Ok(());
         }
+    }
+    let zoom = view_state.style_zoom().level();
+    let pre_key = SdfUploadCache::build_key(world, style, zoom);
+    if world.resources.get::<SdfUploadCache>().is_some_and(|c| {
+        !c.last_deferred
+            && !c.last_needs_atlas_settle
+            && !c.last_needs_refetch
+            && c.last_key.as_ref() == Some(&pre_key)
+    }) {
+        return Ok(());
     }
     let visible = super::covering::upload_tiles(world);
     let arrival_epoch = crate::vector::arrival_epoch(world);
@@ -116,7 +191,6 @@ pub fn upload_system(
     };
 
     textures.retain_if_needed(&world.tiles, style, arrival_epoch);
-    let zoom = view_state.style_zoom().level();
 
     let (deferred, needs_refetch, needs_atlas_settle) = upload_symbol_layer(
         symbol_buffer_pool,
@@ -130,7 +204,23 @@ pub fn upload_system(
         (style, symbol_style, &visible, zoom),
         budget,
     );
+    let post_pool = (
+        symbol_buffer_pool.revision(),
+        symbol_buffer_pool.eviction_generation(),
+    );
     let bound = textures.take_bound();
+    world
+        .resources
+        .insert(SdfUploadPending(deferred || needs_atlas_settle));
+    let mut post_key = pre_key;
+    post_key.pool_rev = post_pool.0;
+    post_key.pool_evict = post_pool.1;
+    world.resources.insert(SdfUploadCache {
+        last_key: Some(post_key),
+        last_deferred: deferred,
+        last_needs_atlas_settle: needs_atlas_settle,
+        last_needs_refetch: needs_refetch,
+    });
     if deferred || needs_atlas_settle {
         crate::render::frame_signals::keep_animating(world);
     }

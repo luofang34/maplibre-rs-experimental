@@ -35,6 +35,10 @@ pub(super) type FrameSourcesAndPainted = (
     FxHashSet<WorldTileCoords>,
 );
 
+mod cache;
+
+use cache::{build_frame_sources_key, update_loose_tight_tiles, FrameSourcesCache};
+
 type FreshTightTiles = (ZoomLevel, Arc<[WorldTileCoords]>);
 
 #[cfg(all(test, feature = "headless", feature = "thread-safe-futures"))]
@@ -51,16 +55,32 @@ pub(super) fn frame_sources_and_painted_mut(
     style: &Style,
     view_state: &ViewState,
 ) -> Result<FrameSourcesAndPainted, SystemError> {
-    let (result, fresh_tight) = compute_frame_sources_and_painted(world, style, view_state)?;
-    if let Some((level, tiles)) = fresh_tight {
-        let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
-        let cache = world
-            .resources
-            .get_or_init_mut::<crate::render::eye_covering::FrameLooseCovering>();
-        if cache.host_frame != host_frame {
-            *cache = crate::render::eye_covering::FrameLooseCovering::for_host_frame(host_frame);
+    let key = build_frame_sources_key(world, style, view_state);
+    if let Some(ref key) = key {
+        if key.terrain_settled {
+            let hit = world
+                .resources
+                .get::<FrameSourcesCache>()
+                .filter(|cache| cache.key.as_ref() == Some(key))
+                .and_then(|cache| {
+                    cache
+                        .result
+                        .clone()
+                        .map(|result| (result, cache.fresh_tight.clone()))
+                });
+            if let Some((result, fresh_tight)) = hit {
+                update_loose_tight_tiles(world, fresh_tight.as_ref());
+                return Ok(result);
+            }
         }
-        cache.tight_view_tiles = Some((Some(tiles), ViewStatePadding::Tight, level));
+    }
+    let (result, fresh_tight) = compute_frame_sources_and_painted(world, style, view_state)?;
+    update_loose_tight_tiles(world, fresh_tight.as_ref());
+    if key.is_some() {
+        let cache = world.resources.get_or_init_mut::<FrameSourcesCache>();
+        cache.key = key;
+        cache.result = Some(result.clone());
+        cache.fresh_tight = fresh_tight;
     }
     Ok(result)
 }

@@ -30,10 +30,10 @@ mod worker;
 pub use dispatch::depends_on_overscaling;
 use dispatch::request_tile;
 #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
-pub(crate) use limiter::{acquire_heavy_tile_slot, PendingUploadPermits, SharedTilePermit};
+pub(crate) use limiter::{acquire_heavy_tile_slot, SharedTilePermit};
 pub(crate) use limiter::{
-    clear_upload_permits, reconcile_upload_permits, snapshot_permit_sources, SharedTileClaim,
-    SharedTileSlot,
+    clear_upload_permits, reconcile_upload_permits, snapshot_permit_sources, PendingUploadPermits,
+    SharedTileClaim, SharedTileSlot,
 };
 use memo::{
     display_pixel_ratio, resolve_view_tiles, update_loose_covering_cache,

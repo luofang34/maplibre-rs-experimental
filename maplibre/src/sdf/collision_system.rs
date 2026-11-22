@@ -176,7 +176,9 @@ impl CollisionSystem {
         );
         if self.history.is_fading() || self.controller.is_pending() || sort_pending {
             crate::render::frame_signals::keep_animating(&mut ctx.world);
-        } else if self.initial_boot_loading && in_flight == 0 {
+        } else if self.initial_boot_loading
+            && active::can_finish_initial_boot(&ctx.world, in_flight)
+        {
             self.initial_boot_finished = true;
             self.initial_boot_loading = false;
         }

@@ -124,3 +124,58 @@ test("setGeoJsonData defers UTF-8 encoding past microtasks and transfers ArrayBu
     assert.deepEqual(decoded, {type: "FeatureCollection", features: [{id: 2}]});
     coalescer.rejectQueued(new Error("done"));
 });
+
+test("waitGeoJsonSettled flushes queued updates and waits for chained in-flight RPCs", async () => {
+    const events = [];
+    const resolvers = [];
+    let notifyFirstStarted;
+    const firstStarted = new Promise(resolve => {
+        notifyFirstStarted = resolve;
+    });
+    const coalescer = createOffscreenCoalescer(
+        () => {},
+        method => {
+            events.push(`start:${method}`);
+            if (events.length === 1) notifyFirstStarted();
+            return new Promise(resolve => {
+                resolvers.push(() => {
+                    events.push(`end:${method}`);
+                    resolve(undefined);
+                });
+            });
+        },
+        () => false,
+    );
+
+    const p1 = coalescer.setGeoJsonData("sensors", {type: "FeatureCollection", features: [{id: 1}]});
+    await firstStarted;
+    assert.equal(resolvers.length, 1);
+
+    // Queue follow-up while first RPC is in flight.
+    const p2 = coalescer.setGeoJsonData("sensors", {type: "FeatureCollection", features: [{id: 2}]});
+    let settled = false;
+    const waitPromise = coalescer.waitGeoJsonSettled().then(() => {
+        settled = true;
+    });
+
+    await new Promise(resolve => queueMicrotask(resolve));
+    assert.equal(settled, false, "waits while initial GeoJSON RPC is still in flight");
+
+    // Finish RPC 1 -> triggers queued RPC 2; waitGeoJsonSettled must still wait.
+    resolvers.shift()();
+    await p1;
+    await new Promise(resolve => queueMicrotask(resolve));
+    assert.equal(resolvers.length, 1, "follow-up GeoJSON RPC dispatched");
+    assert.equal(settled, false, "waits for chained follow-up GeoJSON RPC");
+
+    resolvers.shift()();
+    await p2;
+    await waitPromise;
+    assert.equal(settled, true);
+    assert.deepEqual(events, [
+        "start:setGeoJsonBytes",
+        "end:setGeoJsonBytes",
+        "start:setGeoJsonBytes",
+        "end:setGeoJsonBytes",
+    ]);
+});

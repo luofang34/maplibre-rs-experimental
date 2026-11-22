@@ -32,7 +32,7 @@ export const createOffscreenCoalescer = (post, rawRpc, isClosed) => {
     let jumpInFlight = false;
     let jumpFlushScheduled = false;
     const queuedGeoJson = new Map();
-    const geoJsonInFlight = new Set();
+    const geoJsonInFlight = new Map();
     let geoJsonFlushScheduled = false;
     let geoJsonChannel = null;
 
@@ -162,7 +162,6 @@ export const createOffscreenCoalescer = (post, rawRpc, isClosed) => {
         const batch = queuedGeoJson.get(source);
         if (!batch) return;
         queuedGeoJson.delete(source);
-        geoJsonInFlight.add(source);
         let rpcPromise;
         if (utf8Encoder) {
             try {
@@ -174,7 +173,6 @@ export const createOffscreenCoalescer = (post, rawRpc, isClosed) => {
                 const bytes = utf8Encoder.encode(text);
                 rpcPromise = rawRpc("setGeoJsonBytes", [source, bytes, wasString], [bytes.buffer]);
             } catch (err) {
-                geoJsonInFlight.delete(source);
                 for (const w of batch.waiters) w.reject(err);
                 if (queuedGeoJson.has(source)) dispatchQueuedGeoJson(source);
                 return;
@@ -182,7 +180,7 @@ export const createOffscreenCoalescer = (post, rawRpc, isClosed) => {
         } else {
             rpcPromise = rawRpc("setGeoJsonData", [source, batch.data]);
         }
-        rpcPromise.then(
+        const tracked = rpcPromise.then(
             res => {
                 geoJsonInFlight.delete(source);
                 for (const w of batch.waiters) w.resolve(res);
@@ -194,6 +192,7 @@ export const createOffscreenCoalescer = (post, rawRpc, isClosed) => {
                 if (queuedGeoJson.has(source)) dispatchQueuedGeoJson(source);
             },
         );
+        geoJsonInFlight.set(source, tracked);
     };
 
     const flushQueuedGeoJson = () => {
@@ -244,6 +243,18 @@ export const createOffscreenCoalescer = (post, rawRpc, isClosed) => {
         }
     };
 
+    const waitGeoJsonSettled = async () => {
+        while (!isClosed()) {
+            if (queuedGeoJson.size > 0) {
+                flushQueuedGeoJson();
+            }
+            if (geoJsonInFlight.size === 0 && queuedGeoJson.size === 0) {
+                return;
+            }
+            await Promise.allSettled(Array.from(geoJsonInFlight.values()));
+        }
+    };
+
     const rejectQueued = reason => {
         if (inputRafId !== null && typeof cancelAnimationFrame === "function") {
             cancelAnimationFrame(inputRafId);
@@ -278,6 +289,7 @@ export const createOffscreenCoalescer = (post, rawRpc, isClosed) => {
         queueTouchMove,
         jumpTo,
         setGeoJsonData,
+        waitGeoJsonSettled,
         flushBeforeOrderedRpc,
         rejectQueued,
     };

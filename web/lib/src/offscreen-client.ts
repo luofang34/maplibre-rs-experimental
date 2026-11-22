@@ -507,7 +507,10 @@ export const startOffscreenController = async ({
             }
         };
         proxy.waitArenaLoaded = () => callRpc("waitArenaLoaded", []);
-        proxy.waitArenaIdle = () => callRpc("waitArenaIdle", []);
+        proxy.waitArenaIdle = async () => {
+            await coalescer.waitGeoJsonSettled();
+            return callRpc("waitArenaIdle", []);
+        };
     }
 
     return proxy as unknown as MapController;

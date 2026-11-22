@@ -386,6 +386,9 @@ fn check_coords(
 }
 
 fn scan_properties(s: &mut Scanner<'_>, idx: usize, store: &mut FastColumnStore) -> bool {
+    if let Some(row) = store.values.get_mut(idx) {
+        *row = [None; MAX_FAST_COLS];
+    }
     s.skip_ws();
     if s.bytes.get(s.pos) == Some(&b'n') {
         return s.consume_lit(b"null");
@@ -401,27 +404,28 @@ fn scan_properties(s: &mut Scanner<'_>, idx: usize, store: &mut FastColumnStore)
         let Some(key) = s.next_simple_str() else {
             return false;
         };
-        let Some(col) = store.keys.iter().position(|k| k == key) else {
-            return false;
-        };
         if !s.consume(b':') {
             return false;
         }
-        s.skip_ws();
-        if s.bytes.get(s.pos) == Some(&b'n') {
-            if !s.consume_lit(b"null") {
-                return false;
+        if let Some(col) = store.keys.iter().position(|k| k == key) {
+            s.skip_ws();
+            if s.bytes.get(s.pos) == Some(&b'n') {
+                if !s.consume_lit(b"null") {
+                    return false;
+                }
+                if let Some(slot) = store.values.get_mut(idx).and_then(|row| row.get_mut(col)) {
+                    *slot = None;
+                }
+            } else {
+                let Some(val) = s.next_f64_fast() else {
+                    return false;
+                };
+                if let Some(slot) = store.values.get_mut(idx).and_then(|row| row.get_mut(col)) {
+                    *slot = Some(val);
+                }
             }
-            if let Some(slot) = store.values.get_mut(idx).and_then(|row| row.get_mut(col)) {
-                *slot = None;
-            }
-        } else {
-            let Some(val) = s.next_f64_fast() else {
-                return false;
-            };
-            if let Some(slot) = store.values.get_mut(idx).and_then(|row| row.get_mut(col)) {
-                *slot = Some(val);
-            }
+        } else if !s.skip_value() {
+            return false;
         }
         if s.consume(b',') {
             continue;
@@ -429,3 +433,6 @@ fn scan_properties(s: &mut Scanner<'_>, idx: usize, store: &mut FastColumnStore)
         return s.consume(b'}');
     }
 }
+
+#[cfg(test)]
+mod tests;
