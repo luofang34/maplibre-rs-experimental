@@ -141,3 +141,64 @@ fn the_anchor_of_a_label_is_kept_until_it_has_faded_out() {
         "a hidden label has no anchor to keep"
     );
 }
+
+#[test]
+fn clock_rebases_when_idle_past_one_million_ms_and_keeps_settled_state() {
+    let mut history = PlacementHistory::default();
+    let layer = layer(12);
+    let feature = feature(1000.0);
+    // Advance past 1_000_000 ms across active/settled transitions while staying continuously visible.
+    let mut t = 0_u64;
+    history.begin_with_duration(Duration::from_millis(t), Duration::from_millis(200));
+    history.opacity(&layer, &feature, [true, false]);
+    while history.clock_ms < 1_000_000.0 {
+        t += 500;
+        history.begin_with_duration(Duration::from_millis(t), Duration::from_millis(200));
+        history.opacity(&layer, &feature, [true, false]);
+    }
+    assert!(history.rebase_clock_if_idle());
+    assert_eq!(history.clock_ms, 0.0);
+    assert_eq!(history.effective_shader_time_ms(), 4.0);
+    history.begin_with_duration(Duration::from_millis(t + 16), Duration::from_millis(200));
+    assert_eq!(history.opacity(&layer, &feature, [true, false]), [1.0, 0.0]);
+}
+
+#[test]
+fn quantized_start_ticks_floor_and_settled_shader_time_clears_4ms_step() {
+    let meta = crate::render::shaders::SDFShaderFeatureMetadata::from_placement(
+        0.0,
+        0.0,
+        1.0,
+        10.9,
+        [0.0, 0.0],
+        [1.0; 4],
+        [0.0; 4],
+        [12.0, 0.0, 0.0, 1.0],
+    );
+    assert_eq!(meta.start_time_ms(), 8.0, "floor(10.9 * 0.25) * 4 == 8.0");
+
+    let mut history = PlacementHistory::default();
+    let layer = layer(12);
+    let feature = feature(1000.0);
+    history.begin_with_duration(Duration::ZERO, Duration::from_millis(160));
+    history.opacity(&layer, &feature, [true, false]);
+    history.begin_with_duration(Duration::from_millis(200), Duration::from_millis(160));
+    history.opacity(&layer, &feature, [true, false]);
+    assert!(history.effective_shader_time_ms() >= history.fade_until_ms + 4.0);
+}
+
+#[test]
+fn fade_duration_over_one_second_retains_fading_state() {
+    let mut history = PlacementHistory::default();
+    let layer = layer(12);
+    let feature = feature(1000.0);
+    let fade = Duration::from_secs(2);
+    history.begin_with_duration(Duration::ZERO, fade);
+    assert_eq!(history.opacity(&layer, &feature, [true, false])[0], 0.0);
+    history.begin_with_duration(Duration::from_millis(1500), fade);
+    let mid = history.opacity(&layer, &feature, [true, false])[0];
+    assert!(
+        mid > 0.7 && mid < 0.8,
+        "expected ~0.75 opacity at 1.5s/2s, got {mid}"
+    );
+}

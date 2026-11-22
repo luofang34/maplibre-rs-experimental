@@ -8,6 +8,7 @@
 use cgmath::{InnerSpace, Vector3};
 
 use crate::{
+    projection::globe::camera::GlobeCameraState,
     render::{projection::globe_camera_for_view, shaders::SkyLayerMetadata, view_state::ViewState},
     style::sky::SkySpecification,
 };
@@ -40,6 +41,15 @@ pub fn globe_sky_metadata(
     view_state: &ViewState,
 ) -> Option<SkyLayerMetadata> {
     let camera = globe_camera_for_view(view_state).ok()?;
+    globe_sky_metadata_with_camera(sky, view_state, &camera)
+}
+
+/// Same as [`globe_sky_metadata`], reusing an already-resolved [`GlobeCameraState`].
+pub(crate) fn globe_sky_metadata_with_camera(
+    sky: &SkySpecification,
+    view_state: &ViewState,
+    camera: &GlobeCameraState,
+) -> Option<SkyLayerMetadata> {
     let colors = sky.colors_at(view_state.zoom().value());
     let inverse_projection = camera.inverse_projection().cast::<f32>()?;
     let eye = camera.camera_position();

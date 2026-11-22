@@ -13,7 +13,8 @@ use super::placement::canonical_tile;
 use crate::{
     context::MapContext,
     coords::WorldTileCoords,
-    render::projection::projection_data_for_view,
+    render::{eventually::Eventually, projection::projection_data_for_view},
+    sdf::SymbolBufferPool,
     tcs::system::{System, SystemError, SystemResult},
 };
 
@@ -143,6 +144,18 @@ impl System for CollisionSystem {
 
         self.history.set_fade_duration(effective_fade_duration);
         self.history.advance_clock(now);
+        if self.history.rebase_clock_if_idle() {
+            if let Some(Eventually::Initialized(pool)) =
+                world.resources.get::<Eventually<SymbolBufferPool>>()
+            {
+                upload_diff::rebase_uploaded_metadata(
+                    pool,
+                    &renderer.queue,
+                    &mut self.uploaded,
+                    &mut self.scratch,
+                );
+            }
+        }
 
         self.runs = self.runs.wrapping_add(1);
         let stats = world.resources.get_or_init_mut::<CollisionStats>();
@@ -370,6 +383,7 @@ impl System for CollisionSystem {
                 && earlier_stage_spent > std::time::Duration::from_micros(2_200)
                 && self.controller.defer_for_frame_budget(triggers))
         {
+            self.history.touch_active_states(now);
             sync::sync_symbol_depth_fade(
                 world,
                 renderer,

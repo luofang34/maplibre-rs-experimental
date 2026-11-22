@@ -12,7 +12,7 @@ use std::{
 use serde::Serialize;
 
 use crate::{
-    coords::{WorldTileCoords, ZoomLevel, EXTENT},
+    coords::{WorldTileCoords, EXTENT},
     io::geometry_index::{ExactGeometry, IndexedGeometry},
     render::{resolved_view::ResolvedFrameView, view_state::ViewState},
     sdf::query::{
@@ -31,20 +31,17 @@ use crate::{
 
 mod circle;
 mod extrusion;
+mod globe;
 mod ground;
 mod order;
 mod overzoomed;
 mod surface;
 mod tiles;
 
+use globe::visible_in_screen_box;
 use order::{in_drawing_order, Candidate};
-use surface::{
-    camera_query_bounds, resolve_terrain_index, surface_footprint, visible_in_screen_box,
-};
-use tiles::{candidates_in, tiles_in, QueryTile};
-
-/// Deepest tile zoom a query looks at.
-const MAX_QUERY_ZOOM: i32 = 22;
+use surface::{camera_query_bounds, resolve_terrain_index, surface_footprint};
+use tiles::{candidates_in, select_query_entries, QueryTile};
 
 /// A feature identifier returned by [`query_rendered_features`] or source queries: a non-negative
 /// integer or a string (such as a string `promoteId` or GeoJSON string `id`).
@@ -245,17 +242,13 @@ type TopDown = (u8, i32, i32, i32, Reverse<u32>);
 struct Search<'a> {
     candidates: Vec<Candidate<'a>>,
     query_filter: Option<Filter>,
-    /// Features already reported, per layer and per tile: GL JS reports a feature once for each
-    /// tile it is found in, merging only the copies of one tile in different worlds.
+    /// Features already reported, per layer and per tile.
     seen: HashSet<(String, WorldTileCoords, Identity)>,
-    /// Each feature with its layer's index and, for a fill extrusion, its depth on screen.
     found: Vec<(TopDown, Found)>,
-    /// The query in window pixels, which extrusions and viewport circles are met against.
     screen: extrusion::ScreenQuery,
-    /// The corners of the ground the query covers, in world pixels.
     ground: Vec<[f64; 2]>,
-    /// Whether the query box surrounds the entire visible globe disc in space.
     whole_visible_hemisphere: bool,
+    view_state: &'a ViewState,
     world: &'a World,
     style: &'a Style,
     resolved: &'a ResolvedFrameView,
@@ -360,6 +353,7 @@ fn vector_features(
         screen,
         ground,
         whole_visible_hemisphere,
+        view_state,
         world,
         style,
         resolved: &resolved,
@@ -371,53 +365,29 @@ fn vector_features(
     Ok(found.into_iter().map(|(_, feature)| feature).collect())
 }
 
-/// Collects from the finest level of tiles that holds any index for the region, looking
-/// `margin` screen pixels beyond the query for features a layer draws within reach of it.
 fn search_tiles(world: &World, (region, margin): ([f64; 4], f64), search: &mut Search) {
-    let zoom = search.resolved.zoom;
-    // One level above the view zoom covers sources whose tiles are finer than the view's.
-    let top = (zoom.value().floor() as i32 + 1).clamp(0, MAX_QUERY_ZOOM);
-    let Some(z) = (0..=top).rev().find(|&z| {
-        tiles_in(region, margin, search.resolved, z as u8)
-            .iter()
-            .any(|tile| {
-                world
-                    .tiles
-                    .geometry_index
-                    .tile_indexes(&tile.coords)
-                    .is_some()
-            })
-    }) else {
-        return;
-    };
-    // A source that stops before the view's zoom is queried as GL JS queries it: through the
-    // tiles of the view's zoom cut out of the coarser one.
-    let view_z = (zoom.value().floor() as i32).clamp(0, MAX_QUERY_ZOOM);
-    let tile_z = z.max(view_z) as u8;
-    for mut tile in tiles_in(region, margin, search.resolved, tile_z) {
-        let depth = tile_z - z as u8;
-        let source_coords = WorldTileCoords {
-            x: tile.coords.x >> depth,
-            y: tile.coords.y >> depth,
-            z: ZoomLevel::new(z as u8),
-        };
-        let Some(indexes) = world.tiles.geometry_index.tile_indexes(&source_coords) else {
+    for mut entry in select_query_entries(world, region, margin, search.resolved) {
+        let Some(indexes) = world
+            .tiles
+            .geometry_index
+            .tile_indexes(&entry.source_coords)
+        else {
             continue;
         };
-        tile.footprint = if search.whole_visible_hemisphere {
+        let depth = entry.depth;
+        entry.tile.footprint = if search.whole_visible_hemisphere {
             ground::Footprint::of(&[[0.0, 0.0], [EXTENT, 0.0], [EXTENT, EXTENT], [0.0, EXTENT]])
         } else {
-            tile.footprint_of(&search.ground)
+            entry.tile.footprint_of(&search.ground)
         };
-        let tile = &tile;
+        let tile = &entry.tile;
         let scale = f64::from(1_u32 << depth);
         let offset = [
-            f64::from(tile.coords.x - (source_coords.x << depth)) * EXTENT,
-            f64::from(tile.coords.y - (source_coords.y << depth)) * EXTENT,
+            f64::from(tile.coords.x - (entry.source_coords.x << depth)) * EXTENT,
+            f64::from(tile.coords.y - (entry.source_coords.y << depth)) * EXTENT,
         ];
         let widen = margin * tile.units_per_pixel;
         let [x0, y0, x1, y1] = tile.local;
-        // The window in the units of the tile the index belongs to.
         let child = [x0 - widen, y0 - widen, x1 + widen, y1 + widen];
         let window = [0, 1, 2, 3].map(|i| (child[i] + offset[i % 2]) / scale);
         for (source, index) in indexes {
@@ -451,7 +421,7 @@ fn flat_hit(
     };
     let translate = candidate
         .translate
-        .map(|pixels| pixels * tile.units_per_pixel);
+        .map(|pixels| pixels / tile.world_per_unit);
     ground::touches(
         geometry,
         footprint,
@@ -494,6 +464,7 @@ fn collect(
         found,
         screen,
         whole_visible_hemisphere,
+        view_state,
         world,
         resolved,
         terrain_index,
@@ -514,14 +485,23 @@ fn collect(
         {
             continue;
         }
+        let reach_px = match &layer.paint {
+            Some(LayerPaint::Line(paint)) => {
+                let [hw, off] = ground::line_reach(paint, &geometry.properties, zoom_val);
+                hw + off.abs()
+            }
+            Some(LayerPaint::Heatmap(paint)) => {
+                circle::heatmap_radius(paint, &geometry.properties, zoom_val)
+            }
+            _ => 0.0,
+        };
         let visible_check = |cand: &Candidate| {
             !*whole_visible_hemisphere
                 || visible_in_screen_box(
                     geometry,
-                    tile.origin,
-                    tile.world_per_unit,
-                    cand.translate,
-                    (world, resolved, *terrain_index, *screen),
+                    layer.type_.as_str(),
+                    (tile.origin, tile.world_per_unit, cand.translate, reach_px),
+                    (view_state, world, resolved, *terrain_index, *screen),
                 )
         };
         let depth = match (&geometry.exact, candidate.layer.type_.as_str()) {
@@ -561,7 +541,13 @@ fn collect(
                         exact,
                         (tile, candidate),
                         (paint, &geometry.properties),
-                        (*screen, world, resolved, *terrain_index),
+                        (
+                            *screen,
+                            world,
+                            resolved,
+                            *terrain_index,
+                            *whole_visible_hemisphere,
+                        ),
                     ) =>
                 {
                     None

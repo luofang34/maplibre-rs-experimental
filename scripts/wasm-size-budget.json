@@ -1,0 +1,59 @@
+{
+  "tolerance": 0.03,
+  "variants": {
+    "webgpu": {
+      "artifacts": {
+        "assets/maplibre_bg.wasm": {
+          "rawBytes": 2610436,
+          "gzipBytes": 940277
+        },
+        "assets/maplibre_tile_worker_bg.wasm": {
+          "rawBytes": 1687286,
+          "gzipBytes": 650330
+        },
+        "module.js": {
+          "rawBytes": 180673,
+          "gzipBytes": 50915
+        }
+      },
+      "totalRawBytes": 4478395,
+      "totalGzipBytes": 1641522
+    },
+    "webgl": {
+      "artifacts": {
+        "assets/maplibre_bg.wasm": {
+          "rawBytes": 3965133,
+          "gzipBytes": 1457965
+        },
+        "assets/maplibre_tile_worker_bg.wasm": {
+          "rawBytes": 1687286,
+          "gzipBytes": 650330
+        },
+        "module.js": {
+          "rawBytes": 172557,
+          "gzipBytes": 43009
+        }
+      },
+      "totalRawBytes": 5824976,
+      "totalGzipBytes": 2151304
+    },
+    "webgl-mt": {
+      "artifacts": {
+        "assets/maplibre_bg.wasm": {
+          "rawBytes": 4822966,
+          "gzipBytes": 1841690
+        },
+        "assets/maplibre_tile_worker_bg.wasm": {
+          "rawBytes": 8,
+          "gzipBytes": 28
+        },
+        "module.js": {
+          "rawBytes": 168738,
+          "gzipBytes": 43397
+        }
+      },
+      "totalRawBytes": 4991712,
+      "totalGzipBytes": 1885115
+    }
+  }
+}

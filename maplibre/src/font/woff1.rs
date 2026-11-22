@@ -5,7 +5,7 @@ use std::io::Read;
 use flate2::read::ZlibDecoder;
 
 use super::{
-    container::{assemble_sfnt, SfntTable, MAX_DECOMPRESSED_FONT_BYTES},
+    container::{assemble_sfnt, sfnt_checksum, SfntTable, MAX_DECOMPRESSED_FONT_BYTES},
     FontError,
 };
 
@@ -32,8 +32,8 @@ pub(super) fn unpack_woff1(bytes: &[u8]) -> Result<Vec<u8>, FontError> {
     let flavor = read_u32_be(bytes, 4).ok_or(FontError::InvalidContainer("bad WOFF1 flavor"))?;
     let declared_len =
         read_u32_be(bytes, 8).ok_or(FontError::InvalidContainer("bad WOFF1 length"))? as usize;
-    if declared_len > bytes.len() {
-        return Err(FontError::InvalidContainer("WOFF1 length exceeds buffer"));
+    if declared_len < WOFF1_HEADER_SIZE || declared_len > bytes.len() {
+        return Err(FontError::InvalidContainer("WOFF1 length invalid"));
     }
     let num_tables =
         read_u16_be(bytes, 12).ok_or(FontError::InvalidContainer("bad WOFF1 numTables"))? as usize;
@@ -53,7 +53,7 @@ pub(super) fn unpack_woff1(bytes: &[u8]) -> Result<Vec<u8>, FontError> {
 
     let dir_end = WOFF1_HEADER_SIZE
         .checked_add(num_tables * WOFF1_TABLE_DIR_ENTRY_SIZE)
-        .filter(|&end| end <= bytes.len())
+        .filter(|&end| end <= declared_len)
         .ok_or(FontError::InvalidContainer(
             "WOFF1 table directory truncated",
         ))?;
@@ -76,6 +76,8 @@ pub(super) fn unpack_woff1(bytes: &[u8]) -> Result<Vec<u8>, FontError> {
         let orig_length = read_u32_be(bytes, base + 12)
             .ok_or(FontError::InvalidContainer("WOFF1 origLength truncated"))?
             as usize;
+        let orig_checksum = read_u32_be(bytes, base + 16)
+            .ok_or(FontError::InvalidContainer("WOFF1 origChecksum truncated"))?;
 
         if comp_length > orig_length || offset < dir_end {
             return Err(FontError::InvalidContainer(
@@ -91,7 +93,7 @@ pub(super) fn unpack_woff1(bytes: &[u8]) -> Result<Vec<u8>, FontError> {
 
         let raw_end = offset
             .checked_add(comp_length)
-            .filter(|&end| end <= bytes.len())
+            .filter(|&end| end <= declared_len)
             .ok_or(FontError::InvalidContainer(
                 "WOFF1 table payload out of bounds",
             ))?;
@@ -115,6 +117,14 @@ pub(super) fn unpack_woff1(bytes: &[u8]) -> Result<Vec<u8>, FontError> {
             }
             decoded
         };
+        let mut actual_checksum = sfnt_checksum(&data);
+        if &tag == b"head" && data.len() >= 12 {
+            let adj = u32::from_be_bytes([data[8], data[9], data[10], data[11]]);
+            actual_checksum = actual_checksum.wrapping_sub(adj);
+        }
+        if actual_checksum != orig_checksum {
+            return Err(FontError::InvalidContainer("WOFF1 table checksum mismatch"));
+        }
         tables.push(SfntTable { tag, data });
     }
 

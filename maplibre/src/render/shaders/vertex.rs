@@ -152,7 +152,7 @@ impl SDFShaderFeatureMetadata {
         let halo_b_q4 = (params[2].max(0.0) * 16.0).round().min(255.0) as u32;
         let elev_i20 = (elevation * 16.0).round().clamp(-524_288.0, 524_287.0) as i32;
         let elev_bits = (elev_i20 as u32) & 0x000f_ffff;
-        let start_ticks = (start_time_ms.max(0.0) * 0.25).round().min(524_287.0) as u32;
+        let start_ticks = (start_time_ms.max(0.0) * 0.25).floor().min(524_287.0) as u32;
         Self {
             packed: [
                 elev_bits | (halo_w_q4 << 20) | (((start_ticks >> 16) & 0x7) << 29),
@@ -206,6 +206,16 @@ impl SDFShaderFeatureMetadata {
     pub fn set_target_opacity(&mut self, opacity: f32) {
         let u = (opacity.clamp(0.0, 1.0) * 255.0).round() as u32;
         self.packed[3] = (self.packed[3] & !0xff) | u;
+    }
+
+    /// Settles a finished fade at clock origin (`start = target`, `start_time_ms = 0`) when the
+    /// CPU fade clock rebases back to zero so existing GPU quads do not regress.
+    #[inline]
+    pub fn rebase_settled_fade_to_zero(&mut self) {
+        let target_u8 = self.packed[3] & 0xff;
+        self.packed[3] = (self.packed[3] & !0xff00) | (target_u8 << 8);
+        self.packed[0] &= 0x1fff_ffff;
+        self.packed[2] &= 0x0000_ffff;
     }
 
     /// Whether this vertex carries an along-line glyph pose (`true`) rather than an anchor shift.

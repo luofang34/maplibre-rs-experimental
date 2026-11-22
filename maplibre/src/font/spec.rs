@@ -142,12 +142,23 @@ impl FontStyle {
 }
 
 /// Closed Unicode scalar interval `[start, end]` from a CSS `unicode-range` descriptor.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize)]
 pub struct UnicodeRange {
     /// Inclusive starting codepoint.
     pub start: u32,
     /// Inclusive ending codepoint.
     pub end: u32,
+}
+
+impl Serialize for UnicodeRange {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let formatted = if self.start == self.end {
+            format!("U+{:04X}", self.start)
+        } else {
+            format!("U+{:04X}-{:04X}", self.start, self.end)
+        };
+        serializer.serialize_str(&formatted)
+    }
 }
 
 impl UnicodeRange {
@@ -394,11 +405,19 @@ fn extract_urls_from_str(input: &str) -> Vec<String> {
 fn parse_unicode_ranges_value(value: &serde_json::Value) -> Vec<UnicodeRange> {
     match value {
         serde_json::Value::String(s) => UnicodeRange::parse_list(s),
-        serde_json::Value::Array(items) => items
-            .iter()
-            .filter_map(serde_json::Value::as_str)
-            .flat_map(UnicodeRange::parse_list)
-            .collect(),
+        serde_json::Value::Array(items) => {
+            let mut ranges = Vec::new();
+            for item in items {
+                if let Some(s) = item.as_str() {
+                    ranges.extend(UnicodeRange::parse_list(s));
+                } else if let Ok(range) = serde_json::from_value::<UnicodeRange>(item.clone()) {
+                    if range.start <= range.end && range.end <= 0x10FFFF {
+                        ranges.push(range);
+                    }
+                }
+            }
+            ranges
+        }
         _ => Vec::new(),
     }
 }

@@ -41,19 +41,32 @@ pub struct TileSphericalCap {
 impl TileSphericalCap {
     /// Classifies the radial cap shell `[min_radius, max_radius] * Cap` against the half-space
     /// `plane.truncate().dot(p) + plane.w >= 0.0`.
+    #[cfg(test)]
     pub(crate) fn shell_intersects_plane(
         &self,
         plane: Vector4<f64>,
         min_radius: f64,
         max_radius: f64,
     ) -> Intersection {
+        self.shell_intersects_plane_with_margin(plane, min_radius, max_radius)
+            .0
+    }
+
+    /// Classifies the radial cap shell and returns `(intersection, max_val, min_val)` in
+    /// normalized plane distance units.
+    pub(crate) fn shell_intersects_plane_with_margin(
+        &self,
+        plane: Vector4<f64>,
+        min_radius: f64,
+        max_radius: f64,
+    ) -> (Intersection, f64, f64) {
         let normal = plane.truncate();
         let len = normal.magnitude();
         if len <= f64::EPSILON {
             return if plane.w >= 0.0 {
-                Intersection::Full
+                (Intersection::Full, 0.0, f64::INFINITY)
             } else {
-                Intersection::None
+                (Intersection::None, f64::NEG_INFINITY, 0.0)
             };
         }
         let n = normal / len;
@@ -81,7 +94,7 @@ impl TileSphericalCap {
             min_radius * unit_max
         } + d;
         if max_val < 0.0 {
-            return Intersection::None;
+            return (Intersection::None, max_val, f64::NEG_INFINITY);
         }
         let min_val = if unit_min >= 0.0 {
             min_radius * unit_min
@@ -89,9 +102,9 @@ impl TileSphericalCap {
             max_radius * unit_min
         } + d;
         if min_val >= 0.0 {
-            Intersection::Full
+            (Intersection::Full, max_val, min_val)
         } else {
-            Intersection::Partial
+            (Intersection::Partial, max_val, min_val)
         }
     }
 }

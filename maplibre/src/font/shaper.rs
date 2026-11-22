@@ -240,6 +240,14 @@ where
                     continue;
                 }
                 let char_end = rel_idx + ch.len_utf8();
+                if is_cluster_continuation(ch) {
+                    if let Some((_, _, last_range)) = face_runs.last_mut() {
+                        if last_range.end == rel_idx {
+                            last_range.end = char_end;
+                            continue;
+                        }
+                    }
+                }
                 let (face_id, font) = resolve_face(ch)?;
                 if let Some((last_id, _, last_range)) = face_runs.last_mut() {
                     if *last_id == face_id && last_range.end == rel_idx {
@@ -467,5 +475,8 @@ fn is_cluster_continuation(ch: char) -> bool {
 
 #[cfg(feature = "font-shaping")]
 fn is_bidi_isolate_or_override(ch: char) -> bool {
-    matches!(ch, '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+    matches!(
+        ch,
+        '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+    )
 }

@@ -8,8 +8,8 @@ use thiserror::Error;
 use super::{
     camera::GlobeCameraState,
     covering::{
-        compact_tile_volume, tile_spherical_cap, validate_elevation, CompactTileVolume,
-        GlobeTileBoundsError, TileElevationProvider,
+        compact_tile_volume, validate_elevation, CompactTileVolume, GlobeTileBoundsError,
+        TileElevationProvider,
     },
 };
 #[cfg(test)]
@@ -21,6 +21,14 @@ pub(crate) mod lod;
 
 pub(crate) use frustum::FarPlane;
 use frustum::GlobeFrustum;
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CoveringMargins {
+    pub(crate) min_plane_margin: f64,
+    pub(crate) min_corner_margin: f64,
+    pub(crate) min_focus_margin: f64,
+    pub(crate) max_point_radius: f64,
+}
 
 const ASSUMED_MAX_FEATURE_HEIGHT_METERS: f64 = 500.0;
 const MAX_MERCATOR_HORIZON_DEGREES: f64 = 89.25;
@@ -152,15 +160,35 @@ pub(crate) fn covering_tiles_with_history(
     elevation: &dyn TileElevationProvider,
     history: Option<&crate::projection::lod_history::LodHistory>,
 ) -> Result<Vec<WorldTileCoords>, GlobeCoveringError> {
+    covering_tiles_with_margins(camera, options, (lod, far), elevation, history)
+        .map(|(tiles, _, _)| tiles)
+}
+
+/// Selects the tiles as [`covering_tiles_with_history`] does and also returns the camera's
+/// [`GlobeFrustum`] and strict geometric [`CoveringMargins`] certifying when the tile set
+/// remains unchanged for nearby camera poses.
+pub(crate) fn covering_tiles_with_margins(
+    camera: &GlobeCameraState,
+    options: GlobeCoveringOptions,
+    (lod, far): (lod::LodContext, FarPlane),
+    elevation: &dyn TileElevationProvider,
+    history: Option<&crate::projection::lod_history::LodHistory>,
+) -> Result<(Vec<WorldTileCoords>, GlobeFrustum, CoveringMargins), GlobeCoveringError> {
+    let frustum = GlobeFrustum::from_camera(camera, far);
+    let mut margins = CoveringMargins {
+        min_plane_margin: f64::INFINITY,
+        min_corner_margin: f64::INFINITY,
+        min_focus_margin: f64::INFINITY,
+        max_point_radius: 1.0,
+    };
     if usize::from(u8::from(options.zoom)) >= MAX_ZOOM {
         return Err(GlobeCoveringError::UnsupportedZoom {
             zoom: u8::from(options.zoom),
         });
     }
     if options.max_tiles == 0 {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), frustum, margins));
     }
-    let frustum = GlobeFrustum::from_camera(camera, far);
     let focus_unit = camera.focus_unit_sphere();
     let inspect = |tile: WorldTileCoords, fully_visible| -> Result<_, GlobeCoveringError> {
         let tile = TileCoords::from((tile.x as u32, tile.y as u32, tile.z));
@@ -171,18 +199,33 @@ pub(crate) fn covering_tiles_with_history(
         } else {
             let min_radius = camera.body().unit_radius_at(range.min_meters.min(0.0));
             let max_radius = camera.body().unit_radius_at(range.max_meters.max(0.0));
-            let cap = tile_spherical_cap(tile);
-            let cap_intersection = combine_intersections(
-                frustum.intersects_cap(&cap, min_radius, max_radius),
-                cap.shell_intersects_plane(camera.clipping_plane(), min_radius, max_radius),
+            margins.max_point_radius = margins.max_point_radius.max(max_radius);
+            let cap = super::covering::tile_spherical_cap(tile);
+            let (cap_intersection, cap_margin) = frustum.intersects_cap_with_margin(
+                &cap,
+                camera.clipping_plane(),
+                min_radius,
+                max_radius,
             );
             match cap_intersection {
-                Intersection::None => Intersection::None,
-                Intersection::Full => Intersection::Full,
+                Intersection::None => {
+                    margins.min_plane_margin = margins.min_plane_margin.min(cap_margin);
+                    Intersection::None
+                }
+                Intersection::Full => {
+                    margins.min_plane_margin = margins.min_plane_margin.min(cap_margin);
+                    Intersection::Full
+                }
                 Intersection::Partial => {
+                    margins.min_plane_margin = margins.min_plane_margin.min(cap_margin);
                     let bounds = compact_tile_volume(tile, range, camera.body())
                         .map_err(|source| GlobeCoveringError::TileBounds { source })?;
-                    tile_intersection(&frustum, camera.clipping_plane(), &bounds)
+                    let (vol_intersection, plane_margin, corner_margin, max_pt_r) =
+                        tile_intersection_with_margin(&frustum, camera.clipping_plane(), &bounds);
+                    margins.max_point_radius = margins.max_point_radius.max(max_pt_r);
+                    margins.min_plane_margin = margins.min_plane_margin.min(plane_margin);
+                    margins.min_corner_margin = margins.min_corner_margin.min(corner_margin);
+                    vol_intersection
                 }
             }
         };
@@ -206,7 +249,9 @@ pub(crate) fn covering_tiles_with_history(
         inspect,
     )?;
     sort_by_focus(&mut visible, focus_unit);
-    Ok(add_padding(visible, options.padding, options.max_tiles))
+    margins.min_focus_margin = focus_order_margin(&visible, focus_unit);
+    let tiles = add_padding(visible, options.padding, options.max_tiles);
+    Ok((tiles, frustum, margins))
 }
 
 /// Returns the conservative elevation used to retain features near the frustum horizon.
@@ -220,39 +265,64 @@ pub fn elevation_for_tile_culling(camera: &GlobeCameraState, center_elevation: f
     center_elevation + proximity * ASSUMED_MAX_FEATURE_HEIGHT_METERS
 }
 
-fn tile_intersection(
+fn tile_intersection_with_margin(
     frustum: &GlobeFrustum,
     clipping_plane: Vector4<f64>,
     bounds: &CompactTileVolume,
-) -> Intersection {
+) -> (Intersection, f64, f64, f64) {
     let points = bounds.points_slice();
-    let result = frustum.intersects_volume(points, &bounds.planes);
-    if result == Intersection::None {
-        return result;
+    let max_pt_r = points
+        .iter()
+        .map(|point| point.magnitude())
+        .fold(0.0_f64, f64::max);
+    let (frustum_res, frustum_margin, corner_margin) =
+        frustum.intersects_volume_with_margin(points, &bounds.planes);
+    if frustum_res == Intersection::None {
+        return (Intersection::None, frustum_margin, corner_margin, max_pt_r);
     }
-    combine_intersections(
-        result,
-        classify_points(points, |point| clipping_plane.dot(point.extend(1.0))),
-    )
-}
-
-pub(crate) fn classify_points<T>(points: &[T], distance: impl Fn(&T) -> f64) -> Intersection {
-    let inside = points.iter().filter(|point| distance(point) >= 0.0).count();
-    if inside == 0 {
-        Intersection::None
-    } else if inside == points.len() {
-        Intersection::Full
+    let (clip_min, clip_max) = frustum::plane_extrema(points, clipping_plane);
+    if clip_max < 0.0 {
+        return (Intersection::None, -clip_max, f64::INFINITY, max_pt_r);
+    }
+    if clip_min >= 0.0 && frustum_res == Intersection::Full {
+        return (
+            Intersection::Full,
+            frustum_margin.min(clip_min),
+            f64::INFINITY,
+            max_pt_r,
+        );
+    }
+    let plane_margin = if clip_min >= 0.0 {
+        frustum_margin.min(clip_max)
     } else {
-        Intersection::Partial
-    }
+        frustum_margin.min(clip_max.min(-clip_min))
+    };
+    (Intersection::Partial, plane_margin, corner_margin, max_pt_r)
 }
 
-fn combine_intersections(left: Intersection, right: Intersection) -> Intersection {
-    match (left, right) {
-        (Intersection::None, _) | (_, Intersection::None) => Intersection::None,
-        (Intersection::Full, Intersection::Full) => Intersection::Full,
-        _ => Intersection::Partial,
+fn focus_order_margin(visible: &[WorldTileCoords], focus_unit: Vector3<f64>) -> f64 {
+    let mut min_margin = f64::INFINITY;
+    for pair in visible.windows(2) {
+        let Some((c0, _)) = pair[0].wrapped() else {
+            continue;
+        };
+        let Some((c1, _)) = pair[1].wrapped() else {
+            continue;
+        };
+        let t0 = TileCoords::from((c0.x as u32, c0.y as u32, c0.z));
+        let t1 = TileCoords::from((c1.x as u32, c1.y as u32, c1.z));
+        let cap0 = super::covering::tile_spherical_cap(t0);
+        let cap1 = super::covering::tile_spherical_cap(t1);
+        let gap = cap0.center.dot(focus_unit) - cap1.center.dot(focus_unit);
+        if gap <= 0.0 {
+            return 0.0;
+        }
+        let diff = (cap0.center - cap1.center).magnitude();
+        if diff > 1e-12 {
+            min_margin = min_margin.min(gap / diff);
+        }
     }
+    min_margin
 }
 
 pub(crate) fn sort_by_focus(tiles: &mut [WorldTileCoords], focus_unit: Vector3<f64>) {

@@ -50,8 +50,10 @@ pub struct LightSpecification {
     /// Spherical position as radius, azimuth, and polar angle.
     pub position: StyleProperty<[f64; 3]>,
     /// Colour of the light; extruded polygons are lit with it, white by default.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<StyleProperty<csscolorparser::Color>>,
     /// Strength of the light in 0..=1; 0.5 by default.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub intensity: Option<StyleProperty<f32>>,
 }
 

@@ -162,7 +162,14 @@ pub(crate) fn rasterize_glyph_from_ref(
         pen.finish_open_subpath();
     }
 
-    if pen.commands.is_empty() || pen.max_x <= pen.min_x || pen.max_y <= pen.min_y {
+    if pen.commands.is_empty()
+        || !pen.min_x.is_finite()
+        || !pen.min_y.is_finite()
+        || !pen.max_x.is_finite()
+        || !pen.max_y.is_finite()
+        || pen.max_x <= pen.min_x
+        || pen.max_y <= pen.min_y
+    {
         return Some(RasterizedGlyph {
             width: 0,
             height: 0,
@@ -173,12 +180,25 @@ pub(crate) fn rasterize_glyph_from_ref(
         });
     }
 
-    let min_x = pen.min_x.floor() as i32;
-    let min_y = pen.min_y.floor() as i32;
-    let max_x = pen.max_x.ceil() as i32;
-    let max_y = pen.max_y.ceil() as i32;
-    let raw_w = (max_x - min_x).clamp(0, MAX_GLYPH_DIM);
-    let raw_h = (max_y - min_y).clamp(0, MAX_GLYPH_DIM);
+    const MAX_OUTLINE_COORD: f32 = 4096.0;
+    let min_x = pen
+        .min_x
+        .clamp(-MAX_OUTLINE_COORD, MAX_OUTLINE_COORD)
+        .floor() as i32;
+    let min_y = pen
+        .min_y
+        .clamp(-MAX_OUTLINE_COORD, MAX_OUTLINE_COORD)
+        .floor() as i32;
+    let max_x = pen
+        .max_x
+        .clamp(-MAX_OUTLINE_COORD, MAX_OUTLINE_COORD)
+        .ceil() as i32;
+    let max_y = pen
+        .max_y
+        .clamp(-MAX_OUTLINE_COORD, MAX_OUTLINE_COORD)
+        .ceil() as i32;
+    let raw_w = max_x.saturating_sub(min_x).clamp(0, MAX_GLYPH_DIM);
+    let raw_h = max_y.saturating_sub(min_y).clamp(0, MAX_GLYPH_DIM);
     if raw_w == 0 || raw_h == 0 {
         return Some(RasterizedGlyph {
             width: 0,
@@ -225,7 +245,7 @@ pub(crate) fn rasterize_glyph_from_ref(
         width,
         height,
         left: min_x,
-        top: PBF_BASELINE_TOP - min_y,
+        top: PBF_BASELINE_TOP.saturating_sub(min_y),
         advance,
         bitmap,
     })

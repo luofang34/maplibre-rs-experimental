@@ -61,7 +61,7 @@ fn create_test_map(width: u32, height: u32, style_json: &str) -> *mut MaplibreMa
 
 #[test]
 fn header_declares_every_exported_symbol() {
-    assert_eq!(retain_c_abi_symbols(), 25);
+    assert_eq!(retain_c_abi_symbols(), 27);
 
     let version = unsafe { CStr::from_ptr(maplibre_version()) }.to_string_lossy();
     assert!(!version.is_empty());
@@ -90,6 +90,8 @@ fn header_declares_every_exported_symbol() {
         "maplibre_map_set_feature_state_json",
         "maplibre_map_remove_feature_state",
         "maplibre_map_add_image_rgba8",
+        "maplibre_map_register_custom_layer",
+        "maplibre_map_remove_custom_layer",
         "maplibre_map_needs_redraw",
         "maplibre_map_render_rgba8",
         "maplibre_map_query_rendered_features_json",

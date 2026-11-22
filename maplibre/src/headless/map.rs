@@ -304,6 +304,11 @@ impl HeadlessMap {
             .unwrap_or_default()
     }
 
+    /// Configures symbol collision cadence and fade duration for subsequent frames.
+    pub fn set_placement_config(&mut self, config: crate::sdf::PlacementConfig) {
+        self.map_context.set_placement_config(config);
+    }
+
     /// Whether terrain tiles hang skirts below their edges, as GL JS `terrainSkirtLength`.
     pub fn set_terrain_skirts(&mut self, skirts: crate::terrain::TerrainSkirts) {
         self.map_context.world.resources.insert(skirts);

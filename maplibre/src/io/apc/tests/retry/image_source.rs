@@ -42,7 +42,7 @@ fn tile_pixels(test: &Fixture) -> Option<image::RgbaImage> {
         .iter()
         .find_map(|layer| match layer {
             RasterLayerData::Available(data) => Some(data.image.clone()),
-            RasterLayerData::Missing(_) => None,
+            RasterLayerData::Missing(_) | RasterLayerData::Empty(_) => None,
         })
 }
 

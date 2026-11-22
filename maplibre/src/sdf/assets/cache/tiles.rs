@@ -190,6 +190,9 @@ impl AssetCache {
         let retain_tiles = !is_mock && self.0.budget_bytes > super::DEFAULT_BUDGET_BYTES;
         if !retain_tiles {
             let data = fetch_tile_raw(client, coords, source).await?;
+            if data.is_empty() {
+                return Ok((Arc::new(RgbaImage::new(0, 0)), SharedTileSlot::default()));
+            }
             let slot = acquire_decode_slot(claim).await;
             #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
             let _heavy = crate::vector::request_system::acquire_heavy_tile_slot().await;
@@ -203,6 +206,9 @@ impl AssetCache {
                 let data = fetch_tile_raw(client, coords, source)
                     .await
                     .map_err(CachedTileFailure::into_asset_failure)?;
+                if data.is_empty() {
+                    return Ok((RgbaImage::new(0, 0), 0));
+                }
                 let rgba = decode_rgba(data)
                     .await
                     .map_err(CachedTileFailure::into_asset_failure)?;

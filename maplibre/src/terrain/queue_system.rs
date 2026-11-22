@@ -137,6 +137,21 @@ pub fn queue_system(
             ));
     }
     let Some(dem) = dem_source(style) else {
+        if let Some(terrain) = world.resources.get_mut::<Eventually<TerrainResources>>() {
+            if matches!(terrain, Initialized(_)) {
+                *terrain = Eventually::Uninitialized;
+            }
+        }
+        if let Some(dem_pool) = world.resources.get_mut::<super::gpu_dem_pool::GpuDemPool>() {
+            dem_pool.retain_sources(|id| {
+                id.name().is_some_and(|name| {
+                    matches!(
+                        style.sources.get(name),
+                        Some(crate::style::source::Source::RasterDem(_))
+                    )
+                })
+            });
+        }
         let was_active = world
             .resources
             .get::<TerrainFrame>()

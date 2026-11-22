@@ -105,13 +105,8 @@ pub(super) fn block<'a>(
         return Some(shaped_block);
     }
     let text = paint.label_among(&symbol.properties, zoom, Some(&atlas.icons))?;
-    let chars: Vec<char> = text.chars().collect();
-    let styles = char_styles(paint, symbol, zoom, atlas, chars.len())?;
-    let (mut chars, mut styles): (Vec<char>, Vec<_>) = chars
-        .into_iter()
-        .zip(styles)
-        .filter(|(c, _)| !bidirectional::is_bidi_control(*c))
-        .unzip();
+    let mut chars: Vec<char> = text.chars().collect();
+    let mut styles = char_styles(paint, symbol, zoom, atlas, chars.len())?;
     let spacing = paint.number("text-letter-spacing", &symbol.properties, zoom, 0.0) * 24.0;
     let max_width = paint.number("text-max-width", &symbol.properties, zoom, 10.0) * 24.0;
     // Text along a line runs the whole line: it is never wrapped.
@@ -121,11 +116,16 @@ pub(super) fn block<'a>(
         bidirectional::split_paragraphs(
             &chars,
             wrap(&chars, max_width, &|index| {
-                styles[index].advance(chars[index]) + spacing
+                if bidirectional::is_bidi_control(chars[index]) {
+                    0.0
+                } else {
+                    styles[index].advance(chars[index]) + spacing
+                }
             }),
         )
     };
     let line_height = paint.number("text-line-height", &symbol.properties, zoom, 1.2) * 24.0;
+    let lines = bidirectional::reorder_and_strip_controls(&mut chars, &mut styles, lines);
     let vertical = !super::is_line_placed(paint)
         && symbol
             .vertical
@@ -141,7 +141,6 @@ pub(super) fn block<'a>(
             }
         })
         .fold(0.0, f32::max);
-    bidirectional::reorder_lines(&mut chars, &mut styles, &lines);
     let (line_scales, line_extras, line_contents) = line_sizes(&styles, &lines, vertical);
     let anchors = variable_anchors(paint);
     let anchor = anchors.first().cloned().unwrap_or_else(|| {

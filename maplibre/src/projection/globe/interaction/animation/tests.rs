@@ -60,3 +60,29 @@ fn flight_exports_globe_distance_and_exact_final_state() {
     assert_close(end.center.longitude, target.center.longitude);
     assert_close(end.zoom, target.zoom);
 }
+
+#[test]
+fn ease_and_flight_interpolate_latitude_linearly_without_angular_wrapping() {
+    let ease = GlobeEase::new(
+        LatLon::new(-80.0, 0.0),
+        2.0,
+        LatLon::new(80.0, 0.0),
+        Some(2.0),
+    );
+    let mid = ease.sample(0.5);
+    assert!(mid.center.latitude.is_finite());
+    assert_close(mid.center.latitude, 0.0);
+    assert_close(ease.sample(1.0).center.latitude, 80.0);
+
+    let fly = GlobeFly::new(
+        512.0,
+        LatLon::new(-80.0, 175.0),
+        2.0,
+        LatLon::new(80.0, -175.0),
+        Some(2.0),
+        0.0,
+    );
+    let end = fly.sample(1.0, 0.5, 0.75);
+    assert_close(end.center.latitude, 80.0);
+    assert_close(end.center.longitude, -175.0);
+}

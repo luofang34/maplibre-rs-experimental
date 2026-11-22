@@ -31,3 +31,23 @@ fn reversed_z_keeps_x_y_and_w() {
     assert_eq!(flipped.w, point.w);
     assert_eq!(flipped.z, 1.0 - point.z);
 }
+
+#[test]
+fn camera_clamp_position_respects_antimeridian_crossing_mercator_bounds() {
+    use cgmath::Point2;
+
+    use super::Camera;
+    use crate::{coords::TILE_SIZE, render::view_state::LatLonBounds};
+    let bounds = LatLonBounds::new(170.0, -20.0, -170.0, 20.0);
+    let mut cam = Camera::new((0.0, 0.0), cgmath::Deg(0.0), cgmath::Deg(0.0));
+    cam.set_world_size(TILE_SIZE);
+    cam.set_mercator_bounds(Some(bounds.to_mercator_range()));
+
+    let inside_mx = (-175.0_f64 + 180.0) / 360.0;
+    cam.move_to(Point2::new(inside_mx * TILE_SIZE, 0.5 * TILE_SIZE));
+    assert!((cam.position().x / TILE_SIZE - (1.0 + inside_mx)).abs() < 1e-6);
+
+    let out_east_mx = (-100.0_f64 + 180.0) / 360.0;
+    cam.move_to(Point2::new(out_east_mx * TILE_SIZE, 0.5 * TILE_SIZE));
+    assert!((cam.position().x / TILE_SIZE - (1.0 + 10.0 / 360.0)).abs() < 1e-6);
+}

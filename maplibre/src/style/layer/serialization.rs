@@ -9,7 +9,7 @@ use crate::util::json::extract::{
 };
 
 /// JSON properties grouped by their paint or layout scope.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LayerProperties {
     /// Paint entries, including their values.
     pub paint: Map<String, Value>,

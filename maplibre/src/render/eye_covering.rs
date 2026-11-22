@@ -4,6 +4,8 @@
 //! that selection with its own projection, so a tile cannot change level or content between
 //! the left and right images.
 
+use std::sync::Arc;
+
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
@@ -67,12 +69,14 @@ pub(crate) struct MultiViewExtractCovering {
     pub(crate) skipped_wanted_dem: FxHashSet<WorldTileCoords>,
 }
 
+pub(crate) type CachedViewTiles = (Option<Arc<[WorldTileCoords]>>, ViewStatePadding, ZoomLevel);
+
 /// Per-frame request coverings recorded during single-view `Request` systems so
 /// `retention_system` and `drawn_covering` reuse them without re-walking the globe quadtree.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct FrameLooseCovering {
     pub(crate) host_frame: u64,
-    pub(crate) view_tiles: Option<(Option<Vec<WorldTileCoords>>, ViewStatePadding, ZoomLevel)>,
+    pub(crate) view_tiles: Option<CachedViewTiles>,
     pub(crate) raster_regions: Option<(RasterCoverings, ViewStatePadding, (u64, u64, usize))>,
 }
 
@@ -184,6 +188,16 @@ pub(crate) fn drawn_tiles(world: &World) -> Option<&[WorldTileCoords]> {
     world.resources.get::<SharedCovering>()?.tiles()
 }
 
+fn frame_view_proj_bits(world: &World, style: &Style, view_state: &ViewState) -> [[u64; 4]; 4] {
+    let view_proj = world
+        .resources
+        .get::<crate::render::resolved_view::ResolvedFrameView>()
+        .filter(|resolved| resolved.matches(style, view_state))
+        .map(|resolved| resolved.view_projection)
+        .unwrap_or_else(|| view_state.view_projection());
+    (*AsRef::<[[f64; 4]; 4]>::as_ref(&view_proj.0)).map(|col| col.map(f64::to_bits))
+}
+
 /// Returns already-selected tight-padding tiles for this host frame when view projection and
 /// terrain state match [`SharedCovering`], avoiding duplicate quadtree walks in Cleanup.
 pub(crate) fn matching_tight_tiles<'a>(
@@ -206,9 +220,7 @@ pub(crate) fn matching_tight_tiles<'a>(
             });
     }
     let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
-    let view_proj_bits: [[u64; 4]; 4] =
-        (*AsRef::<[[f64; 4]; 4]>::as_ref(&view_state.view_projection().0))
-            .map(|col| col.map(f64::to_bits));
+    let view_proj_bits = frame_view_proj_bits(world, style, view_state);
     let style_rev = style.revision();
     let terrain_key = terrain_index_key(world);
     world
@@ -267,9 +279,7 @@ pub(crate) fn drawn_covering(
         .resources
         .get::<MultiViewExtractCovering>()
         .is_some_and(|m| m.active);
-    let view_proj_bits: [[u64; 4]; 4] =
-        (*AsRef::<[[f64; 4]; 4]>::as_ref(&view_state.view_projection().0))
-            .map(|col| col.map(f64::to_bits));
+    let view_proj_bits = frame_view_proj_bits(world, style, view_state);
     let style_rev = style.revision();
     let terrain_key = terrain_index_key(world);
     if !multi_active && eye.is_none_or(|e| e.index == 0) {
@@ -296,7 +306,7 @@ pub(crate) fn drawn_covering(
             .map(|(tiles, _, _)| {
                 tiles
                     .as_ref()
-                    .map(|tiles| ViewRegion::from_tiles(tiles.clone(), level, tiles.len().max(1)))
+                    .map(|tiles| ViewRegion::from_tiles(tiles.to_vec(), level, tiles.len().max(1)))
             })
     } else {
         None

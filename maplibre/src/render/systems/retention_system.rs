@@ -284,7 +284,7 @@ fn tiles_in_use_inner(
         .and_then(|c| c.view_tiles.as_ref())
         .filter(|(_, padding, _)| *padding == request_padding)
     {
-        for &coords in cached_view.iter().flatten() {
+        for &coords in cached_view.as_deref().into_iter().flatten() {
             retain_loose_vector_tile(&mut in_use, coords, max_zoom);
         }
     } else if let Some(shared_tiles) = (request_padding == ViewStatePadding::Tight)

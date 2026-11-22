@@ -99,11 +99,29 @@ pub trait CustomStyleLayer: Send + Sync + 'static {
 
     /// Records draw commands into `pass` at the exact painter z-order of this layer in `style.layers`.
     fn render<'pass>(&'pass self, pass: &mut wgpu::RenderPass<'pass>, ctx: &CustomLayerContext<'_>);
+
+    /// Releases GPU/host resources owned by this layer when it is removed, replaced, torn down
+    /// by a style change, reset onto a different render target, or when the map is destroyed.
+    fn deinitialize(&mut self) {}
 }
 
 struct RegisteredCustomLayer {
     layer: Box<dyn CustomStyleLayer>,
     initialized_target: Option<(wgpu::TextureFormat, u32)>,
+}
+
+impl RegisteredCustomLayer {
+    fn deinitialize_if_initialized(&mut self) {
+        if self.initialized_target.take().is_some() {
+            self.layer.deinitialize();
+        }
+    }
+}
+
+impl Drop for RegisteredCustomLayer {
+    fn drop(&mut self) {
+        self.deinitialize_if_initialized();
+    }
 }
 
 /// Registry of host [`CustomStyleLayer`] implementations stored in `World::resources`.
@@ -155,7 +173,15 @@ impl CustomLayerRegistry {
 
     pub(crate) fn mark_all_uninitialized(&mut self) {
         for entry in self.layers.values_mut() {
-            entry.initialized_target = None;
+            entry.deinitialize_if_initialized();
+        }
+    }
+
+    pub(crate) fn deinitialize_layers(&mut self, ids: &[String]) {
+        for id in ids {
+            if let Some(entry) = self.layers.get_mut(id) {
+                entry.deinitialize_if_initialized();
+            }
         }
     }
 }
@@ -279,6 +305,7 @@ pub fn queue_custom_layers_system(
         for (index, id) in &visible_custom {
             if let Some(entry) = registry.layers.get_mut(id) {
                 if entry.initialized_target != Some((color_format, sample_count)) {
+                    entry.deinitialize_if_initialized();
                     entry.layer.initialize(
                         &renderer.device,
                         &renderer.queue,

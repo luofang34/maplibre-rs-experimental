@@ -127,7 +127,7 @@ mod processing;
 mod shared_geometry;
 pub(crate) use decode::*;
 pub(crate) use mvt_slice::fill_feature_properties;
-#[cfg(test)]
+#[cfg(all(test, feature = "mlt"))]
 pub(crate) use mvt_slice::index_mvt_bytes;
 #[cfg(feature = "mlt")]
 pub(crate) use mvt_slice::looks_like_mvt;

@@ -66,6 +66,57 @@ fn custom_layer_registry_insert_and_remove() {
     assert!(!registry.remove("weather"));
 }
 
+#[test]
+fn uninitialized_layer_does_not_deinitialize_on_remove_replace_or_drop() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    struct CountingDummy {
+        id: &'static str,
+        deinit_count: Arc<AtomicUsize>,
+    }
+
+    impl CustomStyleLayer for CountingDummy {
+        fn id(&self) -> &str {
+            self.id
+        }
+
+        fn render<'pass>(
+            &'pass self,
+            _pass: &mut wgpu::RenderPass<'pass>,
+            _ctx: &CustomLayerContext<'_>,
+        ) {
+        }
+
+        fn deinitialize(&mut self) {
+            self.deinit_count.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    let deinit = Arc::new(AtomicUsize::new(0));
+    {
+        let mut registry = CustomLayerRegistry::new();
+        registry.register(CountingDummy {
+            id: "a",
+            deinit_count: Arc::clone(&deinit),
+        });
+        registry.register(CountingDummy {
+            id: "a",
+            deinit_count: Arc::clone(&deinit),
+        });
+        assert!(registry.remove("a"));
+        registry.register(CountingDummy {
+            id: "b",
+            deinit_count: Arc::clone(&deinit),
+        });
+        registry.mark_all_uninitialized();
+        registry.deinitialize_layers(&["b".to_owned()]);
+    }
+    assert_eq!(deinit.load(Ordering::SeqCst), 0);
+}
+
 #[cfg(all(
     feature = "headless",
     feature = "geojson",
@@ -197,6 +248,12 @@ mod gpu_tests {
                 pass.draw(0..3, 0..1);
             }
         }
+
+        fn deinitialize(&mut self) {
+            self.calls.lock().expect("lock").push("deinitialize");
+            self.pipeline = None;
+            self.pending_format = None;
+        }
     }
 
     #[tokio::test]
@@ -322,5 +379,113 @@ mod gpu_tests {
             right_px[0] < 20 && right_px[1] < 20 && right_px[2] > 235,
             "expected right half to show top-east blue (#0000ff) over custom green, got {right_px:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn custom_layer_deinitializes_on_style_removal_reinit_replacement_remove_and_drop() {
+        let with_custom: Style = serde_json::from_value(serde_json::json!({
+            "version": 8,
+            "center": [0.0, 0.0],
+            "zoom": 1.0,
+            "sources": {},
+            "layers": [
+                { "id": "bg", "type": "background", "paint": { "background-color": "#000000" } },
+                { "id": "mid-custom", "type": "custom" }
+            ]
+        }))
+        .expect("style with custom");
+        let without_custom: Style = serde_json::from_value(serde_json::json!({
+            "version": 8,
+            "center": [0.0, 0.0],
+            "zoom": 1.0,
+            "sources": {},
+            "layers": [
+                { "id": "bg", "type": "background", "paint": { "background-color": "#000000" } }
+            ]
+        }))
+        .expect("style without custom");
+
+        let (kernel, renderer) = create_headless_renderer(64, 64, None)
+            .await
+            .expect("headless renderer");
+        let mut map = HeadlessMap::new(
+            with_custom.clone(),
+            renderer,
+            kernel,
+            vec![Box::new(RenderPlugin), Box::new(BackgroundPlugin)],
+        )
+        .expect("headless map");
+
+        let make_layer = || {
+            let calls: Arc<Mutex<Vec<&'static str>>> = Arc::default();
+            let layer = FullscreenGreenLayer {
+                calls: Arc::clone(&calls),
+                observed_zoom: Arc::default(),
+                pipeline: None,
+                pending_format: None,
+            };
+            (layer, calls)
+        };
+        let take_calls = |calls: &Arc<Mutex<Vec<&'static str>>>| -> Vec<&'static str> {
+            std::mem::take(&mut *calls.lock().expect("lock"))
+        };
+
+        let (layer1, calls1) = make_layer();
+        map.register_custom_layer(layer1);
+        map.run_frame().expect("first frame");
+        assert_eq!(take_calls(&calls1), vec!["initialize", "prepare", "render"]);
+
+        // 1. Removing layer via set_style deinitializes without dropping registration.
+        let _ = map.set_style(without_custom);
+        assert_eq!(take_calls(&calls1), vec!["deinitialize"]);
+        map.run_frame().expect("frame without custom layer");
+        assert!(take_calls(&calls1).is_empty());
+
+        // 2. Re-adding the layer in style re-initializes it cleanly.
+        let _ = map.set_style(with_custom.clone());
+        map.run_frame().expect("frame after re-adding style layer");
+        assert_eq!(take_calls(&calls1), vec!["initialize", "prepare", "render"]);
+
+        // 3. mark_all_uninitialized triggers deinitialize and subsequent frame re-initializes.
+        map.world_mut()
+            .resources
+            .get_mut::<CustomLayerRegistry>()
+            .expect("registry")
+            .mark_all_uninitialized();
+        assert_eq!(take_calls(&calls1), vec!["deinitialize"]);
+        map.run_frame().expect("frame after mark_all_uninitialized");
+        assert_eq!(take_calls(&calls1), vec!["initialize", "prepare", "render"]);
+
+        // 4. Removing via mutate_style deinitializes; replacing does not double-deinitialize.
+        map.mutate_style(|s| s.remove_layer("mid-custom"))
+            .expect("remove layer via mutate_style");
+        assert_eq!(take_calls(&calls1), vec!["deinitialize"]);
+
+        let (layer2, calls2) = make_layer();
+        map.register_custom_layer(layer2);
+        assert!(take_calls(&calls1).is_empty());
+
+        let _ = map.set_style(with_custom);
+        map.run_frame().expect("layer 2 renders");
+        assert_eq!(take_calls(&calls2), vec!["initialize", "prepare", "render"]);
+
+        // 5. Replacing an initialized layer deinitializes old instance immediately.
+        let (layer3, calls3) = make_layer();
+        map.register_custom_layer(layer3);
+        assert_eq!(take_calls(&calls2), vec!["deinitialize"]);
+        map.run_frame().expect("layer 3 renders");
+        assert_eq!(take_calls(&calls3), vec!["initialize", "prepare", "render"]);
+
+        // 6. Explicit remove_custom_layer deinitializes immediately.
+        assert!(map.remove_custom_layer("mid-custom"));
+        assert_eq!(take_calls(&calls3), vec!["deinitialize"]);
+
+        // 7. Re-registering and dropping HeadlessMap deinitializes on map teardown.
+        let (layer4, calls4) = make_layer();
+        map.register_custom_layer(layer4);
+        map.run_frame().expect("layer 4 renders");
+        assert_eq!(take_calls(&calls4), vec!["initialize", "prepare", "render"]);
+        drop(map);
+        assert_eq!(take_calls(&calls4), vec!["deinitialize"]);
     }
 }

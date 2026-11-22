@@ -332,3 +332,132 @@ fn pitched_camera_loose_covering_prefetches_nadir_apron_below_bottom_edge() {
         );
     }
 }
+
+#[test]
+fn globe_covering_anchor_matches_fresh_covering_and_invalidates_on_key_changes() {
+    use cgmath::Deg;
+
+    use crate::{
+        coords::{LatLon, WorldCoords, Zoom},
+        projection::{ProjectionSpecification, ProjectionType},
+        render::tile_view_pattern::DEFAULT_TILE_SIZE,
+        window::PhysicalSize,
+    };
+
+    let mut style = Style {
+        projection: Some(ProjectionSpecification {
+            projection_type: ProjectionType::Globe,
+        }),
+        ..Style::default()
+    };
+    let world = World::default();
+    let size = PhysicalSize::new(512, 512).expect("valid size");
+
+    // Sweep smoothly across pan, zoom, and pitch at globe zooms <= 4.
+    let fov = Deg(36.87);
+    let zoom = Zoom::new(2.1);
+    let initial_view = ViewState::new(
+        size,
+        WorldCoords::from_lat_lon(LatLon::new(15.0, 10.0), zoom),
+        zoom,
+        Deg(0.0),
+        fov,
+    );
+    let level = initial_view.zoom().zoom_level(DEFAULT_TILE_SIZE);
+    let (key0, req0, cam0) = eligible_globe_anchor_key(
+        &style,
+        &initial_view,
+        &world,
+        level,
+        ViewStatePadding::Tight,
+    )
+    .expect("z2 globe tight covering is anchor-eligible");
+    let anchor = compute_globe_anchor(
+        key0,
+        req0,
+        ViewStatePadding::Tight,
+        &cam0,
+        initial_view.center_elevation(),
+    )
+    .expect("anchor builds");
+
+    let mut hits = 0usize;
+    for step in 0..24 {
+        let z = Zoom::new(2.1 + f64::from(step) * 0.005);
+        let lat = 15.0 + f64::from(step) * 0.08;
+        let lon = 10.0 + f64::from(step) * 0.08;
+        let mut view = ViewState::new(
+            size,
+            WorldCoords::from_lat_lon(LatLon::new(lat, lon), z),
+            z,
+            Deg(0.0),
+            fov,
+        );
+        view.camera_mut().set_pitch(Deg(f64::from(step) * 0.4));
+        let cur_level = view.zoom().zoom_level(DEFAULT_TILE_SIZE);
+        let (cur_key, _, cur_cam) =
+            eligible_globe_anchor_key(&style, &view, &world, cur_level, ViewStatePadding::Tight)
+                .expect("step eligible");
+        if let Some((cached, exact_order)) = anchor.try_reuse(&cur_key, &cur_cam) {
+            hits += 1;
+            let expected = view_region_for_projection(
+                &style,
+                &view,
+                &world,
+                cur_level,
+                ViewStatePadding::Tight,
+            )
+            .expect("fresh covering")
+            .expect("non-empty region")
+            .iter()
+            .collect::<Vec<_>>();
+            if exact_order {
+                assert_eq!(cached.as_ref(), expected.as_slice());
+            } else {
+                let resorted = anchor.sorted_for_camera(&cur_cam);
+                assert_eq!(resorted.as_ref(), expected.as_slice());
+            }
+        }
+    }
+    assert!(
+        hits > 0,
+        "expected margin-certified anchor hits on smooth sweep"
+    );
+
+    // Viewport resize and teleport both invalidate immediately.
+    let resized = ViewState::new(
+        PhysicalSize::new(640, 512).expect("valid resize"),
+        WorldCoords::from_lat_lon(LatLon::new(15.0, 10.0), zoom),
+        zoom,
+        Deg(0.0),
+        fov,
+    );
+    let (resized_key, _, resized_cam) =
+        eligible_globe_anchor_key(&style, &resized, &world, level, ViewStatePadding::Tight)
+            .expect("resized eligible");
+    assert!(anchor.try_reuse(&resized_key, &resized_cam).is_none());
+
+    let teleport = ViewState::new(
+        size,
+        WorldCoords::from_lat_lon(LatLon::new(-40.0, -140.0), zoom),
+        zoom,
+        Deg(0.0),
+        fov,
+    );
+    let (tele_key, _, tele_cam) =
+        eligible_globe_anchor_key(&style, &teleport, &world, level, ViewStatePadding::Tight)
+            .expect("teleport eligible");
+    assert!(anchor.try_reuse(&tele_key, &tele_cam).is_none());
+
+    // Style revision change invalidates immediately.
+    style.bump_revision();
+    let (style_key, _, style_cam) = eligible_globe_anchor_key(
+        &style,
+        &initial_view,
+        &world,
+        level,
+        ViewStatePadding::Tight,
+    )
+    .expect("style bump eligible");
+    assert!(anchor.try_reuse(&style_key, &style_cam).is_none());
+}

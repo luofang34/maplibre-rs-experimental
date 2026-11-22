@@ -2,10 +2,8 @@
 
 use cgmath::{Point2, Vector2};
 
-use super::extrusion::ScreenQuery;
 use crate::{
     coords::{LatLon, TILE_SIZE},
-    io::geometry_index::{ExactGeometry, IndexedGeometry},
     projection::globe::camera::GlobeCameraState,
     render::{
         resolved_view::{ProjectionMode, ResolvedFrameView},
@@ -90,7 +88,7 @@ pub(super) fn sample_ground_elevation(
     }
 }
 
-fn lat_lon_to_world(loc: LatLon, world_size: f64) -> [f64; 2] {
+pub(super) fn lat_lon_to_world(loc: LatLon, world_size: f64) -> [f64; 2] {
     let mx = (loc.longitude + 180.0) / 360.0;
     let lat_rad = loc
         .latitude
@@ -100,7 +98,7 @@ fn lat_lon_to_world(loc: LatLon, world_size: f64) -> [f64; 2] {
     [mx * world_size, my * world_size]
 }
 
-fn unwrap_world_x(x: f64, reference_x: f64, world_size: f64) -> f64 {
+pub(super) fn unwrap_world_x(x: f64, reference_x: f64, world_size: f64) -> f64 {
     reference_x + (x - reference_x + world_size * 0.5).rem_euclid(world_size) - world_size * 0.5
 }
 
@@ -252,8 +250,7 @@ pub(super) fn camera_query_bounds(
 ) -> [f64; 4] {
     let (width, height) = resolved.viewport_size;
     let camera = if let Some(globe) = resolved.globe_camera() {
-        let sub_eye = globe.location_to_screen(globe.center(), 0.0);
-        [sub_eye.x.clamp(0.0, width), sub_eye.y.clamp(0.0, height)]
+        super::globe::sub_eye_screen_point(globe, width, height)
     } else {
         let offset = view_state.camera().get_pitch().0.tan() * resolved.camera_to_center_distance;
         [width / 2.0, height / 2.0 + offset]
@@ -368,13 +365,8 @@ pub(super) fn surface_footprint(
         }
         let mut region = region_of(&corners)?;
         // When a globe box straddles a pole or spans more than half the planet's longitudes,
-        // expand the x search span across the full Mercator width and verify hits in screen space.
-        let polar_span = resolved.globe_transition() > 0.0
-            && (region[2] - region[0]) > resolved.world_size * 0.5;
-        if polar_span {
-            region[0] = 0.0;
-            region[2] = resolved.world_size;
-        }
+        // expand the x (and polar y) search span and verify hits in screen space.
+        let polar_span = super::globe::expand_polar_region(resolved, bounds, &mut region);
         return Some(SurfaceFootprint {
             region,
             corners: if polar_span { Vec::new() } else { corners },
@@ -404,97 +396,4 @@ pub(super) fn surface_footprint(
     }
 
     None
-}
-
-/// Checks whether a geometry projects onto `screen` on the visible front hemisphere when a query
-/// box surrounds the entire globe disc or encloses a pole.
-pub(super) fn visible_in_screen_box(
-    geometry: &IndexedGeometry<f64>,
-    origin: [f64; 2],
-    world_per_unit: f64,
-    translate: [f64; 2],
-    (world, resolved, terrain_index, screen): (
-        &World,
-        &ResolvedFrameView,
-        Option<&TerrainCoverageIndex>,
-        ScreenQuery,
-    ),
-) -> bool {
-    let project_pt = |x: f64, y: f64| -> Option<[f64; 2]> {
-        let world_pt = [
-            origin[0] + x * world_per_unit + translate[0],
-            origin[1] + y * world_per_unit + translate[1],
-        ];
-        let elev = sample_ground_elevation(world, resolved, terrain_index, world_pt);
-        resolved
-            .project_world_point(world_pt, elev)
-            .map(|proj| proj.window)
-    };
-    match &geometry.exact {
-        ExactGeometry::Point(pt) => {
-            project_pt(pt.x(), pt.y()).is_some_and(|win| screen.reaches(win, 1e-3))
-        }
-        ExactGeometry::LineString(line) => {
-            let mut prev: Option<[f64; 2]> = None;
-            for c in line.coords() {
-                let cur = project_pt(c.x, c.y);
-                if let Some(win) = cur {
-                    if screen.reaches(win, 1e-3) {
-                        return true;
-                    }
-                    if let Some(p) = prev {
-                        let seg = geo::Polygon::new(
-                            geo::LineString::from(vec![
-                                (p[0], p[1]),
-                                (win[0], win[1]),
-                                (p[0], p[1]),
-                            ]),
-                            Vec::new(),
-                        );
-                        if screen.meets(&seg) {
-                            return true;
-                        }
-                    }
-                }
-                prev = cur;
-            }
-            false
-        }
-        ExactGeometry::Polygon(poly) => {
-            let mut ext_pts = Vec::with_capacity(poly.exterior().0.len());
-            for c in poly.exterior().coords() {
-                if let Some(win) = project_pt(c.x, c.y) {
-                    if screen.reaches(win, 1e-3) {
-                        return true;
-                    }
-                    ext_pts.push((win[0], win[1]));
-                }
-            }
-            if ext_pts.len() < 3 {
-                return false;
-            }
-            if ext_pts.first() != ext_pts.last() {
-                ext_pts.push(ext_pts[0]);
-            }
-            let holes: Vec<geo::LineString<f64>> = poly
-                .interiors()
-                .iter()
-                .filter_map(|ring| {
-                    let mut pts: Vec<(f64, f64)> = ring
-                        .coords()
-                        .filter_map(|c| project_pt(c.x, c.y).map(|w| (w[0], w[1])))
-                        .collect();
-                    if pts.len() < 3 {
-                        return None;
-                    }
-                    if pts.first() != pts.last() {
-                        pts.push(pts[0]);
-                    }
-                    Some(geo::LineString::from(pts))
-                })
-                .collect();
-            let projected = geo::Polygon::new(geo::LineString::from(ext_pts), holes);
-            screen.meets(&projected)
-        }
-    }
 }

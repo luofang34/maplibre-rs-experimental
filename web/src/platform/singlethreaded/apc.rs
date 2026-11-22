@@ -187,6 +187,23 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
         const MAX_RAW_MESSAGES_PER_BATCH: usize = 16;
         const MAX_RAW_ATTEMPTS_PER_BATCH: usize = 3;
         let mut buffer = self.buffer.borrow_mut();
+        if buffer.is_empty() {
+            let Ok(mut received) = self.received.try_borrow_mut() else {
+                return PassingReceiveIter::new(Vec::new());
+            };
+            if !received.finished.is_empty() {
+                let mut assignments = self.assignments.borrow_mut();
+                for attempt in received.finished.drain(..) {
+                    assignments.finished(attempt);
+                }
+            }
+            if received.messages.is_empty()
+                && (received.queued.is_empty()
+                    || (!self.boot_unthrottled.get() && !self.batch_open.get()))
+            {
+                return PassingReceiveIter::new(Vec::new());
+            }
+        }
         let mut admitted_bytes: usize = buffer.iter().map(QueuedMessage::raw_byte_len).sum();
         let mut admitted_attempts: rustc_hash::FxHashSet<u64> =
             buffer.iter().filter_map(QueuedMessage::attempt).collect();
@@ -199,9 +216,11 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
         let Ok(mut received) = self.received.try_borrow_mut() else {
             return PassingReceiveIter::new(ret);
         };
-        let mut assignments = self.assignments.borrow_mut();
-        for attempt in received.finished.drain(..) {
-            assignments.finished(attempt);
+        if !received.finished.is_empty() {
+            let mut assignments = self.assignments.borrow_mut();
+            for attempt in received.finished.drain(..) {
+                assignments.finished(attempt);
+            }
         }
         for message in received.messages.drain(..) {
             if filter(&message) {
@@ -209,6 +228,9 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
             } else {
                 buffer.push(QueuedMessage::Decoded(message));
             }
+        }
+        if received.queued.is_empty() {
+            return PassingReceiveIter::new(ret);
         }
         if self.boot_unthrottled.get() {
             for item in received.queued.drain(..) {

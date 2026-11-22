@@ -146,15 +146,45 @@ fn mutate(seed: &[u8], rng: &mut XorShift64) -> Vec<u8> {
     bytes
 }
 
+const DEFAULT_FUZZ_SEED: u64 = 0x9E37_79B9_7F4A_7C15;
+const DEFAULT_FUZZ_ROUNDS: usize = 256;
+
+fn fuzz_seed() -> u64 {
+    let raw = std::env::var("MAPLIBRE_FUZZ_SEED").ok();
+    let parsed = raw.as_deref().and_then(|s| {
+        let trimmed = s.trim();
+        if let Some(hex) = trimmed
+            .strip_prefix("0x")
+            .or_else(|| trimmed.strip_prefix("0X"))
+        {
+            u64::from_str_radix(hex, 16).ok()
+        } else {
+            trimmed.parse::<u64>().ok()
+        }
+    });
+    match parsed {
+        Some(0) | None => DEFAULT_FUZZ_SEED,
+        Some(seed) => seed,
+    }
+}
+
+fn fuzz_rounds() -> usize {
+    std::env::var("MAPLIBRE_FUZZ_ROUNDS")
+        .ok()
+        .and_then(|s| s.trim().parse::<usize>().ok())
+        .map_or(DEFAULT_FUZZ_ROUNDS, |rounds| rounds.max(1))
+}
+
 #[test]
 fn malformed_mvt_and_mlt_mutations_never_panic() {
     let seed_mvt = valid_seed_mvt();
     // Minimal MLT-like header bytes (version 1 + arbitrary stream tags)
     let seed_mlt: &[u8] = &[0x01, 0x05, 0x01, 0x01, b'w', 0x00, 0x10, 0x20, 0x30];
     let layers = test_layers();
-    let mut rng = XorShift64(0x9E37_79B9_7F4A_7C15);
+    let mut rng = XorShift64(fuzz_seed());
+    let rounds = fuzz_rounds();
 
-    for (round, seed) in (0..256_usize).map(|i| {
+    for (round, seed) in (0..rounds).map(|i| {
         if i % 3 == 0 {
             (i, seed_mlt)
         } else {

@@ -198,3 +198,26 @@ fn camera_for_bounds_accounts_for_rotated_bearing_and_pitch() {
         );
     }
 }
+
+#[test]
+fn antimeridian_bounds_normalize_longitudes_and_preserve_full_world() {
+    let anti = LatLonBounds::new(170.0, -30.0, -170.0, 30.0);
+    assert!(anti.contains(LatLon::new(0.0, 175.0)));
+    assert!(anti.contains(LatLon::new(0.0, -175.0)));
+    assert!(anti.contains(LatLon::new(0.0, 190.0)));
+    assert!(!anti.contains(LatLon::new(0.0, 370.0)));
+
+    // `370.0` normalizes to `10.0` (`160°` from `170.0` vs `180°` from `-170.0`), while `-100.0`
+    // and `200.0` (`-160.0`) lie closer to the eastern boundary `-170.0`.
+    let clamped_from_370 = anti.clamp(LatLon::new(0.0, 370.0));
+    assert!((clamped_from_370.longitude - 170.0).abs() < 1e-9);
+    let clamped_east = anti.clamp(LatLon::new(0.0, 200.0));
+    assert!((clamped_east.longitude - (-170.0)).abs() < 1e-9);
+    let clamped_west = anti.clamp(LatLon::new(0.0, 100.0));
+    assert!((clamped_west.longitude - 170.0).abs() < 1e-9);
+
+    let full = LatLonBounds::new(-180.0, -85.0, 180.0, 85.0);
+    assert!(full.contains(LatLon::new(0.0, 180.0)));
+    assert!(full.contains(LatLon::new(0.0, -180.0)));
+    assert!(full.contains(LatLon::new(0.0, 540.0)));
+}

@@ -139,6 +139,16 @@ impl GpuDemPool {
         self.textures.retain(|(id, _), _| id != source);
     }
 
+    /// Retains only GPU DEM textures whose source matches `keep`.
+    pub fn retain_sources(&mut self, mut keep: impl FnMut(&RasterSourceId) -> bool) {
+        self.textures.retain(|(id, _), _| keep(id));
+    }
+
+    /// Releases every GPU DEM texture stored in this pool.
+    pub fn clear(&mut self) {
+        self.textures.clear();
+    }
+
     /// Number of unique `(source, coords)` DEM textures currently resident in GPU memory.
     pub fn texture_count(&self) -> usize {
         self.textures.len()

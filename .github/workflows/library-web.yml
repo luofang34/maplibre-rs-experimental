@@ -46,6 +46,11 @@ jobs:
       - name: Build lib
         shell: bash
         run: just web-lib build --release ${{ inputs.webgl && '--webgl' || '' }} ${{ inputs.multithreaded && '--multithreaded' || '' }}
+      - name: Check WASM size budget
+        shell: bash
+        run: |
+          variant="${{ inputs.webgl && 'webgl' || 'webgpu' }}${{ inputs.multithreaded && '-mt' || '' }}"
+          node scripts/check-wasm-size.mjs --variant "$variant"
       - name: Build demo
         shell: bash
         run: just web-demo build

@@ -216,7 +216,9 @@ fn source_ready_at(
         return false;
     };
     match layer {
-        crate::raster::RasterLayerData::Missing(_) => true,
+        crate::raster::RasterLayerData::Missing(_) | crate::raster::RasterLayerData::Empty(_) => {
+            true
+        }
         crate::raster::RasterLayerData::Available(avail) if !avail.image.is_empty() => true,
         crate::raster::RasterLayerData::Available(_) => match world
             .resources

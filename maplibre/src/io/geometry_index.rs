@@ -34,6 +34,7 @@ struct StoredTileIndex {
 /// source that contributed to it.
 pub struct GeometryIndex {
     index: FxHashMap<Quadkey, BTreeMap<Option<String>, StoredTileIndex>>,
+    coords_map: FxHashMap<Quadkey, WorldTileCoords>,
     total_bytes: usize,
 }
 
@@ -42,6 +43,7 @@ impl GeometryIndex {
     pub fn new() -> Self {
         Self {
             index: FxHashMap::default(),
+            coords_map: FxHashMap::default(),
             total_bytes: 0,
         }
     }
@@ -57,6 +59,7 @@ impl GeometryIndex {
     ) {
         if let Some(key) = coords.build_quad_key() {
             let bytes = tile_index.approximate_bytes();
+            self.coords_map.insert(key, *coords);
             if let Some(replaced) = self.index.entry(key).or_default().insert(
                 source,
                 StoredTileIndex {
@@ -83,9 +86,15 @@ impl GeometryIndex {
         )
     }
 
+    /// Every tile coordinate currently indexed by at least one source.
+    pub fn indexed_coords(&self) -> impl Iterator<Item = WorldTileCoords> + '_ {
+        self.coords_map.values().copied()
+    }
+
     /// Forgets a tile's index when the tile leaves the store.
     pub fn remove(&mut self, coords: &WorldTileCoords) {
         if let Some(key) = coords.build_quad_key() {
+            self.coords_map.remove(&key);
             if let Some(removed) = self.index.remove(&key) {
                 let bytes: usize = removed.values().map(|stored| stored.bytes).sum();
                 self.total_bytes = self.total_bytes.saturating_sub(bytes);

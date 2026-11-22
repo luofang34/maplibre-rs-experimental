@@ -27,6 +27,7 @@ struct Projected {
 
 /// Projects a world-pixel position `metres` above sea level to the window, or `None` behind the
 /// camera or globe horizon.
+#[cfg(test)]
 fn project_resolved(
     resolved: &ResolvedFrameView,
     [x, y]: [f64; 2],
@@ -121,6 +122,25 @@ fn face(corners: &[Projected]) -> Polygon<f64> {
     )
 }
 
+fn ring_from_projected(pts: Vec<Projected>) -> Option<Vec<Projected>> {
+    if pts.len() < 3 {
+        return None;
+    }
+    let mut ring = pts;
+    if ring.first().map(|p| (p.x, p.y)) != ring.last().map(|p| (p.x, p.y)) {
+        ring.push(ring[0]);
+    }
+    Some(ring)
+}
+
+fn to_projected(p: crate::render::resolved_view::ProjectedWindowPoint) -> Projected {
+    Projected {
+        x: p.window[0],
+        y: p.window[1],
+        depth: p.depth,
+    }
+}
+
 /// The depth at which `query` meets `part` of the extrusion of `rings` (world pixels, outer ring
 /// first) from `base` to `top` metres, or `None` when it misses it.
 fn intersection_depth_part(
@@ -130,55 +150,76 @@ fn intersection_depth_part(
     (part, has_floating_floor): (ExtrusionPart, bool),
     query: ScreenQuery,
 ) -> Option<f64> {
-    let projected = |metres: f64| -> Option<Vec<Vec<Projected>>> {
+    let project_wp = |point: [f64; 2], metres: f64| resolved.project_world_point(point, metres);
+    let clip_rings = |metres: f64| -> Vec<Vec<Projected>> {
         rings
             .iter()
-            .map(|ring| {
-                ring.iter()
-                    .map(|point| project_resolved(resolved, *point, metres))
-                    .collect()
+            .filter_map(|ring| {
+                let pts: Vec<([f64; 2], f64)> = ring.iter().map(|&pt| (pt, metres)).collect();
+                let clipped: Vec<Projected> =
+                    super::globe::project_clipped_ring_3d(&pts, &project_wp)
+                        .into_iter()
+                        .map(to_projected)
+                        .collect();
+                ring_from_projected(clipped)
             })
             .collect()
     };
-    let (bases, tops) = (projected(base)?, projected(top)?);
     let mut nearest = f64::INFINITY;
     let mut met = false;
     if matches!(part, ExtrusionPart::Full | ExtrusionPart::Roof) {
-        let roof = Polygon::new(
-            LineString::from(tops[0].iter().map(|c| (c.x, c.y)).collect::<Vec<_>>()),
-            tops[1..]
-                .iter()
-                .map(|ring| LineString::from(ring.iter().map(|c| (c.x, c.y)).collect::<Vec<_>>()))
-                .collect(),
-        );
-        if query.meets(&roof) {
-            met = true;
-            nearest = query.depth(&tops[0]);
+        let tops = clip_rings(top);
+        if let Some((outer, holes)) = tops.split_first() {
+            let roof = Polygon::new(
+                LineString::from(outer.iter().map(|c| (c.x, c.y)).collect::<Vec<_>>()),
+                holes
+                    .iter()
+                    .map(|ring| {
+                        LineString::from(ring.iter().map(|c| (c.x, c.y)).collect::<Vec<_>>())
+                    })
+                    .collect(),
+            );
+            if query.meets(&roof) {
+                met = true;
+                nearest = query.depth(outer);
+            }
         }
     }
     if matches!(part, ExtrusionPart::Floor) || (part == ExtrusionPart::Full && has_floating_floor) {
-        let floor = Polygon::new(
-            LineString::from(bases[0].iter().map(|c| (c.x, c.y)).collect::<Vec<_>>()),
-            bases[1..]
-                .iter()
-                .map(|ring| LineString::from(ring.iter().map(|c| (c.x, c.y)).collect::<Vec<_>>()))
-                .collect(),
-        );
-        if query.meets(&floor) {
-            met = true;
-            nearest = nearest.min(query.depth(&bases[0]));
+        let bases = clip_rings(base);
+        if let Some((outer, holes)) = bases.split_first() {
+            let floor = Polygon::new(
+                LineString::from(outer.iter().map(|c| (c.x, c.y)).collect::<Vec<_>>()),
+                holes
+                    .iter()
+                    .map(|ring| {
+                        LineString::from(ring.iter().map(|c| (c.x, c.y)).collect::<Vec<_>>())
+                    })
+                    .collect(),
+            );
+            if query.meets(&floor) {
+                met = true;
+                nearest = nearest.min(query.depth(outer));
+            }
         }
     }
     if matches!(part, ExtrusionPart::Full | ExtrusionPart::Walls) {
-        for (top_ring, base_ring) in tops.iter().zip(&bases) {
-            for edge in 0..top_ring.len().saturating_sub(1) {
-                let wall = [
-                    top_ring[edge],
-                    top_ring[edge + 1],
-                    base_ring[edge + 1],
-                    base_ring[edge],
-                    top_ring[edge],
+        for ring in rings {
+            for edge in 0..ring.len().saturating_sub(1) {
+                let quad = [
+                    (ring[edge], top),
+                    (ring[edge + 1], top),
+                    (ring[edge + 1], base),
+                    (ring[edge], base),
                 ];
+                let clipped: Vec<Projected> =
+                    super::globe::project_clipped_ring_3d(&quad, &project_wp)
+                        .into_iter()
+                        .map(to_projected)
+                        .collect();
+                let Some(wall) = ring_from_projected(clipped) else {
+                    continue;
+                };
                 if query.meets(&face(&wall)) {
                     met = true;
                     nearest = nearest.min(query.depth(&wall));

@@ -168,6 +168,9 @@ fn tile_has_raster_data(tiles: &Tiles, source: &RasterSourceId, coords: WorldTil
                 matches!(
                     layer,
                     crate::raster::RasterLayerData::Available(avail) if &avail.source == source
+                ) || matches!(
+                    layer,
+                    crate::raster::RasterLayerData::Empty(empty) if &empty.source == source
                 )
             })
         });

@@ -84,4 +84,8 @@ fn globe_tile_mesh_cache_scratch_is_available() {
     assert_eq!(globe_key.granularity, 128);
     assert!(globe_key.extend_to_north_pole);
     assert!(globe_key.extend_to_south_pole);
+
+    // Extreme zoom >= 32 must clamp cleanly without panicking out of ZOOM_BOUNDS.
+    let extreme = mesh_key(coords(0, 0, 40), TileMeshUsage::Raster, false);
+    assert_eq!(extreme.granularity, 32);
 }

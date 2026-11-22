@@ -9,7 +9,8 @@ use crate::{
     coords::WorldTileCoords,
     raster::{
         cross_fade::RasterCrossFade, resource::RasterResources, AvailableRasterLayerData,
-        MissingRasterLayerData, RasterLayerData, RasterLayersDataComponent, RasterSourceId,
+        EmptyRasterLayerData, MissingRasterLayerData, RasterLayerData, RasterLayersDataComponent,
+        RasterSourceId,
     },
     render::{
         eventually::Eventually,
@@ -161,6 +162,11 @@ impl HeadlessMap {
                             source: source.clone(),
                         }),
                     }
+                } else if layer.image.is_empty() {
+                    RasterLayerData::Empty(EmptyRasterLayerData {
+                        coords: layer.coords,
+                        source: layer.source,
+                    })
                 } else {
                     RasterLayerData::Available(layer)
                 };

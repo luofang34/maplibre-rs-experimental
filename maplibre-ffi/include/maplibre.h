@@ -44,6 +44,21 @@ typedef struct {
     double pitch_deg;
 } MaplibreCamera;
 
+/** C callback table passed to `maplibre_map_register_custom_layer`. Any pointer may be `NULL`. */
+typedef struct {
+    /** Opaque host context pointer forwarded to every callback until `deinitialize` finishes. */
+    void *user_data;
+    /** Invoked before `prepare` on first draw or target format / MSAA change. */
+    void (*initialize)(void *user_data, uint32_t color_format, uint32_t sample_count);
+    /** Invoked each visible frame before render pass encoding. */
+    void (*prepare)(void *user_data, uint32_t viewport_width, uint32_t viewport_height,
+                    double zoom);
+    /** Invoked during the layer's painter-order draw step. */
+    void (*render)(void *user_data, uint32_t viewport_width, uint32_t viewport_height, double zoom);
+    /** Invoked once per `initialize` cycle on removal, replacement, style removal, or destroy. */
+    void (*deinitialize)(void *user_data);
+} MaplibreCustomLayerCallbacks;
+
 /** Static NUL-terminated library version string (e.g. `"0.1.0"`). */
 const char *maplibre_version(void);
 
@@ -139,6 +154,20 @@ bool maplibre_map_remove_feature_state(MaplibreMap *map, const char *source,
 bool maplibre_map_add_image_rgba8(MaplibreMap *map, const char *image_id, uint32_t width,
                                   uint32_t height, const uint8_t *rgba, size_t rgba_len,
                                   float pixel_ratio, bool sdf);
+
+/**
+ * Registers or replaces a host custom layer matched against `"type": "custom"` in `style.layers`.
+ * Replacing an initialized layer invokes the old registration's `deinitialize` immediately.
+ */
+bool maplibre_map_register_custom_layer(MaplibreMap *map, const char *layer_id,
+                                        const MaplibreCustomLayerCallbacks *callbacks);
+
+/**
+ * Unregisters the host custom layer under `layer_id`. Returns `true` if one existed (invoking
+ * `deinitialize` if initialized), or `false` if absent (`maplibre_last_error_message()` is `""`)
+ * or on invalid arguments (non-empty error).
+ */
+bool maplibre_map_remove_custom_layer(MaplibreMap *map, const char *layer_id);
 
 /** Returns `true` when the map has dirty state, camera motion, or arrived/pending tile work. */
 bool maplibre_map_needs_redraw(const MaplibreMap *map);

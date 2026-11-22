@@ -346,3 +346,26 @@ fn subdivide_triangles_from_removes_orphaned_vertices_with_identical_triangles()
     };
     assert_eq!(coords(&compacted), coords(&legacy));
 }
+
+#[test]
+fn non_finite_and_oversized_inputs_return_typed_errors_without_panic() {
+    use super::SubdivisionError;
+    assert!(matches!(
+        subdivide_line_segment([0.0, 0.0], [f32::NAN, 100.0], 8),
+        Err(SubdivisionError::LineVertexLimit { .. })
+    ));
+    assert!(matches!(
+        subdivide_line_segment([0.0, 0.0], [1e9, 0.0], 128),
+        Err(SubdivisionError::LineVertexLimit { .. })
+    ));
+
+    let mut bad_buf = VertexBuffers::<ShaderVertex, u32>::new();
+    for p in [[0.0, 0.0], [f32::INFINITY, 10.0], [10.0, 10.0]] {
+        bad_buf.indices.push(bad_buf.vertices.len() as u32);
+        bad_buf.vertices.push(ShaderVertex::new(p, [0.0; 2]));
+    }
+    assert!(matches!(
+        subdivide_triangles(&mut bad_buf, 0, options(8)),
+        Err(SubdivisionError::TriangleCellLimit { .. })
+    ));
+}

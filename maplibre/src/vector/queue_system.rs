@@ -62,10 +62,35 @@ pub fn queue_system(
 
     let zoom = view_state.zoom().value();
     let style_zoom = view_state.style_zoom().value();
-    let uses_globe = style
-        .projection
-        .as_ref()
-        .is_some_and(|specification| specification.projection_type.uses_globe_rendering(zoom));
+    let transition = style.projection.as_ref().map_or(0.0, |specification| {
+        specification.projection_type.globe_transition(zoom)
+    });
+    let external_view = view_state.has_external_view();
+    let needs_mask_borders = if transition <= 0.0 {
+        false
+    } else if transition < 1.0
+        || zoom >= crate::render::projection::PRECISE_GLOBE_ZOOM
+        || external_view
+    {
+        true
+    } else {
+        let mut min_z = u8::MAX;
+        let mut max_z = 0_u8;
+        for view_tile in tile_view_pattern.iter() {
+            view_tile.render_kind(TileKind::Vector, |shape| {
+                let z = u8::from(shape.coords().z);
+                min_z = min_z.min(z);
+                max_z = max_z.max(z);
+            });
+        }
+        crate::render::projection::needs_vector_stencil_borders(
+            transition,
+            zoom,
+            external_view,
+            min_z,
+            max_z,
+        )
+    };
     let skip_draped =
         style.terrain.is_some() && crate::terrain::source::dem_source(style).is_some();
 
@@ -75,7 +100,7 @@ pub fn queue_system(
         buffer_pool_rev: buffer_pool.revision(),
         style_rev: style.revision(),
         layer_state_digest,
-        uses_globe,
+        needs_mask_borders,
         skip_draped,
     };
     if let Some(cached) = &scratch.cached_phases {
@@ -140,7 +165,7 @@ pub fn queue_system(
             let mut ensure_mask = |mask_phase: &mut RenderPhase<TileMaskItem>| {
                 if !mask_emitted {
                     mask_emitted = true;
-                    if uses_globe {
+                    if needs_mask_borders {
                         mask_phase.add(TileMaskItem {
                             projection: ProjectionBinding::View,
                             draw_function: &DrawState::<TileMaskItem, DrawMasks>::INSTANCE,

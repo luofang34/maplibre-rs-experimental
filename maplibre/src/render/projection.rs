@@ -27,9 +27,12 @@ use crate::{
     style::Style,
 };
 mod covering;
-pub(crate) use covering::style_elevated_headroom_meters;
 #[cfg(test)]
 pub(crate) use covering::tests::sea_eye;
+pub(crate) use covering::{
+    compute_globe_anchor, eligible_globe_anchor_key, needs_vector_stencil_borders,
+    style_elevated_headroom_meters, GlobeCoveringAnchor,
+};
 pub use covering::{
     covering_region, raster_source_regions, terrain_region, view_region_for_projection,
     CoveringRequest,
@@ -360,7 +363,7 @@ pub fn projection_data_for_view(
 
 /// The zoom from which the shaders project globe positions relative to the view's centre: a
 /// pixel is about 20 m there, and the metres global f32 coordinates round to start to show.
-const PRECISE_GLOBE_ZOOM: f64 = 12.0;
+pub(crate) const PRECISE_GLOBE_ZOOM: f64 = 12.0;
 
 /// The centre the shaders project globe positions relative to: the f32 Mercator position
 /// nearest the globe camera's centre on the ground, with its clip position and body-centre

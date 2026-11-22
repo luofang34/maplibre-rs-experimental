@@ -57,7 +57,7 @@ impl GlobeEase {
             normalized_start_zoom: normalized_zoom(start_zoom, start_center.latitude),
             normalized_target_zoom: normalized_zoom(target.zoom, target.center.latitude),
             longitude_delta: shortest_angle_delta(start_center.longitude, target.center.longitude),
-            latitude_delta: shortest_angle_delta(start_center.latitude, target.center.latitude),
+            latitude_delta: target.center.latitude - start_center.latitude,
         }
     }
 
@@ -128,7 +128,7 @@ impl GlobeFly {
             target,
             normalized_start_zoom,
             longitude_delta: shortest_angle_delta(start_center.longitude, target.center.longitude),
-            latitude_delta: shortest_angle_delta(start_center.latitude, target.center.latitude),
+            latitude_delta: target.center.latitude - start_center.latitude,
             scale_of_zoom: 2_f64.powf(normalized_target_zoom - normalized_start_zoom),
             scale_of_min_zoom: 2_f64.powf(normalized_min_zoom - normalized_start_zoom),
             pixel_path_length: globe_distance_pixels(

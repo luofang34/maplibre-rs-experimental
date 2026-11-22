@@ -93,6 +93,7 @@ pub(super) fn tile_bytes_stamp(tiles: &Tiles, coords: WorldTileCoords) -> u64 {
                     (avail.image.as_raw().as_ptr() as usize).hash(&mut h);
                 }
                 RasterLayerData::Missing(_) => 0_u8.hash(&mut h),
+                RasterLayerData::Empty(_) => 2_u8.hash(&mut h),
             }
         }
     }

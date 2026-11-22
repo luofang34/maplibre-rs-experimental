@@ -286,7 +286,7 @@ pub(super) fn layer_header(layer: &tile::Layer) -> tile::Layer {
 
 /// Decodes raw MVT bytes on demand into tile-local [`crate::io::geometry_index::IndexedGeometry`]
 /// entries for point and box feature queries.
-#[cfg(test)]
+#[cfg(all(test, feature = "mlt"))]
 pub(crate) fn index_mvt_bytes(
     mvt_bytes: &[u8],
     promote_id: Option<&crate::style::source::PromoteId>,

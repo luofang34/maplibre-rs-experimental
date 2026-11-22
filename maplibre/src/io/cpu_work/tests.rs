@@ -1,6 +1,8 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use std::sync::{mpsc, Arc, Mutex};
+#[cfg(feature = "native-io")]
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 
 use super::{run_cpu_bound, run_cpu_bound_replying};
 use crate::io::apc::{Context, IntoMessage, Message, SendError};
@@ -15,6 +17,7 @@ impl Context for Replies {
     }
 }
 
+#[cfg(feature = "native-io")]
 #[tokio::test]
 async fn work_runs_off_the_thread_that_awaits_it() {
     let caller = std::thread::current().id();
@@ -32,6 +35,7 @@ fn work_without_a_runtime_runs_inline() {
     assert_eq!(worker, caller);
 }
 
+#[cfg(feature = "native-io")]
 #[tokio::test]
 async fn a_panic_in_the_work_is_an_error() {
     let error = run_cpu_bound(|| -> () { panic!("tessellation bug") })
@@ -40,6 +44,7 @@ async fn a_panic_in_the_work_is_an_error() {
     assert!(std::error::Error::source(&error).is_some());
 }
 
+#[cfg(feature = "native-io")]
 #[tokio::test]
 async fn work_whose_call_was_dropped_stops_at_its_next_reply() {
     let replies = Replies::default();

@@ -50,7 +50,7 @@ pub(super) fn mercator_view_region(
             },
             max_tiles: 512,
         },
-        elevation.as_ref(),
+        &elevation,
         history,
     )
     .map_err(|source| ProjectionStateError::MercatorCovering { source })?;

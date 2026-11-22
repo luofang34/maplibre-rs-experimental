@@ -78,11 +78,17 @@ pub fn subdivide_line_segment_on_grid(
     if granularity < 2 || start == end {
         return Ok(vec![end]);
     }
+    if !start[0].is_finite() || !start[1].is_finite() || !end[0].is_finite() || !end[1].is_finite()
+    {
+        return Err(SubdivisionError::LineVertexLimit {
+            limit: MAX_GENERATED_VERTICES_PER_SEGMENT,
+        });
+    }
     let cell_size = (EXTENT_UINT / granularity).max(1) as f32;
     let delta = [end[0] - start[0], end[1] - start[1]];
     let mut crossings = Vec::new();
-    collect_axis_crossings(start[0], end[0], cell_size, &mut crossings);
-    collect_axis_crossings(start[1], end[1], cell_size, &mut crossings);
+    collect_axis_crossings(start[0], end[0], cell_size, &mut crossings)?;
+    collect_axis_crossings(start[1], end[1], cell_size, &mut crossings)?;
     if diagonals {
         // The diagonals are the lines on which x - y is a whole number of cells.
         collect_axis_crossings(
@@ -90,7 +96,7 @@ pub fn subdivide_line_segment_on_grid(
             end[0] - end[1],
             cell_size,
             &mut crossings,
-        );
+        )?;
     }
     crossings.sort_by(f32::total_cmp);
     crossings.dedup_by(|left, right| (*left - *right).abs() <= f32::EPSILON);
@@ -180,18 +186,45 @@ fn off_pole_sentinels(point: [f32; 2]) -> [f32; 2] {
     ]
 }
 
-fn collect_axis_crossings(start: f32, end: f32, cell_size: f32, output: &mut Vec<f32>) {
+fn collect_axis_crossings(
+    start: f32,
+    end: f32,
+    cell_size: f32,
+    output: &mut Vec<f32>,
+) -> Result<(), SubdivisionError> {
+    if !start.is_finite() || !end.is_finite() || !cell_size.is_finite() || cell_size <= 0.0 {
+        return Err(SubdivisionError::LineVertexLimit {
+            limit: MAX_GENERATED_VERTICES_PER_SEGMENT,
+        });
+    }
     if start == end {
-        return;
+        return Ok(());
     }
     let low = start.min(end);
     let high = start.max(end);
-    let first = (low / cell_size).floor() as i64 + 1;
-    let last = (high / cell_size).ceil() as i64;
+    let first_f = (low / cell_size).floor();
+    let last_f = (high / cell_size).ceil();
+    if !first_f.is_finite()
+        || !last_f.is_finite()
+        || first_f < i64::MIN as f32 / 2.0
+        || last_f > i64::MAX as f32 / 2.0
+    {
+        return Err(SubdivisionError::LineVertexLimit {
+            limit: MAX_GENERATED_VERTICES_PER_SEGMENT,
+        });
+    }
+    let first = first_f as i64 + 1;
+    let last = last_f as i64;
+    if last.saturating_sub(first) > MAX_GENERATED_VERTICES_PER_SEGMENT as i64 {
+        return Err(SubdivisionError::LineVertexLimit {
+            limit: MAX_GENERATED_VERTICES_PER_SEGMENT,
+        });
+    }
     for axis in first..last {
         let coordinate = axis as f32 * cell_size;
         output.push((coordinate - start) / (end - start));
     }
+    Ok(())
 }
 
 fn triangle_points<I: Copy + Into<u32>>(
@@ -271,6 +304,11 @@ fn subdivide_triangle<I>(
 where
     I: From<VertexId>,
 {
+    if !triangle.iter().flatten().all(|c| c.is_finite()) {
+        return Err(SubdivisionError::TriangleCellLimit {
+            limit: MAX_CELLS_PER_TRIANGLE,
+        });
+    }
     let cell_size = (EXTENT_UINT / granularity).max(1) as f32;
     let bounds = triangle_bounds(triangle, cell_size);
     if bounds.1 <= bounds.0 || bounds.3 <= bounds.2 {
@@ -280,7 +318,16 @@ where
         append_polygon(buffer, &triangle, clip_x_to_tile, cache);
         return Ok(());
     }
-    let cell_count = (bounds.1 - bounds.0) as usize * (bounds.3 - bounds.2) as usize;
+    let cell_count = usize::try_from(bounds.1.saturating_sub(bounds.0))
+        .ok()
+        .and_then(|w| {
+            usize::try_from(bounds.3.saturating_sub(bounds.2))
+                .ok()
+                .and_then(|h| w.checked_mul(h))
+        })
+        .ok_or(SubdivisionError::TriangleCellLimit {
+            limit: MAX_CELLS_PER_TRIANGLE,
+        })?;
     if cell_count > MAX_CELLS_PER_TRIANGLE {
         return Err(SubdivisionError::TriangleCellLimit {
             limit: MAX_CELLS_PER_TRIANGLE,

@@ -25,7 +25,9 @@ use crate::{
         },
         feature_paint::{intern::TilePropertyInterner, TileFeaturePaintComponent},
         process_vector_tile_with_assets,
-        transferables::{LayerIndexed, LayerTessellated, SymbolLayerTessellated},
+        transferables::{
+            LayerIndexed, LayerTessellated, SymbolLayerTessellated, TileTessellated as _,
+        },
         DefaultVectorTransferables, ProcessVectorContext, VectorLayerBucket,
         VectorLayerBucketComponent, VectorTileRequest, VectorTransferables,
     },
@@ -37,6 +39,7 @@ pub type VectorLayer = <DefaultVectorTransferables as VectorTransferables>::Laye
 pub type SymbolLayer = <DefaultVectorTransferables as VectorTransferables>::SymbolLayerTessellated;
 /// The query index of a source's tile as the headless worker produces it.
 pub type IndexedLayer = <DefaultVectorTransferables as VectorTransferables>::LayerIndexed;
+type TileCompleted = <DefaultVectorTransferables as VectorTransferables>::TileTessellated;
 
 /// Every layer a headless processing step produced, by kind.
 #[derive(Debug, Default)]
@@ -47,6 +50,8 @@ pub struct ProcessedLayers {
     pub symbols: Vec<Box<SymbolLayer>>,
     /// Feature geometry each source tile indexes for queries.
     pub indexes: Vec<Box<IndexedLayer>>,
+    /// Coordinates that completed tessellation (including empty tiles).
+    pub completed_tiles: Vec<WorldTileCoords>,
 }
 
 impl ProcessedLayers {
@@ -55,6 +60,7 @@ impl ProcessedLayers {
         self.vector.append(&mut other.vector);
         self.symbols.append(&mut other.symbols);
         self.indexes.append(&mut other.indexes);
+        self.completed_tiles.append(&mut other.completed_tiles);
     }
 
     /// Whether processing produced no layer of any kind.
@@ -162,6 +168,26 @@ impl ProcessedLayers {
                 ..Default::default()
             });
         }
+        // Empty tiles (e.g. blank MVT or missing source-layer) emit `TileTessellated` without
+        // layers; marking their bucket done suppresses parent fallback.
+        for coords in self.completed_tiles {
+            let overscaled_zoom = overscaled_by_tile.get(&coords).copied().unwrap_or(0);
+            if let Some(bucket) = tiles.query_mut::<&mut VectorLayerBucketComponent>(coords) {
+                bucket.done = true;
+                bucket.failed = false;
+            } else {
+                let mut tile = tiles
+                    .spawn_mut(coords)
+                    .ok_or(HeadlessMapOperationError::InvalidTile { coords })?;
+                tile.insert(VectorLayerBucketComponent {
+                    done: true,
+                    failed: false,
+                    layers: Vec::new(),
+                    overscaled_zoom,
+                    uploaded_stamp: None,
+                });
+            }
+        }
         Ok(())
     }
 
@@ -180,6 +206,11 @@ impl ProcessedLayers {
                 layers
                     .indexes
                     .push(message.into_transferable::<IndexedLayer>()?);
+            } else if message.has_tag(TileCompleted::message_tag()) {
+                let tess = message.into_transferable::<TileCompleted>()?;
+                if !tess.failed() {
+                    layers.completed_tiles.push(tess.coords());
+                }
             }
         }
         Ok(layers)

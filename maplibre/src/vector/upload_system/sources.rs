@@ -72,17 +72,19 @@ pub(super) fn frame_sources_and_painted(
                 .filter(|(_, padding, cached_level)| {
                     *padding == ViewStatePadding::Tight && *cached_level == visible_level
                 })
-                .map(|(tiles, _, _)| tiles.clone())
+                .map(|(tiles, _, _)| {
+                    tiles.as_ref().map(|tiles| {
+                        tiles
+                            .iter()
+                            .filter_map(|coords| coords.wrapped().map(|(wrapped, _)| wrapped))
+                            .collect()
+                    })
+                })
         } else {
             None
         };
         match cached_tiles {
-            Some(tiles) => tiles.map(|tiles| {
-                tiles
-                    .into_iter()
-                    .filter_map(|coords| coords.wrapped().map(|(wrapped, _)| wrapped))
-                    .collect()
-            }),
+            Some(tiles) => tiles,
             None => view_region_for_projection(
                 style,
                 view_state,

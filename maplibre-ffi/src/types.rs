@@ -25,6 +25,9 @@ pub enum FfiError {
     /// A required pointer parameter was null.
     #[error("null pointer passed for `{0}`")]
     NullPointer(&'static str),
+    /// A required string parameter was empty.
+    #[error("string `{0}` must not be empty")]
+    EmptyString(&'static str),
     /// A C string parameter was not valid UTF-8.
     #[error("invalid UTF-8 in `{0}`")]
     InvalidUtf8(&'static str),

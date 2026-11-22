@@ -4,6 +4,7 @@
 #![deny(unused_imports)]
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+mod custom_layer_api;
 mod engine;
 mod error;
 mod lifecycle;
@@ -11,6 +12,10 @@ mod render_api;
 mod style_api;
 mod types;
 
+pub use custom_layer_api::{
+    maplibre_map_register_custom_layer, maplibre_map_remove_custom_layer,
+    MaplibreCustomLayerCallbacks,
+};
 pub use engine::MapEngine;
 pub use lifecycle::{
     maplibre_handle_destroy, maplibre_handle_set_camera, maplibre_handle_set_feature_state_json,
@@ -38,7 +43,7 @@ pub use types::{
 /// `apple`) do not dead-strip re-exported `maplibre_*` symbols during archive linking.
 #[inline(never)]
 pub fn retain_c_abi_symbols() -> usize {
-    let symbols: [usize; 25] = [
+    let symbols: [usize; 27] = [
         maplibre_version as *const () as usize,
         maplibre_last_error_message as *const () as usize,
         maplibre_string_free as *const () as usize,
@@ -61,6 +66,8 @@ pub fn retain_c_abi_symbols() -> usize {
         maplibre_map_set_feature_state_json as *const () as usize,
         maplibre_map_remove_feature_state as *const () as usize,
         maplibre_map_add_image_rgba8 as *const () as usize,
+        maplibre_map_register_custom_layer as *const () as usize,
+        maplibre_map_remove_custom_layer as *const () as usize,
         maplibre_map_needs_redraw as *const () as usize,
         maplibre_map_render_rgba8 as *const () as usize,
         maplibre_map_query_rendered_features_json as *const () as usize,

@@ -79,7 +79,11 @@ pub struct FillPaint {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fill_antialias: Option<serde_json::Value>,
     /// Translation in screen pixels before conversion to tile units.
-    #[serde(rename = "fill-translate", default)]
+    #[serde(
+        rename = "fill-translate",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub fill_translate: Option<crate::style::translation::Translation>,
     /// Coordinate frame for `fill_translate`.
     #[serde(rename = "fill-translate-anchor", default)]
@@ -168,7 +172,11 @@ pub struct FillExtrusionPaint {
     )]
     pub fill_extrusion_rounded_corner_distance: Option<StyleProperty<f32>>,
     /// Translation in screen pixels before conversion to tile units.
-    #[serde(rename = "fill-extrusion-translate", default)]
+    #[serde(
+        rename = "fill-extrusion-translate",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub fill_extrusion_translate: Option<crate::style::translation::Translation>,
     /// Coordinate frame for `fill_extrusion_translate`.
     #[serde(rename = "fill-extrusion-translate-anchor", default)]
@@ -191,7 +199,8 @@ pub struct LinePaint {
     #[serde(rename = "line-width")]
     #[serde(
         default,
-        deserialize_with = "StyleProperty::<f32>::deserialize_f32_or_none"
+        deserialize_with = "StyleProperty::<f32>::deserialize_f32_or_none",
+        skip_serializing_if = "Option::is_none"
     )]
     pub line_width: Option<StyleProperty<f32>>,
     /// Opacity multiplied into the line colour, per feature where data driven.
@@ -203,7 +212,11 @@ pub struct LinePaint {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line_opacity: Option<StyleProperty<f32>>,
     /// Translation in screen pixels before conversion to tile units.
-    #[serde(rename = "line-translate", default)]
+    #[serde(
+        rename = "line-translate",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub line_translate: Option<crate::style::translation::Translation>,
     /// Coordinate frame for `line_translate`.
     #[serde(rename = "line-translate-anchor", default)]

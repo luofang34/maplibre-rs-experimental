@@ -177,6 +177,15 @@ fn invalid_options_return_typed_errors() {
         invalid_fov,
         GlobeCameraError::InvalidFieldOfView { .. }
     ));
+
+    for bad_radius in [0.0, -10.0, f64::NAN, f64::INFINITY] {
+        let err = GlobeCameraState::new(GlobeCameraOptions {
+            radius_pixels: Some(bad_radius),
+            ..options()
+        })
+        .expect_err("invalid radius_pixels must be rejected");
+        assert!(matches!(err, GlobeCameraError::InvalidRadiusPixels { .. }));
+    }
 }
 
 #[test]

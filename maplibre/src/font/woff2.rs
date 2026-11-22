@@ -9,7 +9,7 @@ use super::{
     FontError,
 };
 
-mod glyf_reconstruct;
+pub(super) mod glyf_reconstruct;
 
 const WOFF2_HEADER_SIZE: usize = 48;
 
@@ -127,8 +127,8 @@ pub(super) fn unpack_woff2(bytes: &[u8]) -> Result<Vec<u8>, FontError> {
     let _sig = cursor.read_u32_be()?;
     let mut flavor = cursor.read_u32_be()?;
     let declared_len = cursor.read_u32_be()? as usize;
-    if declared_len > bytes.len() {
-        return Err(FontError::InvalidContainer("WOFF2 length exceeds buffer"));
+    if declared_len < 48 || declared_len > bytes.len() {
+        return Err(FontError::InvalidContainer("WOFF2 length invalid"));
     }
     let num_tables = cursor.read_u16_be()? as usize;
     let reserved = cursor.read_u16_be()?;
@@ -137,7 +137,10 @@ pub(super) fn unpack_woff2(bytes: &[u8]) -> Result<Vec<u8>, FontError> {
             "WOFF2 header has zero tables or non-zero reserved field",
         ));
     }
-    let _total_sfnt_size = cursor.read_u32_be()?;
+    let total_sfnt_size = cursor.read_u32_be()? as usize;
+    if total_sfnt_size > MAX_DECOMPRESSED_FONT_BYTES {
+        return Err(FontError::InvalidContainer("WOFF2 totalSfntSize too large"));
+    }
     let total_compressed_size = cursor.read_u32_be()? as usize;
     // Skip majorVersion, minorVersion, metaOffset/Length/OrigLength, privOffset/Length (24 bytes).
     let _ = cursor.read_slice(24)?;
@@ -157,9 +160,31 @@ pub(super) fn unpack_woff2(bytes: &[u8]) -> Result<Vec<u8>, FontError> {
         let orig_length = cursor.read_uint_base128()? as usize;
         let is_glyf_or_loca = &tag == b"glyf" || &tag == b"loca";
         let transformed = if is_glyf_or_loca {
-            xform_version == 0
+            match xform_version {
+                0 => true,
+                3 => false,
+                _ => {
+                    return Err(FontError::InvalidContainer(
+                        "invalid WOFF2 glyf/loca transform version",
+                    ))
+                }
+            }
+        } else if &tag == b"hmtx" {
+            match xform_version {
+                0 => false,
+                1 => true,
+                _ => {
+                    return Err(FontError::InvalidContainer(
+                        "invalid WOFF2 hmtx transform version",
+                    ))
+                }
+            }
+        } else if xform_version != 0 {
+            return Err(FontError::InvalidContainer(
+                "unsupported WOFF2 table transform version",
+            ));
         } else {
-            xform_version != 0
+            false
         };
         let stream_len = if transformed {
             cursor.read_uint_base128()? as usize
@@ -184,6 +209,20 @@ pub(super) fn unpack_woff2(bytes: &[u8]) -> Result<Vec<u8>, FontError> {
             stream_offset,
             stream_len,
         });
+    }
+    let glyf_entry = entries.iter().find(|e| &e.tag == b"glyf");
+    let loca_entry = entries.iter().find(|e| &e.tag == b"loca");
+    if let (Some(g), Some(l)) = (glyf_entry, loca_entry) {
+        if g.transformed != l.transformed {
+            return Err(FontError::InvalidContainer(
+                "WOFF2 glyf and loca transform mismatch",
+            ));
+        }
+    } else if glyf_entry.is_some_and(|g| g.transformed) || loca_entry.is_some_and(|l| l.transformed)
+    {
+        return Err(FontError::InvalidContainer(
+            "WOFF2 transformed glyf or loca missing partner table",
+        ));
     }
 
     // Optional TTC collection directory (`ttcf` flavor): select the first face's flavor & tables.
@@ -225,9 +264,9 @@ pub(super) fn unpack_woff2(bytes: &[u8]) -> Result<Vec<u8>, FontError> {
         .take(limit)
         .read_to_end(&mut stream)
         .map_err(|_| FontError::InvalidContainer("WOFF2 Brotli decompression failed"))?;
-    if stream.len() < stream_total {
+    if stream.len() != stream_total {
         return Err(FontError::InvalidContainer(
-            "WOFF2 decompressed stream shorter than declared tables",
+            "WOFF2 decompressed stream length mismatch",
         ));
     }
 

@@ -140,12 +140,23 @@ pub struct MissingRasterLayerData {
     pub source: RasterSourceId,
 }
 
+/// A completed imagery raster request whose tile was intentionally empty (e.g. HTTP 204).
+pub struct EmptyRasterLayerData {
+    /// Coordinates of the empty tile.
+    pub coords: WorldTileCoords,
+    /// Style source whose request yielded an empty tile.
+    pub source: RasterSourceId,
+}
+
 /// A worker result retained on a tile before GPU upload and fallback selection.
 pub enum RasterLayerData {
     /// Decoded pixels can supply coverage once uploaded.
     Available(AvailableRasterLayerData),
     /// Fetching or decoding yielded no image; usable ancestors must remain eligible.
     Missing(MissingRasterLayerData),
+    /// Server reported an intentionally empty tile (e.g. HTTP 204); parent fallback is
+    /// suppressed and no GPU texture is allocated.
+    Empty(EmptyRasterLayerData),
 }
 
 impl RasterLayerData {
@@ -153,27 +164,28 @@ impl RasterLayerData {
         match self {
             Self::Available(layer) => &layer.source,
             Self::Missing(layer) => &layer.source,
+            Self::Empty(layer) => &layer.source,
         }
     }
 }
 
 impl RasterLayersDataComponent {
     pub(crate) fn record(&mut self, layer: RasterLayerData) -> bool {
-        let has_image = matches!(layer, RasterLayerData::Available(_));
+        let has_data = !matches!(layer, RasterLayerData::Missing(_));
         if let Some(existing) = self
             .layers
             .iter_mut()
             .find(|existing| existing.source() == layer.source())
         {
-            // A failed refresh must not discard usable pixels from an earlier response.
-            if !has_image && matches!(existing, RasterLayerData::Available(_)) {
+            // A failed refresh must not discard usable pixels or an authoritative empty marker.
+            if !has_data && !matches!(existing, RasterLayerData::Missing(_)) {
                 return false;
             }
             *existing = layer;
         } else {
             self.layers.push(layer);
         }
-        has_image
+        has_data
     }
 
     /// Whether this source delivered an image for the tile.
@@ -181,6 +193,13 @@ impl RasterLayersDataComponent {
         self.layers.iter().any(
             |layer| matches!(layer, RasterLayerData::Available(data) if &data.source == source),
         )
+    }
+
+    /// Whether this source completed as an intentionally empty tile (e.g. HTTP 204).
+    pub fn has_empty_source(&self, source: &RasterSourceId) -> bool {
+        self.layers
+            .iter()
+            .any(|layer| matches!(layer, RasterLayerData::Empty(data) if &data.source == source))
     }
 
     /// Whether this source has a completed unavailable result.
@@ -204,7 +223,11 @@ impl RasterLayersDataComponent {
 
     /// Whether every received result is unavailable, including fetch and decode failures.
     pub fn is_missing(&self) -> bool {
-        !self.layers.is_empty() && !self.has_image()
+        !self.layers.is_empty()
+            && self
+                .layers
+                .iter()
+                .all(|layer| matches!(layer, RasterLayerData::Missing(_)))
     }
 }
 
@@ -236,6 +259,13 @@ impl HasTile for RasterTilesDone {
         coords: WorldTileCoords,
         world: &World,
     ) -> bool {
+        if world
+            .tiles
+            .query::<&RasterLayersDataComponent>(coords)
+            .is_some_and(|data| data.has_empty_source(source))
+        {
+            return true;
+        }
         let cpu_ready = world
             .tiles
             .query::<&RasterLayersDataComponent>(coords)
@@ -257,7 +287,7 @@ impl HasTile for RasterTilesDone {
                         layer,
                         RasterLayerData::Available(available)
                             if source_texture_ready(&available.source, coords, world)
-                    )
+                    ) || matches!(layer, RasterLayerData::Empty(_))
                 })
             });
         let dem_ready = match world.resources.get::<Eventually<RasterResources>>() {

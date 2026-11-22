@@ -400,7 +400,7 @@ fn globe_view_region(
             FarPlane::Horizon,
         )
     };
-    let tiles = covering_tiles_with_history(&camera, options, reach, elevation.as_ref(), history)
+    let tiles = covering_tiles_with_history(&camera, options, reach, &elevation, history)
         .map_err(|source| ProjectionStateError::GlobeCovering { source })?;
     Ok(Some(ViewRegion::from_tiles(tiles, visible_level, 512)))
 }
@@ -434,12 +434,17 @@ fn union_regions(
     }
 }
 
+mod anchor;
 mod elevation;
 mod mercator;
 mod raster;
 #[cfg(test)]
 pub(crate) mod tests;
 
+pub(crate) use anchor::{
+    compute_globe_anchor, eligible_globe_anchor_key, needs_vector_stencil_borders,
+    GlobeCoveringAnchor,
+};
 pub(crate) use elevation::style_elevated_headroom_meters;
 use elevation::{nadir_ground_elevation, tile_elevation};
 use mercator::mercator_view_region;

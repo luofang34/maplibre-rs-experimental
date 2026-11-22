@@ -290,7 +290,8 @@ fn mesh_key(coords: WorldTileCoords, usage: TileMeshUsage, generate_borders: boo
         TileMeshUsage::Stencil => 2,
     };
     let granularity = 128_u32.checked_shr(zoom).unwrap_or(0).max(minimum);
-    let last_row = i64::from(ZOOM_BOUNDS[usize::from(u8::from(coords.z))]) - 1;
+    let z_idx = usize::from(u8::from(coords.z)).min(ZOOM_BOUNDS.len() - 1);
+    let last_row = i64::from(ZOOM_BOUNDS[z_idx]) - 1;
     TileMeshKey {
         granularity,
         generate_borders,

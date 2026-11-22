@@ -18,6 +18,23 @@ fn clamp_ordered(value: f64, a: f64, b: f64) -> f64 {
 }
 
 #[inline]
+fn normalize_lon(lon: f64) -> f64 {
+    if !lon.is_finite() {
+        return 0.0;
+    }
+    if (-180.0..=180.0).contains(&lon) {
+        lon
+    } else {
+        let wrapped = (lon + 180.0).rem_euclid(360.0) - 180.0;
+        if wrapped == -180.0 && lon > 0.0 {
+            180.0
+        } else {
+            wrapped
+        }
+    }
+}
+
+#[inline]
 fn clean_padding(v: f64) -> f64 {
     if v.is_finite() {
         v
@@ -80,10 +97,16 @@ impl LatLonBounds {
         if point.latitude < lat_lo || point.latitude > lat_hi {
             return false;
         }
-        if self.west <= self.east {
-            point.longitude >= self.west && point.longitude <= self.east
+        if (self.east - self.west).abs() >= 360.0 {
+            return true;
+        }
+        let lon = normalize_lon(point.longitude);
+        let west = normalize_lon(self.west);
+        let east = normalize_lon(self.east);
+        if west <= east {
+            lon >= west && lon <= east
         } else {
-            point.longitude >= self.west || point.longitude <= self.east
+            lon >= west || lon <= east
         }
     }
 
@@ -100,17 +123,24 @@ impl LatLonBounds {
             MERCATOR_LATITUDE_LIMIT,
         );
         let lat = clamp_ordered(point.latitude, south, north);
-        let lon = if self.west <= self.east {
-            clamp_ordered(point.longitude, self.west, self.east)
-        } else if point.longitude >= self.west || point.longitude <= self.east {
-            point.longitude
+        let lon = if (self.east - self.west).abs() >= 360.0 {
+            normalize_lon(point.longitude)
         } else {
-            let dist_west = (self.west - point.longitude).abs();
-            let dist_east = (point.longitude - self.east).abs();
-            if dist_west <= dist_east {
-                self.west
+            let p_lon = normalize_lon(point.longitude);
+            let west = normalize_lon(self.west);
+            let east = normalize_lon(self.east);
+            if west <= east {
+                clamp_ordered(p_lon, west, east)
+            } else if p_lon >= west || p_lon <= east {
+                p_lon
             } else {
-                self.east
+                let dist_west = (west - p_lon).abs();
+                let dist_east = (p_lon - east).abs();
+                if dist_west <= dist_east {
+                    west
+                } else {
+                    east
+                }
             }
         };
         LatLon::new(lat, lon)
@@ -128,9 +158,13 @@ impl LatLonBounds {
             -MERCATOR_LATITUDE_LIMIT,
             MERCATOR_LATITUDE_LIMIT,
         );
-        let nw = mercator_from_lat_lon(LatLon::new(north, self.west));
-        let se = mercator_from_lat_lon(LatLon::new(south, self.east));
-        let (min_x, max_x) = if self.west <= self.east {
+        let west = normalize_lon(self.west);
+        let east = normalize_lon(self.east);
+        let nw = mercator_from_lat_lon(LatLon::new(north, west));
+        let se = mercator_from_lat_lon(LatLon::new(south, east));
+        let (min_x, max_x) = if (self.east - self.west).abs() >= 360.0 {
+            (0.0, 1.0)
+        } else if west <= east {
             (nw.x.min(se.x), nw.x.max(se.x))
         } else {
             (nw.x, se.x + 1.0)

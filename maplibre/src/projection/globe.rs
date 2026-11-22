@@ -124,7 +124,8 @@ pub fn project_tile_coordinates_to_unit_sphere(
 
     // This form preserves equatorial precision on GPUs where subtracting PI / 2 after inverse
     // Web Mercator conversion discards significant float32 mantissa bits.
-    let tangent_half_latitude = (PI - mercator_y * PI * 2.0).exp();
+    let exp_arg = (PI - mercator_y * PI * 2.0).clamp(-300.0, 300.0);
+    let tangent_half_latitude = exp_arg.exp();
     let tangent_half_latitude_squared = tangent_half_latitude * tangent_half_latitude;
     let denominator = tangent_half_latitude_squared + 1.0;
     let sin_latitude = (tangent_half_latitude_squared - 1.0) / denominator;
@@ -210,8 +211,9 @@ pub fn closest_point_on_sphere(
 
 /// Returns the zoom delta required to preserve globe radius across a latitude change.
 pub fn globe_zoom_adjustment(old_latitude: f64, new_latitude: f64) -> f64 {
-    let old_scale = old_latitude.to_radians().cos();
-    let new_scale = new_latitude.to_radians().cos();
+    let limit = scale::MERCATOR_LATITUDE_LIMIT;
+    let old_scale = old_latitude.clamp(-limit, limit).to_radians().cos();
+    let new_scale = new_latitude.clamp(-limit, limit).to_radians().cos();
     (new_scale / old_scale).log2()
 }
 
@@ -250,7 +252,8 @@ pub fn elevate_surface_point(
 
 /// Returns latitude circumference relative to the equator for normalized Mercator Y.
 pub fn circumference_ratio_at_mercator_y(mercator_y: f64) -> f64 {
-    let tangent_half_latitude = (PI - mercator_y * PI * 2.0).exp();
+    let exp_arg = (PI - mercator_y * PI * 2.0).clamp(-300.0, 300.0);
+    let tangent_half_latitude = exp_arg.exp();
     2.0 * tangent_half_latitude / (tangent_half_latitude * tangent_half_latitude + 1.0)
 }
 
@@ -295,6 +298,7 @@ fn curved_longitude_interpolation(
     latitude_delta: f64,
     interpolation: f64,
 ) -> f64 {
+    let max_rad = 89.999_f64.to_radians();
     let end_latitude = start_latitude + latitude_delta;
     let crosses_equator = end_latitude.signum() != start_latitude.signum();
     let sample_start = if crosses_equator {
@@ -302,16 +306,21 @@ fn curved_longitude_interpolation(
     } else {
         start_latitude.abs()
     }
-    .to_radians();
-    let sample_end = end_latitude.abs().to_radians();
+    .to_radians()
+    .clamp(-max_rad, max_rad);
+    let sample_end = end_latitude.abs().to_radians().clamp(-max_rad, max_rad);
     let value_start = integrate_secant(sample_start);
     let value_end = integrate_secant(sample_end);
+    if (value_end - value_start).abs() <= f64::EPSILON {
+        return interpolation;
+    }
     let value = integrate_secant(sample_start + interpolation * (sample_end - sample_start));
     (value - value_start) / (value_end - value_start)
 }
 
 fn integrate_secant(radians: f64) -> f64 {
-    let half = radians * 0.5;
+    let max_rad = 89.999_f64.to_radians();
+    let half = radians.clamp(-max_rad, max_rad) * 0.5;
     let (sin, cos) = half.sin_cos();
     (sin + cos).ln() - (cos - sin).ln()
 }

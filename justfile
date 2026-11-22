@@ -101,6 +101,9 @@ web-demo TARGET *FLAGS: (web-install "demo")
 web-test FEATURES: nightly-toolchain (nightly-targets "wasm32-unknown-unknown")
     export RUSTUP_TOOLCHAIN=$NIGHTLY_TOOLCHAIN && cargo test -p web --features "{{ FEATURES }}" --target wasm32-unknown-unknown
 
+web-visual-diff *FLAGS:
+    node scripts/browser-visual-diff.mjs {{ FLAGS }}
+
 #profile-bench:
 # cargo flamegraph --bench render -- --bench
 

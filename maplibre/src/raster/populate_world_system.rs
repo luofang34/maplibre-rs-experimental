@@ -13,7 +13,7 @@ use crate::{
     raster::{
         resource::RasterResources,
         transferables::{LayerRaster, LayerRasterMissing, RasterTransferables},
-        AvailableRasterLayerData, MissingRasterLayerData, RasterLayerData,
+        AvailableRasterLayerData, EmptyRasterLayerData, MissingRasterLayerData, RasterLayerData,
         RasterLayersDataComponent,
     },
     render::eventually::Eventually,
@@ -171,7 +171,15 @@ pub(crate) fn apply_raster_message_with_style<T: RasterTransferables>(
                     }
                 }
             };
-            (coords, RasterLayerData::Available(available))
+            let layer = if available.image.is_empty() {
+                RasterLayerData::Empty(EmptyRasterLayerData {
+                    coords: available.coords,
+                    source: available.source,
+                })
+            } else {
+                RasterLayerData::Available(available)
+            };
+            (coords, layer)
         }
     } else if message.has_tag(T::LayerRasterMissing::message_tag()) {
         let message = message.into_transferable::<T::LayerRasterMissing>()?;

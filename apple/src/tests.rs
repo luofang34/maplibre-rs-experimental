@@ -15,7 +15,7 @@ fn apple_config_and_c_entrypoint_validate_style_globe_and_pitch() {
     init_apple_logging();
     init_apple_logging(); // Idempotent!
 
-    assert_eq!(retain_c_abi_symbols(), 25);
+    assert_eq!(retain_c_abi_symbols(), 27);
 
     let cfg = AppleMapConfig::default()
         .with_style_json(r#"{"version":8,"name":"SwiftMap","sources":{},"layers":[]}"#)

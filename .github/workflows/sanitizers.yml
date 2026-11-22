@@ -1,0 +1,63 @@
+name: Sanitizers (Nightly ASan)
+
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+    inputs:
+      rounds:
+        description: Malformed tile mutation rounds
+        required: false
+        default: '2048'
+        type: string
+      seed:
+        description: PRNG seed for malformed tile mutation fuzzing
+        required: false
+        default: '0x9E3779B97F4A7C15'
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  asan:
+    name: AddressSanitizer (Looped Fuzz & CPU Suites)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup nightly toolchain
+        uses: ./.github/actions/setup
+        with:
+          nightly: true
+          targets: x86_64-unknown-linux-gnu
+      - name: Install Dependencies
+        uses: ./.github/actions/install-system-dependencies
+      - name: Install flatbuffers
+        uses: ./.github/actions/install-flatbuffers
+      - name: Run looped mutation fuzzing and pure-CPU suites under AddressSanitizer
+        shell: bash
+        env:
+          RUSTFLAGS: -Zsanitizer=address
+          RUSTDOCFLAGS: -Zsanitizer=address
+          ASAN_OPTIONS: detect_leaks=0:abort_on_error=1
+          MAPLIBRE_FUZZ_ROUNDS: ${{ inputs.rounds || '2048' }}
+          MAPLIBRE_FUZZ_SEED: ${{ inputs.seed || '0x9E3779B97F4A7C15' }}
+        run: |
+          for filter in \
+            vector::process_vector::tests::malformed \
+            font:: \
+            sdf::tessellation:: \
+            projection::globe:: \
+            style:: \
+            io:: \
+            tcs \
+            coords \
+            vector::tessellation
+          do
+            cargo +nightly test -Z build-std --target x86_64-unknown-linux-gnu -p maplibre --lib -- "$filter"
+          done
+          cargo +nightly test -Z build-std --target x86_64-unknown-linux-gnu -p maplibre --lib -- render::shaders::tests --skip pure_globe

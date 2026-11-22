@@ -47,6 +47,7 @@ pub unsafe extern "C" fn maplibre_map_render_rgba8(
         let expected = (width as usize)
             .checked_mul(height as usize)
             .and_then(|px| px.checked_mul(4))
+            .filter(|&n| n <= isize::MAX as usize)
             .ok_or(FfiError::InvalidSize { width, height })?;
         if out_rgba_len < expected {
             return Err(FfiError::InvalidBufferLength {

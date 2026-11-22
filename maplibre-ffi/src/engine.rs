@@ -11,6 +11,7 @@ use std::{
 
 use cgmath::Deg;
 use maplibre::{
+    custom_layer::CustomStyleLayer,
     headless::map::{
         readback::{FrameReadback, PixelLayout},
         HeadlessMap,
@@ -330,6 +331,23 @@ impl MapEngine {
                 .map_err(FfiError::from)
         })??;
         Ok(())
+    }
+
+    /// Registers or replaces a host [`CustomStyleLayer`] matched against `"type": "custom"` layers.
+    pub fn register_custom_layer(&self, layer: impl CustomStyleLayer) -> Result<(), FfiError> {
+        self.runtime.handle().call_blocking(move |map| {
+            map.register_custom_layer(layer);
+        })?;
+        Ok(())
+    }
+
+    /// Removes a previously registered [`CustomStyleLayer`] by `id`, returning whether one existed.
+    pub fn remove_custom_layer(&self, id: &str) -> Result<bool, FfiError> {
+        let layer_id = id.to_owned();
+        Ok(self
+            .runtime
+            .handle()
+            .call_blocking(move |map| map.remove_custom_layer(&layer_id))?)
     }
 
     /// Whether the map currently needs another frame.

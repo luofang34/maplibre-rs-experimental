@@ -25,6 +25,11 @@ pub(super) fn validate_options(options: GlobeCameraOptions) -> Result<(), GlobeC
             world_size: options.world_size,
         });
     }
+    if let Some(radius_pixels) = options.radius_pixels {
+        if !radius_pixels.is_finite() || radius_pixels <= 0.0 {
+            return Err(GlobeCameraError::InvalidRadiusPixels { radius_pixels });
+        }
+    }
     validate_angles(options)?;
     if !options.center_offset.x.is_finite() || !options.center_offset.y.is_finite() {
         return Err(GlobeCameraError::InvalidCenterOffset {

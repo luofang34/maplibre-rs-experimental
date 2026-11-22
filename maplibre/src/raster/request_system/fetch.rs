@@ -15,7 +15,7 @@ use crate::{
     },
     raster::{
         process_raster::{ProcessRasterContext, ProcessRasterError, RasterTileRequest},
-        transferables::{LayerRasterMissing, RasterTransferables},
+        transferables::{LayerRaster, LayerRasterMissing, RasterTransferables},
         RasterSourceId,
     },
     vector::request_system::{SharedTileClaim, SharedTileSlot},
@@ -247,6 +247,16 @@ async fn fetch_source<T: RasterTransferables, HC: HttpClient, C: Context + Clone
         coords,
         source: RasterSourceId::new(group.source_name.clone()),
     };
+    if data.is_empty() {
+        context
+            .send_back(T::LayerRaster::build_from(
+                request.coords,
+                request.source,
+                image::RgbaImage::new(0, 0),
+            ))
+            .map_err(ProcedureError::Send)?;
+        return Ok((retry, SharedTileSlot::default()));
+    }
     #[cfg(not(target_arch = "wasm32"))]
     let processed = run_cpu_bound_replying(context.clone(), move |context| {
         let mut process_context = ProcessRasterContext::<T, _>::new(context);

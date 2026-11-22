@@ -20,7 +20,7 @@ pub(super) struct VectorPhaseCacheKey {
     pub(super) buffer_pool_rev: u64,
     pub(super) style_rev: u64,
     pub(super) layer_state_digest: u64,
-    pub(super) uses_globe: bool,
+    pub(super) needs_mask_borders: bool,
     pub(super) skip_draped: bool,
 }
 

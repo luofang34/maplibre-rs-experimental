@@ -176,13 +176,7 @@ pub(super) fn diff_and_upload_bucket_with_scratch<
         let old = prev_slice.get(i).unwrap_or(&zero);
         bytemuck::bytes_of(old) != bytemuck::bytes_of(&next[i])
     }) {
-        let mut cursor = start;
-        while cursor < end {
-            let chunk_end = (cursor + MAX_UPLOAD_QUADS_PER_CHUNK).min(end);
-            let expanded = scratch.expand_quads(&next[cursor..chunk_end]);
-            pool.update_feature_metadata_range(queue, entry, cursor * 4, expanded);
-            cursor = chunk_end;
-        }
+        write_quad_chunks(pool, queue, entry, &next[start..end], start, scratch);
     }
     if prev_slice.len() > limit {
         let tail_end = prev_slice.len().min(allocated_quads);
@@ -216,6 +210,68 @@ pub(super) fn diff_and_upload_bucket_with_scratch<
         has_target_visible,
         latest_fade_start_ms,
         quads: next,
+    }
+}
+
+fn write_quad_chunks<Q: Queue<B>, B, V: crate::render::shaders::PoolVertex, I: Pod, TM: Pod>(
+    pool: &BufferPool<Q, B, V, I, TM, SDFShaderFeatureMetadata>,
+    queue: &Q,
+    entry: &IndexEntry,
+    quads: &[SDFShaderFeatureMetadata],
+    quad_offset: usize,
+    scratch: &mut MetadataScratchPool,
+) {
+    let mut cursor = 0;
+    while cursor < quads.len() {
+        let chunk_end = (cursor + MAX_UPLOAD_QUADS_PER_CHUNK).min(quads.len());
+        let expanded = scratch.expand_quads(&quads[cursor..chunk_end]);
+        pool.update_feature_metadata_range(queue, entry, (quad_offset + cursor) * 4, expanded);
+        cursor = chunk_end;
+    }
+}
+
+/// Settles all cached fade metadata at `start_time_ms = 0.0` in both CPU cache and GPU buffers
+/// when `PlacementHistory::rebase_clock_if_idle` resets the fade clock.
+pub(super) fn rebase_uploaded_metadata<
+    Q: Queue<B>,
+    B,
+    V: crate::render::shaders::PoolVertex,
+    I: Pod,
+    TM: Pod,
+>(
+    pool: &BufferPool<Q, B, V, I, TM, SDFShaderFeatureMetadata>,
+    queue: &Q,
+    uploaded: &mut rustc_hash::FxHashMap<
+        (crate::coords::WorldTileCoords, crate::style::StyleLayerId),
+        CachedBucketMetadata,
+    >,
+    scratch: &mut MetadataScratchPool,
+) {
+    for ((coords, layer_id), cached) in uploaded.iter_mut() {
+        cached.latest_fade_start_ms = if cached.has_target_visible { 0.0 } else { -1.0 };
+        if cached.quads.is_empty() {
+            continue;
+        }
+        for quad in &mut cached.quads {
+            quad.rebase_settled_fade_to_zero();
+        }
+        let Some(entry) = pool.index().get_layers(*coords).and_then(|entries| {
+            entries
+                .iter()
+                .find(|entry| entry.style_layer_id == *layer_id)
+        }) else {
+            continue;
+        };
+        if entry.allocation_id() != cached.allocation_id {
+            continue;
+        }
+        let stride = size_of::<SDFShaderFeatureMetadata>() as u64;
+        let range = entry.feature_metadata_buffer_range();
+        let allocated_quads = (((range.end - range.start) / stride) as usize) / 4;
+        let limit = cached.quads.len().min(allocated_quads);
+        if limit > 0 {
+            write_quad_chunks(pool, queue, entry, &cached.quads[..limit], 0, scratch);
+        }
     }
 }
 

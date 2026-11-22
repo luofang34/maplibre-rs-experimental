@@ -4,9 +4,10 @@ pub(crate) use super::buffers::globe_tiles;
 pub use super::buffers::{BackgroundBuffers, BackgroundGpuBuffers};
 use super::{
     buffers::{
-        background_color, globe_tile_metadata_with_vp, sky_metadata_with_camera, world_rows,
+        background_color, fill_globe_tiles, globe_tile_metadata_with_vp, sky_metadata_with_camera,
+        world_rows,
     },
-    globe_sky::{draws_globe_sky, globe_sky_metadata},
+    globe_sky::{draws_globe_sky, globe_sky_metadata, globe_sky_metadata_with_camera},
     render_commands::{
         DrawAtmosphere, DrawBackground, DrawBackgroundPattern, DrawGlobeBackground,
         DrawGlobeBackgroundPattern, DrawSky,
@@ -17,9 +18,10 @@ use crate::{
     render::{
         render_phase::{DrawState, LayerItem, ProjectionBinding, RenderPhase, TranslucentItem},
         resolved_view::ResolvedFrameView,
-        shaders::{AtmosphereLayerMetadata, BackgroundLayerMetadata, ShaderTileMetadata},
+        shaders::{AtmosphereLayerMetadata, BackgroundLayerMetadata},
         view_state::ViewState,
     },
+    style::light::LightSpecification,
     tcs::system::{SystemError, SystemResult},
 };
 
@@ -101,20 +103,26 @@ pub fn queue_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
-    let mut metadatas = Vec::new();
+    if world.resources.get::<RenderPhase<LayerItem>>().is_none()
+        || world
+            .resources
+            .get::<RenderPhase<TranslucentItem>>()
+            .is_none()
+    {
+        return Err(SystemError::Dependencies);
+    }
     let frame = {
         let size = renderer.state().surface().size();
         [size.width() as f32, size.height() as f32]
     };
-    let world_rows = world_rows(view_state, style.terrain.is_none());
-    let mut instances = rustc_hash::FxHashMap::default();
-    let mut opaque_layers = rustc_hash::FxHashSet::default();
     let projection_transition = style.projection.as_ref().map_or(0.0, |specification| {
         specification
             .projection_type
             .globe_transition(view_state.zoom().value())
     });
     let uses_globe = projection_transition > 0.0;
+    let world_rows = world_rows(view_state, !uses_globe && style.terrain.is_none());
+    let horizon = view_state.horizon_line().to_shader();
     let atmosphere_blend = atmosphere_blend(style, view_state, world);
     // Without an atmosphere a full globe still has a sky where the host wants the frame
     // covered; with one, the atmosphere draws the sky. Standard map views curve and fade
@@ -122,53 +130,95 @@ pub fn queue_system(
     let external_or_free = view_state.has_external_view()
         || view_state.navigation_mode() == crate::render::view_state::NavigationMode::FreeGlobe;
     let globe_sky = draws_globe_sky(view_state, projection_transition, atmosphere_blend);
-    let cached_globe_camera = if uses_globe || atmosphere_blend > 0.0 {
-        ResolvedFrameView::globe_camera_for_frame(world, style, view_state).ok()
-    } else {
-        None
+    let (sky_metadata, atmosphere_metadata) = {
+        let cached_globe_camera = if uses_globe || atmosphere_blend > 0.0 {
+            ResolvedFrameView::globe_camera_for_frame(world, style, view_state).ok()
+        } else {
+            None
+        };
+        let sky_metadata = style
+            .sky
+            .as_ref()
+            .filter(|_| {
+                !external_or_free
+                    || projection_transition < 1.0
+                    || view_state.opaque_environment()
+                    || globe_sky
+            })
+            .map(|sky| {
+                globe_sky
+                    .then(|| match cached_globe_camera.as_deref() {
+                        Some(camera) => globe_sky_metadata_with_camera(sky, view_state, camera),
+                        None => globe_sky_metadata(sky, view_state),
+                    })
+                    .flatten()
+                    .unwrap_or_else(|| {
+                        sky_metadata_with_camera(
+                            sky,
+                            view_state,
+                            projection_transition,
+                            frame[1],
+                            cached_globe_camera.as_deref(),
+                        )
+                    })
+            });
+        let atmosphere_metadata = if atmosphere_blend > 0.0 {
+            let owned_camera = cached_globe_camera
+                .is_none()
+                .then(|| ResolvedFrameView::globe_camera_for_frame(world, style, view_state))
+                .transpose()
+                .map_err(|error| {
+                    tracing::error!(?error, "failed to build atmosphere globe camera");
+                    SystemError::Setup
+                })?;
+            let Some(camera) = cached_globe_camera.as_deref().or(owned_camera.as_deref()) else {
+                return Err(SystemError::Setup);
+            };
+            let default_light = LightSpecification::default();
+            let light = style.light.as_ref().unwrap_or(&default_light);
+            let scene_lighting = world
+                .resources
+                .get::<crate::render::SceneLighting>()
+                .copied()
+                .unwrap_or_default();
+            AtmosphereLayerMetadata::from_view(
+                camera,
+                light,
+                scene_lighting,
+                view_state.zoom().value(),
+                atmosphere_blend,
+            )
+            .map_err(|error| {
+                tracing::error!(?error, "failed to build atmosphere shader metadata");
+                SystemError::Setup
+            })?
+        } else {
+            AtmosphereLayerMetadata::disabled()
+        };
+        (sky_metadata, atmosphere_metadata)
     };
-    let sky_metadata = style
-        .sky
-        .as_ref()
-        .filter(|_| {
-            !external_or_free
-                || projection_transition < 1.0
-                || view_state.opaque_environment()
-                || globe_sky
-        })
-        .map(|sky| {
-            globe_sky
-                .then(|| globe_sky_metadata(sky, view_state))
-                .flatten()
-                .unwrap_or_else(|| {
-                    sky_metadata_with_camera(
-                        sky,
-                        view_state,
-                        projection_transition,
-                        frame[1],
-                        cached_globe_camera.as_deref(),
-                    )
-                })
-        });
 
     if let Some(gpu) = world
         .resources
         .get_mut::<super::pattern::BackgroundPatternGpu>()
     {
-        let size = renderer.state().surface().size();
-        gpu.write(
-            &renderer.queue,
-            view_state,
-            [size.width() as f32, size.height() as f32],
-        );
+        gpu.write(&renderer.queue, view_state, frame);
     }
-    {
-        let Some((layer_item_phase, translucent_phase)) = world.resources.query_mut::<(
-            &mut RenderPhase<LayerItem>,
-            &mut RenderPhase<TranslucentItem>,
-        )>() else {
+    world.resources.get_or_init_mut::<BackgroundGpuBuffers>();
+    let has_draws = {
+        let Some((layer_item_phase, translucent_phase, gpu_buffers)) =
+            world.resources.query_mut::<(
+                &mut RenderPhase<LayerItem>,
+                &mut RenderPhase<TranslucentItem>,
+                &mut BackgroundGpuBuffers,
+            )>()
+        else {
             return Err(SystemError::Dependencies);
         };
+        let scratch = &mut gpu_buffers.scratch;
+        scratch.metadatas.clear();
+        scratch.instances.clear();
+        scratch.opaque_layers.clear();
 
         let mut background_index = 0;
         for layer in &style.layers {
@@ -200,14 +250,16 @@ pub fn queue_system(
             let z_index = layer.index as f32;
             let layer_id = layer.layer_id();
             if !is_patterned && c[3] >= 1.0 {
-                opaque_layers.insert(layer_id);
+                scratch.opaque_layers.insert(layer_id);
             }
-            instances.insert(layer_id, metadatas.len() as u32);
-            metadatas.push(BackgroundLayerMetadata {
+            scratch
+                .instances
+                .insert(layer_id, scratch.metadatas.len() as u32);
+            scratch.metadatas.push(BackgroundLayerMetadata {
                 color: c,
                 z_index,
                 padding: [0.0; 3],
-                horizon: view_state.horizon_line().to_shader(),
+                horizon,
                 viewport: [
                     view_state.height() as f32,
                     f32::from(style.terrain.is_some()),
@@ -274,73 +326,58 @@ pub fn queue_system(
                 source_shape: crate::render::tile_view_pattern::ShapeDrawData::default(),
             });
         }
-    }
+        !scratch.metadatas.is_empty() || atmosphere_blend > 0.0 || sky_metadata.is_some()
+    };
 
-    if !metadatas.is_empty() || atmosphere_blend > 0.0 || sky_metadata.is_some() {
-        if metadatas.is_empty() {
-            metadatas.push(BackgroundLayerMetadata {
-                color: [0.0; 4],
-                z_index: 0.0,
-                padding: [0.0; 3],
-                horizon: view_state.horizon_line().to_shader(),
-                viewport: [
-                    view_state.height() as f32,
-                    f32::from(style.terrain.is_some()),
-                    frame[0],
-                    frame[1],
-                ],
-                world_rows,
-            });
-        }
-        let globe_tiles = if uses_globe {
-            globe_tiles(world)
+    if has_draws {
+        let mut globe_tiles = std::mem::take(
+            &mut world
+                .resources
+                .get_or_init_mut::<BackgroundGpuBuffers>()
+                .scratch
+                .globe_tiles,
+        );
+        if uses_globe {
+            fill_globe_tiles(world, &mut globe_tiles);
         } else {
-            Vec::new()
-        };
+            globe_tiles.clear();
+        }
         let gpu_vp = world
             .resources
             .get::<ResolvedFrameView>()
             .filter(|resolved| resolved.matches(style, view_state))
             .map(|resolved| resolved.gpu_view_projection)
             .unwrap_or_else(|| view_state.gpu_view_projection());
-        let tile_metadata: Vec<ShaderTileMetadata> = globe_tiles
-            .iter()
-            .map(|coords| globe_tile_metadata_with_vp(view_state, &gpu_vp, *coords))
-            .collect();
-        let atmosphere_metadata = if atmosphere_blend > 0.0 {
-            let camera = ResolvedFrameView::globe_camera_for_frame(world, style, view_state)
-                .map_err(|error| {
-                    tracing::error!(?error, "failed to build atmosphere globe camera");
-                    SystemError::Setup
-                })?;
-            let light = style.light.clone().unwrap_or_default();
-            let scene_lighting = world
-                .resources
-                .get::<crate::render::SceneLighting>()
-                .copied()
-                .unwrap_or_default();
-            AtmosphereLayerMetadata::from_view(
-                &camera,
-                &light,
-                scene_lighting,
-                view_state.zoom().value(),
-                atmosphere_blend,
-            )
-            .map_err(|error| {
-                tracing::error!(?error, "failed to build atmosphere shader metadata");
-                SystemError::Setup
-            })?
-        } else {
-            AtmosphereLayerMetadata::disabled()
-        };
 
         let (buffer, tile_metadata_buffer, atmosphere_metadata_buffer, sky_metadata_buffer) = {
             let gpu_buffers = world.resources.get_or_init_mut::<BackgroundGpuBuffers>();
+            let scratch = &mut gpu_buffers.scratch;
+            if scratch.metadatas.is_empty() {
+                scratch.metadatas.push(BackgroundLayerMetadata {
+                    color: [0.0; 4],
+                    z_index: 0.0,
+                    padding: [0.0; 3],
+                    horizon,
+                    viewport: [
+                        view_state.height() as f32,
+                        f32::from(style.terrain.is_some()),
+                        frame[0],
+                        frame[1],
+                    ],
+                    world_rows,
+                });
+            }
+            scratch.tile_metadata.clear();
+            scratch.tile_metadata.extend(
+                globe_tiles
+                    .iter()
+                    .map(|coords| globe_tile_metadata_with_vp(view_state, &gpu_vp, *coords)),
+            );
             let buffer = gpu_buffers
-                .write_metadata(&renderer.device, &renderer.queue, &metadatas)
+                .write_staged_metadata(&renderer.device, &renderer.queue)
                 .clone();
             let tile_metadata_buffer = gpu_buffers
-                .write_tile_metadata(&renderer.device, &renderer.queue, &tile_metadata)
+                .write_staged_tile_metadata(&renderer.device, &renderer.queue)
                 .clone();
             let atmosphere_metadata_buffer = gpu_buffers
                 .write_atmosphere(&renderer.device, &renderer.queue, &atmosphere_metadata)
@@ -357,17 +394,43 @@ pub fn queue_system(
                 sky_metadata_buffer,
             )
         };
-        world.resources.insert(BackgroundBuffers {
-            metadata_buffer: buffer,
-            instances,
-            tile_metadata_buffer,
-            globe_tiles,
-            atmosphere_metadata_buffer,
-            sky_metadata_buffer,
-            flat_covers_viewport: !uses_globe
-                && flat_viewport_covered(view_state, style.terrain.is_none(), frame),
-            opaque_layers,
-        });
+        let flat_covers_viewport =
+            !uses_globe && flat_viewport_covered(view_state, style.terrain.is_none(), frame);
+        if let Some((gpu_buffers, existing)) = world
+            .resources
+            .query_mut::<(&mut BackgroundGpuBuffers, &mut BackgroundBuffers)>()
+        {
+            existing.metadata_buffer = buffer;
+            existing.tile_metadata_buffer = tile_metadata_buffer;
+            existing.atmosphere_metadata_buffer = atmosphere_metadata_buffer;
+            existing.sky_metadata_buffer = sky_metadata_buffer;
+            existing.flat_covers_viewport = flat_covers_viewport;
+            std::mem::swap(&mut existing.instances, &mut gpu_buffers.scratch.instances);
+            std::mem::swap(
+                &mut existing.opaque_layers,
+                &mut gpu_buffers.scratch.opaque_layers,
+            );
+            std::mem::swap(&mut existing.globe_tiles, &mut globe_tiles);
+            gpu_buffers.scratch.globe_tiles = globe_tiles;
+        } else {
+            let (instances, opaque_layers) = {
+                let gpu_buffers = world.resources.get_or_init_mut::<BackgroundGpuBuffers>();
+                (
+                    std::mem::take(&mut gpu_buffers.scratch.instances),
+                    std::mem::take(&mut gpu_buffers.scratch.opaque_layers),
+                )
+            };
+            world.resources.insert(BackgroundBuffers {
+                metadata_buffer: buffer,
+                instances,
+                tile_metadata_buffer,
+                globe_tiles,
+                atmosphere_metadata_buffer,
+                sky_metadata_buffer,
+                flat_covers_viewport,
+                opaque_layers,
+            });
+        }
     }
 
     Ok(())

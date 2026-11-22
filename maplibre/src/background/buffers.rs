@@ -1,9 +1,12 @@
 //! Persistent GPU buffers and metadata construction for background, sky, and atmosphere rendering.
 
-use cgmath::{Matrix3, Matrix4, SquareMatrix, Vector3};
+mod scratch;
+
+pub use scratch::world_rows;
+pub(crate) use scratch::{fill_globe_tiles, BackgroundScratch};
 
 use crate::{
-    coords::{WorldTileCoords, TILE_SIZE},
+    coords::WorldTileCoords,
     render::{
         shaders::{
             AtmosphereLayerMetadata, BackgroundLayerMetadata, ShaderTileMetadata, SkyLayerMetadata,
@@ -42,16 +45,17 @@ pub struct BackgroundBuffers {
 /// per-frame GPU buffer creation.
 #[derive(Default)]
 pub struct BackgroundGpuBuffers {
-    inner: Option<AllocatedBuffers>,
+    pub(super) inner: Option<AllocatedBuffers>,
+    pub(crate) scratch: BackgroundScratch,
 }
 
-struct AllocatedBuffers {
-    metadata_buffer: wgpu::Buffer,
-    metadata_capacity: usize,
-    last_metadata_bytes: Vec<u8>,
-    tile_metadata_buffer: wgpu::Buffer,
-    tile_metadata_capacity: usize,
-    last_tile_metadata_bytes: Vec<u8>,
+pub(super) struct AllocatedBuffers {
+    pub(super) metadata_buffer: wgpu::Buffer,
+    pub(super) metadata_capacity: usize,
+    pub(super) last_metadata_bytes: Vec<u8>,
+    pub(super) tile_metadata_buffer: wgpu::Buffer,
+    pub(super) tile_metadata_capacity: usize,
+    pub(super) last_tile_metadata_bytes: Vec<u8>,
     atmosphere_metadata_buffer: wgpu::Buffer,
     last_atmosphere_bytes: Option<[u8; std::mem::size_of::<AtmosphereLayerMetadata>()]>,
     sky_metadata_buffer: wgpu::Buffer,
@@ -68,7 +72,7 @@ impl Drop for AllocatedBuffers {
 }
 
 impl AllocatedBuffers {
-    fn new(device: &wgpu::Device) -> Self {
+    pub(super) fn new(device: &wgpu::Device) -> Self {
         let metadata_capacity = BackgroundGpuBuffers::INITIAL_METADATA_CAPACITY;
         let metadata_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Background Metadata Buffer"),
@@ -143,6 +147,34 @@ fn write_pod_if_changed<const N: usize>(
     }
 }
 
+pub(super) fn write_buffer_slice<T: bytemuck::Pod>(
+    device: &wgpu::Device,
+    queue: &UploadQueue,
+    buffer: &mut wgpu::Buffer,
+    capacity: &mut usize,
+    last_bytes: &mut Vec<u8>,
+    label: &str,
+    items: &[T],
+) {
+    let needed_capacity = items.len().max(1);
+    if needed_capacity > *capacity {
+        let new_capacity = (*capacity * 2).max(needed_capacity);
+        queue.cancel_staged_buffer(buffer);
+        buffer.destroy();
+        *buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label),
+            size: (new_capacity * std::mem::size_of::<T>()) as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        *capacity = new_capacity;
+        last_bytes.clear();
+    }
+    if !items.is_empty() {
+        write_slice_if_changed(queue, buffer, bytemuck::cast_slice(items), last_bytes);
+    }
+}
+
 impl BackgroundGpuBuffers {
     /// Initial capacity for background layer metadata (16 layers).
     pub const INITIAL_METADATA_CAPACITY: usize = 16;
@@ -169,29 +201,15 @@ impl BackgroundGpuBuffers {
         metadatas: &[BackgroundLayerMetadata],
     ) -> &wgpu::Buffer {
         let inner = self.ensure_allocated(device);
-        let needed_capacity = metadatas.len().max(1);
-        if needed_capacity > inner.metadata_capacity {
-            let new_capacity = (inner.metadata_capacity * 2).max(needed_capacity);
-            queue.cancel_staged_buffer(&inner.metadata_buffer);
-            inner.metadata_buffer.destroy();
-            inner.metadata_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Background Metadata Buffer"),
-                size: (new_capacity * std::mem::size_of::<BackgroundLayerMetadata>())
-                    as wgpu::BufferAddress,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            inner.metadata_capacity = new_capacity;
-            inner.last_metadata_bytes.clear();
-        }
-        if !metadatas.is_empty() {
-            write_slice_if_changed(
-                queue,
-                &inner.metadata_buffer,
-                bytemuck::cast_slice(metadatas),
-                &mut inner.last_metadata_bytes,
-            );
-        }
+        write_buffer_slice(
+            device,
+            queue,
+            &mut inner.metadata_buffer,
+            &mut inner.metadata_capacity,
+            &mut inner.last_metadata_bytes,
+            "Background Metadata Buffer",
+            metadatas,
+        );
         &inner.metadata_buffer
     }
 
@@ -203,29 +221,15 @@ impl BackgroundGpuBuffers {
         tile_metadata: &[ShaderTileMetadata],
     ) -> &wgpu::Buffer {
         let inner = self.ensure_allocated(device);
-        let needed_capacity = tile_metadata.len().max(1);
-        if needed_capacity > inner.tile_metadata_capacity {
-            let new_capacity = (inner.tile_metadata_capacity * 2).max(needed_capacity);
-            queue.cancel_staged_buffer(&inner.tile_metadata_buffer);
-            inner.tile_metadata_buffer.destroy();
-            inner.tile_metadata_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Globe Background Tile Metadata Buffer"),
-                size: (new_capacity * std::mem::size_of::<ShaderTileMetadata>())
-                    as wgpu::BufferAddress,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            inner.tile_metadata_capacity = new_capacity;
-            inner.last_tile_metadata_bytes.clear();
-        }
-        if !tile_metadata.is_empty() {
-            write_slice_if_changed(
-                queue,
-                &inner.tile_metadata_buffer,
-                bytemuck::cast_slice(tile_metadata),
-                &mut inner.last_tile_metadata_bytes,
-            );
-        }
+        write_buffer_slice(
+            device,
+            queue,
+            &mut inner.tile_metadata_buffer,
+            &mut inner.tile_metadata_capacity,
+            &mut inner.last_tile_metadata_bytes,
+            "Globe Background Tile Metadata Buffer",
+            tile_metadata,
+        );
         &inner.tile_metadata_buffer
     }
 
@@ -304,17 +308,9 @@ impl BackgroundGpuBuffers {
 /// near an eye standing on the globe follows the sphere as closely as the tiles drawn there;
 /// the world tile while no covering is selected.
 pub fn globe_tiles(world: &crate::tcs::world::World) -> Vec<WorldTileCoords> {
-    let covering: Vec<_> = crate::render::eye_covering::drawn_tiles(world)
-        .unwrap_or_default()
-        .iter()
-        .copied()
-        .filter(|coords| coords.wrapped().is_some())
-        .collect();
-    if covering.is_empty() {
-        vec![WorldTileCoords::default()]
-    } else {
-        covering
-    }
+    let mut tiles = Vec::new();
+    fill_globe_tiles(world, &mut tiles);
+    tiles
 }
 
 /// Calculates tile metadata for globe background tiles.
@@ -452,47 +448,6 @@ pub fn sky_metadata_with_camera(
         inverse_projection,
         up_and_horizon,
     }
-}
-
-/// The rows that tell a pixel's map row for the northern and southern edges of the flat map,
-/// or ones that cut nothing where the map has no such edges.
-pub fn world_rows(view_state: &ViewState, edges: bool) -> [[f32; 4]; 2] {
-    const OPEN: [[f32; 4]; 2] = [[0.0, 0.0, 0.0, -1e30], [0.0, 0.0, 0.0, 1e30]];
-    if !edges {
-        return OPEN;
-    }
-    let center = view_state.camera().position();
-    let relative = view_state.view_projection().0
-        * Matrix4::from_translation(Vector3::new(center.x, center.y, 0.0));
-    let plane = Matrix3::new(
-        relative.x.x,
-        relative.x.y,
-        relative.x.w,
-        relative.y.x,
-        relative.y.y,
-        relative.y.w,
-        relative.w.x,
-        relative.w.y,
-        relative.w.w,
-    );
-    let Some(inverse) = plane.invert() else {
-        return OPEN;
-    };
-    let world = TILE_SIZE * 2_f64.powf(view_state.zoom().value());
-    [
-        [
-            inverse.x.y as f32,
-            inverse.y.y as f32,
-            inverse.z.y as f32,
-            (-center.y) as f32,
-        ],
-        [
-            inverse.x.z as f32,
-            inverse.y.z as f32,
-            inverse.z.z as f32,
-            (world - center.y) as f32,
-        ],
-    ]
 }
 
 #[cfg(test)]

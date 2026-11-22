@@ -1,7 +1,15 @@
+use std::sync::Arc;
+
 use crate::{
     coords::{WorldTileCoords, ZoomLevel},
+    io::tile_sources::{source_max_zoom, TileKind},
     render::{
         eventually::{Eventually, Eventually::Initialized},
+        projection::{
+            compute_globe_anchor, eligible_globe_anchor_key, view_region_for_projection,
+            GlobeCoveringAnchor, ProjectionStateError,
+        },
+        resolved_view::ResolvedFrameView,
         view_state::{ViewState, ViewStatePadding},
         Renderer,
     },
@@ -25,6 +33,7 @@ pub(super) struct RequestViewKey {
 
 impl RequestViewKey {
     pub(super) fn build(
+        world: &World,
         style: &Style,
         view_state: &ViewState,
         renderer: &Renderer,
@@ -46,8 +55,14 @@ impl RequestViewKey {
         {
             return None;
         }
+        let view_proj = world
+            .resources
+            .get::<ResolvedFrameView>()
+            .filter(|resolved| resolved.matches(style, view_state))
+            .map(|resolved| resolved.view_projection)
+            .unwrap_or_else(|| view_state.view_projection());
         Some(Self {
-            view_proj: *AsRef::<[[f64; 4]; 4]>::as_ref(&view_state.view_projection().0),
+            view_proj: *AsRef::<[[f64; 4]; 4]>::as_ref(&view_proj.0),
             viewport: (width, height),
             pixel_ratio,
             external_view: view_state.has_external_view(),
@@ -58,15 +73,108 @@ impl RequestViewKey {
             terrain_active: style.terrain.is_some(),
         })
     }
+
+    #[inline]
+    pub(super) fn matches_non_matrix(&self, other: &Self) -> bool {
+        self.viewport == other.viewport
+            && self.pixel_ratio == other.pixel_ratio
+            && self.external_view == other.external_view
+            && self.tight_requests == other.tight_requests
+            && self.style_rev == other.style_rev
+            && self.request_padding == other.request_padding
+            && self.visible_level == other.visible_level
+            && self.terrain_active == other.terrain_active
+    }
 }
 
 pub(super) struct RequestMemo {
     pub(super) key: RequestViewKey,
-    pub(super) computed: Option<(Vec<WorldTileCoords>, u8)>,
+    pub(super) computed: Option<(Arc<[WorldTileCoords]>, u8)>,
+    pub(super) globe_anchor: Option<Box<GlobeCoveringAnchor>>,
     pub(super) drapes: Vec<WorldTileCoords>,
     pub(super) prefetch: Vec<WorldTileCoords>,
     pub(super) vector_evictions: u64,
     pub(super) settled: bool,
+}
+
+pub(super) enum ResolvedViewTiles {
+    SettledReuse,
+    Computed {
+        computed: Option<(Arc<[WorldTileCoords]>, u8)>,
+        globe_anchor: Option<Box<GlobeCoveringAnchor>>,
+    },
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolve_view_tiles(
+    memo: Option<&RequestMemo>,
+    key: Option<&RequestViewKey>,
+    settled_unchanged: bool,
+    style: &Style,
+    view_state: &ViewState,
+    world: &World,
+    visible_level: ZoomLevel,
+    request_padding: ViewStatePadding,
+    tight_tile_requests: bool,
+) -> Result<ResolvedViewTiles, ProjectionStateError> {
+    if let Some(memo) = memo.filter(|m| key == Some(&m.key)) {
+        return Ok(ResolvedViewTiles::Computed {
+            computed: memo.computed.clone(),
+            globe_anchor: memo.globe_anchor.clone(),
+        });
+    }
+    if let Some((anchor_key, view_request, camera)) =
+        eligible_globe_anchor_key(style, view_state, world, visible_level, request_padding)
+    {
+        if let Some(anchor) = memo.and_then(|memo| memo.globe_anchor.as_deref()) {
+            if let Some((cached_tiles, exact_order)) = anchor.try_reuse(&anchor_key, &camera) {
+                let source_z = source_max_zoom(style, TileKind::Vector)
+                    .map_or(u8::from(visible_level), |m| u8::from(visible_level).min(m));
+                let fallback_independent = tight_tile_requests
+                    || (cfg!(target_arch = "wasm32")
+                        && !view_state.has_external_view()
+                        && source_z < 3);
+                if exact_order && fallback_independent && settled_unchanged {
+                    return Ok(ResolvedViewTiles::SettledReuse);
+                }
+                let final_tiles = if exact_order {
+                    cached_tiles
+                } else {
+                    anchor.sorted_for_camera(&camera)
+                };
+                return Ok(ResolvedViewTiles::Computed {
+                    computed: Some((final_tiles, anchor.level)),
+                    globe_anchor: Some(Box::new(anchor.clone())),
+                });
+            }
+        }
+        let built = compute_globe_anchor(
+            anchor_key,
+            view_request,
+            request_padding,
+            &camera,
+            view_state.center_elevation(),
+        )
+        .map_err(|source| ProjectionStateError::GlobeCovering { source })?;
+        let computed = Some((Arc::clone(&built.tiles), built.level));
+        return Ok(ResolvedViewTiles::Computed {
+            computed,
+            globe_anchor: Some(Box::new(built)),
+        });
+    }
+    let computed =
+        view_region_for_projection(style, view_state, world, visible_level, request_padding)?.map(
+            |region| {
+                (
+                    Arc::from(region.iter().collect::<Vec<_>>()),
+                    u8::from(visible_level),
+                )
+            },
+        );
+    Ok(ResolvedViewTiles::Computed {
+        computed,
+        globe_anchor: None,
+    })
 }
 
 pub(super) fn vector_eviction_generation(world: &World) -> u64 {
@@ -78,7 +186,7 @@ pub(super) fn vector_eviction_generation(world: &World) -> u64 {
 
 pub(super) fn update_loose_covering_cache(
     world: &mut World,
-    computed: Option<&(Vec<WorldTileCoords>, u8)>,
+    computed: Option<&(Arc<[WorldTileCoords]>, u8)>,
     request_padding: ViewStatePadding,
     visible_level: ZoomLevel,
 ) {
@@ -94,7 +202,7 @@ pub(super) fn update_loose_covering_cache(
         };
     }
     cache.view_tiles = Some((
-        computed.map(|(tiles, _)| tiles.clone()),
+        computed.map(|(tiles, _)| Arc::clone(tiles)),
         request_padding,
         visible_level,
     ));

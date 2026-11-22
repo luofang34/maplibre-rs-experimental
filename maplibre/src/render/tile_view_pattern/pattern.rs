@@ -183,10 +183,11 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
         for set in scratch.vector_parents.values_mut() {
             set.clear();
         }
-        if !raster_coverings.is_empty() {
-            for set in scratch.raster_parents.values_mut() {
-                set.clear();
-            }
+        for set in scratch.raster_parents.values_mut() {
+            set.clear();
+        }
+        if raster_coverings.is_empty() {
+            scratch.raster_parents.clear();
         }
         let PatternScratch {
             vector_parents,

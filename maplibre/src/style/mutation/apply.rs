@@ -47,6 +47,13 @@ impl MapContext {
         }
         if !change.removed_layers.is_empty() {
             crate::vector::content::purge_layers(&mut self.world, &change.removed_layers);
+            if let Some(registry) = self
+                .world
+                .resources
+                .get_mut::<crate::custom_layer::CustomLayerRegistry>()
+            {
+                registry.deinitialize_layers(&change.removed_layers);
+            }
         }
         if !change.layers.is_empty() || !change.removed_layers.is_empty() {
             DirtyVectorStyle::mark_style_edit(&mut self.world, change.layers.iter().cloned());
@@ -95,6 +102,13 @@ impl MapContext {
         }
         if !diff.removed_layers.is_empty() {
             crate::vector::content::purge_layers(&mut self.world, &diff.removed_layers);
+            if let Some(registry) = self
+                .world
+                .resources
+                .get_mut::<crate::custom_layer::CustomLayerRegistry>()
+            {
+                registry.deinitialize_layers(&diff.removed_layers);
+            }
         }
         let affected = diff.affected_layers();
         if !affected.is_empty() || !diff.removed_layers.is_empty() || diff.global_state_changed {

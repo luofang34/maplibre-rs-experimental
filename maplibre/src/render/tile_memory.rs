@@ -45,7 +45,7 @@ pub(crate) fn tile_bytes(tiles: &Tiles, coords: WorldTileCoords) -> usize {
                 .iter()
                 .map(|layer| match layer {
                     RasterLayerData::Available(layer) => capacity(layer.image.as_raw()),
-                    RasterLayerData::Missing(_) => 0,
+                    RasterLayerData::Missing(_) | RasterLayerData::Empty(_) => 0,
                 })
                 .sum::<usize>()
         });

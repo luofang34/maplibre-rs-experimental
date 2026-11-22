@@ -324,7 +324,7 @@ pub(crate) fn waiting(world: &World, coords: WorldTileCoords, kind: RequestKind)
         })
 }
 
-#[cfg(any(test, feature = "geojson"))]
+#[cfg(feature = "geojson")]
 pub(crate) fn is_waiting_or_pending(
     tiles: &crate::tcs::tiles::Tiles,
     coords: WorldTileCoords,

@@ -9,13 +9,13 @@ use maplibre::{
     coords::WorldTileCoords,
     headless::{
         create_headless_renderer,
-        map::{process_tile_layers, HeadlessMap},
+        map::{process_tile_layers, readback::read_blocking, HeadlessMap},
         HeadlessPlugin,
     },
     plugin::Plugin,
     projection::ProjectionType,
     render::RenderPlugin,
-    sdf::SdfPlugin,
+    sdf::{PlacementConfig, SdfPlugin},
     style::Style,
     vector::{DefaultVectorTransferables, VectorPlugin},
 };
@@ -23,8 +23,6 @@ use maplibre::{
 /// A `route_points` layer with one point at the tile centre, named `FALLBACK` and labelled
 /// `V12`.
 const LABELLED_POINT_TILE: &str = "1a460a0c726f7574655f706f696e7473121108011204000001011801220509802080201a046e616d651a056c6162656c220a0a0846414c4c4241434b22050a035631322880207802";
-/// Where the headless plugin writes the first frame, relative to the working directory.
-const FRAME: &str = "frame_0.png";
 const SIZE: u32 = 512;
 
 fn hex_bytes(hex: &str) -> Vec<u8> {
@@ -32,19 +30,6 @@ fn hex_bytes(hex: &str) -> Vec<u8> {
         .step_by(2)
         .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).expect("hex digit pair"))
         .collect()
-}
-
-fn read_rgba_png(path: &str) -> (u32, Vec<u8>) {
-    let decoder = png::Decoder::new(std::io::BufReader::new(
-        std::fs::File::open(path).expect("frame written"),
-    ));
-    let mut reader = decoder.read_info().expect("frame is a png");
-    let mut pixels = vec![0; reader.output_buffer_size().expect("buffer size")];
-    let info = reader.next_frame(&mut pixels).expect("frame decodes");
-    assert_eq!(info.color_type, png::ColorType::Rgba);
-    assert_eq!((info.width, info.height), (SIZE, SIZE));
-    pixels.truncate(info.buffer_size());
-    (info.width, pixels)
 }
 
 /// Pixels of the central region that are not the white background.
@@ -65,7 +50,6 @@ fn inked_centre_pixels(width: u32, pixels: &[u8]) -> usize {
 }
 
 #[tokio::test]
-#[ignore = "renders through the GPU adapter of the machine running the test"]
 async fn a_labelled_point_renders_its_text_headless() {
     let style: Style = serde_json::from_value(serde_json::json!({
         "version": 8,
@@ -98,9 +82,10 @@ async fn a_labelled_point_renders_its_text_headless() {
         Box::new(BackgroundPlugin),
         Box::new(VectorPlugin::<DefaultVectorTransferables>::default()),
         Box::new(SdfPlugin::<DefaultVectorTransferables>::default()),
-        Box::new(HeadlessPlugin::new(true)),
+        Box::new(HeadlessPlugin::new(false)),
     ];
     let mut map = HeadlessMap::new(style, renderer, kernel, plugins).expect("headless map");
+    map.set_placement_config(PlacementConfig::immediate());
 
     let layers = process_tile_layers(
         &hex_bytes(LABELLED_POINT_TILE),
@@ -115,12 +100,15 @@ async fn a_labelled_point_renders_its_text_headless() {
         "the label's symbol bucket survives processing"
     );
 
-    std::fs::remove_file(FRAME).ok();
     map.render_tile(layers).expect("frame renders");
-    let (width, pixels) = read_rgba_png(FRAME);
-    std::fs::remove_file(FRAME).ok();
+    let pixels = read_blocking(
+        &map,
+        map.head_texture().expect("head texture"),
+        wgpu::TextureAspect::All,
+    )
+    .expect("readback");
 
-    let inked = inked_centre_pixels(width, &pixels);
+    let inked = inked_centre_pixels(SIZE, &pixels);
     assert!(
         inked > 0,
         "the label's glyphs leave ink at the tile centre, found {inked} inked pixels"
@@ -128,7 +116,6 @@ async fn a_labelled_point_renders_its_text_headless() {
 }
 
 #[tokio::test]
-#[ignore = "renders through the GPU adapter of the machine running the test"]
 async fn a_label_under_a_host_obstacle_is_not_placed() {
     let style: Style = serde_json::from_value(serde_json::json!({
         "version": 8,
@@ -160,9 +147,10 @@ async fn a_label_under_a_host_obstacle_is_not_placed() {
         Box::new(BackgroundPlugin),
         Box::new(VectorPlugin::<DefaultVectorTransferables>::default()),
         Box::new(SdfPlugin::<DefaultVectorTransferables>::default()),
-        Box::new(HeadlessPlugin::new(true)),
+        Box::new(HeadlessPlugin::new(false)),
     ];
     let mut map = HeadlessMap::new(style, renderer, kernel, plugins).expect("headless map");
+    map.set_placement_config(PlacementConfig::immediate());
     let tile = || {
         process_tile_layers(
             &hex_bytes(LABELLED_POINT_TILE),
@@ -193,11 +181,9 @@ async fn a_label_under_a_host_obstacle_is_not_placed() {
         map.query_rendered_symbols(centre, None).is_empty(),
         "not placed under the host's obstacle"
     );
-    std::fs::remove_file(FRAME).ok();
 }
 
 #[tokio::test]
-#[ignore = "renders through the GPU adapter of the machine running the test"]
 async fn a_query_measures_in_logical_pixels_at_a_pixel_ratio_of_two() {
     let style: Style = serde_json::from_value(serde_json::json!({
         "version": 8,
@@ -222,9 +208,10 @@ async fn a_query_measures_in_logical_pixels_at_a_pixel_ratio_of_two() {
         Box::new(RenderPlugin),
         Box::new(VectorPlugin::<DefaultVectorTransferables>::default()),
         Box::new(SdfPlugin::<DefaultVectorTransferables>::default()),
-        Box::new(HeadlessPlugin::new(true)),
+        Box::new(HeadlessPlugin::new(false)),
     ];
     let mut map = HeadlessMap::new(style, renderer, kernel, plugins).expect("headless map");
+    map.set_placement_config(PlacementConfig::immediate());
     map.set_pixel_ratio(2.0);
     let layers = process_tile_layers(
         &hex_bytes(LABELLED_POINT_TILE),
@@ -234,7 +221,6 @@ async fn a_query_measures_in_logical_pixels_at_a_pixel_ratio_of_two() {
     )
     .expect("tile processes");
     map.render_tile(layers).expect("frame renders");
-    std::fs::remove_file(FRAME).ok();
 
     // The page's CSS pixels: a browser host passes pointer positions through unscaled.
     let logical_centre = [f64::from(SIZE) / 4.0; 2];

@@ -1,6 +1,6 @@
 //! Requests tiles which are currently in view
 
-use std::{borrow::Cow, marker::PhantomData, rc::Rc};
+use std::{borrow::Cow, marker::PhantomData, rc::Rc, sync::Arc};
 
 use rustc_hash::FxHashSet;
 
@@ -15,10 +15,7 @@ use crate::{
         tile_sources::{outside_source_bounds, source_max_zoom, source_min_zoom, TileKind},
     },
     kernel::Kernel,
-    render::{
-        projection::view_region_for_projection, tile_view_pattern::DEFAULT_TILE_SIZE,
-        view_state::ViewStatePadding,
-    },
+    render::{tile_view_pattern::DEFAULT_TILE_SIZE, view_state::ViewStatePadding},
     tcs::system::{System, SystemError, SystemResult},
     vector::{transferables::VectorTransferables, VectorLayerBucketComponent},
 };
@@ -37,8 +34,8 @@ pub(crate) use limiter::{
     SharedTileSlot,
 };
 use memo::{
-    display_pixel_ratio, update_loose_covering_cache, vector_eviction_generation, RequestMemo,
-    RequestViewKey,
+    display_pixel_ratio, resolve_view_tiles, update_loose_covering_cache,
+    vector_eviction_generation, RequestMemo, RequestViewKey, ResolvedViewTiles,
 };
 pub use worker::fetch_vector_apc;
 
@@ -107,6 +104,7 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
             .unwrap_or_default();
         let vector_evictions = vector_eviction_generation(world);
         let key = RequestViewKey::build(
+            world,
             style,
             view_state,
             renderer,
@@ -114,18 +112,22 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
             request_padding,
             visible_level,
         );
-        if multi.is_none() {
-            if let (Some(key), Some(memo)) = (key.as_ref(), self.memo.as_ref()) {
-                if memo.settled
-                    && memo.key == *key
+        let settled_unchanged = key.as_ref().is_some_and(|key| {
+            self.memo.as_ref().is_some_and(|memo| {
+                memo.settled
                     && memo.drapes == drapes
                     && memo.prefetch == prefetch
                     && memo.vector_evictions == vector_evictions
+                    && memo.key.matches_non_matrix(key)
                     && !crate::sdf::provided::awaiting(world)
                     && crate::io::tile_backpressure::tiles_in_flight(world) == 0
                     && !tile_retry::needs_frame(world)
                     && tile_retry::next_retry_delay(world).is_none()
-                {
+            })
+        });
+        if multi.is_none() && settled_unchanged {
+            if let (Some(key), Some(memo)) = (key.as_ref(), self.memo.as_ref()) {
+                if memo.key == *key {
                     tile_retry::want(world, RequestKind::Vector, &self.requested);
                     release_unwanted_tiles(world, &self.requested);
                     update_loose_covering_cache(
@@ -154,43 +156,64 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
             || (!renderer.settings.terrain_drape_mode.is_procedural_relief() && drapes.is_empty());
         let magnifies = derived.depends_on_overscaling;
 
-        let (view_tiles_and_level, tight_covering, memo_computed) = if let Some(multi) = &multi {
-            (
-                Some((multi.vector_tiles.clone(), multi.max_view_level)),
-                false,
-                None,
-            )
-        } else if !needs_view_tiles {
-            // Terrain drapes drive vector requests via `drapes`/`prefetch`; skip `view_region`
-            // without overwriting `FrameLooseCovering.view_tiles`.
-            (
-                Some((Vec::new(), u8::from(visible_level))),
-                request_padding == ViewStatePadding::Tight,
-                None,
-            )
-        } else {
-            let computed = match self
-                .memo
-                .as_ref()
-                .filter(|memo| key.as_ref() == Some(&memo.key))
-            {
-                Some(memo) => memo.computed.clone(),
-                None => view_region_for_projection(
+        let (view_tiles_and_level, tight_covering, memo_computed, globe_anchor) =
+            if let Some(multi) = &multi {
+                (
+                    Some((
+                        Arc::from(multi.vector_tiles.as_slice()),
+                        multi.max_view_level,
+                    )),
+                    false,
+                    None,
+                    None,
+                )
+            } else if !needs_view_tiles {
+                // Terrain drapes drive vector requests via `drapes`/`prefetch`; skip `view_region`
+                // without overwriting `FrameLooseCovering.view_tiles`.
+                (
+                    Some((Arc::from([]), u8::from(visible_level))),
+                    request_padding == ViewStatePadding::Tight,
+                    None,
+                    None,
+                )
+            } else {
+                let resolved = resolve_view_tiles(
+                    self.memo.as_ref(),
+                    key.as_ref(),
+                    settled_unchanged,
                     style,
                     view_state,
                     world,
                     visible_level,
                     request_padding,
-                )?
-                .map(|region| (region.iter().collect::<Vec<_>>(), u8::from(visible_level))),
+                    renderer.settings.tight_tile_requests,
+                )?;
+                let (computed, next_anchor) = match resolved {
+                    ResolvedViewTiles::SettledReuse => {
+                        let cached = self.memo.as_ref().and_then(|memo| memo.computed.as_ref());
+                        tile_retry::want(world, RequestKind::Vector, &self.requested);
+                        release_unwanted_tiles(world, &self.requested);
+                        update_loose_covering_cache(world, cached, request_padding, visible_level);
+                        return Ok(());
+                    }
+                    ResolvedViewTiles::Computed {
+                        computed,
+                        globe_anchor,
+                    } => (computed, globe_anchor),
+                };
+                update_loose_covering_cache(
+                    world,
+                    computed.as_ref(),
+                    request_padding,
+                    visible_level,
+                );
+                (
+                    computed.clone(),
+                    request_padding == ViewStatePadding::Tight,
+                    computed,
+                    next_anchor,
+                )
             };
-            update_loose_covering_cache(world, computed.as_ref(), request_padding, visible_level);
-            (
-                computed.clone(),
-                request_padding == ViewStatePadding::Tight,
-                computed,
-            )
-        };
 
         // Tile arrivals, eviction and a settling eye can change the covering without motion.
         if let Some((view_tiles, level)) = view_tiles_and_level {
@@ -226,7 +249,7 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                 .into_iter()
                 .chain(drapes.iter().copied())
                 .chain(coarse_fallbacks)
-                .chain(view_tiles.into_iter().filter(|_| needs_view_tiles))
+                .chain(view_tiles.iter().copied().filter(|_| needs_view_tiles))
                 .chain(prefetch.iter().copied())
                 .chain(lookahead_fallbacks)
             {
@@ -319,6 +342,7 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                 self.memo = Some(RequestMemo {
                     key,
                     computed: memo_computed,
+                    globe_anchor,
                     drapes,
                     prefetch,
                     vector_evictions,

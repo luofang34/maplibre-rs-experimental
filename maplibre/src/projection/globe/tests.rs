@@ -230,3 +230,16 @@ fn the_globe_preset_is_the_implementation_s_expression_and_the_documented_one_st
         "the preset is written back as its name, not expanded"
     );
 }
+
+#[test]
+fn extreme_mercator_y_and_polar_zoom_interpolation_stay_finite() {
+    let north = super::project_tile_coordinates_to_unit_sphere(0, 0, 0, 2048.0, -50_000.0);
+    let south = super::project_tile_coordinates_to_unit_sphere(0, 0, 0, 2048.0, 50_000.0);
+    assert!(north.x.is_finite() && north.y.is_finite() && north.z.is_finite());
+    assert!(south.x.is_finite() && south.y.is_finite() && south.z.is_finite());
+    assert!(circumference_ratio_at_mercator_y(-50.0).is_finite());
+    assert!(circumference_ratio_at_mercator_y(50.0).is_finite());
+    assert!(globe_zoom_adjustment(-95.0, 95.0).is_finite());
+    let polar_interp = interpolate_lat_lon(LatLon::new(90.0, 0.0), 10.0, 0.0001, 0.5);
+    assert!(polar_interp.latitude.is_finite() && polar_interp.longitude.is_finite());
+}

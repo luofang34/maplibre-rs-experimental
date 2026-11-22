@@ -46,11 +46,12 @@ pub(super) fn circle_hit(
     point: Point<f64>,
     (tile, candidate): (&QueryTile, &Candidate),
     (paint, properties): (&CirclePaint, &FeatureProperties),
-    (screen, world, resolved, terrain_index): (
+    (screen, world, resolved, terrain_index, whole_visible_hemisphere): (
         ScreenQuery,
         &World,
         &ResolvedFrameView,
         Option<&TerrainCoverageIndex>,
+        bool,
     ),
 ) -> bool {
     let size = size_pixels(paint, properties, resolved.zoom.value());
@@ -78,12 +79,21 @@ pub(super) fn circle_hit(
                 CirclePitchScale::Map => 1.0,
                 CirclePitchScale::Viewport => w / camera,
             };
+            if whole_visible_hemisphere || resolved.globe_transition() > 0.0 {
+                return super::globe::circle_map_screen_hit(
+                    world_pt,
+                    ground,
+                    size * scale,
+                    centre,
+                    (screen, world, resolved, terrain_index),
+                );
+            }
             let Some(footprint) = &tile.footprint else {
                 return false;
             };
             let moved = candidate
                 .translate
-                .map(|pixels| pixels * tile.units_per_pixel);
+                .map(|pixels| pixels / tile.world_per_unit);
             let drawn = Point::new(point.x() + moved[0], point.y() + moved[1]);
             footprint.reaches(drawn, size * tile.units_per_pixel * scale)
         }
@@ -96,11 +106,12 @@ pub(super) fn geometry_hit(
     geometry: &crate::io::geometry_index::ExactGeometry<f64>,
     (tile, candidate): (&QueryTile, &Candidate),
     (paint, properties): (&CirclePaint, &FeatureProperties),
-    (screen, world, resolved, terrain_index): (
+    (screen, world, resolved, terrain_index, whole_visible_hemisphere): (
         ScreenQuery,
         &World,
         &ResolvedFrameView,
         Option<&TerrainCoverageIndex>,
+        bool,
     ),
 ) -> bool {
     use crate::io::geometry_index::ExactGeometry;
@@ -109,7 +120,13 @@ pub(super) fn geometry_hit(
             point,
             (tile, candidate),
             (paint, properties),
-            (screen, world, resolved, terrain_index),
+            (
+                screen,
+                world,
+                resolved,
+                terrain_index,
+                whole_visible_hemisphere,
+            ),
         )
     };
     match geometry {
@@ -124,7 +141,7 @@ pub(super) fn geometry_hit(
 /// The specification's default `heatmap-radius`.
 const DEFAULT_HEATMAP_RADIUS: f64 = 30.0;
 
-fn heatmap_radius(
+pub(super) fn heatmap_radius(
     paint: &crate::style::heatmap::HeatmapPaint,
     properties: &FeatureProperties,
     zoom: f64,

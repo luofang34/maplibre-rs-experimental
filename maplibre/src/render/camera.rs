@@ -197,10 +197,14 @@ impl Camera {
         let max_x = max_m.x * self.world_size;
         let min_y = min_m.y * self.world_size;
         let max_y = max_m.y * self.world_size;
-        Point2::new(
-            position.x.clamp(min_x, max_x),
-            position.y.clamp(min_y, max_y),
-        )
+        let x = if (max_x - min_x) < self.world_size && (max_x > self.world_size || min_x < 0.0) {
+            let mid_x = 0.5 * (min_x + max_x);
+            let shift = ((mid_x - position.x) / self.world_size).round() * self.world_size;
+            (position.x + shift).clamp(min_x, max_x)
+        } else {
+            position.x.clamp(min_x, max_x)
+        };
+        Point2::new(x, position.y.clamp(min_y, max_y))
     }
 
     /// Returns the largest pitch the camera accepts.

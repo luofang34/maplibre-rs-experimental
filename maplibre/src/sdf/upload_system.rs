@@ -83,8 +83,13 @@ pub fn upload_system(
     {
         return Ok(());
     }
-    if !super::style_has_symbol_layers(style) && super::symbol_pool_empty(world) {
-        return Ok(());
+    if !super::style_has_symbol_layers(style) {
+        if let Some(textures) = world.resources.get_mut::<SymbolTextures>() {
+            textures.clear();
+        }
+        if super::symbol_pool_empty(world) {
+            return Ok(());
+        }
     }
     let visible = super::covering::upload_tiles(world);
     world.resources.get_or_init_mut::<FrameUploads>();
@@ -109,7 +114,7 @@ pub fn upload_system(
         return Err(SystemError::Dependencies);
     };
 
-    textures.retain(&world.tiles);
+    textures.retain(&world.tiles, style);
     let zoom = view_state.style_zoom().level();
 
     let (deferred, needs_refetch, needs_atlas_settle) = upload_symbol_layer(

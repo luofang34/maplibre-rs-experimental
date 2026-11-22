@@ -17,7 +17,7 @@ struct GlobeMeshPrepareMemo {
     flat_prepared: bool,
     flat_with_raster: bool,
     needs_raster_mesh: Option<(u64, bool)>,
-    last_globe: Option<(u64, bool, Vec<crate::coords::WorldTileCoords>)>,
+    last_globe: Option<(u64, bool, bool, Vec<crate::coords::WorldTileCoords>)>,
 }
 
 fn globe_tiles_match(
@@ -79,24 +79,10 @@ pub fn upload_system(
                 )
         })
     };
-    let usages: &[(TileMeshUsage, bool)] = if needs_raster_mesh {
-        &[
-            (TileMeshUsage::Stencil, true),
-            (TileMeshUsage::Stencil, false),
-            (TileMeshUsage::Raster, true),
-            (TileMeshUsage::Raster, false),
-        ]
-    } else {
-        &[
-            (TileMeshUsage::Stencil, true),
-            (TileMeshUsage::Stencil, false),
-        ]
-    };
-
     let uses_globe = projection_data.transition > 0.0;
     world.resources.get_or_init_mut::<GlobeMeshPrepareMemo>();
 
-    let (topology_gen, cached_last_globe) = {
+    let (topology_gen, cached_last_globe, visible_tiles, needs_stencil_borders) = {
         let Some((
             Initialized(tile_view_pattern),
             Initialized(projection_resources),
@@ -127,9 +113,19 @@ pub fn upload_system(
         memo.needs_raster_mesh = Some((style_rev, needs_raster_mesh));
 
         if !uses_globe {
+            memo.last_globe = None;
             if !(memo.flat_prepared && (!needs_raster_mesh || memo.flat_with_raster)) {
                 let coords = crate::coords::WorldTileCoords::default();
-                for &(usage, generate_borders) in usages {
+                let flat_usages: &[(TileMeshUsage, bool)] = if needs_raster_mesh {
+                    &[
+                        (TileMeshUsage::Stencil, false),
+                        (TileMeshUsage::Raster, true),
+                        (TileMeshUsage::Raster, false),
+                    ]
+                } else {
+                    &[(TileMeshUsage::Stencil, false)]
+                };
+                for &(usage, generate_borders) in flat_usages {
                     tile_mesh_cache
                         .prepare(device, queue, coords, usage, generate_borders)
                         .map_err(|error| {
@@ -139,31 +135,73 @@ pub fn upload_system(
                 }
                 memo.flat_prepared = true;
                 memo.flat_with_raster |= needs_raster_mesh;
-                memo.last_globe = None;
             }
             return Ok(());
         }
 
+        let mut visible_tiles = Vec::new();
+        let mut min_z = u8::MAX;
+        let mut max_z = 0_u8;
+        for view_tile in tile_view_pattern.iter() {
+            view_tile.render(|shape| {
+                let coords = shape.coords();
+                let z = u8::from(coords.z);
+                min_z = min_z.min(z);
+                max_z = max_z.max(z);
+                visible_tiles.push(coords);
+            });
+        }
+        let needs_stencil_borders = needs_raster_mesh
+            || crate::render::projection::needs_vector_stencil_borders(
+                projection_data.transition,
+                view_state.zoom().value(),
+                view_state.has_external_view(),
+                min_z,
+                max_z,
+            );
         (
             tile_view_pattern.topology_generation(),
             memo.last_globe.clone(),
+            visible_tiles,
+            needs_stencil_borders,
         )
     };
 
-    let globe_unchanged = cached_last_globe.as_ref().is_some_and(|(tg, raster, bg)| {
-        *tg == topology_gen && (*raster || !needs_raster_mesh) && globe_tiles_match(world, bg)
-    });
+    let globe_unchanged = cached_last_globe
+        .as_ref()
+        .is_some_and(|(tg, raster, borders, bg)| {
+            *tg == topology_gen
+                && (*raster || !needs_raster_mesh)
+                && (*borders || !needs_stencil_borders)
+                && globe_tiles_match(world, bg)
+        });
     if globe_unchanged {
         return Ok(());
     }
 
+    let usages: &[(TileMeshUsage, bool)] = match (needs_raster_mesh, needs_stencil_borders) {
+        (true, true) => &[
+            (TileMeshUsage::Stencil, true),
+            (TileMeshUsage::Stencil, false),
+            (TileMeshUsage::Raster, true),
+            (TileMeshUsage::Raster, false),
+        ],
+        (true, false) => &[
+            (TileMeshUsage::Stencil, false),
+            (TileMeshUsage::Raster, true),
+            (TileMeshUsage::Raster, false),
+        ],
+        (false, true) => &[
+            (TileMeshUsage::Stencil, true),
+            (TileMeshUsage::Stencil, false),
+        ],
+        (false, false) => &[(TileMeshUsage::Stencil, false)],
+    };
+
     let background_tiles = crate::background::queue_system::globe_tiles(world);
-    let Some((Initialized(tile_view_pattern), tile_mesh_cache, memo)) =
-        world.resources.query_mut::<(
-            &Eventually<WgpuTileViewPattern>,
-            &mut GlobeTileMeshCache,
-            &mut GlobeMeshPrepareMemo,
-        )>()
+    let Some((tile_mesh_cache, memo)) = world
+        .resources
+        .query_mut::<(&mut GlobeTileMeshCache, &mut GlobeMeshPrepareMemo)>()
     else {
         return Err(SystemError::Dependencies);
     };
@@ -174,10 +212,6 @@ pub fn upload_system(
                 tracing::error!(%error, %coords, "unable to prepare globe background mesh");
                 SystemError::Setup
             })?;
-    }
-    let mut visible_tiles = Vec::new();
-    for view_tile in tile_view_pattern.iter() {
-        view_tile.render(|shape| visible_tiles.push(shape.coords()));
     }
     for coords in visible_tiles {
         for &(usage, generate_borders) in usages {
@@ -191,9 +225,13 @@ pub fn upload_system(
     }
     let with_raster = cached_last_globe
         .as_ref()
-        .is_some_and(|(tg, raster, _)| *tg == topology_gen && *raster)
+        .is_some_and(|(tg, raster, _, _)| *tg == topology_gen && *raster)
         || needs_raster_mesh;
-    memo.last_globe = Some((topology_gen, with_raster, background_tiles));
+    let with_borders = cached_last_globe
+        .as_ref()
+        .is_some_and(|(tg, _, borders, _)| *tg == topology_gen && *borders)
+        || needs_stencil_borders;
+    memo.last_globe = Some((topology_gen, with_raster, with_borders, background_tiles));
 
     Ok(())
 }

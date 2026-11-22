@@ -30,6 +30,12 @@ pub struct MapContext {
 }
 
 impl MapContext {
+    /// Configures symbol collision cadence and fade duration for subsequent frames.
+    pub fn set_placement_config(&mut self, config: crate::sdf::PlacementConfig) {
+        self.world.resources.insert(config);
+        crate::render::frame_signals::mark_dirty(&mut self.world);
+    }
+
     /// The time of the frame being rendered, as the host wrote it; zero until it does.
     pub fn frame_time(&self) -> std::time::Duration {
         crate::render::frame_input::frame_time(&self.world)

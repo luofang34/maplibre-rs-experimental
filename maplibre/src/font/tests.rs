@@ -1,4 +1,7 @@
+mod cjk_sdf;
+mod shaping;
 pub(crate) mod synth_font;
+mod woff;
 
 use synth_font::{build_synthetic_sfnt, encode_woff1, encode_woff2_transformed};
 

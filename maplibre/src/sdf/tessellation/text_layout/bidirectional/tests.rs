@@ -68,3 +68,56 @@ fn bidirectional_controls_are_not_text() {
         assert!(!is_bidi_control(text), "{text:?}");
     }
 }
+
+#[test]
+fn bidi_controls_guide_reordering_before_being_stripped() {
+    // RLO (U+202E) + "abc" + PDF (U+202C) must reverse "abc" -> "cba" before stripping controls.
+    let mut chars: Vec<char> = "\u{202E}abc\u{202C}".chars().collect();
+    let mut tags: Vec<usize> = (0..chars.len()).collect();
+    let lines = reorder_and_strip_controls(
+        &mut chars,
+        &mut tags,
+        vec![std::ops::Range { start: 0, end: 5 }],
+    );
+    assert_eq!(chars.iter().collect::<String>(), "cba");
+    assert_eq!(tags, [3, 2, 1]);
+    assert_eq!(lines, [std::ops::Range { start: 0, end: 3 }]);
+}
+
+#[test]
+fn rtl_runs_mirror_paired_brackets_per_uax9_l4() {
+    // Hebrew letters wrapping "(abc)" in RTL context mirror parentheses at odd level.
+    assert_eq!(reordered("א(ב)ג"), "ג(ב)א");
+    assert_eq!(reordered("א[ב]ג"), "ג[ב]א");
+    assert_eq!(reordered("א(12)ב"), "ב(12)א");
+}
+
+#[test]
+fn combining_marks_stay_after_their_base_when_rtl_reverses() {
+    // Arabic Ba + Fatha ('\u{064E}'), then Ta ('\u{062A}'): visual order is [Ta, Ba, Fatha].
+    let text = "\u{0628}\u{064E}\u{062A}";
+    assert_eq!(reordered(text), "\u{062A}\u{0628}\u{064E}");
+}
+
+#[test]
+fn paragraph_base_level_persists_across_wrapped_lines() {
+    // RTL paragraph wrapped between two LTR runs keeps paragraph base level across line break.
+    let text = "אב ab cd";
+    let mut chars: Vec<char> = text.chars().collect();
+    let mut tags: Vec<usize> = (0..chars.len()).collect();
+    let wrapped = vec![0..5, 6..chars.len()];
+    reorder_lines(&mut chars, &mut tags, &wrapped);
+    // Line 1 ("אב ab") reads RTL as "ab בא"; line 2 ("cd") keeps LTR order within its run.
+    let line1: String = chars[0..5].iter().collect();
+    let line2: String = chars[6..8].iter().collect();
+    assert_eq!(line1, "ab בא");
+    assert_eq!(line2, "cd");
+
+    // Soft-wrapped isolate across lines continues active override across the wrap boundary.
+    let iso = "\u{202E}abcd\u{202C}";
+    let mut ic: Vec<char> = iso.chars().collect();
+    let mut it: Vec<usize> = (0..ic.len()).collect();
+    let out_lines = reorder_and_strip_controls(&mut ic, &mut it, vec![0..3, 3..6]);
+    assert_eq!(out_lines, [0..2, 2..4]);
+    assert_eq!(ic.iter().collect::<String>(), "badc");
+}

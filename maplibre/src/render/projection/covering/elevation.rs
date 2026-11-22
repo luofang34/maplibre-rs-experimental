@@ -40,7 +40,7 @@ pub(crate) fn style_elevated_headroom_meters(style: &Style) -> f64 {
     headroom
 }
 
-struct HeadroomTileElevation<P> {
+pub(super) struct HeadroomTileElevation<P> {
     inner: P,
     headroom_meters: f64,
 }
@@ -53,6 +53,21 @@ impl<P: TileElevationProvider> TileElevationProvider for HeadroomTileElevation<P
     }
 }
 
+/// Stack-allocated tile elevation provider avoiding a heap `Box` on every covering walk.
+pub(super) enum TileElevation<'a> {
+    Indexed(HeadroomTileElevation<IndexedTileElevation<'a>>),
+    Constant(TileElevationRange),
+}
+
+impl TileElevationProvider for TileElevation<'_> {
+    fn elevation_range(&self, tile: TileCoords) -> TileElevationRange {
+        match self {
+            Self::Indexed(indexed) => indexed.elevation_range(tile),
+            Self::Constant(range) => *range,
+        }
+    }
+}
+
 /// Culling bounds per tile: the loaded DEM's range where terrain has one, else `fallback`,
 /// widened upward by `headroom_meters` when the style renders elevated 3D volumes or lines.
 pub(super) fn tile_elevation<'a>(
@@ -60,13 +75,13 @@ pub(super) fn tile_elevation<'a>(
     world: &'a World,
     fallback: TileElevationRange,
     headroom_meters: f64,
-) -> Box<dyn TileElevationProvider + 'a> {
+) -> TileElevation<'a> {
     match world.resources.get::<TerrainCoverageIndex>() {
-        Some(index) if style.terrain.is_some() => Box::new(HeadroomTileElevation {
+        Some(index) if style.terrain.is_some() => TileElevation::Indexed(HeadroomTileElevation {
             inner: IndexedTileElevation { index, fallback },
             headroom_meters,
         }),
-        _ => Box::new(TileElevationRange {
+        _ => TileElevation::Constant(TileElevationRange {
             min_meters: fallback.min_meters,
             max_meters: fallback.max_meters + headroom_meters,
         }),

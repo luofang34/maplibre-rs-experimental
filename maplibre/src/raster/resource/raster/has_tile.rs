@@ -11,15 +11,27 @@ impl HasTile for RasterResources {
         &self,
         source: &RasterSourceId,
         coords: WorldTileCoords,
-        _world: &World,
+        world: &World,
     ) -> bool {
         self.get_bound_texture(source, &coords).is_some()
+            || world
+                .tiles
+                .query::<&crate::raster::RasterLayersDataComponent>(coords)
+                .is_some_and(|data| data.has_empty_source(source))
     }
 
-    fn has_tile(&self, coords: WorldTileCoords, _world: &World) -> bool {
+    fn has_tile(&self, coords: WorldTileCoords, world: &World) -> bool {
         self.bound_textures
             .values()
             .any(|textures| textures.contains(coords))
+            || world
+                .tiles
+                .query::<&crate::raster::RasterLayersDataComponent>(coords)
+                .is_some_and(|data| {
+                    data.layers
+                        .iter()
+                        .any(|layer| matches!(layer, crate::raster::RasterLayerData::Empty(_)))
+                })
     }
 
     fn nearest_source_ancestor_candidate(

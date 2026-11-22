@@ -240,6 +240,11 @@ impl FormattedText {
     pub(crate) fn to_json(&self) -> serde_json::Value {
         let TextField(text, sections) = &self.0;
         if sections.is_empty() {
+            let needs_format_wrap = crate::style::expression::convert_token_string(text).is_array()
+                || text.starts_with(crate::style::expression::FORMATTED_START);
+            if needs_format_wrap {
+                return serde_json::json!(["format", text, {}]);
+            }
             return serde_json::Value::String(text.clone());
         }
         let mut format = vec![serde_json::json!("format")];
@@ -299,9 +304,6 @@ pub(super) fn parse_font_list(raw: &str) -> Option<String> {
 /// serialized and parsed again keeps its sections and images.
 impl Serialize for FormattedText {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        if self.0 .1.is_empty() {
-            return serializer.serialize_str(&self.0 .0);
-        }
         self.to_json().serialize(serializer)
     }
 }

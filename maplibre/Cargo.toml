@@ -188,6 +188,22 @@ required-features = ["headless"]
 name = "web_host_gpu_render"
 required-features = ["headless", "raster"]
 
+[[test]]
+name = "empty_tile_test"
+required-features = ["headless", "raster", "thread-safe-futures"]
+
+[[test]]
+name = "gtest_symbol_rendering"
+required-features = ["headless", "raster", "thread-safe-futures"]
+
+[[test]]
+name = "globe_query_conformance"
+required-features = ["headless", "raster", "thread-safe-futures"]
+
+[[test]]
+name = "gpu_resource_lifecycle"
+required-features = ["headless", "raster", "thread-safe-futures"]
+
 [build-dependencies]
 maplibre-build-tools = { path = "../maplibre-build-tools", version = "0.1.0" }
 prost-build = "0.14.4"

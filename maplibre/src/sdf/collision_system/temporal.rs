@@ -118,6 +118,42 @@ impl PlacementHistory {
         self.clock_ms
     }
 
+    /// Keeps states claimed by the most recent placement epoch alive across idle frames that
+    /// intentionally skip running a new placement pass.
+    pub(super) fn touch_active_states(&mut self, now: Duration) {
+        let frame = self.frame;
+        for layer_states in self.states.values_mut() {
+            for states in layer_states.values_mut() {
+                for state in states.iter_mut() {
+                    if state.claimed == frame && now > state.last_seen {
+                        state.last_seen = now;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Rebases the monotonic millisecond fade clock back to `0.0` once every fade has settled and
+    /// the clock approaches half of the 19-bit GPU `start_ticks` limit (`2_097_148 ms`).
+    pub(super) fn rebase_clock_if_idle(&mut self) -> bool {
+        if self.is_fading() || self.clock_ms < 1_000_000.0 {
+            return false;
+        }
+        self.clock_ms = 0.0;
+        self.fade_until_ms = 0.0;
+        for layer_states in self.states.values_mut() {
+            for states in layer_states.values_mut() {
+                for state in states.iter_mut() {
+                    for ramp in &mut state.ramp {
+                        ramp.start = ramp.target;
+                        ramp.start_time_ms = 0.0;
+                    }
+                }
+            }
+        }
+        true
+    }
+
     pub(super) fn is_fading(&self) -> bool {
         self.fade_duration_ms > 0.0 && self.clock_ms < self.fade_until_ms
     }
@@ -129,7 +165,8 @@ impl PlacementHistory {
         if self.is_fading() {
             self.clock_ms
         } else {
-            self.fade_until_ms + 1.0
+            // +4.0 ms guarantees the shader clock clears any 4 ms `start_ticks` step + rounding.
+            self.fade_until_ms + 4.0
         }
     }
 
@@ -143,9 +180,10 @@ impl PlacementHistory {
         self.advance_clock(now);
         self.frame = self.frame.wrapping_add(1);
         self.repeats.begin();
+        let retention = Duration::from_secs(1).max(fade_duration);
         self.states.retain(|_, layer_states| {
             layer_states.retain(|_, states| {
-                states.retain(|state| now.saturating_sub(state.last_seen) < Duration::from_secs(1));
+                states.retain(|state| now.saturating_sub(state.last_seen) < retention);
                 !states.is_empty()
             });
             !layer_states.is_empty()

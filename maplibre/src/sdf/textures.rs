@@ -42,6 +42,7 @@ pub(super) struct SymbolTextures {
     atlases: rustc_hash::FxHashMap<usize, Weak<TileAtlas>>,
     tile_atlases: rustc_hash::FxHashMap<(WorldTileCoords, usize), Arc<TileAtlas>>,
     bindings: rustc_hash::FxHashMap<(WorldTileCoords, crate::style::StyleLayerId), DrawBinding>,
+    sampler: Option<wgpu::Sampler>,
     /// Tiles whose labels gained an atlas since the last drain.
     bound: Vec<WorldTileCoords>,
 }
@@ -94,10 +95,15 @@ impl SymbolTextures {
         if !self.bound.contains(&key.0) {
             self.bound.push(key.0);
         }
-        if let Some(old) = self
-            .bindings
-            .insert(key, DrawBinding::new(gpu, texture, uniforms, separate_halo))
-        {
+        let sampler = self.sampler.get_or_insert_with(|| {
+            gpu.device.create_sampler(&wgpu::SamplerDescriptor {
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
+            })
+        });
+        let binding = DrawBinding::new(gpu, sampler, texture, uniforms, separate_halo);
+        if let Some(old) = self.bindings.insert(key, binding) {
             gpu.queue.cancel_staged_buffer(&old.buffer);
         }
     }
@@ -138,16 +144,43 @@ impl SymbolTextures {
         self.bindings.get(&(coords, layer))
     }
 
-    pub fn retain(&mut self, tiles: &crate::tcs::tiles::Tiles) {
-        self.bindings.retain(|(coords, _), _| {
-            tiles
-                .query::<&super::SymbolLayersDataComponent>(*coords)
-                .is_some()
+    pub fn clear(&mut self) {
+        self.atlases.clear();
+        self.tile_atlases.clear();
+        self.bindings.clear();
+        self.bound.clear();
+        self.sampler = None;
+    }
+
+    pub fn retain(&mut self, tiles: &crate::tcs::tiles::Tiles, style: &crate::style::Style) {
+        let symbol_layers: rustc_hash::FxHashSet<crate::style::StyleLayerId> = style
+            .layers
+            .iter()
+            .filter(|layer| layer.type_ == "symbol")
+            .map(|layer| crate::style::StyleLayerId::intern(&layer.id))
+            .collect();
+        if symbol_layers.is_empty() {
+            self.clear();
+            return;
+        }
+        self.bindings.retain(|(coords, layer), _| {
+            symbol_layers.contains(layer)
+                && tiles
+                    .query::<&super::SymbolLayersDataComponent>(*coords)
+                    .is_some()
         });
-        self.tile_atlases.retain(|(coords, _), _| {
+        if self.bindings.is_empty() {
+            self.clear();
+            return;
+        }
+        self.tile_atlases.retain(|(coords, _), atlas| {
             tiles
                 .query::<&super::SymbolLayersDataComponent>(*coords)
                 .is_some()
+                && self
+                    .bindings
+                    .iter()
+                    .any(|((c, _), b)| c == coords && Arc::ptr_eq(&b.atlas, atlas))
         });
         self.atlases.retain(|_, atlas| atlas.strong_count() > 0);
     }
@@ -195,6 +228,7 @@ impl TileAtlas {
 impl DrawBinding {
     fn new(
         gpu: &TextureContext<'_>,
+        sampler: &wgpu::Sampler,
         atlas: Arc<TileAtlas>,
         uniforms: SymbolUniforms,
         separate_halo: bool,
@@ -207,11 +241,6 @@ impl DrawBinding {
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             },
         );
-        let sampler = gpu.device.create_sampler(&wgpu::SamplerDescriptor {
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            ..Default::default()
-        });
         let view = atlas.texture.create_view(&Default::default());
         let group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("symbol atlas and paint"),
@@ -223,7 +252,7 @@ impl DrawBinding {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
+                    resource: wgpu::BindingResource::Sampler(sampler),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,

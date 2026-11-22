@@ -1,6 +1,6 @@
 use cgmath::{InnerSpace, Vector3, Vector4};
 
-use super::{super::camera::GlobeCameraState, classify_points, Intersection};
+use super::{super::camera::GlobeCameraState, Intersection};
 
 const CLIP_CORNERS: [[f64; 4]; 8] = [
     [-1.0, 1.0, -1.0, 1.0],
@@ -38,12 +38,22 @@ pub(crate) enum FarPlane {
     ElevatedMeters(u32),
 }
 
+#[derive(Clone, Debug)]
 pub(crate) struct GlobeFrustum {
     points: [Vector3<f64>; 8],
     planes: [Vector4<f64>; 6],
 }
 
 impl GlobeFrustum {
+    #[inline]
+    pub(crate) fn points(&self) -> &[Vector3<f64>; 8] {
+        &self.points
+    }
+
+    #[inline]
+    pub(crate) fn planes(&self) -> &[Vector4<f64>; 6] {
+        &self.planes
+    }
     /// Builds a frustum from eight corners, four on the far plane then four on the near plane,
     /// each set ordered top-left, top-right, bottom-right, bottom-left; every plane is oriented
     /// towards the centroid so the caller's winding does not matter.
@@ -90,21 +100,73 @@ impl GlobeFrustum {
         Self { points, planes }
     }
 
-    pub(crate) fn intersects_cap(
+    pub(crate) fn intersects_cap_with_margin(
         &self,
         cap: &super::super::covering::TileSphericalCap,
+        clipping_plane: Vector4<f64>,
         min_radius: f64,
         max_radius: f64,
-    ) -> Intersection {
-        let mut result = Intersection::Full;
-        for plane in self.planes {
-            match cap.shell_intersects_plane(plane, min_radius, max_radius) {
-                Intersection::None => return Intersection::None,
-                Intersection::Partial => result = Intersection::Partial,
-                Intersection::Full => {}
+    ) -> (Intersection, f64) {
+        let mut any_partial = false;
+        let mut full_margin = f64::INFINITY;
+        let mut partial_margin = f64::INFINITY;
+        for plane in self
+            .planes
+            .into_iter()
+            .chain(std::iter::once(clipping_plane))
+        {
+            let (class, max_val, min_val) =
+                cap.shell_intersects_plane_with_margin(plane, min_radius, max_radius);
+            match class {
+                Intersection::None => return (Intersection::None, (-max_val).max(0.0)),
+                Intersection::Partial => {
+                    any_partial = true;
+                    partial_margin = partial_margin.min(max_val.min(-min_val).max(0.0));
+                }
+                Intersection::Full => {
+                    full_margin = full_margin.min(min_val.max(0.0));
+                }
             }
         }
-        result
+        if any_partial {
+            (Intersection::Partial, partial_margin)
+        } else {
+            (Intersection::Full, full_margin)
+        }
+    }
+
+    pub(crate) fn intersects_volume_with_margin(
+        &self,
+        points: &[Vector3<f64>],
+        planes: &[Vector4<f64>; 6],
+    ) -> (Intersection, f64, f64) {
+        let mut any_partial = false;
+        let mut full_margin = f64::INFINITY;
+        let mut partial_margin = f64::INFINITY;
+        for plane in self.planes {
+            let (min_dot, max_dot) = plane_extrema(points, plane);
+            if max_dot < 0.0 {
+                return (Intersection::None, -max_dot, f64::INFINITY);
+            }
+            if min_dot >= 0.0 {
+                full_margin = full_margin.min(min_dot);
+            } else {
+                any_partial = true;
+                partial_margin = partial_margin.min(max_dot.min(-min_dot));
+            }
+        }
+        if !any_partial {
+            return (Intersection::Full, full_margin, f64::INFINITY);
+        }
+        let mut corner_margin = f64::INFINITY;
+        for plane in *planes {
+            let (_, max_dot) = plane_extrema(&self.points, plane);
+            if max_dot < 0.0 {
+                return (Intersection::None, partial_margin, -max_dot);
+            }
+            corner_margin = corner_margin.min(max_dot);
+        }
+        (Intersection::Partial, partial_margin, corner_margin)
     }
 
     pub(crate) fn intersects_volume(
@@ -112,28 +174,19 @@ impl GlobeFrustum {
         points: &[Vector3<f64>],
         planes: &[Vector4<f64>; 6],
     ) -> Intersection {
-        let mut result = Intersection::Full;
-        for plane in self.planes {
-            let classification = classify_points(points, |point| plane.dot(point.extend(1.0)));
-            if classification == Intersection::None {
-                return Intersection::None;
-            }
-            if classification == Intersection::Partial {
-                result = Intersection::Partial;
-            }
-        }
-        if result == Intersection::Full {
-            return result;
-        }
-        for plane in *planes {
-            if classify_points(&self.points, |point| plane.dot(point.extend(1.0)))
-                == Intersection::None
-            {
-                return Intersection::None;
-            }
-        }
-        Intersection::Partial
+        self.intersects_volume_with_margin(points, planes).0
     }
+}
+
+pub(crate) fn plane_extrema(points: &[Vector3<f64>], plane: Vector4<f64>) -> (f64, f64) {
+    let mut min_dot = f64::INFINITY;
+    let mut max_dot = f64::NEG_INFINITY;
+    for point in points {
+        let d = plane.dot(point.extend(1.0));
+        min_dot = min_dot.min(d);
+        max_dot = max_dot.max(d);
+    }
+    (min_dot, max_dot)
 }
 
 fn plane_from_points(points: [Vector3<f64>; 8], index: usize) -> Vector4<f64> {

@@ -84,6 +84,12 @@ pub enum GlobeCameraError {
         /// Invalid world size in pixels.
         world_size: f64,
     },
+    /// Explicitly supplied globe radius in pixels must be finite and positive.
+    #[error("globe radius pixels must be finite and positive, got {radius_pixels}")]
+    InvalidRadiusPixels {
+        /// Invalid radius in pixels.
+        radius_pixels: f64,
+    },
     /// A camera angle or center component must be finite.
     #[error("{name} must be finite, got {degrees}")]
     InvalidAngle {

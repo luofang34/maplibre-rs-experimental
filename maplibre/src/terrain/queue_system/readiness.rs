@@ -52,5 +52,5 @@ pub(super) fn ready(
             })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "raster"))]
 mod tests;

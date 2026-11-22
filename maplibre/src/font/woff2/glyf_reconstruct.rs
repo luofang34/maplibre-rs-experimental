@@ -1,9 +1,9 @@
 //! Reconstructs TrueType `glyf`, `loca`, and transformed `hmtx` tables from WOFF2 substreams.
 
-use super::{Cursor, FontError};
+use super::{super::container::MAX_DECOMPRESSED_FONT_BYTES, Cursor, FontError};
 
 /// Output of reconstructing a WOFF2 transformed `glyf` stream.
-pub(super) struct ReconstructedGlyf {
+pub(in crate::font) struct ReconstructedGlyf {
     pub glyf: Vec<u8>,
     pub loca: Vec<u8>,
     pub index_format: u16,
@@ -146,12 +146,17 @@ fn scan_composite_components<'a>(
 }
 
 /// Reconstructs TrueType `glyf` and `loca` tables from a WOFF2 transformed `glyf` stream.
-pub(super) fn reconstruct_glyf_loca(stream: &[u8]) -> Result<ReconstructedGlyf, FontError> {
+pub(in crate::font) fn reconstruct_glyf_loca(
+    stream: &[u8],
+) -> Result<ReconstructedGlyf, FontError> {
     let mut header = Cursor::new(stream);
     let _reserved = header.read_u16_be()?;
     let option_flags = header.read_u16_be()?;
     let num_glyphs = header.read_u16_be()? as usize;
     let mut index_format = header.read_u16_be()?;
+    if index_format > 1 {
+        return Err(FontError::InvalidContainer("WOFF2 invalid indexFormat"));
+    }
     let n_contour_size = header.read_u32_be()? as usize;
     let n_points_size = header.read_u32_be()? as usize;
     let flag_size = header.read_u32_be()? as usize;
@@ -189,6 +194,9 @@ pub(super) fn reconstruct_glyf_loca(stream: &[u8]) -> Result<ReconstructedGlyf, 
     for (glyph_idx, x_min_slot) in x_mins.iter_mut().enumerate() {
         offsets.push(glyf.len());
         let contour_count = n_contours.read_i16_be()?;
+        if contour_count < -1 {
+            return Err(FontError::InvalidContainer("WOFF2 invalid contour count"));
+        }
         let explicit_bbox = has_bit(bbox_bitmap, glyph_idx);
 
         if contour_count == 0 {
@@ -206,9 +214,14 @@ pub(super) fn reconstruct_glyf_loca(stream: &[u8]) -> Result<ReconstructedGlyf, 
             let mut total_points = 0usize;
             for _ in 0..contours {
                 let pts = usize::from(n_points.read_255_ushort()?);
+                if pts == 0 {
+                    return Err(FontError::InvalidContainer(
+                        "WOFF2 zero-point contour in simple glyph",
+                    ));
+                }
                 total_points = total_points
                     .checked_add(pts)
-                    .filter(|&sum| sum > 0 && sum <= u16::MAX as usize + 1)
+                    .filter(|&sum| sum <= u16::MAX as usize + 1)
                     .ok_or(FontError::InvalidContainer(
                         "WOFF2 contour point count invalid",
                     ))?;
@@ -298,6 +311,11 @@ pub(super) fn reconstruct_glyf_loca(stream: &[u8]) -> Result<ReconstructedGlyf, 
 
         // Pad each glyph to a 4-byte boundary so short `loca` (`offset / 2`) stays exact.
         let padded = (glyf.len() + 3) & !3;
+        if padded > MAX_DECOMPRESSED_FONT_BYTES {
+            return Err(FontError::InvalidContainer(
+                "WOFF2 reconstructed glyf exceeds size limit",
+            ));
+        }
         glyf.resize(padded, 0);
     }
     offsets.push(glyf.len());
@@ -330,7 +348,7 @@ pub(super) fn reconstruct_glyf_loca(stream: &[u8]) -> Result<ReconstructedGlyf, 
 }
 
 /// Reconstructs a WOFF2 transformed `hmtx` table (transform version 1, W3C WOFF 2.0 Section 5.4).
-pub(super) fn reconstruct_hmtx(
+pub(in crate::font) fn reconstruct_hmtx(
     stream: &[u8],
     hhea: Option<&[u8]>,
     maxp: Option<&[u8]>,
@@ -348,6 +366,11 @@ pub(super) fn reconstruct_hmtx(
         ))?;
     let num_h_metrics = usize::from(u16::from_be_bytes([hhea[34], hhea[35]]));
     let num_glyphs = usize::from(u16::from_be_bytes([maxp[4], maxp[5]]));
+    if num_h_metrics == 0 {
+        return Err(FontError::InvalidContainer(
+            "WOFF2 hmtx numOfHMetrics is zero",
+        ));
+    }
     if num_h_metrics > num_glyphs {
         return Err(FontError::InvalidContainer(
             "WOFF2 hmtx numOfHMetrics > numGlyphs",
@@ -356,11 +379,16 @@ pub(super) fn reconstruct_hmtx(
 
     let mut cur = Cursor::new(stream);
     let flags = cur.read_u8()?;
-    if (flags & 0xFC) != 0 {
-        return Err(FontError::InvalidContainer("WOFF2 hmtx reserved flags set"));
+    if flags == 0 || (flags & 0xFC) != 0 {
+        return Err(FontError::InvalidContainer("WOFF2 hmtx invalid flags"));
     }
     let omit_proportional_lsb = (flags & 0x01) != 0;
     let omit_monospace_lsb = (flags & 0x02) != 0;
+    if (omit_proportional_lsb || omit_monospace_lsb) && x_mins.len() != num_glyphs {
+        return Err(FontError::InvalidContainer(
+            "WOFF2 hmtx omitted LSBs require reconstructed glyf x_mins",
+        ));
+    }
 
     let mut advances = Vec::with_capacity(num_h_metrics);
     for _ in 0..num_h_metrics {

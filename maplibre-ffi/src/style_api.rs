@@ -228,11 +228,29 @@ pub unsafe extern "C" fn maplibre_map_add_image_rgba8(
         let map_ref = unsafe { borrow_map_mut(map) }?;
         // SAFETY: Validated against null; caller guarantees NUL-terminated string.
         let id = unsafe { required_c_str(image_id, "image_id") }?;
+        if width == 0 || height == 0 {
+            return Err(FfiError::InvalidSize { width, height });
+        }
+        if !pixel_ratio.is_finite() {
+            return Err(FfiError::InvalidNumber("pixel_ratio"));
+        }
+        let expected = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|px| px.checked_mul(4))
+            .filter(|&n| n <= isize::MAX as usize)
+            .ok_or(FfiError::InvalidSize { width, height })?;
         if rgba.is_null() {
             return Err(FfiError::NullPointer("rgba"));
         }
-        // SAFETY: `rgba` is non-null and caller guarantees `rgba_len` readable bytes.
-        let bytes = unsafe { std::slice::from_raw_parts(rgba, rgba_len) };
+        if rgba_len != expected {
+            return Err(FfiError::InvalidBufferLength {
+                expected,
+                actual: rgba_len,
+            });
+        }
+        // SAFETY: `rgba` is non-null, `expected == rgba_len <= isize::MAX`, and caller guarantees
+        // `rgba_len` readable bytes.
+        let bytes = unsafe { std::slice::from_raw_parts(rgba, expected) };
         map_ref
             .engine
             .add_image_rgba8(id, width, height, bytes, pixel_ratio, sdf)
