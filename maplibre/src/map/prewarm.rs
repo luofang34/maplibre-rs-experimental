@@ -72,8 +72,12 @@ pub(super) async fn prepare_io_and_prewarm<
     source_client: &SourceClient<H>,
     apc: &A,
 ) -> PrewarmedRequests {
+    #[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
     crate::sdf::assets::spawn_style_symbol_prefetch(source_client.clone(), style);
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+    apc.warm_style(style);
     resolve_tile_json_sources(style, source_client).await;
+    #[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
     apc.warm_style(style);
     prewarm_initial_tiles(style, view_state, scale_factor, request_attempts, apc)
 }

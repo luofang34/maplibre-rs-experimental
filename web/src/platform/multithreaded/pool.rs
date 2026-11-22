@@ -29,7 +29,7 @@ type Execute = Box<dyn (FnOnce() -> PinnedFuture) + Send>;
 const MAX_RECYCLED_WORKERS: usize = 8;
 /// Concurrent async tasks claimed per worker so network `fetch` I/O overlaps while excess jobs
 /// stay in [`SharedWorkQueue`] for whichever worker finishes its CPU work first to steal.
-const PER_WORKER_CONCURRENCY: usize = 2;
+const PER_WORKER_CONCURRENCY: usize = 4;
 
 thread_local! {
     static RECYCLED_WORKERS: RefCell<Vec<Worker>> = const { RefCell::new(Vec::new()) };

@@ -15,11 +15,11 @@ use std::{
 const MAX_HEAVY_TILES_LOW_MEM: usize = 4;
 #[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
 const MAX_HEAVY_TILES_HIGH_MEM: usize = 2;
-/// 40 MiB (`640 * 64 KiB` WASM pages): run all 4 workers in parallel during low-memory boot and
-/// light scenes, then throttle heavy decodes to 2 once shared linear memory reaches 40 MiB so
+/// 64 MiB (`1024 * 64 KiB` WASM pages): run all 4 workers in parallel during low-memory boot and
+/// scene switches, then throttle heavy decodes to 2 once shared linear memory reaches 64 MiB so
 /// dense flight bursts reuse freed pages instead of permanently growing `WebAssembly.Memory`.
 #[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
-const HEAVY_TILE_THROTTLE_PAGES: usize = 40 * 16;
+const HEAVY_TILE_THROTTLE_PAGES: usize = 64 * 16;
 
 #[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
 const fn heavy_tile_limit_for_pages(pages: usize) -> usize {
@@ -402,9 +402,9 @@ mod tests {
     #[test]
     fn heavy_tile_limit_throttles_above_threshold_and_drains_cleanly() {
         assert_eq!(heavy_tile_limit_for_pages(0), 4);
-        assert_eq!(heavy_tile_limit_for_pages(639), 4);
-        assert_eq!(heavy_tile_limit_for_pages(640), 2);
+        assert_eq!(heavy_tile_limit_for_pages(1023), 4);
         assert_eq!(heavy_tile_limit_for_pages(1024), 2);
+        assert_eq!(heavy_tile_limit_for_pages(1536), 2);
 
         let counter = Arc::new(CountWake(AtomicUsize::new(0)));
         let waker = Waker::from(counter.clone());
@@ -416,28 +416,28 @@ mod tests {
 
         // Tightening limit mid-flight blocks new work until in-flight count drains below 2.
         assert!(state
-            .poll_acquire(heavy_tile_limit_for_pages(640), &waker)
+            .poll_acquire(heavy_tile_limit_for_pages(1024), &waker)
             .is_pending());
         if let Some(w) = state.release() {
             w.wake();
         }
         assert_eq!(state.in_use, 3);
         assert!(state
-            .poll_acquire(heavy_tile_limit_for_pages(640), &waker)
+            .poll_acquire(heavy_tile_limit_for_pages(1024), &waker)
             .is_pending());
         if let Some(w) = state.release() {
             w.wake();
         }
         assert_eq!(state.in_use, 2);
         assert!(state
-            .poll_acquire(heavy_tile_limit_for_pages(640), &waker)
+            .poll_acquire(heavy_tile_limit_for_pages(1024), &waker)
             .is_pending());
         if let Some(w) = state.release() {
             w.wake();
         }
         assert_eq!(state.in_use, 1);
         assert!(state
-            .poll_acquire(heavy_tile_limit_for_pages(640), &waker)
+            .poll_acquire(heavy_tile_limit_for_pages(1024), &waker)
             .is_ready());
         assert_eq!(state.in_use, 2);
     }

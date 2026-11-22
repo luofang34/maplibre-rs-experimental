@@ -17,8 +17,11 @@ use crate::{
 mod local_fonts;
 mod prefetch;
 mod requests;
+#[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
 pub(crate) use prefetch::spawn_style_symbol_prefetch;
 pub use prefetch::spawn_worker_symbol_prefetch;
+#[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+pub(crate) use prefetch::PrefetchPlan;
 #[cfg(test)]
 use requests::requests;
 use requests::symbol_requests;

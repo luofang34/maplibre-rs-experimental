@@ -21,6 +21,7 @@ async fn a_call_is_cancellable_as_soon_as_the_worker_starts_it() {
         .set_style(
             1,
             serde_json::to_string(&maplibre::style::Style::default()).expect("style"),
+            None,
         )
         .expect("style kept");
     let input = serde_json::to_string(&Input::new(

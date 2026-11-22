@@ -98,16 +98,37 @@ impl PassingAsyncProcedureCall {
     }
 
     fn post_style_to_workers(&self, revision: u64, style: &str) -> Result<(), WebError> {
-        let message = worker_message(
+        let rev_js = JsValue::from(revision);
+        let style_js = JsValue::from(style);
+        let prefetch_msg = worker_message(
             "style",
             &[
-                ("revision", &JsValue::from(revision)),
-                ("style", &JsValue::from(style)),
+                ("revision", &rev_js),
+                ("style", &style_js),
+                ("prefetch", &JsValue::TRUE),
             ],
         )?;
-        self.workers
-            .iter()
-            .try_for_each(|worker| worker.post_message(&message).map_err(WebError::from))
+        let plain_msg = if self.workers.len() > 1 {
+            Some(worker_message(
+                "style",
+                &[
+                    ("revision", &rev_js),
+                    ("style", &style_js),
+                    ("prefetch", &JsValue::FALSE),
+                ],
+            )?)
+        } else {
+            None
+        };
+        for (idx, worker) in self.workers.iter().enumerate() {
+            let msg = if idx == 0 {
+                &prefetch_msg
+            } else {
+                plain_msg.as_ref().unwrap_or(&prefetch_msg)
+            };
+            worker.post_message(msg).map_err(WebError::from)?;
+        }
+        Ok(())
     }
 
     fn dispatch_tagged(&self, tag: ProcedureTag, input: Input) -> Result<(), CallError> {

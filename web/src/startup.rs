@@ -23,9 +23,11 @@ pub fn wasm_bindgen_start() {
         console_log::init_with_level(log::Level::Info).ok();
         std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     }
-    // Pre-initialize the process-wide FontSystem before workers spawn so LazyLock never waits
-    // via Atomics.wait on the browser Window thread.
-    drop(maplibre::font::global_font_system());
+    // Pre-initialize the process-wide FontSystem only on the browser Window thread so workers
+    // do not contend via Atomics.wait while booting in parallel.
+    if web_sys::window().is_some() {
+        drop(maplibre::font::global_font_system());
+    }
 
     #[cfg(feature = "trace")]
     enable_tracing();

@@ -5,6 +5,7 @@ use std::cell::RefCell;
 use futures::channel::oneshot;
 use maplibre::{
     io::{
+        apc::AsyncProcedureCall,
         source_client::{HttpClient, HttpSourceClient, SourceClient},
         tile_json::resolve_tile_json_sources,
     },
@@ -215,6 +216,10 @@ where
                 map.set_max_pitch_degrees(parsed.pitch.unwrap_or(0.0).max(70.0));
             }
             drop(map.set_style(parsed));
+            map.kernel().apc().set_boot_unthrottled(true);
+            if let Ok(ctx) = map.context() {
+                map.kernel().apc().warm_style(&ctx.style);
+            }
             Ok::<_, JSError>(())
         })
         .await??;

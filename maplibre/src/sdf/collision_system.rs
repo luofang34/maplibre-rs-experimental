@@ -305,11 +305,8 @@ impl CollisionSystem {
                 now,
                 in_flight,
                 caller_immediate,
-                effective_fade: if self.initial_boot_loading {
-                    std::time::Duration::ZERO
-                } else {
-                    config.fade_duration
-                },
+                boot_final_settle,
+                fade_duration: config.fade_duration,
                 sort_pending: &mut sort_pending,
             },
         )
@@ -365,7 +362,8 @@ struct EpochStartParams<'a> {
     now: std::time::Duration,
     in_flight: usize,
     caller_immediate: bool,
-    effective_fade: std::time::Duration,
+    boot_final_settle: bool,
+    fade_duration: std::time::Duration,
     sort_pending: &'a mut bool,
 }
 
@@ -429,6 +427,7 @@ fn start_new_epoch(
     sys.last_external_view = Some(params.triggers.external_view);
 
     let use_slicing = !params.caller_immediate
+        && !params.boot_final_settle
         && sys.controller.last_dt_non_zero()
         && !params.triggers.obstructed
         && (sys.initial_boot_loading
@@ -458,9 +457,13 @@ fn start_new_epoch(
         tracing::error!(%error, "symbol projection failed");
         SystemError::Setup
     })?;
+    let effective_fade = if sys.initial_boot_loading {
+        std::time::Duration::ZERO
+    } else {
+        params.fade_duration
+    };
     let has_symbols = !layers.is_empty();
-    sys.history
-        .begin_with_duration(params.now, params.effective_fade);
+    sys.history.begin_with_duration(params.now, effective_fade);
     sys.uploaded.retain(|(coords, _), cached| {
         let keep = sys.seen.contains(coords);
         if !keep {

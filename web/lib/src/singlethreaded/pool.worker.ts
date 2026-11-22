@@ -4,7 +4,7 @@ import {initializeWorkerWasm} from "../wasm-worker-instance.mjs";
 type MessageData = { type: 'wasm_init', module: WebAssembly.Module, port?: MessagePort }
     | { type: 'kernel_config', config: string }
     | { type: 'call', procedure_tag: number, attempt: bigint, style_revision: bigint, input: string }
-    | { type: 'style', revision: bigint, style: string }
+    | { type: 'style', revision: bigint, style: string, prefetch?: boolean }
     | { type: 'cancel', attempt: bigint }
     | { type: 'image_provider_modules', urls: string[] }
 
@@ -18,7 +18,7 @@ const started = new Promise<void>(resolve => markStarted = resolve)
 let providersRegistered: Promise<void> = Promise.resolve()
 
 interface TileWorkerCalls {
-    set_style(revision: bigint, style: string): void
+    set_style(revision: bigint, style: string, prefetch?: boolean): void
     process(procedure_tag: number, style_revision: bigint, input: string): Promise<void>
     cancel(attempt: bigint): boolean
     finish_failed(attempt: bigint): void
@@ -120,7 +120,7 @@ const handleMessage = async (message: MessageEvent<MessageData>) => {
         // Ordered behind `providersRegistered` like `call`, so queued startup calls see their
         // style revision before later style updates can evict it.
         await providersRegistered;
-        workerCalls().set_style(message.data.revision, message.data.style)
+        workerCalls().set_style(message.data.revision, message.data.style, message.data.prefetch ?? true)
     } else if (type === 'cancel') {
         calls?.cancel(message.data.attempt)
     } else if (type === 'kernel_config') {

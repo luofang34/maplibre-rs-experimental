@@ -62,10 +62,19 @@ struct RunnerInner {
     raf_closure: RafClosureSlot,
     initial_load_settled: Cell<bool>,
     initial_pumps: Cell<u8>,
+    last_style_swap: Cell<u64>,
     closed: Cell<bool>,
 }
 
 impl RunnerInner {
+    fn sync_style_swap(&self) {
+        let swap = self.map.style_swap_count();
+        if swap != self.last_style_swap.get() {
+            self.last_style_swap.set(swap);
+            self.initial_load_settled.set(false);
+            self.initial_pumps.set(0);
+        }
+    }
     fn schedule_commands(rc: &Rc<RefCell<Self>>) {
         let should_spawn = match rc.try_borrow() {
             Ok(inner) => {
@@ -101,6 +110,7 @@ impl RunnerInner {
             }
             let s = &mut *inner;
             s.commands.apply(&mut s.map);
+            s.sync_style_swap();
             !s.closed.get()
                 && (s.map.has_ready_work()
                     || apc_has_arrivals(s.map.kernel().apc())
@@ -111,11 +121,11 @@ impl RunnerInner {
         }
     }
 
-    fn take_boot_pump(&self, arrivals: bool) -> bool {
+    fn take_boot_pump(&self, has_immediate_work: bool) -> bool {
         if self.initial_load_settled.get() || self.initial_pumps.get() >= MAX_BOOT_IMMEDIATE_PUMPS {
             return false;
         }
-        if arrivals || self.initial_pumps.get() <= 2 {
+        if has_immediate_work || self.initial_pumps.get() <= 2 {
             self.initial_pumps
                 .set(self.initial_pumps.get().saturating_add(1));
             true
@@ -160,7 +170,8 @@ impl RunnerInner {
         } else {
             wait
         };
-        let boot_pump = next_delay == Some(Duration::ZERO) && self.take_boot_pump(arrivals);
+        let boot_pump =
+            next_delay == Some(Duration::ZERO) && self.take_boot_pump(arrivals || map_ready);
         (next_delay, boot_pump)
     }
 
@@ -174,6 +185,7 @@ impl RunnerInner {
         }
 
         self.commands.apply(&mut self.map);
+        self.sync_style_swap();
         if self.commands.is_closed() {
             self.shutdown();
             return None;
@@ -254,6 +266,7 @@ fn start_runner(
     map: Map<OffscreenEnvironment>,
 ) -> OffscreenMapRunner {
     let now = Instant::now();
+    let initial_style_swap = map.style_swap_count();
     let commands = MapCommands::<OffscreenEnvironment>::default();
     let inner = Rc::new(RefCell::new(RunnerInner {
         id: runner_id,
@@ -273,6 +286,7 @@ fn start_runner(
         raf_closure: RefCell::new(None),
         initial_load_settled: Cell::new(false),
         initial_pumps: Cell::new(0),
+        last_style_swap: Cell::new(initial_style_swap),
         closed: Cell::new(false),
     }));
 

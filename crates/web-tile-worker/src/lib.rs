@@ -61,8 +61,15 @@ impl TileWorkerCalls {
     }
 
     /// Stores the parsed style JSON under `revision` for subsequent tile calls.
-    pub fn set_style(&mut self, revision: u64, style: String) -> Result<(), JsValue> {
-        self.inner.set_style(revision, style).map_err(JsValue::from)
+    pub fn set_style(
+        &mut self,
+        revision: u64,
+        style: String,
+        prefetch: Option<bool>,
+    ) -> Result<(), JsValue> {
+        self.inner
+            .set_style(revision, style, prefetch)
+            .map_err(JsValue::from)
     }
 
     /// Runs a tile procedure by wire `ProcedureTag` byte using `style_revision`.

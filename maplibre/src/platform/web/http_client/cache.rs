@@ -17,7 +17,11 @@ use crate::io::source_client::{ByteRange, CachePolicy};
 /// Persistent browser Cache Storage bucket name for cached tiles and metadata.
 pub const BROWSER_TILE_CACHE_NAME: &str = "maplibre-rs-tiles-v1";
 
-/// Default 1 MiB cap for the shared in-memory browser LRU byte cache (backed by persistent Cache Storage).
+/// Default cap for the shared in-memory browser LRU byte cache (backed by persistent Cache Storage).
+#[cfg(target_feature = "atomics")]
+pub const BROWSER_MEMORY_CACHE_CAP_BYTES: usize = 8 * 1024 * 1024;
+/// Default 1 MiB cap for the in-memory browser LRU byte cache (backed by persistent Cache Storage).
+#[cfg(not(target_feature = "atomics"))]
 pub const BROWSER_MEMORY_CACHE_CAP_BYTES: usize = 1024 * 1024;
 const BROWSER_MEMORY_CACHE_MAX_ITEM_BYTES: usize = 512 * 1024;
 

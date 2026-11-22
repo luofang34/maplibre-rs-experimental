@@ -416,6 +416,23 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
         self.in_flight.load(Ordering::Acquire)
     }
 
+    fn warm_style(&self, style: &crate::style::Style) {
+        #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+        {
+            let plan = crate::sdf::assets::PrefetchPlan::from_style(style);
+            if !plan.is_empty() {
+                let config = self.offscreen_kernel_config.clone();
+                drop(self.scheduler.schedule(move || async move {
+                    let kernel = K::create(config);
+                    let client = kernel.source_client();
+                    plan.execute_decoded_wasm(&client).await;
+                }));
+            }
+        }
+        #[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
+        let _ = style;
+    }
+
     fn set_boot_unthrottled(&self, unthrottled: bool) {
         self.boot_unthrottled.set(unthrottled);
     }

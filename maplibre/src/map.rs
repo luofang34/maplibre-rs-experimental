@@ -100,6 +100,7 @@ pub struct Map<E: Environment> {
     custom_layers: crate::custom_layer::CustomLayerRegistry,
     max_pitch: cgmath::Deg<f64>,
     camera_bounds: crate::render::view_state::CameraBounds,
+    style_swap_count: u64,
     #[cfg(feature = "experimental")]
     sun: Option<crate::celestial::EcefDirection>,
 }
@@ -138,6 +139,7 @@ where
             custom_layers: crate::custom_layer::CustomLayerRegistry::new(),
             max_pitch: DEFAULT_MAX_PITCH,
             camera_bounds: crate::render::view_state::CameraBounds::default(),
+            style_swap_count: 0,
             #[cfg(feature = "experimental")]
             sun: None,
         };
@@ -258,6 +260,7 @@ where
     /// Replaces the entire style via [`Style::diff_and_replace`], retaining unchanged source
     /// generations and loaded tiles; works before or after the renderer is initialized.
     pub fn set_style(&mut self, next: Style) -> crate::style::diff::StyleReplacementDiff {
+        self.style_swap_count = self.style_swap_count.wrapping_add(1);
         let diff = match &mut self.map_context {
             CurrentMapContext::Ready(context) => context.set_style(next),
             CurrentMapContext::Pending(pending) => pending.style.diff_and_replace(next),
@@ -265,6 +268,11 @@ where
         self.event_bus.mark_busy();
         self.event_bus.emit(crate::event::MapEvent::StyleDataLoaded);
         diff
+    }
+
+    /// Monotonic counter incremented on every [`Self::set_style`] call.
+    pub fn style_swap_count(&self) -> u64 {
+        self.style_swap_count
     }
 
     /// Adds a layer given as style JSON above `before`, or on top; see [`Style::add_layer`].

@@ -108,14 +108,21 @@ impl TileWorkerCalls {
     }
 
     /// Keeps the style sent by the host as `revision` for subsequent tile calls naming it.
-    pub fn set_style(&mut self, revision: u64, style: String) -> Result<(), JSError> {
+    pub fn set_style(
+        &mut self,
+        revision: u64,
+        style: String,
+        prefetch: Option<bool>,
+    ) -> Result<(), JSError> {
         let style =
             maplibre::style::Style::from_json_str(&style).map_err(WebError::StyleDecoding)?;
         #[cfg(all(target_arch = "wasm32", not(test)))]
-        if CONFIG.with(|slot| slot.borrow().is_some()) {
+        if prefetch.unwrap_or(true) && CONFIG.with(|slot| slot.borrow().is_some()) {
             let client = UsedOffscreenKernelEnvironment::create(kernel_config()).source_client();
             maplibre::sdf::assets::spawn_worker_symbol_prefetch(client, &style);
         }
+        #[cfg(not(all(target_arch = "wasm32", not(test))))]
+        let _ = prefetch;
         self.styles.insert(revision, style);
         Ok(())
     }

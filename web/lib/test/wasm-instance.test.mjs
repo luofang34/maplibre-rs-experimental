@@ -8,7 +8,7 @@ import {initializeWasm} from '../src/wasm-instance.mjs';
 import {initializeWorkerWasm} from '../src/wasm-worker-instance.mjs';
 
 if (!isMainThread) {
-    const instance = await initializeWasm(workerData.module, workerData.memory);
+    const instance = await initializeWasm(workerData.module, workerData.memory, workerData.primary);
     parentPort.postMessage({
         reusesMemory: instance.memory === workerData.memory,
         shared: instance.memory.buffer instanceof SharedArrayBuffer,
@@ -42,6 +42,30 @@ if (!isMainThread) {
             if (shared) instance.__wbindgen_free(pointer, 4, 4);
         }
     });
+
+    if (shared) {
+        test('pre-created shared memory supports parallel primary and secondary workers', async () => {
+            const preCreated = new WebAssembly.Memory({initial: 64, maximum: 16384, shared: true});
+            const primary = new Worker(new URL(import.meta.url), {
+                workerData: {module, memory: preCreated, primary: true},
+            });
+            const secondary = new Worker(new URL(import.meta.url), {
+                workerData: {module, memory: preCreated, primary: false},
+            });
+            try {
+                const [[primaryRes], [secondaryRes]] = await Promise.all([
+                    once(primary, 'message'),
+                    once(secondary, 'message'),
+                ]);
+                assert.equal(primaryRes.shared, true);
+                assert.equal(primaryRes.reusesMemory, true);
+                assert.equal(secondaryRes.shared, true);
+                assert.equal(secondaryRes.reusesMemory, true);
+            } finally {
+                await Promise.all([primary.terminate(), secondary.terminate()]);
+            }
+        });
+    }
 
     const workerWasmPath = new URL('../src/wasm/maplibre_tile_worker_bg.wasm', import.meta.url);
     if (!shared && existsSync(workerWasmPath)) {

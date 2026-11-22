@@ -15,9 +15,13 @@ pub(super) use builder::AtlasBuilder;
 pub(crate) use cache::fetch;
 pub(crate) use cache::tiles;
 pub use cache::{AssetCache, AssetFailure};
+#[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
+pub(crate) use load::spawn_style_symbol_prefetch;
+#[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+pub(crate) use load::PrefetchPlan;
 pub(crate) use load::{
     fetch_symbol_asset_inputs, load_symbol_assets_awaiting_from_tile, pack_symbol_assets,
-    spawn_style_symbol_prefetch, symbol_requests_from_tile,
+    symbol_requests_from_tile,
 };
 pub use load::{
     load_symbol_assets, spawn_worker_symbol_prefetch, SymbolAssetConfig, SymbolAssetError,

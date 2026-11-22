@@ -13,7 +13,7 @@ use crate::{
     style::{layer::LayerPaint, Style},
 };
 
-struct PrefetchPlan {
+pub(crate) struct PrefetchPlan {
     has_symbols: bool,
     sources: Vec<(String, String)>,
     stacks: Vec<String>,
@@ -28,7 +28,7 @@ struct PrefetchPlan {
 }
 
 impl PrefetchPlan {
-    fn from_style(style: &Style) -> Self {
+    pub(crate) fn from_style(style: &Style) -> Self {
         let mut stacks = Vec::new();
         let mut has_symbols = false;
         for layer in &style.layers {
@@ -65,13 +65,17 @@ impl PrefetchPlan {
         }
     }
 
+    pub(crate) fn is_empty(&self) -> bool {
+        !self.has_symbols || (self.sources.is_empty() && self.stacks.is_empty())
+    }
+
     #[cfg(all(
         not(target_arch = "wasm32"),
         feature = "native-io",
         feature = "thread-safe-futures"
     ))]
     async fn execute_decoded<HC: HttpClient>(self, client: &SourceClient<HC>) {
-        if !self.has_symbols || (self.sources.is_empty() && self.stacks.is_empty()) {
+        if self.is_empty() {
             return;
         }
         let tpl = self.glyph_template.as_deref();
@@ -91,7 +95,7 @@ impl PrefetchPlan {
     /// Warms raw HTTP/CacheStorage entries once on the map worker without PNG/PBF CPU decoding.
     #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     async fn execute_warm_raw<HC: HttpClient>(self, client: &SourceClient<HC>) {
-        if !self.has_symbols || (self.sources.is_empty() && self.stacks.is_empty()) {
+        if self.is_empty() {
             return;
         }
         let urls: Vec<String> = self
@@ -112,8 +116,8 @@ impl PrefetchPlan {
 
     /// Pre-fetches and decodes sprites and `0-255` glyph ranges into `client`'s `AssetCache`.
     #[cfg(target_arch = "wasm32")]
-    async fn execute_decoded_wasm<HC: HttpClient>(self, client: &SourceClient<HC>) {
-        if !self.has_symbols || (self.sources.is_empty() && self.stacks.is_empty()) {
+    pub(crate) async fn execute_decoded_wasm<HC: HttpClient>(self, client: &SourceClient<HC>) {
+        if self.is_empty() {
             return;
         }
         let tpl = self.glyph_template.as_deref();
@@ -150,7 +154,7 @@ pub fn spawn_worker_symbol_prefetch<HC: HttpClient + 'static>(
     style: &Style,
 ) {
     let plan = PrefetchPlan::from_style(style);
-    if !plan.has_symbols || (plan.sources.is_empty() && plan.stacks.is_empty()) {
+    if plan.is_empty() {
         return;
     }
     #[cfg(target_arch = "wasm32")]
@@ -163,16 +167,13 @@ pub fn spawn_worker_symbol_prefetch<HC: HttpClient + 'static>(
 
 /// Fires `HTTPS` sprite and `0-255` glyph prefetch in the background without blocking map
 /// initialization on remote asset latency.
+#[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
 pub(crate) fn spawn_style_symbol_prefetch<HC: HttpClient>(client: SourceClient<HC>, style: &Style) {
     let plan = PrefetchPlan::from_style(style);
-    if !plan.has_symbols || (plan.sources.is_empty() && plan.stacks.is_empty()) {
+    if plan.is_empty() {
         return;
     }
-    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
-    wasm_bindgen_futures::spawn_local(async move {
-        plan.execute_decoded_wasm(&client).await;
-    });
-    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
+    #[cfg(target_arch = "wasm32")]
     wasm_bindgen_futures::spawn_local(async move {
         plan.execute_warm_raw(&client).await;
     });

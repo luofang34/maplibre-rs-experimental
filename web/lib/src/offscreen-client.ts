@@ -67,6 +67,22 @@ export const computeMtTileWorkerCount = (): number => {
     return Math.min(4, Math.max(3, Math.floor(cores / 2)));
 };
 
+const createSharedWasmMemory = (): WebAssembly.Memory | undefined => {
+    if (
+        !MULTITHREADED
+        || typeof WebAssembly.Memory !== "function"
+        || typeof (globalThis as {SharedArrayBuffer?: unknown}).SharedArrayBuffer !== "function"
+    ) {
+        return undefined;
+    }
+    try {
+        const initial = Math.min(MT_MAX_MEMORY_PAGES, Math.max(MT_INITIAL_MEMORY_PAGES, 64));
+        return new WebAssembly.Memory({initial, maximum: MT_MAX_MEMORY_PAGES, shared: true});
+    } catch {
+        return undefined;
+    }
+};
+
 export const startOffscreenController = async ({
     canvas,
     wasmPath,
@@ -204,6 +220,7 @@ export const startOffscreenController = async ({
 
     try {
         const mainModulePromise = compileWasmModule(wasmPath);
+        const sharedMemory = createSharedWasmMemory();
         let workerReadyPromise: Promise<void> = Promise.resolve();
         if (!MULTITHREADED) {
             const resolvedWorkerWasm =
@@ -247,6 +264,11 @@ export const startOffscreenController = async ({
 
         const renderInitPromise = mainModulePromise.then(module => {
             if (closed) return;
+            if (MULTITHREADED && sharedMemory) {
+                for (const worker of tileWorkers) {
+                    worker.postMessage({type: "wasm_init", module, memory: sharedMemory});
+                }
+            }
             const ports = channels.map(ch => ch.port1);
             if (styleResolved) {
                 const initId = nextRpcId++;
@@ -257,6 +279,7 @@ export const startOffscreenController = async ({
                             type: "init",
                             id: initId,
                             module,
+                            memory: sharedMemory,
                             canvas: offscreen,
                             width: initial.width,
                             height: initial.height,
@@ -272,6 +295,7 @@ export const startOffscreenController = async ({
                 {
                     type: "preinit",
                     module,
+                    memory: sharedMemory,
                     canvas: offscreen,
                     width: initial.width,
                     height: initial.height,

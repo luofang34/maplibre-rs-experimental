@@ -5,6 +5,7 @@ import {ensureWebGpuCompatibility} from "../webgpu-compat.mjs";
 type PreinitMessage = {
     type: "preinit"
     module: WebAssembly.Module
+    memory?: WebAssembly.Memory
     canvas: OffscreenCanvas
     width: number
     height: number
@@ -22,6 +23,7 @@ type InitMessage = {
     type: "init"
     id: number
     module: WebAssembly.Module
+    memory?: WebAssembly.Memory
     canvas: OffscreenCanvas
     width: number
     height: number
@@ -59,9 +61,13 @@ const postReply = (id: number, ok: boolean, value: unknown) => {
     postMessage(ok ? {type: "rpc_ok", id, result: value} : {type: "rpc_err", id, error: String(value)});
 };
 
-const instantiateAndStartPorts = async (module: WebAssembly.Module, ports: MessagePort[]) => {
-    const wasm = await initializeWasm(module, undefined);
-    if (MULTITHREADED) {
+const instantiateAndStartPorts = async (
+    module: WebAssembly.Module,
+    ports: MessagePort[],
+    memory?: WebAssembly.Memory,
+) => {
+    const wasm = await initializeWasm(module, memory, true);
+    if (MULTITHREADED && !memory) {
         for (const port of ports) {
             port.postMessage({type: "wasm_init", module, memory: wasm.memory});
         }
@@ -74,7 +80,7 @@ onmessage = async (event: MessageEvent<RenderWorkerMessage>) => {
 
     if (msg.type === "preinit") {
         preinitPromise = (async () => {
-            await instantiateAndStartPorts(msg.module, msg.ports);
+            await instantiateAndStartPorts(msg.module, msg.ports, msg.memory);
             let nextPort = 0;
             return (maplibre as any).preinit_maplibre_offscreen(
                 msg.canvas,
@@ -113,7 +119,7 @@ onmessage = async (event: MessageEvent<RenderWorkerMessage>) => {
 
     if (msg.type === "init") {
         const initPromise = (async () => {
-            await instantiateAndStartPorts(msg.module, msg.ports);
+            await instantiateAndStartPorts(msg.module, msg.ports, msg.memory);
             let nextPort = 0;
             runner = await (maplibre as any).run_maplibre_offscreen(
                 msg.canvas,
