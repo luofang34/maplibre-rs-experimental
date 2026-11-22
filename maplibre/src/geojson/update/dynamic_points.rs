@@ -56,6 +56,8 @@ pub(super) struct EvalCache {
     pub prev_pairs: Vec<[FillShaderFeatureMetadata; 2]>,
 }
 
+type SlotCacheEntry = Option<(usize, u8, u64, usize)>;
+
 struct DynamicPointSource {
     keys: Vec<(RawFeatureId, [u64; 2])>,
     world_points: Vec<[f64; 2]>,
@@ -68,7 +70,7 @@ struct DynamicPointSource {
     tile_hits: FxHashMap<WorldTileCoords, Vec<u32>>,
     applied_seq: FxHashMap<(WorldTileCoords, StyleLayerId), (u64, u64)>,
     slot_cache_state: Option<(u64, u64)>,
-    slot_cache: FxHashMap<(WorldTileCoords, StyleLayerId), Option<(usize, u8, u64, usize)>>,
+    slot_cache: FxHashMap<(WorldTileCoords, StyleLayerId), SlotCacheEntry>,
     deferred_bytes: Option<Vec<u8>>,
     fast_ramp_keys_rev: Option<u64>,
     fast_ramp_keys_ok: bool,

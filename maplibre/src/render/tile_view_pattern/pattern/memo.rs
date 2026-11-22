@@ -173,6 +173,8 @@ fn refresh_shapes(
     });
 }
 
+type PatternUploadParams = (u64, u32, u32, u64, bool);
+
 impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
     pub(super) fn refresh_cached_upload(
         &mut self,
@@ -180,7 +182,7 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
         view_proj: &ViewProjection,
         viewport: (f32, f32),
         style_zoom: Zoom,
-        (pure_globe, params, vp_bits): (bool, (u64, u32, u32, u64, bool), Option<[u64; 16]>),
+        (pure_globe, params, vp_bits): (bool, PatternUploadParams, Option<[u64; 16]>),
     ) {
         let vp_changed = !pure_globe
             && (self.last_vp_bits != vp_bits || self.last_upload_params.is_some_and(|p| p.4));
@@ -230,7 +232,7 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
     pub(super) fn commit_metadata_upload(
         &mut self,
         queue: &Q,
-        (mut params, vp_bits): ((u64, u32, u32, u64, bool), Option<[u64; 16]>),
+        (mut params, vp_bits): (PatternUploadParams, Option<[u64; 16]>),
     ) {
         params.0 = self.topology_generation;
         self.uploaded = self.metadata_scratch.len() as u64;
@@ -252,7 +254,7 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
         view_proj: &ViewProjection,
         viewport: (f32, f32),
         style_zoom: Zoom,
-        (pure_globe, params, vp_bits): (bool, (u64, u32, u32, u64, bool), Option<[u64; 16]>),
+        (pure_globe, params, vp_bits): (bool, PatternUploadParams, Option<[u64; 16]>),
     ) {
         let mut buffer = std::mem::take(&mut self.metadata_scratch);
         buffer.clear();

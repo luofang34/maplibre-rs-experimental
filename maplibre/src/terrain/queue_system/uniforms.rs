@@ -288,6 +288,13 @@ pub(super) fn prepare_tiles(
     }
 }
 
+type PreparedSingleTile = (
+    TerrainTileUniforms,
+    TileSources,
+    Option<u64>,
+    Option<Matrix4<f64>>,
+);
+
 fn prepare_single_tile(
     coords: WorldTileCoords,
     drape_source: Option<WorldTileCoords>,
@@ -299,12 +306,7 @@ fn prepare_single_tile(
         f32,
         &TerrainFog,
     ),
-) -> Option<(
-    TerrainTileUniforms,
-    TileSources,
-    Option<u64>,
-    Option<Matrix4<f64>>,
-)> {
+) -> Option<PreparedSingleTile> {
     let zoom = ctx.view_state.zoom();
     let (dem_coords, dem_id, dem_dim) = match terrain.resolve_loaded_dem(coords, ctx.dem) {
         Some((dem_coords, id, dim)) => (Some(dem_coords), Some(id), dim),

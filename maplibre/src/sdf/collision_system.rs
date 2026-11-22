@@ -219,9 +219,7 @@ impl CollisionSystem {
         (zoom, now, in_flight): (f64, std::time::Duration, usize),
         (caller_immediate, view_valid, earlier_stage_spent): (bool, bool, std::time::Duration),
     ) -> Option<SystemResult> {
-        if self.active_epoch.is_none() {
-            return None;
-        }
+        self.active_epoch.as_ref()?;
         let env = active::ActiveStepEnv {
             triggers,
             zoom,

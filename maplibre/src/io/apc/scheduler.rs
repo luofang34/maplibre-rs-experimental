@@ -30,6 +30,8 @@ const MAX_ADMITTED_ATTEMPTS_PER_BATCH: usize = 4;
 pub(crate) type ArrivalWaker = Arc<dyn Fn() + Send + Sync>;
 type SharedArrivalWaker = Arc<Mutex<Option<ArrivalWaker>>>;
 
+type RunningCalls = Arc<Mutex<FxHashMap<u64, (AbortHandle, Arc<AtomicBool>)>>>;
+
 struct CallDispatch<K: OffscreenKernel> {
     input: Input,
     procedure: AsyncProcedure<K, SchedulerContext>,
@@ -40,7 +42,7 @@ struct CallDispatch<K: OffscreenKernel> {
     registration: AbortRegistration,
     cancel_flag: Arc<AtomicBool>,
     sent_any: Arc<AtomicBool>,
-    running: Arc<Mutex<FxHashMap<u64, (AbortHandle, Arc<AtomicBool>)>>>,
+    running: RunningCalls,
     in_flight: Arc<AtomicUsize>,
 }
 
@@ -113,7 +115,7 @@ pub struct SchedulerAsyncProcedureCall<K: OffscreenKernel, S: Scheduler> {
     phantom_k: PhantomData<K>,
     offscreen_kernel_config: OffscreenKernelConfig,
     /// Tracked calls still running, by attempt, so cancelled calls can be stopped and skipped.
-    running: Arc<Mutex<FxHashMap<u64, (AbortHandle, Arc<AtomicBool>)>>>,
+    running: RunningCalls,
     in_flight: Arc<AtomicUsize>,
     cancelled: RefCell<FxHashSet<u64>>,
     pub(crate) waker: SharedArrivalWaker,

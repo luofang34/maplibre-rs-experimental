@@ -89,8 +89,8 @@ fn polar_style(symbol_minzoom: Option<f64>) -> Style {
             "text-halo-width": 1.0
         }
     });
-    if let Some(minzoom) = symbol_minzoom {
-        label["minzoom"] = serde_json::json!(minzoom);
+    if let (Some(minzoom), Some(obj)) = (symbol_minzoom, label.as_object_mut()) {
+        obj.insert("minzoom".to_owned(), serde_json::json!(minzoom));
     }
     serde_json::from_value(serde_json::json!({
         "version": 8,
@@ -175,16 +175,20 @@ async fn atmosphere_renders_alongside_active_symbol_layer() {
     // The sunlit northern globe limb must show bright blue atmospheric scattering well above the
     // unlit #0b172a background (blue > 110, exceeding red by > 25), alongside white label glyphs.
     let sunlit_blue_pixels = pixels
-        .chunks_exact(4)
-        .filter(|px| px[2] > 110 && px[2] > px[0].saturating_add(25))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|&&[r, _, b, _]| b > 110 && b > r.saturating_add(25))
         .count();
     assert!(
         sunlit_blue_pixels >= 500,
         "expected orbital atmosphere haze alongside symbol layer, found {sunlit_blue_pixels} sunlit pixels"
     );
     let label_pixels = pixels
-        .chunks_exact(4)
-        .filter(|px| px[0] > 210 && px[1] > 210 && px[2] > 220)
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|&&[r, g, b, _]| r > 210 && g > 210 && b > 220)
         .count();
     assert!(
         label_pixels > 0,
@@ -197,8 +201,10 @@ async fn negative_polar_zoom_renders_labels_and_clips_boundaries() {
     for minzoom in [None, Some(0.0)] {
         let pixels = render_polar_scene(minzoom, 85.0, 0.0, -1.08).await;
         let label_pixels = pixels
-            .chunks_exact(4)
-            .filter(|px| px[0] > 210 && px[1] > 210 && px[2] > 220)
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|&&[r, g, b, _]| r > 210 && g > 210 && b > 220)
             .count();
         assert!(
             label_pixels > 0,
@@ -208,11 +214,11 @@ async fn negative_polar_zoom_renders_labels_and_clips_boundaries() {
         // and must have zero stray cyan (#5eead4) chord pixels (empty alpha = 0).
         for (x, y) in [(8_u32, 8_u32), (SIZE - 8, 8)] {
             let off = ((y * SIZE + x) * 4) as usize;
+            let px = pixels.get(off..off + 4).unwrap_or(&[]);
             assert_eq!(
-                pixels[off + 3],
-                0,
-                "expected clear outer-space corner above Arctic rim at ({x},{y}), got {:?}",
-                &pixels[off..off + 4]
+                px.get(3).copied(),
+                Some(0),
+                "expected clear outer-space corner above Arctic rim at ({x},{y}), got {px:?}",
             );
         }
     }

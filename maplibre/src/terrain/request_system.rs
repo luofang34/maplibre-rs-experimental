@@ -177,21 +177,20 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
     }
 }
 
+type SingleViewTiles = (
+    Vec<WorldTileCoords>,
+    (
+        crate::terrain::coverage::PreparedTerrainKey,
+        crate::coords::ViewRegion,
+    ),
+);
+
 fn resolve_single_view_tiles(
     style: &crate::style::Style,
     view_state: &crate::render::view_state::ViewState,
     world: &mut crate::tcs::world::World,
     dem: &crate::terrain::source::DemSource,
-) -> Result<
-    Option<(
-        Vec<WorldTileCoords>,
-        (
-            crate::terrain::coverage::PreparedTerrainKey,
-            crate::coords::ViewRegion,
-        ),
-    )>,
-    SystemError,
-> {
+) -> Result<Option<SingleViewTiles>, SystemError> {
     let view_region = crate::render::projection::terrain_region(
         style,
         view_state,

@@ -55,10 +55,12 @@ impl TargetSpecsKey {
         &self,
         tiles: &[WorldTileCoords],
         prefetch_fresh: &[WorldTileCoords],
-        arrivals_over_standin: bool,
-        uniform_globe: bool,
-        raster_coverings_digest: u64,
-        loose_raster_digest: u64,
+        (arrivals_over_standin, uniform_globe, raster_coverings_digest, loose_raster_digest): (
+            bool,
+            bool,
+            u64,
+            u64,
+        ),
         digests: &FrameTerrainDigests,
     ) -> bool {
         self.arrivals_over_standin == arrivals_over_standin
@@ -121,15 +123,7 @@ impl DrapePrepareCache {
         digests: &FrameTerrainDigests,
     ) -> Option<(Arc<Vec<TargetSpec>>, &FxHashSet<WorldTileCoords>)> {
         let key = self.specs_key.as_ref()?;
-        if key.matches_slices(
-            tiles,
-            prefetch_fresh,
-            scalars.0,
-            scalars.1,
-            scalars.2,
-            scalars.3,
-            digests,
-        ) {
+        if key.matches_slices(tiles, prefetch_fresh, scalars, digests) {
             return self
                 .specs
                 .as_ref()

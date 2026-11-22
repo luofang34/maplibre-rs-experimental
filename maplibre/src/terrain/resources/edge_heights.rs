@@ -92,7 +92,9 @@ impl TerrainResources {
             && !dirty_rows.is_empty()
             && dirty_rows.len() * 2 < count
         {
-            self.write_dirty_edge_runs(queue, &edges[..count], dirty_rows);
+            if let Some(bounded) = edges.get(..count) {
+                self.write_dirty_edge_runs(queue, bounded, dirty_rows);
+            }
             self.edge_heights.uploaded_generation = Some(generation);
             return;
         }
@@ -124,10 +126,9 @@ impl TerrainResources {
         rows.sort_unstable();
         rows.dedup();
         let mut idx = 0;
-        while idx < rows.len() {
-            let start = rows[idx];
+        while let Some(&start) = rows.get(idx) {
             let mut end = start + 1;
-            while idx + 1 < rows.len() && rows[idx + 1] == end {
+            while rows.get(idx + 1).is_some_and(|&next| next == end) {
                 idx += 1;
                 end += 1;
             }
