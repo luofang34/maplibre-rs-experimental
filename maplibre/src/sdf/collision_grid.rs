@@ -1,6 +1,7 @@
 //! Screen-space collision lookup bounded by the viewport.
 use rustc_hash::FxHashMap as HashMap;
 
+#[derive(Default)]
 pub(super) struct CollisionGrid {
     cells: HashMap<(i32, i32), Vec<usize>>,
     boxes: Vec<[f64; 4]>,
@@ -21,6 +22,20 @@ impl CollisionGrid {
             cooperative: Vec::new(),
             limit: [(width / 64.0).ceil() as i32, (height / 64.0).ceil() as i32],
         }
+    }
+
+    /// Clears placed boxes while keeping existing cell/box allocations for epoch reuse.
+    pub fn reset(&mut self, width: f64, height: f64) {
+        if self.cells.len() > 1024 {
+            self.cells.clear();
+        } else {
+            for bucket in self.cells.values_mut() {
+                bucket.clear();
+            }
+        }
+        self.boxes.clear();
+        self.cooperative.clear();
+        self.limit = [(width / 64.0).ceil() as i32, (height / 64.0).ceil() as i32];
     }
 
     fn cells_for(&self, [l, t, r, b]: [f64; 4]) -> impl Iterator<Item = (i32, i32)> {

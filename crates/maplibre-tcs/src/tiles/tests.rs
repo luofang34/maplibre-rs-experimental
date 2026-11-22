@@ -169,3 +169,34 @@ fn replacing_a_component_publishes_the_new_value_and_drops_the_old_one() {
     assert_eq!(drops.get(), 100);
     assert!(tiles.query::<&Tracked>(coords).is_none());
 }
+
+#[test]
+fn tile_content_rev_tracks_inserts_and_mutable_queries_only() {
+    let (mut tiles, coords) = populated();
+    let rev_initial = tiles.tile_content_rev(coords).expect("content rev");
+
+    assert_eq!(tiles.query::<&Height>(coords), Some(&Height(10)));
+    assert_eq!(tiles.tile_content_rev(coords), Some(rev_initial));
+
+    let shared = tiles.query_mut::<(&Height, &Opacity)>(coords);
+    assert!(shared.is_some());
+    assert_eq!(tiles.tile_content_rev(coords), Some(rev_initial));
+
+    if let Some(h) = tiles.query_mut::<&mut Height>(coords) {
+        h.0 = 42;
+    }
+    let rev_after_mut = tiles.tile_content_rev(coords).expect("updated rev");
+    assert!(rev_after_mut > rev_initial);
+
+    if let Some((h, _)) = tiles.query_mut::<(&mut Height, &Opacity)>(coords) {
+        h.0 = 99;
+    }
+    let rev_after_tuple_mut = tiles.tile_content_rev(coords).expect("tuple mut rev");
+    assert!(rev_after_tuple_mut > rev_after_mut);
+
+    assert!(tiles.remove(coords));
+    assert_eq!(tiles.tile_content_rev(coords), None);
+    tiles.spawn_mut(coords).expect("respawn").insert(Height(1));
+    let rev_respawn = tiles.tile_content_rev(coords).expect("respawn rev");
+    assert!(rev_respawn > rev_after_tuple_mut);
+}

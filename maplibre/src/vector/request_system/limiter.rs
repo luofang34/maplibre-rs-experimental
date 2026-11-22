@@ -5,6 +5,7 @@
 #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
+    collections::VecDeque,
     future::poll_fn,
     sync::{LazyLock, Mutex},
     task::{Poll, Waker},
@@ -46,7 +47,7 @@ const MAX_UNCONSUMED_SHARED_TILES: usize = 4;
 #[derive(Default)]
 struct PermitState {
     in_use: usize,
-    waiters: Vec<Waker>,
+    waiters: VecDeque<Waker>,
 }
 
 impl PermitState {
@@ -56,15 +57,15 @@ impl PermitState {
             Poll::Ready(())
         } else {
             if !self.waiters.iter().any(|w| w.will_wake(waker)) {
-                self.waiters.push(waker.clone());
+                self.waiters.push_back(waker.clone());
             }
             Poll::Pending
         }
     }
 
-    fn release(&mut self) -> Vec<Waker> {
+    fn release(&mut self) -> Option<Waker> {
         self.in_use = self.in_use.saturating_sub(1);
-        std::mem::take(&mut self.waiters)
+        self.waiters.pop_front()
     }
 }
 
@@ -79,8 +80,7 @@ async fn acquire_slot(gate: &'static Mutex<PermitState>, mut limit: impl FnMut()
 }
 
 fn release_slot(gate: &'static Mutex<PermitState>) {
-    let waiters = crate::platform::lock_unpoisoned(gate).release();
-    for waker in waiters {
+    if let Some(waker) = crate::platform::lock_unpoisoned(gate).release() {
         waker.wake();
     }
 }
@@ -355,7 +355,7 @@ mod tests {
         assert!(state.poll_acquire(2, &waker).is_pending());
         assert_eq!(state.waiters.len(), 1);
 
-        for w in state.release() {
+        if let Some(w) = state.release() {
             w.wake();
         }
         assert_eq!(state.in_use, 1);
@@ -418,21 +418,21 @@ mod tests {
         assert!(state
             .poll_acquire(heavy_tile_limit_for_pages(640), &waker)
             .is_pending());
-        for w in state.release() {
+        if let Some(w) = state.release() {
             w.wake();
         }
         assert_eq!(state.in_use, 3);
         assert!(state
             .poll_acquire(heavy_tile_limit_for_pages(640), &waker)
             .is_pending());
-        for w in state.release() {
+        if let Some(w) = state.release() {
             w.wake();
         }
         assert_eq!(state.in_use, 2);
         assert!(state
             .poll_acquire(heavy_tile_limit_for_pages(640), &waker)
             .is_pending());
-        for w in state.release() {
+        if let Some(w) = state.release() {
             w.wake();
         }
         assert_eq!(state.in_use, 1);

@@ -68,12 +68,21 @@ pub(crate) struct CacheBudget {
     pub bytes: usize,
 }
 
+struct BeforeUploadState {
+    host_frame: u64,
+    arrival_epoch: u64,
+    tiles_len: usize,
+    in_use: FxHashSet<WorldTileCoords>,
+    drawn: usize,
+}
+
 /// Last frame each tile was needed by the view pattern.
 #[derive(Default)]
 pub struct TileRetention {
     last_used: FxHashMap<WorldTileCoords, u64>,
     bytes_cache: bytes_cache::TileBytesCache,
     frame: u64,
+    before_upload: Option<BeforeUploadState>,
 }
 
 /// Offline hosts cannot replace an evicted tile without an active source loader.
@@ -147,7 +156,7 @@ pub(crate) fn evict_before_upload(
     tight_tile_requests: bool,
     extra_in_use: &[WorldTileCoords],
 ) {
-    let _ = run_eviction(
+    let (in_use, drawn) = run_eviction(
         world,
         style,
         view_state,
@@ -155,6 +164,21 @@ pub(crate) fn evict_before_upload(
         (false, true, tight_tile_requests),
         extra_in_use,
     );
+    let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
+    if host_frame > 0 {
+        let arrival_epoch = crate::vector::arrival_epoch(world);
+        let tiles_len = world.tiles.tiles.len();
+        world
+            .resources
+            .get_or_init_mut::<TileRetention>()
+            .before_upload = Some(BeforeUploadState {
+            host_frame,
+            arrival_epoch,
+            tiles_len,
+            in_use,
+            drawn,
+        });
+    }
 }
 
 /// Drops the least recently used tiles beyond the cache budget and releases their GPU data.
@@ -170,14 +194,35 @@ pub fn retention_system(
     if crate::render::eye_covering::EyeInFrame::reuses_content(world) {
         return Ok(());
     }
-    let (in_use, drawn) = run_eviction(
-        world,
-        style,
-        view_state,
-        Some(&renderer.queue),
-        (true, true, renderer.settings.tight_tile_requests),
-        &[],
-    );
+    let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
+    let arrival_epoch = crate::vector::arrival_epoch(world);
+    let tiles_len = world.tiles.tiles.len();
+    let reused = world
+        .resources
+        .get_mut::<TileRetention>()
+        .and_then(|r| r.before_upload.take())
+        .filter(|prev| {
+            host_frame > 0
+                && prev.host_frame == host_frame
+                && prev.arrival_epoch == arrival_epoch
+                && prev.tiles_len == tiles_len
+        });
+    let (in_use, drawn) = if let Some(prev) = reused {
+        let dropped_gpu = drop_cancelled(world, &prev.in_use, Some(&renderer.queue));
+        if dropped_gpu {
+            gpu::reclaim_pool_pages(world, Some(&renderer.queue));
+        }
+        (prev.in_use, prev.drawn)
+    } else {
+        run_eviction(
+            world,
+            style,
+            view_state,
+            Some(&renderer.queue),
+            (true, true, renderer.settings.tight_tile_requests),
+            &[],
+        )
+    };
     if view_state.has_external_view() {
         summary::summarize_residency(world, drawn, in_use.len(), view_state.eye_settled());
         #[cfg(not(target_arch = "wasm32"))]
@@ -415,10 +460,10 @@ fn drop_cancelled<S: BuildHasher>(
     world: &mut World,
     in_use: &HashSet<WorldTileCoords, S>,
     queue: Option<&crate::render::upload_queue::UploadQueue>,
-) {
+) -> bool {
     let cancelled = crate::io::tile_retry::cancel_unwanted(world, in_use);
     if cancelled.is_empty() {
-        return;
+        return false;
     }
     tracing::debug!(
         count = cancelled.len(),
@@ -432,7 +477,7 @@ fn drop_cancelled<S: BuildHasher>(
     }
     if to_drop.is_empty() {
         crate::vector::bump_arrival_epoch(world);
-        return;
+        return false;
     }
     let retention = world.resources.get_or_init_mut::<TileRetention>();
     for coords in &to_drop {
@@ -444,6 +489,7 @@ fn drop_cancelled<S: BuildHasher>(
     }
     crate::vector::bump_arrival_epoch(world);
     gpu::drop_gpu_data_with_queue(world, &to_drop, queue);
+    true
 }
 
 #[cfg(test)]

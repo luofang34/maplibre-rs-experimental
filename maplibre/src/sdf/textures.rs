@@ -45,9 +45,23 @@ pub(super) struct SymbolTextures {
     sampler: Option<wgpu::Sampler>,
     /// Tiles whose labels gained an atlas since the last drain.
     bound: Vec<WorldTileCoords>,
+    last_retain_key: Option<(u64, usize, u64)>,
 }
 
 impl SymbolTextures {
+    pub(super) fn retain_if_needed(
+        &mut self,
+        tiles: &crate::tcs::tiles::Tiles,
+        style: &crate::style::Style,
+        eviction_epoch: u64,
+    ) {
+        let key = (style.revision(), tiles.tiles.len(), eviction_epoch);
+        if self.last_retain_key == Some(key) {
+            return;
+        }
+        self.last_retain_key = Some(key);
+        self.retain(tiles, style);
+    }
     pub fn prepare(
         &mut self,
         gpu: &TextureContext<'_>,
@@ -150,6 +164,7 @@ impl SymbolTextures {
         self.bindings.clear();
         self.bound.clear();
         self.sampler = None;
+        self.last_retain_key = None;
     }
 
     pub fn retain(&mut self, tiles: &crate::tcs::tiles::Tiles, style: &crate::style::Style) {
@@ -173,14 +188,13 @@ impl SymbolTextures {
             self.clear();
             return;
         }
-        self.tile_atlases.retain(|(coords, _), atlas| {
-            tiles
-                .query::<&super::SymbolLayersDataComponent>(*coords)
-                .is_some()
-                && self
-                    .bindings
-                    .iter()
-                    .any(|((c, _), b)| c == coords && Arc::ptr_eq(&b.atlas, atlas))
+        let referenced: rustc_hash::FxHashSet<(WorldTileCoords, usize)> = self
+            .bindings
+            .iter()
+            .map(|((coords, _), binding)| (*coords, Arc::as_ptr(&binding.atlas) as usize))
+            .collect();
+        self.tile_atlases.retain(|&(coords, _), atlas| {
+            referenced.contains(&(coords, Arc::as_ptr(atlas) as usize))
         });
         self.atlases.retain(|_, atlas| atlas.strong_count() > 0);
     }

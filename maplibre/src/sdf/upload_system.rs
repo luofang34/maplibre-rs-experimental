@@ -92,6 +92,7 @@ pub fn upload_system(
         }
     }
     let visible = super::covering::upload_tiles(world);
+    let arrival_epoch = crate::vector::arrival_epoch(world);
     world.resources.get_or_init_mut::<FrameUploads>();
     world
         .resources
@@ -114,7 +115,7 @@ pub fn upload_system(
         return Err(SystemError::Dependencies);
     };
 
-    textures.retain(&world.tiles, style);
+    textures.retain_if_needed(&world.tiles, style, arrival_epoch);
     let zoom = view_state.style_zoom().level();
 
     let (deferred, needs_refetch, needs_atlas_settle) = upload_symbol_layer(

@@ -43,10 +43,10 @@ fn buffered_completion_messages_keep_fifo_order_and_drain_in_one_receive() {
             ..Default::default()
         },
     );
-    let sender = SchedulerContext {
-        sender: apc.channel.0.clone(),
-        waker: crate::platform::lock_unpoisoned(&apc.waker).clone(),
-    };
+    let sender = SchedulerContext::new(
+        apc.channel.0.clone(),
+        crate::platform::lock_unpoisoned(&apc.waker).clone(),
+    );
     let coords = Default::default();
     sender
         .send_back(DefaultTileTessellated::build_partial(coords))

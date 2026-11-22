@@ -355,6 +355,13 @@ pub trait AsyncProcedureCall<K: OffscreenKernel>: 'static {
     /// reach its worker lets the call finish; the map ignores a result it gave up on.
     fn cancel(&self, _attempt: u64) {}
 
+    /// Stops a batch of cancelled `attempts` in one transport pass when possible.
+    fn cancel_batch(&self, attempts: &[u64]) {
+        for &attempt in attempts {
+            self.cancel(attempt);
+        }
+    }
+
     /// Whether results arrived that no [`Self::receive`] has offered to its consumers yet, so
     /// the next frame has something to apply. A transport that cannot tell answers `false`.
     ///

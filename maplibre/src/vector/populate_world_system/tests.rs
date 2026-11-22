@@ -86,7 +86,11 @@ fn shown(world: &World, coords: WorldTileCoords) -> Vec<String> {
 fn a_finished_request_drops_the_layers_it_was_asked_for_but_left_out() {
     // The route was hidden, or its data emptied, so the new request brings roads alone.
     let (mut world, coords) = loaded(&["roads", "route"]);
-    crate::vector::content::begin(&mut world, coords, vec!["roads".into(), "route".into()]);
+    crate::vector::content::begin(
+        &mut world,
+        coords,
+        vec!["roads".into(), "route".into()].into(),
+    );
     crate::vector::content::accept_vector(&mut world, bucket(coords, "roads"));
     finish_tile(&mut world, &DefaultTileTessellated::build_partial(coords));
     assert_eq!(shown(&world, coords), ["roads"]);
@@ -95,7 +99,7 @@ fn a_finished_request_drops_the_layers_it_was_asked_for_but_left_out() {
 #[test]
 fn a_request_limited_to_some_sources_keeps_the_layers_of_the_others() {
     let (mut world, coords) = loaded(&["roads", "route"]);
-    crate::vector::content::begin(&mut world, coords, vec!["route".into()]);
+    crate::vector::content::begin(&mut world, coords, vec!["route".into()].into());
     finish_tile(&mut world, &DefaultTileTessellated::build_from(coords));
     assert_eq!(shown(&world, coords), ["roads"]);
 }
@@ -103,7 +107,11 @@ fn a_request_limited_to_some_sources_keeps_the_layers_of_the_others() {
 #[test]
 fn a_request_that_could_not_read_its_data_keeps_what_the_tile_shows() {
     let (mut world, coords) = loaded(&["roads", "route"]);
-    crate::vector::content::begin(&mut world, coords, vec!["roads".into(), "route".into()]);
+    crate::vector::content::begin(
+        &mut world,
+        coords,
+        vec!["roads".into(), "route".into()].into(),
+    );
     finish_tile(
         &mut world,
         &DefaultTileTessellated::build_failed(coords, false),

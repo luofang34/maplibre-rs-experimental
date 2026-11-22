@@ -64,11 +64,7 @@ pub fn apply_vector_worker_batch<T: VectorTransferables>(
 ) -> Result<(), MessageError> {
     let mut memo = crate::style::feature_state::FeatureStateArcMemo::default();
     let mut interner = super::feature_paint::intern::TilePropertyInterner::default();
-    let layer_by_id: rustc_hash::FxHashMap<&str, &crate::style::layer::StyleLayer> = style
-        .layers
-        .iter()
-        .map(|layer| (layer.id.as_str(), layer))
-        .collect();
+    let layer_by_id = style.cached_layer_index_by_id();
     apply_worker_messages(messages, |message| {
         let attempt = message.attempt();
         if message.has_tag(RequestKind::Vector.message_tag()) {
@@ -154,7 +150,7 @@ fn apply_layer_missing<T: VectorTransferables>(
 fn apply_layer_tessellated<T: VectorTransferables>(
     world: &mut World,
     style: &Style,
-    layer_by_id: &rustc_hash::FxHashMap<&str, &crate::style::layer::StyleLayer>,
+    layer_by_id: &rustc_hash::FxHashMap<String, usize>,
     message: Message,
     attempt: Option<u64>,
     memo: &mut crate::style::feature_state::FeatureStateArcMemo,
@@ -165,9 +161,10 @@ fn apply_layer_tessellated<T: VectorTransferables>(
     let coords = message.coords();
     let mut feature_paint = message.take_feature_paint();
     let mut bucket = message.to_bucket();
-    if let Some(&style_layer) = tile_retry::accepts(world, coords, RequestKind::Vector, attempt)
+    if let Some(style_layer) = tile_retry::accepts(world, coords, RequestKind::Vector, attempt)
         .then(|| layer_by_id.get(bucket.style_layer_id.as_str()))
         .flatten()
+        .and_then(|&idx| style.layers.get(idx))
     {
         let overscaled_zoom = world
             .tiles

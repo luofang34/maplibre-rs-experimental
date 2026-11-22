@@ -79,7 +79,10 @@ impl TileLoad {
 /// Tiles marked loading since they were last counted; a tile that settled or was evicted since
 /// leaves the set the next time it is pruned.
 #[derive(Debug, Default)]
-struct LoadingTiles(HashSet<WorldTileCoords>);
+struct LoadingTiles {
+    tiles: HashSet<WorldTileCoords>,
+    last_pruned_frame: u64,
+}
 
 /// Cumulative count of tile requests admitted across all families in this world.
 #[derive(Clone, Copy, Debug, Default)]
@@ -104,7 +107,7 @@ pub(crate) fn issued(world: &mut World, coords: WorldTileCoords, kind: RequestKi
     world
         .resources
         .get_or_init_mut::<LoadingTiles>()
-        .0
+        .tiles
         .insert(coords);
     let total = world.resources.get_or_init_mut::<TotalRequestsIssued>();
     total.0 = total.0.saturating_add(1);
@@ -154,7 +157,7 @@ pub(crate) fn is_loading(tiles: &Tiles, coords: WorldTileCoords) -> bool {
 pub(crate) fn loading_count(world: &World) -> usize {
     world.resources.get::<LoadingTiles>().map_or(0, |loading| {
         loading
-            .0
+            .tiles
             .iter()
             .filter(|coords| is_loading(&world.tiles, **coords))
             .count()
@@ -171,18 +174,23 @@ pub(crate) fn total_issued(world: &World) -> u64 {
 
 /// Drops the tiles that settled or were evicted since they were marked loading.
 fn prune(world: &mut World) {
+    let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
     let Some(loading) = world.resources.get::<LoadingTiles>() else {
         return;
     };
+    if host_frame > 0 && loading.last_pruned_frame == host_frame {
+        return;
+    }
     let settled: Vec<_> = loading
-        .0
+        .tiles
         .iter()
         .filter(|coords| !is_loading(&world.tiles, **coords))
         .copied()
         .collect();
     if let Some(loading) = world.resources.get_mut::<LoadingTiles>() {
+        loading.last_pruned_frame = host_frame;
         for coords in settled {
-            loading.0.remove(&coords);
+            loading.tiles.remove(&coords);
         }
     }
 }

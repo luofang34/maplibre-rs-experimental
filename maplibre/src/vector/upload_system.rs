@@ -118,6 +118,7 @@ pub fn upload_system(
     };
     if dirty_style_applied {
         paint_scratch.slots.invalidate_all();
+        paint_scratch.invalidate_tiles();
     }
     paint_scratch
         .slots

@@ -51,11 +51,7 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
         if messages.peek().is_none() || renderer.settings.symbol_pools.is_empty() {
             return Ok(());
         }
-        let layer_by_id: rustc_hash::FxHashMap<&str, &crate::style::layer::StyleLayer> = style
-            .layers
-            .iter()
-            .map(|layer| (layer.id.as_str(), layer))
-            .collect();
+        let layer_by_id = style.cached_layer_index_by_id();
         let mut prop_interner =
             crate::vector::feature_paint::intern::TilePropertyInterner::default();
         let mut state_memo = crate::style::feature_state::FeatureStateArcMemo::default();
@@ -69,10 +65,11 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
                 let message = message.into_transferable::<T::SymbolLayerTessellated>()?;
                 let coords = message.coords();
                 let mut bucket = message.to_bucket();
-                if let Some(&style_layer) =
+                if let Some(style_layer) =
                     tile_retry::accepts(world, coords, RequestKind::Vector, attempt)
                         .then(|| layer_by_id.get(bucket.style_layer_id.as_str()))
                         .flatten()
+                        .and_then(|&idx| style.layers.get(idx))
                 {
                     prop_interner.intern_symbol_bucket(&world.tiles, &mut bucket);
                     let retessellate =

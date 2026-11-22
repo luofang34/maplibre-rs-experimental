@@ -49,6 +49,8 @@ pub struct Tiles<G: TileGeometryStore = ()> {
     pyramid: TilePyramid<()>,
     component_pyramids: FxHashMap<TypeId, TilePyramid<()>>,
     component_indices: FxHashMap<TypeId, usize>,
+    content_revs: FxHashMap<Quadkey, u64>,
+    next_content_rev: u64,
 }
 
 impl<G: TileGeometryStore> Default for Tiles<G> {
@@ -60,6 +62,8 @@ impl<G: TileGeometryStore> Default for Tiles<G> {
             pyramid: TilePyramid::default(),
             component_pyramids: FxHashMap::default(),
             component_indices: FxHashMap::default(),
+            content_revs: FxHashMap::default(),
+            next_content_rev: 1,
         }
     }
 }
@@ -121,10 +125,19 @@ impl<G: TileGeometryStore> Tiles<G> {
         }
     }
 
+    /// Monotonic revision bumped when components at `coords` are inserted or mutated, or `None`
+    /// if `coords` is invalid or absent.
+    #[inline]
+    pub fn tile_content_rev(&self, coords: WorldTileCoords) -> Option<u64> {
+        let key = coords.build_quad_key()?;
+        self.content_revs.get(&key).copied()
+    }
+
     /// Drops every tile, component and feature-query geometry.
     pub fn clear(&mut self) {
         self.tiles.clear();
         self.components.clear();
+        self.content_revs.clear();
         self.pyramid.clear();
         for pyramid in self.component_pyramids.values_mut() {
             pyramid.clear();
@@ -145,6 +158,7 @@ impl<G: TileGeometryStore> Tiles<G> {
                 }
             }
         }
+        self.content_revs.remove(&key);
         self.pyramid.remove(coords);
         self.geometry_index.remove_tile(&coords);
         self.tiles.remove(&key).is_some()
@@ -161,13 +175,32 @@ impl<G: TileGeometryStore> Tiles<G> {
     }
 
     fn get_component_mut<T: TileComponent>(&mut self, tile: Tile) -> Option<&mut T> {
-        get_component_boxed_mut(
+        let comp = get_component_boxed_mut(
             &self.component_indices,
             &mut self.components,
             tile.coords,
             TypeId::of::<T>(),
         )?
-        .downcast_mut()
+        .downcast_mut()?;
+        bump_content_rev(
+            &mut self.next_content_rev,
+            &mut self.content_revs,
+            tile.coords,
+        );
+        Some(comp)
+    }
+}
+
+#[inline]
+fn bump_content_rev(
+    next_rev: &mut u64,
+    content_revs: &mut FxHashMap<Quadkey, u64>,
+    coords: WorldTileCoords,
+) {
+    if let Some(key) = coords.build_quad_key() {
+        let rev = *next_rev;
+        *next_rev = next_rev.saturating_add(1);
+        content_revs.insert(key, rev);
     }
 }
 
@@ -269,6 +302,11 @@ impl<G: TileGeometryStore> TileSpawnResult<'_, G> {
                     type_id,
                 );
             }
+            bump_content_rev(
+                &mut self.tiles.next_content_rev,
+                &mut self.tiles.content_revs,
+                self.tile.coords,
+            );
         }
         self
     }
@@ -294,6 +332,9 @@ impl<T: TileComponent> ComponentQuery for &T {
 /// Component lookup with exclusive access to the tile store while constructing the result.
 /// Built-in tuples may mix shared and mutable references to disjoint component types.
 pub trait ComponentQueryMut {
+    /// Whether this query includes at least one `&mut` component borrow.
+    const HAS_MUT: bool;
+
     /// Value returned with a lifetime bounded by the exclusive tile-store borrow.
     type MutItem<'t>;
 
@@ -310,11 +351,20 @@ pub trait ComponentQueryMut {
     ) -> Option<Self::MutItem<'_>> {
         let slots = borrow_component_slots(&mut tiles.components, tile.coords)?;
         let mut slice = DisjointSliceBorrow::new(slots);
-        Self::borrow(&tiles.component_indices, &mut slice)
+        let borrowed = Self::borrow(&tiles.component_indices, &mut slice)?;
+        if Self::HAS_MUT {
+            bump_content_rev(
+                &mut tiles.next_content_rev,
+                &mut tiles.content_revs,
+                tile.coords,
+            );
+        }
+        Some(borrowed)
     }
 }
 
 impl<T: TileComponent> ComponentQueryMut for &T {
+    const HAS_MUT: bool = false;
     type MutItem<'t> = &'t T;
 
     fn borrow<'t>(
@@ -334,6 +384,7 @@ impl<T: TileComponent> ComponentQueryMut for &T {
 }
 
 impl<T: TileComponent> ComponentQueryMut for &mut T {
+    const HAS_MUT: bool = true;
     type MutItem<'t> = &'t mut T;
 
     fn borrow<'t>(
@@ -363,6 +414,7 @@ macro_rules! impl_component_query {
         }
 
         impl<$($param: ComponentQueryMut),*> ComponentQueryMut for ($($param,)*) {
+            const HAS_MUT: bool = false $(|| $param::HAS_MUT)*;
             type MutItem<'t> = ($($param::MutItem<'t>,)*);
 
             fn borrow<'t>(

@@ -33,6 +33,31 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         self.reclaim_empty_pages_with_queue(keep_spare, None);
     }
 
+    /// Releases GPU geometry for a batch of already-evicted tiles in one `pattern_runs` /
+    /// `sort_runs` retain pass without reclaiming slabs per tile.
+    pub fn remove_evicted_tiles_batch(&mut self, evicted: &rustc_hash::FxHashSet<WorldTileCoords>) {
+        if evicted.is_empty() {
+            return;
+        }
+        self.pattern_runs
+            .retain(|(tile, _), _| !evicted.contains(tile));
+        self.sort_runs
+            .retain(|(tile, _), _| !evicted.contains(tile));
+        let mut freed_any = false;
+        for &coords in evicted {
+            let removed = self.index.remove_tile(coords);
+            if !removed.is_empty() {
+                freed_any = true;
+                for entry in &removed {
+                    self.free_entry_ranges(entry);
+                }
+            }
+        }
+        if freed_any {
+            self.revision = self.revision.wrapping_add(1);
+        }
+    }
+
     /// Drops empty slabs beyond `keep_spare`, cancelling any staged writes on `queue` first.
     pub fn reclaim_empty_pages_with_queue(&mut self, keep_spare: usize, queue: Option<&Q>) {
         if self.page_factory.is_none() {

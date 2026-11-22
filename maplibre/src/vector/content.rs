@@ -1,5 +1,7 @@
 //! Successful layer replacements wait for their GPU data before replacing displayed content.
 
+use std::sync::Arc;
+
 use super::{
     feature_paint::{BucketFeatureEntry, TileFeaturePaintComponent},
     AvailableVectorLayerBucket, VectorBufferPool, VectorLayerBucket, VectorLayerBucketComponent,
@@ -14,7 +16,6 @@ use crate::{
     },
 };
 
-#[derive(Default)]
 pub(crate) struct LayerReplacements {
     pub vector: Vec<AvailableVectorLayerBucket>,
     pub symbols: Vec<SymbolLayerData>,
@@ -23,9 +24,23 @@ pub(crate) struct LayerReplacements {
     pub revision: u64,
     /// Non-symbol style layers the request in flight was asked to build; its result is the
     /// tile's whole content for them, so those it leaves out are dropped when it finishes.
-    pub requested: Vec<String>,
+    pub requested: Arc<[String]>,
     /// Which of [`requested`](Self::requested) the request has delivered so far.
     pub delivered: Vec<String>,
+}
+
+impl Default for LayerReplacements {
+    fn default() -> Self {
+        Self {
+            vector: Vec::new(),
+            symbols: Vec::new(),
+            keep_vector: false,
+            keep_symbols: false,
+            revision: 0,
+            requested: Arc::from([]),
+            delivered: Vec::new(),
+        }
+    }
 }
 impl TileComponent for LayerReplacements {}
 
@@ -43,7 +58,7 @@ pub(crate) fn ensure(tiles: &mut Tiles, coords: WorldTileCoords) {
     }
 }
 
-pub(crate) fn begin(world: &mut World, coords: WorldTileCoords, requested: Vec<String>) {
+pub(crate) fn begin(world: &mut World, coords: WorldTileCoords, requested: Arc<[String]>) {
     let vector = world.tiles.query::<&VectorLayerBucketComponent>(coords);
     let keep_vector = vector.is_some_and(|tile| tile.done && !tile.failed);
     if vector.is_none() {
@@ -75,10 +90,11 @@ pub(crate) fn drop_undelivered(world: &mut World, coords: WorldTileCoords) {
     let Some(pending) = world.tiles.query_mut::<&mut LayerReplacements>(coords) else {
         return;
     };
-    let requested = std::mem::take(&mut pending.requested);
+    let requested = std::mem::replace(&mut pending.requested, Arc::from([]));
     let omitted: Vec<String> = requested
-        .into_iter()
+        .iter()
         .filter(|id| !pending.delivered.contains(id))
+        .cloned()
         .collect();
     if !omitted.is_empty() {
         purge_vector_layers(world, coords, &omitted);
@@ -102,7 +118,7 @@ pub(crate) fn discard_pending_refresh(world: &mut World, coords: WorldTileCoords
     if let Some(pending) = world.tiles.query_mut::<&mut LayerReplacements>(coords) {
         pending.vector.clear();
         pending.symbols.clear();
-        pending.requested.clear();
+        pending.requested = Arc::from([]);
         pending.delivered.clear();
         pending.keep_vector = false;
         pending.keep_symbols = false;
@@ -434,62 +450,6 @@ pub(crate) fn has_evicted_gpu_geometry(
     false
 }
 
-/// Drops everything the removed style layers left in loaded tiles: their buckets, pending
-/// replacements and GPU buffers. Buckets are otherwise only ever replaced by layer id, so a layer
-/// that is no longer in the style would keep its geometry until the tile is evicted.
-pub(crate) fn purge_layers(world: &mut World, removed: &[String]) {
-    let coords: Vec<WorldTileCoords> = world.tiles.tiles.values().map(|tile| tile.coords).collect();
-    for at in &coords {
-        purge_vector_layers(world, *at, removed);
-        if let Some(component) = world.tiles.query_mut::<&mut SymbolLayersDataComponent>(*at) {
-            component.uploaded_stamp = None;
-            component.atlas_zoom_q32 = None;
-            component
-                .layers
-                .retain(|layer| !removed.contains(&layer.style_layer_id));
-        }
-        if let Some(pending) = world.tiles.query_mut::<&mut LayerReplacements>(*at) {
-            pending
-                .symbols
-                .retain(|layer| !removed.contains(&layer.style_layer_id));
-        }
-    }
-    if let Some(Eventually::Initialized(pool)) =
-        world.resources.get_mut::<Eventually<SymbolBufferPool>>()
-    {
-        for at in &coords {
-            for id in removed {
-                pool.remove_layer(*at, id);
-            }
-        }
-    }
-}
-
-/// Drops the buckets, pending replacements and GPU buffers of the non-symbol `layers` in one tile.
-fn purge_vector_layers(world: &mut World, at: WorldTileCoords, layers: &[String]) {
-    if let Some(component) = world.tiles.query_mut::<&mut VectorLayerBucketComponent>(at) {
-        component.uploaded_stamp = None;
-        component.layers.retain(|layer| match layer {
-            VectorLayerBucket::AvailableLayer(bucket) => !layers.contains(&bucket.style_layer_id),
-            VectorLayerBucket::Missing(_) => true,
-        });
-    }
-    if let Some(pending) = world.tiles.query_mut::<&mut LayerReplacements>(at) {
-        pending
-            .vector
-            .retain(|layer| !layers.contains(&layer.style_layer_id));
-    }
-    if let Some(paint_store) = world.tiles.query_mut::<&mut TileFeaturePaintComponent>(at) {
-        for id in layers {
-            paint_store.committed.remove(id);
-            paint_store.pending.remove(id);
-        }
-    }
-    if let Some(Eventually::Initialized(pool)) =
-        world.resources.get_mut::<Eventually<VectorBufferPool>>()
-    {
-        for id in layers {
-            pool.remove_layer(at, id);
-        }
-    }
-}
+mod purge;
+pub(crate) use purge::purge_layers;
+use purge::purge_vector_layers;

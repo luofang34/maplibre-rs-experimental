@@ -13,8 +13,8 @@ use rustc_hash::{FxHashMap, FxHashMap as HashMap, FxHashSet as HashSet};
 use super::{
     family,
     layer_pass::slice::{LayerSliceProgress, SlicePlacementState, SliceStepContext},
-    signatures::obstructed_grid,
-    temporal, upload_diff, VisibleLayer,
+    signatures::{populate_obstructed_grid, VisibleLayer},
+    temporal, upload_diff,
 };
 use crate::{
     coords::WorldTileCoords,
@@ -90,8 +90,10 @@ impl ActiveEpoch {
         view_state: &ViewState,
         projection: ShaderProjectionData,
         layers: Vec<VisibleLayer<'_>>,
+        mut boxes: CollisionGrid,
     ) -> Self {
-        let boxes = obstructed_grid(
+        populate_obstructed_grid(
+            &mut boxes,
             view_state.width(),
             view_state.height(),
             world
@@ -108,7 +110,8 @@ impl ActiveEpoch {
                 _ => raw_groups.push((index, layer.style_layer_id.clone(), vec![layer.coords])),
             }
         }
-        let leaders = family::leaders(style);
+        let leaders = style.cached_symbol_leaders(family::leaders);
+        let layer_by_id = style.cached_layer_index_by_id();
         let present: HashSet<String> = raw_groups.iter().map(|(_, id, _)| id.clone()).collect();
         let groups = raw_groups
             .into_iter()
@@ -118,10 +121,9 @@ impl ActiveEpoch {
                     .filter(|leader| **leader != id && present.contains(*leader))
                     .cloned();
                 let is_leader = leaders.get(&id) == Some(&id);
-                let zoom_limits = style
-                    .layers
-                    .iter()
-                    .find(|l| l.id == id)
+                let zoom_limits = layer_by_id
+                    .get(&id)
+                    .and_then(|&idx| style.layers.get(idx))
                     .map(|l| {
                         [
                             l.minzoom.filter(|&m| m > 0.0).unwrap_or(f64::NEG_INFINITY),
@@ -405,11 +407,16 @@ impl ActiveEpoch {
         std::mem::take(&mut self.placed)
     }
 
-    pub(super) fn abort(mut self, scratch: &mut upload_diff::MetadataScratchPool) {
+    pub(super) fn take_grid(&mut self) -> CollisionGrid {
+        std::mem::take(&mut self.boxes)
+    }
+
+    pub(super) fn abort(mut self, scratch: &mut upload_diff::MetadataScratchPool) -> CollisionGrid {
         if let Some(group) = self.active_group.take() {
             group.recycle(scratch);
         }
         self.recycle_pending_uploads(scratch);
+        std::mem::take(&mut self.boxes)
     }
 
     fn recycle_pending_uploads(&mut self, scratch: &mut upload_diff::MetadataScratchPool) {

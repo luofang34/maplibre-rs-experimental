@@ -67,6 +67,7 @@ pub(super) struct PlacementHistory {
     states: FxHashMap<String, FxHashMap<u64, Vec<State>>>,
     now: Duration,
     prev_now: Option<Duration>,
+    active_frame_touched_at: Duration,
     clock_ms: f32,
     fade_until_ms: f32,
     fade_duration_ms: f32,
@@ -81,6 +82,7 @@ impl Default for PlacementHistory {
             states: FxHashMap::default(),
             now: Duration::ZERO,
             prev_now: None,
+            active_frame_touched_at: Duration::ZERO,
             clock_ms: 0.0,
             fade_until_ms: 0.0,
             fade_duration_ms: DEFAULT_FADE_DURATION_MS,
@@ -118,18 +120,11 @@ impl PlacementHistory {
         self.clock_ms
     }
 
-    /// Keeps states claimed by the most recent placement epoch alive across idle frames that
-    /// intentionally skip running a new placement pass.
+    /// Records the latest timestamp for states claimed by the most recent placement epoch so
+    /// throttled/skipped frames stay O(1) and expire lazily at the next epoch commit.
     pub(super) fn touch_active_states(&mut self, now: Duration) {
-        let frame = self.frame;
-        for layer_states in self.states.values_mut() {
-            for states in layer_states.values_mut() {
-                for state in states.iter_mut() {
-                    if state.claimed == frame && now > state.last_seen {
-                        state.last_seen = now;
-                    }
-                }
-            }
+        if now > self.active_frame_touched_at {
+            self.active_frame_touched_at = now;
         }
     }
 
@@ -178,12 +173,20 @@ impl PlacementHistory {
     pub(super) fn begin_with_duration(&mut self, now: Duration, fade_duration: Duration) {
         self.set_fade_duration(fade_duration);
         self.advance_clock(now);
+        let prev_frame = self.frame;
+        let touched = self.active_frame_touched_at;
+        self.active_frame_touched_at = now;
         self.frame = self.frame.wrapping_add(1);
         self.repeats.begin();
         let retention = Duration::from_secs(1).max(fade_duration);
         self.states.retain(|_, layer_states| {
             layer_states.retain(|_, states| {
-                states.retain(|state| now.saturating_sub(state.last_seen) < retention);
+                states.retain_mut(|state| {
+                    if state.claimed == prev_frame && touched > state.last_seen {
+                        state.last_seen = touched;
+                    }
+                    now.saturating_sub(state.last_seen) < retention
+                });
                 !states.is_empty()
             });
             !layer_states.is_empty()

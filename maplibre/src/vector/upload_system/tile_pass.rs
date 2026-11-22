@@ -40,6 +40,8 @@ pub(super) struct TessellatedUploadState<'a> {
 struct TilePassScratch<'a, 'b> {
     feature_meta: Vec<FillShaderFeatureMetadata>,
     protected: rustc_hash::FxHashSet<WorldTileCoords>,
+    layer_index_by_id: Arc<rustc_hash::FxHashMap<String, usize>>,
+    layer_candidates: Vec<usize>,
     has_dem_source: bool,
     upload_started: instant::Instant,
     time_budget: Option<std::time::Duration>,
@@ -110,6 +112,8 @@ pub(super) fn upload_tessellated_layer_with_uncovered(
     let mut pass = TilePassScratch {
         feature_meta: Vec::new(),
         protected,
+        layer_index_by_id: plan.style.cached_layer_index_by_id(),
+        layer_candidates: Vec::new(),
         has_dem_source: crate::terrain::source::dem_source(plan.style).is_some(),
         upload_started: instant::Instant::now(),
         time_budget,
@@ -135,6 +139,29 @@ fn all_tiles_uploaded(tiles: &Tiles, source_tiles: &[WorldTileCoords], stamp: (u
     })
 }
 
+fn collect_tile_style_candidates(
+    layers: &VectorLayerBucketComponent,
+    pending: &LayerReplacements,
+    layer_index_by_id: &rustc_hash::FxHashMap<String, usize>,
+    candidates: &mut Vec<usize>,
+) {
+    candidates.clear();
+    for bucket in &pending.vector {
+        if let Some(&idx) = layer_index_by_id.get(bucket.style_layer_id.as_str()) {
+            candidates.push(idx);
+        }
+    }
+    for layer in &layers.layers {
+        if let VectorLayerBucket::AvailableLayer(bucket) = layer {
+            if let Some(&idx) = layer_index_by_id.get(bucket.style_layer_id.as_str()) {
+                candidates.push(idx);
+            }
+        }
+    }
+    candidates.sort_unstable();
+    candidates.dedup();
+}
+
 fn upload_tile_buckets(
     buffer_pool: &mut VectorBufferPool,
     queue: &UploadQueue,
@@ -144,18 +171,27 @@ fn upload_tile_buckets(
     pass: &mut TilePassScratch<'_, '_>,
 ) {
     ensure_content(tiles, coords);
-    if tiles
-        .query::<(&VectorLayerBucketComponent, &LayerReplacements)>(coords)
-        .is_none_or(|(layers, pending)| {
-            layers.done && pending.vector.is_empty() && layers.uploaded_stamp == Some(pass.stamp)
-        })
+    let mut candidates = std::mem::take(&mut pass.layer_candidates);
     {
-        return;
+        let Some((layers, pending)) =
+            tiles.query::<(&VectorLayerBucketComponent, &LayerReplacements)>(coords)
+        else {
+            pass.layer_candidates = candidates;
+            return;
+        };
+        if layers.done && pending.vector.is_empty() && layers.uploaded_stamp == Some(pass.stamp) {
+            pass.layer_candidates = candidates;
+            return;
+        }
+        collect_tile_style_candidates(layers, pending, &pass.layer_index_by_id, &mut candidates);
     }
     let mut tile_incomplete = false;
     let mut uploaded = false;
     let mut pending_cpu_releases: Vec<(String, Option<u64>, bool)> = Vec::new();
-    for style_layer in plan.shared_style_layers {
+    for &style_idx in &candidates {
+        let Some(style_layer) = plan.shared_style_layers.get(style_idx) else {
+            continue;
+        };
         match process_tile_style_layer(buffer_pool, queue, tiles, plan, coords, style_layer, pass) {
             LayerStep::Continue => continue,
             LayerStep::Incomplete => tile_incomplete = true,
@@ -203,6 +239,8 @@ fn upload_tile_buckets(
     if uploaded {
         pass.state.budget.count_geometry_tile();
     }
+    candidates.clear();
+    pass.layer_candidates = candidates;
 }
 
 fn process_tile_style_layer(

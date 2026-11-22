@@ -10,6 +10,8 @@ use std::sync::{
     Arc, Mutex,
 };
 
+use rustc_hash::FxHashMap;
+
 use super::Style;
 use crate::platform::lock_unpoisoned;
 
@@ -25,6 +27,8 @@ struct WorkerSnapshots {
     full: Option<Arc<Style>>,
     filtered: Option<((bool, bool), Arc<Style>)>,
     vector_layer_ids: Option<Arc<[String]>>,
+    layer_index_by_id: Option<Arc<FxHashMap<String, usize>>>,
+    symbol_leaders: Option<Arc<FxHashMap<String, String>>>,
     derived: Option<DerivedStyleFacts>,
 }
 
@@ -161,5 +165,37 @@ impl Style {
         let facts = compute(self);
         guard.derived = Some(facts);
         facts
+    }
+
+    /// Cached `id -> layer_index` map for [`Self::layers`], rebuilt only when [`Self::revision`]
+    /// changes.
+    pub(crate) fn cached_layer_index_by_id(&self) -> Arc<FxHashMap<String, usize>> {
+        let mut guard = lock_unpoisoned(&self.revision_state.snapshots);
+        if let Some(map) = &guard.layer_index_by_id {
+            return map.clone();
+        }
+        let map: FxHashMap<String, usize> = self
+            .layers
+            .iter()
+            .enumerate()
+            .map(|(index, layer)| (layer.id.clone(), index))
+            .collect();
+        let cached = Arc::new(map);
+        guard.layer_index_by_id = Some(cached.clone());
+        cached
+    }
+
+    /// Cached symbol placement-group `member -> leader` map for the current style revision.
+    pub(crate) fn cached_symbol_leaders(
+        &self,
+        compute: impl FnOnce(&Style) -> FxHashMap<String, String>,
+    ) -> Arc<FxHashMap<String, String>> {
+        let mut guard = lock_unpoisoned(&self.revision_state.snapshots);
+        if let Some(leaders) = &guard.symbol_leaders {
+            return leaders.clone();
+        }
+        let cached = Arc::new(compute(self));
+        guard.symbol_leaders = Some(cached.clone());
+        cached
     }
 }

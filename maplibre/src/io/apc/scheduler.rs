@@ -2,21 +2,23 @@
 
 use std::{
     cell::{Cell, RefCell},
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     marker::PhantomData,
     sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc::{self, Receiver, Sender},
         Arc, Mutex,
     },
     vec::IntoIter,
 };
 
-use futures::future::{AbortHandle, Abortable, Aborted};
+use futures::future::{AbortHandle, AbortRegistration, Abortable, Aborted};
+use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::{
-    AsyncProcedure, AsyncProcedureCall, CallError, Context, Input, IntoMessage, Message,
-    ProcedureError, SendError,
-};
+mod context;
+pub use context::SchedulerContext;
+
+use super::{AsyncProcedure, AsyncProcedureCall, CallError, Input, Message, ProcedureError};
 use crate::{
     environment::{OffscreenKernel, OffscreenKernelConfig},
     io::scheduler::Scheduler,
@@ -25,98 +27,69 @@ use crate::{
 #[cfg(target_arch = "wasm32")]
 const MAX_ADMITTED_ATTEMPTS_PER_BATCH: usize = 4;
 
-#[cfg(target_arch = "wasm32")]
-fn is_intermediate_vector_layer(message: &Message) -> bool {
-    use crate::vector::transferables::TileTessellated as _;
-    matches!(
-        message
-            .tag()
-            .as_any()
-            .downcast_ref::<crate::vector::transferables::VectorMessageTag>(),
-        Some(
-            crate::vector::transferables::VectorMessageTag::LayerMissing
-                | crate::vector::transferables::VectorMessageTag::LayerTessellated
-                | crate::vector::transferables::VectorMessageTag::SymbolLayerTessellated
-                | crate::vector::transferables::VectorMessageTag::LayerIndexed
-        )
-    ) || message.has_tag(crate::sdf::provided::ProvidedImagesReport::message_tag())
-        || message
-            .downcast_ref::<crate::vector::transferables::DefaultTileTessellated>()
-            .is_some_and(|tile| !tile.pending_symbols())
-}
-
 pub(crate) type ArrivalWaker = Arc<dyn Fn() + Send + Sync>;
 type SharedArrivalWaker = Arc<Mutex<Option<ArrivalWaker>>>;
 
-/// Reply sender whose clones share the scheduler-backed APC's receiving channel.
-#[derive(Clone)]
-pub struct SchedulerContext {
-    pub(crate) sender: Sender<Message>,
-    pub(crate) waker: Option<ArrivalWaker>,
-    #[cfg(target_arch = "wasm32")]
-    pending: Arc<Mutex<Vec<Message>>>,
+struct CallDispatch<K: OffscreenKernel> {
+    input: Input,
+    procedure: AsyncProcedure<K, SchedulerContext>,
+    config: OffscreenKernelConfig,
+    sender: Sender<Message>,
+    batch_sender: Sender<Vec<Message>>,
+    waker: Option<ArrivalWaker>,
+    registration: AbortRegistration,
+    cancel_flag: Arc<AtomicBool>,
+    sent_any: Arc<AtomicBool>,
+    running: Arc<Mutex<FxHashMap<u64, (AbortHandle, Arc<AtomicBool>)>>>,
+    in_flight: Arc<AtomicUsize>,
 }
 
-impl SchedulerContext {
-    pub(crate) fn new(sender: Sender<Message>, waker: Option<ArrivalWaker>) -> Self {
-        Self {
-            sender,
-            waker,
+async fn run_tracked_call<K: OffscreenKernel>(dispatch: CallDispatch<K>) {
+    if dispatch.cancel_flag.load(Ordering::Acquire) {
+        tracing::debug!(
+            attempt = dispatch.input.attempt,
+            "queued worker call cancelled before start"
+        );
+        return;
+    }
+    tracing::debug!(thread = ?std::thread::current().name(), "processing worker call");
+
+    let attempt = dispatch.input.attempt;
+    let kernel = K::create(dispatch.config);
+    let context = SchedulerContext::for_call(
+        dispatch.sender,
+        dispatch.batch_sender,
+        dispatch.waker.clone(),
+        dispatch.cancel_flag,
+        dispatch.sent_any.clone(),
+    );
+    #[cfg(target_arch = "wasm32")]
+    let flush_context = context.clone();
+    // A result that cannot be delivered, because the map already shut down, must
+    // not take the worker thread down with it.
+    let call = (dispatch.procedure)(dispatch.input, context, kernel);
+    match Abortable::new(call, dispatch.registration).await {
+        Ok(Err(ProcedureError::Send(_))) => {
+            tracing::debug!(attempt, "discarding worker result after map shutdown")
+        }
+        Ok(Err(error)) => tracing::warn!(?error, "procedure failed"),
+        Ok(Ok(())) => {
             #[cfg(target_arch = "wasm32")]
-            pending: Arc::new(Mutex::new(Vec::new())),
+            drop(flush_context.flush());
         }
+        Err(Aborted) => tracing::debug!(attempt, "cancelled worker call stopped"),
     }
-
-    #[cfg(target_arch = "wasm32")]
-    pub(super) fn flush(&self) -> Result<(), SendError> {
-        let buffered = std::mem::take(&mut *crate::platform::lock_unpoisoned(&self.pending));
-        if buffered.is_empty() {
-            return Ok(());
-        }
-        for msg in buffered {
-            self.sender
-                .send(msg)
-                .map_err(|source| SendError::Transmission {
-                    operation: "sending a result to the caller",
-                    source: Box::new(source),
-                })?;
-        }
-        if let Some(wake) = &self.waker {
+    let remaining = {
+        let mut map = crate::platform::lock_unpoisoned(&dispatch.running);
+        map.remove(&attempt);
+        let len = map.len();
+        dispatch.in_flight.store(len, Ordering::Release);
+        len
+    };
+    if remaining == 0 && !dispatch.sent_any.load(Ordering::Acquire) {
+        if let Some(wake) = dispatch.waker {
             wake();
         }
-        Ok(())
-    }
-}
-
-impl Context for SchedulerContext {
-    fn send_back<T: IntoMessage>(&self, message: T) -> Result<(), SendError> {
-        let message = message.into();
-        #[cfg(target_arch = "wasm32")]
-        {
-            if is_intermediate_vector_layer(&message) {
-                crate::platform::lock_unpoisoned(&self.pending).push(message);
-                return Ok(());
-            }
-            let buffered = std::mem::take(&mut *crate::platform::lock_unpoisoned(&self.pending));
-            for pending_msg in buffered {
-                self.sender
-                    .send(pending_msg)
-                    .map_err(|source| SendError::Transmission {
-                        operation: "sending a result to the caller",
-                        source: Box::new(source),
-                    })?;
-            }
-        }
-        self.sender
-            .send(message)
-            .map_err(|source| SendError::Transmission {
-                operation: "sending a result to the caller",
-                source: Box::new(source),
-            })?;
-        if let Some(wake) = &self.waker {
-            wake();
-        }
-        Ok(())
     }
 }
 
@@ -126,11 +99,12 @@ impl Context for SchedulerContext {
 /// only preparation and admission failures are returned by [`AsyncProcedureCall::call`].
 pub struct SchedulerAsyncProcedureCall<K: OffscreenKernel, S: Scheduler> {
     pub(crate) channel: (Sender<Message>, Receiver<Message>),
+    batch_channel: (Sender<Vec<Message>>, Receiver<Vec<Message>>),
     /// Admitted messages retained for sibling consumers in the current frame.
     buffer: RefCell<Vec<Message>>,
-    /// Unadmitted arrivals peeked from `channel.1` or deferred to a subsequent frame.
+    /// Unadmitted arrivals peeked from channels or deferred to a subsequent frame.
     queued: RefCell<VecDeque<Message>>,
-    /// Whether `receive` may admit new messages from `channel` during the current frame.
+    /// Whether `receive` may admit new messages from channels during the current frame.
     batch_open: Cell<bool>,
     /// When `true` (initial boot), `receive` drains all ready worker results without batch caps.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
@@ -138,16 +112,26 @@ pub struct SchedulerAsyncProcedureCall<K: OffscreenKernel, S: Scheduler> {
     scheduler: S,
     phantom_k: PhantomData<K>,
     offscreen_kernel_config: OffscreenKernelConfig,
-    /// Tracked calls still running, by attempt, so a cancelled one can be stopped.
-    running: Arc<Mutex<HashMap<u64, AbortHandle>>>,
+    /// Tracked calls still running, by attempt, so cancelled calls can be stopped and skipped.
+    running: Arc<Mutex<FxHashMap<u64, (AbortHandle, Arc<AtomicBool>)>>>,
+    in_flight: Arc<AtomicUsize>,
+    cancelled: RefCell<FxHashSet<u64>>,
     pub(crate) waker: SharedArrivalWaker,
 }
 
 impl<K: OffscreenKernel, S: Scheduler> SchedulerAsyncProcedureCall<K, S> {
+    #[cfg(test)]
+    pub(super) fn running(
+        &self,
+    ) -> std::sync::MutexGuard<'_, FxHashMap<u64, (AbortHandle, Arc<AtomicBool>)>> {
+        crate::platform::lock_unpoisoned(&self.running)
+    }
+
     /// Creates an empty reply channel and keeps the worker kernel configuration for future calls.
     pub fn new(scheduler: S, offscreen_kernel_config: OffscreenKernelConfig) -> Self {
         Self {
             channel: mpsc::channel(),
+            batch_channel: mpsc::channel(),
             buffer: RefCell::new(Vec::new()),
             queued: RefCell::new(VecDeque::new()),
             batch_open: Cell::new(true),
@@ -156,12 +140,34 @@ impl<K: OffscreenKernel, S: Scheduler> SchedulerAsyncProcedureCall<K, S> {
             scheduler,
             offscreen_kernel_config,
             running: Arc::default(),
+            in_flight: Arc::default(),
+            cancelled: RefCell::default(),
             waker: Arc::default(),
         }
     }
 
-    pub(super) fn running(&self) -> std::sync::MutexGuard<'_, HashMap<u64, AbortHandle>> {
-        crate::platform::lock_unpoisoned(&self.running)
+    fn drain_channels(&self, queued: &mut VecDeque<Message>) {
+        let cancelled = self.cancelled.borrow();
+        let keep = |msg: &Message| !msg.attempt().is_some_and(|id| cancelled.contains(&id));
+        while let Ok(batch) = self.batch_channel.1.try_recv() {
+            for message in batch {
+                if keep(&message) {
+                    queued.push_back(message);
+                }
+            }
+        }
+        while let Ok(message) = self.channel.1.try_recv() {
+            if keep(&message) {
+                queued.push_back(message);
+            }
+        }
+        drop(cancelled);
+        if queued.is_empty()
+            && self.in_flight.load(Ordering::Acquire) == 0
+            && self.buffer.try_borrow().is_ok_and(|b| b.is_empty())
+        {
+            self.cancelled.borrow_mut().clear();
+        }
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -172,26 +178,17 @@ impl<K: OffscreenKernel, S: Scheduler> SchedulerAsyncProcedureCall<K, S> {
         buffer: &mut Vec<Message>,
     ) {
         let mut queued = self.queued.borrow_mut();
+        self.drain_channels(&mut queued);
         if self.boot_unthrottled.get() {
             while let Some(message) = queued.pop_front() {
-                push_filtered(message, &mut filter, ret, buffer);
-            }
-            while let Ok(message) = self.channel.1.try_recv() {
                 push_filtered(message, &mut filter, ret, buffer);
             }
             return;
         }
         if queued.is_empty() {
-            if let Ok(message) = self.channel.1.try_recv() {
-                queued.push_back(message);
-            } else {
-                return;
-            }
+            return;
         }
-        while let Ok(message) = self.channel.1.try_recv() {
-            queued.push_back(message);
-        }
-        let mut admitted_attempts = rustc_hash::FxHashSet::with_capacity_and_hasher(
+        let mut admitted_attempts = FxHashSet::with_capacity_and_hasher(
             MAX_ADMITTED_ATTEMPTS_PER_BATCH,
             Default::default(),
         );
@@ -255,10 +252,8 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
         #[cfg(not(target_arch = "wasm32"))]
         {
             let mut queued = self.queued.borrow_mut();
+            self.drain_channels(&mut queued);
             while let Some(message) = queued.pop_front() {
-                push_filtered(message, &mut filter, &mut ret, &mut buffer);
-            }
-            while let Ok(message) = self.channel.1.try_recv() {
                 tracing::debug!("Data reached main thread: {message:?}");
                 push_filtered(message, &mut filter, &mut ret, &mut buffer);
             }
@@ -272,61 +267,45 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
         input: Input,
         procedure: AsyncProcedure<K, Self::Context>,
     ) -> Result<(), CallError> {
-        let sender = self.channel.0.clone();
         let waker: Option<ArrivalWaker> =
             if let Some(wake) = crate::platform::lock_unpoisoned(&self.waker).clone() {
                 Some(wake)
             } else {
                 let waker_slot = self.waker.clone();
                 Some(Arc::new(move || {
-                    let current = crate::platform::lock_unpoisoned(&waker_slot).clone();
-                    if let Some(wake) = current {
+                    if let Some(wake) = crate::platform::lock_unpoisoned(&waker_slot).clone() {
                         wake();
                     }
                 }))
             };
-        let offscreen_kernel_config = self.offscreen_kernel_config.clone();
         let attempt = input.attempt;
         let (abort, registration) = AbortHandle::new_pair();
-        self.running().insert(attempt, abort);
-        let running = self.running.clone();
-        let finish_waker = waker.clone();
-
-        let scheduled = self.scheduler.schedule(move || async move {
-            tracing::debug!(thread = ?std::thread::current().name(), "processing worker call");
-
-            let kernel = K::create(offscreen_kernel_config);
-            let context = SchedulerContext::new(sender, waker);
-            #[cfg(target_arch = "wasm32")]
-            let flush_context = context.clone();
-            // A result that cannot be delivered, because the map already shut down, must
-            // not take the worker thread down with it.
-            let call = procedure(input, context, kernel);
-            match Abortable::new(call, registration).await {
-                Ok(Err(ProcedureError::Send(_))) => {
-                    tracing::debug!(attempt, "discarding worker result after map shutdown")
-                }
-                Ok(Err(error)) => tracing::warn!(?error, "procedure failed"),
-                Ok(Ok(())) => {
-                    #[cfg(target_arch = "wasm32")]
-                    drop(flush_context.flush());
-                }
-                Err(Aborted) => tracing::debug!(attempt, "cancelled worker call stopped"),
-            }
-            let remaining = {
-                let mut map = crate::platform::lock_unpoisoned(&running);
-                map.remove(&attempt);
-                map.len()
-            };
-            if remaining == 0 {
-                if let Some(wake) = finish_waker {
-                    wake();
-                }
-            }
-        });
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        let sent_any = Arc::new(AtomicBool::new(false));
+        {
+            let mut map = crate::platform::lock_unpoisoned(&self.running);
+            map.insert(attempt, (abort, cancel_flag.clone()));
+            self.in_flight.store(map.len(), Ordering::Release);
+        }
+        let dispatch = CallDispatch {
+            input,
+            procedure,
+            config: self.offscreen_kernel_config.clone(),
+            sender: self.channel.0.clone(),
+            batch_sender: self.batch_channel.0.clone(),
+            waker,
+            registration,
+            cancel_flag,
+            sent_any,
+            running: self.running.clone(),
+            in_flight: self.in_flight.clone(),
+        };
+        let scheduled = self.scheduler.schedule(move || run_tracked_call(dispatch));
         if scheduled.is_err() {
             // A rejected factory never runs, so nothing else removes its entry.
-            self.running().remove(&attempt);
+            let mut map = crate::platform::lock_unpoisoned(&self.running);
+            map.remove(&attempt);
+            self.in_flight.store(map.len(), Ordering::Release);
         }
         scheduled.map_err(CallError::Schedule)
     }
@@ -344,15 +323,41 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
         if !queued.is_empty() {
             return true;
         }
-        if let Ok(message) = self.channel.1.try_recv() {
-            queued.push_back(message);
-            return true;
-        }
-        false
+        self.drain_channels(&mut queued);
+        !queued.is_empty()
     }
 
     fn cancel(&self, attempt: u64) {
-        if let Some(abort) = self.running().remove(&attempt) {
+        self.cancelled.borrow_mut().insert(attempt);
+        let removed = {
+            let mut map = crate::platform::lock_unpoisoned(&self.running);
+            let entry = map.remove(&attempt);
+            self.in_flight.store(map.len(), Ordering::Release);
+            entry
+        };
+        if let Some((abort, flag)) = removed {
+            flag.store(true, Ordering::Release);
+            abort.abort();
+        }
+    }
+
+    fn cancel_batch(&self, attempts: &[u64]) {
+        if attempts.is_empty() {
+            return;
+        }
+        self.cancelled.borrow_mut().extend(attempts.iter().copied());
+        let mut aborts = Vec::with_capacity(attempts.len());
+        {
+            let mut map = crate::platform::lock_unpoisoned(&self.running);
+            for &attempt in attempts {
+                if let Some(entry) = map.remove(&attempt) {
+                    aborts.push(entry);
+                }
+            }
+            self.in_flight.store(map.len(), Ordering::Release);
+        }
+        for (abort, flag) in aborts {
+            flag.store(true, Ordering::Release);
             abort.abort();
         }
     }
@@ -408,7 +413,7 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
     }
 
     fn in_flight_calls(&self) -> usize {
-        self.running.try_lock().map_or(1, |running| running.len())
+        self.in_flight.load(Ordering::Acquire)
     }
 
     fn set_boot_unthrottled(&self, unthrottled: bool) {

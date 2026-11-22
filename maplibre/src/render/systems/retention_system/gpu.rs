@@ -1,11 +1,14 @@
 //! Releases evicted tile buffers, raster/DEM GPU textures, and empty slab pages.
 
+use rustc_hash::FxHashSet;
+
 #[cfg(feature = "raster")]
 use crate::raster::resource::RasterResources;
 use crate::{
     coords::WorldTileCoords,
     render::{
         eventually::{Eventually, Eventually::Initialized},
+        memory_budget::MemoryPressure,
         upload_queue::UploadQueue,
     },
     tcs::world::World,
@@ -16,20 +19,20 @@ use crate::{
 pub(super) fn drop_gpu_data_with_queue(
     world: &mut World,
     evicted: &[WorldTileCoords],
-    queue: Option<&UploadQueue>,
+    _queue: Option<&UploadQueue>,
 ) {
+    if evicted.is_empty() {
+        return;
+    }
+    let evicted_set: FxHashSet<WorldTileCoords> = evicted.iter().copied().collect();
     if let Some(Initialized(pool)) = world.resources.get_mut::<Eventually<VectorBufferPool>>() {
-        for coords in evicted {
-            pool.remove_evicted_tile_with_queue(*coords, queue);
-        }
+        pool.remove_evicted_tiles_batch(&evicted_set);
     }
     if let Some(Initialized(pool)) = world
         .resources
         .get_mut::<Eventually<crate::sdf::SymbolBufferPool>>()
     {
-        for coords in evicted {
-            pool.remove_evicted_tile_with_queue(*coords, queue);
-        }
+        pool.remove_evicted_tiles_batch(&evicted_set);
     }
     #[cfg(feature = "raster")]
     if let Some(Initialized(raster)) = world.resources.get_mut::<Eventually<RasterResources>>() {
@@ -50,11 +53,11 @@ pub(super) fn drop_gpu_data_with_queue(
 }
 
 pub(super) fn reclaim_pool_pages(world: &mut World, queue: Option<&UploadQueue>) {
-    let is_tight = world
+    let is_critical = world
         .resources
         .get::<crate::render::memory_budget::MemoryBudget>()
-        .is_some_and(crate::render::memory_budget::MemoryBudget::is_tight);
-    let keep_spare = usize::from(!is_tight);
+        .is_some_and(|budget| matches!(budget.pressure(), MemoryPressure::Critical));
+    let keep_spare = usize::from(!is_critical);
     if let Some(Initialized(pool)) = world.resources.get_mut::<Eventually<VectorBufferPool>>() {
         pool.reclaim_empty_pages_with_queue(keep_spare, queue);
     }

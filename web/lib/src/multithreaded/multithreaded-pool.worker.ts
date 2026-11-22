@@ -5,6 +5,7 @@ type BindPortMessage = {type: 'bind_port', port: MessagePort}
 type MessageData =
     | {type: 'wasm_init', module: WebAssembly.Module, memory: WebAssembly.Memory}
     | {type: 'pool_call', work_ptr: number}
+    | number
 
 let initialised: Promise<maplibre.InitOutput> | null = null;
 let resolveInitReady: (() => void) | null = null;
@@ -14,10 +15,10 @@ const initReady = new Promise<void>(resolve => {
 
 const handleMessage = async (message: MessageEvent<MessageData>) => {
     const data = message.data;
-    if (!data) return;
+    if (data === null || data === undefined) return;
 
-    const type = data.type;
-    if (type === 'wasm_init') {
+    if (typeof data !== 'number' && data.type === 'wasm_init') {
+        if (initialised) return;
         const module = data.module;
         const memory = data.memory;
         initialised = initializeWasm(module, memory).catch(err => {
@@ -37,23 +38,26 @@ const handleMessage = async (message: MessageEvent<MessageData>) => {
     // Queue further commands up until the module is fully initialised:
     await initialised;
 
-    if (type === 'pool_call') {
-        const work_ptr = data.work_ptr; // shared memory pointer valid across render worker and pool workers
+    const work_ptr = typeof data === 'number'
+        ? data
+        : data.type === 'pool_call'
+            ? data.work_ptr
+            : null;
+    if (work_ptr === null) return;
 
-        const process_data: (msg: any) => Promise<void> = maplibre["multithreaded_process_data"]
+    const process_data: (msg: any) => Promise<void> = maplibre["multithreaded_process_data"]
 
-        if (!process_data) {
-            throw Error("multithreaded_worker_entry is not defined. Maybe the Rust build used the wrong build configuration.")
-        }
-
-        await process_data(work_ptr);
+    if (!process_data) {
+        throw Error("multithreaded_worker_entry is not defined. Maybe the Rust build used the wrong build configuration.")
     }
+
+    await process_data(work_ptr);
 }
 
 onmessage = (message: MessageEvent<BindPortMessage | MessageData>) => {
     const data = message.data;
-    if (!data) return;
-    if (data.type === 'bind_port') {
+    if (data === null || data === undefined) return;
+    if (typeof data !== 'number' && data.type === 'bind_port') {
         const port = data.port;
         (self as any).__maplibreRenderPort = port;
         port.onmessage = (ev: MessageEvent<MessageData>) => {

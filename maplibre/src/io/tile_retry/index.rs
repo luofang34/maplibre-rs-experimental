@@ -17,6 +17,8 @@ pub(super) struct RetryIndex {
     pub(super) scheduled: [FxHashSet<WorldTileCoords>; 3],
     /// Last wanted set recorded by [`want`] for each [`RequestKind::index`].
     pub(super) last_wanted: [Option<FxHashSet<WorldTileCoords>>; 3],
+    active_scratch: Vec<WorldTileCoords>,
+    missing_scratch: Vec<WorldTileCoords>,
 }
 
 /// The tiles each request family considered this frame; a family that did not run leaves
@@ -158,31 +160,32 @@ pub(crate) fn want<S: std::hash::BuildHasher>(
                 || !slot(&retry_idx.scheduled, kind).is_empty()
         });
     if has_active {
-        let active: Vec<WorldTileCoords> = world
-            .resources
-            .get::<RetryIndex>()
-            .map(|retry_idx| {
-                slot(&retry_idx.pending, kind)
-                    .iter()
-                    .chain(slot(&retry_idx.scheduled, kind).iter())
-                    .copied()
-                    .collect()
-            })
-            .unwrap_or_default();
-        let mut missing = Vec::new();
-        for held in active {
-            if let Some(retries) = world.tiles.query_mut::<&mut TileRequestRetries>(held) {
+        let crate::tcs::world::World { resources, tiles } = world;
+        let retry_idx = resources.get_or_init_mut::<RetryIndex>();
+        let mut active = std::mem::take(&mut retry_idx.active_scratch);
+        active.clear();
+        active.extend(
+            slot(&retry_idx.pending, kind)
+                .iter()
+                .chain(slot(&retry_idx.scheduled, kind).iter())
+                .copied(),
+        );
+        let mut missing = std::mem::take(&mut retry_idx.missing_scratch);
+        missing.clear();
+        for &held in &active {
+            if let Some(retries) = tiles.query_mut::<&mut TileRequestRetries>(held) {
                 retries.slot_mut(kind).out_of_view = !coords.contains(&held);
             } else {
                 missing.push(held);
             }
         }
-        if !missing.is_empty() {
-            let retry_idx = world.resources.get_or_init_mut::<RetryIndex>();
-            for gone in missing {
-                retry_idx.clear_kind(kind, gone);
-            }
+        for &gone in &missing {
+            retry_idx.clear_kind(kind, gone);
         }
+        active.clear();
+        retry_idx.active_scratch = active;
+        missing.clear();
+        retry_idx.missing_scratch = missing;
     }
     let retry_unchanged = world
         .resources
@@ -319,7 +322,5 @@ pub(crate) fn stop_cancelled<K: crate::environment::OffscreenKernel>(
     }
     cancelled.sort_unstable_by(|a, b| b.cmp(a));
     cancelled.dedup();
-    for attempt in cancelled {
-        apc.cancel(attempt);
-    }
+    apc.cancel_batch(&cancelled);
 }

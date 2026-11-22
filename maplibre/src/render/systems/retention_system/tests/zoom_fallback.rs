@@ -165,7 +165,7 @@ fn drop_cancelled_keeps_committed_resident_tiles_and_drops_uncommitted_tiles() {
         .insert(LayerReplacements {
             vector: vec![make_bucket()],
             keep_vector: true,
-            requested: vec!["water".into()],
+            requested: vec!["water".into()].into(),
             delivered: vec!["water".into()],
             ..Default::default()
         })

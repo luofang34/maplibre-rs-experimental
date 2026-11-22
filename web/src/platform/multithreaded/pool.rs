@@ -386,11 +386,8 @@ impl WorkerPool {
             wake_pending,
         };
         let work_ptr = Box::into_raw(Box::new(ticket));
-        let call_msg = js_sys::Object::from_entries(&js_sys::Array::of2(
-            &js_sys::Array::of2(&JsValue::from("type"), &js_sys::JsString::from("pool_call")),
-            &js_sys::Array::of2(&JsValue::from("work_ptr"), &JsValue::from(work_ptr as u32)),
-        ));
-        match call_msg.and_then(|msg| worker.post_message(&msg)) {
+        let ptr_msg = JsValue::from_f64((work_ptr as usize) as f64);
+        match worker.post_message(&ptr_msg) {
             Ok(()) => Ok(()),
             Err(e) => {
                 unsafe {

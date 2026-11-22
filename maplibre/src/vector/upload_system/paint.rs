@@ -111,6 +111,7 @@ pub(super) struct PaintRefreshScratch {
     feature_zoom_updates: Vec<(WorldTileCoords, String, Option<PatternRuns>)>,
     feature_zoom_only_updates: Vec<(WorldTileCoords, String)>,
     opaque_updates: Vec<(WorldTileCoords, crate::style::StyleLayerId, bool)>,
+    tile_paint_stamps: FxHashMap<WorldTileCoords, (VectorPaintFrame, u64)>,
     pub(super) slots: SlotMetaCache,
 }
 
@@ -119,12 +120,17 @@ impl PaintRefreshScratch {
         self.needs_feature_zoom_settle
     }
 
+    pub(super) fn invalidate_tiles(&mut self) {
+        self.tile_paint_stamps.clear();
+    }
+
     pub(super) fn sync_style(&mut self, style: &crate::style::Style) {
         let style_rev = style.revision();
         if self.style_rev != Some(style_rev) {
             self.style_rev = Some(style_rev);
             self.layer_flags.clear();
             self.prev_meta.clear();
+            self.tile_paint_stamps.clear();
             let mut union = 0_u8;
             for layer in &style.layers {
                 let flags = layer_paint_flags(layer);

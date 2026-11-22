@@ -41,6 +41,10 @@ pub(super) struct DrawSort {
 }
 
 impl DrawSort {
+    pub(super) fn might_need_sort(&self, bearing: f64) -> bool {
+        !self.sorted.is_empty() || bearing_bucket(bearing) != 0
+    }
+
     /// Returns `true` when any height-sorted symbol bucket in `layers` has not yet been ordered
     /// for `bearing`'s discrete angular bucket.
     pub(super) fn needs_bearing_sort(

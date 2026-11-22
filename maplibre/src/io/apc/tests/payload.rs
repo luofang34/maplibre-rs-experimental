@@ -77,12 +77,9 @@ fn a_disconnected_caller_retains_the_channel_error_and_rejected_result() {
     }
     let (sender, receiver) = mpsc::channel();
     drop(receiver);
-    let error = SchedulerContext {
-        sender,
-        waker: None,
-    }
-    .send_back(Reply)
-    .expect_err("receiver disconnected");
+    let error = SchedulerContext::new(sender, None)
+        .send_back(Reply)
+        .expect_err("receiver disconnected");
     let source = error
         .source()
         .expect("channel cause")

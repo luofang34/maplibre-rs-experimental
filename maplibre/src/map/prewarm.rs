@@ -1,5 +1,7 @@
 //! Pre-dispatches initial viewport tile fetches concurrently with GPU adapter/device creation.
 
+use std::sync::Arc;
+
 use rustc_hash::FxHashSet;
 
 use crate::{
@@ -45,7 +47,7 @@ struct PrewarmedVector {
 #[derive(Default)]
 pub(super) struct PrewarmedRequests {
     pixel_ratio: f32,
-    requested_vector_layers: Vec<String>,
+    requested_vector_layers: Option<Arc<[String]>>,
     vectors: Vec<PrewarmedVector>,
     wanted_vectors: FxHashSet<WorldTileCoords>,
     dems: Vec<(WorldTileCoords, u64)>,
@@ -154,7 +156,7 @@ fn prewarm_vector_tiles<K: OffscreenKernel, A: AsyncProcedureCall<K>>(
     } else {
         MAX_PREWARM_VECTOR_TILES
     };
-    out.requested_vector_layers = style.cached_vector_layer_ids().to_vec();
+    out.requested_vector_layers = Some(style.cached_vector_layer_ids());
     let mut state = VectorDispatchState {
         ctx,
         apc,
@@ -333,7 +335,9 @@ impl PrewarmedRequests {
                 crate::vector::content::begin(
                     world,
                     item.coords,
-                    self.requested_vector_layers.clone(),
+                    self.requested_vector_layers
+                        .clone()
+                        .unwrap_or_else(|| Arc::from([])),
                 );
                 if let Some(tile) = world
                     .tiles

@@ -62,6 +62,32 @@ struct PaintEvalEnv<'a> {
     paint_started: instant::Instant,
 }
 
+fn tile_entries_stamp(layers: &std::collections::VecDeque<IndexEntry>) -> u64 {
+    let mut acc = layers.len() as u64;
+    for entry in layers {
+        acc = acc.rotate_left(7)
+            ^ (u64::from(entry.style_layer.index) << 32)
+            ^ entry.layer_metadata_buffer_range().start
+            ^ u64::from(entry.evaluated_zoom().map_or(u32::MAX, f32::to_bits));
+    }
+    acc
+}
+
+fn sync_tile_paint_stamp_cache(
+    ctx: &PaintRefreshContext<'_>,
+    frame_changed: bool,
+    scratch: &mut PaintRefreshScratch,
+) {
+    if frame_changed {
+        scratch.tile_paint_stamps.clear();
+    } else if scratch.tile_paint_stamps.len() > ctx.source_tiles.len() + 64 {
+        let source_set: FxHashSet<WorldTileCoords> = ctx.source_tiles.iter().copied().collect();
+        scratch
+            .tile_paint_stamps
+            .retain(|c, _| source_set.contains(c));
+    }
+}
+
 pub(in crate::vector::upload_system) fn refresh_layer_paint(
     buffer_pool: &mut VectorBufferPool,
     queue: &UploadQueue,
@@ -81,6 +107,11 @@ pub(in crate::vector::upload_system) fn refresh_layer_paint(
     if changes.settle_pass {
         scratch.needs_feature_zoom_settle = false;
     }
+    let frame_changed = changes.zoom_changed
+        || changes.bearing_changed
+        || changes.light_changed
+        || changes.settle_pass;
+    sync_tile_paint_stamp_cache(&ctx, frame_changed, scratch);
     scratch.clear();
     let env = PaintEvalEnv {
         queue,
@@ -91,7 +122,14 @@ pub(in crate::vector::upload_system) fn refresh_layer_paint(
     let mut updated_any_feature_layer = false;
 
     for &coords in ctx.source_tiles {
-        for entry in buffer_pool.index().get_layers(coords).into_iter().flatten() {
+        let Some(layers) = buffer_pool.index().get_layers(coords) else {
+            continue;
+        };
+        let stamp = tile_entries_stamp(layers);
+        if !frame_changed && scratch.tile_paint_stamps.get(&coords) == Some(&(ctx.frame, stamp)) {
+            continue;
+        }
+        for entry in layers {
             let flags = *scratch
                 .layer_flags
                 .entry(entry.style_layer.index)
@@ -109,8 +147,9 @@ pub(in crate::vector::upload_system) fn refresh_layer_paint(
                 refresh_entry_uniform_feature_color(buffer_pool, &env, coords, entry, scratch);
             }
         }
+        scratch.tile_paint_stamps.insert(coords, (ctx.frame, stamp));
     }
-    apply_deferred_paint_updates(buffer_pool, ctx.frame.zoom, scratch);
+    apply_deferred_paint_updates(buffer_pool, ctx.frame, scratch);
 }
 
 fn refresh_entry_layer_meta(
@@ -361,18 +400,28 @@ fn refresh_entry_uniform_feature_color(
 
 fn apply_deferred_paint_updates(
     buffer_pool: &mut VectorBufferPool,
-    zoom: f32,
+    frame: VectorPaintFrame,
     scratch: &mut PaintRefreshScratch,
 ) {
     for (coords, layer_id, runs) in scratch.feature_zoom_updates.drain(..) {
-        buffer_pool.set_layer_evaluated_zoom(coords, &layer_id, zoom);
+        buffer_pool.set_layer_evaluated_zoom(coords, &layer_id, frame.zoom);
         if runs.is_some() {
             buffer_pool.set_pattern_runs(coords, &layer_id, runs);
         }
         buffer_pool.bump_layer_paint_revision(coords, &layer_id);
+        if let Some(layers) = buffer_pool.index().get_layers(coords) {
+            scratch
+                .tile_paint_stamps
+                .insert(coords, (frame, tile_entries_stamp(layers)));
+        }
     }
     for (coords, layer_id) in scratch.feature_zoom_only_updates.drain(..) {
-        buffer_pool.set_layer_evaluated_zoom(coords, &layer_id, zoom);
+        buffer_pool.set_layer_evaluated_zoom(coords, &layer_id, frame.zoom);
+        if let Some(layers) = buffer_pool.index().get_layers(coords) {
+            scratch
+                .tile_paint_stamps
+                .insert(coords, (frame, tile_entries_stamp(layers)));
+        }
     }
     for (coords, layer_id, opaque) in scratch.opaque_updates.drain(..) {
         buffer_pool.set_layer_opaque_color_by_id(coords, layer_id, opaque);
