@@ -100,16 +100,16 @@ impl TerrainResources {
         })
     }
 
-    /// Reuses bindings when both textures are unchanged. No drape source binds an inert
-    /// texture for the shader's background surface; an invalid named source returns `None`.
-    pub fn tile_bind_group(
+    /// Reuses bindings using an already-resolved DEM texture ID, avoiding a duplicate DEM map lookup.
+    pub(crate) fn tile_bind_group_with_dem_id(
         &mut self,
         device: &wgpu::Device,
         dem: Option<WorldTileCoords>,
+        dem_id: Option<u64>,
         drape_source: Option<WorldTileCoords>,
     ) -> Option<Arc<wgpu::BindGroup>> {
         let key = (
-            self.dem_id(dem),
+            dem_id.unwrap_or_else(|| self.empty_dem_id()),
             match drape_source {
                 Some(source) => self.drape_id(source)?,
                 None => self.empty_dem_id,
@@ -128,6 +128,18 @@ impl TerrainResources {
         };
         self.bind_groups.insert(key, Arc::clone(&group));
         Some(group)
+    }
+
+    /// Reuses bindings when both textures are unchanged. No drape source binds an inert
+    /// texture for the shader's background surface; an invalid named source returns `None`.
+    pub fn tile_bind_group(
+        &mut self,
+        device: &wgpu::Device,
+        dem: Option<WorldTileCoords>,
+        drape_source: Option<WorldTileCoords>,
+    ) -> Option<Arc<wgpu::BindGroup>> {
+        let dem_id = dem.map(|coords| self.dem_id(Some(coords)));
+        self.tile_bind_group_with_dem_id(device, dem, dem_id, drape_source)
     }
 }
 

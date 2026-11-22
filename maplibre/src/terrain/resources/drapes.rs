@@ -6,7 +6,7 @@
 //! and draw it again every frame, and what a view shows would depend on which other views
 //! share its frame. The lookups by tile answer for the view chosen with
 //! [`TerrainResources::show_drapes_of`], and the spare textures are common to all.
-use std::collections::HashSet;
+use rustc_hash::FxHashSet as HashSet;
 
 use super::TerrainResources;
 use crate::{
@@ -65,6 +65,7 @@ impl TerrainResources {
     #[cfg(feature = "headless")]
     pub(crate) fn release_drapes_of(&mut self, view: Option<ViewSlotId>) {
         self.drapes.retain(|(owner, _)| *owner != view);
+        self.drape_retain_state.remove(&view);
     }
 
     fn drape_key(&self, coords: WorldTileCoords) -> DrapeKey {
@@ -161,12 +162,61 @@ impl TerrainResources {
         )
     }
 
-    /// Whether the view may take a texture for the tile while holding at most `allowed`: a
-    /// tile that has one keeps it.
-    pub(crate) fn within_drape_allowance(&self, coords: WorldTileCoords, allowed: usize) -> bool {
-        let view = self.drape_view;
+    /// Whether the active view already holds a drape slot (drawn or undrawn) for `coords`.
+    pub(crate) fn holds_drape(&self, coords: WorldTileCoords) -> bool {
         self.drapes.holds(self.drape_key(coords))
-            || self.drapes.count(|(owner, _)| *owner == view) < allowed
+    }
+
+    /// Number of active drape slots currently held by the active view.
+    pub(crate) fn view_drape_count(&self) -> usize {
+        let view = self.drape_view;
+        self.drapes.count(|(owner, _)| *owner == view)
+    }
+
+    /// Returns whether the previous frame's retain state matches `(target_coords, view_textures)`
+    /// cleanly (zero unready/new/deferred tiles); otherwise computes `keep` and calls `retain_drapes`.
+    pub(crate) fn retain_drapes_if_stale(
+        &mut self,
+        target_coords: &[WorldTileCoords],
+        view_textures: usize,
+        compute_keep: impl FnOnce(&Self) -> HashSet<WorldTileCoords>,
+    ) {
+        let view = self.drape_view;
+        if let Some((prev_targets, prev_allowance, clean)) = self.drape_retain_state.get(&view) {
+            if *clean
+                && *prev_allowance == view_textures
+                && prev_targets.as_slice() == target_coords
+            {
+                return;
+            }
+        }
+        let keep = compute_keep(self);
+        self.retain_drapes(&keep);
+    }
+
+    /// Records whether every acquired drape for the active view is ready and resident with no new
+    /// or deferred redraws, allowing identical subsequent frames to skip `retain_drapes`.
+    pub(crate) fn finish_drape_retain_state(
+        &mut self,
+        target_coords: &[WorldTileCoords],
+        view_textures: usize,
+        clean: bool,
+    ) {
+        let view = self.drape_view;
+        if !clean {
+            self.drape_retain_state.remove(&view);
+            return;
+        }
+        let entry = self
+            .drape_retain_state
+            .entry(view)
+            .or_insert_with(|| (Vec::new(), 0, false));
+        if entry.0.as_slice() != target_coords {
+            entry.0.clear();
+            entry.0.extend_from_slice(target_coords);
+        }
+        entry.1 = view_textures;
+        entry.2 = true;
     }
 
     /// Leaves a drape acquired this frame undrawn, to be drawn on the next.

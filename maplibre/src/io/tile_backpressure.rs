@@ -57,6 +57,23 @@ pub(crate) fn set_dem_deferred(world: &mut World, deferred: bool) {
         .dem = deferred;
 }
 
+/// Whether the last raster request pass deferred wanted tiles under backpressure.
+#[cfg(feature = "raster")]
+pub(crate) fn has_raster_deferred(world: &World) -> bool {
+    world
+        .resources
+        .get::<BackpressureDeferred>()
+        .is_some_and(|deferred| deferred.raster)
+}
+
+/// Whether the last DEM request pass deferred wanted tiles under backpressure.
+pub(crate) fn has_dem_deferred(world: &World) -> bool {
+    world
+        .resources
+        .get::<BackpressureDeferred>()
+        .is_some_and(|deferred| deferred.dem)
+}
+
 /// Whether wanted tiles remain unrequested while the host allows in-flight tile work.
 pub(crate) fn has_unrequested_visible_tiles(world: &World) -> bool {
     world

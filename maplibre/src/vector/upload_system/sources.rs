@@ -1,9 +1,11 @@
 //! Geometry uploads follow the actual sources selected for the view or terrain textures,
 //! prioritizing uncovered visible tiles first and retaining coarse overview / 1-ring stand-ins.
+use std::sync::Arc;
+
 use rustc_hash::FxHashSet;
 
 use crate::{
-    coords::WorldTileCoords,
+    coords::{WorldTileCoords, ZoomLevel},
     io::tile_sources::{clamp_to_max_zoom, source_max_zoom, TileKind},
     render::{
         eventually::{Eventually, Eventually::Initialized},
@@ -33,11 +35,41 @@ pub(super) type FrameSourcesAndPainted = (
     FxHashSet<WorldTileCoords>,
 );
 
+type FreshTightTiles = (ZoomLevel, Arc<[WorldTileCoords]>);
+
+#[cfg(all(test, feature = "headless", feature = "thread-safe-futures"))]
 pub(super) fn frame_sources_and_painted(
     world: &World,
     style: &Style,
     view_state: &ViewState,
 ) -> Result<FrameSourcesAndPainted, SystemError> {
+    Ok(compute_frame_sources_and_painted(world, style, view_state)?.0)
+}
+
+pub(super) fn frame_sources_and_painted_mut(
+    world: &mut World,
+    style: &Style,
+    view_state: &ViewState,
+) -> Result<FrameSourcesAndPainted, SystemError> {
+    let (result, fresh_tight) = compute_frame_sources_and_painted(world, style, view_state)?;
+    if let Some((level, tiles)) = fresh_tight {
+        let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
+        let cache = world
+            .resources
+            .get_or_init_mut::<crate::render::eye_covering::FrameLooseCovering>();
+        if cache.host_frame != host_frame {
+            *cache = crate::render::eye_covering::FrameLooseCovering::for_host_frame(host_frame);
+        }
+        cache.tight_view_tiles = Some((Some(tiles), ViewStatePadding::Tight, level));
+    }
+    Ok(result)
+}
+
+fn compute_frame_sources_and_painted(
+    world: &World,
+    style: &Style,
+    view_state: &ViewState,
+) -> Result<(FrameSourcesAndPainted, Option<FreshTightTiles>), SystemError> {
     let Some(view_tile_sources) = world.resources.get::<ViewTileSources>() else {
         return Err(SystemError::Dependencies);
     };
@@ -46,7 +78,7 @@ pub(super) fn frame_sources_and_painted(
         view_tile_sources.of_kind(TileKind::Vector),
         crate::vector::UploadedVectorGeometry::for_world(world),
     );
-    let view_tiles = resolve_view_tiles_for_paint(world, style, view_state)?;
+    let (view_tiles, fresh_tight) = resolve_view_tiles_for_paint(world, style, view_state)?;
     let (source_tiles, mut painted_tiles, uncovered, all_view_painted) = if style.terrain.is_some()
     {
         let (src, uncov) = terrain_sources(world, style);
@@ -60,39 +92,28 @@ pub(super) fn frame_sources_and_painted(
             append_missing_gpu_stand_ins(world, tiles, &gpu_vector, &mut painted_tiles);
         }
     }
-    Ok((source_tiles, painted_tiles, uncovered))
+    Ok(((source_tiles, painted_tiles, uncovered), fresh_tight))
 }
 
-fn resolve_view_tiles_for_paint(
+fn resolve_cached_wrapped_tiles(
     world: &World,
     style: &Style,
     view_state: &ViewState,
-) -> Result<Option<Vec<WorldTileCoords>>, SystemError> {
-    let needs_view_tiles_for_paint = style.terrain.is_none()
-        || style.layers.iter().any(|l| {
-            !l.is_hidden()
-                && !matches!(
-                    l.type_.as_str(),
-                    "background" | "symbol" | "sky" | "raster" | "hillshade" | "color-relief"
-                )
-                && (!crate::terrain::is_drapeable(&l.type_)
-                    || crate::vector::structures::kind(l).is_some())
-        });
-    if !needs_view_tiles_for_paint {
-        return Ok(None);
-    }
-    let visible_level = view_state.zoom().zoom_level(DEFAULT_TILE_SIZE);
+    visible_level: ZoomLevel,
+    multi_active: bool,
+) -> Option<Option<Vec<WorldTileCoords>>> {
     let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
-    let multi_active = world
-        .resources
-        .get::<crate::render::eye_covering::MultiViewExtractCovering>()
-        .is_some_and(|m| m.active);
-    let cached_tiles = if !multi_active {
-        world
+    if !multi_active {
+        if let Some(tiles) = world
             .resources
             .get::<crate::render::eye_covering::FrameLooseCovering>()
             .filter(|cache| cache.host_frame == host_frame)
-            .and_then(|cache| cache.view_tiles.as_ref())
+            .and_then(|cache| {
+                cache
+                    .tight_view_tiles
+                    .as_ref()
+                    .or(cache.view_tiles.as_ref())
+            })
             .filter(|(_, padding, cached_level)| {
                 *padding == ViewStatePadding::Tight && *cached_level == visible_level
             })
@@ -104,29 +125,74 @@ fn resolve_view_tiles_for_paint(
                         .collect()
                 })
             })
+        {
+            return Some(tiles);
+        }
+    }
+    crate::render::eye_covering::matching_tight_tiles(world, style, view_state, visible_level).map(
+        |shared_tiles| {
+            Some(
+                shared_tiles
+                    .iter()
+                    .filter_map(|coords| coords.wrapped().map(|(w, _)| w))
+                    .collect(),
+            )
+        },
+    )
+}
+
+fn resolve_view_tiles_for_paint(
+    world: &World,
+    style: &Style,
+    view_state: &ViewState,
+) -> Result<(Option<Vec<WorldTileCoords>>, Option<FreshTightTiles>), SystemError> {
+    let needs_view_tiles_for_paint = style.terrain.is_none()
+        || style.layers.iter().any(|l| {
+            !l.is_hidden()
+                && !matches!(
+                    l.type_.as_str(),
+                    "background" | "symbol" | "sky" | "raster" | "hillshade" | "color-relief"
+                )
+                && (!crate::terrain::is_drapeable(&l.type_)
+                    || crate::vector::structures::kind(l).is_some())
+        });
+    if !needs_view_tiles_for_paint {
+        return Ok((None, None));
+    }
+    let visible_level = view_state.zoom().zoom_level(DEFAULT_TILE_SIZE);
+    let multi_active = world
+        .resources
+        .get::<crate::render::eye_covering::MultiViewExtractCovering>()
+        .is_some_and(|m| m.active);
+    if let Some(tiles) =
+        resolve_cached_wrapped_tiles(world, style, view_state, visible_level, multi_active)
+    {
+        return Ok((tiles, None));
+    }
+    let region = view_region_for_projection(
+        style,
+        view_state,
+        world,
+        visible_level,
+        ViewStatePadding::Tight,
+    )
+    .map_err(|error| {
+        tracing::error!(%error, "unable to select tiles for vector upload");
+        SystemError::Setup
+    })?;
+    let wrapped = region.as_ref().map(|r| {
+        r.copies()
+            .filter_map(|copy| copy.wrapped().map(|(coords, _)| coords))
+            .collect()
+    });
+    let fresh = if !multi_active {
+        region
+            .as_ref()
+            .map(|r| (visible_level, Arc::from(r.iter().collect::<Vec<_>>())))
     } else {
         None
     };
-    match cached_tiles {
-        Some(tiles) => Ok(tiles),
-        None => Ok(view_region_for_projection(
-            style,
-            view_state,
-            world,
-            visible_level,
-            ViewStatePadding::Tight,
-        )
-        .map_err(|error| {
-            tracing::error!(%error, "unable to select tiles for vector upload");
-            SystemError::Setup
-        })?
-        .map(|region| {
-            region
-                .copies()
-                .filter_map(|copy| copy.wrapped().map(|(coords, _)| coords))
-                .collect()
-        })),
-    }
+    Ok((wrapped, fresh))
 }
 
 #[derive(Default)]

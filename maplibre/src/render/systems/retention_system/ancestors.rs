@@ -19,6 +19,13 @@ use crate::{
     terrain::{dem_tile_coords, resources::TerrainResources, source::dem_source},
 };
 
+pub(super) fn bump_arrival_epochs(world: &mut World) {
+    crate::vector::bump_arrival_epoch(world);
+    crate::terrain::bump_dem_arrival_epoch(world);
+    #[cfg(feature = "raster")]
+    crate::raster::bump_raster_arrival_epoch(world);
+}
+
 pub(super) fn retain_requested_vector_tiles(
     world: &World,
     style: &Style,

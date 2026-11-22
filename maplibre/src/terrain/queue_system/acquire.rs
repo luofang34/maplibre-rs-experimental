@@ -1,7 +1,7 @@
 //! Which drapes a frame acquires and draws: textures for its targets, the redraws its time
 //! budget holds, and the drape each surface shows meanwhile.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet as HashSet;
 
 use super::{
     covering,
@@ -58,17 +58,18 @@ pub(super) fn acquire_drapes(
     Vec<DrapeState>,
 ) {
     let target_coords: Vec<WorldTileCoords> = specs.iter().map(|spec| spec.coords).collect();
-    let keep =
+    terrain.retain_drapes_if_stale(&target_coords, view_textures, |t| {
         covering::retained_textures_with_zoom_out(&target_coords, ready, view_textures, |coords| {
-            terrain.drape_texture(coords).is_some()
-        });
-    terrain.retain_drapes(&keep);
+            t.drape_texture(coords).is_some()
+        })
+    });
     // Unready tiles keep their last valid texture or a background surface.
     if memory.is_tight() {
         terrain.shed_spare_drapes();
     }
     // Targets come nearest first, so when textures run out it is the far tiles that
     // draw with an ancestor's drape.
+    let mut held_drapes = terrain.view_drape_count();
     let states: Vec<DrapeState> = specs
         .iter()
         .zip(prints)
@@ -81,15 +82,23 @@ pub(super) fn acquire_drapes(
             }
             // Past its share of the textures a view goes without, as it does when the map's
             // allowance is spent, rather than take what another view's share covers.
-            if !terrain.within_drape_allowance(spec.coords, view_textures) {
+            if !terrain.holds_drape(spec.coords) && held_drapes >= view_textures {
                 return DrapeState::Withheld;
             }
             let may_create = memory.allows_drape_texture(terrain.drape_texture_total());
-            if *prefetch {
+            let state = if *prefetch {
                 terrain.acquire_ahead_drape(device, spec.coords, *print, may_create)
             } else {
                 terrain.acquire_drape_ranked(device, spec.coords, rank, *print, may_create)
+            };
+            if state == DrapeState::New {
+                held_drapes = if may_create {
+                    held_drapes + 1
+                } else {
+                    terrain.view_drape_count()
+                };
             }
+            state
         })
         .collect();
     let redraw = choose_redraws(specs, &states, prefetch, (budget, limit), terrain);
@@ -100,6 +109,12 @@ pub(super) fn acquire_drapes(
             deferred = true;
         }
     }
+    let clean = !deferred
+        && ready.iter().all(|&r| r)
+        && states
+            .iter()
+            .all(|s| matches!(s, DrapeState::Unchanged | DrapeState::Changed));
+    terrain.finish_drape_retain_state(&target_coords, view_textures, clean);
     let sources = drape_sources(specs, &states, &redraw, ready, terrain);
     (redraw, sources, deferred, states)
 }

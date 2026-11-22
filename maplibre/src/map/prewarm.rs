@@ -364,7 +364,9 @@ impl PrewarmedRequests {
                 }
             }
             tile_retry::want(world, RequestKind::Dem, &self.wanted_dems);
-            world.resources.insert(TerrainWantedDems(self.wanted_dems));
+            world
+                .resources
+                .insert(TerrainWantedDems(self.wanted_dems.into_iter().collect()));
         }
 
         #[cfg(feature = "raster")]

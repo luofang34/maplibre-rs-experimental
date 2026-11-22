@@ -155,6 +155,11 @@ impl RunnerInner {
 
         if !self.initial_load_settled.get()
             && !self.map.is_loading()
+            && !self.map.has_ready_work()
+            && !self
+                .map
+                .context()
+                .is_ok_and(maplibre::context::MapContext::has_pending_drapes)
             && !arrivals
             && in_flight == 0
             && wait.is_none()

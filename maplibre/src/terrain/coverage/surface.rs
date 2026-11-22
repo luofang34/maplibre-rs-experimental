@@ -13,6 +13,26 @@ pub(crate) struct StitchedPatchGrid {
 }
 
 impl TerrainCoverageIndex {
+    pub(crate) fn set_surface_edges_if_stale(
+        &mut self,
+        sources: &[(
+            Option<WorldTileCoords>,
+            WorldTileCoords,
+            Option<WorldTileCoords>,
+        )],
+        edges: &Arc<HashMap<WorldTileCoords, EdgeHeights>>,
+        edges_generation: u64,
+    ) {
+        if edges_generation != 0
+            && self.edges_generation == edges_generation
+            && self.rendered.len() == sources.len()
+        {
+            return;
+        }
+        self.set_surface_edges(sources, Arc::clone(edges));
+        self.edges_generation = edges_generation;
+    }
+
     pub(crate) fn set_surface_edges(
         &mut self,
         sources: &[(

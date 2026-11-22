@@ -121,6 +121,7 @@ fn sync_media_source_entry(
             raster.tile_data_changed(&source_id, coords);
         }
         state.tiles.insert(key, generation);
+        crate::raster::bump_raster_arrival_epoch(world);
     }
 }
 

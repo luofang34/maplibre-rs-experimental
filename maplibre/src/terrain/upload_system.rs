@@ -14,6 +14,12 @@ use crate::{
     },
 };
 
+#[derive(Default)]
+struct TerrainUploadCache {
+    last_key: Option<(u64, u64, usize, u64, usize, usize)>,
+    last_deferred: bool,
+}
+
 pub fn upload_system(
     MapContext {
         style,
@@ -34,14 +40,32 @@ pub fn upload_system(
     );
     world.resources.get_or_init_mut::<FrameUploads>();
     world.resources.get_or_init_mut::<GpuDemPool>();
-    let wanted_dems = world
-        .resources
-        .get::<crate::terrain::request_system::TerrainWantedDems>();
     let Some(Initialized(terrain_resources)) =
         world.resources.get::<Eventually<TerrainResources>>()
     else {
         return Ok(());
     };
+    let dem_arrival_epoch = crate::terrain::dem_arrival_epoch(world);
+    let wanted_epoch = crate::terrain::request_system::wanted_dems_epoch(world);
+    let wanted_dems = world
+        .resources
+        .get::<crate::terrain::request_system::TerrainWantedDems>();
+    let wanted_len = wanted_dems.map_or(usize::MAX, |w| w.0.len());
+    let key = (
+        dem_arrival_epoch,
+        wanted_epoch,
+        wanted_len,
+        style.revision(),
+        world.tiles.tiles.len(),
+        terrain_resources.dem_texture_count(),
+    );
+    if world
+        .resources
+        .get::<TerrainUploadCache>()
+        .is_some_and(|c| !c.last_deferred && c.last_key == Some(key))
+    {
+        return Ok(());
+    }
     let to_upload: Vec<_> = world
         .tiles
         .pyramid_of::<DemTileComponent>()
@@ -61,6 +85,10 @@ pub fn upload_system(
         })
         .collect();
     if to_upload.is_empty() {
+        world.resources.insert(TerrainUploadCache {
+            last_key: Some(key),
+            last_deferred: false,
+        });
         return Ok(());
     }
 
@@ -105,6 +133,18 @@ pub fn upload_system(
             terrain_resources.upload_loaded_dem(device, queue, coords, &dem);
         }
     }
+    let next_dem_count = world
+        .resources
+        .get::<Eventually<TerrainResources>>()
+        .and_then(|res| match res {
+            Initialized(terrain_resources) => Some(terrain_resources.dem_texture_count()),
+            _ => None,
+        })
+        .unwrap_or(0);
+    world.resources.insert(TerrainUploadCache {
+        last_key: Some((key.0, key.1, key.2, key.3, key.4, next_dem_count)),
+        last_deferred: deferred,
+    });
     if deferred {
         crate::render::frame_signals::keep_animating(world);
     }

@@ -146,6 +146,11 @@ pub(crate) fn next_retry_delay(world: &World) -> Option<Duration> {
     index::next_retry_delay_indexed(world)
 }
 
+/// Whether any tile of `kind` has a retry deadline that is already due.
+pub(crate) fn kind_has_due_retry(world: &World, kind: RequestKind) -> bool {
+    index::kind_has_due_retry_indexed(world, kind)
+}
+
 /// Requests every requested tile of `kind` again, keeping what it shows until the new data lands.
 pub(crate) fn refresh(world: &mut World, kind: RequestKind) {
     let coords: Vec<WorldTileCoords> = world

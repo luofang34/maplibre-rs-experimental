@@ -18,6 +18,21 @@ use crate::{
     vector::{VectorBufferPool, VectorLayerBucketComponent},
 };
 
+pub(super) type LooseRasterKey = ([[u64; 4]; 4], (u64, u64, usize), u64);
+
+#[derive(Clone, PartialEq, Eq)]
+pub(super) struct FrameTerrainDigests {
+    pub(super) host_frame: u64,
+    pub(super) specs_ptr: usize,
+    pub(super) vector_pool_state: (u64, u64, bool),
+    pub(super) vector_arrival_epoch: u64,
+    pub(super) target_tiles_digest: u64,
+    pub(super) tiles_len: usize,
+    pub(super) raster_gen: u64,
+    pub(super) style_rev: u64,
+    pub(super) style_vis_digest: u64,
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct TargetSpecsKey {
     pub(super) tiles: Vec<WorldTileCoords>,
@@ -33,6 +48,33 @@ pub(super) struct TargetSpecsKey {
     pub(super) raster_gen: u64,
     pub(super) style_rev: u64,
     pub(super) style_vis_digest: u64,
+}
+
+impl TargetSpecsKey {
+    pub(super) fn matches_slices(
+        &self,
+        tiles: &[WorldTileCoords],
+        prefetch_fresh: &[WorldTileCoords],
+        arrivals_over_standin: bool,
+        uniform_globe: bool,
+        raster_coverings_digest: u64,
+        loose_raster_digest: u64,
+        digests: &FrameTerrainDigests,
+    ) -> bool {
+        self.arrivals_over_standin == arrivals_over_standin
+            && self.uniform_globe == uniform_globe
+            && self.raster_coverings_digest == raster_coverings_digest
+            && self.loose_raster_digest == loose_raster_digest
+            && self.vector_pool_state == digests.vector_pool_state
+            && self.vector_arrival_epoch == digests.vector_arrival_epoch
+            && self.target_tiles_digest == digests.target_tiles_digest
+            && self.tiles_len == digests.tiles_len
+            && self.raster_gen == digests.raster_gen
+            && self.style_rev == digests.style_rev
+            && self.style_vis_digest == digests.style_vis_digest
+            && self.tiles.as_slice() == tiles
+            && self.prefetch_fresh.as_slice() == prefetch_fresh
+    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -65,20 +107,70 @@ pub(super) struct DrapePrepareCache {
     prefetch_drapes: FxHashSet<WorldTileCoords>,
     prep_key: Option<DrapePrepKey>,
     prep: Option<Arc<CachedPrep>>,
+    last_digests: Option<FrameTerrainDigests>,
+    loose_raster_key: Option<LooseRasterKey>,
+    loose_raster: Option<crate::render::eye_covering::RasterCoverings>,
 }
 
 impl DrapePrepareCache {
-    pub(super) fn get_specs(
+    pub(super) fn get_specs_matching(
         &self,
-        key: &TargetSpecsKey,
+        tiles: &[WorldTileCoords],
+        prefetch_fresh: &[WorldTileCoords],
+        scalars: (bool, bool, u64, u64),
+        digests: &FrameTerrainDigests,
     ) -> Option<(Arc<Vec<TargetSpec>>, &FxHashSet<WorldTileCoords>)> {
-        if self.specs_key.as_ref() == Some(key) {
+        let key = self.specs_key.as_ref()?;
+        if key.matches_slices(
+            tiles,
+            prefetch_fresh,
+            scalars.0,
+            scalars.1,
+            scalars.2,
+            scalars.3,
+            digests,
+        ) {
             return self
                 .specs
                 .as_ref()
                 .map(|specs| (Arc::clone(specs), &self.prefetch_drapes));
         }
         None
+    }
+
+    pub(super) fn store_frame_digests(&mut self, digests: FrameTerrainDigests) {
+        self.last_digests = Some(digests);
+    }
+
+    pub(super) fn matching_digests(
+        &self,
+        host_frame: u64,
+        specs: &[TargetSpec],
+        style_rev: u64,
+    ) -> Option<&FrameTerrainDigests> {
+        self.last_digests.as_ref().filter(|d| {
+            d.host_frame == host_frame
+                && d.style_rev == style_rev
+                && d.specs_ptr == specs.as_ptr() as usize
+        })
+    }
+
+    pub(super) fn get_loose_raster(
+        &self,
+        key: LooseRasterKey,
+    ) -> Option<crate::render::eye_covering::RasterCoverings> {
+        (self.loose_raster_key == Some(key))
+            .then(|| self.loose_raster.clone())
+            .flatten()
+    }
+
+    pub(super) fn store_loose_raster(
+        &mut self,
+        key: LooseRasterKey,
+        raster: crate::render::eye_covering::RasterCoverings,
+    ) {
+        self.loose_raster_key = Some(key);
+        self.loose_raster = Some(raster);
     }
 
     pub(super) fn store_specs(

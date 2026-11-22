@@ -4,36 +4,26 @@ use cgmath::{Matrix4, SquareMatrix, Vector3};
 use crate::{
     coords::{WorldTileCoords, EXTENT},
     projection::renderer_data::tile_mercator_coordinates,
-    render::view_state::ViewState,
+    render::{
+        resolved_view::{ProjectionMode, ResolvedFrameView},
+        view_state::ViewState,
+    },
     style::{source::TileAddressingScheme, Style},
     tcs::world::World,
     terrain::{
-        drape_targets::TargetSpec,
-        request_system::dem_tile_coords,
         resources::{TerrainFog, TerrainResources, TerrainTileUniforms},
         source::DemSource,
     },
 };
+mod fog;
 mod globe;
 mod polar;
 mod replay;
+#[cfg(test)]
+pub(crate) use fog::terrain_fog;
+use fog::{surface_uniforms, terrain_fog_with_camera};
 pub(super) use replay::replay;
 pub(crate) use replay::TerrainEyeFrame;
-
-/// The nearest uploaded DEM tile at or above the DEM zoom of a view tile.
-pub(super) fn loaded_dem_tile(
-    coords: WorldTileCoords,
-    dem: &DemSource,
-    terrain: &TerrainResources,
-) -> Option<WorldTileCoords> {
-    let mut current = dem_tile_coords(coords, dem.minzoom, dem.maxzoom)?;
-    loop {
-        if terrain.has_dem_texture(current) {
-            return Some(current);
-        }
-        current = current.get_parent()?;
-    }
-}
 
 /// Maps tile coordinates in `0..EXTENT` of `coords` to unit coordinates inside its DEM tile.
 fn dem_matrix(coords: WorldTileCoords, dem: WorldTileCoords) -> Matrix4<f64> {
@@ -87,6 +77,8 @@ fn drape_matrix(coords: WorldTileCoords, source: WorldTileCoords) -> Matrix4<f64
 pub(super) struct TileTextures {
     /// The DEM tile, or none while no DEM covers the tile.
     pub(super) dem: Option<WorldTileCoords>,
+    /// Interior DEM sample side length in pixels.
+    pub(super) dem_dim: f32,
     /// The tile whose drape is shown, an ancestor's until the tile's own is drawn.
     pub(super) drape: Option<WorldTileCoords>,
 }
@@ -94,7 +86,7 @@ pub(super) struct TileTextures {
 pub(super) fn tile_uniforms(
     coords: WorldTileCoords,
     textures: TileTextures,
-    terrain: &TerrainResources,
+    _terrain: &TerrainResources,
     dem: &DemSource,
     transform: &Matrix4<f32>,
     skirt_length: f32,
@@ -104,12 +96,7 @@ pub(super) fn tile_uniforms(
         Some(dem_coords) => (
             dem_matrix(coords, dem_coords).cast::<f32>()?,
             dem.unpack.map(|value| value as f32),
-            (terrain
-                .dem_texture(Some(dem_coords))
-                .size
-                .width
-                .saturating_sub(4))
-            .max(1) as f32,
+            textures.dem_dim,
         ),
         None => (Matrix4::identity(), [0.0; 4], 1.0),
     };
@@ -152,63 +139,6 @@ pub(super) fn tile_uniforms(
     })
 }
 
-/// The fog of the frame from the style's sky and the view, as GL JS `terrainUniformValues`,
-/// smoothly blended across the Mercator-to-globe transition and faded with altitude and
-/// `atmosphere-blend` on the globe.
-pub(crate) fn terrain_fog(style: &Style, view_state: &ViewState) -> TerrainFog {
-    use cgmath::InnerSpace;
-
-    let Some(sky) = &style.sky else {
-        return TerrainFog::default();
-    };
-    let zoom = view_state.zoom().value();
-    let colors = sky.colors_at(view_state.style_zoom().value());
-    let (near, far) = view_state.fog_depth_range();
-    let meters = view_state.eye_fog_meters_per_pixel().unwrap_or(1.0);
-    let (near, mut far) = (near * meters, far * meters);
-    let transition = style.projection.as_ref().map_or(0.0, |specification| {
-        specification.projection_type.globe_transition(zoom)
-    });
-    let external_or_free = view_state.has_external_view()
-        || view_state.navigation_mode() == crate::render::view_state::NavigationMode::FreeGlobe;
-    let mut opacity = view_state.fog_opacity();
-    let globe = if external_or_free {
-        transition > 0.0
-    } else if transition > 0.0 {
-        let globe_fade = crate::render::projection::globe_camera_for_view(view_state)
-            .ok()
-            .map_or(0.0, |camera| {
-                let distance_radii = camera.camera_position().magnitude();
-                let radius_px = camera.globe_radius_pixels();
-                let horizon_dist_px =
-                    (distance_radii * distance_radii - 1.0).max(0.0).sqrt() * radius_px;
-                if horizon_dist_px > near {
-                    let t = f64::from(transition);
-                    far = far.min(far * (1.0 - t) + horizon_dist_px * t);
-                }
-                let atm_h = 100_000.0 / camera.body().radius_meters;
-                let alt = distance_radii - 1.0;
-                let u = ((alt - atm_h) / (9.0 * atm_h)).clamp(0.0, 1.0) as f32;
-                let inside_atmosphere = 1.0 - u * u * (3.0 - 2.0 * u);
-                inside_atmosphere * (1.0 - sky.atmosphere_blend_at_zoom(zoom))
-            });
-        opacity *= 1.0 - transition + transition * globe_fade;
-        opacity <= 0.0
-    } else {
-        false
-    };
-    TerrainFog {
-        fog_color: colors.fog,
-        horizon_color: colors.horizon,
-        near: near as f32,
-        far: far as f32,
-        ground_blend: colors.fog_ground_blend,
-        horizon_blend: colors.horizon_fog_blend,
-        opacity,
-        globe,
-    }
-}
-
 type TileSources = (
     Option<WorldTileCoords>,
     WorldTileCoords,
@@ -218,6 +148,8 @@ type TileSources = (
 pub(super) struct PreparedTerrain {
     pub(super) uniforms: Vec<TerrainTileUniforms>,
     pub(super) sources: Vec<TileSources>,
+    pub(super) dem_ids: Vec<Option<u64>>,
+    pub(super) globe_bases: Vec<Option<Matrix4<f64>>>,
 }
 
 fn frame_globe_camera(
@@ -233,6 +165,28 @@ fn frame_globe_camera(
         .flatten()
 }
 
+pub(super) fn frame_view_projection_and_globe(
+    world: &World,
+    style: &Style,
+    view: &ViewState,
+) -> (
+    crate::render::camera::ViewProjection,
+    Option<crate::projection::globe::camera::GlobeCameraState>,
+) {
+    if let Some(resolved) = world
+        .resources
+        .get::<ResolvedFrameView>()
+        .filter(|resolved| resolved.matches(style, view))
+    {
+        let globe = match &resolved.projection {
+            ProjectionMode::Globe { camera, .. } => Some((**camera).clone()),
+            ProjectionMode::FlatMercator => None,
+        };
+        return (resolved.gpu_view_projection, globe);
+    }
+    (view.gpu_view_projection(), frame_globe_camera(style, view))
+}
+
 pub(super) struct SurfaceContext<'a> {
     style: &'a Style,
     view_state: &'a ViewState,
@@ -242,6 +196,7 @@ pub(super) struct SurfaceContext<'a> {
     lighting: crate::render::SceneLighting,
     paint_zoom: f64,
     clear_color: [f32; 4],
+    gpu_view_projection: crate::render::camera::ViewProjection,
     globe_camera: Option<crate::projection::globe::camera::GlobeCameraState>,
 }
 
@@ -272,7 +227,8 @@ pub(super) fn surface_context<'a>(
         clear.b as f32,
         clear.a as f32,
     ];
-    let globe_camera = frame_globe_camera(style, view_state);
+    let (gpu_view_projection, globe_camera) =
+        frame_view_projection_and_globe(world, style, view_state);
     SurfaceContext {
         style,
         view_state,
@@ -282,20 +238,20 @@ pub(super) fn surface_context<'a>(
         lighting,
         paint_zoom,
         clear_color,
+        gpu_view_projection,
         globe_camera,
     }
 }
 
 pub(super) fn prepare_tiles(
-    targets: (&[TargetSpec], &[Option<WorldTileCoords>]),
+    targets: (&[WorldTileCoords], &[Option<WorldTileCoords>]),
     terrain: &TerrainResources,
     tiles: &crate::tcs::tiles::Tiles,
     ctx: SurfaceContext<'_>,
 ) -> PreparedTerrain {
-    let (specs, drape_sources) = targets;
+    let (coords_list, drape_sources) = targets;
     let zoom = ctx.view_state.zoom();
-    let gpu_view_projection = ctx.view_state.gpu_view_projection();
-    let fog = terrain_fog(ctx.style, ctx.view_state);
+    let fog = terrain_fog_with_camera(ctx.style, ctx.view_state, ctx.globe_camera.as_ref());
     let skirt_length = match ctx.skirts {
         crate::terrain::TerrainSkirts::Auto => {
             ctx.view_state.body().circumference_meters()
@@ -305,22 +261,31 @@ pub(super) fn prepare_tiles(
         // A skirt of no length folds onto the tile edge and covers no pixel.
         crate::terrain::TerrainSkirts::None => 0.0,
     };
-    let mut uniforms = Vec::with_capacity(specs.len());
-    let mut sources = Vec::with_capacity(specs.len());
-    for (spec, &drape_source) in specs.iter().zip(drape_sources) {
-        if let Some((block, tile_source)) = prepare_single_tile(
-            spec.coords,
+    let mut uniforms = Vec::with_capacity(coords_list.len());
+    let mut sources = Vec::with_capacity(coords_list.len());
+    let mut dem_ids = Vec::with_capacity(coords_list.len());
+    let mut globe_bases = Vec::with_capacity(coords_list.len());
+    for (&coords, &drape_source) in coords_list.iter().zip(drape_sources) {
+        if let Some((block, tile_source, dem_id, basis)) = prepare_single_tile(
+            coords,
             drape_source,
             terrain,
             tiles,
             &ctx,
-            (&gpu_view_projection, skirt_length as f32, &fog),
+            (&ctx.gpu_view_projection, skirt_length as f32, &fog),
         ) {
             uniforms.push(block);
             sources.push(tile_source);
+            dem_ids.push(dem_id);
+            globe_bases.push(basis);
         }
     }
-    PreparedTerrain { uniforms, sources }
+    PreparedTerrain {
+        uniforms,
+        sources,
+        dem_ids,
+        globe_bases,
+    }
 }
 
 fn prepare_single_tile(
@@ -334,13 +299,22 @@ fn prepare_single_tile(
         f32,
         &TerrainFog,
     ),
-) -> Option<(TerrainTileUniforms, TileSources)> {
+) -> Option<(
+    TerrainTileUniforms,
+    TileSources,
+    Option<u64>,
+    Option<Matrix4<f64>>,
+)> {
     let zoom = ctx.view_state.zoom();
-    let dem_coords = loaded_dem_tile(coords, ctx.dem, terrain);
+    let (dem_coords, dem_id, dem_dim) = match terrain.resolve_loaded_dem(coords, ctx.dem) {
+        Some((dem_coords, id, dim)) => (Some(dem_coords), Some(id), dim),
+        None => (None, None, 1.0),
+    };
     let mut block = tile_uniforms(
         coords,
         TileTextures {
             dem: dem_coords,
+            dem_dim,
             drape: drape_source,
         },
         terrain,
@@ -371,39 +345,38 @@ fn prepare_single_tile(
         0.0
     };
     block.edge_index = [0, north_cap, south_cap, pole_elev.to_bits()];
-    surface_uniforms(
+    let basis = surface_uniforms(
         &mut block,
         coords,
         (ctx.clear_color, ctx.lighting, terrain.drape_mode()),
         ctx.view_state,
         ctx.globe_camera.as_ref(),
     );
-    Some((block, (dem_coords, coords, drape_source)))
+    Some((block, (dem_coords, coords, drape_source), dem_id, basis))
 }
 
 /// Adds a draw of each surface tile for every copy of the world that shows it, shifted over by
-/// the copy's whole worlds. Returns the draws' sources and the coordinates, beyond the grid for a
-/// copy, each is placed at.
+/// the copy's whole worlds. Returns the draws' sources and coordinates placed.
 pub(super) fn with_world_copies(
-    uniforms: &mut Vec<TerrainTileUniforms>,
-    sources: Vec<TileSources>,
-    copies: Option<&std::collections::HashMap<WorldTileCoords, Vec<i32>>>,
+    prepared: &mut PreparedTerrain,
+    copies: Option<&rustc_hash::FxHashMap<WorldTileCoords, Vec<i32>>>,
     view: &ViewState,
-) -> (Vec<TileSources>, Vec<WorldTileCoords>) {
-    let mut placed: Vec<WorldTileCoords> = sources.iter().map(|(_, coords, _)| *coords).collect();
-    let mut all = sources;
+) {
     let Some(copies) = copies else {
-        return (all, placed);
+        return;
     };
     let projection = view.gpu_view_projection();
     let zoom = view.zoom();
-    let base_len = all.len();
+    let base_len = prepared.sources.len();
     for index in 0..base_len {
-        let (Some(entry), Some(base_block)) =
-            (all.get(index).copied(), uniforms.get(index).copied())
-        else {
+        let (Some(entry), Some(base_block)) = (
+            prepared.sources.get(index).copied(),
+            prepared.uniforms.get(index).copied(),
+        ) else {
             continue;
         };
+        let dem_id = prepared.dem_ids.get(index).copied().flatten();
+        let basis = prepared.globe_bases.get(index).copied().flatten();
         let coords = entry.1;
         let Some(wraps) = copies.get(&coords) else {
             continue;
@@ -423,56 +396,10 @@ pub(super) fn with_world_copies(
                 .downcast()
                 .into();
             block.tile_mercator_coords[0] += *wrap as f32;
-            uniforms.push(block);
-            all.push(entry);
-            placed.push(shifted);
-        }
-    }
-    (all, placed)
-}
-
-fn surface_uniforms(
-    block: &mut TerrainTileUniforms,
-    coords: WorldTileCoords,
-    (clear_color, lighting, drape_mode): (
-        [f32; 4],
-        crate::render::SceneLighting,
-        crate::render::settings::TerrainDrapeMode,
-    ),
-    view: &ViewState,
-    globe_camera: Option<&crate::projection::globe::camera::GlobeCameraState>,
-) {
-    globe::set_uniforms(block, coords, view, globe_camera);
-    block.daylight = lighting.daylight_uniform();
-    block.twilight = lighting.twilight;
-    block.moonlight = lighting.moonlight;
-    block.surface_color = clear_color;
-    block.relief_strength = if view.has_external_view() { 0.45 } else { 0.0 };
-    block.fog_opacity[3] = f32::from(view.has_external_view());
-    block.fog_position = view.eye_fog_position(coords).unwrap_or([0.0; 4]);
-    match drape_mode {
-        crate::render::settings::TerrainDrapeMode::ProceduralRelief(relief) => {
-            let tiles_across = 2_f64.powi(i32::from(u8::from(coords.z)));
-            let merc_u =
-                std::f64::consts::PI * (1.0 - 2.0 * ((f64::from(coords.y) + 0.5) / tiles_across));
-            let tile_span_m =
-                (view.body().circumference_meters() / tiles_across / merc_u.cosh()).max(1.0) as f32;
-            block.procedural_relief = [
-                1.0,
-                f32::from(relief.hypsometric),
-                relief.slope_shading,
-                relief.reference_altitude_meters.unwrap_or(0.0),
-            ];
-            block.procedural_grid = [
-                relief.grid_spacing_meters,
-                relief.grid_opacity,
-                f32::from(relief.reference_altitude_meters.is_some()),
-                tile_span_m,
-            ];
-        }
-        crate::render::settings::TerrainDrapeMode::Draped { .. } => {
-            block.procedural_relief = [0.0; 4];
-            block.procedural_grid = [0.0; 4];
+            prepared.uniforms.push(block);
+            prepared.sources.push(entry);
+            prepared.dem_ids.push(dem_id);
+            prepared.globe_bases.push(basis);
         }
     }
 }

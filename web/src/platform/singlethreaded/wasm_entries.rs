@@ -243,13 +243,12 @@ pub(crate) fn deliver_received_data(
                 None
             }
         } else {
-            let was_empty = received.messages.is_empty() && received.queued.is_empty();
             crate::platform::singlethreaded::apc::QueuedMessage::push_from_wire(
                 &mut received.queued,
                 tag,
                 buffer,
             )?;
-            if was_empty && !received.queued.is_empty() {
+            if !received.messages.is_empty() || !received.queued.is_empty() {
                 received.waker.clone()
             } else {
                 None

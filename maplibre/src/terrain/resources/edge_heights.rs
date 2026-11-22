@@ -72,18 +72,89 @@ impl TerrainResources {
     }
 
     /// Writes the edge height blocks only when `generation == 0` (fallback) or `generation` differs
-    /// from the last uploaded generation.
+    /// from the last uploaded generation, uploading only changed contiguous row runs when resident.
     pub(crate) fn write_edges_if_stale(
         &mut self,
         queue: &crate::render::upload_queue::UploadQueue,
         generation: u64,
         edges: &[crate::terrain::queue_system::edges::EdgeHeights],
+        dirty_rows: &[u32],
     ) {
         if generation != 0 && self.edge_heights.uploaded_generation == Some(generation) {
             return;
         }
-        self.write_edges(queue, edges);
+        let count = edges.len().min(self.edge_heights.capacity());
+        if count == 0 {
+            return;
+        }
+        if generation != 0
+            && self.edge_heights.uploaded_generation.is_some()
+            && !dirty_rows.is_empty()
+            && dirty_rows.len() * 2 < count
+        {
+            self.write_dirty_edge_runs(queue, &edges[..count], dirty_rows);
+            self.edge_heights.uploaded_generation = Some(generation);
+            return;
+        }
+        if generation == 0
+            || self.edge_heights.uploaded_generation.is_none()
+            || dirty_rows.is_empty()
+            || dirty_rows.len() * 2 >= count
+        {
+            self.write_edges(queue, edges);
+        }
         self.edge_heights.uploaded_generation = (generation != 0).then_some(generation);
+    }
+
+    fn write_dirty_edge_runs(
+        &self,
+        queue: &crate::render::upload_queue::UploadQueue,
+        edges: &[crate::terrain::queue_system::edges::EdgeHeights],
+        dirty_rows: &[u32],
+    ) {
+        let mut rows: Vec<usize> = dirty_rows
+            .iter()
+            .copied()
+            .map(|r| r as usize)
+            .filter(|&r| r < edges.len())
+            .collect();
+        if rows.is_empty() {
+            return;
+        }
+        rows.sort_unstable();
+        rows.dedup();
+        let mut idx = 0;
+        while idx < rows.len() {
+            let start = rows[idx];
+            let mut end = start + 1;
+            while idx + 1 < rows.len() && rows[idx + 1] == end {
+                idx += 1;
+                end += 1;
+            }
+            if let Some(slice) = edges.get(start..end) {
+                let copy = wgpu::TexelCopyTextureInfo {
+                    texture: &self.edge_heights.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d {
+                        x: 0,
+                        y: start as u32,
+                        z: 0,
+                    },
+                    aspect: wgpu::TextureAspect::All,
+                };
+                queue.write_texture(
+                    copy,
+                    bytemuck::cast_slice(slice),
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(EDGE_BYTES_PER_TILE),
+                        rows_per_image: None,
+                    },
+                    edge_texture_size((end - start) as u32),
+                );
+            }
+            idx += 1;
+        }
     }
 
     /// Writes the per-tile edge height blocks.

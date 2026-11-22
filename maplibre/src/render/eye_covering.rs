@@ -77,7 +77,19 @@ pub(crate) type CachedViewTiles = (Option<Arc<[WorldTileCoords]>>, ViewStatePadd
 pub(crate) struct FrameLooseCovering {
     pub(crate) host_frame: u64,
     pub(crate) view_tiles: Option<CachedViewTiles>,
+    pub(crate) tight_view_tiles: Option<CachedViewTiles>,
     pub(crate) raster_regions: Option<(RasterCoverings, ViewStatePadding, (u64, u64, usize))>,
+}
+
+impl FrameLooseCovering {
+    pub(crate) fn for_host_frame(host_frame: u64) -> Self {
+        Self {
+            host_frame,
+            view_tiles: None,
+            tight_view_tiles: None,
+            raster_regions: None,
+        }
+    }
 }
 
 /// Total number of eye passes executing in the current [`XrFrame`](crate::render::xr::XrFrame).
@@ -129,7 +141,7 @@ pub(crate) fn snapshot_lod_history(world: &mut World) {
         view: LodHistory::new(
             shared
                 .and_then(|shared| shared.tiles.as_ref())
-                .map_or(&[], |(tiles, _)| tiles.as_slice()),
+                .map_or(&[], |(tiles, _)| &**tiles),
         ),
         raster: shared
             .map(|shared| {
@@ -151,12 +163,13 @@ pub(crate) fn snapshot_lod_history(world: &mut World) {
 pub struct SharedCovering {
     /// The stereo frame whose eyes share the selection; none for a map camera's frame.
     frame: Option<u64>,
+    view_slot: Option<ViewSlotId>,
     host_frame: u64,
     style_rev: u64,
     level: ZoomLevel,
     view_proj_bits: [[u64; 4]; 4],
     terrain_key: (u64, u64, usize),
-    tiles: Option<(Vec<WorldTileCoords>, ZoomLevel)>,
+    tiles: Option<(Arc<[WorldTileCoords]>, ZoomLevel)>,
     raster: RasterCoverings,
 }
 
@@ -172,13 +185,13 @@ impl SharedCovering {
 
     /// The tiles the first eye selected, or `None` when it selected no region.
     pub(crate) fn tiles(&self) -> Option<&[WorldTileCoords]> {
-        self.tiles.as_ref().map(|(tiles, _)| tiles.as_slice())
+        self.tiles.as_ref().map(|(tiles, _)| &**tiles)
     }
 
     fn region(&self) -> Option<ViewRegion> {
         self.tiles
             .as_ref()
-            .map(|(tiles, level)| ViewRegion::from_tiles(tiles.clone(), *level, tiles.len()))
+            .map(|(tiles, level)| ViewRegion::from_tiles(tiles.to_vec(), *level, tiles.len()))
     }
 }
 
@@ -188,7 +201,11 @@ pub(crate) fn drawn_tiles(world: &World) -> Option<&[WorldTileCoords]> {
     world.resources.get::<SharedCovering>()?.tiles()
 }
 
-fn frame_view_proj_bits(world: &World, style: &Style, view_state: &ViewState) -> [[u64; 4]; 4] {
+pub(crate) fn frame_view_proj_bits(
+    world: &World,
+    style: &Style,
+    view_state: &ViewState,
+) -> [[u64; 4]; 4] {
     let view_proj = world
         .resources
         .get::<crate::render::resolved_view::ResolvedFrameView>()
@@ -207,17 +224,13 @@ pub(crate) fn matching_tight_tiles<'a>(
     level: ZoomLevel,
 ) -> Option<&'a [WorldTileCoords]> {
     let eye = world.resources.get::<EyeInFrame>().copied();
+    let view_slot = world.resources.get::<CurrentViewSlot>().and_then(|s| s.0);
     if let Some(eye) = eye.filter(|e| e.index > 0) {
         return world
             .resources
             .get::<SharedCovering>()
             .filter(|shared| shared.frame == Some(eye.frame))
-            .map(|shared| {
-                shared
-                    .tiles
-                    .as_ref()
-                    .map_or(&[][..], |(tiles, _)| tiles.as_slice())
-            });
+            .map(|shared| shared.tiles.as_ref().map_or(&[][..], |(tiles, _)| &**tiles));
     }
     let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
     let view_proj_bits = frame_view_proj_bits(world, style, view_state);
@@ -228,18 +241,14 @@ pub(crate) fn matching_tight_tiles<'a>(
         .get::<SharedCovering>()
         .filter(|shared| {
             shared.frame == eye.map(|e| e.frame)
+                && shared.view_slot == view_slot
                 && shared.host_frame == host_frame
                 && shared.style_rev == style_rev
                 && shared.level == level
                 && shared.view_proj_bits == view_proj_bits
                 && shared.terrain_key == terrain_key
         })
-        .map(|shared| {
-            shared
-                .tiles
-                .as_ref()
-                .map_or(&[][..], |(tiles, _)| tiles.as_slice())
-        })
+        .map(|shared| shared.tiles.as_ref().map_or(&[][..], |(tiles, _)| &**tiles))
 }
 
 pub(crate) fn terrain_index_key(world: &World) -> (u64, u64, usize) {
@@ -257,6 +266,7 @@ pub(crate) fn terrain_index_key(world: &World) -> (u64, u64, usize) {
 
 type DrawnCoveringKey = (
     Option<EyeInFrame>,
+    Option<ViewSlotId>,
     u64,
     u64,
     ZoomLevel,
@@ -266,13 +276,14 @@ type DrawnCoveringKey = (
 
 fn cached_drawn_covering(
     world: &World,
-    (eye, host_frame, style_rev, level, view_proj_bits, terrain_key): DrawnCoveringKey,
+    (eye, view_slot, host_frame, style_rev, level, view_proj_bits, terrain_key): DrawnCoveringKey,
 ) -> Option<(Option<ViewRegion>, RasterCoverings)> {
     world
         .resources
         .get::<SharedCovering>()
         .filter(|shared| {
             shared.frame == eye.map(|e| e.frame)
+                && shared.view_slot == view_slot
                 && shared.host_frame == host_frame
                 && shared.style_rev == style_rev
                 && shared.level == level
@@ -291,11 +302,14 @@ fn tight_cached_region(
     if !can_use_cache {
         return None;
     }
-    world
+    let cache = world
         .resources
         .get::<FrameLooseCovering>()
-        .filter(|cache| cache.host_frame == host_frame)
-        .and_then(|cache| cache.view_tiles.as_ref())
+        .filter(|cache| cache.host_frame == host_frame)?;
+    cache
+        .tight_view_tiles
+        .as_ref()
+        .or(cache.view_tiles.as_ref())
         .filter(|(_, padding, cached_level)| {
             *padding == ViewStatePadding::Tight && *cached_level == level
         })
@@ -346,6 +360,7 @@ pub(crate) fn drawn_covering(
         }
     }
     let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
+    let view_slot = world.resources.get::<CurrentViewSlot>().and_then(|s| s.0);
     let multi_active = world
         .resources
         .get::<MultiViewExtractCovering>()
@@ -353,12 +368,14 @@ pub(crate) fn drawn_covering(
     let view_proj_bits = frame_view_proj_bits(world, style, view_state);
     let style_rev = style.revision();
     let terrain_key = terrain_index_key(world);
-    let can_use_cache = !multi_active && eye.is_none_or(|e| e.index == 0);
-    if can_use_cache {
+    let is_primary_eye = eye.is_none_or(|e| e.index == 0);
+    let can_use_loose_cache = !multi_active && is_primary_eye;
+    if is_primary_eye {
         if let Some(cached) = cached_drawn_covering(
             world,
             (
                 eye,
+                view_slot,
                 host_frame,
                 style_rev,
                 level,
@@ -369,27 +386,31 @@ pub(crate) fn drawn_covering(
             return Ok(cached);
         }
     }
-    let region = match tight_cached_region(world, host_frame, level, can_use_cache) {
+    let region = match tight_cached_region(world, host_frame, level, can_use_loose_cache) {
         Some(cached) => cached,
         None => {
             view_region_for_projection(style, view_state, world, level, ViewStatePadding::Tight)?
         }
     };
-    let raster = match tight_cached_raster(world, host_frame, terrain_key, can_use_cache) {
+    let raster = match tight_cached_raster(world, host_frame, terrain_key, can_use_loose_cache) {
         Some(cached) => cached,
         None => raster_source_regions(style, view_state, world, ViewStatePadding::Tight)?,
     };
-    if eye.is_none_or(|eye| eye.index == 0) {
+    if is_primary_eye {
         world.resources.insert(SharedCovering {
             frame: eye.map(|eye| eye.frame),
+            view_slot,
             host_frame,
             style_rev,
             level,
             view_proj_bits,
             terrain_key,
-            tiles: region
-                .as_ref()
-                .map(|region| (region.iter().collect(), region.zoom_level())),
+            tiles: region.as_ref().map(|region| {
+                (
+                    Arc::from(region.iter().collect::<Vec<_>>()),
+                    region.zoom_level(),
+                )
+            }),
             raster: raster.clone(),
         });
     }

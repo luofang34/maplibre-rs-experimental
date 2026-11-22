@@ -122,6 +122,23 @@ pub(super) fn needs_frame_indexed(world: &World) -> bool {
     false
 }
 
+pub(super) fn kind_has_due_retry_indexed(world: &World, kind: RequestKind) -> bool {
+    let Some(index) = world.resources.get::<RetryIndex>() else {
+        return false;
+    };
+    let scheduled = slot(&index.scheduled, kind);
+    if scheduled.is_empty() {
+        return false;
+    }
+    let now = observed_now(world);
+    scheduled.iter().any(|&coords| {
+        world
+            .tiles
+            .query::<&TileRequestRetries>(coords)
+            .is_some_and(|retries| retries.slot(kind).retry_due(now))
+    })
+}
+
 pub(super) fn next_retry_delay_indexed(world: &World) -> Option<Duration> {
     let index = world.resources.get::<RetryIndex>()?;
     if index.scheduled.iter().all(FxHashSet::is_empty) {

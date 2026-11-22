@@ -55,6 +55,9 @@ pub fn coverage_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
+    if crate::render::eye_covering::EyeInFrame::reuses_content(world) {
+        return Ok(());
+    }
     let Some(dem) = dem_source(style) else {
         world.resources.remove::<PreparedTerrainRegion>();
         if world

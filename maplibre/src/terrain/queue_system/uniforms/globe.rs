@@ -14,14 +14,12 @@ pub(super) fn set_uniforms(
     tile: WorldTileCoords,
     view: &ViewState,
     globe_camera: Option<&GlobeCameraState>,
-) {
+) -> Option<Matrix4<f64>> {
     block.globe_origin = [0.0; 4];
-    let Some(camera) = globe_camera else {
-        return;
-    };
+    let camera = globe_camera?;
     // Coarse tiles and polar fans use the global sphere path. Their local angular span is large.
     if u8::from(tile.z) < 8 {
-        return;
+        return None;
     }
     let n = 2_f64.powi(i32::from(u8::from(tile.z)));
     let longitude = ((f64::from(tile.x) + 0.5) / n * 2.0 - 1.0) * std::f64::consts::PI;
@@ -48,5 +46,22 @@ pub(super) fn set_uniforms(
             (std::f64::consts::TAU / (n * EXTENT)) as f32,
             radius as f32,
         ];
+        return Some(basis);
+    }
+    None
+}
+
+/// Re-projects a tile's precomputed globe tangent basis for a stereo sibling eye without
+/// re-evaluating `sinh`/`atan`/`sin_cos` trigonometry.
+pub(super) fn apply_basis(
+    block: &mut TerrainTileUniforms,
+    camera: Option<&GlobeCameraState>,
+    basis: Option<&Matrix4<f64>>,
+) {
+    let (Some(camera), Some(basis)) = (camera, basis) else {
+        return;
+    };
+    if let Some(matrix) = (camera.wgpu_view_projection() * basis).cast::<f32>() {
+        block.globe_transform = matrix.into();
     }
 }

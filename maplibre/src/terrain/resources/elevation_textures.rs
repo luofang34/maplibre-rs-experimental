@@ -181,14 +181,49 @@ impl TerrainResources {
         }
     }
 
+    /// Advances the per-frame LRU stamp once per terrain frame so individual tile reads do not
+    /// execute atomic fetch-add instructions on every lookup.
+    pub(crate) fn begin_dem_frame(&mut self) {
+        self.dem_frame_tick = next_dem_tick();
+    }
+
+    /// Resolves the nearest uploaded DEM tile covering `coords`, touching its LRU stamp at most
+    /// once per frame and returning `(dem_coords, texture_id, interior_dim)`.
+    pub(crate) fn resolve_loaded_dem(
+        &self,
+        coords: WorldTileCoords,
+        dem: &crate::terrain::source::DemSource,
+    ) -> Option<(WorldTileCoords, u64, f32)> {
+        let mut current =
+            crate::terrain::request_system::dem_tile_coords(coords, dem.minzoom, dem.maxzoom)?;
+        loop {
+            if let Some(entry) = self.dem_textures.get(&current) {
+                if entry.last_used.load(Ordering::Relaxed) != self.dem_frame_tick {
+                    entry
+                        .last_used
+                        .store(self.dem_frame_tick, Ordering::Relaxed);
+                }
+                let dim = entry.texture.size.width.saturating_sub(4).max(1) as f32;
+                return Some((current, entry.id, dim));
+            }
+            current = current.get_parent()?;
+        }
+    }
+
     /// DEM texture of a tile, or the flat stand-in while it loads.
     pub fn dem_texture(&self, coords: Option<WorldTileCoords>) -> &Texture {
         coords
             .and_then(|coords| self.dem_textures.get(&coords))
             .map_or(&self.empty_dem, |dem| {
-                dem.last_used.store(next_dem_tick(), Ordering::Relaxed);
+                if dem.last_used.load(Ordering::Relaxed) != self.dem_frame_tick {
+                    dem.last_used.store(self.dem_frame_tick, Ordering::Relaxed);
+                }
                 &dem.texture
             })
+    }
+
+    pub(super) fn empty_dem_id(&self) -> u64 {
+        self.empty_dem_id
     }
 
     pub(super) fn dem_id(&self, coords: Option<WorldTileCoords>) -> u64 {

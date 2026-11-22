@@ -65,8 +65,13 @@ pub(crate) struct DrapeActivity {
 pub(crate) struct PendingDrapes(FxHashMap<Option<ViewSlotId>, usize>);
 
 impl PendingDrapes {
+    #[cfg(feature = "headless")]
     pub(crate) fn of(&self, view: Option<ViewSlotId>) -> usize {
         self.0.get(&view).copied().unwrap_or(0)
+    }
+
+    pub(crate) fn any_pending(&self) -> bool {
+        self.0.values().any(|&count| count > 0)
     }
 
     #[cfg(feature = "headless")]

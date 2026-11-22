@@ -77,7 +77,7 @@ pub fn upload_system(
     let (paint_frame, previous_paint) = frame_paint(world, style, view_state);
     let refresh_paint = previous_paint != Some(paint_frame);
     let (source_tiles, painted_tiles, uncovered_sources) =
-        sources::frame_sources_and_painted(world, style, view_state)?;
+        sources::frame_sources_and_painted_mut(world, style, view_state)?;
     let has_pending_uploads = has_pending_vector_uploads(world, style, &source_tiles)?;
     let permit_source_set =
         super::request_system::snapshot_permit_sources(world, has_pending_uploads, &source_tiles);

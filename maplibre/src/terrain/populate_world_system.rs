@@ -112,9 +112,11 @@ impl<E: Environment, T: DemTransferables> System for PopulateWorldSystem<E, T> {
                 (coords, DemTileComponent::Missing)
             };
             let loaded = matches!(state, DemTileComponent::Loaded(_));
+            let mut updated = false;
             if let Some(component) = world.tiles.query_mut::<&mut DemTileComponent>(coords) {
                 if loaded || !matches!(component, DemTileComponent::Loaded(_)) {
                     *component = state;
+                    updated = true;
                 }
             }
             if loaded {
@@ -129,6 +131,9 @@ impl<E: Environment, T: DemTransferables> System for PopulateWorldSystem<E, T> {
                     style,
                     coords,
                 );
+            }
+            if updated {
+                crate::terrain::bump_dem_arrival_epoch(world);
             }
             Ok(())
         })?;

@@ -19,7 +19,7 @@ fn picking_and_label_height_follow_the_stitched_edge_and_transition() {
     };
     index.set_surface_edges(
         &[(Some(tile), tile, None)],
-        Arc::new(HashMap::from([(tile, edges)])),
+        Arc::new(HashMap::from_iter([(tile, edges)])),
     );
     let mut tiles = Tiles::default();
     tiles

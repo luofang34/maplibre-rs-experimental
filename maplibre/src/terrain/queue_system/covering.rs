@@ -81,12 +81,12 @@ const ZOOM_OUT_DESCENDANT_DEPTH: u8 = 3;
 pub(super) fn retained_textures(
     targets: impl Iterator<Item = WorldTileCoords>,
     present: impl Fn(WorldTileCoords) -> bool,
-) -> std::collections::HashSet<WorldTileCoords> {
+) -> rustc_hash::FxHashSet<WorldTileCoords> {
     let targets: Vec<_> = targets.collect();
     let mut kept = targets
         .iter()
         .copied()
-        .collect::<std::collections::HashSet<_>>();
+        .collect::<rustc_hash::FxHashSet<_>>();
     for target in targets {
         if present(target) {
             continue;
@@ -110,7 +110,7 @@ pub(super) fn retained_textures_with_zoom_out(
     ready: &[bool],
     view_textures: usize,
     present: impl Fn(WorldTileCoords) -> bool,
-) -> std::collections::HashSet<WorldTileCoords> {
+) -> rustc_hash::FxHashSet<WorldTileCoords> {
     let mut kept = retained_textures(targets.iter().copied(), &present);
     let mut budget = view_textures.saturating_sub(kept.len());
     if budget == 0 {

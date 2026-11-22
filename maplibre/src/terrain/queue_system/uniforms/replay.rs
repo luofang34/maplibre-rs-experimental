@@ -1,4 +1,6 @@
-use super::{frame_globe_camera, surface_uniforms, terrain_fog};
+use cgmath::Matrix4;
+
+use super::{frame_view_projection_and_globe, globe, terrain_fog_with_camera};
 use crate::{
     coords::WorldTileCoords,
     render::{
@@ -14,7 +16,10 @@ use crate::{
 };
 
 #[derive(Clone, Default)]
-pub(crate) struct TerrainEyeFrame(pub Vec<(WorldTileCoords, TerrainTileUniforms)>);
+pub(crate) struct TerrainEyeFrame(
+    pub Vec<(WorldTileCoords, TerrainTileUniforms)>,
+    pub(in crate::terrain::queue_system) Vec<Option<Matrix4<f64>>>,
+);
 
 pub(in crate::terrain::queue_system) fn replay(
     world: &mut World,
@@ -22,36 +27,22 @@ pub(in crate::terrain::queue_system) fn replay(
     view: &ViewState,
     queue: &crate::render::upload_queue::UploadQueue,
 ) -> SystemResult {
-    let fog = terrain_fog(style, view);
+    let (projection, globe_camera) = frame_view_projection_and_globe(world, style, view);
+    let fog = terrain_fog_with_camera(style, view, globe_camera.as_ref());
     let lighting = world
         .resources
         .get::<crate::render::SceneLighting>()
         .copied()
         .unwrap_or_default();
-    let drape_mode = world
-        .resources
-        .get::<crate::render::settings::TerrainDrapeMode>()
-        .copied()
-        .or_else(
-            || match world.resources.get::<Eventually<TerrainResources>>() {
-                Some(Initialized(terrain)) => Some(terrain.drape_mode()),
-                _ => None,
-            },
-        )
-        .unwrap_or_default();
-    let projection = view.gpu_view_projection();
-    let clear = super::super::drape_phase::background_clear_color(style);
-    let clear_color = [
-        clear.r as f32,
-        clear.g as f32,
-        clear.b as f32,
-        clear.a as f32,
-    ];
-    let globe_camera = frame_globe_camera(style, view);
+    let zoom = view.zoom();
+    let external = view.has_external_view();
+    let relief_strength = if external { 0.45 } else { 0.0 };
+    let external_flag = f32::from(external);
+    let daylight = lighting.daylight_uniform();
     if let Some(frame) = world.resources.get_mut::<TerrainEyeFrame>() {
-        for (coords, uniform) in &mut frame.0 {
+        for (idx, (coords, uniform)) in frame.0.iter_mut().enumerate() {
             uniform.transform = projection
-                .to_model_view_projection(coords.transform_for_zoom(view.zoom()))
+                .to_model_view_projection(coords.transform_for_zoom(zoom))
                 .downcast()
                 .into();
             uniform.fog_color = fog.fog_color;
@@ -59,21 +50,29 @@ pub(in crate::terrain::queue_system) fn replay(
             uniform.fog_range = [fog.near, fog.far, fog.ground_blend, fog.horizon_blend];
             uniform.fog_opacity[0] = fog.opacity;
             uniform.fog_opacity[1] = f32::from(fog.globe);
-            surface_uniforms(
-                uniform,
-                *coords,
-                (clear_color, lighting, drape_mode),
-                view,
-                globe_camera.as_ref(),
-            );
+            uniform.fog_opacity[3] = external_flag;
+            uniform.relief_strength = relief_strength;
+            uniform.daylight = daylight;
+            uniform.twilight = lighting.twilight;
+            uniform.moonlight = lighting.moonlight;
+            uniform.fog_position = view.eye_fog_position(*coords).unwrap_or([0.0; 4]);
+            let basis = frame.1.get(idx).and_then(Option::as_ref);
+            if basis.is_some() {
+                globe::apply_basis(uniform, globe_camera.as_ref(), basis);
+            } else {
+                globe::set_uniforms(uniform, *coords, view, globe_camera.as_ref());
+            }
         }
     }
-    if let (Some(frame), Some(Initialized(terrain))) = (
-        world.resources.get::<TerrainEyeFrame>(),
-        world.resources.get::<Eventually<TerrainResources>>(),
-    ) {
-        let uniforms: Vec<_> = frame.0.iter().map(|(_, uniform)| *uniform).collect();
-        terrain.write_uniforms(queue, &uniforms);
+    if let Some((Initialized(terrain), frame)) = world
+        .resources
+        .query_mut::<(&mut Eventually<TerrainResources>, &TerrainEyeFrame)>()
+    {
+        let mut scratch = std::mem::take(&mut terrain.replay_uniforms_scratch);
+        scratch.clear();
+        scratch.extend(frame.0.iter().map(|(_, uniform)| *uniform));
+        terrain.write_uniforms(queue, &scratch);
+        terrain.replay_uniforms_scratch = scratch;
     }
     world.resources.insert(DrapePhase::default());
     super::super::hide_draped_layers(world, style);

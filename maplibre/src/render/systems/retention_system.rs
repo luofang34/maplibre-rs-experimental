@@ -140,7 +140,7 @@ fn run_eviction(
     let evicted = evict_stale_tiles(world, &in_use, drawn);
     if !evicted.is_empty() {
         tracing::debug!(count = evicted.len(), "evicted tiles that left the view");
-        crate::vector::bump_arrival_epoch(world);
+        ancestors::bump_arrival_epochs(world);
         gpu::drop_gpu_data_with_queue(world, &evicted, queue);
     }
     gpu::reclaim_pool_pages(world, queue);
@@ -476,7 +476,7 @@ fn drop_cancelled<S: BuildHasher>(
         crate::vector::content::discard_pending_refresh(world, coords);
     }
     if to_drop.is_empty() {
-        crate::vector::bump_arrival_epoch(world);
+        ancestors::bump_arrival_epochs(world);
         return false;
     }
     let retention = world.resources.get_or_init_mut::<TileRetention>();
@@ -487,7 +487,7 @@ fn drop_cancelled<S: BuildHasher>(
     for coords in &to_drop {
         world.tiles.remove(*coords);
     }
-    crate::vector::bump_arrival_epoch(world);
+    ancestors::bump_arrival_epochs(world);
     gpu::drop_gpu_data_with_queue(world, &to_drop, queue);
     true
 }

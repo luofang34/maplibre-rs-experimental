@@ -128,6 +128,8 @@ fn build_raster_layer_from_payload(
         return match loaded {
             Some(dem) => {
                 ingest_source_dem_with_style(&mut world.tiles, Some(style), &source, coords, dem);
+                crate::terrain::bump_dem_arrival_epoch(world);
+                crate::raster::bump_raster_arrival_epoch(world);
                 RasterLayerData::Available(AvailableRasterLayerData {
                     coords,
                     source,
@@ -219,6 +221,7 @@ pub(crate) fn apply_raster_message_with_style<T: RasterTransferables>(
         {
             raster.tile_data_changed(&source, coords);
         }
+        crate::raster::bump_raster_arrival_epoch(world);
     }
     Ok(())
 }

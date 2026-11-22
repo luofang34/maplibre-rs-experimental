@@ -330,7 +330,7 @@ impl MapContext {
         self.world
             .resources
             .get::<crate::terrain::queue_system::PendingDrapes>()
-            .is_some_and(|pending| pending.of(None) > 0)
+            .is_some_and(crate::terrain::queue_system::PendingDrapes::any_pending)
     }
 
     /// What [`Self::needs_redraw`] asks for a frame for.

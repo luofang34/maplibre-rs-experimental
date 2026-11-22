@@ -186,7 +186,10 @@ impl MapController {
                         drape_redraws: stats.drape_redraws,
                         prefetch_drapes: stats.prefetch_drapes,
                         loaded,
-                        settled: !reasons.any() && !has_arrivals,
+                        settled: !reasons.any()
+                            && !has_arrivals
+                            && !context.has_pending_drapes()
+                            && !context.has_scheduled_retries(),
                         wasm_memory_bytes: wasm_linear_memory_bytes(),
                         gpu_memory_bytes: live_gpu_buffer_bytes(),
                         pending_requests: u32::try_from(

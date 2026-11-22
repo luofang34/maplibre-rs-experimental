@@ -1,4 +1,6 @@
 //! Texture budgets do not change the mesh or DEM resolution under a surface.
+use rustc_hash::FxHashMap;
+
 use crate::{coords::WorldTileCoords, tcs::world::World, terrain::drape_targets::TargetSpec};
 
 #[derive(Clone, Default)]
@@ -14,12 +16,12 @@ pub(crate) fn drawn_surface_tiles(world: &World) -> &[WorldTileCoords] {
 
 /// How many worlds over each surface tile is seen again: its copies beside the main world.
 #[derive(Clone, Default)]
-pub(crate) struct SurfaceCopies(pub std::collections::HashMap<WorldTileCoords, Vec<i32>>);
+pub(crate) struct SurfaceCopies(pub FxHashMap<WorldTileCoords, Vec<i32>>);
 
 impl SurfaceCopies {
     /// The copies of the world the view sees its tiles in, keyed by the tile they repeat.
     pub(super) fn of(tiles: impl Iterator<Item = WorldTileCoords>) -> Self {
-        let mut copies: std::collections::HashMap<WorldTileCoords, Vec<i32>> = Default::default();
+        let mut copies: FxHashMap<WorldTileCoords, Vec<i32>> = FxHashMap::default();
         for (tile, wrap) in tiles.filter_map(WorldTileCoords::wrapped) {
             if wrap != 0 {
                 let wraps = copies.entry(tile).or_default();
@@ -32,24 +34,32 @@ impl SurfaceCopies {
     }
 }
 
-pub(super) fn for_frame(
+pub(super) fn coords_for_frame(
     world: &mut World,
     drapes: &[TargetSpec],
     sources: &[Option<WorldTileCoords>],
-) -> (Vec<TargetSpec>, Vec<Option<WorldTileCoords>>) {
+) -> (Vec<WorldTileCoords>, Vec<Option<WorldTileCoords>>) {
     let surfaces = world
         .resources
         .get::<SurfaceTiles>()
         .map(|surface| surface.0.clone())
         .unwrap_or_default();
     let coordinates: Vec<_> = drapes.iter().map(|drape| drape.coords).collect();
-    let (surfaces, mapped) =
-        if let Some(active) = super::cohort::active_sources(world, &coordinates, sources) {
-            super::cohort::surface_pieces(&surfaces, &active)
-        } else {
-            let mapped = map_sources(&surfaces, drapes, sources);
-            expand_zoom_out_surfaces(world, surfaces, mapped)
-        };
+    if let Some(active) = super::cohort::active_sources(world, &coordinates, sources) {
+        super::cohort::surface_pieces(&surfaces, &active)
+    } else {
+        let mapped = map_sources(&surfaces, drapes, sources);
+        expand_zoom_out_surfaces(world, surfaces, mapped)
+    }
+}
+
+#[cfg(test)]
+pub(super) fn for_frame(
+    world: &mut World,
+    drapes: &[TargetSpec],
+    sources: &[Option<WorldTileCoords>],
+) -> (Vec<TargetSpec>, Vec<Option<WorldTileCoords>>) {
+    let (surfaces, mapped) = coords_for_frame(world, drapes, sources);
     let specs = surfaces
         .into_iter()
         .map(|coords| TargetSpec {
@@ -66,14 +76,22 @@ fn map_sources(
     drapes: &[TargetSpec],
     sources: &[Option<WorldTileCoords>],
 ) -> Vec<Option<WorldTileCoords>> {
+    let mut by_coords: FxHashMap<WorldTileCoords, Option<WorldTileCoords>> =
+        FxHashMap::with_capacity_and_hasher(drapes.len(), Default::default());
+    for (drape, &source) in drapes.iter().zip(sources) {
+        by_coords.entry(drape.coords).or_insert(source);
+    }
     surfaces
         .iter()
-        .map(|coords| {
-            drapes
-                .iter()
-                .zip(sources)
-                .find(|(drape, _)| crate::projection::tile_covering::covers(drape.coords, *coords))
-                .and_then(|(_, source)| *source)
+        .map(|&coords| {
+            let mut current = Some(coords);
+            while let Some(candidate) = current {
+                if let Some(&source) = by_coords.get(&candidate) {
+                    return source;
+                }
+                current = candidate.get_parent();
+            }
+            None
         })
         .collect()
 }

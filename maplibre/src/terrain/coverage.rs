@@ -11,7 +11,9 @@
 //! Between them sits the crate's stitched DEM sample, the height the drawn mesh's vertices
 //! take, which the mesh and the flat camera's gestures are built from.
 
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
+
+use rustc_hash::FxHashMap as HashMap;
 
 pub use super::PolarPoleElevations;
 use crate::{
@@ -74,6 +76,7 @@ pub struct TerrainCoverageIndex {
     dem_tile_size: u32,
     poles: super::PolarPoleElevations,
     edges: Arc<HashMap<WorldTileCoords, super::queue_system::edges::EdgeHeights>>,
+    edges_generation: u64,
 }
 
 impl TerrainCoverageIndex {
@@ -220,9 +223,8 @@ impl TerrainCoverageIndex {
 
     /// Exaggerated elevation bounds of a tile, from the loaded DEM that covers it.
     pub fn tile_elevation_range(&self, coords: WorldTileCoords) -> Option<TileElevationRange> {
-        let (min, max) = self
-            .loaded_dem_for(coords)
-            .and_then(|dem| self.dem_bounds.get(dem))?;
+        let current = dem_tile_coords(coords, self.minzoom, self.maxzoom)?;
+        let (_, &(min, max)) = self.dem_bounds.nearest_ancestor_or_self(current)?;
         let mut min_meters = min * self.exaggeration;
         let mut max_meters = max * self.exaggeration;
         let max_row = 1_i32

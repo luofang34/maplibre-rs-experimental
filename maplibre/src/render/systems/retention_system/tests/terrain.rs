@@ -1,7 +1,5 @@
 #![allow(clippy::expect_used)]
 
-use std::collections::HashSet;
-
 use rustc_hash::FxHashSet;
 
 use super::super::{evict_beyond, finish_tiles_in_use, CacheBudget};
@@ -67,7 +65,10 @@ fn terrain_tiles_survive_wasm_budget_without_evict_refetch_loop() {
         .insert(DrapePrefetchRequests(vec![prefetch_drape]));
     world
         .resources
-        .insert(TerrainWantedDems(HashSet::from([fine_dem, ancestor_dem])));
+        .insert(TerrainWantedDems(FxHashSet::from_iter([
+            fine_dem,
+            ancestor_dem,
+        ])));
 
     let wasm_budget = CacheBudget {
         tiles: 2,

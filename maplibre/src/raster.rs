@@ -339,3 +339,19 @@ impl HasTile for RasterTilesDone {
                 .has_descendants(coords, max_depth)
     }
 }
+
+/// Monotonic epoch bumped whenever raster or shared DEM layer tile data commits or evicts.
+#[derive(Default)]
+pub(crate) struct RasterArrivalEpoch(pub u64);
+
+pub(crate) fn bump_raster_arrival_epoch(world: &mut World) {
+    let epoch = world.resources.get_or_init_mut::<RasterArrivalEpoch>();
+    epoch.0 = epoch.0.wrapping_add(1);
+}
+
+pub(crate) fn raster_arrival_epoch(world: &World) -> u64 {
+    world
+        .resources
+        .get::<RasterArrivalEpoch>()
+        .map_or(0, |epoch| epoch.0)
+}

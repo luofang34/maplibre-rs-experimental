@@ -211,3 +211,19 @@ impl<E: Environment, T: DemTransferables> Plugin<E> for TerrainPlugin<T> {
         Ok(())
     }
 }
+
+/// Monotonic epoch bumped whenever terrain DEM tile state commits, ingests, or evicts.
+#[derive(Default)]
+pub(crate) struct DemArrivalEpoch(pub u64);
+
+pub(crate) fn bump_dem_arrival_epoch(world: &mut World) {
+    let epoch = world.resources.get_or_init_mut::<DemArrivalEpoch>();
+    epoch.0 = epoch.0.wrapping_add(1);
+}
+
+pub(crate) fn dem_arrival_epoch(world: &World) -> u64 {
+    world
+        .resources
+        .get::<DemArrivalEpoch>()
+        .map_or(0, |epoch| epoch.0)
+}

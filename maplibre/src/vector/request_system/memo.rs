@@ -209,11 +209,7 @@ pub(super) fn update_loose_covering_cache(
         .resources
         .get_or_init_mut::<crate::render::eye_covering::FrameLooseCovering>();
     if cache.host_frame != host_frame {
-        *cache = crate::render::eye_covering::FrameLooseCovering {
-            host_frame,
-            view_tiles: None,
-            raster_regions: None,
-        };
+        *cache = crate::render::eye_covering::FrameLooseCovering::for_host_frame(host_frame);
     }
     cache.view_tiles = Some((
         computed.map(|(tiles, _)| Arc::clone(tiles)),

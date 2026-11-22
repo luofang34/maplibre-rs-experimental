@@ -5,6 +5,7 @@ use std::{
     sync::Arc,
 };
 
+use rustc_hash::FxHashMap;
 use sample::{build_edges, Dems, Sources};
 #[cfg(test)]
 use sample::{scale_of, shared_height};
@@ -79,9 +80,11 @@ type Signature = Vec<(WorldTileCoords, Option<(WorldTileCoords, DemRevision)>)>;
 pub(crate) struct EdgeCache {
     signature: Signature,
     sig_scratch: Signature,
-    pub(crate) samples: Arc<HashMap<WorldTileCoords, EdgeHeights>>,
+    pub(crate) samples: Arc<FxHashMap<WorldTileCoords, EdgeHeights>>,
     row_index: FastTileMap<u32>,
+    free_rows: Vec<u32>,
     packed_edges: Vec<EdgeHeights>,
+    dirty_rows: Vec<u32>,
     generation: u64,
     /// How many tiles' edges the last change rebuilt.
     pub(crate) rebuilt: usize,
@@ -96,6 +99,7 @@ impl EdgeCache {
             Option<WorldTileCoords>,
         )],
         tiles: &Tiles,
+        max_rows: usize,
     ) {
         self.sig_scratch.clear();
         self.sig_scratch.reserve(sources.len());
@@ -110,12 +114,16 @@ impl EdgeCache {
         self.sig_scratch
             .sort_by_key(|(tile, _)| (u8::from(tile.z), tile.y, tile.x));
         if self.sig_scratch != self.signature {
-            self.update(tiles);
+            self.update(tiles, max_rows);
         }
     }
 
     pub(super) fn packed_edges(&self) -> &[EdgeHeights] {
         &self.packed_edges
+    }
+
+    pub(super) fn take_dirty_rows(&mut self) -> Vec<u32> {
+        std::mem::take(&mut self.dirty_rows)
     }
 
     /// Assigns each tile's `edge_index[0]` into its uniform block and returns `(generation, fallback)`.
@@ -132,7 +140,7 @@ impl EdgeCache {
         tiles: &Tiles,
         max_rows: usize,
     ) -> (u64, Option<Vec<EdgeHeights>>) {
-        self.sync_signature(sources, tiles);
+        self.sync_signature(sources, tiles, max_rows);
         if self.packed_edges.len() <= max_rows {
             for ((_, tile, _), uniform) in sources.iter().zip(uniforms.iter_mut()) {
                 uniform.edge_index[0] = self.row_index.get(tile).copied().unwrap_or(0);
@@ -159,7 +167,7 @@ impl EdgeCache {
         uniforms: &mut [TerrainTileUniforms],
         tiles: &Tiles,
     ) -> Vec<EdgeHeights> {
-        self.sync_signature(sources, tiles);
+        self.sync_signature(sources, tiles, usize::MAX);
         let mut edges = Vec::with_capacity(sources.len());
         for (index, ((_, tile, _), uniform)) in sources.iter().zip(uniforms.iter_mut()).enumerate()
         {
@@ -170,40 +178,106 @@ impl EdgeCache {
         edges
     }
 
+    fn compact_rows(&mut self) {
+        let samples = Arc::make_mut(&mut self.samples);
+        self.row_index.clear();
+        self.free_rows.clear();
+        self.packed_edges.clear();
+        self.dirty_rows.clear();
+        for (tile, _) in &self.sig_scratch {
+            if self.row_index.contains_key(tile) {
+                continue;
+            }
+            let row = self.packed_edges.len() as u32;
+            self.row_index.insert(*tile, row);
+            self.packed_edges
+                .push(samples.get(tile).copied().unwrap_or_default());
+            self.dirty_rows.push(row);
+        }
+    }
+
+    fn evict_stale_rows(&mut self, after: &FastTileMap<&Option<(WorldTileCoords, DemRevision)>>) {
+        let samples = Arc::make_mut(&mut self.samples);
+        samples.retain(|tile, _| after.contains_key(tile));
+        let free = &mut self.free_rows;
+        self.row_index.retain(|tile, &mut row| {
+            let keep = after.contains_key(tile);
+            if !keep {
+                free.push(row);
+            }
+            keep
+        });
+    }
+
+    fn write_affected_rows(
+        &mut self,
+        affected: &[WorldTileCoords],
+        selection: &Sources,
+        dems: &Dems<'_>,
+    ) {
+        let samples = Arc::make_mut(&mut self.samples);
+        for &tile in affected {
+            let edge = build_edges(tile, selection, dems);
+            samples.insert(tile, edge);
+            let row = if let Some(&existing) = self.row_index.get(&tile) {
+                if let Some(slot) = self.packed_edges.get_mut(existing as usize) {
+                    *slot = edge;
+                }
+                existing
+            } else if let Some(reused) = self.free_rows.pop() {
+                if let Some(slot) = self.packed_edges.get_mut(reused as usize) {
+                    *slot = edge;
+                }
+                self.row_index.insert(tile, reused);
+                reused
+            } else {
+                let next = self.packed_edges.len() as u32;
+                self.packed_edges.push(edge);
+                self.row_index.insert(tile, next);
+                next
+            };
+            self.dirty_rows.push(row);
+        }
+    }
+
     /// Rebuilds the edges of the tiles the change reaches: those added or given another DEM,
     /// and those touching a tile that was added, removed or changed, whose shared vertices
-    /// may now belong to another mesh. The edges of every other tile are kept.
-    fn update(&mut self, tiles: &Tiles) {
-        let mut before = FastTileMap::with_capacity_and_hasher(
-            self.signature.len(),
-            BuildHasherDefault::default(),
-        );
-        for (tile, source) in &self.signature {
-            before.insert(*tile, source);
-        }
-        let mut after = FastTileMap::with_capacity_and_hasher(
-            self.sig_scratch.len(),
-            BuildHasherDefault::default(),
-        );
-        for (tile, source) in &self.sig_scratch {
+    /// may now belong to another mesh. The edges of every other tile are kept in place.
+    fn update(&mut self, tiles: &Tiles, max_rows: usize) {
+        let sigs = std::mem::take(&mut self.sig_scratch);
+        let changed: Vec<WorldTileCoords> = {
+            let mut before = FastTileMap::with_capacity_and_hasher(
+                self.signature.len(),
+                BuildHasherDefault::default(),
+            );
+            for (tile, source) in &self.signature {
+                before.insert(*tile, source);
+            }
+            let mut after =
+                FastTileMap::with_capacity_and_hasher(sigs.len(), BuildHasherDefault::default());
+            for (tile, source) in &sigs {
+                after.insert(*tile, source);
+            }
+            after
+                .iter()
+                .filter(|(tile, source)| before.get(*tile) != Some(*source))
+                .map(|(tile, _)| *tile)
+                .chain(
+                    before
+                        .keys()
+                        .filter(|tile| !after.contains_key(*tile))
+                        .copied(),
+                )
+                .collect()
+        };
+        let mut after =
+            FastTileMap::with_capacity_and_hasher(sigs.len(), BuildHasherDefault::default());
+        for (tile, source) in &sigs {
             after.insert(*tile, source);
         }
-        let changed: Vec<WorldTileCoords> = after
-            .iter()
-            .filter(|(tile, source)| before.get(*tile) != Some(*source))
-            .map(|(tile, _)| *tile)
-            .chain(
-                before
-                    .keys()
-                    .filter(|tile| !after.contains_key(*tile))
-                    .copied(),
-            )
-            .collect();
-        let mut selection_tiles = FastTileMap::with_capacity_and_hasher(
-            self.sig_scratch.len(),
-            BuildHasherDefault::default(),
-        );
-        for (tile, source) in &self.sig_scratch {
+        let mut selection_tiles =
+            FastTileMap::with_capacity_and_hasher(sigs.len(), BuildHasherDefault::default());
+        for (tile, source) in &sigs {
             selection_tiles.insert(*tile, source.as_ref().map(|v| v.0));
         }
         let selection = Sources::new(selection_tiles);
@@ -214,29 +288,14 @@ impl EdgeCache {
             .filter(|tile| changed.iter().any(|other| touches(*tile, *other)))
             .collect();
         let dems = Dems::new(&selection, tiles);
-        let mut samples = HashMap::with_capacity(after.len());
-        for (tile, edges) in self.samples.iter() {
-            if after.contains_key(tile) {
-                samples.insert(*tile, *edges);
-            }
+        self.evict_stale_rows(&after);
+        self.write_affected_rows(&affected, &selection, &dems);
+        if self.packed_edges.len() > max_rows && after.len() <= max_rows {
+            self.compact_rows();
         }
-        for tile in &affected {
-            samples.insert(*tile, build_edges(*tile, &selection, &dems));
-        }
+        drop(after);
         self.rebuilt = affected.len();
-        self.row_index.clear();
-        self.packed_edges.clear();
-        self.packed_edges.reserve(self.sig_scratch.len());
-        for (tile, _) in &self.sig_scratch {
-            if self.row_index.contains_key(tile) {
-                continue;
-            }
-            let row = self.packed_edges.len() as u32;
-            self.row_index.insert(*tile, row);
-            self.packed_edges
-                .push(samples.get(tile).copied().unwrap_or_default());
-        }
-        self.samples = Arc::new(samples);
+        self.sig_scratch = sigs;
         std::mem::swap(&mut self.signature, &mut self.sig_scratch);
         self.generation = self.generation.wrapping_add(1).max(1);
     }

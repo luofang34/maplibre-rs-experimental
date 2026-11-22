@@ -168,6 +168,76 @@ pub(super) fn prepare_drapes(
     })
 }
 
+fn build_prep_key(
+    specs: &[TargetSpec],
+    style: &Style,
+    style_zoom: f64,
+    world: &World,
+    clear_color: wgpu::Color,
+    drape_zoom: f64,
+) -> Option<super::spec_cache::DrapePrepKey> {
+    use super::spec_cache;
+    let strict = world
+        .resources
+        .get::<cohort::TextureCohort>()
+        .is_some_and(|state| state.enabled);
+    let capacity = match world.resources.get::<Eventually<WgpuTileViewPattern>>() {
+        Some(Initialized(pattern)) => pattern.remaining_metadata_capacity(),
+        _ => 0,
+    };
+    let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
+    let cache = world.resources.get::<spec_cache::DrapePrepareCache>()?;
+    let specs_gen = cache.specs_gen_for(specs)?;
+    let (
+        vector_pool_state,
+        vector_arrival_epoch,
+        target_tiles_digest,
+        tiles_len,
+        raster_gen,
+        style_rev,
+        style_vis_digest,
+    ) = match cache.matching_digests(host_frame, specs, style.revision()) {
+        Some(d) => (
+            d.vector_pool_state,
+            d.vector_arrival_epoch,
+            d.target_tiles_digest,
+            d.tiles_len,
+            d.raster_gen,
+            d.style_rev,
+            d.style_vis_digest,
+        ),
+        None => (
+            spec_cache::vector_pool_state(world),
+            crate::vector::arrival_epoch(world),
+            spec_cache::target_coords_vector_digest(specs.iter().map(|spec| spec.coords), world),
+            world.tiles.tiles.len(),
+            spec_cache::raster_mutation_gen(world),
+            style.revision(),
+            spec_cache::style_visibility_digest(style, style_zoom),
+        ),
+    };
+    Some(spec_cache::DrapePrepKey {
+        specs_gen,
+        drape_paint_zoom_bits: crate::vector::upload_system::drape_paint_zoom(drape_zoom).to_bits(),
+        clear_color_bits: [
+            clear_color.r.to_bits(),
+            clear_color.g.to_bits(),
+            clear_color.b.to_bits(),
+            clear_color.a.to_bits(),
+        ],
+        strict,
+        capacity,
+        vector_pool_state,
+        vector_arrival_epoch,
+        target_tiles_digest,
+        tiles_len,
+        raster_gen,
+        hillshade_fingerprint: spec_cache::hillshade_fingerprint(world),
+        style_rev,
+        style_vis_digest,
+    })
+}
+
 fn compute_or_reuse_drape_prep(
     specs: &[TargetSpec],
     style: &Style,
@@ -188,34 +258,7 @@ fn compute_or_reuse_drape_prep(
         _ => 0,
     };
     let style_zoom = view_state.style_zoom().value();
-    let prep_key = world
-        .resources
-        .get::<spec_cache::DrapePrepareCache>()
-        .and_then(|cache| cache.specs_gen_for(specs))
-        .map(|specs_gen| spec_cache::DrapePrepKey {
-            specs_gen,
-            drape_paint_zoom_bits: crate::vector::upload_system::drape_paint_zoom(drape_zoom)
-                .to_bits(),
-            clear_color_bits: [
-                clear_color.r.to_bits(),
-                clear_color.g.to_bits(),
-                clear_color.b.to_bits(),
-                clear_color.a.to_bits(),
-            ],
-            strict,
-            capacity,
-            vector_pool_state: spec_cache::vector_pool_state(world),
-            vector_arrival_epoch: crate::vector::arrival_epoch(world),
-            target_tiles_digest: spec_cache::target_coords_vector_digest(
-                specs.iter().map(|spec| spec.coords),
-                world,
-            ),
-            tiles_len: world.tiles.tiles.len(),
-            raster_gen: spec_cache::raster_mutation_gen(world),
-            hillshade_fingerprint: spec_cache::hillshade_fingerprint(world),
-            style_rev: style.revision(),
-            style_vis_digest: spec_cache::style_visibility_digest(style, style_zoom),
-        });
+    let prep_key = build_prep_key(specs, style, style_zoom, world, clear_color, drape_zoom);
     if let Some(cached) = prep_key.as_ref().and_then(|key| {
         world
             .resources

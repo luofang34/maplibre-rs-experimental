@@ -1,8 +1,10 @@
 //! Requests tiles which are currently in view
 
+mod memo;
+
 use std::{borrow::Cow, marker::PhantomData, rc::Rc};
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 use crate::{
     context::MapContext,
@@ -13,10 +15,10 @@ use crate::{
         frame_style::FrameStyle,
         tile_backpressure::request_budget,
         tile_retry::{self, RequestKind},
-        tile_sources::{missing_tile_fallback, source_layer_groups, TileKind},
+        tile_sources::{missing_tile_fallback, RasterSourceId},
     },
     kernel::Kernel,
-    raster::{transferables::RasterTransferables, RasterLayersDataComponent, RasterSourceId},
+    raster::{transferables::RasterTransferables, RasterLayersDataComponent},
     render::{projection::raster_source_regions, view_state::ViewStatePadding},
     style::Style,
     tcs::system::{System, SystemError, SystemResult},
@@ -24,7 +26,7 @@ use crate::{
 
 pub struct RequestSystem<E: Environment, T: RasterTransferables> {
     kernel: Rc<Kernel<E>>,
-    layer_cache: Option<(u64, bool)>,
+    memo: memo::RasterRequestMemo,
     phantom_t: PhantomData<T>,
 }
 
@@ -32,7 +34,7 @@ impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
     pub fn new(kernel: &Rc<Kernel<E>>) -> Self {
         Self {
             kernel: kernel.clone(),
-            layer_cache: None,
+            memo: memo::RasterRequestMemo::default(),
             phantom_t: Default::default(),
         }
     }
@@ -54,87 +56,122 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
     ) -> SystemResult {
         tile_retry::stop_cancelled(world, self.kernel.apc());
         crate::io::tile_backpressure::set_raster_deferred(world, false);
-        let style_rev = style.revision();
-        let has_raster_layers = match self.layer_cache {
-            Some((rev, has)) if rev == style_rev => has,
-            _ => {
-                let has = style.layers.iter().any(|layer| {
-                    crate::io::tile_sources::RASTER_LAYER_TYPES.contains(&layer.type_.as_str())
-                        && !layer.is_hidden()
-                });
-                self.layer_cache = Some((style_rev, has));
-                has
-            }
-        };
-        if !has_raster_layers {
+        let (has_raster_layers, sources_empty) = self.memo.sync_style(style);
+        if !has_raster_layers || sources_empty {
+            self.memo.invalidate();
             return Ok(());
         }
-        let all_sources: Vec<_> = source_layer_groups(style, TileKind::Raster)
-            .into_iter()
-            .filter(|group| {
-                !crate::raster::media_source::is_media_source(style, group.source_name.as_deref())
-            })
-            .map(|group| RasterSourceId::new(group.source_name))
-            .collect();
-        if all_sources.is_empty() {
-            return Ok(());
-        }
-        // Missing ancestors and deferred tiles must progress while the camera is stationary.
-        // Each raster source covers the view at its own tile size and rounding, as GL JS's
-        // per-source tile managers do; the tiles of every source are requested together.
         let multi = world
             .resources
             .get::<crate::render::eye_covering::MultiViewExtractCovering>()
             .filter(|m| m.active)
             .cloned();
-        let mut regions = if let Some(multi) = &multi {
-            multi.raster_regions.clone()
-        } else {
-            let request_padding = if renderer.settings.tight_tile_requests
-                || (cfg!(target_arch = "wasm32") && !view_state.has_external_view())
-            {
-                ViewStatePadding::Tight
-            } else {
-                ViewStatePadding::Loose
-            };
-            let computed = raster_source_regions(style, view_state, world, request_padding)?;
-            let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
-            let terrain_key = crate::render::eye_covering::terrain_index_key(world);
-            let cached_regions = computed.clone();
-            let cache = world
-                .resources
-                .get_or_init_mut::<crate::render::eye_covering::FrameLooseCovering>();
-            if cache.host_frame != host_frame {
-                *cache = crate::render::eye_covering::FrameLooseCovering {
-                    host_frame,
-                    view_tiles: None,
-                    raster_regions: None,
-                };
-            }
-            cache.raster_regions = Some((cached_regions, request_padding, terrain_key));
-            computed
-        };
+        let tight_padding = renderer.settings.tight_tile_requests
+            || (cfg!(target_arch = "wasm32")
+                && (!view_state.has_external_view() || view_state.request_overscan() <= 1.0));
+        let memo_key = memo::RasterRequestMemo::build_key(
+            world,
+            style,
+            view_state,
+            tight_padding,
+            multi.as_ref(),
+        );
+        if self.memo.try_reuse(world, &memo_key) {
+            return Ok(());
+        }
+        let all_sources = self.memo.cached_sources();
+        let (mut regions, cached_regions) =
+            resolve_regions(style, view_state, world, tight_padding, multi.as_ref())?;
         regions.retain(|(source, _)| {
             !crate::raster::media_source::is_media_source(style, source.name())
         });
-        let mut requested = FxHashSet::default();
-        let mut budget = request_budget(world);
         let stand_ins = drape_stand_ins(style, view_state, world);
-        let (wanted, wanted_sources) = wanted_tiles_with_sources(regions, stand_ins, style, world);
+        self.dispatch_wanted(
+            style,
+            world,
+            &all_sources,
+            regions,
+            stand_ins,
+            multi.as_ref(),
+        );
+        self.memo
+            .record(memo_key, world.tiles.tiles.len(), cached_regions);
+        Ok(())
+    }
+}
+
+type ResolvedRegions = (
+    crate::render::eye_covering::RasterCoverings,
+    Option<(
+        crate::render::eye_covering::RasterCoverings,
+        ViewStatePadding,
+        (u64, u64, usize),
+    )>,
+);
+
+fn resolve_regions(
+    style: &Style,
+    view_state: &crate::render::view_state::ViewState,
+    world: &mut crate::tcs::world::World,
+    tight_padding: bool,
+    multi: Option<&crate::render::eye_covering::MultiViewExtractCovering>,
+) -> Result<ResolvedRegions, SystemError> {
+    if let Some(multi) = multi {
+        return Ok((multi.raster_regions.clone(), None));
+    }
+    let request_padding = if tight_padding {
+        ViewStatePadding::Tight
+    } else {
+        ViewStatePadding::Loose
+    };
+    let computed = raster_source_regions(style, view_state, world, request_padding)?;
+    let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
+    let terrain_key = crate::render::eye_covering::terrain_index_key(world);
+    let cached_regions = computed.clone();
+    let cache = world
+        .resources
+        .get_or_init_mut::<crate::render::eye_covering::FrameLooseCovering>();
+    if cache.host_frame != host_frame {
+        *cache = crate::render::eye_covering::FrameLooseCovering::for_host_frame(host_frame);
+    }
+    cache.raster_regions = Some((cached_regions.clone(), request_padding, terrain_key));
+    Ok((
+        computed,
+        Some((cached_regions, request_padding, terrain_key)),
+    ))
+}
+
+impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
+    fn dispatch_wanted(
+        &mut self,
+        style: &Style,
+        world: &mut crate::tcs::world::World,
+        all_sources: &[RasterSourceId],
+        regions: crate::render::eye_covering::RasterCoverings,
+        stand_ins: Vec<WorldTileCoords>,
+        multi: Option<&crate::render::eye_covering::MultiViewExtractCovering>,
+    ) {
+        let mut requested = std::mem::take(&mut self.memo.requested_scratch);
+        requested.clear();
+        let mut budget = request_budget(world);
+        let mut acc = std::mem::take(&mut self.memo.acc);
+        wanted_tiles_with_sources_into(&mut acc, regions, stand_ins, style, world);
         let mut deferred = false;
         let mut frame_style = FrameStyle::new(style);
-        for coords in wanted {
+        let wanted = std::mem::take(&mut acc.wanted);
+        for coords in &wanted {
+            let coords = *coords;
             if !requested.insert(coords) {
                 continue;
             }
-
             let retry_due = tile_retry::due(world, coords, RequestKind::Raster);
             if tile_retry::waiting(world, coords, RequestKind::Raster) && !retry_due {
                 continue;
             }
-            let target_sources = wanted_sources
+            let target_sources = acc
+                .sources_by_coord
                 .get(&coords)
-                .map_or(all_sources.as_slice(), Vec::as_slice);
+                .map_or(all_sources, Vec::as_slice);
             let pending_sources: Vec<&RasterSourceId> = target_sources
                 .iter()
                 .filter(|source| retry_due || !source_ready_at(world, source, coords))
@@ -142,34 +179,29 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
             if pending_sources.is_empty() {
                 continue;
             }
-            // The rest wait for a later frame, once tiles in flight have landed.
             if budget == 0 {
                 deferred = true;
                 continue;
             }
             budget -= 1;
-
             let only_sources = pending_sources
                 .iter()
                 .map(|source| source.name().map(str::to_owned))
                 .collect::<Option<Vec<String>>>();
-            // One rejected tile must not cost the frame its other tiles.
             if let Err(error) = self.request(coords, only_sources, &mut frame_style, world) {
                 tracing::warn!(%error, "tile request rejected; it is requested again after a backoff");
                 tile_retry::rejected(world, coords, RequestKind::Raster, None);
             }
         }
+        acc.wanted = wanted;
+        self.memo.acc = acc;
         crate::io::tile_backpressure::set_raster_deferred(world, deferred);
-        if let Some(multi) = &multi {
+        if let Some(multi) = multi {
             requested.extend(multi.skipped_wanted_raster.iter().copied());
         }
         tile_retry::want(world, RequestKind::Raster, &requested);
-
-        Ok(())
+        self.memo.requested_scratch = requested;
     }
-}
-
-impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
     fn request(
         &self,
         coords: crate::coords::WorldTileCoords,
@@ -314,18 +346,12 @@ fn wanted_tiles(
     style: &crate::style::Style,
     world: &crate::tcs::world::World,
 ) -> Vec<WorldTileCoords> {
-    wanted_tiles_with_sources(regions, drape_targets, style, world).0
+    let mut acc = memo::WantedTilesAcc::default();
+    wanted_tiles_with_sources_into(&mut acc, regions, drape_targets, style, world);
+    acc.wanted
 }
 
-struct WantedTilesAcc {
-    stand_ins: Vec<WorldTileCoords>,
-    seen_stand_ins: FxHashSet<WorldTileCoords>,
-    wanted: Vec<WorldTileCoords>,
-    coarse_ancestors: Vec<WorldTileCoords>,
-    seen_coarse: FxHashSet<WorldTileCoords>,
-    needed_coarse: FxHashSet<WorldTileCoords>,
-    sources_by_coord: FxHashMap<WorldTileCoords, Vec<RasterSourceId>>,
-}
+use memo::WantedTilesAcc;
 
 type SourceTileConstraints = (u8, Option<(f64, f64, f64, f64)>, u8);
 
@@ -407,26 +433,16 @@ fn collect_source_wanted_tiles(
     }
 }
 
-fn wanted_tiles_with_sources(
+fn wanted_tiles_with_sources_into(
+    acc: &mut WantedTilesAcc,
     regions: Vec<(RasterSourceId, Vec<WorldTileCoords>)>,
     drape_targets: Vec<WorldTileCoords>,
     style: &crate::style::Style,
     world: &crate::tcs::world::World,
-) -> (
-    Vec<WorldTileCoords>,
-    FxHashMap<WorldTileCoords, Vec<RasterSourceId>>,
 ) {
-    let mut acc = WantedTilesAcc {
-        stand_ins: Vec::new(),
-        seen_stand_ins: FxHashSet::default(),
-        wanted: Vec::new(),
-        coarse_ancestors: Vec::new(),
-        seen_coarse: FxHashSet::default(),
-        needed_coarse: FxHashSet::default(),
-        sources_by_coord: FxHashMap::default(),
-    };
+    acc.reset();
     for (source, tiles) in regions {
-        collect_source_wanted_tiles(&mut acc, &source, tiles, &drape_targets, style, world);
+        collect_source_wanted_tiles(acc, &source, tiles, &drape_targets, style, world);
     }
     acc.coarse_ancestors
         .retain(|ancestor| acc.needed_coarse.contains(ancestor));
@@ -436,13 +452,14 @@ fn wanted_tiles_with_sources(
         let remaining = acc
             .coarse_ancestors
             .split_off(acc.coarse_ancestors.len().min(2));
-        acc.coarse_ancestors.extend(acc.wanted);
+        acc.coarse_ancestors.append(&mut acc.wanted);
         acc.coarse_ancestors.extend(remaining);
-        acc.stand_ins.extend(acc.coarse_ancestors);
-        return (acc.stand_ins, acc.sources_by_coord);
+        acc.stand_ins.append(&mut acc.coarse_ancestors);
+        std::mem::swap(&mut acc.stand_ins, &mut acc.wanted);
+        return;
     }
-    acc.stand_ins.extend(acc.wanted);
-    (acc.stand_ins, acc.sources_by_coord)
+    acc.stand_ins.append(&mut acc.wanted);
+    std::mem::swap(&mut acc.stand_ins, &mut acc.wanted);
 }
 
 /// The bounds `(west, south, east, north)` of an image's corners, so tiles it cannot reach are

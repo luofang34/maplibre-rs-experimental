@@ -19,6 +19,12 @@ use crate::{
     terrain::{DemLayersComponent, GpuDemPool},
 };
 
+#[derive(Default)]
+struct RasterUploadCache {
+    last_key: Option<(u64, u64, u64, usize)>,
+    last_deferred: bool,
+}
+
 pub fn upload_system(
     MapContext {
         style,
@@ -58,7 +64,32 @@ pub fn upload_system(
     {
         return Ok(());
     }
-    crate::raster::media_source::sync_media_sources(style, view_state, world);
+    let has_active_media = style.sources.values().any(|s| {
+        matches!(
+            s,
+            crate::style::source::Source::Video(v) if v.frame.is_some()
+        ) || matches!(
+            s,
+            crate::style::source::Source::Canvas(c) if c.frame.is_some()
+        )
+    });
+    let pre_key = (
+        crate::raster::raster_arrival_epoch(world),
+        crate::terrain::dem_arrival_epoch(world),
+        style.revision(),
+        world.tiles.tiles.len(),
+    );
+    if !has_active_media
+        && world
+            .resources
+            .get::<RasterUploadCache>()
+            .is_some_and(|c| !c.last_deferred && c.last_key == Some(pre_key))
+    {
+        return Ok(());
+    }
+    if has_active_media {
+        crate::raster::media_source::sync_media_sources(style, view_state, world);
+    }
     world.resources.get_or_init_mut::<FrameUploads>();
     world.resources.get_or_init_mut::<GpuDemPool>();
     let Some((Initialized(raster_resources), budget, gpu_dem_pool)) = world.resources.query_mut::<(
@@ -99,6 +130,16 @@ pub fn upload_system(
             budget,
         );
     }
+    let post_key = (
+        crate::raster::raster_arrival_epoch(world),
+        crate::terrain::dem_arrival_epoch(world),
+        style.revision(),
+        world.tiles.tiles.len(),
+    );
+    world.resources.insert(RasterUploadCache {
+        last_key: Some(post_key),
+        last_deferred: deferred,
+    });
     if deferred {
         crate::render::frame_signals::keep_animating(world);
     }

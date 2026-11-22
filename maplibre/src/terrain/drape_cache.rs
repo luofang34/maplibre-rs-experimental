@@ -7,9 +7,11 @@
 //! for the next tile that needs one.
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     hash::{Hash, Hasher},
 };
+
+use rustc_hash::FxHashMap as HashMap;
 
 use crate::{coords::WorldTileCoords, terrain::drape_targets::TargetSpec};
 
@@ -127,7 +129,7 @@ pub struct DrapeCache<T, K = WorldTileCoords> {
 impl<T, K> Default for DrapeCache<T, K> {
     fn default() -> Self {
         Self {
-            entries: HashMap::new(),
+            entries: HashMap::default(),
             parked: VecDeque::new(),
             free: Vec::new(),
         }

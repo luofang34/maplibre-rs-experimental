@@ -1,7 +1,6 @@
 //! GPU resources shared by the drape pass and the terrain draw.
 
 use std::{
-    collections::HashMap,
     num::NonZeroU64,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -153,12 +152,19 @@ pub struct TerrainResources {
     index_buffer: wgpu::Buffer,
     index_count: u32,
     uniform_buffer: wgpu::Buffer,
-    dem_textures: HashMap<WorldTileCoords, DemTexture>,
+    last_uploaded_uniforms: Vec<u8>,
+    pub(crate) replay_uniforms_scratch: Vec<TerrainTileUniforms>,
+    dem_textures: FxHashMap<WorldTileCoords, DemTexture>,
+    dem_frame_tick: u64,
     empty_dem: Texture,
     empty_dem_id: u64,
     drapes: DrapeCache<drapes::DrapeTexture, drapes::DrapeKey>,
     /// The view whose drapes the tile lookups below answer with.
     drape_view: Option<crate::render::eye_covering::ViewSlotId>,
+    drape_retain_state: FxHashMap<
+        Option<crate::render::eye_covering::ViewSlotId>,
+        (Vec<WorldTileCoords>, usize, bool),
+    >,
     drape_scratches: Vec<(u32, DrapeScratch)>,
     draws: Vec<TerrainDraw>,
     /// Bind groups keyed by monotonic `(dem_id, drape_id)` texture IDs, avoiding
@@ -231,11 +237,15 @@ impl TerrainResources {
             index_buffer: gpu.index_buffer,
             index_count: gpu.index_count,
             uniform_buffer: gpu.uniform_buffer,
-            dem_textures: HashMap::new(),
+            last_uploaded_uniforms: Vec::new(),
+            replay_uniforms_scratch: Vec::new(),
+            dem_textures: FxHashMap::default(),
+            dem_frame_tick: 1,
             empty_dem: gpu.empty_dem,
             empty_dem_id: next_texture_id(),
             drapes: DrapeCache::default(),
             drape_view: None,
+            drape_retain_state: FxHashMap::default(),
             drape_scratches: Vec::new(),
             draws: Vec::new(),
             bind_groups: FxHashMap::default(),
@@ -263,6 +273,7 @@ impl TerrainResources {
                 self.drape_size = 0;
                 self.drape_scratches.clear();
                 self.drapes = DrapeCache::default();
+                self.drape_retain_state.clear();
                 self.bind_groups.clear();
             }
             TerrainDrapeMode::Draped { edge_px } => {
@@ -271,6 +282,7 @@ impl TerrainResources {
                     self.drape_size = clamped;
                     self.drape_scratches.clear();
                     self.drapes = DrapeCache::default();
+                    self.drape_retain_state.clear();
                     self.bind_groups.clear();
                 }
                 self.drape_mode = TerrainDrapeMode::Draped { edge_px: clamped };
@@ -378,9 +390,9 @@ impl TerrainResources {
         self.scratch_for_size(self.drape_size)
     }
 
-    /// Writes the per-tile uniform blocks and returns how many fit.
+    /// Writes the per-tile uniform blocks when their bytes changed and returns how many fit.
     pub fn write_uniforms(
-        &self,
+        &mut self,
         queue: &crate::render::upload_queue::UploadQueue,
         uniforms: &[TerrainTileUniforms],
     ) -> usize {
@@ -396,7 +408,12 @@ impl TerrainResources {
         if count > 0
             && let Some(slice) = uniforms.get(..count)
         {
-            queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(slice));
+            let bytes = bytemuck::cast_slice(slice);
+            if self.last_uploaded_uniforms.as_slice() != bytes {
+                queue.write_buffer(&self.uniform_buffer, 0, bytes);
+                self.last_uploaded_uniforms.clear();
+                self.last_uploaded_uniforms.extend_from_slice(bytes);
+            }
         }
         count
     }

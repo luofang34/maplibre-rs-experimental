@@ -23,6 +23,10 @@ pub(crate) struct PreparedTerrainKey {
 }
 
 impl PreparedTerrainKey {
+    pub(crate) fn dem_tile_size(&self) -> u32 {
+        self.dem_tile_size
+    }
+
     pub(crate) fn capture(
         view_state: &crate::render::view_state::ViewState,
         world: &crate::tcs::world::World,
