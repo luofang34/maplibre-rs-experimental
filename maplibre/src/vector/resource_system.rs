@@ -60,7 +60,27 @@ pub fn resource_system(
     let needs_extrusion_opaque = needs_extrusion && prepared.needs_extrusion_opaque;
     let needs_extrusion_pattern = needs_extrusion && prepared.needs_extrusion_pattern;
     let needs_extrusion_translucent = needs_extrusion && prepared.needs_extrusion_translucent;
-    let (has_compact_extrusion, has_standard_extrusion) = if needs_extrusion {
+    let extrusion_complete = needs_extrusion
+        && matches!(
+            world.resources.get::<Eventually<ExtrusionPipeline>>(),
+            Some(Initialized(ep))
+                if (!needs_extrusion_opaque || ep.clear_mark.is_some())
+                    && ep.for_globe(uses_globe).is_some_and(|mode| {
+                        (!needs_extrusion_opaque
+                            || (mode.depth.is_some()
+                                && mode.color.is_some()
+                                && mode.compact_depth.is_some()
+                                && mode.compact_color.is_some()))
+                            && (!needs_extrusion_pattern || mode.pattern.is_some())
+                            && (!needs_extrusion_translucent
+                                || (mode.translucent_back.is_some()
+                                    && mode.translucent_front.is_some()
+                                    && mode.compact_translucent_back.is_some()
+                                    && mode.compact_translucent_front.is_some()))
+                    })
+        );
+    let (has_compact_extrusion, has_standard_extrusion) = if needs_extrusion && !extrusion_complete
+    {
         detect_extrusion_encodings(world, &prepared, style_zoom, terrain_needed)
     } else {
         (false, false)
@@ -202,11 +222,13 @@ pub fn resource_system(
             })
         });
 
+    let needs_pattern_resources = missing_pattern_resources && has_pattern_paint;
+
     let pattern_pipeline = if need_base_pipelines
         || need_circle_pipeline
         || need_extrusion_pipeline
         || needs_pattern
-        || missing_pattern_resources
+        || needs_pattern_resources
     {
         let setup = PipelineSetup {
             device,
@@ -247,7 +269,7 @@ pub fn resource_system(
         }
         let created_pattern = needs_pattern.then(|| setup.create_pattern());
         let pattern_layout = setup.pattern;
-        if missing_pattern_resources {
+        if needs_pattern_resources {
             world
                 .resources
                 .insert(super::pattern::PatternResources::new(

@@ -133,6 +133,15 @@ pub struct TerrainFrame {
 /// Requests, stores, drapes and draws the DEM tiles of a style that declares `terrain`.
 pub struct TerrainPlugin<T>(PhantomData<T>);
 
+fn resolve_terrain_frame_view_system(
+    ctx: &mut crate::context::MapContext,
+) -> crate::tcs::system::SystemResult {
+    if ctx.style.terrain.is_none() {
+        return Ok(());
+    }
+    crate::render::resolved_view::resolve_frame_view_system(ctx)
+}
+
 impl<T: DemTransferables> Default for TerrainPlugin<T> {
     fn default() -> Self {
         Self(PhantomData)
@@ -170,10 +179,8 @@ impl<E: Environment, T: DemTransferables> Plugin<E> for TerrainPlugin<T> {
             RenderStageLabel::Prepare,
             elevation::center_elevation_system,
         )?;
-        schedule.add_system_to_stage(
-            RenderStageLabel::Prepare,
-            crate::render::resolved_view::resolve_frame_view_system,
-        )?;
+        schedule
+            .add_system_to_stage(RenderStageLabel::Prepare, resolve_terrain_frame_view_system)?;
         schedule
             .add_system_to_stage(RenderStageLabel::Prepare, resource_system::resource_system)?;
         schedule.add_system_to_stage(RenderStageLabel::Queue, upload_system::upload_system)?;

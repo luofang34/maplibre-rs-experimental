@@ -219,6 +219,13 @@ pub(crate) fn cancel_unwanted<S: std::hash::BuildHasher>(
     world: &mut World,
     in_use: &HashSet<WorldTileCoords, S>,
 ) -> Vec<WorldTileCoords> {
+    if world
+        .resources
+        .get::<RetryIndex>()
+        .is_none_or(|idx| idx.pending.iter().all(FxHashSet::is_empty))
+    {
+        return Vec::new();
+    }
     let Some(wanted) = world
         .resources
         .get_mut::<WantedRequests>()

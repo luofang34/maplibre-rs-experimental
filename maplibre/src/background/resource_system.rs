@@ -13,6 +13,57 @@ use crate::{
     },
 };
 
+#[derive(Default)]
+struct BackgroundStyleCache {
+    key: Option<(u64, u64, u64)>,
+    needs_bg_pattern: bool,
+    has_opaque_bg: bool,
+    has_blended_bg: bool,
+}
+
+impl BackgroundStyleCache {
+    fn evaluate(
+        &mut self,
+        style: &crate::style::Style,
+        zoom: f64,
+        style_zoom: f64,
+    ) -> (bool, bool, bool) {
+        let key = (style.revision(), zoom.to_bits(), style_zoom.to_bits());
+        if self.key == Some(key) {
+            return (
+                self.needs_bg_pattern,
+                self.has_opaque_bg,
+                self.has_blended_bg,
+            );
+        }
+        let mut needs_bg_pattern = false;
+        let (mut has_opaque_bg, mut has_blended_bg) = (false, false);
+        for layer in &style.layers {
+            if layer.type_ != "background" {
+                continue;
+            }
+            let patterned = layer
+                .paint
+                .as_ref()
+                .is_some_and(|p| crate::vector::pattern::pattern_name(p, style_zoom).is_some());
+            needs_bg_pattern |= patterned;
+            if patterned || !layer.is_visible_at(zoom) {
+                continue;
+            }
+            if super::buffers::background_color(layer, zoom)[3] >= 1.0 {
+                has_opaque_bg = true;
+            } else {
+                has_blended_bg = true;
+            }
+        }
+        self.key = Some(key);
+        self.needs_bg_pattern = needs_bg_pattern;
+        self.has_opaque_bg = has_opaque_bg;
+        self.has_blended_bg = has_blended_bg;
+        (needs_bg_pattern, has_opaque_bg, has_blended_bg)
+    }
+}
+
 /// Initializes missing pipelines using the surface format and supported multisampling.
 /// Returns `Dependencies` unless all pipeline slots and initialized projection resources
 /// are present. Already initialized pipelines are retained.
@@ -32,20 +83,79 @@ pub fn resource_system(
         ..
     }: &mut MapContext,
 ) -> crate::tcs::system::SystemResult {
+    let zoom = view_state.zoom().value();
     let style_zoom = view_state.style_zoom().value();
-    let needs_bg_pattern = style.layers.iter().any(|layer| {
-        layer.type_ == "background"
-            && layer
-                .paint
-                .as_ref()
-                .is_some_and(|p| crate::vector::pattern::pattern_name(p, style_zoom).is_some())
-    });
-    let needs_globe = style.projection.as_ref().is_some_and(|spec| {
-        spec.projection_type
-            .globe_transition(view_state.zoom().value())
-            > 0.0
-    });
+    let (needs_bg_pattern, has_opaque_bg, has_blended_bg) = {
+        let cache = world.resources.get_or_init_mut::<BackgroundStyleCache>();
+        cache.evaluate(style, zoom, style_zoom)
+    };
+    let needs_globe = style
+        .projection
+        .as_ref()
+        .is_some_and(|spec| spec.projection_type.globe_transition(zoom) > 0.0);
     let needs_sky = style.sky.is_some();
+    let pattern_gpu_ready = !needs_bg_pattern
+        || world
+            .resources
+            .get::<super::pattern::BackgroundPatternGpu>()
+            .is_some_and(|gpu| !needs_globe || gpu.has_globe());
+    let bg_ready = if needs_globe {
+        world
+            .resources
+            .get::<Eventually<GlobeBackgroundRenderPipeline>>()
+            .is_some_and(|p| match p {
+                Eventually::Initialized(gp) => {
+                    (!has_opaque_bg || gp.opaque.is_some())
+                        && (!has_blended_bg || gp.blended.is_some())
+                }
+                Eventually::Uninitialized => false,
+            })
+    } else {
+        world
+            .resources
+            .get::<Eventually<BackgroundRenderPipeline>>()
+            .is_some_and(|p| match p {
+                Eventually::Initialized(bp) => {
+                    (!has_opaque_bg || (bp.solid_opaque.is_some() && bp.clipped_opaque.is_some()))
+                        && (!has_blended_bg || (bp.solid.is_some() && bp.clipped.is_some()))
+                }
+                Eventually::Uninitialized => !has_opaque_bg && !has_blended_bg,
+            })
+    };
+    let sky_ready = !needs_sky
+        || matches!(
+            world.resources.get::<Eventually<SkyRenderPipeline>>(),
+            Some(Initialized(_))
+        );
+    let atmo_ready = match world
+        .resources
+        .get::<Eventually<AtmosphereRenderPipeline>>()
+    {
+        Some(Initialized(_)) => true,
+        Some(Eventually::Uninitialized) => {
+            super::queue_system::atmosphere_blend(style, view_state, world) <= 0.0
+        }
+        None => false,
+    };
+    if pattern_gpu_ready && bg_ready && sky_ready && atmo_ready {
+        if world
+            .resources
+            .get::<Eventually<ProjectionGpuResources>>()
+            .is_some_and(|p| matches!(p, Initialized(_)))
+            && world
+                .resources
+                .get::<Eventually<BackgroundRenderPipeline>>()
+                .is_some()
+        {
+            if let Some(patterns) = world
+                .resources
+                .get_mut::<crate::vector::pattern::PatternResources>()
+            {
+                patterns.update(device, queue, style, style_zoom);
+            }
+            return Ok(());
+        }
+    }
     if needs_bg_pattern
         && world
             .resources
@@ -165,27 +275,6 @@ pub fn resource_system(
     else {
         return Err(crate::tcs::system::SystemError::Dependencies);
     };
-
-    let zoom = view_state.zoom().value();
-    let (mut has_opaque_bg, mut has_blended_bg) = (false, false);
-    for layer in style
-        .layers
-        .iter()
-        .filter(|layer| layer.type_ == "background" && layer.is_visible_at(zoom))
-    {
-        if layer
-            .paint
-            .as_ref()
-            .is_some_and(|p| crate::vector::pattern::pattern_name(p, style_zoom).is_some())
-        {
-            continue;
-        }
-        if super::buffers::background_color(layer, zoom)[3] >= 1.0 {
-            has_opaque_bg = true;
-        } else {
-            has_blended_bg = true;
-        }
-    }
 
     let bg_pipelines = background_pipeline.initialize(BackgroundRenderPipeline::default);
     if !needs_globe {

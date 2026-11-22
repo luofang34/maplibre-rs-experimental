@@ -8,9 +8,9 @@ use crate::style::{
 };
 
 mod image;
+mod pixels;
 use image::{image_uniform, line_image, pattern_image, ramp_texture, LineImage};
-
-const WIDTH: u32 = 256;
+use pixels::{dash_pixels, dash_scale, normalize_pattern, round_dash_pixels, WIDTH};
 
 struct DashEntry {
     pattern: Vec<f64>,
@@ -40,6 +40,7 @@ pub(crate) struct LineDashResources {
     /// Layers whose pattern varies by feature, and the entry of each style image by its key.
     per_feature: FxHashSet<StyleLayerId>,
     images: FxHashMap<u32, DashEntry>,
+    last_update: Option<(u64, usize, u32)>,
 }
 
 impl LineDashResources {
@@ -108,6 +109,7 @@ impl LineDashResources {
             solid,
             per_feature: FxHashSet::default(),
             images: FxHashMap::default(),
+            last_update: None,
         }
     }
 
@@ -118,6 +120,11 @@ impl LineDashResources {
         style: &Style,
         zoom: f64,
     ) {
+        let scale = dash_scale(zoom);
+        let key = (style.revision(), style.images.len(), scale.to_bits());
+        if self.last_update == Some(key) {
+            return;
+        }
         self.entries.retain(|id, entry| {
             let keep = style.layers.iter().any(|layer| layer.layer_id() == *id);
             if !keep {
@@ -125,21 +132,7 @@ impl LineDashResources {
             }
             keep
         });
-        let scale = dash_scale(zoom);
-        self.per_feature.clear();
-        self.per_feature.extend(
-            style
-                .layers
-                .iter()
-                .filter(|layer| {
-                    layer
-                        .paint
-                        .as_ref()
-                        .is_some_and(|paint| super::pattern::per_feature_pattern(paint).is_some())
-                })
-                .filter(|layer| matches!(layer.paint, Some(LayerPaint::Line(_))))
-                .map(|layer| layer.layer_id()),
-        );
+        self.sync_per_feature_layers(style);
         self.update_images(device, queue, style, scale);
         for layer in &style.layers {
             let Some(LayerPaint::Line(paint)) = &layer.paint else {
@@ -186,6 +179,24 @@ impl LineDashResources {
                 queue.cancel_staged_buffer(&old.uniform);
             }
         }
+        self.last_update = Some(key);
+    }
+
+    fn sync_per_feature_layers(&mut self, style: &Style) {
+        self.per_feature.clear();
+        self.per_feature.extend(
+            style
+                .layers
+                .iter()
+                .filter(|layer| {
+                    layer
+                        .paint
+                        .as_ref()
+                        .is_some_and(|paint| super::pattern::per_feature_pattern(paint).is_some())
+                })
+                .filter(|layer| matches!(layer.paint, Some(LayerPaint::Line(_))))
+                .map(|layer| layer.layer_id()),
+        );
     }
 
     /// Keeps an entry for every image of the style while a line layer picks its image per feature.
@@ -258,132 +269,6 @@ impl LineDashResources {
     pub(crate) fn is_plain_solid(&self, layer: StyleLayerId) -> bool {
         !self.entries.contains_key(&layer) && !self.per_feature.contains(&layer)
     }
-}
-
-/// The pattern as GL JS's line atlas reads it: an odd-length array joins its last dash to its
-/// first, and a gap of zero length joins the dashes either side of it, so a pattern with no
-/// real gap is a solid line.
-fn normalize_pattern(pattern: Vec<f64>) -> Vec<f64> {
-    if pattern.iter().any(|v| !v.is_finite() || *v < 0.0) || pattern.len() < 2 {
-        return Vec::new();
-    }
-    let mut parts = pattern;
-    if parts.len() % 2 == 1 {
-        let last = parts.pop().unwrap_or(0.0);
-        if let Some(first) = parts.first_mut() {
-            *first += last;
-        }
-    }
-    let Some((&first, rest)) = parts.split_first() else {
-        return Vec::new();
-    };
-    let mut merged = vec![first];
-    for pair in rest.chunks(2) {
-        match pair {
-            [gap, dash] if *gap == 0.0 => {
-                if let Some(last) = merged.last_mut() {
-                    *last += dash;
-                }
-            }
-            [gap, dash] => merged.extend([*gap, *dash]),
-            [gap] if *gap > 0.0 => merged.push(*gap),
-            _ => {}
-        }
-    }
-    if merged.len() % 2 == 1 {
-        if merged.len() == 1 {
-            return Vec::new();
-        }
-        // The pattern ended on a dash that the first one continues.
-        let last = merged.pop().unwrap_or(0.0);
-        if let Some(first) = merged.first_mut() {
-            *first += last;
-        }
-    }
-    if merged.iter().sum::<f64>() <= 0.0 {
-        merged.clear();
-    }
-    merged
-}
-
-fn dash_pixels(pattern: &[f64]) -> (Vec<u8>, f32) {
-    let period = pattern.iter().sum::<f64>();
-    if period <= 0.0 {
-        return (vec![255; WIDTH as usize * 4], 0.0);
-    }
-    let mut pixels = Vec::with_capacity(WIDTH as usize * 4);
-    for x in 0..WIDTH {
-        let position = (f64::from(x) + 0.5) / f64::from(WIDTH) * period;
-        let mut edge = 0.0;
-        let mut distance = period;
-        let mut visible = true;
-        for (index, length) in pattern.iter().enumerate() {
-            if position >= edge && position < edge + length {
-                visible = index % 2 == 0;
-            }
-            let delta = (position - edge).abs();
-            distance = distance.min(delta.min(period - delta));
-            edge += length;
-        }
-        let value = (128.0 + distance / period * 254.0 * if visible { 1.0 } else { -1.0 })
-            .clamp(0.0, 255.0) as u8;
-        pixels.extend([value, value, value, 255]);
-    }
-    (pixels, period as f32)
-}
-
-/// Rows either side of the centre of a round dash's texture.
-const ROUND_HALF_ROWS: i32 = 7;
-
-/// The dash texture with round caps: one row per step across the line, each holding the signed
-/// distance to the dash shape at that height, so a dash and a gap end in half circles.
-fn round_dash_pixels(pattern: &[f64]) -> (Vec<u8>, f32, u32) {
-    let period = pattern.iter().sum::<f64>();
-    let rows = (2 * ROUND_HALF_ROWS + 1) as u32;
-    if period <= 0.0 {
-        return (vec![255; WIDTH as usize * rows as usize * 4], 0.0, rows);
-    }
-    let stretch = f64::from(WIDTH) / period;
-    let half = stretch / 2.0;
-    let mut bounds = Vec::with_capacity(pattern.len());
-    let mut edge = 0.0;
-    for length in pattern {
-        bounds.push((edge * stretch, (edge + length) * stretch));
-        edge += length;
-    }
-    let mut pixels = Vec::with_capacity(WIDTH as usize * rows as usize * 4);
-    for row in -ROUND_HALF_ROWS..=ROUND_HALF_ROWS {
-        let middle = f64::from(row) / f64::from(ROUND_HALF_ROWS) * (half + 1.0);
-        for x in 0..WIDTH {
-            let x = f64::from(x);
-            let (index, (left, right)) = bounds
-                .iter()
-                .copied()
-                .enumerate()
-                .find(|(_, (_, right))| x <= *right)
-                .unwrap_or_else(|| {
-                    (
-                        bounds.len().saturating_sub(1),
-                        bounds.last().copied().unwrap_or((0.0, 0.0)),
-                    )
-                });
-            let nearest = (x - left).abs().min((x - right).abs());
-            let signed = if index % 2 == 0 {
-                (nearest * nearest + (half - middle.abs()).powi(2)).sqrt()
-            } else {
-                half - (nearest * nearest + middle * middle).sqrt()
-            };
-            let value = (128.0 + signed / f64::from(WIDTH) * 254.0).clamp(0.0, 255.0) as u8;
-            pixels.extend([value, value, value, 255]);
-        }
-    }
-    (pixels, period as f32, rows)
-}
-
-/// Dashes are laid out in tile units of the whole zoom below the view's, as GL JS does, so
-/// between whole zooms they grow with the map instead of holding their size on screen.
-fn dash_scale(zoom: f64) -> f32 {
-    2.0_f64.powf(zoom - zoom.floor()) as f32
 }
 
 fn create_dash_texture_view(

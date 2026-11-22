@@ -82,6 +82,38 @@ impl System for ResourceSystem {
             });
             supports_transient
         };
+        let cached_layer_depth = if !supports_transient {
+            true
+        } else {
+            let pitch_tilted = view_state.camera().get_pitch().0.abs() >= 1e-4;
+            let style_rev = style.revision();
+            match world.resources.get::<CachedDepthLayerScan>() {
+                Some(cached)
+                    if cached.style_rev == style_rev && cached.pitch_tilted == pitch_tilted =>
+                {
+                    cached.needs_persistent
+                }
+                _ => {
+                    let scan = matches!(
+                        style.projection.as_ref().map(|p| &p.projection_type),
+                        Some(crate::projection::ProjectionType::VerticalPerspective)
+                    ) || style.layers.iter().any(|l| {
+                        l.type_ == "custom"
+                            || (pitch_tilted
+                                && matches!(
+                                    l.type_.as_str(),
+                                    "fill-extrusion" | "raster" | "hillshade" | "color-relief"
+                                ))
+                    });
+                    world.resources.insert(CachedDepthLayerScan {
+                        style_rev,
+                        pitch_tilted,
+                        needs_persistent: scan,
+                    });
+                    scan
+                }
+            }
+        };
         let Some((tile_view_pattern, mask_pipeline, projection_resources, depth_copy)) =
             world.resources.query_mut::<(
                 &mut Eventually<WgpuTileViewPattern>,
@@ -114,27 +146,19 @@ impl System for ResourceSystem {
         } else {
             Msaa { samples: 1 }
         };
-        let pitch_tilted = view_state.camera().get_pitch().0.abs() >= 1e-4;
-        let needs_persistent_depth = settings.depth_readout
-            || state.eye_depth_target.is_some()
-            || style.terrain.is_some()
-            || world_needs_persistent_depth
-            || render_graph.has_custom_scene_depth_writers()
-            || render_graph.contains("overlay_pass")
-            || render_graph.contains("depth_probe_pass")
-            || render_graph.contains("sun_depth_copy")
-            || matches!(
-                style.projection.as_ref().map(|p| &p.projection_type),
-                Some(crate::projection::ProjectionType::VerticalPerspective)
-            )
-            || style.layers.iter().any(|l| {
-                l.type_ == "custom"
-                    || (pitch_tilted
-                        && matches!(
-                            l.type_.as_str(),
-                            "fill-extrusion" | "raster" | "hillshade" | "color-relief"
-                        ))
-            });
+        let needs_persistent_depth = if !supports_transient {
+            true
+        } else {
+            settings.depth_readout
+                || state.eye_depth_target.is_some()
+                || style.terrain.is_some()
+                || world_needs_persistent_depth
+                || render_graph.has_custom_scene_depth_writers()
+                || render_graph.contains("overlay_pass")
+                || render_graph.contains("depth_probe_pass")
+                || render_graph.contains("sun_depth_copy")
+                || cached_layer_depth
+        };
         let depth_usage = if supports_transient && !needs_persistent_depth {
             wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TRANSIENT_ATTACHMENT
         } else {
@@ -302,6 +326,12 @@ impl System for ResourceSystem {
 struct CachedDepthFormatFeatures {
     format: wgpu::TextureFormat,
     supports_transient: bool,
+}
+
+struct CachedDepthLayerScan {
+    style_rev: u64,
+    pitch_tilted: bool,
+    needs_persistent: bool,
 }
 
 fn has_celestial_sun(world: &crate::tcs::world::World) -> bool {

@@ -22,6 +22,7 @@ use crate::{
 
 pub struct PopulateWorldSystem<E: Environment, T> {
     kernel: Rc<Kernel<E>>,
+    idle_rev: Option<u64>,
     phantom_t: PhantomData<T>,
 }
 
@@ -29,6 +30,7 @@ impl<E: Environment, T> PopulateWorldSystem<E, T> {
     pub fn new(kernel: &Rc<Kernel<E>>) -> Self {
         Self {
             kernel: kernel.clone(),
+            idle_rev: None,
             phantom_t: PhantomData,
         }
     }
@@ -48,7 +50,11 @@ impl<E: Environment, T: DemTransferables> System for PopulateWorldSystem<E, T> {
             ..
         }: &mut MapContext,
     ) -> SystemResult {
+        let style_rev = style.revision();
         let unpack = dem_source(style).map(|dem| dem.unpack);
+        if unpack.is_none() && self.idle_rev == Some(style_rev) {
+            return Ok(());
+        }
         let circumference = view_state.body().circumference_meters();
         let messages = self.kernel.apc().receive(|message| {
             message.has_tag(RequestKind::Dem.message_tag())
@@ -126,6 +132,8 @@ impl<E: Environment, T: DemTransferables> System for PopulateWorldSystem<E, T> {
             }
             Ok(())
         })?;
+        self.idle_rev =
+            (unpack.is_none() && self.kernel.apc().in_flight_calls() == 0).then_some(style_rev);
 
         Ok(())
     }

@@ -117,7 +117,7 @@ pub(crate) enum StencilState<'w> {
     DirtyAll,
 }
 
-fn unique_vector_stencils(masks: &[TileMaskItem]) -> bool {
+pub(crate) fn unique_vector_stencils(masks: &[TileMaskItem]) -> bool {
     let mut seen = [0_u64; 2];
     masks
         .iter()
@@ -136,7 +136,7 @@ fn unique_vector_stencils(masks: &[TileMaskItem]) -> bool {
 
 fn next_stencil_state<'w>(
     state: StencilState<'w>,
-    masks: &[TileMaskItem],
+    unique_stencils: bool,
     group: &'w [LayerItem],
 ) -> StencilState<'w> {
     let Some(first) = group.first() else {
@@ -144,7 +144,7 @@ fn next_stencil_state<'w>(
     };
     match first.mask_group {
         MaskGroup::Unmasked => state,
-        MaskGroup::Vector if unique_vector_stencils(masks) => StencilState::Vector,
+        MaskGroup::Vector if unique_stencils => StencilState::Vector,
         MaskGroup::Vector | MaskGroup::Mutating => StencilState::Mutated(group),
         MaskGroup::Custom => StencilState::DirtyAll,
     }
@@ -195,8 +195,9 @@ pub(super) fn above_symbols(world: &World) -> Option<AboveSymbols<'_>> {
         );
     let mut stencil_state = StencilState::Cleared;
     if let (true, Some(masks)) = (masks_ready, masks) {
+        let unique_stencils = unique_vector_stencils(masks);
         for group in below.chunk_by(same_layer) {
-            stencil_state = next_stencil_state(stencil_state, masks, group);
+            stencil_state = next_stencil_state(stencil_state, unique_stencils, group);
         }
     }
     Some(AboveSymbols {
@@ -213,17 +214,13 @@ pub(super) fn same_layer(left: &LayerItem, right: &LayerItem) -> bool {
 pub(super) fn draw_group<'w>(
     pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     world: &'w World,
+    masks: Option<&[TileMaskItem]>,
+    unique_stencils: bool,
     stencil_state: &mut StencilState<'w>,
     group: &'w [LayerItem],
 ) {
-    if let Some(masks) = world.resources.get::<RenderPhase<TileMaskItem>>() {
-        apply_layer_masks(
-            pass,
-            world,
-            masks.into_iter().as_slice(),
-            stencil_state,
-            group,
-        );
+    if let Some(masks) = masks {
+        apply_layer_masks(pass, world, masks, unique_stencils, stencil_state, group);
     }
     for layer in group {
         layer.draw_function.draw(pass, world, layer);
@@ -252,6 +249,7 @@ fn draw_layers<'w>(
         .resources
         .get::<RenderPhase<TileMaskItem>>()
         .map(|phase| phase.into_iter().as_slice());
+    let unique_stencils = masks.is_some_and(unique_vector_stencils);
     if let Some(layers) = world.resources.get::<RenderPhase<LayerItem>>() {
         let mut stencil_state = StencilState::Cleared;
         let all = layers.into_iter().as_slice();
@@ -260,7 +258,14 @@ fn draw_layers<'w>(
             .saturating_sub(above.as_ref().map_or(0, |above| above.items.len()));
         for group in all.get(..drawn).unwrap_or(all).chunk_by(same_layer) {
             if let Some(masks) = masks {
-                apply_layer_masks(pass, world, masks, &mut stencil_state, group);
+                apply_layer_masks(
+                    pass,
+                    world,
+                    masks,
+                    unique_stencils,
+                    &mut stencil_state,
+                    group,
+                );
             }
             for layer in group {
                 // The ground preserves depth for screen-space layers while remaining above the
@@ -284,6 +289,7 @@ pub(crate) fn apply_layer_masks<'w>(
     pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     world: &'w World,
     masks: &[TileMaskItem],
+    unique_stencils: bool,
     state: &mut StencilState<'w>,
     current: &'w [LayerItem],
 ) {
@@ -301,7 +307,7 @@ pub(crate) fn apply_layer_masks<'w>(
     }
 
     let Some(first_mask) = masks.first() else {
-        *state = next_stencil_state(*state, masks, current);
+        *state = next_stencil_state(*state, unique_stencils, current);
         return;
     };
     if matches!(
@@ -338,15 +344,15 @@ pub(crate) fn apply_layer_masks<'w>(
     }
 
     match first.mask_group {
-        MaskGroup::Vector if unique_vector_stencils(masks) => {
+        MaskGroup::Vector if unique_stencils => {
             for mask in masks.iter().filter(|mask| mask.is_vector) {
-                mask.draw_function.draw(pass, world, mask);
+                DrawMask::render(world, mask, pass);
             }
             *state = StencilState::Vector;
         }
         MaskGroup::Vector | MaskGroup::Mutating => {
             for mask in masks.iter().filter(|mask| owns_mask(mask, current)) {
-                mask.draw_function.draw(pass, world, mask);
+                DrawMask::render(world, mask, pass);
             }
             *state = StencilState::Mutated(current);
         }

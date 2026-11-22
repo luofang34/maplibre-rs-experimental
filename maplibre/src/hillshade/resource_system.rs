@@ -27,6 +27,12 @@ fn uniform_layout() -> Vec<wgpu::BindGroupLayoutEntry> {
     }]
 }
 
+#[derive(Default)]
+struct HillshadeStyleCache {
+    rev: Option<u64>,
+    has_dem_layers: bool,
+}
+
 pub fn resource_system(
     MapContext {
         world,
@@ -41,6 +47,20 @@ pub fn resource_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
+    let style_rev = style.revision();
+    let has_dem_layers = match world.resources.get::<HillshadeStyleCache>() {
+        Some(cache) if cache.rev == Some(style_rev) => cache.has_dem_layers,
+        _ => {
+            let has = style
+                .layers
+                .iter()
+                .any(|layer| super::dem_layer_kind(&layer.type_).is_some());
+            let cache = world.resources.get_or_init_mut::<HillshadeStyleCache>();
+            cache.rev = Some(style_rev);
+            cache.has_dem_layers = has;
+            has
+        }
+    };
     let Some((hillshade_resources, Initialized(projection_resources))) =
         world.resources.query_mut::<(
             &mut Eventually<HillshadeResources>,
@@ -49,12 +69,7 @@ pub fn resource_system(
     else {
         return Err(SystemError::Dependencies);
     };
-    if matches!(hillshade_resources, Eventually::Uninitialized)
-        && !style
-            .layers
-            .iter()
-            .any(|layer| super::dem_layer_kind(&layer.type_).is_some())
-    {
+    if matches!(hillshade_resources, Eventually::Uninitialized) && !has_dem_layers {
         return Ok(());
     }
 

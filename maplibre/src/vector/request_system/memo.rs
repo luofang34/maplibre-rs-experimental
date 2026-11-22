@@ -148,7 +148,7 @@ pub(super) fn resolve_view_tiles(
                     || (cfg!(target_arch = "wasm32")
                         && !view_state.has_external_view()
                         && source_z < 3);
-                if exact_order && fallback_independent && settled_unchanged {
+                if fallback_independent && settled_unchanged {
                     return Ok(ResolvedViewTiles::SettledReuse);
                 }
                 let final_tiles = if exact_order {
@@ -248,4 +248,103 @@ pub(super) fn display_pixel_ratio(
 fn pixel_ratio(physical_width: u32, logical_width: f64) -> f32 {
     let ratio = f64::from(physical_width) / logical_width.max(1.0);
     ((ratio * 100.0).round() / 100.0).clamp(0.25, 8.0) as f32
+}
+
+#[cfg(test)]
+mod tests {
+    use cgmath::{Deg, Rad};
+
+    use super::*;
+    use crate::{
+        coords::{LatLon, WorldCoords, Zoom, TILE_SIZE},
+        projection::{ProjectionSpecification, ProjectionType},
+        render::view_state::ViewState,
+        window::PhysicalSize,
+    };
+
+    #[test]
+    fn settled_globe_anchor_reuses_even_when_focus_order_margin_is_inexact() {
+        let style = Style {
+            projection: Some(ProjectionSpecification {
+                projection_type: ProjectionType::Globe,
+            }),
+            ..Style::default()
+        };
+        let size = PhysicalSize::new(800, 600).expect("non-zero test size");
+        let zoom = Zoom::new(2.1);
+        let make_view = |lon: f64| {
+            ViewState::new(
+                size,
+                WorldCoords::from_lat_lon(LatLon::new(38.5, lon), zoom),
+                zoom,
+                Deg(18.0),
+                Rad(0.6435011087932844),
+            )
+        };
+        let world = World::default();
+        let view0 = make_view(0.0);
+        let level0 = view0.zoom().zoom_level(TILE_SIZE);
+        let Ok(ResolvedViewTiles::Computed {
+            computed,
+            globe_anchor,
+        }) = resolve_view_tiles(ViewTileResolutionRequest {
+            memo: None,
+            key: None,
+            settled_unchanged: false,
+            style: &style,
+            view_state: &view0,
+            world: &world,
+            visible_level: level0,
+            request_padding: ViewStatePadding::Tight,
+            tight_tile_requests: true,
+        })
+        else {
+            panic!("initial resolve should compute globe anchor");
+        };
+        let anchor = globe_anchor.expect("zoom 2.1 tight globe should build anchor");
+        let view1 = make_view(0.01);
+        let level1 = view1.zoom().zoom_level(TILE_SIZE);
+        let key_req =
+            eligible_globe_anchor_key(&style, &view1, &world, level1, ViewStatePadding::Tight)
+                .expect("shifted view should also be eligible");
+        let reuse = anchor.try_reuse(&key_req.0, &key_req.2);
+        assert!(
+            matches!(reuse, Some((_, false))),
+            "expected inexact order reuse on small orbit step, got {:?}",
+            reuse.map(|(_, exact)| exact)
+        );
+
+        let memo = RequestMemo {
+            key: RequestViewKey {
+                view_proj: [[0.0; 4]; 4],
+                viewport: (800.0, 600.0),
+                pixel_ratio: 1.0,
+                external_view: false,
+                tight_requests: true,
+                style_rev: style.revision(),
+                request_padding: ViewStatePadding::Tight,
+                visible_level: u8::from(level1),
+                terrain_active: false,
+            },
+            computed,
+            globe_anchor: Some(anchor),
+            drapes: Vec::new(),
+            prefetch: Vec::new(),
+            vector_evictions: 0,
+            settled: true,
+        };
+        let resolved = resolve_view_tiles(ViewTileResolutionRequest {
+            memo: Some(&memo),
+            key: None,
+            settled_unchanged: true,
+            style: &style,
+            view_state: &view1,
+            world: &world,
+            visible_level: level1,
+            request_padding: ViewStatePadding::Tight,
+            tight_tile_requests: true,
+        })
+        .expect("reuse check succeeds");
+        assert!(matches!(resolved, ResolvedViewTiles::SettledReuse));
+    }
 }

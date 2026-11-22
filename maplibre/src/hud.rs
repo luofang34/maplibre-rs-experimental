@@ -276,7 +276,6 @@ fn resource_system(
         world, renderer, ..
     }: &mut MapContext,
 ) -> SystemResult {
-    #[cfg(target_arch = "wasm32")]
     let hud_inactive = world
         .resources
         .get::<NavigationHudState>()
@@ -287,7 +286,6 @@ fn resource_system(
     else {
         return Err(SystemError::Dependencies);
     };
-    #[cfg(target_arch = "wasm32")]
     if matches!(pipeline, Eventually::Uninitialized) && hud_inactive {
         return Ok(());
     }
@@ -341,23 +339,22 @@ fn queue_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
-    let Some(Initialized(NavigationHudPipeline(pipeline))) =
-        world.resources.get::<Eventually<NavigationHudPipeline>>()
-    else {
-        return Ok(());
-    };
     let hud_state = world
         .resources
         .get::<NavigationHudState>()
         .copied()
         .unwrap_or_default();
-    let frame_layout = pipeline.get_bind_group_layout(0);
     let drawn = hud_state.visible && shown_in_current_view(world);
     let gpu = world.resources.get_or_init_mut::<NavigationHudGpu>();
     gpu.drawn = drawn;
     if !drawn {
         return Ok(());
     }
+    let frame_layout = match world.resources.get::<Eventually<NavigationHudPipeline>>() {
+        Some(Initialized(NavigationHudPipeline(pipeline))) => pipeline.get_bind_group_layout(0),
+        _ => return Ok(()),
+    };
+    let gpu = world.resources.get_or_init_mut::<NavigationHudGpu>();
 
     let width = view_state.width();
     let height = view_state.height();

@@ -24,6 +24,7 @@ use crate::{
 
 pub struct RequestSystem<E: Environment, T: RasterTransferables> {
     kernel: Rc<Kernel<E>>,
+    layer_cache: Option<(u64, bool)>,
     phantom_t: PhantomData<T>,
 }
 
@@ -31,6 +32,7 @@ impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
     pub fn new(kernel: &Rc<Kernel<E>>) -> Self {
         Self {
             kernel: kernel.clone(),
+            layer_cache: None,
             phantom_t: Default::default(),
         }
     }
@@ -52,10 +54,19 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
     ) -> SystemResult {
         tile_retry::stop_cancelled(world, self.kernel.apc());
         crate::io::tile_backpressure::set_raster_deferred(world, false);
-        if !style.layers.iter().any(|layer| {
-            crate::io::tile_sources::RASTER_LAYER_TYPES.contains(&layer.type_.as_str())
-                && !layer.is_hidden()
-        }) {
+        let style_rev = style.revision();
+        let has_raster_layers = match self.layer_cache {
+            Some((rev, has)) if rev == style_rev => has,
+            _ => {
+                let has = style.layers.iter().any(|layer| {
+                    crate::io::tile_sources::RASTER_LAYER_TYPES.contains(&layer.type_.as_str())
+                        && !layer.is_hidden()
+                });
+                self.layer_cache = Some((style_rev, has));
+                has
+            }
+        };
+        if !has_raster_layers {
             return Ok(());
         }
         let all_sources: Vec<_> = source_layer_groups(style, TileKind::Raster)

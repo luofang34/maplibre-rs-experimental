@@ -55,6 +55,13 @@ fn density_format_supported(adapter: &wgpu::Adapter) -> bool {
         )
 }
 
+#[derive(Default)]
+struct HeatmapResourceCache {
+    rev: Option<u64>,
+    has_heatmap: bool,
+    density_supported: Option<bool>,
+}
+
 pub fn resource_system(
     MapContext {
         world,
@@ -70,21 +77,50 @@ pub fn resource_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
-    if world
-        .resources
-        .get::<Eventually<HeatmapResources>>()
-        .is_some_and(|res| matches!(res, Eventually::Uninitialized))
-        && !style.layers.iter().any(|layer| {
-            layer.type_ == "heatmap"
-                || matches!(
-                    layer.paint,
-                    Some(crate::style::layer::LayerPaint::Heatmap(_))
-                )
-        })
+    let style_rev = style.revision();
+    let has_heatmap = match world.resources.get::<HeatmapResourceCache>() {
+        Some(cache) if cache.rev == Some(style_rev) => cache.has_heatmap,
+        _ => {
+            let has = style.layers.iter().any(|layer| {
+                layer.type_ == "heatmap"
+                    || matches!(
+                        layer.paint,
+                        Some(crate::style::layer::LayerPaint::Heatmap(_))
+                    )
+            });
+            let cache = world.resources.get_or_init_mut::<HeatmapResourceCache>();
+            cache.rev = Some(style_rev);
+            cache.has_heatmap = has;
+            has
+        }
+    };
+    if !has_heatmap
+        && world
+            .resources
+            .get::<Eventually<HeatmapResources>>()
+            .is_some_and(|res| matches!(res, Eventually::Uninitialized))
     {
         return Ok(());
     }
-    if !density_format_supported(adapter) {
+    if !has_heatmap {
+        return Ok(());
+    }
+    let supported = match world
+        .resources
+        .get::<HeatmapResourceCache>()
+        .and_then(|cache| cache.density_supported)
+    {
+        Some(supported) => supported,
+        None => {
+            let supported = density_format_supported(adapter);
+            world
+                .resources
+                .get_or_init_mut::<HeatmapResourceCache>()
+                .density_supported = Some(supported);
+            supported
+        }
+    };
+    if !supported {
         if world.resources.get::<DensityUnsupported>().is_none() {
             tracing::error!(
                 format = ?DENSITY_FORMAT,

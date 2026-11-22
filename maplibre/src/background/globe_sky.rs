@@ -72,7 +72,7 @@ pub(crate) fn globe_sky_metadata_with_camera(
     Some(SkyLayerMetadata {
         sky_color: colors.sky,
         horizon_color: colors.horizon,
-        horizon: view_state.horizon_line().to_shader(),
+        horizon: [0.0; 4],
         blend: [blend_angle, 0.0, -1.0, 0.0],
         inverse_projection: inverse_projection.into(),
         up_and_horizon: [up_view.x, up_view.y, up_view.z, horizon_elevation],

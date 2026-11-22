@@ -1,22 +1,17 @@
 //! Selects loaded source shapes and owns the tile metadata allocation.
 
-use std::{
-    hash::{Hash, Hasher},
-    marker::PhantomData,
-    sync::Mutex,
-};
+use std::{marker::PhantomData, sync::Mutex};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
     coords::{ViewRegion, WorldTileCoords, Zoom},
     io::tile_sources::{RasterSourceId, TileKind},
-    projection::renderer_data::tile_mercator_coordinates,
     render::{
         camera::ViewProjection,
         resource::{BackingBufferDescriptor, Queue},
         shaders::ShaderTileMetadata,
-        tile_view_pattern::{TileShape, ViewTile, ViewTileSources},
+        tile_view_pattern::{ViewTile, ViewTileSources},
     },
     tcs::world::World,
 };
@@ -81,6 +76,13 @@ pub struct TileViewPattern<Q, B> {
     last_topology_hash: u64,
     /// Monotonic counter incremented when tile shapes, buffer ranges, or stencil refs change.
     topology_generation: u64,
+    topology_dirty: bool,
+    zoom_dirty: bool,
+    cached_vector_zoom_bounds: (u8, u8),
+    cached_all_zoom_bounds: (u8, u8),
+    last_upload_params: Option<(u64, u32, u32, u64, bool)>,
+    last_vp_bits: Option<[u64; 16]>,
+    last_capacity: usize,
     stencil_ids: FxHashMap<(i32, WorldTileCoords), u8>,
     metadata_scratch: Vec<ShaderTileMetadata>,
     last_uploaded_bytes: Vec<u8>,
@@ -119,6 +121,13 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
             uploaded: 0,
             last_topology_hash: 0,
             topology_generation: 0,
+            topology_dirty: true,
+            zoom_dirty: true,
+            cached_vector_zoom_bounds: (u8::MAX, 0),
+            cached_all_zoom_bounds: (u8::MAX, 0),
+            last_upload_params: None,
+            last_vp_bits: None,
+            last_capacity: 0,
             stencil_ids: FxHashMap::default(),
             metadata_scratch: Vec::with_capacity(64),
             last_uploaded_bytes: Vec::new(),
@@ -238,7 +247,39 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
     /// Replaces the CPU-side view tiles; call [`Self::upload_pattern`] before drawing them.
     pub fn update_pattern(&mut self, mut view_tiles: Vec<ViewTile>) {
         self.view_tiles.clear();
-        self.view_tiles.append(&mut view_tiles)
+        self.view_tiles.append(&mut view_tiles);
+        let (mut v_min, mut v_max) = (u8::MAX, 0_u8);
+        let (mut a_min, mut a_max) = (u8::MAX, 0_u8);
+        for view_tile in &self.view_tiles {
+            view_tile.render_kind(TileKind::Vector, |shape| {
+                let z = u8::from(shape.coords().z);
+                v_min = v_min.min(z);
+                v_max = v_max.max(z);
+                a_min = a_min.min(z);
+                a_max = a_max.max(z);
+            });
+            view_tile.render_kind(TileKind::Raster, |shape| {
+                let z = u8::from(shape.coords().z);
+                a_min = a_min.min(z);
+                a_max = a_max.max(z);
+            });
+        }
+        self.cached_vector_zoom_bounds = (v_min, v_max);
+        self.cached_all_zoom_bounds = (a_min, a_max);
+        self.topology_dirty = true;
+        self.zoom_dirty = true;
+    }
+
+    /// Cached `(min_z, max_z)` across vector shapes in the active view pattern.
+    #[inline]
+    pub fn vector_zoom_bounds(&self) -> (u8, u8) {
+        self.cached_vector_zoom_bounds
+    }
+
+    /// Cached `(min_z, max_z)` across all vector and raster shapes in the active view pattern.
+    #[inline]
+    pub fn all_zoom_bounds(&self) -> (u8, u8) {
+        self.cached_all_zoom_bounds
     }
 
     /// Iterates view tiles in covering order; source shapes may reference shared ancestors.
@@ -263,146 +304,73 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
         viewport_height: f32,
         style_zoom: Zoom,
     ) {
+        self.upload_pattern_with_projection(
+            queue,
+            view_proj,
+            viewport_width,
+            viewport_height,
+            style_zoom,
+            false,
+        );
+    }
+
+    /// Writes this frame's view metadata; skips per-tile `transform` multiplies when `pure_globe`.
+    #[tracing::instrument(skip_all)]
+    pub fn upload_pattern_with_projection(
+        &mut self,
+        queue: &Q,
+        view_proj: &ViewProjection,
+        viewport_width: f32,
+        viewport_height: f32,
+        style_zoom: Zoom,
+        pure_globe: bool,
+    ) {
         let capacity = (self.view_tiles_buffer.inner_size
             / std::mem::size_of::<ShaderTileMetadata>() as wgpu::BufferAddress)
             as usize;
-        let mut buffer = std::mem::take(&mut self.metadata_scratch);
-        buffer.clear();
-        let mut stencil_ids = std::mem::take(&mut self.stencil_ids);
-        stencil_ids.clear();
-        let mut upload = PatternUpload {
-            capacity,
-            buffer: &mut buffer,
-            stencil_ids: &mut stencil_ids,
-            next_stencil: 0,
-            skipped: 0,
-            view_proj,
-            viewport: (viewport_width, viewport_height),
-            style_zoom,
-        };
-        let mut topo_hasher = rustc_hash::FxHasher::default();
-        self.view_tiles.len().hash(&mut topo_hasher);
-        for view_tile in &mut self.view_tiles {
-            upload.push_view_tile(view_tile, &mut topo_hasher);
+        let params = (
+            self.topology_generation,
+            viewport_width.to_bits(),
+            viewport_height.to_bits(),
+            style_zoom.value().to_bits(),
+            pure_globe,
+        );
+        let vp_bits = (!pure_globe).then(|| memo::view_proj_bits(view_proj));
+        let topology_dirty = self.topology_dirty || self.last_capacity != capacity;
+        if !topology_dirty
+            && !self.zoom_dirty
+            && self.last_upload_params == Some(params)
+            && (pure_globe || self.last_vp_bits == vp_bits)
+        {
+            self.uploaded = self.metadata_scratch.len() as u64;
+            return;
         }
-        let skipped = upload.skipped;
-        self.record_topology_hash(topo_hasher.finish());
-        if skipped > 0 {
-            tracing::warn!(
-                skipped,
-                capacity,
-                "tile pattern exceeds its buffer; distant shapes are skipped this frame"
+        if !topology_dirty {
+            self.refresh_cached_upload(
+                queue,
+                view_proj,
+                (viewport_width, viewport_height),
+                style_zoom,
+                (pure_globe, params, vp_bits),
             );
+            return;
         }
-        self.uploaded = buffer.len() as u64;
-        let raw_buffer = bytemuck::cast_slice(buffer.as_slice());
-        if self.last_uploaded_bytes.as_slice() != raw_buffer {
-            queue.write_buffer(&self.view_tiles_buffer.inner, 0, raw_buffer);
-            self.last_uploaded_bytes.clear();
-            self.last_uploaded_bytes.extend_from_slice(raw_buffer);
-        }
-        self.stencil_ids = stencil_ids;
-        self.metadata_scratch = buffer;
+        self.rebuild_pattern_upload(
+            queue,
+            capacity,
+            view_proj,
+            (viewport_width, viewport_height),
+            style_zoom,
+            (pure_globe, params, vp_bits),
+        );
     }
 
-    fn record_topology_hash(&mut self, topology_hash: u64) {
+    pub(super) fn record_topology_hash(&mut self, topology_hash: u64) {
         if self.topology_generation == 0 || topology_hash != self.last_topology_hash {
             self.last_topology_hash = topology_hash;
             self.topology_generation = self.topology_generation.wrapping_add(1);
         }
     }
-}
-
-struct PatternUpload<'a> {
-    capacity: usize,
-    buffer: &'a mut Vec<ShaderTileMetadata>,
-    stencil_ids: &'a mut FxHashMap<(i32, WorldTileCoords), u8>,
-    next_stencil: u8,
-    skipped: usize,
-    view_proj: &'a ViewProjection,
-    viewport: (f32, f32),
-    style_zoom: Zoom,
-}
-
-impl PatternUpload<'_> {
-    fn push_view_tile(&mut self, view_tile: &mut ViewTile, hasher: &mut rustc_hash::FxHasher) {
-        view_tile.target.hash(hasher);
-        let mut v_count = 0usize;
-        view_tile.vector.for_each_mut(&mut |shape| {
-            self.push_shape(shape);
-            v_count += 1;
-            hash_shape_topology(shape, hasher);
-        });
-        v_count.hash(hasher);
-        view_tile.raster.len().hash(hasher);
-        for (source_id, shapes) in &mut view_tile.raster {
-            source_id.hash(hasher);
-            let mut r_count = 0usize;
-            shapes.for_each_mut(&mut |shape| {
-                self.push_shape(shape);
-                r_count += 1;
-                hash_shape_topology(shape, hasher);
-            });
-            r_count.hash(hasher);
-        }
-    }
-
-    fn push_shape(&mut self, shape: &mut TileShape) {
-        if self.buffer.len() >= self.capacity {
-            // A pitched view falling back to many small child tiles can exceed the
-            // buffer; shapes past the end stay unrendered until their own tiles load.
-            shape.clear_buffer_range();
-            self.skipped += 1;
-            return;
-        }
-        let stencil_coords = shape.stencil_coords();
-        let stencil_ref = *self
-            .stencil_ids
-            .entry((shape.wrap, stencil_coords))
-            .or_insert_with(|| {
-                if self.next_stencil < 124 {
-                    let assigned = self.next_stencil;
-                    self.next_stencil += 1;
-                    assigned
-                } else {
-                    stencil_coords.stencil_reference_value_3d()
-                }
-            });
-        shape.set_stencil_reference(stencil_ref);
-        shape.set_buffer_range(self.buffer.len() as u64);
-        let transform = self
-            .view_proj
-            .to_model_view_projection(shape.transform)
-            .downcast()
-            .into();
-        let mut mercator = tile_mercator_coordinates(
-            shape
-                .coords()
-                .into_tile(crate::style::source::TileAddressingScheme::XYZ),
-        );
-        // A copy of the world lies whole worlds over in Mercator units.
-        mercator.x += shape.wrap as f32;
-        self.buffer.push(ShaderTileMetadata {
-            transform,
-            zoom_factor: shape.zoom_factor as f32,
-            viewport_width: self.viewport.0,
-            viewport_height: self.viewport.1,
-            tile_mercator_coords: mercator.into(),
-            line_width_scale: 1.0,
-            line_units_per_pixel: 8.0 * self.style_zoom.scale_to_tile(&shape.coords()) as f32,
-            clip_antimeridian: u32::from(u8::from(shape.coords().z) == 0),
-            clip_region: clip_region(shape),
-            _pad: [0; 2],
-        });
-    }
-}
-
-fn hash_shape_topology(shape: &TileShape, hasher: &mut rustc_hash::FxHasher) {
-    shape.coords().hash(hasher);
-    shape.wrap.hash(hasher);
-    shape.is_drawn_within_another().hash(hasher);
-    shape.stencil_reference().hash(hasher);
-    shape.buffer_range().hash(hasher);
 }
 
 mod cover;

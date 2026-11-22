@@ -15,6 +15,13 @@ use crate::{
     tcs::system::{SystemError, SystemResult},
 };
 
+#[derive(Default)]
+struct RasterStyleCache {
+    need_key: Option<(u64, u64)>,
+    style_needs_raster: bool,
+    last_sources_rev: Option<u64>,
+}
+
 pub fn resource_system(
     MapContext {
         world,
@@ -30,41 +37,63 @@ pub fn resource_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
+    let style_rev = style.revision();
     let style_zoom = view_state.style_zoom().value();
-    let has_raster_or_dem_tiles = !world
-        .tiles
-        .pyramid_of::<crate::raster::RasterLayersDataComponent>()
-        .is_empty()
-        || !world
+    let uninitialized = matches!(
+        world.resources.get::<Eventually<RasterResources>>(),
+        Some(Eventually::Uninitialized)
+    );
+    if uninitialized {
+        let has_raster_or_dem_tiles = !world
             .tiles
-            .pyramid_of::<crate::raster::DemLayersComponent>()
-            .is_empty();
+            .pyramid_of::<crate::raster::RasterLayersDataComponent>()
+            .is_empty()
+            || !world
+                .tiles
+                .pyramid_of::<crate::raster::DemLayersComponent>()
+                .is_empty();
+        if !has_raster_or_dem_tiles {
+            let need_key = (style_rev, style_zoom.to_bits());
+            let style_needs_raster = match world.resources.get::<RasterStyleCache>() {
+                Some(cache) if cache.need_key == Some(need_key) => cache.style_needs_raster,
+                _ => {
+                    let needs = style.terrain.is_some()
+                        || style.sources.values().any(|source| {
+                            matches!(
+                                source,
+                                Source::Image(_) | Source::Video(_) | Source::Canvas(_)
+                            )
+                        })
+                        || style.layers.iter().any(|layer| {
+                            matches!(
+                                layer.type_.as_str(),
+                                "raster" | "hillshade" | "color-relief"
+                            ) && !layer.is_hidden()
+                                && layer.is_visible_at(style_zoom)
+                        });
+                    let cache = world.resources.get_or_init_mut::<RasterStyleCache>();
+                    cache.need_key = Some(need_key);
+                    cache.style_needs_raster = needs;
+                    needs
+                }
+            };
+            if !style_needs_raster
+                && world
+                    .resources
+                    .get::<Eventually<ProjectionGpuResources>>()
+                    .is_some_and(|p| matches!(p, Initialized(_)))
+            {
+                return Ok(());
+            }
+        }
+    }
     let Some((raster_resources, Initialized(projection_resources))) = world.resources.query_mut::<(
         &mut Eventually<RasterResources>,
         &mut Eventually<ProjectionGpuResources>,
     )>() else {
         return Err(SystemError::Dependencies);
     };
-    if matches!(raster_resources, Eventually::Uninitialized)
-        && style.terrain.is_none()
-        && !has_raster_or_dem_tiles
-        && !style.sources.values().any(|source| {
-            matches!(
-                source,
-                Source::Image(_) | Source::Video(_) | Source::Canvas(_)
-            )
-        })
-        && !style.layers.iter().any(|layer| {
-            matches!(
-                layer.type_.as_str(),
-                "raster" | "hillshade" | "color-relief"
-            ) && !layer.is_hidden()
-                && layer.is_visible_at(style_zoom)
-        })
-    {
-        return Ok(());
-    }
-
+    let was_uninitialized = matches!(raster_resources, Eventually::Uninitialized);
     raster_resources.initialize(|| {
         let shader = shaders::RasterShader {
             format: surface.surface_format(),
@@ -99,8 +128,19 @@ pub fn resource_system(
             .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
         RasterResources::new(Msaa { samples: 1 }, device, pipeline)
     });
-    if let Initialized(resources) = raster_resources {
-        resources.update_layer_sources(style);
+    let already_synced = !was_uninitialized
+        && world
+            .resources
+            .get::<RasterStyleCache>()
+            .is_some_and(|cache| cache.last_sources_rev == Some(style_rev));
+    if !already_synced {
+        if let Some(Initialized(resources)) =
+            world.resources.get_mut::<Eventually<RasterResources>>()
+        {
+            resources.update_layer_sources(style);
+        }
+        let cache = world.resources.get_or_init_mut::<RasterStyleCache>();
+        cache.last_sources_rev = Some(style_rev);
     }
     Ok(())
 }

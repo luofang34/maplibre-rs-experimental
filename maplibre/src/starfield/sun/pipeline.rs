@@ -57,9 +57,17 @@ impl Shader for SunShader {
 /// and sample count of the frame's depth.
 pub fn resource_system(
     MapContext {
-        world, renderer, ..
+        world,
+        style,
+        view_state,
+        renderer,
+        ..
     }: &mut MapContext,
 ) -> SystemResult {
+    let uses_globe = style.uses_globe_at(view_state.zoom().value());
+    let has_sun = crate::celestial::sun_direction(world)
+        .zip(crate::celestial::discs(world).sun_radius)
+        .is_some();
     let Some((pipeline, depth, Initialized(projection))) = world.resources.query_mut::<(
         &mut Eventually<SunPipeline>,
         &mut Eventually<SunDepth>,
@@ -67,6 +75,9 @@ pub fn resource_system(
     )>() else {
         return Err(SystemError::Dependencies);
     };
+    if matches!(pipeline, Eventually::Uninitialized) && (!uses_globe || !has_sun) {
+        return Ok(());
+    }
     let device = &renderer.device;
     let settings = renderer.settings;
     let surface = &renderer.resources.surface;

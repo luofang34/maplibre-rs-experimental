@@ -55,15 +55,24 @@ impl Shader for MoonShader {
 /// Builds the pipeline once the projection resources exist.
 pub fn resource_system(
     MapContext {
-        world, renderer, ..
+        world,
+        style,
+        view_state,
+        renderer,
+        ..
     }: &mut MapContext,
 ) -> SystemResult {
+    let uses_globe = style.uses_globe_at(view_state.zoom().value());
+    let has_moon = crate::celestial::discs(world).moon.is_some();
     let Some((pipeline, Initialized(projection))) = world.resources.query_mut::<(
         &mut Eventually<MoonPipeline>,
         &Eventually<ProjectionGpuResources>,
     )>() else {
         return Err(SystemError::Dependencies);
     };
+    if matches!(pipeline, Eventually::Uninitialized) && (!uses_globe || !has_moon) {
+        return Ok(());
+    }
     let device = &renderer.device;
     let settings = renderer.settings;
     let surface = &renderer.resources.surface;

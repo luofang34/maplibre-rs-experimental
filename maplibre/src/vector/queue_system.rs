@@ -74,15 +74,7 @@ pub fn queue_system(
     {
         true
     } else {
-        let mut min_z = u8::MAX;
-        let mut max_z = 0_u8;
-        for view_tile in tile_view_pattern.iter() {
-            view_tile.render_kind(TileKind::Vector, |shape| {
-                let z = u8::from(shape.coords().z);
-                min_z = min_z.min(z);
-                max_z = max_z.max(z);
-            });
-        }
+        let (min_z, max_z) = tile_view_pattern.vector_zoom_bounds();
         crate::render::projection::needs_vector_stencil_borders(
             transition,
             zoom,

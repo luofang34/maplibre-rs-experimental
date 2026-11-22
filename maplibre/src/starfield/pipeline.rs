@@ -78,6 +78,8 @@ impl Shader for StarfieldShader {
 pub(super) fn resource_system(
     MapContext {
         world,
+        style,
+        view_state,
         renderer:
             crate::render::Renderer {
                 device,
@@ -88,12 +90,20 @@ pub(super) fn resource_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
+    let uses_globe = style.uses_globe_at(view_state.zoom().value());
+    let has_stars = world
+        .resources
+        .get::<crate::celestial::Starfield>()
+        .is_some_and(|stars| !stars.stars().is_empty());
     let Some((pipeline, Initialized(projection))) = world.resources.query_mut::<(
         &mut Eventually<StarfieldPipeline>,
         &Eventually<ProjectionGpuResources>,
     )>() else {
         return Err(SystemError::Dependencies);
     };
+    if matches!(pipeline, Eventually::Uninitialized) && (!uses_globe || !has_stars) {
+        return Ok(());
+    }
     pipeline.initialize(|| {
         let shader = StarfieldShader {
             format: surface.surface_format(),

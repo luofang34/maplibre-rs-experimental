@@ -111,6 +111,7 @@ fn draw_layers<'w>(
     world: &'w World,
     target: &'w DrapeTarget,
 ) {
+    let unique_stencils = crate::render::main_pass::unique_vector_stencils(&target.masks);
     let mut stencil_state = crate::render::main_pass::StencilState::Cleared;
     for layers in target
         .layers
@@ -120,6 +121,7 @@ fn draw_layers<'w>(
             pass,
             world,
             &target.masks,
+            unique_stencils,
             &mut stencil_state,
             layers,
         );

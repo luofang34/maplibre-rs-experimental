@@ -140,6 +140,31 @@ impl BackgroundPatternGpu {
         queue: &crate::render::upload_queue::UploadQueue,
         view: &ViewState,
         physical: [f32; 2],
+        uses_globe: bool,
+    ) {
+        if !uses_globe {
+            self.write_flat_view(queue, view, physical);
+        }
+        if let Some(globe) = &mut self.globe {
+            // Map pixels the world spans at the view's zoom, which the pattern repeats over.
+            let world = (crate::coords::TILE_SIZE * 2_f64.powf(view.zoom().value())) as f32;
+            let world_bits = world.to_bits();
+            if globe.last_world_bits != Some(world_bits) {
+                queue.write_buffer(
+                    &globe.buffer,
+                    0,
+                    bytemuck::bytes_of(&[world, 0.0, 0.0, 0.0]),
+                );
+                globe.last_world_bits = Some(world_bits);
+            }
+        }
+    }
+
+    fn write_flat_view(
+        &mut self,
+        queue: &crate::render::upload_queue::UploadQueue,
+        view: &ViewState,
+        physical: [f32; 2],
     ) {
         use cgmath::{Matrix4, SquareMatrix, Vector3};
 
@@ -175,19 +200,6 @@ impl BackgroundPatternGpu {
         {
             queue.write_buffer(&self.buffer, 0, bytes);
             self.last_view_bytes = bytes.try_into().ok();
-        }
-        if let Some(globe) = &mut self.globe {
-            // Map pixels the world spans at the view's zoom, which the pattern repeats over.
-            let world = (crate::coords::TILE_SIZE * 2_f64.powf(view.zoom().value())) as f32;
-            let world_bits = world.to_bits();
-            if globe.last_world_bits != Some(world_bits) {
-                queue.write_buffer(
-                    &globe.buffer,
-                    0,
-                    bytemuck::bytes_of(&[world, 0.0, 0.0, 0.0]),
-                );
-                globe.last_world_bits = Some(world_bits);
-            }
         }
     }
 

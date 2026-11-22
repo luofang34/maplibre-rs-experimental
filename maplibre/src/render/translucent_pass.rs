@@ -67,6 +67,11 @@ pub(crate) fn draw_contents<'w>(
             "RenderPhase<TranslucentItem>::size() = {}",
             mask_items.size()
         );
+        let masks = world
+            .resources
+            .get::<super::render_phase::RenderPhase<super::render_phase::TileMaskItem>>()
+            .map(|phase| phase.into_iter().as_slice());
+        let unique_stencils = masks.is_some_and(super::main_pass::unique_vector_stencils);
         let above = super::main_pass::above_symbols(world);
         let mut stencil_state = above
             .as_ref()
@@ -82,12 +87,26 @@ pub(crate) fn draw_contents<'w>(
             while let Some(group) =
                 groups.next_if(|group| group.first().is_some_and(|first| first.index < item.index))
             {
-                super::main_pass::draw_group(render_pass, world, &mut stencil_state, group);
+                super::main_pass::draw_group(
+                    render_pass,
+                    world,
+                    masks,
+                    unique_stencils,
+                    &mut stencil_state,
+                    group,
+                );
             }
             item.draw_function.draw(render_pass, world, item);
         }
         for group in groups {
-            super::main_pass::draw_group(render_pass, world, &mut stencil_state, group);
+            super::main_pass::draw_group(
+                render_pass,
+                world,
+                masks,
+                unique_stencils,
+                &mut stencil_state,
+                group,
+            );
         }
     }
 

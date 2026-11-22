@@ -19,9 +19,70 @@ pub(crate) struct BackgroundScratch {
     pub(crate) globe_tiles: Vec<WorldTileCoords>,
     pub(crate) instances: rustc_hash::FxHashMap<crate::style::StyleLayerId, u32>,
     pub(crate) opaque_layers: rustc_hash::FxHashSet<crate::style::StyleLayerId>,
+    cached_bg_style_rev: Option<u64>,
+    bg_layer_indices: Vec<usize>,
+    last_pure_globe_params: Option<(u32, u32, u64)>,
+    last_pure_globe_tiles: Vec<WorldTileCoords>,
+}
+
+impl BackgroundScratch {
+    pub(crate) fn bg_layer_indices(&mut self, style: &crate::style::Style) -> &[usize] {
+        let rev = style.revision();
+        if self.cached_bg_style_rev != Some(rev) {
+            self.bg_layer_indices.clear();
+            for (idx, layer) in style.layers.iter().enumerate() {
+                if layer.type_ == "background" {
+                    self.bg_layer_indices.push(idx);
+                }
+            }
+            self.cached_bg_style_rev = Some(rev);
+        }
+        &self.bg_layer_indices
+    }
+
+    pub(crate) fn pure_globe_tile_metadata_matches(
+        &self,
+        view_state: &ViewState,
+        globe_tiles: &[WorldTileCoords],
+    ) -> bool {
+        let params = (
+            (view_state.width() as f32).to_bits(),
+            (view_state.height() as f32).to_bits(),
+            view_state.zoom().value().to_bits(),
+        );
+        !self.tile_metadata.is_empty()
+            && self.last_pure_globe_params == Some(params)
+            && self.last_pure_globe_tiles.as_slice() == globe_tiles
+    }
+
+    pub(crate) fn record_pure_globe_tiles(
+        &mut self,
+        view_state: &ViewState,
+        globe_tiles: &[WorldTileCoords],
+    ) {
+        self.last_pure_globe_params = Some((
+            (view_state.width() as f32).to_bits(),
+            (view_state.height() as f32).to_bits(),
+            view_state.zoom().value().to_bits(),
+        ));
+        self.last_pure_globe_tiles.clear();
+        self.last_pure_globe_tiles.extend_from_slice(globe_tiles);
+    }
+
+    pub(crate) fn invalidate_pure_globe_tiles(&mut self) {
+        self.last_pure_globe_params = None;
+    }
 }
 
 impl BackgroundGpuBuffers {
+    /// Returns the buffer allocation generation (`0` until buffers are first allocated).
+    #[inline]
+    pub(crate) fn allocation_generation(&self) -> u64 {
+        self.inner
+            .as_ref()
+            .map_or(0, |inner| inner.buffer_generation)
+    }
+
     /// Uploads `self.scratch.metadatas` into `metadata_buffer`, growing GPU capacity if needed.
     pub(crate) fn write_staged_metadata(
         &mut self,
@@ -30,7 +91,7 @@ impl BackgroundGpuBuffers {
     ) -> &wgpu::Buffer {
         let Self { inner, scratch } = self;
         let inner = inner.get_or_insert_with(|| AllocatedBuffers::new(device));
-        write_buffer_slice(
+        if write_buffer_slice(
             device,
             queue,
             &mut inner.metadata_buffer,
@@ -38,7 +99,9 @@ impl BackgroundGpuBuffers {
             &mut inner.last_metadata_bytes,
             "Background Metadata Buffer",
             &scratch.metadatas,
-        );
+        ) {
+            inner.bump_generation();
+        }
         &inner.metadata_buffer
     }
 
@@ -51,7 +114,7 @@ impl BackgroundGpuBuffers {
     ) -> &wgpu::Buffer {
         let Self { inner, scratch } = self;
         let inner = inner.get_or_insert_with(|| AllocatedBuffers::new(device));
-        write_buffer_slice(
+        if write_buffer_slice(
             device,
             queue,
             &mut inner.tile_metadata_buffer,
@@ -59,7 +122,9 @@ impl BackgroundGpuBuffers {
             &mut inner.last_tile_metadata_bytes,
             "Globe Background Tile Metadata Buffer",
             &scratch.tile_metadata,
-        );
+        ) {
+            inner.bump_generation();
+        }
         &inner.tile_metadata_buffer
     }
 }

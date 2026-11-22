@@ -12,22 +12,15 @@ use crate::{
     vector::resource::BufferPool,
 };
 
-pub fn resource_system(
-    MapContext {
-        world,
-        style,
-        view_state,
-        renderer,
-        ..
-    }: &mut MapContext,
-) -> SystemResult {
-    let style_zoom = view_state.style_zoom().value();
-    let uses_globe = style.uses_globe_at(style_zoom);
-    let pool_has_entries = matches!(
-        world.resources.get::<Eventually<SymbolBufferPool>>(),
-        Some(Eventually::Initialized(pool)) if !pool.index().is_empty()
-    );
-    let tiles_have_symbols = !world
+#[derive(Default)]
+struct SdfHaloStyleCache {
+    key: Option<(u64, u64, bool, bool, bool)>,
+    needs_combined: bool,
+    needs_separate: bool,
+}
+
+fn tiles_have_symbols(world: &crate::tcs::world::World) -> bool {
+    !world
         .tiles
         .pyramid_of::<super::SymbolLayersDataComponent>()
         .is_empty()
@@ -44,48 +37,110 @@ pub fn resource_system(
                             .iter()
                             .any(|l| !l.buffer.buffer.indices.is_empty())
                     })
-        });
-    let has_symbol_geometry = pool_has_entries || tiles_have_symbols;
+        })
+}
 
-    let (mut needs_combined, mut needs_separate) = world
+fn resolve_halo_requirements(
+    world: &mut crate::tcs::world::World,
+    style: &crate::style::Style,
+    style_zoom: f64,
+    uses_globe: bool,
+) -> (bool, bool) {
+    let (tex_combined, tex_separate) = world
         .resources
         .get::<super::textures::SymbolTextures>()
         .map_or(
             (false, false),
             super::textures::SymbolTextures::separate_halo_flags,
         );
-    if has_symbol_geometry {
-        for layer in &style.layers {
-            if layer.type_ != "symbol" || layer.is_hidden() || !layer.is_visible_at(style_zoom) {
-                continue;
-            }
-            if let Some(crate::style::layer::LayerPaint::Symbol(paint)) = &layer.paint {
-                let uniforms = super::paint::SymbolUniforms::new(paint, style_zoom, [1, 1]);
-                let separate = uniforms.text[1] > 1.0
-                    || uniforms.icon[1] > 1.0
-                    || (uniforms.text[1] > 0.0
-                        && paint.number(
-                            "text-letter-spacing",
-                            &Default::default(),
-                            style_zoom,
-                            0.0,
-                        ) < 0.0);
-                if separate {
-                    needs_separate = true;
-                } else {
-                    needs_combined = true;
-                }
+    let key = (
+        style.revision(),
+        style_zoom.to_bits(),
+        uses_globe,
+        tex_combined,
+        tex_separate,
+    );
+    if let Some(cache) = world.resources.get::<SdfHaloStyleCache>() {
+        if cache.key == Some(key) {
+            return (cache.needs_combined, cache.needs_separate);
+        }
+    }
+    let (mut needs_combined, mut needs_separate) = (tex_combined, tex_separate);
+    for layer in &style.layers {
+        if layer.type_ != "symbol" || layer.is_hidden() || !layer.is_visible_at(style_zoom) {
+            continue;
+        }
+        if let Some(crate::style::layer::LayerPaint::Symbol(paint)) = &layer.paint {
+            let uniforms = super::paint::SymbolUniforms::new(paint, style_zoom, [1, 1]);
+            let separate = uniforms.text[1] > 1.0
+                || uniforms.icon[1] > 1.0
+                || (uniforms.text[1] > 0.0
+                    && paint.number("text-letter-spacing", &Default::default(), style_zoom, 0.0)
+                        < 0.0);
+            if separate {
+                needs_separate = true;
             } else {
                 needs_combined = true;
             }
-            if needs_combined && needs_separate {
-                break;
-            }
-        }
-        if !needs_combined && !needs_separate {
+        } else {
             needs_combined = true;
         }
+        if needs_combined && needs_separate {
+            break;
+        }
     }
+    if !needs_combined && !needs_separate {
+        needs_combined = true;
+    }
+    let cache = world.resources.get_or_init_mut::<SdfHaloStyleCache>();
+    cache.key = Some(key);
+    cache.needs_combined = needs_combined;
+    cache.needs_separate = needs_separate;
+    (needs_combined, needs_separate)
+}
+
+pub fn resource_system(
+    MapContext {
+        world,
+        style,
+        view_state,
+        renderer,
+        ..
+    }: &mut MapContext,
+) -> SystemResult {
+    let style_zoom = view_state.style_zoom().value();
+    let uses_globe = style.uses_globe_at(style_zoom);
+    let has_symbol_layers = super::style_has_symbol_layers(style);
+    if let Some(Eventually::Uninitialized) = world.resources.get::<Eventually<SymbolPipeline>>() {
+        if !has_symbol_layers {
+            if let Some(pool) = world.resources.get_mut::<Eventually<SymbolBufferPool>>() {
+                pool.initialize(|| {
+                    BufferPool::from_device_with_sizes(
+                        &renderer.device,
+                        renderer.settings.symbol_pools,
+                    )
+                });
+            }
+            return Ok(());
+        }
+    }
+    let mode_already_complete = matches!(
+        world.resources.get::<Eventually<SymbolPipeline>>(),
+        Some(Initialized(sp))
+            if sp
+                .for_globe(uses_globe)
+                .is_some_and(|m| m.combined.is_some() && m.halo.is_some() && m.fill.is_some())
+    );
+    let has_symbol_geometry = !mode_already_complete
+        && (matches!(
+            world.resources.get::<Eventually<SymbolBufferPool>>(),
+            Some(Initialized(pool)) if !pool.index().is_empty()
+        ) || tiles_have_symbols(world));
+    let (needs_combined, needs_separate) = if has_symbol_geometry {
+        resolve_halo_requirements(world, style, style_zoom, uses_globe)
+    } else {
+        (false, false)
+    };
 
     let Some((pool, pipeline, Initialized(projection))) = world.resources.query_mut::<(
         &mut Eventually<SymbolBufferPool>,
@@ -97,7 +152,7 @@ pub fn resource_system(
     pool.initialize(|| {
         BufferPool::from_device_with_sizes(&renderer.device, renderer.settings.symbol_pools)
     });
-    if matches!(pipeline, Eventually::Uninitialized) && !super::style_has_symbol_layers(style) {
+    if matches!(pipeline, Eventually::Uninitialized) && !has_symbol_layers {
         return Ok(());
     }
     if renderer.settings.symbol_pools.is_empty() {

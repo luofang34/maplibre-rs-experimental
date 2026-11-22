@@ -18,7 +18,7 @@ use crate::{
         RasterLayersDataComponent,
     },
     render::eventually::Eventually,
-    style::Style,
+    style::{source::Source, Style},
     tcs::{
         system::{System, SystemResult},
         world::World,
@@ -31,6 +31,7 @@ use crate::{
 
 pub struct PopulateWorldSystem<E: Environment, T> {
     kernel: Rc<Kernel<E>>,
+    idle_rev: Option<u64>,
     phantom_t: PhantomData<T>,
 }
 
@@ -38,6 +39,7 @@ impl<E: Environment, T> PopulateWorldSystem<E, T> {
     pub fn new(kernel: &Rc<Kernel<E>>) -> Self {
         Self {
             kernel: kernel.clone(),
+            idle_rev: None,
             phantom_t: Default::default(),
         }
     }
@@ -57,6 +59,15 @@ impl<E: Environment, T: RasterTransferables> System for PopulateWorldSystem<E, T
             ..
         }: &mut MapContext,
     ) -> SystemResult {
+        let style_rev = style.revision();
+        let has_raster_or_dem = style.terrain.is_some()
+            || style
+                .sources
+                .values()
+                .any(|source| matches!(source, Source::Raster(_) | Source::RasterDem(_)));
+        if !has_raster_or_dem && self.idle_rev == Some(style_rev) {
+            return Ok(());
+        }
         let circumference = view_state.body().circumference_meters();
         let messages = self.kernel.apc().receive(|message| {
             message.has_tag(RequestKind::Raster.message_tag())
@@ -66,6 +77,8 @@ impl<E: Environment, T: RasterTransferables> System for PopulateWorldSystem<E, T
         apply_worker_messages(messages, |message| {
             apply_raster_message_with_style::<T>(world, Some(style), circumference, message)
         })?;
+        self.idle_rev =
+            (!has_raster_or_dem && self.kernel.apc().in_flight_calls() == 0).then_some(style_rev);
 
         Ok(())
     }

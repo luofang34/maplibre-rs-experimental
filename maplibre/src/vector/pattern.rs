@@ -39,6 +39,7 @@ pub(crate) struct PatternResources {
     /// Every image of the style by its pattern key, for the layers in `per_feature`.
     images: FxHashMap<u32, PatternBinding>,
     sampler: wgpu::Sampler,
+    last_update: Option<(u64, usize, u32)>,
 }
 
 /// Bind group layout of one layer's pattern: the image size, the image and its sampler.
@@ -171,6 +172,7 @@ impl PatternResources {
             per_feature: FxHashSet::default(),
             images: FxHashMap::default(),
             sampler,
+            last_update: None,
         }
     }
 
@@ -184,6 +186,10 @@ impl PatternResources {
         zoom: f64,
     ) {
         let scale = pattern_scale(zoom);
+        let key = (style.revision(), style.images.len(), scale.to_bits());
+        if self.last_update == Some(key) {
+            return;
+        }
         self.layers.retain(|id, binding| {
             let keep = style.layers.iter().any(|layer| layer.layer_id() == *id);
             if !keep {
@@ -235,6 +241,7 @@ impl PatternResources {
                 }
             }
         }
+        self.last_update = Some(key);
     }
 
     /// Keeps a binding for every image of the style while a layer picks its image per feature.

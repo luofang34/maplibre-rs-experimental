@@ -108,7 +108,6 @@ forbid_stray_artifacts = true
 [structure.file_size_allowlist]
 "maplibre/src/projection/globe/covering.rs" = 532
 "maplibre/src/style/expression/evaluate/dispatch.rs" = 509
-"maplibre/src/vector/line_dash.rs" = 510
 "maplibre/src/vector/process_vector/shared_geometry.rs" = 509
 
 [lints]

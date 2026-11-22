@@ -36,6 +36,8 @@ pub struct BackgroundBuffers {
     pub flat_covers_viewport: bool,
     /// Solid-color background layers whose evaluated alpha is `1.0` (`blend: None` eligible).
     pub opaque_layers: rustc_hash::FxHashSet<crate::style::StyleLayerId>,
+    /// Generation matching [`BackgroundGpuBuffers`] buffer allocations; skips handle clones when unchanged.
+    pub(crate) buffer_generation: u64,
 }
 
 /// Persistent GPU buffers updated in place via `UploadQueue::write_buffer`.
@@ -60,6 +62,7 @@ pub(super) struct AllocatedBuffers {
     last_atmosphere_bytes: Option<[u8; std::mem::size_of::<AtmosphereLayerMetadata>()]>,
     sky_metadata_buffer: wgpu::Buffer,
     last_sky_bytes: Option<[u8; std::mem::size_of::<SkyLayerMetadata>()]>,
+    pub(super) buffer_generation: u64,
 }
 
 impl Drop for AllocatedBuffers {
@@ -118,7 +121,14 @@ impl AllocatedBuffers {
             last_atmosphere_bytes: None,
             sky_metadata_buffer,
             last_sky_bytes: None,
+            buffer_generation: 1,
         }
+    }
+}
+
+impl AllocatedBuffers {
+    pub(super) fn bump_generation(&mut self) {
+        self.buffer_generation = self.buffer_generation.wrapping_add(1).max(1);
     }
 }
 
@@ -155,9 +165,10 @@ pub(super) fn write_buffer_slice<T: bytemuck::Pod>(
     last_bytes: &mut Vec<u8>,
     label: &str,
     items: &[T],
-) {
+) -> bool {
     let needed_capacity = items.len().max(1);
-    if needed_capacity > *capacity {
+    let reallocated = needed_capacity > *capacity;
+    if reallocated {
         let new_capacity = (*capacity * 2).max(needed_capacity);
         queue.cancel_staged_buffer(buffer);
         buffer.destroy();
@@ -173,6 +184,7 @@ pub(super) fn write_buffer_slice<T: bytemuck::Pod>(
     if !items.is_empty() {
         write_slice_if_changed(queue, buffer, bytemuck::cast_slice(items), last_bytes);
     }
+    reallocated
 }
 
 impl BackgroundGpuBuffers {
@@ -201,7 +213,7 @@ impl BackgroundGpuBuffers {
         metadatas: &[BackgroundLayerMetadata],
     ) -> &wgpu::Buffer {
         let inner = self.ensure_allocated(device);
-        write_buffer_slice(
+        if write_buffer_slice(
             device,
             queue,
             &mut inner.metadata_buffer,
@@ -209,7 +221,9 @@ impl BackgroundGpuBuffers {
             &mut inner.last_metadata_bytes,
             "Background Metadata Buffer",
             metadatas,
-        );
+        ) {
+            inner.bump_generation();
+        }
         &inner.metadata_buffer
     }
 
@@ -221,7 +235,7 @@ impl BackgroundGpuBuffers {
         tile_metadata: &[ShaderTileMetadata],
     ) -> &wgpu::Buffer {
         let inner = self.ensure_allocated(device);
-        write_buffer_slice(
+        if write_buffer_slice(
             device,
             queue,
             &mut inner.tile_metadata_buffer,
@@ -229,7 +243,9 @@ impl BackgroundGpuBuffers {
             &mut inner.last_tile_metadata_bytes,
             "Globe Background Tile Metadata Buffer",
             tile_metadata,
-        );
+        ) {
+            inner.bump_generation();
+        }
         &inner.tile_metadata_buffer
     }
 
@@ -316,6 +332,30 @@ pub fn globe_tiles(world: &crate::tcs::world::World) -> Vec<WorldTileCoords> {
 /// Calculates tile metadata for globe background tiles.
 pub fn globe_tile_metadata(view_state: &ViewState, coords: WorldTileCoords) -> ShaderTileMetadata {
     globe_tile_metadata_with_vp(view_state, &view_state.gpu_view_projection(), coords)
+}
+
+/// Calculates tile metadata for globe background tiles in pure-globe mode (`transition >= 1.0`),
+/// where shaders ignore per-tile `transform` matrices.
+pub(crate) fn globe_tile_metadata_pure_globe(
+    view_state: &ViewState,
+    coords: WorldTileCoords,
+) -> ShaderTileMetadata {
+    let scale = view_state.zoom().scale_to_tile(&coords) as f32;
+    ShaderTileMetadata {
+        transform: cgmath::Matrix4::<f32>::from_scale(1.0).into(),
+        zoom_factor: scale,
+        viewport_width: view_state.width() as f32,
+        viewport_height: view_state.height() as f32,
+        tile_mercator_coords: crate::projection::renderer_data::tile_mercator_coordinates(
+            coords.into_tile(crate::style::source::TileAddressingScheme::XYZ),
+        )
+        .into(),
+        clip_antimeridian: u32::from(u8::from(coords.z) == 0),
+        line_width_scale: 1.0,
+        line_units_per_pixel: 8.0 * scale,
+        clip_region: WHOLE_TILE,
+        _pad: [0; 2],
+    }
 }
 
 /// Calculates tile metadata for globe background tiles using a precomputed `gpu_vp`.

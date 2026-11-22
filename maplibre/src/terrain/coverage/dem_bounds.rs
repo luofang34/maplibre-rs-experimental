@@ -57,7 +57,13 @@ pub fn coverage_system(
 ) -> SystemResult {
     let Some(dem) = dem_source(style) else {
         world.resources.remove::<PreparedTerrainRegion>();
-        world.resources.insert(TerrainCoverageIndex::default());
+        if world
+            .resources
+            .get::<TerrainCoverageIndex>()
+            .is_some_and(|idx| !idx.is_empty())
+        {
+            world.resources.insert(TerrainCoverageIndex::default());
+        }
         return Ok(());
     };
     let rendered = take_or_compute_tight_terrain_region(style, view_state, world, dem.tile_size)
