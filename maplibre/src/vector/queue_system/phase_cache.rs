@@ -103,6 +103,17 @@ impl CompiledLayerRule {
     }
 
     #[inline]
+    fn has_zoom_dependent_prop(&self) -> bool {
+        let prop_var = |p: Option<&StyleProperty<f32>>| p.is_some_and(|v| !v.is_zoom_constant());
+        let pat_var =
+            |p: Option<&StyleProperty<PatternName>>| p.is_some_and(|v| !v.is_zoom_constant());
+        pat_var(self.pattern_prop.as_ref())
+            || pat_var(self.missing_pattern_prop.as_ref())
+            || prop_var(self.opacity_prop.as_ref())
+            || prop_var(self.width_prop.as_ref())
+    }
+
+    #[inline]
     fn is_visible_at(&self, zoom: f64) -> bool {
         self.minzoom.is_none_or(|min| min <= 0.0 || zoom >= min)
             && self.maxzoom.is_none_or(|max| zoom < max)
@@ -137,6 +148,8 @@ impl CompiledLayerRule {
 #[derive(Default)]
 pub(super) struct CompiledStyleRules {
     style_rev: Option<u64>,
+    has_zoom_dependent_props: bool,
+    zoom_breakpoints: Vec<f64>,
     rules: Vec<(CompiledLayerRule, bool)>,
 }
 
@@ -147,6 +160,8 @@ impl CompiledStyleRules {
             return false;
         }
         self.style_rev = Some(rev);
+        self.has_zoom_dependent_props = false;
+        self.zoom_breakpoints.clear();
         self.rules.clear();
         self.rules.reserve(style.layers.len());
         for layer in &style.layers {
@@ -155,10 +170,39 @@ impl CompiledStyleRules {
                 .as_ref()
                 .and_then(crate::vector::pattern::per_feature_pattern)
                 .is_some();
-            self.rules
-                .push((CompiledLayerRule::from_layer(layer), has_per_feature));
+            let rule = CompiledLayerRule::from_layer(layer);
+            if rule.has_zoom_dependent_prop() {
+                self.has_zoom_dependent_props = true;
+            }
+            if let Some(min) = rule.minzoom.filter(|z| z.is_finite() && *z > 0.0) {
+                self.zoom_breakpoints.push(min);
+            }
+            if let Some(max) = rule.maxzoom.filter(|z| z.is_finite()) {
+                self.zoom_breakpoints.push(max);
+            }
+            self.rules.push((rule, has_per_feature));
         }
+        self.zoom_breakpoints.sort_unstable_by(f64::total_cmp);
+        self.zoom_breakpoints.dedup();
         true
+    }
+
+    #[inline]
+    fn zoom_interval_for(&self, style_zoom: f64) -> Option<(f64, f64)> {
+        if self.has_zoom_dependent_props || !style_zoom.is_finite() {
+            return None;
+        }
+        let pos = self.zoom_breakpoints.partition_point(|&z| z <= style_zoom);
+        let lo = pos
+            .checked_sub(1)
+            .and_then(|idx| self.zoom_breakpoints.get(idx).copied())
+            .unwrap_or(f64::NEG_INFINITY);
+        let hi = self
+            .zoom_breakpoints
+            .get(pos)
+            .copied()
+            .unwrap_or(f64::INFINITY);
+        Some((lo, hi))
     }
 }
 
@@ -167,6 +211,7 @@ pub(super) struct VectorQueueScratch {
     compiled: CompiledStyleRules,
     last_digest: Option<(u64, u64)>,
     last_style_zoom_bits: Option<u64>,
+    valid_zoom_interval: Option<(f64, f64)>,
     pub(super) layer_state_digest: u64,
     pub(super) pattern_layers: FxHashSet<StyleLayerId>,
     pub(super) missing_image_layers: FxHashSet<StyleLayerId>,
@@ -192,10 +237,19 @@ impl VectorQueueScratch {
         let zoom_bits = style_zoom.to_bits();
         if style_changed {
             self.last_style_zoom_bits = None;
+            self.valid_zoom_interval = None;
         } else if self.last_style_zoom_bits == Some(zoom_bits) {
+            return self.layer_state_digest;
+        } else if !self.compiled.has_zoom_dependent_props
+            && self
+                .valid_zoom_interval
+                .is_some_and(|(lo, hi)| style_zoom >= lo && style_zoom < hi)
+        {
+            self.last_style_zoom_bits = Some(zoom_bits);
             return self.layer_state_digest;
         }
         self.last_style_zoom_bits = Some(zoom_bits);
+        self.valid_zoom_interval = self.compiled.zoom_interval_for(style_zoom);
 
         let mut hasher = FxHasher::default();
         self.compiled.rules.len().hash(&mut hasher);
@@ -249,5 +303,36 @@ impl VectorQueueScratch {
             }
         }
         digest
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::VectorQueueScratch;
+    use crate::style::Style;
+
+    #[test]
+    fn zoom_interval_cache_reuses_within_half_open_breakpoints_and_recomputes_at_edges() {
+        let style: Style = serde_json::from_value(serde_json::json!({
+            "version": 8,
+            "sources": {},
+            "layers": [
+                { "id": "mid", "type": "fill", "minzoom": 5, "maxzoom": 10 }
+            ]
+        }))
+        .expect("style");
+        let mut scratch = VectorQueueScratch::default();
+        let d_below = scratch.sync_style_sets(&style, 4.5);
+        assert_eq!(scratch.valid_zoom_interval, Some((f64::NEG_INFINITY, 5.0)));
+        assert_eq!(scratch.sync_style_sets(&style, 4.99), d_below);
+
+        let d_at_min = scratch.sync_style_sets(&style, 5.0);
+        assert_ne!(d_at_min, d_below);
+        assert_eq!(scratch.valid_zoom_interval, Some((5.0, 10.0)));
+        assert_eq!(scratch.sync_style_sets(&style, 7.5), d_at_min);
+
+        let d_at_max = scratch.sync_style_sets(&style, 10.0);
+        assert_eq!(d_at_max, d_below);
+        assert_eq!(scratch.valid_zoom_interval, Some((10.0, f64::INFINITY)));
     }
 }

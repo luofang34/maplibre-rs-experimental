@@ -21,7 +21,8 @@ pub use background::{
     SkyShader,
 };
 pub use circle::{
-    pack_dynamic_circle_radii, CircleDynamicRadiusShader, CircleFeatureStrokeShader, CircleShader,
+    pack_dynamic_circle_radii, pack_dynamic_circle_radius_uniform, CircleDynamicRadiusShader,
+    CircleFeatureStrokeShader, CircleShader,
 };
 pub use fill::{FillPatternShader, FillShader};
 pub use fill_extrusion::{

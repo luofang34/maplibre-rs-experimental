@@ -1,7 +1,10 @@
 //! Frame cache for resolved vector source and paint tile sets.
-use super::{FrameSourcesAndPainted, FreshTightTiles, VectorFallbackTiles};
+use rustc_hash::FxHashSet;
+
+use super::{FrameUploadSources, FreshTightTiles, VectorFallbackTiles};
 use crate::{
     coords::{WorldTileCoords, ZoomLevel},
+    io::tile_sources::{clamp_to_max_zoom, source_max_zoom, TileKind},
     render::{
         eventually::{Eventually, Eventually::Initialized},
         tile_view_pattern::DEFAULT_TILE_SIZE,
@@ -9,7 +12,10 @@ use crate::{
     },
     style::Style,
     tcs::world::World,
-    terrain::request_system::DrapeRequests,
+    terrain::{
+        drape_targets::select_targets, queue_system::uniforms::has_present_ancestor,
+        request_system::DrapeRequests, resources::TerrainResources,
+    },
 };
 
 #[derive(Clone, PartialEq, Eq)]
@@ -32,7 +38,7 @@ pub(super) struct FrameSourcesKey {
 #[derive(Default)]
 pub(super) struct FrameSourcesCache {
     pub(super) key: Option<FrameSourcesKey>,
-    pub(super) result: Option<FrameSourcesAndPainted>,
+    pub(super) result: Option<FrameUploadSources>,
     pub(super) view_tiles_scratch: Vec<WorldTileCoords>,
 }
 
@@ -127,4 +133,58 @@ pub(super) fn update_loose_tight_tiles(world: &mut World, fresh_tight: Option<&F
             *level,
         ));
     }
+}
+
+pub(super) fn terrain_sources(
+    world: &World,
+    style: &Style,
+) -> (Vec<WorldTileCoords>, FxHashSet<WorldTileCoords>) {
+    let max_zoom = source_max_zoom(style, TileKind::Vector);
+    let terrain = match world.resources.get::<Eventually<TerrainResources>>() {
+        Some(Initialized(t)) => Some(t),
+        _ => None,
+    };
+    let targets = std::iter::once(WorldTileCoords::default())
+        .chain(
+            world
+                .resources
+                .get::<DrapeRequests>()
+                .into_iter()
+                .flat_map(|requests| requests.0.iter().copied()),
+        )
+        .chain(
+            world
+                .resources
+                .get::<crate::render::eye_covering::SlotResidencyFloor>()
+                .into_iter()
+                .flat_map(|floor| floor.retained_drapes.iter().copied()),
+        );
+    let selected = select_targets(targets, world, &[]);
+    let mut seen = FxHashSet::default();
+    let mut uncovered_list = Vec::new();
+    let mut covered_list = Vec::new();
+    let mut uncovered_set = FxHashSet::default();
+    for (target, shapes) in selected {
+        let is_uncovered = terrain
+            .is_some_and(|t| t.drape_texture(target).is_none() && !has_present_ancestor(target, t));
+        for source in shapes
+            .into_iter()
+            .filter(|shape| shape.raster_source.is_none())
+            .map(|shape| shape.coords)
+            .chain(std::iter::once(clamp_to_max_zoom(target, max_zoom)))
+        {
+            if is_uncovered {
+                uncovered_set.insert(source);
+            }
+            if seen.insert(source) {
+                if is_uncovered {
+                    uncovered_list.push(source);
+                } else {
+                    covered_list.push(source);
+                }
+            }
+        }
+    }
+    uncovered_list.extend(covered_list);
+    (uncovered_list, uncovered_set)
 }

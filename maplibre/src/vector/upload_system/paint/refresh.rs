@@ -53,6 +53,30 @@ impl PaintChangeFlags {
             | (u8::from(self.light_changed || self.tiles_changed) * 4)
             | (u8::from(self.settle_pass) * 8)
     }
+
+    fn effective_frame_changed(&self, union: u8) -> bool {
+        (self.zoom_changed && (union & (1 | 8 | 64)) != 0)
+            || (self.bearing_changed && (union & 2) != 0)
+            || (self.light_changed && (union & 4) != 0)
+            || (self.settle_pass && (union & 8) != 0)
+    }
+}
+
+#[inline]
+fn normalized_frame(frame: VectorPaintFrame, union: u8) -> VectorPaintFrame {
+    VectorPaintFrame {
+        zoom: if (union & (1 | 8 | 64)) != 0 {
+            frame.zoom
+        } else {
+            0.0
+        },
+        bearing: if (union & 2) != 0 { frame.bearing } else { 0.0 },
+        light: if (union & 4) != 0 {
+            frame.light
+        } else {
+            Default::default()
+        },
+    }
 }
 
 struct PaintEvalEnv<'a> {
@@ -98,7 +122,9 @@ pub(in crate::vector::upload_system) fn refresh_layer_paint(
     if !changes.has_any_change() {
         return;
     }
-    if ctx.previous.is_some() && (scratch.style_flags_union & changes.active_flags()) == 0 {
+    let union = scratch.style_flags_union;
+    let active_flags = changes.active_flags();
+    if ctx.previous.is_some() && (union & active_flags) == 0 {
         if changes.settle_pass {
             scratch.needs_feature_zoom_settle = false;
         }
@@ -107,11 +133,9 @@ pub(in crate::vector::upload_system) fn refresh_layer_paint(
     if changes.settle_pass {
         scratch.needs_feature_zoom_settle = false;
     }
-    let frame_changed = changes.zoom_changed
-        || changes.bearing_changed
-        || changes.light_changed
-        || changes.settle_pass;
-    sync_tile_paint_stamp_cache(&ctx, frame_changed, scratch);
+    let effective_frame_changed = changes.effective_frame_changed(union);
+    let stamp_frame = normalized_frame(ctx.frame, union);
+    sync_tile_paint_stamp_cache(&ctx, effective_frame_changed, scratch);
     scratch.clear();
     let env = PaintEvalEnv {
         queue,
@@ -126,7 +150,9 @@ pub(in crate::vector::upload_system) fn refresh_layer_paint(
             continue;
         };
         let stamp = tile_entries_stamp(layers);
-        if !frame_changed && scratch.tile_paint_stamps.get(&coords) == Some(&(ctx.frame, stamp)) {
+        if !effective_frame_changed
+            && scratch.tile_paint_stamps.get(&coords) == Some(&(stamp_frame, stamp))
+        {
             continue;
         }
         for entry in layers {
@@ -134,6 +160,9 @@ pub(in crate::vector::upload_system) fn refresh_layer_paint(
                 .layer_flags
                 .entry(entry.style_layer.index)
                 .or_insert_with(|| layer_paint_flags(&entry.style_layer));
+            if (flags & active_flags) == 0 {
+                continue;
+            }
             refresh_entry_layer_meta(buffer_pool, &env, coords, entry, flags, scratch);
             let skip_uniform = refresh_entry_feature_paint(
                 buffer_pool,
@@ -147,9 +176,11 @@ pub(in crate::vector::upload_system) fn refresh_layer_paint(
                 refresh_entry_uniform_feature_color(buffer_pool, &env, coords, entry, scratch);
             }
         }
-        scratch.tile_paint_stamps.insert(coords, (ctx.frame, stamp));
+        scratch
+            .tile_paint_stamps
+            .insert(coords, (stamp_frame, stamp));
     }
-    apply_deferred_paint_updates(buffer_pool, ctx.frame, scratch);
+    apply_deferred_paint_updates(buffer_pool, (ctx.frame, stamp_frame), scratch);
 }
 
 fn refresh_entry_layer_meta(
@@ -400,7 +431,7 @@ fn refresh_entry_uniform_feature_color(
 
 fn apply_deferred_paint_updates(
     buffer_pool: &mut VectorBufferPool,
-    frame: VectorPaintFrame,
+    (frame, stamp_frame): (VectorPaintFrame, VectorPaintFrame),
     scratch: &mut PaintRefreshScratch,
 ) {
     for (coords, layer_id, runs) in scratch.feature_zoom_updates.drain(..) {
@@ -412,7 +443,7 @@ fn apply_deferred_paint_updates(
         if let Some(layers) = buffer_pool.index().get_layers(coords) {
             scratch
                 .tile_paint_stamps
-                .insert(coords, (frame, tile_entries_stamp(layers)));
+                .insert(coords, (stamp_frame, tile_entries_stamp(layers)));
         }
     }
     for (coords, layer_id) in scratch.feature_zoom_only_updates.drain(..) {
@@ -420,7 +451,7 @@ fn apply_deferred_paint_updates(
         if let Some(layers) = buffer_pool.index().get_layers(coords) {
             scratch
                 .tile_paint_stamps
-                .insert(coords, (frame, tile_entries_stamp(layers)));
+                .insert(coords, (stamp_frame, tile_entries_stamp(layers)));
         }
     }
     for (coords, layer_id, opaque) in scratch.opaque_updates.drain(..) {

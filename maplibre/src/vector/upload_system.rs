@@ -76,11 +76,14 @@ pub fn upload_system(
     }
     let (paint_frame, previous_paint) = frame_paint(world, style, view_state);
     let refresh_paint = previous_paint != Some(paint_frame);
-    let (source_tiles, painted_tiles, uncovered_sources) =
-        sources::frame_sources_and_painted_mut(world, style, view_state)?;
-    let has_pending_uploads = has_pending_vector_uploads(world, style, &source_tiles)?;
-    let permit_source_set =
-        super::request_system::snapshot_permit_sources(world, has_pending_uploads, &source_tiles);
+    let upload_sources = sources::frame_sources_and_painted_mut(world, style, view_state)?;
+    let has_pending_uploads =
+        has_pending_vector_uploads(world, style, &upload_sources.source_tiles)?;
+    let permit_source_set = super::request_system::snapshot_permit_sources(
+        world,
+        has_pending_uploads,
+        &upload_sources.source_tiles,
+    );
     let terrain_booting = style.terrain.is_some()
         && world
             .resources
@@ -93,10 +96,11 @@ pub fn upload_system(
             view_state,
             queue,
             settings.tight_tile_requests,
-            &painted_tiles,
+            &upload_sources.painted_tiles,
         );
     }
-    let (spatial, changed) = super::structures::for_frame(world, style, &painted_tiles);
+    let (spatial, changed) =
+        super::structures::for_frame(world, style, &upload_sources.painted_tiles);
     init_upload_resources(world);
     #[cfg(feature = "geojson")]
     crate::geojson::update::dynamic_points::ensure_seeded_for_style(world, style);
@@ -125,7 +129,7 @@ pub fn upload_system(
         .sync_generations(style.revision(), buffer_pool.eviction_generation());
     let moving = budget.is_moving();
     let (run_paint_refresh, tiles_changed) = paint_scratch.slots.check_refresh(
-        &painted_tiles,
+        &upload_sources.active_painted_tiles,
         refresh_paint,
         !moving && paint_scratch.needs_settle(),
     );
@@ -136,7 +140,7 @@ pub fn upload_system(
             queue,
             paint::PaintRefreshContext {
                 tiles: &world.tiles,
-                source_tiles: &painted_tiles,
+                source_tiles: &upload_sources.active_painted_tiles,
                 frame: paint_frame,
                 previous: previous_paint,
                 moving,
@@ -161,8 +165,8 @@ pub fn upload_system(
             TessellatedUploadPlan {
                 style,
                 shared_style_layers,
-                source_tiles: &source_tiles,
-                uncovered_sources: &uncovered_sources,
+                source_tiles: &upload_sources.source_tiles,
+                uncovered_sources: &upload_sources.uncovered,
                 spatial: &spatial,
                 paint: paint_frame,
                 allow_cpu_release,
@@ -181,7 +185,7 @@ pub fn upload_system(
         world,
         style,
         queue,
-        &painted_tiles,
+        &upload_sources.active_painted_tiles,
     );
     if deferred || paint_settle_pending {
         crate::render::frame_signals::keep_animating(world);

@@ -6,9 +6,8 @@ use rustc_hash::FxHashSet;
 
 use crate::{
     coords::{WorldTileCoords, ZoomLevel},
-    io::tile_sources::{clamp_to_max_zoom, source_max_zoom, TileKind},
+    io::tile_sources::TileKind,
     render::{
-        eventually::{Eventually, Eventually::Initialized},
         projection::view_region_for_projection,
         tile_view_pattern::{
             coverage::loaded_cover, HasTile, ViewTileSources, CHILDREN_SEARCH_DEPTH,
@@ -18,10 +17,6 @@ use crate::{
     },
     style::Style,
     tcs::{system::SystemError, world::World},
-    terrain::{
-        drape_targets::select_targets, queue_system::uniforms::has_present_ancestor,
-        request_system::DrapeRequests, resources::TerrainResources,
-    },
 };
 
 /// Coarse overview and settled 1-ring prefetch tiles requested by `vector_request` so
@@ -29,15 +24,20 @@ use crate::{
 #[derive(Clone, Default)]
 pub(crate) struct VectorFallbackTiles(pub Vec<WorldTileCoords>);
 
-pub(super) type FrameSourcesAndPainted = (
-    Arc<[WorldTileCoords]>,
-    Arc<[WorldTileCoords]>,
-    Arc<FxHashSet<WorldTileCoords>>,
-);
+/// Resolved source upload order and painted/retained tile sets for one vector upload pass.
+#[derive(Clone)]
+pub(super) struct FrameUploadSources {
+    pub(super) source_tiles: Arc<[WorldTileCoords]>,
+    pub(super) painted_tiles: Arc<[WorldTileCoords]>,
+    pub(super) active_painted_tiles: Arc<[WorldTileCoords]>,
+    pub(super) uncovered: Arc<FxHashSet<WorldTileCoords>>,
+}
 
 mod cache;
 
-use cache::{build_frame_sources_key, update_loose_tight_tiles, FrameSourcesCache};
+use cache::{
+    build_frame_sources_key, terrain_sources, update_loose_tight_tiles, FrameSourcesCache,
+};
 
 type FreshTightTiles = (ZoomLevel, Arc<[WorldTileCoords]>);
 
@@ -46,7 +46,28 @@ pub(super) fn frame_sources_and_painted(
     world: &World,
     style: &Style,
     view_state: &ViewState,
-) -> Result<FrameSourcesAndPainted, SystemError> {
+) -> Result<
+    (
+        Arc<[WorldTileCoords]>,
+        Arc<[WorldTileCoords]>,
+        Arc<FxHashSet<WorldTileCoords>>,
+    ),
+    SystemError,
+> {
+    let resolved = frame_upload_sources(world, style, view_state)?;
+    Ok((
+        resolved.source_tiles,
+        resolved.painted_tiles,
+        resolved.uncovered,
+    ))
+}
+
+#[cfg(all(test, feature = "headless", feature = "thread-safe-futures"))]
+pub(super) fn frame_upload_sources(
+    world: &World,
+    style: &Style,
+    view_state: &ViewState,
+) -> Result<FrameUploadSources, SystemError> {
     let mut scratch = Vec::new();
     let (present, fresh_tight) =
         resolve_view_tiles_for_paint(world, style, view_state, &mut scratch)?;
@@ -58,7 +79,7 @@ pub(super) fn frame_sources_and_painted_mut(
     world: &mut World,
     style: &Style,
     view_state: &ViewState,
-) -> Result<FrameSourcesAndPainted, SystemError> {
+) -> Result<FrameUploadSources, SystemError> {
     let mut scratch = world
         .resources
         .get_mut::<FrameSourcesCache>()
@@ -97,7 +118,7 @@ fn compute_frame_sources_with_tiles(
     world: &World,
     style: &Style,
     view_tiles: Option<&[WorldTileCoords]>,
-) -> Result<FrameSourcesAndPainted, SystemError> {
+) -> Result<FrameUploadSources, SystemError> {
     let Some(view_tile_sources) = world.resources.get::<ViewTileSources>() else {
         return Err(SystemError::Dependencies);
     };
@@ -106,24 +127,46 @@ fn compute_frame_sources_with_tiles(
         view_tile_sources.of_kind(TileKind::Vector),
         crate::vector::UploadedVectorGeometry::for_world(world),
     );
-    let (source_tiles, mut painted_tiles, uncovered, all_view_painted) = if style.terrain.is_some()
-    {
+    if style.terrain.is_some() {
         let (src, uncov) = terrain_sources(world, style);
-        let painted = src.clone();
-        (src, painted, uncov, false)
-    } else {
-        partition_non_terrain_sources(world, view_tiles, &cpu_vector, &gpu_vector)
-    };
+        let mut painted = src.clone();
+        if let Some(tiles) = view_tiles {
+            append_missing_gpu_stand_ins(world, tiles, &gpu_vector, &mut painted);
+        }
+        let painted_arc: Arc<[WorldTileCoords]> = Arc::from(painted);
+        return Ok(FrameUploadSources {
+            source_tiles: Arc::from(src),
+            painted_tiles: Arc::clone(&painted_arc),
+            active_painted_tiles: painted_arc,
+            uncovered: Arc::new(uncov),
+        });
+    }
+    let (source_tiles, mut active_painted, retained_only, uncovered, all_view_painted) =
+        partition_non_terrain_sources(world, view_tiles, &cpu_vector, &gpu_vector);
     if !all_view_painted {
         if let Some(tiles) = view_tiles {
-            append_missing_gpu_stand_ins(world, tiles, &gpu_vector, &mut painted_tiles);
+            append_missing_gpu_stand_ins(world, tiles, &gpu_vector, &mut active_painted);
         }
     }
-    Ok((
-        Arc::from(source_tiles),
-        Arc::from(painted_tiles),
-        Arc::new(uncovered),
-    ))
+    let active_arc: Arc<[WorldTileCoords]> = Arc::from(active_painted);
+    let painted_arc = if retained_only.is_empty() {
+        Arc::clone(&active_arc)
+    } else {
+        let mut painted = Vec::with_capacity(active_arc.len() + retained_only.len());
+        painted.extend_from_slice(&active_arc);
+        for c in retained_only {
+            if !active_arc.contains(&c) {
+                painted.push(c);
+            }
+        }
+        Arc::from(painted)
+    };
+    Ok(FrameUploadSources {
+        source_tiles: Arc::from(source_tiles),
+        painted_tiles: painted_arc,
+        active_painted_tiles: active_arc,
+        uncovered: Arc::new(uncovered),
+    })
 }
 
 fn resolve_cached_wrapped_tiles(
@@ -248,17 +291,20 @@ struct NonTerrainPartition {
     covered_targets: Vec<WorldTileCoords>,
 }
 
+type NonTerrainPartitionResult = (
+    Vec<WorldTileCoords>,
+    Vec<WorldTileCoords>,
+    Vec<WorldTileCoords>,
+    FxHashSet<WorldTileCoords>,
+    bool,
+);
+
 fn partition_non_terrain_sources(
     world: &World,
     view_tiles: Option<&[WorldTileCoords]>,
     cpu_vector: &impl HasTile,
     gpu_vector: &impl HasTile,
-) -> (
-    Vec<WorldTileCoords>,
-    Vec<WorldTileCoords>,
-    FxHashSet<WorldTileCoords>,
-    bool,
-) {
+) -> NonTerrainPartitionResult {
     let mut part = NonTerrainPartition::default();
     if let Some(tiles) = view_tiles {
         collect_view_tile_sources(world, tiles, cpu_vector, gpu_vector, &mut part);
@@ -276,17 +322,25 @@ fn partition_non_terrain_sources(
             part.covered_list.push(coords);
         }
     }
-    let coarse_uncovered = collect_fallback_sources(world, cpu_vector, gpu_vector, &mut part);
-    let mut painted = Vec::with_capacity(
+    let (coarse_uncovered, retained_only) =
+        collect_fallback_sources(world, cpu_vector, gpu_vector, &mut part);
+    let mut active_painted = Vec::with_capacity(
         coarse_uncovered.len() + part.uncovered_list.len() + part.covered_list.len(),
     );
-    painted.extend_from_slice(&coarse_uncovered);
-    painted.extend_from_slice(&part.uncovered_list);
-    painted.extend_from_slice(&part.covered_list);
+    active_painted.extend_from_slice(&coarse_uncovered);
+    active_painted.extend_from_slice(&part.uncovered_list);
+    active_painted.extend_from_slice(&part.covered_list);
     let mut upload_order = coarse_uncovered;
     upload_order.extend(part.uncovered_list);
     upload_order.extend(part.covered_list);
-    (upload_order, painted, part.uncovered_set, all_view_painted)
+    upload_order.extend_from_slice(&retained_only);
+    (
+        upload_order,
+        active_painted,
+        retained_only,
+        part.uncovered_set,
+        all_view_painted,
+    )
 }
 
 fn collect_view_tile_sources(
@@ -341,10 +395,11 @@ fn collect_fallback_sources(
     cpu_vector: &impl HasTile,
     gpu_vector: &impl HasTile,
     part: &mut NonTerrainPartition,
-) -> Vec<WorldTileCoords> {
+) -> (Vec<WorldTileCoords>, Vec<WorldTileCoords>) {
     let mut coarse_uncovered = Vec::new();
+    let mut retained_only = Vec::new();
     let Some(fallbacks) = world.resources.get::<VectorFallbackTiles>() else {
-        return coarse_uncovered;
+        return (coarse_uncovered, retained_only);
     };
     for &coords in &fallbacks.0 {
         let covers_uncovered = !part.uncovered_targets.is_empty()
@@ -363,10 +418,10 @@ fn collect_fallback_sources(
                 coarse_uncovered.push(coords);
             }
         } else if part.seen.insert(coords) {
-            part.covered_list.push(coords);
+            retained_only.push(coords);
         }
     }
-    coarse_uncovered
+    (coarse_uncovered, retained_only)
 }
 
 fn append_missing_gpu_stand_ins(
@@ -397,60 +452,6 @@ fn append_missing_gpu_stand_ins(
             }
         }
     }
-}
-
-pub(super) fn terrain_sources(
-    world: &World,
-    style: &Style,
-) -> (Vec<WorldTileCoords>, FxHashSet<WorldTileCoords>) {
-    let max_zoom = source_max_zoom(style, TileKind::Vector);
-    let terrain = match world.resources.get::<Eventually<TerrainResources>>() {
-        Some(Initialized(t)) => Some(t),
-        _ => None,
-    };
-    let targets = std::iter::once(WorldTileCoords::default())
-        .chain(
-            world
-                .resources
-                .get::<DrapeRequests>()
-                .into_iter()
-                .flat_map(|requests| requests.0.iter().copied()),
-        )
-        .chain(
-            world
-                .resources
-                .get::<crate::render::eye_covering::SlotResidencyFloor>()
-                .into_iter()
-                .flat_map(|floor| floor.retained_drapes.iter().copied()),
-        );
-    let selected = select_targets(targets, world, &[]);
-    let mut seen = FxHashSet::default();
-    let mut uncovered_list = Vec::new();
-    let mut covered_list = Vec::new();
-    let mut uncovered_set = FxHashSet::default();
-    for (target, shapes) in selected {
-        let is_uncovered = terrain
-            .is_some_and(|t| t.drape_texture(target).is_none() && !has_present_ancestor(target, t));
-        for source in shapes
-            .into_iter()
-            .filter(|shape| shape.raster_source.is_none())
-            .map(|shape| shape.coords)
-            .chain(std::iter::once(clamp_to_max_zoom(target, max_zoom)))
-        {
-            if is_uncovered {
-                uncovered_set.insert(source);
-            }
-            if seen.insert(source) {
-                if is_uncovered {
-                    uncovered_list.push(source);
-                } else {
-                    covered_list.push(source);
-                }
-            }
-        }
-    }
-    uncovered_list.extend(covered_list);
-    (uncovered_list, uncovered_set)
 }
 
 #[cfg(test)]

@@ -23,6 +23,17 @@ pub fn pack_dynamic_circle_radii(radius: f32, radius_next: f32) -> FillShaderFea
     }
 }
 
+/// Packs identical `[radius, radius]` screen-pixel radii with a single f16 conversion.
+#[inline]
+pub fn pack_dynamic_circle_radius_uniform(radius: f32) -> FillShaderFeatureMetadata {
+    let half = u32::from(f32_to_f16_bits(radius.max(0.0)));
+    let packed = half | (half << 16);
+    let non_zero = if packed == 0 { 0x8000_0000 } else { packed };
+    FillShaderFeatureMetadata {
+        color: non_zero.to_le_bytes(),
+    }
+}
+
 /// The circle layer shader pair; the fragment output matches `format`.
 pub struct CircleShader {
     /// Colour format of the render target the circles draw into.

@@ -6,13 +6,42 @@ use super::super::{
     EvalCache,
 };
 use crate::{
-    render::shaders::{pack_dynamic_circle_radii, FillShaderFeatureMetadata},
-    style::{circle::CirclePaint, expression::FeatureProperties, StyleLayerId},
+    render::shaders::{
+        pack_dynamic_circle_radii, pack_dynamic_circle_radius_uniform, FillShaderFeatureMetadata,
+    },
+    style::{
+        circle::CirclePaint, expression::FeatureProperties, layer::StyleProperty, StyleLayerId,
+    },
 };
 
 #[inline]
 fn col_index(keys: &[String], key: &str) -> Option<usize> {
     keys.iter().position(|k| k == key)
+}
+
+#[inline]
+fn circle_paint_is_zoom_constant(paint: &CirclePaint) -> bool {
+    paint
+        .circle_color
+        .as_ref()
+        .is_none_or(StyleProperty::is_zoom_constant)
+        && paint
+            .circle_opacity
+            .as_ref()
+            .is_none_or(StyleProperty::is_zoom_constant)
+        && paint
+            .circle_radius
+            .as_ref()
+            .is_none_or(StyleProperty::is_zoom_constant)
+}
+
+#[inline]
+fn eval_zoom_key(paint: &CirclePaint, tile_zoom: f64) -> u64 {
+    if circle_paint_is_zoom_constant(paint) {
+        0_u64
+    } else {
+        tile_zoom.to_bits()
+    }
 }
 
 pub(crate) struct CompiledCircleRamps {
@@ -91,7 +120,7 @@ impl CompiledCircleRamps {
             .flatten();
         Self {
             layer_id: style_layer_id,
-            tile_zoom_bits: tile_zoom.to_bits(),
+            tile_zoom_bits: eval_zoom_key(circle_paint, tile_zoom),
             use_fast,
             radius_const,
             radius_ramp,
@@ -130,6 +159,22 @@ fn eval_fast_pairs(
         ramps.radius_ramp.as_ref(),
         ramps.radius_col,
     ) {
+        if c_col == r_col {
+            for row in &fast_columns.values {
+                let raw = row.get(c_col).copied().flatten();
+                let mut rgba = c_ramp.eval_f64(raw).unwrap_or([0.0, 0.0, 0.0, 1.0]);
+                rgba[3] *= o_const;
+                let r0 = r_ramp
+                    .eval_f64(raw)
+                    .unwrap_or(CirclePaint::DEFAULT_RADIUS)
+                    .max(0.0);
+                pairs.push([
+                    FillShaderFeatureMetadata::from_rgba(rgba),
+                    pack_dynamic_circle_radius_uniform(r0),
+                ]);
+            }
+            return;
+        }
         for row in &fast_columns.values {
             let mut rgba = c_ramp
                 .eval_f64(row.get(c_col).copied().flatten())
@@ -141,11 +186,19 @@ fn eval_fast_pairs(
                 .max(0.0);
             pairs.push([
                 FillShaderFeatureMetadata::from_rgba(rgba),
-                pack_dynamic_circle_radii(r0, r0),
+                pack_dynamic_circle_radius_uniform(r0),
             ]);
         }
         return;
     }
+    eval_fast_general_pairs(pairs, ramps, fast_columns);
+}
+
+fn eval_fast_general_pairs(
+    pairs: &mut Vec<[FillShaderFeatureMetadata; 2]>,
+    ramps: &CompiledCircleRamps,
+    fast_columns: &FastColumnStore,
+) {
     for row in &fast_columns.values {
         let mut rgba = ramps.color_const.unwrap_or_else(|| {
             ramps
@@ -171,22 +224,19 @@ fn eval_fast_pairs(
                 .clamp(0.0, 1.0)
         });
         rgba[3] *= opacity;
-        let radius_pair = if let Some(r) = ramps.radius_const {
-            (r, r)
-        } else {
-            let r0 = ramps
+        let radius = ramps.radius_const.unwrap_or_else(|| {
+            ramps
                 .radius_ramp
                 .as_ref()
                 .and_then(|r| {
                     r.eval_f64(ramps.radius_col.and_then(|c| row.get(c).copied().flatten()))
                 })
                 .unwrap_or(CirclePaint::DEFAULT_RADIUS)
-                .max(0.0);
-            (r0, r0)
-        };
+                .max(0.0)
+        });
         pairs.push([
             FillShaderFeatureMetadata::from_rgba(rgba),
-            pack_dynamic_circle_radii(radius_pair.0, radius_pair.1),
+            pack_dynamic_circle_radius_uniform(radius),
         ]);
     }
 }
@@ -224,8 +274,8 @@ fn eval_slow_pairs(
                 .clamp(0.0, 1.0)
         });
         rgba[3] *= opacity;
-        let (radius, radius_next) = if let Some(r) = ramps.radius_const {
-            (r, r)
+        let packed_radius = if let Some(r) = ramps.radius_const {
+            pack_dynamic_circle_radius_uniform(r)
         } else {
             let r0 = ramps
                 .radius_ramp
@@ -234,29 +284,26 @@ fn eval_slow_pairs(
                 .or_else(|| radius_prop.evaluate_for(props, tile_zoom))
                 .unwrap_or(CirclePaint::DEFAULT_RADIUS)
                 .max(0.0);
-            let r1 = if ramps.radius_zoom_const {
-                r0
+            if ramps.radius_zoom_const {
+                pack_dynamic_circle_radius_uniform(r0)
             } else {
-                radius_prop
+                let r1 = radius_prop
                     .evaluate_for(props, tile_zoom + 1.0)
                     .unwrap_or(CirclePaint::DEFAULT_RADIUS)
-                    .max(0.0)
-            };
-            (r0, r1)
+                    .max(0.0);
+                pack_dynamic_circle_radii(r0, r1)
+            }
         };
-        pairs.push([
-            FillShaderFeatureMetadata::from_rgba(rgba),
-            pack_dynamic_circle_radii(radius, radius_next),
-        ]);
+        pairs.push([FillShaderFeatureMetadata::from_rgba(rgba), packed_radius]);
     }
 }
 
 fn populate_eval_cache(cache: &mut EvalCache, input: &CircleEvalInput<'_>, use_fast: bool) {
-    let zoom_bits = input.tile_zoom.to_bits();
+    let zoom_key = eval_zoom_key(input.circle_paint, input.tile_zoom);
     let prev_key = cache.key;
     if prev_key.is_some_and(|(_, old_layer, old_zoom)| {
         old_layer == input.style_layer_id
-            && old_zoom == zoom_bits
+            && old_zoom == zoom_key
             && cache.pairs.len() == input.all_props.len()
     }) {
         std::mem::swap(&mut cache.pairs, &mut cache.prev_pairs);
@@ -268,9 +315,7 @@ fn populate_eval_cache(cache: &mut EvalCache, input: &CircleEvalInput<'_>, use_f
     cache.pairs.clear();
     cache.pairs.reserve(input.all_props.len());
     let needs_compile = cache.ramps.as_ref().is_none_or(|r| {
-        r.layer_id != input.style_layer_id
-            || r.tile_zoom_bits != zoom_bits
-            || r.use_fast != use_fast
+        r.layer_id != input.style_layer_id || r.tile_zoom_bits != zoom_key || r.use_fast != use_fast
     });
     if needs_compile {
         cache.ramps = Some(CompiledCircleRamps::compile(
@@ -282,6 +327,7 @@ fn populate_eval_cache(cache: &mut EvalCache, input: &CircleEvalInput<'_>, use_f
         ));
     }
     let Some(ramps) = cache.ramps.as_ref() else {
+        cache.any_changed = true;
         return;
     };
     if use_fast {
@@ -295,7 +341,8 @@ fn populate_eval_cache(cache: &mut EvalCache, input: &CircleEvalInput<'_>, use_f
             input.tile_zoom,
         );
     }
-    cache.key = Some((input.seq, input.style_layer_id, zoom_bits));
+    cache.any_changed = cache.prev_key.is_none() || cache.pairs != cache.prev_pairs;
+    cache.key = Some((input.seq, input.style_layer_id, zoom_key));
 }
 
 pub(super) fn populate_and_check_unchanged(
@@ -305,15 +352,19 @@ pub(super) fn populate_and_check_unchanged(
 ) -> bool {
     let use_fast = input.fast_columns.active_seq == Some(input.seq)
         && input.fast_columns.values.len() == input.all_props.len();
-    let cache_key = (input.seq, input.style_layer_id, input.tile_zoom.to_bits());
+    let zoom_key = eval_zoom_key(input.circle_paint, input.tile_zoom);
+    let cache_key = (input.seq, input.style_layer_id, zoom_key);
     if cache.key != Some(cache_key) || cache.pairs.len() != input.all_props.len() {
         populate_eval_cache(cache, input, use_fast);
     }
     let Some(prev_seq) = prev_applied_seq else {
         return false;
     };
-    if cache.prev_key != Some((prev_seq, input.style_layer_id, input.tile_zoom.to_bits())) {
+    if cache.prev_key != Some((prev_seq, input.style_layer_id, zoom_key)) {
         return false;
+    }
+    if !cache.any_changed {
+        return true;
     }
     input.hits.iter().all(|&feat_idx| {
         cache.pairs.get(feat_idx as usize) == cache.prev_pairs.get(feat_idx as usize)
@@ -332,7 +383,8 @@ pub(super) fn evaluate_circle_metadata_into(
     }
     let use_fast = input.fast_columns.active_seq == Some(input.seq)
         && input.fast_columns.values.len() == input.all_props.len();
-    let cache_key = (input.seq, input.style_layer_id, input.tile_zoom.to_bits());
+    let zoom_key = eval_zoom_key(input.circle_paint, input.tile_zoom);
+    let cache_key = (input.seq, input.style_layer_id, zoom_key);
     if cache.key != Some(cache_key) || cache.pairs.len() != input.all_props.len() {
         populate_eval_cache(cache, &input, use_fast);
     }

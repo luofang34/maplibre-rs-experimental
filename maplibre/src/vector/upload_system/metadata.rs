@@ -259,7 +259,24 @@ pub(super) fn paint_metadata_depends_on_zoom(paint: Option<&LayerPaint>) -> bool
                 .flatten()
                 .any(|v| !v.is_zoom_constant())
         }
-        Some(LayerPaint::Circle(_) | LayerPaint::Heatmap(_)) => true,
+        Some(LayerPaint::Heatmap(_)) => true,
+        Some(LayerPaint::Circle(p)) => {
+            p.circle_translate.is_some()
+                || p.circle_color
+                    .as_ref()
+                    .is_some_and(|v| !v.is_zoom_constant())
+                || p.circle_stroke_color
+                    .as_ref()
+                    .is_some_and(|v| !v.is_zoom_constant())
+                || [
+                    p.circle_opacity.as_ref(),
+                    p.circle_stroke_opacity.as_ref(),
+                    p.circle_blur.as_ref(),
+                ]
+                .into_iter()
+                .flatten()
+                .any(|v| !v.is_zoom_constant())
+        }
         Some(LayerPaint::FillExtrusion(p)) => {
             p.fill_extrusion_translate.is_some()
                 || p.fill_extrusion_color

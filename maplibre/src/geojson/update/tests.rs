@@ -321,8 +321,16 @@ fn stationary_point_bytes_update_skips_generation_and_flushes_cleanly() {
 fn pack_dynamic_circle_radii_encodes_nonzero_zero_sentinel() {
     let zero = crate::render::shaders::pack_dynamic_circle_radii(0.0, 0.0);
     assert_eq!(u32::from_le_bytes(zero.color), 0x8000_0000);
+    assert_eq!(
+        u32::from_le_bytes(crate::render::shaders::pack_dynamic_circle_radius_uniform(0.0).color),
+        0x8000_0000
+    );
     let normal = crate::render::shaders::pack_dynamic_circle_radii(4.0, 13.0);
     let raw = u32::from_le_bytes(normal.color);
     assert_ne!(raw, 0);
     assert_ne!(raw, 0x8000_0000);
+    assert_eq!(
+        crate::render::shaders::pack_dynamic_circle_radius_uniform(4.0).color,
+        crate::render::shaders::pack_dynamic_circle_radii(4.0, 4.0).color
+    );
 }

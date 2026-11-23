@@ -6,7 +6,7 @@ mod headless {
     use crate::{
         coords::{LatLon, WorldCoords, Zoom, ZoomLevel},
         headless::create_headless_renderer,
-        render::ShaderVertex,
+        render::{eventually::Eventually, ShaderVertex},
         tcs::tiles::Tiles,
         vector::{
             tessellation::OverAlignedVertexBuffer, AvailableVectorLayerBucket, VectorBufferPool,
@@ -177,11 +177,13 @@ mod headless {
             .resources
             .insert(VectorFallbackTiles(vec![unrelated_z11, coarse_z11]));
 
-        let (source_tiles, painted, uncovered) =
-            frame_sources_and_painted(&world, &style, &view_z14).expect("sources");
-        assert_eq!(source_tiles.first(), Some(&coarse_z11));
-        assert!(uncovered.contains(&coarse_z11));
-        assert!(painted.contains(&coarse_z11));
-        assert!(!uncovered.contains(&unrelated_z11));
+        let resolved = frame_upload_sources(&world, &style, &view_z14).expect("sources");
+        assert_eq!(resolved.source_tiles.first(), Some(&coarse_z11));
+        assert!(resolved.uncovered.contains(&coarse_z11));
+        assert!(resolved.painted_tiles.contains(&coarse_z11));
+        assert!(resolved.active_painted_tiles.contains(&coarse_z11));
+        assert!(resolved.painted_tiles.contains(&unrelated_z11));
+        assert!(!resolved.active_painted_tiles.contains(&unrelated_z11));
+        assert!(!resolved.uncovered.contains(&unrelated_z11));
     }
 }

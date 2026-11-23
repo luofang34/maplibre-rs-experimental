@@ -54,6 +54,7 @@ pub(super) struct EvalCache {
     pub pairs: Vec<[FillShaderFeatureMetadata; 2]>,
     pub prev_key: Option<(u64, StyleLayerId, u64)>,
     pub prev_pairs: Vec<[FillShaderFeatureMetadata; 2]>,
+    pub any_changed: bool,
 }
 
 type SlotCacheEntry = Option<(usize, u8, u64, usize)>;
