@@ -115,12 +115,15 @@ impl GlobeLayerUniformPool {
             self.last_bytes.clear();
         }
         let stride = self.stride as usize;
+        let trailing_pad = stride.saturating_sub(UNIFORM_SIZE);
         self.staged.clear();
-        self.staged.resize(needed * stride, 0);
-        for (i, meta) in layers.iter().enumerate() {
+        self.staged.reserve(needed * stride);
+        for meta in layers {
             let uniform = GlobeBackgroundUniform::from_layer(meta);
-            let start = i * stride;
-            self.staged[start..start + UNIFORM_SIZE].copy_from_slice(bytemuck::bytes_of(&uniform));
+            self.staged.extend_from_slice(bytemuck::bytes_of(&uniform));
+            if trailing_pad > 0 {
+                self.staged.resize(self.staged.len() + trailing_pad, 0);
+            }
         }
         if self.last_bytes != self.staged {
             queue.write_buffer(&self.buffer, 0, &self.staged);

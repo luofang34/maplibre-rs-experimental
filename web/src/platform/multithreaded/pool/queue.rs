@@ -118,7 +118,10 @@ impl SharedWorkQueue {
         if inner.ready.len() < worker_count {
             inner.ready.resize(worker_count, false);
         }
-        let any_ready = inner.ready[..worker_count].iter().any(|&r| r);
+        let any_ready = inner
+            .ready
+            .get(..worker_count)
+            .is_some_and(|ready| ready.iter().any(|&r| r));
         let start = if any_ready {
             let s = inner.next_turn % worker_count;
             inner.next_turn = inner.next_turn.wrapping_add(1);
