@@ -244,7 +244,7 @@ impl AssetCache {
             let data = fetch_tile_raw(client, coords, source).await?;
             let slot = acquire_decode_slot(claim).await;
             #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
-            let _heavy = crate::vector::request_system::acquire_heavy_tile_slot().await;
+            let _dem = crate::vector::request_system::acquire_dem_tile_slot().await;
             let rgba = decode_rgba(data).await?;
             let sample_metres = dem::sample_metres(*coords, rgba.width(), circumference_meters);
             let tile = decode_dem(Arc::new(rgba), unpack, sample_metres).await?;

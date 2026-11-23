@@ -145,11 +145,28 @@ type TileSources = (
     Option<WorldTileCoords>,
 );
 
+#[derive(Default)]
 pub(super) struct PreparedTerrain {
     pub(super) uniforms: Vec<TerrainTileUniforms>,
     pub(super) sources: Vec<TileSources>,
     pub(super) dem_ids: Vec<Option<u64>>,
     pub(super) globe_bases: Vec<Option<Matrix4<f64>>>,
+}
+
+impl PreparedTerrain {
+    pub(super) fn clear(&mut self) {
+        self.uniforms.clear();
+        self.sources.clear();
+        self.dem_ids.clear();
+        self.globe_bases.clear();
+    }
+
+    fn reserve(&mut self, additional: usize) {
+        self.uniforms.reserve(additional);
+        self.sources.reserve(additional);
+        self.dem_ids.reserve(additional);
+        self.globe_bases.reserve(additional);
+    }
 }
 
 fn frame_globe_camera(
@@ -243,12 +260,13 @@ pub(super) fn surface_context<'a>(
     }
 }
 
-pub(super) fn prepare_tiles(
+pub(super) fn prepare_tiles_into(
+    out: &mut PreparedTerrain,
     targets: (&[WorldTileCoords], &[Option<WorldTileCoords>]),
     terrain: &TerrainResources,
     tiles: &crate::tcs::tiles::Tiles,
     ctx: SurfaceContext<'_>,
-) -> PreparedTerrain {
+) {
     let (coords_list, drape_sources) = targets;
     let zoom = ctx.view_state.zoom();
     let fog = terrain_fog_with_camera(ctx.style, ctx.view_state, ctx.globe_camera.as_ref());
@@ -261,10 +279,8 @@ pub(super) fn prepare_tiles(
         // A skirt of no length folds onto the tile edge and covers no pixel.
         crate::terrain::TerrainSkirts::None => 0.0,
     };
-    let mut uniforms = Vec::with_capacity(coords_list.len());
-    let mut sources = Vec::with_capacity(coords_list.len());
-    let mut dem_ids = Vec::with_capacity(coords_list.len());
-    let mut globe_bases = Vec::with_capacity(coords_list.len());
+    out.clear();
+    out.reserve(coords_list.len());
     for (&coords, &drape_source) in coords_list.iter().zip(drape_sources) {
         if let Some((block, tile_source, dem_id, basis)) = prepare_single_tile(
             coords,
@@ -274,17 +290,11 @@ pub(super) fn prepare_tiles(
             &ctx,
             (&ctx.gpu_view_projection, skirt_length as f32, &fog),
         ) {
-            uniforms.push(block);
-            sources.push(tile_source);
-            dem_ids.push(dem_id);
-            globe_bases.push(basis);
+            out.uniforms.push(block);
+            out.sources.push(tile_source);
+            out.dem_ids.push(dem_id);
+            out.globe_bases.push(basis);
         }
-    }
-    PreparedTerrain {
-        uniforms,
-        sources,
-        dem_ids,
-        globe_bases,
     }
 }
 
@@ -364,7 +374,7 @@ pub(super) fn with_world_copies(
     copies: Option<&rustc_hash::FxHashMap<WorldTileCoords, Vec<i32>>>,
     view: &ViewState,
 ) {
-    let Some(copies) = copies else {
+    let Some(copies) = copies.filter(|copies| !copies.is_empty()) else {
         return;
     };
     let projection = view.gpu_view_projection();

@@ -54,13 +54,21 @@ impl DrapeableLayersCache {
 }
 
 pub(super) fn hide_draped_layers(world: &mut World, style: &Style) {
-    let mut cache = world
+    if world
         .resources
-        .remove::<DrapeableLayersCache>()
-        .unwrap_or_default();
-    let drapeable = cache.layers(style);
-    if let Some(layer_phase) = world.resources.get_mut::<RenderPhase<LayerItem>>() {
+        .get::<RenderPhase<LayerItem>>()
+        .is_none_or(|phase| phase.items().is_empty())
+    {
+        return;
+    }
+    if world.resources.get::<DrapeableLayersCache>().is_none() {
+        world.resources.insert(DrapeableLayersCache::default());
+    }
+    if let Some((cache, layer_phase)) = world
+        .resources
+        .query_mut::<(&mut DrapeableLayersCache, &mut RenderPhase<LayerItem>)>()
+    {
+        let drapeable = cache.layers(style);
         layer_phase.retain(|item| !drapeable.contains(&item.style_layer));
     }
-    world.resources.insert(cache);
 }

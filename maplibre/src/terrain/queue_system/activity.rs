@@ -159,11 +159,20 @@ impl Window {
         self.frames += 1;
         self.targets += frame.specs.len();
         self.budget += frame.budget.0;
-        let targets: Vec<WorldTileCoords> = frame.specs.iter().map(|spec| spec.coords).collect();
+        let targets_changed = self.last_targets.len() != frame.specs.len()
+            || self
+                .last_targets
+                .iter()
+                .zip(frame.specs)
+                .any(|(prev, spec)| *prev != spec.coords);
         if self.frames > 1 || !self.last_targets.is_empty() {
-            self.target_set_changes += u32::from(targets != self.last_targets);
+            self.target_set_changes += u32::from(targets_changed);
         }
-        self.last_targets = targets;
+        if targets_changed {
+            self.last_targets.clear();
+            self.last_targets
+                .extend(frame.specs.iter().map(|spec| spec.coords));
+        }
         let paint_zoom = frame.paint_zoom.to_bits();
         self.paint_zoom_changes +=
             u32::from(self.last_paint_zoom.is_some_and(|last| last != paint_zoom));

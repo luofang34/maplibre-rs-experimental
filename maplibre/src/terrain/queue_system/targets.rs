@@ -2,7 +2,8 @@
 use super::*;
 use crate::{
     render::{
-        eye_covering::drawn_covering, memory_budget::MemoryBudget,
+        eye_covering::{ensure_drawn_covering_for_raster, SharedCovering},
+        memory_budget::MemoryBudget,
         tile_view_pattern::RasterCoverings as SliceRasterCoverings,
     },
     terrain::drape_targets::{
@@ -36,17 +37,10 @@ pub(crate) fn target_specs_arc(
     view_state: &ViewState,
     world: &mut World,
 ) -> Result<std::sync::Arc<Vec<TargetSpec>>, SystemError> {
-    let zoom = view_state.zoom();
-    let (_, raster_coverings) =
-        drawn_covering(style, view_state, world, zoom.zoom_level(DEFAULT_TILE_SIZE)).map_err(
-            |error| {
-                tracing::error!(%error, "unable to select terrain tiles");
-                SystemError::Setup
-            },
-        )?;
     let Some(dem) = crate::terrain::source::dem_source(style) else {
         return Ok(std::sync::Arc::new(Vec::new()));
     };
+    let owned_raster = resolve_frame_raster(style, view_state, world)?;
     let Some(view_region) = crate::terrain::coverage::take_or_compute_tight_terrain_region(
         style,
         view_state,
@@ -70,34 +64,86 @@ pub(crate) fn target_specs_arc(
         uniform_globe || arrivals_over_standin,
     );
     let mut digests = build_frame_digests(style, view_state, world, &tiles, &fresh_prefetch);
-    let raster_coverings_digest = super::spec_cache::raster_coverings_digest(&raster_coverings);
     let loose_raster_digest = prefetch_plan.as_ref().map_or(0, |(_, loose)| {
         super::spec_cache::raster_coverings_digest(loose)
     });
-    let specs = build_or_reuse_specs(
-        style,
-        view_state.style_zoom().value(),
-        world,
-        (tiles, fresh_prefetch, &raster_coverings, prefetch_plan),
-        (
-            arrivals_over_standin,
-            uniform_globe,
-            raster_coverings_digest,
-            loose_raster_digest,
-        ),
-        &mut digests,
-    );
+    let (specs, pending) = {
+        let raster_coverings: &SliceRasterCoverings = match &owned_raster {
+            Some(raster) => raster,
+            None => world
+                .resources
+                .get::<SharedCovering>()
+                .map_or(&[][..], SharedCovering::raster),
+        };
+        let raster_coverings_digest = super::spec_cache::raster_coverings_digest(raster_coverings);
+        build_or_reuse_specs(
+            style,
+            view_state.style_zoom().value(),
+            world,
+            (tiles, fresh_prefetch, raster_coverings, prefetch_plan),
+            (
+                arrivals_over_standin,
+                uniform_globe,
+                raster_coverings_digest,
+                loose_raster_digest,
+            ),
+            &mut digests,
+        )
+    };
+    commit_spec_cache(world, &specs, pending, digests);
+    Ok(specs)
+}
+
+fn resolve_frame_raster(
+    style: &Style,
+    view_state: &ViewState,
+    world: &mut World,
+) -> Result<Option<crate::render::eye_covering::RasterCoverings>, SystemError> {
+    if !style.cached_has_any_raster_type(&crate::io::tile_sources::RASTER_LAYER_TYPES) {
+        return Ok(Some(Vec::new()));
+    }
+    let zoom = view_state.zoom();
+    ensure_drawn_covering_for_raster(style, view_state, world, zoom.zoom_level(DEFAULT_TILE_SIZE))
+        .map_err(|error| {
+            tracing::error!(%error, "unable to select terrain tiles");
+            SystemError::Setup
+        })
+}
+
+fn commit_spec_cache(
+    world: &mut World,
+    specs: &std::sync::Arc<Vec<TargetSpec>>,
+    pending: Option<PendingSpecCommit>,
+    digests: super::spec_cache::FrameTerrainDigests,
+) {
+    if let Some((prefetch_drapes, specs_key)) = pending {
+        if !prefetch_drapes.is_empty() {
+            world
+                .resources
+                .insert(PrefetchDrapes(prefetch_drapes.clone()));
+        }
+        if let Some(key) = specs_key {
+            world
+                .resources
+                .get_or_init_mut::<super::spec_cache::DrapePrepareCache>()
+                .store_specs(key, std::sync::Arc::clone(specs), prefetch_drapes);
+        }
+    }
     world
         .resources
         .get_or_init_mut::<super::spec_cache::DrapePrepareCache>()
         .store_frame_digests(digests);
-    Ok(specs)
 }
+
+type PendingSpecCommit = (
+    rustc_hash::FxHashSet<WorldTileCoords>,
+    Option<super::spec_cache::TargetSpecsKey>,
+);
 
 fn build_or_reuse_specs(
     style: &Style,
     style_zoom: f64,
-    world: &mut World,
+    world: &World,
     (tiles, fresh_prefetch, raster_coverings, prefetch_plan): (
         Vec<WorldTileCoords>,
         Vec<WorldTileCoords>,
@@ -106,7 +152,7 @@ fn build_or_reuse_specs(
     ),
     scalars: (bool, bool, u64, u64),
     digests: &mut super::spec_cache::FrameTerrainDigests,
-) -> std::sync::Arc<Vec<TargetSpec>> {
+) -> (std::sync::Arc<Vec<TargetSpec>>, Option<PendingSpecCommit>) {
     use super::spec_cache;
     let (arrivals_over_standin, uniform_globe, raster_coverings_digest, loose_raster_digest) =
         scalars;
@@ -116,27 +162,19 @@ fn build_or_reuse_specs(
         .and_then(|cache| cache.get_specs_matching(&tiles, &fresh_prefetch, scalars, digests))
     {
         digests.specs_ptr = std::sync::Arc::as_ptr(&cached_specs) as usize;
-        if !cached_prefetch.is_empty() {
-            world
-                .resources
-                .insert(PrefetchDrapes(cached_prefetch.clone()));
-        }
-        return cached_specs;
+        let pending = (!cached_prefetch.is_empty()).then(|| (cached_prefetch.clone(), None));
+        return (cached_specs, pending);
     }
     let arrivals = if arrivals_over_standin {
         Arrivals::OverStandIn
     } else {
         Arrivals::Together
     };
-    let raster_vec = raster_coverings.to_vec();
-    let mut targets = select_targets_as(tiles.iter().copied(), world, &raster_vec, arrivals);
+    let mut targets = select_targets_as(tiles.iter().copied(), world, raster_coverings, arrivals);
     let mut prefetch_drapes = rustc_hash::FxHashSet::default();
     if let Some((fresh, loose_raster)) = prefetch_plan {
         if !fresh.is_empty() {
             prefetch_drapes = fresh.iter().copied().collect();
-            world
-                .resources
-                .insert(PrefetchDrapes(prefetch_drapes.clone()));
             targets.extend(select_targets(fresh.into_iter(), world, &loose_raster));
         }
     }
@@ -157,11 +195,7 @@ fn build_or_reuse_specs(
         style_rev: digests.style_rev,
         style_vis_digest: digests.style_vis_digest,
     };
-    world
-        .resources
-        .get_or_init_mut::<spec_cache::DrapePrepareCache>()
-        .store_specs(specs_key, std::sync::Arc::clone(&specs), prefetch_drapes);
-    specs
+    (specs, Some((prefetch_drapes, Some(specs_key))))
 }
 
 fn select_frame_drape_tiles(

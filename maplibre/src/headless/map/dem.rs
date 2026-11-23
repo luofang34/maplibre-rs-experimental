@@ -40,9 +40,13 @@ impl HeadlessMap {
                 .insert(component);
             dem_coords.push(coords);
         }
+        let has_dem = !dem_coords.is_empty();
         for coords in dem_coords {
             backfill_neighbours(tiles, coords);
             crate::terrain::dem_store::sync_terrain_dem_to_store(tiles, &context.style, coords);
+        }
+        if has_dem {
+            crate::terrain::bump_dem_arrival_epoch(&mut context.world);
         }
         if let Err(error) = crate::render::frame::run_frame(&mut self.schedule, context) {
             tracing::warn!(?error, "terrain index warm-up frame failed");

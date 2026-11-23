@@ -82,6 +82,12 @@ pub fn queue_system(
             raster_resources.write_departing_paint(device, queue, &layer.id, &uniforms);
         }
     }
+    if style.terrain.is_some() && crate::terrain::source::dem_source(style).is_some() {
+        if animating_fade {
+            crate::render::frame_signals::keep_animating(world);
+        }
+        return Ok(());
+    }
 
     let mut items = Vec::new();
     let uses_globe = style.projection.as_ref().is_some_and(|specification| {

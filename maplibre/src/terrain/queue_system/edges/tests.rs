@@ -122,20 +122,20 @@ fn cover(cache: &mut EdgeCache, coverage: &[(WorldTileCoords, WorldTileCoords)],
 fn rebuilt_from_scratch(
     coverage: &[(WorldTileCoords, WorldTileCoords)],
     tiles: &Tiles,
-) -> FxHashMap<WorldTileCoords, EdgeHeights> {
+) -> FxHashMap<WorldTileCoords, Arc<EdgeHeights>> {
     let mut fresh = EdgeCache::default();
     cover(&mut fresh, coverage, tiles);
     (*fresh.samples).clone()
 }
 
 fn same(
-    a: &FxHashMap<WorldTileCoords, EdgeHeights>,
-    b: &FxHashMap<WorldTileCoords, EdgeHeights>,
+    a: &FxHashMap<WorldTileCoords, Arc<EdgeHeights>>,
+    b: &FxHashMap<WorldTileCoords, Arc<EdgeHeights>>,
 ) -> bool {
     a.len() == b.len()
         && a.iter().all(|(tile, edges)| {
             b.get(tile)
-                .is_some_and(|other| bytemuck::bytes_of(edges) == bytemuck::bytes_of(other))
+                .is_some_and(|other| bytemuck::bytes_of(&**edges) == bytemuck::bytes_of(&**other))
         })
 }
 

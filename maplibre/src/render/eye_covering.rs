@@ -188,6 +188,11 @@ impl SharedCovering {
         self.tiles.as_ref().map(|(tiles, _)| &**tiles)
     }
 
+    /// The tiles each raster source selected for the frame.
+    pub(crate) fn raster(&self) -> &[(RasterSourceId, Vec<WorldTileCoords>)] {
+        &self.raster
+    }
+
     fn region(&self) -> Option<ViewRegion> {
         self.tiles
             .as_ref()
@@ -264,35 +269,6 @@ pub(crate) fn terrain_index_key(world: &World) -> (u64, u64, usize) {
         })
 }
 
-type DrawnCoveringKey = (
-    Option<EyeInFrame>,
-    Option<ViewSlotId>,
-    u64,
-    u64,
-    ZoomLevel,
-    [[u64; 4]; 4],
-    (u64, u64, usize),
-);
-
-fn cached_drawn_covering(
-    world: &World,
-    (eye, view_slot, host_frame, style_rev, level, view_proj_bits, terrain_key): DrawnCoveringKey,
-) -> Option<(Option<ViewRegion>, RasterCoverings)> {
-    world
-        .resources
-        .get::<SharedCovering>()
-        .filter(|shared| {
-            shared.frame == eye.map(|e| e.frame)
-                && shared.view_slot == view_slot
-                && shared.host_frame == host_frame
-                && shared.style_rev == style_rev
-                && shared.level == level
-                && shared.view_proj_bits == view_proj_bits
-                && shared.terrain_key == terrain_key
-        })
-        .map(|shared| (shared.region(), shared.raster.clone()))
-}
-
 fn tight_cached_region(
     world: &World,
     host_frame: u64,
@@ -346,6 +322,154 @@ fn tight_cached_raster(
         .map(|(regions, _, _)| regions.clone())
 }
 
+struct CoveringQuery {
+    eye: Option<EyeInFrame>,
+    view_slot: Option<ViewSlotId>,
+    host_frame: u64,
+    style_rev: u64,
+    level: ZoomLevel,
+    view_proj_bits: [[u64; 4]; 4],
+    terrain_key: (u64, u64, usize),
+    multi_active: bool,
+}
+
+impl CoveringQuery {
+    fn from_frame(style: &Style, view_state: &ViewState, world: &World, level: ZoomLevel) -> Self {
+        let eye = world.resources.get::<EyeInFrame>().copied();
+        let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
+        let view_slot = world.resources.get::<CurrentViewSlot>().and_then(|s| s.0);
+        let multi_active = world
+            .resources
+            .get::<MultiViewExtractCovering>()
+            .is_some_and(|m| m.active);
+        Self {
+            eye,
+            view_slot,
+            host_frame,
+            style_rev: style.revision(),
+            level,
+            view_proj_bits: frame_view_proj_bits(world, style, view_state),
+            terrain_key: terrain_index_key(world),
+            multi_active,
+        }
+    }
+
+    fn is_primary_eye(&self) -> bool {
+        self.eye.is_none_or(|e| e.index == 0)
+    }
+
+    fn can_use_loose_cache(&self) -> bool {
+        !self.multi_active && self.is_primary_eye()
+    }
+
+    fn matches(&self, shared: &SharedCovering) -> bool {
+        if let Some(eye) = self.eye.filter(|eye| eye.index > 0) {
+            return shared.frame == Some(eye.frame);
+        }
+        shared.frame == self.eye.map(|e| e.frame)
+            && shared.view_slot == self.view_slot
+            && shared.host_frame == self.host_frame
+            && shared.style_rev == self.style_rev
+            && shared.level == self.level
+            && shared.view_proj_bits == self.view_proj_bits
+            && shared.terrain_key == self.terrain_key
+    }
+}
+
+fn matching_shared_covering<'w>(
+    world: &'w World,
+    query: &CoveringQuery,
+) -> Option<&'w SharedCovering> {
+    world
+        .resources
+        .get::<SharedCovering>()
+        .filter(|shared| query.matches(shared))
+}
+
+fn compute_covering_parts(
+    style: &Style,
+    view_state: &ViewState,
+    world: &mut World,
+    query: &CoveringQuery,
+) -> Result<
+    (
+        Option<Arc<[WorldTileCoords]>>,
+        Option<ViewRegion>,
+        RasterCoverings,
+    ),
+    ProjectionStateError,
+> {
+    let can_use_loose_cache = query.can_use_loose_cache();
+    let (cached_arc, region) =
+        match tight_cached_region(world, query.host_frame, query.level, can_use_loose_cache) {
+            Some((arc, region)) => (arc, region),
+            None => (
+                None,
+                view_region_for_projection(
+                    style,
+                    view_state,
+                    world,
+                    query.level,
+                    ViewStatePadding::Tight,
+                )?,
+            ),
+        };
+    let raster = match tight_cached_raster(
+        world,
+        query.host_frame,
+        query.terrain_key,
+        can_use_loose_cache,
+    ) {
+        Some(cached) => cached,
+        None => raster_source_regions(style, view_state, world, ViewStatePadding::Tight)?,
+    };
+    Ok((cached_arc, region, raster))
+}
+
+fn store_shared_covering(
+    world: &mut World,
+    query: &CoveringQuery,
+    cached_arc: Option<Arc<[WorldTileCoords]>>,
+    region: Option<&ViewRegion>,
+    raster: RasterCoverings,
+) {
+    world.resources.insert(SharedCovering {
+        frame: query.eye.map(|eye| eye.frame),
+        view_slot: query.view_slot,
+        host_frame: query.host_frame,
+        style_rev: query.style_rev,
+        level: query.level,
+        view_proj_bits: query.view_proj_bits,
+        terrain_key: query.terrain_key,
+        tiles: region.map(|region| {
+            let arc = cached_arc.unwrap_or_else(|| Arc::from(region.iter().collect::<Vec<_>>()));
+            (arc, region.zoom_level())
+        }),
+        raster,
+    });
+}
+
+/// Ensures [`SharedCovering`] holds the current frame's covering when it tracks the primary
+/// eye, without cloning the covering back out when `SharedCovering` is current. Returns `Some`
+/// only for a secondary eye whose covering was not already cached on [`SharedCovering`].
+pub(crate) fn ensure_drawn_covering_for_raster(
+    style: &Style,
+    view_state: &ViewState,
+    world: &mut World,
+    level: ZoomLevel,
+) -> Result<Option<RasterCoverings>, ProjectionStateError> {
+    let query = CoveringQuery::from_frame(style, view_state, world, level);
+    if matching_shared_covering(world, &query).is_some() {
+        return Ok(None);
+    }
+    let (cached_arc, region, raster) = compute_covering_parts(style, view_state, world, &query)?;
+    if query.is_primary_eye() {
+        store_shared_covering(world, &query, cached_arc, region.as_ref(), raster);
+        return Ok(None);
+    }
+    Ok(Some(raster))
+}
+
 /// The tiles the frame draws at `level`, with the raster tiles each raster source draws:
 /// the first eye's selection when the schedule runs for a later eye of the same frame, and
 /// otherwise this view's own, kept as the next frame's level history.
@@ -355,77 +479,13 @@ pub(crate) fn drawn_covering(
     world: &mut World,
     level: ZoomLevel,
 ) -> Result<(Option<ViewRegion>, RasterCoverings), ProjectionStateError> {
-    let eye = world.resources.get::<EyeInFrame>().copied();
-    if let Some(eye) = eye.filter(|eye| eye.index > 0) {
-        if let Some(shared) = world
-            .resources
-            .get::<SharedCovering>()
-            .filter(|shared| shared.frame == Some(eye.frame))
-        {
-            return Ok((shared.region(), shared.raster.clone()));
-        }
+    let query = CoveringQuery::from_frame(style, view_state, world, level);
+    if let Some(shared) = matching_shared_covering(world, &query) {
+        return Ok((shared.region(), shared.raster.clone()));
     }
-    let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
-    let view_slot = world.resources.get::<CurrentViewSlot>().and_then(|s| s.0);
-    let multi_active = world
-        .resources
-        .get::<MultiViewExtractCovering>()
-        .is_some_and(|m| m.active);
-    let view_proj_bits = frame_view_proj_bits(world, style, view_state);
-    let style_rev = style.revision();
-    let terrain_key = terrain_index_key(world);
-    let is_primary_eye = eye.is_none_or(|e| e.index == 0);
-    let can_use_loose_cache = !multi_active && is_primary_eye;
-    if is_primary_eye {
-        if let Some(cached) = cached_drawn_covering(
-            world,
-            (
-                eye,
-                view_slot,
-                host_frame,
-                style_rev,
-                level,
-                view_proj_bits,
-                terrain_key,
-            ),
-        ) {
-            return Ok(cached);
-        }
-    }
-    let (cached_arc, region) =
-        match tight_cached_region(world, host_frame, level, can_use_loose_cache) {
-            Some((arc, region)) => (arc, region),
-            None => (
-                None,
-                view_region_for_projection(
-                    style,
-                    view_state,
-                    world,
-                    level,
-                    ViewStatePadding::Tight,
-                )?,
-            ),
-        };
-    let raster = match tight_cached_raster(world, host_frame, terrain_key, can_use_loose_cache) {
-        Some(cached) => cached,
-        None => raster_source_regions(style, view_state, world, ViewStatePadding::Tight)?,
-    };
-    if is_primary_eye {
-        world.resources.insert(SharedCovering {
-            frame: eye.map(|eye| eye.frame),
-            view_slot,
-            host_frame,
-            style_rev,
-            level,
-            view_proj_bits,
-            terrain_key,
-            tiles: region.as_ref().map(|region| {
-                let arc =
-                    cached_arc.unwrap_or_else(|| Arc::from(region.iter().collect::<Vec<_>>()));
-                (arc, region.zoom_level())
-            }),
-            raster: raster.clone(),
-        });
+    let (cached_arc, region, raster) = compute_covering_parts(style, view_state, world, &query)?;
+    if query.is_primary_eye() {
+        store_shared_covering(world, &query, cached_arc, region.as_ref(), raster.clone());
     }
     Ok((region, raster))
 }

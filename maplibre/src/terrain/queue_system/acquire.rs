@@ -51,6 +51,7 @@ pub(super) fn acquire_drapes(
     (budget, limit): (usize, usize),
     terrain: &mut TerrainResources,
     device: &wgpu::Device,
+    (coalesce, coalesce_motion): (&mut super::steady_cache::DrapeCoalesceState, bool),
 ) -> (
     Vec<bool>,
     Vec<Option<WorldTileCoords>>,
@@ -101,7 +102,50 @@ pub(super) fn acquire_drapes(
             state
         })
         .collect();
-    let redraw = choose_redraws(specs, &states, prefetch, (budget, limit), terrain);
+    if ready.iter().all(|&r| r) && states.iter().all(|s| *s == DrapeState::Unchanged) {
+        coalesce.reset();
+        terrain.finish_drape_retain_state(&target_coords, view_textures, true);
+        let redraw = vec![false; specs.len()];
+        let sources = specs.iter().map(|s| Some(s.coords)).collect();
+        return (redraw, sources, false, states);
+    }
+    finish_acquire_drapes(
+        specs,
+        ready,
+        prefetch,
+        (&target_coords, view_textures, budget, limit),
+        states,
+        terrain,
+        (coalesce, coalesce_motion),
+    )
+}
+
+fn finish_acquire_drapes(
+    specs: &[TargetSpec],
+    ready: &[bool],
+    prefetch: &[bool],
+    (target_coords, view_textures, budget, limit): (&[WorldTileCoords], usize, usize, usize),
+    states: Vec<DrapeState>,
+    terrain: &mut TerrainResources,
+    (coalesce, coalesce_motion): (&mut super::steady_cache::DrapeCoalesceState, bool),
+) -> (
+    Vec<bool>,
+    Vec<Option<WorldTileCoords>>,
+    bool,
+    Vec<DrapeState>,
+) {
+    let mut redraw = choose_redraws(specs, &states, prefetch, (budget, limit), terrain);
+    let defer_changed = coalesce.should_defer_changed(
+        coalesce_motion,
+        states.iter().any(|s| *s == DrapeState::Changed),
+    );
+    if defer_changed {
+        for (state, drawn) in states.iter().zip(redraw.iter_mut()) {
+            if *state == DrapeState::Changed {
+                *drawn = false;
+            }
+        }
+    }
     let mut deferred = false;
     for ((spec, state), drawn) in specs.iter().zip(&states).zip(&redraw) {
         if !matches!(state, DrapeState::Unchanged | DrapeState::Withheld) && !drawn {
@@ -114,7 +158,7 @@ pub(super) fn acquire_drapes(
         && states
             .iter()
             .all(|s| matches!(s, DrapeState::Unchanged | DrapeState::Changed));
-    terrain.finish_drape_retain_state(&target_coords, view_textures, clean);
+    terrain.finish_drape_retain_state(target_coords, view_textures, clean);
     let sources = drape_sources(specs, &states, &redraw, ready, terrain);
     (redraw, sources, deferred, states)
 }

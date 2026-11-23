@@ -96,21 +96,14 @@ pub fn coverage_system(
         });
         return Ok(());
     }
-    let prev = world.resources.get_mut::<TerrainCoverageIndex>();
-    let (prev_bounds, reused_dem_bounds) = match prev {
-        Some(prev_idx) => {
-            let summary = (
-                prev_idx.min_elevation,
-                prev_idx.max_elevation,
-                prev_idx.dem_bounds.len(),
-            );
-            let reused = (prev_idx.dem_bounds_sig == dem_sig
-                && prev_idx.dem_bounds.len() == dem_count)
-                .then(|| std::mem::take(&mut prev_idx.dem_bounds));
-            (Some(summary), reused)
-        }
-        None => (None, None),
-    };
+    let reused_dem_bounds =
+        world
+            .resources
+            .get_mut::<TerrainCoverageIndex>()
+            .and_then(|prev_idx| {
+                (prev_idx.dem_bounds_sig == dem_sig && prev_idx.dem_bounds.len() == dem_count)
+                    .then(|| std::mem::take(&mut prev_idx.dem_bounds))
+            });
     let bounds = reused_dem_bounds.unwrap_or_else(|| build_dem_bounds(&world.tiles));
     let index = match &rendered {
         Some(region) => TerrainCoverageIndex::build_with_dem_bounds(
@@ -129,18 +122,11 @@ pub fn coverage_system(
         }
         .with_poles(poles),
     };
-    let bounds_unchanged = prev_bounds.is_some_and(|(min_e, max_e, count)| {
-        count == index.dem_bounds.len()
-            && (min_e - index.min_elevation).abs() < 1e-3
-            && (max_e - index.max_elevation).abs() < 1e-3
-    });
     world.resources.insert(index);
-    if bounds_unchanged {
-        let key = PreparedTerrainKey::capture(view_state, world, dem.tile_size);
-        world.resources.insert(PreparedTerrainRegion {
-            key,
-            region: rendered,
-        });
-    }
+    let key = PreparedTerrainKey::capture(view_state, world, dem.tile_size);
+    world.resources.insert(PreparedTerrainRegion {
+        key,
+        region: rendered,
+    });
     Ok(())
 }

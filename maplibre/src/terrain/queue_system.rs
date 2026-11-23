@@ -17,7 +17,7 @@ use crate::{
         world::World,
     },
     terrain::{
-        resources::{TerrainDraw, TerrainResources, UNIFORM_STRIDE},
+        resources::TerrainResources,
         source::{dem_source, DemSource},
         DrapePhase, TerrainFrame,
     },
@@ -32,6 +32,7 @@ pub(crate) mod edges;
 mod prefetch;
 mod readiness;
 mod spec_cache;
+mod steady_cache;
 mod targets;
 #[cfg(any(test, feature = "headless"))]
 pub(crate) use targets::target_specs;
@@ -197,7 +198,14 @@ pub fn queue_system(
     if EyeInFrame::reuses_content(world) {
         return uniforms::replay(world, style, view_state, queue);
     }
-    world.resources.insert(TerrainEyeFrame::default());
+    if steady_cache::needs_eye_frame(world)
+        || world
+            .resources
+            .get::<TerrainEyeFrame>()
+            .is_some_and(|frame| !frame.0.is_empty())
+    {
+        world.resources.insert(TerrainEyeFrame::default());
+    }
     world
         .resources
         .insert(surface_covering::SurfaceTiles::default());
@@ -275,10 +283,14 @@ fn queue_tiles(
     targets: (&[WorldTileCoords], &[Option<WorldTileCoords>]),
 ) -> SystemResult {
     let mut edge_cache = std::mem::take(world.resources.get_or_init_mut::<edges::EdgeCache>());
-    let copies = world
-        .resources
-        .get::<surface_covering::SurfaceCopies>()
-        .map(|copies| copies.0.clone());
+    let mut queue_scratch = std::mem::take(
+        world
+            .resources
+            .get_or_init_mut::<steady_cache::TerrainQueueScratch>(),
+    );
+    let copies_non_empty =
+        queue_scratch.populate_copies(world.resources.get::<surface_covering::SurfaceCopies>());
+    let dem_arrival_epoch = crate::terrain::dem_arrival_epoch(world);
     let ctx = uniforms::surface_context(world, style, view_state, dem);
     let key_fn = draw_order_key_with_resolved(
         world
@@ -289,51 +301,82 @@ fn queue_tiles(
         view_state,
         f64::from(dem.tile_size),
     );
-    {
+    let result = (|| -> SystemResult {
         let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>()
         else {
             return Err(SystemError::Dependencies);
         };
         terrain.begin_dem_frame();
-        let mut prepared = uniforms::prepare_tiles(targets, terrain, &world.tiles, ctx);
-        uniforms::with_world_copies(&mut prepared, copies.as_ref(), view_state);
-        let (edge_gen, fallback_edges) = edge_cache.assign_indices(
-            &prepared.sources,
-            &mut prepared.uniforms,
-            &world.tiles,
-            terrain.edge_capacity(),
-        );
-        let dirty_rows = edge_cache.take_dirty_rows();
-        if let Some(edges) = &fallback_edges {
-            terrain.write_edges_if_stale(queue, 0, edges, &[]);
-        } else {
-            terrain.write_edges_if_stale(queue, edge_gen, edge_cache.packed_edges(), &dirty_rows);
-        }
-        let written = terrain.write_uniforms(queue, &prepared.uniforms);
-        tracing::debug!(
-            targets = targets.0.len(),
-            dem_hits = prepared
-                .sources
-                .iter()
-                .filter(|(dem, _, _)| dem.is_some())
-                .count(),
-            written,
-            "terrain frame queued"
-        );
-        let draws = build_sorted_draws(
-            device,
+        uniforms::prepare_tiles_into(
+            &mut queue_scratch.prepared,
+            targets,
             terrain,
-            &prepared.sources,
-            &prepared.dem_ids,
-            written,
-            &key_fn,
+            &world.tiles,
+            ctx,
         );
-        terrain.set_draws(draws);
-        finish_surface_and_eye_frame(world, &mut prepared, &edge_cache, edge_gen, written);
-    }
+        uniforms::with_world_copies(
+            &mut queue_scratch.prepared,
+            copies_non_empty.then_some(&queue_scratch.copies_scratch),
+            view_state,
+        );
+        let (edge_gen, written) = prepare_and_upload_tile_gpu(
+            terrain,
+            &mut edge_cache,
+            &mut queue_scratch.prepared,
+            &world.tiles,
+            queue,
+            dem_arrival_epoch,
+            targets.0.len(),
+        );
+        queue_scratch.sync_draws(device, terrain, written, &key_fn);
+        finish_surface_and_eye_frame(
+            world,
+            &mut queue_scratch.prepared,
+            &edge_cache,
+            edge_gen,
+            written,
+        );
+        Ok(())
+    })();
     world.resources.insert(edge_cache);
+    world.resources.insert(queue_scratch);
+    result
+}
 
-    Ok(())
+fn prepare_and_upload_tile_gpu(
+    terrain: &mut TerrainResources,
+    edge_cache: &mut edges::EdgeCache,
+    prepared: &mut uniforms::PreparedTerrain,
+    tiles: &crate::tcs::tiles::Tiles,
+    queue: &crate::render::upload_queue::UploadQueue,
+    dem_arrival_epoch: u64,
+    target_count: usize,
+) -> (u64, usize) {
+    let (edge_gen, fallback_edges) = edge_cache.assign_indices_with_epoch(
+        &prepared.sources,
+        &mut prepared.uniforms,
+        tiles,
+        terrain.edge_capacity(),
+        Some(dem_arrival_epoch),
+    );
+    let dirty_rows = edge_cache.take_dirty_rows();
+    if let Some(edges) = &fallback_edges {
+        terrain.write_edges_if_stale(queue, 0, edges, &[]);
+    } else {
+        terrain.write_edges_if_stale(queue, edge_gen, edge_cache.packed_edges(), &dirty_rows);
+    }
+    let written = terrain.write_uniforms(queue, &prepared.uniforms);
+    tracing::debug!(
+        targets = target_count,
+        dem_hits = prepared
+            .sources
+            .iter()
+            .filter(|(dem, _, _)| dem.is_some())
+            .count(),
+        written,
+        "terrain frame queued"
+    );
+    (edge_gen, written)
 }
 
 fn finish_surface_and_eye_frame(
@@ -351,48 +394,16 @@ fn finish_surface_and_eye_frame(
     ) {
         index.set_surface_edges_if_stale(written_sources, &edge_cache.samples, edge_gen);
     }
-    let kept = prepared
-        .sources
-        .iter()
-        .zip(prepared.uniforms.iter())
-        .take(written)
-        .map(|((_, coords, _), uniform)| (*coords, *uniform))
-        .collect();
-    let mut globe_bases = std::mem::take(&mut prepared.globe_bases);
-    globe_bases.truncate(written);
-    world.resources.insert(TerrainEyeFrame(kept, globe_bases));
-}
-
-fn build_sorted_draws(
-    device: &wgpu::Device,
-    terrain: &mut TerrainResources,
-    sources: &[(
-        Option<WorldTileCoords>,
-        WorldTileCoords,
-        Option<WorldTileCoords>,
-    )],
-    dem_ids: &[Option<u64>],
-    written: usize,
-    key_fn: &impl Fn(&WorldTileCoords) -> f64,
-) -> Vec<TerrainDraw> {
-    let mut keyed_draws: Vec<(f64, TerrainDraw)> = sources
-        .iter()
-        .zip(dem_ids.iter().copied())
-        .take(written)
-        .enumerate()
-        .filter_map(|(index, ((dem_coords, coords, drape_source), dem_id))| {
-            let bind_group =
-                terrain.tile_bind_group_with_dem_id(device, *dem_coords, dem_id, *drape_source)?;
-            Some((
-                key_fn(coords),
-                TerrainDraw {
-                    coords: *coords,
-                    bind_group,
-                    uniform_offset: (index as u64 * UNIFORM_STRIDE) as u32,
-                },
-            ))
-        })
-        .collect();
-    keyed_draws.sort_unstable_by(|left, right| left.0.total_cmp(&right.0));
-    keyed_draws.into_iter().map(|(_, draw)| draw).collect()
+    if steady_cache::needs_eye_frame(world) {
+        let kept = prepared
+            .sources
+            .iter()
+            .zip(prepared.uniforms.iter())
+            .take(written)
+            .map(|((_, coords, _), uniform)| (*coords, *uniform))
+            .collect();
+        let mut globe_bases = std::mem::take(&mut prepared.globe_bases);
+        globe_bases.truncate(written);
+        world.resources.insert(TerrainEyeFrame(kept, globe_bases));
+    }
 }

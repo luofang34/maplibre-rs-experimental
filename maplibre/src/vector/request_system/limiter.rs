@@ -15,6 +15,8 @@ use std::{
 const MAX_HEAVY_TILES_LOW_MEM: usize = 4;
 #[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
 const MAX_HEAVY_TILES_HIGH_MEM: usize = 2;
+#[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
+const MAX_DEM_TILES: usize = 2;
 /// 32 MiB (`512 * 64 KiB` WASM pages): run all active workers in parallel during low-memory boot
 /// and scene switches, then throttle heavy decodes to 2 once shared linear memory reaches 32 MiB
 /// so dense flight bursts reuse freed pages instead of permanently ratcheting `WebAssembly.Memory`.
@@ -71,6 +73,10 @@ impl PermitState {
 
 static LIMITER: LazyLock<Mutex<PermitState>> = LazyLock::new(|| Mutex::new(PermitState::default()));
 
+#[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
+static DEM_LIMITER: LazyLock<Mutex<PermitState>> =
+    LazyLock::new(|| Mutex::new(PermitState::default()));
+
 #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
 static SHARED_TILES: LazyLock<Mutex<PermitState>> =
     LazyLock::new(|| Mutex::new(PermitState::default()));
@@ -101,6 +107,27 @@ impl Drop for HeavyTileSlot {
 pub(crate) async fn acquire_heavy_tile_slot() -> HeavyTileSlot {
     acquire_slot(&LIMITER, current_heavy_tile_limit).await;
     HeavyTileSlot { _private: () }
+}
+
+/// RAII token bounding concurrent DEM tile decodes on `wasm32 + atomics`.
+#[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
+pub(crate) struct DemTileSlot {
+    _private: (),
+}
+
+#[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
+impl Drop for DemTileSlot {
+    fn drop(&mut self) {
+        release_slot(&DEM_LIMITER);
+    }
+}
+
+/// Acquires one dedicated DEM decode slot so terrain elevation tiles are never starved behind
+/// heavy vector MVT decodes.
+#[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
+pub(crate) async fn acquire_dem_tile_slot() -> DemTileSlot {
+    acquire_slot(&DEM_LIMITER, || MAX_DEM_TILES).await;
+    DemTileSlot { _private: () }
 }
 
 /// RAII token reserved after HTTP fetch and released when the completed tile message is consumed.
@@ -440,5 +467,19 @@ mod tests {
             .poll_acquire(heavy_tile_limit_for_pages(512), &waker)
             .is_ready());
         assert_eq!(state.in_use, 2);
+    }
+
+    #[test]
+    fn dem_limiter_is_independent_from_heavy_vector_limiter() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let _heavy = acquire_heavy_tile_slot().await;
+            let dem1 = acquire_dem_tile_slot().await;
+            let dem2 = acquire_dem_tile_slot().await;
+            drop((dem1, dem2));
+            let _dem3 = acquire_dem_tile_slot().await;
+        });
     }
 }

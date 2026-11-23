@@ -20,7 +20,7 @@ impl TerrainCoverageIndex {
             WorldTileCoords,
             Option<WorldTileCoords>,
         )],
-        edges: &Arc<HashMap<WorldTileCoords, EdgeHeights>>,
+        edges: &Arc<HashMap<WorldTileCoords, Arc<EdgeHeights>>>,
         edges_generation: u64,
     ) {
         if edges_generation != 0
@@ -40,7 +40,7 @@ impl TerrainCoverageIndex {
             WorldTileCoords,
             Option<WorldTileCoords>,
         )],
-        edges: Arc<HashMap<WorldTileCoords, EdgeHeights>>,
+        edges: Arc<HashMap<WorldTileCoords, Arc<EdgeHeights>>>,
     ) {
         self.rendered = sources.iter().map(|(dem, tile, _)| (*tile, *dem)).collect();
         self.zooms = sources

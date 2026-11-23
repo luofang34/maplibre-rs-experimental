@@ -114,32 +114,100 @@ pub(super) fn prepare_drapes(
     };
     let (budget, limit) = drape_frame_budget(world, view_state);
     let view_textures = crate::terrain::drape_share::textures(world, memory);
-    let (redraw, drape_sources, deferred, states) = {
-        let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>()
-        else {
-            return Err(SystemError::Dependencies);
-        };
-        let (redraw, drape_sources, deferred, states) = acquire_drapes(
-            specs,
-            (prints, ready, &prefetch),
-            (memory, view_textures),
-            (budget, limit),
-            terrain,
-            device,
-        );
-        for (spec, drawn) in specs.iter().zip(&redraw) {
-            if *drawn {
-                if let Some(edge_px) = terrain.drape_edge_px(spec.coords) {
-                    terrain.ensure_scratch_for_size(device, edge_px);
-                }
+    let coalesce_motion = cfg!(target_arch = "wasm32")
+        && crate::render::frame_signals::camera_moved(world, view_state);
+    if world
+        .resources
+        .get::<super::steady_cache::DrapeCoalesceState>()
+        .is_none()
+    {
+        world
+            .resources
+            .insert(super::steady_cache::DrapeCoalesceState::default());
+    }
+    let (redraw, drape_sources, deferred, states) = acquire_and_ensure_scratch(
+        specs,
+        (prints, ready, &prefetch),
+        (memory, view_textures),
+        (budget, limit),
+        coalesce_motion,
+        world,
+        device,
+    )?;
+    record_drape_activity(
+        world,
+        (specs, &states, ready, &prefetch, &redraw, &drape_sources),
+        (budget, limit),
+        drape_zoom,
+        deferred,
+    );
+    Ok(PreparedDrapes {
+        redraw,
+        sources: drape_sources,
+        clear_color,
+    })
+}
+
+fn acquire_and_ensure_scratch(
+    specs: &[TargetSpec],
+    (prints, ready, prefetch): (&[u64], &[bool], &[bool]),
+    (memory, view_textures): (MemoryBudget, usize),
+    (budget, limit): (usize, usize),
+    coalesce_motion: bool,
+    world: &mut World,
+    device: &wgpu::Device,
+) -> Result<
+    (
+        Vec<bool>,
+        Vec<Option<WorldTileCoords>>,
+        bool,
+        Vec<crate::terrain::drape_cache::DrapeState>,
+    ),
+    SystemError,
+> {
+    let Some((Initialized(terrain), coalesce)) = world.resources.query_mut::<(
+        &mut Eventually<TerrainResources>,
+        &mut super::steady_cache::DrapeCoalesceState,
+    )>() else {
+        return Err(SystemError::Dependencies);
+    };
+    let acquired = acquire_drapes(
+        specs,
+        (prints, ready, prefetch),
+        (memory, view_textures),
+        (budget, limit),
+        terrain,
+        device,
+        (coalesce, coalesce_motion),
+    );
+    for (spec, drawn) in specs.iter().zip(&acquired.0) {
+        if *drawn {
+            if let Some(edge_px) = terrain.drape_edge_px(spec.coords) {
+                terrain.ensure_scratch_for_size(device, edge_px);
             }
         }
-        (redraw, drape_sources, deferred, states)
-    };
+    }
+    Ok(acquired)
+}
+
+fn record_drape_activity(
+    world: &mut World,
+    (specs, states, ready, prefetch, redraw, drape_sources): (
+        &[TargetSpec],
+        &[crate::terrain::drape_cache::DrapeState],
+        &[bool],
+        &[bool],
+        &[bool],
+        &[Option<WorldTileCoords>],
+    ),
+    budget: (usize, usize),
+    drape_zoom: f64,
+    deferred: bool,
+) {
     let drawn = |ahead: bool| {
         redraw
             .iter()
-            .zip(&prefetch)
+            .zip(prefetch)
             .filter(|(drawn, prefetched)| **drawn && **prefetched == ahead)
             .count()
     };
@@ -148,12 +216,12 @@ pub(super) fn prepare_drapes(
         world,
         &activity::FrameDrapes {
             specs,
-            states: &states,
+            states,
             ready,
-            prefetch: &prefetch,
-            redraw: &redraw,
-            sources: &drape_sources,
-            budget: (budget, limit),
+            prefetch,
+            redraw,
+            sources: drape_sources,
+            budget,
             paint_zoom: drape_zoom,
         },
     );
@@ -161,11 +229,6 @@ pub(super) fn prepare_drapes(
     if deferred {
         crate::render::frame_signals::keep_animating(world);
     }
-    Ok(PreparedDrapes {
-        redraw,
-        sources: drape_sources,
-        clear_color,
-    })
 }
 
 fn build_prep_key(

@@ -75,7 +75,7 @@ pub struct TerrainCoverageIndex {
     /// Samples along a DEM tile's side.
     dem_tile_size: u32,
     poles: super::PolarPoleElevations,
-    edges: Arc<HashMap<WorldTileCoords, super::queue_system::edges::EdgeHeights>>,
+    edges: Arc<HashMap<WorldTileCoords, Arc<super::queue_system::edges::EdgeHeights>>>,
     edges_generation: u64,
 }
 

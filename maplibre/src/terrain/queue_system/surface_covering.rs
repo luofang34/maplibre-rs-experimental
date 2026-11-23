@@ -44,13 +44,27 @@ pub(super) fn coords_for_frame(
         .get::<SurfaceTiles>()
         .map(|surface| surface.0.clone())
         .unwrap_or_default();
-    let coordinates: Vec<_> = drapes.iter().map(|drape| drape.coords).collect();
-    if let Some(active) = super::cohort::active_sources(world, &coordinates, sources) {
-        super::cohort::surface_pieces(&surfaces, &active)
-    } else {
-        let mapped = map_sources(&surfaces, drapes, sources);
-        expand_zoom_out_surfaces(world, surfaces, mapped)
+    let cohort_enabled = world
+        .resources
+        .get::<super::cohort::TextureCohort>()
+        .is_some_and(|state| state.enabled);
+    if cohort_enabled {
+        let coordinates: Vec<_> = drapes.iter().map(|drape| drape.coords).collect();
+        if let Some(active) = super::cohort::active_sources(world, &coordinates, sources) {
+            return super::cohort::surface_pieces(&surfaces, &active);
+        }
     }
+    let mapped = if surfaces.len() == drapes.len()
+        && surfaces
+            .iter()
+            .zip(drapes)
+            .all(|(surface, drape)| *surface == drape.coords)
+    {
+        sources.to_vec()
+    } else {
+        map_sources(&surfaces, drapes, sources)
+    };
+    expand_zoom_out_surfaces(world, surfaces, mapped)
 }
 
 #[cfg(test)]

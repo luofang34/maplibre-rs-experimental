@@ -268,7 +268,7 @@ impl TerrainResources {
             .map(|drape| &drape.texture)
     }
 
-    pub(super) fn drape_id(&self, coords: WorldTileCoords) -> Option<u64> {
+    pub(crate) fn drape_id(&self, coords: WorldTileCoords) -> Option<u64> {
         self.drapes
             .get(self.drape_key(coords))
             .map(|drape| drape.id)
