@@ -12,6 +12,25 @@ let resolveInitReady: (() => void) | null = null;
 const initReady = new Promise<void>(resolve => {
     resolveInitReady = resolve;
 });
+let wasmReady = false;
+let renderPort: MessagePort | null = null;
+let portReadySent = false;
+let globalReadySent = false;
+
+const notifyReady = () => {
+    if (!wasmReady) return;
+    if (renderPort) {
+        if (!portReadySent) {
+            portReadySent = true;
+            renderPort.postMessage({type: 'worker_ready'});
+        }
+        return;
+    }
+    if (!globalReadySent) {
+        globalReadySent = true;
+        self.postMessage({type: 'worker_ready'});
+    }
+};
 
 const handleMessage = async (message: MessageEvent<MessageData>) => {
     const data = message.data;
@@ -21,12 +40,18 @@ const handleMessage = async (message: MessageEvent<MessageData>) => {
         if (initialised) return;
         const module = data.module;
         const memory = data.memory;
-        initialised = initializeWasm(module, memory).catch(err => {
-            // Propagate uncaught rejection without unhandled rejection races:
-            globalThis.reportError?.(err);
-            // Rethrow to keep promise rejected and prevent execution of further commands:
-            throw err;
-        });
+        initialised = initializeWasm(module, memory)
+            .then(output => {
+                wasmReady = true;
+                notifyReady();
+                return output;
+            })
+            .catch(err => {
+                // Propagate uncaught rejection without unhandled rejection races:
+                globalThis.reportError?.(err);
+                // Rethrow to keep promise rejected and prevent execution of further commands:
+                throw err;
+            });
         resolveInitReady?.();
         resolveInitReady = null;
         return;
@@ -59,11 +84,13 @@ onmessage = (message: MessageEvent<BindPortMessage | MessageData>) => {
     if (data === null || data === undefined) return;
     if (typeof data !== 'number' && data.type === 'bind_port') {
         const port = data.port;
+        renderPort = port;
         (self as any).__maplibreRenderPort = port;
         port.onmessage = (ev: MessageEvent<MessageData>) => {
             void handleMessage(ev);
         };
         port.start?.();
+        notifyReady();
         return;
     }
     void handleMessage(message as MessageEvent<MessageData>);

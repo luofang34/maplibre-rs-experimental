@@ -115,7 +115,7 @@ impl PoolState {
         &self,
         endpoint: WorkerEndpoint,
         wake_pending: Arc<AtomicBool>,
-        onmessage: WorkerListener,
+        make_listener: impl FnOnce(usize) -> WorkerListener,
     ) -> Option<usize> {
         let mut workers = self.workers.borrow_mut();
         if workers
@@ -124,8 +124,9 @@ impl PoolState {
         {
             return None;
         }
-        endpoint.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
         let idx = workers.len();
+        let onmessage = make_listener(idx);
+        endpoint.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
         workers.push((endpoint, wake_pending));
         self.listeners.borrow_mut().push(onmessage);
         Some(idx)
@@ -283,10 +284,12 @@ impl WorkerPool {
     }
 
     fn try_spawn(&self) -> Result<Option<usize>, WebError> {
+        let mut already_ready = false;
         let endpoint = match &self.factory {
             EndpointFactory::Dedicated(new_worker) => {
                 let worker =
                     if let Some(reused) = RECYCLED_WORKERS.with(|bin| bin.borrow_mut().pop()) {
+                        already_ready = true;
                         reused
                     } else {
                         log::debug!("spawning new worker");
@@ -315,16 +318,39 @@ impl WorkerPool {
 
         let state = Rc::downgrade(&self.state);
         let wake_pending = Arc::new(AtomicBool::new(false));
-        let listener_wake_pending = wake_pending.clone();
-        let onmessage = Closure::wrap(Box::new(move |_event: MessageEvent| {
-            listener_wake_pending.store(false, Ordering::SeqCst);
-            let waker = state.upgrade().and_then(|s| s.waker.borrow().clone());
-            if let Some(wake) = waker {
-                wake();
+        let idx = self.state.push(endpoint, wake_pending.clone(), move |idx| {
+            let listener_wake_pending = wake_pending;
+            Closure::wrap(Box::new(move |event: MessageEvent| {
+                let data = event.data();
+                let is_worker_ready = data.is_object()
+                    && js_sys::Reflect::get(&data, &JsValue::from_str("type"))
+                        .ok()
+                        .and_then(|v| v.as_string())
+                        .is_some_and(|kind| kind == "worker_ready");
+                if is_worker_ready {
+                    if let Some(s) = state.upgrade() {
+                        s.queue.mark_ready(idx);
+                        while s.queue.claim_backlogged_for(idx) {
+                            if dispatch_ticket_from_state(&s, idx).is_err() {
+                                break;
+                            }
+                        }
+                    }
+                    return;
+                }
+                listener_wake_pending.store(false, Ordering::SeqCst);
+                let waker = state.upgrade().and_then(|s| s.waker.borrow().clone());
+                if let Some(wake) = waker {
+                    wake();
+                }
+            }) as Box<dyn FnMut(MessageEvent)>)
+        });
+        if already_ready {
+            if let Some(worker_idx) = idx {
+                self.state.queue.mark_ready(worker_idx);
             }
-        }) as Box<dyn FnMut(MessageEvent)>);
-
-        Ok(self.state.push(endpoint, wake_pending, onmessage))
+        }
+        Ok(idx)
     }
 
     fn can_ramp(&self, worker_count: usize, queued: usize) -> bool {
@@ -335,33 +361,39 @@ impl WorkerPool {
     }
 
     fn dispatch_ticket(&self, worker_index: usize) -> Result<(), WebError> {
-        let workers = self.state.workers.borrow();
-        let Some((worker, wake_pending)) = workers.get(worker_index).cloned() else {
-            drop(workers);
-            self.state.queue.rollback_claim(worker_index);
-            return Err(WebError::TypeError("Invalid worker index".into()));
-        };
-        drop(workers);
+        dispatch_ticket_from_state(&self.state, worker_index)
+    }
+}
 
-        let ticket = Work {
-            queue: Arc::clone(&self.state.queue),
-            worker_index,
-            wake_pending,
-        };
-        let work_ptr = Box::into_raw(Box::new(ticket));
-        let ptr_msg = JsValue::from_f64((work_ptr as usize) as f64);
-        match worker.post_message(&ptr_msg) {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                unsafe {
-                    drop(Box::from_raw(work_ptr));
-                }
-                self.state.queue.rollback_claim(worker_index);
-                Err(e.into())
+fn dispatch_ticket_from_state(state: &PoolState, worker_index: usize) -> Result<(), WebError> {
+    let workers = state.workers.borrow();
+    let Some((worker, wake_pending)) = workers.get(worker_index).cloned() else {
+        drop(workers);
+        state.queue.rollback_claim(worker_index);
+        return Err(WebError::TypeError("Invalid worker index".into()));
+    };
+    drop(workers);
+
+    let ticket = Work {
+        queue: Arc::clone(&state.queue),
+        worker_index,
+        wake_pending,
+    };
+    let work_ptr = Box::into_raw(Box::new(ticket));
+    let ptr_msg = JsValue::from_f64((work_ptr as usize) as f64);
+    match worker.post_message(&ptr_msg) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            unsafe {
+                drop(Box::from_raw(work_ptr));
             }
+            state.queue.rollback_claim(worker_index);
+            Err(e.into())
         }
     }
+}
 
+impl WorkerPool {
     pub fn execute(
         &self,
         f: impl (FnOnce() -> PinnedFuture) + Send + 'static,

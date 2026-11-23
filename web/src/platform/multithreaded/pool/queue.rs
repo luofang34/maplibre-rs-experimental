@@ -31,12 +31,39 @@ fn lock_queue<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 struct QueueInner {
     jobs: VecDeque<Execute>,
     in_flight: Vec<usize>,
+    ready: Vec<bool>,
     next_turn: usize,
     closed: bool,
 }
 
 pub(crate) struct SharedWorkQueue {
     inner: Mutex<QueueInner>,
+}
+
+fn pick_worker(
+    inner: &QueueInner,
+    worker_count: usize,
+    start: usize,
+    require_ready: bool,
+) -> Option<usize> {
+    let mut best: Option<(usize, usize)> = None;
+    for offset in 0..worker_count {
+        let idx = (start + offset) % worker_count;
+        if require_ready && !inner.ready.get(idx).copied().unwrap_or(false) {
+            continue;
+        }
+        let load = inner.in_flight.get(idx).copied().unwrap_or(0);
+        if load >= PER_WORKER_CONCURRENCY {
+            continue;
+        }
+        if best.is_none_or(|(_, best_load)| load < best_load) {
+            best = Some((idx, load));
+            if load == 0 {
+                break;
+            }
+        }
+    }
+    best.map(|(idx, _)| idx)
 }
 
 impl SharedWorkQueue {
@@ -46,8 +73,37 @@ impl SharedWorkQueue {
         }
     }
 
-    /// Appends `job` to the shared queue and claims a dispatch slot on the least-loaded active
-    /// worker below [`PER_WORKER_CONCURRENCY`], or reports backlog depth when saturated.
+    pub(super) fn mark_ready(&self, worker_index: usize) {
+        let mut inner = lock_queue(&self.inner);
+        if inner.ready.len() <= worker_index {
+            inner.ready.resize(worker_index + 1, false);
+        }
+        if let Some(flag) = inner.ready.get_mut(worker_index) {
+            *flag = true;
+        }
+    }
+
+    pub(super) fn claim_backlogged_for(&self, worker_index: usize) -> bool {
+        let mut inner = lock_queue(&self.inner);
+        if inner.closed || inner.jobs.is_empty() {
+            return false;
+        }
+        if inner.in_flight.len() <= worker_index {
+            inner.in_flight.resize(worker_index + 1, 0);
+        }
+        let load = inner.in_flight.get(worker_index).copied().unwrap_or(0);
+        if load >= PER_WORKER_CONCURRENCY {
+            return false;
+        }
+        if let Some(slot) = inner.in_flight.get_mut(worker_index) {
+            *slot = slot.saturating_add(1);
+        }
+        true
+    }
+
+    /// Appends `job` to the shared queue and claims a dispatch slot on the least-loaded ready
+    /// worker below [`PER_WORKER_CONCURRENCY`] (falling back to slot 0 / unready workers when no
+    /// worker has finished WASM initialization yet), or reports backlog depth when saturated.
     pub(super) fn push_and_claim(&self, job: Execute, worker_count: usize) -> ClaimOutcome {
         let mut inner = lock_queue(&self.inner);
         inner.jobs.push_back(job);
@@ -59,24 +115,24 @@ impl SharedWorkQueue {
         if inner.in_flight.len() < worker_count {
             inner.in_flight.resize(worker_count, 0);
         }
-        let start = inner.next_turn % worker_count;
-        inner.next_turn = inner.next_turn.wrapping_add(1);
-
-        let mut best: Option<(usize, usize)> = None;
-        for offset in 0..worker_count {
-            let idx = (start + offset) % worker_count;
-            let load = inner.in_flight.get(idx).copied().unwrap_or(0);
-            if load >= PER_WORKER_CONCURRENCY {
-                continue;
-            }
-            if best.is_none_or(|(_, best_load)| load < best_load) {
-                best = Some((idx, load));
-                if load == 0 {
-                    break;
-                }
-            }
+        if inner.ready.len() < worker_count {
+            inner.ready.resize(worker_count, false);
         }
-        if let Some((idx, _)) = best {
+        let any_ready = inner.ready[..worker_count].iter().any(|&r| r);
+        let start = if any_ready {
+            let s = inner.next_turn % worker_count;
+            inner.next_turn = inner.next_turn.wrapping_add(1);
+            s
+        } else {
+            0
+        };
+        let chosen = if any_ready {
+            pick_worker(&inner, worker_count, start, true)
+                .or_else(|| pick_worker(&inner, worker_count, start, false))
+        } else {
+            pick_worker(&inner, worker_count, 0, false)
+        };
+        if let Some(idx) = chosen {
             if let Some(slot) = inner.in_flight.get_mut(idx) {
                 *slot = slot.saturating_add(1);
             }
@@ -163,5 +219,78 @@ mod tests {
         assert!(queue.pop_or_release(0).is_some());
         queue.close_and_clear();
         assert!(queue.pop_or_release(0).is_none());
+    }
+
+    #[test]
+    fn assigns_initial_burst_to_slot_zero_when_none_ready() {
+        let queue = SharedWorkQueue::new();
+        for _ in 0..PER_WORKER_CONCURRENCY {
+            assert!(matches!(
+                queue.push_and_claim(noop_job(), 3),
+                ClaimOutcome::Claimed {
+                    worker_index: 0,
+                    ..
+                }
+            ));
+        }
+        assert!(matches!(
+            queue.push_and_claim(noop_job(), 3),
+            ClaimOutcome::Claimed {
+                worker_index: 1,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn prefers_ready_workers_over_unready_workers() {
+        let queue = SharedWorkQueue::new();
+        queue.mark_ready(1);
+        for _ in 0..PER_WORKER_CONCURRENCY {
+            assert!(matches!(
+                queue.push_and_claim(noop_job(), 2),
+                ClaimOutcome::Claimed {
+                    worker_index: 1,
+                    ..
+                }
+            ));
+        }
+        assert!(matches!(
+            queue.push_and_claim(noop_job(), 2),
+            ClaimOutcome::Claimed {
+                worker_index: 0,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn mark_ready_drains_backlogged_jobs_via_claim_backlogged_for() {
+        let queue = SharedWorkQueue::new();
+        for _ in 0..PER_WORKER_CONCURRENCY {
+            assert!(matches!(
+                queue.push_and_claim(noop_job(), 1),
+                ClaimOutcome::Claimed {
+                    worker_index: 0,
+                    ..
+                }
+            ));
+        }
+        assert!(matches!(
+            queue.push_and_claim(noop_job(), 1),
+            ClaimOutcome::Backlogged { queued: 5 }
+        ));
+        assert!(matches!(
+            queue.push_and_claim(noop_job(), 1),
+            ClaimOutcome::Backlogged { queued: 6 }
+        ));
+
+        queue.mark_ready(1);
+        assert!(queue.claim_backlogged_for(1));
+        assert!(queue.claim_backlogged_for(1));
+        for _ in 0..(PER_WORKER_CONCURRENCY - 2) {
+            assert!(queue.claim_backlogged_for(1));
+        }
+        assert!(!queue.claim_backlogged_for(1));
     }
 }

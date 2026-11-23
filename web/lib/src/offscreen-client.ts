@@ -327,6 +327,19 @@ export const startOffscreenController = async ({
             : Promise.resolve(resolvedStyleValue);
         stylePromise.catch(() => {});
 
+        const postStaggeredMtWasmInit = (module: WebAssembly.Module, memory: WebAssembly.Memory) => {
+            if (tileWorkers.length === 0) return;
+            tileWorkers[0].postMessage({type: "wasm_init", module, memory});
+            for (let i = 1; i < tileWorkers.length; i++) {
+                const worker = tileWorkers[i];
+                queueMicrotask(() => {
+                    if (!closed) {
+                        worker.postMessage({type: "wasm_init", module, memory});
+                    }
+                });
+            }
+        };
+
         const renderInitPromise = mainModulePromise.then(module => {
             if (closed) return;
             if (styleRejected) {
@@ -358,9 +371,7 @@ export const startOffscreenController = async ({
                     );
                 });
                 if (MULTITHREADED && sharedMemory) {
-                    for (const worker of tileWorkers) {
-                        worker.postMessage({type: "wasm_init", module, memory: sharedMemory});
-                    }
+                    postStaggeredMtWasmInit(module, sharedMemory);
                 }
                 return initDone;
             }
@@ -383,9 +394,7 @@ export const startOffscreenController = async ({
                 );
             });
             if (MULTITHREADED && sharedMemory) {
-                for (const worker of tileWorkers) {
-                    worker.postMessage({type: "wasm_init", module, memory: sharedMemory});
-                }
+                postStaggeredMtWasmInit(module, sharedMemory);
             }
             stylePromise.then(
                 resolvedStyleJson => {

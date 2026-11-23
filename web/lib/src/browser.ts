@@ -7,6 +7,9 @@ export interface GraphicsBackendInput {
     hasWebGpu: boolean;
     hasWebGl: boolean;
     hasWebglFallbackModule?: boolean;
+    multithreaded?: boolean;
+    crossOriginIsolated?: boolean;
+    isSecureContext?: boolean;
 }
 
 export type GraphicsBackendDecision =
@@ -21,7 +24,22 @@ export const selectGraphicsBackend = ({
     hasWebGpu,
     hasWebGl,
     hasWebglFallbackModule = true,
+    multithreaded = false,
+    crossOriginIsolated = true,
+    isSecureContext = true,
 }: GraphicsBackendInput): GraphicsBackendDecision => {
+    if (multithreaded && (!isSecureContext || !crossOriginIsolated)) {
+        if (!webgl && hasWebGl && hasWebglFallbackModule) {
+            return {backend: "fallback-webgl2"};
+        }
+        return {
+            backend: "error",
+            message: !isSecureContext
+                ? "isSecureContext is false!"
+                : "crossOriginIsolated is false! " +
+                  "The Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy HTTP headers are required.",
+        };
+    }
     if (webgl) {
         return hasWebGl
             ? {backend: "webgl2"}

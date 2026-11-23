@@ -41,6 +41,31 @@ test('selectGraphicsBackend returns typed error when neither WebGPU nor WebGL2 w
     assert.equal(decision.backend, 'error');
 });
 
+test('selectGraphicsBackend falls back to WebGL2 on multithreaded non-COOP/COEP when WebGL is available', () => {
+    assert.deepEqual(
+        selectGraphicsBackend({
+            webgl: false,
+            hasWebGpu: true,
+            hasWebGl: true,
+            hasWebglFallbackModule: true,
+            multithreaded: true,
+            crossOriginIsolated: false,
+            isSecureContext: true,
+        }),
+        {backend: 'fallback-webgl2'},
+    );
+    const err = selectGraphicsBackend({
+        webgl: false,
+        hasWebGpu: true,
+        hasWebGl: false,
+        hasWebglFallbackModule: true,
+        multithreaded: true,
+        crossOriginIsolated: false,
+        isSecureContext: true,
+    });
+    assert.equal(err.backend, 'error');
+});
+
 test('probeWebGpuAvailable handles missing navigator.gpu or null adapter without throwing', async () => {
     resetWebGpuProbeForTest();
     assert.equal(await probeWebGpuAvailable(undefined), false);

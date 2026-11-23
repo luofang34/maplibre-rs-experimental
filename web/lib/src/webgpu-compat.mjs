@@ -39,6 +39,66 @@ const unshareByteSource = (data, dataOffset, size, sabCtor, getSabView, getScrat
     return -1;
 };
 
+const ADAPTER_INFO_DEFAULTS = {
+    vendor: "",
+    architecture: "",
+    device: "",
+    description: "",
+    subgroupMinSize: 0,
+    subgroupMaxSize: 0,
+    isFallbackAdapter: false,
+};
+
+const normalizeProtoDefaults = (proto, defaults) => {
+    if (!proto) return;
+    for (const [key, fallback] of Object.entries(defaults)) {
+        const descriptor = Object.getOwnPropertyDescriptor(proto, key);
+        if (!descriptor) {
+            try {
+                Object.defineProperty(proto, key, {
+                    get: () => fallback,
+                    configurable: true,
+                });
+            } catch {
+                // Ignore non-extensible host prototypes.
+            }
+        } else if (descriptor.configurable && typeof descriptor.get === "function") {
+            const origGet = descriptor.get;
+            Object.defineProperty(proto, key, {
+                ...descriptor,
+                get() {
+                    const value = origGet.call(this);
+                    return value === undefined || value === null ? fallback : value;
+                },
+            });
+        }
+    }
+};
+
+const normalizeAdapterInfo = (info) => {
+    const base = info && typeof info === "object" ? info : {};
+    for (const [key, fallback] of Object.entries(ADAPTER_INFO_DEFAULTS)) {
+        const value = base[key];
+        if (value !== undefined && value !== null) continue;
+        try {
+            Object.defineProperty(base, key, {
+                value: fallback,
+                configurable: true,
+                enumerable: true,
+            });
+        } catch {
+            const wrapped = {...base};
+            for (const [k, fb] of Object.entries(ADAPTER_INFO_DEFAULTS)) {
+                if (wrapped[k] === undefined || wrapped[k] === null) {
+                    wrapped[k] = fb;
+                }
+            }
+            return wrapped;
+        }
+    }
+    return base;
+};
+
 export const ensureWebGpuCompatibility = (
     scope = globalThis,
     { sharedMemory = true, traceGpuCalls = true } = {},
@@ -55,40 +115,37 @@ export const ensureWebGpuCompatibility = (
         // Proceed even if scope is non-extensible.
     }
 
-    const adapterInfoCtor = scope?.GPUAdapterInfo;
-    const proto = adapterInfoCtor?.prototype;
-    if (proto) {
-        const defaults = {
-            vendor: "",
-            architecture: "",
-            device: "",
-            description: "",
-            subgroupMinSize: 0,
-            subgroupMaxSize: 0,
-            isFallbackAdapter: false,
-        };
+    normalizeProtoDefaults(scope?.GPUAdapterInfo?.prototype, ADAPTER_INFO_DEFAULTS);
 
-        for (const [key, fallback] of Object.entries(defaults)) {
-            const descriptor = Object.getOwnPropertyDescriptor(proto, key);
-            if (!descriptor) {
-                try {
-                    Object.defineProperty(proto, key, {
-                        get: () => fallback,
-                        configurable: true,
-                    });
-                } catch {
-                    // Ignore non-extensible host prototypes.
-                }
-            } else if (descriptor.configurable && typeof descriptor.get === "function") {
-                const origGet = descriptor.get;
-                Object.defineProperty(proto, key, {
-                    ...descriptor,
+    const adapterProto = scope?.GPUAdapter?.prototype;
+    if (adapterProto) {
+        normalizeProtoDefaults(adapterProto, {isFallbackAdapter: false});
+        const infoDesc = Object.getOwnPropertyDescriptor(adapterProto, "info");
+        if (!infoDesc) {
+            try {
+                Object.defineProperty(adapterProto, "info", {
                     get() {
-                        const value = origGet.call(this);
-                        return value === undefined || value === null ? fallback : value;
+                        return normalizeAdapterInfo({});
                     },
+                    configurable: true,
                 });
+            } catch {
+                // Ignore non-extensible host prototypes.
             }
+        } else if (infoDesc.configurable && typeof infoDesc.get === "function") {
+            const origInfoGet = infoDesc.get;
+            Object.defineProperty(adapterProto, "info", {
+                ...infoDesc,
+                get() {
+                    return normalizeAdapterInfo(origInfoGet.call(this));
+                },
+            });
+        }
+        if (typeof adapterProto.requestAdapterInfo === "function") {
+            const origRequestAdapterInfo = adapterProto.requestAdapterInfo;
+            adapterProto.requestAdapterInfo = async function (...args) {
+                return normalizeAdapterInfo(await origRequestAdapterInfo.apply(this, args));
+            };
         }
     }
 

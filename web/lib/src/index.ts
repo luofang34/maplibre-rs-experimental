@@ -104,11 +104,59 @@ export const startMapLibre = async (
     canvasId?: string,
     options?: StartMapOptions,
 ): Promise<MapLibreMap | undefined> => {
-    let message = checkRequirements();
-    if (message) {
-        console.error(message)
-        alert(message)
-        return
+    const secureCtx = typeof isSecureContext === "boolean" ? isSecureContext : false;
+    const coi = typeof crossOriginIsolated === "boolean" ? crossOriginIsolated : false;
+    const hasWebGpuFeature = Boolean(
+        typeof navigator !== "undefined" &&
+        "gpu" in navigator &&
+        typeof (navigator as {gpu?: {requestAdapter?: unknown}}).gpu?.requestAdapter === "function",
+    );
+
+    if (WEBGL) {
+        const message = checkRequirements();
+        if (message) {
+            console.error(message);
+            alert(message);
+            return;
+        }
+    } else {
+        const mtEnvReady = !MULTITHREADED || (secureCtx && coi);
+        const earlyDecision = selectGraphicsBackend({
+            webgl: false,
+            hasWebGpu: hasWebGpuFeature,
+            hasWebGl: mtEnvReady && hasWebGpuFeature ? false : isWebGLSupported(),
+            hasWebglFallbackModule: true,
+            multithreaded: MULTITHREADED,
+            crossOriginIsolated: coi,
+            isSecureContext: secureCtx,
+        });
+        if (earlyDecision.backend === "fallback-webgl2") {
+            if (MULTITHREADED && !mtEnvReady) {
+                console.warn(
+                    "Multithreaded WebGPU requires crossOriginIsolated (COOP/COEP) in a secure context; falling back to single-threaded WebGL2.",
+                );
+            }
+            const normalizedFallbackStyle = normalizeStyleInput(
+                styleJson,
+                options?.transformRequest,
+            );
+            const fallbackStyle: string | Promise<string | undefined> | undefined =
+                normalizedFallbackStyle.resolved
+                    ? (normalizedFallbackStyle.value as string | undefined)
+                    : (normalizedFallbackStyle.promise as Promise<string | undefined>);
+            return loadWebGlFallback(
+                workerPath,
+                fallbackStyle,
+                imageProviderModules,
+                canvasId,
+                options,
+            );
+        }
+        if (earlyDecision.backend === "error") {
+            console.error(earlyDecision.message);
+            alert(earlyDecision.message);
+            return undefined;
+        }
     }
 
     const styleAbort = typeof AbortController === "function" ? new AbortController() : undefined;
@@ -122,11 +170,6 @@ export const startMapLibre = async (
         (styleSource as Promise<string | undefined>).catch(() => {});
     }
 
-    const hasWebGpuFeature = Boolean(
-        typeof navigator !== "undefined" &&
-        "gpu" in navigator &&
-        typeof (navigator as {gpu?: {requestAdapter?: unknown}}).gpu?.requestAdapter === "function",
-    );
     const mainModulePrefetch = compileWasmModule(wasmPath);
     const workerModulePrefetch =
         !MULTITHREADED
@@ -155,29 +198,6 @@ export const startMapLibre = async (
     };
 
     if (!WEBGL) {
-        const decision = selectGraphicsBackend({
-            webgl: false,
-            hasWebGpu: hasWebGpuFeature,
-            hasWebGl: hasWebGpuFeature ? false : isWebGLSupported(),
-            hasWebglFallbackModule: true,
-        });
-        if (decision.backend === "fallback-webgl2") {
-            terminatePrewarmedWorkers();
-            return loadWebGlFallback(
-                workerPath,
-                styleSource,
-                imageProviderModules,
-                canvasId,
-                options,
-            );
-        }
-        if (decision.backend === "error") {
-            styleAbort?.abort();
-            terminatePrewarmedWorkers();
-            console.error(decision.message);
-            alert(decision.message);
-            return undefined;
-        }
         ensureWebGpuCompatibility(globalThis, {
             sharedMemory: MULTITHREADED,
             traceGpuCalls: ARENA_TELEMETRY,

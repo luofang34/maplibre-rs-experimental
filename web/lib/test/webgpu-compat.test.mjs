@@ -263,3 +263,37 @@ test('skips per-draw queue/pass wrappers when sharedMemory and traceGpuCalls are
     buf.destroy();
     assert.equal(getLiveGpuBufferBytes(scope), 0);
 });
+
+test('normalizes GPUAdapter.info, requestAdapterInfo, and isFallbackAdapter even without GPUAdapterInfo', async () => {
+    class MockAdapter {
+        get info() {
+            return Object.freeze({vendor: 'Apple', subgroupMinSize: null});
+        }
+        async requestAdapterInfo() {
+            return {architecture: 'common-3', description: undefined};
+        }
+    }
+    const scope = {GPUAdapter: MockAdapter};
+    ensureWebGpuCompatibility(scope, {sharedMemory: false, traceGpuCalls: false});
+
+    const adapter = new MockAdapter();
+    assert.equal(adapter.isFallbackAdapter, false);
+    assert.equal(adapter.info.vendor, 'Apple');
+    assert.equal(adapter.info.subgroupMinSize, 0);
+    assert.equal(adapter.info.subgroupMaxSize, 0);
+    assert.equal(adapter.info.isFallbackAdapter, false);
+
+    const asyncInfo = await adapter.requestAdapterInfo();
+    assert.equal(asyncInfo.architecture, 'common-3');
+    assert.equal(asyncInfo.description, '');
+    assert.equal(asyncInfo.vendor, '');
+    assert.equal(asyncInfo.isFallbackAdapter, false);
+
+    class MinimalAdapter {}
+    const minScope = {GPUAdapter: MinimalAdapter};
+    ensureWebGpuCompatibility(minScope, {sharedMemory: false, traceGpuCalls: false});
+    const minAdapter = new MinimalAdapter();
+    assert.equal(minAdapter.isFallbackAdapter, false);
+    assert.equal(minAdapter.info.vendor, '');
+    assert.equal(minAdapter.info.subgroupMinSize, 0);
+});
