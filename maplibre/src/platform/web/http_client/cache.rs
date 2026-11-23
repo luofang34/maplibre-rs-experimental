@@ -17,12 +17,15 @@ use crate::io::source_client::{ByteRange, CachePolicy};
 /// Persistent browser Cache Storage bucket name for cached tiles and metadata.
 pub const BROWSER_TILE_CACHE_NAME: &str = "maplibre-rs-tiles-v1";
 
-/// Default cap for the shared in-memory browser LRU byte cache (backed by persistent Cache Storage).
+/// Default 2 MiB cap for the shared in-memory browser LRU byte cache (backed by Cache Storage).
 #[cfg(target_feature = "atomics")]
-pub const BROWSER_MEMORY_CACHE_CAP_BYTES: usize = 8 * 1024 * 1024;
+pub const BROWSER_MEMORY_CACHE_CAP_BYTES: usize = 2 * 1024 * 1024;
 /// Default 1 MiB cap for the in-memory browser LRU byte cache (backed by persistent Cache Storage).
 #[cfg(not(target_feature = "atomics"))]
 pub const BROWSER_MEMORY_CACHE_CAP_BYTES: usize = 1024 * 1024;
+#[cfg(target_feature = "atomics")]
+const BROWSER_MEMORY_CACHE_MAX_ITEM_BYTES: usize = 256 * 1024;
+#[cfg(not(target_feature = "atomics"))]
 const BROWSER_MEMORY_CACHE_MAX_ITEM_BYTES: usize = 512 * 1024;
 
 struct LruState {
@@ -256,7 +259,13 @@ pub(super) async fn put_browser_cache(url: &str, body: &[u8]) {
     drop(JsFuture::from(cache.put_with_str(url, &response)).await);
 }
 
+#[cfg(target_feature = "atomics")]
+const DECODED_RGBA_MAX_BYTES: usize = 2 * 1024 * 1024;
+#[cfg(not(target_feature = "atomics"))]
 const DECODED_RGBA_MAX_BYTES: usize = 4 * 1024 * 1024;
+#[cfg(target_feature = "atomics")]
+const DECODED_SPRITE_CACHE_CAP_BYTES: usize = 2 * 1024 * 1024;
+#[cfg(not(target_feature = "atomics"))]
 const DECODED_SPRITE_CACHE_CAP_BYTES: usize = 4 * 1024 * 1024;
 
 struct DecodedSpriteEntry {

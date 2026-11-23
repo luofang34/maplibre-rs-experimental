@@ -1,8 +1,8 @@
 import init from "./wasm/maplibre.js";
 
-// The generated bindings own the module's memory limits; workers reuse the main instance's
-// memory only when it is shared. Pre-created shared memory passes primary = true on the render worker.
-export const initializeWasm = (source, memory, primary = !memory) =>
-    memory && !primary
-        ? init({module_or_path: source, memory, thread_stack_size: 262144})
+// Pass thread_stack_size whenever SharedArrayBuffer memory is supplied so any worker
+// initializing after another thread does not fall back to the 2 MiB default stack.
+export const initializeWasm = (source, memory, _primary = !memory) =>
+    memory
+        ? init({module_or_path: source, memory, thread_stack_size: 196608})
         : init({module_or_path: source, memory});

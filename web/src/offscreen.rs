@@ -42,6 +42,11 @@ type WakeTimerSlot = RefCell<Option<(i32, Closure<dyn FnMut()>)>>;
 type WakeChannelSlot = RefCell<Option<(MessagePort, MessagePort, Closure<dyn FnMut()>)>>;
 type RafClosureSlot = RefCell<Option<Closure<dyn FnMut(f64)>>>;
 
+fn drain_mt_magazine() {
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+    crate::platform::multithreaded::alloc::drain_thread_magazine();
+}
+
 const MAX_BOOT_IMMEDIATE_PUMPS: u8 = 128;
 
 struct RunnerInner {
@@ -63,6 +68,7 @@ struct RunnerInner {
     initial_load_settled: Cell<bool>,
     initial_pumps: Cell<u8>,
     last_style_swap: Cell<u64>,
+    mag_drain_counter: Cell<u8>,
     closed: Cell<bool>,
 }
 
@@ -73,6 +79,7 @@ impl RunnerInner {
             self.last_style_swap.set(swap);
             self.initial_load_settled.set(false);
             self.initial_pumps.set(0);
+            drain_mt_magazine();
         }
     }
     fn schedule_commands(rc: &Rc<RefCell<Self>>) {
@@ -211,7 +218,13 @@ impl RunnerInner {
             log::error!("offscreen map schedule error: {err}");
         }
         self.commands.observe(&mut self.map);
-        Some(self.compute_next_wakeup(Instant::now()))
+        let next = self.compute_next_wakeup(Instant::now());
+        let tick = self.mag_drain_counter.get().wrapping_add(1);
+        self.mag_drain_counter.set(tick);
+        if next.0.is_none() || tick.is_multiple_of(8) {
+            drain_mt_magazine();
+        }
+        Some(next)
     }
 
     fn run_frame(rc: &Rc<RefCell<Self>>) {
@@ -292,6 +305,7 @@ fn start_runner(
         initial_load_settled: Cell::new(false),
         initial_pumps: Cell::new(0),
         last_style_swap: Cell::new(initial_style_swap),
+        mag_drain_counter: Cell::new(0),
         closed: Cell::new(false),
     }));
 

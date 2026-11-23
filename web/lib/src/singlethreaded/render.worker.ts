@@ -11,6 +11,7 @@ type PreinitMessage = {
     height: number
     scaleFactor: number
     ports: MessagePort[]
+    eagerWorkerCount?: number
 }
 
 type FinishInitMessage = {
@@ -29,6 +30,7 @@ type InitMessage = {
     height: number
     scaleFactor: number
     ports: MessagePort[]
+    eagerWorkerCount?: number
     styleJson?: string
 }
 
@@ -56,6 +58,8 @@ let runner: any = null;
 let controller: any = null;
 let ready: Promise<void> | null = null;
 let preinitPromise: Promise<any> | null = null;
+let activeWasmMemory: WebAssembly.Memory | undefined;
+let dormantPorts: Array<MessagePort | null> = [];
 
 const postReply = (id: number, ok: boolean, value: unknown) => {
     postMessage(ok ? {type: "rpc_ok", id, result: value} : {type: "rpc_err", id, error: String(value)});
@@ -64,14 +68,37 @@ const postReply = (id: number, ok: boolean, value: unknown) => {
 const instantiateAndStartPorts = async (
     module: WebAssembly.Module,
     ports: MessagePort[],
+    eagerCount: number,
     memory?: WebAssembly.Memory,
 ) => {
     const wasm = await initializeWasm(module, memory, true);
+    activeWasmMemory = memory ?? wasm.memory;
     if (MULTITHREADED && !memory) {
-        for (const port of ports) {
-            port.postMessage({type: "wasm_init", module, memory: wasm.memory});
+        for (let i = 0; i < eagerCount && i < ports.length; i++) {
+            ports[i].postMessage({type: "wasm_init", module, memory: activeWasmMemory});
         }
     }
+};
+
+const createPortAcquirer = (msg: PreinitMessage | InitMessage) => {
+    let nextPort = 0;
+    const eagerCount = MULTITHREADED
+        ? Math.min(msg.eagerWorkerCount ?? msg.ports.length, msg.ports.length)
+        : msg.ports.length;
+    dormantPorts = msg.ports.slice();
+    return () => {
+        const idx = nextPort++;
+        if (idx >= msg.ports.length) return undefined;
+        const port = msg.ports[idx];
+        dormantPorts[idx] = null;
+        if (MULTITHREADED && idx >= eagerCount) {
+            postMessage({type: "spawn_mt_worker", slot: idx});
+            if (!msg.memory && activeWasmMemory) {
+                port.postMessage({type: "wasm_init", module: msg.module, memory: activeWasmMemory});
+            }
+        }
+        return port;
+    };
 };
 
 onmessage = async (event: MessageEvent<RenderWorkerMessage>) => {
@@ -80,14 +107,17 @@ onmessage = async (event: MessageEvent<RenderWorkerMessage>) => {
 
     if (msg.type === "preinit") {
         preinitPromise = (async () => {
-            await instantiateAndStartPorts(msg.module, msg.ports, msg.memory);
-            let nextPort = 0;
+            const eagerCount = MULTITHREADED
+                ? Math.min(msg.eagerWorkerCount ?? msg.ports.length, msg.ports.length)
+                : msg.ports.length;
+            await instantiateAndStartPorts(msg.module, msg.ports, eagerCount, msg.memory);
+            const acquirePort = createPortAcquirer(msg);
             return (maplibre as any).preinit_maplibre_offscreen(
                 msg.canvas,
                 msg.width,
                 msg.height,
                 msg.scaleFactor,
-                () => msg.ports[nextPort++],
+                acquirePort,
             );
         })();
         preinitPromise.catch(() => {});
@@ -119,14 +149,17 @@ onmessage = async (event: MessageEvent<RenderWorkerMessage>) => {
 
     if (msg.type === "init") {
         const initPromise = (async () => {
-            await instantiateAndStartPorts(msg.module, msg.ports, msg.memory);
-            let nextPort = 0;
+            const eagerCount = MULTITHREADED
+                ? Math.min(msg.eagerWorkerCount ?? msg.ports.length, msg.ports.length)
+                : msg.ports.length;
+            await instantiateAndStartPorts(msg.module, msg.ports, eagerCount, msg.memory);
+            const acquirePort = createPortAcquirer(msg);
             runner = await (maplibre as any).run_maplibre_offscreen(
                 msg.canvas,
                 msg.width,
                 msg.height,
                 msg.scaleFactor,
-                () => msg.ports[nextPort++],
+                acquirePort,
                 msg.styleJson,
             );
             controller = runner.controller();
@@ -196,6 +229,10 @@ onmessage = async (event: MessageEvent<RenderWorkerMessage>) => {
             }
             break;
         case "destroy":
+            for (const port of dormantPorts) {
+                port?.close();
+            }
+            dormantPorts = [];
             runner.destroy();
             runner = null;
             controller = null;

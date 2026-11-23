@@ -10,7 +10,7 @@ import {preventDefaultTouchActions} from "./canvas";
 import {MapLibreMap} from "./map";
 import {
     compileWasmModule,
-    computeMtTileWorkerCount,
+    computeMtEagerWorkerCount,
     computeStTileWorkerCount,
     startOffscreenController,
     type WasmModuleSource,
@@ -113,7 +113,7 @@ export const startMapLibre = async (
             : undefined;
     const prePoolWorkers: Worker[] = preRenderWorker
         ? Array.from(
-              {length: MULTITHREADED ? computeMtTileWorkerCount() : computeStTileWorkerCount()},
+              {length: MULTITHREADED ? computeMtEagerWorkerCount() : computeStTileWorkerCount()},
               () => MULTITHREADED ? MultithreadedPoolWorker() : PoolWorker(),
           )
         : [];
@@ -208,7 +208,7 @@ export const startMapLibre = async (
 
     if (MULTITHREADED && !mtWasmPrimed) {
         mtWasmPrimed = true;
-        const targetMtWorkers = computeMtTileWorkerCount();
+        const targetMtWorkers = computeMtEagerWorkerCount();
         while (prewarmedMtWorkers.length < targetMtWorkers) {
             prewarmedMtWorkers.push(createMtWorker());
         }

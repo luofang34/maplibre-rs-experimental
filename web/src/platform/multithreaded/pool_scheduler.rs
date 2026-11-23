@@ -1,15 +1,17 @@
-use std::{cell::RefCell, future::Future};
+use std::future::Future;
 
 use maplibre::{benchmarking::io::scheduler::ScheduleError, io::scheduler::Scheduler};
 use wasm_bindgen::{prelude::*, JsCast};
-use web_sys::{MessagePort, Worker};
+use web_sys::MessagePort;
+#[cfg(feature = "winit-window")]
+use web_sys::Worker;
 
 use super::pool::WorkerPool;
 use crate::error::WebError;
 
 const MAX_MT_WORKERS: usize = 4;
+const MAX_EAGER_MT_WORKERS: usize = 2;
 
-#[cfg_attr(not(feature = "winit-window"), allow(dead_code))]
 fn hardware_mt_worker_count() -> usize {
     let cores = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("navigator"))
         .ok()
@@ -22,7 +24,17 @@ fn hardware_mt_worker_count() -> usize {
                 4
             }
         });
-    (cores / 2).clamp(3, MAX_MT_WORKERS)
+    cores.saturating_sub(1).clamp(1, MAX_MT_WORKERS)
+}
+
+const fn initial_mt_worker_count(target: usize) -> usize {
+    if target == 0 {
+        1
+    } else if target < MAX_EAGER_MT_WORKERS {
+        target
+    } else {
+        MAX_EAGER_MT_WORKERS
+    }
 }
 
 pub struct WebWorkerPoolScheduler {
@@ -30,51 +42,60 @@ pub struct WebWorkerPoolScheduler {
 }
 
 impl WebWorkerPoolScheduler {
-    #[cfg_attr(not(feature = "winit-window"), allow(dead_code))]
+    #[cfg_attr(
+        not(feature = "winit-window"),
+        expect(
+            dead_code,
+            reason = "Dedicated worker pool scheduler is only used under winit-window"
+        )
+    )]
     pub fn new(new_worker: js_sys::Function) -> Result<Self, WebError> {
-        let count = hardware_mt_worker_count();
-        let pool = WorkerPool::new(
-            count,
-            Box::new(move || {
-                new_worker
-                    .call0(&JsValue::undefined())
-                    .map_err(WebError::from)?
-                    .dyn_into::<Worker>()
-                    .map_err(|_e| WebError::TypeError("Unable to cast to Worker".into()))
-            }),
-        )?;
+        let max_workers = hardware_mt_worker_count();
+        let initial = initial_mt_worker_count(max_workers);
+        #[cfg(not(feature = "winit-window"))]
+        let factory = {
+            let _ = new_worker;
+            Box::new(|| {
+                Err(WebError::TypeError(
+                    "Dedicated worker factory requires winit-window".into(),
+                ))
+            })
+        };
+        #[cfg(feature = "winit-window")]
+        let factory = Box::new(move || {
+            new_worker
+                .call0(&JsValue::undefined())
+                .map_err(WebError::from)?
+                .dyn_into::<Worker>()
+                .map_err(|_e| WebError::TypeError("Unable to cast to Worker".into()))
+        });
+        let pool = WorkerPool::new(initial, max_workers, factory)?;
         Ok(Self { pool })
     }
 
     pub fn from_ports(new_port: js_sys::Function) -> Result<Self, WebError> {
-        let mut ports = Vec::with_capacity(MAX_MT_WORKERS);
-        for _ in 0..MAX_MT_WORKERS {
-            let val = new_port
-                .call0(&JsValue::undefined())
-                .map_err(WebError::from)?;
-            if val.is_undefined() || val.is_null() {
-                break;
-            }
-            let port = val
-                .dyn_into::<MessagePort>()
-                .map_err(|_e| WebError::TypeError("Unable to cast to MessagePort".into()))?;
-            ports.push(port);
-        }
-        if ports.is_empty() {
+        let max_workers = hardware_mt_worker_count();
+        let initial = initial_mt_worker_count(max_workers);
+        let pool = WorkerPool::from_ports(
+            initial,
+            max_workers,
+            Box::new(move || {
+                let val = new_port
+                    .call0(&JsValue::undefined())
+                    .map_err(WebError::from)?;
+                if val.is_undefined() || val.is_null() {
+                    return Ok(None);
+                }
+                val.dyn_into::<MessagePort>()
+                    .map(Some)
+                    .map_err(|_e| WebError::TypeError("Unable to cast to MessagePort".into()))
+            }),
+        )?;
+        if pool.worker_count() == 0 {
             return Err(WebError::TypeError(
                 "No MessagePorts supplied to WebWorkerPoolScheduler".into(),
             ));
         }
-        let count = ports.len();
-        let iter = RefCell::new(ports.into_iter());
-        let pool = WorkerPool::from_ports(
-            count,
-            Box::new(move || {
-                iter.borrow_mut()
-                    .next()
-                    .ok_or_else(|| WebError::TypeError("Exhausted pre-bound MessagePorts".into()))
-            }),
-        )?;
         Ok(Self { pool })
     }
 }

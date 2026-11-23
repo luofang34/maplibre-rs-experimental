@@ -5,134 +5,48 @@
     reason = "frees boxed Work ticket when posting message to worker fails"
 )]
 
+mod queue;
+
 use std::{
-    cell::RefCell,
-    collections::VecDeque,
+    cell::{Cell, RefCell},
     rc::Rc,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex, MutexGuard,
+        Arc,
     },
+    time::Duration,
 };
 
 use wasm_bindgen::{prelude::*, JsCast};
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent, MessagePort, Worker};
 
+pub use self::queue::PinnedFuture;
+use self::queue::{ClaimOutcome, SharedWorkQueue};
 use crate::error::WebError;
 
-pub type PinnedFuture = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'static>>;
-
 type NewWorker = Box<dyn Fn() -> Result<Worker, WebError>>;
-type NewPort = Box<dyn Fn() -> Result<MessagePort, WebError>>;
-type Execute = Box<dyn (FnOnce() -> PinnedFuture) + Send>;
+type NewPort = Box<dyn Fn() -> Result<Option<MessagePort>, WebError>>;
 
 const MAX_RECYCLED_WORKERS: usize = 8;
-/// Concurrent async tasks claimed per worker so network `fetch` I/O overlaps while excess jobs
-/// stay in [`SharedWorkQueue`] for whichever worker finishes its CPU work first to steal.
-const PER_WORKER_CONCURRENCY: usize = 4;
+const RAMP_BACKLOG_THRESHOLD: usize = 2;
+const RAMP_BOOT_GRACE_MS: u64 = 150;
+const RAMP_COOLDOWN_MS: u64 = 100;
+#[cfg(target_arch = "wasm32")]
+const RAMP_MAX_MEMORY_PAGES: usize = 32 * 16;
 
 thread_local! {
     static RECYCLED_WORKERS: RefCell<Vec<Worker>> = const { RefCell::new(Vec::new()) };
     static CURRENT_WORKER_WAKE: RefCell<Option<Arc<AtomicBool>>> = const { RefCell::new(None) };
 }
 
-fn lock_queue<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    match mutex.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
+fn low_memory_for_ramp() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        core::arch::wasm32::memory_size::<0>() < RAMP_MAX_MEMORY_PAGES
     }
-}
-
-#[derive(Default)]
-struct QueueInner {
-    jobs: VecDeque<Execute>,
-    in_flight: Vec<usize>,
-    next_turn: usize,
-    closed: bool,
-}
-
-pub(crate) struct SharedWorkQueue {
-    inner: Mutex<QueueInner>,
-}
-
-impl SharedWorkQueue {
-    fn new() -> Self {
-        Self {
-            inner: Mutex::new(QueueInner::default()),
-        }
-    }
-
-    /// Appends `job` to the shared queue and claims a dispatch slot on the least-loaded worker
-    /// below [`PER_WORKER_CONCURRENCY`], or returns `None` when all workers are already active
-    /// and will steal `job` directly in [`Self::pop_or_release`] without another `postMessage`.
-    fn push_and_claim(&self, job: Execute, worker_count: usize) -> Option<usize> {
-        let mut inner = lock_queue(&self.inner);
-        inner.jobs.push_back(job);
-        if worker_count == 0 {
-            return None;
-        }
-        if inner.in_flight.len() < worker_count {
-            inner.in_flight.resize(worker_count, 0);
-        }
-        let start = inner.next_turn % worker_count;
-        inner.next_turn = inner.next_turn.wrapping_add(1);
-
-        let mut best: Option<(usize, usize)> = None;
-        for offset in 0..worker_count {
-            let idx = (start + offset) % worker_count;
-            let load = inner.in_flight.get(idx).copied().unwrap_or(0);
-            if load >= PER_WORKER_CONCURRENCY {
-                continue;
-            }
-            if best.is_none_or(|(_, best_load)| load < best_load) {
-                best = Some((idx, load));
-                if load == 0 {
-                    break;
-                }
-            }
-        }
-        if let Some((idx, _)) = best {
-            if let Some(slot) = inner.in_flight.get_mut(idx) {
-                *slot = slot.saturating_add(1);
-            }
-            Some(idx)
-        } else {
-            None
-        }
-    }
-
-    fn rollback_claim(&self, worker_index: usize) {
-        let mut inner = lock_queue(&self.inner);
-        if let Some(slot) = inner.in_flight.get_mut(worker_index) {
-            *slot = slot.saturating_sub(1);
-        }
-    }
-
-    fn pop_or_release(&self, worker_index: usize) -> Option<Execute> {
-        let mut inner = lock_queue(&self.inner);
-        if inner.closed {
-            if let Some(slot) = inner.in_flight.get_mut(worker_index) {
-                *slot = slot.saturating_sub(1);
-            }
-            return None;
-        }
-        if let Some(job) = inner.jobs.pop_front() {
-            Some(job)
-        } else {
-            if let Some(slot) = inner.in_flight.get_mut(worker_index) {
-                *slot = slot.saturating_sub(1);
-            }
-            None
-        }
-    }
-
-    fn close_and_clear(&self) {
-        let drained = {
-            let mut inner = lock_queue(&self.inner);
-            inner.closed = true;
-            std::mem::take(&mut inner.jobs)
-        };
-        drop(drained);
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        true
     }
 }
 
@@ -170,7 +84,13 @@ impl WorkerEndpoint {
     }
 }
 
-#[cfg_attr(not(feature = "winit-window"), allow(dead_code))]
+#[cfg_attr(
+    not(feature = "winit-window"),
+    expect(
+        dead_code,
+        reason = "Dedicated worker factory is only constructed under winit-window"
+    )
+)]
 enum EndpointFactory {
     Dedicated(NewWorker),
     Port(NewPort),
@@ -188,6 +108,10 @@ struct PoolState {
     queue: Arc<SharedWorkQueue>,
     waker: RefCell<Option<Arc<dyn Fn() + Send + Sync>>>,
     listeners: RefCell<Vec<WorkerListener>>,
+    max_workers: usize,
+    factory_exhausted: Cell<bool>,
+    created_at: instant::Instant,
+    last_ramp_at: Cell<Option<instant::Instant>>,
 }
 
 impl PoolState {
@@ -196,17 +120,19 @@ impl PoolState {
         endpoint: WorkerEndpoint,
         wake_pending: Arc<AtomicBool>,
         onmessage: WorkerListener,
-    ) {
+    ) -> Option<usize> {
         let mut workers = self.workers.borrow_mut();
         if workers
             .iter()
             .any(|(existing, _)| existing.as_js_value() == endpoint.as_js_value())
         {
-            return;
+            return None;
         }
         endpoint.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
+        let idx = workers.len();
         workers.push((endpoint, wake_pending));
         self.listeners.borrow_mut().push(onmessage);
+        Some(idx)
     }
 }
 
@@ -268,30 +194,59 @@ fn post_worker_wake(scope: &DedicatedWorkerGlobalScope) -> Result<(), JsValue> {
 }
 
 impl WorkerPool {
-    /// Creates a `WorkerPool` primed with `initial` dedicated web workers.
-    #[cfg_attr(not(feature = "winit-window"), allow(dead_code))]
-    pub fn new(initial: usize, new_worker: NewWorker) -> Result<WorkerPool, WebError> {
-        Self::with_factory(initial, EndpointFactory::Dedicated(new_worker))
+    /// Creates a `WorkerPool` primed with `initial` dedicated web workers and up to `max_workers`.
+    #[cfg_attr(
+        not(feature = "winit-window"),
+        expect(
+            dead_code,
+            reason = "Dedicated worker constructor is only used under winit-window"
+        )
+    )]
+    pub fn new(
+        initial: usize,
+        max_workers: usize,
+        new_worker: NewWorker,
+    ) -> Result<Self, WebError> {
+        Self::with_factory(initial, max_workers, EndpointFactory::Dedicated(new_worker))
     }
 
-    /// Creates a `WorkerPool` backed by `initial` pre-connected `MessagePort`s (already primed
-    /// with `wasm_init` by the `OffscreenCanvas` render worker).
-    pub fn from_ports(initial: usize, new_port: NewPort) -> Result<WorkerPool, WebError> {
-        Self::with_factory(initial, EndpointFactory::Port(new_port))
+    /// Creates a `WorkerPool` primed with `initial` `MessagePort`s and lazy growth up to
+    /// `max_workers`.
+    pub fn from_ports(
+        initial: usize,
+        max_workers: usize,
+        new_port: NewPort,
+    ) -> Result<Self, WebError> {
+        Self::with_factory(initial, max_workers, EndpointFactory::Port(new_port))
     }
 
-    fn with_factory(initial: usize, factory: EndpointFactory) -> Result<WorkerPool, WebError> {
+    pub(crate) fn worker_count(&self) -> usize {
+        self.state.workers.borrow().len()
+    }
+
+    fn with_factory(
+        initial: usize,
+        max_workers: usize,
+        factory: EndpointFactory,
+    ) -> Result<WorkerPool, WebError> {
+        let max_workers = max_workers.max(initial).max(1);
         let pool = WorkerPool {
             factory,
             state: Rc::new(PoolState {
-                workers: RefCell::new(Vec::with_capacity(initial)),
+                workers: RefCell::new(Vec::with_capacity(max_workers)),
                 queue: Arc::new(SharedWorkQueue::new()),
                 waker: RefCell::new(None),
-                listeners: RefCell::new(Vec::with_capacity(initial)),
+                listeners: RefCell::new(Vec::with_capacity(max_workers)),
+                max_workers,
+                factory_exhausted: Cell::new(false),
+                created_at: instant::Instant::now(),
+                last_ramp_at: Cell::new(None),
             }),
         };
         for _ in 0..initial {
-            pool.spawn()?;
+            if pool.try_spawn()?.is_none() {
+                break;
+            }
         }
 
         Ok(pool)
@@ -320,7 +275,7 @@ impl WorkerPool {
         })
     }
 
-    fn spawn(&self) -> Result<(), WebError> {
+    fn try_spawn(&self) -> Result<Option<usize>, WebError> {
         let endpoint = match &self.factory {
             EndpointFactory::Dedicated(new_worker) => {
                 let worker =
@@ -342,7 +297,13 @@ impl WorkerPool {
                     };
                 WorkerEndpoint::Dedicated(worker)
             }
-            EndpointFactory::Port(new_port) => WorkerEndpoint::Port(new_port()?),
+            EndpointFactory::Port(new_port) => match new_port()? {
+                Some(port) => WorkerEndpoint::Port(port),
+                None => {
+                    self.state.factory_exhausted.set(true);
+                    return Ok(None);
+                }
+            },
         };
 
         let state = Rc::downgrade(&self.state);
@@ -356,25 +317,30 @@ impl WorkerPool {
             }
         }) as Box<dyn FnMut(MessageEvent)>);
 
-        self.state.push(endpoint, wake_pending, onmessage);
-        Ok(())
+        Ok(self.state.push(endpoint, wake_pending, onmessage))
     }
 
-    pub fn execute(
-        &self,
-        f: impl (FnOnce() -> PinnedFuture) + Send + 'static,
-    ) -> Result<(), WebError> {
-        if self.state.workers.borrow().is_empty() {
-            self.spawn()?;
+    fn should_ramp(&self, worker_count: usize, queued: usize) -> bool {
+        if queued < RAMP_BACKLOG_THRESHOLD
+            || worker_count >= self.state.max_workers
+            || self.state.factory_exhausted.get()
+            || !low_memory_for_ramp()
+        {
+            return false;
         }
+        if self.state.created_at.elapsed() < Duration::from_millis(RAMP_BOOT_GRACE_MS) {
+            return false;
+        }
+        self.state
+            .last_ramp_at
+            .get()
+            .is_none_or(|t| t.elapsed() >= Duration::from_millis(RAMP_COOLDOWN_MS))
+    }
+
+    fn dispatch_ticket(&self, worker_index: usize) -> Result<(), WebError> {
         let workers = self.state.workers.borrow();
-        if workers.is_empty() {
-            return Err(WebError::TypeError("Worker pool has no workers".into()));
-        }
-        let Some(worker_index) = self.state.queue.push_and_claim(Box::new(f), workers.len()) else {
-            return Ok(());
-        };
         let Some((worker, wake_pending)) = workers.get(worker_index).cloned() else {
+            drop(workers);
             self.state.queue.rollback_claim(worker_index);
             return Err(WebError::TypeError("Invalid worker index".into()));
         };
@@ -395,6 +361,32 @@ impl WorkerPool {
                 }
                 self.state.queue.rollback_claim(worker_index);
                 Err(e.into())
+            }
+        }
+    }
+
+    pub fn execute(
+        &self,
+        f: impl (FnOnce() -> PinnedFuture) + Send + 'static,
+    ) -> Result<(), WebError> {
+        if self.state.workers.borrow().is_empty() {
+            self.try_spawn()?;
+        }
+        let worker_count = self.state.workers.borrow().len();
+        if worker_count == 0 {
+            return Err(WebError::TypeError("Worker pool has no workers".into()));
+        }
+        match self.state.queue.push_and_claim(Box::new(f), worker_count) {
+            ClaimOutcome::Claimed(idx) => self.dispatch_ticket(idx),
+            ClaimOutcome::Backlogged { queued } => {
+                if self.should_ramp(worker_count, queued) {
+                    if let Some(new_idx) = self.try_spawn()? {
+                        self.state.last_ramp_at.set(Some(instant::Instant::now()));
+                        self.state.queue.claim_worker(new_idx);
+                        return self.dispatch_ticket(new_idx);
+                    }
+                }
+                Ok(())
             }
         }
     }

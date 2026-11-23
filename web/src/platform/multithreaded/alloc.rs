@@ -1,7 +1,7 @@
 //! Thread-local small-block magazine allocator for `wasm32 + atomics`.
 //!
 //! Under shared-memory WASM, `std::alloc::System` delegates to `dlmalloc` protected by a single
-//! global spinlock. By caching freed small/medium blocks (`16..=32768` bytes, `align <= 8`) in
+//! global spinlock. By caching freed small/medium blocks (`16..=2048` bytes, `align <= 8`) in
 //! per-thread freelists, the render worker and tile workers avoid contending with decode,
 //! tessellation, and eviction bursts on frequent `Vec`/hash-map churn while draining on worker idle.
 #![expect(
@@ -15,12 +15,11 @@ use std::{
     ptr,
 };
 
-const NUM_CLASSES: usize = 12;
+const NUM_CLASSES: usize = 8;
 const MIN_CLASS_BYTES: usize = 16;
-const MAX_CLASS_BYTES: usize = 32768;
+const MAX_CLASS_BYTES: usize = 2048;
 const BASE_ALIGN: usize = 8;
-const CLASS_CAPS: [u16; NUM_CLASSES] = [128, 128, 96, 64, 48, 32, 24, 16, 8, 8, 4, 4];
-const MAX_DRAIN_BURST: u16 = 16;
+const CLASS_CAPS: [u16; NUM_CLASSES] = [96, 96, 64, 48, 32, 24, 16, 8];
 
 struct Magazine {
     heads: [*mut u8; NUM_CLASSES],
@@ -71,7 +70,7 @@ impl Magazine {
 
     fn drain_half(&mut self, class_idx: usize) {
         let count = self.counts.get(class_idx).copied().unwrap_or(0);
-        let burst = (count / 2).clamp(1, MAX_DRAIN_BURST);
+        let burst = (count / 2).max(1);
         let target = count.saturating_sub(burst);
         self.drain_to(class_idx, target);
     }
@@ -109,7 +108,7 @@ impl Magazine {
 }
 
 pub(crate) fn drain_thread_magazine() {
-    drop(MAG.try_with(|tm| tm.with_mut(Magazine::drain_all)));
+    let _ = MAG.try_with(|tm| tm.with_mut(Magazine::drain_all));
 }
 
 struct ThreadMagazine {
@@ -159,7 +158,7 @@ const fn class_index(layout: Layout) -> Option<usize> {
 #[inline]
 const fn class_layout(class_idx: usize) -> Layout {
     let size = MIN_CLASS_BYTES << class_idx;
-    // SAFETY: `size` is a non-zero power-of-two in `16..=32768` and `BASE_ALIGN` is `8`,
+    // SAFETY: `size` is a non-zero power-of-two in `16..=2048` and `BASE_ALIGN` is `8`,
     // satisfying all `Layout::from_size_align` invariants without panic paths.
     unsafe { Layout::from_size_align_unchecked(size, BASE_ALIGN) }
 }
@@ -250,7 +249,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn size_classes_cover_16_to_32768_bytes_and_drain_cleanly() {
+    fn size_classes_cover_16_to_2048_bytes_and_drain_cleanly() {
         assert_eq!(
             class_index(
                 Layout::from_size_align(1, 1)
@@ -269,24 +268,16 @@ mod tests {
         );
         assert_eq!(
             class_index(
-                Layout::from_size_align(8192, 8)
+                Layout::from_size_align(2048, 8)
                     .ok()
                     .unwrap_or(Layout::new::<u8>())
             ),
-            Some(9)
+            Some(7)
         );
+        assert_eq!(class_layout(7).size(), 2048);
         assert_eq!(
             class_index(
-                Layout::from_size_align(32768, 8)
-                    .ok()
-                    .unwrap_or(Layout::new::<u8>())
-            ),
-            Some(11)
-        );
-        assert_eq!(class_layout(11).size(), 32768);
-        assert_eq!(
-            class_index(
-                Layout::from_size_align(32769, 8)
+                Layout::from_size_align(2049, 8)
                     .ok()
                     .unwrap_or(Layout::new::<u8>())
             ),
@@ -294,7 +285,7 @@ mod tests {
         );
         assert_eq!(
             class_index(
-                Layout::from_size_align(65536, 8)
+                Layout::from_size_align(8192, 8)
                     .ok()
                     .unwrap_or(Layout::new::<u8>())
             ),

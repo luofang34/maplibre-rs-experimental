@@ -65,6 +65,34 @@ if (!isMainThread) {
                 await Promise.all([primary.terminate(), secondary.terminate()]);
             }
         });
+
+        test('secondary-before-primary on pre-created shared memory keeps stack compact', async () => {
+            const preCreated = new WebAssembly.Memory({initial: 32, maximum: 16384, shared: true});
+            const secondary = new Worker(new URL(import.meta.url), {
+                workerData: {module, memory: preCreated, primary: false},
+            });
+            try {
+                const [secondaryRes] = await once(secondary, 'message');
+                assert.equal(secondaryRes.shared, true);
+                assert.equal(secondaryRes.reusesMemory, true);
+                const primary = new Worker(new URL(import.meta.url), {
+                    workerData: {module, memory: preCreated, primary: true},
+                });
+                try {
+                    const [primaryRes] = await once(primary, 'message');
+                    assert.equal(primaryRes.shared, true);
+                    assert.equal(primaryRes.reusesMemory, true);
+                    assert.ok(
+                        preCreated.buffer.byteLength <= 72 * 65536,
+                        `expected <= 72 pages, got ${preCreated.buffer.byteLength / 65536}`,
+                    );
+                } finally {
+                    await primary.terminate();
+                }
+            } finally {
+                await secondary.terminate();
+            }
+        });
     }
 
     const workerWasmPath = new URL('../src/wasm/maplibre_tile_worker_bg.wasm', import.meta.url);

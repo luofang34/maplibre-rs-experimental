@@ -1,6 +1,11 @@
 import type {MapController} from "./wasm/maplibre";
 import type {ArenaFrameTelemetry, CameraState} from "./map";
 import {createOffscreenCoalescer} from "./offscreen-coalesce.mjs";
+import {
+    computeMtEagerWorkerCount,
+    computeMtTargetWorkerCount,
+    createDormantPortSlotController,
+} from "./mt-pool-slots.mjs";
 
 type Waiter = { resolve: (v: any) => void, reject: (e: any) => void };
 
@@ -62,10 +67,9 @@ export const computeStTileWorkerCount = (): number => {
     return Math.min(6, Math.max(ST_TILE_WORKER_COUNT, Math.floor(cores / 2)));
 };
 
-export const computeMtTileWorkerCount = (): number => {
-    const cores = Number(globalThis.navigator?.hardwareConcurrency) || 4;
-    return Math.min(4, Math.max(3, Math.floor(cores / 2)));
-};
+export {computeMtEagerWorkerCount, computeMtTargetWorkerCount};
+
+export const computeMtTileWorkerCount = (): number => computeMtTargetWorkerCount();
 
 const createSharedWasmMemory = (): WebAssembly.Memory | undefined => {
     if (
@@ -76,7 +80,7 @@ const createSharedWasmMemory = (): WebAssembly.Memory | undefined => {
         return undefined;
     }
     try {
-        const initial = Math.min(MT_MAX_MEMORY_PAGES, Math.max(MT_INITIAL_MEMORY_PAGES, 64));
+        const initial = Math.min(MT_MAX_MEMORY_PAGES, Math.max(MT_INITIAL_MEMORY_PAGES, 32));
         return new WebAssembly.Memory({initial, maximum: MT_MAX_MEMORY_PAGES, shared: true});
     } catch {
         return undefined;
@@ -97,31 +101,60 @@ export const startOffscreenController = async ({
 }: OffscreenStartArgs): Promise<MapController> => {
     const offscreen = canvas.transferControlToOffscreen();
 
-    // Spawn render worker + tile workers immediately at t=0 in parallel with WASM compilation.
-    const workerCount = MULTITHREADED ? computeMtTileWorkerCount() : computeStTileWorkerCount();
+    // Spawn render worker + eager tile workers at t=0; defer extra MT workers until backlogged.
+    const workerCount = MULTITHREADED ? computeMtTargetWorkerCount() : computeStTileWorkerCount();
+    const eagerWorkerCount = MULTITHREADED
+        ? computeMtEagerWorkerCount(workerCount)
+        : workerCount;
     const renderWorker = prewarmedRenderWorker ?? createRenderWorker();
     const tileWorkers: Worker[] = [];
     const channels: MessageChannel[] = [];
     const providerUrls = imageProviderModules.map(url => new URL(url, location.href).href);
-
-    for (let i = 0; i < workerCount; i++) {
-        const worker = !workerPath && prewarmedPoolWorkers?.length
+    const takeOrSpawnTileWorker = (): Worker =>
+        !workerPath && prewarmedPoolWorkers?.length
             ? prewarmedPoolWorkers.pop()!
             : (workerPath ? new Worker(workerPath, {type: "module"}) : createPoolWorker());
-        if (!MULTITHREADED && providerUrls.length > 0) {
-            worker.postMessage({type: "image_provider_modules", urls: providerUrls});
-        }
-        const channel = new MessageChannel();
-        if (MULTITHREADED) {
-            const port2 = channel.port2;
-            worker.postMessage({type: "bind_port", port: port2}, [port2]);
-        }
-        tileWorkers.push(worker);
-        channels.push(channel);
-    }
 
     let nextRpcId = 1;
     let closed = false;
+    let portsTransferred = false;
+    let compiledMainModule: WebAssembly.Module | null = null;
+    const sharedMemory = createSharedWasmMemory();
+    const dormantSlots = createDormantPortSlotController({
+        totalCount: workerCount,
+        eagerCount: eagerWorkerCount,
+        spawnWorkerForSlot: (_slot: number, port2: MessagePort) => {
+            const worker = takeOrSpawnTileWorker();
+            tileWorkers.push(worker);
+            worker.postMessage({type: "bind_port", port: port2}, [port2]);
+            if (compiledMainModule && sharedMemory) {
+                worker.postMessage({
+                    type: "wasm_init",
+                    module: compiledMainModule,
+                    memory: sharedMemory,
+                });
+            }
+        },
+    });
+
+    for (let i = 0; i < workerCount; i++) {
+        const channel = new MessageChannel();
+        channels.push(channel);
+        if (i < eagerWorkerCount) {
+            const worker = takeOrSpawnTileWorker();
+            if (!MULTITHREADED && providerUrls.length > 0) {
+                worker.postMessage({type: "image_provider_modules", urls: providerUrls});
+            }
+            if (MULTITHREADED) {
+                const port2 = channel.port2;
+                worker.postMessage({type: "bind_port", port: port2}, [port2]);
+            }
+            tileWorkers.push(worker);
+        } else {
+            dormantSlots.setDormant(i, channel.port2);
+        }
+    }
+
     const pending = new Map<number, Waiter>();
     let cameraListener: ((camera: CameraState) => void) | null = null;
     let telemetryListener: ((telemetry: ArenaFrameTelemetry) => void) | null = null;
@@ -158,6 +191,15 @@ export const startOffscreenController = async ({
         for (const w of tileWorkers) {
             w.terminate();
         }
+        dormantSlots.closeAll();
+        if (!portsTransferred) {
+            for (const ch of channels) {
+                ch.port1.close();
+                if (!MULTITHREADED) {
+                    ch.port2.close();
+                }
+            }
+        }
     };
 
     renderWorker.onmessage = (event: MessageEvent<any>) => {
@@ -179,6 +221,9 @@ export const startOffscreenController = async ({
             cameraListener?.(msg.payload);
         } else if (msg.type === "telemetry") {
             telemetryListener?.(msg.payload);
+        } else if (msg.type === "spawn_mt_worker") {
+            if (closed || !MULTITHREADED) return;
+            dormantSlots.activate(Number(msg.slot));
         } else if (msg.type === "destroyed") {
             terminateAllWorkers();
         }
@@ -220,7 +265,6 @@ export const startOffscreenController = async ({
 
     try {
         const mainModulePromise = compileWasmModule(wasmPath);
-        const sharedMemory = createSharedWasmMemory();
         let workerReadyPromise: Promise<void> = Promise.resolve();
         if (!MULTITHREADED) {
             const resolvedWorkerWasm =
@@ -264,15 +308,12 @@ export const startOffscreenController = async ({
 
         const renderInitPromise = mainModulePromise.then(module => {
             if (closed) return;
-            if (MULTITHREADED && sharedMemory) {
-                for (const worker of tileWorkers) {
-                    worker.postMessage({type: "wasm_init", module, memory: sharedMemory});
-                }
-            }
+            compiledMainModule = module;
             const ports = channels.map(ch => ch.port1);
+            portsTransferred = true;
             if (styleResolved) {
                 const initId = nextRpcId++;
-                return new Promise<void>((resolve, reject) => {
+                const initDone = new Promise<void>((resolve, reject) => {
                     pending.set(initId, {resolve, reject});
                     renderWorker.postMessage(
                         {
@@ -285,11 +326,18 @@ export const startOffscreenController = async ({
                             height: initial.height,
                             scaleFactor: initial.scaleFactor,
                             ports,
+                            eagerWorkerCount,
                             styleJson: resolvedStyleValue,
                         },
                         [offscreen, ...ports],
                     );
                 });
+                if (MULTITHREADED && sharedMemory) {
+                    for (const worker of tileWorkers) {
+                        worker.postMessage({type: "wasm_init", module, memory: sharedMemory});
+                    }
+                }
+                return initDone;
             }
             renderWorker.postMessage(
                 {
@@ -301,9 +349,15 @@ export const startOffscreenController = async ({
                     height: initial.height,
                     scaleFactor: initial.scaleFactor,
                     ports,
+                    eagerWorkerCount,
                 },
                 [offscreen, ...ports],
             );
+            if (MULTITHREADED && sharedMemory) {
+                for (const worker of tileWorkers) {
+                    worker.postMessage({type: "wasm_init", module, memory: sharedMemory});
+                }
+            }
             return stylePromise.then(resolvedStyleJson => {
                 if (closed) return;
                 const initId = nextRpcId++;
