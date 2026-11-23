@@ -1,5 +1,12 @@
 // @include projection.vertex.wgsl
 
+struct GlobeLayerUniforms {
+    color: vec4<f32>,
+    viewport: vec4<f32>,
+}
+
+@group(1) @binding(0) var<uniform> layer: GlobeLayerUniforms;
+
 struct VertexOutput {
     @location(0) color: vec4<f32>,
     @location(1) mercator: vec2<f32>,
@@ -15,9 +22,6 @@ fn main(
     @location(5) translate2: vec4<f32>,
     @location(6) translate3: vec4<f32>,
     @location(7) translate4: vec4<f32>,
-    @location(8) color: vec4<f32>,
-    @location(10) z_index: f32,
-    @location(11) viewport: vec4<f32>,
 ) -> VertexOutput {
     let tile_position = vec3<f32>(raw_position, 0.0);
     let projected = project_tile_position_3d(
@@ -26,10 +30,10 @@ fn main(
         tile_mercator_coords,
     );
     var position = projected.clip_position;
-    if viewport.y > 0.5 {
+    if layer.viewport.y > 0.5 {
         position.z = max(position.z, 0.0) * 1.0e-6;
     }
     // Mercator position in world units, which the pattern repeats over.
     let mercator = tile_mercator_coords.xy + tile_position.xy * tile_mercator_coords.zw;
-    return VertexOutput(color, mercator, projected.horizon_distance, position);
+    return VertexOutput(layer.color, mercator, projected.horizon_distance, position);
 }

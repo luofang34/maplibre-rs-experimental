@@ -225,3 +225,154 @@ fn terrain_fog_transitions_smoothly_across_globe_zoom_levels() {
     assert!(!z6.globe && z6.opacity > 0.3 && z6.opacity < 0.7);
     assert!(z4.globe && z4.opacity == 0.0);
 }
+
+#[test]
+fn no_instanced_shader_layout_uses_zero_array_stride() {
+    use crate::render::shaders::{
+        AtmosphereShader, BackgroundPatternShader, BackgroundShader, CircleDynamicRadiusShader,
+        CircleFeatureStrokeShader, CircleShader, ExtrusionPass, FillExtrusionCompactShader,
+        FillExtrusionShader, FillPatternShader, FillShader, FlatTileMaskShader,
+        GlobeBackgroundPatternShader, GlobeBackgroundShader, HeatmapCompositeShader,
+        HeatmapDensityShader, LineShader, PlainLineShader, RasterShader, Shader, SymbolShader,
+        TerrainLineShader, TerrainShader, TileMaskShader,
+    };
+
+    let format = wgpu::TextureFormat::Rgba8Unorm;
+    let states = [
+        (
+            "BackgroundShader",
+            BackgroundShader { format }.describe_vertex(),
+        ),
+        (
+            "BackgroundPatternShader",
+            BackgroundPatternShader { format }.describe_vertex(),
+        ),
+        (
+            "GlobeBackgroundShader",
+            GlobeBackgroundShader { format }.describe_vertex(),
+        ),
+        (
+            "GlobeBackgroundPatternShader",
+            GlobeBackgroundPatternShader { format }.describe_vertex(),
+        ),
+        ("SkyShader", SkyShader { format }.describe_vertex()),
+        (
+            "AtmosphereShader",
+            AtmosphereShader { format }.describe_vertex(),
+        ),
+        (
+            "FillShader_globe",
+            FillShader { format }.describe_vertex_for_globe(true),
+        ),
+        (
+            "FillShader_flat",
+            FillShader { format }.describe_vertex_for_globe(false),
+        ),
+        (
+            "FillPatternShader",
+            FillPatternShader { format }.describe_vertex(),
+        ),
+        ("LineShader", LineShader { format }.describe_vertex()),
+        (
+            "PlainLineShader_globe",
+            PlainLineShader {
+                format,
+                globe: true,
+            }
+            .describe_vertex(),
+        ),
+        (
+            "PlainLineShader_flat",
+            PlainLineShader {
+                format,
+                globe: false,
+            }
+            .describe_vertex(),
+        ),
+        (
+            "TerrainLineShader",
+            TerrainLineShader { format }.describe_vertex(),
+        ),
+        ("CircleShader", CircleShader { format }.describe_vertex()),
+        (
+            "CircleFeatureStrokeShader",
+            CircleFeatureStrokeShader { format }.describe_vertex(),
+        ),
+        (
+            "CircleDynamicRadiusShader",
+            CircleDynamicRadiusShader { format }.describe_vertex(),
+        ),
+        (
+            "FillExtrusion_depth",
+            FillExtrusionShader {
+                format,
+                pass: ExtrusionPass::Depth,
+            }
+            .describe_vertex(),
+        ),
+        (
+            "FillExtrusion_color",
+            FillExtrusionShader {
+                format,
+                pass: ExtrusionPass::Color,
+            }
+            .describe_vertex(),
+        ),
+        (
+            "FillExtrusion_compact",
+            FillExtrusionCompactShader {
+                format,
+                pass: ExtrusionPass::Color,
+            }
+            .describe_vertex(),
+        ),
+        (
+            "HeatmapDensityShader",
+            HeatmapDensityShader.describe_vertex(),
+        ),
+        (
+            "HeatmapCompositeShader",
+            HeatmapCompositeShader { format }.describe_vertex(),
+        ),
+        ("RasterShader", RasterShader { format }.describe_vertex()),
+        ("TerrainShader", TerrainShader { format }.describe_vertex()),
+        ("SymbolShader", SymbolShader { format }.describe_vertex()),
+        (
+            "TileMaskShader",
+            TileMaskShader {
+                format,
+                draw_colors: false,
+                debug_lines: false,
+            }
+            .describe_vertex(),
+        ),
+        (
+            "FlatTileMaskShader",
+            FlatTileMaskShader { format }.describe_vertex(),
+        ),
+    ];
+    for (name, vertex_state) in states {
+        for (slot, layout) in vertex_state.buffers.iter().enumerate() {
+            if layout.step_mode == wgpu::VertexStepMode::Instance {
+                assert_ne!(
+                    layout.array_stride, 0,
+                    "{name} slot {slot} uses VertexStepMode::Instance with array_stride == 0 (breaks WebGL2)"
+                );
+            }
+        }
+    }
+    assert_eq!(
+        GlobeBackgroundShader { format }
+            .describe_vertex()
+            .buffers
+            .len(),
+        2
+    );
+    assert_eq!(
+        GlobeBackgroundPatternShader { format }
+            .describe_vertex()
+            .buffers
+            .len(),
+        2
+    );
+}

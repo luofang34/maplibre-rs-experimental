@@ -1,9 +1,13 @@
 //! Persistent GPU buffers and metadata construction for background, sky, and atmosphere rendering.
 
+mod globe_uniform;
 mod scratch;
+mod sky;
 
+use globe_uniform::GlobeLayerUniformPool;
 pub use scratch::world_rows;
 pub(crate) use scratch::{fill_globe_tiles, BackgroundScratch};
+pub use sky::{sky_metadata, sky_metadata_with_camera};
 
 use crate::{
     coords::WorldTileCoords,
@@ -22,6 +26,10 @@ use crate::{
 pub struct BackgroundBuffers {
     /// Background layer paint metadata.
     pub metadata_buffer: wgpu::Buffer,
+    /// Dynamic uniform bind group supplying [`GlobeBackgroundUniform`] at `@group(1)`.
+    pub globe_layer_bind_group: wgpu::BindGroup,
+    /// Byte stride between entries in [`Self::globe_layer_bind_group`].
+    pub globe_layer_stride: u32,
     /// Instance of each background style layer in `metadata_buffer`.
     pub instances: rustc_hash::FxHashMap<crate::style::StyleLayerId, u32>,
     /// The tile transform of each of `globe_tiles`, in order, used by globe meshes.
@@ -55,6 +63,7 @@ pub(super) struct AllocatedBuffers {
     pub(super) metadata_buffer: wgpu::Buffer,
     pub(super) metadata_capacity: usize,
     pub(super) last_metadata_bytes: Vec<u8>,
+    pub(super) globe_uniform: GlobeLayerUniformPool,
     pub(super) tile_metadata_buffer: wgpu::Buffer,
     pub(super) tile_metadata_capacity: usize,
     pub(super) last_tile_metadata_bytes: Vec<u8>,
@@ -77,6 +86,7 @@ impl Drop for AllocatedBuffers {
 impl AllocatedBuffers {
     pub(super) fn new(device: &wgpu::Device) -> Self {
         let metadata_capacity = BackgroundGpuBuffers::INITIAL_METADATA_CAPACITY;
+        let globe_uniform = GlobeLayerUniformPool::new(device, metadata_capacity);
         let metadata_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Background Metadata Buffer"),
             size: (metadata_capacity * std::mem::size_of::<BackgroundLayerMetadata>())
@@ -114,6 +124,7 @@ impl AllocatedBuffers {
             metadata_buffer,
             metadata_capacity,
             last_metadata_bytes: Vec::new(),
+            globe_uniform,
             tile_metadata_buffer,
             tile_metadata_capacity,
             last_tile_metadata_bytes: Vec::new(),
@@ -213,7 +224,7 @@ impl BackgroundGpuBuffers {
         metadatas: &[BackgroundLayerMetadata],
     ) -> &wgpu::Buffer {
         let inner = self.ensure_allocated(device);
-        if write_buffer_slice(
+        let slice_realloc = write_buffer_slice(
             device,
             queue,
             &mut inner.metadata_buffer,
@@ -221,7 +232,9 @@ impl BackgroundGpuBuffers {
             &mut inner.last_metadata_bytes,
             "Background Metadata Buffer",
             metadatas,
-        ) {
+        );
+        let uniform_realloc = inner.globe_uniform.write_layers(device, queue, metadatas);
+        if slice_realloc || uniform_realloc {
             inner.bump_generation();
         }
         &inner.metadata_buffer
@@ -404,90 +417,6 @@ pub fn background_color(layer: &crate::style::layer::StyleLayer, zoom: f64) -> [
         .unwrap_or(1.0);
     color[3] *= opacity.clamp(0.0, 1.0);
     color
-}
-
-/// The sky draw's values for the frame, scaled to the physical frame height.
-pub fn sky_metadata(
-    sky: &crate::style::sky::SkySpecification,
-    view_state: &ViewState,
-    projection_transition: f32,
-    frame_height: f32,
-) -> SkyLayerMetadata {
-    sky_metadata_with_camera(sky, view_state, projection_transition, frame_height, None)
-}
-
-/// Same as [`sky_metadata`], reusing an already-resolved [`GlobeCameraState`] when available.
-pub fn sky_metadata_with_camera(
-    sky: &crate::style::sky::SkySpecification,
-    view_state: &ViewState,
-    projection_transition: f32,
-    frame_height: f32,
-    cached_globe_camera: Option<&crate::projection::globe::camera::GlobeCameraState>,
-) -> SkyLayerMetadata {
-    let zoom = view_state.zoom().value();
-    let colors = sky.colors_at(zoom);
-    let logical_height = view_state.height();
-    let scale = if logical_height > 0.0 && frame_height > 0.0 {
-        f64::from(frame_height) / logical_height
-    } else {
-        1.0
-    };
-    let height = logical_height * scale;
-    let mut horizon = view_state.horizon_line();
-    horizon.point.x *= scale;
-    horizon.point.y *= scale;
-    let sky_blend = if view_state.opaque_environment() {
-        0.0
-    } else {
-        projection_transition
-    };
-    let (inverse_projection, up_and_horizon) = if sky_blend > 0.0 {
-        let owned = cached_globe_camera
-            .is_none()
-            .then(|| crate::render::projection::globe_camera_for_view(view_state).ok())
-            .flatten();
-        cached_globe_camera
-            .or(owned.as_ref())
-            .and_then(|camera| {
-                let mut inv: [[f32; 4]; 4] = camera.inverse_projection().cast::<f32>()?.into();
-                let globe_pos = camera.globe_center_in_view().cast::<f32>()?;
-                inv[2] = [
-                    camera.camera_to_center_distance() as f32,
-                    scale as f32,
-                    camera.globe_radius_pixels() as f32,
-                    sky.atmosphere_blend_at_zoom(zoom),
-                ];
-                Some((inv, [globe_pos.x, globe_pos.y, globe_pos.z, 0.0]))
-            })
-            .unwrap_or_else(|| {
-                (
-                    cgmath::Matrix4::from_scale(1.0).into(),
-                    [0.0, 0.0, 1.0, 0.0],
-                )
-            })
-    } else {
-        (
-            cgmath::Matrix4::from_scale(1.0).into(),
-            [0.0, 0.0, 1.0, 0.0],
-        )
-    };
-    SkyLayerMetadata {
-        sky_color: colors.sky,
-        horizon_color: colors.horizon,
-        horizon: horizon.to_shader(),
-        blend: [
-            (f64::from(colors.sky_horizon_blend) * height / 2.0) as f32,
-            sky_blend,
-            height as f32,
-            if view_state.has_external_view() {
-                1.0e-8
-            } else {
-                0.0
-            },
-        ],
-        inverse_projection,
-        up_and_horizon,
-    }
 }
 
 #[cfg(test)]

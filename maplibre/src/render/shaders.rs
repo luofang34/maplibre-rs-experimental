@@ -17,8 +17,8 @@ mod vertex;
 
 pub use background::{
     AtmosphereLayerMetadata, AtmosphereShader, BackgroundLayerMetadata, BackgroundPatternShader,
-    BackgroundShader, GlobeBackgroundPatternShader, GlobeBackgroundShader, SkyLayerMetadata,
-    SkyShader,
+    BackgroundShader, GlobeBackgroundPatternShader, GlobeBackgroundShader, GlobeBackgroundUniform,
+    SkyLayerMetadata, SkyShader,
 };
 pub use circle::{
     pack_dynamic_circle_radii, pack_dynamic_circle_radius_uniform, CircleDynamicRadiusShader,

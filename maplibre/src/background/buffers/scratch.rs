@@ -150,7 +150,7 @@ impl BackgroundGpuBuffers {
     ) -> &wgpu::Buffer {
         let Self { inner, scratch } = self;
         let inner = inner.get_or_insert_with(|| AllocatedBuffers::new(device));
-        if write_buffer_slice(
+        let slice_realloc = write_buffer_slice(
             device,
             queue,
             &mut inner.metadata_buffer,
@@ -158,7 +158,11 @@ impl BackgroundGpuBuffers {
             &mut inner.last_metadata_bytes,
             "Background Metadata Buffer",
             &scratch.metadatas,
-        ) {
+        );
+        let uniform_realloc = inner
+            .globe_uniform
+            .write_layers(device, queue, &scratch.metadatas);
+        if slice_realloc || uniform_realloc {
             inner.bump_generation();
         }
         &inner.metadata_buffer

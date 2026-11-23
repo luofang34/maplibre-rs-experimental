@@ -225,7 +225,7 @@ fn circle_layer_layout(include_stroke: bool, include_zero_dyn_radius: bool) -> V
         },
     ]);
     VertexBufferLayout {
-        array_stride: 0,
+        array_stride: std::mem::size_of::<ShaderLayerMetadata>() as u64,
         step_mode: wgpu::VertexStepMode::Instance,
         attributes,
     }

@@ -109,7 +109,7 @@ impl Shader for FillShader {
                 ShaderTileMetadata::basic_layout(),
                 // layer metadata
                 VertexBufferLayout {
-                    array_stride: 0,
+                    array_stride: std::mem::size_of::<super::ShaderLayerMetadata>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: vec![
                         attribute(0, wgpu::VertexFormat::Float32, 10),

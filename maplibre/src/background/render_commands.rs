@@ -139,24 +139,16 @@ impl RenderCommand<LayerItem> for DrawGlobeBackgroundQuad {
         ) else {
             return RenderCommandResult::Failure;
         };
-        let instance = u64::from(
-            buffers
-                .instances
-                .get(&item.style_layer)
-                .copied()
-                .unwrap_or(0),
-        );
-        // Layer metadata uses array_stride = 0 across instanced tiles; tile metadata is sliced
-        // per contiguous mesh-variant run with 0-based instance indices for WebGL2 compatibility.
+        let instance = buffers
+            .instances
+            .get(&item.style_layer)
+            .copied()
+            .unwrap_or(0);
+        // Layer metadata uses dynamic uniform offsets at `@group(1)` and tile metadata is sliced
+        // per contiguous mesh-variant run with `0..count` indices for WebGL2 & WebGPU parity.
+        let dynamic_offset = instance.saturating_mul(buffers.globe_layer_stride);
+        pass.set_bind_group(1, &buffers.globe_layer_bind_group, &[dynamic_offset]);
         let stride = std::mem::size_of::<crate::render::shaders::ShaderTileMetadata>() as u64;
-        let layer_stride =
-            std::mem::size_of::<crate::render::shaders::BackgroundLayerMetadata>() as u64;
-        pass.set_vertex_buffer(
-            2,
-            buffers
-                .metadata_buffer
-                .slice(instance * layer_stride..(instance + 1) * layer_stride),
-        );
         let mut idx = 0_usize;
         let mut drawn = false;
         for chunk in buffers.globe_tiles.chunk_by(|a, b| {
@@ -215,8 +207,8 @@ impl RenderCommand<LayerItem> for SetGlobeBackgroundPatternPipeline {
         };
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, projection_resources.bind_group(), &[]);
-        pass.set_bind_group(1, image, &[]);
-        pass.set_bind_group(2, world_size, &[]);
+        pass.set_bind_group(2, image, &[]);
+        pass.set_bind_group(3, world_size, &[]);
         RenderCommandResult::Success
     }
 }

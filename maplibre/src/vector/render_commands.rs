@@ -149,18 +149,12 @@ fn bind_vector_tile_buffers<'w>(
     let source_shape = &item.source_shape;
     pass.set_stencil_reference(u32::from(source_shape.stencil_reference()));
     let (first, base_vertex) = buffer_pool.bind_layer(pass, entry, (3, whole));
-    let instances = if whole {
-        let tile_instance = source_shape.instance_index()?;
-        pass.set_vertex_buffer(1, tile_view_pattern.buffer().slice(..));
-        tile_instance..tile_instance + 1
-    } else {
-        let tile_view_pattern_buffer = source_shape.buffer_range()?;
-        pass.set_vertex_buffer(
-            1,
-            tile_view_pattern.buffer().slice(tile_view_pattern_buffer),
-        );
-        0..1
-    };
+    let tile_view_pattern_buffer = source_shape.buffer_range()?;
+    pass.set_vertex_buffer(
+        1,
+        tile_view_pattern.buffer().slice(tile_view_pattern_buffer),
+    );
+    let instances = 0..1;
     pass.set_vertex_buffer(
         2,
         buffer_pool

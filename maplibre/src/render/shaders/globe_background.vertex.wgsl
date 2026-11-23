@@ -1,5 +1,12 @@
 // @include projection.vertex.wgsl
 
+struct GlobeLayerUniforms {
+    color: vec4<f32>,
+    viewport: vec4<f32>,
+}
+
+@group(1) @binding(0) var<uniform> layer: GlobeLayerUniforms;
+
 struct VertexOutput {
     @location(0) color: vec4<f32>,
     @builtin(position) position: vec4<f32>,
@@ -13,9 +20,6 @@ fn main(
     @location(5) translate2: vec4<f32>,
     @location(6) translate3: vec4<f32>,
     @location(7) translate4: vec4<f32>,
-    @location(8) color: vec4<f32>,
-    @location(10) z_index: f32,
-    @location(11) viewport: vec4<f32>,
 ) -> VertexOutput {
     let tile_position = vec3<f32>(raw_position, 0.0);
     let projected = project_tile_position_3d(
@@ -26,7 +30,7 @@ fn main(
     var position = projected.clip_position;
     // Background paint cannot occlude bathymetry or land below the reference ellipsoid.
     // A relative depth stays behind terrain at every scene scale and above the sky.
-    if viewport.y > 0.5 {
+    if layer.viewport.y > 0.5 {
         position.z = max(position.z, 0.0) * 1.0e-6;
     }
     // Keep front-facing globe background strictly above `0.0` (at least ~16 ULPs on
@@ -34,5 +38,5 @@ fn main(
     if position.w > 0.0 && position.z > 0.0 {
         position.z = max(position.z, position.w * 1.0e-6);
     }
-    return VertexOutput(color, position);
+    return VertexOutput(layer.color, position);
 }

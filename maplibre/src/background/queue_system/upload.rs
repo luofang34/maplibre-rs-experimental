@@ -310,6 +310,14 @@ fn publish_background_buffers(
                 .write_staged_metadata(&renderer.device, &renderer.queue)
                 .clone()
         });
+        let (globe_layer_bind_group, globe_layer_stride) = gpu_buffers
+            .globe_layer_binding()
+            .map(|(bg, stride)| (bg.clone(), stride))
+            .unwrap_or_else(|| {
+                gpu_buffers.write_staged_globe_layers(&renderer.device, &renderer.queue)
+            });
+        existing.globe_layer_bind_group = globe_layer_bind_group;
+        existing.globe_layer_stride = globe_layer_stride;
         existing.tile_metadata_buffer =
             gpu_buffers
                 .tile_metadata_buffer()
@@ -364,6 +372,8 @@ fn insert_background_buffers(
     let metadata_buffer = gpu_buffers
         .write_staged_metadata(&renderer.device, &renderer.queue)
         .clone();
+    let (globe_layer_bind_group, globe_layer_stride) =
+        gpu_buffers.write_staged_globe_layers(&renderer.device, &renderer.queue);
     let tile_metadata_buffer = gpu_buffers
         .write_staged_tile_metadata(&renderer.device, &renderer.queue)
         .clone();
@@ -383,6 +393,8 @@ fn insert_background_buffers(
     let buf_gen = gpu_buffers.allocation_generation();
     world.resources.insert(BackgroundBuffers {
         metadata_buffer,
+        globe_layer_bind_group,
+        globe_layer_stride,
         instances,
         tile_metadata_buffer,
         globe_tiles,

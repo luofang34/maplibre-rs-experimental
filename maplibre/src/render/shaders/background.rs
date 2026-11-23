@@ -33,6 +33,26 @@ pub struct BackgroundLayerMetadata {
     pub world_rows: [[f32; 4]; 2],
 }
 
+/// Layer uniform bound at `@group(1) @binding(0)` by globe background pipelines.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable, PartialEq)]
+pub struct GlobeBackgroundUniform {
+    /// Encoded-sRGB background color with straight alpha.
+    pub color: [f32; 4],
+    /// Viewport height in X, terrain-enabled flag in Y, then the frame's width and height.
+    pub viewport: [f32; 4],
+}
+
+impl GlobeBackgroundUniform {
+    /// Extracts the uniform fields consumed by globe background vertex shaders.
+    pub const fn from_layer(meta: &BackgroundLayerMetadata) -> Self {
+        Self {
+            color: meta.color,
+            viewport: meta.viewport,
+        }
+    }
+}
+
 /// Fullscreen background clipped to the flat map's horizon.
 pub struct BackgroundShader {
     /// Format of the color attachment receiving the background.
@@ -169,27 +189,6 @@ fn globe_background_buffers() -> Vec<VertexBufferLayout> {
     vec![
         crate::render::tile_mesh::GpuTileMeshVertex::vertex_buffer_layout(),
         ShaderTileMetadata::instance_layout(tile_attrs),
-        VertexBufferLayout {
-            array_stride: 0,
-            step_mode: wgpu::VertexStepMode::Instance,
-            attributes: vec![
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    format: wgpu::VertexFormat::Float32x4,
-                    shader_location: 8,
-                },
-                wgpu::VertexAttribute {
-                    offset: wgpu::VertexFormat::Float32x4.size(),
-                    format: wgpu::VertexFormat::Float32,
-                    shader_location: 10,
-                },
-                wgpu::VertexAttribute {
-                    offset: std::mem::offset_of!(BackgroundLayerMetadata, viewport) as u64,
-                    format: wgpu::VertexFormat::Float32x4,
-                    shader_location: 11,
-                },
-            ],
-        },
     ]
 }
 

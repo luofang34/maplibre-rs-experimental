@@ -175,48 +175,61 @@ pub fn resource_system(
     {
         patterns.update(device, queue, style, view_state.style_zoom().value());
     }
-    if needs_globe
-        && world
+    let globe_layer_layout = needs_globe.then(|| {
+        world
+            .resources
+            .get_or_init_mut::<super::buffers::BackgroundGpuBuffers>()
+            .globe_layer_layout(device)
+    });
+    if let Some(ref globe_layer_layout) = globe_layer_layout {
+        if world
             .resources
             .get::<super::pattern::BackgroundPatternGpu>()
             .is_some_and(|gpu| !gpu.has_globe())
-    {
-        let projection_layout = match world.resources.get::<Eventually<ProjectionGpuResources>>() {
-            Some(Initialized(resources)) => Some(resources.bind_group_layout().clone()),
-            _ => None,
-        };
-        if let Some(projection_layout) = projection_layout {
-            let shader = GlobeBackgroundPatternShader {
-                format: surface.surface_format(),
-            };
-            let image_layouts = super::pattern::layouts(device);
-            let world_layout = super::pattern::world_layout(device);
-            let mut descriptor = TilePipeline::new(
-                "globe_background_pattern_pipeline".into(),
-                *settings,
-                shader.describe_vertex(),
-                shader.describe_fragment(),
-                crate::render::resource::TilePipelineOptions {
-                    depth_stencil_enabled: true,
-                    update_stencil: false,
-                    debug_stencil: true,
-                    wireframe: false,
-                    multisampling: surface.is_multisampling_supported(settings.msaa),
-                    textured: false,
-                },
-            )
-            .with_depth_write()
-            .describe_render_pipeline();
-            descriptor.primitive.cull_mode = Some(wgpu::Face::Back);
-            let pipeline = descriptor.initialize_with_prefix_layouts(
-                device,
-                &[&projection_layout, &image_layouts[0], &world_layout],
-            );
-            if let Some(gpu) = world
-                .resources
-                .get_mut::<super::pattern::BackgroundPatternGpu>()
-            {
-                gpu.with_globe(device, queue, pipeline, &world_layout);
+        {
+            let projection_layout =
+                match world.resources.get::<Eventually<ProjectionGpuResources>>() {
+                    Some(Initialized(resources)) => Some(resources.bind_group_layout().clone()),
+                    _ => None,
+                };
+            if let Some(projection_layout) = projection_layout {
+                let shader = GlobeBackgroundPatternShader {
+                    format: surface.surface_format(),
+                };
+                let image_layouts = super::pattern::layouts(device);
+                let world_layout = super::pattern::world_layout(device);
+                let mut descriptor = TilePipeline::new(
+                    "globe_background_pattern_pipeline".into(),
+                    *settings,
+                    shader.describe_vertex(),
+                    shader.describe_fragment(),
+                    crate::render::resource::TilePipelineOptions {
+                        depth_stencil_enabled: true,
+                        update_stencil: false,
+                        debug_stencil: true,
+                        wireframe: false,
+                        multisampling: surface.is_multisampling_supported(settings.msaa),
+                        textured: false,
+                    },
+                )
+                .with_depth_write()
+                .describe_render_pipeline();
+                descriptor.primitive.cull_mode = Some(wgpu::Face::Back);
+                let pipeline = descriptor.initialize_with_prefix_layouts(
+                    device,
+                    &[
+                        &projection_layout,
+                        globe_layer_layout,
+                        &image_layouts[0],
+                        &world_layout,
+                    ],
+                );
+                if let Some(gpu) = world
+                    .resources
+                    .get_mut::<super::pattern::BackgroundPatternGpu>()
+                {
+                    gpu.with_globe(device, queue, pipeline, &world_layout);
+                }
             }
         }
     }
@@ -320,7 +333,7 @@ pub fn resource_system(
         }
     }
 
-    if needs_globe {
+    if let (true, Some(globe_layer_layout)) = (needs_globe, globe_layer_layout.as_ref()) {
         let globe_bg = globe_background_pipeline.initialize(GlobeBackgroundRenderPipeline::default);
         let shader = GlobeBackgroundShader {
             format: surface.surface_format(),
@@ -333,40 +346,33 @@ pub fn resource_system(
             multisampling: surface.is_multisampling_supported(settings.msaa),
             textured: false,
         };
+        let create_globe_pipeline = |name: &'static str, fragment| {
+            let mut descriptor = TilePipeline::new(
+                name.into(),
+                *settings,
+                shader.describe_vertex(),
+                fragment,
+                options,
+            )
+            .with_depth_write()
+            .describe_render_pipeline();
+            descriptor.primitive.cull_mode = Some(wgpu::Face::Back);
+            descriptor.initialize_with_prefix_layouts(
+                device,
+                &[projection_resources.bind_group_layout(), globe_layer_layout],
+            )
+        };
         if has_opaque_bg {
             globe_bg.opaque.get_or_insert_with(|| {
-                let mut descriptor = TilePipeline::new(
-                    "globe_background_opaque_pipeline".into(),
-                    *settings,
-                    shader.describe_vertex(),
+                create_globe_pipeline(
+                    "globe_background_opaque_pipeline",
                     shader.describe_opaque_fragment(),
-                    options,
-                )
-                .with_depth_write()
-                .describe_render_pipeline();
-                descriptor.primitive.cull_mode = Some(wgpu::Face::Back);
-                descriptor.initialize_with_prefix_layouts(
-                    device,
-                    &[projection_resources.bind_group_layout()],
                 )
             });
         }
         if has_blended_bg {
             globe_bg.blended.get_or_insert_with(|| {
-                let mut descriptor = TilePipeline::new(
-                    "globe_background_pipeline".into(),
-                    *settings,
-                    shader.describe_vertex(),
-                    shader.describe_fragment(),
-                    options,
-                )
-                .with_depth_write()
-                .describe_render_pipeline();
-                descriptor.primitive.cull_mode = Some(wgpu::Face::Back);
-                descriptor.initialize_with_prefix_layouts(
-                    device,
-                    &[projection_resources.bind_group_layout()],
-                )
+                create_globe_pipeline("globe_background_pipeline", shader.describe_fragment())
             });
         }
 

@@ -8,10 +8,10 @@ struct WorldUniforms {
     pixels: vec4<f32>,
 };
 
-@group(1) @binding(0) var<uniform> pattern: PatternUniforms;
-@group(1) @binding(1) var pattern_texture: texture_2d<f32>;
-@group(1) @binding(2) var pattern_sampler: sampler;
-@group(2) @binding(0) var<uniform> world: WorldUniforms;
+@group(2) @binding(0) var<uniform> pattern: PatternUniforms;
+@group(2) @binding(1) var pattern_texture: texture_2d<f32>;
+@group(2) @binding(2) var pattern_sampler: sampler;
+@group(3) @binding(0) var<uniform> world: WorldUniforms;
 
 struct Output {
     @location(0) out_color: vec4<f32>,
