@@ -161,10 +161,9 @@ impl MapController {
                 let stats = context.last_frame_stats();
                 if stats.frame != 0 && stats.frame != last_frame {
                     last_frame = stats.frame;
-                    let has_arrivals =
-                        AsyncProcedureCall::<WHATWGOffscreenKernelEnvironment>::has_arrivals(
-                            map.kernel().apc(),
-                        );
+                    let has_arrivals = AsyncProcedureCall::<WHATWGOffscreenKernelEnvironment>::has_pending_arrivals(
+                        map.kernel().apc(),
+                    );
                     let reasons = context.redraw_reasons();
                     let loaded = !reasons.loading
                         && !reasons.awaiting_images
@@ -233,7 +232,7 @@ impl MapController {
         let reply = with_controller_handle!(&self.handle, |handle| {
             handle.until(|map| {
                 let has_arrivals =
-                    AsyncProcedureCall::<WHATWGOffscreenKernelEnvironment>::has_arrivals(
+                    AsyncProcedureCall::<WHATWGOffscreenKernelEnvironment>::has_pending_arrivals(
                         map.kernel().apc(),
                     );
                 let context = map.context().ok()?;
@@ -264,7 +263,7 @@ impl MapController {
         let reply = with_controller_handle!(&self.handle, |handle| {
             handle.until(|map| {
                 let has_arrivals =
-                    AsyncProcedureCall::<WHATWGOffscreenKernelEnvironment>::has_arrivals(
+                    AsyncProcedureCall::<WHATWGOffscreenKernelEnvironment>::has_pending_arrivals(
                         map.kernel().apc(),
                     );
                 let context = map.context().ok()?;

@@ -57,8 +57,8 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
         let mut state_memo = crate::style::feature_state::FeatureStateArcMemo::default();
         let mut handled = false;
         apply_worker_messages(messages, |message| {
-            handled = true;
             if message.has_tag(super::provided::ProvidedImagesReport::message_tag()) {
+                handled = true;
                 let report =
                     message.into_transferable::<super::provided::ProvidedImagesReport>()?;
                 super::provided::apply(world, *report);
@@ -73,6 +73,7 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
                         .flatten()
                         .and_then(|&idx| style.layers.get(idx))
                 {
+                    handled = true;
                     prop_interner.intern_symbol_bucket(&world.tiles, &mut bucket);
                     let retessellate =
                         crate::vector::arrival_sync::sync_arriving_symbol_bucket_for_layer(

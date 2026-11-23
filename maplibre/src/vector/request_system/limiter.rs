@@ -11,17 +11,17 @@ use std::{
 };
 
 #[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
-const MAX_HEAVY_TILES_LOW_MEM: usize = 3;
+const MAX_HEAVY_TILES_LOW_MEM: usize = 4;
 #[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
 const MAX_HEAVY_TILES_HIGH_MEM: usize = 2;
 #[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
 const MAX_DEM_TILES: usize = 2;
-/// 24 MiB (`384 * 64 KiB` WASM pages): run up to 3 heavy workers in parallel during low-memory
+/// 28 MiB (`448 * 64 KiB` WASM pages): run up to 4 heavy workers in parallel during low-memory
 /// boot and scene switches, then throttle heavy decodes to 2 once shared linear memory reaches
-/// 24 MiB so dense flight bursts reuse freed pages instead of permanently ratcheting
+/// 28 MiB so dense flight bursts reuse freed pages instead of permanently ratcheting
 /// `WebAssembly.Memory`.
 #[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
-const HEAVY_TILE_THROTTLE_PAGES: usize = 24 * 16;
+const HEAVY_TILE_THROTTLE_PAGES: usize = 28 * 16;
 
 #[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
 const fn heavy_tile_limit_for_pages(pages: usize) -> usize {
@@ -44,7 +44,7 @@ fn current_heavy_tile_limit() -> usize {
 }
 
 #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
-const MAX_UNCONSUMED_SHARED_TILES: usize = 2;
+const MAX_UNCONSUMED_SHARED_TILES: usize = 4;
 
 #[derive(Default)]
 struct PermitState {
@@ -434,36 +434,43 @@ mod tests {
 
     #[test]
     fn heavy_tile_limit_throttles_above_threshold_and_drains_cleanly() {
-        assert_eq!(heavy_tile_limit_for_pages(0), 3);
-        assert_eq!(heavy_tile_limit_for_pages(383), 3);
-        assert_eq!(heavy_tile_limit_for_pages(384), 2);
+        assert_eq!(heavy_tile_limit_for_pages(0), 4);
+        assert_eq!(heavy_tile_limit_for_pages(447), 4);
+        assert_eq!(heavy_tile_limit_for_pages(448), 2);
         assert_eq!(heavy_tile_limit_for_pages(1024), 2);
 
         let counter = Arc::new(CountWake(AtomicUsize::new(0)));
         let waker = Waker::from(counter.clone());
         let mut state = PermitState::default();
-        for _ in 0..3 {
-            assert!(state.poll_acquire(3, &waker).is_ready());
+        for _ in 0..4 {
+            assert!(state.poll_acquire(4, &waker).is_ready());
         }
-        assert_eq!(state.in_use, 3);
+        assert_eq!(state.in_use, 4);
 
         // Tightening limit mid-flight blocks new work until in-flight count drains below 2.
         assert!(state
-            .poll_acquire(heavy_tile_limit_for_pages(384), &waker)
+            .poll_acquire(heavy_tile_limit_for_pages(448), &waker)
+            .is_pending());
+        for w in state.release() {
+            w.wake();
+        }
+        assert_eq!(state.in_use, 3);
+        assert!(state
+            .poll_acquire(heavy_tile_limit_for_pages(448), &waker)
             .is_pending());
         for w in state.release() {
             w.wake();
         }
         assert_eq!(state.in_use, 2);
         assert!(state
-            .poll_acquire(heavy_tile_limit_for_pages(384), &waker)
+            .poll_acquire(heavy_tile_limit_for_pages(448), &waker)
             .is_pending());
         for w in state.release() {
             w.wake();
         }
         assert_eq!(state.in_use, 1);
         assert!(state
-            .poll_acquire(heavy_tile_limit_for_pages(384), &waker)
+            .poll_acquire(heavy_tile_limit_for_pages(448), &waker)
             .is_ready());
         assert_eq!(state.in_use, 2);
     }

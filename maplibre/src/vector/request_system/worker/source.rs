@@ -1,5 +1,11 @@
 use super::*;
 
+pub(super) struct SourceSlots<'a> {
+    pub(super) heavy: &'a mut Option<super::super::limiter::HeavyTileSlot>,
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+    pub(super) shared: &'a mut Option<super::super::limiter::SharedTilePermit>,
+}
+
 pub(super) async fn process_source<
     T: VectorTransferables,
     C: Context + Clone + Send,
@@ -11,10 +17,7 @@ pub(super) async fn process_source<
     client: &SourceClient<H>,
     group: &SourceLayerGroup,
     context: C,
-    (heavy_slot, pass): (
-        &mut Option<super::super::limiter::HeavyTileSlot>,
-        SourcePass,
-    ),
+    (slots, pass): (SourceSlots<'_>, SourcePass),
 ) -> Result<Option<provided::Symbols>, ProcessVectorError> {
     let GroupTile {
         mut tile,
@@ -57,7 +60,7 @@ pub(super) async fn process_source<
             Arc::new(SymbolAtlas::default()),
         )
         .await?;
-        drop(heavy_slot.take());
+        drop(slots.heavy.take());
         return Ok(None);
     }
     let sym_request = make_tile_request(coords, symbols, projection, pass.overscaled_zoom);
@@ -74,7 +77,7 @@ pub(super) async fn process_source<
             has_dem_source,
             pass,
         },
-        heavy_slot,
+        slots,
     )
     .await
 }
@@ -149,7 +152,7 @@ async fn process_source_with_symbols<
     H: HttpClient,
 >(
     args: SourceSymbolsArgs<'_, C, H>,
-    heavy_slot: &mut Option<super::super::limiter::HeavyTileSlot>,
+    slots: SourceSlots<'_>,
 ) -> Result<Option<provided::Symbols>, ProcessVectorError> {
     let zoom = f64::from(args.pass.overscaled_zoom.max(u8::from(args.coords.z)));
     let sym_requests =
@@ -185,10 +188,19 @@ async fn process_source_with_symbols<
                     .send_back(T::TileTessellated::build_partial(args.coords))
                     .map_err(ProcessVectorError::SendError)?;
             }
-            // Release HeavyTileSlot strictly BEFORE awaiting remote glyph/sprite HTTP I/O.
-            drop(heavy_slot.take());
+            // Release HeavyTileSlot and SharedTilePermit strictly BEFORE awaiting remote HTTP I/O.
+            drop(slots.heavy.take());
+            #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+            drop(slots.shared.take());
             let loaded = assets_fut.await;
-            *heavy_slot = Some(acquire_heavy_tile_slot().await);
+            if loaded.is_ok() {
+                // Re-acquire SharedTilePermit BEFORE HeavyTileSlot to match initial lock order.
+                #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+                if slots.shared.is_none() {
+                    *slots.shared = Some(super::super::limiter::acquire_shared_tile_permit().await);
+                }
+                *slots.heavy = Some(acquire_heavy_tile_slot().await);
+            }
             loaded
         }
     }
@@ -205,7 +217,7 @@ async fn process_source_with_symbols<
         assets.atlas,
     )
     .await?;
-    drop(heavy_slot.take());
+    drop(slots.heavy.take());
     Ok(Some(provided::Symbols {
         again,
         pixel_ratio: args.pass.pixel_ratio,

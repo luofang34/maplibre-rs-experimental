@@ -65,19 +65,21 @@ pub fn apply_vector_worker_batch<T: VectorTransferables>(
     let mut memo = crate::style::feature_state::FeatureStateArcMemo::default();
     let mut interner = super::feature_paint::intern::TilePropertyInterner::default();
     let layer_by_id = style.cached_layer_index_by_id();
+    let mut accepted_any = false;
     apply_worker_messages(messages, |message| {
         let attempt = message.attempt();
         if message.has_tag(RequestKind::Vector.message_tag()) {
-            apply_request_outcome(world, message)?;
+            accepted_any |= apply_request_outcome(world, message)?;
         } else if message.has_tag(T::TileTessellated::message_tag()) {
             let message = message.into_transferable::<T::TileTessellated>()?;
             if tile_retry::accepts(world, message.coords(), RequestKind::Vector, attempt) {
                 finish_tile(world, &*message);
+                accepted_any = true;
             }
         } else if message.has_tag(T::LayerMissing::message_tag()) {
-            apply_layer_missing::<T>(world, message, attempt)?;
+            accepted_any |= apply_layer_missing::<T>(world, message, attempt)?;
         } else if message.has_tag(T::LayerTessellated::message_tag()) {
-            apply_layer_tessellated::<T>(
+            accepted_any |= apply_layer_tessellated::<T>(
                 world,
                 style,
                 &layer_by_id,
@@ -87,15 +89,18 @@ pub fn apply_vector_worker_batch<T: VectorTransferables>(
                 &mut interner,
             )?;
         } else if message.has_tag(T::LayerIndexed::message_tag()) {
-            apply_layer_indexed::<T>(world, style, message, attempt, &mut memo, &mut interner)?;
+            accepted_any |=
+                apply_layer_indexed::<T>(world, style, message, attempt, &mut memo, &mut interner)?;
         }
         Ok(())
     })?;
-    super::bump_arrival_epoch(world);
+    if accepted_any {
+        super::bump_arrival_epoch(world);
+    }
     Ok(())
 }
 
-fn apply_request_outcome(world: &mut World, message: Message) -> Result<(), MessageError> {
+fn apply_request_outcome(world: &mut World, message: Message) -> Result<bool, MessageError> {
     #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
     let mut message = message;
     #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
@@ -117,23 +122,23 @@ fn apply_request_outcome(world: &mut World, message: Message) -> Result<(), Mess
             .get_or_init_mut::<super::request_system::PendingUploadPermits>()
             .push(coords, permit);
     }
-    Ok(())
+    Ok(true)
 }
 
 fn apply_layer_missing<T: VectorTransferables>(
     world: &mut World,
     message: Message,
     attempt: Option<u64>,
-) -> Result<(), MessageError> {
+) -> Result<bool, MessageError> {
     let message = message.into_transferable::<T::LayerMissing>()?;
     if !tile_retry::accepts(world, message.coords(), RequestKind::Vector, attempt) {
-        return Ok(());
+        return Ok(false);
     }
     let Some(component) = world
         .tiles
         .query_mut::<&mut VectorLayerBucketComponent>(message.coords())
     else {
-        return Ok(());
+        return Ok(false);
     };
     if !component.layers.iter().any(|layer| match layer {
         VectorLayerBucket::AvailableLayer(layer) => layer.source_layer == message.layer_name(),
@@ -144,7 +149,7 @@ fn apply_layer_missing<T: VectorTransferables>(
             .layers
             .push(VectorLayerBucket::Missing(message.to_bucket()));
     }
-    Ok(())
+    Ok(true)
 }
 
 fn apply_layer_tessellated<T: VectorTransferables>(
@@ -155,7 +160,7 @@ fn apply_layer_tessellated<T: VectorTransferables>(
     attempt: Option<u64>,
     memo: &mut crate::style::feature_state::FeatureStateArcMemo,
     interner: &mut super::feature_paint::intern::TilePropertyInterner,
-) -> Result<(), MessageError> {
+) -> Result<bool, MessageError> {
     let mut message = message.into_transferable::<T::LayerTessellated>()?;
     // A layer removed while its tile was in flight must not come back with the reply.
     let coords = message.coords();
@@ -192,8 +197,9 @@ fn apply_layer_tessellated<T: VectorTransferables>(
         if retessellate {
             tile_retry::refresh_tiles(world, RequestKind::Vector, &[coords]);
         }
+        return Ok(true);
     }
-    Ok(())
+    Ok(false)
 }
 
 fn apply_layer_indexed<T: VectorTransferables>(
@@ -203,7 +209,7 @@ fn apply_layer_indexed<T: VectorTransferables>(
     attempt: Option<u64>,
     memo: &mut crate::style::feature_state::FeatureStateArcMemo,
     interner: &mut super::feature_paint::intern::TilePropertyInterner,
-) -> Result<(), MessageError> {
+) -> Result<bool, MessageError> {
     let message = message.into_transferable::<T::LayerIndexed>()?;
     if !tile_retry::accepts(world, message.coords(), RequestKind::Vector, attempt)
         || world
@@ -211,7 +217,7 @@ fn apply_layer_indexed<T: VectorTransferables>(
             .query::<&VectorLayerBucketComponent>(message.coords())
             .is_none()
     {
-        return Ok(());
+        return Ok(false);
     }
     let coords = message.coords();
     let source = message.source();
@@ -222,7 +228,7 @@ fn apply_layer_indexed<T: VectorTransferables>(
         .tiles
         .geometry_index
         .index_tile(&coords, source, index);
-    Ok(())
+    Ok(true)
 }
 
 fn finish_tile<T: TileTessellated>(world: &mut crate::tcs::world::World, message: &T) {

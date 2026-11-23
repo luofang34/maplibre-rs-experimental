@@ -151,3 +151,110 @@ fn buffered_unmatched_arrivals_keep_reporting_until_matching_consumer_drains_the
     assert_eq!(drained, [99]);
     assert!(!apc.has_arrivals());
 }
+
+#[cfg(all(feature = "native-io", not(target_arch = "wasm32")))]
+#[test]
+#[allow(clippy::expect_used)]
+fn cancelled_attempt_stays_suppressed_until_active_call_finishes_and_peek_preserves_batch_gate() {
+    use std::sync::{Arc, Mutex};
+
+    use super::{AsyncProcedureCall, Input, Message, SchedulerAsyncProcedureCall};
+    use crate::{
+        environment::OffscreenKernelConfig,
+        io::scheduler::{ScheduleError, Scheduler},
+        platform::ReqwestOffscreenKernelEnvironment,
+    };
+
+    #[derive(Clone, Default)]
+    struct QueuedTestScheduler {
+        tasks: Arc<Mutex<Vec<Box<dyn FnOnce() + Send>>>>,
+    }
+
+    impl Scheduler for QueuedTestScheduler {
+        #[cfg(feature = "thread-safe-futures")]
+        fn schedule<T>(
+            &self,
+            future_factory: impl (FnOnce() -> T) + Send + 'static,
+        ) -> Result<(), ScheduleError>
+        where
+            T: std::future::Future<Output = ()> + Send + 'static,
+        {
+            self.tasks
+                .lock()
+                .expect("tasks lock")
+                .push(Box::new(move || {
+                    futures::executor::block_on(future_factory());
+                }));
+            Ok(())
+        }
+
+        #[cfg(not(feature = "thread-safe-futures"))]
+        fn schedule<T>(
+            &self,
+            future_factory: impl (FnOnce() -> T) + Send + 'static,
+        ) -> Result<(), ScheduleError>
+        where
+            T: std::future::Future<Output = ()> + 'static,
+        {
+            self.tasks
+                .lock()
+                .expect("tasks lock")
+                .push(Box::new(move || {
+                    futures::executor::block_on(future_factory());
+                }));
+            Ok(())
+        }
+    }
+
+    fn noop_proc(
+        _input: Input,
+        _ctx: super::SchedulerContext,
+        _kernel: ReqwestOffscreenKernelEnvironment,
+    ) -> super::AsyncProcedureFuture {
+        Box::pin(async { Ok(()) })
+    }
+
+    let scheduler = QueuedTestScheduler::default();
+    let apc = SchedulerAsyncProcedureCall::<ReqwestOffscreenKernelEnvironment, _>::new(
+        scheduler.clone(),
+        OffscreenKernelConfig::default(),
+    );
+
+    let input = Input::new(Default::default(), crate::style::Style::empty(), 42);
+    apc.call(input, noop_proc).expect("call scheduled");
+    apc.cancel(42);
+    assert!(
+        apc.running().is_empty(),
+        "cancel removes running entry immediately"
+    );
+    assert_eq!(apc.cancelled_len(), 1);
+
+    apc.set_batch_open_for_test(false);
+    apc.channel
+        .0
+        .send(Message::new(&0_u32, Box::new(77_u32)).with_attempt(42))
+        .expect("send late message");
+    assert!(
+        !apc.has_pending_arrivals(),
+        "late message for cancelled attempt must still be dropped while active_calls > 0"
+    );
+    assert!(
+        !apc.batch_open(),
+        "has_pending_arrivals must not mutate batch_open"
+    );
+    assert_eq!(apc.cancelled_len(), 1);
+
+    let tasks: Vec<_> = scheduler
+        .tasks
+        .lock()
+        .expect("tasks lock")
+        .drain(..)
+        .collect();
+    for task in tasks {
+        task();
+    }
+
+    assert!(!apc.has_pending_arrivals());
+    assert_eq!(apc.cancelled_len(), 0);
+    assert!(!apc.has_arrivals() && apc.batch_open());
+}

@@ -14,7 +14,7 @@ use crate::{
     terrain::resources::{TerrainDraw, TerrainResources, UNIFORM_STRIDE},
 };
 
-const MAX_COALESCE_FRAMES: u8 = 2;
+const MAX_COALESCE_FRAMES: u8 = 4;
 const MAX_STATIC_CACHE_ENTRIES: usize = if cfg!(target_arch = "wasm32") {
     512
 } else {
@@ -346,10 +346,11 @@ mod tests {
     }
 
     #[test]
-    fn drape_coalesce_defers_at_most_two_moving_frames_and_resets_when_settled() {
+    fn drape_coalesce_defers_at_most_four_moving_frames_and_resets_when_settled() {
         let mut state = DrapeCoalesceState::default();
-        assert!(state.should_defer_changed(true, true));
-        assert!(state.should_defer_changed(true, true));
+        for _ in 0..4 {
+            assert!(state.should_defer_changed(true, true));
+        }
         assert!(!state.should_defer_changed(true, true));
         assert!(state.should_defer_changed(true, true));
 

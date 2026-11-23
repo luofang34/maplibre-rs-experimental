@@ -218,12 +218,27 @@ pub(super) fn prepare_tiles_into(
         // A skirt of no length folds onto the tile edge and covers no pixel.
         crate::terrain::TerrainSkirts::None => 0.0,
     };
-    let vector_tiles_len = tiles
-        .pyramid_of::<crate::vector::VectorLayerBucketComponent>()
-        .len();
+    let any_polar = coords_list.iter().any(|coords| {
+        let max_row = (1_i32
+            .checked_shl(u32::from(u8::from(coords.z)))
+            .unwrap_or(1))
+            - 1;
+        coords.y == 0 || coords.y == max_row
+    });
+    let vector_tiles_len = if any_polar {
+        tiles
+            .pyramid_of::<crate::vector::VectorLayerBucketComponent>()
+            .len()
+    } else {
+        0
+    };
     static_cache.begin_frame(super::steady_cache::StaticFrameKey {
         style_rev: ctx.style.revision(),
-        paint_zoom_bits: ctx.paint_zoom.to_bits(),
+        paint_zoom_bits: if any_polar {
+            ctx.paint_zoom.to_bits()
+        } else {
+            0
+        },
         clear_color_bits: ctx.clear_color.map(f32::to_bits),
         poles_north_bits: ctx.poles.north_meters.to_bits(),
         poles_south_bits: ctx.poles.south_meters.to_bits(),
@@ -232,7 +247,11 @@ pub(super) fn prepare_tiles_into(
         dem_unpack_bits: ctx.dem.unpack.map(f64::to_bits),
         radius_bits: ctx.view_state.body().radius_meters.to_bits(),
         has_globe_camera: ctx.globe_camera.is_some(),
-        vector_arrival_epoch: ctx.vector_arrival_epoch,
+        vector_arrival_epoch: if any_polar {
+            ctx.vector_arrival_epoch
+        } else {
+            0
+        },
         vector_tiles_len,
     });
     out.clear();

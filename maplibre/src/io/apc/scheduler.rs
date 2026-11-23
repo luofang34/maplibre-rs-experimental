@@ -44,9 +44,19 @@ struct CallDispatch<K: OffscreenKernel> {
     sent_any: Arc<AtomicBool>,
     running: RunningCalls,
     in_flight: Arc<AtomicUsize>,
+    active_calls: Arc<AtomicUsize>,
+}
+
+struct ActiveCallGuard(Arc<AtomicUsize>);
+
+impl Drop for ActiveCallGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 async fn run_tracked_call<K: OffscreenKernel>(dispatch: CallDispatch<K>) {
+    let _active_guard = ActiveCallGuard(dispatch.active_calls);
     if dispatch.cancel_flag.load(Ordering::Acquire) {
         tracing::debug!(
             attempt = dispatch.input.attempt,
@@ -117,6 +127,7 @@ pub struct SchedulerAsyncProcedureCall<K: OffscreenKernel, S: Scheduler> {
     /// Tracked calls still running, by attempt, so cancelled calls can be stopped and skipped.
     running: RunningCalls,
     in_flight: Arc<AtomicUsize>,
+    active_calls: Arc<AtomicUsize>,
     cancelled: RefCell<FxHashSet<u64>>,
     pub(crate) waker: SharedArrivalWaker,
 }
@@ -127,6 +138,21 @@ impl<K: OffscreenKernel, S: Scheduler> SchedulerAsyncProcedureCall<K, S> {
         &self,
     ) -> std::sync::MutexGuard<'_, FxHashMap<u64, (AbortHandle, Arc<AtomicBool>)>> {
         crate::platform::lock_unpoisoned(&self.running)
+    }
+
+    #[cfg(test)]
+    pub(super) fn cancelled_len(&self) -> usize {
+        self.cancelled.borrow().len()
+    }
+
+    #[cfg(test)]
+    pub(super) fn batch_open(&self) -> bool {
+        self.batch_open.get()
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_batch_open_for_test(&self, open: bool) {
+        self.batch_open.set(open);
     }
 
     /// Creates an empty reply channel and keeps the worker kernel configuration for future calls.
@@ -143,6 +169,7 @@ impl<K: OffscreenKernel, S: Scheduler> SchedulerAsyncProcedureCall<K, S> {
             offscreen_kernel_config,
             running: Arc::default(),
             in_flight: Arc::default(),
+            active_calls: Arc::default(),
             cancelled: RefCell::default(),
             waker: Arc::default(),
         }
@@ -166,6 +193,7 @@ impl<K: OffscreenKernel, S: Scheduler> SchedulerAsyncProcedureCall<K, S> {
         drop(cancelled);
         if queued.is_empty()
             && self.in_flight.load(Ordering::Acquire) == 0
+            && self.active_calls.load(Ordering::Acquire) == 0
             && self.buffer.try_borrow().is_ok_and(|b| b.is_empty())
         {
             self.cancelled.borrow_mut().clear();
@@ -289,6 +317,7 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
             map.insert(attempt, (abort, cancel_flag.clone()));
             self.in_flight.store(map.len(), Ordering::Release);
         }
+        self.active_calls.fetch_add(1, Ordering::AcqRel);
         let dispatch = CallDispatch {
             input,
             procedure,
@@ -301,10 +330,12 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
             sent_any,
             running: self.running.clone(),
             in_flight: self.in_flight.clone(),
+            active_calls: self.active_calls.clone(),
         };
         let scheduled = self.scheduler.schedule(move || run_tracked_call(dispatch));
         if scheduled.is_err() {
             // A rejected factory never runs, so nothing else removes its entry.
+            self.active_calls.fetch_sub(1, Ordering::AcqRel);
             let mut map = crate::platform::lock_unpoisoned(&self.running);
             map.remove(&attempt);
             self.in_flight.store(map.len(), Ordering::Release);
@@ -314,6 +345,10 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
 
     fn has_arrivals(&self) -> bool {
         self.batch_open.set(true);
+        self.has_pending_arrivals()
+    }
+
+    fn has_pending_arrivals(&self) -> bool {
         if self
             .buffer
             .try_borrow()

@@ -189,7 +189,14 @@ async fn run_single_group<T: VectorTransferables, C: Context + Clone + Send, H: 
         client,
         target.group,
         context.clone(),
-        (&mut heavy_slot, pass),
+        (
+            source::SourceSlots {
+                heavy: &mut heavy_slot,
+                #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+                shared: state.shared_permit,
+            },
+            pass,
+        ),
     )
     .await
     {
