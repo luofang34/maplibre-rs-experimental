@@ -74,7 +74,7 @@ impl Node for MainPassNode {
             .command_encoder
             .begin_render_pass(&wgpu::RenderPassDescriptor {
                 multiview_mask: None,
-                label: Some("main_pass"),
+                label: cfg!(debug_assertions).then_some("main_pass"),
                 color_attachments: &[Some(color)],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &depth_texture.view,
@@ -94,10 +94,15 @@ impl Node for MainPassNode {
                     .and_then(crate::render::gpu_timer::GpuTimer::pass_writes),
                 occlusion_query_set: None,
             });
-        let mut pass = crate::render::tracked_pass::TrackedRenderPass::new(pass);
-        draw_layers(&mut pass, world);
+        let base_vertex = world
+            .resources
+            .get::<crate::render::tracked_pass::DrawCapabilities>()
+            .is_some_and(|cap| cap.base_vertex);
+        let mut pass =
+            crate::render::tracked_pass::TrackedRenderPass::new(pass).with_base_vertex(base_vertex);
+        let inline_ctx = draw_layers(&mut pass, world);
         if inline_translucent && translucent_has_work {
-            super::translucent_pass::draw_contents(&mut pass, world);
+            super::translucent_pass::draw_contents_inline(&mut pass, world, inline_ctx);
         }
         pass.finish(world);
     }
@@ -162,7 +167,31 @@ pub(super) struct AboveSymbols<'w> {
     pub items: &'w [LayerItem],
 }
 
-pub(super) fn above_symbols(world: &World) -> Option<AboveSymbols<'_>> {
+pub(super) struct PassLayerState<'w> {
+    pub masks: Option<&'w [TileMaskItem]>,
+    pub unique_stencils: bool,
+    pub above: Option<AboveSymbols<'w>>,
+}
+
+pub(super) fn resolve_pass_layer_state(world: &World) -> PassLayerState<'_> {
+    let masks = world
+        .resources
+        .get::<RenderPhase<TileMaskItem>>()
+        .map(|phase| phase.into_iter().as_slice());
+    let unique_stencils = masks.is_some_and(unique_vector_stencils);
+    let above = above_symbols_with_masks(world, masks, unique_stencils);
+    PassLayerState {
+        masks,
+        unique_stencils,
+        above,
+    }
+}
+
+fn above_symbols_with_masks<'w>(
+    world: &'w World,
+    masks: Option<&'w [TileMaskItem]>,
+    unique_stencils: bool,
+) -> Option<AboveSymbols<'w>> {
     if world
         .resources
         .get::<crate::render::ground::FrameGround>()
@@ -181,10 +210,12 @@ pub(super) fn above_symbols(world: &World) -> Option<AboveSymbols<'_>> {
     let items = layers.into_iter().as_slice();
     let split = items.partition_point(|item| item.index < cutoff);
     let (below, above_items) = items.split_at_checked(split).unwrap_or((items, &[]));
-    let masks = world
-        .resources
-        .get::<RenderPhase<TileMaskItem>>()
-        .map(|phase| phase.into_iter().as_slice());
+    if above_items.is_empty() {
+        return Some(AboveSymbols {
+            stencil_state: StencilState::Cleared,
+            items: &[],
+        });
+    }
     let masks_ready = masks.is_some()
         && matches!(
             world.resources.query::<(
@@ -194,8 +225,7 @@ pub(super) fn above_symbols(world: &World) -> Option<AboveSymbols<'_>> {
             Some((Initialized(_), Initialized(_)))
         );
     let mut stencil_state = StencilState::Cleared;
-    if let (true, Some(masks)) = (masks_ready, masks) {
-        let unique_stencils = unique_vector_stencils(masks);
+    if masks_ready {
         for group in below.chunk_by(same_layer) {
             stencil_state = next_stencil_state(stencil_state, unique_stencils, group);
         }
@@ -214,7 +244,7 @@ pub(super) fn same_layer(left: &LayerItem, right: &LayerItem) -> bool {
 pub(super) fn draw_group<'w>(
     pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     world: &'w World,
-    masks: Option<&[TileMaskItem]>,
+    masks: Option<&'w [TileMaskItem]>,
     unique_stencils: bool,
     stencil_state: &mut StencilState<'w>,
     group: &'w [LayerItem],
@@ -230,7 +260,7 @@ pub(super) fn draw_group<'w>(
 fn draw_layers<'w>(
     pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     world: &'w World,
-) {
+) -> PassLayerState<'w> {
     let ground = world
         .resources
         .get::<crate::render::ground::FrameGround>()
@@ -244,25 +274,20 @@ fn draw_layers<'w>(
             }
         }
     }
-    let above = above_symbols(world);
-    let masks = world
-        .resources
-        .get::<RenderPhase<TileMaskItem>>()
-        .map(|phase| phase.into_iter().as_slice());
-    let unique_stencils = masks.is_some_and(unique_vector_stencils);
+    let layer_state = resolve_pass_layer_state(world);
     if let Some(layers) = world.resources.get::<RenderPhase<LayerItem>>() {
         let mut stencil_state = StencilState::Cleared;
         let all = layers.into_iter().as_slice();
         let drawn = all
             .len()
-            .saturating_sub(above.as_ref().map_or(0, |above| above.items.len()));
+            .saturating_sub(layer_state.above.as_ref().map_or(0, |a| a.items.len()));
         for group in all.get(..drawn).unwrap_or(all).chunk_by(same_layer) {
-            if let Some(masks) = masks {
+            if let Some(masks) = layer_state.masks {
                 apply_layer_masks(
                     pass,
                     world,
                     masks,
-                    unique_stencils,
+                    layer_state.unique_stencils,
                     &mut stencil_state,
                     group,
                 );
@@ -283,12 +308,66 @@ fn draw_layers<'w>(
     if let Some(surface) = ground.filter(|_| ground_pending) {
         (surface.draw)(pass, world);
     }
+    layer_state
+}
+
+fn owns_mask(mask: &TileMaskItem, layers: &[LayerItem]) -> bool {
+    layers
+        .iter()
+        .any(|layer| layer.source_shape.buffer_range() == mask.source_shape.buffer_range())
+}
+
+fn render_mask_list<'w, I: Iterator<Item = &'w TileMaskItem>>(
+    (world, pattern, mesh_cache): (
+        &'w World,
+        &'w crate::render::tile_view_pattern::WgpuTileViewPattern,
+        &'w crate::render::tile_mesh::GlobeTileMeshCache,
+    ),
+    pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
+    masks: I,
+    fixed_reference: Option<u32>,
+) {
+    for mask in masks {
+        let reference =
+            fixed_reference.unwrap_or_else(|| u32::from(mask.source_shape.stencil_reference()));
+        DrawMask::render_prepared(world, pattern, mesh_cache, mask, pass, reference);
+    }
+}
+
+fn clear_stale_masks<'w>(
+    ctx: (
+        &'w World,
+        &'w crate::render::tile_view_pattern::WgpuTileViewPattern,
+        &'w crate::render::tile_mesh::GlobeTileMeshCache,
+    ),
+    pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
+    masks: &'w [TileMaskItem],
+    state: StencilState<'w>,
+) {
+    match state {
+        StencilState::Cleared => {}
+        StencilState::Vector => render_mask_list(
+            ctx,
+            pass,
+            masks.iter().filter(|m| m.is_vector),
+            Some(EMPTY_STENCIL_REFERENCE),
+        ),
+        StencilState::Mutated(previous) => render_mask_list(
+            ctx,
+            pass,
+            masks.iter().filter(|m| owns_mask(m, previous)),
+            Some(EMPTY_STENCIL_REFERENCE),
+        ),
+        StencilState::DirtyAll => {
+            render_mask_list(ctx, pass, masks.iter(), Some(EMPTY_STENCIL_REFERENCE))
+        }
+    }
 }
 
 pub(crate) fn apply_layer_masks<'w>(
     pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     world: &'w World,
-    masks: &[TileMaskItem],
+    masks: &'w [TileMaskItem],
     unique_stencils: bool,
     state: &mut StencilState<'w>,
     current: &'w [LayerItem],
@@ -316,44 +395,27 @@ pub(crate) fn apply_layer_masks<'w>(
     ) {
         return;
     }
-
-    let owns_mask = |mask: &TileMaskItem, layers: &[LayerItem]| {
-        layers
-            .iter()
-            .any(|layer| layer.source_shape.buffer_range() == mask.source_shape.buffer_range())
+    let Some((Initialized(pattern), mesh_cache)) = world.resources.query::<(
+        &Eventually<crate::render::tile_view_pattern::WgpuTileViewPattern>,
+        &crate::render::tile_mesh::GlobeTileMeshCache,
+    )>() else {
+        return;
     };
 
-    // Clear only masks left dirty or mismatched by a preceding pyramid.
-    match *state {
-        StencilState::Cleared => {}
-        StencilState::Vector => {
-            for mask in masks.iter().filter(|mask| mask.is_vector) {
-                DrawMask::render_with_reference(world, mask, pass, EMPTY_STENCIL_REFERENCE);
-            }
-        }
-        StencilState::Mutated(previous) => {
-            for mask in masks.iter().filter(|mask| owns_mask(mask, previous)) {
-                DrawMask::render_with_reference(world, mask, pass, EMPTY_STENCIL_REFERENCE);
-            }
-        }
-        StencilState::DirtyAll => {
-            for mask in masks {
-                DrawMask::render_with_reference(world, mask, pass, EMPTY_STENCIL_REFERENCE);
-            }
-        }
-    }
-
+    let ctx = (world, pattern, mesh_cache);
+    clear_stale_masks(ctx, pass, masks, *state);
     match first.mask_group {
         MaskGroup::Vector if unique_stencils => {
-            for mask in masks.iter().filter(|mask| mask.is_vector) {
-                DrawMask::render(world, mask, pass);
-            }
+            render_mask_list(ctx, pass, masks.iter().filter(|m| m.is_vector), None);
             *state = StencilState::Vector;
         }
         MaskGroup::Vector | MaskGroup::Mutating => {
-            for mask in masks.iter().filter(|mask| owns_mask(mask, current)) {
-                DrawMask::render(world, mask, pass);
-            }
+            render_mask_list(
+                ctx,
+                pass,
+                masks.iter().filter(|m| owns_mask(m, current)),
+                None,
+            );
             *state = StencilState::Mutated(current);
         }
         MaskGroup::Unmasked | MaskGroup::Custom => {}

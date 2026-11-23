@@ -93,14 +93,22 @@ struct Pass {
     node: Box<dyn Node>,
 }
 
+struct ResolvedOrder {
+    order: Vec<usize>,
+    has_main_before_translucent: bool,
+    trans_pass_index: Option<usize>,
+    between_indices: Vec<usize>,
+}
+
 /// The frame's passes in the order they run.
 #[derive(Default)]
 pub struct RenderGraph {
     passes: Vec<Pass>,
     /// `(before, after)` pass indices.
     constraints: BTreeSet<(usize, usize)>,
-    /// Pass indices in run order, resolved after the last change.
-    order: Option<Vec<usize>>,
+    /// Resolved run order and pass-fusion indices, updated after passes or edges change.
+    order: Option<ResolvedOrder>,
+    has_custom_depth_writers: bool,
 }
 
 impl RenderGraph {
@@ -115,6 +123,7 @@ impl RenderGraph {
         if self.index(&name).is_some() {
             return Err(RenderGraphError::DuplicateNode(name));
         }
+        self.has_custom_depth_writers |= node.writes_custom_scene_depth();
         self.passes.push(Pass {
             name,
             node: Box::new(node),
@@ -143,15 +152,13 @@ impl RenderGraph {
 
     /// Whether any registered pass may write custom 3D scene depth outside `main_pass`.
     pub(crate) fn has_custom_scene_depth_writers(&self) -> bool {
-        self.passes
-            .iter()
-            .any(|pass| pass.node.writes_custom_scene_depth())
+        self.has_custom_depth_writers
     }
 
     /// Resolves the run order after passes or constraints changed.
     pub fn prepare(&mut self) -> Result<(), RenderGraphError> {
         if self.order.is_none() {
-            self.order = Some(self.resolve()?);
+            self.order = Some(self.resolve_metadata()?);
         }
         Ok(())
     }
@@ -159,12 +166,12 @@ impl RenderGraph {
     /// The pass names in the order they run.
     pub fn node_order(&self) -> Result<Vec<&str>, RenderGraphError> {
         let order = match &self.order {
-            Some(order) => order.clone(),
-            None => self.resolve()?,
+            Some(resolved) => Cow::Borrowed(&resolved.order),
+            None => Cow::Owned(self.resolve()?),
         };
         Ok(order
-            .into_iter()
-            .filter_map(|index| self.passes.get(index).map(|pass| pass.name.as_ref()))
+            .iter()
+            .filter_map(|&index| self.passes.get(index).map(|pass| pass.name.as_ref()))
             .collect())
     }
 
@@ -175,10 +182,39 @@ impl RenderGraph {
         resources: &RenderResources,
         world: &World,
     ) -> Result<(), RenderGraphError> {
-        let order = match &self.order {
-            Some(order) => Cow::Borrowed(order),
-            None => Cow::Owned(self.resolve()?),
+        let owned;
+        let resolved = match &self.order {
+            Some(resolved) => resolved,
+            None => {
+                owned = self.resolve_metadata()?;
+                &owned
+            }
         };
+        let between_has_work = resolved.between_indices.iter().any(|&idx| {
+            self.passes
+                .get(idx)
+                .is_some_and(|p| p.node.has_active_work(resources, world))
+        });
+        render_context.between_main_and_translucent_has_work = between_has_work;
+        render_context.inline_translucent_pass = resolved.has_main_before_translucent
+            && !between_has_work
+            && !crate::render::translucent_pass::needs_symbol_depth_copy(world);
+        for &index in &resolved.order {
+            if render_context.inline_translucent_pass && resolved.trans_pass_index == Some(index) {
+                continue;
+            }
+            let Some(pass) = self.passes.get(index) else {
+                continue;
+            };
+            #[cfg(feature = "trace")]
+            let _span = tracing::info_span!("render_pass", name = pass.name.as_ref()).entered();
+            pass.node.run(render_context, resources, world);
+        }
+        Ok(())
+    }
+
+    fn resolve_metadata(&self) -> Result<ResolvedOrder, RenderGraphError> {
+        let order = self.resolve()?;
         let main_pos = order.iter().position(|&idx| {
             self.passes
                 .get(idx)
@@ -189,27 +225,17 @@ impl RenderGraph {
                 p.name.as_ref() == crate::render::draw_graph::node::TRANSLUCENT_PASS
             })
         });
-        let between_has_work = match (main_pos, trans_pos) {
-            (Some(m), Some(t)) if m < t => order.get(m + 1..t).unwrap_or(&[]).iter().any(|&idx| {
-                self.passes
-                    .get(idx)
-                    .is_some_and(|p| p.node.has_active_work(resources, world))
-            }),
-            _ => false,
+        let trans_pass_index = trans_pos.and_then(|pos| order.get(pos).copied());
+        let (has_main_before_translucent, between_indices) = match (main_pos, trans_pos) {
+            (Some(m), Some(t)) if m < t => (true, order.get(m + 1..t).unwrap_or(&[]).to_vec()),
+            _ => (false, Vec::new()),
         };
-        render_context.between_main_and_translucent_has_work = between_has_work;
-        render_context.inline_translucent_pass = matches!((main_pos, trans_pos), (Some(m), Some(t)) if m < t)
-            && !between_has_work
-            && !crate::render::translucent_pass::needs_symbol_depth_copy(world);
-        for &index in order.iter() {
-            let Some(pass) = self.passes.get(index) else {
-                continue;
-            };
-            #[cfg(feature = "trace")]
-            let _span = tracing::info_span!("render_pass", name = pass.name.as_ref()).entered();
-            pass.node.run(render_context, resources, world);
-        }
-        Ok(())
+        Ok(ResolvedOrder {
+            order,
+            has_main_before_translucent,
+            trans_pass_index,
+            between_indices,
+        })
     }
 
     fn index(&self, name: &str) -> Option<usize> {

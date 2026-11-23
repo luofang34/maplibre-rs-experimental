@@ -35,15 +35,20 @@ impl PassStats {
 /// What the passes of the frames so far recorded, until a host takes the counts.
 #[derive(Default)]
 pub struct RenderStats {
-    recorded: std::sync::Mutex<PassStats>,
+    draws: std::sync::atomic::AtomicU32,
+    state_changes: std::sync::atomic::AtomicU32,
+    redundant_state_changes: std::sync::atomic::AtomicU32,
     frame_draws: std::sync::atomic::AtomicU32,
 }
 
 impl RenderStats {
     fn record(&self, stats: PassStats) {
-        self.frame_draws
-            .fetch_add(stats.draws, std::sync::atomic::Ordering::Relaxed);
-        crate::platform::lock_unpoisoned(&self.recorded).add(stats);
+        use std::sync::atomic::Ordering::Relaxed;
+        self.frame_draws.fetch_add(stats.draws, Relaxed);
+        self.draws.fetch_add(stats.draws, Relaxed);
+        self.state_changes.fetch_add(stats.state_changes, Relaxed);
+        self.redundant_state_changes
+            .fetch_add(stats.redundant_state_changes, Relaxed);
     }
 
     /// Takes the draw calls recorded during the current frame without resetting [`Self::take`].
@@ -54,12 +59,22 @@ impl RenderStats {
 
     /// The counts since the last [`Self::take`], leaving them in place.
     pub fn peek(&self) -> PassStats {
-        *crate::platform::lock_unpoisoned(&self.recorded)
+        use std::sync::atomic::Ordering::Relaxed;
+        PassStats {
+            draws: self.draws.load(Relaxed),
+            state_changes: self.state_changes.load(Relaxed),
+            redundant_state_changes: self.redundant_state_changes.load(Relaxed),
+        }
     }
 
     /// The counts since the last call, leaving zero behind.
     pub fn take(&self) -> PassStats {
-        std::mem::take(&mut *crate::platform::lock_unpoisoned(&self.recorded))
+        use std::sync::atomic::Ordering::Relaxed;
+        PassStats {
+            draws: self.draws.swap(0, Relaxed),
+            state_changes: self.state_changes.swap(0, Relaxed),
+            redundant_state_changes: self.redundant_state_changes.swap(0, Relaxed),
+        }
     }
 }
 
@@ -140,11 +155,6 @@ struct BoundSlice {
 }
 
 impl BoundSlice {
-    #[inline]
-    fn matches(&self, slice: &wgpu::BufferSlice<'_>) -> bool {
-        self.offset == slice.offset() && self.size == slice.size() && &self.buffer == slice.buffer()
-    }
-
     fn of(slice: &wgpu::BufferSlice<'_>) -> Self {
         Self {
             buffer: slice.buffer().clone(),
@@ -158,8 +168,8 @@ impl BoundSlice {
 #[derive(Default)]
 struct BoundState {
     pipeline: Option<wgpu::RenderPipeline>,
-    bind_groups: Vec<Option<(wgpu::BindGroup, SmallVec<[wgpu::DynamicOffset; 2]>)>>,
-    vertex_buffers: Vec<Option<BoundSlice>>,
+    bind_groups: SmallVec<[Option<(wgpu::BindGroup, SmallVec<[wgpu::DynamicOffset; 2]>)>; 4]>,
+    vertex_buffers: SmallVec<[Option<BoundSlice>; 4]>,
     index_buffer: Option<(BoundSlice, wgpu::IndexFormat)>,
     stencil_reference: Option<u32>,
 }
@@ -169,6 +179,7 @@ pub struct TrackedRenderPass<'w> {
     pass: wgpu::RenderPass<'w>,
     bound: BoundState,
     stats: PassStats,
+    base_vertex_cap: Option<bool>,
 }
 
 impl<'w> TrackedRenderPass<'w> {
@@ -178,7 +189,25 @@ impl<'w> TrackedRenderPass<'w> {
             pass,
             bound: BoundState::default(),
             stats: PassStats::default(),
+            base_vertex_cap: None,
         }
+    }
+
+    /// Attaches pre-resolved [`DrawCapabilities::base_vertex`] so hot draw commands skip
+    /// per-item [`World`](crate::tcs::world::World) resource lookups.
+    pub(crate) fn with_base_vertex(mut self, base_vertex: bool) -> Self {
+        self.base_vertex_cap = Some(base_vertex);
+        self
+    }
+
+    #[inline]
+    pub(crate) fn base_vertex(&self, world: &crate::tcs::world::World) -> bool {
+        self.base_vertex_cap.unwrap_or_else(|| {
+            world
+                .resources
+                .get::<DrawCapabilities>()
+                .is_some_and(|capabilities| capabilities.base_vertex)
+        })
     }
 
     /// What the pass has recorded so far.
@@ -218,58 +247,84 @@ impl<'w> TrackedRenderPass<'w> {
         bind_group: &wgpu::BindGroup,
         offsets: &[wgpu::DynamicOffset],
     ) {
-        let index = index as usize;
-        let is_same = self
-            .bound
-            .bind_groups
-            .get(index)
-            .and_then(|slot| slot.as_ref())
-            .is_some_and(|(bound_bg, bound_offsets)| {
-                bound_bg == bind_group && bound_offsets.as_slice() == offsets
-            });
-
-        if self.count(!is_same) {
-            if self.bound.bind_groups.len() <= index {
-                self.bound.bind_groups.resize_with(index + 1, || None);
+        let slot_idx = index as usize;
+        if self.bound.bind_groups.len() <= slot_idx {
+            self.bound.bind_groups.resize_with(slot_idx + 1, || None);
+        }
+        let Some(slot) = self.bound.bind_groups.get_mut(slot_idx) else {
+            return;
+        };
+        let changed = match slot {
+            Some((bound_bg, bound_offsets)) if bound_bg == bind_group => {
+                if bound_offsets.as_slice() == offsets {
+                    false
+                } else {
+                    bound_offsets.clear();
+                    bound_offsets.extend_from_slice(offsets);
+                    true
+                }
             }
-            if let Some(slot) = self.bound.bind_groups.get_mut(index) {
+            _ => {
                 *slot = Some((bind_group.clone(), SmallVec::from_slice(offsets)));
+                true
             }
-            self.pass.set_bind_group(index as u32, bind_group, offsets);
+        };
+        if self.count(changed) {
+            self.pass.set_bind_group(index, bind_group, offsets);
         }
     }
 
     /// Binds `slice` at vertex buffer `slot` unless that range is bound there.
     pub fn set_vertex_buffer(&mut self, slot: u32, slice: wgpu::BufferSlice<'_>) {
         let slot_idx = slot as usize;
-        let is_same = self
-            .bound
-            .vertex_buffers
-            .get(slot_idx)
-            .and_then(|bound| bound.as_ref())
-            .is_some_and(|bound| bound.matches(&slice));
-
-        if self.count(!is_same) {
-            if self.bound.vertex_buffers.len() <= slot_idx {
-                self.bound.vertex_buffers.resize_with(slot_idx + 1, || None);
+        if self.bound.vertex_buffers.len() <= slot_idx {
+            self.bound.vertex_buffers.resize_with(slot_idx + 1, || None);
+        }
+        let Some(bound_slot) = self.bound.vertex_buffers.get_mut(slot_idx) else {
+            return;
+        };
+        let changed = match bound_slot {
+            Some(bound) if &bound.buffer == slice.buffer() => {
+                if bound.offset == slice.offset() && bound.size == slice.size() {
+                    false
+                } else {
+                    bound.offset = slice.offset();
+                    bound.size = slice.size();
+                    true
+                }
             }
-            if let Some(bound) = self.bound.vertex_buffers.get_mut(slot_idx) {
-                *bound = Some(BoundSlice::of(&slice));
+            _ => {
+                *bound_slot = Some(BoundSlice::of(&slice));
+                true
             }
+        };
+        if self.count(changed) {
             self.pass.set_vertex_buffer(slot, slice);
         }
     }
 
     /// Binds `slice` as the index buffer unless that range and format are bound.
     pub fn set_index_buffer(&mut self, slice: wgpu::BufferSlice<'_>, format: wgpu::IndexFormat) {
-        let is_same = self
-            .bound
-            .index_buffer
-            .as_ref()
-            .is_some_and(|(bound, bound_format)| *bound_format == format && bound.matches(&slice));
-
-        if self.count(!is_same) {
-            self.bound.index_buffer = Some((BoundSlice::of(&slice), format));
+        let changed = match &mut self.bound.index_buffer {
+            Some((bound, bound_format)) if &bound.buffer == slice.buffer() => {
+                if *bound_format == format
+                    && bound.offset == slice.offset()
+                    && bound.size == slice.size()
+                {
+                    false
+                } else {
+                    bound.offset = slice.offset();
+                    bound.size = slice.size();
+                    *bound_format = format;
+                    true
+                }
+            }
+            slot => {
+                *slot = Some((BoundSlice::of(&slice), format));
+                true
+            }
+        };
+        if self.count(changed) {
             self.pass.set_index_buffer(slice, format);
         }
     }

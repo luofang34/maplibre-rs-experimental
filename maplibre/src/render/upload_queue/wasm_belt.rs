@@ -17,6 +17,7 @@ pub(super) struct WasmStagingBelt {
     slots: [Option<(wgpu::Buffer, u64)>; RING_SLOTS],
     next_slot: usize,
     quiet_frames: u8,
+    cached_max_buf: Option<u64>,
 }
 
 impl Drop for WasmStagingBelt {
@@ -98,7 +99,7 @@ impl WasmStagingBelt {
                 old_buf.destroy();
             }
             let buf = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("upload_queue_staging_buffer"),
+                label: cfg!(debug_assertions).then_some("upload_queue_staging_buffer"),
                 size: next_cap,
                 usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
@@ -123,10 +124,12 @@ impl WasmStagingBelt {
             return false;
         }
         let payload_bytes = payload.len() as u64;
-        let max_buf = device
-            .limits()
-            .max_buffer_size
-            .min(MAX_STAGING_BUFFER_CAPACITY);
+        let max_buf = *self.cached_max_buf.get_or_insert_with(|| {
+            device
+                .limits()
+                .max_buffer_size
+                .min(MAX_STAGING_BUFFER_CAPACITY)
+        });
         if payload_bytes > max_buf {
             flush_copies_direct(queue, payload, copies);
             return false;

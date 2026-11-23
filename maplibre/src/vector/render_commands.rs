@@ -1,6 +1,5 @@
 //! Fill, line and circle commands that skip draws until GPU geometry and paint are ready.
 use crate::{
-    coords::WorldTileCoords,
     render::{
         eventually::{Eventually, Eventually::Initialized},
         projection::ProjectionGpuResources,
@@ -8,14 +7,18 @@ use crate::{
         tile_view_pattern::WgpuTileViewPattern,
     },
     tcs::world::World,
-    vector::{CirclePipeline, LinePipeline, VectorBufferPool, VectorPipeline},
+    vector::{CirclePipeline, VectorBufferPool, VectorPipeline},
 };
 
 mod extrusion;
+mod line;
+mod pattern;
 pub use extrusion::*;
+pub use line::*;
+pub use pattern::*;
 
 #[inline]
-fn resolve_vector_entry<'w>(
+pub(super) fn resolve_vector_entry<'w>(
     world: &'w World,
     item: &LayerItem,
 ) -> Option<&'w crate::vector::resource::IndexEntry> {
@@ -26,7 +29,7 @@ fn resolve_vector_entry<'w>(
         .resolve_entry(item.tile.coords, item.style_layer, item.entry_slot)
 }
 
-fn is_uniform_entry(world: &World, item: &LayerItem) -> bool {
+pub(super) fn is_uniform_entry(world: &World, item: &LayerItem) -> bool {
     resolve_vector_entry(world, item)
         .is_some_and(crate::vector::resource::IndexEntry::is_uniform_feature_metadata)
 }
@@ -72,6 +75,43 @@ impl RenderCommand<LayerItem> for SetVectorTilePipeline {
 /// With `RUNS`, a layer whose pattern varies by feature is drawn one run of features at a
 /// time, each with the image its pattern names bound at the second bind group.
 pub struct DrawVectorTile<const RUNS: bool = false>;
+impl<const RUNS: bool> DrawVectorTile<RUNS> {
+    pub(super) fn draw_prepared<'w>(
+        world: &'w World,
+        buffer_pool: &'w VectorBufferPool,
+        tile_view_pattern: &'w WgpuTileViewPattern,
+        entry: &'w crate::vector::resource::IndexEntry,
+        item: &LayerItem,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
+    ) -> RenderCommandResult {
+        tracing::trace!(
+            "Drawing layer {:?} at {}",
+            entry.style_layer.source_layer,
+            entry.coords
+        );
+        if entry.indices_buffer_range().is_empty() {
+            tracing::error!("Tried to draw a vector tile without any vertices");
+            return RenderCommandResult::Failure;
+        }
+        let whole = pass.base_vertex(world);
+        let Some((first, base_vertex, instances)) =
+            bind_vector_tile_buffers(buffer_pool, tile_view_pattern, whole, item, entry, pass)
+        else {
+            return RenderCommandResult::Failure;
+        };
+        draw_vector_tile_runs::<RUNS>(
+            world,
+            buffer_pool,
+            whole,
+            item,
+            entry,
+            pass,
+            (first, base_vertex, instances),
+        );
+        RenderCommandResult::Success
+    }
+}
+
 impl<const RUNS: bool> RenderCommand<LayerItem> for DrawVectorTile<RUNS> {
     fn render<'w>(
         world: &'w World,
@@ -94,48 +134,20 @@ impl<const RUNS: bool> RenderCommand<LayerItem> for DrawVectorTile<RUNS> {
         else {
             return RenderCommandResult::Failure;
         };
-
-        tracing::trace!(
-            "Drawing layer {:?} at {}",
-            entry.style_layer.source_layer,
-            entry.coords
-        );
-        if entry.indices_buffer_range().is_empty() {
-            tracing::error!("Tried to draw a vector tile without any vertices");
-            return RenderCommandResult::Failure;
-        }
-
-        let Some((first, base_vertex, instances)) =
-            bind_vector_tile_buffers(world, buffer_pool, tile_view_pattern, item, entry, pass)
-        else {
-            return RenderCommandResult::Failure;
-        };
-        draw_vector_tile_runs::<RUNS>(
-            world,
-            buffer_pool,
-            item,
-            entry,
-            pass,
-            (first, base_vertex, instances),
-        );
-        RenderCommandResult::Success
+        Self::draw_prepared(world, buffer_pool, tile_view_pattern, entry, item, pass)
     }
 }
 
 fn bind_vector_tile_buffers<'w>(
-    world: &'w World,
     buffer_pool: &'w VectorBufferPool,
     tile_view_pattern: &'w WgpuTileViewPattern,
+    whole: bool,
     item: &LayerItem,
     entry: &'w crate::vector::resource::IndexEntry,
     pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
 ) -> Option<(u32, i32, std::ops::Range<u32>)> {
     let source_shape = &item.source_shape;
     pass.set_stencil_reference(u32::from(source_shape.stencil_reference()));
-    let whole = world
-        .resources
-        .get::<crate::render::tracked_pass::DrawCapabilities>()
-        .is_some_and(|capabilities| capabilities.base_vertex);
     let (first, base_vertex) = buffer_pool.bind_layer(pass, entry, (3, whole));
     let instances = if whole {
         let tile_instance = source_shape.instance_index()?;
@@ -161,6 +173,7 @@ fn bind_vector_tile_buffers<'w>(
 fn draw_vector_tile_runs<'w, const RUNS: bool>(
     world: &'w World,
     buffer_pool: &VectorBufferPool,
+    whole: bool,
     item: &LayerItem,
     entry: &crate::vector::resource::IndexEntry,
     pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
@@ -174,10 +187,6 @@ fn draw_vector_tile_runs<'w, const RUNS: bool>(
         .then(|| buffer_pool.pattern_runs_by_id(item.tile.coords, item.style_layer))
         .flatten();
     let Some(runs) = runs else {
-        let whole = world
-            .resources
-            .get::<crate::render::tracked_pass::DrawCapabilities>()
-            .is_some_and(|capabilities| capabilities.base_vertex);
         if whole {
             if let Some(chunks) = entry.u16_chunks() {
                 for (v_off, range) in chunks {
@@ -219,7 +228,7 @@ fn draw_vector_tile_runs<'w, const RUNS: bool>(
 
 /// Where a line lies this frame, which decides its pipeline and how it is drawn.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum LineMode {
+pub(super) enum LineMode {
     /// On the map plane, or draped into the terrain textures.
     Flat,
     /// At heights of its own over the terrain.
@@ -230,94 +239,21 @@ enum LineMode {
     Terrain,
 }
 
-fn line_mode(world: &World, item: &LayerItem) -> LineMode {
-    let kind = world
-        .resources
-        .get::<Eventually<VectorBufferPool>>()
-        .and_then(|pool| match pool {
-            Initialized(pool) => {
-                pool.index()
-                    .resolve_entry(item.tile.coords, item.style_layer, item.entry_slot)
-            }
-            _ => None,
-        })
-        .and_then(|entry| super::structures::kind(&entry.style_layer));
+pub(super) fn line_mode_for_entry(
+    entry: Option<&crate::vector::resource::IndexEntry>,
+    terrain_active: bool,
+) -> LineMode {
+    let kind = entry.and_then(|entry| super::structures::kind(&entry.style_layer));
     if matches!(kind, Some(super::structures::StructureKind::ElevatedLine)) {
         return LineMode::Elevated;
     }
-    let terrain = world
-        .resources
-        .get::<crate::terrain::TerrainFrame>()
-        .is_some_and(|frame| frame.active);
-    if !terrain {
+    if !terrain_active {
         return LineMode::Flat;
     }
     match kind {
         None => LineMode::Flat,
         Some(super::structures::StructureKind::Overlay) => LineMode::Terrain,
         Some(_) => LineMode::Structure,
-    }
-}
-
-/// Binds the line pipeline and dash atlas; elevated structures and lines on the terrain surface
-/// use depth-aware drawing on terrain.
-pub struct SetLineTilePipeline;
-impl RenderCommand<LayerItem> for SetLineTilePipeline {
-    fn render<'w>(
-        world: &'w World,
-        item: &LayerItem,
-        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
-    ) -> RenderCommandResult {
-        let Some((Initialized(pipeline), Initialized(projection_resources))) =
-            world.resources.query::<(
-                &Eventually<LinePipeline>,
-                &Eventually<ProjectionGpuResources>,
-            )>()
-        else {
-            return RenderCommandResult::Failure;
-        };
-
-        let mode = line_mode(world, item);
-        let dashes = world.resources.get::<super::line_dash::LineDashResources>();
-        let (chosen, needs_dash_group) = match mode {
-            LineMode::Flat => {
-                let is_plain = item.run.is_none()
-                    && dashes.is_some_and(|dashes| dashes.is_plain_solid(item.style_layer));
-                if is_plain {
-                    let plain = if projection_resources.is_globe_active(item.projection_binding()) {
-                        pipeline.globe_plain.as_ref()
-                    } else {
-                        pipeline.flat_plain.as_ref()
-                    };
-                    if let Some(plain) = plain {
-                        (Some(plain), false)
-                    } else {
-                        (pipeline.flat.as_ref(), true)
-                    }
-                } else {
-                    (pipeline.flat.as_ref(), true)
-                }
-            }
-            LineMode::Structure => (pipeline.structure.as_ref(), true),
-            LineMode::Elevated => (pipeline.elevated.as_ref(), true),
-            LineMode::Terrain => (pipeline.terrain.as_ref(), true),
-        };
-        let Some(chosen) = chosen else {
-            return RenderCommandResult::Failure;
-        };
-        pass.set_pipeline(chosen.select(is_uniform_entry(world, item)));
-        pass.set_bind_group(
-            0,
-            projection_resources.bind_group_for(item.projection_binding()),
-            &[],
-        );
-        if needs_dash_group {
-            let Some(dashes) = dashes else {
-                return RenderCommandResult::Failure;
-            };
-            pass.set_bind_group(1, dashes.binding(item.style_layer), &[]);
-        }
-        RenderCommandResult::Success
     }
 }
 
@@ -351,110 +287,113 @@ impl RenderCommand<LayerItem> for SetCircleTilePipeline {
     }
 }
 
-/// Binds the pattern pipeline and the pattern of the item's layer.
-pub struct SetPatternTilePipeline;
-impl RenderCommand<LayerItem> for SetPatternTilePipeline {
+/// Fused command binding the polygon-fill pipeline and drawing the bucket in one query/lookup.
+pub struct DrawVectorTiles;
+impl RenderCommand<LayerItem> for DrawVectorTiles {
     fn render<'w>(
         world: &'w World,
         item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let (Some(patterns), Some(Initialized(projection_resources))) = (
-            world.resources.get::<super::pattern::PatternResources>(),
-            world.resources.get::<Eventually<ProjectionGpuResources>>(),
+        let Some((
+            Initialized(pipeline),
+            Initialized(projection_resources),
+            Initialized(buffer_pool),
+            Initialized(tile_view_pattern),
+        )) = world.resources.query::<(
+            &Eventually<VectorPipeline>,
+            &Eventually<ProjectionGpuResources>,
+            &Eventually<VectorBufferPool>,
+            &Eventually<WgpuTileViewPattern>,
+        )>()
+        else {
+            return RenderCommandResult::Failure;
+        };
+        let Some(entry) =
+            buffer_pool
+                .index()
+                .resolve_entry(item.tile.coords, item.style_layer, item.entry_slot)
+        else {
+            return RenderCommandResult::Failure;
+        };
+        if entry.indices_buffer_range().is_empty() {
+            tracing::error!("Tried to draw a vector tile without any vertices");
+            return RenderCommandResult::Failure;
+        }
+        let globe = projection_resources.is_globe_active(item.projection_binding());
+        let Some(selected) = pipeline.select(
+            globe,
+            entry.is_opaque_color(),
+            entry.is_uniform_feature_metadata(),
         ) else {
             return RenderCommandResult::Failure;
         };
-        let binding = patterns.binding(item.style_layer);
-        if binding.is_none() && !patterns.is_per_feature(item.style_layer) {
-            return RenderCommandResult::Failure;
-        }
-        let Some(pipeline) = patterns.pipeline() else {
-            return RenderCommandResult::Failure;
-        };
-        pass.set_pipeline(pipeline.select(is_uniform_entry(world, item)));
+        pass.set_pipeline(selected);
         pass.set_bind_group(
             0,
             projection_resources.bind_group_for(item.projection_binding()),
             &[],
         );
-        if let Some(binding) = binding {
-            pass.set_bind_group(1, binding, &[]);
-        }
-        RenderCommandResult::Success
+        DrawVectorTile::<false>::draw_prepared(
+            world,
+            buffer_pool,
+            tile_view_pattern,
+            entry,
+            item,
+            pass,
+        )
     }
 }
 
-/// Binds and draws a polygon bucket filled with a repeating image.
-pub type DrawPatternTiles = (SetPatternTilePipeline, DrawVectorTile<true>);
-/// Binds the image of the item's layer at the second bind group.
-pub struct SetPatternBindGroup;
-impl RenderCommand<LayerItem> for SetPatternBindGroup {
+/// Fused command binding the circle pipeline and drawing the bucket in one query/lookup.
+pub struct DrawCircleTiles;
+impl RenderCommand<LayerItem> for DrawCircleTiles {
     fn render<'w>(
         world: &'w World,
         item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some(patterns) = world.resources.get::<super::pattern::PatternResources>() else {
-            return RenderCommandResult::Failure;
-        };
-        match patterns.binding(item.style_layer) {
-            Some(binding) => pass.set_bind_group(1, binding, &[]),
-            None if patterns.is_per_feature(item.style_layer) => {}
-            None => return RenderCommandResult::Failure,
-        }
-        RenderCommandResult::Success
-    }
-}
-
-/// Binds and draws a polygon-fill bucket when both commands succeed.
-pub type DrawVectorTiles = (SetVectorTilePipeline, DrawVectorTile);
-/// Draws a stroked-line bucket. A line on the terrain is drawn once over each terrain tile its
-/// tile overlaps, with that tile's surface bound, since its vertices take their height from it.
-pub struct DrawLineTile;
-impl RenderCommand<LayerItem> for DrawLineTile {
-    fn render<'w>(
-        world: &'w World,
-        item: &LayerItem,
-        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
-    ) -> RenderCommandResult {
-        if line_mode(world, item) != LineMode::Terrain {
-            return DrawVectorTile::<true>::render(world, item, pass);
-        }
-        let Some(Initialized(terrain)) = world
-            .resources
-            .get::<Eventually<crate::terrain::resources::TerrainResources>>()
+        let Some((
+            Initialized(pipeline),
+            Initialized(projection_resources),
+            Initialized(buffer_pool),
+            Initialized(tile_view_pattern),
+        )) = world.resources.query::<(
+            &Eventually<CirclePipeline>,
+            &Eventually<ProjectionGpuResources>,
+            &Eventually<VectorBufferPool>,
+            &Eventually<WgpuTileViewPattern>,
+        )>()
         else {
             return RenderCommandResult::Failure;
         };
-        let tile = item.source_shape.coords();
-        for draw in terrain
-            .draws()
-            .iter()
-            .filter(|draw| overlaps(draw.coords, tile))
-        {
-            pass.set_bind_group(2, draw.bind_group.as_ref(), &[draw.uniform_offset]);
-            if let RenderCommandResult::Failure = DrawVectorTile::<true>::render(world, item, pass)
-            {
-                return RenderCommandResult::Failure;
-            }
+        let Some(entry) =
+            buffer_pool
+                .index()
+                .resolve_entry(item.tile.coords, item.style_layer, item.entry_slot)
+        else {
+            return RenderCommandResult::Failure;
+        };
+        if entry.indices_buffer_range().is_empty() {
+            tracing::error!("Tried to draw a vector tile without any vertices");
+            return RenderCommandResult::Failure;
         }
-        RenderCommandResult::Success
+        let Some(selected) = pipeline.select_entry(Some(entry)) else {
+            return RenderCommandResult::Failure;
+        };
+        pass.set_pipeline(selected);
+        pass.set_bind_group(
+            0,
+            projection_resources.bind_group_for(item.projection_binding()),
+            &[],
+        );
+        DrawVectorTile::<false>::draw_prepared(
+            world,
+            buffer_pool,
+            tile_view_pattern,
+            entry,
+            item,
+            pass,
+        )
     }
 }
-
-/// Whether one tile contains the other.
-fn overlaps(a: WorldTileCoords, b: WorldTileCoords) -> bool {
-    let (coarse, fine) = if u8::from(a.z) <= u8::from(b.z) {
-        (a, b)
-    } else {
-        (b, a)
-    };
-    let levels = u8::from(fine.z) - u8::from(coarse.z);
-    fine.x >> levels == coarse.x && fine.y >> levels == coarse.y
-}
-
-/// Binds and draws a stroked-line bucket when both commands succeed.
-pub type DrawLineTiles = (SetLineTilePipeline, DrawLineTile);
-/// Binds and draws a circle bucket when both commands succeed.
-pub type DrawCircleTiles = (SetCircleTilePipeline, DrawVectorTile);

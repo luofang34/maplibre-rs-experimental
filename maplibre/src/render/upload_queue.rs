@@ -8,7 +8,7 @@
 //! upload that skips the count.
 
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Mutex,
 };
 
@@ -49,6 +49,8 @@ struct StagedCopy {
 struct StagingBeltState {
     payload: Vec<u8>,
     copies: Vec<StagedCopy>,
+    #[cfg(not(target_arch = "wasm32"))]
+    cached_max_buf: Option<u64>,
     #[cfg(target_arch = "wasm32")]
     wasm_belt: wasm_belt::WasmStagingBelt,
     #[cfg(not(target_arch = "wasm32"))]
@@ -77,6 +79,7 @@ pub struct UploadQueue {
     queue: wgpu::Queue,
     written: AtomicU64,
     staging_enabled: bool,
+    has_staged: AtomicBool,
     staging: Mutex<StagingBeltState>,
 }
 
@@ -87,6 +90,7 @@ impl UploadQueue {
             queue,
             written: AtomicU64::new(0),
             staging_enabled: false,
+            has_staged: AtomicBool::new(false),
             staging: Mutex::new(StagingBeltState::default()),
         }
     }
@@ -97,6 +101,7 @@ impl UploadQueue {
             queue,
             written: AtomicU64::new(0),
             staging_enabled: true,
+            has_staged: AtomicBool::new(false),
             staging: Mutex::new(StagingBeltState::default()),
         }
     }
@@ -171,6 +176,7 @@ impl UploadQueue {
                     dst_offset: offset,
                     size,
                 });
+                self.has_staged.store(true, Ordering::Release);
                 return;
             }
         }
@@ -187,13 +193,14 @@ impl UploadQueue {
 
     /// Cancels any pending staged writes targeting `buffer` before the caller destroys it.
     pub fn cancel_staged_buffer(&self, buffer: &wgpu::Buffer) {
-        if !self.staging_enabled {
+        if !self.staging_enabled || !self.has_staged.load(Ordering::Acquire) {
             return;
         }
         let mut staging = crate::platform::lock_unpoisoned(&self.staging);
         staging.copies.retain(|copy| &copy.dst != buffer);
         if staging.copies.is_empty() {
             staging.payload.clear();
+            self.has_staged.store(false, Ordering::Release);
         }
     }
 
@@ -218,27 +225,35 @@ impl UploadQueue {
                     .payload
                     .shrink_to(SHRINK_STAGING_BUFFER_CAPACITY as usize);
                 staging.copies.shrink_to(256);
+                self.has_staged.store(false, Ordering::Release);
                 return false;
             }
-            let max_buf = device
-                .limits()
-                .max_buffer_size
-                .min(MAX_STAGING_BUFFER_CAPACITY);
+            let max_buf = *staging.cached_max_buf.get_or_insert_with(|| {
+                device
+                    .limits()
+                    .max_buffer_size
+                    .min(MAX_STAGING_BUFFER_CAPACITY)
+            });
             let StagingBeltState {
                 payload,
                 copies,
                 native_ring,
+                ..
             } = &mut *staging;
-            if native_ring.encode_into(device, encoder, payload, copies, max_buf) {
+            let encoded = if native_ring.encode_into(device, encoder, payload, copies, max_buf) {
                 payload.clear();
                 if payload.capacity() > SHRINK_STAGING_BUFFER_CAPACITY as usize * 4 {
                     payload.shrink_to(SHRINK_STAGING_BUFFER_CAPACITY as usize);
                     copies.shrink_to(256);
                 }
-                return true;
-            }
-            flush_copies_direct(&self.queue, payload, copies);
-            false
+                true
+            } else {
+                flush_copies_direct(&self.queue, payload, copies);
+                false
+            };
+            self.has_staged
+                .store(!staging.copies.is_empty(), Ordering::Release);
+            encoded
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -247,7 +262,9 @@ impl UploadQueue {
                 copies,
                 wasm_belt,
             } = &mut *staging;
-            wasm_belt.encode_into(&self.queue, device, encoder, payload, copies)
+            let encoded = wasm_belt.encode_into(&self.queue, device, encoder, payload, copies);
+            self.has_staged.store(!copies.is_empty(), Ordering::Release);
+            encoded
         }
     }
 
@@ -256,6 +273,7 @@ impl UploadQueue {
     /// transfers to submit ahead of the frame's render passes.
     pub fn flush_staged(&self, device: &wgpu::Device) -> Option<wgpu::CommandBuffer> {
         if !self.staging_enabled
+            || !self.has_staged.load(Ordering::Acquire)
             || crate::platform::lock_unpoisoned(&self.staging)
                 .copies
                 .is_empty()
@@ -263,13 +281,16 @@ impl UploadQueue {
             return None;
         }
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("upload_queue_staging_encoder"),
+            label: cfg!(debug_assertions).then_some("upload_queue_staging_encoder"),
         });
         self.encode_staged_into(device, &mut encoder)
             .then(|| encoder.finish())
     }
 
     fn flush_staged_for_buffer(&self, target: &wgpu::Buffer) {
+        if !self.has_staged.load(Ordering::Acquire) {
+            return;
+        }
         let mut staging = crate::platform::lock_unpoisoned(&self.staging);
         if !staging.copies.iter().any(|copy| &copy.dst == target) {
             return;
@@ -296,6 +317,7 @@ impl UploadQueue {
         });
         if copies.is_empty() {
             payload.clear();
+            self.has_staged.store(false, Ordering::Release);
         }
     }
 
@@ -352,7 +374,7 @@ impl UploadQueue {
         &self,
         command_buffers: I,
     ) -> wgpu::SubmissionIndex {
-        if self.staging_enabled {
+        if self.staging_enabled && self.has_staged.load(Ordering::Acquire) {
             let mut staging = crate::platform::lock_unpoisoned(&self.staging);
             if !staging.copies.is_empty() {
                 let StagingBeltState {
@@ -360,6 +382,7 @@ impl UploadQueue {
                 } = &mut *staging;
                 flush_copies_direct(&self.queue, payload, copies);
             }
+            self.has_staged.store(false, Ordering::Release);
         }
         let submission = self.queue.submit(command_buffers);
         #[cfg(not(target_arch = "wasm32"))]

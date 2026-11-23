@@ -147,7 +147,10 @@ export const startMapLibre = async (
             alert(decision.message);
             return undefined;
         }
-        ensureWebGpuCompatibility();
+        ensureWebGpuCompatibility(globalThis, {
+            sharedMemory: MULTITHREADED,
+            traceGpuCalls: ARENA_TELEMETRY,
+        });
     }
 
     preventDefaultTouchActions();

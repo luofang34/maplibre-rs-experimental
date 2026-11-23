@@ -110,9 +110,7 @@ impl<E: Environment> Plugin<E> for RenderPlugin {
         )?;
         schedule.add_stage(
             RenderStageLabel::Render,
-            SystemStage::default()
-                .with_system(super::gpu_timer::gpu_timer_system)
-                .with_system(SystemContainer::new(GraphRunnerSystem)),
+            SystemStage::default().with_system(SystemContainer::new(GraphRunnerSystem)),
         )?;
         schedule.add_stage(
             RenderStageLabel::Cleanup,

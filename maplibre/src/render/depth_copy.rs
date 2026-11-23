@@ -150,7 +150,7 @@ impl DepthCopyPipeline {
         };
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             multiview_mask: None,
-            label: Some("depth_copy"),
+            label: cfg!(debug_assertions).then_some("depth_copy"),
             color_attachments: &[],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: target,

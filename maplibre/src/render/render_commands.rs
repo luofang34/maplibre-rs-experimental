@@ -57,19 +57,14 @@ impl RenderCommand<TileMaskItem> for DrawMask {
 }
 
 impl DrawMask {
-    pub(crate) fn render_with_reference<'w>(
+    pub(crate) fn render_prepared<'w>(
         world: &'w World,
+        tile_view_pattern: &'w WgpuTileViewPattern,
+        tile_mesh_cache: &'w GlobeTileMeshCache,
         item: &TileMaskItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
         reference: u32,
     ) -> RenderCommandResult {
-        let Some((Initialized(tile_view_pattern), tile_mesh_cache)) = world
-            .resources
-            .query::<(&Eventually<WgpuTileViewPattern>, &GlobeTileMeshCache)>()
-        else {
-            return RenderCommandResult::Failure;
-        };
-
         let tile_mask = &item.source_shape;
         let Some(mesh) = tile_mesh_cache.get(
             tile_mask.coords(),
@@ -81,10 +76,7 @@ impl DrawMask {
 
         pass.set_stencil_reference(reference);
 
-        let whole = world
-            .resources
-            .get::<crate::render::tracked_pass::DrawCapabilities>()
-            .is_some_and(|capabilities| capabilities.base_vertex);
+        let whole = pass.base_vertex(world);
         pass.set_vertex_buffer(0, mesh.vertex_buffer().slice(..));
         let instances = if whole {
             let Some(tile_instance) = tile_mask.instance_index() else {
@@ -106,6 +98,28 @@ impl DrawMask {
         pass.draw_indexed(0..mesh.index_count(), 0, instances);
 
         RenderCommandResult::Success
+    }
+
+    pub(crate) fn render_with_reference<'w>(
+        world: &'w World,
+        item: &TileMaskItem,
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
+        reference: u32,
+    ) -> RenderCommandResult {
+        let Some((Initialized(tile_view_pattern), tile_mesh_cache)) = world
+            .resources
+            .query::<(&Eventually<WgpuTileViewPattern>, &GlobeTileMeshCache)>()
+        else {
+            return RenderCommandResult::Failure;
+        };
+        Self::render_prepared(
+            world,
+            tile_view_pattern,
+            tile_mesh_cache,
+            item,
+            pass,
+            reference,
+        )
     }
 }
 

@@ -41,7 +41,7 @@ pub(crate) fn needs_symbol_depth_copy(world: &World) -> bool {
     world
         .resources
         .get::<RenderPhase<TranslucentItem>>()
-        .is_some_and(|items| items.size() > 0)
+        .is_some_and(|items| items.into_iter().any(|item| item.index != u32::MAX))
         && matches!(
             world
                 .resources
@@ -50,9 +50,10 @@ pub(crate) fn needs_symbol_depth_copy(world: &World) -> bool {
         )
 }
 
-pub(crate) fn draw_contents<'w>(
+pub(crate) fn draw_contents_inline<'w>(
     render_pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     world: &'w World,
+    layer_state: super::main_pass::PassLayerState<'w>,
 ) {
     if let Some(hooks) = world.resources.get::<crate::render::PassDrawHooks>() {
         for hook in hooks.hooks(crate::render::PassHookPoint::TranslucentPassBegin) {
@@ -67,12 +68,9 @@ pub(crate) fn draw_contents<'w>(
             "RenderPhase<TranslucentItem>::size() = {}",
             mask_items.size()
         );
-        let masks = world
-            .resources
-            .get::<super::render_phase::RenderPhase<super::render_phase::TileMaskItem>>()
-            .map(|phase| phase.into_iter().as_slice());
-        let unique_stencils = masks.is_some_and(super::main_pass::unique_vector_stencils);
-        let above = super::main_pass::above_symbols(world);
+        let masks = layer_state.masks;
+        let unique_stencils = layer_state.unique_stencils;
+        let above = layer_state.above;
         let mut stencil_state = above
             .as_ref()
             .map_or(super::main_pass::StencilState::Cleared, |above| {
@@ -117,6 +115,14 @@ pub(crate) fn draw_contents<'w>(
             }
         }
     }
+}
+
+pub(crate) fn draw_contents<'w>(
+    render_pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
+    world: &'w World,
+) {
+    let layer_state = super::main_pass::resolve_pass_layer_state(world);
+    draw_contents_inline(render_pass, world, layer_state);
 }
 
 fn copy_symbol_depth_if_needed(
@@ -229,13 +235,18 @@ impl Node for TranslucentPassNode {
                 .command_encoder
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
                     multiview_mask: None,
-                    label: Some("translucent_pass"),
+                    label: cfg!(debug_assertions).then_some("translucent_pass"),
                     color_attachments: &[Some(color_attachment)],
                     depth_stencil_attachment: Some(depth_stencil_attachment),
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });
-        let mut render_pass = crate::render::tracked_pass::TrackedRenderPass::new(render_pass);
+        let base_vertex = world
+            .resources
+            .get::<crate::render::tracked_pass::DrawCapabilities>()
+            .is_some_and(|cap| cap.base_vertex);
+        let mut render_pass = crate::render::tracked_pass::TrackedRenderPass::new(render_pass)
+            .with_base_vertex(base_vertex);
         draw_contents(&mut render_pass, world);
         render_pass.finish(world);
     }

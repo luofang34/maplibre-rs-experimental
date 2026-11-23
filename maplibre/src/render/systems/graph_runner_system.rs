@@ -29,11 +29,13 @@ impl System for GraphRunnerSystem {
                     queue,
                     resources: state,
                     render_graph,
+                    settings,
                     ..
                 },
             ..
         }: &mut MapContext,
     ) -> SystemResult {
+        crate::render::gpu_timer::update_gpu_timer(world, device, queue, settings);
         render_graph.prepare().map_err(RenderError::Graph)?;
         run_graph(render_graph, device, queue, state, world).map_err(RenderError::Graph)?;
 

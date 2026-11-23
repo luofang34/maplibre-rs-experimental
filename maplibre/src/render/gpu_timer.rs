@@ -137,14 +137,28 @@ impl GpuTimer {
             });
     }
 
-    /// The main pass time of the last measured frame, once its timestamps are back.
-    pub fn take(&self, device: &wgpu::Device, period_nanos: f32) -> Option<Duration> {
+    /// Whether the readback buffer finished mapping and holds readable timestamps.
+    #[inline]
+    pub(crate) fn is_mapped(&self) -> bool {
+        self.state.load(Ordering::Acquire) == MAPPED
+    }
+
+    /// Drives the native readback mapping callback without waiting on the GPU.
+    #[inline]
+    pub(crate) fn poll_if_mapping(&self, device: &wgpu::Device) {
+        #[cfg(not(target_arch = "wasm32"))]
         if self.state.load(Ordering::Acquire) == MAPPING {
-            // Drives the mapping callback without waiting for the GPU.
             if let Err(error) = device.poll(wgpu::PollType::Poll) {
                 tracing::debug!(%error, "polling for GPU timestamps failed");
             }
         }
+        #[cfg(target_arch = "wasm32")]
+        let _ = device;
+    }
+
+    /// The main pass time of the last measured frame, once its timestamps are back.
+    pub fn take(&self, device: &wgpu::Device, period_nanos: f32) -> Option<Duration> {
+        self.poll_if_mapping(device);
         if self.state.load(Ordering::Acquire) != MAPPED {
             return None;
         }
@@ -167,58 +181,46 @@ impl GpuTimer {
 
 /// Starts the main-pass timer on first use, files the last measurement that came back and tags
 /// the measurement this frame starts with its host frame.
-pub(crate) fn gpu_timer_system(
-    crate::context::MapContext {
-        world,
-        renderer:
-            crate::render::Renderer {
-                device,
-                queue,
-                settings,
-                ..
-            },
-        ..
-    }: &mut crate::context::MapContext,
-) -> crate::tcs::system::SystemResult {
+pub(crate) fn update_gpu_timer(
+    world: &mut crate::tcs::world::World,
+    device: &wgpu::Device,
+    queue: &crate::render::upload_queue::UploadQueue,
+    settings: &crate::render::settings::RendererSettings,
+) {
     let trace_active = world
         .resources
         .get::<crate::render::frame_trace::FrameTraceSlot>()
         .is_some_and(|slot| slot.0.is_some());
     let enabled = settings.gpu_timing || trace_active;
     if !enabled {
-        if world
-            .resources
-            .get::<GpuTimerSlot>()
-            .is_some_and(|slot| slot.0.is_some())
-        {
-            world.resources.insert(GpuTimerSlot(None));
+        if world.resources.get::<GpuTimerSlot>().is_some() {
+            world.resources.remove::<GpuTimerSlot>();
         }
-        return Ok(());
+        return;
     }
-    if world
-        .resources
-        .get::<GpuTimerSlot>()
-        .is_none_or(|slot| slot.0.is_none())
-    {
+    if world.resources.get::<GpuTimerSlot>().is_none() {
         world.resources.insert(GpuTimerSlot(GpuTimer::new(device)));
     }
-    let timer = world
+    let Some(timer) = world
         .resources
         .get::<GpuTimerSlot>()
-        .and_then(|slot| slot.0.as_ref());
-    let measured = timer.and_then(|timer| {
-        Some((
-            timer.frame(),
-            timer.take(device, queue.get_timestamp_period())?,
-        ))
-    });
-    if let Some(timer) = timer {
-        timer.tag(crate::render::frame_signals::host_frame_in_progress(world));
-    }
+        .and_then(|slot| slot.0.as_ref())
+    else {
+        return;
+    };
+    timer.poll_if_mapping(device);
+    let measured = timer
+        .is_mapped()
+        .then(|| {
+            timer
+                .take(device, queue.get_timestamp_period())
+                .map(|spent| (timer.frame(), spent))
+        })
+        .flatten();
+    timer.tag(crate::render::frame_signals::host_frame_in_progress(world));
     if let Some((frame, spent)) = measured {
         crate::render::frame_signals::record_gpu_time(world, frame, spent);
     }
-    Ok(())
 }
 
 /// Resolves the main pass's timestamps into the frame's commands.

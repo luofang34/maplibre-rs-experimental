@@ -1,6 +1,6 @@
 //! Extension hooks executed during render passes.
 
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use crate::{render::tracked_pass::TrackedRenderPass, tcs::world::World};
 
@@ -13,6 +13,17 @@ pub enum PassHookPoint {
     TranslucentPassBegin,
     /// End of TRANSLUCENT_PASS, after all map layers and symbols have drawn.
     TranslucentPassEnd,
+}
+
+impl PassHookPoint {
+    #[inline]
+    const fn index(self) -> usize {
+        match self {
+            Self::MainPassBegin => 0,
+            Self::TranslucentPassBegin => 1,
+            Self::TranslucentPassEnd => 2,
+        }
+    }
 }
 
 /// A draw hook callable during render pass execution.
@@ -59,7 +70,7 @@ where
 /// Container for pass draw hooks registered in the World resources.
 #[derive(Default, Clone)]
 pub struct PassDrawHooks {
-    hooks: HashMap<PassHookPoint, Vec<Arc<dyn PassDrawHook>>>,
+    hooks: [Vec<Arc<dyn PassDrawHook>>; 3],
 }
 
 impl PassDrawHooks {
@@ -70,7 +81,9 @@ impl PassDrawHooks {
 
     /// Registers a draw hook for a specific hook point.
     pub fn register(&mut self, point: PassHookPoint, hook: impl PassDrawHook) {
-        self.hooks.entry(point).or_default().push(Arc::new(hook));
+        if let Some(bucket) = self.hooks.get_mut(point.index()) {
+            bucket.push(Arc::new(hook));
+        }
     }
 
     /// Registers a draw hook guarded by a fast per-frame active-work predicate.
@@ -84,7 +97,7 @@ impl PassDrawHooks {
 
     /// Borrows all registered hooks for `point` without heap allocation.
     pub fn hooks(&self, point: PassHookPoint) -> &[Arc<dyn PassDrawHook>] {
-        self.hooks.get(&point).map_or(&[], Vec::as_slice)
+        self.hooks.get(point.index()).map_or(&[], Vec::as_slice)
     }
 
     /// Returns whether any hook registered at `point` reports active draw work for `world`.
@@ -94,7 +107,7 @@ impl PassDrawHooks {
 
     /// Retrieves cloned handles to all registered hooks for the hook point.
     pub fn get_hooks(&self, point: PassHookPoint) -> Vec<Arc<dyn PassDrawHook>> {
-        self.hooks.get(&point).cloned().unwrap_or_default()
+        self.hooks.get(point.index()).cloned().unwrap_or_default()
     }
 }
 
