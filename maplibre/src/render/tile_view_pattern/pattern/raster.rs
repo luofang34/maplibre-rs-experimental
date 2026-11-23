@@ -1,7 +1,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{
-    cover::{covering_shapes_for, selected_shapes, source_shapes},
+    cover::{covering_shapes_for, selected_shapes, source_shapes, CoverTiles},
     RasterCoverings,
 };
 use crate::{
@@ -113,10 +113,10 @@ fn raster_shapes<T: HasTile>(
     let covered = super::super::coverage::disjoint_tiles(coords, covered);
     let complete = super::super::coverage::covers_target(coords, &covered).then(|| covered.clone());
     if let Some(tiles) = complete {
-        selected_shapes(coords, tiles, zoom, used_parents)
+        selected_shapes(coords, CoverTiles::Many(tiles), zoom, used_parents)
     } else if covered.is_empty() {
         match super::super::coverage::loaded_cover(sources, coords, world) {
-            Some(tiles) => selected_shapes(coords, tiles, zoom, used_parents),
+            Some(tiles) => selected_shapes(coords, CoverTiles::Many(tiles), zoom, used_parents),
             None => source_shapes(sources, coords, zoom, world, used_parents),
         }
     } else {
@@ -127,6 +127,6 @@ fn raster_shapes<T: HasTile>(
         tiles.retain(|tile| !covered.contains(tile));
         tiles.extend(covered);
         tiles.sort_by_key(|tile| tile.z);
-        selected_shapes(coords, tiles, zoom, used_parents)
+        selected_shapes(coords, CoverTiles::Many(tiles), zoom, used_parents)
     }
 }

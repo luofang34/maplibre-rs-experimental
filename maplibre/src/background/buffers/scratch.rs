@@ -23,6 +23,8 @@ pub(crate) struct BackgroundScratch {
     bg_layer_indices: Vec<usize>,
     last_pure_globe_params: Option<(u32, u32, u64)>,
     last_pure_globe_tiles: Vec<WorldTileCoords>,
+    last_globe_drawn: Vec<WorldTileCoords>,
+    globe_tiles_populated: bool,
 }
 
 impl BackgroundScratch {
@@ -40,37 +42,83 @@ impl BackgroundScratch {
         &self.bg_layer_indices
     }
 
-    pub(crate) fn pure_globe_tile_metadata_matches(
-        &self,
-        view_state: &ViewState,
-        globe_tiles: &[WorldTileCoords],
-    ) -> bool {
-        let params = (
-            (view_state.width() as f32).to_bits(),
-            (view_state.height() as f32).to_bits(),
-            view_state.zoom().value().to_bits(),
+    /// Rebuilds `self.globe_tiles` only when `drawn` differs from the previous globe covering.
+    pub(crate) fn sync_globe_tiles(&mut self, drawn: Option<&[WorldTileCoords]>) -> bool {
+        let slice = drawn.unwrap_or(&[]);
+        if self.globe_tiles_populated && self.last_globe_drawn.as_slice() == slice {
+            return false;
+        }
+        self.last_globe_drawn.clear();
+        self.last_globe_drawn.extend_from_slice(slice);
+        self.globe_tiles.clear();
+        self.globe_tiles.extend(
+            slice
+                .iter()
+                .copied()
+                .filter(|coords| coords.wrapped().is_some()),
         );
-        !self.tile_metadata.is_empty()
-            && self.last_pure_globe_params == Some(params)
-            && self.last_pure_globe_tiles.as_slice() == globe_tiles
+        if self.globe_tiles.is_empty() {
+            self.globe_tiles.push(WorldTileCoords::default());
+        }
+        self.globe_tiles_populated = true;
+        true
     }
 
-    pub(crate) fn record_pure_globe_tiles(
+    pub(crate) fn clear_globe_tiles(&mut self) -> bool {
+        let had = !self.globe_tiles.is_empty() || self.globe_tiles_populated;
+        self.last_globe_drawn.clear();
+        self.globe_tiles.clear();
+        self.globe_tiles_populated = false;
+        had
+    }
+
+    pub(crate) fn prepare_tile_metadata(
         &mut self,
         view_state: &ViewState,
-        globe_tiles: &[WorldTileCoords],
-    ) {
-        self.last_pure_globe_params = Some((
-            (view_state.width() as f32).to_bits(),
-            (view_state.height() as f32).to_bits(),
-            view_state.zoom().value().to_bits(),
-        ));
-        self.last_pure_globe_tiles.clear();
-        self.last_pure_globe_tiles.extend_from_slice(globe_tiles);
-    }
-
-    pub(crate) fn invalidate_pure_globe_tiles(&mut self) {
-        self.last_pure_globe_params = None;
+        gpu_vp: Option<&crate::render::camera::ViewProjection>,
+        pure_globe: bool,
+        alloc_gen: u64,
+    ) -> bool {
+        if pure_globe {
+            let params = (
+                (view_state.width() as f32).to_bits(),
+                (view_state.height() as f32).to_bits(),
+                view_state.zoom().value().to_bits(),
+            );
+            if alloc_gen != 0
+                && !self.tile_metadata.is_empty()
+                && self.last_pure_globe_params == Some(params)
+                && self.last_pure_globe_tiles.as_slice() == self.globe_tiles.as_slice()
+            {
+                return false;
+            }
+            self.tile_metadata.clear();
+            self.tile_metadata.extend(
+                self.globe_tiles
+                    .iter()
+                    .map(|coords| super::globe_tile_metadata_pure_globe(view_state, *coords)),
+            );
+            self.last_pure_globe_params = Some(params);
+            self.last_pure_globe_tiles.clear();
+            self.last_pure_globe_tiles
+                .extend_from_slice(&self.globe_tiles);
+            true
+        } else {
+            self.last_pure_globe_params = None;
+            if self.globe_tiles.is_empty() {
+                self.tile_metadata.clear();
+                return alloc_gen == 0;
+            }
+            if let Some(vp) = gpu_vp {
+                self.tile_metadata.clear();
+                self.tile_metadata.extend(
+                    self.globe_tiles
+                        .iter()
+                        .map(|coords| super::globe_tile_metadata_with_vp(view_state, vp, *coords)),
+                );
+            }
+            true
+        }
     }
 }
 

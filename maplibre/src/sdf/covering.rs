@@ -16,7 +16,7 @@ use crate::{
     tcs::world::World,
 };
 
-type SelectionKey = (u64, u64, u64, u64, u64);
+type SelectionKey = (u64, u64, u64, u64, u64, u64, usize);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct CoveringViewKey {
@@ -27,8 +27,8 @@ struct CoveringViewKey {
 }
 
 impl CoveringViewKey {
-    fn of(view: &ViewState) -> Self {
-        let m: [[f64; 4]; 4] = view.gpu_view_projection().0.into();
+    fn of(view: &ViewState, gpu_vp: &crate::render::camera::ViewProjection) -> Self {
+        let m: [[f64; 4]; 4] = gpu_vp.0.into();
         Self {
             gpu_vp_bits: m.map(|col| col.map(f64::to_bits)),
             zoom_bits: view.zoom().value().to_bits(),
@@ -42,10 +42,13 @@ pub(crate) struct SymbolCovering {
     pub tiles: Vec<WorldTileCoords>,
     pub buffer: wgpu::Buffer,
     selection_key: Option<SelectionKey>,
-    all_targets_ready: bool,
     last_upload_view: Option<CoveringViewKey>,
     metadata_scratch: Vec<ShaderTileMetadata>,
     last_uploaded_bytes: Vec<u8>,
+    pub(super) queue_scratch: Vec<crate::render::render_phase::TranslucentItem>,
+    visible_key: Option<(u64, u64)>,
+    visible_hash: u64,
+    visible_ids: Vec<crate::style::StyleLayerId>,
 }
 
 impl Drop for SymbolCovering {
@@ -98,24 +101,36 @@ pub(super) fn upload_tiles(world: &World) -> Vec<WorldTileCoords> {
     tiles
 }
 
-fn visible_symbol_hash(style: &Style, zoom: f64) -> u64 {
+fn compute_visible_symbols(style: &Style, zoom: f64) -> (u64, Vec<crate::style::StyleLayerId>) {
     use std::hash::{Hash, Hasher};
+    let indices = style.cached_symbol_layer_indices();
     let mut hasher = rustc_hash::FxHasher::default();
-    for (idx, layer) in style.layers.iter().enumerate() {
-        if layer.type_ == "symbol" && layer.is_visible_at(zoom) {
+    let mut ids = Vec::with_capacity(indices.len());
+    for &idx in indices.iter() {
+        if let Some(layer) = style.layers.get(idx)
+            && layer.is_visible_at(zoom)
+        {
             idx.hash(&mut hasher);
+            ids.push(layer.layer_id());
         }
     }
-    hasher.finish()
+    (hasher.finish(), ids)
 }
 
-fn visible_symbol_ids(style: &Style, zoom: f64) -> Vec<crate::style::StyleLayerId> {
-    style
-        .layers
-        .iter()
-        .filter(|layer| layer.type_ == "symbol" && layer.is_visible_at(zoom))
-        .map(crate::style::layer::StyleLayer::layer_id)
-        .collect()
+fn sync_visible_symbols(world: &mut World, style: &Style, zoom: f64) -> u64 {
+    let key = (style.revision(), zoom.to_bits());
+    if let Some(covering) = world.resources.get::<SymbolCovering>()
+        && covering.visible_key == Some(key)
+    {
+        return covering.visible_hash;
+    }
+    let (hash, ids) = compute_visible_symbols(style, zoom);
+    if let Some(covering) = world.resources.get_mut::<SymbolCovering>() {
+        covering.visible_key = Some(key);
+        covering.visible_hash = hash;
+        covering.visible_ids = ids;
+    }
+    hash
 }
 
 fn ready(
@@ -188,41 +203,46 @@ pub(super) fn update(
     device: &wgpu::Device,
     queue: &crate::render::upload_queue::UploadQueue,
 ) {
-    let key = covering_selection_key(world, style, view);
+    let style_zoom = view.style_zoom().value();
+    let vis_hash = sync_visible_symbols(world, style, style_zoom);
+    let key = covering_selection_key(world, style, vis_hash);
     let can_reuse = crate::render::eye_covering::EyeInFrame::reuses_content(world)
         || world
             .resources
             .get::<SymbolCovering>()
-            .is_some_and(|c| c.all_targets_ready && c.selection_key == Some(key));
+            .is_some_and(|c| c.selection_key == Some(key));
     if can_reuse {
         refresh_reused_covering(world, view, queue);
         return;
     }
-    let visible_layers = visible_symbol_ids(style, view.style_zoom().value());
-    let (tiles, all_targets_ready) = select_with_status(&targets(world), |coords| {
+    let visible_layers = world
+        .resources
+        .get_mut::<SymbolCovering>()
+        .filter(|c| c.visible_key == Some((style.revision(), style_zoom.to_bits())))
+        .map_or_else(
+            || compute_visible_symbols(style, style_zoom).1,
+            |c| std::mem::take(&mut c.visible_ids),
+        );
+    let (tiles, _) = select_with_status(&targets(world), |coords| {
         ready(world, &visible_layers, coords)
     });
+    if let Some(covering) = world.resources.get_mut::<SymbolCovering>()
+        && covering.visible_ids.is_empty()
+    {
+        covering.visible_ids = visible_layers;
+    }
     if tiles.is_empty() {
         if let Some(covering) = world.resources.get_mut::<SymbolCovering>() {
             covering.tiles.clear();
             covering.selection_key = Some(key);
-            covering.all_targets_ready = false;
             covering.last_upload_view = None;
         }
         return;
     }
-    upload_covering_tiles(
-        world,
-        view,
-        device,
-        queue,
-        tiles,
-        Some(key),
-        all_targets_ready,
-    );
+    upload_covering_tiles(world, view, device, queue, tiles, Some(key));
 }
 
-fn covering_selection_key(world: &World, style: &Style, view: &ViewState) -> SelectionKey {
+fn covering_selection_key(world: &World, style: &Style, visible_hash: u64) -> SelectionKey {
     let topology_gen = match world.resources.get::<Eventually<WgpuTileViewPattern>>() {
         Some(Initialized(pattern)) => pattern.topology_generation(),
         _ => 0,
@@ -236,7 +256,9 @@ fn covering_selection_key(world: &World, style: &Style, view: &ViewState) -> Sel
         pool_rev,
         pool_evict,
         style.revision(),
-        visible_symbol_hash(style, view.style_zoom().value()),
+        visible_hash,
+        crate::vector::arrival_epoch(world),
+        world.tiles.tiles.len(),
     )
 }
 
@@ -251,7 +273,8 @@ fn refresh_reused_covering(
     if covering.tiles.is_empty() {
         return;
     }
-    let view_key = CoveringViewKey::of(view);
+    let gpu_vp = view.gpu_view_projection();
+    let view_key = CoveringViewKey::of(view, &gpu_vp);
     if covering.last_upload_view == Some(view_key) {
         return;
     }
@@ -264,7 +287,7 @@ fn refresh_reused_covering(
         ..
     } = covering;
     metadata_scratch.clear();
-    metadata_scratch.extend(tiles.iter().map(|coords| metadata(*coords, view)));
+    metadata_scratch.extend(tiles.iter().map(|coords| metadata(*coords, view, &gpu_vp)));
     let bytes = bytemuck::cast_slice(metadata_scratch.as_slice());
     if !bytes.is_empty() && last_uploaded_bytes.as_slice() != bytes {
         queue.write_buffer(buffer, 0, bytes);
@@ -281,15 +304,15 @@ fn upload_covering_tiles(
     queue: &crate::render::upload_queue::UploadQueue,
     tiles: Vec<WorldTileCoords>,
     selection_key: Option<SelectionKey>,
-    all_targets_ready: bool,
 ) {
+    let gpu_vp = view.gpu_view_projection();
     let mut entries = world
         .resources
         .get_mut::<SymbolCovering>()
         .map(|c| std::mem::take(&mut c.metadata_scratch))
         .unwrap_or_default();
     entries.clear();
-    entries.extend(tiles.iter().map(|coords| metadata(*coords, view)));
+    entries.extend(tiles.iter().map(|coords| metadata(*coords, view, &gpu_vp)));
     let bytes = bytemuck::cast_slice(&entries);
     let required = (bytes.len() as u64).max(256);
     if world
@@ -297,10 +320,20 @@ fn upload_covering_tiles(
         .get::<SymbolCovering>()
         .is_none_or(|covering| covering.buffer.size() < required)
     {
-        if let Some(old) = world.resources.remove::<SymbolCovering>() {
-            queue.cancel_staged_buffer(&old.buffer);
-            old.buffer.destroy();
-        }
+        let (prev_vis_key, prev_vis_hash, prev_vis_ids, prev_queue_scratch) =
+            world.resources.remove::<SymbolCovering>().map_or_else(
+                || (None, 0, Vec::new(), Vec::new()),
+                |mut old| {
+                    queue.cancel_staged_buffer(&old.buffer);
+                    old.buffer.destroy();
+                    (
+                        old.visible_key,
+                        old.visible_hash,
+                        std::mem::take(&mut old.visible_ids),
+                        std::mem::take(&mut old.queue_scratch),
+                    )
+                },
+            );
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("symbol tile transforms"),
             size: required.next_power_of_two(),
@@ -311,13 +344,16 @@ fn upload_covering_tiles(
             tiles: Vec::new(),
             buffer,
             selection_key: None,
-            all_targets_ready: false,
             last_upload_view: None,
             metadata_scratch: Vec::new(),
             last_uploaded_bytes: Vec::new(),
+            queue_scratch: prev_queue_scratch,
+            visible_key: prev_vis_key,
+            visible_hash: prev_vis_hash,
+            visible_ids: prev_vis_ids,
         });
     }
-    let view_key = CoveringViewKey::of(view);
+    let view_key = CoveringViewKey::of(view, &gpu_vp);
     if let Some(covering) = world.resources.get_mut::<SymbolCovering>() {
         if !bytes.is_empty() && covering.last_uploaded_bytes.as_slice() != bytes {
             queue.write_buffer(&covering.buffer, 0, bytes);
@@ -326,18 +362,20 @@ fn upload_covering_tiles(
         }
         covering.tiles = tiles;
         covering.selection_key = selection_key;
-        covering.all_targets_ready = all_targets_ready;
         covering.last_upload_view = Some(view_key);
         covering.metadata_scratch = entries;
     }
 }
 
-fn metadata(coords: WorldTileCoords, view: &ViewState) -> ShaderTileMetadata {
+fn metadata(
+    coords: WorldTileCoords,
+    view: &ViewState,
+    gpu_vp: &crate::render::camera::ViewProjection,
+) -> ShaderTileMetadata {
     let zoom = view.zoom();
     let zoom_factor = view.style_zoom().scale_to_tile(&coords) as f32;
     ShaderTileMetadata {
-        transform: view
-            .gpu_view_projection()
+        transform: gpu_vp
             .to_model_view_projection(coords.transform_for_zoom(zoom))
             .downcast()
             .into(),

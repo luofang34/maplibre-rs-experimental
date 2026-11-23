@@ -201,6 +201,29 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
         world: &World,
     ) -> Vec<ViewTile> {
         let mut view_tiles = Vec::with_capacity(self.view_tiles.len());
+        self.generate_pattern_into(
+            view_region,
+            sources,
+            raster_coverings,
+            zoom,
+            world,
+            &mut view_tiles,
+        );
+        view_tiles
+    }
+
+    /// Populates `out` with view tile source shapes, reusing `out`'s existing buffer capacity.
+    #[tracing::instrument(skip_all)]
+    pub fn generate_pattern_into(
+        &self,
+        view_region: &ViewRegion,
+        sources: &ViewTileSources,
+        raster_coverings: &RasterCoverings,
+        zoom: Zoom,
+        world: &World,
+        out: &mut Vec<ViewTile>,
+    ) {
+        out.clear();
         // A parent stands in once for each copy of the world it is seen in.
         let mut scratch = self.scratch.lock().unwrap_or_else(|e| e.into_inner());
         scratch.reset(raster_coverings.is_empty());
@@ -235,19 +258,23 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
                 world,
                 raster_parents,
             );
-            view_tiles.push(ViewTile {
+            out.push(ViewTile {
                 target: coords,
                 vector,
                 raster,
             });
         }
-        view_tiles
     }
 
     /// Replaces the CPU-side view tiles; call [`Self::upload_pattern`] before drawing them.
     pub fn update_pattern(&mut self, mut view_tiles: Vec<ViewTile>) {
-        self.view_tiles.clear();
-        self.view_tiles.append(&mut view_tiles);
+        self.update_pattern_swapped(&mut view_tiles);
+    }
+
+    /// Swaps in `view_tiles`, returning the previous cleared buffer for reuse on future misses.
+    pub fn update_pattern_swapped(&mut self, view_tiles: &mut Vec<ViewTile>) {
+        std::mem::swap(&mut self.view_tiles, view_tiles);
+        view_tiles.clear();
         let (mut v_min, mut v_max) = (u8::MAX, 0_u8);
         let (mut a_min, mut a_max) = (u8::MAX, 0_u8);
         for view_tile in &self.view_tiles {
@@ -376,6 +403,8 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
 mod cover;
 mod memo;
 mod raster;
+
 pub use cover::covering_shapes_for;
 use cover::{clip_region, source_shapes_bounded};
+pub(crate) use memo::compute_memo_key;
 pub use memo::TileViewPatternMemo;

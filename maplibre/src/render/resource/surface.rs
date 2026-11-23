@@ -34,6 +34,8 @@ pub enum Head {
 /// Resizing changes the requested size; [`Self::reconfigure`] applies it to GPU resources.
 pub struct Surface {
     size: PhysicalSize,
+    max_texture_dimension_2d: u32,
+    dirty_size: bool,
     head: Head,
 }
 
@@ -59,7 +61,8 @@ impl Surface {
     where
         MW: MapWindow + HeadedMapWindow,
     {
-        let size = clamp_size(window.size(), adapter.limits().max_texture_dimension_2d);
+        let max_texture_dimension_2d = adapter.limits().max_texture_dimension_2d;
+        let size = clamp_size(window.size(), max_texture_dimension_2d);
 
         let capabilities = surface.get_capabilities(adapter);
         log::info!("adapter capabilities on surface: {capabilities:?}");
@@ -85,6 +88,8 @@ impl Surface {
 
         Self {
             size,
+            max_texture_dimension_2d,
+            dirty_size: true,
             head: Head::Headed(WindowHead {
                 surface,
                 size,
@@ -144,12 +149,15 @@ impl Surface {
         settings: &RendererSettings,
         destroy_texture_on_drop: bool,
     ) -> Self {
-        let size = clamp_size(size, device.limits().max_texture_dimension_2d);
+        let max_texture_dimension_2d = device.limits().max_texture_dimension_2d;
+        let size = clamp_size(size, max_texture_dimension_2d);
         let format = settings
             .texture_format
             .unwrap_or(wgpu::TextureFormat::Rgba8Unorm);
         Self {
             size,
+            max_texture_dimension_2d,
+            dirty_size: false,
             head: Head::Headless(share_gpu(BufferedTextureHead::new(
                 device,
                 size,
@@ -213,7 +221,10 @@ impl Surface {
 
     /// Records nonzero physical-pixel dimensions without allocating or configuring GPU resources.
     pub fn resize(&mut self, size: PhysicalSize) {
-        self.size = size;
+        if self.size != size {
+            self.size = size;
+            self.dirty_size = true;
+        }
     }
 
     /// Applies a pending size change; an unchanged size leaves resources untouched.
@@ -222,7 +233,11 @@ impl Surface {
     /// texture and readback buffer; existing [`Arc`] clones retain the previous allocation.
     /// This does not recreate dependent depth or multisample attachments.
     pub fn reconfigure(&mut self, device: &wgpu::Device) {
-        self.size = clamp_size(self.size, device.limits().max_texture_dimension_2d);
+        if !self.dirty_size {
+            return;
+        }
+        self.dirty_size = false;
+        self.size = clamp_size(self.size, self.max_texture_dimension_2d);
         match &mut self.head {
             Head::Headed(window) => {
                 if window.has_changed(&(self.size.width(), self.size.height())) {
@@ -263,6 +278,7 @@ impl Surface {
             Head::Headed(window_head) => {
                 if window_head.has_changed(&(self.size.width(), self.size.height())) {
                     window_head.recreate_surface(window, instance)?;
+                    self.dirty_size = true;
                 }
             }
             Head::Headless(_) => {}

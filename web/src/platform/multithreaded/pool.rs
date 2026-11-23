@@ -179,8 +179,8 @@ impl Work {
             });
             func().await;
         }
-        #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
-        super::alloc::drain_thread_magazine();
+        #[cfg(target_arch = "wasm32")]
+        crate::platform::alloc::drain_thread_magazine();
     }
 }
 

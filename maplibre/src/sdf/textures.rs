@@ -42,6 +42,8 @@ pub(super) struct SymbolTextures {
     atlases: rustc_hash::FxHashMap<usize, Weak<TileAtlas>>,
     tile_atlases: rustc_hash::FxHashMap<(WorldTileCoords, usize), Arc<TileAtlas>>,
     bindings: rustc_hash::FxHashMap<(WorldTileCoords, crate::style::StyleLayerId), DrawBinding>,
+    combined_count: usize,
+    separate_count: usize,
     sampler: Option<wgpu::Sampler>,
     /// Tiles whose labels gained an atlas since the last drain.
     bound: Vec<WorldTileCoords>,
@@ -77,7 +79,16 @@ impl SymbolTextures {
                 && paint.number("text-letter-spacing", &Default::default(), zoom, 0.0) < 0.0);
         if let Some(binding) = self.bindings.get_mut(&key) {
             if binding.atlas.source.same_gpu_atlas(atlas) {
-                binding.separate_halo = separate_halo;
+                if binding.separate_halo != separate_halo {
+                    if binding.separate_halo {
+                        self.separate_count = self.separate_count.saturating_sub(1);
+                        self.combined_count = self.combined_count.saturating_add(1);
+                    } else {
+                        self.combined_count = self.combined_count.saturating_sub(1);
+                        self.separate_count = self.separate_count.saturating_add(1);
+                    }
+                    binding.separate_halo = separate_halo;
+                }
                 if binding.uniforms != uniforms {
                     gpu.queue
                         .write_buffer(&binding.buffer, 0, bytemuck::bytes_of(&uniforms));
@@ -117,7 +128,17 @@ impl SymbolTextures {
             })
         });
         let binding = DrawBinding::new(gpu, sampler, texture, uniforms, separate_halo);
+        if separate_halo {
+            self.separate_count = self.separate_count.saturating_add(1);
+        } else {
+            self.combined_count = self.combined_count.saturating_add(1);
+        }
         if let Some(old) = self.bindings.insert(key, binding) {
+            if old.separate_halo {
+                self.separate_count = self.separate_count.saturating_sub(1);
+            } else {
+                self.combined_count = self.combined_count.saturating_sub(1);
+            }
             gpu.queue.cancel_staged_buffer(&old.buffer);
         }
     }
@@ -129,19 +150,7 @@ impl SymbolTextures {
 
     /// Returns `(any_combined, any_separate_halo)` across currently prepared draw bindings.
     pub fn separate_halo_flags(&self) -> (bool, bool) {
-        let mut combined = false;
-        let mut separate_halo = false;
-        for binding in self.bindings.values() {
-            if binding.separate_halo {
-                separate_halo = true;
-            } else {
-                combined = true;
-            }
-            if combined && separate_halo {
-                break;
-            }
-        }
-        (combined, separate_halo)
+        (self.combined_count > 0, self.separate_count > 0)
     }
 
     #[cfg(all(test, feature = "headless"))]
@@ -162,6 +171,8 @@ impl SymbolTextures {
         self.atlases.clear();
         self.tile_atlases.clear();
         self.bindings.clear();
+        self.combined_count = 0;
+        self.separate_count = 0;
         self.bound.clear();
         self.sampler = None;
         self.last_retain_key = None;
@@ -188,6 +199,17 @@ impl SymbolTextures {
             self.clear();
             return;
         }
+        let mut combined_count = 0_usize;
+        let mut separate_count = 0_usize;
+        for binding in self.bindings.values() {
+            if binding.separate_halo {
+                separate_count += 1;
+            } else {
+                combined_count += 1;
+            }
+        }
+        self.combined_count = combined_count;
+        self.separate_count = separate_count;
         let referenced: rustc_hash::FxHashSet<(WorldTileCoords, usize)> = self
             .bindings
             .iter()

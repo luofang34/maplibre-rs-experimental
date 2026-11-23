@@ -1,5 +1,8 @@
 //! GPU pipeline initialization for background paint, sky and atmosphere.
 
+mod style_cache;
+
+use self::style_cache::BackgroundStyleCache;
 use crate::{
     context::MapContext,
     render::{
@@ -12,57 +15,6 @@ use crate::{
         },
     },
 };
-
-#[derive(Default)]
-struct BackgroundStyleCache {
-    key: Option<(u64, u64, u64)>,
-    needs_bg_pattern: bool,
-    has_opaque_bg: bool,
-    has_blended_bg: bool,
-}
-
-impl BackgroundStyleCache {
-    fn evaluate(
-        &mut self,
-        style: &crate::style::Style,
-        zoom: f64,
-        style_zoom: f64,
-    ) -> (bool, bool, bool) {
-        let key = (style.revision(), zoom.to_bits(), style_zoom.to_bits());
-        if self.key == Some(key) {
-            return (
-                self.needs_bg_pattern,
-                self.has_opaque_bg,
-                self.has_blended_bg,
-            );
-        }
-        let mut needs_bg_pattern = false;
-        let (mut has_opaque_bg, mut has_blended_bg) = (false, false);
-        for layer in &style.layers {
-            if layer.type_ != "background" {
-                continue;
-            }
-            let patterned = layer
-                .paint
-                .as_ref()
-                .is_some_and(|p| crate::vector::pattern::pattern_name(p, style_zoom).is_some());
-            needs_bg_pattern |= patterned;
-            if patterned || !layer.is_visible_at(zoom) {
-                continue;
-            }
-            if super::buffers::background_color(layer, zoom)[3] >= 1.0 {
-                has_opaque_bg = true;
-            } else {
-                has_blended_bg = true;
-            }
-        }
-        self.key = Some(key);
-        self.needs_bg_pattern = needs_bg_pattern;
-        self.has_opaque_bg = has_opaque_bg;
-        self.has_blended_bg = has_blended_bg;
-        (needs_bg_pattern, has_opaque_bg, has_blended_bg)
-    }
-}
 
 /// Initializes missing pipelines using the surface format and supported multisampling.
 /// Returns `Dependencies` unless all pipeline slots and initialized projection resources
@@ -99,6 +51,14 @@ pub fn resource_system(
             .resources
             .get::<super::pattern::BackgroundPatternGpu>()
             .is_some_and(|gpu| !needs_globe || gpu.has_globe());
+    let flat_covers = (!needs_globe && (has_opaque_bg || has_blended_bg)).then(|| {
+        let size = surface.size();
+        super::queue_system::flat_viewport_covered(
+            view_state,
+            style.terrain.is_none(),
+            [size.width() as f32, size.height() as f32],
+        )
+    });
     let bg_ready = if needs_globe {
         world
             .resources
@@ -111,13 +71,19 @@ pub fn resource_system(
                 Eventually::Uninitialized => false,
             })
     } else {
+        let covers = flat_covers.unwrap_or(true);
         world
             .resources
             .get::<Eventually<BackgroundRenderPipeline>>()
             .is_some_and(|p| match p {
                 Eventually::Initialized(bp) => {
-                    (!has_opaque_bg || (bp.solid_opaque.is_some() && bp.clipped_opaque.is_some()))
-                        && (!has_blended_bg || (bp.solid.is_some() && bp.clipped.is_some()))
+                    if covers {
+                        (!has_opaque_bg || bp.solid_opaque.is_some())
+                            && (!has_blended_bg || bp.solid.is_some())
+                    } else {
+                        (!has_opaque_bg || bp.clipped_opaque.is_some())
+                            && (!has_blended_bg || bp.clipped.is_some())
+                    }
                 }
                 Eventually::Uninitialized => !has_opaque_bg && !has_blended_bg,
             })
@@ -278,12 +244,14 @@ pub fn resource_system(
 
     let bg_pipelines = background_pipeline.initialize(BackgroundRenderPipeline::default);
     if !needs_globe {
-        let size = surface.size();
-        let covers = super::queue_system::flat_viewport_covered(
-            view_state,
-            style.terrain.is_none(),
-            [size.width() as f32, size.height() as f32],
-        );
+        let covers = flat_covers.unwrap_or_else(|| {
+            let size = surface.size();
+            super::queue_system::flat_viewport_covered(
+                view_state,
+                style.terrain.is_none(),
+                [size.width() as f32, size.height() as f32],
+            )
+        });
         let shader = BackgroundShader {
             format: surface.surface_format(),
         };

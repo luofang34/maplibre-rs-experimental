@@ -59,7 +59,9 @@ pub fn coverage_system(
         return Ok(());
     }
     let Some(dem) = dem_source(style) else {
-        world.resources.remove::<PreparedTerrainRegion>();
+        if world.resources.get::<PreparedTerrainRegion>().is_some() {
+            world.resources.remove::<PreparedTerrainRegion>();
+        }
         if world
             .resources
             .get::<TerrainCoverageIndex>()

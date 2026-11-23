@@ -142,7 +142,9 @@ pub fn queue_system(
                 *terrain = Eventually::Uninitialized;
             }
         }
-        if let Some(dem_pool) = world.resources.get_mut::<super::gpu_dem_pool::GpuDemPool>() {
+        if let Some(dem_pool) = world.resources.get_mut::<super::gpu_dem_pool::GpuDemPool>()
+            && dem_pool.texture_count() > 0
+        {
             dem_pool.retain_sources(|id| {
                 id.name().is_some_and(|name| {
                     matches!(

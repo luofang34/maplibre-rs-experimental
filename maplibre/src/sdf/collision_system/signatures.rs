@@ -244,7 +244,7 @@ pub(super) fn has_symbol_depth_occluders(
     render_graph: &crate::render::graph::RenderGraph,
     pitch: f64,
 ) -> bool {
-    use crate::render::render_phase::{LayerItem, MaskGroup, RenderPhase};
+    use crate::render::render_phase::{LayerItem, RenderPhase};
     if render_graph.has_custom_scene_depth_writers() {
         return true;
     }
@@ -266,11 +266,5 @@ pub(super) fn has_symbol_depth_occluders(
     world
         .resources
         .get::<RenderPhase<LayerItem>>()
-        .is_some_and(|layers| {
-            layers.into_iter().any(|item| match item.mask_group {
-                MaskGroup::Custom => true,
-                MaskGroup::Mutating => !flat_view,
-                MaskGroup::Unmasked | MaskGroup::Vector => false,
-            })
-        })
+        .is_some_and(|layers| layers.has_depth_occluders(flat_view))
 }

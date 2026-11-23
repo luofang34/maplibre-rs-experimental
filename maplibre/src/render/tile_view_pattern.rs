@@ -11,6 +11,7 @@ use std::{mem::size_of, ops::Range};
 pub(crate) use availability::SourceTiles;
 pub use availability::{HasTile, KindSources, QueryHasTile, ViewTileSources};
 use cgmath::Matrix4;
+pub(crate) use pattern::compute_memo_key;
 pub use pattern::{
     covering_shapes_for, RasterCoverings, TileMetadataOverflow, TileViewPattern,
     TileViewPatternMemo, CHILDREN_SEARCH_DEPTH, COMPLETE_CHILDREN_SEARCH_DEPTH,

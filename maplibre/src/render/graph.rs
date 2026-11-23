@@ -109,6 +109,7 @@ pub struct RenderGraph {
     /// Resolved run order and pass-fusion indices, updated after passes or edges change.
     order: Option<ResolvedOrder>,
     has_custom_depth_writers: bool,
+    has_named_depth_readers: bool,
 }
 
 impl RenderGraph {
@@ -124,6 +125,10 @@ impl RenderGraph {
             return Err(RenderGraphError::DuplicateNode(name));
         }
         self.has_custom_depth_writers |= node.writes_custom_scene_depth();
+        self.has_named_depth_readers |= matches!(
+            name.as_ref(),
+            "overlay_pass" | "depth_probe_pass" | "sun_depth_copy"
+        );
         self.passes.push(Pass {
             name,
             node: Box::new(node),
@@ -153,6 +158,12 @@ impl RenderGraph {
     /// Whether any registered pass may write custom 3D scene depth outside `main_pass`.
     pub(crate) fn has_custom_scene_depth_writers(&self) -> bool {
         self.has_custom_depth_writers
+    }
+
+    /// Whether any built-in depth-reading pass (`overlay_pass`, `depth_probe_pass`, or
+    /// `sun_depth_copy`) is present in the graph.
+    pub(crate) fn has_named_depth_reader_passes(&self) -> bool {
+        self.has_named_depth_readers
     }
 
     /// Resolves the run order after passes or constraints changed.

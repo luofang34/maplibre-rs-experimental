@@ -95,14 +95,20 @@ impl CoveringRequest {
     /// The request for the view tiles at `level`, bounded by the deepest zoom `style` declares
     /// (at least zoom 22, matching GL JS's default `maxZoom`).
     pub fn view_for_style(style: &Style, level: ZoomLevel, zoom: f64) -> Self {
-        let zoom_range = SourceZoomRange::from_style(Some(0), Some(view_max_zoom(style)));
+        let (max_zoom, headroom_meters) = style.cached_covering_bounds(|s| {
+            (
+                view_max_zoom(s),
+                elevation::style_elevated_headroom_meters(s),
+            )
+        });
+        let zoom_range = SourceZoomRange::from_style(Some(0), Some(max_zoom));
         Self {
             level: zoom_range.cap(level),
             requested_zoom: zoom,
             rounding: ZoomRounding::Floor,
             zoom_range,
             surface: false,
-            headroom_meters: style_elevated_headroom_meters(style),
+            headroom_meters,
         }
     }
 
@@ -259,7 +265,7 @@ pub(super) fn covering_region_with_history(
     let mut region = covering_region_single(style, view_state, world, request, padding, history)?;
     if padding == ViewStatePadding::Loose && !view_state.has_external_view() {
         let pitch_deg = view_state.camera().get_pitch().0.to_degrees().abs();
-        let has_extrusion = elevation::style_elevated_headroom_meters(style) > 0.0;
+        let has_extrusion = request.headroom_meters > 0.0;
         let needs_nadir_apron = style.terrain.is_some()
             || (has_extrusion && pitch_deg > 45.0)
             || pitch_deg

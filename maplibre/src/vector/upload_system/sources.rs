@@ -30,9 +30,9 @@ use crate::{
 pub(crate) struct VectorFallbackTiles(pub Vec<WorldTileCoords>);
 
 pub(super) type FrameSourcesAndPainted = (
-    Vec<WorldTileCoords>,
-    Vec<WorldTileCoords>,
-    FxHashSet<WorldTileCoords>,
+    Arc<[WorldTileCoords]>,
+    Arc<[WorldTileCoords]>,
+    Arc<FxHashSet<WorldTileCoords>>,
 );
 
 mod cache;
@@ -47,7 +47,11 @@ pub(super) fn frame_sources_and_painted(
     style: &Style,
     view_state: &ViewState,
 ) -> Result<FrameSourcesAndPainted, SystemError> {
-    Ok(compute_frame_sources_and_painted(world, style, view_state)?.0)
+    let mut scratch = Vec::new();
+    let (present, fresh_tight) =
+        resolve_view_tiles_for_paint(world, style, view_state, &mut scratch)?;
+    let _ = fresh_tight;
+    compute_frame_sources_with_tiles(world, style, present.then_some(scratch.as_slice()))
 }
 
 pub(super) fn frame_sources_and_painted_mut(
@@ -55,41 +59,45 @@ pub(super) fn frame_sources_and_painted_mut(
     style: &Style,
     view_state: &ViewState,
 ) -> Result<FrameSourcesAndPainted, SystemError> {
-    let key = build_frame_sources_key(world, style, view_state);
-    if let Some(ref key) = key {
-        if key.terrain_settled {
-            let hit = world
-                .resources
-                .get::<FrameSourcesCache>()
-                .filter(|cache| cache.key.as_ref() == Some(key))
-                .and_then(|cache| {
-                    cache
-                        .result
-                        .clone()
-                        .map(|result| (result, cache.fresh_tight.clone()))
-                });
-            if let Some((result, fresh_tight)) = hit {
-                update_loose_tight_tiles(world, fresh_tight.as_ref());
-                return Ok(result);
-            }
-        }
-    }
-    let (result, fresh_tight) = compute_frame_sources_and_painted(world, style, view_state)?;
+    let mut scratch = world
+        .resources
+        .get_mut::<FrameSourcesCache>()
+        .map(|cache| std::mem::take(&mut cache.view_tiles_scratch))
+        .unwrap_or_default();
+    let (present, fresh_tight) =
+        resolve_view_tiles_for_paint(world, style, view_state, &mut scratch)?;
     update_loose_tight_tiles(world, fresh_tight.as_ref());
+    let resolved_tiles = present.then_some(scratch.as_slice());
+    let key = build_frame_sources_key(world, style, view_state, resolved_tiles);
+    if let Some(ref key) = key
+        && key.terrain_settled
+        && let Some(hit) = world
+            .resources
+            .get::<FrameSourcesCache>()
+            .filter(|cache| cache.key.as_ref() == Some(key))
+            .and_then(|cache| cache.result.clone())
+    {
+        if let Some(cache) = world.resources.get_mut::<FrameSourcesCache>() {
+            cache.view_tiles_scratch = scratch;
+        }
+        return Ok(hit);
+    }
+    let computed = compute_frame_sources_with_tiles(world, style, resolved_tiles);
+    let cache = world.resources.get_or_init_mut::<FrameSourcesCache>();
+    cache.view_tiles_scratch = scratch;
+    let result = computed?;
     if key.is_some() {
-        let cache = world.resources.get_or_init_mut::<FrameSourcesCache>();
         cache.key = key;
         cache.result = Some(result.clone());
-        cache.fresh_tight = fresh_tight;
     }
     Ok(result)
 }
 
-fn compute_frame_sources_and_painted(
+fn compute_frame_sources_with_tiles(
     world: &World,
     style: &Style,
-    view_state: &ViewState,
-) -> Result<(FrameSourcesAndPainted, Option<FreshTightTiles>), SystemError> {
+    view_tiles: Option<&[WorldTileCoords]>,
+) -> Result<FrameSourcesAndPainted, SystemError> {
     let Some(view_tile_sources) = world.resources.get::<ViewTileSources>() else {
         return Err(SystemError::Dependencies);
     };
@@ -98,21 +106,24 @@ fn compute_frame_sources_and_painted(
         view_tile_sources.of_kind(TileKind::Vector),
         crate::vector::UploadedVectorGeometry::for_world(world),
     );
-    let (view_tiles, fresh_tight) = resolve_view_tiles_for_paint(world, style, view_state)?;
     let (source_tiles, mut painted_tiles, uncovered, all_view_painted) = if style.terrain.is_some()
     {
         let (src, uncov) = terrain_sources(world, style);
         let painted = src.clone();
         (src, painted, uncov, false)
     } else {
-        partition_non_terrain_sources(world, view_tiles.as_deref(), &cpu_vector, &gpu_vector)
+        partition_non_terrain_sources(world, view_tiles, &cpu_vector, &gpu_vector)
     };
     if !all_view_painted {
-        if let Some(tiles) = &view_tiles {
+        if let Some(tiles) = view_tiles {
             append_missing_gpu_stand_ins(world, tiles, &gpu_vector, &mut painted_tiles);
         }
     }
-    Ok(((source_tiles, painted_tiles, uncovered), fresh_tight))
+    Ok((
+        Arc::from(source_tiles),
+        Arc::from(painted_tiles),
+        Arc::new(uncovered),
+    ))
 }
 
 fn resolve_cached_wrapped_tiles(
@@ -121,7 +132,8 @@ fn resolve_cached_wrapped_tiles(
     view_state: &ViewState,
     visible_level: ZoomLevel,
     multi_active: bool,
-) -> Option<Option<Vec<WorldTileCoords>>> {
+    out: &mut Vec<WorldTileCoords>,
+) -> Option<bool> {
     let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
     if !multi_active {
         if let Some(tiles) = world
@@ -137,26 +149,30 @@ fn resolve_cached_wrapped_tiles(
             .filter(|(_, padding, cached_level)| {
                 *padding == ViewStatePadding::Tight && *cached_level == visible_level
             })
-            .map(|(tiles, _, _)| {
-                tiles.as_ref().map(|tiles| {
+            .map(|(tiles, _, _)| tiles.as_deref())
+        {
+            out.clear();
+            return Some(if let Some(tiles) = tiles {
+                out.extend(
                     tiles
                         .iter()
-                        .filter_map(|coords| coords.wrapped().map(|(wrapped, _)| wrapped))
-                        .collect()
-                })
-            })
-        {
-            return Some(tiles);
+                        .filter_map(|coords| coords.wrapped().map(|(wrapped, _)| wrapped)),
+                );
+                true
+            } else {
+                false
+            });
         }
     }
     crate::render::eye_covering::matching_tight_tiles(world, style, view_state, visible_level).map(
         |shared_tiles| {
-            Some(
+            out.clear();
+            out.extend(
                 shared_tiles
                     .iter()
-                    .filter_map(|coords| coords.wrapped().map(|(w, _)| w))
-                    .collect(),
-            )
+                    .filter_map(|coords| coords.wrapped().map(|(w, _)| w)),
+            );
+            true
         },
     )
 }
@@ -165,7 +181,8 @@ fn resolve_view_tiles_for_paint(
     world: &World,
     style: &Style,
     view_state: &ViewState,
-) -> Result<(Option<Vec<WorldTileCoords>>, Option<FreshTightTiles>), SystemError> {
+    out: &mut Vec<WorldTileCoords>,
+) -> Result<(bool, Option<FreshTightTiles>), SystemError> {
     let needs_view_tiles_for_paint = style.terrain.is_none()
         || style.layers.iter().any(|l| {
             !l.is_hidden()
@@ -177,17 +194,18 @@ fn resolve_view_tiles_for_paint(
                     || crate::vector::structures::kind(l).is_some())
         });
     if !needs_view_tiles_for_paint {
-        return Ok((None, None));
+        out.clear();
+        return Ok((false, None));
     }
     let visible_level = view_state.zoom().zoom_level(DEFAULT_TILE_SIZE);
     let multi_active = world
         .resources
         .get::<crate::render::eye_covering::MultiViewExtractCovering>()
         .is_some_and(|m| m.active);
-    if let Some(tiles) =
-        resolve_cached_wrapped_tiles(world, style, view_state, visible_level, multi_active)
+    if let Some(present) =
+        resolve_cached_wrapped_tiles(world, style, view_state, visible_level, multi_active, out)
     {
-        return Ok((tiles, None));
+        return Ok((present, None));
     }
     let region = view_region_for_projection(
         style,
@@ -200,11 +218,16 @@ fn resolve_view_tiles_for_paint(
         tracing::error!(%error, "unable to select tiles for vector upload");
         SystemError::Setup
     })?;
-    let wrapped = region.as_ref().map(|r| {
-        r.copies()
-            .filter_map(|copy| copy.wrapped().map(|(coords, _)| coords))
-            .collect()
-    });
+    out.clear();
+    let present = if let Some(ref r) = region {
+        out.extend(
+            r.copies()
+                .filter_map(|copy| copy.wrapped().map(|(coords, _)| coords)),
+        );
+        true
+    } else {
+        false
+    };
     let fresh = if !multi_active {
         region
             .as_ref()
@@ -212,7 +235,7 @@ fn resolve_view_tiles_for_paint(
     } else {
         None
     };
-    Ok((wrapped, fresh))
+    Ok((present, fresh))
 }
 
 #[derive(Default)]

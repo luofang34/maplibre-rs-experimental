@@ -254,6 +254,18 @@ pub(super) fn decode_bucket_from_bytes(bytes: &[u8]) -> Option<AvailableVectorLa
 }
 
 #[cfg(any(test, feature = "renderer"))]
+pub(crate) fn decode_from_bytes(
+    bytes: &[u8],
+) -> Option<(
+    Box<AvailableVectorLayerBucket>,
+    Option<Vec<BucketFeatureEntry>>,
+)> {
+    let bucket = Box::new(decode_bucket_from_bytes(bytes)?);
+    let paint = peek_paint_bytes(bytes).and_then(decode_feature_paint);
+    Some((bucket, paint))
+}
+
+#[cfg(any(test, feature = "renderer"))]
 pub(crate) fn decode_from_js_slice(
     buffer: &ArrayBuffer,
     base_offset: u32,

@@ -1,12 +1,11 @@
 //! Frame cache for resolved vector source and paint tile sets.
-use std::sync::Arc;
-
 use super::{FrameSourcesAndPainted, FreshTightTiles, VectorFallbackTiles};
 use crate::{
-    coords::WorldTileCoords,
+    coords::{WorldTileCoords, ZoomLevel},
     render::{
         eventually::{Eventually, Eventually::Initialized},
-        view_state::{ViewState, ViewStatePadding},
+        tile_view_pattern::DEFAULT_TILE_SIZE,
+        view_state::ViewState,
     },
     style::Style,
     tcs::world::World,
@@ -15,11 +14,9 @@ use crate::{
 
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct FrameSourcesKey {
-    view_proj_bits: [[u64; 4]; 4],
-    zoom_bits: u64,
-    style_zoom_bits: u64,
-    viewport_bits: (u64, u64),
-    external_view: bool,
+    view_tiles_present: bool,
+    view_tiles_hash: u64,
+    zoom_level: ZoomLevel,
     style_rev: u64,
     arrival_epoch: u64,
     pool_rev: u64,
@@ -36,7 +33,7 @@ pub(super) struct FrameSourcesKey {
 pub(super) struct FrameSourcesCache {
     pub(super) key: Option<FrameSourcesKey>,
     pub(super) result: Option<FrameSourcesAndPainted>,
-    pub(super) fresh_tight: Option<FreshTightTiles>,
+    pub(super) view_tiles_scratch: Vec<WorldTileCoords>,
 }
 
 fn hash_coord_slice(coords: &[WorldTileCoords]) -> u64 {
@@ -53,6 +50,7 @@ pub(super) fn build_frame_sources_key(
     world: &World,
     style: &Style,
     view_state: &ViewState,
+    view_tiles: Option<&[WorldTileCoords]>,
 ) -> Option<FrameSourcesKey> {
     if world
         .resources
@@ -77,24 +75,30 @@ pub(super) fn build_frame_sources_key(
                 .resources
                 .get::<crate::terrain::queue_system::PendingDrapes>()
                 .is_some_and(crate::terrain::queue_system::PendingDrapes::any_pending));
-    let drape_hash = world
-        .resources
-        .get::<DrapeRequests>()
-        .map_or(0, |r| hash_coord_slice(&r.0));
+    let drape_hash = if terrain_active {
+        world
+            .resources
+            .get::<DrapeRequests>()
+            .map_or(0, |r| hash_coord_slice(&r.0))
+    } else {
+        0
+    };
     let fallback_hash = world
         .resources
         .get::<VectorFallbackTiles>()
         .map_or(0, |f| hash_coord_slice(&f.0));
-    let retained_drapes_len = world
-        .resources
-        .get::<crate::render::eye_covering::SlotResidencyFloor>()
-        .map_or(0, |f| f.retained_drapes.len());
+    let retained_drapes_len = if terrain_active {
+        world
+            .resources
+            .get::<crate::render::eye_covering::SlotResidencyFloor>()
+            .map_or(0, |f| f.retained_drapes.len())
+    } else {
+        0
+    };
     Some(FrameSourcesKey {
-        view_proj_bits: crate::render::eye_covering::frame_view_proj_bits(world, style, view_state),
-        zoom_bits: view_state.zoom().value().to_bits(),
-        style_zoom_bits: view_state.style_zoom().value().to_bits(),
-        viewport_bits: (view_state.width().to_bits(), view_state.height().to_bits()),
-        external_view: view_state.has_external_view(),
+        view_tiles_present: view_tiles.is_some(),
+        view_tiles_hash: view_tiles.map_or(0, hash_coord_slice),
+        zoom_level: view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
         style_rev: style.revision(),
         arrival_epoch: crate::vector::arrival_epoch(world),
         pool_rev: pool.revision(),
@@ -117,6 +121,10 @@ pub(super) fn update_loose_tight_tiles(world: &mut World, fresh_tight: Option<&F
         if cache.host_frame != host_frame {
             *cache = crate::render::eye_covering::FrameLooseCovering::for_host_frame(host_frame);
         }
-        cache.tight_view_tiles = Some((Some(Arc::clone(tiles)), ViewStatePadding::Tight, *level));
+        cache.tight_view_tiles = Some((
+            Some(std::sync::Arc::clone(tiles)),
+            crate::render::view_state::ViewStatePadding::Tight,
+            *level,
+        ));
     }
 }

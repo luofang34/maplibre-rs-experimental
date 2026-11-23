@@ -15,6 +15,9 @@ pub fn image_providers() -> &'static ImageProviders {
     IMAGE_PROVIDERS.get_or_init(ImageProviders::default)
 }
 
+#[cfg(any(test, target_arch = "wasm32"))]
+pub(crate) mod alloc;
+
 #[cfg(target_feature = "atomics")]
 pub mod multithreaded;
 

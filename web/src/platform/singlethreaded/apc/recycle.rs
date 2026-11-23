@@ -6,8 +6,23 @@ use js_sys::{Array, ArrayBuffer};
 use wasm_bindgen::{closure::Closure, JsCast, JsValue};
 use web_sys::{MessageEvent, MessagePort, Worker};
 
-use super::{worker_message, ReceivedType};
+use super::ReceivedType;
 use crate::{error::WebError, platform::singlethreaded::wasm_entries::deliver_received_data};
+
+/// Builds a worker message `{ type: kind, <key>: value, ... }`.
+pub(super) fn worker_message(
+    kind: &str,
+    fields: &[(&str, &JsValue)],
+) -> Result<js_sys::Object, WebError> {
+    let entries = js_sys::Array::of1(&js_sys::Array::of2(
+        &JsValue::from("type"),
+        &JsValue::from(kind),
+    ));
+    for (key, value) in fields {
+        entries.push(&js_sys::Array::of2(&JsValue::from(*key), value));
+    }
+    js_sys::Object::from_entries(&entries).map_err(WebError::from)
+}
 
 const MAX_RECYCLED_ST_WORKERS: usize = 6;
 
@@ -17,6 +32,13 @@ pub(super) enum WorkerEndpoint {
 }
 
 impl WorkerEndpoint {
+    pub(super) fn as_js_value(&self) -> &JsValue {
+        match self {
+            Self::Dedicated(worker) => worker.as_ref(),
+            Self::Port(port) => port.as_ref(),
+        }
+    }
+
     pub(super) fn post_message(&self, msg: &JsValue) -> Result<(), JsValue> {
         match self {
             Self::Dedicated(worker) => worker.post_message(msg),

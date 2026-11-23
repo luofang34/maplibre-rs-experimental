@@ -22,6 +22,28 @@ pub(super) fn source_shapes<T: HasTile>(
     source_shapes_bounded(container, coords, zoom, world, used_parents, None)
 }
 
+/// Candidate source tile selection holding a single tile without heap allocation.
+pub(super) enum CoverTiles {
+    Single(WorldTileCoords),
+    Many(Vec<WorldTileCoords>),
+}
+
+impl CoverTiles {
+    fn as_slice(&self) -> &[WorldTileCoords] {
+        match self {
+            Self::Single(tile) => std::slice::from_ref(tile),
+            Self::Many(tiles) => tiles.as_slice(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        match self {
+            Self::Single(_) => false,
+            Self::Many(tiles) => tiles.is_empty(),
+        }
+    }
+}
+
 pub(super) fn source_shapes_bounded<T: HasTile>(
     container: &T,
     coords: WorldTileCoords,
@@ -34,7 +56,7 @@ pub(super) fn source_shapes_bounded<T: HasTile>(
         usize::from(max_z.saturating_sub(u8::from(coords.z)))
     });
     let cover = if container.has_tile(coords, world) {
-        Some(vec![coords])
+        Some(CoverTiles::Single(coords))
     } else {
         container
             .get_complete_children(
@@ -42,16 +64,18 @@ pub(super) fn source_shapes_bounded<T: HasTile>(
                 world,
                 COMPLETE_CHILDREN_SEARCH_DEPTH.min(max_child_depth),
             )
+            .map(CoverTiles::Many)
             .or_else(|| {
                 container
                     .get_available_parent(coords, world)
-                    .map(|parent| vec![parent])
+                    .map(CoverTiles::Single)
             })
     };
     match cover.or_else(|| {
         container
             .get_available_children(coords, world, CHILDREN_SEARCH_DEPTH.min(max_child_depth))
             .filter(|tiles| !tiles.is_empty())
+            .map(CoverTiles::Many)
     }) {
         Some(tiles) if !tiles.is_empty() => selected_shapes(coords, tiles, zoom, used_parents),
         _ => SourceShapes::None,
@@ -60,7 +84,7 @@ pub(super) fn source_shapes_bounded<T: HasTile>(
 
 pub(super) fn selected_shapes(
     coords: WorldTileCoords,
-    tiles: Vec<WorldTileCoords>,
+    tiles: CoverTiles,
     zoom: Zoom,
     used_parents: &mut FxHashSet<WorldTileCoords>,
 ) -> SourceShapes {
@@ -75,20 +99,25 @@ pub(super) fn selected_shapes(
 
 /// Shapes for covering tiles that overlap `coords`: the tile itself, its descendants, or the
 /// one ancestor standing in for it.
-fn shapes_from_tiles(
-    coords: WorldTileCoords,
-    tiles: Vec<WorldTileCoords>,
-    zoom: Zoom,
-) -> SourceShapes {
-    match tiles.as_slice() {
-        [tile] if *tile == coords => SourceShapes::SourceEqTarget(TileShape::new(coords, zoom)),
-        [tile] if tile.z < coords.z => SourceShapes::Parent(TileShape::new(*tile, zoom)),
-        _ => SourceShapes::Children(
-            tiles
-                .into_iter()
-                .map(|tile| TileShape::new(tile, zoom))
-                .collect(),
-        ),
+fn shapes_from_tiles(coords: WorldTileCoords, tiles: CoverTiles, zoom: Zoom) -> SourceShapes {
+    match tiles {
+        CoverTiles::Single(tile) if tile == coords => {
+            SourceShapes::SourceEqTarget(TileShape::new(coords, zoom))
+        }
+        CoverTiles::Single(tile) if tile.z < coords.z => {
+            SourceShapes::Parent(TileShape::new(tile, zoom))
+        }
+        CoverTiles::Single(tile) => SourceShapes::Children(vec![TileShape::new(tile, zoom)]),
+        CoverTiles::Many(tiles) => match tiles.as_slice() {
+            [tile] if *tile == coords => SourceShapes::SourceEqTarget(TileShape::new(coords, zoom)),
+            [tile] if tile.z < coords.z => SourceShapes::Parent(TileShape::new(*tile, zoom)),
+            _ => SourceShapes::Children(
+                tiles
+                    .into_iter()
+                    .map(|tile| TileShape::new(tile, zoom))
+                    .collect(),
+            ),
+        },
     }
 }
 

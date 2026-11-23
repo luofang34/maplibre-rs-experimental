@@ -17,6 +17,8 @@ use crate::{
 
 #[derive(Default)]
 struct RasterStyleCache {
+    rev_any_key: Option<u64>,
+    style_has_any_raster: bool,
     need_key: Option<(u64, u64)>,
     style_needs_raster: bool,
     last_sources_rev: Option<u64>,
@@ -53,11 +55,12 @@ pub fn resource_system(
                 .pyramid_of::<crate::raster::DemLayersComponent>()
                 .is_empty();
         if !has_raster_or_dem_tiles {
-            let need_key = (style_rev, style_zoom.to_bits());
-            let style_needs_raster = match world.resources.get::<RasterStyleCache>() {
-                Some(cache) if cache.need_key == Some(need_key) => cache.style_needs_raster,
-                _ => {
-                    let needs = style.terrain.is_some()
+            let style_needs_raster = {
+                let cache = world.resources.get_or_init_mut::<RasterStyleCache>();
+                let has_any = if cache.rev_any_key == Some(style_rev) {
+                    cache.style_has_any_raster
+                } else {
+                    let any = style.terrain.is_some()
                         || style.sources.values().any(|source| {
                             matches!(
                                 source,
@@ -69,12 +72,36 @@ pub fn resource_system(
                                 layer.type_.as_str(),
                                 "raster" | "hillshade" | "color-relief"
                             ) && !layer.is_hidden()
-                                && layer.is_visible_at(style_zoom)
                         });
-                    let cache = world.resources.get_or_init_mut::<RasterStyleCache>();
-                    cache.need_key = Some(need_key);
-                    cache.style_needs_raster = needs;
-                    needs
+                    cache.rev_any_key = Some(style_rev);
+                    cache.style_has_any_raster = any;
+                    any
+                };
+                if !has_any {
+                    false
+                } else {
+                    let need_key = (style_rev, style_zoom.to_bits());
+                    if cache.need_key == Some(need_key) {
+                        cache.style_needs_raster
+                    } else {
+                        let needs = style.terrain.is_some()
+                            || style.sources.values().any(|source| {
+                                matches!(
+                                    source,
+                                    Source::Image(_) | Source::Video(_) | Source::Canvas(_)
+                                )
+                            })
+                            || style.layers.iter().any(|layer| {
+                                matches!(
+                                    layer.type_.as_str(),
+                                    "raster" | "hillshade" | "color-relief"
+                                ) && !layer.is_hidden()
+                                    && layer.is_visible_at(style_zoom)
+                            });
+                        cache.need_key = Some(need_key);
+                        cache.style_needs_raster = needs;
+                        needs
+                    }
                 }
             };
             if !style_needs_raster

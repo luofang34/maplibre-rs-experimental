@@ -1,19 +1,20 @@
 //! Deferred JS `ArrayBuffer` queue so worker payloads stay outside WASM linear memory until
-//! consumed one message at a time.
+//! consumed one message at a time, with single-copy batch unpack for compact tile batches.
 
 #![deny(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
-use std::vec::IntoIter;
+use std::rc::Rc;
 
 use js_sys::{ArrayBuffer, Uint8Array};
 use maplibre::io::apc::{CallError, Message};
 
 use super::{
     decode_message,
-    wire::{decode_message_bytes, BATCH_ITEM_HEADER_BYTES},
+    wire::{decode_outcome_slice, BATCH_ITEM_HEADER_BYTES},
     TrackedPayloadError, WebMessageTag,
 };
-use crate::platform::singlethreaded::transferables::FlatBufferTransferable;
+
+const MAX_BATCH_COPY_BYTES: u32 = 512 * 1024;
 
 pub(crate) enum QueuedMessage {
     Decoded(Message),
@@ -21,6 +22,7 @@ pub(crate) enum QueuedMessage {
         wire_tag: WebMessageTag,
         effective_tag: WebMessageTag,
         attempt: Option<u64>,
+        byte_len: u32,
         buffer: ArrayBuffer,
     },
     RawSlice {
@@ -30,10 +32,47 @@ pub(crate) enum QueuedMessage {
         byte_offset: u32,
         byte_len: u32,
     },
+    OwnedSlice {
+        effective_tag: WebMessageTag,
+        attempt: Option<u64>,
+        data: Rc<Vec<u8>>,
+        byte_offset: u32,
+        byte_len: u32,
+    },
+}
+
+fn parse_batch_header(
+    bytes: &[u8],
+    total: u32,
+) -> Result<(WebMessageTag, Option<u64>, u32), CallError> {
+    let hdr = bytes
+        .first_chunk::<BATCH_ITEM_HEADER_BYTES>()
+        .ok_or_else(|| {
+            CallError::Deserialize(Box::new(TrackedPayloadError::BatchTruncated {
+                offset: 0,
+                total,
+            }))
+        })?;
+    let inner_tag = WebMessageTag::from_u32(u32::from_le_bytes([hdr[0], hdr[1], hdr[2], hdr[3]]))
+        .map_err(|error| CallError::Deserialize(Box::new(error)))?;
+    if matches!(
+        inner_tag,
+        WebMessageTag::TrackedPayload | WebMessageTag::BatchPayload
+    ) {
+        return Err(CallError::Deserialize(Box::new(
+            TrackedPayloadError::Nested,
+        )));
+    }
+    let has_attempt = u32::from_le_bytes([hdr[4], hdr[5], hdr[6], hdr[7]]) != 0;
+    let raw_attempt = u64::from_le_bytes([
+        hdr[8], hdr[9], hdr[10], hdr[11], hdr[12], hdr[13], hdr[14], hdr[15],
+    ]);
+    let payload_len = u32::from_le_bytes([hdr[16], hdr[17], hdr[18], hdr[19]]);
+    Ok((inner_tag, has_attempt.then_some(raw_attempt), payload_len))
 }
 
 impl QueuedMessage {
-    fn decode_batch_item(
+    fn decode_batch_item_js(
         buffer: &ArrayBuffer,
         cursor: &mut u32,
         total: u32,
@@ -49,23 +88,7 @@ impl QueuedMessage {
         }
         let mut hdr = [0_u8; BATCH_ITEM_HEADER_BYTES];
         Uint8Array::new_with_byte_offset_and_length(buffer, *cursor, hdr_len).copy_to(&mut hdr);
-        let inner_tag =
-            WebMessageTag::from_u32(u32::from_le_bytes([hdr[0], hdr[1], hdr[2], hdr[3]]))
-                .map_err(|error| CallError::Deserialize(Box::new(error)))?;
-        if matches!(
-            inner_tag,
-            WebMessageTag::TrackedPayload | WebMessageTag::BatchPayload
-        ) {
-            return Err(CallError::Deserialize(Box::new(
-                TrackedPayloadError::Nested,
-            )));
-        }
-        let has_attempt = u32::from_le_bytes([hdr[4], hdr[5], hdr[6], hdr[7]]) != 0;
-        let raw_attempt = u64::from_le_bytes([
-            hdr[8], hdr[9], hdr[10], hdr[11], hdr[12], hdr[13], hdr[14], hdr[15],
-        ]);
-        let attempt = has_attempt.then_some(raw_attempt);
-        let payload_len = u32::from_le_bytes([hdr[16], hdr[17], hdr[18], hdr[19]]);
+        let (inner_tag, attempt, payload_len) = parse_batch_header(&hdr, total)?;
         let payload_offset = *cursor + hdr_len;
         if total - payload_offset < payload_len {
             return Err(CallError::Deserialize(Box::new(
@@ -83,7 +106,7 @@ impl QueuedMessage {
             let bytes =
                 Uint8Array::new_with_byte_offset_and_length(buffer, payload_offset, payload_len)
                     .to_vec();
-            let msg = decode_message_bytes(inner_tag, bytes, 0)?;
+            let msg = decode_outcome_slice(inner_tag, &bytes)?;
             let msg = match attempt {
                 Some(id) => msg.with_attempt(id),
                 None => msg,
@@ -94,6 +117,59 @@ impl QueuedMessage {
             effective_tag: inner_tag,
             attempt,
             buffer: buffer.clone(),
+            byte_offset: payload_offset,
+            byte_len: payload_len,
+        })
+    }
+
+    fn decode_batch_item_owned(
+        shared: &Rc<Vec<u8>>,
+        cursor: &mut u32,
+        total: u32,
+    ) -> Result<Self, CallError> {
+        let hdr_len = BATCH_ITEM_HEADER_BYTES as u32;
+        if total - *cursor < hdr_len {
+            return Err(CallError::Deserialize(Box::new(
+                TrackedPayloadError::BatchTruncated {
+                    offset: *cursor,
+                    total,
+                },
+            )));
+        }
+        let cur = *cursor as usize;
+        let hdr = shared
+            .get(cur..cur + BATCH_ITEM_HEADER_BYTES)
+            .unwrap_or_default();
+        let (inner_tag, attempt, payload_len) = parse_batch_header(hdr, total)?;
+        let payload_offset = *cursor + hdr_len;
+        if total - payload_offset < payload_len {
+            return Err(CallError::Deserialize(Box::new(
+                TrackedPayloadError::BatchTruncated {
+                    offset: payload_offset,
+                    total,
+                },
+            )));
+        }
+        *cursor = payload_offset + payload_len;
+        if matches!(
+            inner_tag,
+            WebMessageTag::TileRequestOutcome | WebMessageTag::ProvidedImages
+        ) {
+            let start = payload_offset as usize;
+            let slice = shared
+                .get(start..start + payload_len as usize)
+                .unwrap_or_default();
+            let msg = decode_outcome_slice(inner_tag, slice)?;
+            let msg = match attempt {
+                Some(id) => msg.with_attempt(id),
+                None => msg,
+            };
+            return Ok(Self::Decoded(msg));
+        }
+        Ok(Self::OwnedSlice {
+            effective_tag: inner_tag,
+            attempt,
+            data: Rc::clone(shared),
             byte_offset: payload_offset,
             byte_len: payload_len,
         })
@@ -110,8 +186,19 @@ impl QueuedMessage {
         }
         let total = buffer.byte_length();
         let mut cursor = 0_u32;
+        if total <= MAX_BATCH_COPY_BYTES {
+            let mut raw = vec![0_u8; total as usize];
+            if total > 0 {
+                Uint8Array::new(&buffer).copy_to(&mut raw);
+            }
+            let shared = Rc::new(raw);
+            while cursor < total {
+                out.push(Self::decode_batch_item_owned(&shared, &mut cursor, total)?);
+            }
+            return Ok(());
+        }
         while cursor < total {
-            out.push(Self::decode_batch_item(&buffer, &mut cursor, total)?);
+            out.push(Self::decode_batch_item_js(&buffer, &mut cursor, total)?);
         }
         Ok(())
     }
@@ -120,8 +207,8 @@ impl QueuedMessage {
         wire_tag: WebMessageTag,
         buffer: ArrayBuffer,
     ) -> Result<Self, CallError> {
+        let byte_len = buffer.byte_length();
         let (effective_tag, attempt) = if wire_tag == WebMessageTag::TrackedPayload {
-            let byte_len = buffer.byte_length();
             if byte_len < 12 {
                 return Err(CallError::Deserialize(Box::new(
                     TrackedPayloadError::Header {
@@ -163,6 +250,7 @@ impl QueuedMessage {
             wire_tag,
             effective_tag,
             attempt,
+            byte_len,
             buffer,
         })
     }
@@ -170,15 +258,18 @@ impl QueuedMessage {
     pub(super) fn raw_byte_len(&self) -> usize {
         match self {
             Self::Decoded(_) => 0,
-            Self::Raw { buffer, .. } => buffer.byte_length() as usize,
-            Self::RawSlice { byte_len, .. } => *byte_len as usize,
+            Self::Raw { byte_len, .. }
+            | Self::RawSlice { byte_len, .. }
+            | Self::OwnedSlice { byte_len, .. } => *byte_len as usize,
         }
     }
 
     pub(super) fn attempt(&self) -> Option<u64> {
         match self {
             Self::Decoded(message) => message.attempt(),
-            Self::Raw { attempt, .. } | Self::RawSlice { attempt, .. } => *attempt,
+            Self::Raw { attempt, .. }
+            | Self::RawSlice { attempt, .. }
+            | Self::OwnedSlice { attempt, .. } => *attempt,
         }
     }
 
@@ -194,6 +285,11 @@ impl QueuedMessage {
                 effective_tag,
                 attempt,
                 ..
+            }
+            | Self::OwnedSlice {
+                effective_tag,
+                attempt,
+                ..
             } => {
                 let probe = match attempt {
                     Some(attempt) => {
@@ -204,144 +300,5 @@ impl QueuedMessage {
                 filter(&probe)
             }
         }
-    }
-}
-
-pub struct PassingReceiveIter {
-    inner: IntoIter<QueuedMessage>,
-}
-
-impl PassingReceiveIter {
-    pub(super) fn new(items: Vec<QueuedMessage>) -> Self {
-        Self {
-            inner: items.into_iter(),
-        }
-    }
-}
-
-fn try_decode_direct_js(
-    effective_tag: WebMessageTag,
-    attempt: Option<u64>,
-    buffer: &ArrayBuffer,
-    offset: u32,
-    len: u32,
-) -> Option<Result<Message, ()>> {
-    let decoded = match effective_tag {
-        WebMessageTag::LayerTessellated => {
-            FlatBufferTransferable::from_js_layer_tessellated(buffer, offset, len)
-        }
-        WebMessageTag::SymbolLayerTessellated => {
-            FlatBufferTransferable::from_js_symbol_layer(buffer, offset, len)
-        }
-        WebMessageTag::LayerIndexed => {
-            FlatBufferTransferable::from_js_layer_indexed(buffer, offset, len)
-        }
-        _ => return None,
-    };
-    let Some(transferable) = decoded else {
-        return Some(Err(()));
-    };
-    let msg = Message::new(effective_tag.to_static(), Box::new(transferable));
-    Some(Ok(match attempt {
-        Some(id) => msg.with_attempt(id),
-        None => msg,
-    }))
-}
-
-fn decode_raw_item(
-    wire_tag: WebMessageTag,
-    effective_tag: WebMessageTag,
-    attempt: Option<u64>,
-    buffer: ArrayBuffer,
-) -> Option<Message> {
-    let offset = if wire_tag == WebMessageTag::TrackedPayload {
-        12_u32
-    } else {
-        0_u32
-    };
-    let len = buffer.byte_length().saturating_sub(offset);
-    if let Some(result) = try_decode_direct_js(effective_tag, attempt, &buffer, offset, len) {
-        return match result {
-            Ok(msg) => Some(msg),
-            Err(()) => {
-                tracing::warn!(
-                    ?wire_tag,
-                    ?effective_tag,
-                    "dropping malformed worker payload"
-                );
-                None
-            }
-        };
-    }
-    match decode_message(wire_tag, buffer) {
-        Ok(message) => Some(message),
-        Err(error) => {
-            tracing::warn!(?wire_tag, %error, "dropping malformed worker payload");
-            None
-        }
-    }
-}
-
-fn decode_raw_slice_item(
-    effective_tag: WebMessageTag,
-    attempt: Option<u64>,
-    buffer: &ArrayBuffer,
-    byte_offset: u32,
-    byte_len: u32,
-) -> Option<Message> {
-    if let Some(result) =
-        try_decode_direct_js(effective_tag, attempt, buffer, byte_offset, byte_len)
-    {
-        return match result {
-            Ok(msg) => Some(msg),
-            Err(()) => {
-                tracing::warn!(?effective_tag, "dropping malformed batched worker payload");
-                None
-            }
-        };
-    }
-    let bytes = Uint8Array::new_with_byte_offset_and_length(buffer, byte_offset, byte_len).to_vec();
-    match decode_message_bytes(effective_tag, bytes, 0) {
-        Ok(message) => Some(match attempt {
-            Some(id) => message.with_attempt(id),
-            None => message,
-        }),
-        Err(error) => {
-            tracing::warn!(
-                ?effective_tag,
-                %error,
-                "dropping malformed batched worker payload"
-            );
-            None
-        }
-    }
-}
-
-impl Iterator for PassingReceiveIter {
-    type Item = Message;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        for item in self.inner.by_ref() {
-            let decoded = match item {
-                QueuedMessage::Decoded(message) => Some(message),
-                QueuedMessage::Raw {
-                    wire_tag,
-                    effective_tag,
-                    attempt,
-                    buffer,
-                } => decode_raw_item(wire_tag, effective_tag, attempt, buffer),
-                QueuedMessage::RawSlice {
-                    effective_tag,
-                    attempt,
-                    buffer,
-                    byte_offset,
-                    byte_len,
-                } => decode_raw_slice_item(effective_tag, attempt, &buffer, byte_offset, byte_len),
-            };
-            if let Some(msg) = decoded {
-                return Some(msg);
-            }
-        }
-        None
     }
 }

@@ -306,14 +306,31 @@ fn decode_lazy_mvt_from_js(
     let index = TileIndex::LazyMvt(
         LazyMvtIndex::from_packed(Arc::from(mvt), compressed).with_rescale(rescale),
     );
-    Some(FlatBufferTransferable {
-        tag: WebMessageTag::LayerIndexed,
-        data: Vec::new(),
-        start: 0,
-        unpacked_vector: None,
-        unpacked_symbol: None,
-        unpacked_index: Some((coords, source, index)),
-    })
+    Some(FlatBufferTransferable::from_unpacked_index(
+        coords, source, index,
+    ))
+}
+
+#[cfg(any(test, feature = "renderer"))]
+pub(super) fn decode_bytes_layer_indexed(bytes: &[u8]) -> Option<FlatBufferTransferable> {
+    if let Some((coords, compressed, rescale, source, mvt_slice)) = parse_lazy_mvt_header(bytes) {
+        let index = TileIndex::LazyMvt(
+            LazyMvtIndex::from_packed(Arc::from(mvt_slice), compressed).with_rescale(rescale),
+        );
+        return Some(FlatBufferTransferable::from_unpacked_index(
+            coords,
+            source.map(str::to_owned),
+            index,
+        ));
+    }
+    if bytes.len() < WIRE_INDEX_HEADER_LEN {
+        return None;
+    }
+    Some(FlatBufferTransferable::from_vec(
+        WebMessageTag::LayerIndexed,
+        bytes.to_vec(),
+        0,
+    ))
 }
 
 #[cfg(any(test, feature = "renderer"))]

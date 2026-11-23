@@ -30,6 +30,11 @@ struct WorkerSnapshots {
     layer_index_by_id: Option<Arc<FxHashMap<String, usize>>>,
     symbol_leaders: Option<Arc<FxHashMap<String, String>>>,
     derived: Option<DerivedStyleFacts>,
+    covering_bounds: Option<(u8, f64)>,
+    has_symbol_layers: Option<bool>,
+    has_raster_layer: Option<bool>,
+    has_any_raster_type: Option<bool>,
+    symbol_layer_indices: Option<Arc<[usize]>>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -197,5 +202,72 @@ impl Style {
         let cached = Arc::new(compute(self));
         guard.symbol_leaders = Some(cached.clone());
         cached
+    }
+
+    /// Cached `(view_max_zoom, elevated_headroom_meters)` bounds recomputed at most once per revision.
+    pub(crate) fn cached_covering_bounds(
+        &self,
+        compute: impl FnOnce(&Style) -> (u8, f64),
+    ) -> (u8, f64) {
+        let mut guard = lock_unpoisoned(&self.revision_state.snapshots);
+        if let Some(bounds) = guard.covering_bounds {
+            return bounds;
+        }
+        let bounds = compute(self);
+        guard.covering_bounds = Some(bounds);
+        bounds
+    }
+
+    /// Cached check for whether the style declares any `"symbol"` layer.
+    pub(crate) fn cached_has_symbol_layers(&self) -> bool {
+        let mut guard = lock_unpoisoned(&self.revision_state.snapshots);
+        if let Some(has) = guard.has_symbol_layers {
+            return has;
+        }
+        let has = self.layers.iter().any(|layer| layer.type_ == "symbol");
+        guard.has_symbol_layers = Some(has);
+        has
+    }
+
+    /// Cached check for whether the style declares any `"raster"` layer.
+    pub(crate) fn cached_has_raster_layer(&self) -> bool {
+        let mut guard = lock_unpoisoned(&self.revision_state.snapshots);
+        if let Some(has) = guard.has_raster_layer {
+            return has;
+        }
+        let has = self.layers.iter().any(|layer| layer.type_ == "raster");
+        guard.has_raster_layer = Some(has);
+        has
+    }
+
+    /// Cached check for whether the style declares any layer whose type is in `types`.
+    pub(crate) fn cached_has_any_raster_type(&self, types: &[&str]) -> bool {
+        let mut guard = lock_unpoisoned(&self.revision_state.snapshots);
+        if let Some(has) = guard.has_any_raster_type {
+            return has;
+        }
+        let has = self
+            .layers
+            .iter()
+            .any(|layer| types.contains(&layer.type_.as_str()));
+        guard.has_any_raster_type = Some(has);
+        has
+    }
+
+    /// Cached layer indices of all `"symbol"` layers in this style revision.
+    pub(crate) fn cached_symbol_layer_indices(&self) -> Arc<[usize]> {
+        let mut guard = lock_unpoisoned(&self.revision_state.snapshots);
+        if let Some(indices) = &guard.symbol_layer_indices {
+            return indices.clone();
+        }
+        let indices: Arc<[usize]> = self
+            .layers
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, layer)| (layer.type_ == "symbol").then_some(idx))
+            .collect::<Vec<_>>()
+            .into();
+        guard.symbol_layer_indices = Some(indices.clone());
+        indices
     }
 }

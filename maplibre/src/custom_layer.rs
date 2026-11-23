@@ -253,6 +253,13 @@ pub fn queue_custom_layers_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
+    if world
+        .resources
+        .get::<CustomLayerRegistry>()
+        .is_none_or(|registry| registry.layers.is_empty())
+    {
+        return Ok(());
+    }
     let zoom = view_state.zoom().value();
     let visible_custom: Vec<(u32, String)> = style
         .layers

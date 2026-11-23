@@ -5,6 +5,16 @@ use crate::style::{
     Style,
 };
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) struct ExtrusionDetectionKey {
+    pub(super) style_rev: u64,
+    pub(super) arrival_epoch: u64,
+    pub(super) pool_rev: u64,
+    pub(super) pool_eviction_gen: u64,
+    pub(super) terrain_needed: bool,
+    pub(super) vis_mask: u64,
+}
+
 #[derive(Default)]
 pub(super) struct VectorPreparedState {
     revision: Option<u64>,
@@ -29,6 +39,7 @@ pub(super) struct VectorPreparedState {
     pub(super) has_dash_or_pattern_line: bool,
     last_dash_revision: Option<u64>,
     last_pattern_revision: Option<u64>,
+    pub(super) cached_extrusion: Option<(ExtrusionDetectionKey, (bool, bool))>,
 }
 
 impl VectorPreparedState {
@@ -61,7 +72,24 @@ impl VectorPreparedState {
         self.extrusion_layers = scan.extrusion_layers;
         self.has_pattern_paint = scan.has_pattern_paint;
         self.has_dash_or_pattern_line = scan.has_dash_or_pattern_line;
+        self.cached_extrusion = None;
         true
+    }
+
+    pub(super) fn extrusion_visibility_mask(&self, style_zoom: f64) -> u64 {
+        let mut mask = 0_u64;
+        for (idx, (_, minz, maxz)) in self.extrusion_layers.iter().enumerate() {
+            let visible =
+                minz.is_none_or(|min| style_zoom >= min) && maxz.is_none_or(|max| style_zoom < max);
+            if visible {
+                if idx < 64 {
+                    mask |= 1_u64 << idx;
+                } else {
+                    mask = mask.rotate_left(7) ^ (idx as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+                }
+            }
+        }
+        mask
     }
 
     pub(super) fn needs_extrusion_at_zoom(&mut self, style_zoom: f64, uses_globe: bool) -> bool {

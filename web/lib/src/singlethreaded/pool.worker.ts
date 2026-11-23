@@ -1,11 +1,27 @@
 import * as maplibre from "../wasm/maplibre_tile_worker"
 import {initializeWorkerWasm} from "../wasm-worker-instance.mjs";
 
+type BatchAttempts = ArrayLike<bigint> & Iterable<bigint>
+
+type CallMessage =
+    | { type: 'call', procedure_tag: number, attempt: bigint, style_revision: bigint, input: string }
+    | {
+        type: 'call',
+        attempt: bigint,
+        style_revision: bigint,
+        x: number,
+        y: number,
+        meta: number,
+        pixel_ratio: number,
+        input?: undefined,
+    }
+
 type MessageData = { type: 'wasm_init', module: WebAssembly.Module, port?: MessagePort }
     | { type: 'kernel_config', config: string }
-    | { type: 'call', procedure_tag: number, attempt: bigint, style_revision: bigint, input: string }
+    | CallMessage
     | { type: 'style', revision: bigint, style: string, prefetch?: boolean }
     | { type: 'cancel', attempt: bigint }
+    | { type: 'cancel_batch', attempts: BatchAttempts }
     | { type: 'image_provider_modules', urls: string[] }
 
 let initialised: Promise<maplibre.InitOutput> = null
@@ -20,7 +36,16 @@ let providersRegistered: Promise<void> = Promise.resolve()
 interface TileWorkerCalls {
     set_style(revision: bigint, style: string, prefetch?: boolean): void
     process(procedure_tag: number, style_revision: bigint, input: string): Promise<void>
+    process_tile(
+        attempt: bigint,
+        style_revision: bigint,
+        x: number,
+        y: number,
+        meta: number,
+        pixel_ratio: number,
+    ): Promise<void>
     cancel(attempt: bigint): boolean
+    cancel_batch(attempts: BatchAttempts): void
     finish_failed(attempt: bigint): void
 }
 
@@ -43,11 +68,11 @@ const registerProviders = async (urls: string[]) => {
 /** The calls this worker runs, made once the module has started. */
 const workerCalls = (): TileWorkerCalls => {
     if (!calls) {
-        const TileWorkerCalls: new () => TileWorkerCalls = maplibre["TileWorkerCalls"];
-        if (!TileWorkerCalls) {
+        const TileWorkerCallsCtor = maplibre["TileWorkerCalls"] as unknown as new () => TileWorkerCalls;
+        if (!TileWorkerCallsCtor) {
             throw Error("TileWorkerCalls is not defined. Maybe the Rust build used the wrong build configuration.")
         }
-        calls = new TileWorkerCalls()
+        calls = new TileWorkerCallsCtor()
     }
     return calls
 }
@@ -56,6 +81,7 @@ const handleMessage = async (message: MessageEvent<MessageData>) => {
     // Calls and cancels are noted before any await: the port delivers them in order, but
     // their handlers resume in the order their awaits settle.
     let call: { cancelled: boolean } = null
+    let batchCancels: bigint[] = null
     if (message.data.type === 'call') {
         call = {cancelled: false}
         waiting.set(message.data.attempt, call)
@@ -63,6 +89,18 @@ const handleMessage = async (message: MessageEvent<MessageData>) => {
         const waitingCall = waiting.get(message.data.attempt)
         if (waitingCall) {
             waitingCall.cancelled = true
+            return
+        }
+    } else if (message.data.type === 'cancel_batch') {
+        for (const attempt of message.data.attempts) {
+            const waitingCall = waiting.get(attempt)
+            if (waitingCall) {
+                waitingCall.cancelled = true
+            } else {
+                (batchCancels ??= []).push(attempt)
+            }
+        }
+        if (!batchCancels) {
             return
         }
     }
@@ -107,11 +145,21 @@ const handleMessage = async (message: MessageEvent<MessageData>) => {
             return
         }
         // WARNING: Do not modify data passed from Rust!
-        const procedure_tag = data.procedure_tag;
-        const input = data.input;
-
         try {
-            await workerCalls().process(procedure_tag, data.style_revision, input);
+            if (typeof data.input === 'string') {
+                const jsonCall = data as Extract<CallMessage, { input: string }>;
+                await workerCalls().process(jsonCall.procedure_tag, jsonCall.style_revision, jsonCall.input);
+            } else {
+                const flat = data as Extract<CallMessage, { x: number }>;
+                await workerCalls().process_tile(
+                    flat.attempt,
+                    flat.style_revision,
+                    flat.x,
+                    flat.y,
+                    flat.meta,
+                    flat.pixel_ratio,
+                );
+            }
         } catch (err) {
             workerCalls().finish_failed(data.attempt);
             throw err;
@@ -123,6 +171,10 @@ const handleMessage = async (message: MessageEvent<MessageData>) => {
         workerCalls().set_style(message.data.revision, message.data.style, message.data.prefetch ?? true)
     } else if (type === 'cancel') {
         calls?.cancel(message.data.attempt)
+    } else if (type === 'cancel_batch') {
+        if (batchCancels && calls) {
+            calls.cancel_batch(batchCancels);
+        }
     } else if (type === 'kernel_config') {
         const data = message.data;
 

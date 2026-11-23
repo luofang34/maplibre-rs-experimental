@@ -221,6 +221,24 @@ fn build_atmosphere_metadata(
     })
 }
 
+#[derive(Default)]
+struct PendingAtmosphere(Option<TranslucentItem>);
+
+/// Enqueues any deferred atmosphere draw into [`RenderPhase<TranslucentItem>`] at the start of
+/// `PhaseSort`.
+pub fn flush_atmosphere_system(MapContext { world, .. }: &mut MapContext) -> SystemResult {
+    if let Some(item) = world
+        .resources
+        .get_mut::<PendingAtmosphere>()
+        .and_then(|pending| pending.0.take())
+    {
+        if let Some(translucent_phase) = world.resources.get_mut::<RenderPhase<TranslucentItem>>() {
+            translucent_phase.add(item);
+        }
+    }
+    Ok(())
+}
+
 /// Appends visible background, sky and atmosphere items and uploads their frame metadata.
 /// Returns `Dependencies` if the required phases are absent, or `Setup` if atmosphere
 /// camera or shader metadata cannot be constructed. Existing phase items are not cleared.
@@ -240,6 +258,9 @@ pub fn queue_system(
             .is_none()
     {
         return Err(SystemError::Dependencies);
+    }
+    if let Some(pending) = world.resources.get_mut::<PendingAtmosphere>() {
+        pending.0 = None;
     }
     let frame = {
         let size = renderer.state().surface().size();
@@ -300,8 +321,11 @@ pub fn queue_system(
         atmosphere_blend,
         resolved_vp,
     };
-    let (has_draws, has_patterned_bg) =
+    let (has_draws, has_patterned_bg, pending_atmosphere) =
         enqueue_background_layers(world, style, view_state, &params, sky_metadata.is_some())?;
+    if let Some(item) = pending_atmosphere {
+        world.resources.get_or_init_mut::<PendingAtmosphere>().0 = Some(item);
+    }
     if has_patterned_bg {
         if let Some(gpu) = world
             .resources

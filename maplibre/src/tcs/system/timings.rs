@@ -1,16 +1,68 @@
 //! Wall-clock time spent per system and stage, for hosts that need to know what a slow frame
 //! is doing when no profiler can attach.
 
-use std::{borrow::Cow, collections::HashMap, sync::Arc, time::Duration};
+use std::{borrow::Cow, sync::Arc, time::Duration};
+
+use rustc_hash::FxHashMap;
 
 use crate::{context::MapContext, tcs::world::World};
+
+#[cfg(target_arch = "wasm32")]
+mod clock {
+    use std::time::Duration;
+
+    #[wasm_bindgen::prelude::wasm_bindgen(
+        inline_js = "const perf = globalThis.performance; export function maplibre_perf_now_ms() { return perf ? perf.now() : Date.now(); }"
+    )]
+    extern "C" {
+        fn maplibre_perf_now_ms() -> f64;
+    }
+
+    #[derive(Clone, Copy)]
+    pub(crate) struct Stamp(f64);
+
+    impl Stamp {
+        #[inline]
+        pub(crate) fn now() -> Self {
+            Self(maplibre_perf_now_ms())
+        }
+
+        #[inline]
+        pub(crate) fn elapsed_since(self, earlier: Self) -> Duration {
+            let ms = (self.0 - earlier.0).max(0.0);
+            Duration::from_secs_f64(ms * 0.001)
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+mod clock {
+    use std::time::Duration;
+
+    #[derive(Clone, Copy)]
+    pub(crate) struct Stamp(instant::Instant);
+
+    impl Stamp {
+        #[inline]
+        pub(crate) fn now() -> Self {
+            Self(instant::Instant::now())
+        }
+
+        #[inline]
+        pub(crate) fn elapsed_since(self, earlier: Self) -> Duration {
+            self.0.saturating_duration_since(earlier.0)
+        }
+    }
+}
+
+pub(crate) use clock::Stamp;
 
 /// Time each system and stage has taken, and heap bytes each has kept, since the last
 /// report.
 #[derive(Default)]
 pub struct FrameTimings {
-    spent: HashMap<Cow<'static, str>, Duration>,
-    grown: HashMap<Cow<'static, str>, isize>,
+    spent: FxHashMap<Cow<'static, str>, Duration>,
+    grown: FxHashMap<Cow<'static, str>, isize>,
     frames: u64,
     /// The stages of the frame in progress, in the order they ran.
     stages: Vec<(Arc<str>, Duration)>,
@@ -78,7 +130,7 @@ impl FrameTimings {
 }
 
 /// Adds `value` under `name`, copying the name only the first time it is seen.
-fn add<V: std::ops::AddAssign>(map: &mut HashMap<Cow<'static, str>, V>, name: &str, value: V) {
+fn add<V: std::ops::AddAssign>(map: &mut FxHashMap<Cow<'static, str>, V>, name: &str, value: V) {
     if let Some(total) = map.get_mut(name) {
         *total += value;
         return;
@@ -92,14 +144,20 @@ pub fn measure<R>(
     name: &str,
     run: impl FnOnce(&mut MapContext) -> R,
 ) -> (R, Duration) {
-    let started = instant::Instant::now();
-    let heap_before = super::heap::live_bytes(&context.world.resources);
+    let heap_sampler = context
+        .world
+        .resources
+        .get::<super::heap::HeapSampler>()
+        .copied();
+    let started = Stamp::now();
+    let heap_before = heap_sampler.map_or(0, super::heap::HeapSampler::sample);
     let result = run(context);
-    let spent = started.elapsed();
-    let grown = super::heap::live_bytes(&context.world.resources) - heap_before;
+    let spent = Stamp::now().elapsed_since(started);
     let timings = context.world.resources.get_or_init_mut::<FrameTimings>();
     timings.record(name, spent);
-    timings.record_growth(name, grown);
+    if let Some(sampler) = heap_sampler {
+        timings.record_growth(name, sampler.sample() - heap_before);
+    }
     (result, spent)
 }
 
@@ -110,4 +168,19 @@ pub fn stage_finished(world: &mut World, name: Arc<str>, spent: Duration) {
         .get_or_init_mut::<FrameTimings>()
         .stages
         .push((name, spent));
+}
+
+/// Records both per-stage elapsed time and any sampled heap delta into [`FrameTimings`].
+pub(crate) fn record_stage(
+    world: &mut World,
+    name: &Arc<str>,
+    spent: Duration,
+    grown: Option<isize>,
+) {
+    let timings = world.resources.get_or_init_mut::<FrameTimings>();
+    timings.record(name.as_ref(), spent);
+    if let Some(bytes) = grown {
+        timings.record_growth(name.as_ref(), bytes);
+    }
+    timings.stages.push((name.clone(), spent));
 }

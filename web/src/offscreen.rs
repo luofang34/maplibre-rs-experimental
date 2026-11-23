@@ -42,9 +42,9 @@ type WakeTimerSlot = RefCell<Option<(i32, Closure<dyn FnMut()>)>>;
 type WakeChannelSlot = RefCell<Option<(MessagePort, MessagePort, Closure<dyn FnMut()>)>>;
 type RafClosureSlot = RefCell<Option<Closure<dyn FnMut(f64)>>>;
 
-fn drain_mt_magazine() {
-    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
-    crate::platform::multithreaded::alloc::drain_thread_magazine();
+fn drain_magazine() {
+    #[cfg(target_arch = "wasm32")]
+    crate::platform::alloc::drain_thread_magazine();
 }
 
 const MAX_BOOT_IMMEDIATE_PUMPS: u8 = 128;
@@ -79,7 +79,7 @@ impl RunnerInner {
             self.last_style_swap.set(swap);
             self.initial_load_settled.set(false);
             self.initial_pumps.set(0);
-            drain_mt_magazine();
+            drain_magazine();
         }
     }
     fn schedule_commands(rc: &Rc<RefCell<Self>>) {
@@ -222,7 +222,7 @@ impl RunnerInner {
         let tick = self.mag_drain_counter.get().wrapping_add(1);
         self.mag_drain_counter.set(tick);
         if next.0.is_none() || tick.is_multiple_of(8) {
-            drain_mt_magazine();
+            drain_magazine();
         }
         Some(next)
     }

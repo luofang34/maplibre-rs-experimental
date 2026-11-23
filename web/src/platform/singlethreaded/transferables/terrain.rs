@@ -46,6 +46,97 @@ fn parse_raw_dem_header(bytes: &[u8]) -> Option<RawDemHeader> {
     })
 }
 
+#[cfg(any(test, feature = "renderer"))]
+fn decode_dem_parts_from_header_and_pixels(
+    hdr_bytes: &[u8],
+    pixels: Vec<u8>,
+) -> Option<(WorldTileCoords, Result<(Arc<DemTile>, f64), RgbaImage>)> {
+    match read_u32_le(hdr_bytes, 0) {
+        Some(LAYER_DEM_IMAGE_MAGIC) => {
+            let coords = read_coords_at(hdr_bytes, 4).unwrap_or_default();
+            let (Some(width), Some(height)) =
+                (read_u32_le(hdr_bytes, 16), read_u32_le(hdr_bytes, 20))
+            else {
+                return Some((coords, Err(RgbaImage::new(0, 0))));
+            };
+            let expected = (width as usize)
+                .checked_mul(height as usize)
+                .and_then(|n| n.checked_mul(4));
+            let image = if expected == Some(pixels.len()) {
+                RgbaImage::from_vec(width, height, pixels).unwrap_or_else(|| RgbaImage::new(0, 0))
+            } else {
+                RgbaImage::new(0, 0)
+            };
+            Some((coords, Err(image)))
+        }
+        Some(LAYER_DEM_RAW_MAGIC) => {
+            let coords = read_coords_at(hdr_bytes, 4).unwrap_or_default();
+            let Some(hdr) = parse_raw_dem_header(hdr_bytes) else {
+                return Some((coords, Err(RgbaImage::new(0, 0))));
+            };
+            let out = match DemTile::from_raw_parts(
+                hdr.dim, hdr.stride, pixels, hdr.unpack, hdr.min, hdr.max,
+            ) {
+                Ok(dem) => Ok((Arc::new(dem), hdr.circumference)),
+                Err(_) => Err(RgbaImage::new(0, 0)),
+            };
+            Some((coords, out))
+        }
+        _ => None,
+    }
+}
+
+#[cfg(any(test, feature = "renderer"))]
+pub(super) fn decode_bytes_layer_dem(bytes: &[u8]) -> Option<FlatBufferTransferable> {
+    let px_offset = match read_u32_le(bytes, 0)? {
+        LAYER_DEM_IMAGE_MAGIC => DEM_IMAGE_HEADER_BYTES,
+        LAYER_DEM_RAW_MAGIC => DEM_RAW_HEADER_BYTES,
+        _ => return None,
+    };
+    let hdr_bytes = bytes.get(..px_offset)?;
+    let pixels = bytes.get(px_offset..)?.to_vec();
+    let (coords, outcome) = decode_dem_parts_from_header_and_pixels(hdr_bytes, pixels)?;
+    Some(FlatBufferTransferable::from_unpacked_dem(coords, outcome))
+}
+
+#[cfg(any(test, feature = "renderer"))]
+pub(super) fn decode_js_layer_dem(
+    buffer: &js_sys::ArrayBuffer,
+    base_offset: u32,
+    byte_len: u32,
+) -> Option<FlatBufferTransferable> {
+    let end = base_offset.checked_add(byte_len)?;
+    if end > buffer.byte_length() || (byte_len as usize) < 4 {
+        return None;
+    }
+    let mut magic_buf = [0_u8; 4];
+    js_sys::Uint8Array::new_with_byte_offset_and_length(buffer, base_offset, 4)
+        .copy_to(&mut magic_buf);
+    let hdr_len = match u32::from_le_bytes(magic_buf) {
+        LAYER_DEM_IMAGE_MAGIC => DEM_IMAGE_HEADER_BYTES,
+        LAYER_DEM_RAW_MAGIC => DEM_RAW_HEADER_BYTES,
+        _ => return None,
+    };
+    if (byte_len as usize) < hdr_len {
+        return None;
+    }
+    let mut hdr = [0_u8; DEM_RAW_HEADER_BYTES];
+    js_sys::Uint8Array::new_with_byte_offset_and_length(buffer, base_offset, hdr_len as u32)
+        .copy_to(&mut hdr[..hdr_len]);
+    let px_len = (byte_len as usize) - hdr_len;
+    let mut pixels = vec![0_u8; px_len];
+    if px_len > 0 {
+        js_sys::Uint8Array::new_with_byte_offset_and_length(
+            buffer,
+            base_offset + hdr_len as u32,
+            px_len as u32,
+        )
+        .copy_to(&mut pixels);
+    }
+    let (coords, outcome) = decode_dem_parts_from_header_and_pixels(&hdr[..hdr_len], pixels)?;
+    Some(FlatBufferTransferable::from_unpacked_dem(coords, outcome))
+}
+
 impl LayerDem for FlatBufferTransferable {
     fn message_tag() -> &'static dyn MessageTag {
         &WebMessageTag::LayerDem
@@ -93,6 +184,9 @@ impl LayerDem for FlatBufferTransferable {
     }
 
     fn coords(&self) -> WorldTileCoords {
+        if let Some((coords, _)) = &self.unpacked_dem {
+            return *coords;
+        }
         let bytes = self.data();
         match read_u32_le(bytes, 0) {
             Some(LAYER_DEM_IMAGE_MAGIC | LAYER_DEM_RAW_MAGIC) => {
@@ -102,7 +196,13 @@ impl LayerDem for FlatBufferTransferable {
         }
     }
 
-    fn into_image(self) -> RgbaImage {
+    fn into_image(mut self) -> RgbaImage {
+        if let Some((_, outcome)) = self.unpacked_dem.take() {
+            return match outcome {
+                Ok((dem, _)) => dem.to_rgba_image(),
+                Err(image) => image,
+            };
+        }
         let bytes = self.data();
         match read_u32_le(bytes, 0) {
             Some(LAYER_DEM_IMAGE_MAGIC) => {
@@ -127,7 +227,13 @@ impl LayerDem for FlatBufferTransferable {
         }
     }
 
-    fn into_shared_dem(self) -> Result<(Arc<DemTile>, f64, Arc<RgbaImage>), RgbaImage> {
+    fn into_shared_dem(mut self) -> Result<(Arc<DemTile>, f64, Arc<RgbaImage>), RgbaImage> {
+        if let Some((_, outcome)) = self.unpacked_dem.take() {
+            return match outcome {
+                Ok((dem, circ)) => Ok((dem, circ, Arc::new(RgbaImage::new(0, 0)))),
+                Err(image) => Err(image),
+            };
+        }
         let Some(hdr) = parse_raw_dem_header(self.data()) else {
             return Err(self.into_image());
         };

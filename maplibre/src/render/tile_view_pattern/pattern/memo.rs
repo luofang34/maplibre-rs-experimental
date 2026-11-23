@@ -22,7 +22,7 @@ use crate::{
 };
 
 #[derive(Clone, PartialEq, Eq)]
-struct PatternMemoKey {
+pub(crate) struct PatternMemoKey {
     style_rev: u64,
     view_region_digest: u64,
     view_region_len: usize,
@@ -37,65 +37,52 @@ struct PatternMemoKey {
     raster_mutation_gen: u64,
 }
 
+/// Computes the frame memo key for `(view_region, raster_coverings, style_rev, world)`, or
+/// `None` when active raster cross-fades prevent key reuse.
+pub(crate) fn compute_memo_key(
+    view_region: &ViewRegion,
+    raster_coverings: &[(RasterSourceId, Vec<WorldTileCoords>)],
+    style_rev: u64,
+    world: &World,
+) -> Option<PatternMemoKey> {
+    (!has_active_cross_fade(world))
+        .then(|| build_key(view_region, raster_coverings, style_rev, world))
+}
+
 /// Caches the most recent [`TileViewPattern`] key across frames so smooth panning or zooming
 /// inside an unchanged covering only updates per-shape zoom transforms in place.
 #[derive(Default)]
 pub struct TileViewPatternMemo {
     key: Option<PatternMemoKey>,
     last_zoom_bits: u64,
+    scratch_view_tiles: Vec<ViewTile>,
 }
 
 impl TileViewPatternMemo {
-    /// Returns `true` if `tile_view_pattern` already holds the exact covering/source selection
-    /// for `(view_region, raster_coverings, style_rev, world)`.
-    pub(crate) fn matches(
-        &mut self,
-        view_region: &ViewRegion,
-        raster_coverings: &[(RasterSourceId, Vec<WorldTileCoords>)],
-        style_rev: u64,
-        world: &World,
-    ) -> bool {
-        if has_active_cross_fade(world) {
-            self.invalidate();
-            return false;
-        }
-        let next_key = build_key(view_region, raster_coverings, style_rev, world);
-        if self.key.as_ref() == Some(&next_key) {
-            return true;
-        }
-        self.invalidate();
-        false
+    pub(crate) fn matches_key(&self, next_key: Option<&PatternMemoKey>) -> bool {
+        matches!((&self.key, next_key), (Some(cached), Some(next)) if cached == next)
     }
 
-    /// Returns `true` if `zoom` changed since the previous frame and records the new zoom.
-    pub(crate) fn needs_zoom_update(&mut self, zoom: Zoom) -> bool {
-        let zoom_bits = zoom.value().to_bits();
-        if self.last_zoom_bits != zoom_bits {
-            self.last_zoom_bits = zoom_bits;
-            true
-        } else {
-            false
-        }
+    pub(crate) fn zoom_changed(&self, zoom: Zoom) -> bool {
+        self.last_zoom_bits != zoom.value().to_bits()
     }
 
-    pub(crate) fn record(
-        &mut self,
-        view_region: &ViewRegion,
-        raster_coverings: &[(RasterSourceId, Vec<WorldTileCoords>)],
-        style_rev: u64,
-        zoom: Zoom,
-        world: &World,
-    ) {
-        if has_active_cross_fade(world) {
-            self.invalidate();
-            return;
-        }
-        self.key = Some(build_key(view_region, raster_coverings, style_rev, world));
+    pub(crate) fn set_zoom(&mut self, zoom: Zoom) {
         self.last_zoom_bits = zoom.value().to_bits();
     }
 
-    fn invalidate(&mut self) {
-        self.key = None;
+    pub(crate) fn record_key(&mut self, key: Option<PatternMemoKey>, zoom: Zoom) {
+        self.key = key;
+        self.last_zoom_bits = zoom.value().to_bits();
+    }
+
+    pub(crate) fn take_scratch(&mut self) -> Vec<ViewTile> {
+        std::mem::take(&mut self.scratch_view_tiles)
+    }
+
+    pub(crate) fn put_scratch(&mut self, mut scratch: Vec<ViewTile>) {
+        scratch.clear();
+        self.scratch_view_tiles = scratch;
     }
 }
 

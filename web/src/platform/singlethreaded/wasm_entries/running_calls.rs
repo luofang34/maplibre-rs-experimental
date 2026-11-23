@@ -28,6 +28,20 @@ impl RunningCalls {
         handle.abort();
         true
     }
+
+    /// Stops every active call listed in `attempts`.
+    pub(crate) fn cancel_batch(&mut self, attempts: &[u64]) {
+        for &attempt in attempts {
+            if let Some(handle) = self.0.remove(&attempt) {
+                handle.abort();
+            }
+        }
+    }
+
+    /// Whether no active worker calls are tracked.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 #[cfg(test)]

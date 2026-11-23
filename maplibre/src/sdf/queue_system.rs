@@ -49,17 +49,24 @@ pub fn queue_system(
         };
     }
     let Some((covering, phase, Initialized(pool))) = world.resources.query_mut::<(
-        &SymbolCovering,
+        &mut SymbolCovering,
         &mut RenderPhase<TranslucentItem>,
         &Eventually<SymbolBufferPool>,
     )>() else {
         return Err(SystemError::Dependencies);
     };
     let stride = size_of::<ShaderTileMetadata>() as u64;
-    for (index, coords) in covering.tiles.iter().enumerate() {
+    let SymbolCovering {
+        tiles,
+        queue_scratch,
+        ..
+    } = covering;
+    queue_scratch.clear();
+    let style_zoom = view_state.style_zoom().value();
+    let zoom = view_state.zoom();
+    for (index, coords) in tiles.iter().enumerate() {
         let start = index as u64 * stride;
-        let shape = TileShape::with_buffer_range(*coords, view_state.zoom(), start..start + stride)
-            .draw_data();
+        let shape = TileShape::with_buffer_range(*coords, zoom, start..start + stride).draw_data();
         for (slot_idx, layer) in pool
             .index()
             .get_layers(*coords)
@@ -67,13 +74,10 @@ pub fn queue_system(
             .flatten()
             .enumerate()
         {
-            if !layer
-                .style_layer
-                .is_visible_at(view_state.style_zoom().value())
-            {
+            if !layer.style_layer.is_visible_at(style_zoom) {
                 continue;
             }
-            phase.add(TranslucentItem {
+            queue_scratch.push(TranslucentItem {
                 draw_function: &DrawState::<TranslucentItem, DrawSymbols>::INSTANCE,
                 index: layer.style_layer.index,
                 style_layer: layer.style_layer_id,
@@ -84,5 +88,9 @@ pub fn queue_system(
             });
         }
     }
+    if !queue_scratch.is_sorted_by_key(|item| item.index) {
+        queue_scratch.sort_by_key(|item| item.index);
+    }
+    phase.extend_from_slice(queue_scratch);
     Ok(())
 }

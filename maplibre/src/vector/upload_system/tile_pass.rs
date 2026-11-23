@@ -24,7 +24,7 @@ use crate::{
 pub(super) struct TessellatedUploadPlan<'a> {
     pub style: &'a Style,
     pub shared_style_layers: &'a [Arc<StyleLayer>],
-    pub source_tiles: Vec<WorldTileCoords>,
+    pub source_tiles: &'a [WorldTileCoords],
     pub uncovered_sources: &'a rustc_hash::FxHashSet<WorldTileCoords>,
     pub spatial: &'a [SpatialBuffer],
     pub paint: VectorPaintFrame,
@@ -82,7 +82,7 @@ pub(super) fn upload_tessellated_layer(
         TessellatedUploadPlan {
             style,
             shared_style_layers: &shared,
-            source_tiles,
+            source_tiles: &source_tiles,
             uncovered_sources: &empty,
             spatial,
             paint,
@@ -123,7 +123,7 @@ pub(super) fn upload_tessellated_layer_with_uncovered(
         stamp,
         state: &mut state,
     };
-    for &coords in &plan.source_tiles {
+    for &coords in plan.source_tiles {
         upload_tile_buckets(buffer_pool, queue, tiles, &plan, coords, &mut pass);
     }
     (pass.any_deferred, pass.needs_refetch)

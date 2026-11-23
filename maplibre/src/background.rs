@@ -67,6 +67,10 @@ impl<E: Environment> Plugin<E> for BackgroundPlugin {
             crate::render::RenderStageLabel::Queue,
             queue_system::queue_system,
         )?;
+        schedule.add_early_system_to_stage(
+            crate::render::RenderStageLabel::PhaseSort,
+            queue_system::flush_atmosphere_system,
+        )?;
         #[cfg(not(feature = "experimental"))]
         let _ = renderer;
         #[cfg(feature = "experimental")]

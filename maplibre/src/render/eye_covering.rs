@@ -298,7 +298,7 @@ fn tight_cached_region(
     host_frame: u64,
     level: ZoomLevel,
     can_use_cache: bool,
-) -> Option<Option<ViewRegion>> {
+) -> Option<(Option<Arc<[WorldTileCoords]>>, Option<ViewRegion>)> {
     if !can_use_cache {
         return None;
     }
@@ -313,10 +313,16 @@ fn tight_cached_region(
         .filter(|(_, padding, cached_level)| {
             *padding == ViewStatePadding::Tight && *cached_level == level
         })
-        .map(|(tiles, _, _)| {
-            tiles
-                .as_ref()
-                .map(|tiles| ViewRegion::from_tiles(tiles.to_vec(), level, tiles.len().max(1)))
+        .map(|(tiles, _, _)| match tiles.as_ref() {
+            Some(arc) => (
+                Some(Arc::clone(arc)),
+                Some(ViewRegion::from_tiles(
+                    arc.to_vec(),
+                    level,
+                    arc.len().max(1),
+                )),
+            ),
+            None => (None, None),
         })
 }
 
@@ -386,12 +392,20 @@ pub(crate) fn drawn_covering(
             return Ok(cached);
         }
     }
-    let region = match tight_cached_region(world, host_frame, level, can_use_loose_cache) {
-        Some(cached) => cached,
-        None => {
-            view_region_for_projection(style, view_state, world, level, ViewStatePadding::Tight)?
-        }
-    };
+    let (cached_arc, region) =
+        match tight_cached_region(world, host_frame, level, can_use_loose_cache) {
+            Some((arc, region)) => (arc, region),
+            None => (
+                None,
+                view_region_for_projection(
+                    style,
+                    view_state,
+                    world,
+                    level,
+                    ViewStatePadding::Tight,
+                )?,
+            ),
+        };
     let raster = match tight_cached_raster(world, host_frame, terrain_key, can_use_loose_cache) {
         Some(cached) => cached,
         None => raster_source_regions(style, view_state, world, ViewStatePadding::Tight)?,
@@ -406,10 +420,9 @@ pub(crate) fn drawn_covering(
             view_proj_bits,
             terrain_key,
             tiles: region.as_ref().map(|region| {
-                (
-                    Arc::from(region.iter().collect::<Vec<_>>()),
-                    region.zoom_level(),
-                )
+                let arc =
+                    cached_arc.unwrap_or_else(|| Arc::from(region.iter().collect::<Vec<_>>()));
+                (arc, region.zoom_level())
             }),
             raster: raster.clone(),
         });

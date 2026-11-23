@@ -1,9 +1,16 @@
 //! Prepares GPU-owned resources by initializing them if they are uninitialized or out-of-date.
 mod extrusion_setup;
+mod pipeline_checks;
 mod prepared_state;
 mod setup;
 
-use self::{prepared_state::VectorPreparedState, setup::PipelineSetup};
+use self::{
+    pipeline_checks::{
+        check_pipeline_needs, collect_prepared_flags, resolve_extrusion_needs, PipelineNeedsCheck,
+    },
+    prepared_state::VectorPreparedState,
+    setup::PipelineSetup,
+};
 use crate::{
     context::MapContext,
     render::{
@@ -40,73 +47,19 @@ pub fn resource_system(
         .resources
         .get::<crate::terrain::TerrainFrame>()
         .is_some_and(|frame| frame.active);
-    let mut prepared = world
-        .resources
-        .remove::<VectorPreparedState>()
-        .unwrap_or_default();
-    prepared.sync_style(style, terrain_active);
-    let update_dashes = prepared.should_update_dashes(style);
-    let update_patterns = prepared.should_update_patterns(style);
-    let needs_fill = prepared.needs_fill;
-    let needs_flat_lines = prepared.needs_flat_lines;
-    let needs_terrain_lines = prepared.needs_terrain_lines;
-    let needs_elevated_lines = prepared.needs_elevated_lines;
-    let needs_circle = prepared.needs_circle;
-    let needs_circle_feature_stroke = needs_circle && prepared.needs_circle_feature_stroke;
-    let needs_circle_dynamic_radius = needs_circle && prepared.needs_circle_dynamic_radius;
     let uses_globe = style.uses_globe_at(style_zoom);
     let terrain_needed = style.terrain.is_some() || terrain_active;
-    let needs_extrusion = prepared.needs_extrusion_at_zoom(style_zoom, uses_globe);
-    let needs_extrusion_opaque = needs_extrusion && prepared.needs_extrusion_opaque;
-    let needs_extrusion_pattern = needs_extrusion && prepared.needs_extrusion_pattern;
-    let needs_extrusion_translucent = needs_extrusion && prepared.needs_extrusion_translucent;
-    let extrusion_complete = needs_extrusion
-        && matches!(
-            world.resources.get::<Eventually<ExtrusionPipeline>>(),
-            Some(Initialized(ep))
-                if (!needs_extrusion_opaque || ep.clear_mark.is_some())
-                    && ep.for_globe(uses_globe).is_some_and(|mode| {
-                        (!needs_extrusion_opaque
-                            || (mode.depth.is_some()
-                                && mode.color.is_some()
-                                && mode.compact_depth.is_some()
-                                && mode.compact_color.is_some()))
-                            && (!needs_extrusion_pattern || mode.pattern.is_some())
-                            && (!needs_extrusion_translucent
-                                || (mode.translucent_back.is_some()
-                                    && mode.translucent_front.is_some()
-                                    && mode.compact_translucent_back.is_some()
-                                    && mode.compact_translucent_front.is_some()))
-                    })
-        );
-    let (has_compact_extrusion, has_standard_extrusion) = if needs_extrusion && !extrusion_complete
-    {
-        detect_extrusion_encodings(world, &prepared, style_zoom, terrain_needed)
-    } else {
-        (false, false)
-    };
-    let extrusion_needs = extrusion_setup::ExtrusionPipelineNeeds {
-        globe: uses_globe,
-        standard_opaque: needs_extrusion_opaque && has_standard_extrusion,
-        compact_opaque: needs_extrusion_opaque && has_compact_extrusion,
-        pattern: needs_extrusion_opaque && needs_extrusion_pattern && has_standard_extrusion,
-        standard_translucent: needs_extrusion_translucent && has_standard_extrusion,
-        compact_translucent: needs_extrusion_translucent && has_compact_extrusion,
-        clear_mark: needs_extrusion_opaque && (has_compact_extrusion || has_standard_extrusion),
-    };
-    let has_pattern_paint = prepared.has_pattern_paint;
-    let needs_plain_flat_lines = needs_flat_lines && (!uses_globe || terrain_needed);
-    let needs_plain_globe_lines = needs_flat_lines && uses_globe;
-    let needs_full_flat_lines = needs_flat_lines && prepared.has_dash_or_pattern_line;
-    let needs_flat_fill_opaque =
-        needs_fill && prepared.needs_fill_opaque && (!uses_globe || terrain_needed);
-    let needs_flat_fill_blended =
-        needs_fill && prepared.needs_fill_blended && (!uses_globe || terrain_needed);
-    let needs_globe_fill_opaque = needs_fill && prepared.needs_fill_opaque && uses_globe;
-    let needs_globe_fill_blended = needs_fill && prepared.needs_fill_blended && uses_globe;
-    world.resources.insert(prepared);
-
-    let needs_any_lines = needs_flat_lines || needs_terrain_lines || needs_elevated_lines;
+    let flags = collect_prepared_flags(world, style, style_zoom, uses_globe, terrain_active);
+    let extrusion_needs = resolve_extrusion_needs(
+        world,
+        style.revision(),
+        style_zoom,
+        terrain_needed,
+        uses_globe,
+        &flags,
+    );
+    let needs_any_lines =
+        flags.needs_flat_lines || flags.needs_terrain_lines || flags.needs_elevated_lines;
     if needs_any_lines
         && world
             .resources
@@ -117,7 +70,7 @@ pub fn resource_system(
             .resources
             .insert(super::line_dash::LineDashResources::new(device, queue));
     }
-    if update_dashes && needs_any_lines {
+    if flags.update_dashes && needs_any_lines {
         if let Some(dashes) = world
             .resources
             .get_mut::<super::line_dash::LineDashResources>()
@@ -125,16 +78,32 @@ pub fn resource_system(
             dashes.update(device, queue, style, style_zoom);
         }
     }
-    let dashes_layout = world
-        .resources
-        .get::<super::line_dash::LineDashResources>()
-        .map(|dashes| dashes.layout.clone());
-    if needs_any_lines && dashes_layout.is_none() {
+    if needs_any_lines
+        && world
+            .resources
+            .get::<super::line_dash::LineDashResources>()
+            .is_none()
+    {
         return Err(SystemError::Dependencies);
     }
-    let pattern_res = world.resources.get::<super::pattern::PatternResources>();
-    let missing_pattern_resources = pattern_res.is_none();
-    let missing_pattern_pipeline = pattern_res.is_none_or(|patterns| patterns.pipeline().is_none());
+    let checks = check_pipeline_needs(
+        world,
+        style,
+        style_zoom,
+        uses_globe,
+        terrain_needed,
+        &flags,
+        extrusion_needs,
+    );
+    let need_base = checks.need_vector_pipeline || checks.need_line_pipeline;
+    let dashes_layout = if need_base || checks.need_circle_pipeline {
+        world
+            .resources
+            .get::<super::line_dash::LineDashResources>()
+            .map(|dashes| dashes.layout.clone())
+    } else {
+        None
+    };
     let supports_base_vertex = world
         .resources
         .get::<crate::render::tracked_pass::DrawCapabilities>()
@@ -147,6 +116,37 @@ pub fn resource_system(
             },
             |caps| caps.base_vertex,
         );
+    apply_pipeline_setup(
+        world,
+        device,
+        surface,
+        settings,
+        supports_base_vertex,
+        need_base,
+        checks,
+        dashes_layout.as_ref(),
+    )?;
+    if flags.update_patterns {
+        if let Some(patterns) = world
+            .resources
+            .get_mut::<super::pattern::PatternResources>()
+        {
+            patterns.update(device, queue, style, style_zoom);
+        }
+    }
+    Ok(())
+}
+
+fn apply_pipeline_setup(
+    world: &mut crate::tcs::world::World,
+    device: &wgpu::Device,
+    surface: &crate::render::resource::Surface,
+    settings: &crate::render::settings::RendererSettings,
+    supports_base_vertex: bool,
+    need_base: bool,
+    checks: PipelineNeedsCheck,
+    dashes_layout: Option<&wgpu::BindGroupLayout>,
+) -> Result<(), SystemError> {
     let Some((
         buffer_pool,
         vector_pipeline,
@@ -173,114 +173,66 @@ pub fn resource_system(
             .with_shared_layer_metadata()
     });
 
-    let need_vector_pipeline = needs_fill
-        && !matches!(vector_pipeline, Initialized(vp) if
-            (!needs_flat_fill_opaque || vp.flat_opaque.is_some())
-            && (!needs_flat_fill_blended || vp.flat_blended.is_some())
-            && (!needs_globe_fill_opaque || vp.globe_opaque.is_some())
-            && (!needs_globe_fill_blended || vp.globe_blended.is_some()));
-    let need_line_pipeline = needs_any_lines
-        && !matches!(line_pipeline, Initialized(lp) if
-            (!needs_plain_flat_lines || lp.flat_plain.is_some())
-            && (!needs_plain_globe_lines || lp.globe_plain.is_some())
-            && (!needs_full_flat_lines || lp.flat.is_some())
-            && (!needs_terrain_lines || (lp.structure.is_some() && lp.terrain.is_some()))
-            && (!needs_elevated_lines || lp.elevated.is_some()));
-    let need_base_pipelines = need_vector_pipeline || need_line_pipeline;
-    let need_circle_pipeline = needs_circle
-        && !matches!(circle_pipeline, Initialized(cp) if
-            (!needs_circle_feature_stroke || cp.feature_stroke.is_some())
-            && (!needs_circle_dynamic_radius || cp.dynamic_radius.is_some()));
-    let need_extrusion_pipeline = needs_extrusion
-        && (has_compact_extrusion || has_standard_extrusion)
-        && !matches!(extrusion_pipeline, Initialized(ep) if
-        (!extrusion_needs.clear_mark || ep.clear_mark.is_some())
-            && (!(extrusion_needs.standard_opaque
-                || extrusion_needs.compact_opaque
-                || extrusion_needs.pattern
-                || extrusion_needs.standard_translucent
-                || extrusion_needs.compact_translucent)
-                || ep.for_globe(uses_globe).is_some_and(|mode| {
-                    (!extrusion_needs.standard_opaque
-                        || (mode.depth.is_some() && mode.color.is_some()))
-                        && (!extrusion_needs.compact_opaque
-                            || (mode.compact_depth.is_some() && mode.compact_color.is_some()))
-                        && (!extrusion_needs.pattern || mode.pattern.is_some())
-                        && (!extrusion_needs.standard_translucent
-                            || (mode.translucent_back.is_some()
-                                && mode.translucent_front.is_some()))
-                        && (!extrusion_needs.compact_translucent
-                            || (mode.compact_translucent_back.is_some()
-                                && mode.compact_translucent_front.is_some()))
-                })));
-    let needs_pattern = missing_pattern_pipeline
-        && has_pattern_paint
-        && style.layers.iter().any(|layer| {
-            layer.paint.as_ref().is_some_and(|paint| {
-                super::pattern::pattern_name(paint, style_zoom).is_some()
-                    || super::pattern::per_feature_pattern(paint).is_some()
-            })
-        });
-
-    let needs_pattern_resources = missing_pattern_resources && has_pattern_paint;
-
-    let pattern_pipeline = if need_base_pipelines
-        || need_circle_pipeline
-        || need_extrusion_pipeline
-        || needs_pattern
-        || needs_pattern_resources
+    if !(need_base
+        || checks.need_circle_pipeline
+        || checks.need_extrusion_pipeline
+        || checks.needs_pattern
+        || checks.needs_pattern_resources)
     {
-        let setup = PipelineSetup {
+        return Ok(());
+    }
+
+    let setup = PipelineSetup {
+        device,
+        settings: *settings,
+        format: surface.surface_format(),
+        multisampling: surface.is_multisampling_supported(settings.msaa),
+        projection: projection_resources.bind_group_layout(),
+        pattern: crate::render::resource::create_bind_group_layout_cached(
             device,
-            settings: *settings,
-            format: surface.surface_format(),
-            multisampling: surface.is_multisampling_supported(settings.msaa),
-            projection: projection_resources.bind_group_layout(),
-            pattern: crate::render::resource::create_bind_group_layout_cached(
-                device,
-                Some("pattern layout"),
-                &super::pattern::layout_entries(),
-            ),
-        };
-        if need_base_pipelines || need_circle_pipeline {
-            setup.initialize(
-                vector_pipeline,
-                line_pipeline,
-                circle_pipeline,
-                dashes_layout.as_ref(),
-                setup::VectorPipelineNeeds {
-                    flat_fill_opaque: needs_flat_fill_opaque,
-                    flat_fill_blended: needs_flat_fill_blended,
-                    globe_fill_opaque: needs_globe_fill_opaque,
-                    globe_fill_blended: needs_globe_fill_blended,
-                    plain_flat_lines: needs_plain_flat_lines,
-                    plain_globe_lines: needs_plain_globe_lines,
-                    flat_lines: needs_full_flat_lines,
-                    terrain_lines: needs_terrain_lines,
-                    elevated_lines: needs_elevated_lines,
-                    circle: needs_circle,
-                    circle_feature_stroke: needs_circle_feature_stroke,
-                    circle_dynamic_radius: needs_circle_dynamic_radius,
-                },
-            );
-        }
-        if need_extrusion_pipeline {
-            setup.initialize_extrusion(extrusion_pipeline, extrusion_needs);
-        }
-        let created_pattern = needs_pattern.then(|| setup.create_pattern());
-        let pattern_layout = setup.pattern;
-        if needs_pattern_resources {
-            world
-                .resources
-                .insert(super::pattern::PatternResources::new(
-                    device,
-                    pattern_layout,
-                ));
-        }
-        created_pattern
-    } else {
-        None
+            Some("pattern layout"),
+            &super::pattern::layout_entries(),
+        ),
     };
+    if need_base || checks.need_circle_pipeline {
+        setup.initialize(
+            vector_pipeline,
+            line_pipeline,
+            circle_pipeline,
+            dashes_layout,
+            checks.setup_needs,
+        );
+    }
+    if checks.need_extrusion_pipeline {
+        setup.initialize_extrusion(extrusion_pipeline, checks.extrusion_needs);
+    }
+    let pattern_pipeline = checks.needs_pattern.then(|| setup.create_pattern());
+    let pattern_layout = setup.pattern;
+    install_pattern_resources(
+        world,
+        device,
+        checks.needs_pattern_resources,
+        pattern_layout,
+        pattern_pipeline,
+    );
+    Ok(())
+}
+
+fn install_pattern_resources(
+    world: &mut crate::tcs::world::World,
+    device: &wgpu::Device,
+    needs_pattern_resources: bool,
+    pattern_layout: wgpu::BindGroupLayout,
+    pattern_pipeline: Option<crate::render::resource::FeaturePipelinePair>,
+) {
+    if needs_pattern_resources {
+        world
+            .resources
+            .insert(super::pattern::PatternResources::new(
+                device,
+                pattern_layout,
+            ));
+    }
     if let (Some(pipeline), Some(patterns)) = (
         pattern_pipeline,
         world
@@ -289,15 +241,6 @@ pub fn resource_system(
     ) {
         patterns.set_pipeline(pipeline);
     }
-    if update_patterns {
-        if let Some(patterns) = world
-            .resources
-            .get_mut::<super::pattern::PatternResources>()
-        {
-            patterns.update(device, queue, style, style_zoom);
-        }
-    }
-    Ok(())
 }
 
 fn detect_extrusion_encodings(

@@ -137,11 +137,15 @@ impl DrapeCost {
 /// running average, before this frame's drape passes record how many drapes they time.
 pub(crate) fn drape_timer_system(
     crate::context::MapContext {
+        style,
         world,
         renderer: crate::render::Renderer { device, queue, .. },
         ..
     }: &mut crate::context::MapContext,
 ) -> crate::tcs::system::SystemResult {
+    if style.terrain.is_none() && world.resources.get::<DrapeTimerSlot>().is_none() {
+        return Ok(());
+    }
     if world.resources.get::<DrapeTimerSlot>().is_none() {
         world.resources.insert(DrapeTimerSlot::new(device));
     }

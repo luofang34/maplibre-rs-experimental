@@ -46,7 +46,11 @@ pub(crate) fn ensure_seeded_for_style(world: &mut World, style: &Style) {
         .cloned()
         .collect();
 
-    if eligible.is_empty() && world.resources.get::<DynamicPointGeoJson>().is_none() {
+    if eligible.is_empty() {
+        let state = world.resources.get_or_init_mut::<DynamicPointGeoJson>();
+        state.sources.clear();
+        state.circle_layers.clear();
+        state.last_style_revision = Some(current_rev);
         return;
     }
     let circle_layers: Vec<(usize, String)> = style

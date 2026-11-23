@@ -55,7 +55,9 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
         let mut prop_interner =
             crate::vector::feature_paint::intern::TilePropertyInterner::default();
         let mut state_memo = crate::style::feature_state::FeatureStateArcMemo::default();
+        let mut handled = false;
         apply_worker_messages(messages, |message| {
+            handled = true;
             if message.has_tag(super::provided::ProvidedImagesReport::message_tag()) {
                 let report =
                     message.into_transferable::<super::provided::ProvidedImagesReport>()?;
@@ -87,6 +89,9 @@ impl<E: Environment, T: VectorTransferables> System for PopulateWorldSystem<E, T
             }
             Ok(())
         })?;
+        if handled {
+            crate::vector::bump_arrival_epoch(world);
+        }
 
         Ok(())
     }

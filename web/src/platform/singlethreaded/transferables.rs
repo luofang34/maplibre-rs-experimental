@@ -38,6 +38,12 @@ pub struct FlatBufferTransferable {
     )>,
     pub(crate) unpacked_symbol: Option<Box<maplibre::sdf::SymbolLayerData>>,
     pub(crate) unpacked_index: Option<(WorldTileCoords, Option<String>, TileIndex)>,
+    pub(crate) unpacked_raster:
+        Option<Result<AvailableRasterLayerData, Box<maplibre::raster::SharedRasterDem>>>,
+    pub(crate) unpacked_dem: Option<(
+        WorldTileCoords,
+        Result<(std::sync::Arc<maplibre::terrain::DemTile>, f64), RgbaImage>,
+    )>,
 }
 
 impl FlatBufferTransferable {
@@ -51,6 +57,8 @@ impl FlatBufferTransferable {
             unpacked_vector: None,
             unpacked_symbol: None,
             unpacked_index: None,
+            unpacked_raster: None,
+            unpacked_dem: None,
         }
     }
 
@@ -62,6 +70,59 @@ impl FlatBufferTransferable {
             unpacked_vector: None,
             unpacked_symbol: None,
             unpacked_index: None,
+            unpacked_raster: None,
+            unpacked_dem: None,
+        }
+    }
+
+    #[cfg(any(test, feature = "renderer"))]
+    pub(crate) fn from_unpacked_index(
+        coords: WorldTileCoords,
+        source: Option<String>,
+        index: TileIndex,
+    ) -> Self {
+        Self {
+            tag: WebMessageTag::LayerIndexed,
+            data: Vec::new(),
+            start: 0,
+            unpacked_vector: None,
+            unpacked_symbol: None,
+            unpacked_index: Some((coords, source, index)),
+            unpacked_raster: None,
+            unpacked_dem: None,
+        }
+    }
+
+    #[cfg(any(test, feature = "renderer"))]
+    pub(crate) fn from_unpacked_raster(
+        res: Result<AvailableRasterLayerData, Box<maplibre::raster::SharedRasterDem>>,
+    ) -> Self {
+        Self {
+            tag: WebMessageTag::LayerRaster,
+            data: Vec::new(),
+            start: 0,
+            unpacked_vector: None,
+            unpacked_symbol: None,
+            unpacked_index: None,
+            unpacked_raster: Some(res),
+            unpacked_dem: None,
+        }
+    }
+
+    #[cfg(any(test, feature = "renderer"))]
+    pub(crate) fn from_unpacked_dem(
+        coords: WorldTileCoords,
+        outcome: Result<(std::sync::Arc<maplibre::terrain::DemTile>, f64), RgbaImage>,
+    ) -> Self {
+        Self {
+            tag: WebMessageTag::LayerDem,
+            data: Vec::new(),
+            start: 0,
+            unpacked_vector: None,
+            unpacked_symbol: None,
+            unpacked_index: None,
+            unpacked_raster: None,
+            unpacked_dem: Some((coords, outcome)),
         }
     }
 
@@ -72,14 +133,30 @@ impl FlatBufferTransferable {
         len: u32,
     ) -> Option<Self> {
         let (bucket, paint) = tessellated::js_wire::decode_from_js_slice(buffer, offset, len)?;
-        Some(Self {
+        Some(Self::from_unpacked_vector(bucket, paint))
+    }
+
+    #[cfg(any(test, feature = "renderer"))]
+    fn from_unpacked_vector(
+        bucket: Box<maplibre::vector::AvailableVectorLayerBucket>,
+        paint: Option<Vec<maplibre::vector::feature_paint::BucketFeatureEntry>>,
+    ) -> Self {
+        Self {
             tag: WebMessageTag::LayerTessellated,
             data: Vec::new(),
             start: 0,
             unpacked_vector: Some((bucket, paint)),
             unpacked_symbol: None,
             unpacked_index: None,
-        })
+            unpacked_raster: None,
+            unpacked_dem: None,
+        }
+    }
+
+    #[cfg(any(test, feature = "renderer"))]
+    pub(crate) fn from_bytes_layer_tessellated(bytes: &[u8]) -> Option<Self> {
+        let (bucket, paint) = tessellated::js_wire::decode_from_bytes(bytes)?;
+        Some(Self::from_unpacked_vector(bucket, paint))
     }
 
     #[cfg(any(test, feature = "renderer"))]
@@ -89,14 +166,27 @@ impl FlatBufferTransferable {
         len: u32,
     ) -> Option<Self> {
         let bucket = symbol::js_wire::decode_symbol_layer_from_js(buffer, offset, len)?;
-        Some(Self {
+        Some(Self::from_unpacked_symbol(bucket))
+    }
+
+    #[cfg(any(test, feature = "renderer"))]
+    fn from_unpacked_symbol(bucket: maplibre::sdf::SymbolLayerData) -> Self {
+        Self {
             tag: WebMessageTag::SymbolLayerTessellated,
             data: Vec::new(),
             start: 0,
             unpacked_vector: None,
             unpacked_symbol: Some(Box::new(bucket)),
             unpacked_index: None,
-        })
+            unpacked_raster: None,
+            unpacked_dem: None,
+        }
+    }
+
+    #[cfg(any(test, feature = "renderer"))]
+    pub(crate) fn from_bytes_symbol_layer(bytes: &[u8]) -> Option<Self> {
+        let bucket = symbol::decode_symbol_bucket_from_bytes(bytes)?;
+        Some(Self::from_unpacked_symbol(bucket))
     }
 
     #[cfg(any(test, feature = "renderer"))]
@@ -106,6 +196,39 @@ impl FlatBufferTransferable {
         len: u32,
     ) -> Option<Self> {
         indexed::decode_js_layer_indexed(buffer, offset, len)
+    }
+
+    #[cfg(any(test, feature = "renderer"))]
+    pub(crate) fn from_bytes_layer_indexed(bytes: &[u8]) -> Option<Self> {
+        indexed::decode_bytes_layer_indexed(bytes)
+    }
+
+    #[cfg(any(test, feature = "renderer"))]
+    pub(crate) fn from_js_layer_raster(
+        buffer: &js_sys::ArrayBuffer,
+        offset: u32,
+        len: u32,
+    ) -> Option<Self> {
+        raster::decode_js_layer_raster(buffer, offset, len)
+    }
+
+    #[cfg(any(test, feature = "renderer"))]
+    pub(crate) fn from_bytes_layer_raster(bytes: &[u8]) -> Option<Self> {
+        raster::decode_bytes_layer_raster(bytes)
+    }
+
+    #[cfg(any(test, feature = "renderer"))]
+    pub(crate) fn from_js_layer_dem(
+        buffer: &js_sys::ArrayBuffer,
+        offset: u32,
+        len: u32,
+    ) -> Option<Self> {
+        terrain::decode_js_layer_dem(buffer, offset, len)
+    }
+
+    #[cfg(any(test, feature = "renderer"))]
+    pub(crate) fn from_bytes_layer_dem(bytes: &[u8]) -> Option<Self> {
+        terrain::decode_bytes_layer_dem(bytes)
     }
 
     pub fn data(&self) -> &[u8] {

@@ -1,9 +1,8 @@
-//! Thread-local small-block magazine allocator for `wasm32 + atomics`.
+//! Thread-local small-block magazine allocator for `wasm32`.
 //!
-//! Under shared-memory WASM, `std::alloc::System` delegates to `dlmalloc` protected by a single
-//! global spinlock. By caching freed small/medium blocks (`16..=2048` bytes, `align <= 8`) in
-//! per-thread freelists, the render worker and tile workers avoid contending with decode,
-//! tessellation, and eviction bursts on frequent `Vec`/hash-map churn while draining on worker idle.
+//! Avoids repeated `dlmalloc` contention/overhead (and global spinlock contention under
+//! `wasm32 + atomics`) by caching freed small blocks (`16..=2048` bytes, `align <= 8`) in
+//! per-thread freelists and draining when workers or render frames go idle.
 #![expect(
     unsafe_code,
     reason = "thread-local magazine allocator implements GlobalAlloc and raw freelist pointers"

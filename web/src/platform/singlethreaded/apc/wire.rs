@@ -262,6 +262,23 @@ pub(crate) fn decode_message(
 }
 
 #[cfg(any(test, feature = "renderer"))]
+pub(crate) fn decode_outcome_slice(tag: WebMessageTag, slice: &[u8]) -> Result<Message, CallError> {
+    if tag == WebMessageTag::TileRequestOutcome {
+        let outcome = decode_outcome(slice)
+            .ok_or_else(|| CallError::Deserialize(Box::new(TrackedPayloadError::WirePayload)))?;
+        return Ok(IntoMessage::into(outcome));
+    }
+    if tag == WebMessageTag::ProvidedImages {
+        let report = decode_provided_report(slice)
+            .ok_or_else(|| CallError::Deserialize(Box::new(TrackedPayloadError::WirePayload)))?;
+        return Ok(IntoMessage::into(report));
+    }
+    Err(CallError::Deserialize(Box::new(
+        TrackedPayloadError::WirePayload,
+    )))
+}
+
+#[cfg(any(test, feature = "renderer"))]
 pub(crate) fn decode_message_bytes(
     tag: WebMessageTag,
     bytes: Vec<u8>,
@@ -291,15 +308,11 @@ pub(crate) fn decode_message_bytes(
         return decode_message_bytes(inner_tag, bytes, offset + 12)
             .map(|message| message.with_attempt(attempt));
     }
-    if tag == WebMessageTag::TileRequestOutcome {
-        let outcome = decode_outcome(slice)
-            .ok_or_else(|| CallError::Deserialize(Box::new(TrackedPayloadError::WirePayload)))?;
-        return Ok(IntoMessage::into(outcome));
-    }
-    if tag == WebMessageTag::ProvidedImages {
-        let report = decode_provided_report(slice)
-            .ok_or_else(|| CallError::Deserialize(Box::new(TrackedPayloadError::WirePayload)))?;
-        return Ok(IntoMessage::into(report));
+    if matches!(
+        tag,
+        WebMessageTag::TileRequestOutcome | WebMessageTag::ProvidedImages
+    ) {
+        return decode_outcome_slice(tag, slice);
     }
     Ok(Message::new(
         tag.to_static(),
@@ -315,13 +328,15 @@ pub(crate) fn encode_call_finished(attempt: u64) -> ArrayBuffer {
 /// Reads the attempt from the payload of a [`WebMessageTag::CallFinished`] message.
 #[cfg(any(test, feature = "renderer"))]
 pub(crate) fn decode_call_finished(buffer: &ArrayBuffer) -> Result<u64, CallError> {
-    let bytes = Uint8Array::new(buffer).to_vec();
-    let attempt = <[u8; 8]>::try_from(bytes.as_slice()).map_err(|_| {
-        CallError::Deserialize(Box::new(TrackedPayloadError::Finished {
-            bytes: bytes.len(),
-        }))
-    })?;
-    Ok(u64::from_le_bytes(attempt))
+    let len = buffer.byte_length() as usize;
+    if len != 8 {
+        return Err(CallError::Deserialize(Box::new(
+            TrackedPayloadError::Finished { bytes: len },
+        )));
+    }
+    let mut bytes = [0_u8; 8];
+    Uint8Array::new(buffer).copy_to(&mut bytes);
+    Ok(u64::from_le_bytes(bytes))
 }
 
 /// Tells the main thread this worker stopped running the call for `attempt`.

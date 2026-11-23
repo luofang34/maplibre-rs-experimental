@@ -235,6 +235,12 @@ impl Schedule {
         include: impl Fn(&dyn StageLabel) -> bool,
     ) -> StageResult {
         let mut failure = None;
+        let heap_sampler = context
+            .world
+            .resources
+            .get::<crate::tcs::system::heap::HeapSampler>()
+            .copied();
+        let mut stage_cursor: Option<timings::Stamp> = None;
         for entry in &mut self.entries {
             if !include(&*entry.label) {
                 continue;
@@ -246,9 +252,14 @@ impl Schedule {
             }
             #[cfg(feature = "trace")]
             let _stage_span = tracing::info_span!("stage", name = entry.name.as_ref()).entered();
-            let (result, spent) =
-                timings::measure(context, &entry.name, |context| entry.stage.run(context));
-            timings::stage_finished(&mut context.world, entry.name.clone(), spent);
+            let started = stage_cursor.unwrap_or_else(timings::Stamp::now);
+            let heap_before = heap_sampler.map_or(0, crate::tcs::system::heap::HeapSampler::sample);
+            let result = entry.stage.run(context);
+            let ended = timings::Stamp::now();
+            stage_cursor = Some(ended);
+            let spent = ended.elapsed_since(started);
+            let grown = heap_sampler.map(|s| s.sample() - heap_before);
+            timings::record_stage(&mut context.world, &entry.name, spent, grown);
             if let Err(error) = result {
                 if failure.is_none() {
                     failure = Some(error);

@@ -161,7 +161,7 @@ pub fn upload_system(
             TessellatedUploadPlan {
                 style,
                 shared_style_layers,
-                source_tiles,
+                source_tiles: &source_tiles,
                 uncovered_sources: &uncovered_sources,
                 spatial: &spatial,
                 paint: paint_frame,

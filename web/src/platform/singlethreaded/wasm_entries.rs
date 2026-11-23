@@ -135,12 +135,50 @@ impl TileWorkerCalls {
         style_revision: u64,
         input: String,
     ) -> Result<js_sys::Promise, JSError> {
-        let procedure = resolve_procedure(procedure_tag)?;
-
-        let mut input = Input::from_json_slice(input.as_bytes()).map_err(|e| {
+        let input = Input::from_json_slice(input.as_bytes()).map_err(|e| {
             log::error!("DeserializeInput error: {e}");
             CallError::DeserializeInput(Box::new(e))
         })?;
+        self.start_input(procedure_tag, style_revision, input)
+    }
+
+    /// Starts a call from scalar wire parameters without allocating or parsing JSON.
+    pub fn process_tile(
+        &self,
+        attempt: u64,
+        style_revision: u64,
+        x: i32,
+        y: i32,
+        meta: u32,
+        pixel_ratio: f32,
+    ) -> Result<js_sys::Promise, JSError> {
+        let procedure_tag = (meta & 0xff) as u8;
+        let z = ((meta >> 8) & 0xff) as u8;
+        let overscaled_zoom = ((meta >> 16) & 0xff) as u8;
+        let refetch = (meta & (1 << 24)) != 0;
+        let coords = maplibre::coords::WorldTileCoords {
+            x,
+            y,
+            z: maplibre::coords::ZoomLevel::new(z),
+        };
+        let mut input = Input::new(
+            coords,
+            std::sync::Arc::new(maplibre::style::Style::empty()),
+            attempt,
+        );
+        input.overscaled_zoom = overscaled_zoom;
+        input.pixel_ratio = pixel_ratio;
+        input.refetch = refetch;
+        self.start_input(procedure_tag, style_revision, input)
+    }
+
+    fn start_input(
+        &self,
+        procedure_tag: u8,
+        style_revision: u64,
+        mut input: Input,
+    ) -> Result<js_sys::Promise, JSError> {
+        let procedure = resolve_procedure(procedure_tag)?;
         let attempt = input.attempt;
         let context = PassingContext::new();
         let Some(style) = self.styles.get(style_revision) else {
@@ -189,7 +227,15 @@ impl TileWorkerCalls {
             if matches!(result, Ok(Ok(()))) {
                 drop(flush_context.flush());
             }
-            running.borrow_mut().finish(attempt);
+            let empty_after = {
+                let mut calls = running.borrow_mut();
+                calls.finish(attempt);
+                calls.is_empty()
+            };
+            if empty_after {
+                #[cfg(target_arch = "wasm32")]
+                crate::platform::alloc::drain_thread_magazine();
+            }
             if let Err(error) = post_call_finished(attempt) {
                 tracing::warn!(attempt, %error, "reporting a finished call failed");
             }
@@ -207,6 +253,11 @@ impl TileWorkerCalls {
     /// Stops the call for `attempt` at its next await; `false` when it is not running.
     pub fn cancel(&self, attempt: u64) -> bool {
         self.running.borrow_mut().cancel(attempt)
+    }
+
+    /// Stops a batch of active worker calls by `attempt`.
+    pub fn cancel_batch(&self, attempts: &[u64]) {
+        self.running.borrow_mut().cancel_batch(attempts);
     }
 
     /// Releases host assignment tracking when a call failed before starting its future.

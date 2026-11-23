@@ -239,11 +239,11 @@ const wasmPack = () => {
     } else {
         writeFileSync(
             `${outDirectory}/maplibre_tile_worker.js`,
-            'export default async function init() { return {}; }\nexport function register_image_provider() {}\nexport function bind_worker_reply_port() {}\nexport function set_kernel_config() {}\nexport class TileWorkerCalls { set_style() {} async process() {} cancel() { return false; } finish_failed() {} }\n',
+            'export default async function init() { return {}; }\nexport function register_image_provider() {}\nexport function bind_worker_reply_port() {}\nexport function set_kernel_config() {}\nexport class TileWorkerCalls { set_style() {} async process() {} async process_tile() {} cancel() { return false; } cancel_batch() {} finish_failed() {} }\n',
         );
         writeFileSync(
             `${outDirectory}/maplibre_tile_worker.d.ts`,
-            'export type InitOutput = {};\nexport default function init(input?: unknown): Promise<InitOutput>;\nexport function register_image_provider(...args: unknown[]): void;\nexport function bind_worker_reply_port(...args: unknown[]): void;\nexport function set_kernel_config(...args: unknown[]): void;\nexport class TileWorkerCalls { set_style(revision: bigint, style: string, prefetch?: boolean): void; process(procedure_tag: number, style_revision: bigint, input: string): Promise<void>; cancel(attempt: bigint): boolean; finish_failed(attempt: bigint): void; }\n',
+            'export type InitOutput = {};\nexport default function init(input?: unknown): Promise<InitOutput>;\nexport function register_image_provider(...args: unknown[]): void;\nexport function bind_worker_reply_port(...args: unknown[]): void;\nexport function set_kernel_config(...args: unknown[]): void;\nexport class TileWorkerCalls { set_style(revision: bigint, style: string, prefetch?: boolean): void; process(procedure_tag: number, style_revision: bigint, input: string): Promise<void>; process_tile(attempt: bigint, style_revision: bigint, x: number, y: number, meta: number, pixel_ratio: number): Promise<void>; cancel(attempt: bigint): boolean; cancel_batch(attempts: ArrayLike<bigint>): void; finish_failed(attempt: bigint): void; }\n',
         );
         writeFileSync(`${outDirectory}/maplibre_tile_worker_bg.wasm`, Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]));
     }

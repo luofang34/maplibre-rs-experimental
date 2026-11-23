@@ -11,6 +11,7 @@ mod tests;
 
 const SYMBOL_HEADER_BYTES: usize = 40;
 
+#[derive(Clone, Copy)]
 pub(super) struct SymbolHeader {
     coords: WorldTileCoords,
     has_atlas: bool,
@@ -155,13 +156,22 @@ impl SymbolLayerTessellated for FlatBufferTransferable {
     }
 }
 
-fn decode_symbol_bucket(owned_data: Vec<u8>, start: usize) -> Option<SymbolLayerData> {
-    let bytes = owned_data.get(start..)?;
+type SymbolBody = (
+    SymbolHeader,
+    OverAlignedVertexBuffer<ShaderSymbolVertex, u32>,
+    String,
+    String,
+    Vec<Feature>,
+    usize,
+);
+
+fn parse_symbol_body(bytes: &[u8]) -> Option<SymbolBody> {
     let hdr = parse_symbol_header(bytes, bytes.len())?;
     let mut cursor = SYMBOL_HEADER_BYTES;
     let take = |cur: &mut usize, len: usize| -> Option<&[u8]> {
-        let slice = bytes.get(*cur..*cur + len)?;
-        *cur += len;
+        let end = cur.checked_add(len)?;
+        let slice = bytes.get(*cur..end)?;
+        *cur = end;
         Some(slice)
     };
 
@@ -189,6 +199,19 @@ fn decode_symbol_bucket(owned_data: Vec<u8>, start: usize) -> Option<SymbolLayer
                 tracing::error!("invalid symbol features");
                 Vec::new()
             });
+    Some((
+        hdr,
+        OverAlignedVertexBuffer::from_vecs(vertices, indices, hdr.usable_indices),
+        source_layer,
+        style_layer_id,
+        features,
+        cursor,
+    ))
+}
+
+fn decode_symbol_bucket(owned_data: Vec<u8>, start: usize) -> Option<SymbolLayerData> {
+    let bytes = owned_data.get(start..)?;
+    let (hdr, buffer, source_layer, style_layer_id, features, cursor) = parse_symbol_body(bytes)?;
     let atlas = hdr
         .has_atlas
         .then(|| decode_symbol_atlas_owned(hdr.coords, owned_data, start + cursor, hdr.atlas_len))
@@ -198,10 +221,64 @@ fn decode_symbol_bucket(owned_data: Vec<u8>, start: usize) -> Option<SymbolLayer
         coords: hdr.coords,
         source_layer,
         style_layer_id,
-        buffer: OverAlignedVertexBuffer::from_vecs(vertices, indices, hdr.usable_indices),
+        buffer,
         features,
         atlas,
     })
+}
+
+#[cfg(any(test, feature = "renderer"))]
+pub(super) fn decode_symbol_bucket_from_bytes(bytes: &[u8]) -> Option<SymbolLayerData> {
+    let (hdr, buffer, source_layer, style_layer_id, features, cursor) = parse_symbol_body(bytes)?;
+    let atlas = hdr
+        .has_atlas
+        .then(|| {
+            let end = cursor.checked_add(hdr.atlas_len)?;
+            decode_symbol_atlas_slice(hdr.coords, bytes.get(cursor..end)?)
+        })
+        .flatten();
+
+    Some(SymbolLayerData {
+        coords: hdr.coords,
+        source_layer,
+        style_layer_id,
+        buffer,
+        features,
+        atlas,
+    })
+}
+
+#[cfg(any(test, feature = "renderer"))]
+fn decode_symbol_atlas_slice(
+    coords: WorldTileCoords,
+    bytes: &[u8],
+) -> Option<std::sync::Arc<maplibre::sdf::assets::SymbolAtlas>> {
+    let first_word = u32::from_le_bytes(*bytes.first_chunk::<4>()?);
+    if first_word == ATLAS_WIRE_MAGIC {
+        let hdr24 = bytes.first_chunk::<24>()?;
+        let kind = u32::from_le_bytes([hdr24[4], hdr24[5], hdr24[6], hdr24[7]]);
+        let width = u32::from_le_bytes([hdr24[8], hdr24[9], hdr24[10], hdr24[11]]);
+        let height = u32::from_le_bytes([hdr24[12], hdr24[13], hdr24[14], hdr24[15]]);
+        let ptr_id = u64::from_le_bytes([
+            hdr24[16], hdr24[17], hdr24[18], hdr24[19], hdr24[20], hdr24[21], hdr24[22], hdr24[23],
+        ]);
+        let key = (coords, width, height, ptr_id);
+        if let Some(hit) = check_atlas_cache(&key) {
+            return Some(hit);
+        }
+        if kind == ATLAS_WIRE_REF {
+            return None;
+        }
+        let pixels = bytes.get(24..)?;
+        let expected_len = (width as usize)
+            .saturating_mul(height as usize)
+            .saturating_mul(4);
+        if pixels.len() != expected_len {
+            return None;
+        }
+        return Some(insert_atlas_cache(key, [width, height], pixels.to_vec()));
+    }
+    atlas_from_wire_bytes(coords, bytes)
 }
 
 pub(super) const ATLAS_WIRE_MAGIC: u32 = u32::MAX;

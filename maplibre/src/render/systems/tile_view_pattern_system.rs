@@ -6,7 +6,8 @@ use crate::{
         eventually::{Eventually, Eventually::Initialized},
         eye_covering::drawn_covering,
         tile_view_pattern::{
-            TileViewPatternMemo, ViewTileSources, WgpuTileViewPattern, DEFAULT_TILE_SIZE,
+            compute_memo_key, TileViewPatternMemo, ViewTileSources, WgpuTileViewPattern,
+            DEFAULT_TILE_SIZE,
         },
     },
     tcs::system::{SystemError, SystemResult},
@@ -34,54 +35,70 @@ pub fn tile_view_pattern_system(
     if let Some(view_region) = &view_region {
         let zoom = view_state.zoom();
         let style_rev = style.revision();
-        let mut memo = world
+        let next_key = compute_memo_key(view_region, &raster_coverings, style_rev, world);
+        let hit = world
             .resources
-            .remove::<TileViewPatternMemo>()
-            .unwrap_or_default();
-        let Some(Initialized(tile_view_pattern)) =
-            world.resources.get::<Eventually<WgpuTileViewPattern>>()
-        else {
-            world.resources.insert(memo);
-            return Err(SystemError::Dependencies);
-        };
-        let is_empty = tile_view_pattern.is_empty();
-        if !is_empty && memo.matches(view_region, &raster_coverings, style_rev, world) {
-            if memo.needs_zoom_update(zoom) {
-                if let Some(Initialized(tile_view_pattern)) =
-                    world.resources.get_mut::<Eventually<WgpuTileViewPattern>>()
-                {
-                    tile_view_pattern.update_zoom_in_place(zoom);
-                }
+            .query::<(&TileViewPatternMemo, &Eventually<WgpuTileViewPattern>)>()
+            .map(|(memo, pattern)| {
+                let is_empty = match pattern {
+                    Initialized(p) => p.is_empty(),
+                    _ => return Err(SystemError::Dependencies),
+                };
+                Ok((
+                    !is_empty && memo.matches_key(next_key.as_ref()),
+                    memo.zoom_changed(zoom),
+                ))
+            })
+            .transpose()?;
+        if let Some((true, zoom_changed)) = hit {
+            if zoom_changed
+                && let Some((memo, Initialized(tile_view_pattern))) = world.resources.query_mut::<(
+                    &mut TileViewPatternMemo,
+                    &mut Eventually<WgpuTileViewPattern>,
+                )>(
+                )
+            {
+                memo.set_zoom(zoom);
+                tile_view_pattern.update_zoom_in_place(zoom);
             }
-            world.resources.insert(memo);
             return Ok(());
         }
+        let mut view_tiles = world
+            .resources
+            .get_mut::<TileViewPatternMemo>()
+            .map_or_else(Vec::new, TileViewPatternMemo::take_scratch);
         let Some((Initialized(tile_view_pattern), view_tile_sources)) = world
             .resources
             .query::<(&Eventually<WgpuTileViewPattern>, &ViewTileSources)>()
         else {
-            world.resources.insert(memo);
+            if let Some(memo) = world.resources.get_mut::<TileViewPatternMemo>() {
+                memo.put_scratch(view_tiles);
+            }
             return Err(SystemError::Dependencies);
         };
-        let view_tiles = tile_view_pattern.generate_pattern(
+        tile_view_pattern.generate_pattern_into(
             view_region,
             view_tile_sources,
             &raster_coverings,
             zoom,
             world,
+            &mut view_tiles,
         );
-        memo.record(view_region, &raster_coverings, style_rev, zoom, world);
         log::trace!("Tiles in view: {}", view_tiles.len());
 
         let Some(Initialized(tile_view_pattern)) = world
             .resources
             .query_mut::<&mut Eventually<WgpuTileViewPattern>>()
         else {
-            world.resources.insert(memo);
+            if let Some(memo) = world.resources.get_mut::<TileViewPatternMemo>() {
+                memo.put_scratch(view_tiles);
+            }
             return Err(SystemError::Dependencies);
         };
-        tile_view_pattern.update_pattern(view_tiles);
-        world.resources.insert(memo);
+        tile_view_pattern.update_pattern_swapped(&mut view_tiles);
+        let memo = world.resources.get_or_init_mut::<TileViewPatternMemo>();
+        memo.put_scratch(view_tiles);
+        memo.record_key(next_key, zoom);
     }
 
     Ok(())

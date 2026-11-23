@@ -29,6 +29,7 @@ pub enum ProjectionBinding {
 /// A resource to collect and sort draw requests for specific [`PhaseItems`](PhaseItem).
 pub struct RenderPhase<I: PhaseItem> {
     items: Vec<I>,
+    mask_group_bits: u8,
 }
 
 impl<'a, I: PhaseItem> IntoIterator for &'a RenderPhase<I> {
@@ -42,13 +43,17 @@ impl<'a, I: PhaseItem> IntoIterator for &'a RenderPhase<I> {
 
 impl<I: PhaseItem> Default for RenderPhase<I> {
     fn default() -> Self {
-        Self { items: Vec::new() }
+        Self {
+            items: Vec::new(),
+            mask_group_bits: 0,
+        }
     }
 }
 
 impl<I: PhaseItem> RenderPhase<I> {
     /// Adds a [`PhaseItem`] to this render phase.
     pub fn add(&mut self, item: I) {
+        self.mask_group_bits |= item.mask_group_bit();
         self.items.push(item);
     }
 
@@ -57,6 +62,9 @@ impl<I: PhaseItem> RenderPhase<I> {
     where
         I: Clone,
     {
+        for item in items {
+            self.mask_group_bits |= item.mask_group_bit();
+        }
         self.items.extend_from_slice(items);
     }
 
@@ -89,16 +97,35 @@ impl<I: PhaseItem> RenderPhase<I> {
     /// Drops queued items while retaining the vector allocation for the next frame.
     pub fn clear(&mut self) {
         self.items.clear();
+        self.mask_group_bits = 0;
     }
 
     /// Keeps only the items the predicate accepts.
-    pub fn retain(&mut self, keep: impl FnMut(&I) -> bool) {
-        self.items.retain(keep);
+    pub fn retain(&mut self, mut keep: impl FnMut(&I) -> bool) {
+        let mut bits = 0_u8;
+        self.items.retain(|item| {
+            let kept = keep(item);
+            if kept {
+                bits |= item.mask_group_bit();
+            }
+            kept
+        });
+        self.mask_group_bits = bits;
     }
 
     /// Number of queued items, including items whose draw resources are not ready.
     pub fn size(&self) -> usize {
         self.items.len()
+    }
+}
+
+impl RenderPhase<LayerItem> {
+    /// Returns `true` when any queued layer writes scene depth that symbol occlusion must test.
+    pub fn has_depth_occluders(&self, flat_view: bool) -> bool {
+        let custom_bit = 1_u8 << (MaskGroup::Custom as u8);
+        let mutating_bit = 1_u8 << (MaskGroup::Mutating as u8);
+        (self.mask_group_bits & custom_bit) != 0
+            || (!flat_view && (self.mask_group_bits & mutating_bit) != 0)
     }
 }
 
@@ -192,6 +219,10 @@ impl PhaseItem for LayerItem {
 
     fn projection_binding(&self) -> ProjectionBinding {
         self.projection
+    }
+
+    fn mask_group_bit(&self) -> u8 {
+        1_u8 << (self.mask_group as u8)
     }
 }
 

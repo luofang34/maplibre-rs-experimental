@@ -23,10 +23,9 @@
 #[cfg(not(any(no_pendantic_os_check, target_arch = "wasm32")))]
 compile_error!("web works only on wasm32.");
 
-#[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+#[cfg(all(target_arch = "wasm32", not(test)))]
 #[global_allocator]
-static GLOBAL_ALLOC: platform::multithreaded::alloc::MagazineAllocator =
-    platform::multithreaded::alloc::MagazineAllocator;
+static GLOBAL_ALLOC: platform::alloc::MagazineAllocator = platform::alloc::MagazineAllocator;
 
 #[cfg(feature = "renderer")]
 mod application;

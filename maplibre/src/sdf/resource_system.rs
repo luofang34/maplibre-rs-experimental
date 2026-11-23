@@ -14,6 +14,8 @@ use crate::{
 
 #[derive(Default)]
 struct SdfHaloStyleCache {
+    layers_rev: Option<u64>,
+    symbol_layer_indices: Vec<usize>,
     key: Option<(u64, u64, bool, bool, bool)>,
     needs_combined: bool,
     needs_separate: bool,
@@ -53,21 +55,33 @@ fn resolve_halo_requirements(
             (false, false),
             super::textures::SymbolTextures::separate_halo_flags,
         );
+    let rev = style.revision();
     let key = (
-        style.revision(),
+        rev,
         style_zoom.to_bits(),
         uses_globe,
         tex_combined,
         tex_separate,
     );
-    if let Some(cache) = world.resources.get::<SdfHaloStyleCache>() {
-        if cache.key == Some(key) {
-            return (cache.needs_combined, cache.needs_separate);
+    let cache = world.resources.get_or_init_mut::<SdfHaloStyleCache>();
+    if cache.layers_rev != Some(rev) {
+        cache.layers_rev = Some(rev);
+        cache.symbol_layer_indices.clear();
+        for (idx, layer) in style.layers.iter().enumerate() {
+            if layer.type_ == "symbol" && !layer.is_hidden() {
+                cache.symbol_layer_indices.push(idx);
+            }
         }
     }
+    if cache.key == Some(key) {
+        return (cache.needs_combined, cache.needs_separate);
+    }
     let (mut needs_combined, mut needs_separate) = (tex_combined, tex_separate);
-    for layer in &style.layers {
-        if layer.type_ != "symbol" || layer.is_hidden() || !layer.is_visible_at(style_zoom) {
+    for &idx in &cache.symbol_layer_indices {
+        let Some(layer) = style.layers.get(idx) else {
+            continue;
+        };
+        if !layer.is_visible_at(style_zoom) {
             continue;
         }
         if let Some(crate::style::layer::LayerPaint::Symbol(paint)) = &layer.paint {
@@ -92,7 +106,6 @@ fn resolve_halo_requirements(
     if !needs_combined && !needs_separate {
         needs_combined = true;
     }
-    let cache = world.resources.get_or_init_mut::<SdfHaloStyleCache>();
     cache.key = Some(key);
     cache.needs_combined = needs_combined;
     cache.needs_separate = needs_separate;
@@ -124,12 +137,19 @@ pub fn resource_system(
             return Ok(());
         }
     }
+    let (needs_combined, needs_separate) = if has_symbol_layers {
+        resolve_halo_requirements(world, style, style_zoom, uses_globe)
+    } else {
+        (false, false)
+    };
     let mode_already_complete = matches!(
         world.resources.get::<Eventually<SymbolPipeline>>(),
         Some(Initialized(sp))
-            if sp
-                .for_globe(uses_globe)
-                .is_some_and(|m| m.combined.is_some() && m.halo.is_some() && m.fill.is_some())
+            if (!needs_combined && !needs_separate)
+                || sp.for_globe(uses_globe).is_some_and(|m| {
+                    (!needs_combined || m.combined.is_some())
+                        && (!needs_separate || (m.halo.is_some() && m.fill.is_some()))
+                })
     );
     let has_symbol_geometry = !mode_already_complete
         && (matches!(
@@ -137,7 +157,7 @@ pub fn resource_system(
             Some(Initialized(pool)) if !pool.index().is_empty()
         ) || tiles_have_symbols(world));
     let (needs_combined, needs_separate) = if has_symbol_geometry {
-        resolve_halo_requirements(world, style, style_zoom, uses_globe)
+        (needs_combined, needs_separate)
     } else {
         (false, false)
     };

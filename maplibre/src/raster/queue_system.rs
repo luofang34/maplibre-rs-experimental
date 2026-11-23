@@ -32,14 +32,10 @@ pub fn queue_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
-    let style_zoom = view_state.style_zoom().value();
-    if !style
-        .layers
-        .iter()
-        .any(|layer| layer.type_ == "raster" && layer.is_visible_at(style_zoom))
-    {
+    if !style.cached_has_raster_layer() {
         return Ok(());
     }
+    let style_zoom = view_state.style_zoom().value();
     let now = instant::Instant::now();
     let mut animating_fade = false;
     if let Some(fade) = world.resources.get_mut::<RasterCrossFade>() {

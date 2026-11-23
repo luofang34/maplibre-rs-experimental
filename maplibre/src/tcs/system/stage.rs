@@ -39,13 +39,24 @@ impl SystemStage {
 
 impl Stage for SystemStage {
     fn run(&mut self, context: &mut MapContext) -> StageResult {
+        let measure_systems = cfg!(test)
+            || tracing::enabled!(tracing::Level::INFO)
+            || context
+                .world
+                .resources
+                .get::<super::heap::HeapSampler>()
+                .is_some();
         for container in &mut self.systems {
             #[cfg(feature = "trace")]
             let _span =
                 tracing::info_span!("system", name = container.system.name().as_ref()).entered();
-            let name = container.system.name();
             let system = &mut container.system;
-            timings::measure(context, &name, |context| system.run(context)).0?;
+            if measure_systems {
+                let name = system.name();
+                timings::measure(context, &name, |context| system.run(context)).0?;
+            } else {
+                system.run(context)?;
+            }
         }
         Ok(())
     }

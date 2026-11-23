@@ -129,7 +129,7 @@ impl SymbolPipeline {
 
 /// Checks whether `style` declares any `"symbol"` layer.
 pub(crate) fn style_has_symbol_layers(style: &crate::style::Style) -> bool {
-    style.layers.iter().any(|layer| layer.type_ == "symbol")
+    style.cached_has_symbol_layers()
 }
 
 /// Checks whether the GPU symbol pool is either uninitialized or holds zero uploaded layers.

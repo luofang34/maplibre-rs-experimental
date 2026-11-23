@@ -20,11 +20,7 @@ pub fn raster_source_regions(
     world: &World,
     padding: ViewStatePadding,
 ) -> Result<RasterCoverings, ProjectionStateError> {
-    if !style
-        .layers
-        .iter()
-        .any(|layer| RASTER_LAYER_TYPES.contains(&layer.type_.as_str()))
-    {
+    if !style.cached_has_any_raster_type(&RASTER_LAYER_TYPES) {
         return Ok(Vec::new());
     }
     let zoom = view_state.zoom().value();

@@ -1,5 +1,5 @@
 //! Queues [PhaseItems](crate::render::render_phase::PhaseItem) for rendering.
-use phase_cache::{CachedVectorPhases, VectorPhaseCacheKey, VectorQueueScratch};
+use phase_cache::{VectorPhaseCacheKey, VectorQueueScratch};
 use rustc_hash::FxHashSet;
 
 use crate::{
@@ -122,23 +122,25 @@ pub fn queue_system(
         ..
     } = scratch;
     active_unclipped_3d_shapes.clear();
-    for view_tile in tile_view_pattern.iter() {
-        view_tile.render_kind(TileKind::Vector, |shape| {
-            if let Some(layer_entries) = buffer_pool_index.get_layers(shape.coords()) {
-                for layer_entry in layer_entries {
-                    if unclipped_3d_layers.contains(&layer_entry.style_layer_id)
-                        && !zero_opacity_layers.contains(&layer_entry.style_layer_id)
-                        && layer_entry.style_layer.is_visible_at(style_zoom)
-                    {
-                        active_unclipped_3d_shapes.insert((
-                            shape.wrap,
-                            shape.coords(),
-                            layer_entry.style_layer.index,
-                        ));
+    if !unclipped_3d_layers.is_empty() {
+        for view_tile in tile_view_pattern.iter() {
+            view_tile.render_kind(TileKind::Vector, |shape| {
+                if let Some(layer_entries) = buffer_pool_index.get_layers(shape.coords()) {
+                    for layer_entry in layer_entries {
+                        if unclipped_3d_layers.contains(&layer_entry.style_layer_id)
+                            && !zero_opacity_layers.contains(&layer_entry.style_layer_id)
+                            && layer_entry.style_layer.is_visible_at(style_zoom)
+                        {
+                            active_unclipped_3d_shapes.insert((
+                                shape.wrap,
+                                shape.coords(),
+                                layer_entry.style_layer.index,
+                            ));
+                        }
                     }
                 }
-            }
-        });
+            });
+        }
     }
     // Every tile's depth is drawn before any tile's colour, so an extrusion that crosses tiles
     // shows its nearest surface once instead of once per tile.
@@ -352,19 +354,17 @@ pub fn queue_system(
 
     mask_phase.sort_tail(mask_start);
     layer_item_phase.sort_tail(layer_start);
-    scratch.cached_phases = Some(CachedVectorPhases {
-        key: cache_key,
-        masks: mask_phase
-            .items()
-            .get(mask_start..)
-            .unwrap_or_default()
-            .to_vec(),
-        layers: layer_item_phase
-            .items()
-            .get(layer_start..)
-            .unwrap_or_default()
-            .to_vec(),
-    });
+    let mask_slice = mask_phase.items().get(mask_start..).unwrap_or_default();
+    let layer_slice = layer_item_phase
+        .items()
+        .get(layer_start..)
+        .unwrap_or_default();
+    let cached = scratch.cached_phases.get_or_insert_default();
+    cached.key = cache_key;
+    cached.masks.clear();
+    cached.masks.extend_from_slice(mask_slice);
+    cached.layers.clear();
+    cached.layers.extend_from_slice(layer_slice);
 
     Ok(())
 }

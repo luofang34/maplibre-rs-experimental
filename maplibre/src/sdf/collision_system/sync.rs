@@ -40,6 +40,18 @@ pub(super) fn prune_inactive_symbol_draws(
     history: &PlacementHistory,
     uploaded: &FxHashMap<(WorldTileCoords, StyleLayerId), upload_diff::CachedBucketMetadata>,
 ) {
+    let has_symbol_items = world
+        .resources
+        .get::<RenderPhase<TranslucentItem>>()
+        .is_some_and(|phase| {
+            phase
+                .items()
+                .iter()
+                .any(|item| item.style_layer != StyleLayerId::ATMOSPHERE && item.index != u32::MAX)
+        });
+    if !has_symbol_items {
+        return;
+    }
     let now_ms = history.effective_shader_time_ms();
     let fade_duration_ms = history.fade_duration_ms();
     let Some((phase, Initialized(pool))) = world.resources.query_mut::<(

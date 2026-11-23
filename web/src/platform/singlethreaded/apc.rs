@@ -22,7 +22,7 @@ use maplibre::{
 use wasm_bindgen::JsValue;
 
 #[cfg(any(test, feature = "renderer"))]
-pub use self::raw_queue::PassingReceiveIter;
+pub use self::raw_decode::PassingReceiveIter;
 pub use self::tag::WebMessageTag;
 #[cfg(test)]
 pub(crate) use self::wire::{encode_call_finished, prepare_message};
@@ -61,6 +61,7 @@ pub struct PassingAsyncProcedureCall {
     listeners: Vec<recycle::WorkerMessageClosure>,
 
     buffer: RefCell<Vec<QueuedMessage>>,
+    scratch: RefCell<scratch::ReceiveScratch>,
     batch_open: Cell<bool>,
     boot_unthrottled: Cell<bool>,
 
@@ -89,6 +90,7 @@ impl PassingAsyncProcedureCall {
             workers,
             listeners,
             buffer: RefCell::new(Vec::default()),
+            scratch: RefCell::default(),
             batch_open: Cell::new(true),
             boot_unthrottled: Cell::new(true),
             received,
@@ -98,35 +100,9 @@ impl PassingAsyncProcedureCall {
     }
 
     fn post_style_to_workers(&self, revision: u64, style: &str) -> Result<(), WebError> {
-        let rev_js = JsValue::from(revision);
-        let style_js = JsValue::from(style);
-        let prefetch_msg = worker_message(
-            "style",
-            &[
-                ("revision", &rev_js),
-                ("style", &style_js),
-                ("prefetch", &JsValue::TRUE),
-            ],
-        )?;
-        let plain_msg = if self.workers.len() > 1 {
-            Some(worker_message(
-                "style",
-                &[
-                    ("revision", &rev_js),
-                    ("style", &style_js),
-                    ("prefetch", &JsValue::FALSE),
-                ],
-            )?)
-        } else {
-            None
-        };
         for (idx, worker) in self.workers.iter().enumerate() {
-            let msg = if idx == 0 {
-                &prefetch_msg
-            } else {
-                plain_msg.as_ref().unwrap_or(&prefetch_msg)
-            };
-            worker.post_message(msg).map_err(WebError::from)?;
+            post::post_st_style(worker.as_js_value(), revision, style, idx == 0)
+                .map_err(WebError::from)?;
         }
         Ok(())
     }
@@ -144,20 +120,6 @@ impl PassingAsyncProcedureCall {
                 self.post_style_to_workers(revision, style)
             })
             .map_err(|error| CallError::Serialize(Box::new(error)))?;
-        let input = serde_json::to_string(&input).map_err(|e| CallError::Serialize(Box::new(e)))?;
-
-        // The worker reads the attempt without decoding the input, so a cancel can overtake
-        // a call that waits for the worker to start.
-        let message = worker_message(
-            "call",
-            &[
-                ("procedure_tag", &JsValue::from(tag.as_u8())),
-                ("attempt", &JsValue::from(attempt)),
-                ("style_revision", &JsValue::from(style_revision)),
-                ("input", &JsValue::from(input)),
-            ],
-        )
-        .map_err(|error| CallError::Serialize(Box::new(error)))?;
 
         if let Ok(mut received) = self.received.try_borrow_mut() {
             let mut assignments = self.assignments.borrow_mut();
@@ -174,81 +136,40 @@ impl PassingAsyncProcedureCall {
             .get(index)
             .ok_or(CallError::Schedule(ScheduleError::NoWorkers))?;
 
-        worker.post_message(&message).map_err(|error| {
+        let post_res = if input.only_sources.is_some() {
+            let serialized =
+                serde_json::to_string(&input).map_err(|e| CallError::Serialize(Box::new(e)))?;
+            let message = recycle::worker_message(
+                "call",
+                &[
+                    ("procedure_tag", &JsValue::from(tag.as_u8())),
+                    ("attempt", &JsValue::from(attempt)),
+                    ("style_revision", &JsValue::from(style_revision)),
+                    ("input", &JsValue::from(serialized)),
+                ],
+            )
+            .map_err(|error| CallError::Serialize(Box::new(error)))?;
+            worker.post_message(&message)
+        } else {
+            let meta = (tag.as_u8() as u32)
+                | ((u8::from(input.coords.z) as u32) << 8)
+                | ((input.overscaled_zoom as u32) << 16)
+                | (u32::from(input.refetch) << 24);
+            post::post_st_tile_call(
+                worker.as_js_value(),
+                attempt,
+                style_revision,
+                input.coords.x,
+                input.coords.y,
+                meta,
+                input.pixel_ratio,
+            )
+        };
+        post_res.map_err(|error| {
             CallError::Schedule(ScheduleError::Scheduling(Box::new(WebError::from(error))))
         })?;
         self.assignments.borrow_mut().assign(attempt, index);
         Ok(())
-    }
-}
-
-/// Builds a worker message `{ type: kind, <key>: value, ... }`.
-#[cfg(any(test, feature = "renderer"))]
-pub(super) fn worker_message(
-    kind: &str,
-    fields: &[(&str, &JsValue)],
-) -> Result<js_sys::Object, WebError> {
-    let entries = js_sys::Array::of1(&js_sys::Array::of2(
-        &JsValue::from("type"),
-        &JsValue::from(kind),
-    ));
-    for (key, value) in fields {
-        entries.push(&js_sys::Array::of2(&JsValue::from(*key), value));
-    }
-    js_sys::Object::from_entries(&entries).map_err(WebError::from)
-}
-
-#[cfg(any(test, feature = "renderer"))]
-struct BatchBudget {
-    bytes: usize,
-    attempts: rustc_hash::FxHashSet<u64>,
-    msgs: usize,
-}
-
-#[cfg(any(test, feature = "renderer"))]
-impl BatchBudget {
-    const MAX_RAW_BYTES: usize = 768 * 1024;
-    const MAX_RAW_MESSAGES: usize = 16;
-    const MAX_RAW_ATTEMPTS: usize = 3;
-
-    fn from_buffer(buffer: &[QueuedMessage]) -> Self {
-        Self {
-            bytes: buffer.iter().map(QueuedMessage::raw_byte_len).sum(),
-            attempts: buffer.iter().filter_map(QueuedMessage::attempt).collect(),
-            msgs: buffer.len(),
-        }
-    }
-
-    fn try_admit(
-        &mut self,
-        item: &QueuedMessage,
-        attempt_totals: &rustc_hash::FxHashMap<u64, usize>,
-    ) -> bool {
-        let attempt = item.attempt();
-        let admit = match attempt {
-            None => {
-                self.attempts.is_empty()
-                    || (self.msgs < Self::MAX_RAW_MESSAGES && self.bytes < Self::MAX_RAW_BYTES)
-            }
-            Some(id) => {
-                self.attempts.contains(&id)
-                    || self.attempts.is_empty()
-                    || (self.attempts.len() < Self::MAX_RAW_ATTEMPTS
-                        && self.msgs < Self::MAX_RAW_MESSAGES
-                        && self
-                            .bytes
-                            .saturating_add(attempt_totals.get(&id).copied().unwrap_or(0))
-                            <= Self::MAX_RAW_BYTES)
-            }
-        };
-        if admit {
-            if let Some(id) = attempt {
-                self.attempts.insert(id);
-            }
-            self.msgs = self.msgs.saturating_add(1);
-            self.bytes = self.bytes.saturating_add(item.raw_byte_len());
-        }
-        admit
     }
 }
 
@@ -268,21 +189,22 @@ impl PassingAsyncProcedureCall {
         received: &mut Received,
         buffer: &mut Vec<QueuedMessage>,
         ret: &mut Vec<QueuedMessage>,
-        budget: &mut BatchBudget,
         filter: &mut F,
     ) {
-        let mut attempt_totals: rustc_hash::FxHashMap<u64, usize> =
-            rustc_hash::FxHashMap::default();
+        let mut scratch = self.scratch.borrow_mut();
+        let scratch = &mut *scratch;
+        scratch.budget.reset_from_buffer(buffer);
+        scratch.attempt_totals.clear();
         for item in &received.queued {
             if let Some(id) = item.attempt() {
-                let entry = attempt_totals.entry(id).or_insert(0);
+                let entry = scratch.attempt_totals.entry(id).or_insert(0);
                 *entry = entry.saturating_add(item.raw_byte_len());
             }
         }
-        let mut deferred = Vec::new();
+        scratch.deferred.clear();
         for item in received.queued.drain(..) {
-            if !budget.try_admit(&item, &attempt_totals) {
-                deferred.push(item);
+            if !scratch.budget.try_admit(&item, &scratch.attempt_totals) {
+                scratch.deferred.push(item);
                 continue;
             }
             if item.matches(filter) {
@@ -291,10 +213,10 @@ impl PassingAsyncProcedureCall {
                 buffer.push(item);
             }
         }
-        if !deferred.is_empty() {
+        if !scratch.deferred.is_empty() {
             self.batch_open.set(false);
         }
-        received.queued = deferred;
+        std::mem::swap(&mut received.queued, &mut scratch.deferred);
     }
 }
 
@@ -317,7 +239,6 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
                 return PassingReceiveIter::new(Vec::new());
             }
         }
-        let mut budget = BatchBudget::from_buffer(&buffer);
         // Partial and final tile completions must retain the worker's delivery order.
         let mut ret: Vec<QueuedMessage> = buffer
             .extract_if(.., |item| item.matches(&mut filter))
@@ -348,13 +269,7 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
             return PassingReceiveIter::new(ret);
         }
         if self.batch_open.get() {
-            self.admit_throttled_queued(
-                &mut received,
-                &mut buffer,
-                &mut ret,
-                &mut budget,
-                &mut filter,
-            );
+            self.admit_throttled_queued(&mut received, &mut buffer, &mut ret, &mut filter);
         }
         PassingReceiveIter::new(ret)
     }
@@ -393,11 +308,52 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
         let Some(worker) = self.workers.get(index) else {
             return;
         };
-        let posted = worker_message("cancel", &[("attempt", &JsValue::from(attempt))])
-            .and_then(|message| worker.post_message(&message).map_err(WebError::from));
-        if let Err(error) = posted {
+        if let Err(error) =
+            post::post_st_cancel(worker.as_js_value(), attempt).map_err(WebError::from)
+        {
             // The call finishes and the map ignores its result.
             tracing::warn!(attempt, %error, "cancelling a worker call failed");
+        }
+    }
+
+    fn cancel_batch(&self, attempts: &[u64]) {
+        if attempts.is_empty() || self.workers.is_empty() {
+            return;
+        }
+        let mut scratch = self.scratch.borrow_mut();
+        if scratch.cancel_buckets.len() < self.workers.len() {
+            scratch
+                .cancel_buckets
+                .resize_with(self.workers.len(), Vec::new);
+        }
+        for bucket in &mut scratch.cancel_buckets {
+            bucket.clear();
+        }
+        {
+            let mut assignments = self.assignments.borrow_mut();
+            for &attempt in attempts {
+                if let Some(index) = assignments.cancel(attempt) {
+                    if let Some(bucket) = scratch.cancel_buckets.get_mut(index) {
+                        bucket.push(attempt);
+                    }
+                }
+            }
+        }
+        for (index, bucket) in scratch.cancel_buckets.iter().enumerate() {
+            if bucket.is_empty() {
+                continue;
+            }
+            let Some(worker) = self.workers.get(index) else {
+                continue;
+            };
+            let res = if let [only] = bucket.as_slice() {
+                post::post_st_cancel(worker.as_js_value(), *only)
+            } else {
+                post::post_st_cancel_batch(worker.as_js_value(), bucket.as_slice())
+            };
+            if let Err(error) = res.map_err(WebError::from) {
+                tracing::warn!(count = bucket.len(), %error, "batch-cancelling worker calls failed");
+            }
         }
     }
 
@@ -478,9 +434,15 @@ impl Drop for PassingAsyncProcedureCall {
 #[cfg(any(test, feature = "renderer"))]
 mod assignments;
 #[cfg(any(test, feature = "renderer"))]
+mod post;
+#[cfg(any(test, feature = "renderer"))]
+mod raw_decode;
+#[cfg(any(test, feature = "renderer"))]
 mod raw_queue;
 #[cfg(any(test, feature = "renderer"))]
 mod recycle;
+#[cfg(any(test, feature = "renderer"))]
+mod scratch;
 #[cfg(any(test, feature = "renderer"))]
 mod style_revisions;
 pub mod tag;

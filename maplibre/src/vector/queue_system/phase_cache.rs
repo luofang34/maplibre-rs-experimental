@@ -14,7 +14,7 @@ use crate::{
     },
 };
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct VectorPhaseCacheKey {
     pub(super) topology_gen: u64,
     pub(super) buffer_pool_rev: u64,
@@ -24,6 +24,7 @@ pub(super) struct VectorPhaseCacheKey {
     pub(super) skip_draped: bool,
 }
 
+#[derive(Default)]
 pub(super) struct CachedVectorPhases {
     pub(super) key: VectorPhaseCacheKey,
     pub(super) masks: Vec<TileMaskItem>,

@@ -31,6 +31,12 @@ pub trait PhaseItem {
     fn projection_binding(&self) -> super::ProjectionBinding {
         super::ProjectionBinding::View
     }
+
+    /// Bitmask contribution tracked by [`RenderPhase`](super::RenderPhase) for `O(1)`
+    /// mask-group queries.
+    fn mask_group_bit(&self) -> u8 {
+        0
+    }
 }
 
 /// [`RenderCommand`] is a trait that runs a world query and produces one or more
