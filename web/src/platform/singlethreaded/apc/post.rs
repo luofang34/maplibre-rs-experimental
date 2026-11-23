@@ -32,7 +32,8 @@ export function post_st_cancel(target, attempt) {
 }
 
 export function post_st_cancel_batch(target, attempts) {
-    target.postMessage({ type: "cancel_batch", attempts });
+    const copy = attempts.slice();
+    target.postMessage({ type: "cancel_batch", attempts: copy }, [copy.buffer]);
 }
 
 export function post_st_style(target, revision, style, prefetch) {
