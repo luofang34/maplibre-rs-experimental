@@ -171,14 +171,15 @@ impl<E: Environment, T: DemTransferables> Plugin<E> for TerrainPlugin<T> {
             RenderStageLabel::Request,
             SystemContainer::new(RequestSystem::<E, T>::new(&kernel)),
         )?;
-        // Prepare rather than Request: headless rendering drops the Request stage, and the
-        // elevation must be known before the Queue stage builds the view pattern. The index
-        // runs first so the center elevation samples this frame's tiles.
-        schedule.add_system_to_stage(RenderStageLabel::Prepare, coverage::coverage_system)?;
+        // Sync DEM bounds first so center elevation sees arriving DEMs, then resolve center
+        // elevation before building the tight terrain covering and `PreparedTerrainRegion`.
+        schedule
+            .add_system_to_stage(RenderStageLabel::Prepare, coverage::sync_dem_bounds_system)?;
         schedule.add_system_to_stage(
             RenderStageLabel::Prepare,
             elevation::center_elevation_system,
         )?;
+        schedule.add_system_to_stage(RenderStageLabel::Prepare, coverage::coverage_system)?;
         schedule
             .add_system_to_stage(RenderStageLabel::Prepare, resolve_terrain_frame_view_system)?;
         schedule

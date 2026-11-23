@@ -189,6 +189,14 @@ impl PassingAsyncProcedureCall {
 
 #[cfg(any(test, feature = "renderer"))]
 impl PassingAsyncProcedureCall {
+    fn has_queued_or_buffered(&self) -> bool {
+        self.buffer.try_borrow().is_ok_and(|b| !b.is_empty())
+            || self
+                .received
+                .try_borrow()
+                .is_ok_and(|r| !r.messages.is_empty() || !r.queued.is_empty())
+    }
+
     fn drain_finished(&self, received: &mut Received) {
         if !received.finished.is_empty() {
             let mut assignments = self.assignments.borrow_mut();
@@ -247,8 +255,7 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
             };
             self.drain_finished(&mut received);
             if received.messages.is_empty()
-                && (received.queued.is_empty()
-                    || (!self.boot_unthrottled.get() && !self.batch_open.get()))
+                && (received.queued.is_empty() || !self.batch_open.get())
             {
                 return PassingReceiveIter::new(Vec::new(), None);
             }
@@ -273,18 +280,19 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
         if received.queued.is_empty() {
             return PassingReceiveIter::new(ret, weak);
         }
-        if self.boot_unthrottled.get() {
-            for item in received.queued.drain(..) {
-                if item.matches(&mut filter) {
-                    ret.push(item);
-                } else {
-                    buffer.push(item);
-                }
-            }
-            return PassingReceiveIter::new(ret, weak);
-        }
         if self.batch_open.get() {
-            self.admit_throttled_queued(&mut received, &mut buffer, &mut ret, &mut filter);
+            if self.boot_unthrottled.get() {
+                if self.scratch.borrow_mut().admit_boot_queued(
+                    &mut received.queued,
+                    &mut buffer,
+                    &mut ret,
+                    &mut filter,
+                ) {
+                    self.batch_open.set(false);
+                }
+            } else {
+                self.admit_throttled_queued(&mut received, &mut buffer, &mut ret, &mut filter);
+            }
         }
         PassingReceiveIter::new(ret, weak)
     }
@@ -398,16 +406,11 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
 
     fn has_arrivals(&self) -> bool {
         self.batch_open.set(true);
-        if self
-            .buffer
-            .try_borrow()
-            .is_ok_and(|buffer| !buffer.is_empty())
-        {
-            return true;
-        }
-        self.received
-            .try_borrow()
-            .is_ok_and(|received| !received.messages.is_empty() || !received.queued.is_empty())
+        self.has_queued_or_buffered()
+    }
+
+    fn has_pending_arrivals(&self) -> bool {
+        self.has_queued_or_buffered()
     }
 
     fn supports_waker(&self) -> bool {

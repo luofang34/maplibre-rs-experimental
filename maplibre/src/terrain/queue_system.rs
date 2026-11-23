@@ -209,10 +209,16 @@ pub fn queue_system(
     world
         .resources
         .insert(surface_covering::SurfaceTiles::default());
-    let (phase, surface_coords, surface_sources) = if drape_mode.is_procedural_relief() {
+    let (phase, surface_coords, surface_sources, clear_color) = if drape_mode.is_procedural_relief()
+    {
         let coords = procedural_tiles(style, view_state, world)?;
         let sources = vec![None; coords.len()];
-        (DrapePhase::default(), coords, sources)
+        (
+            DrapePhase::default(),
+            coords,
+            sources,
+            drape_phase::background_clear_color(style),
+        )
     } else {
         let specs = target_specs_arc(style, view_state, world)?;
         let drape_zoom = stabilize_drape_fingerprint_zoom(world, view_state.style_zoom().value());
@@ -240,7 +246,7 @@ pub fn queue_system(
         }
         let (surface_coords, surface_sources) =
             surface_covering::coords_for_frame(world, &specs, &sources);
-        (phase, surface_coords, surface_sources)
+        (phase, surface_coords, surface_sources, clear_color)
     };
     queue_tiles(
         world,
@@ -248,7 +254,7 @@ pub fn queue_system(
         view_state,
         device,
         queue,
-        &dem,
+        (&dem, clear_color),
         (&surface_coords, &surface_sources),
     )?;
     hide_draped_layers(world, style);
@@ -279,7 +285,7 @@ fn queue_tiles(
     view_state: &ViewState,
     device: &wgpu::Device,
     queue: &crate::render::upload_queue::UploadQueue,
-    dem: &DemSource,
+    (dem, clear_color): (&DemSource, wgpu::Color),
     targets: (&[WorldTileCoords], &[Option<WorldTileCoords>]),
 ) -> SystemResult {
     let mut edge_cache = std::mem::take(world.resources.get_or_init_mut::<edges::EdgeCache>());
@@ -291,7 +297,7 @@ fn queue_tiles(
     let copies_non_empty =
         queue_scratch.populate_copies(world.resources.get::<surface_covering::SurfaceCopies>());
     let dem_arrival_epoch = crate::terrain::dem_arrival_epoch(world);
-    let ctx = uniforms::surface_context(world, style, view_state, dem);
+    let ctx = uniforms::surface_context(world, style, view_state, dem, clear_color);
     let key_fn = draw_order_key_with_resolved(
         world
             .resources
@@ -309,6 +315,7 @@ fn queue_tiles(
         terrain.begin_dem_frame();
         uniforms::prepare_tiles_into(
             &mut queue_scratch.prepared,
+            &mut queue_scratch.static_cache,
             targets,
             terrain,
             &world.tiles,

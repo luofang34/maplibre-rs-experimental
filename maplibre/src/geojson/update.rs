@@ -215,6 +215,7 @@ impl Style {
             })?;
             super::store::prime_geojson_index(next_gen, Arc::new(index));
         }
+        super::store::evict_primed_geojson_index(source.generation);
         source.data = data;
         source.generation = next_gen;
         self.bump_revision();
@@ -256,6 +257,7 @@ impl Style {
         })?;
         let next_gen = fresh_generation();
         super::store::prime_geojson_index(next_gen, Arc::new(index));
+        super::store::evict_primed_geojson_index(source.generation);
         source.data = GeoJsonData::Inline(Arc::new(updated));
         source.generation = next_gen;
         self.bump_revision();

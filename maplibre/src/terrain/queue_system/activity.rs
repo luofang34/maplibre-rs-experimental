@@ -106,16 +106,19 @@ pub(super) fn record(world: &mut World, frame: &FrameDrapes<'_>) {
         .resources
         .get::<CurrentViewSlot>()
         .and_then(|slot| slot.0);
-    let cost = world
-        .resources
-        .get::<crate::terrain::drape_timing::DrapeCost>()
-        .copied()
-        .unwrap_or_default();
     world
         .resources
         .get_or_init_mut::<PendingDrapes>()
         .0
         .insert(view, frame.pending());
+    if !tracing::enabled!(tracing::Level::INFO) {
+        return;
+    }
+    let cost = world
+        .resources
+        .get::<crate::terrain::drape_timing::DrapeCost>()
+        .copied()
+        .unwrap_or_default();
     let activity = world.resources.get_or_init_mut::<DrapeActivity>();
     let window = activity.views.entry(view).or_default();
     window.count(frame);

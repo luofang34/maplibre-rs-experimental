@@ -16,6 +16,13 @@ use crate::{
 /// `8 * 4 * 80 B = 2,560 B`, balancing fewer WebGPU IPC calls against minimal clean-byte over-upload.
 const MAX_CLEAN_GAP_QUADS: usize = 8;
 
+/// Maximum quads retained in a recycled per-bucket scratch vector.
+const MAX_RECYCLE_QUADS: usize = if cfg!(target_arch = "wasm32") {
+    4_096
+} else {
+    16_384
+};
+
 /// Maximum quads expanded or zeroed per chunk upload (`1024 * 4 * 80 B = 320 KiB` scratch cap).
 const MAX_UPLOAD_QUADS_PER_CHUNK: usize = 1024;
 
@@ -38,9 +45,23 @@ impl MetadataScratchPool {
 
     /// Returns a per-quad `Vec<SDFShaderFeatureMetadata>` to the pool if capacity is bounded.
     pub(super) fn recycle(&mut self, mut buf: Vec<SDFShaderFeatureMetadata>) {
-        if buf.capacity() > 0 && buf.capacity() <= 16_384 && self.free.len() < 2 {
+        if buf.capacity() > 0 && buf.capacity() <= MAX_RECYCLE_QUADS && self.free.len() < 2 {
             buf.clear();
             self.free.push(buf);
+        }
+    }
+
+    /// Drops oversized transient upload staging buffers on `wasm32` after an epoch completes.
+    pub(super) fn shrink_transient(&mut self) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            if self.expand.capacity() > 512 {
+                self.expand = Vec::new();
+            }
+            if self.zeros.capacity() > 512 {
+                self.zeros = Vec::new();
+            }
+            self.free.retain(|buf| buf.capacity() <= 2_048);
         }
     }
 

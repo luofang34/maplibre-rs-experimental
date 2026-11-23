@@ -374,6 +374,11 @@ pub trait AsyncProcedureCall<K: OffscreenKernel>: 'static {
         false
     }
 
+    /// Read-only peek of pending arrivals without resetting frame admission batch gates.
+    fn has_pending_arrivals(&self) -> bool {
+        self.has_arrivals()
+    }
+
     /// The image providers the workers ask, when they share this transport's memory. A
     /// transport whose workers build their own configuration has none to offer here.
     fn image_providers(&self) -> Option<&crate::sdf::assets::ImageProviders> {

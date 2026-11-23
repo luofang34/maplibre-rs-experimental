@@ -218,8 +218,7 @@ fn upload_tile_buckets(
                 }
                 if let Some(shared_key) = release_cpu {
                     let release_colors =
-                        !crate::style::feature_state::layer_paint_reads_feature_state(style_layer)
-                            && !paint::feature_paint_depends_on_zoom(style_layer);
+                        !crate::style::feature_state::layer_paint_reads_feature_state(style_layer);
                     pending_cpu_releases.push((style_layer.id.clone(), shared_key, release_colors));
                 }
             }

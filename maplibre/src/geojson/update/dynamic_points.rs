@@ -59,6 +59,17 @@ pub(super) struct EvalCache {
 
 type SlotCacheEntry = Option<(usize, u8, u64, usize)>;
 
+impl DynamicPointGeoJson {
+    /// Drops cached tile hits and slot states for an evicted world tile.
+    pub(crate) fn evict_tile(&mut self, coords: WorldTileCoords) {
+        for src in self.sources.values_mut() {
+            src.tile_hits.remove(&coords);
+            src.applied_seq.retain(|(c, _), _| *c != coords);
+            src.slot_cache.retain(|(c, _), _| *c != coords);
+        }
+    }
+}
+
 struct DynamicPointSource {
     keys: Vec<(RawFeatureId, [u64; 2])>,
     world_points: Vec<[f64; 2]>,
@@ -77,6 +88,15 @@ struct DynamicPointSource {
     fast_ramp_keys_ok: bool,
     pub(super) fast_columns: FastColumnStore,
     eval_cache: EvalCache,
+}
+
+impl DynamicPointSource {
+    fn ensure_scratch_props(&mut self) {
+        if self.scratch_props.len() != self.keys.len() {
+            self.scratch_props
+                .resize_with(self.keys.len(), FeatureProperties::default);
+        }
+    }
 }
 
 fn compute_tile_hits(world_points: &[[f64; 2]], coords: WorldTileCoords) -> Vec<u32> {
@@ -133,6 +153,11 @@ pub(crate) fn invalidate_after_style_change(style: &Style, world: &mut World) {
     for (name, src_state) in &mut state.sources {
         if src_state.fast_columns.active_seq == Some(src_state.seq) {
             if let Some(bytes) = src_state.deferred_bytes.as_deref() {
+                if src_state.scratch_props.len() != src_state.keys.len() {
+                    src_state
+                        .scratch_props
+                        .resize_with(src_state.keys.len(), FeatureProperties::default);
+                }
                 if try_parse_stationary_bytes(
                     bytes,
                     &src_state.keys,
@@ -239,12 +264,11 @@ fn build_source_from_value(
         properties.push(props);
     }
 
-    let scratch_props = properties.clone();
     Some(DynamicPointSource {
         keys,
         world_points,
         properties,
-        scratch_props,
+        scratch_props: Vec::new(),
         promoted,
         generate_id: src.generate_id,
         inject_identity,
@@ -317,6 +341,7 @@ pub(crate) fn try_apply_stationary_bytes<'a>(
         return Ok(());
     }
     src_state.fast_columns.active_seq = None;
+    src_state.ensure_scratch_props();
     if !try_parse_stationary_bytes(
         &bytes,
         &src_state.keys,
@@ -366,6 +391,7 @@ pub(crate) fn try_apply_stationary_inline(
     if features.len() != src_state.keys.len() || features.is_empty() {
         return false;
     }
+    src_state.ensure_scratch_props();
     for (idx, (feature, expected)) in features.iter().zip(src_state.keys.iter()).enumerate() {
         if feature.get("type").and_then(JsonValue::as_str) != Some("Feature") {
             return false;

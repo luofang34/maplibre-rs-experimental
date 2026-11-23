@@ -44,6 +44,7 @@ pub fn queue_system(
     let departing_opacity: rustc_hash::FxHashMap<String, f32> = world
         .resources
         .get::<RasterCrossFade>()
+        .filter(|fade| !fade.is_empty())
         .map(|fade| {
             style
                 .layers

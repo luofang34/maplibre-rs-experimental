@@ -15,8 +15,19 @@ pub(super) fn set_uniforms(
     view: &ViewState,
     globe_camera: Option<&GlobeCameraState>,
 ) -> Option<Matrix4<f64>> {
-    block.globe_origin = [0.0; 4];
-    let camera = globe_camera?;
+    let radius = view.body().radius_meters;
+    let Some((basis, origin)) = compute_basis(tile, radius) else {
+        block.globe_origin = [0.0; 4];
+        return None;
+    };
+    apply_basis_or_clear(block, globe_camera, Some(&basis), origin)
+}
+
+/// Computes tile-local tangent basis and globe origin uniform for `tile` (`z >= 8`).
+pub(in crate::terrain::queue_system) fn compute_basis(
+    tile: WorldTileCoords,
+    radius: f64,
+) -> Option<(Matrix4<f64>, [f32; 4])> {
     // Coarse tiles and polar fans use the global sphere path. Their local angular span is large.
     if u8::from(tile.z) < 8 {
         return None;
@@ -28,7 +39,6 @@ pub(super) fn set_uniforms(
         .atan();
     let (s, c) = latitude.sin_cos();
     let (sl, cl) = longitude.sin_cos();
-    let radius = view.body().radius_meters;
     let east = Vector3::new(cl, 0.0, -sl);
     let north = Vector3::new(-sl * s, c, -cl * s);
     let up = Vector3::new(sl * c, s, cl * c);
@@ -38,16 +48,30 @@ pub(super) fn set_uniforms(
         (up / radius).extend(0.0),
         up.extend(1.0),
     );
-    if let Some(matrix) = (camera.wgpu_view_projection() * basis).cast::<f32>() {
+    let origin = [
+        s as f32,
+        c as f32,
+        (std::f64::consts::TAU / (n * EXTENT)) as f32,
+        radius as f32,
+    ];
+    Some((basis, origin))
+}
+
+/// Applies precomputed globe tangent basis into `block`, clearing `globe_origin` on fallback.
+pub(super) fn apply_basis_or_clear(
+    block: &mut TerrainTileUniforms,
+    camera: Option<&GlobeCameraState>,
+    basis: Option<&Matrix4<f64>>,
+    origin: [f32; 4],
+) -> Option<Matrix4<f64>> {
+    if let (Some(camera), Some(basis)) = (camera, basis)
+        && let Some(matrix) = (camera.wgpu_view_projection() * basis).cast::<f32>()
+    {
         block.globe_transform = matrix.into();
-        block.globe_origin = [
-            s as f32,
-            c as f32,
-            (std::f64::consts::TAU / (n * EXTENT)) as f32,
-            radius as f32,
-        ];
-        return Some(basis);
+        block.globe_origin = origin;
+        return Some(*basis);
     }
+    block.globe_origin = [0.0; 4];
     None
 }
 

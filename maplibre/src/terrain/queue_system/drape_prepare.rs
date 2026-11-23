@@ -105,12 +105,12 @@ pub(super) fn prepare_drapes(
         compute_or_reuse_drape_prep(specs, style, view_state, world, clear_color, drape_zoom);
     let prints = prep.prints.as_slice();
     let ready = prep.ready.as_slice();
-    let prefetch: Vec<bool> = {
-        let ahead = world.resources.get::<targets::PrefetchDrapes>();
-        specs
+    let prefetch: Vec<bool> = match world.resources.get::<targets::PrefetchDrapes>() {
+        Some(ahead) if !ahead.0.is_empty() => specs
             .iter()
-            .map(|spec| ahead.is_some_and(|ahead| ahead.0.contains(&spec.coords)))
-            .collect()
+            .map(|spec| ahead.0.contains(&spec.coords))
+            .collect(),
+        _ => vec![false; specs.len()],
     };
     let (budget, limit) = drape_frame_budget(world, view_state);
     let view_textures = crate::terrain::drape_share::textures(world, memory);
@@ -213,11 +213,62 @@ fn record_drape_activity(world: &mut World, drapes: &activity::FrameDrapes<'_>, 
     }
 }
 
+type PrepDigests = ((u64, u64, bool), u64, u64, (usize, usize), u64, u64, u64);
+
+fn resolve_prep_digests(
+    specs: &[TargetSpec],
+    style: &Style,
+    style_zoom: f64,
+    host_frame: u64,
+    world: &mut World,
+) -> Option<(u64, PrepDigests)> {
+    use super::spec_cache;
+    let cache = world.resources.get::<spec_cache::DrapePrepareCache>()?;
+    let specs_gen = cache.specs_gen_for(specs)?;
+    if let Some(d) = cache.matching_digests(host_frame, specs, style.revision()) {
+        return Some((
+            specs_gen,
+            (
+                d.vector_pool_state,
+                d.vector_arrival_epoch,
+                d.target_tiles_digest,
+                d.relevant_tiles_len,
+                d.raster_gen,
+                d.style_rev,
+                d.style_vis_digest,
+            ),
+        ));
+    }
+    let vector_pool_state = spec_cache::vector_pool_state(world);
+    let vector_arrival_epoch = crate::vector::arrival_epoch(world);
+    let target_tiles_digest =
+        spec_cache::target_coords_vector_digest(specs.iter().map(|spec| spec.coords), world);
+    let relevant_tiles_len = spec_cache::relevant_tiles_len(world);
+    let raster_gen = spec_cache::raster_mutation_gen(world);
+    let style_rev = style.revision();
+    let style_vis_digest = world
+        .resources
+        .get_or_init_mut::<spec_cache::DrapePrepareCache>()
+        .style_visibility_digest_cached(style, style_zoom);
+    Some((
+        specs_gen,
+        (
+            vector_pool_state,
+            vector_arrival_epoch,
+            target_tiles_digest,
+            relevant_tiles_len,
+            raster_gen,
+            style_rev,
+            style_vis_digest,
+        ),
+    ))
+}
+
 fn build_prep_key(
     specs: &[TargetSpec],
     style: &Style,
     style_zoom: f64,
-    world: &World,
+    world: &mut World,
     clear_color: wgpu::Color,
     drape_zoom: f64,
 ) -> Option<super::spec_cache::DrapePrepKey> {
@@ -231,36 +282,18 @@ fn build_prep_key(
         _ => 0,
     };
     let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
-    let cache = world.resources.get::<spec_cache::DrapePrepareCache>()?;
-    let specs_gen = cache.specs_gen_for(specs)?;
     let (
-        vector_pool_state,
-        vector_arrival_epoch,
-        target_tiles_digest,
-        tiles_len,
-        raster_gen,
-        style_rev,
-        style_vis_digest,
-    ) = match cache.matching_digests(host_frame, specs, style.revision()) {
-        Some(d) => (
-            d.vector_pool_state,
-            d.vector_arrival_epoch,
-            d.target_tiles_digest,
-            d.tiles_len,
-            d.raster_gen,
-            d.style_rev,
-            d.style_vis_digest,
+        specs_gen,
+        (
+            vector_pool_state,
+            vector_arrival_epoch,
+            target_tiles_digest,
+            relevant_tiles_len,
+            raster_gen,
+            style_rev,
+            style_vis_digest,
         ),
-        None => (
-            spec_cache::vector_pool_state(world),
-            crate::vector::arrival_epoch(world),
-            spec_cache::target_coords_vector_digest(specs.iter().map(|spec| spec.coords), world),
-            world.tiles.tiles.len(),
-            spec_cache::raster_mutation_gen(world),
-            style.revision(),
-            spec_cache::style_visibility_digest(style, style_zoom),
-        ),
-    };
+    ) = resolve_prep_digests(specs, style, style_zoom, host_frame, world)?;
     Some(spec_cache::DrapePrepKey {
         specs_gen,
         drape_paint_zoom_bits: crate::vector::upload_system::drape_paint_zoom(drape_zoom).to_bits(),
@@ -275,7 +308,7 @@ fn build_prep_key(
         vector_pool_state,
         vector_arrival_epoch,
         target_tiles_digest,
-        tiles_len,
+        relevant_tiles_len,
         raster_gen,
         hillshade_fingerprint: spec_cache::hillshade_fingerprint(world),
         style_rev,

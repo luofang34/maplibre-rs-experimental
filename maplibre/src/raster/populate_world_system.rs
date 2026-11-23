@@ -85,7 +85,7 @@ impl<E: Environment, T: RasterTransferables> System for PopulateWorldSystem<E, T
         })?;
         self.idle_rev = (!has_raster_or_dem
             && self.kernel.apc().in_flight_calls() == 0
-            && !self.kernel.apc().has_arrivals())
+            && !self.kernel.apc().has_pending_arrivals())
         .then_some(style_rev);
 
         Ok(())

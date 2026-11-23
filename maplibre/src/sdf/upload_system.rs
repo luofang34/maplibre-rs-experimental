@@ -98,7 +98,10 @@ impl SdfUploadCache {
         SdfUploadKey {
             arrival_epoch: crate::vector::arrival_epoch(world),
             style_rev: style.revision(),
-            tiles_len: world.tiles.tiles.len(),
+            tiles_len: world
+                .tiles
+                .pyramid_of::<super::SymbolLayersDataComponent>()
+                .len(),
             topology_gen,
             covering_len,
             pool_rev,

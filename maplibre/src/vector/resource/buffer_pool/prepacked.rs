@@ -171,6 +171,9 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
                                 bytemuck::cast_slice(&self.u16_index_scratch),
                             );
                             self.u16_index_scratch.clear();
+                            if self.u16_index_scratch.capacity() > 8_192 {
+                                self.u16_index_scratch.shrink_to(8_192);
+                            }
                         }
                     } else {
                         let wide: Vec<u32> = usable_u16s.iter().copied().map(u32::from).collect();

@@ -174,8 +174,14 @@ impl EdgeCache {
         max_rows: usize,
         dem_arrival_epoch: Option<u64>,
     ) -> (u64, Option<Vec<EdgeHeights>>) {
-        let fast_key = dem_arrival_epoch
-            .map(|epoch| (sources_digest(sources), epoch, tiles.tiles.len(), max_rows));
+        let fast_key = dem_arrival_epoch.map(|epoch| {
+            (
+                sources_digest(sources),
+                epoch,
+                tiles.pyramid_of::<DemTileComponent>().len(),
+                max_rows,
+            )
+        });
         if fast_key.is_none()
             || self.last_fast_key != fast_key
             || self.packed_edges.len() > max_rows

@@ -52,6 +52,7 @@ pub(super) fn handle_aborted_or_deferred_active_epoch(
     if env.triggers.obstructed || env.fade_zero || !env.view_valid || stale_camera {
         if let Some(epoch) = sys.active_epoch.take() {
             sys.grid_cache = epoch.abort(&mut sys.scratch);
+            sys.scratch.shrink_transient();
         }
         sys.placed_view = None;
         sys.last_content_signature = None;
@@ -165,6 +166,7 @@ fn finish_active_step(
             .resources
             .insert(super::super::query::PlacementBearing(epoch.bearing));
         sys.grid_cache = epoch.take_grid();
+        sys.scratch.shrink_transient();
         sort_pending
     } else {
         sys.active_epoch = Some(epoch);
@@ -245,6 +247,7 @@ pub(super) fn finish_new_epoch(
             .resources
             .insert(super::super::query::PlacementBearing(bearing));
         returned_grid = epoch.take_grid();
+        sys.scratch.shrink_transient();
     } else {
         sys.active_epoch = Some(epoch);
     }

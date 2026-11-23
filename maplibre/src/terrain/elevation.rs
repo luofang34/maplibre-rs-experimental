@@ -85,7 +85,10 @@ pub fn center_elevation_system(
     let vp_bits = |vs: &ViewState| {
         (*AsRef::<[[f64; 4]; 4]>::as_ref(&vs.view_projection().0)).map(|col| col.map(f64::to_bits))
     };
-    let vp_before = vp_bits(view_state);
+    let vp_before = world
+        .resources
+        .get::<crate::terrain::coverage::PreparedTerrainRegion>()
+        .map(|_| vp_bits(view_state));
     let now_ts = world.resources.get::<FrameInput>().map(|f| f.timestamp);
     let center_ready = ground_center_smoothed(view_state, world, now_ts);
     if !past_mercator_rows(view_state) {
@@ -107,7 +110,9 @@ pub fn center_elevation_system(
             state.last_zoom = view_state.zoom().value();
         }
     }
-    if vp_bits(view_state) == vp_before {
+    if let Some(before) = vp_before
+        && vp_bits(view_state) == before
+    {
         if let Some(dem_tile_size) = world
             .resources
             .get::<crate::terrain::coverage::PreparedTerrainRegion>()

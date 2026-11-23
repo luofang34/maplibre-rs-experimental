@@ -33,7 +33,7 @@ pub(crate) struct PatternMemoKey {
     vector_pool_has_capacity: bool,
     vector_arrival_epoch: u64,
     view_vector_digest: u64,
-    tiles_len: usize,
+    tiles_len: (usize, usize),
     raster_mutation_gen: u64,
 }
 
@@ -443,6 +443,15 @@ fn build_key(
     #[cfg(not(feature = "raster"))]
     let raster_mutation_gen = 0_u64;
 
+    #[cfg(feature = "raster")]
+    let raster_tiles_len = world
+        .tiles
+        .pyramid_of::<crate::raster::RasterLayersDataComponent>()
+        .len();
+    #[cfg(not(feature = "raster"))]
+    let raster_tiles_len = 0_usize;
+    let vector_tiles_len = world.tiles.pyramid_of::<VectorLayerBucketComponent>().len();
+
     PatternMemoKey {
         style_rev,
         view_region_digest: vh.finish(),
@@ -454,7 +463,7 @@ fn build_key(
         vector_pool_has_capacity,
         vector_arrival_epoch: crate::vector::arrival_epoch(world),
         view_vector_digest: tv.finish(),
-        tiles_len: world.tiles.tiles.len(),
+        tiles_len: (vector_tiles_len, raster_tiles_len),
         raster_mutation_gen,
     }
 }

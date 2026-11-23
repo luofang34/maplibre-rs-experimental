@@ -6,12 +6,45 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::raw_queue::QueuedMessage;
 
+const BOOT_MAX_DRAIN_ATTEMPTS: usize = 4;
+
 #[derive(Default)]
 pub(super) struct ReceiveScratch {
     pub(super) budget: BatchBudget,
     pub(super) attempt_totals: FxHashMap<u64, usize>,
     pub(super) deferred: Vec<QueuedMessage>,
     pub(super) cancel_buckets: Vec<Vec<u64>>,
+}
+
+impl ReceiveScratch {
+    pub(super) fn admit_boot_queued<F: FnMut(&maplibre::io::apc::Message) -> bool>(
+        &mut self,
+        received_queued: &mut Vec<QueuedMessage>,
+        buffer: &mut Vec<QueuedMessage>,
+        ret: &mut Vec<QueuedMessage>,
+        filter: &mut F,
+    ) -> bool {
+        self.budget.clear_attempts();
+        self.deferred.clear();
+        for item in received_queued.drain(..) {
+            if let Some(id) = item.attempt() {
+                if !self.budget.attempts.contains(&id)
+                    && self.budget.attempts.len() >= BOOT_MAX_DRAIN_ATTEMPTS
+                {
+                    self.deferred.push(item);
+                    continue;
+                }
+                self.budget.attempts.insert(id);
+            }
+            if item.matches(filter) {
+                ret.push(item);
+            } else {
+                buffer.push(item);
+            }
+        }
+        std::mem::swap(received_queued, &mut self.deferred);
+        !received_queued.is_empty()
+    }
 }
 
 #[derive(Default)]
@@ -25,6 +58,10 @@ impl BatchBudget {
     const MAX_RAW_BYTES: usize = 768 * 1024;
     const MAX_RAW_MESSAGES: usize = 16;
     const MAX_RAW_ATTEMPTS: usize = 3;
+
+    pub(super) fn clear_attempts(&mut self) {
+        self.attempts.clear();
+    }
 
     pub(super) fn reset_from_buffer(&mut self, buffer: &[QueuedMessage]) {
         self.bytes = buffer.iter().map(QueuedMessage::raw_byte_len).sum();

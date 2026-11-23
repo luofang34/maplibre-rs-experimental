@@ -152,7 +152,7 @@ pub struct TerrainResources {
     index_buffer: wgpu::Buffer,
     index_count: u32,
     uniform_buffer: wgpu::Buffer,
-    last_uploaded_uniforms: Vec<u8>,
+    last_uploaded_uniforms: Option<(u64, u64, usize)>,
     pub(crate) replay_uniforms_scratch: Vec<TerrainTileUniforms>,
     dem_textures: FxHashMap<WorldTileCoords, DemTexture>,
     dem_frame_tick: u64,
@@ -237,7 +237,7 @@ impl TerrainResources {
             index_buffer: gpu.index_buffer,
             index_count: gpu.index_count,
             uniform_buffer: gpu.uniform_buffer,
-            last_uploaded_uniforms: Vec::new(),
+            last_uploaded_uniforms: None,
             replay_uniforms_scratch: Vec::new(),
             dem_textures: FxHashMap::default(),
             dem_frame_tick: 1,
@@ -409,10 +409,10 @@ impl TerrainResources {
             && let Some(slice) = uniforms.get(..count)
         {
             let bytes = bytemuck::cast_slice(slice);
-            if self.last_uploaded_uniforms.as_slice() != bytes {
+            let digest = uniform_bytes_digest(bytes);
+            if self.last_uploaded_uniforms != Some(digest) {
                 queue.write_buffer(&self.uniform_buffer, 0, bytes);
-                self.last_uploaded_uniforms.clear();
-                self.last_uploaded_uniforms.extend_from_slice(bytes);
+                self.last_uploaded_uniforms = Some(digest);
             }
         }
         count
@@ -455,4 +455,26 @@ impl Drop for TerrainResources {
         self.index_buffer.destroy();
         self.uniform_buffer.destroy();
     }
+}
+
+fn uniform_bytes_digest(bytes: &[u8]) -> (u64, u64, usize) {
+    let mut h1 = 0x517c_c1b7_2722_0a95_u64;
+    let mut h2 = 0xcbf2_9ce4_8422_2325_u64;
+    let (chunks, rem) = bytes.as_chunks::<8>();
+    for &chunk in chunks {
+        let word = u64::from_le_bytes(chunk);
+        h1 = h1
+            .rotate_left(5)
+            .wrapping_add(word)
+            .wrapping_mul(0x517c_c1b7_2722_0a95);
+        h2 = (h2 ^ word).wrapping_mul(0x0100_0000_01b3).rotate_right(7);
+    }
+    for &byte in rem {
+        h1 = h1
+            .rotate_left(5)
+            .wrapping_add(u64::from(byte))
+            .wrapping_mul(0x517c_c1b7_2722_0a95);
+        h2 = (h2 ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
+    }
+    (h1, h2, bytes.len())
 }

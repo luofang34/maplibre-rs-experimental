@@ -16,26 +16,41 @@ use crate::{
 /// Which of the acquired drapes to draw this frame, at most `budget`: tiles never drawn
 /// first, since a reused texture shows another tile's content until they are, then tiles
 /// whose content changed.
+#[cfg(test)]
 pub(super) fn budget_redraws(states: &[DrapeState], budget: usize) -> Vec<bool> {
     let mut redraw = vec![false; states.len()];
+    fill_budget_redraws(states, None, false, budget, &mut redraw);
+    redraw
+}
+
+fn fill_budget_redraws(
+    states: &[DrapeState],
+    prefetch: Option<&[bool]>,
+    want_prefetch: bool,
+    budget: usize,
+    redraw: &mut [bool],
+) -> usize {
     let mut drawn = 0;
     for wanted in [DrapeState::New, DrapeState::Changed] {
-        for (slot, state) in redraw.iter_mut().zip(states) {
+        for (idx, (slot, state)) in redraw.iter_mut().zip(states).enumerate() {
             if drawn >= budget {
-                return redraw;
+                return drawn;
             }
-            if *state == wanted {
+            let matches_ahead = prefetch
+                .is_none_or(|flags| flags.get(idx).copied().unwrap_or(false) == want_prefetch);
+            if matches_ahead && *state == wanted {
                 *slot = true;
                 drawn += 1;
             }
         }
     }
-    redraw
+    drawn
 }
 
 /// Tiles whose texture holds no content of their own yet. A new drape the budget deferred
 /// would show whatever tile last used the texture, so its surface uses an ancestor or the
 /// background color until its own texture is drawn.
+#[cfg(test)]
 pub(super) fn awaiting_first_draw(states: &[DrapeState], redraw: &[bool]) -> Vec<bool> {
     states
         .iter()
@@ -58,7 +73,9 @@ pub(super) fn acquire_drapes(
     bool,
     Vec<DrapeState>,
 ) {
-    let target_coords: Vec<WorldTileCoords> = specs.iter().map(|spec| spec.coords).collect();
+    let mut target_coords = std::mem::take(&mut coalesce.scratch.target_coords);
+    target_coords.clear();
+    target_coords.extend(specs.iter().map(|spec| spec.coords));
     terrain.retain_drapes_if_stale(&target_coords, view_textures, |t| {
         covering::retained_textures_with_zoom_out(&target_coords, ready, view_textures, |coords| {
             t.drape_texture(coords).is_some()
@@ -105,11 +122,12 @@ pub(super) fn acquire_drapes(
     if ready.iter().all(|&r| r) && states.iter().all(|s| *s == DrapeState::Unchanged) {
         coalesce.reset();
         terrain.finish_drape_retain_state(&target_coords, view_textures, true);
+        coalesce.scratch.target_coords = target_coords;
         let redraw = vec![false; specs.len()];
         let sources = specs.iter().map(|s| Some(s.coords)).collect();
         return (redraw, sources, false, states);
     }
-    finish_acquire_drapes(
+    let result = finish_acquire_drapes(
         specs,
         ready,
         prefetch,
@@ -117,7 +135,9 @@ pub(super) fn acquire_drapes(
         states,
         terrain,
         (coalesce, coalesce_motion),
-    )
+    );
+    coalesce.scratch.target_coords = target_coords;
+    result
 }
 
 fn finish_acquire_drapes(
@@ -157,7 +177,14 @@ fn finish_acquire_drapes(
             .iter()
             .all(|s| matches!(s, DrapeState::Unchanged | DrapeState::Changed));
     terrain.finish_drape_retain_state(target_coords, view_textures, clean);
-    let sources = drape_sources(specs, &states, &redraw, ready, terrain);
+    let sources = drape_sources_with_scratch(
+        specs,
+        &states,
+        &redraw,
+        ready,
+        terrain,
+        (&mut coalesce.scratch.hidden, &mut coalesce.scratch.undrawn),
+    );
     (redraw, sources, deferred, states)
 }
 
@@ -172,21 +199,8 @@ fn choose_redraws(
     (budget, limit): (usize, usize),
     terrain: &TerrainResources,
 ) -> Vec<bool> {
-    let only = |ahead: bool| -> Vec<DrapeState> {
-        states
-            .iter()
-            .zip(prefetch)
-            .map(|(state, prefetched)| {
-                if *prefetched == ahead {
-                    *state
-                } else {
-                    DrapeState::Unchanged
-                }
-            })
-            .collect()
-    };
-    let mut redraw = budget_redraws(&only(false), budget);
-    let mut drawn = redraw.iter().filter(|drawn| **drawn).count();
+    let mut redraw = vec![false; states.len()];
+    let mut drawn = fill_budget_redraws(states, Some(prefetch), false, budget, &mut redraw);
     let emergency_limit = if cfg!(target_arch = "wasm32") {
         budget.max(4).min(limit)
     } else {
@@ -211,36 +225,43 @@ fn choose_redraws(
         }
     }
     let spare = budget.saturating_sub(drawn);
-    for (slot, draw) in redraw.iter_mut().zip(budget_redraws(&only(true), spare)) {
-        *slot |= draw;
+    if spare > 0 {
+        fill_budget_redraws(states, Some(prefetch), true, spare, &mut redraw);
     }
     redraw
 }
 
-pub(super) fn drape_sources(
+fn drape_sources_with_scratch(
     specs: &[TargetSpec],
     states: &[DrapeState],
     redraw: &[bool],
     ready: &[bool],
     terrain: &TerrainResources,
+    (hidden, undrawn): (&mut Vec<bool>, &mut HashSet<WorldTileCoords>),
 ) -> Vec<Option<WorldTileCoords>> {
-    let hidden: Vec<bool> = awaiting_first_draw(states, redraw)
-        .into_iter()
-        .zip(ready)
-        .zip(states)
-        .map(|((hidden, ready), state)| hidden || !ready || *state == DrapeState::Withheld)
-        .collect();
-    let undrawn: HashSet<WorldTileCoords> = specs
-        .iter()
-        .zip(&hidden)
-        .filter(|(_, hidden)| **hidden)
-        .map(|(spec, _)| spec.coords)
-        .collect();
+    hidden.clear();
+    hidden.extend(
+        states
+            .iter()
+            .zip(redraw)
+            .zip(ready)
+            .map(|((state, drawn), ready)| {
+                (*state == DrapeState::New && !drawn) || !ready || *state == DrapeState::Withheld
+            }),
+    );
+    undrawn.clear();
+    undrawn.extend(
+        specs
+            .iter()
+            .zip(hidden.iter())
+            .filter(|(_, h)| **h)
+            .map(|(spec, _)| spec.coords),
+    );
     specs
         .iter()
-        .zip(&hidden)
-        .map(|(spec, hidden)| {
-            if *hidden && terrain.drape_texture(spec.coords).is_none() {
+        .zip(hidden.iter())
+        .map(|(spec, is_hidden)| {
+            if *is_hidden && terrain.drape_texture(spec.coords).is_none() {
                 nearest_present_ancestor(spec.coords, terrain, |ancestor| {
                     !undrawn.contains(&ancestor)
                 })

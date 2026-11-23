@@ -27,7 +27,7 @@ pub(super) struct FrameTerrainDigests {
     pub(super) vector_pool_state: (u64, u64, bool),
     pub(super) vector_arrival_epoch: u64,
     pub(super) target_tiles_digest: u64,
-    pub(super) tiles_len: usize,
+    pub(super) relevant_tiles_len: (usize, usize),
     pub(super) raster_gen: u64,
     pub(super) style_rev: u64,
     pub(super) style_vis_digest: u64,
@@ -44,7 +44,7 @@ pub(super) struct TargetSpecsKey {
     pub(super) vector_pool_state: (u64, u64, bool),
     pub(super) vector_arrival_epoch: u64,
     pub(super) target_tiles_digest: u64,
-    pub(super) tiles_len: usize,
+    pub(super) relevant_tiles_len: (usize, usize),
     pub(super) raster_gen: u64,
     pub(super) style_rev: u64,
     pub(super) style_vis_digest: u64,
@@ -70,7 +70,7 @@ impl TargetSpecsKey {
             && self.vector_pool_state == digests.vector_pool_state
             && self.vector_arrival_epoch == digests.vector_arrival_epoch
             && self.target_tiles_digest == digests.target_tiles_digest
-            && self.tiles_len == digests.tiles_len
+            && self.relevant_tiles_len == digests.relevant_tiles_len
             && self.raster_gen == digests.raster_gen
             && self.style_rev == digests.style_rev
             && self.style_vis_digest == digests.style_vis_digest
@@ -89,7 +89,7 @@ pub(super) struct DrapePrepKey {
     pub(super) vector_pool_state: (u64, u64, bool),
     pub(super) vector_arrival_epoch: u64,
     pub(super) target_tiles_digest: u64,
-    pub(super) tiles_len: usize,
+    pub(super) relevant_tiles_len: (usize, usize),
     pub(super) raster_gen: u64,
     pub(super) hillshade_fingerprint: u64,
     pub(super) style_rev: u64,
@@ -112,6 +112,7 @@ pub(super) struct DrapePrepareCache {
     last_digests: Option<FrameTerrainDigests>,
     loose_raster_key: Option<LooseRasterKey>,
     loose_raster: Option<crate::render::eye_covering::RasterCoverings>,
+    style_vis_cache: Option<(u64, u64, u64)>,
 }
 
 impl DrapePrepareCache {
@@ -199,6 +200,31 @@ impl DrapePrepareCache {
         self.prep_key = Some(key);
         self.prep = Some(prep);
     }
+
+    pub(super) fn style_visibility_digest_cached(&mut self, style: &Style, zoom: f64) -> u64 {
+        let key = (style.revision(), zoom.to_bits());
+        if let Some((rev, zoom_bits, digest)) = self.style_vis_cache
+            && rev == key.0
+            && zoom_bits == key.1
+        {
+            return digest;
+        }
+        let digest = style_visibility_digest(style, zoom);
+        self.style_vis_cache = Some((key.0, key.1, digest));
+        digest
+    }
+}
+
+pub(super) fn relevant_tiles_len(world: &World) -> (usize, usize) {
+    let vector = world.tiles.pyramid_of::<VectorLayerBucketComponent>().len();
+    #[cfg(feature = "raster")]
+    let raster = world
+        .tiles
+        .pyramid_of::<crate::raster::RasterLayersDataComponent>()
+        .len();
+    #[cfg(not(feature = "raster"))]
+    let raster = 0;
+    (vector, raster)
 }
 
 pub(super) fn raster_coverings_digest(coverings: &[(RasterSourceId, Vec<WorldTileCoords>)]) -> u64 {

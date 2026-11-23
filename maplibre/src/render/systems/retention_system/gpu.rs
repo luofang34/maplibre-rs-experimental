@@ -49,6 +49,15 @@ pub(super) fn drop_gpu_data_with_queue(
             pool.drop_coords(*coords);
         }
     }
+    #[cfg(feature = "geojson")]
+    if let Some(dynamic) = world
+        .resources
+        .get_mut::<crate::geojson::update::dynamic_points::DynamicPointGeoJson>()
+    {
+        for coords in evicted {
+            dynamic.evict_tile(*coords);
+        }
+    }
 }
 
 pub(super) fn reclaim_pool_pages(world: &mut World, queue: Option<&UploadQueue>) {

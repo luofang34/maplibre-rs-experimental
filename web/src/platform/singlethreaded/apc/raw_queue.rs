@@ -15,7 +15,7 @@ use super::{
     TrackedPayloadError, WebMessageTag,
 };
 
-const MAX_BATCH_COPY_BYTES: u32 = 512 * 1024;
+const MAX_BATCH_COPY_BYTES: u32 = 128 * 1024;
 
 pub(crate) enum QueuedMessage {
     Decoded(Message),

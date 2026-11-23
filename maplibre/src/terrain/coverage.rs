@@ -74,7 +74,10 @@ pub struct TerrainCoverageIndex {
     maxzoom: u8,
     /// Samples along a DEM tile's side.
     dem_tile_size: u32,
+    /// Configured polar cap datum elevations.
     poles: super::PolarPoleElevations,
+    /// True after in-place DEM bounds sync before `coverage_system` rebuilds `rendered`.
+    rendered_stale: bool,
     edges: Arc<HashMap<WorldTileCoords, Arc<super::queue_system::edges::EdgeHeights>>>,
     edges_generation: u64,
 }
@@ -123,6 +126,24 @@ impl TerrainCoverageIndex {
         index.min_elevation = min - BRACKET_PADDING_METERS;
         index.max_elevation = max + BRACKET_PADDING_METERS;
         index
+    }
+
+    /// Updates loaded DEM bounds in place so `center_elevation_system` sees new tiles immediately.
+    pub(super) fn sync_dem_bounds_in_place(
+        &mut self,
+        bounds: crate::tcs::pyramid::TilePyramid<(f64, f64)>,
+        dem_bounds_sig: u64,
+        dem: &DemSource,
+        poles: super::PolarPoleElevations,
+    ) {
+        self.dem_bounds = bounds;
+        self.dem_bounds_sig = dem_bounds_sig;
+        self.exaggeration = f64::from(dem.exaggeration);
+        self.minzoom = dem.minzoom;
+        self.maxzoom = dem.maxzoom;
+        self.dem_tile_size = dem.tile_size;
+        self.poles = poles;
+        self.rendered_stale = true;
     }
 
     /// Whether any tile is rendered.
@@ -402,7 +423,7 @@ impl TileElevationProvider for IndexedTileElevation<'_> {
 }
 
 mod dem_bounds;
-pub use dem_bounds::coverage_system;
+pub use dem_bounds::{coverage_system, sync_dem_bounds_system};
 mod prepared;
 pub(crate) use prepared::{
     take_or_compute_tight_terrain_region, PreparedTerrainKey, PreparedTerrainRegion,

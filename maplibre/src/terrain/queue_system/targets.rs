@@ -190,7 +190,7 @@ fn build_or_reuse_specs(
         vector_pool_state: digests.vector_pool_state,
         vector_arrival_epoch: digests.vector_arrival_epoch,
         target_tiles_digest: digests.target_tiles_digest,
-        tiles_len: digests.tiles_len,
+        relevant_tiles_len: digests.relevant_tiles_len,
         raster_gen: digests.raster_gen,
         style_rev: digests.style_rev,
         style_vis_digest: digests.style_vis_digest,
@@ -209,9 +209,7 @@ fn select_frame_drape_tiles(
         .get::<MemoryBudget>()
         .copied()
         .unwrap_or_default();
-    world
-        .resources
-        .insert(surface_covering::SurfaceTiles(view_region.iter().collect()));
+    let surface_tiles: Vec<_> = view_region.iter().collect();
     world
         .resources
         .insert(surface_covering::SurfaceCopies::of(view_region.copies()));
@@ -220,28 +218,18 @@ fn select_frame_drape_tiles(
         .resources
         .get_or_init_mut::<cohort::TextureCohort>()
         .enabled = uniform_globe;
-    let allowance =
-        crate::terrain::drape_share::allowance(world, memory, view_region.iter().count());
+    let allowance = crate::terrain::drape_share::allowance(world, memory, surface_tiles.len());
     let tiles: Vec<_> = if uniform_globe {
-        cohort::targets(
-            world,
-            &view_region.iter().collect::<Vec<_>>(),
-            allowance.textures,
-        )
+        cohort::targets(world, &surface_tiles, allowance.textures)
     } else if view_state.has_external_view() || view_state.pose_view().is_some() {
-        // An eye's screen-resolution covering reaches its horizon in more tiles than the
-        // textures allow; the surfaces keep every tile, so only the drapes coarsen.
         let focus = covering::focus_for_view(style, view_state);
-        covering::for_frame(
-            world,
-            view_region.iter().collect(),
-            // The view's share of the textures, less those it regroups with.
-            allowance.targets,
-            focus,
-        )
+        covering::for_frame(world, surface_tiles.clone(), allowance.targets, focus)
     } else {
-        view_region.iter().collect()
+        surface_tiles.clone()
     };
+    world
+        .resources
+        .insert(surface_covering::SurfaceTiles(surface_tiles));
     super::prefetch::prepare(
         style,
         view_state,
@@ -249,20 +237,31 @@ fn select_frame_drape_tiles(
         &tiles,
         (memory, allowance.targets),
     );
-    let had_new_drape = match world
+    let (changed, had_new_drape) = match world
         .resources
         .get::<crate::terrain::request_system::DrapeRequests>()
     {
-        Some(prev) => tiles.iter().any(|tile| !prev.0.contains(tile)),
-        None => !tiles.is_empty(),
+        Some(prev) => (
+            prev.0 != tiles,
+            tiles.iter().any(|tile| !prev.0.contains(tile)),
+        ),
+        None => (true, !tiles.is_empty()),
     };
     if had_new_drape {
         crate::render::frame_signals::keep_animating(world);
     }
-    world
+    if changed {
+        world
+            .resources
+            .insert(crate::terrain::request_system::DrapeRequests(tiles.clone()));
+    }
+    if world
         .resources
-        .insert(crate::terrain::request_system::DrapeRequests(tiles.clone()));
-    world.resources.insert(PrefetchDrapes::default());
+        .get::<PrefetchDrapes>()
+        .is_none_or(|p| !p.0.is_empty())
+    {
+        world.resources.insert(PrefetchDrapes::default());
+    }
     (tiles, uniform_globe)
 }
 
@@ -352,7 +351,7 @@ fn plan_prefetch_drapes(
 fn build_frame_digests(
     style: &Style,
     view_state: &ViewState,
-    world: &World,
+    world: &mut World,
     tiles: &[WorldTileCoords],
     fresh_prefetch: &[WorldTileCoords],
 ) -> super::spec_cache::FrameTerrainDigests {
@@ -362,16 +361,25 @@ fn build_frame_digests(
         tiles.iter().chain(fresh_prefetch.iter()).copied(),
         world,
     );
+    let vector_pool_state = spec_cache::vector_pool_state(world);
+    let vector_arrival_epoch = crate::vector::arrival_epoch(world);
+    let relevant_tiles_len = spec_cache::relevant_tiles_len(world);
+    let raster_gen = spec_cache::raster_mutation_gen(world);
+    let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
+    let style_vis_digest = world
+        .resources
+        .get_or_init_mut::<spec_cache::DrapePrepareCache>()
+        .style_visibility_digest_cached(style, style_zoom);
     spec_cache::FrameTerrainDigests {
-        host_frame: crate::render::frame_signals::host_frame_in_progress(world),
+        host_frame,
         specs_ptr: 0,
-        vector_pool_state: spec_cache::vector_pool_state(world),
-        vector_arrival_epoch: crate::vector::arrival_epoch(world),
+        vector_pool_state,
+        vector_arrival_epoch,
         target_tiles_digest,
-        tiles_len: world.tiles.tiles.len(),
-        raster_gen: spec_cache::raster_mutation_gen(world),
+        relevant_tiles_len,
+        raster_gen,
         style_rev: style.revision(),
-        style_vis_digest: spec_cache::style_visibility_digest(style, style_zoom),
+        style_vis_digest,
     }
 }
 

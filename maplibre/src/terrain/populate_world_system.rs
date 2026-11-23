@@ -139,7 +139,7 @@ impl<E: Environment, T: DemTransferables> System for PopulateWorldSystem<E, T> {
         })?;
         self.idle_rev = (unpack.is_none()
             && self.kernel.apc().in_flight_calls() == 0
-            && !self.kernel.apc().has_arrivals())
+            && !self.kernel.apc().has_pending_arrivals())
         .then_some(style_rev);
 
         Ok(())

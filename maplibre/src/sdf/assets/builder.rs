@@ -8,6 +8,10 @@ use super::{AtlasEntry, SymbolAtlas};
 use crate::sdf::glyphs;
 
 const INITIAL_ATLAS_WIDTH: u32 = 512;
+#[cfg(target_arch = "wasm32")]
+const MAX_PIXELS_OVERALLOC: usize = 128 * 1024;
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_PIXELS_OVERALLOC: usize = 512 * 1024;
 
 /// Incremental shelf packer with a transparent border around every image.
 pub(in crate::sdf) struct AtlasBuilder {
@@ -79,7 +83,7 @@ impl AtlasBuilder {
         if needed > self.atlas.pixels.capacity() {
             let target = needed
                 .saturating_mul(2)
-                .min(needed.saturating_add(512 * 1024));
+                .min(needed.saturating_add(MAX_PIXELS_OVERALLOC));
             self.atlas
                 .pixels
                 .reserve(target.saturating_sub(self.atlas.pixels.len()));
@@ -326,7 +330,15 @@ impl AtlasBuilder {
         self.atlas
             .pixels
             .resize((self.atlas.size[0] * self.atlas.size[1] * 4) as usize, 0);
-        self.atlas.pixels.shrink_to_fit();
+        if self
+            .atlas
+            .pixels
+            .capacity()
+            .saturating_sub(self.atlas.pixels.len())
+            > 256 * 1024
+        {
+            self.atlas.pixels.shrink_to_fit();
+        }
         #[cfg(not(test))]
         {
             let staged = std::mem::take(&mut self.atlas.pixels);

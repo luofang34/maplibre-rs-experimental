@@ -1,5 +1,5 @@
 //! Terrain texture coordinates and uniforms shared across a stereo frame.
-use cgmath::{Matrix4, SquareMatrix, Vector3};
+use cgmath::{Matrix4, SquareMatrix};
 
 use crate::{
     coords::{WorldTileCoords, EXTENT},
@@ -21,7 +21,7 @@ mod polar;
 mod replay;
 #[cfg(test)]
 pub(crate) use fog::terrain_fog;
-use fog::{surface_uniforms, terrain_fog_with_camera};
+use fog::terrain_fog_with_camera;
 pub(super) use replay::replay;
 pub(crate) use replay::TerrainEyeFrame;
 
@@ -31,7 +31,7 @@ fn dem_matrix(coords: WorldTileCoords, dem: WorldTileCoords) -> Matrix4<f64> {
     let scale = 2_f64.powi(delta);
     let origin_x = f64::from(coords.x - (dem.x << delta)) / scale;
     let origin_y = f64::from(coords.y - (dem.y << delta)) / scale;
-    Matrix4::from_translation(Vector3::new(origin_x, origin_y, 0.0))
+    Matrix4::from_translation(cgmath::Vector3::new(origin_x, origin_y, 0.0))
         * Matrix4::from_nonuniform_scale(1.0 / (EXTENT * scale), 1.0 / (EXTENT * scale), 1.0)
 }
 
@@ -69,74 +69,8 @@ fn drape_matrix(coords: WorldTileCoords, source: WorldTileCoords) -> Matrix4<f64
     let scale = 2_f64.powi(delta);
     let origin_x = f64::from(coords.x - (source.x << delta)) / scale;
     let origin_y = f64::from(coords.y - (source.y << delta)) / scale;
-    Matrix4::from_translation(Vector3::new(origin_x, origin_y, 0.0))
+    Matrix4::from_translation(cgmath::Vector3::new(origin_x, origin_y, 0.0))
         * Matrix4::from_nonuniform_scale(1.0 / scale, 1.0 / scale, 1.0)
-}
-
-/// The tiles whose textures a terrain tile samples.
-pub(super) struct TileTextures {
-    /// The DEM tile, or none while no DEM covers the tile.
-    pub(super) dem: Option<WorldTileCoords>,
-    /// Interior DEM sample side length in pixels.
-    pub(super) dem_dim: f32,
-    /// The tile whose drape is shown, an ancestor's until the tile's own is drawn.
-    pub(super) drape: Option<WorldTileCoords>,
-}
-
-pub(super) fn tile_uniforms(
-    coords: WorldTileCoords,
-    textures: TileTextures,
-    _terrain: &TerrainResources,
-    dem: &DemSource,
-    transform: &Matrix4<f32>,
-    skirt_length: f32,
-    fog: &TerrainFog,
-) -> Option<TerrainTileUniforms> {
-    let (dem_matrix, dem_unpack, dem_dim) = match textures.dem {
-        Some(dem_coords) => (
-            dem_matrix(coords, dem_coords).cast::<f32>()?,
-            dem.unpack.map(|value| value as f32),
-            textures.dem_dim,
-        ),
-        None => (Matrix4::identity(), [0.0; 4], 1.0),
-    };
-    Some(TerrainTileUniforms {
-        transform: (*transform).into(),
-        globe_transform: Matrix4::identity().into(),
-        globe_origin: [0.0; 4],
-        dem_matrix: dem_matrix.into(),
-        drape_matrix: textures
-            .drape
-            .map_or_else(Matrix4::identity, |source| drape_matrix(coords, source))
-            .cast::<f32>()?
-            .into(),
-        tile_mercator_coords: tile_mercator_coordinates(
-            coords.into_tile(TileAddressingScheme::XYZ),
-        )
-        .into(),
-        dem_unpack,
-        dem_dim,
-        exaggeration: dem.exaggeration,
-        skirt_length,
-        relief_strength: 0.0,
-        fog_color: fog.fog_color,
-        horizon_color: fog.horizon_color,
-        fog_range: [fog.near, fog.far, fog.ground_blend, fog.horizon_blend],
-        fog_opacity: [
-            fog.opacity,
-            f32::from(fog.globe),
-            f32::from(textures.drape.is_none()),
-            0.0,
-        ],
-        edge_index: [0; 4],
-        surface_color: [0.0; 4],
-        fog_position: [0.0; 4],
-        daylight: [0.0; 4],
-        twilight: [0.0; 4],
-        moonlight: [0.0; 4],
-        procedural_relief: [0.0; 4],
-        procedural_grid: [0.0; 4],
-    })
 }
 
 type TileSources = (
@@ -213,6 +147,8 @@ pub(super) struct SurfaceContext<'a> {
     lighting: crate::render::SceneLighting,
     paint_zoom: f64,
     clear_color: [f32; 4],
+    vector_arrival_epoch: u64,
+    has_external_view: bool,
     gpu_view_projection: crate::render::camera::ViewProjection,
     globe_camera: Option<crate::projection::globe::camera::GlobeCameraState>,
 }
@@ -223,6 +159,7 @@ pub(super) fn surface_context<'a>(
     style: &'a Style,
     view_state: &'a ViewState,
     dem: &'a DemSource,
+    clear: wgpu::Color,
 ) -> SurfaceContext<'a> {
     let skirts = world.resources.get::<crate::terrain::TerrainSkirts>();
     let poles = world
@@ -237,7 +174,6 @@ pub(super) fn surface_context<'a>(
         .unwrap_or_default();
     let paint_zoom =
         crate::vector::upload_system::paint::current_zoom(world, view_state.style_zoom().value());
-    let clear = super::drape_phase::background_clear_color(style);
     let clear_color = [
         clear.r as f32,
         clear.g as f32,
@@ -255,6 +191,8 @@ pub(super) fn surface_context<'a>(
         lighting,
         paint_zoom,
         clear_color,
+        vector_arrival_epoch: crate::vector::arrival_epoch(world),
+        has_external_view: view_state.has_external_view(),
         gpu_view_projection,
         globe_camera,
     }
@@ -262,6 +200,7 @@ pub(super) fn surface_context<'a>(
 
 pub(super) fn prepare_tiles_into(
     out: &mut PreparedTerrain,
+    static_cache: &mut super::steady_cache::TileStaticUniformCache,
     targets: (&[WorldTileCoords], &[Option<WorldTileCoords>]),
     terrain: &TerrainResources,
     tiles: &crate::tcs::tiles::Tiles,
@@ -279,6 +218,23 @@ pub(super) fn prepare_tiles_into(
         // A skirt of no length folds onto the tile edge and covers no pixel.
         crate::terrain::TerrainSkirts::None => 0.0,
     };
+    let vector_tiles_len = tiles
+        .pyramid_of::<crate::vector::VectorLayerBucketComponent>()
+        .len();
+    static_cache.begin_frame(super::steady_cache::StaticFrameKey {
+        style_rev: ctx.style.revision(),
+        paint_zoom_bits: ctx.paint_zoom.to_bits(),
+        clear_color_bits: ctx.clear_color.map(f32::to_bits),
+        poles_north_bits: ctx.poles.north_meters.to_bits(),
+        poles_south_bits: ctx.poles.south_meters.to_bits(),
+        drape_mode_bits: super::steady_cache::StaticFrameKey::drape_mode_bits(terrain.drape_mode()),
+        dem_exaggeration_bits: ctx.dem.exaggeration.to_bits(),
+        dem_unpack_bits: ctx.dem.unpack.map(f64::to_bits),
+        radius_bits: ctx.view_state.body().radius_meters.to_bits(),
+        has_globe_camera: ctx.globe_camera.is_some(),
+        vector_arrival_epoch: ctx.vector_arrival_epoch,
+        vector_tiles_len,
+    });
     out.clear();
     out.reserve(coords_list.len());
     for (&coords, &drape_source) in coords_list.iter().zip(drape_sources) {
@@ -288,7 +244,8 @@ pub(super) fn prepare_tiles_into(
             terrain,
             tiles,
             &ctx,
-            (&ctx.gpu_view_projection, skirt_length as f32, &fog),
+            static_cache,
+            (skirt_length as f32, &fog),
         ) {
             out.uniforms.push(block);
             out.sources.push(tile_source);
@@ -305,38 +262,23 @@ type PreparedSingleTile = (
     Option<Matrix4<f64>>,
 );
 
-fn prepare_single_tile(
+fn build_tile_static(
     coords: WorldTileCoords,
-    drape_source: Option<WorldTileCoords>,
-    terrain: &TerrainResources,
+    (dem_coords, dem_dim, drape_source): (Option<WorldTileCoords>, f32, Option<WorldTileCoords>),
+    drape_mode: crate::render::settings::TerrainDrapeMode,
     tiles: &crate::tcs::tiles::Tiles,
     ctx: &SurfaceContext<'_>,
-    (gpu_view_projection, skirt_length, fog): (
-        &crate::render::camera::ViewProjection,
-        f32,
-        &TerrainFog,
-    ),
-) -> Option<PreparedSingleTile> {
-    let zoom = ctx.view_state.zoom();
-    let (dem_coords, dem_id, dem_dim) = match terrain.resolve_loaded_dem(coords, ctx.dem) {
-        Some((dem_coords, id, dim)) => (Some(dem_coords), Some(id), dim),
-        None => (None, None, 1.0),
+) -> Option<super::steady_cache::CachedTileStatic> {
+    let (dem_mat, dem_unpack) = match dem_coords {
+        Some(dc) => (
+            dem_matrix(coords, dc).cast::<f32>()?,
+            ctx.dem.unpack.map(|value| value as f32),
+        ),
+        None => (Matrix4::identity(), [0.0; 4]),
     };
-    let mut block = tile_uniforms(
-        coords,
-        TileTextures {
-            dem: dem_coords,
-            dem_dim,
-            drape: drape_source,
-        },
-        terrain,
-        ctx.dem,
-        &gpu_view_projection
-            .to_model_view_projection(coords.transform_for_zoom(zoom))
-            .downcast(),
-        skirt_length,
-        fog,
-    )?;
+    let drape_mat = drape_source
+        .map_or_else(Matrix4::identity, |source| drape_matrix(coords, source))
+        .cast::<f32>()?;
     let [north_cap, south_cap] = polar::cap_colors_with_base(
         coords,
         drape_source,
@@ -356,13 +298,97 @@ fn prepare_single_tile(
     } else {
         0.0
     };
-    block.edge_index = [0, north_cap, south_cap, pole_elev.to_bits()];
-    let basis = surface_uniforms(
+    let (globe_basis, globe_origin) = if ctx.globe_camera.is_some() {
+        globe::compute_basis(coords, ctx.view_state.body().radius_meters)
+            .map_or((None, [0.0; 4]), |(basis, origin)| (Some(basis), origin))
+    } else {
+        (None, [0.0; 4])
+    };
+    let (procedural_relief, procedural_grid) =
+        fog::procedural_uniforms(coords, drape_mode, ctx.view_state.body().radius_meters);
+    Some(super::steady_cache::CachedTileStatic {
+        dem_matrix: dem_mat.into(),
+        drape_matrix: drape_mat.into(),
+        tile_mercator_coords: tile_mercator_coordinates(
+            coords.into_tile(TileAddressingScheme::XYZ),
+        )
+        .into(),
+        dem_unpack,
+        dem_dim,
+        exaggeration: ctx.dem.exaggeration,
+        edge_index: [0, north_cap, south_cap, pole_elev.to_bits()],
+        surface_color: ctx.clear_color,
+        globe_origin,
+        globe_basis,
+        procedural_relief,
+        procedural_grid,
+        last_used_frame: 0,
+    })
+}
+
+fn prepare_single_tile(
+    coords: WorldTileCoords,
+    drape_source: Option<WorldTileCoords>,
+    terrain: &TerrainResources,
+    tiles: &crate::tcs::tiles::Tiles,
+    ctx: &SurfaceContext<'_>,
+    static_cache: &mut super::steady_cache::TileStaticUniformCache,
+    (skirt_length, fog): (f32, &TerrainFog),
+) -> Option<PreparedSingleTile> {
+    let zoom = ctx.view_state.zoom();
+    let (dem_coords, dem_id, dem_dim) = match terrain.resolve_loaded_dem(coords, ctx.dem) {
+        Some((dem_coords, id, dim)) => (Some(dem_coords), Some(id), dim),
+        None => (None, None, 1.0),
+    };
+    let key = (coords, dem_coords, dem_id, drape_source);
+    let cached = static_cache.get_or_try_insert_with(key, || {
+        build_tile_static(
+            coords,
+            (dem_coords, dem_dim, drape_source),
+            terrain.drape_mode(),
+            tiles,
+            ctx,
+        )
+    })?;
+    let mut block = TerrainTileUniforms {
+        transform: ctx
+            .gpu_view_projection
+            .to_model_view_projection(coords.transform_for_zoom(zoom))
+            .downcast()
+            .into(),
+        globe_transform: Matrix4::identity().into(),
+        globe_origin: [0.0; 4],
+        dem_matrix: cached.dem_matrix,
+        drape_matrix: cached.drape_matrix,
+        tile_mercator_coords: cached.tile_mercator_coords,
+        dem_unpack: cached.dem_unpack,
+        dem_dim: cached.dem_dim,
+        exaggeration: cached.exaggeration,
+        skirt_length,
+        relief_strength: if ctx.has_external_view { 0.45 } else { 0.0 },
+        fog_color: fog.fog_color,
+        horizon_color: fog.horizon_color,
+        fog_range: [fog.near, fog.far, fog.ground_blend, fog.horizon_blend],
+        fog_opacity: [
+            fog.opacity,
+            f32::from(fog.globe),
+            f32::from(drape_source.is_none()),
+            f32::from(ctx.has_external_view),
+        ],
+        edge_index: cached.edge_index,
+        surface_color: cached.surface_color,
+        fog_position: ctx.view_state.eye_fog_position(coords).unwrap_or([0.0; 4]),
+        daylight: ctx.lighting.daylight_uniform(),
+        twilight: ctx.lighting.twilight,
+        moonlight: ctx.lighting.moonlight,
+        procedural_relief: cached.procedural_relief,
+        procedural_grid: cached.procedural_grid,
+    };
+    let basis = globe::apply_basis_or_clear(
         &mut block,
-        coords,
-        (ctx.clear_color, ctx.lighting, terrain.drape_mode()),
-        ctx.view_state,
         ctx.globe_camera.as_ref(),
+        cached.globe_basis.as_ref(),
+        cached.globe_origin,
     );
     Some((block, (dem_coords, coords, drape_source), dem_id, basis))
 }
