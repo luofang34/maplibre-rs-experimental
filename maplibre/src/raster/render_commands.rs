@@ -6,8 +6,7 @@ use crate::{
         eventually::{Eventually, Eventually::Initialized},
         projection::ProjectionGpuResources,
         render_phase::{LayerItem, PhaseItem, RenderCommand, RenderCommandResult},
-        tile_mesh::{GlobeTileMeshCache, TileMeshUsage},
-        tile_view_pattern::WgpuTileViewPattern,
+        tile_mesh::TileMeshUsage,
     },
     tcs::world::World,
 };
@@ -104,10 +103,11 @@ impl RenderCommand<LayerItem> for DrawRasterTile {
         item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some((Initialized(tile_view_pattern), tile_mesh_cache)) = world
-            .resources
-            .query::<(&Eventually<WgpuTileViewPattern>, &GlobeTileMeshCache)>()
-        else {
+        let refs = pass.frame_refs();
+        let (Some(tile_view_pattern), Some(tile_mesh_cache)) = (
+            crate::render::pass_refs::PassFrameRefs::resolve_tile_view_pattern(refs, world),
+            crate::render::pass_refs::PassFrameRefs::resolve_tile_mesh_cache(refs, world),
+        ) else {
             return RenderCommandResult::Failure;
         };
 
@@ -131,10 +131,7 @@ impl RenderCommand<LayerItem> for DrawRasterTile {
 
         pass.set_stencil_reference(reference);
 
-        let whole = world
-            .resources
-            .get::<crate::render::tracked_pass::DrawCapabilities>()
-            .is_some_and(|capabilities| capabilities.base_vertex);
+        let whole = pass.base_vertex(world);
         pass.set_vertex_buffer(0, mesh.vertex_buffer().slice(..));
         let instances = if whole {
             let Some(tile_instance) = source_shape.instance_index() else {

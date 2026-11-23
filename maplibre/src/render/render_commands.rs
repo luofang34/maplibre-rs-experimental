@@ -3,12 +3,10 @@
 #![deny(missing_docs)]
 use crate::{
     render::{
-        eventually::{Eventually, Eventually::Initialized},
-        projection::ProjectionGpuResources,
+        pass_refs::PassFrameRefs,
         render_phase::{PhaseItem, RenderCommand, RenderCommandResult, TileMaskItem},
         tile_mesh::{GlobeTileMeshCache, TileMeshUsage},
         tile_view_pattern::WgpuTileViewPattern,
-        MaskPipeline,
     },
     tcs::world::World,
 };
@@ -21,12 +19,11 @@ impl<P: PhaseItem> RenderCommand<P> for SetMaskPipeline {
         item: &P,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some((Initialized(pipeline), Initialized(projection_resources))) =
-            world.resources.query::<(
-                &Eventually<MaskPipeline>,
-                &Eventually<ProjectionGpuResources>,
-            )>()
-        else {
+        let refs = pass.frame_refs();
+        let (Some(pipeline), Some(projection_resources)) = (
+            PassFrameRefs::resolve_mask_pipeline(refs, world),
+            PassFrameRefs::resolve_projection(refs, world),
+        ) else {
             return RenderCommandResult::Failure;
         };
         let binding = item.projection_binding();
@@ -106,10 +103,11 @@ impl DrawMask {
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
         reference: u32,
     ) -> RenderCommandResult {
-        let Some((Initialized(tile_view_pattern), tile_mesh_cache)) = world
-            .resources
-            .query::<(&Eventually<WgpuTileViewPattern>, &GlobeTileMeshCache)>()
-        else {
+        let refs = pass.frame_refs();
+        let (Some(tile_view_pattern), Some(tile_mesh_cache)) = (
+            PassFrameRefs::resolve_tile_view_pattern(refs, world),
+            PassFrameRefs::resolve_tile_mesh_cache(refs, world),
+        ) else {
             return RenderCommandResult::Failure;
         };
         Self::render_prepared(

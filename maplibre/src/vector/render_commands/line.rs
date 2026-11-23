@@ -4,7 +4,7 @@ use super::{line_mode_for_entry, DrawVectorTile, LineMode};
 use crate::{
     coords::WorldTileCoords,
     render::{
-        eventually::{Eventually, Eventually::Initialized},
+        pass_refs::PassFrameRefs,
         projection::ProjectionGpuResources,
         render_phase::{LayerItem, PhaseItem, RenderCommand, RenderCommandResult},
         tile_view_pattern::WgpuTileViewPattern,
@@ -23,24 +23,18 @@ impl RenderCommand<LayerItem> for SetLineTilePipeline {
         item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some((Initialized(pipeline), Initialized(projection_resources))) =
-            world.resources.query::<(
-                &Eventually<LinePipeline>,
-                &Eventually<ProjectionGpuResources>,
-            )>()
-        else {
+        let refs = pass.frame_refs();
+        let (Some(pipeline), Some(projection_resources)) = (
+            PassFrameRefs::resolve_line_pipeline(refs, world),
+            PassFrameRefs::resolve_projection(refs, world),
+        ) else {
             return RenderCommandResult::Failure;
         };
 
-        let entry = super::resolve_vector_entry(world, item);
-        let terrain = world
-            .resources
-            .get::<crate::terrain::TerrainFrame>()
-            .is_some_and(|frame| frame.active);
+        let entry = super::resolve_vector_entry(refs, world, item);
+        let terrain = PassFrameRefs::resolve_terrain_active(refs, world);
         let mode = line_mode_for_entry(entry, terrain);
-        let dashes = world
-            .resources
-            .get::<crate::vector::line_dash::LineDashResources>();
+        let dashes = PassFrameRefs::resolve_line_dashes(refs, world);
         if !bind_line_pipeline(
             pipeline,
             projection_resources,
@@ -118,12 +112,11 @@ impl RenderCommand<LayerItem> for DrawLineTile {
         item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some((Initialized(buffer_pool), Initialized(tile_view_pattern))) =
-            world.resources.query::<(
-                &Eventually<VectorBufferPool>,
-                &Eventually<WgpuTileViewPattern>,
-            )>()
-        else {
+        let refs = pass.frame_refs();
+        let (Some(buffer_pool), Some(tile_view_pattern)) = (
+            PassFrameRefs::resolve_vector_pool(refs, world),
+            PassFrameRefs::resolve_tile_view_pattern(refs, world),
+        ) else {
             return RenderCommandResult::Failure;
         };
         let Some(entry) =
@@ -133,10 +126,7 @@ impl RenderCommand<LayerItem> for DrawLineTile {
         else {
             return RenderCommandResult::Failure;
         };
-        let terrain = world
-            .resources
-            .get::<crate::terrain::TerrainFrame>()
-            .is_some_and(|frame| frame.active);
+        let terrain = PassFrameRefs::resolve_terrain_active(refs, world);
         let mode = line_mode_for_entry(Some(entry), terrain);
         draw_line_prepared(
             world,
@@ -160,17 +150,18 @@ impl RenderCommand<LayerItem> for DrawLineTiles {
         item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some((
-            Initialized(pipeline),
-            Initialized(projection_resources),
-            Initialized(buffer_pool),
-            Initialized(tile_view_pattern),
-        )) = world.resources.query::<(
-            &Eventually<LinePipeline>,
-            &Eventually<ProjectionGpuResources>,
-            &Eventually<VectorBufferPool>,
-            &Eventually<WgpuTileViewPattern>,
-        )>()
+        let refs = pass.frame_refs();
+        let (
+            Some(pipeline),
+            Some(projection_resources),
+            Some(buffer_pool),
+            Some(tile_view_pattern),
+        ) = (
+            PassFrameRefs::resolve_line_pipeline(refs, world),
+            PassFrameRefs::resolve_projection(refs, world),
+            PassFrameRefs::resolve_vector_pool(refs, world),
+            PassFrameRefs::resolve_tile_view_pattern(refs, world),
+        )
         else {
             return RenderCommandResult::Failure;
         };
@@ -185,14 +176,9 @@ impl RenderCommand<LayerItem> for DrawLineTiles {
             tracing::error!("Tried to draw a vector tile without any vertices");
             return RenderCommandResult::Failure;
         }
-        let terrain = world
-            .resources
-            .get::<crate::terrain::TerrainFrame>()
-            .is_some_and(|frame| frame.active);
+        let terrain = PassFrameRefs::resolve_terrain_active(refs, world);
         let mode = line_mode_for_entry(Some(entry), terrain);
-        let dashes = world
-            .resources
-            .get::<crate::vector::line_dash::LineDashResources>();
+        let dashes = PassFrameRefs::resolve_line_dashes(refs, world);
         if !bind_line_pipeline(
             pipeline,
             projection_resources,
@@ -235,10 +221,7 @@ fn draw_line_prepared<'w>(
             pass,
         );
     }
-    let Some(Initialized(terrain)) = world
-        .resources
-        .get::<Eventually<crate::terrain::resources::TerrainResources>>()
-    else {
+    let Some(terrain) = PassFrameRefs::resolve_terrain_resources(pass.frame_refs(), world) else {
         return RenderCommandResult::Failure;
     };
     let tile = item.source_shape.coords();

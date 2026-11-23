@@ -356,6 +356,9 @@ impl<Q: Queue<B>, B, V: PoolVertex, I: Pod, TM: Pod, FM: Pod> BufferPool<Q, B, V
         coords: WorldTileCoords,
         id: crate::style::StyleLayerId,
     ) -> Option<&[(u32, Range<u32>)]> {
+        if self.pattern_runs.is_empty() {
+            return None;
+        }
         self.pattern_runs.get(&(coords, id)).map(Vec::as_slice)
     }
 

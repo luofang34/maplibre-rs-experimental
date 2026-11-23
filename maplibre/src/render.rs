@@ -55,6 +55,7 @@ pub(crate) mod systems;
 mod graph_runner;
 pub(crate) mod main_pass;
 pub(crate) use main_pass::{EMPTY_STENCIL_REFERENCE, STENCIL_MARK};
+pub(crate) mod pass_refs;
 pub mod shaders;
 mod translucent_pass;
 

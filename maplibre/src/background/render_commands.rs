@@ -11,7 +11,7 @@ use crate::{
         eventually::Eventually::{self, Initialized},
         projection::ProjectionGpuResources,
         render_phase::{LayerItem, PhaseItem, RenderCommand, RenderCommandResult},
-        tile_mesh::{GlobeTileMeshCache, TileMeshUsage},
+        tile_mesh::TileMeshUsage,
     },
     tcs::world::World,
 };
@@ -90,12 +90,16 @@ impl RenderCommand<LayerItem> for SetGlobeBackgroundPipeline {
         item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some((Initialized(pipelines), Initialized(projection_resources))) =
-            world.resources.query::<(
-                &Eventually<GlobeBackgroundRenderPipeline>,
-                &Eventually<ProjectionGpuResources>,
-            )>()
-        else {
+        let (Some(pipelines), Some(projection_resources)) = (
+            world
+                .resources
+                .get::<Eventually<GlobeBackgroundRenderPipeline>>()
+                .and_then(|res| match res {
+                    Initialized(v) => Some(v),
+                    _ => None,
+                }),
+            crate::render::pass_refs::PassFrameRefs::resolve_projection(pass.frame_refs(), world),
+        ) else {
             return RenderCommandResult::Failure;
         };
         let opaque = world
@@ -124,10 +128,15 @@ impl RenderCommand<LayerItem> for DrawGlobeBackgroundQuad {
         item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some((buffers, mesh_cache)) = world.resources.query::<(
-            &crate::background::queue_system::BackgroundBuffers,
-            &GlobeTileMeshCache,
-        )>() else {
+        let (Some(buffers), Some(mesh_cache)) = (
+            world
+                .resources
+                .get::<crate::background::queue_system::BackgroundBuffers>(),
+            crate::render::pass_refs::PassFrameRefs::resolve_tile_mesh_cache(
+                pass.frame_refs(),
+                world,
+            ),
+        ) else {
             return RenderCommandResult::Failure;
         };
         let instance = u64::from(
@@ -137,8 +146,8 @@ impl RenderCommand<LayerItem> for DrawGlobeBackgroundQuad {
                 .copied()
                 .unwrap_or(0),
         );
-        // Both the tile and the layer step per instance, so each is bound as a one-element
-        // slice and drawn as instance zero.
+        // Layer metadata uses array_stride = 0 across instanced tiles; tile metadata is sliced
+        // per contiguous mesh-variant run with 0-based instance indices for WebGL2 compatibility.
         let stride = std::mem::size_of::<crate::render::shaders::ShaderTileMetadata>() as u64;
         let layer_stride =
             std::mem::size_of::<crate::render::shaders::BackgroundLayerMetadata>() as u64;
@@ -148,21 +157,28 @@ impl RenderCommand<LayerItem> for DrawGlobeBackgroundQuad {
                 .metadata_buffer
                 .slice(instance * layer_stride..(instance + 1) * layer_stride),
         );
+        let mut idx = 0_usize;
         let mut drawn = false;
-        for (index, coords) in (0_u64..).zip(&buffers.globe_tiles) {
-            let Some(mesh) = mesh_cache.get(*coords, TileMeshUsage::Raster, false) else {
-                continue;
-            };
-            pass.set_vertex_buffer(0, mesh.vertex_buffer().slice(..));
-            pass.set_vertex_buffer(
-                1,
-                buffers
-                    .tile_metadata_buffer
-                    .slice(index * stride..(index + 1) * stride),
-            );
-            pass.set_index_buffer(mesh.index_buffer().slice(..), mesh.index_format());
-            pass.draw_indexed(0..mesh.index_count(), 0, 0..1);
-            drawn = true;
+        for chunk in buffers.globe_tiles.chunk_by(|a, b| {
+            crate::render::tile_mesh::globe_mesh_group_key(*a, TileMeshUsage::Raster)
+                == crate::render::tile_mesh::globe_mesh_group_key(*b, TileMeshUsage::Raster)
+        }) {
+            let count = chunk.len();
+            if let Some(first) = chunk.first() {
+                if let Some(mesh) = mesh_cache.get(*first, TileMeshUsage::Raster, false) {
+                    let start_byte = (idx as u64) * stride;
+                    let end_byte = ((idx + count) as u64) * stride;
+                    pass.set_vertex_buffer(0, mesh.vertex_buffer().slice(..));
+                    pass.set_vertex_buffer(
+                        1,
+                        buffers.tile_metadata_buffer.slice(start_byte..end_byte),
+                    );
+                    pass.set_index_buffer(mesh.index_buffer().slice(..), mesh.index_format());
+                    pass.draw_indexed(0..mesh.index_count(), 0, 0..count as u32);
+                    drawn = true;
+                }
+            }
+            idx += count;
         }
         if drawn {
             RenderCommandResult::Success
@@ -180,14 +196,15 @@ impl RenderCommand<LayerItem> for SetGlobeBackgroundPatternPipeline {
         item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let (Some(gpu), Some(patterns), Some(Initialized(projection_resources))) = (
+        let (Some(gpu), Some(patterns), Some(projection_resources)) = (
             world
                 .resources
                 .get::<crate::background::pattern::BackgroundPatternGpu>(),
-            world
-                .resources
-                .get::<crate::vector::pattern::PatternResources>(),
-            world.resources.get::<Eventually<ProjectionGpuResources>>(),
+            crate::render::pass_refs::PassFrameRefs::resolve_pattern_resources(
+                pass.frame_refs(),
+                world,
+            ),
+            crate::render::pass_refs::PassFrameRefs::resolve_projection(pass.frame_refs(), world),
         ) else {
             return RenderCommandResult::Failure;
         };

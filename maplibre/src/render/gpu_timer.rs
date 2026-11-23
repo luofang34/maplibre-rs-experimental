@@ -14,6 +14,7 @@ use std::{
 
 /// Bytes of the two resolved timestamps.
 const RESOLVED_BYTES: u64 = 2 * std::mem::size_of::<u64>() as u64;
+const TELEMETRY_SAMPLE_STRIDE: u64 = 16;
 
 const IDLE: u8 = 0;
 const WRITTEN: u8 = 1;
@@ -32,6 +33,7 @@ pub struct GpuTimer {
     state: Arc<AtomicU8>,
     /// The host frame whose passes the measurement in flight timed.
     frame: std::sync::atomic::AtomicU64,
+    sample_allowed: std::sync::atomic::AtomicBool,
 }
 
 impl Drop for GpuTimer {
@@ -66,7 +68,12 @@ impl GpuTimer {
             readback: buffer(wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST),
             state: Arc::new(AtomicU8::new(IDLE)),
             frame: std::sync::atomic::AtomicU64::new(0),
+            sample_allowed: std::sync::atomic::AtomicBool::new(true),
         })
+    }
+
+    pub(crate) fn set_sample_allowed(&self, allowed: bool) {
+        self.sample_allowed.store(allowed, Ordering::Relaxed);
     }
 
     /// Names the host frame that the next measurement will time, unless one is in flight.
@@ -96,6 +103,9 @@ impl GpuTimer {
         last: bool,
     ) -> Option<wgpu::RenderPassTimestampWrites<'_>> {
         if first {
+            if !self.sample_allowed.load(Ordering::Relaxed) {
+                return None;
+            }
             self.state
                 .compare_exchange(IDLE, WRITTEN, Ordering::AcqRel, Ordering::Acquire)
                 .ok()?;
@@ -217,7 +227,9 @@ pub(crate) fn update_gpu_timer(
                 .map(|spent| (timer.frame(), spent))
         })
         .flatten();
-    timer.tag(crate::render::frame_signals::host_frame_in_progress(world));
+    let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
+    timer.set_sample_allowed(trace_active || host_frame.is_multiple_of(TELEMETRY_SAMPLE_STRIDE));
+    timer.tag(host_frame);
     if let Some((frame, spent)) = measured {
         crate::render::frame_signals::record_gpu_time(world, frame, spent);
     }

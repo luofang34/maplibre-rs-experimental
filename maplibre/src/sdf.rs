@@ -37,9 +37,9 @@ mod placement;
 pub(crate) mod populate_world_system;
 pub mod provided;
 mod queue_system;
-mod render_commands;
+pub(crate) mod render_commands;
 mod resource_system;
-mod textures;
+pub(crate) mod textures;
 pub(crate) mod translation;
 mod upload_system;
 pub mod visibility;
@@ -50,13 +50,13 @@ pub(crate) mod glyphs;
 pub mod tessellation;
 
 #[derive(Default)]
-struct SymbolModePipelines {
+pub(crate) struct SymbolModePipelines {
     combined: Option<wgpu::RenderPipeline>,
     halo: Option<wgpu::RenderPipeline>,
     fill: Option<wgpu::RenderPipeline>,
 }
 
-struct SymbolPipeline {
+pub(crate) struct SymbolPipeline {
     atlas_layout: wgpu::BindGroupLayout,
     depth_layout: wgpu::BindGroupLayout,
     flat: Option<SymbolModePipelines>,

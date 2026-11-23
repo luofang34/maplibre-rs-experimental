@@ -42,3 +42,13 @@ impl TileBytesCache {
         self.entries.len()
     }
 }
+
+pub(super) fn prune_last_used<S: std::hash::BuildHasher>(
+    last_used: &mut FxHashMap<WorldTileCoords, u64>,
+    tiles: &Tiles,
+    in_use: &std::collections::HashSet<WorldTileCoords, S>,
+) {
+    if last_used.len() > tiles.tiles.len() * 2 + 64 {
+        last_used.retain(|coords, _| tiles.exists(*coords) || in_use.contains(coords));
+    }
+}

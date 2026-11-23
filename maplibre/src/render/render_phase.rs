@@ -274,13 +274,20 @@ pub struct TileMaskItem {
 }
 
 impl PhaseItem for TileMaskItem {
-    type SortKey = (u32, u8);
+    type SortKey = (u32, u8, bool, bool);
 
     /// Coarser tiles write their masks first, so the masks of finer tiles lie over them.
     fn sort_key(&self) -> Self::SortKey {
+        let coords = self.source_shape.coords();
+        let (_, north, south) = crate::render::tile_mesh::globe_mesh_group_key(
+            coords,
+            crate::render::tile_mesh::TileMeshUsage::Stencil,
+        );
         (
             u32::from(!self.generate_borders),
-            u8::from(self.source_shape.coords().z),
+            u8::from(coords.z),
+            north,
+            south,
         )
     }
 

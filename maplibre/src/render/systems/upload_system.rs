@@ -213,6 +213,7 @@ pub fn upload_system(
     else {
         return Err(SystemError::Dependencies);
     };
+    tile_mesh_cache.advance_epoch();
     for &coords in &background_tiles {
         tile_mesh_cache
             .prepare(device, queue, coords, TileMeshUsage::Raster, false)
@@ -231,6 +232,7 @@ pub fn upload_system(
                 })?;
         }
     }
+    tile_mesh_cache.evict_stale(32);
     let (with_raster, with_borders) = {
         let prev = memo.last_globe.as_ref();
         (

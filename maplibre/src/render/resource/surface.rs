@@ -207,10 +207,7 @@ impl Surface {
                     texture: frame,
                 }
             }
-            Head::Headless(arc) => arc
-                .texture
-                .create_view(&wgpu::TextureViewDescriptor::default())
-                .into(),
+            Head::Headless(arc) => arc.texture_view.clone().into(),
         })
     }
 

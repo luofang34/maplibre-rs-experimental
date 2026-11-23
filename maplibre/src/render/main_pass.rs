@@ -94,12 +94,9 @@ impl Node for MainPassNode {
                     .and_then(crate::render::gpu_timer::GpuTimer::pass_writes),
                 occlusion_query_set: None,
             });
-        let base_vertex = world
-            .resources
-            .get::<crate::render::tracked_pass::DrawCapabilities>()
-            .is_some_and(|cap| cap.base_vertex);
+        let frame_refs = crate::render::pass_refs::PassFrameRefs::from_world(world);
         let mut pass =
-            crate::render::tracked_pass::TrackedRenderPass::new(pass).with_base_vertex(base_vertex);
+            crate::render::tracked_pass::TrackedRenderPass::new(pass).with_frame_refs(frame_refs);
         let inline_ctx = draw_layers(&mut pass, world);
         if inline_translucent && translucent_has_work {
             super::translucent_pass::draw_contents_inline(&mut pass, world, inline_ctx);
@@ -292,16 +289,20 @@ fn draw_layers<'w>(
                     group,
                 );
             }
-            for layer in group {
-                // The ground preserves depth for screen-space layers while remaining above the
-                // background.
-                if let Some(surface) = ground.filter(|surface| {
-                    ground_pending && layer.index > surface.draw_after_layer_index
-                }) {
-                    (surface.draw)(pass, world);
-                    ground_pending = false;
+            if !ground_pending {
+                for layer in group {
+                    layer.draw_function.draw(pass, world, layer);
                 }
-                layer.draw_function.draw(pass, world, layer);
+            } else if let Some(surface) = ground {
+                for layer in group {
+                    // The ground preserves depth for screen-space layers while remaining above the
+                    // background.
+                    if ground_pending && layer.index > surface.draw_after_layer_index {
+                        (surface.draw)(pass, world);
+                        ground_pending = false;
+                    }
+                    layer.draw_function.draw(pass, world, layer);
+                }
             }
         }
     }

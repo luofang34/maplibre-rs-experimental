@@ -114,6 +114,12 @@ impl DepthCopyPipeline {
             cached_bind: Mutex::new(None),
         }
     }
+
+    /// Drops any cached source depth texture bind group so resized textures are released promptly.
+    pub(crate) fn clear_cached_bind(&self) {
+        let mut cached = crate::platform::lock_unpoisoned(&self.cached_bind);
+        *cached = None;
+    }
     /// Resolves the rendered depth into a single-sample target.
     pub(crate) fn copy(
         &self,

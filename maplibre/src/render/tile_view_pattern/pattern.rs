@@ -53,14 +53,19 @@ struct PatternScratch {
 
 impl PatternScratch {
     fn reset(&mut self, clear_raster: bool) {
-        for set in self.vector_parents.values_mut() {
-            set.clear();
+        if self.vector_parents.len() > 8 {
+            self.vector_parents.clear();
+        } else {
+            for set in self.vector_parents.values_mut() {
+                set.clear();
+            }
         }
-        for set in self.raster_parents.values_mut() {
-            set.clear();
-        }
-        if clear_raster {
+        if clear_raster || self.raster_parents.len() > 8 {
             self.raster_parents.clear();
+        } else {
+            for set in self.raster_parents.values_mut() {
+                set.clear();
+            }
         }
     }
 }

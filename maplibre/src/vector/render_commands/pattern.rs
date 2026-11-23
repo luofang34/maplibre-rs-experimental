@@ -3,13 +3,10 @@
 use super::DrawVectorTile;
 use crate::{
     render::{
-        eventually::{Eventually, Eventually::Initialized},
-        projection::ProjectionGpuResources,
+        pass_refs::PassFrameRefs,
         render_phase::{LayerItem, PhaseItem, RenderCommand, RenderCommandResult},
-        tile_view_pattern::WgpuTileViewPattern,
     },
     tcs::world::World,
-    vector::{pattern::PatternResources, VectorBufferPool},
 };
 
 /// Binds the pattern pipeline and the pattern of the item's layer.
@@ -20,9 +17,10 @@ impl RenderCommand<LayerItem> for SetPatternTilePipeline {
         item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let (Some(patterns), Some(Initialized(projection_resources))) = (
-            world.resources.get::<PatternResources>(),
-            world.resources.get::<Eventually<ProjectionGpuResources>>(),
+        let refs = pass.frame_refs();
+        let (Some(patterns), Some(projection_resources)) = (
+            PassFrameRefs::resolve_pattern_resources(refs, world),
+            PassFrameRefs::resolve_projection(refs, world),
         ) else {
             return RenderCommandResult::Failure;
         };
@@ -33,7 +31,7 @@ impl RenderCommand<LayerItem> for SetPatternTilePipeline {
         let Some(pipeline) = patterns.pipeline() else {
             return RenderCommandResult::Failure;
         };
-        pass.set_pipeline(pipeline.select(super::is_uniform_entry(world, item)));
+        pass.set_pipeline(pipeline.select(super::is_uniform_entry(refs, world, item)));
         pass.set_bind_group(
             0,
             projection_resources.bind_group_for(item.projection_binding()),
@@ -55,17 +53,18 @@ impl RenderCommand<LayerItem> for DrawPatternTiles {
         item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some((
-            patterns,
-            Initialized(projection_resources),
-            Initialized(buffer_pool),
-            Initialized(tile_view_pattern),
-        )) = world.resources.query::<(
-            &PatternResources,
-            &Eventually<ProjectionGpuResources>,
-            &Eventually<VectorBufferPool>,
-            &Eventually<WgpuTileViewPattern>,
-        )>()
+        let refs = pass.frame_refs();
+        let (
+            Some(patterns),
+            Some(projection_resources),
+            Some(buffer_pool),
+            Some(tile_view_pattern),
+        ) = (
+            PassFrameRefs::resolve_pattern_resources(refs, world),
+            PassFrameRefs::resolve_projection(refs, world),
+            PassFrameRefs::resolve_vector_pool(refs, world),
+            PassFrameRefs::resolve_tile_view_pattern(refs, world),
+        )
         else {
             return RenderCommandResult::Failure;
         };
@@ -115,7 +114,8 @@ impl RenderCommand<LayerItem> for SetPatternBindGroup {
         item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some(patterns) = world.resources.get::<PatternResources>() else {
+        let Some(patterns) = PassFrameRefs::resolve_pattern_resources(pass.frame_refs(), world)
+        else {
             return RenderCommandResult::Failure;
         };
         match patterns.binding(item.style_layer) {

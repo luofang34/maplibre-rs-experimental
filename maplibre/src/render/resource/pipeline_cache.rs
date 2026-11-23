@@ -147,6 +147,22 @@ impl SharedPipelines {
             state.shaders.clear();
             state.shaders.shrink_to_fit();
         }
+        if !state.layouts.is_empty() {
+            state.layouts.clear();
+            state.layouts.shrink_to_fit();
+        }
+        if !state.pipelines.is_empty() {
+            state.pipelines.clear();
+            state.pipelines.shrink_to_fit();
+        }
+    }
+
+    /// Evicts all cached shader modules, bind-group layouts, and pipelines belonging to `device`.
+    pub fn evict_device(&self, device: &wgpu::Device) {
+        let mut state = crate::platform::lock_unpoisoned(&self.0.state);
+        state.shaders.retain(|(dev, _), _| dev != device);
+        state.layouts.retain(|(dev, _), _| dev != device);
+        state.pipelines.retain(|key, _| &key.device != device);
     }
 
     /// Number of WGSL shader modules compiled on the device through this cache.

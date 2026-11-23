@@ -38,6 +38,12 @@ impl WasmStagingBelt {
         copies: &mut Vec<StagedCopy>,
     ) {
         payload.clear();
+        if payload.capacity() > SHRINK_STAGING_BUFFER_CAPACITY as usize * 4 {
+            payload.shrink_to(SHRINK_STAGING_BUFFER_CAPACITY as usize);
+        }
+        if copies.capacity() > 256 {
+            copies.shrink_to(256);
+        }
         let any_oversized = self.slots.iter().any(|slot| {
             slot.as_ref()
                 .is_some_and(|(_, cap)| *cap > SHRINK_STAGING_BUFFER_CAPACITY)
@@ -120,6 +126,11 @@ impl WasmStagingBelt {
         let slot_index = self.next_slot;
         self.next_slot = (self.next_slot + 1) % RING_SLOTS;
         if copies.is_empty() {
+            self.handle_quiet_frame(slot_index, payload, copies);
+            return false;
+        }
+        if copies.len() == 1 {
+            flush_copies_direct(queue, payload, copies);
             self.handle_quiet_frame(slot_index, payload, copies);
             return false;
         }

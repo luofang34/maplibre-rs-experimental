@@ -66,7 +66,7 @@ pub mod tessellation;
 
 /// Polygon fill pipelines separated by projection mode (flat/globe) and opacity (`blend: None`).
 #[derive(Default)]
-struct VectorPipeline {
+pub(crate) struct VectorPipeline {
     flat_opaque: Option<crate::render::resource::FeaturePipelinePair>,
     flat_blended: Option<crate::render::resource::FeaturePipelinePair>,
     globe_opaque: Option<crate::render::resource::FeaturePipelinePair>,
@@ -86,7 +86,7 @@ impl VectorPipeline {
 }
 
 /// The pipelines of stroked lines, by where a line lies.
-struct LinePipeline {
+pub(crate) struct LinePipeline {
     /// Plain solid lines on the flat Mercator plane (or into drape textures), without dash/pattern bindings.
     flat_plain: Option<crate::render::resource::FeaturePipelinePair>,
     /// Plain solid lines projected onto the globe surface, without dash/pattern bindings.
@@ -120,7 +120,7 @@ struct ExtrusionModePipelines {
 
 /// The passes of extruded polygons: depth, colour once per pixel, stencil reset, and translucent shells.
 #[derive(Default)]
-struct ExtrusionPipeline {
+pub(crate) struct ExtrusionPipeline {
     flat: Option<ExtrusionModePipelines>,
     globe: Option<ExtrusionModePipelines>,
     clear_mark: Option<wgpu::RenderPipeline>,
@@ -144,7 +144,7 @@ impl ExtrusionPipeline {
     }
 }
 
-struct CirclePipeline {
+pub(crate) struct CirclePipeline {
     pair: crate::render::resource::FeaturePipelinePair,
     feature_stroke: Option<wgpu::RenderPipeline>,
     dynamic_radius: Option<wgpu::RenderPipeline>,

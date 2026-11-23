@@ -398,6 +398,7 @@ pub(crate) fn evict_beyond<S: BuildHasher>(
             retention.last_used.insert(*coords, frame);
         }
         retention.bytes_cache.prune_if_oversized(tiles);
+        bytes_cache::prune_last_used(&mut retention.last_used, tiles, in_use);
         tiles
             .tiles
             .values()

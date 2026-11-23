@@ -1,13 +1,12 @@
 //! Fill, line and circle commands that skip draws until GPU geometry and paint are ready.
 use crate::{
     render::{
-        eventually::{Eventually, Eventually::Initialized},
-        projection::ProjectionGpuResources,
+        pass_refs::PassFrameRefs,
         render_phase::{LayerItem, PhaseItem, RenderCommand, RenderCommandResult},
         tile_view_pattern::WgpuTileViewPattern,
     },
     tcs::world::World,
-    vector::{CirclePipeline, VectorBufferPool, VectorPipeline},
+    vector::VectorBufferPool,
 };
 
 mod extrusion;
@@ -19,18 +18,21 @@ pub use pattern::*;
 
 #[inline]
 pub(super) fn resolve_vector_entry<'w>(
+    refs: Option<&PassFrameRefs<'w>>,
     world: &'w World,
     item: &LayerItem,
 ) -> Option<&'w crate::vector::resource::IndexEntry> {
-    let Initialized(pool) = world.resources.get::<Eventually<VectorBufferPool>>()? else {
-        return None;
-    };
+    let pool = PassFrameRefs::resolve_vector_pool(refs, world)?;
     pool.index()
         .resolve_entry(item.tile.coords, item.style_layer, item.entry_slot)
 }
 
-pub(super) fn is_uniform_entry(world: &World, item: &LayerItem) -> bool {
-    resolve_vector_entry(world, item)
+pub(super) fn is_uniform_entry(
+    refs: Option<&PassFrameRefs<'_>>,
+    world: &World,
+    item: &LayerItem,
+) -> bool {
+    resolve_vector_entry(refs, world, item)
         .is_some_and(crate::vector::resource::IndexEntry::is_uniform_feature_metadata)
 }
 
@@ -42,16 +44,15 @@ impl RenderCommand<LayerItem> for SetVectorTilePipeline {
         item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some((Initialized(pipeline), Initialized(projection_resources))) =
-            world.resources.query::<(
-                &Eventually<VectorPipeline>,
-                &Eventually<ProjectionGpuResources>,
-            )>()
-        else {
+        let refs = pass.frame_refs();
+        let (Some(pipeline), Some(projection_resources)) = (
+            PassFrameRefs::resolve_vector_pipeline(refs, world),
+            PassFrameRefs::resolve_projection(refs, world),
+        ) else {
             return RenderCommandResult::Failure;
         };
 
-        let entry = resolve_vector_entry(world, item);
+        let entry = resolve_vector_entry(refs, world, item);
         let globe = projection_resources.is_globe_active(item.projection_binding());
         let opaque = entry.is_some_and(crate::vector::resource::IndexEntry::is_opaque_color);
         let uniform =
@@ -118,12 +119,11 @@ impl<const RUNS: bool> RenderCommand<LayerItem> for DrawVectorTile<RUNS> {
         item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some((Initialized(buffer_pool), Initialized(tile_view_pattern))) =
-            world.resources.query::<(
-                &Eventually<VectorBufferPool>,
-                &Eventually<WgpuTileViewPattern>,
-            )>()
-        else {
+        let refs = pass.frame_refs();
+        let (Some(buffer_pool), Some(tile_view_pattern)) = (
+            PassFrameRefs::resolve_vector_pool(refs, world),
+            PassFrameRefs::resolve_tile_view_pattern(refs, world),
+        ) else {
             return RenderCommandResult::Failure;
         };
 
@@ -206,8 +206,9 @@ fn draw_vector_tile_runs<'w, const RUNS: bool>(
         );
         return;
     };
-    let patterns = world.resources.get::<super::pattern::PatternResources>();
-    let dashes = world.resources.get::<super::line_dash::LineDashResources>();
+    let refs = pass.frame_refs();
+    let patterns = PassFrameRefs::resolve_pattern_resources(refs, world);
+    let dashes = PassFrameRefs::resolve_line_dashes(refs, world);
     let is_line = entry.style_layer.type_ == "line";
     for (key, range) in runs {
         let image = if is_line {
@@ -265,16 +266,15 @@ impl RenderCommand<LayerItem> for SetCircleTilePipeline {
         item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some((Initialized(pipeline), Initialized(projection_resources))) =
-            world.resources.query::<(
-                &Eventually<CirclePipeline>,
-                &Eventually<ProjectionGpuResources>,
-            )>()
-        else {
+        let refs = pass.frame_refs();
+        let (Some(pipeline), Some(projection_resources)) = (
+            PassFrameRefs::resolve_circle_pipeline(refs, world),
+            PassFrameRefs::resolve_projection(refs, world),
+        ) else {
             return RenderCommandResult::Failure;
         };
 
-        let Some(selected) = pipeline.select_entry(resolve_vector_entry(world, item)) else {
+        let Some(selected) = pipeline.select_entry(resolve_vector_entry(refs, world, item)) else {
             return RenderCommandResult::Failure;
         };
         pass.set_pipeline(selected);
@@ -295,17 +295,18 @@ impl RenderCommand<LayerItem> for DrawVectorTiles {
         item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some((
-            Initialized(pipeline),
-            Initialized(projection_resources),
-            Initialized(buffer_pool),
-            Initialized(tile_view_pattern),
-        )) = world.resources.query::<(
-            &Eventually<VectorPipeline>,
-            &Eventually<ProjectionGpuResources>,
-            &Eventually<VectorBufferPool>,
-            &Eventually<WgpuTileViewPattern>,
-        )>()
+        let refs = pass.frame_refs();
+        let (
+            Some(pipeline),
+            Some(projection_resources),
+            Some(buffer_pool),
+            Some(tile_view_pattern),
+        ) = (
+            PassFrameRefs::resolve_vector_pipeline(refs, world),
+            PassFrameRefs::resolve_projection(refs, world),
+            PassFrameRefs::resolve_vector_pool(refs, world),
+            PassFrameRefs::resolve_tile_view_pattern(refs, world),
+        )
         else {
             return RenderCommandResult::Failure;
         };
@@ -353,17 +354,18 @@ impl RenderCommand<LayerItem> for DrawCircleTiles {
         item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some((
-            Initialized(pipeline),
-            Initialized(projection_resources),
-            Initialized(buffer_pool),
-            Initialized(tile_view_pattern),
-        )) = world.resources.query::<(
-            &Eventually<CirclePipeline>,
-            &Eventually<ProjectionGpuResources>,
-            &Eventually<VectorBufferPool>,
-            &Eventually<WgpuTileViewPattern>,
-        )>()
+        let refs = pass.frame_refs();
+        let (
+            Some(pipeline),
+            Some(projection_resources),
+            Some(buffer_pool),
+            Some(tile_view_pattern),
+        ) = (
+            PassFrameRefs::resolve_circle_pipeline(refs, world),
+            PassFrameRefs::resolve_projection(refs, world),
+            PassFrameRefs::resolve_vector_pool(refs, world),
+            PassFrameRefs::resolve_tile_view_pattern(refs, world),
+        )
         else {
             return RenderCommandResult::Failure;
         };

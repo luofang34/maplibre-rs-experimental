@@ -59,6 +59,17 @@ impl BackgroundScratch {
         );
         if self.globe_tiles.is_empty() {
             self.globe_tiles.push(WorldTileCoords::default());
+        } else {
+            self.globe_tiles.sort_unstable_by_key(|coords| {
+                (
+                    crate::render::tile_mesh::globe_mesh_group_key(
+                        *coords,
+                        crate::render::tile_mesh::TileMeshUsage::Raster,
+                    ),
+                    coords.x,
+                    coords.y,
+                )
+            });
         }
         self.globe_tiles_populated = true;
         true

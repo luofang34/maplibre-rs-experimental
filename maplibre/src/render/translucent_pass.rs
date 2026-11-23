@@ -50,18 +50,30 @@ pub(crate) fn needs_symbol_depth_copy(world: &World) -> bool {
         )
 }
 
-pub(crate) fn draw_contents_inline<'w>(
+fn run_translucent_hooks<'w>(
     render_pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     world: &'w World,
-    layer_state: super::main_pass::PassLayerState<'w>,
+    point: crate::render::PassHookPoint,
 ) {
     if let Some(hooks) = world.resources.get::<crate::render::PassDrawHooks>() {
-        for hook in hooks.hooks(crate::render::PassHookPoint::TranslucentPassBegin) {
+        for hook in hooks.hooks(point) {
             if hook.has_work(world) {
                 hook.draw(render_pass, world);
             }
         }
     }
+}
+
+pub(crate) fn draw_contents_inline<'w>(
+    render_pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
+    world: &'w World,
+    layer_state: super::main_pass::PassLayerState<'w>,
+) {
+    run_translucent_hooks(
+        render_pass,
+        world,
+        crate::render::PassHookPoint::TranslucentPassBegin,
+    );
 
     if let Some(mask_items) = world.resources.get::<RenderPhase<TranslucentItem>>() {
         log::trace!(
@@ -81,10 +93,21 @@ pub(crate) fn draw_contents_inline<'w>(
             .map_or(&[][..], |above| above.items)
             .chunk_by(super::main_pass::same_layer)
             .peekable();
-        for item in mask_items {
-            while let Some(group) =
-                groups.next_if(|group| group.first().is_some_and(|first| first.index < item.index))
-            {
+        let all_translucent = mask_items.into_iter().as_slice();
+        for chunk in all_translucent.chunk_by(|a, b| {
+            a.index == b.index
+                && a.style_layer == b.style_layer
+                && a.entry_slot != super::render_phase::UNSET_ENTRY_SLOT
+                && b.entry_slot != super::render_phase::UNSET_ENTRY_SLOT
+        }) {
+            let Some(first_item) = chunk.first() else {
+                continue;
+            };
+            while let Some(group) = groups.next_if(|group| {
+                group
+                    .first()
+                    .is_some_and(|first| first.index < first_item.index)
+            }) {
                 super::main_pass::draw_group(
                     render_pass,
                     world,
@@ -94,7 +117,11 @@ pub(crate) fn draw_contents_inline<'w>(
                     group,
                 );
             }
-            item.draw_function.draw(render_pass, world, item);
+            if !crate::sdf::render_commands::try_draw_symbol_group(world, chunk, render_pass) {
+                for item in chunk {
+                    item.draw_function.draw(render_pass, world, item);
+                }
+            }
         }
         for group in groups {
             super::main_pass::draw_group(
@@ -108,13 +135,11 @@ pub(crate) fn draw_contents_inline<'w>(
         }
     }
 
-    if let Some(hooks) = world.resources.get::<crate::render::PassDrawHooks>() {
-        for hook in hooks.hooks(crate::render::PassHookPoint::TranslucentPassEnd) {
-            if hook.has_work(world) {
-                hook.draw(render_pass, world);
-            }
-        }
-    }
+    run_translucent_hooks(
+        render_pass,
+        world,
+        crate::render::PassHookPoint::TranslucentPassEnd,
+    );
 }
 
 pub(crate) fn draw_contents<'w>(
@@ -241,12 +266,9 @@ impl Node for TranslucentPassNode {
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });
-        let base_vertex = world
-            .resources
-            .get::<crate::render::tracked_pass::DrawCapabilities>()
-            .is_some_and(|cap| cap.base_vertex);
+        let frame_refs = crate::render::pass_refs::PassFrameRefs::from_world(world);
         let mut render_pass = crate::render::tracked_pass::TrackedRenderPass::new(render_pass)
-            .with_base_vertex(base_vertex);
+            .with_frame_refs(frame_refs);
         draw_contents(&mut render_pass, world);
         render_pass.finish(world);
     }

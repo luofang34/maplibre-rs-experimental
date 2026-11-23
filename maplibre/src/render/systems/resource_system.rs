@@ -271,24 +271,24 @@ struct AttachmentSpec {
     depth_usage: wgpu::TextureUsages,
 }
 
-fn sync_depth_and_msaa(
+fn sync_depth_texture(
     state: &mut crate::render::RenderResources,
     depth_copy: &mut Eventually<DepthCopyPipeline>,
-    tile_view_pattern: &mut Eventually<WgpuTileViewPattern>,
     device: &wgpu::Device,
     settings: &RendererSettings,
-    spec: AttachmentSpec,
+    spec: &AttachmentSpec,
 ) {
     let (w, h) = (spec.size.width(), spec.size.height());
-    let surface = &state.surface;
-    if matches!(
+    let mut depth_reset = matches!(
         &state.depth_texture,
         Eventually::Initialized(tex) if tex.texture.usage() != spec.depth_usage
-    ) {
+    );
+    if depth_reset {
         state.depth_texture.take();
     }
     state.depth_texture.reinitialize(
         || {
+            depth_reset = true;
             Texture::new(
                 Some("depth texture"),
                 device,
@@ -301,6 +301,24 @@ fn sync_depth_and_msaa(
         },
         &(w, h),
     );
+    if depth_reset {
+        if let Eventually::Initialized(pipeline) = depth_copy {
+            pipeline.clear_cached_bind();
+        }
+    }
+}
+
+fn sync_depth_and_msaa(
+    state: &mut crate::render::RenderResources,
+    depth_copy: &mut Eventually<DepthCopyPipeline>,
+    tile_view_pattern: &mut Eventually<WgpuTileViewPattern>,
+    device: &wgpu::Device,
+    settings: &RendererSettings,
+    spec: AttachmentSpec,
+) {
+    let (w, h) = (spec.size.width(), spec.size.height());
+    sync_depth_texture(state, depth_copy, device, settings, &spec);
+    let surface = &state.surface;
     if settings.depth_readout {
         state.depth_readout_texture.reinitialize(
             || {

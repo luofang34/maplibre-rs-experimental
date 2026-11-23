@@ -17,7 +17,7 @@ impl Drop for TileAtlas {
     }
 }
 
-pub(super) struct DrawBinding {
+pub(crate) struct DrawBinding {
     atlas: Arc<TileAtlas>,
     pub group: wgpu::BindGroup,
     pub separate_halo: bool,
@@ -38,7 +38,7 @@ pub(super) struct TextureContext<'a> {
 }
 
 #[derive(Default)]
-pub(super) struct SymbolTextures {
+pub(crate) struct SymbolTextures {
     atlases: rustc_hash::FxHashMap<usize, Weak<TileAtlas>>,
     tile_atlases: rustc_hash::FxHashMap<(WorldTileCoords, usize), Arc<TileAtlas>>,
     bindings: rustc_hash::FxHashMap<(WorldTileCoords, crate::style::StyleLayerId), DrawBinding>,
@@ -64,7 +64,7 @@ impl SymbolTextures {
         self.last_retain_key = Some(key);
         self.retain(tiles, style);
     }
-    pub fn prepare(
+    pub(super) fn prepare(
         &mut self,
         gpu: &TextureContext<'_>,
         key: (WorldTileCoords, crate::style::StyleLayerId),
@@ -159,7 +159,7 @@ impl SymbolTextures {
     }
 
     #[inline]
-    pub fn binding_by_id(
+    pub(crate) fn binding_by_id(
         &self,
         coords: WorldTileCoords,
         layer: crate::style::StyleLayerId,

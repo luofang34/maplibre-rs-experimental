@@ -113,12 +113,18 @@ pub enum GpuTileMeshError {
     },
 }
 
+struct CachedMesh {
+    mesh: GpuTileMesh,
+    last_used: u64,
+}
+
 /// Lazily populated GPU cache keyed by subdivision, borders, and pole extensions.
 #[derive(Default)]
 pub struct GlobeTileMeshCache {
-    meshes: HashMap<TileMeshKey, GpuTileMesh>,
+    meshes: HashMap<TileMeshKey, CachedMesh>,
     scratch: TileMeshScratch,
     globe_active: bool,
+    epoch: u64,
 }
 
 impl GlobeTileMeshCache {
@@ -130,6 +136,19 @@ impl GlobeTileMeshCache {
     /// Returns `true` when no GPU tile meshes have been prepared yet.
     pub fn is_empty(&self) -> bool {
         self.meshes.is_empty()
+    }
+
+    pub(crate) fn advance_epoch(&mut self) {
+        self.epoch = self.epoch.wrapping_add(1);
+    }
+
+    pub(crate) fn evict_stale(&mut self, max_age: u64) {
+        if self.meshes.len() > 16 {
+            let epoch = self.epoch;
+            self.meshes.retain(|key, entry| {
+                key.granularity == 1 || epoch.saturating_sub(entry.last_used) <= max_age
+            });
+        }
     }
 
     /// Updates whether spherical globe projection (`transition > 0.0`) is active this frame.
@@ -172,7 +191,8 @@ impl GlobeTileMeshCache {
         generate_borders: bool,
     ) -> Result<(), GpuTileMeshError> {
         let key = self.key_for(coords, usage, generate_borders);
-        if self.meshes.contains_key(&key) {
+        if let Some(entry) = self.meshes.get_mut(&key) {
+            entry.last_used = self.epoch;
             return Ok(());
         }
         let views = create_tile_mesh_into(
@@ -207,11 +227,14 @@ impl GlobeTileMeshCache {
         self.scratch = TileMeshScratch::default();
         self.meshes.insert(
             key,
-            GpuTileMesh {
-                vertex_buffer,
-                index_buffer,
-                index_format,
-                index_count,
+            CachedMesh {
+                mesh: GpuTileMesh {
+                    vertex_buffer,
+                    index_buffer,
+                    index_format,
+                    index_count,
+                },
+                last_used: self.epoch,
             },
         );
         Ok(())
@@ -226,6 +249,7 @@ impl GlobeTileMeshCache {
     ) -> Option<&GpuTileMesh> {
         self.meshes
             .get(&self.key_for(coords, usage, generate_borders))
+            .map(|entry| &entry.mesh)
     }
 }
 
@@ -279,6 +303,18 @@ fn flat_mesh_key(generate_borders: bool) -> TileMeshKey {
         extend_to_north_pole: false,
         extend_to_south_pole: false,
     }
+}
+
+pub(crate) fn globe_mesh_group_key(
+    coords: WorldTileCoords,
+    usage: TileMeshUsage,
+) -> (u32, bool, bool) {
+    let key = mesh_key(coords, usage, false);
+    (
+        key.granularity,
+        key.extend_to_north_pole,
+        key.extend_to_south_pole,
+    )
 }
 
 fn mesh_key(coords: WorldTileCoords, usage: TileMeshUsage, generate_borders: bool) -> TileMeshKey {

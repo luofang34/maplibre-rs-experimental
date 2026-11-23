@@ -40,6 +40,7 @@ impl System for GraphRunnerSystem {
         run_graph(render_graph, device, queue, state, world).map_err(RenderError::Graph)?;
 
         {
+            #[cfg(feature = "trace")]
             let _span = tracing::info_span!("present_frames").entered();
 
             let Initialized(render_target) = state.render_target.take() else {

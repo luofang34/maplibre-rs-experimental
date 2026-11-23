@@ -2,13 +2,11 @@
 
 use crate::{
     render::{
-        eventually::{Eventually, Eventually::Initialized},
-        projection::ProjectionGpuResources,
+        pass_refs::PassFrameRefs,
         render_phase::{LayerItem, PhaseItem, RenderCommand, RenderCommandResult},
-        tile_view_pattern::WgpuTileViewPattern,
     },
     tcs::world::World,
-    vector::{render_commands::DrawVectorTile, ExtrusionPipeline, VectorBufferPool},
+    vector::render_commands::DrawVectorTile,
 };
 
 /// Binds one pass of the extrusion pipeline (selecting the 8-byte compact pipeline when the entry
@@ -35,12 +33,11 @@ impl<const PASS: u8> RenderCommand<LayerItem> for SetExtrusionPipeline<PASS> {
         item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some((Initialized(pipeline), Initialized(projection_resources))) =
-            world.resources.query::<(
-                &Eventually<ExtrusionPipeline>,
-                &Eventually<ProjectionGpuResources>,
-            )>()
-        else {
+        let refs = pass.frame_refs();
+        let (Some(pipeline), Some(projection_resources)) = (
+            PassFrameRefs::resolve_extrusion_pipeline(refs, world),
+            PassFrameRefs::resolve_projection(refs, world),
+        ) else {
             return RenderCommandResult::Failure;
         };
 
@@ -49,7 +46,7 @@ impl<const PASS: u8> RenderCommand<LayerItem> for SetExtrusionPipeline<PASS> {
         else {
             return RenderCommandResult::Failure;
         };
-        let entry = super::resolve_vector_entry(world, item);
+        let entry = super::resolve_vector_entry(refs, world, item);
         let compact = PASS != extrusion_pass::PATTERN
             && entry.is_some_and(crate::vector::resource::IndexEntry::is_compact_extrusion);
         let uniform =
@@ -97,7 +94,7 @@ impl RenderCommand<LayerItem> for DrawExtrusionStencilClear {
         _item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some(Initialized(pipeline)) = world.resources.get::<Eventually<ExtrusionPipeline>>()
+        let Some(pipeline) = PassFrameRefs::resolve_extrusion_pipeline(pass.frame_refs(), world)
         else {
             return RenderCommandResult::Failure;
         };
@@ -150,17 +147,18 @@ impl<const PASS: u8, const RUNS: bool> RenderCommand<LayerItem> for DrawExtrusio
         item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some((
-            Initialized(pipeline),
-            Initialized(projection_resources),
-            Initialized(buffer_pool),
-            Initialized(tile_view_pattern),
-        )) = world.resources.query::<(
-            &Eventually<ExtrusionPipeline>,
-            &Eventually<ProjectionGpuResources>,
-            &Eventually<VectorBufferPool>,
-            &Eventually<WgpuTileViewPattern>,
-        )>()
+        let refs = pass.frame_refs();
+        let (
+            Some(pipeline),
+            Some(projection_resources),
+            Some(buffer_pool),
+            Some(tile_view_pattern),
+        ) = (
+            PassFrameRefs::resolve_extrusion_pipeline(refs, world),
+            PassFrameRefs::resolve_projection(refs, world),
+            PassFrameRefs::resolve_vector_pool(refs, world),
+            PassFrameRefs::resolve_tile_view_pattern(refs, world),
+        )
         else {
             return RenderCommandResult::Failure;
         };
@@ -184,10 +182,7 @@ impl<const PASS: u8, const RUNS: bool> RenderCommand<LayerItem> for DrawExtrusio
             return RenderCommandResult::Failure;
         };
         if PASS == extrusion_pass::PATTERN {
-            let Some(patterns) = world
-                .resources
-                .get::<crate::vector::pattern::PatternResources>()
-            else {
+            let Some(patterns) = PassFrameRefs::resolve_pattern_resources(refs, world) else {
                 return RenderCommandResult::Failure;
             };
             match patterns.binding(item.style_layer) {

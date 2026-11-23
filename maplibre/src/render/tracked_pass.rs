@@ -10,6 +10,11 @@ use std::ops::Range;
 
 use smallvec::SmallVec;
 
+use super::pass_refs::{
+    update_bound_bind_group, update_bound_slice, update_extra_bind_group,
+    update_extra_vertex_buffer, BoundBindGroup, BoundSlice, HandleId, PassFrameRefs,
+};
+
 /// What a pass recorded, and what it skipped because it was already bound.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PassStats {
@@ -146,34 +151,29 @@ impl DrawCapabilities {
     }
 }
 
-/// A bound buffer range, compared by buffer identity, offset and size.
-#[derive(Clone, PartialEq)]
-struct BoundSlice {
-    buffer: wgpu::Buffer,
-    offset: wgpu::BufferAddress,
-    size: wgpu::BufferAddress,
-}
-
-impl BoundSlice {
-    fn of(slice: &wgpu::BufferSlice<'_>) -> Self {
-        Self {
-            buffer: slice.buffer().clone(),
-            offset: slice.offset(),
-            size: slice.size(),
-        }
-    }
-}
-
-type BoundBindGroup = (wgpu::BindGroup, SmallVec<[wgpu::DynamicOffset; 2]>);
-
 /// The state a pass has bound.
-#[derive(Default)]
 struct BoundState {
-    pipeline: Option<wgpu::RenderPipeline>,
-    bind_groups: SmallVec<[Option<BoundBindGroup>; 4]>,
-    vertex_buffers: SmallVec<[Option<BoundSlice>; 4]>,
+    pipeline: Option<HandleId>,
+    bind_groups: [Option<BoundBindGroup>; 4],
+    extra_bind_groups: SmallVec<[(u32, BoundBindGroup); 0]>,
+    vertex_buffers: [Option<BoundSlice>; 4],
+    extra_vertex_buffers: SmallVec<[(u32, BoundSlice); 0]>,
     index_buffer: Option<(BoundSlice, wgpu::IndexFormat)>,
     stencil_reference: Option<u32>,
+}
+
+impl Default for BoundState {
+    fn default() -> Self {
+        Self {
+            pipeline: None,
+            bind_groups: std::array::from_fn(|_| None),
+            extra_bind_groups: SmallVec::new(),
+            vertex_buffers: [None; 4],
+            extra_vertex_buffers: SmallVec::new(),
+            index_buffer: None,
+            stencil_reference: None,
+        }
+    }
 }
 
 /// Records into a [`wgpu::RenderPass`], skipping state that is already bound.
@@ -182,6 +182,7 @@ pub struct TrackedRenderPass<'w> {
     bound: BoundState,
     stats: PassStats,
     base_vertex_cap: Option<bool>,
+    frame_refs: Option<PassFrameRefs<'w>>,
 }
 
 impl<'w> TrackedRenderPass<'w> {
@@ -192,14 +193,22 @@ impl<'w> TrackedRenderPass<'w> {
             bound: BoundState::default(),
             stats: PassStats::default(),
             base_vertex_cap: None,
+            frame_refs: None,
         }
     }
 
-    /// Attaches pre-resolved [`DrawCapabilities::base_vertex`] so hot draw commands skip
-    /// per-item [`World`](crate::tcs::world::World) resource lookups.
-    pub(crate) fn with_base_vertex(mut self, base_vertex: bool) -> Self {
-        self.base_vertex_cap = Some(base_vertex);
+    /// Attaches pass-scoped immutable render resources resolved once at pass start.
+    pub(crate) fn with_frame_refs(mut self, frame_refs: PassFrameRefs<'w>) -> Self {
+        if let Some(cap) = frame_refs.capabilities {
+            self.base_vertex_cap = Some(cap.base_vertex);
+        }
+        self.frame_refs = Some(frame_refs);
         self
+    }
+
+    #[inline]
+    pub(crate) fn frame_refs(&self) -> Option<&PassFrameRefs<'w>> {
+        self.frame_refs.as_ref()
     }
 
     #[inline]
@@ -235,9 +244,10 @@ impl<'w> TrackedRenderPass<'w> {
 
     /// Binds `pipeline` unless it is bound already.
     pub fn set_pipeline(&mut self, pipeline: &wgpu::RenderPipeline) {
-        let changed = self.bound.pipeline.as_ref() != Some(pipeline);
+        let id = HandleId::of(pipeline);
+        let changed = self.bound.pipeline != Some(id);
         if self.count(changed) {
-            self.bound.pipeline = Some(pipeline.clone());
+            self.bound.pipeline = Some(id);
             self.pass.set_pipeline(pipeline);
         }
     }
@@ -249,27 +259,11 @@ impl<'w> TrackedRenderPass<'w> {
         bind_group: &wgpu::BindGroup,
         offsets: &[wgpu::DynamicOffset],
     ) {
-        let slot_idx = index as usize;
-        if self.bound.bind_groups.len() <= slot_idx {
-            self.bound.bind_groups.resize_with(slot_idx + 1, || None);
-        }
-        let Some(slot) = self.bound.bind_groups.get_mut(slot_idx) else {
-            return;
-        };
-        let changed = match slot {
-            Some((bound_bg, bound_offsets)) if bound_bg == bind_group => {
-                if bound_offsets.as_slice() == offsets {
-                    false
-                } else {
-                    bound_offsets.clear();
-                    bound_offsets.extend_from_slice(offsets);
-                    true
-                }
-            }
-            _ => {
-                *slot = Some((bind_group.clone(), SmallVec::from_slice(offsets)));
-                true
-            }
+        let bg_id = HandleId::of(bind_group);
+        let changed = if let Some(slot) = self.bound.bind_groups.get_mut(index as usize) {
+            update_bound_bind_group(slot, bg_id, offsets)
+        } else {
+            update_extra_bind_group(&mut self.bound.extra_bind_groups, index, bg_id, offsets)
         };
         if self.count(changed) {
             self.pass.set_bind_group(index, bind_group, offsets);
@@ -278,27 +272,11 @@ impl<'w> TrackedRenderPass<'w> {
 
     /// Binds `slice` at vertex buffer `slot` unless that range is bound there.
     pub fn set_vertex_buffer(&mut self, slot: u32, slice: wgpu::BufferSlice<'_>) {
-        let slot_idx = slot as usize;
-        if self.bound.vertex_buffers.len() <= slot_idx {
-            self.bound.vertex_buffers.resize_with(slot_idx + 1, || None);
-        }
-        let Some(bound_slot) = self.bound.vertex_buffers.get_mut(slot_idx) else {
-            return;
-        };
-        let changed = match bound_slot {
-            Some(bound) if &bound.buffer == slice.buffer() => {
-                if bound.offset == slice.offset() && bound.size == slice.size() {
-                    false
-                } else {
-                    bound.offset = slice.offset();
-                    bound.size = slice.size();
-                    true
-                }
-            }
-            _ => {
-                *bound_slot = Some(BoundSlice::of(&slice));
-                true
-            }
+        let next = BoundSlice::of(&slice);
+        let changed = if let Some(bound_slot) = self.bound.vertex_buffers.get_mut(slot as usize) {
+            update_bound_slice(bound_slot, next)
+        } else {
+            update_extra_vertex_buffer(&mut self.bound.extra_vertex_buffers, slot, next)
         };
         if self.count(changed) {
             self.pass.set_vertex_buffer(slot, slice);
@@ -307,26 +285,10 @@ impl<'w> TrackedRenderPass<'w> {
 
     /// Binds `slice` as the index buffer unless that range and format are bound.
     pub fn set_index_buffer(&mut self, slice: wgpu::BufferSlice<'_>, format: wgpu::IndexFormat) {
-        let changed = match &mut self.bound.index_buffer {
-            Some((bound, bound_format)) if &bound.buffer == slice.buffer() => {
-                if *bound_format == format
-                    && bound.offset == slice.offset()
-                    && bound.size == slice.size()
-                {
-                    false
-                } else {
-                    bound.offset = slice.offset();
-                    bound.size = slice.size();
-                    *bound_format = format;
-                    true
-                }
-            }
-            slot => {
-                *slot = Some((BoundSlice::of(&slice), format));
-                true
-            }
-        };
+        let next = BoundSlice::of(&slice);
+        let changed = self.bound.index_buffer != Some((next, format));
         if self.count(changed) {
+            self.bound.index_buffer = Some((next, format));
             self.pass.set_index_buffer(slice, format);
         }
     }

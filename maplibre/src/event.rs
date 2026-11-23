@@ -268,10 +268,12 @@ impl MapEventBus {
     }
 
     pub(crate) fn push_ready_resources(&self, items: impl IntoIterator<Item = ResourceReady>) {
-        self.inner
-            .borrow_mut()
-            .buffered_ready_resources
-            .extend(items);
+        const MAX_BUFFERED_READY: usize = 1024;
+        let mut inner = self.inner.borrow_mut();
+        inner.buffered_ready_resources.extend(items);
+        while inner.buffered_ready_resources.len() > MAX_BUFFERED_READY {
+            inner.buffered_ready_resources.pop_front();
+        }
     }
 
     pub(crate) fn take_buffered_ready_resources(&self) -> Vec<ResourceReady> {

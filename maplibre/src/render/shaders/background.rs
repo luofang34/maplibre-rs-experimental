@@ -170,7 +170,7 @@ fn globe_background_buffers() -> Vec<VertexBufferLayout> {
         crate::render::tile_mesh::GpuTileMeshVertex::vertex_buffer_layout(),
         ShaderTileMetadata::instance_layout(tile_attrs),
         VertexBufferLayout {
-            array_stride: std::mem::size_of::<BackgroundLayerMetadata>() as u64,
+            array_stride: 0,
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: vec![
                 wgpu::VertexAttribute {
