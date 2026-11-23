@@ -205,6 +205,7 @@ fn passing_apc_reports_arrivals_until_receive_offers_them() {
         workers: Vec::new(),
         listeners: Vec::new(),
         buffer: RefCell::new(Vec::new()),
+        scratch: RefCell::default(),
         batch_open: Cell::new(true),
         boot_unthrottled: Cell::new(true),
         received: received.clone(),

@@ -21,7 +21,7 @@ struct RasterStyleCache {
     style_has_any_raster: bool,
     need_key: Option<(u64, u64)>,
     style_needs_raster: bool,
-    last_sources_rev: Option<u64>,
+    last_sources_fingerprint: Option<u64>,
 }
 
 pub fn resource_system(
@@ -155,11 +155,12 @@ pub fn resource_system(
             .initialize_with_prefix_layouts(device, &[projection_resources.bind_group_layout()]);
         RasterResources::new(Msaa { samples: 1 }, device, pipeline)
     });
+    let sources_fp = raster_sources_fingerprint(style);
     let already_synced = !was_uninitialized
         && world
             .resources
             .get::<RasterStyleCache>()
-            .is_some_and(|cache| cache.last_sources_rev == Some(style_rev));
+            .is_some_and(|cache| cache.last_sources_fingerprint == Some(sources_fp));
     if !already_synced {
         if let Some(Initialized(resources)) =
             world.resources.get_mut::<Eventually<RasterResources>>()
@@ -167,7 +168,50 @@ pub fn resource_system(
             resources.update_layer_sources(style);
         }
         let cache = world.resources.get_or_init_mut::<RasterStyleCache>();
-        cache.last_sources_rev = Some(style_rev);
+        cache.last_sources_fingerprint = Some(sources_fp);
     }
     Ok(())
+}
+
+fn raster_sources_fingerprint(style: &crate::style::Style) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = rustc_hash::FxHasher::default();
+    style.revision().hash(&mut hasher);
+    style.layers.len().hash(&mut hasher);
+    for layer in &style.layers {
+        if matches!(
+            layer.type_.as_str(),
+            "raster" | "hillshade" | "color-relief"
+        ) {
+            layer.id.hash(&mut hasher);
+            layer.type_.hash(&mut hasher);
+            layer.source.hash(&mut hasher);
+        }
+    }
+    style.sources.len().hash(&mut hasher);
+    let mut sources_xor = 0_u64;
+    for (name, source) in &style.sources {
+        let mut entry = rustc_hash::FxHasher::default();
+        name.hash(&mut entry);
+        match source {
+            Source::Raster(r) => {
+                1_u8.hash(&mut entry);
+                r.tiles
+                    .as_ref()
+                    .is_some_and(|t| !t.is_empty())
+                    .hash(&mut entry);
+            }
+            Source::RasterDem(d) => {
+                2_u8.hash(&mut entry);
+                d.tiles
+                    .as_ref()
+                    .is_some_and(|t| !t.is_empty())
+                    .hash(&mut entry);
+            }
+            _ => continue,
+        }
+        sources_xor ^= entry.finish();
+    }
+    sources_xor.hash(&mut hasher);
+    hasher.finish()
 }

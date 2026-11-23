@@ -166,7 +166,7 @@ impl RasterResources {
             .map(|(_, revision, _)| *revision)
     }
 
-    /// Drops every source binding at these coordinates without advancing the insertion generation.
+    /// Drops every source binding at these coordinates.
     pub fn remove_texture(&mut self, coords: WorldTileCoords) {
         for textures in self.bound_textures.values_mut() {
             textures.remove(coords);
@@ -174,6 +174,7 @@ impl RasterResources {
         for bindings in self.dem_bindings.values_mut() {
             bindings.remove(&coords);
         }
+        self.mutation_gen = self.mutation_gen.wrapping_add(1);
     }
 
     /// Inserts or replaces the texture/sampler binding at group one of the raster pipeline,
@@ -366,16 +367,15 @@ impl RasterResources {
 
     /// Marks the texture of a tile whose CPU data changed for upload on the next Queue pass.
     pub(crate) fn tile_data_changed(&mut self, source: &RasterSourceId, coords: WorldTileCoords) {
-        if self.has_border(source) {
-            if let Some((_, rev, _)) = self
-                .dem_bindings
-                .get_mut(source)
-                .and_then(|bindings| bindings.get_mut(&coords))
-            {
-                *rev = None;
-            }
-        } else {
+        if !self.has_border(source) {
             self.remove_source_texture(source, coords);
+            return;
+        }
+        self.mutation_gen = self.mutation_gen.wrapping_add(1);
+        if let Some(b) = self.dem_bindings.get_mut(source)
+            && let Some(e) = b.get_mut(&coords)
+        {
+            e.1 = None;
         }
     }
 

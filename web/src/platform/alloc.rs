@@ -107,7 +107,9 @@ impl Magazine {
 }
 
 pub(crate) fn drain_thread_magazine() {
-    let _ = MAG.try_with(|tm| tm.with_mut(Magazine::drain_all));
+    let Ok(_) = MAG.try_with(|tm| tm.with_mut(Magazine::drain_all)) else {
+        return;
+    };
 }
 
 struct ThreadMagazine {

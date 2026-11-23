@@ -164,11 +164,13 @@ impl BoundSlice {
     }
 }
 
+type BoundBindGroup = (wgpu::BindGroup, SmallVec<[wgpu::DynamicOffset; 2]>);
+
 /// The state a pass has bound.
 #[derive(Default)]
 struct BoundState {
     pipeline: Option<wgpu::RenderPipeline>,
-    bind_groups: SmallVec<[Option<(wgpu::BindGroup, SmallVec<[wgpu::DynamicOffset; 2]>)>; 4]>,
+    bind_groups: SmallVec<[Option<BoundBindGroup>; 4]>,
     vertex_buffers: SmallVec<[Option<BoundSlice>; 4]>,
     index_buffer: Option<(BoundSlice, wgpu::IndexFormat)>,
     stencil_reference: Option<u32>,

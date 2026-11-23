@@ -73,9 +73,10 @@ fn try_decode_direct_js(
             let decoded = DECODE_SCRATCH.with(|cell| {
                 let mut scratch = cell.borrow_mut();
                 scratch.resize(len as usize, 0);
-                Uint8Array::new_with_byte_offset_and_length(buffer, offset, len)
-                    .copy_to(&mut scratch[..len as usize]);
-                let res = try_decode_from_bytes(effective_tag, attempt, &scratch[..len as usize]);
+                let res = scratch.get_mut(..len as usize).and_then(|dst| {
+                    Uint8Array::new_with_byte_offset_and_length(buffer, offset, len).copy_to(dst);
+                    try_decode_from_bytes(effective_tag, attempt, dst)
+                });
                 if scratch.capacity() > MAX_ITEM_SCRATCH_BYTES {
                     scratch.shrink_to(MAX_ITEM_SCRATCH_BYTES);
                 }

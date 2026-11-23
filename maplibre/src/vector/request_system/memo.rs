@@ -179,10 +179,12 @@ pub(super) fn resolve_view_tiles(
     let computed =
         view_region_for_projection(style, view_state, world, visible_level, request_padding)?.map(
             |region| {
-                (
-                    Arc::from(region.iter().collect::<Vec<_>>()),
-                    u8::from(visible_level),
-                )
+                let tiles: Vec<_> = if request_padding == ViewStatePadding::Tight {
+                    region.copies().collect()
+                } else {
+                    region.iter().collect()
+                };
+                (Arc::from(tiles), u8::from(visible_level))
             },
         );
     Ok(ResolvedViewTiles::Computed {

@@ -136,9 +136,16 @@ pub(super) fn prepare_drapes(
     )?;
     record_drape_activity(
         world,
-        (specs, &states, ready, &prefetch, &redraw, &drape_sources),
-        (budget, limit),
-        drape_zoom,
+        &activity::FrameDrapes {
+            specs,
+            states: &states,
+            ready,
+            prefetch: &prefetch,
+            redraw: &redraw,
+            sources: &drape_sources,
+            budget: (budget, limit),
+            paint_zoom: drape_zoom,
+        },
         deferred,
     );
     Ok(PreparedDrapes {
@@ -148,6 +155,13 @@ pub(super) fn prepare_drapes(
     })
 }
 
+type AcquiredDrapes = (
+    Vec<bool>,
+    Vec<Option<WorldTileCoords>>,
+    bool,
+    Vec<crate::terrain::drape_cache::DrapeState>,
+);
+
 fn acquire_and_ensure_scratch(
     specs: &[TargetSpec],
     (prints, ready, prefetch): (&[u64], &[bool], &[bool]),
@@ -156,15 +170,7 @@ fn acquire_and_ensure_scratch(
     coalesce_motion: bool,
     world: &mut World,
     device: &wgpu::Device,
-) -> Result<
-    (
-        Vec<bool>,
-        Vec<Option<WorldTileCoords>>,
-        bool,
-        Vec<crate::terrain::drape_cache::DrapeState>,
-    ),
-    SystemError,
-> {
+) -> Result<AcquiredDrapes, SystemError> {
     let Some((Initialized(terrain), coalesce)) = world.resources.query_mut::<(
         &mut Eventually<TerrainResources>,
         &mut super::steady_cache::DrapeCoalesceState,
@@ -190,41 +196,17 @@ fn acquire_and_ensure_scratch(
     Ok(acquired)
 }
 
-fn record_drape_activity(
-    world: &mut World,
-    (specs, states, ready, prefetch, redraw, drape_sources): (
-        &[TargetSpec],
-        &[crate::terrain::drape_cache::DrapeState],
-        &[bool],
-        &[bool],
-        &[bool],
-        &[Option<WorldTileCoords>],
-    ),
-    budget: (usize, usize),
-    drape_zoom: f64,
-    deferred: bool,
-) {
+fn record_drape_activity(world: &mut World, drapes: &activity::FrameDrapes<'_>, deferred: bool) {
     let drawn = |ahead: bool| {
-        redraw
+        drapes
+            .redraw
             .iter()
-            .zip(prefetch)
+            .zip(drapes.prefetch)
             .filter(|(drawn, prefetched)| **drawn && **prefetched == ahead)
             .count()
     };
     crate::render::frame_signals::count_drape_redraws(world, drawn(false), drawn(true));
-    activity::record(
-        world,
-        &activity::FrameDrapes {
-            specs,
-            states,
-            ready,
-            prefetch,
-            redraw,
-            sources: drape_sources,
-            budget,
-            paint_zoom: drape_zoom,
-        },
-    );
+    activity::record(world, drapes);
     // A drape left for a later frame's budget needs that frame.
     if deferred {
         crate::render::frame_signals::keep_animating(world);

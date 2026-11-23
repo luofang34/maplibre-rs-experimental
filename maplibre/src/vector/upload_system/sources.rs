@@ -274,7 +274,7 @@ fn resolve_view_tiles_for_paint(
     let fresh = if !multi_active {
         region
             .as_ref()
-            .map(|r| (visible_level, Arc::from(r.iter().collect::<Vec<_>>())))
+            .map(|r| (visible_level, Arc::from(r.copies().collect::<Vec<_>>())))
     } else {
         None
     };

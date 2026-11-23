@@ -135,10 +135,8 @@ fn finish_acquire_drapes(
     Vec<DrapeState>,
 ) {
     let mut redraw = choose_redraws(specs, &states, prefetch, (budget, limit), terrain);
-    let defer_changed = coalesce.should_defer_changed(
-        coalesce_motion,
-        states.iter().any(|s| *s == DrapeState::Changed),
-    );
+    let defer_changed =
+        coalesce.should_defer_changed(coalesce_motion, states.contains(&DrapeState::Changed));
     if defer_changed {
         for (state, drawn) in states.iter().zip(redraw.iter_mut()) {
             if *state == DrapeState::Changed {

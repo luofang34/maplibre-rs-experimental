@@ -309,9 +309,9 @@ pub(super) fn decode_js_layer_raster(
     }
     let mut peek = [0_u8; 256];
     let peek_len = (byte_len as usize).min(peek.len());
+    let peek_slice = peek.get_mut(..peek_len)?;
     js_sys::Uint8Array::new_with_byte_offset_and_length(buffer, base_offset, peek_len as u32)
-        .copy_to(&mut peek[..peek_len]);
-    let peek_slice = &peek[..peek_len];
+        .copy_to(peek_slice);
     let is_dem = is_raw_dem_frame(peek_slice);
     let min_hdr = if is_dem {
         RASTER_DEM_HEADER_BYTES
@@ -325,7 +325,7 @@ pub(super) fn decode_js_layer_raster(
     }
     let overflow_hdr;
     let hdr_bytes = if px_offset <= peek_len {
-        &peek_slice[..px_offset]
+        peek_slice.get(..px_offset)?
     } else {
         overflow_hdr = copy_header_bytes(buffer, base_offset, byte_len, px_offset)?;
         overflow_hdr.as_slice()

@@ -118,13 +118,15 @@ pub fn resource_system(
         );
     apply_pipeline_setup(
         world,
-        device,
-        surface,
-        settings,
-        supports_base_vertex,
-        need_base,
-        checks,
-        dashes_layout.as_ref(),
+        PipelineSetupContext {
+            device,
+            surface,
+            settings,
+            supports_base_vertex,
+            need_base,
+            checks,
+            dashes_layout: dashes_layout.as_ref(),
+        },
     )?;
     if flags.update_patterns {
         if let Some(patterns) = world
@@ -137,15 +139,19 @@ pub fn resource_system(
     Ok(())
 }
 
-fn apply_pipeline_setup(
-    world: &mut crate::tcs::world::World,
-    device: &wgpu::Device,
-    surface: &crate::render::resource::Surface,
-    settings: &crate::render::settings::RendererSettings,
+struct PipelineSetupContext<'a> {
+    device: &'a wgpu::Device,
+    surface: &'a crate::render::resource::Surface,
+    settings: &'a crate::render::settings::RendererSettings,
     supports_base_vertex: bool,
     need_base: bool,
     checks: PipelineNeedsCheck,
-    dashes_layout: Option<&wgpu::BindGroupLayout>,
+    dashes_layout: Option<&'a wgpu::BindGroupLayout>,
+}
+
+fn apply_pipeline_setup(
+    world: &mut crate::tcs::world::World,
+    ctx: PipelineSetupContext<'_>,
 ) -> Result<(), SystemError> {
     let Some((
         buffer_pool,
@@ -167,51 +173,51 @@ fn apply_pipeline_setup(
     };
 
     buffer_pool.initialize(|| {
-        BufferPool::from_device_with_sizes(device, settings.buffer_pools)
-            .with_u16_chunks(supports_base_vertex)
+        BufferPool::from_device_with_sizes(ctx.device, ctx.settings.buffer_pools)
+            .with_u16_chunks(ctx.supports_base_vertex)
             .with_decoupled_feature_metadata()
             .with_shared_layer_metadata()
     });
 
-    if !(need_base
-        || checks.need_circle_pipeline
-        || checks.need_extrusion_pipeline
-        || checks.needs_pattern
-        || checks.needs_pattern_resources)
+    if !(ctx.need_base
+        || ctx.checks.need_circle_pipeline
+        || ctx.checks.need_extrusion_pipeline
+        || ctx.checks.needs_pattern
+        || ctx.checks.needs_pattern_resources)
     {
         return Ok(());
     }
 
     let setup = PipelineSetup {
-        device,
-        settings: *settings,
-        format: surface.surface_format(),
-        multisampling: surface.is_multisampling_supported(settings.msaa),
+        device: ctx.device,
+        settings: *ctx.settings,
+        format: ctx.surface.surface_format(),
+        multisampling: ctx.surface.is_multisampling_supported(ctx.settings.msaa),
         projection: projection_resources.bind_group_layout(),
         pattern: crate::render::resource::create_bind_group_layout_cached(
-            device,
+            ctx.device,
             Some("pattern layout"),
             &super::pattern::layout_entries(),
         ),
     };
-    if need_base || checks.need_circle_pipeline {
+    if ctx.need_base || ctx.checks.need_circle_pipeline {
         setup.initialize(
             vector_pipeline,
             line_pipeline,
             circle_pipeline,
-            dashes_layout,
-            checks.setup_needs,
+            ctx.dashes_layout,
+            ctx.checks.setup_needs,
         );
     }
-    if checks.need_extrusion_pipeline {
-        setup.initialize_extrusion(extrusion_pipeline, checks.extrusion_needs);
+    if ctx.checks.need_extrusion_pipeline {
+        setup.initialize_extrusion(extrusion_pipeline, ctx.checks.extrusion_needs);
     }
-    let pattern_pipeline = checks.needs_pattern.then(|| setup.create_pattern());
+    let pattern_pipeline = ctx.checks.needs_pattern.then(|| setup.create_pattern());
     let pattern_layout = setup.pattern;
     install_pattern_resources(
         world,
-        device,
-        checks.needs_pattern_resources,
+        ctx.device,
+        ctx.checks.needs_pattern_resources,
         pattern_layout,
         pattern_pipeline,
     );

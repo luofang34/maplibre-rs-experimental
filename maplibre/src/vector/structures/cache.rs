@@ -129,9 +129,17 @@ fn fast_precheck_key(
     ))
 }
 
+struct EmptyStyleMeta {
+    rev: u64,
+    digest: u64,
+    has_markers: bool,
+    has_non_overlay: bool,
+    layer_ids: Arc<rustc_hash::FxHashSet<String>>,
+}
+
 fn empty_profiles(
     world: &mut World,
-    style_meta: Option<(u64, u64, bool, bool, Arc<rustc_hash::FxHashSet<String>>)>,
+    style_meta: Option<EmptyStyleMeta>,
 ) -> Arc<Vec<SpatialBuffer>> {
     if style_meta.is_none() {
         if let Some(cached) = world
@@ -149,9 +157,13 @@ fn empty_profiles(
         .map_or_else(|| Arc::new(Vec::new()), |cached| cached.buffers.clone());
     let (style_rev, style_digest, has_markers, has_non_overlay, structure_layer_ids) =
         match style_meta {
-            Some((rev, digest, markers, non_overlay, ids)) => {
-                (Some(rev), digest, markers, non_overlay, ids)
-            }
+            Some(meta) => (
+                Some(meta.rev),
+                meta.digest,
+                meta.has_markers,
+                meta.has_non_overlay,
+                meta.layer_ids,
+            ),
             None => (None, 0, false, false, Arc::default()),
         };
     world.resources.insert(CachedProfiles {
@@ -191,13 +203,13 @@ fn resolve_style_structures(
     let (style_digest, has_markers, has_non_overlay, structure_layer_ids) =
         digest_style_structures(style);
     if !has_non_overlay {
-        let meta = Some((
-            style_rev,
-            style_digest,
+        let meta = Some(EmptyStyleMeta {
+            rev: style_rev,
+            digest: style_digest,
             has_markers,
-            false,
-            structure_layer_ids,
-        ));
+            has_non_overlay: false,
+            layer_ids: structure_layer_ids,
+        });
         return Err(empty_profiles(world, meta));
     }
     Ok((style_digest, has_markers, structure_layer_ids))

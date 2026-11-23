@@ -9,28 +9,41 @@ use crate::{context::MapContext, tcs::world::World};
 
 #[cfg(target_arch = "wasm32")]
 mod clock {
-    use std::time::Duration;
+    use std::{sync::OnceLock, time::Duration};
 
-    #[wasm_bindgen::prelude::wasm_bindgen(
-        inline_js = "const perf = globalThis.performance; export function maplibre_perf_now_ms() { return perf ? perf.now() : Date.now(); }"
-    )]
-    extern "C" {
-        fn maplibre_perf_now_ms() -> f64;
+    static FAST_NOW_MS: OnceLock<fn() -> f64> = OnceLock::new();
+
+    /// Registers a low-overhead host millisecond clock (e.g. cached `performance.now()`)
+    /// so stage timing avoids per-call global-object lookups on `wasm32`.
+    pub fn register_wasm_clock(now_ms: fn() -> f64) {
+        FAST_NOW_MS.get_or_init(|| now_ms);
     }
 
     #[derive(Clone, Copy)]
-    pub(crate) struct Stamp(f64);
+    pub(crate) enum Stamp {
+        HostMs(f64),
+        Instant(instant::Instant),
+    }
 
     impl Stamp {
         #[inline]
         pub(crate) fn now() -> Self {
-            Self(maplibre_perf_now_ms())
+            if let Some(&now_ms) = FAST_NOW_MS.get() {
+                Self::HostMs(now_ms())
+            } else {
+                Self::Instant(instant::Instant::now())
+            }
         }
 
         #[inline]
         pub(crate) fn elapsed_since(self, earlier: Self) -> Duration {
-            let ms = (self.0 - earlier.0).max(0.0);
-            Duration::from_secs_f64(ms * 0.001)
+            match (self, earlier) {
+                (Self::HostMs(now), Self::HostMs(prev)) => {
+                    Duration::from_secs_f64((now - prev).max(0.0) * 0.001)
+                }
+                (Self::Instant(now), Self::Instant(prev)) => now.saturating_duration_since(prev),
+                _ => Duration::ZERO,
+            }
         }
     }
 }
@@ -55,6 +68,8 @@ mod clock {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+pub use clock::register_wasm_clock;
 pub(crate) use clock::Stamp;
 
 /// Time each system and stage has taken, and heap bytes each has kept, since the last

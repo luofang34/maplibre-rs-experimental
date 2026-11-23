@@ -269,12 +269,14 @@ pub(crate) fn terrain_index_key(world: &World) -> (u64, u64, usize) {
         })
 }
 
+type CachedTightRegion = (Option<Arc<[WorldTileCoords]>>, Option<ViewRegion>);
+
 fn tight_cached_region(
     world: &World,
     host_frame: u64,
     level: ZoomLevel,
     can_use_cache: bool,
-) -> Option<(Option<Arc<[WorldTileCoords]>>, Option<ViewRegion>)> {
+) -> Option<CachedTightRegion> {
     if !can_use_cache {
         return None;
     }
@@ -386,19 +388,18 @@ fn matching_shared_covering<'w>(
         .filter(|shared| query.matches(shared))
 }
 
+type CoveringParts = (
+    Option<Arc<[WorldTileCoords]>>,
+    Option<ViewRegion>,
+    RasterCoverings,
+);
+
 fn compute_covering_parts(
     style: &Style,
     view_state: &ViewState,
     world: &mut World,
     query: &CoveringQuery,
-) -> Result<
-    (
-        Option<Arc<[WorldTileCoords]>>,
-        Option<ViewRegion>,
-        RasterCoverings,
-    ),
-    ProjectionStateError,
-> {
+) -> Result<CoveringParts, ProjectionStateError> {
     let can_use_loose_cache = query.can_use_loose_cache();
     let (cached_arc, region) =
         match tight_cached_region(world, query.host_frame, query.level, can_use_loose_cache) {
@@ -442,7 +443,7 @@ fn store_shared_covering(
         view_proj_bits: query.view_proj_bits,
         terrain_key: query.terrain_key,
         tiles: region.map(|region| {
-            let arc = cached_arc.unwrap_or_else(|| Arc::from(region.iter().collect::<Vec<_>>()));
+            let arc = cached_arc.unwrap_or_else(|| Arc::from(region.copies().collect::<Vec<_>>()));
             (arc, region.zoom_level())
         }),
         raster,

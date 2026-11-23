@@ -21,7 +21,7 @@ use crate::{
 
 #[derive(Default)]
 struct RasterUploadCache {
-    last_key: Option<(u64, u64, u64, usize)>,
+    last_key: Option<(u64, u64, u64, u64, usize)>,
     last_deferred: bool,
 }
 
@@ -34,12 +34,11 @@ pub fn upload_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
-    let Some(raster_state) = world.resources.get::<Eventually<RasterResources>>() else {
+    let Some(Initialized(raster_resources)) = world.resources.get::<Eventually<RasterResources>>()
+    else {
         return Ok(());
     };
-    if !matches!(raster_state, Initialized(_)) {
-        return Ok(());
-    }
+    let pre_raster_gen = raster_resources.mutation_generation();
     if crate::render::eye_covering::EyeInFrame::reuses_content(world) {
         return Ok(());
     }
@@ -76,6 +75,7 @@ pub fn upload_system(
     let pre_key = (
         crate::raster::raster_arrival_epoch(world),
         crate::terrain::dem_arrival_epoch(world),
+        pre_raster_gen,
         style.revision(),
         world.tiles.tiles.len(),
     );
@@ -130,9 +130,11 @@ pub fn upload_system(
             budget,
         );
     }
+    let post_raster_gen = raster_resources.mutation_generation();
     let post_key = (
         crate::raster::raster_arrival_epoch(world),
         crate::terrain::dem_arrival_epoch(world),
+        post_raster_gen,
         style.revision(),
         world.tiles.tiles.len(),
     );

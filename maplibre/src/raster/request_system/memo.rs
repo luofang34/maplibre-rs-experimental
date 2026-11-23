@@ -149,12 +149,15 @@ impl RasterRequestMemo {
         view_state: &ViewState,
         tight_padding: bool,
         multi: Option<&MultiViewExtractCovering>,
-    ) -> RasterRequestKey {
+    ) -> Option<RasterRequestKey> {
+        if !view_state.has_valid_perspective() {
+            return None;
+        }
         let drapes_hash = world
             .resources
             .get::<DrapeRequests>()
             .map_or(0, |r| hash_drapes(&r.0));
-        RasterRequestKey {
+        Some(RasterRequestKey {
             style_rev: style.revision(),
             view_proj_bits: frame_view_proj_bits(world, style, view_state),
             viewport_bits: (view_state.width().to_bits(), view_state.height().to_bits()),
@@ -172,7 +175,7 @@ impl RasterRequestMemo {
             dem_arrival_epoch: crate::terrain::dem_arrival_epoch(world),
             tiles_len: world.tiles.tiles.len(),
             multi_key: multi.map(hash_multi_raster),
-        }
+        })
     }
 
     pub(super) fn try_reuse(&self, world: &mut World, key: &RasterRequestKey) -> bool {

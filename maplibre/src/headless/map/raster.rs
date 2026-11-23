@@ -127,6 +127,8 @@ impl HeadlessMap {
         let style = &self.map_context.style;
         let circumference = self.map_context.view_state.body().circumference_meters();
         let world = &mut self.map_context.world;
+        let has_rasters = !rasters_by_tile.is_empty();
+        let mut loaded_dem = false;
         for (coords, layers) in rasters_by_tile {
             if world
                 .tiles
@@ -151,6 +153,7 @@ impl HeadlessMap {
                                 dem,
                                 is_terrain_source(style, &source),
                             );
+                            loaded_dem = true;
                             RasterLayerData::Available(AvailableRasterLayerData {
                                 coords,
                                 source: source.clone(),
@@ -183,6 +186,20 @@ impl HeadlessMap {
                 }
             }
         }
+        bump_epochs_after_load(world, has_rasters, loaded_dem);
         Ok(())
+    }
+}
+
+fn bump_epochs_after_load(
+    world: &mut crate::tcs::world::World,
+    has_rasters: bool,
+    loaded_dem: bool,
+) {
+    if has_rasters {
+        crate::raster::bump_raster_arrival_epoch(world);
+    }
+    if loaded_dem {
+        crate::terrain::bump_dem_arrival_epoch(world);
     }
 }

@@ -68,7 +68,10 @@ impl DemRequestMemo {
         view_state: &ViewState,
         dem_tile_size: u32,
         multi: Option<&MultiViewExtractCovering>,
-    ) -> DemRequestKey {
+    ) -> Option<DemRequestKey> {
+        if !view_state.has_valid_perspective() {
+            return None;
+        }
         let drapes_hash = world
             .resources
             .get::<DrapeRequests>()
@@ -86,7 +89,7 @@ impl DemRequestMemo {
         } else {
             None
         };
-        DemRequestKey {
+        Some(DemRequestKey {
             style_rev: style.revision(),
             view_proj_bits: frame_view_proj_bits(world, style, view_state),
             viewport_bits: (view_state.width().to_bits(), view_state.height().to_bits()),
@@ -98,7 +101,7 @@ impl DemRequestMemo {
             tiles_len: world.tiles.tiles.len(),
             prepared_key,
             multi_key: multi.map(hash_multi_dem),
-        }
+        })
     }
 
     pub(super) fn try_reuse(&self, world: &mut World, key: &DemRequestKey) -> bool {

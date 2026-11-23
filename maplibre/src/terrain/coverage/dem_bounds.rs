@@ -96,11 +96,17 @@ pub fn coverage_system(
         });
         return Ok(());
     }
+    let mut prev_bounds = None;
     let reused_dem_bounds =
         world
             .resources
             .get_mut::<TerrainCoverageIndex>()
             .and_then(|prev_idx| {
+                prev_bounds = Some((
+                    prev_idx.min_elevation,
+                    prev_idx.max_elevation,
+                    prev_idx.dem_bounds.len(),
+                ));
                 (prev_idx.dem_bounds_sig == dem_sig && prev_idx.dem_bounds.len() == dem_count)
                     .then(|| std::mem::take(&mut prev_idx.dem_bounds))
             });
@@ -122,11 +128,18 @@ pub fn coverage_system(
         }
         .with_poles(poles),
     };
-    world.resources.insert(index);
-    let key = PreparedTerrainKey::capture(view_state, world, dem.tile_size);
-    world.resources.insert(PreparedTerrainRegion {
-        key,
-        region: rendered,
+    let bounds_unchanged = prev_bounds.is_some_and(|(min_e, max_e, count)| {
+        count == index.dem_bounds.len()
+            && (min_e - index.min_elevation).abs() < 1e-3
+            && (max_e - index.max_elevation).abs() < 1e-3
     });
+    world.resources.insert(index);
+    if bounds_unchanged {
+        let key = PreparedTerrainKey::capture(view_state, world, dem.tile_size);
+        world.resources.insert(PreparedTerrainRegion {
+            key,
+            region: rendered,
+        });
+    }
     Ok(())
 }

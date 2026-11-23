@@ -104,7 +104,7 @@ pub(super) fn upload_tessellated_layer_with_uncovered(
     mut state: TessellatedUploadState<'_>,
 ) -> (bool, bool) {
     let stamp = (plan.style.revision(), buffer_pool.eviction_generation());
-    if all_tiles_uploaded(tiles, &plan.source_tiles, stamp) {
+    if all_tiles_uploaded(tiles, plan.source_tiles, stamp) {
         return (false, false);
     }
     let protected: rustc_hash::FxHashSet<_> = plan.source_tiles.iter().copied().collect();

@@ -55,9 +55,9 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
         }: &mut MapContext,
     ) -> SystemResult {
         tile_retry::stop_cancelled(world, self.kernel.apc());
-        crate::io::tile_backpressure::set_raster_deferred(world, false);
         let (has_raster_layers, sources_empty) = self.memo.sync_style(style);
         if !has_raster_layers || sources_empty {
+            crate::io::tile_backpressure::set_raster_deferred(world, false);
             self.memo.invalidate();
             return Ok(());
         }
@@ -76,9 +76,13 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
             tight_padding,
             multi.as_ref(),
         );
-        if self.memo.try_reuse(world, &memo_key) {
+        if memo_key
+            .as_ref()
+            .is_some_and(|key| self.memo.try_reuse(world, key))
+        {
             return Ok(());
         }
+        crate::io::tile_backpressure::set_raster_deferred(world, false);
         let all_sources = self.memo.cached_sources();
         let (mut regions, cached_regions) =
             resolve_regions(style, view_state, world, tight_padding, multi.as_ref())?;
@@ -94,8 +98,10 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
             stand_ins,
             multi.as_ref(),
         );
-        self.memo
-            .record(memo_key, world.tiles.tiles.len(), cached_regions);
+        if let Some(memo_key) = memo_key {
+            self.memo
+                .record(memo_key, world.tiles.tiles.len(), cached_regions);
+        }
         Ok(())
     }
 }

@@ -259,6 +259,26 @@ impl ViewState {
         }
     }
 
+    /// Whether projecting this view can build a finite frustum without panicking.
+    pub(crate) fn has_valid_perspective(&self) -> bool {
+        if self.external_projection().is_some() {
+            return true;
+        }
+        let fovy = self.perspective.fovy().0;
+        if !(self.width.is_finite()
+            && self.height.is_finite()
+            && self.width > 0.0
+            && self.height > 0.0
+            && fovy.is_finite()
+            && fovy > 0.0
+            && fovy < consts::PI)
+        {
+            return false;
+        }
+        let (near_z, far_z) = self.depth_range(self.center_offset());
+        near_z.is_finite() && far_z.is_finite() && near_z > 0.0 && far_z > near_z
+    }
+
     /// Returns the perspective-center offset from the viewport center.
     pub fn center_offset(&self) -> Point2<f64> {
         let center = self.edge_insets.center(self.width, self.height);

@@ -50,7 +50,7 @@ fn parse_raw_dem_header(bytes: &[u8]) -> Option<RawDemHeader> {
 fn decode_dem_parts_from_header_and_pixels(
     hdr_bytes: &[u8],
     pixels: Vec<u8>,
-) -> Option<(WorldTileCoords, Result<(Arc<DemTile>, f64), RgbaImage>)> {
+) -> Option<super::UnpackedDem> {
     match read_u32_le(hdr_bytes, 0) {
         Some(LAYER_DEM_IMAGE_MAGIC) => {
             let coords = read_coords_at(hdr_bytes, 4).unwrap_or_default();
@@ -121,8 +121,9 @@ pub(super) fn decode_js_layer_dem(
         return None;
     }
     let mut hdr = [0_u8; DEM_RAW_HEADER_BYTES];
+    let hdr_slice = hdr.get_mut(..hdr_len)?;
     js_sys::Uint8Array::new_with_byte_offset_and_length(buffer, base_offset, hdr_len as u32)
-        .copy_to(&mut hdr[..hdr_len]);
+        .copy_to(hdr_slice);
     let px_len = (byte_len as usize) - hdr_len;
     let mut pixels = vec![0_u8; px_len];
     if px_len > 0 {
@@ -133,7 +134,7 @@ pub(super) fn decode_js_layer_dem(
         )
         .copy_to(&mut pixels);
     }
-    let (coords, outcome) = decode_dem_parts_from_header_and_pixels(&hdr[..hdr_len], pixels)?;
+    let (coords, outcome) = decode_dem_parts_from_header_and_pixels(hdr_slice, pixels)?;
     Some(FlatBufferTransferable::from_unpacked_dem(coords, outcome))
 }
 

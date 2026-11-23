@@ -1,6 +1,14 @@
 #[cfg(feature = "renderer")]
 use wasm_bindgen::prelude::*;
 
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen(
+    inline_js = "const perf = globalThis.performance; export function maplibre_perf_now_ms() { return perf ? perf.now() : Date.now(); }"
+)]
+extern "C" {
+    fn maplibre_perf_now_ms() -> f64;
+}
+
 #[cfg(feature = "trace")]
 fn enable_tracing() {
     use tracing_subscriber::{layer::SubscriberExt, Registry};
@@ -18,6 +26,8 @@ fn enable_tracing() {
 #[cfg_attr(feature = "renderer", wasm_bindgen(start))]
 /// Installs logging and panic reporting for each wasm instance.
 pub fn wasm_bindgen_start() {
+    #[cfg(target_arch = "wasm32")]
+    maplibre::tcs::system::timings::register_wasm_clock(maplibre_perf_now_ms);
     #[cfg(debug_assertions)]
     {
         console_log::init_with_level(log::Level::Info).ok();

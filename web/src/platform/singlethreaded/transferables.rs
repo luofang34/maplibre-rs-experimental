@@ -27,6 +27,11 @@ use maplibre::{
 
 use crate::platform::singlethreaded::apc::WebMessageTag;
 
+pub(crate) type UnpackedDem = (
+    WorldTileCoords,
+    Result<(std::sync::Arc<maplibre::terrain::DemTile>, f64), RgbaImage>,
+);
+
 /// Owned byte buffer carrying a single worker-to-main transferable payload.
 pub struct FlatBufferTransferable {
     tag: WebMessageTag,
@@ -40,10 +45,7 @@ pub struct FlatBufferTransferable {
     pub(crate) unpacked_index: Option<(WorldTileCoords, Option<String>, TileIndex)>,
     pub(crate) unpacked_raster:
         Option<Result<AvailableRasterLayerData, Box<maplibre::raster::SharedRasterDem>>>,
-    pub(crate) unpacked_dem: Option<(
-        WorldTileCoords,
-        Result<(std::sync::Arc<maplibre::terrain::DemTile>, f64), RgbaImage>,
-    )>,
+    pub(crate) unpacked_dem: Option<UnpackedDem>,
 }
 
 impl FlatBufferTransferable {

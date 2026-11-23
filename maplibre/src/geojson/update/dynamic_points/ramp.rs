@@ -82,8 +82,7 @@ impl<T: Copy> Stops<T> {
             }),
             _ => {
                 let mut general = Vec::with_capacity(items.len());
-                for i in 0..items.len() {
-                    let (x, v) = items[i];
+                for (i, &(x, v)) in items.iter().enumerate() {
                     let inv = items
                         .get(i + 1)
                         .map_or(0.0, |(next_x, _)| inv_span(x, *next_x));

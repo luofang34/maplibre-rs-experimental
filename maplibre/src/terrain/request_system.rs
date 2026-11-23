@@ -139,8 +139,8 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
         }: &mut MapContext,
     ) -> SystemResult {
         tile_retry::stop_cancelled(world, self.kernel.apc());
-        crate::io::tile_backpressure::set_dem_deferred(world, false);
         let Some(dem) = dem_source(style) else {
+            crate::io::tile_backpressure::set_dem_deferred(world, false);
             self.memo.invalidate();
             return Ok(());
         };
@@ -156,9 +156,13 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
             dem.tile_size,
             multi.as_ref(),
         );
-        if self.memo.try_reuse(world, &memo_key) {
+        if memo_key
+            .as_ref()
+            .is_some_and(|key| self.memo.try_reuse(world, key))
+        {
             return Ok(());
         }
+        crate::io::tile_backpressure::set_dem_deferred(world, false);
         let (terrain_tiles, fresh_region) = match &multi {
             Some(m) => (m.terrain_tiles.clone(), None),
             None => {
@@ -171,8 +175,10 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
             }
         };
         self.dispatch_wanted(style, world, &dem, &terrain_tiles, multi.as_ref());
-        self.memo
-            .record(memo_key, world.tiles.tiles.len(), fresh_region);
+        if let Some(memo_key) = memo_key {
+            self.memo
+                .record(memo_key, world.tiles.tiles.len(), fresh_region);
+        }
         Ok(())
     }
 }

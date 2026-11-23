@@ -5,7 +5,6 @@
 #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
-    collections::VecDeque,
     future::poll_fn,
     sync::{LazyLock, Mutex},
     task::{Poll, Waker},
@@ -49,7 +48,7 @@ const MAX_UNCONSUMED_SHARED_TILES: usize = 4;
 #[derive(Default)]
 struct PermitState {
     in_use: usize,
-    waiters: VecDeque<Waker>,
+    waiters: Vec<Waker>,
 }
 
 impl PermitState {
@@ -59,15 +58,15 @@ impl PermitState {
             Poll::Ready(())
         } else {
             if !self.waiters.iter().any(|w| w.will_wake(waker)) {
-                self.waiters.push_back(waker.clone());
+                self.waiters.push(waker.clone());
             }
             Poll::Pending
         }
     }
 
-    fn release(&mut self) -> Option<Waker> {
+    fn release(&mut self) -> Vec<Waker> {
         self.in_use = self.in_use.saturating_sub(1);
-        self.waiters.pop_front()
+        std::mem::take(&mut self.waiters)
     }
 }
 
@@ -86,7 +85,8 @@ async fn acquire_slot(gate: &'static Mutex<PermitState>, mut limit: impl FnMut()
 }
 
 fn release_slot(gate: &'static Mutex<PermitState>) {
-    if let Some(waker) = crate::platform::lock_unpoisoned(gate).release() {
+    let waiters = crate::platform::lock_unpoisoned(gate).release();
+    for waker in waiters {
         waker.wake();
     }
 }
@@ -377,16 +377,21 @@ mod tests {
         assert!(state.poll_acquire(2, &waker).is_ready());
         assert_eq!(state.in_use, 2);
 
-        // 3rd waiter blocks at limit and deduplicates identical wakers.
+        // Waiters block at limit, deduplicate identical wakers, and all wake on release so an
+        // aborted front waiter cannot starve followers.
+        let counter2 = Arc::new(CountWake(AtomicUsize::new(0)));
+        let waker2 = Waker::from(counter2.clone());
         assert!(state.poll_acquire(2, &waker).is_pending());
         assert!(state.poll_acquire(2, &waker).is_pending());
-        assert_eq!(state.waiters.len(), 1);
+        assert!(state.poll_acquire(2, &waker2).is_pending());
+        assert_eq!(state.waiters.len(), 2);
 
-        if let Some(w) = state.release() {
+        for w in state.release() {
             w.wake();
         }
         assert_eq!(state.in_use, 1);
         assert_eq!(counter.0.load(Ordering::Relaxed), 1);
+        assert_eq!(counter2.0.load(Ordering::Relaxed), 1);
         assert!(state.poll_acquire(2, &waker).is_ready());
         assert_eq!(state.in_use, 2);
     }
@@ -445,21 +450,21 @@ mod tests {
         assert!(state
             .poll_acquire(heavy_tile_limit_for_pages(512), &waker)
             .is_pending());
-        if let Some(w) = state.release() {
+        for w in state.release() {
             w.wake();
         }
         assert_eq!(state.in_use, 3);
         assert!(state
             .poll_acquire(heavy_tile_limit_for_pages(512), &waker)
             .is_pending());
-        if let Some(w) = state.release() {
+        for w in state.release() {
             w.wake();
         }
         assert_eq!(state.in_use, 2);
         assert!(state
             .poll_acquire(heavy_tile_limit_for_pages(512), &waker)
             .is_pending());
-        if let Some(w) = state.release() {
+        for w in state.release() {
             w.wake();
         }
         assert_eq!(state.in_use, 1);

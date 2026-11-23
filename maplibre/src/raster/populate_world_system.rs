@@ -61,10 +61,16 @@ impl<E: Environment, T: RasterTransferables> System for PopulateWorldSystem<E, T
     ) -> SystemResult {
         let style_rev = style.revision();
         let has_raster_or_dem = style.terrain.is_some()
-            || style
-                .sources
-                .values()
-                .any(|source| matches!(source, Source::Raster(_) | Source::RasterDem(_)));
+            || style.sources.values().any(|source| {
+                matches!(
+                    source,
+                    Source::Raster(_)
+                        | Source::RasterDem(_)
+                        | Source::Image(_)
+                        | Source::Video(_)
+                        | Source::Canvas(_)
+                )
+            });
         if !has_raster_or_dem && self.idle_rev == Some(style_rev) {
             return Ok(());
         }
