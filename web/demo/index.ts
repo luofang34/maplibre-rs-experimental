@@ -69,7 +69,7 @@ const loadStyle = async (): Promise<string | undefined> => {
 }
 
 const start = async () => {
-  const map = await startMapLibre(undefined, undefined, await loadStyle())
+  const map = await startMapLibre(undefined, undefined, loadStyle())
   const module = await example?.catch(() => null)
   if (map && typeof module?.run === 'function') {
     await module.run(map)

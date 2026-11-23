@@ -53,6 +53,7 @@ interface OffscreenStartArgs {
     workerWasmPath?: WasmModuleSource
     workerPath: string | undefined
     styleJson?: string | Promise<string | undefined>
+    styleAbort?: AbortController
     imageProviderModules: string[]
     createRenderWorker: () => Worker
     createPoolWorker: () => Worker
@@ -93,6 +94,7 @@ export const startOffscreenController = async ({
     workerWasmPath,
     workerPath,
     styleJson,
+    styleAbort,
     imageProviderModules,
     createRenderWorker,
     createPoolWorker,
@@ -117,7 +119,9 @@ export const startOffscreenController = async ({
 
     let nextRpcId = 1;
     let closed = false;
+    let initPosted = false;
     let portsTransferred = false;
+    let workerPortsTransferred = false;
     let compiledMainModule: WebAssembly.Module | null = null;
     const sharedMemory = createSharedWasmMemory();
     const dormantSlots = createDormantPortSlotController({
@@ -187,19 +191,22 @@ export const startOffscreenController = async ({
     };
 
     const terminateAllWorkers = () => {
+        renderWorker.onmessage = null;
+        renderWorker.onerror = null;
         renderWorker.terminate();
-        for (const w of tileWorkers) {
+        for (const w of tileWorkers.splice(0)) {
             w.terminate();
         }
         dormantSlots.closeAll();
-        if (!portsTransferred) {
-            for (const ch of channels) {
+        for (const ch of channels.splice(0)) {
+            if (!portsTransferred) {
                 ch.port1.close();
-                if (!MULTITHREADED) {
-                    ch.port2.close();
-                }
+            }
+            if (!MULTITHREADED && !workerPortsTransferred) {
+                ch.port2.close();
             }
         }
+        compiledMainModule = null;
     };
 
     renderWorker.onmessage = (event: MessageEvent<any>) => {
@@ -245,17 +252,20 @@ export const startOffscreenController = async ({
     const teardown = () => {
         if (closed) return;
         closed = true;
+        styleAbort?.abort();
         cameraListener = null;
         telemetryListener = null;
         for (const fn of cleanupFns.splice(0)) {
             fn();
         }
         let destroyDispatched = false;
-        try {
-            renderWorker.postMessage({type: "destroy"});
-            destroyDispatched = true;
-        } catch {
-            // Worker is unreachable or already terminated.
+        if (initPosted) {
+            try {
+                renderWorker.postMessage({type: "destroy"});
+                destroyDispatched = true;
+            } catch {
+                // Worker is unreachable or already terminated.
+            }
         }
         rejectAll(new Error("the map's host has stopped"));
         if (!destroyDispatched) {
@@ -271,6 +281,7 @@ export const startOffscreenController = async ({
                 workerWasmPath ?? new URL("./wasm/maplibre_tile_worker_bg.wasm", import.meta.url).href;
             workerReadyPromise = compileWasmModule(resolvedWorkerWasm).then(workerModule => {
                 if (closed) return;
+                workerPortsTransferred = true;
                 for (let i = 0; i < workerCount; i++) {
                     const port2 = channels[i].port2;
                     tileWorkers[i].postMessage(
@@ -298,21 +309,35 @@ export const startOffscreenController = async ({
             styleJson != null && typeof (styleJson as Promise<string | undefined>).then === "function";
         let styleResolved = !isThenable;
         let resolvedStyleValue: string | undefined = isThenable ? undefined : (styleJson as string | undefined);
+        let styleErrorValue: unknown = null;
+        let styleRejected = false;
         const stylePromise = isThenable
-            ? Promise.resolve(styleJson).then(value => {
-                  resolvedStyleValue = value;
-                  styleResolved = true;
-                  return value;
-              })
+            ? Promise.resolve(styleJson).then(
+                  value => {
+                      resolvedStyleValue = value;
+                      styleResolved = true;
+                      return value;
+                  },
+                  err => {
+                      styleRejected = true;
+                      styleErrorValue = err;
+                      throw err;
+                  },
+              )
             : Promise.resolve(resolvedStyleValue);
+        stylePromise.catch(() => {});
 
         const renderInitPromise = mainModulePromise.then(module => {
             if (closed) return;
+            if (styleRejected) {
+                throw styleErrorValue;
+            }
             compiledMainModule = module;
             const ports = channels.map(ch => ch.port1);
             portsTransferred = true;
+            initPosted = true;
+            const initId = nextRpcId++;
             if (styleResolved) {
-                const initId = nextRpcId++;
                 const initDone = new Promise<void>((resolve, reject) => {
                     pending.set(initId, {resolve, reject});
                     renderWorker.postMessage(
@@ -339,37 +364,46 @@ export const startOffscreenController = async ({
                 }
                 return initDone;
             }
-            renderWorker.postMessage(
-                {
-                    type: "preinit",
-                    module,
-                    memory: sharedMemory,
-                    canvas: offscreen,
-                    width: initial.width,
-                    height: initial.height,
-                    scaleFactor: initial.scaleFactor,
-                    ports,
-                    eagerWorkerCount,
-                },
-                [offscreen, ...ports],
-            );
+            const initDone = new Promise<void>((resolve, reject) => {
+                pending.set(initId, {resolve, reject});
+                renderWorker.postMessage(
+                    {
+                        type: "preinit_deferred",
+                        id: initId,
+                        module,
+                        memory: sharedMemory,
+                        canvas: offscreen,
+                        width: initial.width,
+                        height: initial.height,
+                        scaleFactor: initial.scaleFactor,
+                        ports,
+                        eagerWorkerCount,
+                    },
+                    [offscreen, ...ports],
+                );
+            });
             if (MULTITHREADED && sharedMemory) {
                 for (const worker of tileWorkers) {
                     worker.postMessage({type: "wasm_init", module, memory: sharedMemory});
                 }
             }
-            return stylePromise.then(resolvedStyleJson => {
-                if (closed) return;
-                const initId = nextRpcId++;
-                return new Promise<void>((resolve, reject) => {
-                    pending.set(initId, {resolve, reject});
+            stylePromise.then(
+                resolvedStyleJson => {
+                    if (closed) return;
                     renderWorker.postMessage({
-                        type: "finish_init",
-                        id: initId,
+                        type: "style_ready",
                         styleJson: resolvedStyleJson,
                     });
-                });
-            });
+                },
+                err => {
+                    if (closed) return;
+                    renderWorker.postMessage({
+                        type: "style_error",
+                        error: err instanceof Error ? err.message : String(err),
+                    });
+                },
+            );
+            return initDone;
         });
         await Promise.all([renderInitPromise, workerReadyPromise]);
 

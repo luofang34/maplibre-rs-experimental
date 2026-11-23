@@ -60,18 +60,22 @@ impl RunnerInner {
                 return;
             }
         }
-        drop(
-            inner
-                .scope
-                .set_timeout_with_callback_and_timeout_and_arguments_0(
-                    closure.as_ref().unchecked_ref(),
-                    16,
-                ),
-        );
+        if let Ok(id) = inner
+            .scope
+            .set_timeout_with_callback_and_timeout_and_arguments_0(
+                closure.as_ref().unchecked_ref(),
+                16,
+            )
+        {
+            inner.raf_fallback_timer.set(Some(id));
+        }
     }
 
     pub(super) fn cancel_raf(&self) {
         self.raf_pending.set(false);
+        if let Some(timer_id) = self.raf_fallback_timer.take() {
+            self.scope.clear_timeout_with_handle(timer_id);
+        }
         if let Some(raf_id) = self.raf_handle.take() {
             if let Ok(cancel) =
                 js_sys::Reflect::get(&self.scope, &JsValue::from_str("cancelAnimationFrame"))

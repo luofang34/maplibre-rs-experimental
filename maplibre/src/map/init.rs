@@ -7,7 +7,7 @@ use crate::{
         camera::starting_view, prewarm::prepare_io_and_prewarm, CurrentMapContext, Map, MapError,
         PendingMapContext,
     },
-    render::Renderer,
+    render::{view_state::ViewState, Renderer},
     tcs::world::World,
     window::{HeadedMapWindow, MapWindow, MapWindowConfig},
 };
@@ -24,6 +24,38 @@ where
         self.initialize_with_renderer(None).await
     }
 
+    /// Resolves source metadata and pre-dispatches initial tiles before the renderer is ready.
+    pub async fn prepare_prewarm(&mut self) -> Result<(), MapError> {
+        let CurrentMapContext::Pending(pending) = &mut self.map_context else {
+            return Err(MapError::RendererAlreadySet);
+        };
+        if pending.prewarmed.is_some() {
+            return Ok(());
+        }
+        let window_size = self.window.size();
+        let scale_factor = self.window.scale_factor();
+        let mut view_state = starting_view(
+            &pending.style,
+            pending.view_state.as_ref(),
+            window_size,
+            self.max_pitch,
+            self.camera_bounds,
+            pending.jump,
+        )?;
+        view_state.resize(window_size.to_logical(scale_factor));
+        let prewarmed = prepare_io_and_prewarm(
+            &mut pending.style,
+            &view_state,
+            scale_factor,
+            &self.request_attempts,
+            self.kernel.source_client(),
+            self.kernel.apc(),
+        )
+        .await;
+        pending.prewarmed = Some((view_state, prewarmed));
+        Ok(())
+    }
+
     /// Completes map initialization, optionally consuming a pre-initialized [`Renderer`].
     pub async fn initialize_with_renderer(
         &mut self,
@@ -32,44 +64,19 @@ where
         let CurrentMapContext::Pending(pending) = &mut self.map_context else {
             return Err(MapError::RendererAlreadySet);
         };
-        let PendingMapContext {
-            style,
-            renderer_builder,
-            view_state: retained_view,
-            jump,
-        } = pending.as_mut();
         let window_size = self.window.size();
         let scale_factor = self.window.scale_factor();
-        let mut view_state = starting_view(
-            style,
-            retained_view.as_ref(),
-            window_size,
+        let (view_state, prewarmed, mut renderer) = resolve_renderer_and_prewarm(
+            pending.as_mut(),
+            &self.window,
             self.max_pitch,
             self.camera_bounds,
-            *jump,
-        )?;
-        view_state.resize(window_size.to_logical(scale_factor));
-
-        let init_io_fut = prepare_io_and_prewarm(
-            style,
-            &view_state,
-            scale_factor,
             &self.request_attempts,
-            self.kernel.source_client(),
-            self.kernel.apc(),
-        );
-        let (renderer_res, prewarmed) = if let Some(renderer) = pre_renderer {
-            let prewarmed = init_io_fut.await;
-            (Ok(renderer), prewarmed)
-        } else {
-            let renderer_fut = renderer_builder
-                .clone()
-                .build()
-                .initialize_renderer::<E::MapWindowConfig>(&self.window);
-            futures::future::join(renderer_fut, init_io_fut).await
-        };
-        let mut renderer = renderer_res.map_err(MapError::DeviceInit)?;
-        *jump = None;
+            &self.kernel,
+            pre_renderer,
+        )
+        .await?;
+        pending.jump = None;
         renderer.resize_surface(window_size);
 
         let world = build_world(
@@ -90,12 +97,70 @@ where
         let context = Box::new(MapContext {
             world,
             view_state,
-            style: std::mem::take(style),
+            style: std::mem::take(&mut pending.style),
             renderer,
         });
         self.map_context = CurrentMapContext::Ready(context);
         Ok(())
     }
+}
+
+async fn resolve_renderer_and_prewarm<E: Environment>(
+    pending: &mut PendingMapContext,
+    window: &<E::MapWindowConfig as MapWindowConfig>::MapWindow,
+    max_pitch: cgmath::Deg<f64>,
+    camera_bounds: crate::render::view_state::CameraBounds,
+    request_attempts: &crate::io::tile_retry::RequestAttempts,
+    kernel: &std::rc::Rc<crate::kernel::Kernel<E>>,
+    pre_renderer: Option<Renderer>,
+) -> Result<(ViewState, super::prewarm::PrewarmedRequests, Renderer), MapError>
+where
+    <E::MapWindowConfig as MapWindowConfig>::MapWindow: HeadedMapWindow,
+{
+    let window_size = window.size();
+    let scale_factor = window.scale_factor();
+    if let Some((view_state, requests)) = pending.prewarmed.take() {
+        let renderer = match pre_renderer {
+            Some(renderer) => renderer,
+            None => pending
+                .renderer_builder
+                .clone()
+                .build()
+                .initialize_renderer::<E::MapWindowConfig>(window)
+                .await
+                .map_err(MapError::DeviceInit)?,
+        };
+        return Ok((view_state, requests, renderer));
+    }
+    let mut view_state = starting_view(
+        &pending.style,
+        pending.view_state.as_ref(),
+        window_size,
+        max_pitch,
+        camera_bounds,
+        pending.jump,
+    )?;
+    view_state.resize(window_size.to_logical(scale_factor));
+    let init_io_fut = prepare_io_and_prewarm(
+        &mut pending.style,
+        &view_state,
+        scale_factor,
+        request_attempts,
+        kernel.source_client(),
+        kernel.apc(),
+    );
+    let (renderer_res, requests) = if let Some(renderer) = pre_renderer {
+        (Ok(renderer), init_io_fut.await)
+    } else {
+        let renderer_fut = pending
+            .renderer_builder
+            .clone()
+            .build()
+            .initialize_renderer::<E::MapWindowConfig>(window);
+        futures::future::join(renderer_fut, init_io_fut).await
+    };
+    let renderer = renderer_res.map_err(MapError::DeviceInit)?;
+    Ok((view_state, requests, renderer))
 }
 
 struct WorldInitParts<'a, E: Environment> {

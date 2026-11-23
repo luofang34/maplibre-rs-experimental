@@ -7,12 +7,17 @@ pub type PinnedFuture = std::pin::Pin<Box<dyn std::future::Future<Output = ()> +
 pub(super) type Execute = Box<dyn (FnOnce() -> PinnedFuture) + Send>;
 
 /// Concurrent async tasks claimed per worker so network `fetch` I/O overlaps while keeping
-/// excess raw payloads queued instead of pinning shared WASM memory across dormant slots.
-const PER_WORKER_CONCURRENCY: usize = 2;
+/// excess raw payloads bounded by `limiter`.
+const PER_WORKER_CONCURRENCY: usize = 4;
 
 pub(super) enum ClaimOutcome {
-    Claimed(usize),
-    Backlogged { queued: usize },
+    Claimed {
+        worker_index: usize,
+        total_in_flight: usize,
+    },
+    Backlogged {
+        queued: usize,
+    },
 }
 
 fn lock_queue<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -75,7 +80,11 @@ impl SharedWorkQueue {
             if let Some(slot) = inner.in_flight.get_mut(idx) {
                 *slot = slot.saturating_add(1);
             }
-            ClaimOutcome::Claimed(idx)
+            let total_in_flight = inner.in_flight.iter().sum();
+            ClaimOutcome::Claimed {
+                worker_index: idx,
+                total_in_flight,
+            }
         } else {
             ClaimOutcome::Backlogged {
                 queued: inner.jobs.len(),
@@ -125,5 +134,34 @@ impl SharedWorkQueue {
             std::mem::take(&mut inner.jobs)
         };
         drop(drained);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn noop_job() -> Execute {
+        Box::new(|| Box::pin(async {}))
+    }
+
+    #[test]
+    fn claims_up_to_per_worker_concurrency_then_backlogs() {
+        let queue = SharedWorkQueue::new();
+        for expected in 1..=(2 * PER_WORKER_CONCURRENCY) {
+            let outcome = queue.push_and_claim(noop_job(), 2);
+            assert!(matches!(
+                outcome,
+                ClaimOutcome::Claimed { total_in_flight, .. } if total_in_flight == expected
+            ));
+        }
+        let overflow = queue.push_and_claim(noop_job(), 2);
+        assert!(matches!(
+            overflow,
+            ClaimOutcome::Backlogged { queued } if queued == 9
+        ));
+        assert!(queue.pop_or_release(0).is_some());
+        queue.close_and_clear();
+        assert!(queue.pop_or_release(0).is_none());
     }
 }

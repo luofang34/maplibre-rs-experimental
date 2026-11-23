@@ -93,10 +93,19 @@ export const ensureWebGpuCompatibility = (
     }
 
     const sabCtor = scope?.SharedArrayBuffer;
+    const sabViews = typeof WeakMap === "function" ? new WeakMap() : null;
     let cachedSab = null;
     let cachedSabLen = -1;
     let cachedSabView = null;
     const getSabView = (srcBuffer) => {
+        if (sabViews) {
+            let view = sabViews.get(srcBuffer);
+            if (!view || view.byteLength !== srcBuffer.byteLength) {
+                view = new Uint8Array(srcBuffer);
+                sabViews.set(srcBuffer, view);
+            }
+            return view;
+        }
         if (srcBuffer !== cachedSab || srcBuffer.byteLength !== cachedSabLen || !cachedSabView) {
             cachedSab = srcBuffer;
             cachedSabLen = srcBuffer.byteLength;
@@ -105,13 +114,22 @@ export const ensureWebGpuCompatibility = (
         return cachedSabView;
     };
     let byteScratch = new Uint8Array(65536);
+    let smallScratchWrites = 0;
     const getByteScratch = (minBytes) => {
         if (byteScratch.byteLength < minBytes) {
+            smallScratchWrites = 0;
             let nextCap = byteScratch.byteLength || 65536;
             while (nextCap < minBytes) {
                 nextCap *= 2;
             }
             byteScratch = new Uint8Array(nextCap);
+        } else if (byteScratch.byteLength > 2 * 1024 * 1024 && minBytes <= 256 * 1024) {
+            if (++smallScratchWrites >= 64) {
+                smallScratchWrites = 0;
+                byteScratch = new Uint8Array(256 * 1024);
+            }
+        } else {
+            smallScratchWrites = 0;
         }
         return byteScratch;
     };

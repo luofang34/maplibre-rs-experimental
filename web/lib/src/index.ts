@@ -15,12 +15,27 @@ import {
     startOffscreenController,
     type WasmModuleSource,
 } from "./offscreen-client";
+import {normalizeStyleInput} from "./style-input.mjs";
 // @ts-ignore esbuild plugin is handling this
 import MultithreadedPoolWorker from './multithreaded/multithreaded-pool.worker.js';
 // @ts-ignore esbuild plugin is handling this
 import PoolWorker from './singlethreaded/pool.worker.js';
 // @ts-ignore esbuild plugin is handling this
 import RenderWorker from './singlethreaded/render.worker.js';
+
+export type StyleInput =
+    | string
+    | Record<string, unknown>
+    | Promise<string | Record<string, unknown> | undefined>
+    | undefined;
+
+export type TransformRequestResult =
+    | string
+    | { url: string; headers?: HeadersInit; credentials?: RequestCredentials; mode?: RequestMode }
+    | null
+    | undefined;
+
+export type TransformRequestFn = (url: string, resourceType: string) => TransformRequestResult;
 
 export interface StartMapOptions {
     /** Optional URL, `WebAssembly.Module`, or pending promise for `maplibre_tile_worker_bg.wasm`. */
@@ -29,6 +44,8 @@ export interface StartMapOptions {
     webglModulePath?: string;
     /** Optional fallback WebGL2 `.wasm` source paired with `webglModulePath`. */
     webglWasmPath?: WasmModuleSource;
+    /** Optional request rewriter applied when `styleJson` is passed as a style URL string. */
+    transformRequest?: TransformRequestFn;
 }
 
 let mtWasmPrimed = false;
@@ -36,16 +53,18 @@ const prewarmedMtWorkers: Worker[] = [];
 
 const loadWebGlFallback = async (
     workerPath: string | undefined,
-    styleJson: string | Promise<string | undefined>,
+    styleJson: string | Promise<string | undefined> | undefined,
     imageProviderModules: string[],
     canvasId: string | undefined,
     options: StartMapOptions | undefined,
 ): Promise<MapLibreMap | undefined> => {
     const relFallback = ["webgl", "module.js"].join("/");
     const webglUrl = options?.webglModulePath ?? new URL(relFallback, import.meta.url).href;
-    const resolvedStyle = await styleJson;
     try {
-        const webglMod = await import(/* @vite-ignore */ webglUrl);
+        const [resolvedStyle, webglMod] = await Promise.all([
+            Promise.resolve(styleJson),
+            import(/* @vite-ignore */ webglUrl),
+        ]);
         if (typeof webglMod?.startMapLibre === "function") {
             console.warn("WebGPU unavailable in this browser; falling back automatically to WebGL2.");
             return webglMod.startMapLibre(
@@ -80,7 +99,7 @@ const loadWebGlFallback = async (
 export const startMapLibre = async (
     wasmPath: WasmModuleSource,
     workerPath: string | undefined,
-    styleJson?: string | Promise<string | undefined>,
+    styleJson?: StyleInput,
     imageProviderModules: string[] = [],
     canvasId?: string,
     options?: StartMapOptions,
@@ -90,6 +109,17 @@ export const startMapLibre = async (
         console.error(message)
         alert(message)
         return
+    }
+
+    const styleAbort = typeof AbortController === "function" ? new AbortController() : undefined;
+    const normalizedStyle = normalizeStyleInput(styleJson, options?.transformRequest, {
+        signal: styleAbort?.signal,
+    });
+    const styleSource: string | Promise<string | undefined> | undefined = normalizedStyle.resolved
+        ? (normalizedStyle.value as string | undefined)
+        : (normalizedStyle.promise as Promise<string | undefined>);
+    if (!normalizedStyle.resolved) {
+        (styleSource as Promise<string | undefined>).catch(() => {});
     }
 
     const hasWebGpuFeature = Boolean(
@@ -135,13 +165,14 @@ export const startMapLibre = async (
             terminatePrewarmedWorkers();
             return loadWebGlFallback(
                 workerPath,
-                styleJson,
+                styleSource,
                 imageProviderModules,
                 canvasId,
                 options,
             );
         }
         if (decision.backend === "error") {
+            styleAbort?.abort();
             terminatePrewarmedWorkers();
             console.error(decision.message);
             alert(decision.message);
@@ -169,7 +200,8 @@ export const startMapLibre = async (
                 wasmPath: mainModulePrefetch ?? wasmPath,
                 workerWasmPath: workerModulePrefetch ?? options?.workerWasmPath,
                 workerPath,
-                styleJson,
+                styleJson: styleSource,
+                styleAbort,
                 imageProviderModules: MULTITHREADED ? [] : imageProviderModules,
                 createRenderWorker: () => RenderWorker(),
                 createPoolWorker: () => MULTITHREADED ? MultithreadedPoolWorker() : PoolWorker(),
@@ -186,12 +218,13 @@ export const startMapLibre = async (
                 canvas.replaceWith(freshCanvas);
                 return loadWebGlFallback(
                     workerPath,
-                    styleJson,
+                    styleSource,
                     imageProviderModules,
                     canvasId,
                     options,
                 );
             }
+            styleAbort?.abort();
             // Fall back to main-thread winit only if canvas control was not already transferred.
             if (!(err instanceof DOMException && err.name === "InvalidStateError")) {
                 throw err;
@@ -225,7 +258,7 @@ export const startMapLibre = async (
         : (wasmSource as string | WebAssembly.Module | undefined);
     const [workerModule, resolvedStyleJson] = await Promise.all([
         workerModulePromise,
-        Promise.resolve(styleJson),
+        Promise.resolve(styleSource),
         initializeWasm(resolvedWasm, undefined),
     ]);
 

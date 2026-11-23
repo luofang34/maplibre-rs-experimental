@@ -237,3 +237,61 @@ pub async fn run_maplibre_offscreen(
     }
     Ok(start_runner(wk.runner_id, wk.scope, wk.window_state, map))
 }
+
+fn extract_optional_style_json(value: JsValue) -> Result<Option<String>, JSError> {
+    if value.is_undefined() || value.is_null() {
+        return Ok(None);
+    }
+    value.as_string().map(Some).ok_or_else(|| {
+        WebError::TypeError("styleJson must resolve to a string or null".into()).into()
+    })
+}
+
+/// Initializes WebGPU adapter/device while awaiting `style_json_promise` and overlapping TileJSON/prewarm.
+#[wasm_bindgen]
+pub async fn run_maplibre_offscreen_deferred(
+    canvas: OffscreenCanvas,
+    width: u32,
+    height: u32,
+    scale_factor: f64,
+    new_worker: js_sys::Function,
+    style_json_promise: js_sys::Promise,
+) -> Result<OffscreenMapRunner, JSError> {
+    let wk = create_window_and_kernel(canvas, width, height, scale_factor, new_worker)?;
+    let window = wk
+        .kernel
+        .map_window_config()
+        .create()
+        .map_err(maplibre::map::MapError::Window)?;
+    let settings = maplibre::render::settings::RendererSettings {
+        gpu_timing: cfg!(feature = "arena-telemetry"),
+        ..Default::default()
+    };
+    let renderer_fut = RendererBuilder::new()
+        .with_renderer_settings(settings)
+        .build()
+        .initialize_renderer::<OffscreenMapWindowConfig>(&window);
+    let size = wk.size;
+    let scale = wk.scale;
+    let runner_id = wk.runner_id;
+    let scope = wk.scope;
+    let window_state = wk.window_state;
+    let kernel = wk.kernel;
+    let style_io_fut = async {
+        let style_js = wasm_bindgen_futures::JsFuture::from(style_json_promise)
+            .await
+            .map_err(WebError::from)?;
+        let style_json = extract_optional_style_json(style_js)?;
+        let mut map = build_map(kernel, style_json)?;
+        map.prepare_prewarm().await?;
+        Ok::<_, JSError>(map)
+    };
+    let (renderer_res, map_res) = futures::future::join(renderer_fut, style_io_fut).await;
+    let renderer = renderer_res.map_err(maplibre::map::MapError::DeviceInit)?;
+    let mut map = map_res?;
+    map.initialize_with_renderer(Some(renderer)).await?;
+    if let Ok(context) = map.context_mut() {
+        context.resize(size, scale);
+    }
+    Ok(start_runner(runner_id, scope, window_state, map))
+}

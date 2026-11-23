@@ -14,7 +14,6 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::Duration,
 };
 
 use wasm_bindgen::{prelude::*, JsCast};
@@ -28,11 +27,10 @@ type NewWorker = Box<dyn Fn() -> Result<Worker, WebError>>;
 type NewPort = Box<dyn Fn() -> Result<Option<MessagePort>, WebError>>;
 
 const MAX_RECYCLED_WORKERS: usize = 8;
-const RAMP_BACKLOG_THRESHOLD: usize = 2;
-const RAMP_BOOT_GRACE_MS: u64 = 150;
-const RAMP_COOLDOWN_MS: u64 = 100;
+const RAMP_BACKLOG_THRESHOLD: usize = 1;
+const RAMP_INFLIGHT_PER_WORKER: usize = 2;
 #[cfg(target_arch = "wasm32")]
-const RAMP_MAX_MEMORY_PAGES: usize = 32 * 16;
+const RAMP_MAX_MEMORY_PAGES: usize = 48 * 16;
 
 thread_local! {
     static RECYCLED_WORKERS: RefCell<Vec<Worker>> = const { RefCell::new(Vec::new()) };
@@ -110,8 +108,6 @@ struct PoolState {
     listeners: RefCell<Vec<WorkerListener>>,
     max_workers: usize,
     factory_exhausted: Cell<bool>,
-    created_at: instant::Instant,
-    last_ramp_at: Cell<Option<instant::Instant>>,
 }
 
 impl PoolState {
@@ -140,11 +136,13 @@ impl Drop for PoolState {
     fn drop(&mut self) {
         self.queue.close_and_clear();
         let drained = std::mem::take(self.workers.get_mut());
+        for (endpoint, _) in &drained {
+            endpoint.set_onmessage(None);
+        }
         self.listeners.get_mut().clear();
         RECYCLED_WORKERS.with(|bin| {
             let mut bin = bin.borrow_mut();
             for (endpoint, _) in drained {
-                endpoint.set_onmessage(None);
                 match endpoint {
                     WorkerEndpoint::Dedicated(worker) => {
                         if bin.len() < MAX_RECYCLED_WORKERS {
@@ -168,8 +166,19 @@ pub struct Work {
     wake_pending: Arc<AtomicBool>,
 }
 
+struct ClearWorkerWake;
+
+impl Drop for ClearWorkerWake {
+    fn drop(&mut self) {
+        CURRENT_WORKER_WAKE.with(|slot| {
+            *slot.borrow_mut() = None;
+        });
+    }
+}
+
 impl Work {
     pub async fn run(self) {
+        let _clear_wake = ClearWorkerWake;
         loop {
             let Some(func) = self.queue.pop_or_release(self.worker_index) else {
                 break;
@@ -239,8 +248,6 @@ impl WorkerPool {
                 listeners: RefCell::new(Vec::with_capacity(max_workers)),
                 max_workers,
                 factory_exhausted: Cell::new(false),
-                created_at: instant::Instant::now(),
-                last_ramp_at: Cell::new(None),
             }),
         };
         for _ in 0..initial {
@@ -320,21 +327,11 @@ impl WorkerPool {
         Ok(self.state.push(endpoint, wake_pending, onmessage))
     }
 
-    fn should_ramp(&self, worker_count: usize, queued: usize) -> bool {
-        if queued < RAMP_BACKLOG_THRESHOLD
-            || worker_count >= self.state.max_workers
-            || self.state.factory_exhausted.get()
-            || !low_memory_for_ramp()
-        {
-            return false;
-        }
-        if self.state.created_at.elapsed() < Duration::from_millis(RAMP_BOOT_GRACE_MS) {
-            return false;
-        }
-        self.state
-            .last_ramp_at
-            .get()
-            .is_none_or(|t| t.elapsed() >= Duration::from_millis(RAMP_COOLDOWN_MS))
+    fn can_ramp(&self, worker_count: usize, queued: usize) -> bool {
+        queued >= RAMP_BACKLOG_THRESHOLD
+            && worker_count < self.state.max_workers
+            && !self.state.factory_exhausted.get()
+            && low_memory_for_ramp()
     }
 
     fn dispatch_ticket(&self, worker_index: usize) -> Result<(), WebError> {
@@ -377,11 +374,24 @@ impl WorkerPool {
             return Err(WebError::TypeError("Worker pool has no workers".into()));
         }
         match self.state.queue.push_and_claim(Box::new(f), worker_count) {
-            ClaimOutcome::Claimed(idx) => self.dispatch_ticket(idx),
-            ClaimOutcome::Backlogged { queued } => {
-                if self.should_ramp(worker_count, queued) {
+            ClaimOutcome::Claimed {
+                worker_index,
+                total_in_flight,
+            } => {
+                self.dispatch_ticket(worker_index)?;
+                if total_in_flight >= worker_count * RAMP_INFLIGHT_PER_WORKER
+                    && self.can_ramp(worker_count, 1)
+                {
                     if let Some(new_idx) = self.try_spawn()? {
-                        self.state.last_ramp_at.set(Some(instant::Instant::now()));
+                        self.state.queue.claim_worker(new_idx);
+                        self.dispatch_ticket(new_idx)?;
+                    }
+                }
+                Ok(())
+            }
+            ClaimOutcome::Backlogged { queued, .. } => {
+                if self.can_ramp(worker_count, queued) {
+                    if let Some(new_idx) = self.try_spawn()? {
                         self.state.queue.claim_worker(new_idx);
                         return self.dispatch_ticket(new_idx);
                     }

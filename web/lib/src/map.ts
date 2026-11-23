@@ -123,24 +123,37 @@ const CLICK_TOLERANCE = 3
 export class MapLibreMap {
     private readonly listeners = new Map<MapMouseEventType, Set<Listener>>()
     private pressed: { x: number, y: number, id: number } | null = null
+    private readonly removeDomListeners: () => void
 
     constructor(private readonly controller: MapController, readonly canvas: HTMLCanvasElement) {
-        canvas.addEventListener("pointerdown", event => {
+        const onPointerDown = (event: PointerEvent) => {
             if (event.isPrimary && event.button === 0) {
                 this.pressed = {x: event.clientX, y: event.clientY, id: event.pointerId}
             }
-        })
-        canvas.addEventListener("pointerup", event => {
+        }
+        const onPointerUp = (event: PointerEvent) => {
             const pressed = this.pressed
             this.pressed = null
             if (!pressed || pressed.id !== event.pointerId) return
             const moved = Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y)
             if (moved <= CLICK_TOLERANCE) this.fire("click", event)
-        })
-        canvas.addEventListener("pointercancel", () => this.pressed = null)
-        canvas.addEventListener("pointermove", event => {
+        }
+        const onPointerCancel = () => {
+            this.pressed = null
+        }
+        const onPointerMove = (event: PointerEvent) => {
             if (event.pointerType !== "touch") this.fire("mousemove", event)
-        })
+        }
+        canvas.addEventListener("pointerdown", onPointerDown)
+        canvas.addEventListener("pointerup", onPointerUp)
+        canvas.addEventListener("pointercancel", onPointerCancel)
+        canvas.addEventListener("pointermove", onPointerMove)
+        this.removeDomListeners = () => {
+            canvas.removeEventListener("pointerdown", onPointerDown)
+            canvas.removeEventListener("pointerup", onPointerUp)
+            canvas.removeEventListener("pointercancel", onPointerCancel)
+            canvas.removeEventListener("pointermove", onPointerMove)
+        }
     }
 
     /** Calls `listener` for each `type` event, as GL JS `on`. */
@@ -276,6 +289,7 @@ export class MapLibreMap {
 
     /** Tears down the running map event loop, workers, and GPU resources, as GL JS `remove`. */
     remove(): void {
+        this.removeDomListeners()
         this.listeners.clear()
         this.controller.remove()
     }

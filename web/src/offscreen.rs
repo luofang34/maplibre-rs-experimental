@@ -61,6 +61,7 @@ struct RunnerInner {
     raf_pending: Cell<bool>,
     cmd_pending: Cell<bool>,
     raf_handle: Cell<Option<i32>>,
+    raf_fallback_timer: Cell<Option<i32>>,
     wake_timer: WakeTimerSlot,
     boot_wake_channel: WakeChannelSlot,
     immediate_wake_pending: Cell<bool>,
@@ -190,6 +191,7 @@ impl RunnerInner {
     fn step_frame(&mut self) -> Option<(Option<Duration>, bool)> {
         self.raf_pending.set(false);
         self.raf_handle.set(None);
+        self.raf_fallback_timer.set(None);
         self.clear_wake_timer();
         if self.closed.get() || self.commands.is_closed() {
             self.shutdown();
@@ -298,6 +300,7 @@ fn start_runner(
         raf_pending: Cell::new(false),
         cmd_pending: Cell::new(false),
         raf_handle: Cell::new(None),
+        raf_fallback_timer: Cell::new(None),
         wake_timer: RefCell::new(None),
         boot_wake_channel: RefCell::new(None),
         immediate_wake_pending: Cell::new(false),

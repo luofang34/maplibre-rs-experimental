@@ -84,6 +84,7 @@ pub struct PendingMapContext {
     pub(super) view_state: Option<ViewState>,
     /// The jump made while the renderer is not ready, for the view it starts with.
     pub(super) jump: Option<CameraOptions>,
+    prewarmed: Option<(ViewState, prewarm::PrewarmedRequests)>,
 }
 
 /// Owns a host window and the plugin schedule that updates and renders its map.
@@ -132,6 +133,7 @@ where
                 renderer_builder,
                 view_state: None,
                 jump: None,
+                prewarmed: None,
             })),
             window,
             plugins,
@@ -206,6 +208,7 @@ where
                 renderer_builder: RendererBuilder::new(),
                 view_state: None,
                 jump: None,
+                prewarmed: None,
             })),
         );
         match prev {
@@ -225,6 +228,7 @@ where
                         .with_renderer_settings(c.renderer.settings)
                         .with_wgpu_settings(c.renderer.wgpu_settings.clone()),
                     jump: None,
+                    prewarmed: None,
                 }));
             }
             CurrentMapContext::Pending(pending) => {
