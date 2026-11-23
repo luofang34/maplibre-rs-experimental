@@ -7,6 +7,7 @@ use std::rc::Rc;
 
 use js_sys::{ArrayBuffer, Uint8Array};
 use maplibre::io::apc::{CallError, Message};
+use rustc_hash::FxHashSet;
 
 use super::{
     decode_message,
@@ -76,7 +77,8 @@ impl QueuedMessage {
         buffer: &ArrayBuffer,
         cursor: &mut u32,
         total: u32,
-    ) -> Result<Self, CallError> {
+        cancelled: &FxHashSet<u64>,
+    ) -> Result<Option<Self>, CallError> {
         let hdr_len = BATCH_ITEM_HEADER_BYTES as u32;
         if total - *cursor < hdr_len {
             return Err(CallError::Deserialize(Box::new(
@@ -99,6 +101,9 @@ impl QueuedMessage {
             )));
         }
         *cursor = payload_offset + payload_len;
+        if attempt.is_some_and(|id| cancelled.contains(&id)) {
+            return Ok(None);
+        }
         if matches!(
             inner_tag,
             WebMessageTag::TileRequestOutcome | WebMessageTag::ProvidedImages
@@ -111,22 +116,23 @@ impl QueuedMessage {
                 Some(id) => msg.with_attempt(id),
                 None => msg,
             };
-            return Ok(Self::Decoded(msg));
+            return Ok(Some(Self::Decoded(msg)));
         }
-        Ok(Self::RawSlice {
+        Ok(Some(Self::RawSlice {
             effective_tag: inner_tag,
             attempt,
             buffer: buffer.clone(),
             byte_offset: payload_offset,
             byte_len: payload_len,
-        })
+        }))
     }
 
     fn decode_batch_item_owned(
         shared: &Rc<Vec<u8>>,
         cursor: &mut u32,
         total: u32,
-    ) -> Result<Self, CallError> {
+        cancelled: &FxHashSet<u64>,
+    ) -> Result<Option<Self>, CallError> {
         let hdr_len = BATCH_ITEM_HEADER_BYTES as u32;
         if total - *cursor < hdr_len {
             return Err(CallError::Deserialize(Box::new(
@@ -151,6 +157,9 @@ impl QueuedMessage {
             )));
         }
         *cursor = payload_offset + payload_len;
+        if attempt.is_some_and(|id| cancelled.contains(&id)) {
+            return Ok(None);
+        }
         if matches!(
             inner_tag,
             WebMessageTag::TileRequestOutcome | WebMessageTag::ProvidedImages
@@ -164,41 +173,50 @@ impl QueuedMessage {
                 Some(id) => msg.with_attempt(id),
                 None => msg,
             };
-            return Ok(Self::Decoded(msg));
+            return Ok(Some(Self::Decoded(msg)));
         }
-        Ok(Self::OwnedSlice {
+        Ok(Some(Self::OwnedSlice {
             effective_tag: inner_tag,
             attempt,
             data: Rc::clone(shared),
             byte_offset: payload_offset,
             byte_len: payload_len,
-        })
+        }))
     }
 
     pub(crate) fn push_from_wire(
         out: &mut Vec<Self>,
         wire_tag: WebMessageTag,
         buffer: ArrayBuffer,
+        cancelled: &FxHashSet<u64>,
     ) -> Result<(), CallError> {
         if wire_tag != WebMessageTag::BatchPayload {
-            out.push(Self::from_wire(wire_tag, buffer)?);
+            if let Some(msg) = Self::from_wire(wire_tag, buffer, cancelled)? {
+                out.push(msg);
+            }
             return Ok(());
         }
         let total = buffer.byte_length();
         let mut cursor = 0_u32;
-        if total <= MAX_BATCH_COPY_BYTES {
+        if total <= MAX_BATCH_COPY_BYTES && cancelled.is_empty() {
             let mut raw = vec![0_u8; total as usize];
             if total > 0 {
                 Uint8Array::new(&buffer).copy_to(&mut raw);
             }
             let shared = Rc::new(raw);
             while cursor < total {
-                out.push(Self::decode_batch_item_owned(&shared, &mut cursor, total)?);
+                if let Some(msg) =
+                    Self::decode_batch_item_owned(&shared, &mut cursor, total, cancelled)?
+                {
+                    out.push(msg);
+                }
             }
             return Ok(());
         }
         while cursor < total {
-            out.push(Self::decode_batch_item_js(&buffer, &mut cursor, total)?);
+            if let Some(msg) = Self::decode_batch_item_js(&buffer, &mut cursor, total, cancelled)? {
+                out.push(msg);
+            }
         }
         Ok(())
     }
@@ -206,7 +224,8 @@ impl QueuedMessage {
     pub(crate) fn from_wire(
         wire_tag: WebMessageTag,
         buffer: ArrayBuffer,
-    ) -> Result<Self, CallError> {
+        cancelled: &FxHashSet<u64>,
+    ) -> Result<Option<Self>, CallError> {
         let byte_len = buffer.byte_length();
         let (effective_tag, attempt) = if wire_tag == WebMessageTag::TrackedPayload {
             if byte_len < 12 {
@@ -234,6 +253,9 @@ impl QueuedMessage {
                 header[4], header[5], header[6], header[7], header[8], header[9], header[10],
                 header[11],
             ]);
+            if cancelled.contains(&attempt) {
+                return Ok(None);
+            }
             (inner_tag, Some(attempt))
         } else {
             (wire_tag, None)
@@ -243,16 +265,16 @@ impl QueuedMessage {
             effective_tag,
             WebMessageTag::TileRequestOutcome | WebMessageTag::ProvidedImages
         ) {
-            return decode_message(wire_tag, buffer).map(Self::Decoded);
+            return decode_message(wire_tag, buffer).map(|msg| Some(Self::Decoded(msg)));
         }
 
-        Ok(Self::Raw {
+        Ok(Some(Self::Raw {
             wire_tag,
             effective_tag,
             attempt,
             byte_len,
             buffer,
-        })
+        }))
     }
 
     pub(super) fn raw_byte_len(&self) -> usize {

@@ -83,8 +83,10 @@ impl<E: Environment, T: RasterTransferables> System for PopulateWorldSystem<E, T
         apply_worker_messages(messages, |message| {
             apply_raster_message_with_style::<T>(world, Some(style), circumference, message)
         })?;
-        self.idle_rev =
-            (!has_raster_or_dem && self.kernel.apc().in_flight_calls() == 0).then_some(style_rev);
+        self.idle_rev = (!has_raster_or_dem
+            && self.kernel.apc().in_flight_calls() == 0
+            && !self.kernel.apc().has_arrivals())
+        .then_some(style_rev);
 
         Ok(())
     }

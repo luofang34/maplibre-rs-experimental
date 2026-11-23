@@ -466,10 +466,21 @@ impl LayerRasterMissing for FlatBufferTransferable {
     }
 
     fn coords(&self) -> WorldTileCoords {
+        #[cfg(any(test, feature = "renderer"))]
+        if let Some(UnpackedTiny::Named(coords, _)) = &self.unpacked_tiny {
+            return *coords;
+        }
         decode_named_coords(self.data()).0
     }
 
     fn to_layer(self) -> MissingRasterLayerData {
+        #[cfg(any(test, feature = "renderer"))]
+        if let Some(UnpackedTiny::Named(coords, name)) = self.unpacked_tiny {
+            return MissingRasterLayerData {
+                coords,
+                source: RasterSourceId::new(name),
+            };
+        }
         let (coords, name) = decode_named_coords(self.data());
         MissingRasterLayerData {
             coords,

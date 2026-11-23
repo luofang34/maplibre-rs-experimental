@@ -94,6 +94,27 @@ fn resolve_procedure(
     }
 }
 
+fn unpack_tile_input(attempt: u64, x: i32, y: i32, meta: u32, pixel_ratio: f32) -> (u8, Input) {
+    let procedure_tag = (meta & 0xff) as u8;
+    let z = ((meta >> 8) & 0xff) as u8;
+    let overscaled_zoom = ((meta >> 16) & 0xff) as u8;
+    let refetch = (meta & (1 << 24)) != 0;
+    let coords = maplibre::coords::WorldTileCoords {
+        x,
+        y,
+        z: maplibre::coords::ZoomLevel::new(z),
+    };
+    let mut input = Input::new(
+        coords,
+        std::sync::Arc::new(maplibre::style::Style::empty()),
+        attempt,
+    );
+    input.overscaled_zoom = overscaled_zoom;
+    input.pixel_ratio = pixel_ratio;
+    input.refetch = refetch;
+    (procedure_tag, input)
+}
+
 /// The tile calls one worker runs, so the host can stop a call it gave up on.
 #[derive(Default)]
 pub struct TileWorkerCalls {
@@ -152,33 +173,46 @@ impl TileWorkerCalls {
         meta: u32,
         pixel_ratio: f32,
     ) -> Result<js_sys::Promise, JSError> {
-        let procedure_tag = (meta & 0xff) as u8;
-        let z = ((meta >> 8) & 0xff) as u8;
-        let overscaled_zoom = ((meta >> 16) & 0xff) as u8;
-        let refetch = (meta & (1 << 24)) != 0;
-        let coords = maplibre::coords::WorldTileCoords {
-            x,
-            y,
-            z: maplibre::coords::ZoomLevel::new(z),
-        };
-        let mut input = Input::new(
-            coords,
-            std::sync::Arc::new(maplibre::style::Style::empty()),
-            attempt,
-        );
-        input.overscaled_zoom = overscaled_zoom;
-        input.pixel_ratio = pixel_ratio;
-        input.refetch = refetch;
+        let (procedure_tag, input) = unpack_tile_input(attempt, x, y, meta, pixel_ratio);
         self.start_input(procedure_tag, style_revision, input)
     }
 
-    fn start_input(
+    /// Starts all packed calls in `words` (`8` `u32` words per call) without per-tile promises.
+    pub fn process_tile_batch(&self, words: &[u32]) {
+        for w in words.as_chunks::<8>().0 {
+            let attempt = u64::from(w[0]) | (u64::from(w[1]) << 32);
+            let style_revision = u64::from(w[2]) | (u64::from(w[3]) << 32);
+            let x = w[4] as i32;
+            let y = w[5] as i32;
+            let meta = w[6];
+            let pixel_ratio = f32::from_bits(w[7]);
+            let (procedure_tag, input) = unpack_tile_input(attempt, x, y, meta, pixel_ratio);
+            match self.prepare_input_future(procedure_tag, style_revision, input) {
+                Ok(fut) => {
+                    wasm_bindgen_futures::spawn_local(async move {
+                        if let Err(err) = fut.await {
+                            tracing::warn!(attempt, ?err, "batched worker tile call failed");
+                        }
+                    });
+                }
+                Err((err, already_finished)) => {
+                    if !already_finished {
+                        self.finish_failed(attempt);
+                    }
+                    tracing::warn!(attempt, ?err, "batched worker tile call rejected");
+                }
+            }
+        }
+    }
+
+    fn prepare_input_future(
         &self,
         procedure_tag: u8,
         style_revision: u64,
         mut input: Input,
-    ) -> Result<js_sys::Promise, JSError> {
-        let procedure = resolve_procedure(procedure_tag)?;
+    ) -> Result<impl std::future::Future<Output = Result<(), JSError>> + 'static, (JSError, bool)>
+    {
+        let procedure = resolve_procedure(procedure_tag).map_err(|err| (err.into(), false))?;
         let attempt = input.attempt;
         let context = PassingContext::new();
         let Some(style) = self.styles.get(style_revision) else {
@@ -198,7 +232,7 @@ impl TileWorkerCalls {
                 ));
             }
             drop(post_call_finished(attempt));
-            return Err(WebError::StyleRevisionMissing(style_revision).into());
+            return Err((WebError::StyleRevisionMissing(style_revision).into(), true));
         };
         input.style = style;
 
@@ -222,7 +256,7 @@ impl TileWorkerCalls {
             context,
             UsedOffscreenKernelEnvironment::create(kernel_config()),
         );
-        Ok(wasm_bindgen_futures::future_to_promise(async move {
+        Ok(async move {
             let result = Abortable::new(call, registration).await;
             if matches!(result, Ok(Ok(()))) {
                 drop(flush_context.flush());
@@ -240,13 +274,29 @@ impl TileWorkerCalls {
                 tracing::warn!(attempt, %error, "reporting a finished call failed");
             }
             match result {
-                Ok(Ok(())) => Ok(JsValue::UNDEFINED),
+                Ok(Ok(())) => Ok(()),
                 Err(Aborted) => {
                     log::debug!("cancelled worker call {attempt} stopped");
-                    Ok(JsValue::UNDEFINED)
+                    Ok(())
                 }
-                Ok(Err(error)) => Err(JSError::from(error).into()),
+                Ok(Err(error)) => Err(JSError::from(error)),
             }
+        })
+    }
+
+    fn start_input(
+        &self,
+        procedure_tag: u8,
+        style_revision: u64,
+        input: Input,
+    ) -> Result<js_sys::Promise, JSError> {
+        let fut = self
+            .prepare_input_future(procedure_tag, style_revision, input)
+            .map_err(|(err, _)| err)?;
+        Ok(wasm_bindgen_futures::future_to_promise(async move {
+            fut.await
+                .map(|()| JsValue::UNDEFINED)
+                .map_err(JsValue::from)
         }))
     }
 
@@ -287,20 +337,24 @@ pub(crate) fn deliver_received_data(
             .map_err(|_| WebError::ReceivedBusy)?;
 
         if tag == WebMessageTag::CallFinished {
-            received.finished.push(decode_call_finished(&buffer)?);
+            let attempt = decode_call_finished(&buffer)?;
+            received.cancelled.remove(&attempt);
+            received.finished.push(attempt);
             if !received.messages.is_empty() || !received.queued.is_empty() {
                 received.waker.clone()
             } else {
                 None
             }
         } else {
+            let received_ref = &mut *received;
             crate::platform::singlethreaded::apc::QueuedMessage::push_from_wire(
-                &mut received.queued,
+                &mut received_ref.queued,
                 tag,
                 buffer,
+                &received_ref.cancelled,
             )?;
-            if !received.messages.is_empty() || !received.queued.is_empty() {
-                received.waker.clone()
+            if !received_ref.messages.is_empty() || !received_ref.queued.is_empty() {
+                received_ref.waker.clone()
             } else {
                 None
             }

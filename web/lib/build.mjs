@@ -325,6 +325,7 @@ const wasmPack = () => {
             'test/webgl-fallback.test.mjs',
             'test/mt-lazy-pool.test.mjs',
             'test/style-input.test.mjs',
+            'test/st-call-batch.test.mjs',
         ]);
         if (postOptTests.status !== 0) {
             throw new Error('Post-wasm-opt initialization tests failed');

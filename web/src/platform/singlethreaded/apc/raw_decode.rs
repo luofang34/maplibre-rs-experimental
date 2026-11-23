@@ -2,15 +2,23 @@
 
 #![deny(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
-use std::{cell::RefCell, rc::Rc, vec::IntoIter};
+use std::{
+    cell::RefCell,
+    rc::{Rc, Weak},
+    vec::IntoIter,
+};
 
 use js_sys::{ArrayBuffer, Uint8Array};
 use maplibre::io::apc::Message;
 
-use super::{decode_message, raw_queue::QueuedMessage, wire::decode_message_bytes, WebMessageTag};
+use super::{
+    decode_message, raw_queue::QueuedMessage, wire::decode_message_bytes, ReceivedType,
+    WebMessageTag,
+};
 use crate::platform::singlethreaded::transferables::FlatBufferTransferable;
 
 const MAX_ITEM_SCRATCH_BYTES: usize = 256 * 1024;
+const TINY_STACK_DECODE_BYTES: usize = 256;
 
 thread_local! {
     static DECODE_SCRATCH: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
@@ -19,12 +27,14 @@ thread_local! {
 /// Consumes queued wire messages on demand, decoding payloads lazily one item at a time.
 pub struct PassingReceiveIter {
     inner: IntoIter<QueuedMessage>,
+    received: Option<Weak<ReceivedType>>,
 }
 
 impl PassingReceiveIter {
-    pub(super) fn new(items: Vec<QueuedMessage>) -> Self {
+    pub(super) fn new(items: Vec<QueuedMessage>, received: Option<Weak<ReceivedType>>) -> Self {
         Self {
             inner: items.into_iter(),
+            received,
         }
     }
 }
@@ -35,6 +45,10 @@ fn try_decode_from_bytes(
     slice: &[u8],
 ) -> Option<Message> {
     let transferable = match effective_tag {
+        WebMessageTag::TileTessellated => {
+            FlatBufferTransferable::from_bytes_tile_tessellated(slice)
+        }
+        WebMessageTag::LayerMissing => FlatBufferTransferable::from_bytes_layer_missing(slice),
         WebMessageTag::LayerTessellated => {
             FlatBufferTransferable::from_bytes_layer_tessellated(slice)
         }
@@ -43,7 +57,13 @@ fn try_decode_from_bytes(
         }
         WebMessageTag::LayerIndexed => FlatBufferTransferable::from_bytes_layer_indexed(slice),
         WebMessageTag::LayerRaster => FlatBufferTransferable::from_bytes_layer_raster(slice),
+        WebMessageTag::LayerRasterMissing => {
+            FlatBufferTransferable::from_bytes_layer_raster_missing(slice)
+        }
         WebMessageTag::LayerDem => FlatBufferTransferable::from_bytes_layer_dem(slice),
+        WebMessageTag::LayerDemMissing => {
+            FlatBufferTransferable::from_bytes_layer_dem_missing(slice)
+        }
         _ => return None,
     }?;
     let msg = Message::new(effective_tag.to_static(), Box::new(transferable));
@@ -60,6 +80,23 @@ fn try_decode_direct_js(
     offset: u32,
     len: u32,
 ) -> Option<Result<Message, ()>> {
+    if matches!(
+        effective_tag,
+        WebMessageTag::TileTessellated
+            | WebMessageTag::LayerMissing
+            | WebMessageTag::LayerRasterMissing
+            | WebMessageTag::LayerDemMissing
+    ) && len > 0
+        && (len as usize) <= TINY_STACK_DECODE_BYTES
+    {
+        let end = offset.checked_add(len)?;
+        if end <= buffer.byte_length() {
+            let mut stack = [0_u8; TINY_STACK_DECODE_BYTES];
+            let dst = stack.get_mut(..len as usize)?;
+            Uint8Array::new_with_byte_offset_and_length(buffer, offset, len).copy_to(dst);
+            return Some(try_decode_from_bytes(effective_tag, attempt, dst).ok_or(()));
+        }
+    }
     if matches!(
         effective_tag,
         WebMessageTag::LayerTessellated
@@ -192,11 +229,15 @@ fn decode_owned_slice_item(
     let slice = data.get(start..end)?;
     if matches!(
         effective_tag,
-        WebMessageTag::LayerTessellated
+        WebMessageTag::TileTessellated
+            | WebMessageTag::LayerMissing
+            | WebMessageTag::LayerTessellated
             | WebMessageTag::SymbolLayerTessellated
             | WebMessageTag::LayerIndexed
             | WebMessageTag::LayerRaster
+            | WebMessageTag::LayerRasterMissing
             | WebMessageTag::LayerDem
+            | WebMessageTag::LayerDemMissing
     ) {
         if let Some(msg) = try_decode_from_bytes(effective_tag, attempt, slice) {
             return Some(msg);
@@ -225,6 +266,18 @@ impl Iterator for PassingReceiveIter {
 
     fn next(&mut self) -> Option<Self::Item> {
         for item in self.inner.by_ref() {
+            let cancelled = item.attempt().is_some_and(|attempt| {
+                self.received
+                    .as_ref()
+                    .and_then(Weak::upgrade)
+                    .is_some_and(|cell| {
+                        cell.try_borrow()
+                            .is_ok_and(|guard| guard.cancelled.contains(&attempt))
+                    })
+            });
+            if cancelled {
+                continue;
+            }
             let decoded = match item {
                 QueuedMessage::Decoded(message) => Some(message),
                 QueuedMessage::Raw {

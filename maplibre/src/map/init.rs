@@ -207,5 +207,27 @@ fn build_world<E: Environment>(
         crate::render::RenderStageLabel::Input,
         crate::context::style_transition_system,
     ));
+    drop(parts.schedule.add_system_to_stage(
+        crate::render::RenderStageLabel::Request,
+        crate::tcs::system::SystemContainer::new(FlushRequestsSystem {
+            kernel: parts.kernel.clone(),
+        }),
+    ));
     Ok(world)
+}
+
+struct FlushRequestsSystem<E: Environment> {
+    kernel: std::rc::Rc<crate::kernel::Kernel<E>>,
+}
+
+impl<E: Environment> crate::tcs::system::System for FlushRequestsSystem<E> {
+    fn name(&self) -> std::borrow::Cow<'static, str> {
+        "flush_requests".into()
+    }
+
+    fn run(&mut self, _context: &mut MapContext) -> crate::tcs::system::SystemResult {
+        use crate::io::apc::AsyncProcedureCall;
+        self.kernel.apc().flush_calls();
+        Ok(())
+    }
 }

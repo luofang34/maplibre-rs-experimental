@@ -27,6 +27,11 @@ export function post_st_tile_call(
     });
 }
 
+export function post_st_tile_call_batch(target, words) {
+    const copy = words.slice();
+    target.postMessage({ type: "call_batch", words: copy }, [copy.buffer]);
+}
+
 export function post_st_cancel(target, attempt) {
     target.postMessage({ type: "cancel", attempt });
 }
@@ -50,6 +55,12 @@ export function post_st_style(target, revision, style, prefetch) {
             y: i32,
             meta: u32,
             pixel_ratio: f32,
+        ) -> Result<(), JsValue>;
+
+        #[wasm_bindgen(catch)]
+        pub(crate) fn post_st_tile_call_batch(
+            target: &JsValue,
+            words: &[u32],
         ) -> Result<(), JsValue>;
 
         #[wasm_bindgen(catch)]
@@ -91,6 +102,13 @@ mod imp {
         Ok(())
     }
 
+    pub(crate) fn post_st_tile_call_batch(
+        _target: &JsValue,
+        _words: &[u32],
+    ) -> Result<(), JsValue> {
+        Ok(())
+    }
+
     pub(crate) fn post_st_cancel(_target: &JsValue, _attempt: u64) -> Result<(), JsValue> {
         Ok(())
     }
@@ -112,4 +130,6 @@ mod imp {
     }
 }
 
-pub(super) use imp::{post_st_cancel, post_st_cancel_batch, post_st_style, post_st_tile_call};
+pub(super) use imp::{
+    post_st_cancel, post_st_cancel_batch, post_st_style, post_st_tile_call, post_st_tile_call_batch,
+};

@@ -62,6 +62,9 @@ opt-level = 2
 [profile.wasm-mt-release.package.rustc-hash]
 opt-level = 2
 
+[profile.wasm-release.package.maplibre]
+opt-level = "s"
+
 [profile.wasm-release.package.earcut]
 opt-level = 2
 

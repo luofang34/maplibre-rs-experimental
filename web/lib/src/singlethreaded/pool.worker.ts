@@ -1,5 +1,6 @@
 import * as maplibre from "../wasm/maplibre_tile_worker"
 import {initializeWorkerWasm} from "../wasm-worker-instance.mjs";
+import {decodeBatchAttempt, filterBatchWords, registerBatchCalls} from "./st-call-batch.mjs";
 
 type BatchAttempts = ArrayLike<bigint> & Iterable<bigint>
 
@@ -19,6 +20,7 @@ type CallMessage =
 type MessageData = { type: 'wasm_init', module: WebAssembly.Module, port?: MessagePort }
     | { type: 'kernel_config', config: string }
     | CallMessage
+    | { type: 'call_batch', words: Uint32Array }
     | { type: 'style', revision: bigint, style: string, prefetch?: boolean }
     | { type: 'cancel', attempt: bigint }
     | { type: 'cancel_batch', attempts: BatchAttempts }
@@ -44,6 +46,7 @@ interface TileWorkerCalls {
         meta: number,
         pixel_ratio: number,
     ): Promise<void>
+    process_tile_batch(words: Uint32Array): void
     cancel(attempt: bigint): boolean
     cancel_batch(attempts: BatchAttempts): void
     finish_failed(attempt: bigint): void
@@ -81,10 +84,13 @@ const handleMessage = async (message: MessageEvent<MessageData>) => {
     // Calls and cancels are noted before any await: the port delivers them in order, but
     // their handlers resume in the order their awaits settle.
     let call: { cancelled: boolean } = null
+    let batchWaiting: Array<{ idx: number, attempt: bigint, entry: { cancelled: boolean } }> = null
     let batchCancels: bigint[] = null
     if (message.data.type === 'call') {
         call = {cancelled: false}
         waiting.set(message.data.attempt, call)
+    } else if (message.data.type === 'call_batch') {
+        batchWaiting = registerBatchCalls(message.data.words, waiting)
     } else if (message.data.type === 'cancel') {
         const waitingCall = waiting.get(message.data.attempt)
         if (waitingCall) {
@@ -162,7 +168,21 @@ const handleMessage = async (message: MessageEvent<MessageData>) => {
             }
         } catch (err) {
             workerCalls().finish_failed(data.attempt);
-            throw err;
+            globalThis.reportError?.(err);
+        }
+    } else if (type === 'call_batch') {
+        await providersRegistered;
+        const filtered = filterBatchWords(message.data.words, batchWaiting, waiting);
+        if (!filtered) {
+            return;
+        }
+        try {
+            workerCalls().process_tile_batch(filtered);
+        } catch (err) {
+            for (let i = 0; i + 7 < filtered.length; i += 8) {
+                workerCalls().finish_failed(decodeBatchAttempt(filtered, i));
+            }
+            globalThis.reportError?.(err);
         }
     } else if (type === 'style') {
         // Ordered behind `providersRegistered` like `call`, so queued startup calls see their

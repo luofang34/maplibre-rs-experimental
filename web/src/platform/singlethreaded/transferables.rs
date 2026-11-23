@@ -19,10 +19,7 @@ use maplibre::{
     sdf::{Feature, SymbolLayerData},
     terrain::transferables::{DemTransferables, LayerDem, LayerDemMissing},
     tile::Layer,
-    vector::{
-        LayerIndexed, LayerMissing, MissingVectorLayerBucket, SymbolLayerTessellated,
-        TileTessellated, VectorTransferables,
-    },
+    vector::{LayerIndexed, SymbolLayerTessellated, VectorTransferables},
 };
 
 use crate::platform::singlethreaded::apc::WebMessageTag;
@@ -32,11 +29,19 @@ pub(crate) type UnpackedDem = (
     Result<(std::sync::Arc<maplibre::terrain::DemTile>, f64), RgbaImage>,
 );
 
+#[cfg(any(test, feature = "renderer"))]
+pub(crate) enum UnpackedTiny {
+    Completion(WorldTileCoords, bool, bool),
+    Named(WorldTileCoords, Option<String>),
+}
+
 /// Owned byte buffer carrying a single worker-to-main transferable payload.
 pub struct FlatBufferTransferable {
     tag: WebMessageTag,
     data: Vec<u8>,
     start: usize,
+    #[cfg(any(test, feature = "renderer"))]
+    pub(super) unpacked_tiny: Option<UnpackedTiny>,
     pub(crate) unpacked_vector: Option<(
         Box<maplibre::vector::AvailableVectorLayerBucket>,
         Option<Vec<maplibre::vector::feature_paint::BucketFeatureEntry>>,
@@ -56,6 +61,7 @@ impl FlatBufferTransferable {
             tag,
             data: buffer.to_vec(),
             start: 0,
+            unpacked_tiny: None,
             unpacked_vector: None,
             unpacked_symbol: None,
             unpacked_index: None,
@@ -69,12 +75,67 @@ impl FlatBufferTransferable {
             tag,
             data,
             start,
+            #[cfg(any(test, feature = "renderer"))]
+            unpacked_tiny: None,
             unpacked_vector: None,
             unpacked_symbol: None,
             unpacked_index: None,
             unpacked_raster: None,
             unpacked_dem: None,
         }
+    }
+
+    #[cfg(any(test, feature = "renderer"))]
+    fn from_unpacked_tiny(tag: WebMessageTag, tiny: UnpackedTiny) -> Self {
+        Self {
+            tag,
+            data: Vec::new(),
+            start: 0,
+            unpacked_tiny: Some(tiny),
+            unpacked_vector: None,
+            unpacked_symbol: None,
+            unpacked_index: None,
+            unpacked_raster: None,
+            unpacked_dem: None,
+        }
+    }
+
+    #[cfg(any(test, feature = "renderer"))]
+    pub(crate) fn from_bytes_tile_tessellated(bytes: &[u8]) -> Option<Self> {
+        let coords = read_coords_at(bytes, 0)?;
+        let pending = bytes.get(9).is_some_and(|&b| b != 0);
+        let failed = bytes.get(10).is_some_and(|&b| b != 0);
+        Some(Self::from_unpacked_tiny(
+            WebMessageTag::TileTessellated,
+            UnpackedTiny::Completion(coords, pending, failed),
+        ))
+    }
+
+    #[cfg(any(test, feature = "renderer"))]
+    pub(crate) fn from_bytes_layer_missing(bytes: &[u8]) -> Option<Self> {
+        let (coords, name) = parse_named_coords_strict(bytes)?;
+        Some(Self::from_unpacked_tiny(
+            WebMessageTag::LayerMissing,
+            UnpackedTiny::Named(coords, name.map(str::to_owned)),
+        ))
+    }
+
+    #[cfg(any(test, feature = "renderer"))]
+    pub(crate) fn from_bytes_layer_raster_missing(bytes: &[u8]) -> Option<Self> {
+        let (coords, name) = parse_named_coords_strict(bytes)?;
+        Some(Self::from_unpacked_tiny(
+            WebMessageTag::LayerRasterMissing,
+            UnpackedTiny::Named(coords, name.map(str::to_owned)),
+        ))
+    }
+
+    #[cfg(any(test, feature = "renderer"))]
+    pub(crate) fn from_bytes_layer_dem_missing(bytes: &[u8]) -> Option<Self> {
+        let coords = read_coords_at(bytes, 0)?;
+        Some(Self::from_unpacked_tiny(
+            WebMessageTag::LayerDemMissing,
+            UnpackedTiny::Named(coords, None),
+        ))
     }
 
     #[cfg(any(test, feature = "renderer"))]
@@ -87,6 +148,7 @@ impl FlatBufferTransferable {
             tag: WebMessageTag::LayerIndexed,
             data: Vec::new(),
             start: 0,
+            unpacked_tiny: None,
             unpacked_vector: None,
             unpacked_symbol: None,
             unpacked_index: Some((coords, source, index)),
@@ -103,6 +165,7 @@ impl FlatBufferTransferable {
             tag: WebMessageTag::LayerRaster,
             data: Vec::new(),
             start: 0,
+            unpacked_tiny: None,
             unpacked_vector: None,
             unpacked_symbol: None,
             unpacked_index: None,
@@ -120,6 +183,7 @@ impl FlatBufferTransferable {
             tag: WebMessageTag::LayerDem,
             data: Vec::new(),
             start: 0,
+            unpacked_tiny: None,
             unpacked_vector: None,
             unpacked_symbol: None,
             unpacked_index: None,
@@ -147,6 +211,7 @@ impl FlatBufferTransferable {
             tag: WebMessageTag::LayerTessellated,
             data: Vec::new(),
             start: 0,
+            unpacked_tiny: None,
             unpacked_vector: Some((bucket, paint)),
             unpacked_symbol: None,
             unpacked_index: None,
@@ -177,6 +242,7 @@ impl FlatBufferTransferable {
             tag: WebMessageTag::SymbolLayerTessellated,
             data: Vec::new(),
             start: 0,
+            unpacked_tiny: None,
             unpacked_vector: None,
             unpacked_symbol: Some(Box::new(bucket)),
             unpacked_index: None,
@@ -286,99 +352,6 @@ pub(super) fn read_coords_at(bytes: &[u8], offset: usize) -> Option<WorldTileCoo
     })
 }
 
-pub(super) fn encode_named_coords(
-    tag: WebMessageTag,
-    coords: WorldTileCoords,
-    name: Option<&str>,
-) -> FlatBufferTransferable {
-    let name_bytes = name.map(str::as_bytes);
-    let name_len = name_bytes.map_or(0, <[u8]>::len);
-    let mut data = Vec::with_capacity(16 + name_len);
-    data.extend_from_slice(&coords.x.to_le_bytes());
-    data.extend_from_slice(&coords.y.to_le_bytes());
-    data.push(u8::from(coords.z));
-    data.push(u8::from(name_bytes.is_some()));
-    data.extend_from_slice(&[0, 0]);
-    data.extend_from_slice(&(name_len as u32).to_le_bytes());
-    if let Some(bytes) = name_bytes {
-        data.extend_from_slice(bytes);
-    }
-    FlatBufferTransferable::from_vec(tag, data, 0)
-}
-
-pub(super) fn decode_named_coords(bytes: &[u8]) -> (WorldTileCoords, Option<&str>) {
-    let Some(coords) = read_coords_at(bytes, 0) else {
-        return (WorldTileCoords::default(), None);
-    };
-    let has_name = bytes.get(9).is_some_and(|&b| b != 0);
-    if !has_name {
-        return (coords, None);
-    }
-    let name = read_u32_le(bytes, 12)
-        .and_then(|len| bytes.get(16..16 + len as usize))
-        .and_then(|slice| std::str::from_utf8(slice).ok());
-    (coords, name)
-}
-
-impl TileTessellated for FlatBufferTransferable {
-    fn message_tag() -> &'static dyn MessageTag {
-        &WebMessageTag::TileTessellated
-    }
-
-    fn build_from(coords: WorldTileCoords) -> Self {
-        tile_completion(coords, false, false)
-    }
-
-    fn build_partial(coords: WorldTileCoords) -> Self {
-        tile_completion(coords, true, false)
-    }
-
-    fn build_failed(coords: WorldTileCoords, pending_symbols: bool) -> Self {
-        tile_completion(coords, pending_symbols, true)
-    }
-
-    fn failed(&self) -> bool {
-        self.data().get(10).is_none_or(|&b| b != 0)
-    }
-
-    fn pending_symbols(&self) -> bool {
-        self.data().get(9).is_some_and(|&b| b != 0)
-    }
-
-    fn coords(&self) -> WorldTileCoords {
-        self.data()
-            .get(..11)
-            .and_then(|bytes| read_coords_at(bytes, 0))
-            .unwrap_or_default()
-    }
-}
-
-impl LayerMissing for FlatBufferTransferable {
-    fn message_tag() -> &'static dyn MessageTag {
-        &WebMessageTag::LayerMissing
-    }
-
-    fn build_from(coords: WorldTileCoords, layer_name: String) -> Self {
-        encode_named_coords(WebMessageTag::LayerMissing, coords, Some(&layer_name))
-    }
-
-    fn coords(&self) -> WorldTileCoords {
-        decode_named_coords(self.data()).0
-    }
-
-    fn layer_name(&self) -> &str {
-        decode_named_coords(self.data()).1.unwrap_or_default()
-    }
-
-    fn to_bucket(self) -> MissingVectorLayerBucket {
-        let (coords, name) = decode_named_coords(self.data());
-        MissingVectorLayerBucket {
-            source_layer: name.unwrap_or_default().to_owned(),
-            coords,
-        }
-    }
-}
-
 impl Debug for FlatBufferTransferable {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "FlatBufferTransferable<{:?}>(??)", self.tag)
@@ -397,6 +370,8 @@ mod tessellated;
 mod raster;
 
 mod symbol;
+#[cfg(any(test, feature = "renderer"))]
+pub(crate) use self::symbol::clear_atlas_cache as clear_symbol_atlas_cache;
 
 #[derive(Copy, Clone)]
 pub struct FlatTransferables;
@@ -417,4 +392,6 @@ impl RasterTransferables for FlatTransferables {
 mod terrain;
 
 mod completion;
-use self::completion::tile_completion;
+#[cfg(any(test, feature = "renderer"))]
+use self::completion::parse_named_coords_strict;
+use self::completion::{decode_named_coords, encode_named_coords};

@@ -326,6 +326,7 @@ fn prewarm_initial_tiles<K: OffscreenKernel, A: AsyncProcedureCall<K>>(
     prewarm_dem_tiles(&ctx, &mut frame_style, apc, &mut out);
     #[cfg(feature = "raster")]
     prewarm_raster_tiles(&ctx, &mut frame_style, apc, &mut out);
+    apc.flush_calls();
     out
 }
 

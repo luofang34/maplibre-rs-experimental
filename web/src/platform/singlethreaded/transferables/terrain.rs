@@ -109,21 +109,19 @@ pub(super) fn decode_js_layer_dem(
     if end > buffer.byte_length() || (byte_len as usize) < 4 {
         return None;
     }
-    let mut magic_buf = [0_u8; 4];
-    js_sys::Uint8Array::new_with_byte_offset_and_length(buffer, base_offset, 4)
-        .copy_to(&mut magic_buf);
-    let hdr_len = match u32::from_le_bytes(magic_buf) {
+    let peek_len = byte_len.min(DEM_RAW_HEADER_BYTES as u32);
+    let mut hdr = [0_u8; DEM_RAW_HEADER_BYTES];
+    let peek_slice = hdr.get_mut(..peek_len as usize)?;
+    js_sys::Uint8Array::new_with_byte_offset_and_length(buffer, base_offset, peek_len)
+        .copy_to(peek_slice);
+    let hdr_len = match u32::from_le_bytes(*peek_slice.first_chunk::<4>()?) {
         LAYER_DEM_IMAGE_MAGIC => DEM_IMAGE_HEADER_BYTES,
         LAYER_DEM_RAW_MAGIC => DEM_RAW_HEADER_BYTES,
         _ => return None,
     };
-    if (byte_len as usize) < hdr_len {
-        return None;
-    }
-    let mut hdr = [0_u8; DEM_RAW_HEADER_BYTES];
-    let hdr_slice = hdr.get_mut(..hdr_len)?;
-    js_sys::Uint8Array::new_with_byte_offset_and_length(buffer, base_offset, hdr_len as u32)
-        .copy_to(hdr_slice);
+    let hdr_slice = hdr
+        .get(..hdr_len)
+        .filter(|_| (peek_len as usize) >= hdr_len)?;
     let px_len = (byte_len as usize) - hdr_len;
     let mut pixels = vec![0_u8; px_len];
     if px_len > 0 {
@@ -260,6 +258,10 @@ impl LayerDemMissing for FlatBufferTransferable {
     }
 
     fn coords(&self) -> WorldTileCoords {
+        #[cfg(any(test, feature = "renderer"))]
+        if let Some(UnpackedTiny::Named(coords, _)) = &self.unpacked_tiny {
+            return *coords;
+        }
         decode_named_coords(self.data()).0
     }
 }

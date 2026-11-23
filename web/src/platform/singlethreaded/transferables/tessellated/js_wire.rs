@@ -200,7 +200,9 @@ pub(super) fn peek_paint_bytes(bytes: &[u8]) -> Option<&[u8]> {
     bytes.get(paint_start..paint_start + parsed.paint_bytes_len)
 }
 
-pub(super) fn decode_bucket_from_bytes(bytes: &[u8]) -> Option<AvailableVectorLayerBucket> {
+fn decode_bucket_with_paint_from_bytes(
+    bytes: &[u8],
+) -> Option<(AvailableVectorLayerBucket, Option<&[u8]>)> {
     let hdr = bytes.first_chunk::<HEADER_BYTES>()?;
     let h = parse_header(hdr, bytes.len())?;
     let mut cur = HEADER_BYTES;
@@ -241,16 +243,26 @@ pub(super) fn decode_bucket_from_bytes(bytes: &[u8]) -> Option<AvailableVectorLa
     let mut feature_sort_keys = vec![0.0_f32; h.feature_sort_key_count];
     bytemuck::cast_slice_mut(&mut feature_sort_keys)
         .copy_from_slice(take(&mut cur, h.feature_sort_key_count * 4)?);
+    let paint_slice = (h.paint_bytes_len > 0)
+        .then(|| take(&mut cur, h.paint_bytes_len))
+        .flatten();
 
-    Some(AvailableVectorLayerBucket {
-        coords: h.coords,
-        source_layer,
-        style_layer_id,
-        buffer,
-        feature_indices,
-        feature_colors,
-        feature_sort_keys,
-    })
+    Some((
+        AvailableVectorLayerBucket {
+            coords: h.coords,
+            source_layer,
+            style_layer_id,
+            buffer,
+            feature_indices,
+            feature_colors,
+            feature_sort_keys,
+        },
+        paint_slice,
+    ))
+}
+
+pub(super) fn decode_bucket_from_bytes(bytes: &[u8]) -> Option<AvailableVectorLayerBucket> {
+    decode_bucket_with_paint_from_bytes(bytes).map(|(bucket, _)| bucket)
 }
 
 #[cfg(any(test, feature = "renderer"))]
@@ -260,9 +272,9 @@ pub(crate) fn decode_from_bytes(
     Box<AvailableVectorLayerBucket>,
     Option<Vec<BucketFeatureEntry>>,
 )> {
-    let bucket = Box::new(decode_bucket_from_bytes(bytes)?);
-    let paint = peek_paint_bytes(bytes).and_then(decode_feature_paint);
-    Some((bucket, paint))
+    let (bucket, paint_slice) = decode_bucket_with_paint_from_bytes(bytes)?;
+    let paint = paint_slice.and_then(decode_feature_paint);
+    Some((Box::new(bucket), paint))
 }
 
 #[cfg(any(test, feature = "renderer"))]

@@ -48,6 +48,8 @@ pub struct Received {
     pub(crate) queued: Vec<QueuedMessage>,
     /// Attempts whose calls a worker stopped running.
     pub(crate) finished: Vec<u64>,
+    /// Attempts cancelled on the main thread so late worker replies can be dropped before copying.
+    pub(crate) cancelled: rustc_hash::FxHashSet<u64>,
     /// Main-thread redraw waker invoked when results transition from empty to non-empty.
     pub(crate) waker: Option<Arc<dyn Fn() + Send + Sync>>,
 }
@@ -62,6 +64,7 @@ pub struct PassingAsyncProcedureCall {
 
     buffer: RefCell<Vec<QueuedMessage>>,
     scratch: RefCell<scratch::ReceiveScratch>,
+    outgoing: RefCell<outgoing::OutgoingCallBatches>,
     batch_open: Cell<bool>,
     boot_unthrottled: Cell<bool>,
 
@@ -91,12 +94,20 @@ impl PassingAsyncProcedureCall {
             listeners,
             buffer: RefCell::new(Vec::default()),
             scratch: RefCell::default(),
+            outgoing: RefCell::default(),
             batch_open: Cell::new(true),
             boot_unthrottled: Cell::new(true),
             received,
             assignments: RefCell::default(),
             styles: RefCell::default(),
         })
+    }
+
+    fn flush_calls_inner(&self) {
+        let mut assignments = self.assignments.borrow_mut();
+        self.outgoing
+            .borrow_mut()
+            .flush(&self.workers, &mut assignments);
     }
 
     fn post_style_to_workers(&self, revision: u64, style: &str) -> Result<(), WebError> {
@@ -117,6 +128,7 @@ impl PassingAsyncProcedureCall {
             .styles
             .borrow_mut()
             .revision(&input.style, |revision, style| {
+                self.flush_calls_inner();
                 self.post_style_to_workers(revision, style)
             })
             .map_err(|error| CallError::Serialize(Box::new(error)))?;
@@ -136,7 +148,7 @@ impl PassingAsyncProcedureCall {
             .get(index)
             .ok_or(CallError::Schedule(ScheduleError::NoWorkers))?;
 
-        let post_res = if input.only_sources.is_some() {
+        if input.only_sources.is_some() {
             let serialized =
                 serde_json::to_string(&input).map_err(|e| CallError::Serialize(Box::new(e)))?;
             let message = recycle::worker_message(
@@ -149,25 +161,27 @@ impl PassingAsyncProcedureCall {
                 ],
             )
             .map_err(|error| CallError::Serialize(Box::new(error)))?;
-            worker.post_message(&message)
+            worker.post_message(&message).map_err(|error| {
+                CallError::Schedule(ScheduleError::Scheduling(Box::new(WebError::from(error))))
+            })?;
         } else {
             let meta = (tag.as_u8() as u32)
                 | ((u8::from(input.coords.z) as u32) << 8)
                 | ((input.overscaled_zoom as u32) << 16)
                 | (u32::from(input.refetch) << 24);
-            post::post_st_tile_call(
-                worker.as_js_value(),
-                attempt,
-                style_revision,
-                input.coords.x,
-                input.coords.y,
-                meta,
-                input.pixel_ratio,
-            )
-        };
-        post_res.map_err(|error| {
-            CallError::Schedule(ScheduleError::Scheduling(Box::new(WebError::from(error))))
-        })?;
+            self.outgoing.borrow_mut().push(
+                index,
+                self.workers.len(),
+                outgoing::PackedTileCall {
+                    attempt,
+                    style_revision,
+                    x: input.coords.x,
+                    y: input.coords.y,
+                    meta,
+                    pixel_ratio: input.pixel_ratio,
+                },
+            );
+        }
         self.assignments.borrow_mut().assign(attempt, index);
         Ok(())
     }
@@ -229,14 +243,14 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
         let mut buffer = self.buffer.borrow_mut();
         if buffer.is_empty() {
             let Ok(mut received) = self.received.try_borrow_mut() else {
-                return PassingReceiveIter::new(Vec::new());
+                return PassingReceiveIter::new(Vec::new(), None);
             };
             self.drain_finished(&mut received);
             if received.messages.is_empty()
                 && (received.queued.is_empty()
                     || (!self.boot_unthrottled.get() && !self.batch_open.get()))
             {
-                return PassingReceiveIter::new(Vec::new());
+                return PassingReceiveIter::new(Vec::new(), None);
             }
         }
         // Partial and final tile completions must retain the worker's delivery order.
@@ -244,8 +258,9 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
             .extract_if(.., |item| item.matches(&mut filter))
             .collect();
 
+        let weak = Some(Rc::downgrade(&self.received));
         let Ok(mut received) = self.received.try_borrow_mut() else {
-            return PassingReceiveIter::new(ret);
+            return PassingReceiveIter::new(ret, weak);
         };
         self.drain_finished(&mut received);
         for message in received.messages.drain(..) {
@@ -256,7 +271,7 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
             }
         }
         if received.queued.is_empty() {
-            return PassingReceiveIter::new(ret);
+            return PassingReceiveIter::new(ret, weak);
         }
         if self.boot_unthrottled.get() {
             for item in received.queued.drain(..) {
@@ -266,12 +281,12 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
                     buffer.push(item);
                 }
             }
-            return PassingReceiveIter::new(ret);
+            return PassingReceiveIter::new(ret, weak);
         }
         if self.batch_open.get() {
             self.admit_throttled_queued(&mut received, &mut buffer, &mut ret, &mut filter);
         }
-        PassingReceiveIter::new(ret)
+        PassingReceiveIter::new(ret, weak)
     }
 
     fn call(
@@ -293,6 +308,10 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
         self.dispatch_tagged(tag, input)
     }
 
+    fn flush_calls(&self) {
+        self.flush_calls_inner();
+    }
+
     fn supports_prewarm(&self) -> bool {
         true
     }
@@ -305,6 +324,15 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
         let Some(index) = self.assignments.borrow_mut().cancel(attempt) else {
             return;
         };
+        if self.outgoing.borrow_mut().remove_pending(index, attempt) {
+            return;
+        }
+        if let Ok(mut received) = self.received.try_borrow_mut() {
+            if received.cancelled.len() > 2048 {
+                received.cancelled.clear();
+            }
+            received.cancelled.insert(attempt);
+        }
         let Some(worker) = self.workers.get(index) else {
             return;
         };
@@ -330,9 +358,20 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
             bucket.clear();
         }
         {
+            let mut outgoing = self.outgoing.borrow_mut();
             let mut assignments = self.assignments.borrow_mut();
+            let mut received = self.received.try_borrow_mut().ok();
             for &attempt in attempts {
                 if let Some(index) = assignments.cancel(attempt) {
+                    if outgoing.remove_pending(index, attempt) {
+                        continue;
+                    }
+                    if let Some(ref mut rec) = received {
+                        if rec.cancelled.len() > 2048 {
+                            rec.cancelled.clear();
+                        }
+                        rec.cancelled.insert(attempt);
+                    }
                     if let Some(bucket) = scratch.cancel_buckets.get_mut(index) {
                         bucket.push(attempt);
                     }
@@ -385,6 +424,7 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
         if self.workers.is_empty() {
             return;
         }
+        self.flush_calls_inner();
         if let Err(error) = self.styles.borrow_mut().warm(style, |revision, json| {
             self.post_style_to_workers(revision, json)
         }) {
@@ -412,6 +452,7 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
 #[cfg(any(test, feature = "renderer"))]
 impl Drop for PassingAsyncProcedureCall {
     fn drop(&mut self) {
+        self.outgoing.get_mut().clear();
         let mut busy = vec![false; self.workers.len()];
         for (_, idx) in self.assignments.get_mut().drain() {
             if let Some(slot) = busy.get_mut(idx) {
@@ -426,13 +467,17 @@ impl Drop for PassingAsyncProcedureCall {
             received.messages.clear();
             received.queued.clear();
             received.finished.clear();
+            received.cancelled.clear();
             received.waker = None;
         }
+        crate::platform::singlethreaded::transferables::clear_symbol_atlas_cache();
     }
 }
 
 #[cfg(any(test, feature = "renderer"))]
 mod assignments;
+#[cfg(any(test, feature = "renderer"))]
+mod outgoing;
 #[cfg(any(test, feature = "renderer"))]
 mod post;
 #[cfg(any(test, feature = "renderer"))]

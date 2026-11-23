@@ -190,10 +190,14 @@ impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
                 continue;
             }
             budget -= 1;
-            let only_sources = pending_sources
-                .iter()
-                .map(|source| source.name().map(str::to_owned))
-                .collect::<Option<Vec<String>>>();
+            let only_sources = (pending_sources.len() != all_sources.len())
+                .then(|| {
+                    pending_sources
+                        .iter()
+                        .map(|source| source.name().map(str::to_owned))
+                        .collect::<Option<Vec<String>>>()
+                })
+                .flatten();
             if let Err(error) = self.request(coords, only_sources, &mut frame_style, world) {
                 tracing::warn!(%error, "tile request rejected; it is requested again after a backoff");
                 tile_retry::rejected(world, coords, RequestKind::Raster, None);

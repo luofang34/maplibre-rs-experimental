@@ -153,11 +153,13 @@ pub(super) fn release_workers(
     mut listeners: Vec<WorkerMessageClosure>,
     busy_indices: &[bool],
 ) {
+    for endpoint in &workers {
+        endpoint.set_onmessage(None);
+    }
     listeners.clear();
     RECYCLED_ST_WORKERS.with(|bin| {
         let mut bin = bin.borrow_mut();
         for (idx, endpoint) in workers.into_iter().enumerate() {
-            endpoint.set_onmessage(None);
             match endpoint {
                 WorkerEndpoint::Dedicated(worker) => {
                     let is_busy = busy_indices.get(idx).copied().unwrap_or(false);

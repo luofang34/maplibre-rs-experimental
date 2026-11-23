@@ -9,7 +9,11 @@ use super::*;
 fn completion_state_survives_worker_buffer_transfer() {
     let coords = WorldTileCoords::from((7, 3, 4_u8.into()));
     for (message, pending, failed) in [
-        (FlatBufferTransferable::build_from(coords), false, false),
+        (
+            <FlatBufferTransferable as TileTessellated>::build_from(coords),
+            false,
+            false,
+        ),
         (FlatBufferTransferable::build_partial(coords), true, false),
         (
             FlatBufferTransferable::build_failed(coords, true),

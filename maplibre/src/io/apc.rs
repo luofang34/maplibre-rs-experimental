@@ -340,6 +340,9 @@ pub trait AsyncProcedureCall<K: OffscreenKernel>: 'static {
         self.call(input, procedure)
     }
 
+    /// Flushes any batched outgoing tile calls accumulated during the current stage.
+    fn flush_calls(&self) {}
+
     /// Whether this transport supports dispatching initial tile fetches before Frame 1 while GPU
     /// initialization is still in flight.
     fn supports_prewarm(&self) -> bool {

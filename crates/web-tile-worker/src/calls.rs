@@ -57,6 +57,11 @@ impl TileWorkerCalls {
             .map_err(JsValue::from)
     }
 
+    /// Runs a packed batch of tile calls without allocating per-tile JS promises.
+    pub fn process_tile_batch(&self, words: &[u32]) {
+        self.inner.process_tile_batch(words);
+    }
+
     /// Cancels an active tile call by `attempt`; returns `true` if it was still running.
     pub fn cancel(&self, attempt: u64) -> bool {
         self.inner.cancel(attempt)

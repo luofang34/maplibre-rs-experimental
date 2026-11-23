@@ -148,6 +148,7 @@ impl<E: Environment> crate::tcs::system::System for StopCancelledSystem<E> {
         crate::context::MapContext { world, .. }: &mut crate::context::MapContext,
     ) -> crate::tcs::system::SystemResult {
         crate::io::tile_retry::stop_cancelled(world, self.kernel.apc());
+        crate::io::apc::AsyncProcedureCall::flush_calls(self.kernel.apc());
         Ok(())
     }
 }

@@ -337,6 +337,15 @@ pub(super) fn insert_atlas_cache(
 }
 
 #[cfg(any(test, feature = "renderer"))]
+pub(crate) fn clear_atlas_cache() {
+    ATLAS_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        cache.recent.clear();
+        cache.weak.retain(|_, weak| weak.strong_count() > 0);
+    });
+}
+
+#[cfg(any(test, feature = "renderer"))]
 pub(super) fn atlas_from_wire_bytes(
     coords: WorldTileCoords,
     bytes: &[u8],
