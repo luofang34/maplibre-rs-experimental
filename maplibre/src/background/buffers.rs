@@ -4,6 +4,8 @@ mod globe_uniform;
 mod scratch;
 mod sky;
 
+#[cfg(test)]
+pub(crate) use globe_uniform::globe_layer_bind_group_layout;
 use globe_uniform::GlobeLayerUniformPool;
 pub use scratch::world_rows;
 pub(crate) use scratch::{fill_globe_tiles, BackgroundScratch};

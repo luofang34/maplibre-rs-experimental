@@ -175,20 +175,17 @@ async fn projection_aware_tile_pipelines_compile() {
     let queue = crate::render::upload_queue::UploadQueue::new(queue);
     let projection = super::ProjectionGpuResources::new(&device, &queue);
     let dashes = crate::vector::line_dash::LineDashResources::new(&device, &queue);
+    let globe_bg = crate::background::buffers::globe_layer_bind_group_layout(&device);
     let format = wgpu::TextureFormat::Rgba8Unorm;
+    let mask = TileMaskShader {
+        format,
+        draw_colors: false,
+        debug_lines: false,
+    };
     let shaders: [(&str, Box<dyn Shader>, bool, bool); 7] = [
         ("test fill", Box::new(FillShader { format }), false, false),
         ("test line", Box::new(LineShader { format }), false, false),
-        (
-            "test mask",
-            Box::new(TileMaskShader {
-                format,
-                draw_colors: false,
-                debug_lines: false,
-            }),
-            false,
-            false,
-        ),
+        ("test mask", Box::new(mask), false, false),
         (
             "test raster",
             Box::new(RasterShader { format }),
@@ -261,10 +258,10 @@ async fn projection_aware_tile_pipelines_compile() {
                 .get_or_insert_with(Vec::new)
                 .push(crate::sdf::depth::SymbolDepth::layout());
         }
-        let layouts = if name == "test line" {
-            vec![projection.bind_group_layout(), &dashes.layout]
-        } else {
-            vec![projection.bind_group_layout()]
+        let layouts = match name {
+            "test line" => vec![projection.bind_group_layout(), &dashes.layout],
+            "test globe background" => vec![projection.bind_group_layout(), &globe_bg],
+            _ => vec![projection.bind_group_layout()],
         };
         descriptor.initialize_with_prefix_layouts(&device, &layouts);
     }
