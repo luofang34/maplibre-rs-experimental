@@ -66,6 +66,14 @@ fn pick_worker(
     best.map(|(idx, _)| idx)
 }
 
+/// Lowest slot with spare concurrency. Before any worker reports ready the lowest slots are the
+/// eager ones whose WASM instantiation started first, so filling them in order hands the boot
+/// burst to whichever worker can start soonest.
+fn first_slot_with_capacity(inner: &QueueInner, worker_count: usize) -> Option<usize> {
+    (0..worker_count)
+        .find(|&idx| inner.in_flight.get(idx).copied().unwrap_or(0) < PER_WORKER_CONCURRENCY)
+}
+
 impl SharedWorkQueue {
     pub(super) fn new() -> Self {
         Self {
@@ -133,7 +141,7 @@ impl SharedWorkQueue {
             pick_worker(&inner, worker_count, start, true)
                 .or_else(|| pick_worker(&inner, worker_count, start, false))
         } else {
-            pick_worker(&inner, worker_count, 0, false)
+            first_slot_with_capacity(&inner, worker_count)
         };
         if let Some(idx) = chosen {
             if let Some(slot) = inner.in_flight.get_mut(idx) {
