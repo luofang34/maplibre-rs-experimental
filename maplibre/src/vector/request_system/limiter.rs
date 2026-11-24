@@ -15,13 +15,15 @@ const MAX_HEAVY_TILES_LOW_MEM: usize = 4;
 #[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
 const MAX_HEAVY_TILES_HIGH_MEM: usize = 2;
 #[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
-const MAX_DEM_TILES: usize = 2;
-/// 28 MiB (`448 * 64 KiB` WASM pages): run up to 4 heavy workers in parallel during low-memory
+const MAX_DEM_TILES_LOW_MEM: usize = 2;
+#[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
+const MAX_DEM_TILES_HIGH_MEM: usize = 1;
+/// 24 MiB (`384 * 64 KiB` WASM pages): run up to 4 heavy workers in parallel during low-memory
 /// boot and scene switches, then throttle heavy decodes to 2 once shared linear memory reaches
-/// 28 MiB so dense flight bursts reuse freed pages instead of permanently ratcheting
+/// 24 MiB so dense flight bursts reuse freed pages instead of permanently ratcheting
 /// `WebAssembly.Memory`.
 #[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
-const HEAVY_TILE_THROTTLE_PAGES: usize = 28 * 16;
+const HEAVY_TILE_THROTTLE_PAGES: usize = 24 * 16;
 
 #[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
 const fn heavy_tile_limit_for_pages(pages: usize) -> usize {
@@ -29,6 +31,27 @@ const fn heavy_tile_limit_for_pages(pages: usize) -> usize {
         MAX_HEAVY_TILES_HIGH_MEM
     } else {
         MAX_HEAVY_TILES_LOW_MEM
+    }
+}
+
+#[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
+const fn dem_tile_limit_for_pages(pages: usize) -> usize {
+    if pages >= HEAVY_TILE_THROTTLE_PAGES {
+        MAX_DEM_TILES_HIGH_MEM
+    } else {
+        MAX_DEM_TILES_LOW_MEM
+    }
+}
+
+#[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
+fn current_dem_tile_limit() -> usize {
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+    {
+        dem_tile_limit_for_pages(core::arch::wasm32::memory_size::<0>())
+    }
+    #[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
+    {
+        MAX_DEM_TILES_LOW_MEM
     }
 }
 
@@ -43,8 +66,24 @@ fn current_heavy_tile_limit() -> usize {
     }
 }
 
+#[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
+const MAX_SHARED_TILES_LOW_MEM: usize = 8;
+#[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
+const MAX_SHARED_TILES_HIGH_MEM: usize = 4;
+
+#[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
+const fn shared_tile_limit_for_pages(pages: usize) -> usize {
+    if pages >= HEAVY_TILE_THROTTLE_PAGES {
+        MAX_SHARED_TILES_HIGH_MEM
+    } else {
+        MAX_SHARED_TILES_LOW_MEM
+    }
+}
+
 #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
-const MAX_UNCONSUMED_SHARED_TILES: usize = 4;
+fn current_shared_tile_limit() -> usize {
+    shared_tile_limit_for_pages(core::arch::wasm32::memory_size::<0>())
+}
 
 #[derive(Default)]
 struct PermitState {
@@ -127,7 +166,7 @@ impl Drop for DemTileSlot {
 /// heavy vector MVT decodes.
 #[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
 pub(crate) async fn acquire_dem_tile_slot() -> DemTileSlot {
-    acquire_slot(&DEM_LIMITER, || MAX_DEM_TILES).await;
+    acquire_slot(&DEM_LIMITER, current_dem_tile_limit).await;
     DemTileSlot { _private: () }
 }
 
@@ -148,7 +187,7 @@ impl Drop for SharedTilePermit {
 /// Reserves one unconsumed shared-memory tile slot upfront before decode starts.
 #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
 pub(crate) async fn acquire_shared_tile_permit() -> SharedTilePermit {
-    acquire_slot(&SHARED_TILES, || MAX_UNCONSUMED_SHARED_TILES).await;
+    acquire_slot(&SHARED_TILES, current_shared_tile_limit).await;
     SharedTilePermit { _private: () }
 }
 
@@ -349,143 +388,4 @@ pub(crate) fn reconcile_upload_permits(
 }
 
 #[cfg(test)]
-mod tests {
-    use std::{
-        sync::{
-            atomic::{AtomicUsize, Ordering},
-            Arc,
-        },
-        task::Wake,
-    };
-
-    use super::*;
-
-    struct CountWake(AtomicUsize);
-
-    impl Wake for CountWake {
-        fn wake(self: Arc<Self>) {
-            self.0.fetch_add(1, Ordering::Relaxed);
-        }
-    }
-
-    #[test]
-    fn permit_state_reserves_upfront_blocks_at_limit_and_wakes_waiter_on_release() {
-        let counter = Arc::new(CountWake(AtomicUsize::new(0)));
-        let waker = Waker::from(counter.clone());
-        let mut state = PermitState::default();
-
-        assert!(state.poll_acquire(2, &waker).is_ready());
-        assert!(state.poll_acquire(2, &waker).is_ready());
-        assert_eq!(state.in_use, 2);
-
-        // Waiters block at limit, deduplicate identical wakers, and all wake on release so an
-        // aborted front waiter cannot starve followers.
-        let counter2 = Arc::new(CountWake(AtomicUsize::new(0)));
-        let waker2 = Waker::from(counter2.clone());
-        assert!(state.poll_acquire(2, &waker).is_pending());
-        assert!(state.poll_acquire(2, &waker).is_pending());
-        assert!(state.poll_acquire(2, &waker2).is_pending());
-        assert_eq!(state.waiters.len(), 2);
-
-        for w in state.release() {
-            w.wake();
-        }
-        assert_eq!(state.in_use, 1);
-        assert_eq!(counter.0.load(Ordering::Relaxed), 1);
-        assert_eq!(counter2.0.load(Ordering::Relaxed), 1);
-        assert!(state.poll_acquire(2, &waker).is_ready());
-        assert_eq!(state.in_use, 2);
-    }
-
-    #[test]
-    fn pending_upload_permits_deduplicates_and_releases_when_not_deferred() {
-        use crate::coords::WorldTileCoords;
-
-        let t0 = WorldTileCoords {
-            x: 1,
-            y: 2,
-            z: 14.into(),
-        };
-        let t1 = WorldTileCoords {
-            x: 2,
-            y: 2,
-            z: 14.into(),
-        };
-        let mut queue = PermitQueue::default();
-        assert!(queue.is_empty());
-
-        queue.push(t0, "first");
-        queue.push(t0, "replaced");
-        queue.push(t1, "second");
-        assert_eq!(queue.0, vec![(t0, "replaced"), (t1, "second")]);
-
-        // While upload budget deferred tiles, only visible still-pending coords remain.
-        queue.retain_deferred(true, |coords| coords == t1);
-        assert_eq!(queue.0, vec![(t1, "second")]);
-
-        // As soon as a frame ends without deferral, all permits release to prevent deadlock.
-        queue.retain_deferred(false, |_| true);
-        assert!(queue.is_empty());
-
-        queue.push(t0, "readded");
-        queue.clear();
-        assert!(queue.is_empty());
-    }
-
-    #[test]
-    fn heavy_tile_limit_throttles_above_threshold_and_drains_cleanly() {
-        assert_eq!(heavy_tile_limit_for_pages(0), 4);
-        assert_eq!(heavy_tile_limit_for_pages(447), 4);
-        assert_eq!(heavy_tile_limit_for_pages(448), 2);
-        assert_eq!(heavy_tile_limit_for_pages(1024), 2);
-
-        let counter = Arc::new(CountWake(AtomicUsize::new(0)));
-        let waker = Waker::from(counter.clone());
-        let mut state = PermitState::default();
-        for _ in 0..4 {
-            assert!(state.poll_acquire(4, &waker).is_ready());
-        }
-        assert_eq!(state.in_use, 4);
-
-        // Tightening limit mid-flight blocks new work until in-flight count drains below 2.
-        assert!(state
-            .poll_acquire(heavy_tile_limit_for_pages(448), &waker)
-            .is_pending());
-        for w in state.release() {
-            w.wake();
-        }
-        assert_eq!(state.in_use, 3);
-        assert!(state
-            .poll_acquire(heavy_tile_limit_for_pages(448), &waker)
-            .is_pending());
-        for w in state.release() {
-            w.wake();
-        }
-        assert_eq!(state.in_use, 2);
-        assert!(state
-            .poll_acquire(heavy_tile_limit_for_pages(448), &waker)
-            .is_pending());
-        for w in state.release() {
-            w.wake();
-        }
-        assert_eq!(state.in_use, 1);
-        assert!(state
-            .poll_acquire(heavy_tile_limit_for_pages(448), &waker)
-            .is_ready());
-        assert_eq!(state.in_use, 2);
-    }
-
-    #[test]
-    fn dem_limiter_is_independent_from_heavy_vector_limiter() {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .expect("runtime");
-        rt.block_on(async {
-            let _heavy = acquire_heavy_tile_slot().await;
-            let dem1 = acquire_dem_tile_slot().await;
-            let dem2 = acquire_dem_tile_slot().await;
-            drop((dem1, dem2));
-            let _dem3 = acquire_dem_tile_slot().await;
-        });
-    }
-}
+mod tests;

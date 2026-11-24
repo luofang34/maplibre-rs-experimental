@@ -12,13 +12,15 @@ use std::{
     vec::IntoIter,
 };
 
-use futures::future::{AbortHandle, AbortRegistration, Abortable, Aborted};
-use rustc_hash::{FxHashMap, FxHashSet};
+use futures::future::AbortHandle;
+use rustc_hash::FxHashSet;
 
 mod context;
+mod dispatch;
 pub use context::SchedulerContext;
+use dispatch::{run_tracked_call, CallDispatch, RunningCalls};
 
-use super::{AsyncProcedure, AsyncProcedureCall, CallError, Input, Message, ProcedureError};
+use super::{AsyncProcedure, AsyncProcedureCall, CallError, Input, Message};
 use crate::{
     environment::{OffscreenKernel, OffscreenKernelConfig},
     io::scheduler::Scheduler,
@@ -29,81 +31,6 @@ const MAX_ADMITTED_ATTEMPTS_PER_BATCH: usize = 4;
 
 pub(crate) type ArrivalWaker = Arc<dyn Fn() + Send + Sync>;
 type SharedArrivalWaker = Arc<Mutex<Option<ArrivalWaker>>>;
-
-type RunningCalls = Arc<Mutex<FxHashMap<u64, (AbortHandle, Arc<AtomicBool>)>>>;
-
-struct CallDispatch<K: OffscreenKernel> {
-    input: Input,
-    procedure: AsyncProcedure<K, SchedulerContext>,
-    config: OffscreenKernelConfig,
-    sender: Sender<Message>,
-    batch_sender: Sender<Vec<Message>>,
-    waker: Option<ArrivalWaker>,
-    registration: AbortRegistration,
-    cancel_flag: Arc<AtomicBool>,
-    sent_any: Arc<AtomicBool>,
-    running: RunningCalls,
-    in_flight: Arc<AtomicUsize>,
-    active_calls: Arc<AtomicUsize>,
-}
-
-struct ActiveCallGuard(Arc<AtomicUsize>);
-
-impl Drop for ActiveCallGuard {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::AcqRel);
-    }
-}
-
-async fn run_tracked_call<K: OffscreenKernel>(dispatch: CallDispatch<K>) {
-    let _active_guard = ActiveCallGuard(dispatch.active_calls);
-    if dispatch.cancel_flag.load(Ordering::Acquire) {
-        tracing::debug!(
-            attempt = dispatch.input.attempt,
-            "queued worker call cancelled before start"
-        );
-        return;
-    }
-    tracing::debug!(thread = ?std::thread::current().name(), "processing worker call");
-
-    let attempt = dispatch.input.attempt;
-    let kernel = K::create(dispatch.config);
-    let context = SchedulerContext::for_call(
-        dispatch.sender,
-        dispatch.batch_sender,
-        dispatch.waker.clone(),
-        dispatch.cancel_flag,
-        dispatch.sent_any.clone(),
-    );
-    #[cfg(target_arch = "wasm32")]
-    let flush_context = context.clone();
-    // A result that cannot be delivered, because the map already shut down, must
-    // not take the worker thread down with it.
-    let call = (dispatch.procedure)(dispatch.input, context, kernel);
-    match Abortable::new(call, dispatch.registration).await {
-        Ok(Err(ProcedureError::Send(_))) => {
-            tracing::debug!(attempt, "discarding worker result after map shutdown")
-        }
-        Ok(Err(error)) => tracing::warn!(?error, "procedure failed"),
-        Ok(Ok(())) => {
-            #[cfg(target_arch = "wasm32")]
-            drop(flush_context.flush());
-        }
-        Err(Aborted) => tracing::debug!(attempt, "cancelled worker call stopped"),
-    }
-    let remaining = {
-        let mut map = crate::platform::lock_unpoisoned(&dispatch.running);
-        map.remove(&attempt);
-        let len = map.len();
-        dispatch.in_flight.store(len, Ordering::Release);
-        len
-    };
-    if remaining == 0 && !dispatch.sent_any.load(Ordering::Acquire) {
-        if let Some(wake) = dispatch.waker {
-            wake();
-        }
-    }
-}
 
 /// An APC using a scheduler for execution and an in-process channel for replies.
 ///
@@ -136,7 +63,7 @@ impl<K: OffscreenKernel, S: Scheduler> SchedulerAsyncProcedureCall<K, S> {
     #[cfg(test)]
     pub(super) fn running(
         &self,
-    ) -> std::sync::MutexGuard<'_, FxHashMap<u64, (AbortHandle, Arc<AtomicBool>)>> {
+    ) -> std::sync::MutexGuard<'_, rustc_hash::FxHashMap<u64, (AbortHandle, Arc<AtomicBool>)>> {
         crate::platform::lock_unpoisoned(&self.running)
     }
 
@@ -200,6 +127,40 @@ impl<K: OffscreenKernel, S: Scheduler> SchedulerAsyncProcedureCall<K, S> {
         }
     }
 
+    #[inline]
+    fn is_cancelled(&self, message: &Message) -> bool {
+        message
+            .attempt()
+            .is_some_and(|id| self.cancelled.borrow().contains(&id))
+    }
+
+    fn purge_cancelled_local(&self) {
+        let mut dropped = Vec::new();
+        if let Ok(cancelled) = self.cancelled.try_borrow() {
+            if cancelled.is_empty() {
+                return;
+            }
+            if let Ok(mut queued) = self.queued.try_borrow_mut() {
+                let len = queued.len();
+                for _ in 0..len {
+                    if let Some(msg) = queued.pop_front() {
+                        if msg.attempt().is_some_and(|id| cancelled.contains(&id)) {
+                            dropped.push(msg);
+                        } else {
+                            queued.push_back(msg);
+                        }
+                    }
+                }
+            }
+            if let Ok(mut buffer) = self.buffer.try_borrow_mut() {
+                dropped.extend(buffer.extract_if(.., |msg| {
+                    msg.attempt().is_some_and(|id| cancelled.contains(&id))
+                }));
+            }
+        }
+        drop(dropped);
+    }
+
     #[cfg(target_arch = "wasm32")]
     fn receive_wasm<F: FnMut(&Message) -> bool>(
         &self,
@@ -211,6 +172,9 @@ impl<K: OffscreenKernel, S: Scheduler> SchedulerAsyncProcedureCall<K, S> {
         self.drain_channels(&mut queued);
         if self.boot_unthrottled.get() {
             while let Some(message) = queued.pop_front() {
+                if self.is_cancelled(&message) {
+                    continue;
+                }
                 push_filtered(message, &mut filter, ret, buffer);
             }
             return;
@@ -229,6 +193,9 @@ impl<K: OffscreenKernel, S: Scheduler> SchedulerAsyncProcedureCall<K, S> {
         }
         let mut deferred = VecDeque::new();
         while let Some(message) = queued.pop_front() {
+            if self.is_cancelled(&message) {
+                continue;
+            }
             let attempt = message.attempt();
             let admit = attempt.is_none_or(|id| {
                 admitted_attempts.contains(&id)
@@ -284,6 +251,9 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
             let mut queued = self.queued.borrow_mut();
             self.drain_channels(&mut queued);
             while let Some(message) = queued.pop_front() {
+                if self.is_cancelled(&message) {
+                    continue;
+                }
                 tracing::debug!("Data reached main thread: {message:?}");
                 push_filtered(message, &mut filter, &mut ret, &mut buffer);
             }
@@ -376,6 +346,7 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
             flag.store(true, Ordering::Release);
             abort.abort();
         }
+        self.purge_cancelled_local();
     }
 
     fn cancel_batch(&self, attempts: &[u64]) {
@@ -397,6 +368,7 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
             flag.store(true, Ordering::Release);
             abort.abort();
         }
+        self.purge_cancelled_local();
     }
 
     fn supports_prewarm(&self) -> bool {
@@ -459,11 +431,11 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
             let plan = crate::sdf::assets::PrefetchPlan::from_style(style);
             if !plan.is_empty() {
                 let config = self.offscreen_kernel_config.clone();
-                drop(self.scheduler.schedule(move || async move {
+                wasm_bindgen_futures::spawn_local(async move {
                     let kernel = K::create(config);
                     let client = kernel.source_client();
                     plan.execute_decoded_wasm(&client).await;
-                }));
+                });
             }
         }
         #[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
@@ -474,3 +446,6 @@ impl<K: OffscreenKernel, S: Scheduler> AsyncProcedureCall<K> for SchedulerAsyncP
         self.boot_unthrottled.set(unthrottled);
     }
 }
+
+#[cfg(test)]
+mod tests;
