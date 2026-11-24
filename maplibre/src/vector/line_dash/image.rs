@@ -1,3 +1,4 @@
+use super::crossfade::{CrossfadeParameters, DashUniforms};
 use crate::style::{property::StyleProperty, Style};
 
 /// What fills a line instead of its colour, when something does.
@@ -18,21 +19,59 @@ pub(super) enum LineImage {
     },
 }
 
-/// The uniform of a dash entry: the dash period, what fills the line, and the size of a pattern
-/// or, for a dash, whether its texture has the rows of round caps and how far the fractional
-/// zoom stretches it.
-pub(super) fn image_uniform(period: f32, image: &LineImage, round: bool, scale: f32) -> [f32; 4] {
-    let round = f32::from(round);
+/// Uniform parameters for a dash, gradient, or pattern line entry.
+pub(super) fn build_dash_uniforms(
+    (from_period, to_period): (f32, f32),
+    image: &LineImage,
+    round: bool,
+    scale: f32,
+    crossfade: CrossfadeParameters,
+    floor_width: f32,
+    dual_rows: bool,
+) -> DashUniforms {
+    let round_flag = f32::from(round);
+    let dual_flag = f32::from(dual_rows);
     match image {
-        LineImage::None => [period, 0.0, round, scale],
+        LineImage::None => DashUniforms {
+            params: [to_period, 0.0, round_flag, scale],
+            fade: [
+                from_period,
+                crossfade.from_scale,
+                crossfade.to_scale,
+                crossfade.mix,
+            ],
+            extra: [floor_width, dual_flag, 0.0, 0.0],
+        },
         // A stepped gradient's ramp is spread over the progress on a logarithmic scale.
         LineImage::Gradient(texels)
             if texels.len() == crate::style::line_gradient::STEP_RAMP_TEXELS =>
         {
-            [period, 1.25, round, scale]
+            DashUniforms {
+                params: [to_period, 1.25, round_flag, scale],
+                fade: [
+                    from_period,
+                    crossfade.from_scale,
+                    crossfade.to_scale,
+                    crossfade.mix,
+                ],
+                extra: [floor_width, dual_flag, 0.0, 0.0],
+            }
         }
-        LineImage::Gradient(_) => [period, 1.0, round, scale],
-        LineImage::Pattern { display, .. } => [period, 2.0 + scale, display[0], display[1]],
+        LineImage::Gradient(_) => DashUniforms {
+            params: [to_period, 1.0, round_flag, scale],
+            fade: [
+                from_period,
+                crossfade.from_scale,
+                crossfade.to_scale,
+                crossfade.mix,
+            ],
+            extra: [floor_width, dual_flag, 0.0, 0.0],
+        },
+        LineImage::Pattern { display, .. } => DashUniforms {
+            params: [0.0, 2.0 + scale, display[0], display[1]],
+            fade: [0.0, 1.0, 1.0, 1.0],
+            extra: [floor_width, 0.0, 0.0, 0.0],
+        },
     }
 }
 

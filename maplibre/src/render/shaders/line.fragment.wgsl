@@ -1,6 +1,12 @@
+struct DashUniforms {
+    params: vec4<f32>,
+    fade: vec4<f32>,
+    extra: vec4<f32>,
+};
+
 @group(1) @binding(0) var dash_texture: texture_2d<f32>;
 @group(1) @binding(1) var dash_sampler: sampler;
-@group(1) @binding(2) var<uniform> dash_period: vec4<f32>;
+@group(1) @binding(2) var<uniform> dash_period: DashUniforms;
 @group(1) @binding(3) var ramp_texture: texture_2d<f32>;
 @group(1) @binding(4) var ramp_sampler: sampler;
 
@@ -35,24 +41,82 @@ fn main(in: FragmentInput) -> Output {
         in.v_gamma_scale > 0.0,
     );
 
-    // Uniform branch: solid lines skip dash_texture sampling completely.
+    let is_pattern = dash_period.params.y > 1.5;
+    let is_gradient = dash_period.params.y > 0.5 && !is_pattern;
+
+    // Uniform branch: solid lines and pattern lines skip dash_texture sampling completely.
     var dash_alpha = 1.0;
-    if dash_period.x > 0.0 {
-        // Dashes stretch with the fractional zoom; a pattern keeps `dash_period.w` for its height.
-        let dash_scale = select(1.0, dash_period.w, dash_period.y < 1.5);
-        // A dash with round caps has a row of the texture for each step across the line.
-        let round_dash = dash_period.z > 0.5 && dash_period.y < 1.5;
-        let dash_v = select(0.5, (7.5 - 7.0 * in.across) / 15.0, round_dash);
-        let distance_sample = textureSample(dash_texture, dash_sampler,
-            vec2<f32>(in.dash.x / max(dash_period.x * dash_scale, 1e-6), dash_v)).r;
+    let to_period = dash_period.params.x;
+    let from_period = dash_period.fade.x;
+    if !is_pattern && (to_period > 0.0 || from_period > 0.0) {
+        let dash_scale = max(dash_period.params.w, 1e-6);
+        let round_dash = dash_period.params.z > 0.5;
+        let dual_rows = dash_period.extra.y > 0.5;
+        let local_v = select(0.5, (7.5 - 7.0 * clamp(in.across, -1.0, 1.0)) / 15.0, round_dash);
+        let from_v = select(local_v, local_v * 0.5, dual_rows);
+        let to_v = select(local_v, local_v * 0.5 + 0.5, dual_rows);
+
+        let from_scaled = max(from_period * dash_period.fade.y, 1e-6);
+        let to_scaled = max(to_period * dash_period.fade.z, 1e-6);
+        let mix_t = clamp(dash_period.fade.w, 0.0, 1.0);
+
+        var distance_sample = 1.0;
+        var active_period_scaled = to_scaled;
+        if mix_t >= 1.0 {
+            if to_period > 0.0 {
+                distance_sample = textureSample(
+                    dash_texture,
+                    dash_sampler,
+                    vec2<f32>(in.dash.x / (to_scaled * dash_scale), to_v),
+                ).r;
+            }
+            active_period_scaled = to_scaled;
+        } else if mix_t <= 0.0 {
+            if from_period > 0.0 {
+                distance_sample = textureSample(
+                    dash_texture,
+                    dash_sampler,
+                    vec2<f32>(in.dash.x / (from_scaled * dash_scale), from_v),
+                ).r;
+            }
+            active_period_scaled = from_scaled;
+        } else {
+            var dist_a = 1.0;
+            if from_period > 0.0 {
+                dist_a = textureSample(
+                    dash_texture,
+                    dash_sampler,
+                    vec2<f32>(in.dash.x / (from_scaled * dash_scale), from_v),
+                ).r;
+            }
+            var dist_b = 1.0;
+            if to_period > 0.0 {
+                dist_b = textureSample(
+                    dash_texture,
+                    dash_sampler,
+                    vec2<f32>(in.dash.x / (to_scaled * dash_scale), to_v),
+                ).r;
+            }
+            distance_sample = mix(dist_a, dist_b, mix_t);
+            active_period_scaled = select(
+                max(from_scaled, to_scaled),
+                min(from_scaled, to_scaled),
+                from_period > 0.0 && to_period > 0.0,
+            );
+        }
+
         // A gradient line's dash edge is a smoothstep over a thirtysecond of the pattern's width in
         // alpha units, as GL JS draws it; other dashes ramp over a pixel.
-        let edge = 1.0 / max(dash_period.x * in.floor_width, 1e-6);
+        let edge = 1.0 / max(active_period_scaled * in.floor_width, 1e-6);
         let gradient_alpha = smoothstep(0.5 - edge, 0.5 + edge, distance_sample);
         dash_alpha = select(
-            clamp(0.5 + (distance_sample * 255.0 - 128.0) / 254.0 * dash_period.x * dash_scale * in.dash.y, 0.0, 1.0),
+            clamp(
+                0.5 + (distance_sample * 255.0 - 128.0) / 254.0 * active_period_scaled * dash_scale * in.dash.y,
+                0.0,
+                1.0,
+            ),
             gradient_alpha,
-            dash_period.y > 0.5 && dash_period.y < 1.5,
+            is_gradient,
         );
     }
 
@@ -70,9 +134,9 @@ fn main(in: FragmentInput) -> Output {
     // Uniform branch: plain lines skip ramp_texture sampling and log2 completely.
     var out_rgb = in.v_color.rgb;
     var coverage = in.v_color.a * alpha * dash_alpha;
-    if dash_period.y > 1.5 {
+    if is_pattern {
         // A pattern repeats along the line with its height fitted to the line's width.
-        let along = fract(in.dash.x / dash_period.z * dash_period.w / (dash_period.y - 2.0));
+        let along = fract(in.dash.x / dash_period.params.z * dash_period.params.w / (dash_period.params.y - 2.0));
         // The image spans the pattern less a texel of its own edge on every side, as GL JS
         // pads each image in its atlas.
         let dimensions = vec2<f32>(textureDimensions(ramp_texture));
@@ -82,9 +146,9 @@ fn main(in: FragmentInput) -> Output {
         // takes straight colours.
         out_rgb = texel.rgb / max(texel.a, 1e-4);
         coverage = texel.a * in.v_color.a * alpha;
-    } else if dash_period.y > 0.5 {
+    } else if is_gradient {
         // A stepped gradient's ramp covers the progress on a logarithmic scale.
-        let stepped = dash_period.y > 1.2 && dash_period.y < 1.3;
+        let stepped = dash_period.params.y > 1.2 && dash_period.params.y < 1.3;
         let clamped_progress = clamp(in.progress, 0.0, 1.0);
         let ramp_position = select(
             clamped_progress,
@@ -97,7 +161,6 @@ fn main(in: FragmentInput) -> Output {
         out_rgb = ramp.rgb / max(ramp.a, 1e-4);
         coverage *= ramp.a;
     }
-    let is_gradient = dash_period.y > 0.5 && dash_period.y <= 1.5;
     let final_alpha = select(0.0, coverage, visible && (is_gradient || coverage >= 0.01));
     return Output(vec4<f32>(out_rgb, final_alpha));
 }

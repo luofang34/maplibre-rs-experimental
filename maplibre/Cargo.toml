@@ -209,6 +209,10 @@ required-features = ["headless", "raster", "thread-safe-futures"]
 name = "gpu_resource_lifecycle"
 required-features = ["headless", "raster", "thread-safe-futures"]
 
+[[test]]
+name = "line_dasharray_zoom"
+required-features = ["headless", "geojson"]
+
 [build-dependencies]
 maplibre-build-tools = { path = "../maplibre-build-tools", version = "0.1.0" }
 prost-build = "0.14.4"

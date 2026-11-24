@@ -70,13 +70,18 @@ pub fn resource_system(
             .resources
             .insert(super::line_dash::LineDashResources::new(device, queue));
     }
-    if flags.update_dashes && needs_any_lines {
-        if let Some(dashes) = world
+    let frame_time = crate::render::frame_input::frame_time(world);
+    let now = (!frame_time.is_zero()).then_some(frame_time);
+    let dash_fading = if flags.update_dashes && needs_any_lines {
+        world
             .resources
             .get_mut::<super::line_dash::LineDashResources>()
-        {
-            dashes.update(device, queue, style, style_zoom);
-        }
+            .is_some_and(|dashes| dashes.update(device, queue, style, style_zoom, now))
+    } else {
+        false
+    };
+    if dash_fading {
+        crate::render::frame_signals::keep_animating(world);
     }
     if needs_any_lines
         && world

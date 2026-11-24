@@ -56,6 +56,14 @@ struct VertexOutput {
     @location(12) tile_bounds: vec4<f32>,
 };
 
+struct DashUniforms {
+    params: vec4<f32>,
+    fade: vec4<f32>,
+    extra: vec4<f32>,
+};
+
+@group(1) @binding(2) var<uniform> dash_period: DashUniforms;
+
 @vertex
 fn main(
     @location(0) v_pos_q2: vec2<i32>,
@@ -89,9 +97,8 @@ fn main(
     let per_feature = ((w3 >> 29u) & 1u) != 0u;
     let feature_width = f32((w3 >> 18u) & 0x7ffu) / 16.0;
     let feature_offset = f32(i32((w3 >> 8u) & 0x3ffu) - 512) / 8.0;
-    let line_width_px = select(line_width, feature_width, per_feature) * line_scale.x;
-    // A gradient line measures its dashes in pixels rather than line widths.
-    let dash_unit = select(line_width_px, 1.0, is_gradient);
+    let base_line_width = select(line_width, feature_width, per_feature);
+    let line_width_px = base_line_width * line_scale.x;
     let line_offset = select(line_style.x, feature_offset, per_feature);
     let gap_u8 = select(w3 & 0xffu, 0xffu, spatial);
     let blur_u8 = select((v_meta.x >> 24u) & 0xffu, 0xffu, spatial);
@@ -226,20 +233,24 @@ fn main(
         spatial || ground.on_terrain,
     );
 
-    // A line with a gradient counts its dashes along the progress of the whole line, scaled to
-    // a range of 32767, in widths rounded down: a pattern repeats every `sum * 16 * floor(width)`
-    // of those units, as GL JS draws it.
-    let floor_width = max(floor(select(line_width, feature_width, per_feature)), 1.0);
-    var dash = vec2<f32>(path_dist / max(dash_scale * dash_unit, 1e-6), dash_unit);
+    // Scale dashes by `line-floorwidth` evaluated at `zoom.floor()` (`extra.x >= 0.0`), or the
+    // tile-zoom per-feature width when `line-width` is data-driven (`extra.x < 0.0`).
+    let floor_width = select(dash_period.extra.x, base_line_width, dash_period.extra.x < 0.0);
+    let floor_width_px = floor_width * line_scale.x;
+    var dash = vec2<f32>(
+        path_dist / max(dash_scale * floor_width_px, 1e-6),
+        floor_width_px,
+    );
     var progress = 0.0;
     if is_gradient {
         let grad_len_q4 = round(color.x * 255.0)
             + round(color.y * 255.0) * 256.0
             + round(color.z * 255.0) * 65536.0;
         let grad_len = max(grad_len_q4 / 16.0, 1e-6);
+        let grad_tile_units = 2.0 * dash_scale * floor_width_px;
         dash = vec2<f32>(
-            path_dist / grad_len * 32767.0 / (16.0 * floor_width),
-            grad_len / max(dash_scale, 1e-6) * 16.0 * floor_width / 32767.0,
+            path_dist / grad_len * 32767.0 / max(grad_tile_units, 1e-6),
+            grad_len / max(dash_scale, 1e-6) * grad_tile_units / 32767.0,
         );
         progress = path_dist / grad_len;
     }

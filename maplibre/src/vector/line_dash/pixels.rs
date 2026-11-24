@@ -119,6 +119,37 @@ pub(super) fn round_dash_pixels(pattern: &[f64]) -> (Vec<u8>, f32, u32) {
     (pixels, period as f32, rows)
 }
 
+/// Builds the dash texture rows for `(from, to)`. When `from != to`, both patterns are stacked
+/// vertically into `2 * rows_per_pattern` rows so a single texture sample binds both cross-fade stops.
+pub(super) fn build_dash_texture_pixels(
+    from: &[f64],
+    to: &[f64],
+    round: bool,
+) -> (Vec<u8>, f32, f32, u32, bool) {
+    let single = |pat: &[f64]| {
+        if round {
+            round_dash_pixels(pat)
+        } else {
+            let (pixels, period) = dash_pixels(pat);
+            (pixels, period, 1)
+        }
+    };
+    if from == to {
+        let (pixels, period, rows) = single(to);
+        return (pixels, period, period, rows, false);
+    }
+    let (mut from_pixels, from_period, rows_per_pattern) = single(from);
+    let (to_pixels, to_period, _) = single(to);
+    from_pixels.extend_from_slice(&to_pixels);
+    (
+        from_pixels,
+        from_period,
+        to_period,
+        rows_per_pattern * 2,
+        true,
+    )
+}
+
 /// Dashes are laid out in tile units of the whole zoom below the view's, as GL JS does, so
 /// between whole zooms they grow with the map instead of holding their size on screen.
 pub(super) fn dash_scale(zoom: f64) -> f32 {
