@@ -198,15 +198,18 @@ fn style_source_changes_and_layer_removal_do_not_reuse_stale_bindings() {
             [0, 0, 255, 255],
         );
         map.map_context.style.layers[2].source = Some("a".into());
+        map.map_context.style.bump_revision();
         map.run_frame().expect("change source");
         assert_color(
             &read_blocking(&map, "identity-style-source-a"),
             [0, 255, 0, 255],
         );
         let mut layer = map.map_context.style.layers.pop().expect("B layer");
+        map.map_context.style.bump_revision();
         map.run_frame().expect("remove B layer");
         layer.source = Some("b".into());
         map.map_context.style.layers.push(layer);
+        map.map_context.style.bump_revision();
         map.run_frame().expect("restore B layer");
         assert_color(
             &read_blocking(&map, "identity-style-restored"),
@@ -308,6 +311,7 @@ async fn assert_default_parent(terrain: bool, missing_urls: bool) {
     } else {
         map.map_context.style.layers[2].source = None;
     }
+    map.map_context.style.bump_revision();
     let required_default = map
         .required_raster_source_tile_coords(&Default::default())
         .expect("default covering");

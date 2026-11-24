@@ -49,12 +49,15 @@ struct WorkerSnapshots {
 /// Cached `(source_name, layer_indices)` pairs grouping non-hidden raster-like layers per style revision.
 pub(crate) type RasterSourceLayerIndex = Arc<[(Option<String>, Arc<[usize]>)]>;
 
+/// Cached geographic bounding box `(west, south, east, north)` for source bounds checks.
+pub(crate) type SourceBounds = (f64, f64, f64, f64);
+
 /// Cached per-[`TileKind`](crate::io::tile_sources::TileKind) zoom bounds and combined geographic bounds.
 #[derive(Clone, Debug)]
 pub(crate) struct TileKindSummary {
     pub min_zoom: Option<u8>,
     pub max_zoom: Option<u8>,
-    pub bounds: Option<Arc<[(f64, f64, f64, f64)]>>,
+    pub bounds: Option<Arc<[SourceBounds]>>,
 }
 
 #[derive(Clone, Copy, Debug)]

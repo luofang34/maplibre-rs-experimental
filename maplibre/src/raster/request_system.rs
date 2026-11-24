@@ -19,10 +19,7 @@ use crate::{
     },
     kernel::Kernel,
     raster::{transferables::RasterTransferables, RasterLayersDataComponent},
-    render::{
-        eye_covering::RasterCoverings, projection::raster_source_regions,
-        view_state::ViewStatePadding,
-    },
+    render::{projection::raster_source_regions, view_state::ViewStatePadding},
     style::Style,
     tcs::system::{System, SystemError, SystemResult},
 };
@@ -116,7 +113,7 @@ fn resolve_regions(
     view_state: &crate::render::view_state::ViewState,
     world: &mut crate::tcs::world::World,
     tight_padding: bool,
-) -> Result<(RasterCoverings, ViewStatePadding, (u64, u64, usize)), SystemError> {
+) -> Result<memo::CachedRasterRegions, SystemError> {
     let request_padding = if tight_padding {
         ViewStatePadding::Tight
     } else {

@@ -24,6 +24,9 @@ use crate::{
     terrain::request_system::DrapeRequests,
 };
 
+pub(super) type TerrainIndexKey = (u64, u64, usize);
+pub(super) type CachedRasterRegions = (RasterCoverings, ViewStatePadding, TerrainIndexKey);
+
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct RasterRequestKey {
     style_rev: u64,
@@ -69,7 +72,7 @@ impl WantedTilesAcc {
 pub(super) struct RasterRequestMemo {
     style_cache: Option<(u64, bool, Vec<RasterSourceId>)>,
     last_key: Option<RasterRequestKey>,
-    cached_regions: Option<(RasterCoverings, ViewStatePadding, (u64, u64, usize))>,
+    cached_regions: Option<CachedRasterRegions>,
     pub(super) acc: WantedTilesAcc,
     pub(super) requested_scratch: FxHashSet<WorldTileCoords>,
 }
@@ -208,7 +211,7 @@ impl RasterRequestMemo {
         &mut self,
         mut key: RasterRequestKey,
         tiles_len: usize,
-        regions: Option<(RasterCoverings, ViewStatePadding, (u64, u64, usize))>,
+        regions: Option<CachedRasterRegions>,
     ) {
         key.tiles_len = tiles_len;
         self.last_key = Some(key);
