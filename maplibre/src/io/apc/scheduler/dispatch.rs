@@ -64,7 +64,15 @@ pub(super) async fn run_tracked_call<K: OffscreenKernel>(dispatch: CallDispatch<
     let flush_context = context.clone();
     // A result that cannot be delivered because the map shut down must not panic the worker.
     let call = (dispatch.procedure)(dispatch.input, context, kernel);
-    match Abortable::new(call, dispatch.registration).await {
+    let outcome = Abortable::new(call, dispatch.registration).await;
+    let (was_tracked, remaining) = {
+        let mut map = crate::platform::lock_unpoisoned(&dispatch.running);
+        let was_tracked = map.remove(&attempt).is_some();
+        let len = map.len();
+        dispatch.in_flight.store(len, Ordering::Release);
+        (was_tracked, len)
+    };
+    match outcome {
         Ok(Err(ProcedureError::Send(_))) => {
             tracing::debug!(attempt, "discarding worker result after map shutdown")
         }
@@ -75,14 +83,7 @@ pub(super) async fn run_tracked_call<K: OffscreenKernel>(dispatch: CallDispatch<
         }
         Err(Aborted) => tracing::debug!(attempt, "cancelled worker call stopped"),
     }
-    let remaining = {
-        let mut map = crate::platform::lock_unpoisoned(&dispatch.running);
-        map.remove(&attempt);
-        let len = map.len();
-        dispatch.in_flight.store(len, Ordering::Release);
-        len
-    };
-    if remaining == 0 && !dispatch.sent_any.load(Ordering::Acquire) {
+    if was_tracked && remaining == 0 && !dispatch.sent_any.load(Ordering::Acquire) {
         if let Some(wake) = dispatch.waker {
             wake();
         }

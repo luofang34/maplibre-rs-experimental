@@ -35,6 +35,7 @@ const RAMP_MAX_MEMORY_PAGES: usize = 48 * 16;
 thread_local! {
     static RECYCLED_WORKERS: RefCell<Vec<Worker>> = const { RefCell::new(Vec::new()) };
     static CURRENT_WORKER_WAKE: RefCell<Option<Arc<AtomicBool>>> = const { RefCell::new(None) };
+    static ACTIVE_WORK_TASKS: Cell<usize> = const { Cell::new(0) };
 }
 
 fn low_memory_for_ramp() -> bool {
@@ -167,21 +168,42 @@ pub struct Work {
     wake_pending: Arc<AtomicBool>,
 }
 
-struct ClearWorkerWake;
+struct WorkerWakeGuard;
 
-impl Drop for ClearWorkerWake {
-    fn drop(&mut self) {
+impl WorkerWakeGuard {
+    fn enter(wake_pending: &Arc<AtomicBool>) -> Self {
+        ACTIVE_WORK_TASKS.with(|count| count.set(count.get().saturating_add(1)));
         CURRENT_WORKER_WAKE.with(|slot| {
-            *slot.borrow_mut() = None;
+            *slot.borrow_mut() = Some(Arc::clone(wake_pending));
         });
+        Self
+    }
+}
+
+impl Drop for WorkerWakeGuard {
+    fn drop(&mut self) {
+        let remaining = ACTIVE_WORK_TASKS.with(|count| {
+            let next = count.get().saturating_sub(1);
+            count.set(next);
+            next
+        });
+        if remaining == 0 {
+            CURRENT_WORKER_WAKE.with(|slot| {
+                *slot.borrow_mut() = None;
+            });
+        }
     }
 }
 
 impl Work {
     pub async fn run(self) {
-        let _clear_wake = ClearWorkerWake;
+        let _wake_guard = WorkerWakeGuard::enter(&self.wake_pending);
+        let mut ticket_started = false;
         loop {
-            let Some(func) = self.queue.pop_or_release(self.worker_index) else {
+            let Some(func) = self
+                .queue
+                .pop_or_release(self.worker_index, &mut ticket_started)
+            else {
                 break;
             };
             CURRENT_WORKER_WAKE.with(|slot| {

@@ -31,9 +31,25 @@ fn lock_queue<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 struct QueueInner {
     jobs: VecDeque<Execute>,
     in_flight: Vec<usize>,
+    pending_tickets: Vec<usize>,
     ready: Vec<bool>,
     next_turn: usize,
     closed: bool,
+}
+
+fn record_claim(inner: &mut QueueInner, worker_index: usize) {
+    if inner.in_flight.len() <= worker_index {
+        inner.in_flight.resize(worker_index + 1, 0);
+    }
+    if inner.pending_tickets.len() <= worker_index {
+        inner.pending_tickets.resize(worker_index + 1, 0);
+    }
+    if let Some(slot) = inner.in_flight.get_mut(worker_index) {
+        *slot = slot.saturating_add(1);
+    }
+    if let Some(pending) = inner.pending_tickets.get_mut(worker_index) {
+        *pending = pending.saturating_add(1);
+    }
 }
 
 pub(crate) struct SharedWorkQueue {
@@ -96,26 +112,20 @@ impl SharedWorkQueue {
         if inner.closed {
             return false;
         }
-        let ready_in_flight: usize = inner
-            .in_flight
+        let ready_pending_tickets: usize = inner
+            .pending_tickets
             .iter()
             .enumerate()
             .filter(|&(i, _)| inner.ready.get(i).copied().unwrap_or(false))
-            .map(|(_, &load)| load)
+            .map(|(_, &pending)| pending)
             .sum();
-        if inner.jobs.len() <= ready_in_flight {
+        if inner.jobs.len() <= ready_pending_tickets {
             return false;
         }
-        if inner.in_flight.len() <= worker_index {
-            inner.in_flight.resize(worker_index + 1, 0);
-        }
-        let load = inner.in_flight.get(worker_index).copied().unwrap_or(0);
-        if load >= PER_WORKER_CONCURRENCY {
+        if inner.in_flight.get(worker_index).copied().unwrap_or(0) >= PER_WORKER_CONCURRENCY {
             return false;
         }
-        if let Some(slot) = inner.in_flight.get_mut(worker_index) {
-            *slot = slot.saturating_add(1);
-        }
+        record_claim(&mut inner, worker_index);
         true
     }
 
@@ -132,6 +142,9 @@ impl SharedWorkQueue {
         }
         if inner.in_flight.len() < worker_count {
             inner.in_flight.resize(worker_count, 0);
+        }
+        if inner.pending_tickets.len() < worker_count {
+            inner.pending_tickets.resize(worker_count, 0);
         }
         if inner.ready.len() < worker_count {
             inner.ready.resize(worker_count, false);
@@ -154,9 +167,7 @@ impl SharedWorkQueue {
             first_slot_with_capacity(&inner, worker_count)
         };
         if let Some(idx) = chosen {
-            if let Some(slot) = inner.in_flight.get_mut(idx) {
-                *slot = slot.saturating_add(1);
-            }
+            record_claim(&mut inner, idx);
             let total_in_flight = inner.in_flight.iter().sum();
             ClaimOutcome::Claimed {
                 worker_index: idx,
@@ -171,12 +182,7 @@ impl SharedWorkQueue {
 
     pub(super) fn claim_worker(&self, worker_index: usize) {
         let mut inner = lock_queue(&self.inner);
-        if inner.in_flight.len() <= worker_index {
-            inner.in_flight.resize(worker_index + 1, 0);
-        }
-        if let Some(slot) = inner.in_flight.get_mut(worker_index) {
-            *slot = slot.saturating_add(1);
-        }
+        record_claim(&mut inner, worker_index);
     }
 
     pub(super) fn rollback_claim(&self, worker_index: usize) {
@@ -184,10 +190,23 @@ impl SharedWorkQueue {
         if let Some(slot) = inner.in_flight.get_mut(worker_index) {
             *slot = slot.saturating_sub(1);
         }
+        if let Some(pending) = inner.pending_tickets.get_mut(worker_index) {
+            *pending = pending.saturating_sub(1);
+        }
     }
 
-    pub(super) fn pop_or_release(&self, worker_index: usize) -> Option<Execute> {
+    pub(super) fn pop_or_release(
+        &self,
+        worker_index: usize,
+        ticket_started: &mut bool,
+    ) -> Option<Execute> {
         let mut inner = lock_queue(&self.inner);
+        if !*ticket_started {
+            *ticket_started = true;
+            if let Some(pending) = inner.pending_tickets.get_mut(worker_index) {
+                *pending = pending.saturating_sub(1);
+            }
+        }
         if inner.closed {
             if let Some(slot) = inner.in_flight.get_mut(worker_index) {
                 *slot = slot.saturating_sub(1);
@@ -237,9 +256,11 @@ mod tests {
             overflow,
             ClaimOutcome::Backlogged { queued } if queued == 9
         ));
-        assert!(queue.pop_or_release(0).is_some());
+        let mut started = false;
+        assert!(queue.pop_or_release(0, &mut started).is_some());
+        assert!(started);
         queue.close_and_clear();
-        assert!(queue.pop_or_release(0).is_none());
+        assert!(queue.pop_or_release(0, &mut started).is_none());
     }
 
     #[test]
@@ -328,5 +349,85 @@ mod tests {
         queue.mark_ready(1);
         assert!(queue.claim_backlogged_for(1));
         assert!(!queue.claim_backlogged_for(1));
+    }
+
+    #[test]
+    fn claim_backlogged_for_does_not_starve_behind_running_ready_worker() {
+        let queue = SharedWorkQueue::new();
+        queue.mark_ready(0);
+        for _ in 0..PER_WORKER_CONCURRENCY {
+            assert!(matches!(
+                queue.push_and_claim(noop_job(), 1),
+                ClaimOutcome::Claimed {
+                    worker_index: 0,
+                    ..
+                }
+            ));
+        }
+        // Simulate all 4 tasks on Worker 0 having popped their jobs and awaiting network I/O.
+        for _ in 0..PER_WORKER_CONCURRENCY {
+            let mut started = false;
+            assert!(queue.pop_or_release(0, &mut started).is_some());
+            assert!(started);
+        }
+        // 4 more jobs arrive and remain backlogged while Worker 0 is busy.
+        for expected in 1..=PER_WORKER_CONCURRENCY {
+            assert!(matches!(
+                queue.push_and_claim(noop_job(), 1),
+                ClaimOutcome::Backlogged { queued } if queued == expected
+            ));
+        }
+
+        queue.mark_ready(1);
+        for _ in 0..PER_WORKER_CONCURRENCY {
+            assert!(queue.claim_backlogged_for(1));
+        }
+        assert!(!queue.claim_backlogged_for(1));
+    }
+
+    #[test]
+    fn claim_backlogged_for_respects_ready_unpopped_tickets_without_overclaiming() {
+        let queue = SharedWorkQueue::new();
+        queue.mark_ready(0);
+        assert!(matches!(
+            queue.push_and_claim(noop_job(), 2),
+            ClaimOutcome::Claimed {
+                worker_index: 0,
+                ..
+            }
+        ));
+        queue.mark_ready(1);
+        assert!(!queue.claim_backlogged_for(1));
+    }
+
+    #[test]
+    fn rollback_and_empty_first_pop_release_pending_tickets() {
+        let queue = SharedWorkQueue::new();
+        queue.mark_ready(0);
+        assert!(matches!(
+            queue.push_and_claim(noop_job(), 2),
+            ClaimOutcome::Claimed {
+                worker_index: 0,
+                ..
+            }
+        ));
+        queue.rollback_claim(0);
+        queue.mark_ready(1);
+        assert!(queue.claim_backlogged_for(1));
+        assert!(!queue.claim_backlogged_for(1));
+
+        // Drain the single job via worker 0, then worker 1's ticket pops empty and releases its
+        // pending ticket so future backlog isn't suppressed.
+        let mut started0 = false;
+        assert!(queue.pop_or_release(0, &mut started0).is_some());
+        let mut started1 = false;
+        assert!(queue.pop_or_release(1, &mut started1).is_none());
+        assert!(started1);
+
+        assert!(matches!(
+            queue.push_and_claim(noop_job(), 0),
+            ClaimOutcome::Backlogged { queued: 1 }
+        ));
+        assert!(queue.claim_backlogged_for(0));
     }
 }
