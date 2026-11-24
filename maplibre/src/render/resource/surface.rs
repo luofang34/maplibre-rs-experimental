@@ -308,6 +308,26 @@ impl Surface {
         }
         is_supported
     }
+
+    /// Usage of the multisampled color target that goes with a depth attachment of
+    /// `depth_usage`. Depth is transient exactly when one pass draws the whole frame; the color
+    /// samples are then resolved inside that pass and never loaded again, so a tile-based GPU
+    /// need not back them with memory either.
+    pub(crate) fn multisampling_usage(
+        &self,
+        depth_usage: wgpu::TextureUsages,
+    ) -> wgpu::TextureUsages {
+        let allowed = match &self.head {
+            Head::Headed(headed) => headed.texture_format_features.allowed_usages,
+            Head::Headless(headless) => headless.texture_format_features.allowed_usages,
+        };
+        let transient = wgpu::TextureUsages::TRANSIENT_ATTACHMENT;
+        if depth_usage.contains(transient) && allowed.contains(transient) {
+            wgpu::TextureUsages::RENDER_ATTACHMENT | transient
+        } else {
+            wgpu::TextureUsages::RENDER_ATTACHMENT
+        }
+    }
 }
 
 #[cfg(all(test, feature = "headless"))]

@@ -345,6 +345,11 @@ fn sync_depth_and_msaa(
             &spec.msaa.samples,
         );
     }
+    let msaa_usage = surface.multisampling_usage(spec.depth_usage);
+    if matches!(&state.multisampling_texture, Eventually::Initialized(Some(t)) if t.texture.usage() != msaa_usage)
+    {
+        state.multisampling_texture.take();
+    }
     state.multisampling_texture.reinitialize(
         || {
             (settings.msaa.is_multisampling() && surface.is_multisampling_supported(settings.msaa))
@@ -356,7 +361,7 @@ fn sync_depth_and_msaa(
                         w,
                         h,
                         settings.msaa,
-                        wgpu::TextureUsages::RENDER_ATTACHMENT,
+                        msaa_usage,
                     )
                 })
         },

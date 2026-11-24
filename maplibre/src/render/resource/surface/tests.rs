@@ -40,6 +40,38 @@ async fn sixteen_samples_are_supported_when_advertised() {
 }
 
 #[tokio::test]
+async fn the_multisampled_color_target_is_transient_only_alongside_transient_depth() {
+    let attachment = wgpu::TextureUsages::RENDER_ATTACHMENT;
+    let transient = wgpu::TextureUsages::TRANSIENT_ATTACHMENT;
+    let mut surface = surface_with_flags(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X4).await;
+    let allow = |surface: &mut Surface, usages| {
+        let Head::Headless(texture) = surface.head_mut() else {
+            panic!("offscreen surface");
+        };
+        Arc::get_mut(texture)
+            .expect("unique texture")
+            .texture_format_features
+            .allowed_usages = usages;
+    };
+
+    allow(&mut surface, attachment | transient);
+    assert_eq!(
+        surface.multisampling_usage(attachment | transient),
+        attachment | transient
+    );
+    assert_eq!(
+        surface.multisampling_usage(attachment | wgpu::TextureUsages::TEXTURE_BINDING),
+        attachment
+    );
+
+    allow(&mut surface, attachment);
+    assert_eq!(
+        surface.multisampling_usage(attachment | transient),
+        attachment
+    );
+}
+
+#[tokio::test]
 async fn an_invalid_sample_count_falls_back_to_a_valid_frame() {
     use crate::{
         headless::{create_headless_renderer_with_settings, map::HeadlessMap},
