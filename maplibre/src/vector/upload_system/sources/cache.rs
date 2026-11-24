@@ -31,6 +31,10 @@ pub(super) struct FrameSourcesKey {
     terrain_active: bool,
     pub(super) terrain_settled: bool,
     retained_drapes_len: usize,
+    retained_drapes_hash: u64,
+    multi_active: bool,
+    current_slot: Option<u32>,
+    drape_view: Option<u32>,
     drape_hash: u64,
     fallback_hash: u64,
 }
@@ -40,16 +44,6 @@ pub(super) struct FrameSourcesCache {
     pub(super) key: Option<FrameSourcesKey>,
     pub(super) result: Option<FrameUploadSources>,
     pub(super) view_tiles_scratch: Vec<WorldTileCoords>,
-}
-
-fn hash_coord_slice(coords: &[WorldTileCoords]) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = rustc_hash::FxHasher::default();
-    coords.len().hash(&mut hasher);
-    for c in coords {
-        c.hash(&mut hasher);
-    }
-    hasher.finish()
 }
 
 /// Digest of `coords` as a set. A covering lists its tiles nearest the camera's focus first, so
@@ -63,19 +57,53 @@ pub(super) fn hash_coord_set(coords: &[WorldTileCoords]) -> u64 {
     })
 }
 
+fn hash_retained_drapes(drapes: &FxHashSet<WorldTileCoords>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    drapes.iter().fold(drapes.len() as u64, |digest, c| {
+        let mut hasher = rustc_hash::FxHasher::default();
+        c.hash(&mut hasher);
+        digest.wrapping_add(hasher.finish())
+    })
+}
+
+fn terrain_key_fields(world: &World, terrain_active: bool) -> (bool, u64, usize, u64) {
+    if !terrain_active {
+        return (true, 0, 0, 0);
+    }
+    let settled = world
+        .resources
+        .get::<crate::terrain::DrapePhase>()
+        .is_none_or(|p| p.targets.is_empty())
+        && !world
+            .resources
+            .get::<crate::terrain::queue_system::PendingDrapes>()
+            .is_some_and(crate::terrain::queue_system::PendingDrapes::any_pending);
+    let drape_hash = world
+        .resources
+        .get::<DrapeRequests>()
+        .map_or(0, |r| hash_coord_set(&r.0));
+    let (retained_len, retained_hash) = world
+        .resources
+        .get::<crate::render::eye_covering::SlotResidencyFloor>()
+        .map_or((0, 0), |f| {
+            (
+                f.retained_drapes.len(),
+                hash_retained_drapes(&f.retained_drapes),
+            )
+        });
+    (settled, drape_hash, retained_len, retained_hash)
+}
+
 pub(super) fn build_frame_sources_key(
     world: &World,
     style: &Style,
     view_state: &ViewState,
     view_tiles: Option<&[WorldTileCoords]>,
 ) -> Option<FrameSourcesKey> {
-    if world
+    let multi_active = world
         .resources
         .get::<crate::render::eye_covering::MultiViewExtractCovering>()
-        .is_some_and(|m| m.active)
-    {
-        return None;
-    }
+        .is_some_and(|m| m.active);
     let Some(Initialized(pool)) = world
         .resources
         .get::<Eventually<crate::vector::VectorBufferPool>>()
@@ -83,34 +111,14 @@ pub(super) fn build_frame_sources_key(
         return None;
     };
     let terrain_active = style.terrain.is_some();
-    let terrain_settled = !terrain_active
-        || (world
-            .resources
-            .get::<crate::terrain::DrapePhase>()
-            .is_none_or(|p| p.targets.is_empty())
-            && !world
-                .resources
-                .get::<crate::terrain::queue_system::PendingDrapes>()
-                .is_some_and(crate::terrain::queue_system::PendingDrapes::any_pending));
-    let drape_hash = if terrain_active {
-        world
-            .resources
-            .get::<DrapeRequests>()
-            .map_or(0, |r| hash_coord_slice(&r.0))
-    } else {
-        0
-    };
+    let (terrain_settled, drape_hash, retained_drapes_len, retained_drapes_hash) =
+        terrain_key_fields(world, terrain_active);
     let fallback_hash = world
         .resources
         .get::<VectorFallbackTiles>()
-        .map_or(0, |f| hash_coord_slice(&f.0));
-    let retained_drapes_len = if terrain_active {
-        world
-            .resources
-            .get::<crate::render::eye_covering::SlotResidencyFloor>()
-            .map_or(0, |f| f.retained_drapes.len())
-    } else {
-        0
+        .map_or(0, |f| hash_coord_set(&f.0));
+    let slot_raw = |s: &Option<crate::render::eye_covering::ViewSlotId>| {
+        s.map(crate::render::eye_covering::ViewSlotId::as_u32)
     };
     Some(FrameSourcesKey {
         view_tiles_present: view_tiles.is_some(),
@@ -124,6 +132,16 @@ pub(super) fn build_frame_sources_key(
         terrain_active,
         terrain_settled,
         retained_drapes_len,
+        retained_drapes_hash,
+        multi_active,
+        current_slot: world
+            .resources
+            .get::<crate::render::eye_covering::CurrentViewSlot>()
+            .and_then(|s| slot_raw(&s.0)),
+        drape_view: world
+            .resources
+            .get::<crate::render::eye_covering::DrapeView>()
+            .and_then(|v| slot_raw(&v.0)),
         drape_hash,
         fallback_hash,
     })

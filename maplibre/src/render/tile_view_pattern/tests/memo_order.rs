@@ -48,6 +48,32 @@ fn a_different_covering_of_the_same_size_rebuilds_the_pattern() {
 }
 
 #[test]
+fn a_reordered_raster_covering_reuses_the_pattern() {
+    use crate::io::tile_sources::RasterSourceId;
+    let world = World::default();
+    let reg = region(vec![tile(3, 3, 3), tile(4, 3, 3)]);
+    let raster_a = vec![(
+        RasterSourceId::from("sat"),
+        vec![tile(3, 3, 3), tile(4, 3, 3)],
+    )];
+    let raster_b = vec![(
+        RasterSourceId::from("sat"),
+        vec![tile(4, 3, 3), tile(3, 3, 3)],
+    )];
+    let raster_c = vec![(
+        RasterSourceId::from("sat"),
+        vec![tile(3, 3, 3), tile(5, 3, 3)],
+    )];
+    let mut memo = TileViewPatternMemo::default();
+    memo.record_key(compute_memo_key(&reg, &raster_a, 7, &world), Zoom::new(3.0));
+
+    let reordered = compute_memo_key(&reg, &raster_b, 7, &world);
+    assert!(memo.matches_key(reordered.as_ref(), false));
+    let changed = compute_memo_key(&reg, &raster_c, 7, &world);
+    assert!(!memo.matches_key(changed.as_ref(), false));
+}
+
+#[test]
 fn either_order_of_a_covering_generates_the_same_tiles() {
     let pattern: TileViewPattern<TestQueue, TestBuffer> =
         TileViewPattern::new(BackingBufferDescriptor::new(TestBuffer, 0));

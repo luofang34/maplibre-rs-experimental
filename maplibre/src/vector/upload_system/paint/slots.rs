@@ -8,12 +8,13 @@ use crate::{coords::WorldTileCoords, render::shaders::ShaderLayerMetadata};
 
 #[inline]
 pub(in super::super) fn source_tiles_hash(source_tiles: &[WorldTileCoords]) -> u64 {
-    let mut hasher = FxHasher::default();
-    source_tiles.len().hash(&mut hasher);
-    for coords in source_tiles {
-        coords.hash(&mut hasher);
-    }
-    hasher.finish()
+    source_tiles
+        .iter()
+        .fold(source_tiles.len() as u64, |digest, coords| {
+            let mut hasher = FxHasher::default();
+            coords.hash(&mut hasher);
+            digest.wrapping_add(hasher.finish())
+        })
 }
 
 #[derive(Default)]

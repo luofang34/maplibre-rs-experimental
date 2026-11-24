@@ -20,21 +20,30 @@ struct GlobeMeshPrepareMemo {
     last_globe: Option<(u64, bool, bool, Vec<crate::coords::WorldTileCoords>)>,
 }
 
+fn tile_sets_match(
+    drawn: &[crate::coords::WorldTileCoords],
+    cached_bg: &[crate::coords::WorldTileCoords],
+) -> bool {
+    let mut wrapped = drawn
+        .iter()
+        .copied()
+        .filter(|coords| coords.wrapped().is_some());
+    let Some(first) = wrapped.next() else {
+        return cached_bg == [crate::coords::WorldTileCoords::default()];
+    };
+    cached_bg.contains(&first)
+        && wrapped.all(|coords| cached_bg.contains(&coords))
+        && cached_bg
+            .iter()
+            .all(|coords| drawn.iter().any(|d| d == coords && d.wrapped().is_some()))
+}
+
 fn globe_tiles_match(
     world: &crate::tcs::world::World,
     cached_bg: &[crate::coords::WorldTileCoords],
 ) -> bool {
     let drawn = crate::render::eye_covering::drawn_tiles(world).unwrap_or_default();
-    let mut wrapped = drawn
-        .iter()
-        .copied()
-        .filter(|coords| coords.wrapped().is_some())
-        .peekable();
-    if wrapped.peek().is_none() {
-        cached_bg == [crate::coords::WorldTileCoords::default()]
-    } else {
-        wrapped.eq(cached_bg.iter().copied())
-    }
+    tile_sets_match(drawn, cached_bg)
 }
 
 pub fn upload_system(
@@ -245,4 +254,29 @@ pub fn upload_system(
     memo.last_globe = Some((topology_gen, with_raster, with_borders, background_tiles));
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tile_sets_match;
+    use crate::coords::{WorldTileCoords, ZoomLevel};
+
+    fn tile(x: i32, y: i32, z: u8) -> WorldTileCoords {
+        WorldTileCoords {
+            x,
+            y,
+            z: ZoomLevel::new(z),
+        }
+    }
+
+    #[test]
+    fn globe_tiles_match_ignores_covering_order() {
+        let a = tile(3, 3, 3);
+        let b = tile(4, 3, 3);
+        let c = tile(3, 4, 3);
+        assert!(tile_sets_match(&[b, c, a], &[a, b, c]));
+        assert!(!tile_sets_match(&[a, b], &[a, b, c]));
+        assert!(!tile_sets_match(&[tile(5, 3, 3), b, c], &[a, b, c]));
+        assert!(tile_sets_match(&[], &[WorldTileCoords::default()]));
+    }
 }

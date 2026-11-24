@@ -93,7 +93,17 @@ impl SharedWorkQueue {
 
     pub(super) fn claim_backlogged_for(&self, worker_index: usize) -> bool {
         let mut inner = lock_queue(&self.inner);
-        if inner.closed || inner.jobs.is_empty() {
+        if inner.closed {
+            return false;
+        }
+        let ready_in_flight: usize = inner
+            .in_flight
+            .iter()
+            .enumerate()
+            .filter(|&(i, _)| inner.ready.get(i).copied().unwrap_or(false))
+            .map(|(_, &load)| load)
+            .sum();
+        if inner.jobs.len() <= ready_in_flight {
             return false;
         }
         if inner.in_flight.len() <= worker_index {
@@ -302,6 +312,21 @@ mod tests {
         for _ in 0..(PER_WORKER_CONCURRENCY - 2) {
             assert!(queue.claim_backlogged_for(1));
         }
+        assert!(!queue.claim_backlogged_for(1));
+    }
+
+    #[test]
+    fn claim_backlogged_for_does_not_overclaim_single_queued_job() {
+        let queue = SharedWorkQueue::new();
+        assert!(matches!(
+            queue.push_and_claim(noop_job(), 2),
+            ClaimOutcome::Claimed {
+                worker_index: 0,
+                ..
+            }
+        ));
+        queue.mark_ready(1);
+        assert!(queue.claim_backlogged_for(1));
         assert!(!queue.claim_backlogged_for(1));
     }
 }

@@ -36,6 +36,12 @@ pub struct GlobeDaylightPipeline(pub wgpu::RenderPipeline);
 #[derive(Default)]
 pub struct GlobeDaylightGpu(Option<wgpu::Buffer>);
 
+impl GlobeDaylightGpu {
+    pub(crate) fn has_frame(&self) -> bool {
+        self.0.is_some()
+    }
+}
+
 /// What the pass takes for one frame.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]

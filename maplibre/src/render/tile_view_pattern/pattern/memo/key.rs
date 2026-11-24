@@ -108,13 +108,14 @@ fn build_key(
             }
         }
     }
-    let mut rh = FxHasher::default();
+    let mut raster_coverings_digest = 0_u64;
     for (source, tiles) in raster_coverings {
-        source.hash(&mut rh);
-        tiles.len().hash(&mut rh);
+        let mut tiles_acc = tiles.len() as u64;
         for coords in tiles {
-            coords.hash(&mut rh);
+            tiles_acc = tiles_acc.wrapping_add(digest_of(coords));
         }
+        raster_coverings_digest =
+            raster_coverings_digest.wrapping_add(digest_of(&(source, tiles_acc)));
     }
     let (vector_pool_rev, vector_pool_eviction_gen, vector_pool_has_capacity) =
         match world.resources.get::<Eventually<VectorBufferPool>>() {
@@ -150,7 +151,7 @@ fn build_key(
         view_region_digest,
         view_region_order_digest: view_region_order.finish(),
         view_region_len,
-        raster_coverings_digest: rh.finish(),
+        raster_coverings_digest,
         raster_coverings_len: raster_coverings.len(),
         vector_pool_rev,
         vector_pool_eviction_gen,

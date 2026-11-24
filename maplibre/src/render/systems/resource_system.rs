@@ -1,6 +1,10 @@
 //! Prepares GPU-owned resources by initializing them if they are uninitialized or out-of-date.
 
+mod depth;
+
 use std::{borrow::Cow, mem};
+
+use depth::{compute_needs_persistent_depth, depth_texture_usage, CachedDepthFormatFeatures};
 
 use crate::{
     context::MapContext,
@@ -191,77 +195,6 @@ fn ensure_draw_capabilities_and_features(
             format: settings.depth_texture_format,
             supports_transient,
         });
-    }
-}
-
-fn compute_needs_persistent_depth(
-    world: &mut crate::tcs::world::World,
-    style: &crate::style::Style,
-    view_state: &crate::render::view_state::ViewState,
-    settings: &RendererSettings,
-    state: &crate::render::RenderResources,
-    render_graph: &crate::render::graph::RenderGraph,
-) -> bool {
-    let supports_transient = world
-        .resources
-        .get::<CachedDepthFormatFeatures>()
-        .is_some_and(|c| c.supports_transient);
-    if !supports_transient {
-        return true;
-    }
-    let world_needs = world
-        .resources
-        .get::<crate::render::ground::FrameGround>()
-        .is_some_and(|g| g.0.is_some())
-        || has_celestial_sun(world)
-        || matches!(
-            world
-                .resources
-                .get::<Eventually<crate::sdf::depth::SymbolDepth>>(),
-            Some(Eventually::Initialized(sd)) if !sd.skip_depth_copy
-        );
-    if settings.depth_readout
-        || state.eye_depth_target.is_some()
-        || style.terrain.is_some()
-        || world_needs
-        || render_graph.has_custom_scene_depth_writers()
-        || render_graph.has_named_depth_reader_passes()
-    {
-        return true;
-    }
-    let pitch_tilted = view_state.camera().get_pitch().0.abs() >= 1e-4;
-    let style_rev = style.revision();
-    if let Some(cached) = world.resources.get::<CachedDepthLayerScan>()
-        && cached.style_rev == style_rev
-        && cached.pitch_tilted == pitch_tilted
-    {
-        return cached.needs_persistent;
-    }
-    let scan = matches!(
-        style.projection.as_ref().map(|p| &p.projection_type),
-        Some(crate::projection::ProjectionType::VerticalPerspective)
-    ) || style.layers.iter().any(|l| {
-        l.type_ == "custom"
-            || (pitch_tilted
-                && matches!(
-                    l.type_.as_str(),
-                    "fill-extrusion" | "raster" | "hillshade" | "color-relief"
-                ))
-    });
-    world.resources.insert(CachedDepthLayerScan {
-        style_rev,
-        pitch_tilted,
-        needs_persistent: scan,
-    });
-    scan
-}
-
-fn depth_texture_usage(supports_transient: bool, needs_persistent: bool) -> wgpu::TextureUsages {
-    if supports_transient && !needs_persistent {
-        wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TRANSIENT_ATTACHMENT
-    } else {
-        // A host compositor or downstream pass reads depth back via copy or sampling.
-        wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING
     }
 }
 
@@ -473,27 +406,4 @@ struct CachedRenderPrepKey {
     has_eye_depth_target: bool,
     want_flat: bool,
     want_globe: bool,
-}
-
-struct CachedDepthFormatFeatures {
-    format: wgpu::TextureFormat,
-    supports_transient: bool,
-}
-
-struct CachedDepthLayerScan {
-    style_rev: u64,
-    pitch_tilted: bool,
-    needs_persistent: bool,
-}
-
-fn has_celestial_sun(world: &crate::tcs::world::World) -> bool {
-    #[cfg(feature = "experimental")]
-    {
-        crate::celestial::lighting(world).sun.is_some()
-    }
-    #[cfg(not(feature = "experimental"))]
-    {
-        let _ = world;
-        false
-    }
 }

@@ -166,6 +166,16 @@ impl RenderGraph {
         self.has_named_depth_readers
     }
 
+    /// Whether `main_pass` runs before `translucent_pass`, required for inline pass fusion.
+    pub(crate) fn has_main_before_translucent(&self) -> bool {
+        match &self.order {
+            Some(order) => order.has_main_before_translucent,
+            None => self
+                .resolve_metadata()
+                .is_ok_and(|resolved| resolved.has_main_before_translucent),
+        }
+    }
+
     /// Resolves the run order after passes or constraints changed.
     pub fn prepare(&mut self) -> Result<(), RenderGraphError> {
         if self.order.is_none() {
