@@ -185,7 +185,10 @@ impl TerrainResources {
         if let Some((prev_targets, prev_allowance, clean)) = self.drape_retain_state.get(&view) {
             if *clean
                 && *prev_allowance == view_textures
-                && prev_targets.as_slice() == target_coords
+                && crate::terrain::queue_system::spec_cache::same_tile_set(
+                    prev_targets.as_slice(),
+                    target_coords,
+                )
             {
                 return;
             }
@@ -211,7 +214,10 @@ impl TerrainResources {
             .drape_retain_state
             .entry(view)
             .or_insert_with(|| (Vec::new(), 0, false));
-        if entry.0.as_slice() != target_coords {
+        if !crate::terrain::queue_system::spec_cache::same_tile_set(
+            entry.0.as_slice(),
+            target_coords,
+        ) {
             entry.0.clear();
             entry.0.extend_from_slice(target_coords);
         }

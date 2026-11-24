@@ -42,18 +42,10 @@ pub fn upload_system(
     if crate::render::eye_covering::EyeInFrame::reuses_content(world) {
         return Ok(());
     }
+    let has_media_sources = style.cached_has_media_sources();
     let has_raster_or_media = style
-        .layers
-        .iter()
-        .any(|l| crate::io::tile_sources::RASTER_LAYER_TYPES.contains(&l.type_.as_str()))
-        || style.sources.values().any(|s| {
-            matches!(
-                s,
-                crate::style::source::Source::Image(_)
-                    | crate::style::source::Source::Video(_)
-                    | crate::style::source::Source::Canvas(_)
-            )
-        });
+        .cached_has_any_raster_type(&crate::io::tile_sources::RASTER_LAYER_TYPES)
+        || has_media_sources;
     if !has_raster_or_media
         && world
             .tiles
@@ -63,15 +55,16 @@ pub fn upload_system(
     {
         return Ok(());
     }
-    let has_active_media = style.sources.values().any(|s| {
-        matches!(
-            s,
-            crate::style::source::Source::Video(v) if v.frame.is_some()
-        ) || matches!(
-            s,
-            crate::style::source::Source::Canvas(c) if c.frame.is_some()
-        )
-    });
+    let has_active_media = has_media_sources
+        && style.sources.values().any(|s| {
+            matches!(
+                s,
+                crate::style::source::Source::Video(v) if v.frame.is_some()
+            ) || matches!(
+                s,
+                crate::style::source::Source::Canvas(c) if c.frame.is_some()
+            )
+        });
     let pre_key = (
         crate::raster::raster_arrival_epoch(world),
         crate::terrain::dem_arrival_epoch(world),

@@ -8,7 +8,7 @@ mod sky;
 pub(crate) use globe_uniform::globe_layer_bind_group_layout;
 use globe_uniform::GlobeLayerUniformPool;
 pub use scratch::world_rows;
-pub(crate) use scratch::{fill_globe_tiles, BackgroundScratch};
+pub(crate) use scratch::{fill_globe_tiles, world_rows_with_vp, BackgroundScratch};
 pub use sky::{sky_metadata, sky_metadata_with_camera};
 
 use crate::{

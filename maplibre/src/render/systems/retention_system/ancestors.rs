@@ -108,7 +108,7 @@ pub(crate) fn finish_tiles_in_use(
     let dem = dem_source(style);
     let max_zoom = crate::io::tile_sources::source_max_zoom(style, TileKind::Vector);
     if style.terrain.is_some()
-        && !crate::io::tile_sources::source_layer_groups(style, TileKind::Vector).is_empty()
+        && style.cached_has_vector_source_layers()
         && crate::io::tile_sources::source_min_zoom(style, TileKind::Vector)
             .is_none_or(|min| min == 0)
     {
@@ -222,6 +222,9 @@ pub(super) fn retain_terrain_region_if_needed(
 }
 
 fn active_raster_sources(style: &Style) -> Vec<(RasterSourceId, u8)> {
+    if !style.cached_has_any_raster_type(&crate::io::tile_sources::RASTER_LAYER_TYPES) {
+        return Vec::new();
+    }
     let mut seen = FxHashSet::default();
     let mut out = Vec::new();
     for group in crate::io::tile_sources::source_layer_groups(style, TileKind::Raster) {

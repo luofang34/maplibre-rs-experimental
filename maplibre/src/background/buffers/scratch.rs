@@ -214,16 +214,19 @@ pub(crate) fn fill_globe_tiles(world: &crate::tcs::world::World, out: &mut Vec<W
     }
 }
 
-/// The rows that tell a pixel's map row for the northern and southern edges of the flat map,
-/// or ones that cut nothing where the map has no such edges.
-pub fn world_rows(view_state: &ViewState, edges: bool) -> [[f32; 4]; 2] {
+/// Same as [`world_rows`], reusing a precomputed camera view-projection matrix when available.
+pub fn world_rows_with_vp(
+    view_state: &ViewState,
+    view_projection: &Matrix4<f64>,
+    edges: bool,
+) -> [[f32; 4]; 2] {
     const OPEN: [[f32; 4]; 2] = [[0.0, 0.0, 0.0, -1e30], [0.0, 0.0, 0.0, 1e30]];
     if !edges {
         return OPEN;
     }
     let center = view_state.camera().position();
-    let relative = view_state.view_projection().0
-        * Matrix4::from_translation(Vector3::new(center.x, center.y, 0.0));
+    let relative =
+        view_projection * Matrix4::from_translation(Vector3::new(center.x, center.y, 0.0));
     let plane = Matrix3::new(
         relative.x.x,
         relative.x.y,
@@ -253,4 +256,14 @@ pub fn world_rows(view_state: &ViewState, edges: bool) -> [[f32; 4]; 2] {
             (world - center.y) as f32,
         ],
     ]
+}
+
+/// The rows that tell a pixel's map row for the northern and southern edges of the flat map,
+/// or ones that cut nothing where the map has no such edges.
+pub fn world_rows(view_state: &ViewState, edges: bool) -> [[f32; 4]; 2] {
+    if !edges {
+        return [[0.0, 0.0, 0.0, -1e30], [0.0, 0.0, 0.0, 1e30]];
+    }
+    let vp = view_state.view_projection();
+    world_rows_with_vp(view_state, &vp.0, edges)
 }

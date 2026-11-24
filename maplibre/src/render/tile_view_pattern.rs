@@ -298,6 +298,25 @@ pub struct ShapeDrawData {
 }
 
 impl ShapeDrawData {
+    /// Builds draw metadata directly from a tile coordinate and pre-uploaded buffer range
+    /// without constructing a temporary `TileShape` or `Matrix4<f64>`.
+    #[inline]
+    pub(crate) fn from_buffer_range(
+        coords: WorldTileCoords,
+        buffer_range: Range<wgpu::BufferAddress>,
+    ) -> Self {
+        Self {
+            buffer_start: buffer_range.start,
+            coords,
+            wrap: 0,
+            buffer_len: u32::try_from(buffer_range.end.saturating_sub(buffer_range.start))
+                .unwrap_or(u32::MAX),
+            stencil_reference: coords.stencil_reference_value_3d(),
+            within_another: false,
+            has_buffer_range: true,
+        }
+    }
+
     /// Tile coordinate represented by this entry.
     #[inline]
     pub fn coords(&self) -> WorldTileCoords {

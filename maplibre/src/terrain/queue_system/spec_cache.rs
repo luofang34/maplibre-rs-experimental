@@ -50,6 +50,18 @@ pub(super) struct TargetSpecsKey {
     pub(super) style_vis_digest: u64,
 }
 
+/// Compares two covering slices as sets so orbit-only reordering never invalidates cached specs
+/// or drape retain tracking.
+pub(in crate::terrain) fn same_tile_set(a: &[WorldTileCoords], b: &[WorldTileCoords]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    if a == b {
+        return true;
+    }
+    a.iter().all(|t| b.contains(t)) && b.iter().all(|t| a.contains(t))
+}
+
 impl TargetSpecsKey {
     pub(super) fn matches_slices(
         &self,
@@ -74,8 +86,8 @@ impl TargetSpecsKey {
             && self.raster_gen == digests.raster_gen
             && self.style_rev == digests.style_rev
             && self.style_vis_digest == digests.style_vis_digest
-            && self.tiles.as_slice() == tiles
-            && self.prefetch_fresh.as_slice() == prefetch_fresh
+            && same_tile_set(&self.tiles, tiles)
+            && same_tile_set(&self.prefetch_fresh, prefetch_fresh)
     }
 }
 
@@ -85,7 +97,6 @@ pub(super) struct DrapePrepKey {
     pub(super) drape_paint_zoom_bits: u64,
     pub(super) clear_color_bits: [u64; 4],
     pub(super) strict: bool,
-    pub(super) capacity: usize,
     pub(super) vector_pool_state: (u64, u64, bool),
     pub(super) vector_arrival_epoch: u64,
     pub(super) target_tiles_digest: u64,
@@ -99,6 +110,8 @@ pub(super) struct DrapePrepKey {
 pub(super) struct CachedPrep {
     pub(super) prints: Vec<u64>,
     pub(super) ready: Vec<bool>,
+    pub(super) needed_shapes: usize,
+    pub(super) clipped_at_capacity: Option<usize>,
 }
 
 #[derive(Default)]
@@ -113,6 +126,7 @@ pub(super) struct DrapePrepareCache {
     loose_raster_key: Option<LooseRasterKey>,
     loose_raster: Option<crate::render::eye_covering::RasterCoverings>,
     style_vis_cache: Option<(u64, u64, u64)>,
+    draw_after_layer_cache: Option<(u64, u32)>,
 }
 
 impl DrapePrepareCache {
@@ -189,16 +203,40 @@ impl DrapePrepareCache {
             .map(|_| self.specs_gen)
     }
 
-    pub(super) fn get_prep(&self, key: &DrapePrepKey) -> Option<Arc<CachedPrep>> {
-        if self.prep_key.as_ref() == Some(key) {
-            return self.prep.as_ref().map(Arc::clone);
+    pub(super) fn get_prep(&self, key: &DrapePrepKey, capacity: usize) -> Option<Arc<CachedPrep>> {
+        if self.prep_key.as_ref() != Some(key) {
+            return None;
         }
-        None
+        self.prep
+            .as_ref()
+            .filter(|prep| {
+                prep.clipped_at_capacity
+                    .map_or(capacity >= prep.needed_shapes, |cap| cap == capacity)
+            })
+            .map(Arc::clone)
     }
 
     pub(super) fn store_prep(&mut self, key: DrapePrepKey, prep: Arc<CachedPrep>) {
         self.prep_key = Some(key);
         self.prep = Some(prep);
+    }
+
+    pub(super) fn cached_draw_after_layer_index(&mut self, style: &Style) -> u32 {
+        let rev = style.revision();
+        if let Some((cached_rev, index)) = self.draw_after_layer_cache
+            && cached_rev == rev
+        {
+            return index;
+        }
+        let index = style
+            .layers
+            .iter()
+            .filter(|layer| layer.type_ == "background")
+            .map(|layer| layer.index)
+            .max()
+            .unwrap_or(0);
+        self.draw_after_layer_cache = Some((rev, index));
+        index
     }
 
     pub(super) fn style_visibility_digest_cached(&mut self, style: &Style, zoom: f64) -> u64 {
@@ -228,16 +266,19 @@ pub(super) fn relevant_tiles_len(world: &World) -> (usize, usize) {
 }
 
 pub(super) fn raster_coverings_digest(coverings: &[(RasterSourceId, Vec<WorldTileCoords>)]) -> u64 {
-    let mut h = FxHasher::default();
-    coverings.len().hash(&mut h);
-    for (source, tiles) in coverings {
-        source.hash(&mut h);
-        tiles.len().hash(&mut h);
-        for coords in tiles {
-            coords.hash(&mut h);
-        }
-    }
-    h.finish()
+    coverings
+        .iter()
+        .fold(coverings.len() as u64, |acc, (source, tiles)| {
+            let mut sh = FxHasher::default();
+            source.hash(&mut sh);
+            let tile_digest = tiles.iter().fold(tiles.len() as u64, |t_acc, coords| {
+                let mut th = FxHasher::default();
+                coords.hash(&mut th);
+                t_acc.wrapping_add(th.finish())
+            });
+            tile_digest.hash(&mut sh);
+            acc.wrapping_add(sh.finish())
+        })
 }
 
 pub(super) fn style_visibility_digest(style: &Style, zoom: f64) -> u64 {

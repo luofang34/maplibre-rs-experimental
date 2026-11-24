@@ -5,7 +5,7 @@ use crate::{
         eventually::{Eventually, Eventually::Initialized},
         render_phase::{DrawState, RenderPhase, TranslucentItem},
         shaders::ShaderTileMetadata,
-        tile_view_pattern::TileShape,
+        tile_view_pattern::ShapeDrawData,
     },
     sdf::{covering::SymbolCovering, render_commands::DrawSymbols, SymbolBufferPool},
     tcs::{
@@ -58,15 +58,28 @@ pub fn queue_system(
     let stride = size_of::<ShaderTileMetadata>() as u64;
     let SymbolCovering {
         tiles,
+        tiles_version,
+        visible_hash,
+        phase_key,
         queue_scratch,
         ..
     } = covering;
+    let next_phase_key = (
+        *tiles_version,
+        style.revision(),
+        *visible_hash,
+        pool.revision(),
+        pool.eviction_generation(),
+    );
+    if *phase_key == Some(next_phase_key) {
+        phase.extend_from_slice(queue_scratch);
+        return Ok(());
+    }
     queue_scratch.clear();
     let style_zoom = view_state.style_zoom().value();
-    let zoom = view_state.zoom();
     for (index, coords) in tiles.iter().enumerate() {
         let start = index as u64 * stride;
-        let shape = TileShape::with_buffer_range(*coords, zoom, start..start + stride).draw_data();
+        let shape = ShapeDrawData::from_buffer_range(*coords, start..start + stride);
         for (slot_idx, layer) in pool
             .index()
             .get_layers(*coords)
@@ -91,6 +104,7 @@ pub fn queue_system(
     if !queue_scratch.is_sorted_by_key(|item| item.index) {
         queue_scratch.sort_by_key(|item| item.index);
     }
+    *phase_key = Some(next_phase_key);
     phase.extend_from_slice(queue_scratch);
     Ok(())
 }

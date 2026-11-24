@@ -53,6 +53,7 @@ fn metadata_shortage_defers_whole_textures_instead_of_caching_partial_coverage()
         })
         .collect();
     let mut ready = vec![true; 3];
-    fit_metadata(&specs, &mut ready, 4);
+    let (needed, clipped) = fit_metadata(&specs, &mut ready, 4);
     assert_eq!(ready, [true, false, true]);
+    assert_eq!((needed, clipped), (3, true));
 }

@@ -99,13 +99,14 @@ fn sources_digest(
     )],
 ) -> u64 {
     use std::hash::Hash;
-    let mut hasher = TileHasher::default();
-    sources.len().hash(&mut hasher);
-    for (dem, tile, _) in sources {
-        dem.hash(&mut hasher);
-        tile.hash(&mut hasher);
-    }
-    hasher.finish()
+    sources
+        .iter()
+        .fold(sources.len() as u64, |acc, (dem, tile, _)| {
+            let mut hasher = TileHasher::default();
+            dem.hash(&mut hasher);
+            tile.hash(&mut hasher);
+            acc.wrapping_add(hasher.finish())
+        })
 }
 
 impl EdgeCache {

@@ -26,7 +26,9 @@ pub fn queue_system(
         ..
     }: &mut MapContext,
 ) -> SystemResult {
-    if style.terrain.is_some() && crate::terrain::source::dem_source(style).is_some() {
+    if (style.terrain.is_some() && crate::terrain::source::dem_source(style).is_some())
+        || !style.cached_has_dem_layers()
+    {
         return Ok(());
     }
     let Some((tile_view_pattern, raster_resources, resources)) = world.resources.query::<(

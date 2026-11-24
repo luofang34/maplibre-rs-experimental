@@ -116,13 +116,14 @@ fn frame_globe_camera(
         .flatten()
 }
 
-pub(super) fn frame_view_projection_and_globe(
+pub(super) fn frame_view_projection_globe_and_eye(
     world: &World,
     style: &Style,
     view: &ViewState,
 ) -> (
     crate::render::camera::ViewProjection,
     Option<crate::projection::globe::camera::GlobeCameraState>,
+    Option<cgmath::Vector3<f64>>,
 ) {
     if let Some(resolved) = world
         .resources
@@ -133,9 +134,17 @@ pub(super) fn frame_view_projection_and_globe(
             ProjectionMode::Globe { camera, .. } => Some((**camera).clone()),
             ProjectionMode::FlatMercator => None,
         };
-        return (resolved.gpu_view_projection, globe);
+        return (
+            resolved.gpu_view_projection,
+            globe,
+            Some(resolved.eye_position),
+        );
     }
-    (view.gpu_view_projection(), frame_globe_camera(style, view))
+    (
+        view.gpu_view_projection(),
+        frame_globe_camera(style, view),
+        None,
+    )
 }
 
 pub(super) struct SurfaceContext<'a> {
@@ -149,6 +158,7 @@ pub(super) struct SurfaceContext<'a> {
     clear_color: [f32; 4],
     vector_arrival_epoch: u64,
     has_external_view: bool,
+    eye_fog: Option<crate::render::view_state::EyeFogParams>,
     gpu_view_projection: crate::render::camera::ViewProjection,
     globe_camera: Option<crate::projection::globe::camera::GlobeCameraState>,
 }
@@ -180,8 +190,9 @@ pub(super) fn surface_context<'a>(
         clear.b as f32,
         clear.a as f32,
     ];
-    let (gpu_view_projection, globe_camera) =
-        frame_view_projection_and_globe(world, style, view_state);
+    let (gpu_view_projection, globe_camera, resolved_eye) =
+        frame_view_projection_globe_and_eye(world, style, view_state);
+    let eye_fog = view_state.eye_fog_params(resolved_eye);
     SurfaceContext {
         style,
         view_state,
@@ -193,6 +204,7 @@ pub(super) fn surface_context<'a>(
         clear_color,
         vector_arrival_epoch: crate::vector::arrival_epoch(world),
         has_external_view: view_state.has_external_view(),
+        eye_fog,
         gpu_view_projection,
         globe_camera,
     }
@@ -396,7 +408,9 @@ fn prepare_single_tile(
         ],
         edge_index: cached.edge_index,
         surface_color: cached.surface_color,
-        fog_position: ctx.view_state.eye_fog_position(coords).unwrap_or([0.0; 4]),
+        fog_position: ctx
+            .eye_fog
+            .map_or([0.0; 4], |params| params.for_tile(coords)),
         daylight: ctx.lighting.daylight_uniform(),
         twilight: ctx.lighting.twilight,
         moonlight: ctx.lighting.moonlight,

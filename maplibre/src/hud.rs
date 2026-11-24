@@ -197,6 +197,7 @@ pub struct NavigationHudPipeline(pub wgpu::RenderPipeline);
 #[derive(Default)]
 pub struct NavigationHudGpu {
     frame: Option<(wgpu::Buffer, wgpu::BindGroup)>,
+    last_frame: Option<[u8; std::mem::size_of::<HudFrame>()]>,
     drawn: bool,
     vertex_count: u32,
 }
@@ -331,6 +332,47 @@ fn resource_system(
     Ok(())
 }
 
+fn build_hud_frame(
+    view_state: &crate::render::view_state::ViewState,
+    hud_state: NavigationHudState,
+) -> (HudFrame, u32) {
+    let width = view_state.width();
+    let height = view_state.height();
+    let origin = NavigationHudState::panel_origin(width, height, view_state.edge_insets());
+    let mut flags = 0u32;
+    if hud_state.three_dimensional {
+        flags |= 1;
+    }
+    if hud_state.auto_tilt {
+        flags |= 2;
+    }
+    if hud_state.north_locked {
+        flags |= 4;
+    }
+    if hud_state.rts_mode {
+        flags |= 8;
+    }
+    let selection_active = u32::from(hud_state.selection_box.is_some());
+    let vertex_count = if selection_active != 0 { 12 } else { 6 };
+    let frame = HudFrame {
+        viewport_and_panel: [
+            width as f32,
+            height as f32,
+            origin.x as f32,
+            origin.y as f32,
+        ],
+        angles_and_interaction: [
+            view_state.camera().get_bearing().0 as f32,
+            view_state.camera().get_pitch().0 as f32,
+            hud_state.hovered.map_or(-1.0, HudButton::slot_index),
+            hud_state.pressed.map_or(-1.0, HudButton::slot_index),
+        ],
+        state_flags: [flags, selection_active, 0, 0],
+        selection_rect: hud_state.selection_box.unwrap_or([0.0; 4]),
+    };
+    (frame, vertex_count)
+}
+
 fn queue_system(
     MapContext {
         world,
@@ -350,49 +392,24 @@ fn queue_system(
     if !drawn {
         return Ok(());
     }
-    let frame_layout = match world.resources.get::<Eventually<NavigationHudPipeline>>() {
-        Some(Initialized(NavigationHudPipeline(pipeline))) => pipeline.get_bind_group_layout(0),
-        _ => return Ok(()),
+    let (frame, vertex_count) = build_hud_frame(view_state, hud_state);
+    gpu.vertex_count = vertex_count;
+    let frame_bytes: [u8; std::mem::size_of::<HudFrame>()] = bytemuck::cast(frame);
+    if gpu.frame.is_some() && gpu.last_frame == Some(frame_bytes) {
+        return Ok(());
+    }
+    let frame_layout = if gpu.frame.is_none() {
+        match world.resources.get::<Eventually<NavigationHudPipeline>>() {
+            Some(Initialized(NavigationHudPipeline(pipeline))) => {
+                Some(pipeline.get_bind_group_layout(0))
+            }
+            _ => return Ok(()),
+        }
+    } else {
+        None
     };
     let gpu = world.resources.get_or_init_mut::<NavigationHudGpu>();
-
-    let width = view_state.width();
-    let height = view_state.height();
-    let origin = NavigationHudState::panel_origin(width, height, view_state.edge_insets());
-    let mut flags = 0u32;
-    if hud_state.three_dimensional {
-        flags |= 1;
-    }
-    if hud_state.auto_tilt {
-        flags |= 2;
-    }
-    if hud_state.north_locked {
-        flags |= 4;
-    }
-    if hud_state.rts_mode {
-        flags |= 8;
-    }
-    let selection_active = u32::from(hud_state.selection_box.is_some());
-    gpu.vertex_count = if selection_active != 0 { 12 } else { 6 };
-
-    let frame = HudFrame {
-        viewport_and_panel: [
-            width as f32,
-            height as f32,
-            origin.x as f32,
-            origin.y as f32,
-        ],
-        angles_and_interaction: [
-            view_state.camera().get_bearing().0 as f32,
-            view_state.camera().get_pitch().0 as f32,
-            hud_state.hovered.map_or(-1.0, HudButton::slot_index),
-            hud_state.pressed.map_or(-1.0, HudButton::slot_index),
-        ],
-        state_flags: [flags, selection_active, 0, 0],
-        selection_rect: hud_state.selection_box.unwrap_or([0.0; 4]),
-    };
-
-    let (buffer, _) = gpu.frame.get_or_insert_with(|| {
+    if let Some(layout) = frame_layout.as_ref() {
         let buffer = renderer.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("navigation hud frame"),
             size: std::mem::size_of::<HudFrame>() as u64,
@@ -403,17 +420,18 @@ fn queue_system(
             .device
             .create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("navigation hud bind group"),
-                layout: &frame_layout,
+                layout,
                 entries: &[wgpu::BindGroupEntry {
                     binding: 0,
                     resource: buffer.as_entire_binding(),
                 }],
             });
-        (buffer, bind_group)
-    });
-    renderer
-        .queue
-        .write_buffer(buffer, 0, bytemuck::bytes_of(&frame));
+        gpu.frame = Some((buffer, bind_group));
+    }
+    if let Some((buffer, _)) = &gpu.frame {
+        renderer.queue.write_buffer(buffer, 0, &frame_bytes);
+        gpu.last_frame = Some(frame_bytes);
+    }
     Ok(())
 }
 

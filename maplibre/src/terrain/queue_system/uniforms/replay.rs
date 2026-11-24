@@ -1,6 +1,6 @@
 use cgmath::Matrix4;
 
-use super::{frame_view_projection_and_globe, globe, terrain_fog_with_camera};
+use super::{frame_view_projection_globe_and_eye, globe, terrain_fog_with_camera};
 use crate::{
     coords::WorldTileCoords,
     render::{
@@ -27,8 +27,10 @@ pub(in crate::terrain::queue_system) fn replay(
     view: &ViewState,
     queue: &crate::render::upload_queue::UploadQueue,
 ) -> SystemResult {
-    let (projection, globe_camera) = frame_view_projection_and_globe(world, style, view);
+    let (projection, globe_camera, resolved_eye) =
+        frame_view_projection_globe_and_eye(world, style, view);
     let fog = terrain_fog_with_camera(style, view, globe_camera.as_ref());
+    let eye_fog = view.eye_fog_params(resolved_eye);
     let lighting = world
         .resources
         .get::<crate::render::SceneLighting>()
@@ -55,7 +57,7 @@ pub(in crate::terrain::queue_system) fn replay(
             uniform.daylight = daylight;
             uniform.twilight = lighting.twilight;
             uniform.moonlight = lighting.moonlight;
-            uniform.fog_position = view.eye_fog_position(*coords).unwrap_or([0.0; 4]);
+            uniform.fog_position = eye_fog.map_or([0.0; 4], |params| params.for_tile(*coords));
             let basis = frame.1.get(idx).and_then(Option::as_ref);
             if basis.is_some() {
                 globe::apply_basis(uniform, globe_camera.as_ref(), basis);

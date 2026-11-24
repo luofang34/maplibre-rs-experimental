@@ -266,7 +266,13 @@ pub(super) fn upload_and_publish_background(
             .clear_globe_tiles()
     };
     let flat_covers_viewport = !uses_globe
-        && super::flat_viewport_covered(view_state, style.terrain.is_none(), params.frame);
+        && super::flat_viewport_covered_precomputed(
+            view_state,
+            style.terrain.is_none(),
+            params.frame,
+            params.horizon,
+            params.world_rows,
+        );
     let buf_gen = stage_background_buffers(
         world,
         style,

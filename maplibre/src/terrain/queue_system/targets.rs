@@ -242,7 +242,7 @@ fn select_frame_drape_tiles(
         .get::<crate::terrain::request_system::DrapeRequests>()
     {
         Some(prev) => (
-            prev.0 != tiles,
+            !super::spec_cache::same_tile_set(&prev.0, &tiles),
             tiles.iter().any(|tile| !prev.0.contains(tile)),
         ),
         None => (true, !tiles.is_empty()),

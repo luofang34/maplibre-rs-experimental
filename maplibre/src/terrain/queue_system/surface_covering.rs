@@ -176,17 +176,27 @@ fn subdivide_to_descendant_drapes(
     }
 }
 
-pub(super) fn fit_metadata(specs: &[TargetSpec], ready: &mut [bool], mut remaining: usize) {
+pub(super) fn fit_metadata(
+    specs: &[TargetSpec],
+    ready: &mut [bool],
+    mut remaining: usize,
+) -> (usize, bool) {
+    let mut needed_shapes = 0_usize;
+    let mut clipped = false;
     for (spec, ready) in specs.iter().zip(ready) {
         if !*ready {
             continue;
         }
-        if spec.shapes.len() > remaining {
+        let len = spec.shapes.len();
+        if len > remaining {
             *ready = false;
+            clipped = true;
         } else {
-            remaining -= spec.shapes.len();
+            remaining -= len;
+            needed_shapes += len;
         }
     }
+    (needed_shapes, clipped)
 }
 
 #[cfg(test)]

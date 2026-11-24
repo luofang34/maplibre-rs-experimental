@@ -31,7 +31,7 @@ mod drape_prepare;
 pub(crate) mod edges;
 mod prefetch;
 mod readiness;
-mod spec_cache;
+pub(in crate::terrain) mod spec_cache;
 mod steady_cache;
 mod targets;
 #[cfg(any(test, feature = "headless"))]
@@ -198,13 +198,13 @@ pub fn queue_system(
     if EyeInFrame::reuses_content(world) {
         return uniforms::replay(world, style, view_state, queue);
     }
-    if steady_cache::needs_eye_frame(world)
-        || world
-            .resources
-            .get::<TerrainEyeFrame>()
-            .is_some_and(|frame| !frame.0.is_empty())
-    {
-        world.resources.insert(TerrainEyeFrame::default());
+    if !steady_cache::needs_eye_frame(world) {
+        if let Some(frame) = world.resources.get_mut::<TerrainEyeFrame>()
+            && (!frame.0.is_empty() || !frame.1.is_empty())
+        {
+            frame.0.clear();
+            frame.1.clear();
+        }
     }
     world
         .resources
@@ -227,7 +227,11 @@ pub fn queue_system(
             sources,
             clear_color,
         } = prepare_drapes(&specs, style, view_state, world, device, drape_zoom)?;
-        let encode_started = instant::Instant::now();
+        let has_timer = world
+            .resources
+            .get::<crate::terrain::drape_timing::DrapeTimerSlot>()
+            .is_some();
+        let encode_started = (has_timer && redraw.iter().any(|&r| r)).then(instant::Instant::now);
         let phase = encode_drapes(
             &specs,
             &redraw,
@@ -236,13 +240,13 @@ pub fn queue_system(
             crate::coords::Zoom::new(drape_zoom),
             queue,
         )?;
-        if !phase.targets.is_empty() {
-            if let Some(slot) = world
+        if let Some(started) = encode_started
+            && !phase.targets.is_empty()
+            && let Some(slot) = world
                 .resources
                 .get::<crate::terrain::drape_timing::DrapeTimerSlot>()
-            {
-                slot.record_encode_cpu(encode_started.elapsed());
-            }
+        {
+            slot.record_encode_cpu(started.elapsed());
         }
         let (surface_coords, surface_sources) =
             surface_covering::coords_for_frame(world, &specs, &sources);
@@ -258,13 +262,10 @@ pub fn queue_system(
         (&surface_coords, &surface_sources),
     )?;
     hide_draped_layers(world, style);
-    let draw_after_layer_index = style
-        .layers
-        .iter()
-        .filter(|layer| layer.type_ == "background")
-        .map(|layer| layer.index)
-        .max()
-        .unwrap_or(0);
+    let draw_after_layer_index = world
+        .resources
+        .get_or_init_mut::<spec_cache::DrapePrepareCache>()
+        .cached_draw_after_layer_index(style);
     world.resources.insert(phase);
     set_frame(
         world,
@@ -402,15 +403,19 @@ fn finish_surface_and_eye_frame(
         index.set_surface_edges_if_stale(written_sources, &edge_cache.samples, edge_gen);
     }
     if steady_cache::needs_eye_frame(world) {
-        let kept = prepared
-            .sources
-            .iter()
-            .zip(prepared.uniforms.iter())
-            .take(written)
-            .map(|((_, coords, _), uniform)| (*coords, *uniform))
-            .collect();
-        let mut globe_bases = std::mem::take(&mut prepared.globe_bases);
-        globe_bases.truncate(written);
-        world.resources.insert(TerrainEyeFrame(kept, globe_bases));
+        let frame = world.resources.get_or_init_mut::<TerrainEyeFrame>();
+        frame.0.clear();
+        frame.0.extend(
+            prepared
+                .sources
+                .iter()
+                .zip(prepared.uniforms.iter())
+                .take(written)
+                .map(|((_, coords, _), uniform)| (*coords, *uniform)),
+        );
+        frame.1.clear();
+        frame
+            .1
+            .extend(prepared.globe_bases.iter().take(written).copied());
     }
 }

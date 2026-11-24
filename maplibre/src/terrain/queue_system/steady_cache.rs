@@ -116,26 +116,32 @@ impl TileStaticUniformCache {
         key: StaticTileKey,
         build: impl FnOnce() -> Option<CachedTileStatic>,
     ) -> Option<TileStaticRef<'_>> {
+        use std::collections::hash_map::Entry;
         let tick = self.frame_tick;
-        if !self.entries.contains_key(&key) {
-            let mut built = build()?;
+        if self.entries.len() >= MAX_STATIC_CACHE_ENTRIES && !self.entries.contains_key(&key) {
+            self.entries
+                .retain(|_, value| tick.saturating_sub(value.last_used_frame) <= 4);
             if self.entries.len() >= MAX_STATIC_CACHE_ENTRIES {
                 self.entries
-                    .retain(|_, value| tick.saturating_sub(value.last_used_frame) <= 4);
-                if self.entries.len() >= MAX_STATIC_CACHE_ENTRIES {
-                    self.entries
-                        .retain(|_, value| value.last_used_frame == tick);
-                }
-                if self.entries.len() >= MAX_STATIC_CACHE_ENTRIES {
-                    return Some(TileStaticRef::Bypass(Box::new(built)));
-                }
+                    .retain(|_, value| value.last_used_frame == tick);
             }
-            built.last_used_frame = tick;
-            self.entries.insert(key, built);
+            if self.entries.len() >= MAX_STATIC_CACHE_ENTRIES {
+                let built = build()?;
+                return Some(TileStaticRef::Bypass(Box::new(built)));
+            }
         }
-        let entry = self.entries.get_mut(&key)?;
-        entry.last_used_frame = tick;
-        Some(TileStaticRef::Cached(entry))
+        match self.entries.entry(key) {
+            Entry::Occupied(entry) => {
+                let cached = entry.into_mut();
+                cached.last_used_frame = tick;
+                Some(TileStaticRef::Cached(cached))
+            }
+            Entry::Vacant(vacant) => {
+                let mut built = build()?;
+                built.last_used_frame = tick;
+                Some(TileStaticRef::Cached(vacant.insert(built)))
+            }
+        }
     }
 }
 

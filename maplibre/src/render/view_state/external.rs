@@ -25,6 +25,7 @@ use crate::{
 
 mod spatial;
 mod sphere;
+pub(crate) use spatial::EyeFogParams;
 
 /// Where the local frame of an [`ExternalView`] is anchored.
 #[derive(Clone, Copy, Debug, PartialEq)]

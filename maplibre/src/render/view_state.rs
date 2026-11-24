@@ -425,6 +425,7 @@ mod unprojection;
 
 pub use bounds::{CameraBounds, CameraFit, EdgePadding, LatLonBounds};
 use external::ExternalEye;
+pub(crate) use external::EyeFogParams;
 pub use external::{ExternalAnchor, ExternalView, ExternalViewError};
 pub use flight::{FlightCurve, FlightPath, FlyOptions};
 pub use horizon::HorizonLine;

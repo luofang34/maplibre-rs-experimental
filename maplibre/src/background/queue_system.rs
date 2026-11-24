@@ -8,7 +8,7 @@ use upload::{enqueue_background_layers, upload_and_publish_background, Backgroun
 pub(crate) use super::buffers::globe_tiles;
 pub use super::buffers::{BackgroundBuffers, BackgroundGpuBuffers};
 use super::{
-    buffers::{sky_metadata_with_camera, world_rows},
+    buffers::{sky_metadata_with_camera, world_rows, world_rows_with_vp},
     globe_sky::{draws_globe_sky, globe_sky_metadata, globe_sky_metadata_with_camera},
 };
 use crate::{
@@ -24,13 +24,17 @@ use crate::{
     tcs::system::{SystemError, SystemResult},
 };
 
-/// Returns `true` when an unclipped flat quad is guaranteed to pass every `background.fragment.wgsl` check.
-pub(crate) fn flat_viewport_covered(view_state: &ViewState, edges: bool, frame: [f32; 2]) -> bool {
+/// Same as [`flat_viewport_covered`], reusing already-computed `horizon` and `world_rows`.
+pub(crate) fn flat_viewport_covered_precomputed(
+    view_state: &ViewState,
+    edges: bool,
+    frame: [f32; 2],
+    horizon: [f32; 4],
+    [row_num, row_den]: [[f32; 4]; 2],
+) -> bool {
     if !edges || frame[0] <= 0.0 || frame[1] <= 0.0 {
         return false;
     }
-    let horizon = view_state.horizon_line().to_shader();
-    let [row_num, row_den] = world_rows(view_state, edges);
     let logical_h = view_state.height() as f32;
     let scale = logical_h / frame[1].max(1.0);
     for (px, py, nx, ny) in [
@@ -55,6 +59,16 @@ pub(crate) fn flat_viewport_covered(view_state: &ViewState, edges: bool, frame: 
         }
     }
     true
+}
+
+/// Returns `true` when an unclipped flat quad is guaranteed to pass every `background.fragment.wgsl` check.
+pub(crate) fn flat_viewport_covered(view_state: &ViewState, edges: bool, frame: [f32; 2]) -> bool {
+    if !edges || frame[0] <= 0.0 || frame[1] <= 0.0 {
+        return false;
+    }
+    let horizon = view_state.horizon_line().to_shader();
+    let rows = world_rows(view_state, edges);
+    flat_viewport_covered_precomputed(view_state, edges, frame, horizon, rows)
 }
 
 const SKY_SPACE_CUTOFF_RATIO: f64 = 10.0 * (100_000.0 / 6_371_008.8);
@@ -307,10 +321,15 @@ pub fn queue_system(
     let (world_rows, horizon) = if uses_globe {
         (world_rows(view_state, false), [0.0; 4])
     } else {
-        (
-            world_rows(view_state, style.terrain.is_none()),
-            view_state.horizon_line().to_shader(),
-        )
+        let edges = style.terrain.is_none();
+        let rows = if !edges {
+            world_rows(view_state, false)
+        } else if let Some(resolved) = resolved_view {
+            world_rows_with_vp(view_state, &resolved.view_projection.0, true)
+        } else {
+            world_rows(view_state, true)
+        };
+        (rows, view_state.horizon_line().to_shader())
     };
     world.resources.get_or_init_mut::<BackgroundGpuBuffers>();
     let params = BackgroundFrameParams {

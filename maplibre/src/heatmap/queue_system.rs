@@ -55,6 +55,9 @@ pub fn queue_system(
         return Err(SystemError::Dependencies);
     };
     density_phase.layers.clear();
+    if !style.cached_has_heatmap_layers() {
+        return Ok(());
+    }
     let (Initialized(tile_view_pattern), Initialized(buffer_pool), Initialized(resources)) =
         (tile_view_pattern, buffer_pool, resources)
     else {

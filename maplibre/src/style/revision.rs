@@ -34,6 +34,10 @@ struct WorkerSnapshots {
     has_symbol_layers: Option<bool>,
     has_raster_layer: Option<bool>,
     has_any_raster_type: Option<bool>,
+    has_heatmap_layer: Option<bool>,
+    has_dem_layer: Option<bool>,
+    has_media_source: Option<bool>,
+    has_vector_source_layers: Option<bool>,
     symbol_layer_indices: Option<Arc<[usize]>>,
 }
 
@@ -251,6 +255,68 @@ impl Style {
             .iter()
             .any(|layer| types.contains(&layer.type_.as_str()));
         guard.has_any_raster_type = Some(has);
+        has
+    }
+
+    /// Cached check for whether the style declares any `"heatmap"` layer.
+    pub(crate) fn cached_has_heatmap_layers(&self) -> bool {
+        let mut guard = lock_unpoisoned(&self.revision_state.snapshots);
+        if let Some(has) = guard.has_heatmap_layer {
+            return has;
+        }
+        let has = self
+            .layers
+            .iter()
+            .any(|layer| matches!(layer.paint, Some(super::layer::LayerPaint::Heatmap(_))));
+        guard.has_heatmap_layer = Some(has);
+        has
+    }
+
+    /// Cached check for whether the style declares any `"hillshade"` or `"color-relief"` layer.
+    pub(crate) fn cached_has_dem_layers(&self) -> bool {
+        let mut guard = lock_unpoisoned(&self.revision_state.snapshots);
+        if let Some(has) = guard.has_dem_layer {
+            return has;
+        }
+        let has = self
+            .layers
+            .iter()
+            .any(|layer| matches!(layer.type_.as_str(), "hillshade" | "color-relief"));
+        guard.has_dem_layer = Some(has);
+        has
+    }
+
+    /// Cached check for whether the style declares any `image`, `video`, or `canvas` source.
+    pub(crate) fn cached_has_media_sources(&self) -> bool {
+        let mut guard = lock_unpoisoned(&self.revision_state.snapshots);
+        if let Some(has) = guard.has_media_source {
+            return has;
+        }
+        let has = self.sources.values().any(|s| {
+            matches!(
+                s,
+                super::source::Source::Image(_)
+                    | super::source::Source::Video(_)
+                    | super::source::Source::Canvas(_)
+            )
+        });
+        guard.has_media_source = Some(has);
+        has
+    }
+
+    /// Cached check for whether any layer in the style reads vector tile geometry.
+    pub(crate) fn cached_has_vector_source_layers(&self) -> bool {
+        let mut guard = lock_unpoisoned(&self.revision_state.snapshots);
+        if let Some(has) = guard.has_vector_source_layers {
+            return has;
+        }
+        let has = self.layers.iter().any(|layer| {
+            !matches!(
+                layer.type_.as_str(),
+                "raster" | "hillshade" | "color-relief" | "background"
+            )
+        });
+        guard.has_vector_source_layers = Some(has);
         has
     }
 

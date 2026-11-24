@@ -45,9 +45,11 @@ pub(crate) struct SymbolCovering {
     last_upload_view: Option<CoveringViewKey>,
     metadata_scratch: Vec<ShaderTileMetadata>,
     last_uploaded_bytes: Vec<u8>,
+    pub(super) tiles_version: u64,
+    pub(super) phase_key: Option<(u64, u64, u64, u64, u64)>,
     pub(super) queue_scratch: Vec<crate::render::render_phase::TranslucentItem>,
     visible_key: Option<(u64, u64)>,
-    visible_hash: u64,
+    pub(super) visible_hash: u64,
     visible_ids: Vec<crate::style::StyleLayerId>,
 }
 
@@ -212,7 +214,7 @@ pub(super) fn update(
             .get::<SymbolCovering>()
             .is_some_and(|c| c.selection_key == Some(key));
     if can_reuse {
-        refresh_reused_covering(world, view, queue);
+        refresh_reused_covering(world, style, view, queue);
         return;
     }
     let visible_layers = world
@@ -233,13 +235,17 @@ pub(super) fn update(
     }
     if tiles.is_empty() {
         if let Some(covering) = world.resources.get_mut::<SymbolCovering>() {
-            covering.tiles.clear();
+            if !covering.tiles.is_empty() {
+                covering.tiles.clear();
+                covering.tiles_version = covering.tiles_version.wrapping_add(1);
+                covering.phase_key = None;
+            }
             covering.selection_key = Some(key);
             covering.last_upload_view = None;
         }
         return;
     }
-    upload_covering_tiles(world, view, device, queue, tiles, Some(key));
+    upload_covering_tiles(world, style, view, device, queue, tiles, Some(key));
 }
 
 fn covering_selection_key(world: &World, style: &Style, visible_hash: u64) -> SelectionKey {
@@ -262,18 +268,34 @@ fn covering_selection_key(world: &World, style: &Style, visible_hash: u64) -> Se
     )
 }
 
+fn frame_gpu_view_projection(
+    world: &World,
+    style: &Style,
+    view: &ViewState,
+) -> crate::render::camera::ViewProjection {
+    world
+        .resources
+        .get::<crate::render::resolved_view::ResolvedFrameView>()
+        .filter(|resolved| resolved.matches(style, view))
+        .map_or_else(
+            || view.gpu_view_projection(),
+            |resolved| resolved.gpu_view_projection,
+        )
+}
+
 fn refresh_reused_covering(
     world: &mut World,
+    style: &Style,
     view: &ViewState,
     queue: &crate::render::upload_queue::UploadQueue,
 ) {
+    let gpu_vp = frame_gpu_view_projection(world, style, view);
     let Some(covering) = world.resources.get_mut::<SymbolCovering>() else {
         return;
     };
     if covering.tiles.is_empty() {
         return;
     }
-    let gpu_vp = view.gpu_view_projection();
     let view_key = CoveringViewKey::of(view, &gpu_vp);
     if covering.last_upload_view == Some(view_key) {
         return;
@@ -299,13 +321,14 @@ fn refresh_reused_covering(
 
 fn upload_covering_tiles(
     world: &mut World,
+    style: &Style,
     view: &ViewState,
     device: &wgpu::Device,
     queue: &crate::render::upload_queue::UploadQueue,
     tiles: Vec<WorldTileCoords>,
     selection_key: Option<SelectionKey>,
 ) {
-    let gpu_vp = view.gpu_view_projection();
+    let gpu_vp = frame_gpu_view_projection(world, style, view);
     let mut entries = world
         .resources
         .get_mut::<SymbolCovering>()
@@ -320,9 +343,9 @@ fn upload_covering_tiles(
         .get::<SymbolCovering>()
         .is_none_or(|covering| covering.buffer.size() < required)
     {
-        let (prev_vis_key, prev_vis_hash, prev_vis_ids, prev_queue_scratch) =
+        let (prev_vis_key, prev_vis_hash, prev_vis_ids, prev_tiles_ver, prev_queue_scratch) =
             world.resources.remove::<SymbolCovering>().map_or_else(
-                || (None, 0, Vec::new(), Vec::new()),
+                || (None, 0, Vec::new(), 0, Vec::new()),
                 |mut old| {
                     queue.cancel_staged_buffer(&old.buffer);
                     old.buffer.destroy();
@@ -330,6 +353,7 @@ fn upload_covering_tiles(
                         old.visible_key,
                         old.visible_hash,
                         std::mem::take(&mut old.visible_ids),
+                        old.tiles_version,
                         std::mem::take(&mut old.queue_scratch),
                     )
                 },
@@ -347,6 +371,8 @@ fn upload_covering_tiles(
             last_upload_view: None,
             metadata_scratch: Vec::new(),
             last_uploaded_bytes: Vec::new(),
+            tiles_version: prev_tiles_ver,
+            phase_key: None,
             queue_scratch: prev_queue_scratch,
             visible_key: prev_vis_key,
             visible_hash: prev_vis_hash,
@@ -360,7 +386,11 @@ fn upload_covering_tiles(
             covering.last_uploaded_bytes.clear();
             covering.last_uploaded_bytes.extend_from_slice(bytes);
         }
-        covering.tiles = tiles;
+        if covering.tiles != tiles {
+            covering.tiles = tiles;
+            covering.tiles_version = covering.tiles_version.wrapping_add(1);
+            covering.phase_key = None;
+        }
         covering.selection_key = selection_key;
         covering.last_upload_view = Some(view_key);
         covering.metadata_scratch = entries;
