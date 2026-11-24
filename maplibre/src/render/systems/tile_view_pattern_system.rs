@@ -40,12 +40,12 @@ pub fn tile_view_pattern_system(
             .resources
             .query::<(&TileViewPatternMemo, &Eventually<WgpuTileViewPattern>)>()
             .map(|(memo, pattern)| {
-                let is_empty = match pattern {
-                    Initialized(p) => p.is_empty(),
+                let (is_empty, drops_shapes) = match pattern {
+                    Initialized(p) => (p.is_empty(), p.drops_shapes()),
                     _ => return Err(SystemError::Dependencies),
                 };
                 Ok((
-                    !is_empty && memo.matches_key(next_key.as_ref()),
+                    !is_empty && memo.matches_key(next_key.as_ref(), drops_shapes),
                     memo.zoom_changed(zoom),
                 ))
             })

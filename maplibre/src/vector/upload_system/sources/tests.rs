@@ -187,3 +187,24 @@ mod headless {
         assert!(!resolved.uncovered.contains(&unrelated_z11));
     }
 }
+
+#[test]
+fn a_covering_digest_ignores_order_but_not_membership() {
+    use super::cache::hash_coord_set;
+    use crate::coords::{WorldTileCoords, ZoomLevel};
+    let tile = |x, y| WorldTileCoords {
+        x,
+        y,
+        z: ZoomLevel::new(3),
+    };
+    let digest = hash_coord_set(&[tile(1, 2), tile(2, 2), tile(3, 2)]);
+    assert_eq!(
+        digest,
+        hash_coord_set(&[tile(3, 2), tile(1, 2), tile(2, 2)])
+    );
+    assert_ne!(
+        digest,
+        hash_coord_set(&[tile(1, 2), tile(2, 2), tile(4, 2)])
+    );
+    assert_ne!(digest, hash_coord_set(&[tile(1, 2), tile(2, 2)]));
+}

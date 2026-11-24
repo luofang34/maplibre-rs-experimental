@@ -52,6 +52,17 @@ fn hash_coord_slice(coords: &[WorldTileCoords]) -> u64 {
     hasher.finish()
 }
 
+/// Digest of `coords` as a set. A covering lists its tiles nearest the camera's focus first, so
+/// an orbit reorders an unchanged covering; the sources resolved from it stay the same set.
+pub(super) fn hash_coord_set(coords: &[WorldTileCoords]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    coords.iter().fold(coords.len() as u64, |digest, c| {
+        let mut hasher = rustc_hash::FxHasher::default();
+        c.hash(&mut hasher);
+        digest.wrapping_add(hasher.finish())
+    })
+}
+
 pub(super) fn build_frame_sources_key(
     world: &World,
     style: &Style,
@@ -103,7 +114,7 @@ pub(super) fn build_frame_sources_key(
     };
     Some(FrameSourcesKey {
         view_tiles_present: view_tiles.is_some(),
-        view_tiles_hash: view_tiles.map_or(0, hash_coord_slice),
+        view_tiles_hash: view_tiles.map_or(0, hash_coord_set),
         zoom_level: view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
         style_rev: style.revision(),
         arrival_epoch: crate::vector::arrival_epoch(world),

@@ -5,49 +5,21 @@ use std::hash::{Hash, Hasher};
 
 use rustc_hash::{FxHashMap, FxHasher};
 
+mod key;
+
+pub(crate) use key::{compute_memo_key, PatternMemoKey};
+
 use super::{clip_region, TileViewPattern};
 use crate::{
-    coords::{ViewRegion, WorldTileCoords, Zoom},
-    io::tile_sources::RasterSourceId,
+    coords::{WorldTileCoords, Zoom},
     projection::renderer_data::tile_mercator_coordinates,
     render::{
         camera::ViewProjection,
-        eventually::{Eventually, Eventually::Initialized},
         resource::Queue,
         shaders::ShaderTileMetadata,
         tile_view_pattern::{SourceShapes, TileShape, ViewTile},
     },
-    tcs::world::World,
-    vector::{VectorBufferPool, VectorLayerBucketComponent},
 };
-
-#[derive(Clone, PartialEq, Eq)]
-pub(crate) struct PatternMemoKey {
-    style_rev: u64,
-    view_region_digest: u64,
-    view_region_len: usize,
-    raster_coverings_digest: u64,
-    raster_coverings_len: usize,
-    vector_pool_rev: u64,
-    vector_pool_eviction_gen: u64,
-    vector_pool_has_capacity: bool,
-    vector_arrival_epoch: u64,
-    view_vector_digest: u64,
-    tiles_len: (usize, usize),
-    raster_mutation_gen: u64,
-}
-
-/// Computes the frame memo key for `(view_region, raster_coverings, style_rev, world)`, or
-/// `None` when active raster cross-fades prevent key reuse.
-pub(crate) fn compute_memo_key(
-    view_region: &ViewRegion,
-    raster_coverings: &[(RasterSourceId, Vec<WorldTileCoords>)],
-    style_rev: u64,
-    world: &World,
-) -> Option<PatternMemoKey> {
-    (!has_active_cross_fade(world))
-        .then(|| build_key(view_region, raster_coverings, style_rev, world))
-}
 
 /// Caches the most recent [`TileViewPattern`] key across frames so smooth panning or zooming
 /// inside an unchanged covering only updates per-shape zoom transforms in place.
@@ -59,8 +31,18 @@ pub struct TileViewPatternMemo {
 }
 
 impl TileViewPatternMemo {
-    pub(crate) fn matches_key(&self, next_key: Option<&PatternMemoKey>) -> bool {
-        matches!((&self.key, next_key), (Some(cached), Some(next)) if cached == next)
+    /// Whether the cached pattern still serves `next_key`. `order_matters` is set while the
+    /// pattern dropped shapes past its buffer's end: which ones it dropped follows the region's
+    /// order, so only then does a reordered region need a fresh pattern.
+    pub(crate) fn matches_key(
+        &self,
+        next_key: Option<&PatternMemoKey>,
+        order_matters: bool,
+    ) -> bool {
+        matches!(
+            (&self.key, next_key),
+            (Some(cached), Some(next)) if cached.same_inputs(next, order_matters)
+        )
     }
 
     pub(crate) fn zoom_changed(&self, zoom: Zoom) -> bool {
@@ -264,6 +246,7 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
             upload.push_view_tile(view_tile, &mut topo_hasher);
         }
         let skipped = upload.skipped;
+        self.skipped_shapes = skipped;
         self.record_topology_hash(topo_hasher.finish());
         if skipped > 0 {
             tracing::warn!(
@@ -374,96 +357,4 @@ fn hash_shape_topology(shape: &TileShape, hasher: &mut FxHasher) {
     shape.is_drawn_within_another().hash(hasher);
     shape.stencil_reference().hash(hasher);
     shape.buffer_range().hash(hasher);
-}
-
-fn has_active_cross_fade(world: &World) -> bool {
-    #[cfg(feature = "raster")]
-    {
-        world
-            .resources
-            .get::<crate::raster::cross_fade::RasterCrossFade>()
-            .is_some_and(|fade| !fade.is_empty())
-    }
-    #[cfg(not(feature = "raster"))]
-    {
-        let _ = world;
-        false
-    }
-}
-
-fn build_key(
-    view_region: &ViewRegion,
-    raster_coverings: &[(RasterSourceId, Vec<WorldTileCoords>)],
-    style_rev: u64,
-    world: &World,
-) -> PatternMemoKey {
-    let mut vh = FxHasher::default();
-    let mut view_region_len = 0_usize;
-    let mut tv = FxHasher::default();
-    for seen in view_region.copies() {
-        view_region_len += 1;
-        seen.hash(&mut vh);
-        if let Some((canonical, _)) = seen.wrapped() {
-            if let Some(buckets) = world.tiles.query::<&VectorLayerBucketComponent>(canonical) {
-                (
-                    canonical,
-                    buckets.done,
-                    buckets.failed,
-                    buckets.uploaded_stamp,
-                )
-                    .hash(&mut tv);
-            }
-        }
-    }
-    let mut rh = FxHasher::default();
-    for (source, tiles) in raster_coverings {
-        source.hash(&mut rh);
-        tiles.len().hash(&mut rh);
-        for coords in tiles {
-            coords.hash(&mut rh);
-        }
-    }
-    let (vector_pool_rev, vector_pool_eviction_gen, vector_pool_has_capacity) =
-        match world.resources.get::<Eventually<VectorBufferPool>>() {
-            Some(Initialized(pool)) => (
-                pool.revision(),
-                pool.eviction_generation(),
-                pool.has_capacity(),
-            ),
-            _ => (0, 0, false),
-        };
-    #[cfg(feature = "raster")]
-    let raster_mutation_gen = match world
-        .resources
-        .get::<Eventually<crate::raster::resource::RasterResources>>()
-    {
-        Some(Initialized(raster)) => raster.mutation_generation(),
-        _ => 0,
-    };
-    #[cfg(not(feature = "raster"))]
-    let raster_mutation_gen = 0_u64;
-
-    #[cfg(feature = "raster")]
-    let raster_tiles_len = world
-        .tiles
-        .pyramid_of::<crate::raster::RasterLayersDataComponent>()
-        .len();
-    #[cfg(not(feature = "raster"))]
-    let raster_tiles_len = 0_usize;
-    let vector_tiles_len = world.tiles.pyramid_of::<VectorLayerBucketComponent>().len();
-
-    PatternMemoKey {
-        style_rev,
-        view_region_digest: vh.finish(),
-        view_region_len,
-        raster_coverings_digest: rh.finish(),
-        raster_coverings_len: raster_coverings.len(),
-        vector_pool_rev,
-        vector_pool_eviction_gen,
-        vector_pool_has_capacity,
-        vector_arrival_epoch: crate::vector::arrival_epoch(world),
-        view_vector_digest: tv.finish(),
-        tiles_len: (vector_tiles_len, raster_tiles_len),
-        raster_mutation_gen,
-    }
 }

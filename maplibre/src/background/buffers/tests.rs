@@ -72,3 +72,21 @@ fn colour_follows_zoom() {
     assert_eq!(start[..3], [1.0, 0.0, 0.0]);
     assert_eq!(end[..3], [0.0, 0.0, 1.0]);
 }
+
+#[test]
+fn a_reordered_globe_covering_keeps_the_instance_tiles() {
+    let tile = |x, y| WorldTileCoords {
+        x,
+        y,
+        z: crate::coords::ZoomLevel::new(2),
+    };
+    let mut scratch = BackgroundScratch::default();
+    assert!(scratch.sync_globe_tiles(Some(&[tile(0, 1), tile(1, 1), tile(2, 1)])));
+    let instances = scratch.globe_tiles.clone();
+
+    assert!(!scratch.sync_globe_tiles(Some(&[tile(2, 1), tile(0, 1), tile(1, 1)])));
+    assert_eq!(scratch.globe_tiles, instances);
+
+    assert!(scratch.sync_globe_tiles(Some(&[tile(2, 1), tile(0, 1), tile(3, 1)])));
+    assert_ne!(scratch.globe_tiles, instances);
+}

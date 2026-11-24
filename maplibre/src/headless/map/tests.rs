@@ -334,3 +334,6 @@ mod lod_hysteresis;
 
 #[path = "tests/long_jump.rs"]
 mod long_jump;
+
+#[path = "tests/globe_orbit.rs"]
+mod globe_orbit;

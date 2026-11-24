@@ -24,6 +24,7 @@ pub(crate) struct BackgroundScratch {
     last_pure_globe_params: Option<(u32, u32, u64)>,
     last_pure_globe_tiles: Vec<WorldTileCoords>,
     last_globe_drawn: Vec<WorldTileCoords>,
+    incoming_globe_drawn: Vec<WorldTileCoords>,
     globe_tiles_populated: bool,
 }
 
@@ -45,11 +46,15 @@ impl BackgroundScratch {
     /// Rebuilds `self.globe_tiles` only when `drawn` differs from the previous globe covering.
     pub(crate) fn sync_globe_tiles(&mut self, drawn: Option<&[WorldTileCoords]>) -> bool {
         let slice = drawn.unwrap_or(&[]);
-        if self.globe_tiles_populated && self.last_globe_drawn.as_slice() == slice {
+        // A covering lists tiles nearest the focus first; compared sorted, an orbit that only
+        // reorders it leaves the instance buffer alone.
+        self.incoming_globe_drawn.clear();
+        self.incoming_globe_drawn.extend_from_slice(slice);
+        self.incoming_globe_drawn.sort_unstable();
+        if self.globe_tiles_populated && self.last_globe_drawn == self.incoming_globe_drawn {
             return false;
         }
-        self.last_globe_drawn.clear();
-        self.last_globe_drawn.extend_from_slice(slice);
+        std::mem::swap(&mut self.last_globe_drawn, &mut self.incoming_globe_drawn);
         self.globe_tiles.clear();
         self.globe_tiles.extend(
             slice

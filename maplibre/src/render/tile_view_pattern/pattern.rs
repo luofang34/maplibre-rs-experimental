@@ -88,6 +88,8 @@ pub struct TileViewPattern<Q, B> {
     last_upload_params: Option<(u64, u32, u32, u64, bool)>,
     last_vp_bits: Option<[u64; 16]>,
     last_capacity: usize,
+    /// Shapes the latest upload left out because the metadata buffer was full.
+    skipped_shapes: usize,
     stencil_ids: FxHashMap<(i32, WorldTileCoords), u8>,
     metadata_scratch: Vec<ShaderTileMetadata>,
     last_uploaded_bytes: Vec<u8>,
@@ -133,12 +135,18 @@ impl<Q: Queue<B>, B> TileViewPattern<Q, B> {
             last_upload_params: None,
             last_vp_bits: None,
             last_capacity: 0,
+            skipped_shapes: 0,
             stencil_ids: FxHashMap::default(),
             metadata_scratch: Vec::with_capacity(64),
             last_uploaded_bytes: Vec::new(),
             scratch: Mutex::new(PatternScratch::default()),
             phantom_q: Default::default(),
         }
+    }
+
+    /// Whether the latest upload left shapes out for lack of buffer space.
+    pub(crate) fn drops_shapes(&self) -> bool {
+        self.skipped_shapes > 0
     }
 
     /// Monotonic generation incremented whenever tile shapes, buffer ranges, or stencil refs change.
