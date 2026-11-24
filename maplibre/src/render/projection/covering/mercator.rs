@@ -29,8 +29,13 @@ pub(super) fn mercator_view_region(
         mercator_elevation_range(view_state, pitch_degrees, fov_degrees),
         request.headroom_meters,
     );
+    let resolved = world
+        .resources
+        .get::<crate::render::resolved_view::ResolvedFrameView>()
+        .filter(|resolved| resolved.matches(style, view_state));
     let tiles = mercator_covering_tiles(
         view_state,
+        resolved,
         MercatorCoveringOptions {
             zoom: visible_level,
             requested_zoom: request.requested_zoom,

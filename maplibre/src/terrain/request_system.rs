@@ -204,8 +204,12 @@ fn resolve_single_view_tiles(
         dem.tile_size,
         ViewStatePadding::Tight,
     )?;
-    let key =
-        crate::terrain::coverage::PreparedTerrainKey::capture(view_state, world, dem.tile_size);
+    let key = crate::terrain::coverage::PreparedTerrainKey::capture_for_style(
+        style,
+        view_state,
+        world,
+        dem.tile_size,
+    );
     world
         .resources
         .insert(crate::terrain::coverage::PreparedTerrainRegion {
@@ -215,8 +219,16 @@ fn resolve_single_view_tiles(
     let Some(view_region) = view_region else {
         return Ok(None);
     };
-    let order_key =
-        crate::terrain::queue_system::draw_order_key(style, view_state, f64::from(dem.tile_size));
+    let resolved = world
+        .resources
+        .get::<crate::render::resolved_view::ResolvedFrameView>()
+        .filter(|resolved| resolved.matches(style, view_state));
+    let order_key = crate::terrain::queue_system::draw_order_key_with_resolved(
+        resolved,
+        style,
+        view_state,
+        f64::from(dem.tile_size),
+    );
     let mut keyed: Vec<(f64, WorldTileCoords)> =
         view_region.iter().map(|c| (order_key(&c), c)).collect();
     keyed.sort_unstable_by(|left, right| left.0.total_cmp(&right.0));
@@ -234,10 +246,7 @@ impl<E: Environment, T: DemTransferables> RequestSystem<E, T> {
         multi: Option<&crate::render::eye_covering::MultiViewExtractCovering>,
     ) {
         let mut requested = FxHashSet::default();
-        let has_raster = style
-            .layers
-            .iter()
-            .any(|layer| RASTER_LAYER_TYPES.contains(&layer.type_.as_str()) && !layer.is_hidden());
+        let has_raster = style.cached_has_visible_raster_type(&RASTER_LAYER_TYPES);
         let mut budget = dem_request_budget(world, has_raster);
         let mut wanted = {
             let drapes = world

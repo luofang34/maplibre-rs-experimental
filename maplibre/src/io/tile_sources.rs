@@ -291,25 +291,70 @@ pub fn source_layer_groups(style: &Style, kind: TileKind) -> Vec<SourceLayerGrou
     groups.into_values().collect()
 }
 
-/// The style sources the layers of one tile kind read from.
-fn used_sources(style: &Style, kind: TileKind) -> impl Iterator<Item = &Source> {
-    style
+/// Cached non-hidden raster-like layer indices grouped by resolved source name.
+pub(crate) fn raster_source_layer_indices(
+    style: &Style,
+) -> crate::style::revision::RasterSourceLayerIndex {
+    style.cached_raster_source_layers(|style| {
+        let mut groups: BTreeMap<Option<String>, Vec<usize>> = BTreeMap::new();
+        for (idx, layer) in style
+            .layers
+            .iter()
+            .enumerate()
+            .filter(|(_, layer)| TileKind::Raster.accepts_layer(layer) && !layer.is_hidden())
+        {
+            let Some((key, _, _)) = resolve_layer_source(style, TileKind::Raster, layer) else {
+                continue;
+            };
+            groups.entry(key).or_default().push(idx);
+        }
+        groups.into_iter().collect()
+    })
+}
+
+fn tile_kind_summary(style: &Style, kind: TileKind) -> crate::style::revision::TileKindSummary {
+    let (mut min_z, mut max_z) = (None::<u8>, None::<u8>);
+    let (mut min_open, mut max_open, mut bounds_open, mut any) = (false, false, false, false);
+    let mut bounds = Vec::new();
+    for source in style
         .layers
         .iter()
-        .filter(move |layer| kind.accepts_layer(layer))
+        .filter(|layer| kind.accepts_layer(layer))
         .filter_map(|layer| style.sources.get(layer.source.as_ref()?))
+    {
+        any = true;
+        match kind.min_zoom_of(source) {
+            Some(v) => min_z = Some(min_z.map_or(v, |m| m.min(v))),
+            None => min_open = true,
+        }
+        match kind.max_zoom_of(source) {
+            Some(v) => max_z = Some(max_z.map_or(v, |m| m.max(v))),
+            None => max_open = true,
+        }
+        match kind.bounds_of(source) {
+            Some(b) if !bounds.contains(&b) => bounds.push(b),
+            Some(_) => {}
+            None => bounds_open = true,
+        }
+    }
+    crate::style::revision::TileKindSummary {
+        min_zoom: (!min_open).then_some(min_z).flatten(),
+        max_zoom: (!max_open).then_some(max_z).flatten(),
+        bounds: (any && !bounds_open).then(|| bounds.into()),
+    }
+}
+
+fn cached_summary(style: &Style, kind: TileKind) -> crate::style::revision::TileKindSummary {
+    style.cached_tile_kind_summary(kind == TileKind::Raster, |style| {
+        tile_kind_summary(style, kind)
+    })
 }
 
 /// The deepest zoom any tile source used by the style has tiles for, which requests are clamped
 /// to: a tile at it holds every source, the sources that end sooner cut from their tile at
 /// their last zoom. `None` when a source has no last zoom, so that it reaches every zoom.
 pub fn source_max_zoom(style: &Style, kind: TileKind) -> Option<u8> {
-    let mut deepest = None;
-    for source in used_sources(style, kind) {
-        let max_zoom = kind.max_zoom_of(source)?;
-        deepest = Some(deepest.map_or(max_zoom, |deepest: u8| deepest.max(max_zoom)));
-    }
-    deepest
+    cached_summary(style, kind).max_zoom
 }
 
 /// Zoom level whose tiles cover the view for a source, as GL JS `coveringZoomLevel`: the map
@@ -367,33 +412,16 @@ const MAX_ZOOM_DELTA: i32 = 2;
 /// source above its own first zoom is empty in a tile the others fill. `None` when a source
 /// declares no first zoom, so that it starts at the root.
 pub fn source_min_zoom(style: &Style, kind: TileKind) -> Option<u8> {
-    let mut shallowest = None;
-    for source in used_sources(style, kind) {
-        let min_zoom = kind.min_zoom_of(source)?;
-        shallowest = Some(shallowest.map_or(min_zoom, |shallowest: u8| shallowest.min(min_zoom)));
-    }
-    shallowest
+    cached_summary(style, kind).min_zoom
 }
 
 /// Whether every source of this kind that the style draws declares bounds that leave the tile
 /// out, so that it is not requested, as GL JS skips tiles outside a source's `bounds`.
 pub fn outside_source_bounds(style: &Style, kind: TileKind, coords: WorldTileCoords) -> bool {
-    let mut any = false;
-    for source in style
-        .layers
-        .iter()
-        .filter(|layer| kind.accepts_layer(layer))
-        .filter_map(|layer| style.sources.get(layer.source.as_ref()?))
-    {
-        let Some((west, south, east, north)) = kind.bounds_of(source) else {
-            return false;
-        };
-        any = true;
-        if tile_in_bounds(coords, (west, south, east, north)) {
-            return false;
-        }
-    }
-    any
+    cached_summary(style, kind)
+        .bounds
+        .as_deref()
+        .is_some_and(|list| list.iter().all(|&b| !tile_in_bounds(coords, b)))
 }
 
 /// Whether the tile's geographic extent overlaps the bounds `(west, south, east, north)`;

@@ -15,7 +15,7 @@ use super::{
     TrackedPayloadError, WebMessageTag,
 };
 
-const MAX_BATCH_COPY_BYTES: u32 = 128 * 1024;
+const MAX_BATCH_COPY_BYTES: u32 = 1024 * 1024;
 
 pub(crate) enum QueuedMessage {
     Decoded(Message),
@@ -198,7 +198,7 @@ impl QueuedMessage {
         }
         let total = buffer.byte_length();
         let mut cursor = 0_u32;
-        if total <= MAX_BATCH_COPY_BYTES && cancelled.is_empty() {
+        if total <= MAX_BATCH_COPY_BYTES {
             let mut raw = vec![0_u8; total as usize];
             if total > 0 {
                 Uint8Array::new(&buffer).copy_to(&mut raw);

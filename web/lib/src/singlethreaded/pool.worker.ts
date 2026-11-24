@@ -1,6 +1,6 @@
 import * as maplibre from "../wasm/maplibre_tile_worker"
 import {initializeWorkerWasm} from "../wasm-worker-instance.mjs";
-import {decodeBatchAttempt, filterBatchWords, registerBatchCalls} from "./st-call-batch.mjs";
+import {decodeBatchAttempt, partitionBatchWords, registerBatchCalls} from "./st-call-batch.mjs";
 
 type BatchAttempts = ArrayLike<bigint> & Iterable<bigint>
 
@@ -148,6 +148,7 @@ const handleMessage = async (message: MessageEvent<MessageData>) => {
         const data = message.data;
         waiting.delete(data.attempt)
         if (call.cancelled) {
+            workerCalls().finish_failed(data.attempt);
             return
         }
         // WARNING: Do not modify data passed from Rust!
@@ -172,7 +173,14 @@ const handleMessage = async (message: MessageEvent<MessageData>) => {
         }
     } else if (type === 'call_batch') {
         await providersRegistered;
-        const filtered = filterBatchWords(message.data.words, batchWaiting, waiting);
+        const {words: filtered, cancelledAttempts} = partitionBatchWords(
+            message.data.words,
+            batchWaiting,
+            waiting,
+        );
+        for (const attempt of cancelledAttempts) {
+            workerCalls().finish_failed(attempt);
+        }
         if (!filtered) {
             return;
         }

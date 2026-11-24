@@ -11,7 +11,7 @@ use super::super::{
 use crate::coords::{TileCoords, ZoomLevel, EXTENT};
 
 const CAP_CACHE_LEN: usize = if cfg!(target_arch = "wasm32") {
-    256
+    1024
 } else {
     2048
 };

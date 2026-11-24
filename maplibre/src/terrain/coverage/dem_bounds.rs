@@ -182,7 +182,7 @@ pub fn coverage_system(
                 && prev.matches_inputs(rendered.as_ref(), (dem_sig, dem_count), &dem, poles)
         })
     {
-        let key = PreparedTerrainKey::capture(view_state, world, dem.tile_size);
+        let key = PreparedTerrainKey::capture_for_style(style, view_state, world, dem.tile_size);
         world.resources.insert(PreparedTerrainRegion {
             key,
             region: rendered,
@@ -228,7 +228,7 @@ pub fn coverage_system(
     });
     world.resources.insert(index);
     if bounds_unchanged {
-        let key = PreparedTerrainKey::capture(view_state, world, dem.tile_size);
+        let key = PreparedTerrainKey::capture_for_style(style, view_state, world, dem.tile_size);
         world.resources.insert(PreparedTerrainRegion {
             key,
             region: rendered,

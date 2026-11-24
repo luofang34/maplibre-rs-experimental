@@ -426,6 +426,7 @@ impl<HC: HttpClient, S: OfflineStore> OfflineManager<HC, S> {
         pre_stored: &mut u64,
     ) -> Result<(), OfflineDownloadError> {
         let pending = pending_non_volatile_tile_json_urls(style);
+        let mut mutated = false;
         for (source_name, url) in pending {
             let key = self
                 .source_client
@@ -461,14 +462,23 @@ impl<HC: HttpClient, S: OfflineStore> OfflineManager<HC, S> {
             })?;
             if let Some(src) = style.sources.get_mut(&source_name) {
                 match src {
-                    Source::Vector(v) | Source::Raster(v) => apply_tile_json(v, tile_json),
-                    Source::RasterDem(d) => apply_tile_json_to_dem(d, tile_json),
+                    Source::Vector(v) | Source::Raster(v) => {
+                        apply_tile_json(v, tile_json);
+                        mutated = true;
+                    }
+                    Source::RasterDem(d) => {
+                        apply_tile_json_to_dem(d, tile_json);
+                        mutated = true;
+                    }
                     Source::GeoJson(_)
                     | Source::Image(_)
                     | Source::Video(_)
                     | Source::Canvas(_) => {}
                 }
             }
+        }
+        if mutated {
+            style.bump_revision();
         }
         Ok(())
     }

@@ -18,7 +18,7 @@ use crate::{
         RasterLayersDataComponent,
     },
     render::eventually::Eventually,
-    style::{source::Source, Style},
+    style::Style,
     tcs::{
         system::{System, SystemResult},
         world::World,
@@ -60,17 +60,8 @@ impl<E: Environment, T: RasterTransferables> System for PopulateWorldSystem<E, T
         }: &mut MapContext,
     ) -> SystemResult {
         let style_rev = style.revision();
-        let has_raster_or_dem = style.terrain.is_some()
-            || style.sources.values().any(|source| {
-                matches!(
-                    source,
-                    Source::Raster(_)
-                        | Source::RasterDem(_)
-                        | Source::Image(_)
-                        | Source::Video(_)
-                        | Source::Canvas(_)
-                )
-            });
+        let has_raster_or_dem =
+            style.terrain.is_some() || style.cached_has_raster_or_media_sources();
         if !has_raster_or_dem && self.idle_rev == Some(style_rev) {
             return Ok(());
         }

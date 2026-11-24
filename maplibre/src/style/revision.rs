@@ -34,11 +34,27 @@ struct WorkerSnapshots {
     has_symbol_layers: Option<bool>,
     has_raster_layer: Option<bool>,
     has_any_raster_type: Option<bool>,
+    has_visible_raster_type: Option<bool>,
+    has_raster_or_media_sources: Option<bool>,
     has_heatmap_layer: Option<bool>,
     has_dem_layer: Option<bool>,
     has_media_source: Option<bool>,
     has_vector_source_layers: Option<bool>,
     symbol_layer_indices: Option<Arc<[usize]>>,
+    vector_tile_summary: Option<TileKindSummary>,
+    raster_tile_summary: Option<TileKindSummary>,
+    raster_source_layers: Option<RasterSourceLayerIndex>,
+}
+
+/// Cached `(source_name, layer_indices)` pairs grouping non-hidden raster-like layers per style revision.
+pub(crate) type RasterSourceLayerIndex = Arc<[(Option<String>, Arc<[usize]>)]>;
+
+/// Cached per-[`TileKind`](crate::io::tile_sources::TileKind) zoom bounds and combined geographic bounds.
+#[derive(Clone, Debug)]
+pub(crate) struct TileKindSummary {
+    pub min_zoom: Option<u8>,
+    pub max_zoom: Option<u8>,
+    pub bounds: Option<Arc<[(f64, f64, f64, f64)]>>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -335,5 +351,81 @@ impl Style {
             .into();
         guard.symbol_layer_indices = Some(indices.clone());
         indices
+    }
+
+    /// Cached check for whether any non-hidden layer has a type in `types`.
+    pub(crate) fn cached_has_visible_raster_type(&self, types: &[&str]) -> bool {
+        let mut guard = lock_unpoisoned(&self.revision_state.snapshots);
+        if let Some(has) = guard.has_visible_raster_type {
+            return has;
+        }
+        let has = self
+            .layers
+            .iter()
+            .any(|layer| types.contains(&layer.type_.as_str()) && !layer.is_hidden());
+        guard.has_visible_raster_type = Some(has);
+        has
+    }
+
+    /// Cached check for whether the style declares any raster, DEM, image, video, or canvas source.
+    pub(crate) fn cached_has_raster_or_media_sources(&self) -> bool {
+        let mut guard = lock_unpoisoned(&self.revision_state.snapshots);
+        if let Some(has) = guard.has_raster_or_media_sources {
+            return has;
+        }
+        let has = self.sources.values().any(|s| {
+            matches!(
+                s,
+                super::source::Source::Raster(_)
+                    | super::source::Source::RasterDem(_)
+                    | super::source::Source::Image(_)
+                    | super::source::Source::Video(_)
+                    | super::source::Source::Canvas(_)
+            )
+        });
+        guard.has_raster_or_media_sources = Some(has);
+        has
+    }
+
+    /// Cached zoom range and source bounds summary for vector or raster-like layers.
+    pub(crate) fn cached_tile_kind_summary(
+        &self,
+        is_raster: bool,
+        compute: impl FnOnce(&Self) -> TileKindSummary,
+    ) -> TileKindSummary {
+        let mut guard = lock_unpoisoned(&self.revision_state.snapshots);
+        let slot = if is_raster {
+            &guard.raster_tile_summary
+        } else {
+            &guard.vector_tile_summary
+        };
+        if let Some(summary) = slot {
+            return summary.clone();
+        }
+        let summary = compute(self);
+        if is_raster {
+            guard.raster_tile_summary = Some(summary.clone());
+        } else {
+            guard.vector_tile_summary = Some(summary.clone());
+        }
+        summary
+    }
+
+    /// Cached non-hidden raster-like layer indices grouped by resolved source name.
+    pub(crate) fn cached_raster_source_layers(
+        &self,
+        compute: impl FnOnce(&Self) -> Vec<(Option<String>, Vec<usize>)>,
+    ) -> RasterSourceLayerIndex {
+        let mut guard = lock_unpoisoned(&self.revision_state.snapshots);
+        if let Some(groups) = &guard.raster_source_layers {
+            return groups.clone();
+        }
+        let groups: RasterSourceLayerIndex = compute(self)
+            .into_iter()
+            .map(|(name, indices)| (name, Arc::from(indices)))
+            .collect::<Vec<_>>()
+            .into();
+        guard.raster_source_layers = Some(groups.clone());
+        groups
     }
 }

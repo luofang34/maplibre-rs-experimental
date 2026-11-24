@@ -36,9 +36,7 @@ mod steady_cache;
 mod targets;
 #[cfg(any(test, feature = "headless"))]
 pub(crate) use targets::target_specs;
-pub(crate) use targets::{
-    draw_order_key, draw_order_key_with_resolved, procedural_tiles, target_specs_arc,
-};
+pub(crate) use targets::{draw_order_key_with_resolved, procedural_tiles, target_specs_arc};
 mod drape_phase;
 mod frame;
 pub(crate) mod surface_covering;

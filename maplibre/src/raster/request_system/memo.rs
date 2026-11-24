@@ -9,7 +9,7 @@ use crate::{
     io::{
         tile_backpressure::has_raster_deferred,
         tile_retry::{self, RequestKind},
-        tile_sources::{source_layer_groups, RasterSourceId, TileKind},
+        tile_sources::RasterSourceId,
     },
     render::{
         eye_covering::{
@@ -109,20 +109,15 @@ impl RasterRequestMemo {
             .as_ref()
             .is_some_and(|(rev, _, _)| *rev == style_rev);
         if !valid {
-            let has_raster_layers = style.layers.iter().any(|layer| {
-                crate::io::tile_sources::RASTER_LAYER_TYPES.contains(&layer.type_.as_str())
-                    && !layer.is_hidden()
-            });
+            let has_raster_layers =
+                style.cached_has_visible_raster_type(&crate::io::tile_sources::RASTER_LAYER_TYPES);
             let all_sources = if has_raster_layers {
-                source_layer_groups(style, TileKind::Raster)
-                    .into_iter()
-                    .filter(|group| {
-                        !crate::raster::media_source::is_media_source(
-                            style,
-                            group.source_name.as_deref(),
-                        )
+                crate::io::tile_sources::raster_source_layer_indices(style)
+                    .iter()
+                    .filter(|(name, _)| {
+                        !crate::raster::media_source::is_media_source(style, name.as_deref())
                     })
-                    .map(|group| RasterSourceId::new(group.source_name))
+                    .map(|(name, _)| RasterSourceId::new(name.clone()))
                     .collect()
             } else {
                 Vec::new()

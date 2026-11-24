@@ -19,7 +19,10 @@ use crate::{
     },
     kernel::Kernel,
     raster::{transferables::RasterTransferables, RasterLayersDataComponent},
-    render::{projection::raster_source_regions, view_state::ViewStatePadding},
+    render::{
+        eye_covering::RasterCoverings, projection::raster_source_regions,
+        view_state::ViewStatePadding,
+    },
     style::Style,
     tcs::system::{System, SystemError, SystemResult},
 };
@@ -84,47 +87,36 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
         }
         crate::io::tile_backpressure::set_raster_deferred(world, false);
         let all_sources = self.memo.cached_sources();
-        let (mut regions, cached_regions) =
-            resolve_regions(style, view_state, world, tight_padding, multi.as_ref())?;
-        regions.retain(|(source, _)| {
-            !crate::raster::media_source::is_media_source(style, source.name())
-        });
         let stand_ins = drape_stand_ins(style, view_state, world);
-        self.dispatch_wanted(
-            style,
-            world,
-            &all_sources,
-            regions,
-            stand_ins,
-            multi.as_ref(),
-        );
+        let fresh_regions = if let Some(multi) = &multi {
+            self.dispatch_wanted(
+                style,
+                world,
+                &all_sources,
+                &multi.raster_regions,
+                stand_ins,
+                Some(multi),
+            );
+            None
+        } else {
+            let resolved = resolve_regions(style, view_state, world, tight_padding)?;
+            self.dispatch_wanted(style, world, &all_sources, &resolved.0, stand_ins, None);
+            Some(resolved)
+        };
         if let Some(memo_key) = memo_key {
             self.memo
-                .record(memo_key, world.tiles.tiles.len(), cached_regions);
+                .record(memo_key, world.tiles.tiles.len(), fresh_regions);
         }
         Ok(())
     }
 }
-
-type ResolvedRegions = (
-    crate::render::eye_covering::RasterCoverings,
-    Option<(
-        crate::render::eye_covering::RasterCoverings,
-        ViewStatePadding,
-        (u64, u64, usize),
-    )>,
-);
 
 fn resolve_regions(
     style: &Style,
     view_state: &crate::render::view_state::ViewState,
     world: &mut crate::tcs::world::World,
     tight_padding: bool,
-    multi: Option<&crate::render::eye_covering::MultiViewExtractCovering>,
-) -> Result<ResolvedRegions, SystemError> {
-    if let Some(multi) = multi {
-        return Ok((multi.raster_regions.clone(), None));
-    }
+) -> Result<(RasterCoverings, ViewStatePadding, (u64, u64, usize)), SystemError> {
     let request_padding = if tight_padding {
         ViewStatePadding::Tight
     } else {
@@ -133,18 +125,14 @@ fn resolve_regions(
     let computed = raster_source_regions(style, view_state, world, request_padding)?;
     let host_frame = crate::render::frame_signals::host_frame_in_progress(world);
     let terrain_key = crate::render::eye_covering::terrain_index_key(world);
-    let cached_regions = computed.clone();
     let cache = world
         .resources
         .get_or_init_mut::<crate::render::eye_covering::FrameLooseCovering>();
     if cache.host_frame != host_frame {
         *cache = crate::render::eye_covering::FrameLooseCovering::for_host_frame(host_frame);
     }
-    cache.raster_regions = Some((cached_regions.clone(), request_padding, terrain_key));
-    Ok((
-        computed,
-        Some((cached_regions, request_padding, terrain_key)),
-    ))
+    cache.raster_regions = Some((computed.clone(), request_padding, terrain_key));
+    Ok((computed, request_padding, terrain_key))
 }
 
 impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
@@ -153,7 +141,7 @@ impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
         style: &Style,
         world: &mut crate::tcs::world::World,
         all_sources: &[RasterSourceId],
-        regions: crate::render::eye_covering::RasterCoverings,
+        regions: &[(RasterSourceId, Vec<WorldTileCoords>)],
         stand_ins: Vec<WorldTileCoords>,
         multi: Option<&crate::render::eye_covering::MultiViewExtractCovering>,
     ) {
@@ -161,7 +149,14 @@ impl<E: Environment, T: RasterTransferables> RequestSystem<E, T> {
         requested.clear();
         let mut budget = request_budget(world);
         let mut acc = std::mem::take(&mut self.memo.acc);
-        wanted_tiles_with_sources_into(&mut acc, regions, stand_ins, style, world);
+        wanted_tiles_with_sources_into(
+            &mut acc,
+            regions,
+            stand_ins,
+            style,
+            world,
+            style.cached_has_media_sources(),
+        );
         let mut deferred = false;
         let mut frame_style = FrameStyle::new(style);
         let wanted = std::mem::take(&mut acc.wanted);
@@ -357,7 +352,7 @@ fn wanted_tiles(
     world: &crate::tcs::world::World,
 ) -> Vec<WorldTileCoords> {
     let mut acc = memo::WantedTilesAcc::default();
-    wanted_tiles_with_sources_into(&mut acc, regions, drape_targets, style, world);
+    wanted_tiles_with_sources_into(&mut acc, &regions, drape_targets, style, world, false);
     acc.wanted
 }
 
@@ -392,7 +387,7 @@ fn source_tile_constraints(
 fn collect_source_wanted_tiles(
     acc: &mut WantedTilesAcc,
     source: &RasterSourceId,
-    tiles: Vec<WorldTileCoords>,
+    tiles: &[WorldTileCoords],
     drape_targets: &[WorldTileCoords],
     style: &crate::style::Style,
     world: &crate::tcs::world::World,
@@ -413,7 +408,7 @@ fn collect_source_wanted_tiles(
             }
         }
     }
-    for coords in tiles {
+    for &coords in tiles {
         // Tiles outside the source's declared bounds are never requested.
         if bounds.is_some_and(|bounds| !crate::io::tile_sources::tile_in_bounds(coords, bounds)) {
             continue;
@@ -445,14 +440,18 @@ fn collect_source_wanted_tiles(
 
 fn wanted_tiles_with_sources_into(
     acc: &mut WantedTilesAcc,
-    regions: Vec<(RasterSourceId, Vec<WorldTileCoords>)>,
+    regions: &[(RasterSourceId, Vec<WorldTileCoords>)],
     drape_targets: Vec<WorldTileCoords>,
     style: &crate::style::Style,
     world: &crate::tcs::world::World,
+    skip_media: bool,
 ) {
     acc.reset();
     for (source, tiles) in regions {
-        collect_source_wanted_tiles(acc, &source, tiles, &drape_targets, style, world);
+        if skip_media && crate::raster::media_source::is_media_source(style, source.name()) {
+            continue;
+        }
+        collect_source_wanted_tiles(acc, source, tiles, &drape_targets, style, world);
     }
     acc.coarse_ancestors
         .retain(|ancestor| acc.needed_coarse.contains(ancestor));

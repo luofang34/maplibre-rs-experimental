@@ -1,3 +1,5 @@
+use smallvec::SmallVec;
+
 use crate::{
     render::{
         pass_refs::PassFrameRefs,
@@ -10,6 +12,7 @@ use crate::{
     },
     sdf::{textures::SymbolTextures, SymbolBufferPool, SymbolModePipelines},
     tcs::world::World,
+    vector::IndexEntry,
 };
 
 struct SymbolPassResources<'w> {
@@ -60,13 +63,19 @@ fn resolve_symbol_instances<'w>(
     }
 }
 
-fn draw_symbol_halo_pass<'w>(
+struct DeferredSymbolFill<'a, 'w> {
+    item: &'a TranslucentItem,
+    entry: &'w IndexEntry,
+    bind_group: &'w wgpu::BindGroup,
+}
+
+fn draw_symbol_halo_pass<'a, 'w>(
     res: &SymbolPassResources<'w>,
-    items: &[TranslucentItem],
+    items: &'a [TranslucentItem],
     pass: &mut TrackedRenderPass<'w>,
     whole: bool,
-) -> bool {
-    let mut any_deferred = false;
+    deferred: &mut SmallVec<[DeferredSymbolFill<'a, 'w>; 16]>,
+) {
     for item in items {
         let Some(entry) =
             res.pool
@@ -92,7 +101,6 @@ fn draw_symbol_halo_pass<'w>(
             let Some(halo) = res.mode.halo.as_ref() else {
                 continue;
             };
-            any_deferred = true;
             halo
         } else {
             let Some(combined) = res.mode.combined.as_ref() else {
@@ -103,6 +111,13 @@ fn draw_symbol_halo_pass<'w>(
         let Some(instances) = resolve_symbol_instances(pass, res.covering, item, whole) else {
             continue;
         };
+        if binding.separate_halo {
+            deferred.push(DeferredSymbolFill {
+                item,
+                entry,
+                bind_group: &binding.group,
+            });
+        }
         pass.set_pipeline(pipeline);
         pass.set_bind_group(1, &binding.group, &[]);
         let (first_idx, base_vertex) = res.pool.bind_layer(pass, entry, (2, whole));
@@ -112,12 +127,11 @@ fn draw_symbol_halo_pass<'w>(
             instances,
         );
     }
-    any_deferred
 }
 
 fn draw_symbol_fill_pass<'w>(
     res: &SymbolPassResources<'w>,
-    items: &[TranslucentItem],
+    deferred: &[DeferredSymbolFill<'_, 'w>],
     pass: &mut TrackedRenderPass<'w>,
     whole: bool,
 ) {
@@ -125,31 +139,15 @@ fn draw_symbol_fill_pass<'w>(
         return;
     };
     pass.set_pipeline(fill);
-    for item in items {
-        let Some(entry) =
-            res.pool
-                .index()
-                .resolve_entry(item.tile.coords, item.style_layer, item.entry_slot)
+    for entry_fill in deferred {
+        let Some(instances) = resolve_symbol_instances(pass, res.covering, entry_fill.item, whole)
         else {
             continue;
         };
-        let Some(binding) = res
-            .textures
-            .binding_by_id(item.tile.coords, item.style_layer)
-            .filter(|binding| binding.separate_halo)
-        else {
-            continue;
-        };
-        if entry.indices_buffer_range().is_empty() {
-            continue;
-        }
-        let Some(instances) = resolve_symbol_instances(pass, res.covering, item, whole) else {
-            continue;
-        };
-        pass.set_bind_group(1, &binding.group, &[]);
-        let (first_idx, base_vertex) = res.pool.bind_layer(pass, entry, (2, whole));
+        pass.set_bind_group(1, entry_fill.bind_group, &[]);
+        let (first_idx, base_vertex) = res.pool.bind_layer(pass, entry_fill.entry, (2, whole));
         pass.draw_indexed(
-            first_idx..first_idx + entry.indices_range().len() as u32,
+            first_idx..first_idx + entry_fill.entry.indices_range().len() as u32,
             base_vertex,
             instances,
         );
@@ -174,8 +172,10 @@ pub(crate) fn try_draw_symbol_group<'w>(
     let whole = pass.base_vertex(world);
     pass.set_bind_group(0, res.projection.bind_group(), &[]);
     pass.set_bind_group(2, &res.depth.binding, &[]);
-    if draw_symbol_halo_pass(&res, items, pass, whole) {
-        draw_symbol_fill_pass(&res, items, pass, whole);
+    let mut deferred = SmallVec::new();
+    draw_symbol_halo_pass(&res, items, pass, whole, &mut deferred);
+    if !deferred.is_empty() {
+        draw_symbol_fill_pass(&res, &deferred, pass, whole);
     }
     true
 }

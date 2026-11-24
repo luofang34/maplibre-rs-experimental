@@ -118,7 +118,8 @@ pub fn center_elevation_system(
             .get::<crate::terrain::coverage::PreparedTerrainRegion>()
             .map(|prepared| prepared.key.dem_tile_size())
         {
-            let refreshed = crate::terrain::coverage::PreparedTerrainKey::capture(
+            let refreshed = crate::terrain::coverage::PreparedTerrainKey::capture_for_style(
+                style,
                 view_state,
                 world,
                 dem_tile_size,

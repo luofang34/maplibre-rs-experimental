@@ -185,6 +185,7 @@ fn min_zoom_is_the_shallowest_declared_source_unless_one_declares_none() {
             _ => panic!("vector or GeoJSON source"),
         }
     }
+    style.bump_revision();
     assert_eq!(source_min_zoom(&style, TileKind::Vector), Some(1));
 }
 

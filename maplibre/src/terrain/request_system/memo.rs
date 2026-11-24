@@ -81,7 +81,8 @@ impl DemRequestMemo {
             .get::<DrapePrefetchRequests>()
             .map_or(0, |r| hash_coords(&r.0));
         let prepared_key = if multi.is_none() {
-            Some(PreparedTerrainKey::capture(
+            Some(PreparedTerrainKey::capture_for_style(
+                style,
                 view_state,
                 world,
                 dem_tile_size,

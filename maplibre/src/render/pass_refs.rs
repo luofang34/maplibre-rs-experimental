@@ -5,6 +5,8 @@ use std::hash::{Hash, Hasher};
 
 use smallvec::SmallVec;
 
+#[cfg(feature = "raster")]
+use crate::raster::{cross_fade::RasterCrossFade, resource::RasterResources};
 use crate::{
     render::{
         eventually::{Eventually, Eventually::Initialized},
@@ -150,6 +152,10 @@ pub(crate) struct PassFrameRefs<'w> {
     pub symbol_pool: Option<&'w SymbolBufferPool>,
     pub symbol_covering: Option<&'w SymbolCovering>,
     pub symbol_textures: Option<&'w SymbolTextures>,
+    #[cfg(feature = "raster")]
+    pub raster_resources: Option<&'w RasterResources>,
+    #[cfg(feature = "raster")]
+    pub raster_cross_fade: Option<&'w RasterCrossFade>,
 }
 
 impl<'w> PassFrameRefs<'w> {
@@ -178,6 +184,10 @@ impl<'w> PassFrameRefs<'w> {
             symbol_pool: initialized::<SymbolBufferPool>(world),
             symbol_covering: world.resources.get::<SymbolCovering>(),
             symbol_textures: world.resources.get::<SymbolTextures>(),
+            #[cfg(feature = "raster")]
+            raster_resources: initialized::<RasterResources>(world),
+            #[cfg(feature = "raster")]
+            raster_cross_fade: world.resources.get::<RasterCrossFade>(),
         }
     }
 
@@ -342,6 +352,27 @@ impl<'w> PassFrameRefs<'w> {
         refs.map_or_else(
             || world.resources.get::<SymbolTextures>(),
             |r| r.symbol_textures,
+        )
+    }
+
+    #[cfg(feature = "raster")]
+    #[inline]
+    pub(crate) fn resolve_raster_resources(
+        refs: Option<&Self>,
+        world: &'w World,
+    ) -> Option<&'w RasterResources> {
+        refs.map_or_else(|| initialized(world), |r| r.raster_resources)
+    }
+
+    #[cfg(feature = "raster")]
+    #[inline]
+    pub(crate) fn resolve_raster_cross_fade(
+        refs: Option<&Self>,
+        world: &'w World,
+    ) -> Option<&'w RasterCrossFade> {
+        refs.map_or_else(
+            || world.resources.get::<RasterCrossFade>(),
+            |r| r.raster_cross_fade,
         )
     }
 }

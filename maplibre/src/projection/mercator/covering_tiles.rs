@@ -76,15 +76,32 @@ pub(crate) fn covering_tiles_with_history(
     elevation: &dyn TileElevationProvider,
     history: Option<&crate::projection::lod_history::LodHistory>,
 ) -> Result<Vec<WorldTileCoords>, MercatorCoveringError> {
+    covering_tiles_with_resolved(view_state, None, options, elevation, history)
+}
+
+pub(crate) fn covering_tiles_with_resolved(
+    view_state: &ViewState,
+    resolved: Option<&crate::render::resolved_view::ResolvedFrameView>,
+    options: MercatorCoveringOptions,
+    elevation: &dyn TileElevationProvider,
+    history: Option<&crate::projection::lod_history::LodHistory>,
+) -> Result<Vec<WorldTileCoords>, MercatorCoveringError> {
     if usize::from(u8::from(options.zoom)) >= MAX_ZOOM {
         return Err(MercatorCoveringError::UnsupportedZoom {
             zoom: u8::from(options.zoom),
         });
     }
-    let frustum = GlobeFrustum::from_points_oriented(view_state.frustum_corners()?);
-    let world_size = TILE_SIZE * 2_f64.powf(view_state.zoom().value());
+    let corners = match resolved.and_then(|r| r.inverted_view_projection.as_ref()) {
+        Some(inverted) => view_state.frustum_corners_with_inverted(inverted)?,
+        None => view_state.frustum_corners()?,
+    };
+    let frustum = GlobeFrustum::from_points_oriented(corners);
+    let world_size = resolved.map_or_else(
+        || TILE_SIZE * 2_f64.powf(view_state.zoom().value()),
+        |r| r.world_size,
+    );
     let center = view_state.camera().position();
-    let eye = view_state.eye_position();
+    let eye = resolved.map_or_else(|| view_state.eye_position(), |r| r.eye_position);
     let lod = lod_context(view_state, options.requested_zoom, world_size);
     let priority_px = if view_state.has_external_view() {
         Point2::new(eye.x, eye.y)

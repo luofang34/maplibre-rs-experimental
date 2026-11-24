@@ -1,5 +1,5 @@
 //! Split and merge hysteresis without delaying newly visible ground.
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use crate::coords::{TileCoords, WorldTileCoords};
 
@@ -7,19 +7,19 @@ const ZOOM_MARGIN: f64 = 0.15;
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct LodHistory {
-    leaves: HashSet<WorldTileCoords>,
-    refined: HashSet<WorldTileCoords>,
+    leaves: FxHashSet<WorldTileCoords>,
+    refined: FxHashSet<WorldTileCoords>,
 }
 
 impl LodHistory {
     pub(crate) fn new(tiles: &[WorldTileCoords]) -> Self {
         // A tile is judged by its canonical coordinates, whichever copy of the world it was
         // drawn in.
-        let leaves: HashSet<_> = tiles
+        let leaves: FxHashSet<_> = tiles
             .iter()
             .filter_map(|tile| tile.wrapped().map(|(canonical, _)| canonical))
             .collect();
-        let mut refined = HashSet::new();
+        let mut refined = FxHashSet::default();
         for tile in &leaves {
             let mut parent = tile.get_parent();
             while let Some(tile) = parent {

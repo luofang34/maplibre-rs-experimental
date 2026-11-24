@@ -27,13 +27,50 @@ impl PreparedTerrainKey {
         self.dem_tile_size
     }
 
+    #[cfg(any(test, feature = "headless"))]
     pub(crate) fn capture(
         view_state: &crate::render::view_state::ViewState,
         world: &crate::tcs::world::World,
         dem_tile_size: u32,
     ) -> Self {
         let m: [[f64; 4]; 4] = view_state.view_projection().0.into();
-        let vp_bits = m.map(|col| col.map(f64::to_bits));
+        Self::capture_with_vp_bits(
+            m.map(|col| col.map(f64::to_bits)),
+            view_state,
+            world,
+            dem_tile_size,
+        )
+    }
+
+    pub(crate) fn capture_for_style(
+        style: &crate::style::Style,
+        view_state: &crate::render::view_state::ViewState,
+        world: &crate::tcs::world::World,
+        dem_tile_size: u32,
+    ) -> Self {
+        let vp_bits = world
+            .resources
+            .get::<crate::render::resolved_view::ResolvedFrameView>()
+            .filter(|resolved| resolved.matches(style, view_state))
+            .map_or_else(
+                || {
+                    let m: [[f64; 4]; 4] = view_state.view_projection().0.into();
+                    m.map(|col| col.map(f64::to_bits))
+                },
+                |resolved| {
+                    let m: [[f64; 4]; 4] = resolved.view_projection.0.into();
+                    m.map(|col| col.map(f64::to_bits))
+                },
+            );
+        Self::capture_with_vp_bits(vp_bits, view_state, world, dem_tile_size)
+    }
+
+    fn capture_with_vp_bits(
+        vp_bits: [[u64; 4]; 4],
+        view_state: &crate::render::view_state::ViewState,
+        world: &crate::tcs::world::World,
+        dem_tile_size: u32,
+    ) -> Self {
         let (min_elev_idx_bits, max_elev_idx_bits, dem_bounds_len) = world
             .resources
             .get::<TerrainCoverageIndex>()
@@ -94,7 +131,9 @@ pub(crate) fn take_or_compute_tight_terrain_region(
     dem_tile_size: u32,
 ) -> Result<Option<crate::coords::ViewRegion>, crate::render::projection::ProjectionStateError> {
     if let Some(cached) = world.resources.remove::<PreparedTerrainRegion>() {
-        if cached.key == PreparedTerrainKey::capture(view_state, world, dem_tile_size) {
+        if cached.key
+            == PreparedTerrainKey::capture_for_style(style, view_state, world, dem_tile_size)
+        {
             return Ok(cached.region);
         }
     }

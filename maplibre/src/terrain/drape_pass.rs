@@ -54,7 +54,8 @@ impl Node for DrapePassNode {
         let timer = world
             .resources
             .get::<crate::terrain::drape_timing::DrapeTimerSlot>();
-        let pass_started = instant::Instant::now();
+        let pass_started = timer.is_some().then(instant::Instant::now);
+        let frame_refs = crate::render::pass_refs::PassFrameRefs::from_world(world);
         for (index, (target, texture, top_level, scratch)) in drawn.iter().enumerate() {
             let timestamp_writes = timer.and_then(|slot| {
                 let writes = slot
@@ -73,7 +74,7 @@ impl Node for DrapePassNode {
                     .command_encoder
                     .begin_render_pass(&wgpu::RenderPassDescriptor {
                         multiview_mask: None,
-                        label: Some("drape_pass"),
+                        label: cfg!(debug_assertions).then_some("drape_pass"),
                         color_attachments: &[Some(color_attachment)],
                         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                             view: &scratch.depth_stencil.view,
@@ -90,7 +91,8 @@ impl Node for DrapePassNode {
                         occlusion_query_set: None,
                     });
             {
-                let mut render_pass = crate::render::tracked_pass::TrackedRenderPass::new(pass);
+                let mut render_pass = crate::render::tracked_pass::TrackedRenderPass::new(pass)
+                    .with_frame_refs(frame_refs);
                 draw_layers(&mut render_pass, world, target);
                 render_pass.finish(world);
             }
@@ -100,8 +102,8 @@ impl Node for DrapePassNode {
                 texture,
             );
         }
-        if let Some(slot) = timer {
-            slot.record_pass_cpu(pass_started.elapsed(), drawn.len());
+        if let (Some(slot), Some(started)) = (timer, pass_started) {
+            slot.record_pass_cpu(started.elapsed(), drawn.len());
         }
     }
 }
@@ -136,22 +138,24 @@ fn color_attachment<'a>(
     top_level: &'a wgpu::TextureView,
     color: wgpu::Color,
 ) -> wgpu::RenderPassColorAttachment<'a> {
-    let ops = wgpu::Operations {
-        load: wgpu::LoadOp::Clear(color),
-        store: StoreOp::Store,
-    };
     match &scratch.color {
         Some(multisampled) => wgpu::RenderPassColorAttachment {
             depth_slice: None,
             view: &multisampled.view,
             resolve_target: Some(top_level),
-            ops,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(color),
+                store: StoreOp::Discard,
+            },
         },
         None => wgpu::RenderPassColorAttachment {
             depth_slice: None,
             view: top_level,
             resolve_target: None,
-            ops,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(color),
+                store: StoreOp::Store,
+            },
         },
     }
 }

@@ -15,7 +15,7 @@ mod cap;
 pub(crate) use cap::{closest_mercator_data_point_on_tile, closest_unit_sphere_point_on_tile};
 pub use cap::{tile_spherical_cap, TileSphericalCap};
 
-const VOL_CACHE_LEN: usize = 256 + 1792 * (!cfg!(target_arch = "wasm32") as usize);
+const VOL_CACHE_LEN: usize = 1024 + 1024 * (!cfg!(target_arch = "wasm32") as usize);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct VolKey {

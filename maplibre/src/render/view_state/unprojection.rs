@@ -31,10 +31,11 @@ impl ViewState {
         })
     }
 
-    /// Corners of the view frustum in world space: four on the far plane, then four on the
-    /// near plane, each ordered top-left, top-right, bottom-right, bottom-left on screen.
-    pub fn frustum_corners(&self) -> Result<[Vector3<f64>; 8], ViewProjectionError> {
-        let inverted = self.inverted_view_projection()?;
+    /// Corners of the view frustum in world space using an already-inverted clip-to-world transform.
+    pub(crate) fn frustum_corners_with_inverted(
+        &self,
+        inverted: &InvertedViewProjection,
+    ) -> Result<[Vector3<f64>; 8], ViewProjectionError> {
         let points = std::array::from_fn(|index| {
             let (x, y) = match index & 3 {
                 0 => (0.0, 0.0),
@@ -43,7 +44,7 @@ impl ViewState {
                 _ => (0.0, self.height),
             };
             let depth = if index < 4 { 1.0 } else { 0.0 };
-            self.window_to_world(&Vector3::new(x, y, depth), &inverted)
+            self.window_to_world(&Vector3::new(x, y, depth), inverted)
         });
         if points
             .iter()
@@ -52,5 +53,12 @@ impl ViewState {
             return Err(ViewProjectionError);
         }
         Ok(points)
+    }
+
+    /// Corners of the view frustum in world space: four on the far plane, then four on the
+    /// near plane, each ordered top-left, top-right, bottom-right, bottom-left on screen.
+    pub fn frustum_corners(&self) -> Result<[Vector3<f64>; 8], ViewProjectionError> {
+        let inverted = self.inverted_view_projection()?;
+        self.frustum_corners_with_inverted(&inverted)
     }
 }

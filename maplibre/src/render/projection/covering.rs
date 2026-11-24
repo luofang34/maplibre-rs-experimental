@@ -1,5 +1,5 @@
 //! Visible requests and speculative coverage under the active projection.
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 #[cfg(test)]
 use super::globe_camera_for_view;
@@ -17,7 +17,7 @@ use crate::{
         },
         lod_history::LodHistory,
         mercator::{
-            covering_tiles::covering_tiles_with_history as mercator_covering_tiles,
+            covering_tiles::covering_tiles_with_resolved as mercator_covering_tiles,
             MercatorCoveringOptions,
         },
         ProjectionType,
@@ -429,7 +429,7 @@ fn union_regions(
         (Some(primary), Some(secondary)) => {
             // Speculative padding must never evict tiles the primary view actually draws.
             let max_tiles = max_tiles.max(primary.iter().count());
-            let mut seen = HashSet::new();
+            let mut seen = FxHashSet::default();
             let tiles: Vec<WorldTileCoords> = primary
                 .iter()
                 .chain(secondary.iter())

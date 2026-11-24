@@ -30,29 +30,27 @@ export function registerBatchCalls(words, waiting) {
 }
 
 /**
- * Deletes settled entries from `waiting` and compacts out any calls cancelled while queued.
+ * Deletes settled entries from `waiting`, separates cancelled attempt IDs, and compacts live calls.
  * @param {Uint32Array} words
  * @param {Array<{ idx: number, attempt: bigint, entry: { cancelled: boolean } }>} registered
  * @param {Map<bigint, { cancelled: boolean }>} waiting
- * @returns {Uint32Array | null}
+ * @returns {{ words: Uint32Array | null, cancelledAttempts: bigint[] }}
  */
-export function filterBatchWords(words, registered, waiting) {
-    let anyCancelled = false;
+export function partitionBatchWords(words, registered, waiting) {
+    /** @type {bigint[]} */
+    const cancelledAttempts = [];
     for (const item of registered) {
         waiting.delete(item.attempt);
         if (item.entry.cancelled) {
-            anyCancelled = true;
+            cancelledAttempts.push(item.attempt);
         }
     }
-    if (!anyCancelled) {
-        return words;
+    if (cancelledAttempts.length === 0) {
+        return {words, cancelledAttempts};
     }
-    let keptCount = 0;
-    for (const item of registered) {
-        if (!item.entry.cancelled) keptCount++;
-    }
+    const keptCount = registered.length - cancelledAttempts.length;
     if (keptCount === 0) {
-        return null;
+        return {words: null, cancelledAttempts};
     }
     const compact = new Uint32Array(keptCount * WORDS_PER_CALL);
     let dst = 0;
@@ -63,5 +61,16 @@ export function filterBatchWords(words, registered, waiting) {
         }
         dst += WORDS_PER_CALL;
     }
-    return compact;
+    return {words: compact, cancelledAttempts};
+}
+
+/**
+ * Deletes settled entries from `waiting` and compacts out any calls cancelled while queued.
+ * @param {Uint32Array} words
+ * @param {Array<{ idx: number, attempt: bigint, entry: { cancelled: boolean } }>} registered
+ * @param {Map<bigint, { cancelled: boolean }>} waiting
+ * @returns {Uint32Array | null}
+ */
+export function filterBatchWords(words, registered, waiting) {
+    return partitionBatchWords(words, registered, waiting).words;
 }

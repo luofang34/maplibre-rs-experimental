@@ -5,6 +5,7 @@ import {
     WORDS_PER_CALL,
     decodeBatchAttempt,
     filterBatchWords,
+    partitionBatchWords,
     registerBatchCalls,
 } from '../src/singlethreaded/st-call-batch.mjs';
 
@@ -69,5 +70,32 @@ test('filterBatchWords returns original buffer when none cancelled and null when
     waiting.get(21n).cancelled = true;
     waiting.get(22n).cancelled = true;
     assert.equal(filterBatchWords(words, reg2, waiting), null);
+    assert.equal(waiting.size, 0);
+});
+
+test('partitionBatchWords returns cancelled attempt IDs alongside compacted batch words', () => {
+    const waiting = new Map();
+    const words = packCalls([
+        {attempt: 31n, styleRevision: 2n, x: 0, y: 0, meta: 1, pixelRatio: 1},
+        {attempt: 32n, styleRevision: 2n, x: 1, y: 0, meta: 1, pixelRatio: 1},
+        {attempt: 33n, styleRevision: 2n, x: 2, y: 0, meta: 1, pixelRatio: 1},
+    ]);
+
+    const reg1 = registerBatchCalls(words, waiting);
+    waiting.get(32n).cancelled = true;
+    const part1 = partitionBatchWords(words, reg1, waiting);
+    assert.deepEqual(part1.cancelledAttempts, [32n]);
+    assert.ok(part1.words instanceof Uint32Array);
+    assert.equal(part1.words.length, 2 * WORDS_PER_CALL);
+    assert.equal(decodeBatchAttempt(part1.words, 0), 31n);
+    assert.equal(decodeBatchAttempt(part1.words, WORDS_PER_CALL), 33n);
+
+    const reg2 = registerBatchCalls(words, waiting);
+    waiting.get(31n).cancelled = true;
+    waiting.get(32n).cancelled = true;
+    waiting.get(33n).cancelled = true;
+    const part2 = partitionBatchWords(words, reg2, waiting);
+    assert.deepEqual(part2.cancelledAttempts, [31n, 32n, 33n]);
+    assert.equal(part2.words, null);
     assert.equal(waiting.size, 0);
 });

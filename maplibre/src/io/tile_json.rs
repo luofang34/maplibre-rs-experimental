@@ -206,6 +206,7 @@ pub async fn resolve_tile_json_sources<HC: HttpClient>(
             .map(|(_, url, volatile)| client.fetch_source_url(url, *volatile)),
     )
     .await;
+    let mut mutated = false;
     for ((name, url, _), fetched) in pending.into_iter().zip(results) {
         let Some(source) = style.sources.get_mut(&name) else {
             continue;
@@ -215,6 +216,7 @@ pub async fn resolve_tile_json_sources<HC: HttpClient>(
                 Ok(tile_json) => {
                     tracing::info!(source = %name, %url, "resolved TileJSON source");
                     apply_tile_json_to_source(source, tile_json);
+                    mutated = true;
                 }
                 Err(error) => {
                     tracing::warn!(source = %name, %url, %error, "TileJSON document is invalid");
@@ -229,6 +231,9 @@ pub async fn resolve_tile_json_sources<HC: HttpClient>(
                 );
             }
         }
+    }
+    if mutated {
+        style.bump_revision();
     }
 }
 

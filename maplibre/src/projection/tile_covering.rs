@@ -1,10 +1,8 @@
 //! Coverage-preserving refinement with a bounded tile working set.
-use std::{
-    cmp::Ordering,
-    collections::{BinaryHeap, HashMap},
-};
+use std::{cmp::Ordering, collections::BinaryHeap};
 
 use cgmath::{InnerSpace, Point2, Vector3};
+use rustc_hash::FxHashMap;
 
 #[cfg(test)]
 use crate::coords::LatLon;
@@ -223,7 +221,7 @@ pub(crate) fn coarsen_with_focus(
     if tiles.len() <= limit {
         return tiles;
     }
-    let mut ancestors = HashMap::new();
+    let mut ancestors = FxHashMap::default();
     let mut world_copies = 0_i32;
     for (index, tile) in tiles.iter().enumerate() {
         let mut ancestor = Some(*tile);

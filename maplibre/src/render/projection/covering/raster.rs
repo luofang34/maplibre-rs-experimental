@@ -3,7 +3,7 @@
 use super::{covering_region_with_history, ProjectionStateError};
 use crate::{
     coords::TILE_SIZE,
-    io::tile_sources::{source_layer_groups, RasterSourceId, TileKind, RASTER_LAYER_TYPES},
+    io::tile_sources::{raster_source_layer_indices, RasterSourceId, RASTER_LAYER_TYPES},
     render::{
         eye_covering::{FrameLodHistory, RasterCoverings},
         view_state::{ViewState, ViewStatePadding},
@@ -26,15 +26,15 @@ pub fn raster_source_regions(
     let zoom = view_state.zoom().value();
     let style_zoom = view_state.style_zoom().value();
     let mut regions = Vec::new();
-    for group in source_layer_groups(style, TileKind::Raster) {
-        if !group
-            .layers
+    for (source_name, layer_indices) in raster_source_layer_indices(style).iter() {
+        if !layer_indices
             .iter()
+            .filter_map(|&idx| style.layers.get(idx))
             .any(|layer| layer.is_visible_at(style_zoom))
         {
             continue;
         }
-        let source = RasterSourceId::new(group.source_name);
+        let source = RasterSourceId::new(source_name.clone());
         let definition = source.name().and_then(|name| style.sources.get(name));
         let mut request = raster_covering_request(zoom, definition);
         if !request.zoom_range.serves(request.level) && style_zoom > zoom {

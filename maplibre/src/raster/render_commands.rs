@@ -1,10 +1,9 @@
 //! Raster draw commands that stop when uploaded textures, meshes or metadata are missing.
 
 use crate::{
-    raster::{cross_fade::RasterCrossFade, resource::RasterResources, RasterSourceId},
+    raster::RasterSourceId,
     render::{
-        eventually::{Eventually, Eventually::Initialized},
-        projection::ProjectionGpuResources,
+        pass_refs::PassFrameRefs,
         render_phase::{LayerItem, PhaseItem, RenderCommand, RenderCommandResult},
         tile_mesh::TileMeshUsage,
     },
@@ -19,12 +18,11 @@ impl<P: PhaseItem> RenderCommand<P> for SetRasterTilePipeline {
         item: &P,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some((Initialized(raster_resources), Initialized(projection_resources))) =
-            world.resources.query::<(
-                &Eventually<RasterResources>,
-                &Eventually<ProjectionGpuResources>,
-            )>()
-        else {
+        let refs = pass.frame_refs();
+        let (Some(raster_resources), Some(projection_resources)) = (
+            PassFrameRefs::resolve_raster_resources(refs, world),
+            PassFrameRefs::resolve_projection(refs, world),
+        ) else {
             return RenderCommandResult::Failure;
         };
 
@@ -46,8 +44,8 @@ impl RenderCommand<LayerItem> for SetRasterViewBindGroup {
         item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some(Initialized(raster_resources)) =
-            world.resources.get::<Eventually<RasterResources>>()
+        let Some(raster_resources) =
+            PassFrameRefs::resolve_raster_resources(pass.frame_refs(), world)
         else {
             return RenderCommandResult::Failure;
         };
@@ -71,22 +69,18 @@ impl RenderCommand<LayerItem> for SetRasterPaintBindGroup {
         item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some(Initialized(raster_resources)) =
-            world.resources.get::<Eventually<RasterResources>>()
-        else {
+        let refs = pass.frame_refs();
+        let Some(raster_resources) = PassFrameRefs::resolve_raster_resources(refs, world) else {
             return RenderCommandResult::Failure;
         };
-        let departing = world
-            .resources
-            .get::<RasterCrossFade>()
-            .is_some_and(|fade| {
-                fade.is_departing(
-                    raster_resources
-                        .layer_source(item.style_layer.as_str())
-                        .and_then(RasterSourceId::name),
-                    &item.tile.coords,
-                )
-            });
+        let departing = PassFrameRefs::resolve_raster_cross_fade(refs, world).is_some_and(|fade| {
+            fade.is_departing(
+                raster_resources
+                    .layer_source(item.style_layer.as_str())
+                    .and_then(RasterSourceId::name),
+                &item.tile.coords,
+            )
+        });
         let Some(bind_group) = raster_resources.layer_paint(item.style_layer, departing) else {
             return RenderCommandResult::Failure;
         };
