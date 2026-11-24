@@ -168,7 +168,8 @@ impl MapController {
                     let loaded = !reasons.loading
                         && !reasons.awaiting_images
                         && !reasons.camera_moved
-                        && !has_arrivals;
+                        && !has_arrivals
+                        && !context.has_scheduled_retries();
                     let (passes, set_vertex_buffers, write_buffer_calls, write_buffer_bytes) =
                         last_gpu_api_stats();
                     let payload = ArenaFrameTelemetry {
@@ -243,6 +244,7 @@ impl MapController {
                     && !reasons.awaiting_images
                     && !reasons.camera_moved
                     && !has_arrivals
+                    && !context.has_scheduled_retries()
                 {
                     Some(CameraState::of(context))
                 } else {

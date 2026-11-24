@@ -29,7 +29,7 @@ export const createOffscreenCoalescer = (post, rawRpc, isClosed) => {
     let inputMicrotaskQueued = false;
 
     let queuedJump = null;
-    let jumpInFlight = false;
+    let jumpInFlight = null;
     let jumpFlushScheduled = false;
     const queuedGeoJson = new Map();
     const geoJsonInFlight = new Map();
@@ -123,22 +123,26 @@ export const createOffscreenCoalescer = (post, rawRpc, isClosed) => {
 
     const dispatchQueuedJump = () => {
         jumpFlushScheduled = false;
-        if (isClosed() || jumpInFlight || !queuedJump) return;
+        if (isClosed() || jumpInFlight !== null || !queuedJump) return;
         const batch = queuedJump;
         queuedJump = null;
-        jumpInFlight = true;
-        rawRpc("jumpTo", [batch.options]).then(
+        const tracked = rawRpc("jumpTo", [batch.options]).then(
             res => {
-                jumpInFlight = false;
+                if (jumpInFlight === tracked) {
+                    jumpInFlight = null;
+                }
                 for (const w of batch.waiters) w.resolve(res);
                 if (queuedJump) dispatchQueuedJump();
             },
             err => {
-                jumpInFlight = false;
+                if (jumpInFlight === tracked) {
+                    jumpInFlight = null;
+                }
                 for (const w of batch.waiters) w.reject(err);
                 if (queuedJump) dispatchQueuedJump();
             },
         );
+        jumpInFlight = tracked;
     };
 
     const jumpTo = options => {
@@ -150,7 +154,7 @@ export const createOffscreenCoalescer = (post, rawRpc, isClosed) => {
             } else {
                 queuedJump = {options, waiters: [{resolve, reject}]};
             }
-            if (!jumpInFlight && !jumpFlushScheduled) {
+            if (jumpInFlight === null && !jumpFlushScheduled) {
                 jumpFlushScheduled = true;
                 queueMicrotask(dispatchQueuedJump);
             }
@@ -235,7 +239,7 @@ export const createOffscreenCoalescer = (post, rawRpc, isClosed) => {
 
     const flushBeforeOrderedRpc = () => {
         flushInput();
-        if (queuedJump && !jumpInFlight) {
+        if (queuedJump && jumpInFlight === null) {
             dispatchQueuedJump();
         }
         if (queuedGeoJson.size > 0) {
@@ -255,12 +259,36 @@ export const createOffscreenCoalescer = (post, rawRpc, isClosed) => {
         }
     };
 
+    const waitPendingSettled = async () => {
+        while (!isClosed()) {
+            flushInput();
+            if (queuedJump && jumpInFlight === null) {
+                dispatchQueuedJump();
+            }
+            if (queuedGeoJson.size > 0) {
+                flushQueuedGeoJson();
+            }
+            const pending = [];
+            if (jumpInFlight !== null) {
+                pending.push(jumpInFlight);
+            }
+            for (const p of geoJsonInFlight.values()) {
+                pending.push(p);
+            }
+            if (pending.length === 0 && !queuedJump && queuedGeoJson.size === 0) {
+                return;
+            }
+            await Promise.allSettled(pending);
+        }
+    };
+
     const rejectQueued = reason => {
         if (inputRafId !== null && typeof cancelAnimationFrame === "function") {
             cancelAnimationFrame(inputRafId);
         }
         inputRafId = null;
         inputMicrotaskQueued = false;
+        jumpFlushScheduled = false;
         geoJsonFlushScheduled = false;
         if (geoJsonChannel) {
             geoJsonChannel.port1.onmessage = null;
@@ -290,6 +318,7 @@ export const createOffscreenCoalescer = (post, rawRpc, isClosed) => {
         jumpTo,
         setGeoJsonData,
         waitGeoJsonSettled,
+        waitPendingSettled,
         flushBeforeOrderedRpc,
         rejectQueued,
     };

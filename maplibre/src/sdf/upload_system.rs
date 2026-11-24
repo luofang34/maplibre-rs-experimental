@@ -57,7 +57,7 @@ struct SdfUploadKey {
     style_rev: u64,
     tiles_len: usize,
     topology_gen: u64,
-    covering_len: usize,
+    covering_tiles_version: u64,
     pool_rev: u64,
     pool_evict: u64,
     target_zoom_q32: i32,
@@ -87,10 +87,10 @@ impl SdfUploadCache {
             Some(Initialized(pattern)) => pattern.topology_generation(),
             _ => 0,
         };
-        let covering_len = world
+        let covering_tiles_version = world
             .resources
             .get::<super::covering::SymbolCovering>()
-            .map_or(0, |covering| covering.tiles.len());
+            .map_or(0, |covering| covering.tiles_version);
         let (pool_rev, pool_evict) = match world.resources.get::<Eventually<SymbolBufferPool>>() {
             Some(Initialized(pool)) => (pool.revision(), pool.eviction_generation()),
             _ => (0, 0),
@@ -103,7 +103,7 @@ impl SdfUploadCache {
                 .pyramid_of::<super::SymbolLayersDataComponent>()
                 .len(),
             topology_gen,
-            covering_len,
+            covering_tiles_version,
             pool_rev,
             pool_evict,
             target_zoom_q32,

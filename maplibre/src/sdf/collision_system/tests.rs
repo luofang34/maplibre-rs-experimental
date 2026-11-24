@@ -65,6 +65,76 @@ fn the_hosts_obstacles_are_in_the_grid_before_any_label() {
     assert!(!super::obstructed_grid(800.0, 600.0, None).overlaps([130.0, 105.0, 200.0, 120.0]));
 }
 
+#[test]
+fn can_finish_initial_boot_blocks_on_pending_retry_upload_or_provided_image() {
+    use crate::{
+        io::tile_retry::{self, RequestDisposition, RequestKind, TileRequestOutcome},
+        sdf::{
+            provided::{self, ProvidedImagesReport, ProvidedImagesState},
+            upload_system::SdfUploadPending,
+        },
+        tcs::world::World,
+    };
+
+    let mut world = World::default();
+    assert!(super::active::can_finish_initial_boot(&world, 0));
+    assert!(!super::active::can_finish_initial_boot(&world, 1));
+
+    world.resources.insert(SdfUploadPending(true));
+    assert!(!super::active::can_finish_initial_boot(&world, 0));
+    world.resources.insert(SdfUploadPending(false));
+    assert!(super::active::can_finish_initial_boot(&world, 0));
+
+    let coords = WorldTileCoords::from((0, 0, ZoomLevel::new(4)));
+    let attempt = tile_retry::next_attempt(&mut world);
+    tile_retry::started(&mut world, coords, RequestKind::Vector, attempt, None);
+    provided::apply(
+        &mut world,
+        ProvidedImagesReport {
+            coords,
+            attempt: Some(attempt),
+            names: vec!["pin".to_owned()],
+            pixel_ratio: 1.0,
+            state: ProvidedImagesState::Awaiting,
+        },
+    );
+    assert!(!super::active::can_finish_initial_boot(&world, 0));
+
+    provided::apply(
+        &mut world,
+        ProvidedImagesReport {
+            coords,
+            attempt: Some(attempt),
+            names: vec!["pin".to_owned()],
+            pixel_ratio: 1.0,
+            state: ProvidedImagesState::Settled,
+        },
+    );
+    tile_retry::completed(
+        &mut world,
+        TileRequestOutcome {
+            coords,
+            kind: RequestKind::Vector,
+            attempt: Some(attempt),
+            disposition: RequestDisposition::Retry,
+        },
+    );
+    assert!(!super::active::can_finish_initial_boot(&world, 0));
+
+    let retry_attempt = tile_retry::next_attempt(&mut world);
+    tile_retry::started(&mut world, coords, RequestKind::Vector, retry_attempt, None);
+    tile_retry::completed(
+        &mut world,
+        TileRequestOutcome {
+            coords,
+            kind: RequestKind::Vector,
+            attempt: Some(retry_attempt),
+            disposition: RequestDisposition::Complete,
+        },
+    );
+    assert!(super::active::can_finish_initial_boot(&world, 0));
+}
+
 #[cfg(all(feature = "headless", feature = "thread-safe-futures"))]
 #[tokio::test]
 async fn sliced_epoch_commits_all_pending_uploads_atomically_in_one_frame() {

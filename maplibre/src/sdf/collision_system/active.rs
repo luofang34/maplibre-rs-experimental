@@ -271,6 +271,8 @@ pub(super) fn finish_new_epoch(
 pub(super) fn can_finish_initial_boot(world: &crate::tcs::world::World, in_flight: usize) -> bool {
     in_flight == 0
         && !crate::io::tile_backpressure::has_unrequested_visible_tiles(world)
+        && crate::io::tile_retry::next_retry_delay(world).is_none()
+        && !crate::sdf::provided::awaiting(world)
         && !world
             .resources
             .get::<crate::sdf::upload_system::SdfUploadPending>()

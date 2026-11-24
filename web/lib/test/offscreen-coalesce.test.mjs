@@ -179,3 +179,75 @@ test("waitGeoJsonSettled flushes queued updates and waits for chained in-flight 
         "end:setGeoJsonBytes",
     ]);
 });
+
+test("waitPendingSettled drains in-flight and chained queued jumpTo before resolving", async () => {
+    const events = [];
+    const jumpResolvers = [];
+    const geoJsonResolvers = [];
+    let notifyFirstJumpStarted;
+    const firstJumpStarted = new Promise(resolve => {
+        notifyFirstJumpStarted = resolve;
+    });
+    const coalescer = createOffscreenCoalescer(
+        msg => events.push(`post:${msg.type}`),
+        (method, args) => {
+            events.push(`start:${method}`);
+            if (method === "jumpTo") {
+                if (jumpResolvers.length === 0 && events.filter(e => e === "start:jumpTo").length === 1) {
+                    notifyFirstJumpStarted();
+                }
+                return new Promise(resolve => {
+                    jumpResolvers.push(() => {
+                        events.push(`end:jumpTo:${JSON.stringify(args[0])}`);
+                        resolve(undefined);
+                    });
+                });
+            }
+            return new Promise(resolve => {
+                geoJsonResolvers.push(() => {
+                    events.push(`end:${method}`);
+                    resolve(undefined);
+                });
+            });
+        },
+        () => false,
+    );
+
+    const p1 = coalescer.jumpTo({zoom: 10});
+    await firstJumpStarted;
+    assert.equal(jumpResolvers.length, 1);
+
+    // Queue follow-up jumpTo, pointer move, and GeoJSON update while jumpTo #1 is in flight.
+    const p2 = coalescer.jumpTo({zoom: 11});
+    coalescer.queuePointerMove(12, 34);
+    const g1 = coalescer.setGeoJsonData("sensors", {type: "FeatureCollection", features: []});
+
+    let settled = false;
+    const waitPromise = coalescer.waitPendingSettled().then(() => {
+        settled = true;
+    });
+
+    await new Promise(resolve => queueMicrotask(resolve));
+    assert.equal(settled, false, "waits while initial jumpTo is still in flight");
+
+    // Finish jumpTo #1 -> chains jumpTo #2; waitPendingSettled must keep waiting.
+    jumpResolvers.shift()();
+    await p1;
+    await new Promise(resolve => queueMicrotask(resolve));
+    assert.equal(jumpResolvers.length, 1, "chained jumpTo #2 dispatched");
+    assert.equal(settled, false, "waits for chained jumpTo #2 and pending GeoJSON");
+
+    jumpResolvers.shift()();
+    await p2;
+    await new Promise(resolve => queueMicrotask(resolve));
+    assert.equal(geoJsonResolvers.length, 1, "GeoJSON RPC is in flight");
+    assert.equal(settled, false, "waits while GeoJSON RPC is still in flight");
+    geoJsonResolvers.shift()();
+    await g1;
+    await waitPromise;
+    assert.equal(settled, true);
+    assert.ok(events.includes("post:pmove"));
+    assert.ok(events.includes('end:jumpTo:{"zoom":10}'));
+    assert.ok(events.includes('end:jumpTo:{"zoom":11}'));
+    assert.ok(events.includes("end:setGeoJsonBytes"));
+});

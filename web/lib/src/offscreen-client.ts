@@ -603,9 +603,12 @@ export const startOffscreenController = async ({
                 renderWorker.postMessage({type: "listen", kind: "telemetry", enabled: Boolean(cb)});
             }
         };
-        proxy.waitArenaLoaded = () => callRpc("waitArenaLoaded", []);
+        proxy.waitArenaLoaded = async () => {
+            await coalescer.waitPendingSettled();
+            return callRpc("waitArenaLoaded", []);
+        };
         proxy.waitArenaIdle = async () => {
-            await coalescer.waitGeoJsonSettled();
+            await coalescer.waitPendingSettled();
             return callRpc("waitArenaIdle", []);
         };
     }
