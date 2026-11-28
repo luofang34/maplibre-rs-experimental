@@ -82,12 +82,14 @@ fn pick_worker(
     best.map(|(idx, _)| idx)
 }
 
-/// Lowest slot with spare concurrency. Before any worker reports ready the lowest slots are the
-/// eager ones whose WASM instantiation started first, so filling them in order hands the boot
-/// burst to whichever worker can start soonest.
-fn first_slot_with_capacity(inner: &QueueInner, worker_count: usize) -> Option<usize> {
-    (0..worker_count)
-        .find(|&idx| inner.in_flight.get(idx).copied().unwrap_or(0) < PER_WORKER_CONCURRENCY)
+/// Least-loaded slot starting at `start` before any worker reports ready so initial boot bursts
+/// fan out evenly across all eager workers instead of saturating slot 0 first.
+fn first_slot_with_capacity(
+    inner: &QueueInner,
+    worker_count: usize,
+    start: usize,
+) -> Option<usize> {
+    pick_worker(inner, worker_count, start, false)
 }
 
 impl SharedWorkQueue {
@@ -153,18 +155,16 @@ impl SharedWorkQueue {
             .ready
             .get(..worker_count)
             .is_some_and(|ready| ready.iter().any(|&r| r));
-        let start = if any_ready {
+        let start = {
             let s = inner.next_turn % worker_count;
             inner.next_turn = inner.next_turn.wrapping_add(1);
             s
-        } else {
-            0
         };
         let chosen = if any_ready {
             pick_worker(&inner, worker_count, start, true)
                 .or_else(|| pick_worker(&inner, worker_count, start, false))
         } else {
-            first_slot_with_capacity(&inner, worker_count)
+            first_slot_with_capacity(&inner, worker_count, start)
         };
         if let Some(idx) = chosen {
             record_claim(&mut inner, idx);
@@ -264,21 +264,18 @@ mod tests {
     }
 
     #[test]
-    fn assigns_initial_burst_to_slot_zero_when_none_ready() {
+    fn assigns_initial_burst_across_slots_when_none_ready() {
         let queue = SharedWorkQueue::new();
-        for _ in 0..PER_WORKER_CONCURRENCY {
+        for expected in 0..3 {
             assert!(matches!(
                 queue.push_and_claim(noop_job(), 3),
-                ClaimOutcome::Claimed {
-                    worker_index: 0,
-                    ..
-                }
+                ClaimOutcome::Claimed { worker_index, .. } if worker_index == expected
             ));
         }
         assert!(matches!(
             queue.push_and_claim(noop_job(), 3),
             ClaimOutcome::Claimed {
-                worker_index: 1,
+                worker_index: 0,
                 ..
             }
         ));

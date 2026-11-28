@@ -10,7 +10,7 @@ use super::pool::WorkerPool;
 use crate::error::WebError;
 
 const MAX_MT_WORKERS: usize = 4;
-const MAX_EAGER_MT_WORKERS: usize = 2;
+const MAX_EAGER_MT_WORKERS: usize = 4;
 
 fn hardware_mt_worker_count() -> usize {
     let cores = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("navigator"))

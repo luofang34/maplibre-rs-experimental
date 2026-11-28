@@ -15,8 +15,8 @@ test("MT target and eager worker counts scale cleanly within caps", () => {
 
     assert.equal(computeMtEagerWorkerCount(1), 1);
     assert.equal(computeMtEagerWorkerCount(2), 2);
-    assert.equal(computeMtEagerWorkerCount(3), 2);
-    assert.equal(computeMtEagerWorkerCount(4), 2);
+    assert.equal(computeMtEagerWorkerCount(3), 3);
+    assert.equal(computeMtEagerWorkerCount(4), 4);
 });
 
 test("dormant port controller activates each slot once and closes remaining ports on teardown", () => {

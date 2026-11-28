@@ -3,7 +3,7 @@ export const computeMtTargetWorkerCount = (
 ) => Math.min(4, Math.max(1, cores - 1));
 
 export const computeMtEagerWorkerCount = (target = computeMtTargetWorkerCount()) =>
-    Math.min(2, target);
+    Math.min(4, target);
 
 /**
  * Manages lazy activation and cleanup of dormant secondary worker MessagePorts so multithreaded

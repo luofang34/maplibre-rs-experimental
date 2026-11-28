@@ -305,7 +305,7 @@ impl WorkerPool {
         })
     }
 
-    fn try_spawn(&self) -> Result<Option<usize>, WebError> {
+    fn try_spawn(&self) -> Result<Option<(usize, bool)>, WebError> {
         let mut already_ready = false;
         let endpoint = match &self.factory {
             EndpointFactory::Dedicated(new_worker) => {
@@ -372,7 +372,7 @@ impl WorkerPool {
                 self.state.queue.mark_ready(worker_idx);
             }
         }
-        Ok(idx)
+        Ok(idx.map(|worker_idx| (worker_idx, already_ready)))
     }
 
     fn can_ramp(&self, worker_count: usize, queued: usize) -> bool {
@@ -436,7 +436,7 @@ impl WorkerPool {
                 if total_in_flight >= worker_count * RAMP_INFLIGHT_PER_WORKER
                     && self.can_ramp(worker_count, 1)
                 {
-                    if let Some(new_idx) = self.try_spawn()? {
+                    if let Some((new_idx, true)) = self.try_spawn()? {
                         self.state.queue.claim_worker(new_idx);
                         self.dispatch_ticket(new_idx)?;
                     }
@@ -445,7 +445,7 @@ impl WorkerPool {
             }
             ClaimOutcome::Backlogged { queued, .. } => {
                 if self.can_ramp(worker_count, queued) {
-                    if let Some(new_idx) = self.try_spawn()? {
+                    if let Some((new_idx, true)) = self.try_spawn()? {
                         self.state.queue.claim_worker(new_idx);
                         return self.dispatch_ticket(new_idx);
                     }

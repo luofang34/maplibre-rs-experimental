@@ -328,15 +328,10 @@ export const startOffscreenController = async ({
         stylePromise.catch(() => {});
 
         const postStaggeredMtWasmInit = (module: WebAssembly.Module, memory: WebAssembly.Memory) => {
-            if (tileWorkers.length === 0) return;
-            tileWorkers[0].postMessage({type: "wasm_init", module, memory});
-            for (let i = 1; i < tileWorkers.length; i++) {
-                const worker = tileWorkers[i];
-                queueMicrotask(() => {
-                    if (!closed) {
-                        worker.postMessage({type: "wasm_init", module, memory});
-                    }
-                });
+            for (const worker of tileWorkers) {
+                if (!closed) {
+                    worker.postMessage({type: "wasm_init", module, memory});
+                }
             }
         };
 
