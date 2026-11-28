@@ -24,6 +24,7 @@ pub(super) type VisibleLayer<'a> = (
 pub(super) struct SignatureCache {
     style_rev: Option<u64>,
     symbol_layer_indices: Vec<usize>,
+    vis_band: Option<(u64, f64, f64, u64)>,
     last_content_key: Option<(u64, u64, u64, u64, u64)>,
     last_content_sig: u64,
 }
@@ -41,26 +42,61 @@ impl SignatureCache {
                     .enumerate()
                     .filter_map(|(idx, l)| (l.type_ == "symbol").then_some(idx)),
             );
+            self.vis_band = None;
             self.last_content_key = None;
         }
     }
 
+    fn visible_hash(&mut self, style: &crate::style::Style, zoom: f64) -> u64 {
+        let rev = style.revision();
+        if let Some((cached_rev, lo, hi, vis_hash)) = self.vis_band
+            && cached_rev == rev
+            && zoom >= lo
+            && zoom < hi
+        {
+            return vis_hash;
+        }
+        let mut vis_h = FxHasher::default();
+        self.symbol_layer_indices.len().hash(&mut vis_h);
+        let mut band_lo = f64::NEG_INFINITY;
+        let mut band_hi = f64::INFINITY;
+        for &idx in &self.symbol_layer_indices {
+            let Some(layer) = style.layers.get(idx) else {
+                continue;
+            };
+            if let Some(minzoom) = layer.minzoom
+                && minzoom > 0.0
+            {
+                if zoom >= minzoom {
+                    band_lo = band_lo.max(minzoom);
+                } else {
+                    band_hi = band_hi.min(minzoom);
+                }
+            }
+            if let Some(maxzoom) = layer.maxzoom {
+                if zoom < maxzoom {
+                    band_hi = band_hi.min(maxzoom);
+                } else {
+                    band_lo = band_lo.max(maxzoom);
+                }
+            }
+            if layer.is_visible_at(zoom) {
+                idx.hash(&mut vis_h);
+            }
+        }
+        let vis_hash = vis_h.finish();
+        self.vis_band = Some((rev, band_lo, band_hi, vis_hash));
+        vis_hash
+    }
+
     fn content_key(
-        &self,
+        &mut self,
         world: &crate::tcs::world::World,
         style: &crate::style::Style,
         zoom: f64,
         seen: &FxHashSet<WorldTileCoords>,
     ) -> (u64, u64, u64, u64, u64) {
-        let mut vis_h = FxHasher::default();
-        self.symbol_layer_indices.len().hash(&mut vis_h);
-        for &idx in &self.symbol_layer_indices {
-            if let Some(layer) = style.layers.get(idx) {
-                if layer.is_visible_at(zoom) {
-                    idx.hash(&mut vis_h);
-                }
-            }
-        }
+        let vis_hash = self.visible_hash(style, zoom);
         let mut seen_acc = seen.len() as u64;
         let mut content_acc = 0_u64;
         for &coords in seen {
@@ -76,13 +112,7 @@ impl SignatureCache {
             Some(Initialized(pool)) => pool.revision(),
             _ => 0,
         };
-        (
-            style.revision(),
-            vis_h.finish(),
-            seen_acc,
-            pool_rev,
-            content_acc,
-        )
+        (style.revision(), vis_hash, seen_acc, pool_rev, content_acc)
     }
 
     pub(super) fn resolve_content_sig(

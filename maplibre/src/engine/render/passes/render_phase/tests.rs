@@ -35,6 +35,7 @@ fn raster(index: u32, generate_borders: bool) -> LayerItem {
         },
         source_shape: ShapeDrawData::default(),
         mask_group: MaskGroup::Mutating,
+        draw_kind: super::LayerDrawKind::Other,
         run: None,
     }
 }

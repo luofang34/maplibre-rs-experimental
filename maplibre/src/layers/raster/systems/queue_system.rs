@@ -10,8 +10,8 @@ use crate::{
         eventually::{Eventually, Eventually::Initialized},
         render_commands::DrawMasks,
         render_phase::{
-            DrawState, LayerItem, MaskGroup, ProjectionBinding, RenderCommand, RenderCommandResult,
-            RenderPhase, TileMaskItem,
+            DrawState, LayerDrawKind, LayerItem, MaskGroup, ProjectionBinding, RenderCommand,
+            RenderCommandResult, RenderPhase, TileMaskItem,
         },
         tile_view_pattern::WgpuTileViewPattern,
         Renderer,
@@ -248,6 +248,7 @@ fn empty_mask_draws(
         },
         source_shape: source_shape.draw_data(),
         mask_group: MaskGroup::Mutating,
+        draw_kind: LayerDrawKind::Other,
         run: None,
     }];
     (layers, masks)
@@ -275,6 +276,7 @@ fn source_draws(
             },
             source_shape: shape_data,
             mask_group: MaskGroup::Mutating,
+            draw_kind: LayerDrawKind::Raster,
             run: None,
         });
     }
@@ -290,6 +292,7 @@ fn source_draws(
         },
         source_shape: shape_data,
         mask_group: MaskGroup::Mutating,
+        draw_kind: LayerDrawKind::Raster,
         run: None,
     });
     (layers, masks)

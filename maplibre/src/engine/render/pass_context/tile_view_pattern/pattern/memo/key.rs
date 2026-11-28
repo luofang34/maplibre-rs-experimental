@@ -133,7 +133,6 @@ pub(crate) fn compute_fast_memo_key(
 
 /// Computes the frame memo key for `(view_region, raster_coverings, style_rev, snapshot)`, or
 pub(crate) type TileVectorStamp = Option<(bool, bool, Option<(u64, u64)>)>;
-type TileVectorStampFn<'a> = &'a dyn Fn(WorldTileCoords) -> TileVectorStamp;
 
 /// `None` when active raster cross-fades prevent key reuse.
 pub(crate) fn compute_memo_key(
@@ -141,7 +140,7 @@ pub(crate) fn compute_memo_key(
     raster_coverings: &[(RasterSourceId, Vec<WorldTileCoords>)],
     style_rev: u64,
     snapshot: PatternEpochSnapshot,
-    tile_vector_stamp: TileVectorStampFn<'_>,
+    tile_vector_stamp: impl Fn(WorldTileCoords) -> TileVectorStamp,
 ) -> Option<PatternMemoKey> {
     (!snapshot.has_active_cross_fade).then(|| {
         build_key(
@@ -165,7 +164,7 @@ fn build_key(
     raster_coverings: &[(RasterSourceId, Vec<WorldTileCoords>)],
     style_rev: u64,
     snapshot: PatternEpochSnapshot,
-    tile_vector_stamp: TileVectorStampFn<'_>,
+    tile_vector_stamp: impl Fn(WorldTileCoords) -> TileVectorStamp,
 ) -> PatternMemoKey {
     let mut view_region_digest = 0_u64;
     let mut view_region_order = FxHasher::default();

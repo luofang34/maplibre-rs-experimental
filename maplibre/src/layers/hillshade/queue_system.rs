@@ -132,6 +132,7 @@ fn source_draws(
             },
             source_shape: shape_data,
             mask_group: MaskGroup::Mutating,
+            draw_kind: crate::render::render_phase::LayerDrawKind::Other,
             run: None,
         });
     }
@@ -149,6 +150,7 @@ fn source_draws(
         },
         source_shape: shape_data,
         mask_group: MaskGroup::Mutating,
+        draw_kind: crate::render::render_phase::LayerDrawKind::Other,
         run: None,
     });
     (draws, masks)

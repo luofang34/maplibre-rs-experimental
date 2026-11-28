@@ -33,6 +33,17 @@ pub(super) struct DemRequestKey {
 }
 
 #[derive(Default)]
+pub(super) struct DemRequestScratch {
+    pub(super) requested: FxHashSet<WorldTileCoords>,
+    pub(super) seen: FxHashSet<WorldTileCoords>,
+    pub(super) fine: Vec<WorldTileCoords>,
+    pub(super) remaining: Vec<WorldTileCoords>,
+    pub(super) wanted: Vec<WorldTileCoords>,
+    pub(super) single_view_tiles: Vec<WorldTileCoords>,
+    pub(super) keyed: Vec<(f64, WorldTileCoords)>,
+}
+
+#[derive(Default)]
 pub(super) struct DemRequestMemo {
     last_key: Option<DemRequestKey>,
     pub(super) last_region: Option<(PreparedTerrainKey, ViewRegion)>,
@@ -153,16 +164,20 @@ impl DemRequestMemo {
 }
 
 /// Inserts `requested` into `TerrainWantedDems` and bumps `TerrainWantedDemsEpoch` only when set membership changed.
-pub(super) fn store_wanted_dems(world: &mut World, requested: FxHashSet<WorldTileCoords>) {
+pub(super) fn store_wanted_dems(world: &mut World, requested: &FxHashSet<WorldTileCoords>) {
     let unchanged = world
         .resources
         .get::<TerrainWantedDems>()
-        .is_some_and(|prev| prev.0 == requested);
+        .is_some_and(|prev| prev.0 == *requested);
     if !unchanged {
         let epoch = world
             .resources
             .get_or_init_mut::<super::TerrainWantedDemsEpoch>();
         epoch.0 = epoch.0.wrapping_add(1);
-        world.resources.insert(TerrainWantedDems(requested));
+        world
+            .resources
+            .get_or_init_mut::<TerrainWantedDems>()
+            .0
+            .clone_from(requested);
     }
 }

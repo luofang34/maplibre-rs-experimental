@@ -75,43 +75,48 @@ pub(crate) fn upload_system(
                 SystemError::Setup
             })?;
             let snapshot = (resolved.gpu_view_projection, resolved.shader_projection);
-            world.resources.insert(resolved);
+            if let Some(slot) = world.resources.get_mut::<ResolvedFrameView>() {
+                *slot = resolved;
+            } else {
+                world.resources.insert(resolved);
+            }
             snapshot
         }
     };
     let style_rev = style.revision();
-    let needs_raster_mesh = if let Some((_, needs)) = world
-        .resources
-        .get::<GlobeMeshPrepareMemo>()
-        .and_then(|m| m.needs_raster_mesh)
-        .filter(|(rev, _)| *rev == style_rev)
-    {
-        needs
-    } else {
-        style.layers.iter().any(|layer| {
-            !layer.is_hidden()
-                && matches!(
-                    layer.type_.as_str(),
-                    "raster" | "hillshade" | "color-relief"
-                )
-        })
-    };
     let uses_globe = projection_data.transition > 0.0;
-    world.resources.get_or_init_mut::<GlobeMeshPrepareMemo>();
+    if !world.resources.exists::<GlobeMeshPrepareMemo>() {
+        world.resources.insert(GlobeMeshPrepareMemo::default());
+    }
 
-    let (topology_gen, needs_stencil_borders, meshes_empty) = {
+    let (topology_gen, needs_raster_mesh, needs_stencil_borders, meshes_empty) = {
         let Some((
             Initialized(tile_view_pattern),
             Initialized(projection_resources),
             tile_mesh_cache,
+            memo,
         )) = world.resources.query_mut::<(
             &mut Eventually<WgpuTileViewPattern>,
             &mut Eventually<ProjectionGpuResources>,
             &mut GlobeTileMeshCache,
+            &mut GlobeMeshPrepareMemo,
         )>()
         else {
             return Err(SystemError::Dependencies);
         };
+
+        let needs_raster_mesh =
+            if let Some((_, needs)) = memo.needs_raster_mesh.filter(|(rev, _)| *rev == style_rev) {
+                needs
+            } else {
+                style.layers.iter().any(|layer| {
+                    !layer.is_hidden()
+                        && matches!(
+                            layer.type_.as_str(),
+                            "raster" | "hillshade" | "color-relief"
+                        )
+                })
+            };
 
         tile_view_pattern.upload_pattern_with_projection(
             queue,
@@ -132,25 +137,14 @@ pub(crate) fn upload_system(
                 min_z,
                 max_z,
             );
-        (
-            tile_view_pattern.topology_generation(),
-            borders,
-            tile_mesh_cache.is_empty(),
-        )
-    };
-
-    {
-        let memo = world.resources.get_or_init_mut::<GlobeMeshPrepareMemo>();
-        if meshes_empty {
+        let empty = tile_mesh_cache.is_empty();
+        if empty {
             *memo = GlobeMeshPrepareMemo::default();
         }
         memo.needs_raster_mesh = Some((style_rev, needs_raster_mesh));
         if !uses_globe {
             memo.last_globe = None;
             if !(memo.flat_prepared && (!needs_raster_mesh || memo.flat_with_raster)) {
-                let Some(tile_mesh_cache) = world.resources.get_mut::<GlobeTileMeshCache>() else {
-                    return Err(SystemError::Dependencies);
-                };
                 let coords = WorldTileCoords::default();
                 let flat_usages: &[(TileMeshUsage, bool)] = if needs_raster_mesh {
                     &[
@@ -169,13 +163,19 @@ pub(crate) fn upload_system(
                             SystemError::Setup
                         })?;
                 }
-                let memo = world.resources.get_or_init_mut::<GlobeMeshPrepareMemo>();
                 memo.flat_prepared = true;
                 memo.flat_with_raster |= needs_raster_mesh;
             }
             return Ok(());
         }
-    }
+        (
+            tile_view_pattern.topology_generation(),
+            needs_raster_mesh,
+            borders,
+            empty,
+        )
+    };
+    let _ = meshes_empty;
 
     let globe_unchanged = world
         .resources

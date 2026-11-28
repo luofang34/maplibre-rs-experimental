@@ -61,7 +61,7 @@ impl SlotMetaCache {
             return (refresh_paint || settle_pending, false);
         }
         let (run, tiles_changed) = self.check_refresh(source_tiles, refresh_paint, settle_pending);
-        if run && tiles_changed {
+        if run {
             self.last_source_arc = Some(Arc::clone(source_tiles));
         }
         (run, tiles_changed)

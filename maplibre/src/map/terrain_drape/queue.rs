@@ -98,11 +98,16 @@ pub(crate) fn queue_system(
                 .get::<DrapePhase>()
                 .is_some_and(|phase| !phase.targets.is_empty())
         {
-            world.resources.insert(TerrainEyeFrame::default());
-            world
-                .resources
-                .insert(surface_covering::SurfaceTiles::default());
-            world.resources.insert(DrapePhase::default());
+            if let Some(frame) = world.resources.get_mut::<TerrainEyeFrame>() {
+                frame.0.clear();
+                frame.1.clear();
+            }
+            if let Some(tiles) = world.resources.get_mut::<surface_covering::SurfaceTiles>() {
+                tiles.0.clear();
+            }
+            if let Some(phase) = world.resources.get_mut::<DrapePhase>() {
+                *phase = DrapePhase::default();
+            }
             set_frame(world, TerrainFrame::default());
         } else if world
             .resources
@@ -138,7 +143,9 @@ pub(crate) fn queue_system(
     }
     world
         .resources
-        .insert(surface_covering::SurfaceTiles::default());
+        .get_or_init_mut::<surface_covering::SurfaceTiles>()
+        .0
+        .clear();
     let (phase, surface_coords, surface_sources, clear_color) = if drape_mode.is_procedural_relief()
     {
         let coords = procedural_tiles(style, view_state, world)?;
@@ -205,7 +212,7 @@ pub(crate) fn queue_system(
         .resources
         .get_or_init_mut::<DrapePrepareCache>()
         .cached_draw_after_layer_index(style);
-    world.resources.insert(phase);
+    *world.resources.get_or_init_mut::<DrapePhase>() = phase;
     set_frame(
         world,
         TerrainFrame {
@@ -290,8 +297,10 @@ fn queue_tiles(
         );
         Ok(())
     })();
-    world.resources.insert(edge_cache);
-    world.resources.insert(queue_scratch);
+    *world.resources.get_or_init_mut::<edges::EdgeCache>() = edge_cache;
+    *world
+        .resources
+        .get_or_init_mut::<steady_cache::TerrainQueueScratch>() = queue_scratch;
     result
 }
 

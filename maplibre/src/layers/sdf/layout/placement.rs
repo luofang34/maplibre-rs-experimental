@@ -12,39 +12,35 @@ use crate::{
 
 mod ground;
 mod line_labels;
-pub(in crate::layers::sdf) use ground::{buried_in_terrain, canonical_tile, project, LabelGround};
+#[cfg(test)]
+pub(in crate::layers::sdf) use ground::project;
+pub(in crate::layers::sdf) use ground::{
+    buried_in_terrain, canonical_tile, project_with, LabelGround, TileProjector,
+};
 pub(in crate::layers::sdf) use line_labels::{line_glyph_boxes, line_glyph_poses, LinePoses};
 
-struct ScreenBoxQuery<'a> {
-    layer: &'a SymbolLayerData,
-    feature: &'a Feature,
-    elevation: f32,
-    view: &'a ViewState,
-    projection: &'a ShaderProjectionData,
-    uniforms: &'a SymbolUniforms,
-    text_shift: [f32; 2],
-    anchor_clip: Option<(f64, Vector4<f64>)>,
-}
+type BoxView<'a> = (
+    &'a ViewState,
+    &'a ShaderProjectionData,
+    Option<&'a TileProjector>,
+);
 
 pub(in crate::layers::sdf) fn screen_boxes(
     layer: &SymbolLayerData,
     feature: &Feature,
     elevation: f32,
-    view: &ViewState,
-    projection: &ShaderProjectionData,
+    view_ctx: BoxView<'_>,
     uniforms: &SymbolUniforms,
     anchor_clip: Option<(f64, Vector4<f64>)>,
 ) -> Option<[Option<[f64; 4]>; 2]> {
-    screen_boxes_shifted_with_clip(ScreenBoxQuery {
+    screen_boxes_shifted_with_clip(
         layer,
         feature,
         elevation,
-        view,
-        projection,
+        view_ctx,
         uniforms,
-        text_shift: [0.0; 2],
-        anchor_clip,
-    })
+        ([0.0; 2], anchor_clip),
+    )
 }
 
 /// [`screen_boxes`] with the text moved by `text_shift` layout pixels along its own axes before
@@ -53,34 +49,28 @@ pub(in crate::layers::sdf) fn screen_boxes_shifted(
     layer: &SymbolLayerData,
     feature: &Feature,
     elevation: f32,
-    view: &ViewState,
-    projection: &ShaderProjectionData,
+    view_ctx: BoxView<'_>,
     uniforms: &SymbolUniforms,
     text_shift: [f32; 2],
 ) -> Option<[Option<[f64; 4]>; 2]> {
-    screen_boxes_shifted_with_clip(ScreenBoxQuery {
+    screen_boxes_shifted_with_clip(
         layer,
         feature,
         elevation,
-        view,
-        projection,
+        view_ctx,
         uniforms,
-        text_shift,
-        anchor_clip: None,
-    })
+        (text_shift, None),
+    )
 }
 
-fn screen_boxes_shifted_with_clip(query: ScreenBoxQuery<'_>) -> Option<[Option<[f64; 4]>; 2]> {
-    let ScreenBoxQuery {
-        layer,
-        feature,
-        elevation,
-        view,
-        projection,
-        uniforms,
-        text_shift,
-        anchor_clip,
-    } = query;
+fn screen_boxes_shifted_with_clip(
+    layer: &SymbolLayerData,
+    feature: &Feature,
+    elevation: f32,
+    (view, projection, projector): BoxView<'_>,
+    uniforms: &SymbolUniforms,
+    (text_shift, anchor_clip): ([f32; 2], Option<(f64, Vector4<f64>)>),
+) -> Option<[Option<[f64; 4]>; 2]> {
     let mut result: [Option<[f64; 4]>; 2] = [None, None];
     for mut part in feature.parts.into_iter().flatten() {
         if part.text {
@@ -101,6 +91,7 @@ fn screen_boxes_shifted_with_clip(query: ScreenBoxQuery<'_>) -> Option<[Option<[
             elevation: f64::from(elevation),
             view,
             projection,
+            projector,
             uniforms,
             anchor_clip,
         };
@@ -141,8 +132,7 @@ pub(in crate::layers::sdf) fn text_perspective_scale(
     layer: &SymbolLayerData,
     feature: &Feature,
     elevation: f32,
-    view: &ViewState,
-    projection: &ShaderProjectionData,
+    (view, projection, projector): (&ViewState, &ShaderProjectionData, Option<&TileProjector>),
     uniforms: &SymbolUniforms,
     anchor_clip: Option<(f64, Vector4<f64>)>,
 ) -> f64 {
@@ -153,7 +143,8 @@ pub(in crate::layers::sdf) fn text_perspective_scale(
     let height = f64::from(elevation) * f64::from(metrics.ground_align);
     let clip = match anchor_clip {
         Some((h, clip)) if (h - height).abs() < 1e-6 => Some(clip),
-        _ => project(
+        _ => project_with(
+            projector,
             layer.coords,
             [
                 f64::from(feature.text_anchor.x),
@@ -189,8 +180,7 @@ pub(in crate::layers::sdf) fn beyond_perspective_cutoff(
     layer: &SymbolLayerData,
     feature: &Feature,
     elevation: f32,
-    view: &ViewState,
-    projection: &ShaderProjectionData,
+    (view, projection, projector): (&ViewState, &ShaderProjectionData, Option<&TileProjector>),
     uniforms: &SymbolUniforms,
 ) -> bool {
     if fixed_symbol_scale(view) {
@@ -201,7 +191,7 @@ pub(in crate::layers::sdf) fn beyond_perspective_cutoff(
         f64::from(feature.text_anchor.x),
         f64::from(feature.text_anchor.y),
     ];
-    project(layer.coords, anchor, height, view, projection)
+    project_with(projector, layer.coords, anchor, height, view, projection)
         .filter(|clip| clip.w > 0.0)
         .is_some_and(|clip| {
             0.5 + 0.5 * f64::from(projection.center_clip_w) / clip.w < PERSPECTIVE_RATIO_CUTOFF
@@ -213,8 +203,7 @@ pub(in crate::layers::sdf) fn text_rotation(
     layer: &SymbolLayerData,
     feature: &Feature,
     elevation: f32,
-    view: &ViewState,
-    projection: &ShaderProjectionData,
+    (view, projection, projector): (&ViewState, &ShaderProjectionData, Option<&TileProjector>),
     uniforms: &SymbolUniforms,
     anchor_clip: Option<(f64, Vector4<f64>)>,
 ) -> f64 {
@@ -234,13 +223,21 @@ pub(in crate::layers::sdf) fn text_rotation(
         elevation: f64::from(elevation),
         view,
         projection,
+        projector,
         uniforms,
         anchor_clip,
     };
     let height = f64::from(elevation) * f64::from(metrics.ground_align) + part.height;
     let clip = match anchor_clip {
         Some((h, clip)) if (h - height).abs() < 1e-6 => Some(clip),
-        _ => project(layer.coords, placement.anchor, height, view, projection),
+        _ => project_with(
+            projector,
+            layer.coords,
+            placement.anchor,
+            height,
+            view,
+            projection,
+        ),
     };
     let Some(clip) = clip else {
         return 0.0;
@@ -248,7 +245,8 @@ pub(in crate::layers::sdf) fn text_rotation(
     let rotation = if metrics.map_aligned {
         // A map-plane shift lands turned by the screen direction of the text's own axis.
         let angle = f64::from(metrics.angle) + part.angle;
-        project(
+        project_with(
+            projector,
             layer.coords,
             [
                 placement.anchor[0] + angle.cos() * 16.0,
@@ -275,6 +273,7 @@ struct Placement<'a> {
     elevation: f64,
     view: &'a ViewState,
     projection: &'a ShaderProjectionData,
+    projector: Option<&'a TileProjector>,
     uniforms: &'a SymbolUniforms,
     anchor_clip: Option<(f64, Vector4<f64>)>,
 }
@@ -289,7 +288,14 @@ impl Placement<'_> {
         let height = self.elevation * f64::from(metrics.ground_align) + part.height;
         let clip = match self.anchor_clip {
             Some((h, clip)) if (h - height).abs() < 1e-6 => clip,
-            _ => project(self.coords, self.anchor, height, self.view, self.projection)?,
+            _ => project_with(
+                self.projector,
+                self.coords,
+                self.anchor,
+                height,
+                self.view,
+                self.projection,
+            )?,
         };
         if clip.w <= 0.0 {
             return None;
@@ -358,7 +364,8 @@ impl Placement<'_> {
             for y in [part.bounds[1], part.bounds[3]] {
                 let dx = (x * cos - y * sin) * scale;
                 let dy = (x * sin + y * cos) * scale;
-                let point = project(
+                let point = project_with(
+                    self.projector,
                     self.coords,
                     [self.anchor[0] + dx * units, self.anchor[1] + dy * units],
                     height,
@@ -387,7 +394,8 @@ impl Placement<'_> {
     ) -> Option<f64> {
         let mut angle = f64::from(metrics.angle) + part.angle;
         if metrics.follows_line {
-            let tangent = project(
+            let tangent = project_with(
+                self.projector,
                 self.coords,
                 [
                     self.anchor[0] + angle.cos() * 16.0,
@@ -418,7 +426,8 @@ impl Placement<'_> {
     }
 
     fn world_up_angle(&self, height: f64, clip: Vector4<f64>) -> Option<f64> {
-        let up = project(
+        let up = project_with(
+            self.projector,
             self.coords,
             self.anchor,
             height + 100.0,
@@ -433,7 +442,8 @@ impl Placement<'_> {
         };
         let mut axis = delta(up);
         if axis[0].hypot(axis[1]) < 0.01 {
-            axis = delta(project(
+            axis = delta(project_with(
+                self.projector,
                 self.coords,
                 [self.anchor[0], self.anchor[1] - 16.0],
                 height,
@@ -452,8 +462,16 @@ impl Placement<'_> {
     }
 
     fn tile_units(&self) -> f64 {
-        let count = 2_f64.powi(i32::from(u8::from(self.coords.z)));
-        let y = (f64::from(self.coords.y) + self.anchor[1] / 4096.0) / count;
+        let (tile_y, count) = self.projector.map_or_else(
+            || {
+                (
+                    f64::from(self.coords.y),
+                    2_f64.powi(i32::from(u8::from(self.coords.z))),
+                )
+            },
+            |p| (p.tile_y, p.z_scale),
+        );
+        let y = (tile_y + self.anchor[1] / 4096.0) / count;
         let cos_lat = (1.0 / (std::f64::consts::PI * (1.0 - 2.0 * y)).cosh()).max(1e-4);
         let transition = f64::from(self.projection.transition);
         let globe_scale = f64::from(self.projection.globe_circle[0]) / cos_lat;

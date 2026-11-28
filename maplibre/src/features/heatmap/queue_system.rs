@@ -118,6 +118,7 @@ pub fn queue_system(
                     },
                     source_shape: shape_data,
                     mask_group: crate::render::render_phase::MaskGroup::Vector,
+                    draw_kind: crate::render::render_phase::LayerDrawKind::Other,
                     run: None,
                 });
             }
@@ -141,6 +142,7 @@ pub fn queue_system(
             },
             source_shape: any_shape.draw_data(),
             mask_group: crate::render::render_phase::MaskGroup::Unmasked,
+            draw_kind: crate::render::render_phase::LayerDrawKind::Other,
             run: None,
         });
     }

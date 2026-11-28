@@ -424,16 +424,15 @@ impl TileElevationProvider for IndexedTileElevation<'_> {
 }
 
 impl crate::render::projection::TerrainElevationSource for TerrainCoverageIndex {
-    fn elevation_range(
-        &self,
-        tile: TileCoords,
-        fallback: TileElevationRange,
-    ) -> TileElevationRange {
-        IndexedTileElevation {
-            index: self,
-            fallback,
+    fn elevation_bounds_view(&self) -> crate::render::projection::ElevationBoundsView<'_> {
+        crate::render::projection::ElevationBoundsView {
+            dem_bounds: &self.dem_bounds,
+            exaggeration: self.exaggeration,
+            minzoom: self.minzoom,
+            maxzoom: self.maxzoom,
+            north_pole_meters: self.poles.north_meters,
+            south_pole_meters: self.poles.south_meters,
         }
-        .elevation_range(tile)
     }
 
     fn nadir_ground_elevation(

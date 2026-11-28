@@ -1,6 +1,6 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use super::{drawn_covering, EyeInFrame};
+use super::{drawn_covering_fast, EyeInFrame};
 use crate::{
     coords::{LatLon, WorldCoords, WorldTileCoords, Zoom, TILE_SIZE},
     render::view_state::ViewState,
@@ -28,8 +28,12 @@ fn view(zoom: f64) -> ViewState {
 
 fn tiles(style: &Style, view: &ViewState, world: &mut World) -> Vec<WorldTileCoords> {
     let level = view.zoom().zoom_level(TILE_SIZE);
-    let (region, _) = drawn_covering(style, view, world, level).expect("a covering");
-    region.expect("a region").iter().collect()
+    drawn_covering_fast(style, view, world, level)
+        .expect("a covering")
+        .into_region()
+        .expect("a region")
+        .iter()
+        .collect()
 }
 
 #[test]

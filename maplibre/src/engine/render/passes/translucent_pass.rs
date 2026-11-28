@@ -51,6 +51,78 @@ fn run_translucent_hooks<'w>(
     }
 }
 
+fn draw_translucent_phase_items<'w>(
+    render_pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
+    world: &'w World,
+    mask_items: &'w RenderPhase<TranslucentItem>,
+    layer_state: crate::render::render_commands::stencil_groups::PassLayerState<'w>,
+) {
+    log::trace!(
+        "RenderPhase<TranslucentItem>::size() = {}",
+        mask_items.size()
+    );
+    let masks = layer_state.masks;
+    let unique_stencils = layer_state.unique_stencils;
+    let above = layer_state.above;
+    let mut stencil_state = above.as_ref().map_or(
+        crate::render::render_commands::stencil_groups::StencilState::Cleared,
+        |above| above.stencil_state,
+    );
+    let mut groups = above
+        .as_ref()
+        .map_or(&[][..], |above| above.items)
+        .chunk_by(crate::render::render_commands::stencil_groups::same_layer)
+        .peekable();
+    let symbol_hooks = world
+        .resources
+        .get::<crate::render::graph::SymbolPassHooks>()
+        .copied();
+    let layer_hooks = world
+        .resources
+        .get::<crate::render::graph::LayerPassHooks>()
+        .copied();
+    let all_translucent = mask_items.into_iter().as_slice();
+    for chunk in all_translucent.chunk_by(|a, b| {
+        a.index == b.index
+            && a.style_layer == b.style_layer
+            && a.entry_slot != crate::render::render_phase::UNSET_ENTRY_SLOT
+            && b.entry_slot != crate::render::render_phase::UNSET_ENTRY_SLOT
+    }) {
+        let Some(first_item) = chunk.first() else {
+            continue;
+        };
+        while let Some(group) = groups.next_if(|group| {
+            group
+                .first()
+                .is_some_and(|first| first.index < first_item.index)
+        }) {
+            crate::render::render_commands::stencil_groups::draw_group(
+                render_pass,
+                world,
+                layer_hooks,
+                (masks, unique_stencils),
+                &mut stencil_state,
+                group,
+            );
+        }
+        if !symbol_hooks.is_some_and(|hooks| (hooks.try_draw_group)(world, chunk, render_pass)) {
+            for item in chunk {
+                item.draw_function.draw(render_pass, world, item);
+            }
+        }
+    }
+    for group in groups {
+        crate::render::render_commands::stencil_groups::draw_group(
+            render_pass,
+            world,
+            layer_hooks,
+            (masks, unique_stencils),
+            &mut stencil_state,
+            group,
+        );
+    }
+}
+
 pub(crate) fn draw_contents_inline<'w>(
     render_pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     world: &'w World,
@@ -63,66 +135,7 @@ pub(crate) fn draw_contents_inline<'w>(
     );
 
     if let Some(mask_items) = world.resources.get::<RenderPhase<TranslucentItem>>() {
-        log::trace!(
-            "RenderPhase<TranslucentItem>::size() = {}",
-            mask_items.size()
-        );
-        let masks = layer_state.masks;
-        let unique_stencils = layer_state.unique_stencils;
-        let above = layer_state.above;
-        let mut stencil_state = above.as_ref().map_or(
-            crate::render::render_commands::stencil_groups::StencilState::Cleared,
-            |above| above.stencil_state,
-        );
-        let mut groups = above
-            .as_ref()
-            .map_or(&[][..], |above| above.items)
-            .chunk_by(crate::render::render_commands::stencil_groups::same_layer)
-            .peekable();
-        let all_translucent = mask_items.into_iter().as_slice();
-        for chunk in all_translucent.chunk_by(|a, b| {
-            a.index == b.index
-                && a.style_layer == b.style_layer
-                && a.entry_slot != crate::render::render_phase::UNSET_ENTRY_SLOT
-                && b.entry_slot != crate::render::render_phase::UNSET_ENTRY_SLOT
-        }) {
-            let Some(first_item) = chunk.first() else {
-                continue;
-            };
-            while let Some(group) = groups.next_if(|group| {
-                group
-                    .first()
-                    .is_some_and(|first| first.index < first_item.index)
-            }) {
-                crate::render::render_commands::stencil_groups::draw_group(
-                    render_pass,
-                    world,
-                    masks,
-                    unique_stencils,
-                    &mut stencil_state,
-                    group,
-                );
-            }
-            if !world
-                .resources
-                .get::<crate::render::graph::SymbolPassHooks>()
-                .is_some_and(|hooks| (hooks.try_draw_group)(world, chunk, render_pass))
-            {
-                for item in chunk {
-                    item.draw_function.draw(render_pass, world, item);
-                }
-            }
-        }
-        for group in groups {
-            crate::render::render_commands::stencil_groups::draw_group(
-                render_pass,
-                world,
-                masks,
-                unique_stencils,
-                &mut stencil_state,
-                group,
-            );
-        }
+        draw_translucent_phase_items(render_pass, world, mask_items, layer_state);
     }
 
     run_translucent_hooks(
@@ -130,15 +143,6 @@ pub(crate) fn draw_contents_inline<'w>(
         world,
         crate::render::PassHookPoint::TranslucentPassEnd,
     );
-}
-
-pub(crate) fn draw_contents<'w>(
-    render_pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
-    world: &'w World,
-) {
-    let layer_state =
-        crate::render::render_commands::stencil_groups::resolve_pass_layer_state(world);
-    draw_contents_inline(render_pass, world, layer_state);
 }
 
 fn copy_symbol_depth_if_needed(
@@ -250,10 +254,21 @@ impl Node for TranslucentPassNode {
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });
-        let frame_refs = crate::render::pass_refs::PassFrameRefs::from_world(world);
+        let layer_state =
+            crate::render::render_commands::stencil_groups::resolve_pass_layer_state(world);
+        let above_items = layer_state
+            .above
+            .as_ref()
+            .map_or(&[][..], |above| above.items);
+        let domains = crate::render::render_commands::stencil_groups::layer_items_ref_domains(
+            above_items,
+            crate::render::pass_refs::PassFrameRefs::DOMAIN_SDF
+                | crate::render::pass_refs::PassFrameRefs::DOMAIN_TERRAIN,
+        );
+        let frame_refs = crate::render::pass_refs::PassFrameRefs::from_world_for(world, domains);
         let mut render_pass = crate::render::tracked_pass::TrackedRenderPass::new(render_pass)
             .with_frame_refs(frame_refs);
-        draw_contents(&mut render_pass, world);
+        draw_contents_inline(&mut render_pass, world, layer_state);
         render_pass.finish(world);
     }
 }

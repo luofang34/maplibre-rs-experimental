@@ -10,6 +10,7 @@ use state::{feature_hash, tile_scale, State};
 use crate::{
     coords::WorldTileCoords,
     sdf::{Feature, SymbolLayerData},
+    style::StyleLayerId,
 };
 
 /// Default duration in milliseconds of a symbol collision opacity transition (`160 ms`).
@@ -54,7 +55,7 @@ impl FadeRamp {
 }
 
 pub(in crate::layers::sdf::collision_system) struct PlacementHistory {
-    states: FxHashMap<String, FxHashMap<u64, Vec<State>>>,
+    states: FxHashMap<StyleLayerId, FxHashMap<u64, Vec<State>>>,
     now: Duration,
     prev_now: Option<Duration>,
     active_frame_touched_at: Duration,
@@ -104,12 +105,17 @@ fn tile_center_and_half_span(tile: WorldTileCoords) -> (f64, f64, f64) {
 }
 
 impl PlacementHistory {
-    fn find_state(&self, layer: &SymbolLayerData, feature: &Feature) -> Option<&State> {
+    fn find_state(
+        &self,
+        layer_id: StyleLayerId,
+        coords: WorldTileCoords,
+        feature: &Feature,
+    ) -> Option<&State> {
         self.states
-            .get(layer.style_layer_id.as_str())?
+            .get(&layer_id)?
             .get(&feature_hash(feature))?
             .iter()
-            .find(|state| state.matches(layer.coords, feature))
+            .find(|state| state.matches(coords, feature))
     }
 
     pub(in crate::layers::sdf::collision_system) fn yielded_to_previous_repeat(&self) -> bool {
@@ -227,10 +233,11 @@ impl PlacementHistory {
 
     pub(in crate::layers::sdf::collision_system) fn was_visible(
         &self,
-        layer: &SymbolLayerData,
+        layer_id: StyleLayerId,
+        coords: WorldTileCoords,
         feature: &Feature,
     ) -> bool {
-        self.find_state(layer, feature)
+        self.find_state(layer_id, coords, feature)
             .is_some_and(State::is_target_visible)
     }
 
@@ -239,10 +246,10 @@ impl PlacementHistory {
     /// without active fades to skip per-feature projection completely.
     pub(in crate::layers::sdf::collision_system) fn tile_has_active_state(
         &self,
-        style_layer_id: &str,
+        style_layer_id: StyleLayerId,
         tile: WorldTileCoords,
     ) -> bool {
-        let Some(layer_states) = self.states.get(style_layer_id) else {
+        let Some(layer_states) = self.states.get(&style_layer_id) else {
             return false;
         };
         let (center_x, center_y, half_span) = tile_center_and_half_span(tile);
@@ -255,10 +262,11 @@ impl PlacementHistory {
     /// neither drawn nor found by a query. Asked before [`Self::fade_ramps`] takes it.
     pub(in crate::layers::sdf::collision_system) fn shown_elsewhere(
         &self,
-        layer: &SymbolLayerData,
+        layer_id: StyleLayerId,
+        coords: WorldTileCoords,
         feature: &Feature,
     ) -> bool {
-        let Some(layer_states) = self.states.get(layer.style_layer_id.as_str()) else {
+        let Some(layer_states) = self.states.get(&layer_id) else {
             return false;
         };
         let frame = self.frame;
@@ -268,8 +276,7 @@ impl PlacementHistory {
                 states
                     .iter()
                     .find(|state| {
-                        state.matches(layer.coords, feature)
-                            && !state.is_claimed_by_tile(frame, layer.coords)
+                        state.matches(coords, feature) && !state.is_claimed_by_tile(frame, coords)
                     })
                     .is_some_and(|state| state.is_claimed_in_frame(frame))
             })
@@ -277,6 +284,7 @@ impl PlacementHistory {
 
     pub(in crate::layers::sdf::collision_system) fn fade_ramps(
         &mut self,
+        layer_id: StyleLayerId,
         layer: &SymbolLayerData,
         feature: &Feature,
         target: [bool; 2],
@@ -288,7 +296,7 @@ impl PlacementHistory {
         let any_target = target[0] || target[1];
         let hash = feature_hash(feature);
         if !any_target {
-            let Some(layer_states) = self.states.get(layer.style_layer_id.as_str()) else {
+            let Some(layer_states) = self.states.get(&layer_id) else {
                 return [FadeRamp::default(); 2];
             };
             if !layer_states.contains_key(&hash) {
@@ -297,7 +305,7 @@ impl PlacementHistory {
         }
         let states = self
             .states
-            .entry(layer.style_layer_id.clone())
+            .entry(layer_id)
             .or_default()
             .entry(hash)
             .or_default();
@@ -345,7 +353,8 @@ impl PlacementHistory {
     ) -> [f32; 2] {
         let now_ms = self.clock_ms;
         let fade_duration_ms = self.fade_duration_ms;
-        self.fade_ramps(layer, feature, target)
+        let layer_id = StyleLayerId::intern(&layer.style_layer_id);
+        self.fade_ramps(layer_id, layer, feature, target)
             .map(|ramp| ramp.at(now_ms, fade_duration_ms))
     }
 }
@@ -355,10 +364,11 @@ impl PlacementHistory {
     /// GL JS tries first so a label that still fits does not jump between anchors.
     pub(in crate::layers::sdf::collision_system) fn previous_anchor(
         &self,
-        layer: &SymbolLayerData,
+        layer_id: StyleLayerId,
+        coords: WorldTileCoords,
         feature: &Feature,
     ) -> Option<usize> {
-        self.find_state(layer, feature)?.anchor()
+        self.find_state(layer_id, coords, feature)?.anchor()
     }
 
     /// Records the anchor this frame placed the label's text with, on the state
@@ -366,7 +376,8 @@ impl PlacementHistory {
     /// as GL JS keeps the offsets of symbols that are not yet hidden.
     pub(in crate::layers::sdf::collision_system) fn remember_anchor(
         &mut self,
-        layer: &SymbolLayerData,
+        layer_id: StyleLayerId,
+        coords: WorldTileCoords,
         feature: &Feature,
         anchor: Option<usize>,
     ) {
@@ -375,12 +386,11 @@ impl PlacementHistory {
         let fade_duration_ms = self.fade_duration_ms;
         if let Some(state) = self
             .states
-            .get_mut(layer.style_layer_id.as_str())
+            .get_mut(&layer_id)
             .and_then(|layer_states| layer_states.get_mut(&feature_hash(feature)))
             .and_then(|states| {
                 states.iter_mut().find(|state| {
-                    state.is_claimed_by_tile(frame, layer.coords)
-                        && state.matches(layer.coords, feature)
+                    state.is_claimed_by_tile(frame, coords) && state.matches(coords, feature)
                 })
             })
         {

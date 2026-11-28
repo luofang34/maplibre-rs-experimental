@@ -179,10 +179,19 @@ fn push_shape_items(
         is_vector: shape.is_vector,
     });
     for layer in &shape.vector_layers {
-        let draw_function: &'static dyn Draw<LayerItem> = if layer.is_line {
-            &DrawState::<LayerItem, DrawLineTiles>::INSTANCE
+        let (draw_function, draw_kind): (
+            &'static dyn Draw<LayerItem>,
+            crate::render::render_phase::LayerDrawKind,
+        ) = if layer.is_line {
+            (
+                &DrawState::<LayerItem, DrawLineTiles>::INSTANCE,
+                crate::render::render_phase::LayerDrawKind::VectorLine,
+            )
         } else {
-            &DrawState::<LayerItem, DrawVectorTiles>::INSTANCE
+            (
+                &DrawState::<LayerItem, DrawVectorTiles>::INSTANCE,
+                crate::render::render_phase::LayerDrawKind::VectorFill,
+            )
         };
         target.layers.push(LayerItem {
             draw_function,
@@ -196,15 +205,25 @@ fn push_shape_items(
             source_shape: shape_data,
             projection: ProjectionBinding::Flat,
             mask_group: MaskGroup::Vector,
+            draw_kind,
             run: None,
         });
     }
     #[cfg(feature = "raster")]
     for (id, index, dem) in &shape.raster_layers {
-        let draw_function: &'static dyn Draw<LayerItem> = if *dem {
-            &DrawState::<LayerItem, DrawDemTiles>::INSTANCE
+        let (draw_function, draw_kind): (
+            &'static dyn Draw<LayerItem>,
+            crate::render::render_phase::LayerDrawKind,
+        ) = if *dem {
+            (
+                &DrawState::<LayerItem, DrawDemTiles>::INSTANCE,
+                crate::render::render_phase::LayerDrawKind::Other,
+            )
         } else {
-            &DrawState::<LayerItem, DrawRasterTiles>::INSTANCE
+            (
+                &DrawState::<LayerItem, DrawRasterTiles>::INSTANCE,
+                crate::render::render_phase::LayerDrawKind::Raster,
+            )
         };
         target.layers.push(LayerItem {
             draw_function,
@@ -218,6 +237,7 @@ fn push_shape_items(
             source_shape: shape_data,
             projection: ProjectionBinding::Flat,
             mask_group: MaskGroup::Mutating,
+            draw_kind,
             run: None,
         });
     }

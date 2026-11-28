@@ -79,8 +79,27 @@ fn a_missing_dem_tile_falls_back_to_the_nearest_ancestor_that_may_exist() {
     );
 }
 
-use super::request_order;
+use rustc_hash::FxHashSet;
+
+use super::append_ordered_into;
 use crate::tcs::tiles::Tiles;
+
+fn request_order(
+    tiles: impl Iterator<Item = WorldTileCoords>,
+    loaded: &Tiles,
+    minzoom: u8,
+    maxzoom: u8,
+) -> Vec<WorldTileCoords> {
+    let mut seen = FxHashSet::default();
+    let (mut fine, mut remaining, mut out) = (Vec::new(), Vec::new(), Vec::new());
+    append_ordered_into(
+        tiles,
+        loaded,
+        (minzoom, maxzoom),
+        (&mut seen, &mut fine, &mut remaining, &mut out),
+    );
+    out
+}
 
 #[test]
 fn foreground_detail_precedes_distant_texture_ancestors() {

@@ -43,11 +43,12 @@ struct TilePassScratch<'a, 'b> {
     layer_index_by_id: Arc<rustc_hash::FxHashMap<String, usize>>,
     layer_candidates: Vec<usize>,
     has_dem_source: bool,
-    upload_started: instant::Instant,
+    upload_started: Option<instant::Instant>,
     time_budget: Option<std::time::Duration>,
     uploaded_any_bucket: bool,
     any_deferred: bool,
     needs_refetch: bool,
+    any_stamp_mutated: bool,
     stamp: (u64, u64),
     state: &'a mut TessellatedUploadState<'b>,
 }
@@ -75,7 +76,7 @@ pub(crate) fn upload_tessellated_layer(
 ) -> (bool, bool) {
     let empty = rustc_hash::FxHashSet::default();
     let shared: Vec<_> = style.layers.iter().cloned().map(Arc::new).collect();
-    upload_tessellated_layer_with_uncovered(
+    let (deferred, needs_refetch, _) = upload_tessellated_layer_with_uncovered(
         buffer_pool,
         queue,
         tiles,
@@ -93,7 +94,8 @@ pub(crate) fn upload_tessellated_layer(
             dyn_points,
             paint_scratch: None,
         },
-    )
+    );
+    (deferred, needs_refetch)
 }
 
 pub(super) fn upload_tessellated_layer_with_uncovered(
@@ -102,10 +104,10 @@ pub(super) fn upload_tessellated_layer_with_uncovered(
     tiles: &mut Tiles,
     plan: TessellatedUploadPlan<'_>,
     mut state: TessellatedUploadState<'_>,
-) -> (bool, bool) {
+) -> (bool, bool, bool) {
     let stamp = (plan.style.revision(), buffer_pool.eviction_generation());
     if all_tiles_uploaded(tiles, plan.source_tiles, stamp) {
-        return (false, false);
+        return (false, false, false);
     }
     let protected: rustc_hash::FxHashSet<_> = plan.source_tiles.iter().copied().collect();
     let time_budget = state.budget.vector_upload_time_budget();
@@ -115,18 +117,23 @@ pub(super) fn upload_tessellated_layer_with_uncovered(
         layer_index_by_id: plan.style.cached_layer_index_by_id(),
         layer_candidates: Vec::new(),
         has_dem_source: crate::terrain::source::dem_source(plan.style).is_some(),
-        upload_started: instant::Instant::now(),
+        upload_started: None,
         time_budget,
         uploaded_any_bucket: false,
         any_deferred: false,
         needs_refetch: false,
+        any_stamp_mutated: false,
         stamp,
         state: &mut state,
     };
     for &coords in plan.source_tiles {
         upload_tile_buckets(buffer_pool, queue, tiles, &plan, coords, &mut pass);
     }
-    (pass.any_deferred, pass.needs_refetch)
+    (
+        pass.any_deferred,
+        pass.needs_refetch,
+        pass.any_stamp_mutated,
+    )
 }
 
 fn all_tiles_uploaded(tiles: &Tiles, source_tiles: &[WorldTileCoords], stamp: (u64, u64)) -> bool {
@@ -212,15 +219,14 @@ fn upload_tile_buckets(
                 release_cpu,
             } => {
                 uploaded |= did_upload;
-                pass.uploaded_any_bucket |= did_upload;
-                if let Some(index) = replacement {
-                    commit_pending_vector(tiles, coords, index);
-                }
-                if let Some(shared_key) = release_cpu {
-                    let release_colors =
-                        !crate::style::feature_state::layer_paint_reads_feature_state(style_layer);
-                    pending_cpu_releases.push((style_layer.id.clone(), shared_key, release_colors));
-                }
+                commit_tile_layer_step(
+                    tiles,
+                    coords,
+                    style_layer,
+                    pass,
+                    (replacement, did_upload, release_cpu),
+                    &mut pending_cpu_releases,
+                );
             }
         }
     }
@@ -229,10 +235,12 @@ fn upload_tile_buckets(
         let end_stamp = (plan.style.revision(), buffer_pool.eviction_generation());
         if let Some((layers, pending)) =
             tiles.query_mut::<(&mut VectorLayerBucketComponent, &LayerReplacements)>(coords)
+            && layers.done
+            && pending.vector.is_empty()
+            && layers.uploaded_stamp != Some(end_stamp)
         {
-            if layers.done && pending.vector.is_empty() {
-                layers.uploaded_stamp = Some(end_stamp);
-            }
+            pass.any_stamp_mutated = true;
+            layers.uploaded_stamp = Some(end_stamp);
         }
     }
     if uploaded {
@@ -240,6 +248,33 @@ fn upload_tile_buckets(
     }
     candidates.clear();
     pass.layer_candidates = candidates;
+}
+
+fn commit_tile_layer_step(
+    tiles: &mut Tiles,
+    coords: WorldTileCoords,
+    style_layer: &Arc<StyleLayer>,
+    pass: &mut TilePassScratch<'_, '_>,
+    (replacement, did_upload, release_cpu): (Option<usize>, bool, Option<Option<u64>>),
+    pending_cpu_releases: &mut Vec<(String, Option<u64>, bool)>,
+) {
+    if did_upload {
+        pass.uploaded_any_bucket = true;
+        if pass.time_budget.is_some() && pass.upload_started.is_none() {
+            pass.upload_started = Some(instant::Instant::now());
+        }
+    }
+    if did_upload || replacement.is_some() {
+        pass.any_stamp_mutated = true;
+    }
+    if let Some(index) = replacement {
+        commit_pending_vector(tiles, coords, index);
+    }
+    if let Some(shared_key) = release_cpu {
+        let release_colors =
+            !crate::style::feature_state::layer_paint_reads_feature_state(style_layer);
+        pending_cpu_releases.push((style_layer.id.clone(), shared_key, release_colors));
+    }
 }
 
 fn process_tile_style_layer(
@@ -348,10 +383,12 @@ fn execute_bucket_upload(
         && crate::vector::uniform_paint::uniform_color(style_layer, f64::from(plan.paint.zoom))
             .is_some();
     let bytes = upload_size(style_layer, bucket, is_uniform, is_dynamic_circle);
-    if pass
-        .time_budget
-        .is_some_and(|limit| pass.uploaded_any_bucket && pass.upload_started.elapsed() >= limit)
-        || pass.state.budget.geometry_tiles_exhausted_for(is_uncovered)
+    if pass.time_budget.is_some_and(|limit| {
+        pass.uploaded_any_bucket
+            && pass
+                .upload_started
+                .is_some_and(|started| started.elapsed() >= limit)
+    }) || pass.state.budget.geometry_tiles_exhausted_for(is_uncovered)
         || !pass.state.budget.can_take_geometry(bytes, is_uncovered)
     {
         return LayerStep::Exhausted;

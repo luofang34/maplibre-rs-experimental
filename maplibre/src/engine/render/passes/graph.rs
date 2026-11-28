@@ -310,6 +310,66 @@ impl RenderGraph {
     }
 }
 
+/// Callback signature registered in [`LayerPassHooks`] for batched layer-group drawing.
+pub(crate) type LayerGroupDrawHook = for<'w> fn(
+    &'w World,
+    &[crate::render::render_phase::LayerItem],
+    &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
+) -> bool;
+
+/// Layer-group callbacks registered by `VectorPlugin` and `RasterPlugin` so `render` stays
+/// decoupled from domain draw commands.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct LayerPassHooks {
+    pub try_draw_vector_group: Option<LayerGroupDrawHook>,
+    pub try_draw_raster_group: Option<LayerGroupDrawHook>,
+}
+
+impl LayerPassHooks {
+    #[inline]
+    pub(crate) fn dispatch_group<'w>(
+        self,
+        world: &'w World,
+        group: &[crate::render::render_phase::LayerItem],
+        pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
+    ) -> bool {
+        use crate::render::render_phase::LayerDrawKind;
+        let Some(first) = group.first() else {
+            return false;
+        };
+        match first.draw_kind {
+            LayerDrawKind::VectorFill
+            | LayerDrawKind::VectorLine
+            | LayerDrawKind::VectorCircle
+            | LayerDrawKind::VectorPattern
+            | LayerDrawKind::ExtrusionDepth
+            | LayerDrawKind::ExtrusionColor
+            | LayerDrawKind::ExtrusionPatternColor
+            | LayerDrawKind::ExtrusionTranslucentBack
+            | LayerDrawKind::ExtrusionTranslucentFront => self
+                .try_draw_vector_group
+                .is_some_and(|draw_group| draw_group(world, group, pass)),
+            LayerDrawKind::Raster => self
+                .try_draw_raster_group
+                .is_some_and(|draw_group| draw_group(world, group, pass)),
+            LayerDrawKind::Other if group.iter().any(|i| i.draw_kind == LayerDrawKind::Raster) => {
+                self.try_draw_raster_group
+                    .is_some_and(|draw_group| draw_group(world, group, pass))
+            }
+            LayerDrawKind::Other
+                if group.len() > 1
+                    && group.iter().any(|i| {
+                        !matches!(i.draw_kind, LayerDrawKind::Other | LayerDrawKind::Raster)
+                    }) =>
+            {
+                self.try_draw_vector_group
+                    .is_some_and(|draw_group| draw_group(world, group, pass))
+            }
+            LayerDrawKind::Other => false,
+        }
+    }
+}
+
 /// Symbol pass callbacks registered by `SdfPlugin` so `render` stays decoupled from `sdf`.
 #[derive(Clone, Copy)]
 pub(crate) struct SymbolPassHooks {

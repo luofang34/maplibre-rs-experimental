@@ -76,6 +76,10 @@ fn collect_coarse_ancestors(
     extra_requests: &mut Vec<WorldTileCoords>,
     handoff_parents: &mut Vec<WorldTileCoords>,
 ) {
+    let pool = match world.resources.get::<Eventually<VectorBufferPool>>() {
+        Some(Eventually::Initialized(pool)) => Some(pool),
+        _ => None,
+    };
     let mut candidates = Vec::new();
     let mut seen_ancestors = FxHashSet::default();
     for &coords in view_tiles {
@@ -96,8 +100,11 @@ fn collect_coarse_ancestors(
             continue;
         }
         let spawned = tile_spawned(world, ancestor);
-        let uncovered = !all_children_uploaded(world, view_tiles, max_zoom, ancestor);
-        if spawned || (allow_new_coarse && uncovered) {
+        if !spawned && !allow_new_coarse {
+            continue;
+        }
+        let uncovered = !all_children_uploaded(world, pool, view_tiles, max_zoom, ancestor);
+        if spawned || uncovered {
             candidates.push((ancestor, uncovered));
         }
     }
@@ -117,19 +124,37 @@ fn collect_coarse_ancestors(
     }
 }
 
+fn tile_geometry_uploaded(coords: WorldTileCoords, world: &World, pool: &VectorBufferPool) -> bool {
+    let Some(buckets) = world.tiles.query::<&VectorLayerBucketComponent>(coords) else {
+        return false;
+    };
+    if !buckets.done {
+        return false;
+    }
+    if buckets
+        .uploaded_stamp
+        .is_some_and(|(_, eviction_gen)| eviction_gen == pool.eviction_generation())
+    {
+        return true;
+    }
+    buckets.layers.iter().all(|layer| match layer {
+        crate::vector::VectorLayerBucket::AvailableLayer(bucket) => {
+            !bucket.buffer.has_drawable_geometry() || pool.has_layer(coords, &bucket.style_layer_id)
+        }
+        crate::vector::VectorLayerBucket::Missing(_) => true,
+    })
+}
+
 fn all_children_uploaded(
     world: &World,
+    pool: Option<&VectorBufferPool>,
     view_tiles: &[WorldTileCoords],
     max_zoom: Option<u8>,
     ancestor: WorldTileCoords,
 ) -> bool {
-    let Some(Eventually::Initialized(pool)) = world.resources.get::<Eventually<VectorBufferPool>>()
-    else {
+    let Some(pool) = pool.filter(|p| p.has_capacity()) else {
         return false;
     };
-    if !pool.has_capacity() {
-        return false;
-    }
     let az = u8::from(ancestor.z);
     let mut any_covered = false;
     for &child in view_tiles {
@@ -144,12 +169,7 @@ fn all_children_uploaded(
         let shift = u32::from(cz - az);
         if source_child.x >> shift == ancestor.x && source_child.y >> shift == ancestor.y {
             any_covered = true;
-            if world
-                .tiles
-                .query::<&VectorLayerBucketComponent>(source_child)
-                .is_none_or(|b| !b.done)
-                || !crate::vector::geometry_uploaded(source_child, world)
-            {
+            if !tile_geometry_uploaded(source_child, world, pool) {
                 return false;
             }
         }

@@ -27,6 +27,7 @@ mod signatures;
 mod sliced;
 mod temporal;
 mod upload_diff;
+mod upload_flush;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod proptests;
@@ -55,6 +56,7 @@ pub struct CollisionSystem {
     draw_sort: policy::draw_sort::DrawSort,
     /// Persistent scratch set of currently visible covering tile coordinates.
     seen: FxHashSet<WorldTileCoords>,
+    seen_version: Option<u64>,
     sig_cache: signatures::SignatureCache,
     grid_cache: CollisionGrid,
     /// Revision of the host's label obstacles the last placement kept clear.
@@ -345,9 +347,16 @@ impl CollisionSystem {
         self.runs = self.runs.wrapping_add(1);
         let stats = ctx.world.resources.get_or_init_mut::<CollisionStats>();
         stats.runs = stats.runs.wrapping_add(1);
-        self.seen.clear();
         if let Some(covering) = ctx.world.resources.get::<super::covering::SymbolCovering>() {
-            self.seen.extend(covering.tiles.iter().copied());
+            if self.seen_version != Some(covering.tiles_version)
+                || self.seen.len() != covering.tiles.len()
+            {
+                self.seen.clear();
+                self.seen.extend(covering.tiles.iter().copied());
+                self.seen_version = Some(covering.tiles_version);
+            }
+        } else if self.seen_version.take().is_some() || !self.seen.is_empty() {
+            self.seen.clear();
         }
         in_flight
     }

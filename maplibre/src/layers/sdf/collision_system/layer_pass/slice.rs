@@ -6,11 +6,14 @@ use super::{
     empty_metadata, write_feature_metadata, LayerFrame,
 };
 use crate::{
-    render::shaders::SDFShaderFeatureMetadata,
+    render::{camera::ViewProjection, shaders::SDFShaderFeatureMetadata},
     sdf::{
-        collision_grid::CollisionGrid, paint::SymbolUniforms, placement::LinePoses,
+        collision_grid::CollisionGrid,
+        paint::SymbolUniforms,
+        placement::{LinePoses, TileProjector},
         query::PlacedSymbols,
     },
+    style::StyleLayerId,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -21,6 +24,7 @@ const FEATURE_BATCH_CHECK: usize = 32;
 /// In-progress placement state across a style layer's visible tiles.
 pub(in crate::layers::sdf::collision_system) struct LayerSliceProgress {
     ordered: Vec<(usize, usize, bool)>,
+    projectors: Vec<Option<TileProjector>>,
     cursor: usize,
     pub(in crate::layers::sdf::collision_system) metadata: Vec<Vec<SDFShaderFeatureMetadata>>,
     pub(in crate::layers::sdf::collision_system) outcomes: super::family::Outcomes,
@@ -35,6 +39,7 @@ pub(in crate::layers::sdf::collision_system) struct SliceStepContext<'a> {
         &'a crate::render::projection::ShaderProjectionData,
     pub(in crate::layers::sdf::collision_system) layers:
         &'a [Option<&'a crate::sdf::SymbolLayerData>],
+    pub(in crate::layers::sdf::collision_system) style_layer_id: StyleLayerId,
     pub(in crate::layers::sdf::collision_system) paint: &'a crate::style::layer::SymbolPaint,
     pub(in crate::layers::sdf::collision_system) zoom_limits: [f64; 2],
 }
@@ -51,28 +56,37 @@ pub(in crate::layers::sdf::collision_system) struct SlicePlacementState<'a> {
 impl LayerSliceProgress {
     pub(in crate::layers::sdf::collision_system) fn start(
         world: &crate::tcs::world::World,
-        view_state: &crate::render::view_state::ViewState,
-        projection: &crate::render::projection::ShaderProjectionData,
-        layers: &[&crate::sdf::SymbolLayerData],
+        (view_state, gpu_vp, projection): (
+            &crate::render::view_state::ViewState,
+            ViewProjection,
+            &crate::render::projection::ShaderProjectionData,
+        ),
+        (layers, layer_id): (&[&crate::sdf::SymbolLayerData], StyleLayerId),
         paint: &crate::style::layer::SymbolPaint,
         history: &temporal::PlacementHistory,
     ) -> Self {
         let metadata: Vec<_> = layers.iter().map(|layer| empty_metadata(layer)).collect();
         let outcomes: super::family::Outcomes = (0..layers.len()).map(|_| Vec::new()).collect();
-        let zoom = view_state.style_zoom().value();
-        let uniforms = SymbolUniforms::new(paint, zoom, [1, 1]);
+        let style_zoom = view_state.style_zoom().value();
+        let view_zoom = view_state.zoom();
+        let uniforms = SymbolUniforms::new(paint, style_zoom, [1, 1]);
         let has_terrain_or_height = world
             .resources
             .get::<crate::terrain::coverage::TerrainCoverageIndex>()
             .is_some()
             || paint.uses_shared_height();
+        let projectors: Vec<_> = layers
+            .iter()
+            .map(|layer| TileProjector::new(layer.coords, gpu_vp, view_zoom, projection))
+            .collect();
         let culled: Vec<bool> = layers
             .iter()
-            .map(|layer| {
+            .zip(projectors.iter())
+            .map(|(layer, projector)| {
                 tile_culled_on_flat_mercator(
                     layer,
-                    view_state,
-                    projection,
+                    layer_id,
+                    (view_state, projection, projector.as_ref()),
                     &uniforms,
                     has_terrain_or_height,
                     history,
@@ -82,12 +96,13 @@ impl LayerSliceProgress {
         if culled.iter().all(|&c| c) {
             return Self {
                 ordered: Vec::new(),
+                projectors,
                 cursor: 0,
                 metadata,
                 outcomes,
             };
         }
-        let ordered = ordered_features(layers, &culled, history)
+        let ordered = ordered_features(layers, layer_id, &culled, history)
             .into_iter()
             .filter_map(|(pos, feat_idx, feature, was_visible)| {
                 (!feature.fallback).then_some((pos, feat_idx, was_visible))
@@ -95,6 +110,7 @@ impl LayerSliceProgress {
             .collect();
         Self {
             ordered,
+            projectors,
             cursor: 0,
             metadata,
             outcomes,
@@ -157,7 +173,9 @@ impl LayerSliceProgress {
         };
         let mut next = Some((feature_index, initial_feature, was_visible, false));
         while let Some((index, feature, was_visible, suppressed)) = next.take() {
+            let projector = self.projectors.get(position).and_then(Option::as_ref);
             let feat_frame = LayerFrame {
+                projector,
                 uniforms: if frame.has_data_driven_sizes {
                     frame
                         .uniforms
@@ -175,7 +193,8 @@ impl LayerSliceProgress {
                 Some(LinePoses::Poses(poses)) => Some(poses.clone()),
                 _ => None,
             };
-            self.record_feature_outcome(
+            record_feature_outcome(
+                (&mut self.metadata, &mut self.outcomes),
                 FeatureOutcomeRecord {
                     position,
                     index,
@@ -196,58 +215,12 @@ impl LayerSliceProgress {
                     (
                         index + 1,
                         other,
-                        state.history.was_visible(layer, other),
+                        state
+                            .history
+                            .was_visible(frame.style_layer_id, layer.coords, other),
                         suppressed || outcome.placed,
                     )
                 });
-        }
-    }
-
-    fn record_feature_outcome(
-        &mut self,
-        record: FeatureOutcomeRecord<'_>,
-        scratch: &mut super::super::upload_diff::MetadataScratchPool,
-    ) {
-        let FeatureOutcomeRecord {
-            position,
-            index,
-            layer,
-            feature,
-            zoom,
-            outcome,
-            poses,
-            paint,
-        } = record;
-        if let Some(meta) = self.metadata.get_mut(position) {
-            if (!outcome.ramps[0].is_hidden() || !outcome.ramps[1].is_hidden())
-                && meta.capacity() == 0
-            {
-                *meta = scratch.acquire();
-            }
-            write_feature_metadata(
-                layer,
-                feature,
-                (outcome.ramps, outcome.text_shift, outcome.anchor),
-                outcome.ground,
-                poses.as_deref(),
-                (paint, zoom, meta),
-            );
-        }
-        if !outcome.ramps[0].is_hidden() || !outcome.ramps[1].is_hidden() {
-            if let Some(outcomes) = self.outcomes.get_mut(position) {
-                if outcomes.is_empty() {
-                    outcomes.resize_with(layer.features.len(), || None);
-                }
-                if let Some(slot) = outcomes.get_mut(index) {
-                    *slot = Some(super::family::Outcome {
-                        ramps: outcome.ramps,
-                        text_shift: outcome.text_shift,
-                        anchor: outcome.anchor,
-                        ground: outcome.ground,
-                        poses,
-                    });
-                }
-            }
         }
     }
 
@@ -257,6 +230,56 @@ impl LayerSliceProgress {
     ) {
         for buf in self.metadata {
             scratch.recycle(buf);
+        }
+    }
+}
+
+fn record_feature_outcome(
+    (tile_metadata, tile_outcomes): (
+        &mut [Vec<SDFShaderFeatureMetadata>],
+        &mut super::family::Outcomes,
+    ),
+    record: FeatureOutcomeRecord<'_>,
+    scratch: &mut super::super::upload_diff::MetadataScratchPool,
+) {
+    let FeatureOutcomeRecord {
+        position,
+        index,
+        layer,
+        feature,
+        zoom,
+        outcome,
+        poses,
+        paint,
+    } = record;
+    if let Some(meta) = tile_metadata.get_mut(position) {
+        if (!outcome.ramps[0].is_hidden() || !outcome.ramps[1].is_hidden()) && meta.capacity() == 0
+        {
+            *meta = scratch.acquire();
+        }
+        write_feature_metadata(
+            layer,
+            feature,
+            (outcome.ramps, outcome.text_shift, outcome.anchor),
+            outcome.ground,
+            poses.as_deref(),
+            (paint, zoom, meta),
+        );
+    }
+    if !outcome.ramps[0].is_hidden() || !outcome.ramps[1].is_hidden() {
+        if let Some(outcomes) = tile_outcomes.get_mut(position) {
+            if outcomes.is_empty() {
+                outcomes.resize_with(layer.features.len(), || None);
+            }
+            if let Some(slot) = outcomes.get_mut(index) {
+                *slot = Some(super::family::Outcome {
+                    ramps: outcome.ramps,
+                    text_shift: outcome.text_shift,
+                    anchor: outcome.anchor,
+                    ground: outcome.ground,
+                    poses,
+                });
+            }
         }
     }
 }
@@ -303,6 +326,8 @@ fn build_layer_frame<'a>(ctx: &'a SliceStepContext<'a>) -> LayerFrame<'a> {
         world: ctx.world,
         view_state: ctx.view_state,
         projection: ctx.projection,
+        projector: None,
+        style_layer_id: ctx.style_layer_id,
         paint: ctx.paint,
         uniforms: SymbolUniforms::new(ctx.paint, zoom, [1, 1]),
         zoom_limits: ctx.zoom_limits,

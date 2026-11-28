@@ -9,8 +9,8 @@ use crate::{
         eventually::{Eventually, Eventually::Initialized},
         render_commands::DrawMasks,
         render_phase::{
-            DrawState, LayerItem, MaskGroup, ProjectionBinding, RenderPhase, SortedRun,
-            TileMaskItem, UNSET_ENTRY_SLOT,
+            DrawState, LayerDrawKind, LayerItem, MaskGroup, ProjectionBinding, RenderPhase,
+            SortedRun, TileMaskItem, UNSET_ENTRY_SLOT,
         },
         tile_view_pattern::WgpuTileViewPattern,
     },
@@ -206,86 +206,112 @@ pub fn queue_system(
                     } else {
                         MaskGroup::Vector
                     };
-                    let draw_function: &'static dyn crate::render::render_phase::Draw<LayerItem> =
-                        match layer_entry.style_layer.type_.as_str() {
-                            // The heatmap plugin draws these into a density target instead.
-                            "heatmap" => continue,
-                            "line" => &DrawState::<LayerItem, DrawLineTiles>::INSTANCE,
-                            "circle" => &DrawState::<LayerItem, DrawCircleTiles>::INSTANCE,
-                            "fill-extrusion"
-                                if translucent_extrusion_layers.contains(&layer_id) =>
+                    let (draw_function, draw_kind): (
+                        &'static dyn crate::render::render_phase::Draw<LayerItem>,
+                        LayerDrawKind,
+                    ) = match layer_entry.style_layer.type_.as_str() {
+                        // The heatmap plugin draws these into a density target instead.
+                        "heatmap" => continue,
+                        "line" => (
+                            &DrawState::<LayerItem, DrawLineTiles>::INSTANCE,
+                            LayerDrawKind::VectorLine,
+                        ),
+                        "circle" => (
+                            &DrawState::<LayerItem, DrawCircleTiles>::INSTANCE,
+                            LayerDrawKind::VectorCircle,
+                        ),
+                        "fill-extrusion" if translucent_extrusion_layers.contains(&layer_id) => {
+                            translucent_fronts.push(LayerItem {
+                                projection: ProjectionBinding::View,
+                                draw_function: &DrawState::<
+                                    LayerItem,
+                                    DrawExtrusionTranslucentFront,
+                                >::INSTANCE,
+                                index: layer_entry.style_layer.index,
+                                generate_borders: false,
+                                style_layer: layer_id,
+                                entry_slot,
+                                tile: Tile {
+                                    coords: layer_entry.coords,
+                                },
+                                source_shape: shape_data,
+                                mask_group: MaskGroup::Unmasked,
+                                draw_kind: LayerDrawKind::ExtrusionTranslucentFront,
+                                run: None,
+                            });
+                            (
+                                &DrawState::<LayerItem, DrawExtrusionTranslucentBack>::INSTANCE,
+                                LayerDrawKind::ExtrusionTranslucentBack,
+                            )
+                        }
+                        "fill-extrusion" => {
+                            ensure_mask(mask_phase);
+                            if !extrusion_clears
+                                .iter()
+                                .any(|item| item.style_layer == layer_id)
                             {
-                                translucent_fronts.push(LayerItem {
+                                extrusion_clears.push(LayerItem {
                                     projection: ProjectionBinding::View,
                                     draw_function: &DrawState::<
                                         LayerItem,
-                                        DrawExtrusionTranslucentFront,
+                                        DrawExtrusionStencilClear,
                                     >::INSTANCE,
                                     index: layer_entry.style_layer.index,
                                     generate_borders: false,
                                     style_layer: layer_id,
-                                    entry_slot,
-                                    tile: Tile {
-                                        coords: layer_entry.coords,
-                                    },
-                                    source_shape: shape_data,
-                                    mask_group: MaskGroup::Unmasked,
-                                    run: None,
-                                });
-                                &DrawState::<LayerItem, DrawExtrusionTranslucentBack>::INSTANCE
-                            }
-                            "fill-extrusion" => {
-                                ensure_mask(mask_phase);
-                                if !extrusion_clears
-                                    .iter()
-                                    .any(|item| item.style_layer == layer_id)
-                                {
-                                    extrusion_clears.push(LayerItem {
-                                        projection: ProjectionBinding::View,
-                                        draw_function: &DrawState::<
-                                            LayerItem,
-                                            DrawExtrusionStencilClear,
-                                        >::INSTANCE,
-                                        index: layer_entry.style_layer.index,
-                                        generate_borders: false,
-                                        style_layer: layer_id,
-                                        entry_slot: UNSET_ENTRY_SLOT,
-                                        tile: Tile {
-                                            coords: layer_entry.coords,
-                                        },
-                                        source_shape: shape_data,
-                                        mask_group: MaskGroup::Vector,
-                                        run: None,
-                                    });
-                                }
-                                let color: &'static dyn crate::render::render_phase::Draw<
-                                    LayerItem,
-                                > = if pattern_layers.contains(&layer_id) {
-                                    &DrawState::<LayerItem, DrawExtrusionPatternColor>::INSTANCE
-                                } else {
-                                    &DrawState::<LayerItem, DrawExtrusionColor>::INSTANCE
-                                };
-                                extrusion_colors.push(LayerItem {
-                                    projection: ProjectionBinding::View,
-                                    draw_function: color,
-                                    index: layer_entry.style_layer.index,
-                                    generate_borders: false,
-                                    style_layer: layer_id,
-                                    entry_slot,
+                                    entry_slot: UNSET_ENTRY_SLOT,
                                     tile: Tile {
                                         coords: layer_entry.coords,
                                     },
                                     source_shape: shape_data,
                                     mask_group: MaskGroup::Vector,
+                                    draw_kind: LayerDrawKind::Other,
                                     run: None,
                                 });
-                                &DrawState::<LayerItem, DrawExtrusionDepth>::INSTANCE
                             }
-                            "fill" if pattern_layers.contains(&layer_id) => {
-                                &DrawState::<LayerItem, DrawPatternTiles>::INSTANCE
-                            }
-                            _ => &DrawState::<LayerItem, DrawVectorTiles>::INSTANCE,
-                        };
+                            let (color, color_kind): (
+                                &'static dyn crate::render::render_phase::Draw<LayerItem>,
+                                LayerDrawKind,
+                            ) = if pattern_layers.contains(&layer_id) {
+                                (
+                                    &DrawState::<LayerItem, DrawExtrusionPatternColor>::INSTANCE,
+                                    LayerDrawKind::ExtrusionPatternColor,
+                                )
+                            } else {
+                                (
+                                    &DrawState::<LayerItem, DrawExtrusionColor>::INSTANCE,
+                                    LayerDrawKind::ExtrusionColor,
+                                )
+                            };
+                            extrusion_colors.push(LayerItem {
+                                projection: ProjectionBinding::View,
+                                draw_function: color,
+                                index: layer_entry.style_layer.index,
+                                generate_borders: false,
+                                style_layer: layer_id,
+                                entry_slot,
+                                tile: Tile {
+                                    coords: layer_entry.coords,
+                                },
+                                source_shape: shape_data,
+                                mask_group: MaskGroup::Vector,
+                                draw_kind: color_kind,
+                                run: None,
+                            });
+                            (
+                                &DrawState::<LayerItem, DrawExtrusionDepth>::INSTANCE,
+                                LayerDrawKind::ExtrusionDepth,
+                            )
+                        }
+                        "fill" if pattern_layers.contains(&layer_id) => (
+                            &DrawState::<LayerItem, DrawPatternTiles>::INSTANCE,
+                            LayerDrawKind::VectorPattern,
+                        ),
+                        _ => (
+                            &DrawState::<LayerItem, DrawVectorTiles>::INSTANCE,
+                            LayerDrawKind::VectorFill,
+                        ),
+                    };
 
                     // Features that draw in the order of a sort key, across tiles, draw a run at
                     // a time.
@@ -307,6 +333,7 @@ pub fn queue_system(
                                 },
                                 source_shape: shape_data,
                                 mask_group: MaskGroup::Vector,
+                                draw_kind: LayerDrawKind::VectorCircle,
                                 run: Some(SortedRun {
                                     key: *key,
                                     start: range.start,
@@ -331,6 +358,7 @@ pub fn queue_system(
                         },
                         source_shape: shape_data,
                         mask_group,
+                        draw_kind,
                         run: None,
                     });
                 }

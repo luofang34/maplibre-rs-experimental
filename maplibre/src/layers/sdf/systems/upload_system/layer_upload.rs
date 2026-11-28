@@ -32,7 +32,7 @@ struct SymbolLayerUploadCtx<'a> {
     target_zoom_q32: i32,
     moving: bool,
     stamp: (u64, u64),
-    upload_started: instant::Instant,
+    upload_started: Option<instant::Instant>,
     sdf_time_budget: Option<std::time::Duration>,
 }
 
@@ -61,8 +61,19 @@ fn all_tiles_uploaded(
 }
 
 fn time_budget_spent(ctx: &SymbolLayerUploadCtx<'_>, progress: &UploadProgress) -> bool {
-    ctx.sdf_time_budget
-        .is_some_and(|limit| progress.did_gpu_work && ctx.upload_started.elapsed() >= limit)
+    ctx.sdf_time_budget.is_some_and(|limit| {
+        progress.did_gpu_work
+            && ctx
+                .upload_started
+                .is_some_and(|started| started.elapsed() >= limit)
+    })
+}
+
+fn record_gpu_work(ctx: &mut SymbolLayerUploadCtx<'_>, progress: &mut UploadProgress) {
+    progress.did_gpu_work = true;
+    if ctx.sdf_time_budget.is_some() && ctx.upload_started.is_none() {
+        ctx.upload_started = Some(instant::Instant::now());
+    }
 }
 
 fn update_committed_atlases(
@@ -91,7 +102,7 @@ fn update_committed_atlases(
                 style_layer,
                 ctx.atlas_zoom,
             );
-            progress.did_gpu_work = true;
+            record_gpu_work(ctx, progress);
         }
     }
     layers.atlas_zoom_q32 = Some(ctx.target_zoom_q32);
@@ -159,8 +170,9 @@ fn upload_single_symbol_layer(
         false
     };
     prepare_atlas(ctx.textures, ctx.gpu, layer, style_layer, ctx.atlas_zoom);
-    progress.did_gpu_work |=
-        did_upload || (layer.atlas.is_some() && layers.atlas_zoom_q32 != Some(ctx.target_zoom_q32));
+    if did_upload || (layer.atlas.is_some() && layers.atlas_zoom_q32 != Some(ctx.target_zoom_q32)) {
+        record_gpu_work(ctx, progress);
+    }
     commit_symbol_upload(layers, pending, replacement, did_upload, style_layer);
     true
 }
@@ -264,7 +276,7 @@ pub(crate) fn upload_symbol_layer(
         target_zoom_q32,
         moving,
         stamp,
-        upload_started: instant::Instant::now(),
+        upload_started: None,
         sdf_time_budget,
     };
     let mut progress = UploadProgress {

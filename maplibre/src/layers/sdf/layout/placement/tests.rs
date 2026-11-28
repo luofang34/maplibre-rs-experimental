@@ -58,6 +58,7 @@ fn free_camera_symbols_keep_their_pixel_size_at_nearby_visible_anchors() {
             anchor_clip: None,
             view: &view,
             projection: &projection,
+            projector: None,
             uniforms: &uniforms,
         };
         if let Some(bounds) = placement.bounds(&part) {
@@ -155,6 +156,7 @@ fn polar_camera_pan_preserves_globe_label_tile_unit_scale() {
         anchor_clip: None,
         view: &equator_view,
         projection: &equator_proj,
+        projector: None,
         uniforms: &uniforms,
     }
     .tile_units();
@@ -169,6 +171,7 @@ fn polar_camera_pan_preserves_globe_label_tile_unit_scale() {
             anchor_clip: None,
             view: &polar_view,
             projection: &polar_proj,
+            projector: None,
             uniforms: &uniforms,
         }
         .tile_units();

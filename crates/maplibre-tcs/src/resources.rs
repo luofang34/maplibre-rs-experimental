@@ -150,14 +150,22 @@ impl Resources {
 
     /// Borrows `&R` or tuples of one through six shared resource references.
     /// Built-in queries return `None` when any requested type is absent.
+    #[inline(always)]
     pub fn query<Q: ResourceQuery>(&self) -> Option<Q::Item<'_>> {
         Q::query(self)
     }
 
     /// Borrows the requested resources, or returns `None` for a missing resource or alias
     /// conflict. Repeated shared references are allowed; mutable references must be disjoint.
+    #[inline(always)]
     pub fn query_mut<Q: ResourceQueryMut>(&mut self) -> Option<Q::MutItem<'_>> {
         Q::query_mut(self)
+    }
+
+    #[inline]
+    fn borrow_disjoint_mut<Q: ResourceQueryMut + ?Sized>(&mut self) -> Option<Q::MutItem<'_>> {
+        let mut slice = DisjointSliceBorrow::new(&mut self.resources);
+        Q::borrow(&self.index, &mut slice)
     }
 }
 
@@ -173,6 +181,7 @@ pub trait ResourceQuery {
 impl<R: Resource> ResourceQuery for &R {
     type Item<'r> = &'r R;
 
+    #[inline(always)]
     fn query(resources: &Resources) -> Option<Self::Item<'_>> {
         resources.get::<R>()
     }
@@ -191,9 +200,9 @@ pub trait ResourceQueryMut {
     ) -> Option<Self::MutItem<'r>>;
 
     /// Looks up resources; built-in queries return `None` on absence or conflicting access.
+    #[inline]
     fn query_mut(resources: &mut Resources) -> Option<Self::MutItem<'_>> {
-        let mut slice = DisjointSliceBorrow::new(&mut resources.resources);
-        Self::borrow(&resources.index, &mut slice)
+        resources.borrow_disjoint_mut::<Self>()
     }
 }
 
@@ -208,6 +217,7 @@ impl<R: Resource> ResourceQueryMut for &R {
         slice.borrow_shared(slot)?.downcast_ref()
     }
 
+    #[inline(always)]
     fn query_mut(resources: &mut Resources) -> Option<Self::MutItem<'_>> {
         resources.get::<R>()
     }
@@ -224,6 +234,7 @@ impl<R: Resource> ResourceQueryMut for &mut R {
         slice.borrow_mut(slot)?.downcast_mut()
     }
 
+    #[inline(always)]
     fn query_mut(resources: &mut Resources) -> Option<Self::MutItem<'_>> {
         resources.get_mut::<R>()
     }

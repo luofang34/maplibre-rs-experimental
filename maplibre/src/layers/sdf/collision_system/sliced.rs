@@ -8,7 +8,7 @@
 
 use std::{collections::VecDeque, time::Duration};
 
-use rustc_hash::{FxHashMap, FxHashMap as HashMap, FxHashSet as HashSet};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use super::{
     layer_pass::{
@@ -21,11 +21,8 @@ use super::{
 use crate::{
     coords::WorldTileCoords,
     render::{
-        eventually::{Eventually, Eventually::Initialized},
-        projection::ShaderProjectionData,
-        shaders::SDFShaderFeatureMetadata,
-        upload_queue::UploadQueue,
-        view_state::ViewState,
+        eventually::Eventually, projection::ShaderProjectionData,
+        shaders::SDFShaderFeatureMetadata, upload_queue::UploadQueue, view_state::ViewState,
     },
     sdf::{
         collision_grid::CollisionGrid, query::PlacedSymbols, SymbolBufferPool, SymbolLayerData,
@@ -38,17 +35,21 @@ use crate::{
     tcs::world::World,
 };
 
-#[cfg(target_arch = "wasm32")]
-const SLICE_BUDGET_SETTLED: Duration = Duration::from_micros(1000);
-#[cfg(not(target_arch = "wasm32"))]
-const SLICE_BUDGET_SETTLED: Duration = Duration::from_micros(1800);
-#[cfg(target_arch = "wasm32")]
-const SLICE_BUDGET_MOVING: Duration = Duration::from_micros(500);
-#[cfg(not(target_arch = "wasm32"))]
-const SLICE_BUDGET_MOVING: Duration = Duration::from_micros(550);
+const SLICE_BUDGET_SETTLED: Duration = Duration::from_micros(if cfg!(target_arch = "wasm32") {
+    1000
+} else {
+    1800
+});
+const SLICE_BUDGET_MOVING: Duration = Duration::from_micros(if cfg!(target_arch = "wasm32") {
+    500
+} else {
+    550
+});
 
 struct EpochGroup {
     style_layer_id: String,
+    layer_id: StyleLayerId,
+    style_layer_idx: Option<usize>,
     zoom_limits: [f64; 2],
     is_leader: bool,
     leader_of: Option<String>,
@@ -65,9 +66,18 @@ pub(super) struct CommittedEpoch {
     pub(super) saw_background_change: bool,
 }
 
+type MirroredLayerGroup = (
+    String,
+    String,
+    StyleLayerId,
+    Option<usize>,
+    Vec<WorldTileCoords>,
+);
+
 /// Multi-frame incremental symbol collision epoch.
 pub(super) struct ActiveEpoch {
     view_state: ViewState,
+    gpu_vp: crate::render::camera::ViewProjection,
     projection: ShaderProjectionData,
     pub(super) zoom: f64,
     pub(super) bearing: f64,
@@ -79,7 +89,7 @@ pub(super) struct ActiveEpoch {
     group_idx: usize,
     active_group: Option<LayerSliceProgress>,
     outcomes: HashMap<String, (Vec<WorldTileCoords>, family::Outcomes)>,
-    mirrored: VecDeque<(String, String, Vec<WorldTileCoords>)>,
+    mirrored: VecDeque<MirroredLayerGroup>,
     pending_uploads: VecDeque<(StyleLayerId, WorldTileCoords, Vec<SDFShaderFeatureMetadata>)>,
 }
 
@@ -90,7 +100,7 @@ pub(super) struct EpochStepContext<'a> {
     pub(super) queue: &'a UploadQueue,
     pub(super) history: &'a mut temporal::PlacementHistory,
     pub(super) uploaded:
-        &'a mut FxHashMap<(WorldTileCoords, StyleLayerId), upload_diff::CachedBucketMetadata>,
+        &'a mut HashMap<(WorldTileCoords, StyleLayerId), upload_diff::CachedBucketMetadata>,
     pub(super) scratch: &'a mut upload_diff::MetadataScratchPool,
     pub(super) sliced: bool,
 }
@@ -108,9 +118,7 @@ impl ActiveEpoch {
             &mut boxes,
             view_state.width(),
             view_state.height(),
-            world
-                .resources
-                .get::<crate::sdf::obstacles::LabelObstacles>(),
+            world.resources.get(),
         );
         let has_symbols = !layers.is_empty();
         let mut raw_groups: Vec<(u32, String, Vec<WorldTileCoords>)> = Vec::new();
@@ -133,9 +141,9 @@ impl ActiveEpoch {
                     .filter(|leader| **leader != id && present.contains(*leader))
                     .cloned();
                 let is_leader = leaders.get(&id) == Some(&id);
-                let zoom_limits = layer_by_id
-                    .get(&id)
-                    .and_then(|&idx| style.layers.get(idx))
+                let style_layer_idx = layer_by_id.get(&id).copied();
+                let zoom_limits = style_layer_idx
+                    .and_then(|idx| style.layers.get(idx))
                     .map(|l| {
                         [
                             l.minzoom.filter(|&m| m > 0.0).unwrap_or(f64::NEG_INFINITY),
@@ -143,8 +151,11 @@ impl ActiveEpoch {
                         ]
                     })
                     .unwrap_or([f64::NEG_INFINITY, 24.0]);
+                let layer_id = StyleLayerId::intern(&id);
                 EpochGroup {
                     style_layer_id: id,
+                    layer_id,
+                    style_layer_idx,
                     zoom_limits,
                     is_leader,
                     leader_of,
@@ -152,9 +163,11 @@ impl ActiveEpoch {
                 }
             })
             .collect();
+        let gpu_vp = crate::sdf::covering::frame_gpu_view_projection(world, style, view_state);
 
         Self {
             view_state: view_state.clone(),
+            gpu_vp,
             projection,
             zoom: view_state.style_zoom().value(),
             bearing: view_state.camera().get_bearing().0,
@@ -201,12 +214,14 @@ impl ActiveEpoch {
                 self.mirrored.push_back((
                     leader.clone(),
                     group.style_layer_id.clone(),
+                    group.layer_id,
+                    group.style_layer_idx,
                     std::mem::take(&mut group.coords),
                 ));
                 self.group_idx += 1;
                 continue;
             }
-            let Some(paint) = resolve_paint(ctx.style, &group.style_layer_id) else {
+            let Some(paint) = resolve_paint_by_idx(ctx.style, group.style_layer_idx) else {
                 self.group_idx += 1;
                 continue;
             };
@@ -246,9 +261,8 @@ impl ActiveEpoch {
         group.coords = live_coords;
         self.active_group = Some(LayerSliceProgress::start(
             world,
-            &self.view_state,
-            &self.projection,
-            &live_refs,
+            (&self.view_state, self.gpu_vp, &self.projection),
+            (&live_refs, group.layer_id),
             paint,
             history,
         ));
@@ -280,6 +294,7 @@ impl ActiveEpoch {
                 view_state: &self.view_state,
                 projection: &self.projection,
                 layers: &resolved,
+                style_layer_id: group.layer_id,
                 paint,
                 zoom_limits: group.zoom_limits,
             },
@@ -309,7 +324,7 @@ impl ActiveEpoch {
                 (coords.clone(), progress.outcomes),
             );
         }
-        let layer_id = StyleLayerId::intern(&group.style_layer_id);
+        let layer_id = group.layer_id;
         for (c, meta) in coords.into_iter().zip(progress.metadata) {
             self.pending_uploads.push_back((layer_id, c, meta));
         }
@@ -317,7 +332,7 @@ impl ActiveEpoch {
 
     fn finish_mirrored_and_upload(
         &mut self,
-        mut ctx: EpochStepContext<'_>,
+        ctx: EpochStepContext<'_>,
         started: instant::Instant,
         budget: Duration,
         mut did_work: bool,
@@ -332,7 +347,9 @@ impl ActiveEpoch {
             did_work |= self.process_mirrored_group(ctx.world, ctx.style, entry);
         }
 
-        if let Some(Initialized(pool)) = ctx.world.resources.get::<Eventually<SymbolBufferPool>>() {
+        if let Some(Eventually::Initialized(pool)) =
+            ctx.world.resources.get::<Eventually<SymbolBufferPool>>()
+        {
             // Defer before flushing so GPU updates across all tiles commit atomically in one frame.
             if ctx.sliced
                 && did_work
@@ -341,7 +358,13 @@ impl ActiveEpoch {
             {
                 return false;
             }
-            self.flush_pending_uploads(pool, &mut ctx);
+            super::upload_flush::flush_pending_uploads(
+                pool,
+                &mut self.pending_uploads,
+                ctx.queue,
+                ctx.uploaded,
+                ctx.scratch,
+            );
         } else {
             self.recycle_pending_uploads(ctx.scratch);
         }
@@ -352,11 +375,11 @@ impl ActiveEpoch {
         &mut self,
         world: &World,
         style: &Style,
-        (leader_id, follower_id, follower_coords): (String, String, Vec<WorldTileCoords>),
+        (leader_id, follower_id, layer_id, follower_idx, follower_coords): MirroredLayerGroup,
     ) -> bool {
         let (Some((leader_coords, outcome)), Some(paint)) = (
             self.outcomes.get(&leader_id),
-            resolve_paint(style, &follower_id),
+            resolve_paint_by_idx(style, follower_idx),
         ) else {
             return false;
         };
@@ -381,38 +404,10 @@ impl ActiveEpoch {
             (paint, self.zoom),
             &mut self.placed,
         );
-        let layer_id = StyleLayerId::intern(&follower_id);
         for (c, meta) in live_follower_coords.into_iter().zip(metadata) {
             self.pending_uploads.push_back((layer_id, c, meta));
         }
         true
-    }
-
-    fn flush_pending_uploads(&mut self, pool: &SymbolBufferPool, ctx: &mut EpochStepContext<'_>) {
-        while let Some((layer_id, coords, metadata)) = self.pending_uploads.pop_front() {
-            let Some(entry) = pool.as_ref().get_layers(coords).and_then(|entries| {
-                entries
-                    .iter()
-                    .find(|entry| entry.style_layer_id == layer_id)
-            }) else {
-                ctx.scratch.recycle(metadata);
-                continue;
-            };
-            let key = (coords, layer_id);
-            let prev = ctx.uploaded.remove(&key);
-            let next_cached = upload_diff::diff_and_upload_bucket_with_scratch(
-                pool,
-                ctx.queue,
-                entry,
-                prev.as_ref(),
-                metadata,
-                ctx.scratch,
-            );
-            if let Some(prev) = prev {
-                ctx.scratch.recycle(prev.quads);
-            }
-            ctx.uploaded.insert(key, next_cached);
-        }
     }
 
     pub(super) fn note_triggers(&mut self, triggers: &super::controller::PlacementTriggers) {
@@ -439,7 +434,7 @@ impl ActiveEpoch {
     }
 
     fn recycle_pending_uploads(&mut self, scratch: &mut upload_diff::MetadataScratchPool) {
-        while let Some((_, _, metadata)) = self.pending_uploads.pop_front() {
+        for (_, _, metadata) in self.pending_uploads.drain(..) {
             scratch.recycle(metadata);
         }
     }
@@ -449,12 +444,10 @@ impl ActiveEpoch {
         view_state: ViewState,
         pending_uploads: Vec<(StyleLayerId, WorldTileCoords, Vec<SDFShaderFeatureMetadata>)>,
     ) -> Self {
-        let mut outcomes = HashMap::default();
-        outcomes.insert("leader".to_owned(), (Vec::new(), Vec::new()));
-        let mut mirrored = VecDeque::new();
-        mirrored.push_back(("leader".to_owned(), "follower".to_owned(), Vec::new()));
+        let gpu_vp = view_state.gpu_view_projection();
         Self {
             view_state,
+            gpu_vp,
             projection: bytemuck::Zeroable::zeroed(),
             zoom: 12.0,
             bearing: 0.0,
@@ -465,8 +458,14 @@ impl ActiveEpoch {
             groups: Vec::new(),
             group_idx: 0,
             active_group: None,
-            outcomes,
-            mirrored,
+            outcomes: HashMap::from_iter([("leader".to_owned(), (Vec::new(), Vec::new()))]),
+            mirrored: VecDeque::from([(
+                "leader".to_owned(),
+                "follower".to_owned(),
+                StyleLayerId::intern("follower"),
+                Some(0),
+                Vec::new(),
+            )]),
             pending_uploads: pending_uploads.into_iter().collect(),
         }
     }
@@ -485,13 +484,9 @@ fn resolve_layer<'a>(
         .find(|layer| layer.style_layer_id == style_layer_id)
 }
 
-fn resolve_paint<'a>(style: &'a Style, style_layer_id: &str) -> Option<&'a SymbolPaint> {
-    style.layers.iter().find_map(|layer| {
-        if layer.id == style_layer_id {
-            if let Some(LayerPaint::Symbol(paint)) = &layer.paint {
-                return Some(paint);
-            }
-        }
-        None
+fn resolve_paint_by_idx(style: &Style, idx: Option<usize>) -> Option<&SymbolPaint> {
+    style.layers.get(idx?).and_then(|l| match l.paint.as_ref() {
+        Some(LayerPaint::Symbol(paint)) => Some(paint),
+        _ => None,
     })
 }

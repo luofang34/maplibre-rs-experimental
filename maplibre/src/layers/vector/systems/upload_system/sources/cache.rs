@@ -44,6 +44,7 @@ pub(super) struct FrameSourcesCache {
     pub(super) key: Option<FrameSourcesKey>,
     pub(super) result: Option<FrameUploadSources>,
     pub(super) view_tiles_scratch: Vec<WorldTileCoords>,
+    pub(super) needs_view_tiles_for_paint: Option<(u64, bool)>,
 }
 
 /// Digest of `coords` as a set. A covering lists its tiles nearest the camera's focus first, so

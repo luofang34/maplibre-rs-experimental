@@ -1,7 +1,7 @@
 //! Where the glyphs of a label that follows its line go at the current view, and the boxes
 //! they collide with.
 
-use super::{project, LabelGround, Placement};
+use super::{project_with, LabelGround, Placement, TileProjector};
 use crate::{
     render::{
         projection::{fixed_symbol_scale, ShaderProjectionData},
@@ -46,16 +46,14 @@ pub(in crate::layers::sdf) fn line_glyph_poses(
     layer: &SymbolLayerData,
     feature: &Feature,
     ground: &LabelGround,
-    view: &ViewState,
-    projection: &ShaderProjectionData,
+    (view, projection, projector): (&ViewState, &ShaderProjectionData, Option<&TileProjector>),
     (uniforms, upright): (&SymbolUniforms, bool),
 ) -> LinePoses {
     match poses_along_line(
         layer,
         feature,
         ground,
-        view,
-        projection,
+        (view, projection, projector),
         (uniforms, upright),
     ) {
         LinePoses::Poses(poses) => LinePoses::Poses(
@@ -78,15 +76,21 @@ fn poses_along_line(
     layer: &SymbolLayerData,
     feature: &Feature,
     ground: &LabelGround,
-    view: &ViewState,
-    projection: &ShaderProjectionData,
+    (view, projection, projector): (&ViewState, &ShaderProjectionData, Option<&TileProjector>),
     (uniforms, upright): (&SymbolUniforms, bool),
 ) -> LinePoses {
     let Some(line) = &feature.line else {
         return LinePoses::NotApplicable;
     };
-    let viewport =
-        |line| viewport_poses(layer, line, feature, ground, (view, projection, uniforms));
+    let viewport = |line| {
+        viewport_poses(
+            layer,
+            line,
+            feature,
+            ground,
+            (view, projection, projector, uniforms),
+        )
+    };
     if upright {
         return match viewport(line) {
             LinePoses::Poses(poses) => LinePoses::Poses(
@@ -105,7 +109,13 @@ fn poses_along_line(
     if !text_m.map_aligned {
         return viewport(line);
     }
-    map_plane_poses(layer, line, feature, ground, (view, projection, uniforms))
+    map_plane_poses(
+        layer,
+        line,
+        feature,
+        ground,
+        (view, projection, projector, uniforms),
+    )
 }
 
 /// How far a glyph at `point` on `polyline` rises above the anchor's ground: the rises under
@@ -150,14 +160,31 @@ fn map_plane_poses(
     line: &LineLabel,
     feature: &Feature,
     ground: &LabelGround,
-    (view, projection, uniforms): (&ViewState, &ShaderProjectionData, &SymbolUniforms),
+    (view, projection, projector, uniforms): (
+        &ViewState,
+        &ShaderProjectionData,
+        Option<&TileProjector>,
+        &SymbolUniforms,
+    ),
 ) -> LinePoses {
     let text_m = uniforms.part_metrics(true);
-    let placement = line_placement(layer, feature, ground, view, projection, uniforms);
+    let placement = line_placement(
+        layer,
+        feature,
+        ground,
+        (view, projection, projector),
+        uniforms,
+    );
     let height = f64::from(ground.elevation) * f64::from(text_m.ground_align);
-    let Some(clip) = project(layer.coords, placement.anchor, height, view, projection)
-        .filter(|clip| clip.w > 0.0)
-    else {
+    let Some(clip) = project_with(
+        projector,
+        layer.coords,
+        placement.anchor,
+        height,
+        view,
+        projection,
+    )
+    .filter(|clip| clip.w > 0.0) else {
         return LinePoses::DoesNotFit;
     };
     let ratio = if fixed_symbol_scale(view) {
@@ -201,8 +228,11 @@ fn line_placement<'a>(
     layer: &SymbolLayerData,
     feature: &Feature,
     ground: &LabelGround,
-    view: &'a ViewState,
-    projection: &'a ShaderProjectionData,
+    (view, projection, projector): (
+        &'a ViewState,
+        &'a ShaderProjectionData,
+        Option<&'a TileProjector>,
+    ),
     uniforms: &'a SymbolUniforms,
 ) -> Placement<'a> {
     Placement {
@@ -215,6 +245,7 @@ fn line_placement<'a>(
         anchor_clip: None,
         view,
         projection,
+        projector,
         uniforms,
     }
 }
@@ -227,7 +258,8 @@ fn map_poses_read_backwards(
 ) -> bool {
     let screen = |pose: &GlyphPose| {
         let point = [f64::from(pose.point[0]), f64::from(pose.point[1])];
-        project(
+        project_with(
+            placement.projector,
             layer.coords,
             point,
             height_at(ground, placement.uniforms, point),
@@ -253,8 +285,7 @@ pub(in crate::layers::sdf) fn line_glyph_boxes(
     layer: &SymbolLayerData,
     (poses, image_sizes, upright): (&[GlyphPose], &[[f32; 2]], bool),
     elevation: f32,
-    view: &ViewState,
-    projection: &ShaderProjectionData,
+    (view, projection, projector): (&ViewState, &ShaderProjectionData, Option<&TileProjector>),
     uniforms: &SymbolUniforms,
 ) -> Vec<[f64; 4]> {
     let text_m = uniforms.part_metrics(true);
@@ -269,6 +300,7 @@ pub(in crate::layers::sdf) fn line_glyph_boxes(
         anchor_clip: None,
         view,
         projection,
+        projector,
         uniforms,
     };
     poses
@@ -276,7 +308,8 @@ pub(in crate::layers::sdf) fn line_glyph_boxes(
         .enumerate()
         .filter_map(|(index, pose)| {
             let height = f64::from(elevation + pose.rise) * f64::from(text_m.ground_align);
-            let clip = project(
+            let clip = project_with(
+                projector,
                 layer.coords,
                 [f64::from(pose.point[0]), f64::from(pose.point[1])],
                 height,
@@ -320,18 +353,31 @@ fn viewport_poses(
     line: &LineLabel,
     feature: &Feature,
     ground: &LabelGround,
-    (view, projection, uniforms): (&ViewState, &ShaderProjectionData, &SymbolUniforms),
+    (view, projection, projector, uniforms): (
+        &ViewState,
+        &ShaderProjectionData,
+        Option<&TileProjector>,
+        &SymbolUniforms,
+    ),
 ) -> LinePoses {
-    let placement = line_placement(layer, feature, ground, view, projection, uniforms);
+    let placement = line_placement(
+        layer,
+        feature,
+        ground,
+        (view, projection, projector),
+        uniforms,
+    );
     let on_screen = |point: [f64; 2]| {
         let height = height_at(ground, uniforms, point);
-        project(layer.coords, point, height, view, projection).map(|clip| OnScreen {
-            screen: if clip.w > 0.0 {
-                placement.screen(clip)
-            } else {
-                [0.0; 2]
-            },
-            w: clip.w,
+        project_with(projector, layer.coords, point, height, view, projection).map(|clip| {
+            OnScreen {
+                screen: if clip.w > 0.0 {
+                    placement.screen(clip)
+                } else {
+                    [0.0; 2]
+                },
+                w: clip.w,
+            }
         })
     };
     let Some(anchor) = on_screen(placement.anchor).filter(|anchor| anchor.w > 0.0) else {

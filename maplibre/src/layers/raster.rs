@@ -136,7 +136,15 @@ impl<E: Environment, T: RasterTransferables> Plugin<E> for RasterPlugin<T> {
         _renderer: &mut crate::render::Renderer,
     ) -> Result<(), crate::plugin::PluginError> {
         install_pattern_hooks(world);
-        crate::render::pass_refs::PassRefPopulators::register(world, populate_raster_pass_refs);
+        crate::render::pass_refs::PassRefPopulators::register(
+            world,
+            crate::render::pass_refs::PassFrameRefs::DOMAIN_RASTER,
+            populate_raster_pass_refs,
+        );
+        world
+            .resources
+            .get_or_init_mut::<crate::render::graph::LayerPassHooks>()
+            .try_draw_raster_group = Some(render_commands::try_draw_raster_group);
         world
             .resources
             .insert(Eventually::<RasterResources>::Uninitialized);

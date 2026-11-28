@@ -4,10 +4,11 @@ use super::{DrawMask, SetMaskPipeline};
 use crate::{
     render::{
         eventually::{Eventually, Eventually::Initialized},
+        pass_refs::PassFrameRefs,
         projection::ProjectionGpuResources,
         render_phase::{
-            LayerItem, MaskGroup, RenderCommand, RenderCommandResult, RenderPhase, TileMaskItem,
-            TranslucentItem,
+            LayerDrawKind, LayerItem, MaskGroup, RenderCommand, RenderCommandResult, RenderPhase,
+            TileMaskItem, TranslucentItem,
         },
         tile_mesh::GlobeTileMeshCache,
         tile_view_pattern::WgpuTileViewPattern,
@@ -158,20 +159,50 @@ pub(crate) fn same_layer(left: &LayerItem, right: &LayerItem) -> bool {
     left.index == right.index && left.style_layer == right.style_layer
 }
 
+/// Computes the union of `PassFrameRefs::DOMAIN_*` bits required to draw `items`.
+pub(crate) fn layer_items_ref_domains(items: &[LayerItem], mut domains: u8) -> u8 {
+    let full =
+        PassFrameRefs::DOMAIN_VECTOR | PassFrameRefs::DOMAIN_RASTER | PassFrameRefs::DOMAIN_TERRAIN;
+    for item in items {
+        let need = match item.draw_kind {
+            LayerDrawKind::VectorLine => {
+                PassFrameRefs::DOMAIN_VECTOR | PassFrameRefs::DOMAIN_TERRAIN
+            }
+            LayerDrawKind::VectorFill
+            | LayerDrawKind::VectorCircle
+            | LayerDrawKind::VectorPattern
+            | LayerDrawKind::ExtrusionDepth
+            | LayerDrawKind::ExtrusionColor
+            | LayerDrawKind::ExtrusionPatternColor
+            | LayerDrawKind::ExtrusionTranslucentBack
+            | LayerDrawKind::ExtrusionTranslucentFront => PassFrameRefs::DOMAIN_VECTOR,
+            LayerDrawKind::Raster => PassFrameRefs::DOMAIN_RASTER,
+            LayerDrawKind::Other => PassFrameRefs::DOMAIN_DRAPE,
+        };
+        domains |= need;
+        if (domains & full) == full {
+            break;
+        }
+    }
+    domains
+}
+
 /// Draws one layer's items inside its tile masks, updating `stencil_state`.
 pub(crate) fn draw_group<'w>(
     pass: &mut TrackedRenderPass<'w>,
     world: &'w World,
-    masks: Option<&'w [TileMaskItem]>,
-    unique_stencils: bool,
+    layer_hooks: Option<crate::render::graph::LayerPassHooks>,
+    (masks, unique_stencils): (Option<&'w [TileMaskItem]>, bool),
     stencil_state: &mut StencilState<'w>,
     group: &'w [LayerItem],
 ) {
     if let Some(masks) = masks {
         apply_layer_masks(pass, world, masks, unique_stencils, stencil_state, group);
     }
-    for layer in group {
-        layer.draw_function.draw(pass, world, layer);
+    if !layer_hooks.is_some_and(|hooks| hooks.dispatch_group(world, group, pass)) {
+        for layer in group {
+            layer.draw_function.draw(pass, world, layer);
+        }
     }
 }
 

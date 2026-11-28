@@ -13,9 +13,12 @@ use crate::{
 };
 
 mod extrusion;
+mod group;
 mod line;
 mod pattern;
 pub use extrusion::*;
+pub(crate) use group::try_draw_vector_group;
+use group::try_draw_vector_group_with_kind;
 pub use line::*;
 pub use pattern::*;
 
@@ -189,7 +192,7 @@ impl<const RUNS: bool> DrawVectorTile<RUNS> {
         else {
             return RenderCommandResult::Failure;
         };
-        draw_vector_tile_runs::<RUNS>(
+        draw_vector_tile_runs(
             world,
             buffer_pool,
             whole,
@@ -197,6 +200,7 @@ impl<const RUNS: bool> DrawVectorTile<RUNS> {
             entry,
             pass,
             (first, base_vertex, instances),
+            RUNS,
         );
         RenderCommandResult::Success
     }
@@ -253,7 +257,11 @@ fn bind_vector_tile_buffers<'w>(
     Some((first, base_vertex, instances))
 }
 
-fn draw_vector_tile_runs<'w, const RUNS: bool>(
+#[expect(
+    clippy::too_many_arguments,
+    reason = "internal draw helper shared by DrawVectorTile and vector group dispatch"
+)]
+pub(super) fn draw_vector_tile_runs<'w>(
     world: &'w World,
     buffer_pool: &VectorBufferPool,
     whole: bool,
@@ -261,12 +269,13 @@ fn draw_vector_tile_runs<'w, const RUNS: bool>(
     entry: &crate::vector::resource::IndexEntry,
     pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     (first, base_vertex, instances): (u32, i32, std::ops::Range<u32>),
+    allow_runs: bool,
 ) {
     if let Some(run) = &item.run {
         pass.draw_indexed(first + run.start..first + run.end, base_vertex, instances);
         return;
     }
-    let runs = RUNS
+    let runs = allow_runs
         .then(|| buffer_pool.pattern_runs_by_id(item.tile.coords, item.style_layer))
         .flatten();
     let Some(runs) = runs else {
@@ -373,6 +382,65 @@ impl RenderCommand<LayerItem> for SetCircleTilePipeline {
     }
 }
 
+/// The pass an extrusion draw belongs to.
+pub mod extrusion_pass {
+    /// Depth only.
+    pub const DEPTH: u8 = 0;
+    /// Colour once per pixel.
+    pub const COLOR: u8 = 1;
+    /// Colour from an image, once per pixel.
+    pub const PATTERN: u8 = 3;
+    /// Back-facing shell of a translucent 3D volume.
+    pub const TRANSLUCENT_BACK: u8 = 4;
+    /// Front-facing shell of a translucent 3D volume.
+    pub const TRANSLUCENT_FRONT: u8 = 5;
+}
+
+pub(super) fn select_extrusion_pipeline<'a>(
+    mode: &'a crate::vector::ExtrusionModePipelines,
+    pass_kind: u8,
+    entry: &crate::vector::resource::IndexEntry,
+) -> Option<&'a wgpu::RenderPipeline> {
+    let compact = pass_kind != extrusion_pass::PATTERN && entry.is_compact_extrusion();
+    let uniform = entry.is_uniform_feature_metadata();
+    if compact {
+        match pass_kind {
+            extrusion_pass::DEPTH => mode.compact_depth.as_ref(),
+            extrusion_pass::COLOR => mode.compact_color.as_ref(),
+            extrusion_pass::TRANSLUCENT_BACK => mode.compact_translucent_back.as_ref(),
+            extrusion_pass::TRANSLUCENT_FRONT => mode.compact_translucent_front.as_ref(),
+            _ => None,
+        }
+    } else {
+        match pass_kind {
+            extrusion_pass::DEPTH => mode.depth.as_ref(),
+            extrusion_pass::COLOR => mode.color.as_ref().map(|p| p.select(uniform)),
+            extrusion_pass::PATTERN => mode.pattern.as_ref().map(|p| p.select(uniform)),
+            extrusion_pass::TRANSLUCENT_BACK => {
+                mode.translucent_back.as_ref().map(|p| p.select(uniform))
+            }
+            extrusion_pass::TRANSLUCENT_FRONT => {
+                mode.translucent_front.as_ref().map(|p| p.select(uniform))
+            }
+            _ => None,
+        }
+    }
+}
+
+/// Where one tile contains the other.
+pub(super) fn overlaps(
+    a: crate::coords::WorldTileCoords,
+    b: crate::coords::WorldTileCoords,
+) -> bool {
+    let (coarse, fine) = if u8::from(a.z) <= u8::from(b.z) {
+        (a, b)
+    } else {
+        (b, a)
+    };
+    let levels = u8::from(fine.z) - u8::from(coarse.z);
+    fine.x >> levels == coarse.x && fine.y >> levels == coarse.y
+}
+
 /// Fused command binding the polygon-fill pipeline and drawing the bucket in one query/lookup.
 pub struct DrawVectorTiles;
 impl RenderCommand<LayerItem> for DrawVectorTiles {
@@ -381,54 +449,16 @@ impl RenderCommand<LayerItem> for DrawVectorTiles {
         item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let refs = pass.as_ref().as_ref();
-        let (
-            Some(pipeline),
-            Some(projection_resources),
-            Some(buffer_pool),
-            Some(tile_view_pattern),
-        ) = (
-            resolve_vector_pipeline(refs, world),
-            PassFrameRefs::resolve_projection(refs, world),
-            resolve_vector_pool(refs, world),
-            PassFrameRefs::resolve_tile_view_pattern(refs, world),
-        )
-        else {
-            return RenderCommandResult::Failure;
-        };
-        let Some(entry) =
-            buffer_pool
-                .as_ref()
-                .resolve_entry(item.tile.coords, item.style_layer, item.entry_slot)
-        else {
-            return RenderCommandResult::Failure;
-        };
-        if entry.indices_buffer_range().is_empty() {
-            tracing::error!("Tried to draw a vector tile without any vertices");
-            return RenderCommandResult::Failure;
-        }
-        let globe = projection_resources.is_globe_active(item.projection_binding());
-        let Some(selected) = pipeline.select(
-            globe,
-            entry.is_opaque_color(),
-            entry.is_uniform_feature_metadata(),
-        ) else {
-            return RenderCommandResult::Failure;
-        };
-        pass.set_pipeline(selected);
-        pass.set_bind_group(
-            0,
-            projection_resources.bind_group_for(item.projection_binding()),
-            &[],
-        );
-        DrawVectorTile::<false>::draw_prepared(
+        if group::try_draw_vector_group_with_kind(
             world,
-            buffer_pool,
-            tile_view_pattern,
-            entry,
-            item,
+            std::slice::from_ref(item),
             pass,
-        )
+            crate::render::render_phase::LayerDrawKind::VectorFill,
+        ) {
+            RenderCommandResult::Success
+        } else {
+            RenderCommandResult::Failure
+        }
     }
 }
 
@@ -440,48 +470,15 @@ impl RenderCommand<LayerItem> for DrawCircleTiles {
         item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let refs = pass.as_ref().as_ref();
-        let (
-            Some(pipeline),
-            Some(projection_resources),
-            Some(buffer_pool),
-            Some(tile_view_pattern),
-        ) = (
-            resolve_circle_pipeline(refs, world),
-            PassFrameRefs::resolve_projection(refs, world),
-            resolve_vector_pool(refs, world),
-            PassFrameRefs::resolve_tile_view_pattern(refs, world),
-        )
-        else {
-            return RenderCommandResult::Failure;
-        };
-        let Some(entry) =
-            buffer_pool
-                .as_ref()
-                .resolve_entry(item.tile.coords, item.style_layer, item.entry_slot)
-        else {
-            return RenderCommandResult::Failure;
-        };
-        if entry.indices_buffer_range().is_empty() {
-            tracing::error!("Tried to draw a vector tile without any vertices");
-            return RenderCommandResult::Failure;
-        }
-        let Some(selected) = pipeline.select_entry(Some(entry)) else {
-            return RenderCommandResult::Failure;
-        };
-        pass.set_pipeline(selected);
-        pass.set_bind_group(
-            0,
-            projection_resources.bind_group_for(item.projection_binding()),
-            &[],
-        );
-        DrawVectorTile::<false>::draw_prepared(
+        if group::try_draw_vector_group_with_kind(
             world,
-            buffer_pool,
-            tile_view_pattern,
-            entry,
-            item,
+            std::slice::from_ref(item),
             pass,
-        )
+            crate::render::render_phase::LayerDrawKind::VectorCircle,
+        ) {
+            RenderCommandResult::Success
+        } else {
+            RenderCommandResult::Failure
+        }
     }
 }

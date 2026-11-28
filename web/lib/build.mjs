@@ -283,6 +283,7 @@ const wasmPack = () => {
             "-o", tmpPath,
             optLevel,
             "--converge",
+            "--strip-target-features",
             "--one-caller-inline-max-function-size=20",
             "--strip-debug",
             "--strip-producers",

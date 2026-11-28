@@ -151,6 +151,34 @@ pub enum MaskGroup {
 /// [`RingIndex`](crate::vector::resource::RingIndex) entry.
 pub use crate::render::resource::buffer_pool::UNSET_ENTRY_SLOT;
 
+/// Identifies the layer-group renderer eligible to batch contiguous same-layer items.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum LayerDrawKind {
+    /// Custom or unbatched layer command dispatched individually via `draw_function`.
+    #[default]
+    Other,
+    /// Solid or data-driven polygon fill bucket (`DrawVectorTiles`).
+    VectorFill,
+    /// Stroked vector line bucket (`DrawLineTiles`).
+    VectorLine,
+    /// Circle marker bucket (`DrawCircleTiles`).
+    VectorCircle,
+    /// Patterned polygon fill bucket (`DrawPatternTiles`).
+    VectorPattern,
+    /// Opaque 3D extrusion depth pre-pass (`DrawExtrusionDepth`).
+    ExtrusionDepth,
+    /// Opaque 3D extrusion shaded pass (`DrawExtrusionColor`).
+    ExtrusionColor,
+    /// Opaque 3D extrusion patterned pass (`DrawExtrusionPatternColor`).
+    ExtrusionPatternColor,
+    /// Translucent 3D extrusion back-face shell (`DrawExtrusionTranslucentBack`).
+    ExtrusionTranslucentBack,
+    /// Translucent 3D extrusion front-face shell (`DrawExtrusionTranslucentFront`).
+    ExtrusionTranslucentFront,
+    /// Imagery raster tile (`DrawRasterTiles`).
+    Raster,
+}
+
 /// Main-pass draw sorted by style index, then interiors before borders within each layer.
 #[derive(Clone, Copy)]
 pub struct LayerItem {
@@ -175,6 +203,8 @@ pub struct LayerItem {
     pub projection: ProjectionBinding,
     /// Stencil mask discipline for this draw item.
     pub mask_group: MaskGroup,
+    /// Domain batching tag used by [`LayerPassHooks`](crate::render::graph::LayerPassHooks).
+    pub draw_kind: LayerDrawKind,
     /// The part of the layer's geometry this draw covers, when features draw in the order of a
     /// sort key across tiles; the whole layer otherwise.
     pub run: Option<SortedRun>,

@@ -1,14 +1,12 @@
 //! Extracts data from the current state.
 
-use std::sync::Arc;
-
 use crate::{
     context::MapContext,
     coords::{ViewRegion, WorldTileCoords, Zoom, ZoomLevel},
     io::tile_sources::RasterSourceId,
     render::{
         eventually::{Eventually, Eventually::Initialized},
-        eye_covering::{drawn_covering, matching_drawn_tiles_arc},
+        eye_covering::drawn_covering_fast,
         tile_view_pattern::{
             compute_fast_memo_key, compute_memo_key, FastPatternKey, PatternEpochSnapshot,
             PatternMemoKey, TileViewPatternMemo, ViewTileSources, WgpuTileViewPattern,
@@ -82,7 +80,7 @@ fn capture_epoch_snapshot(world: &World, has_raster: bool) -> PatternEpochSnapsh
     }
 }
 
-fn try_reuse_memo(
+fn try_reuse_full_memo(
     world: &mut World,
     view_region: &ViewRegion,
     raster_coverings: &[(RasterSourceId, Vec<WorldTileCoords>)],
@@ -91,39 +89,26 @@ fn try_reuse_memo(
     (style_rev, zoom): (u64, Zoom),
 ) -> Result<Option<Option<PatternMemoKey>>, SystemError> {
     let tiles = &world.tiles;
-    let Some((memo, pattern)) = world.resources.query_mut::<(
-        &mut TileViewPatternMemo,
-        &mut Eventually<WgpuTileViewPattern>,
-    )>() else {
-        return Ok(Some(compute_memo_key(
-            view_region,
-            raster_coverings,
-            style_rev,
-            snapshot,
-            &|canonical| {
-                tiles
-                    .query::<&VectorLayerBucketComponent>(canonical)
-                    .map(|buckets| (buckets.done, buckets.failed, buckets.uploaded_stamp))
-            },
-        )));
-    };
-    let Initialized(pattern) = pattern else {
-        return Err(SystemError::Dependencies);
-    };
-    if memo.try_reuse_fast(pattern, fast_key, zoom) {
-        return Ok(None);
-    }
     let next_key = compute_memo_key(
         view_region,
         raster_coverings,
         style_rev,
         snapshot,
-        &|canonical| {
+        |canonical| {
             tiles
                 .query::<&VectorLayerBucketComponent>(canonical)
                 .map(|buckets| (buckets.done, buckets.failed, buckets.uploaded_stamp))
         },
     );
+    let Some((memo, pattern)) = world.resources.query_mut::<(
+        &mut TileViewPatternMemo,
+        &mut Eventually<WgpuTileViewPattern>,
+    )>() else {
+        return Ok(Some(next_key));
+    };
+    let Initialized(pattern) = pattern else {
+        return Err(SystemError::Dependencies);
+    };
     if memo.try_reuse_full(pattern, next_key.as_ref(), fast_key.cloned(), zoom) {
         return Ok(None);
     }
@@ -139,67 +124,76 @@ pub fn tile_view_pattern_system(
     }: &mut MapContext,
 ) -> SystemResult {
     let level: ZoomLevel = view_state.zoom().zoom_level(DEFAULT_TILE_SIZE);
-    let (view_region, raster_coverings) =
-        drawn_covering(style, view_state, world, level).map_err(|error| {
-            tracing::error!(%error, "unable to select tiles for rendering");
-            SystemError::Setup
-        })?;
-    if let Some(view_region) = &view_region {
-        let zoom = view_state.zoom();
-        let style_rev = style.revision();
-        let snapshot = capture_epoch_snapshot(world, !raster_coverings.is_empty());
-        let tiles_arc: Option<Arc<[WorldTileCoords]>> =
-            matching_drawn_tiles_arc(style, view_state, world, level);
-        let fast_key = tiles_arc
-            .as_ref()
-            .and_then(|arc| compute_fast_memo_key(arc, &raster_coverings, style_rev, snapshot));
-        let Some(next_key) = try_reuse_memo(
-            world,
-            view_region,
-            &raster_coverings,
-            fast_key.as_ref(),
-            snapshot,
-            (style_rev, zoom),
-        )?
-        else {
-            return Ok(());
-        };
-        let mut view_tiles = world
-            .resources
-            .get_mut::<TileViewPatternMemo>()
-            .map_or_else(Vec::new, TileViewPatternMemo::begin_rebuild);
-        let Some((Initialized(tile_view_pattern), view_tile_sources)) = world
-            .resources
-            .query::<(&Eventually<WgpuTileViewPattern>, &ViewTileSources)>()
-        else {
-            if let Some(memo) = world.resources.get_mut::<TileViewPatternMemo>() {
-                memo.put_scratch(view_tiles);
-            }
-            return Err(SystemError::Dependencies);
-        };
-        tile_view_pattern.generate_pattern_into(
-            view_region,
-            view_tile_sources,
-            &raster_coverings,
-            zoom,
-            world,
-            &mut view_tiles,
-        );
-        log::trace!("Tiles in view: {}", view_tiles.len());
-
-        let Some(Initialized(tile_view_pattern)) = world
-            .resources
-            .query_mut::<&mut Eventually<WgpuTileViewPattern>>()
-        else {
-            if let Some(memo) = world.resources.get_mut::<TileViewPatternMemo>() {
-                memo.put_scratch(view_tiles);
-            }
-            return Err(SystemError::Dependencies);
-        };
-        tile_view_pattern.update_pattern_swapped(&mut view_tiles);
-        let memo = world.resources.get_or_init_mut::<TileViewPatternMemo>();
-        memo.finish_rebuild(view_tiles, next_key, fast_key, zoom);
+    let mut covering = drawn_covering_fast(style, view_state, world, level).map_err(|error| {
+        tracing::error!(%error, "unable to select tiles for rendering");
+        SystemError::Setup
+    })?;
+    if !covering.has_tiles() {
+        return Ok(());
     }
+    let zoom = view_state.zoom();
+    let style_rev = style.revision();
+    let snapshot = capture_epoch_snapshot(world, !covering.raster.is_empty());
+    let fast_key = covering
+        .tiles_arc()
+        .and_then(|arc| compute_fast_memo_key(arc, &covering.raster, style_rev, snapshot));
+    if let Some((memo, Initialized(pattern))) = world.resources.query_mut::<(
+        &mut TileViewPatternMemo,
+        &mut Eventually<WgpuTileViewPattern>,
+    )>() && memo.try_reuse_fast(pattern, fast_key.as_ref(), zoom)
+    {
+        return Ok(());
+    }
+    let raster_coverings = std::mem::take(&mut covering.raster);
+    let Some(view_region) = covering.into_region() else {
+        return Ok(());
+    };
+    let Some(next_key) = try_reuse_full_memo(
+        world,
+        &view_region,
+        &raster_coverings,
+        fast_key.as_ref(),
+        snapshot,
+        (style_rev, zoom),
+    )?
+    else {
+        return Ok(());
+    };
+    let mut view_tiles = world
+        .resources
+        .get_mut::<TileViewPatternMemo>()
+        .map_or_else(Vec::new, TileViewPatternMemo::begin_rebuild);
+    let Some((Initialized(tile_view_pattern), view_tile_sources)) = world
+        .resources
+        .query::<(&Eventually<WgpuTileViewPattern>, &ViewTileSources)>()
+    else {
+        if let Some(memo) = world.resources.get_mut::<TileViewPatternMemo>() {
+            memo.put_scratch(view_tiles);
+        }
+        return Err(SystemError::Dependencies);
+    };
+    tile_view_pattern.generate_pattern_into(
+        &view_region,
+        view_tile_sources,
+        &raster_coverings,
+        zoom,
+        world,
+        &mut view_tiles,
+    );
+    log::trace!("Tiles in view: {}", view_tiles.len());
+
+    let Some(Initialized(tile_view_pattern)) = world
+        .resources
+        .query_mut::<&mut Eventually<WgpuTileViewPattern>>()
+    else {
+        if let Some(memo) = world.resources.get_mut::<TileViewPatternMemo>() {
+            memo.put_scratch(view_tiles);
+        }
+        return Err(SystemError::Dependencies);
+    };
+    tile_view_pattern.update_pattern_swapped(&mut view_tiles);
+    let memo = world.resources.get_or_init_mut::<TileViewPatternMemo>();
+    memo.finish_rebuild(view_tiles, next_key, fast_key, zoom);
 
     Ok(())
 }

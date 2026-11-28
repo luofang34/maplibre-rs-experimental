@@ -11,9 +11,11 @@ use crate::{
         paint::SymbolUniforms,
         placement::{
             line_glyph_poses, text_perspective_scale, text_rotation, LabelGround, LinePoses,
+            TileProjector,
         },
         query::{PlacedSymbol, PlacedSymbols},
     },
+    style::StyleLayerId,
 };
 
 mod anchors;
@@ -29,6 +31,8 @@ struct LayerFrame<'a> {
     world: &'a crate::tcs::world::World,
     view_state: &'a crate::render::view_state::ViewState,
     projection: &'a crate::render::projection::ShaderProjectionData,
+    projector: Option<&'a TileProjector>,
+    style_layer_id: StyleLayerId,
     paint: &'a crate::style::layer::SymbolPaint,
     uniforms: SymbolUniforms,
     zoom_limits: [f64; 2],
@@ -149,7 +153,8 @@ impl LayerFrame<'_> {
     ) -> Option<cgmath::Vector4<f64>> {
         (!suppressed && relevance > 0.0)
             .then(|| {
-                crate::sdf::placement::project(
+                crate::sdf::placement::project_with(
+                    self.projector,
                     layer.coords,
                     [
                         f64::from(feature.text_anchor.x),
@@ -191,8 +196,7 @@ impl LayerFrame<'_> {
                 layer,
                 feature,
                 ground,
-                self.view_state,
-                self.projection,
+                (self.view_state, self.projection, self.projector),
                 &self.uniforms,
                 anchor_clip.map(|clip| (f64::from(ground), clip)),
             )
@@ -214,8 +218,7 @@ impl LayerFrame<'_> {
                     layer,
                     feature,
                     label_ground,
-                    self.view_state,
-                    self.projection,
+                    (self.view_state, self.projection, self.projector),
                     (&self.uniforms, self.glyphs_stay_upright),
                 )
             })
@@ -237,7 +240,12 @@ impl LayerFrame<'_> {
             label_boxes(
                 (layer, feature, ground),
                 (line, self.glyphs_stay_upright),
-                (self.view_state, self.projection, &self.uniforms),
+                (
+                    self.view_state,
+                    self.projection,
+                    self.projector,
+                    &self.uniforms,
+                ),
                 anchor_clip.map(|clip| (f64::from(ground), clip)),
             )
         } else {
@@ -289,7 +297,7 @@ impl LayerFrame<'_> {
             (layer, feature, ground),
             (&rules, boxes, viewport),
             (rectangles, &glyph_boxes),
-            history.previous_anchor(layer, feature),
+            history.previous_anchor(self.style_layer_id, layer.coords, feature),
             anchor_clip,
         );
         let repeat = Repeat::of(layer, feature, &rectangles, viewport, self.repeat_distance);
@@ -314,7 +322,8 @@ impl LayerFrame<'_> {
         };
         let visible = rules.place_along_line(rectangles, &glyph_boxes, boxes, viewport);
         let any_visible = visible[0] || visible[1];
-        let duplicate = any_visible && history.shown_elsewhere(layer, feature);
+        let duplicate =
+            any_visible && history.shown_elsewhere(self.style_layer_id, layer.coords, feature);
         if let Some(repeat) = repeat.filter(|_| any_visible && !duplicate) {
             history.remember_repeat(repeat);
         }
@@ -357,8 +366,7 @@ impl LayerFrame<'_> {
                     layer,
                     feature,
                     ground,
-                    self.view_state,
-                    self.projection,
+                    (self.view_state, self.projection, self.projector),
                     &self.uniforms,
                     clip_with_ground,
                 ),
@@ -366,8 +374,7 @@ impl LayerFrame<'_> {
                     layer,
                     feature,
                     ground,
-                    self.view_state,
-                    self.projection,
+                    (self.view_state, self.projection, self.projector),
                     &self.uniforms,
                     clip_with_ground,
                 ),
@@ -384,9 +391,14 @@ impl LayerFrame<'_> {
         (placed, history): (&mut PlacedSymbols, &mut temporal::PlacementHistory),
         line: Option<LinePoses>,
     ) -> FeaturePlacement {
-        let ramps = history.fade_ramps(layer, feature, visible);
+        let ramps = history.fade_ramps(self.style_layer_id, layer, feature, visible);
         if visible[0] || was_visible {
-            history.remember_anchor(layer, feature, visible[0].then_some(anchor));
+            history.remember_anchor(
+                self.style_layer_id,
+                layer.coords,
+                feature,
+                visible[0].then_some(anchor),
+            );
         }
         // A placed label is found from its first frame, while it starts fading in, as GL JS
         // queries its collision index; a copy drawn by another tile is found once.

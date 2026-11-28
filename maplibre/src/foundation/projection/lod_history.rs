@@ -12,22 +12,33 @@ pub(crate) struct LodHistory {
 }
 
 impl LodHistory {
-    pub(crate) fn new(tiles: &[WorldTileCoords]) -> Self {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.leaves.is_empty()
+    }
+
+    pub(crate) fn rebuild(&mut self, tiles: &[WorldTileCoords]) {
         // A tile is judged by its canonical coordinates, whichever copy of the world it was
         // drawn in.
-        let leaves: FxHashSet<_> = tiles
-            .iter()
-            .filter_map(|tile| tile.wrapped().map(|(canonical, _)| canonical))
-            .collect();
-        let mut refined = FxHashSet::default();
-        for tile in &leaves {
+        self.leaves.clear();
+        self.leaves.extend(
+            tiles
+                .iter()
+                .filter_map(|tile| tile.wrapped().map(|(canonical, _)| canonical)),
+        );
+        self.refined.clear();
+        for tile in &self.leaves {
             let mut parent = tile.get_parent();
             while let Some(tile) = parent {
-                refined.insert(tile);
+                self.refined.insert(tile);
                 parent = tile.get_parent();
             }
         }
-        Self { leaves, refined }
+    }
+
+    pub(crate) fn new(tiles: &[WorldTileCoords]) -> Self {
+        let mut history = Self::default();
+        history.rebuild(tiles);
+        history
     }
 
     pub(crate) fn bias(&self, tile: TileCoords) -> f64 {

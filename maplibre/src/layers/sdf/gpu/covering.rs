@@ -303,7 +303,7 @@ fn covering_selection_key(world: &World, style: &Style, visible_hash: u64) -> Se
     )
 }
 
-fn frame_gpu_view_projection(
+pub(in crate::layers::sdf) fn frame_gpu_view_projection(
     world: &World,
     style: &Style,
     view: &ViewState,

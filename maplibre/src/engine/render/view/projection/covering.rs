@@ -464,5 +464,5 @@ pub(crate) use anchor::{
 };
 pub(crate) use elevation::style_elevated_headroom_meters;
 use elevation::{nadir_ground_elevation, tile_elevation};
-pub use elevation::{TerrainElevationBridge, TerrainElevationSource};
+pub use elevation::{ElevationBoundsView, TerrainElevationBridge, TerrainElevationSource};
 use mercator::mercator_view_region;

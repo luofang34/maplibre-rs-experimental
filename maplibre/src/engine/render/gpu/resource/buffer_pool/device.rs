@@ -8,6 +8,22 @@ pub trait BufferBindPass {
     fn set_index_buffer(&mut self, slice: wgpu::BufferSlice<'_>, format: wgpu::IndexFormat);
 }
 
+/// Per-layer-group whole-slab binding state to skip redundant `HandleId::of` hashes across tiles.
+#[derive(Default)]
+pub struct SlabBindCache {
+    whole_idx: Option<(u16, bool)>,
+    whole_vtx: Option<u16>,
+    whole_fm: Option<(u16, bool)>,
+}
+
+impl SlabBindCache {
+    /// Clears cached whole-slab identities when an unbatched command mutates pass state.
+    #[inline]
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
 impl<V: PoolVertex, I: Pod, TM: Pod, FM: Pod>
     BufferPool<crate::render::upload_queue::UploadQueue, wgpu::Buffer, V, I, TM, FM>
 {
@@ -96,64 +112,104 @@ impl<V: PoolVertex, I: Pod, TM: Pod, FM: Pod>
         entry: &IndexEntry,
         (feature_slot, whole): (u32, bool),
     ) -> (u32, i32) {
-        let format = if entry.index_u16 {
-            wgpu::IndexFormat::Uint16
-        } else {
-            crate::render::INDEX_FORMAT
-        };
-        let idx_buf = self.indices_for(entry);
-        let v_slab = self.vertex_slab_of(entry.vertex_page);
+        let mut cache = SlabBindCache::default();
+        self.bind_layer_cached(pass, entry, (feature_slot, whole), &mut cache)
+    }
 
+    fn bind_cached_whole_idx<P: BufferBindPass>(
+        &self,
+        pass: &mut P,
+        entry: &IndexEntry,
+        cache: &mut SlabBindCache,
+    ) {
+        let key = (entry.index_page, entry.index_u16);
+        if cache.whole_idx != Some(key) {
+            cache.whole_idx = Some(key);
+            let format = if entry.index_u16 {
+                wgpu::IndexFormat::Uint16
+            } else {
+                crate::render::INDEX_FORMAT
+            };
+            pass.set_index_buffer(self.indices_for(entry).slice(..), format);
+        }
+    }
+
+    /// Binds a layer's indices, vertices and feature metadata using `cache` to elide duplicate
+    /// whole-slab `slice(..)` calls across consecutive tiles in the same layer group.
+    pub fn bind_layer_cached<P: BufferBindPass>(
+        &self,
+        pass: &mut P,
+        entry: &IndexEntry,
+        (feature_slot, whole): (u32, bool),
+        cache: &mut SlabBindCache,
+    ) -> (u32, i32) {
+        let v_slab = self.vertex_slab_of(entry.vertex_page);
         if entry.is_uniform_feature_metadata() {
             let fm_range = entry.feature_metadata_buffer_range();
             if !fm_range.is_empty() {
+                cache.whole_fm = None;
                 pass.set_vertex_buffer(
                     feature_slot,
                     self.feature_metadata_for(entry).slice(fm_range),
                 );
             }
             if whole {
-                pass.set_index_buffer(idx_buf.slice(..), format);
-                pass.set_vertex_buffer(0, v_slab.vertices.inner.slice(..));
-                (entry.whole_buffer_indices().start, entry.base_vertex())
-            } else {
-                pass.set_index_buffer(idx_buf.slice(entry.indices_buffer_range()), format);
-                pass.set_vertex_buffer(
-                    0,
-                    v_slab.vertices.inner.slice(entry.vertices_buffer_range()),
-                );
-                (0, 0)
+                self.bind_cached_whole_idx(pass, entry, cache);
+                if cache.whole_vtx != Some(entry.vertex_page) {
+                    cache.whole_vtx = Some(entry.vertex_page);
+                    pass.set_vertex_buffer(0, v_slab.vertices.inner.slice(..));
+                }
+                return (entry.whole_buffer_indices().start, entry.base_vertex());
             }
         } else if whole && entry.has_paired_fm() && !entry.is_dual_feature_metadata() {
-            pass.set_index_buffer(idx_buf.slice(..), format);
-            pass.set_vertex_buffer(0, v_slab.vertices.inner.slice(..));
-            pass.set_vertex_buffer(feature_slot, self.feature_metadata_for(entry).slice(..));
-            (entry.whole_buffer_indices().start, entry.base_vertex())
-        } else if whole {
-            pass.set_index_buffer(idx_buf.slice(..), format);
-            pass.set_vertex_buffer(
-                0,
-                v_slab.vertices.inner.slice(entry.vertices_buffer_range()),
-            );
-            pass.set_vertex_buffer(
-                feature_slot,
-                self.feature_metadata_for(entry)
-                    .slice(entry.buffer_feature_metadata.start..),
-            );
-            (entry.whole_buffer_indices().start, 0)
-        } else {
-            pass.set_index_buffer(idx_buf.slice(entry.indices_buffer_range()), format);
-            pass.set_vertex_buffer(
-                0,
-                v_slab.vertices.inner.slice(entry.vertices_buffer_range()),
-            );
-            pass.set_vertex_buffer(
-                feature_slot,
-                self.feature_metadata_for(entry)
-                    .slice(entry.buffer_feature_metadata.start..),
-            );
-            (0, 0)
+            self.bind_cached_whole_idx(pass, entry, cache);
+            if cache.whole_vtx != Some(entry.vertex_page) {
+                cache.whole_vtx = Some(entry.vertex_page);
+                pass.set_vertex_buffer(0, v_slab.vertices.inner.slice(..));
+            }
+            let (fm_buf, fm_key) = match &v_slab.paired_fm {
+                Some(fm) => (&fm.inner, (entry.vertex_page, true)),
+                None => (
+                    &self.feature_slab_of(entry.feature_page).buffer.inner,
+                    (entry.feature_page, false),
+                ),
+            };
+            if cache.whole_fm != Some(fm_key) {
+                cache.whole_fm = Some(fm_key);
+                pass.set_vertex_buffer(feature_slot, fm_buf.slice(..));
+            }
+            return (entry.whole_buffer_indices().start, entry.base_vertex());
         }
+        cache.whole_vtx = None;
+        cache.whole_fm = None;
+        let first = if whole {
+            self.bind_cached_whole_idx(pass, entry, cache);
+            entry.whole_buffer_indices().start
+        } else {
+            cache.whole_idx = None;
+            let format = if entry.index_u16 {
+                wgpu::IndexFormat::Uint16
+            } else {
+                crate::render::INDEX_FORMAT
+            };
+            pass.set_index_buffer(
+                self.indices_for(entry).slice(entry.indices_buffer_range()),
+                format,
+            );
+            0
+        };
+        pass.set_vertex_buffer(
+            0,
+            v_slab.vertices.inner.slice(entry.vertices_buffer_range()),
+        );
+        if !entry.is_uniform_feature_metadata() {
+            pass.set_vertex_buffer(
+                feature_slot,
+                self.feature_metadata_for(entry)
+                    .slice(entry.buffer_feature_metadata.start..),
+            );
+        }
+        (first, 0)
     }
 }
 

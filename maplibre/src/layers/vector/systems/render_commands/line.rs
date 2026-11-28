@@ -2,7 +2,6 @@
 
 use super::{line_mode_for_entry, DrawVectorTile, LineMode};
 use crate::{
-    coords::WorldTileCoords,
     render::{
         pass_refs::PassFrameRefs,
         projection::ProjectionGpuResources,
@@ -150,55 +149,16 @@ impl RenderCommand<LayerItem> for DrawLineTiles {
         item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let refs = pass.as_ref().as_ref();
-        let (
-            Some(pipeline),
-            Some(projection_resources),
-            Some(buffer_pool),
-            Some(tile_view_pattern),
-        ) = (
-            super::resolve_line_pipeline(refs, world),
-            PassFrameRefs::resolve_projection(refs, world),
-            super::resolve_vector_pool(refs, world),
-            PassFrameRefs::resolve_tile_view_pattern(refs, world),
-        )
-        else {
-            return RenderCommandResult::Failure;
-        };
-        let Some(entry) =
-            buffer_pool
-                .as_ref()
-                .resolve_entry(item.tile.coords, item.style_layer, item.entry_slot)
-        else {
-            return RenderCommandResult::Failure;
-        };
-        if entry.indices_buffer_range().is_empty() {
-            tracing::error!("Tried to draw a vector tile without any vertices");
-            return RenderCommandResult::Failure;
-        }
-        let terrain = super::resolve_terrain_active(refs, world);
-        let mode = line_mode_for_entry(Some(entry), terrain);
-        let dashes = super::resolve_line_dashes(refs, world);
-        if !bind_line_pipeline(
-            pipeline,
-            projection_resources,
-            dashes,
-            item,
-            Some(entry),
-            mode,
-            pass,
-        ) {
-            return RenderCommandResult::Failure;
-        }
-        draw_line_prepared(
+        if super::try_draw_vector_group_with_kind(
             world,
-            buffer_pool,
-            tile_view_pattern,
-            entry,
-            mode,
-            item,
+            std::slice::from_ref(item),
             pass,
-        )
+            crate::render::render_phase::LayerDrawKind::VectorLine,
+        ) {
+            RenderCommandResult::Success
+        } else {
+            RenderCommandResult::Failure
+        }
     }
 }
 
@@ -227,7 +187,7 @@ fn draw_line_prepared<'w>(
     let tile = item.source_shape.coords();
     if terrain
         .try_for_each_draw(|draw_coords, bind_group, uniform_offset| {
-            if !overlaps(draw_coords, tile) {
+            if !super::overlaps(draw_coords, tile) {
                 return Ok(());
             }
             pass.set_bind_group(2, bind_group, &[uniform_offset]);
@@ -248,15 +208,4 @@ fn draw_line_prepared<'w>(
         return RenderCommandResult::Failure;
     }
     RenderCommandResult::Success
-}
-
-/// Whether one tile contains the other.
-fn overlaps(a: WorldTileCoords, b: WorldTileCoords) -> bool {
-    let (coarse, fine) = if u8::from(a.z) <= u8::from(b.z) {
-        (a, b)
-    } else {
-        (b, a)
-    };
-    let levels = u8::from(fine.z) - u8::from(coarse.z);
-    fine.x >> levels == coarse.x && fine.y >> levels == coarse.y
 }

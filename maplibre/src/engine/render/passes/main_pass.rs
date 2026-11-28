@@ -84,9 +84,14 @@ impl Node for MainPassNode {
                     .and_then(crate::render::gpu_timer::GpuTimer::pass_writes),
                 occlusion_query_set: None,
             });
-        let frame_refs = crate::render::pass_refs::PassFrameRefs::from_world(world);
-        let mut pass =
-            crate::render::tracked_pass::TrackedRenderPass::new(pass).with_frame_refs(frame_refs);
+        let mut pass = crate::render::tracked_pass::TrackedRenderPass::new(pass);
+        if let Some(domains) =
+            main_pass_ref_domains(world, inline_translucent && translucent_has_work)
+        {
+            pass = pass.with_frame_refs(crate::render::pass_refs::PassFrameRefs::from_world_for(
+                world, domains,
+            ));
+        }
         let inline_ctx = draw_layers(&mut pass, world);
         if inline_translucent && translucent_has_work {
             super::translucent_pass::draw_contents_inline(&mut pass, world, inline_ctx);
@@ -112,6 +117,10 @@ fn draw_layers<'w>(
             }
         }
     }
+    let layer_hooks = world
+        .resources
+        .get::<crate::render::graph::LayerPassHooks>()
+        .copied();
     let layer_state = resolve_pass_layer_state(world);
     if let Some(layers) = world.resources.get::<RenderPhase<LayerItem>>() {
         let mut stencil_state = StencilState::Cleared;
@@ -130,18 +139,19 @@ fn draw_layers<'w>(
                     group,
                 );
             }
-            if !ground_pending {
+            if ground_pending
+                && let Some(surface) = ground
+                && group
+                    .first()
+                    .is_some_and(|first| first.index > surface.draw_after_layer_index)
+            {
+                // The ground preserves depth for screen-space layers while remaining above the
+                // background.
+                (surface.draw)(pass, world);
+                ground_pending = false;
+            }
+            if !layer_hooks.is_some_and(|hooks| hooks.dispatch_group(world, group, pass)) {
                 for layer in group {
-                    layer.draw_function.draw(pass, world, layer);
-                }
-            } else if let Some(surface) = ground {
-                for layer in group {
-                    // The ground preserves depth for screen-space layers while remaining above the
-                    // background.
-                    if ground_pending && layer.index > surface.draw_after_layer_index {
-                        (surface.draw)(pass, world);
-                        ground_pending = false;
-                    }
                     layer.draw_function.draw(pass, world, layer);
                 }
             }
@@ -151,6 +161,23 @@ fn draw_layers<'w>(
         (surface.draw)(pass, world);
     }
     layer_state
+}
+
+fn main_pass_ref_domains(world: &World, inline_translucent_work: bool) -> Option<u8> {
+    use crate::render::pass_refs::PassFrameRefs;
+    let layers = world
+        .resources
+        .get::<RenderPhase<LayerItem>>()
+        .map_or(&[][..], AsRef::as_ref);
+    if layers.is_empty() && !inline_translucent_work {
+        return None;
+    }
+    let initial = if inline_translucent_work {
+        PassFrameRefs::DOMAIN_SDF | PassFrameRefs::DOMAIN_TERRAIN
+    } else {
+        PassFrameRefs::DOMAIN_EMPTY
+    };
+    Some(crate::render::render_commands::stencil_groups::layer_items_ref_domains(layers, initial))
 }
 
 fn color_attachment<'a>(

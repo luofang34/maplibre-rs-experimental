@@ -86,7 +86,7 @@ struct PaintEvalEnv<'a> {
     queue: &'a UploadQueue,
     ctx: &'a PaintRefreshContext<'a>,
     changes: &'a PaintChangeFlags,
-    paint_started: instant::Instant,
+    paint_started: std::cell::Cell<Option<instant::Instant>>,
 }
 
 #[inline]
@@ -140,7 +140,7 @@ impl PaintRefreshScratch {
             queue,
             ctx: &ctx,
             changes: &changes,
-            paint_started: instant::Instant::now(),
+            paint_started: std::cell::Cell::new(None),
         };
         let mut updated_any_feature_layer = false;
 
@@ -171,9 +171,8 @@ impl PaintRefreshScratch {
                     self.refresh_entry_uniform_feature_color(buffer_pool, &env, coords, entry);
                 }
             }
-            if let Some(stamp) = stamp {
-                self.tile_paint_stamps.insert(coords, (stamp_frame, stamp));
-            }
+            let stamp = stamp.unwrap_or_else(|| tile_entries_stamp(layers));
+            self.tile_paint_stamps.insert(coords, (stamp_frame, stamp));
         }
         self.apply_deferred_paint_updates(buffer_pool, (ctx.frame, stamp_frame));
     }
@@ -286,7 +285,10 @@ impl PaintRefreshScratch {
         if cfg!(target_arch = "wasm32")
             && (env.ctx.moving || changes.settle_pass)
             && *updated_any_feature_layer
-            && env.paint_started.elapsed() >= std::time::Duration::from_micros(400)
+            && env
+                .paint_started
+                .get()
+                .is_some_and(|started| started.elapsed() >= std::time::Duration::from_micros(400))
         {
             self.needs_feature_zoom_settle = true;
             return true;
@@ -354,6 +356,12 @@ impl PaintRefreshScratch {
             return;
         }
         buffer_pool.update_feature_metadata(env.queue, entry, &self.feature_meta_scratch);
+        if cfg!(target_arch = "wasm32")
+            && (env.ctx.moving || env.changes.settle_pass)
+            && env.paint_started.get().is_none()
+        {
+            env.paint_started.set(Some(instant::Instant::now()));
+        }
         *updated_any_feature_layer = true;
         self.queue_pattern_and_opaque_updates(coords, entry, bucket, &colors);
     }

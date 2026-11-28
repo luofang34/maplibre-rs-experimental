@@ -88,6 +88,7 @@ impl<E: Environment, T: DemTransferables> Plugin<E> for TerrainPlugin<T> {
         coverage::install_elevation_bridge(world);
         crate::render::pass_refs::PassRefPopulators::register(
             world,
+            crate::render::pass_refs::PassFrameRefs::DOMAIN_TERRAIN,
             crate::terrain::populate_terrain_pass_refs,
         );
 

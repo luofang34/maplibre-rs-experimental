@@ -18,10 +18,21 @@ pub(super) fn set_frame(world: &mut World, frame: TerrainFrame) {
             draw_after_layer_index: frame.draw_after_layer_index,
             draw: crate::terrain::draw_terrain,
         });
-    world
+    if let Some(slot) = world
         .resources
-        .insert(crate::render::ground::FrameGround(ground));
-    world.resources.insert(frame);
+        .get_mut::<crate::render::ground::FrameGround>()
+    {
+        slot.0 = ground;
+    } else {
+        world
+            .resources
+            .insert(crate::render::ground::FrameGround(ground));
+    }
+    if let Some(slot) = world.resources.get_mut::<TerrainFrame>() {
+        *slot = frame;
+    } else {
+        world.resources.insert(frame);
+    }
 }
 
 /// Caches the style's drapeable layer IDs by `style.revision()` so terrain frames do not

@@ -21,7 +21,7 @@ pub(crate) use covering::{
 };
 pub use covering::{
     covering_region, terrain_region, view_region_for_projection, CoveringRequest,
-    TerrainElevationBridge, TerrainElevationSource,
+    ElevationBoundsView, TerrainElevationBridge, TerrainElevationSource,
 };
 
 /// Which projection uniform a draw binds at group zero.

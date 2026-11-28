@@ -1,7 +1,10 @@
 //! Which of a label's variable anchors it is placed with.
 
 use super::{super::policy::rules, LayerFrame};
-use crate::sdf::collision_grid::CollisionGrid;
+use crate::{
+    sdf::{collision_grid::CollisionGrid, placement::TileProjector},
+    style::StyleLayerId,
+};
 
 impl LayerFrame<'_> {
     pub(super) fn first_fitting_anchor(
@@ -39,8 +42,7 @@ impl LayerFrame<'_> {
                     layer,
                     feature,
                     ground,
-                    self.view_state,
-                    self.projection,
+                    (self.view_state, self.projection, self.projector),
                     &self.uniforms,
                     *shift,
                 ) {
@@ -121,8 +123,12 @@ pub(super) type OrderedFeature<'a> = (usize, usize, &'a crate::sdf::Feature, boo
 /// active/fading state in `history`.
 pub(super) fn tile_culled_on_flat_mercator(
     layer: &crate::sdf::SymbolLayerData,
-    view_state: &crate::render::view_state::ViewState,
-    projection: &crate::render::projection::ShaderProjectionData,
+    layer_id: StyleLayerId,
+    (view_state, projection, projector): (
+        &crate::render::view_state::ViewState,
+        &crate::render::projection::ShaderProjectionData,
+        Option<&TileProjector>,
+    ),
     uniforms: &crate::sdf::paint::SymbolUniforms,
     has_terrain_or_height: bool,
     history: &super::super::temporal::PlacementHistory,
@@ -133,13 +139,9 @@ pub(super) fn tile_culled_on_flat_mercator(
     if has_terrain_or_height || projection.transition > 0.0 {
         return false;
     }
-    if crate::sdf::placement::canonical_tile(layer.coords).is_none() {
-        return !history.tile_has_active_state(&layer.style_layer_id, layer.coords);
-    }
-    let mvp = view_state
-        .gpu_view_projection()
-        .to_model_view_projection(layer.coords.transform_for_zoom(view_state.zoom()))
-        .get();
+    let Some(mvp) = projector.and_then(|p| p.flat_mvp) else {
+        return !history.tile_has_active_state(layer_id, layer.coords);
+    };
     const MIN_EXTENT: f64 = -512.0;
     const MAX_EXTENT: f64 = 4608.0;
     let corners = [
@@ -177,13 +179,14 @@ pub(super) fn tile_culled_on_flat_mercator(
         false
     };
     (behind_camera || beyond_horizon || offscreen)
-        && !history.tile_has_active_state(&layer.style_layer_id, layer.coords)
+        && !history.tile_has_active_state(layer_id, layer.coords)
 }
 
 /// Features of unculled `layers` in placement order: ascending `symbol-sort-key`, equal keys in
 /// tile order, and within a tile the labels that were visible first so they keep their place.
 pub(super) fn ordered_features<'a>(
     layers: &[&'a crate::sdf::SymbolLayerData],
+    layer_id: StyleLayerId,
     culled: &[bool],
     history: &super::super::temporal::PlacementHistory,
 ) -> Vec<OrderedFeature<'a>> {
@@ -199,7 +202,12 @@ pub(super) fn ordered_features<'a>(
                 .map(move |(i, feature)| (position, layer, i, feature))
         })
         .map(|(position, layer, i, feature)| {
-            (position, i, feature, history.was_visible(layer, feature))
+            (
+                position,
+                i,
+                feature,
+                history.was_visible(layer_id, layer.coords, feature),
+            )
         })
         .collect();
     features.sort_by(|(pa, _, a, _), (pb, _, b, _)| {
@@ -215,9 +223,10 @@ pub(super) fn ordered_features<'a>(
 pub(super) fn label_boxes(
     (layer, feature, ground): (&crate::sdf::SymbolLayerData, &crate::sdf::Feature, f32),
     (line, upright): (&Option<crate::sdf::placement::LinePoses>, bool),
-    (view_state, projection, uniforms): (
+    (view_state, projection, projector, uniforms): (
         &crate::render::view_state::ViewState,
         &crate::render::projection::ShaderProjectionData,
+        Option<&TileProjector>,
         &crate::sdf::paint::SymbolUniforms,
     ),
     anchor_clip: Option<(f64, cgmath::Vector4<f64>)>,
@@ -226,8 +235,7 @@ pub(super) fn label_boxes(
         layer,
         feature,
         ground,
-        view_state,
-        projection,
+        (view_state, projection, projector),
         uniforms,
         anchor_clip,
     )
@@ -243,8 +251,7 @@ pub(super) fn label_boxes(
         layer,
         (poses, image_sizes, upright),
         ground,
-        view_state,
-        projection,
+        (view_state, projection, projector),
         uniforms,
     );
     if rectangles[0].is_some() {
@@ -284,8 +291,11 @@ pub(super) fn beyond_perspective_cutoff_with_clip(
     layer: &crate::sdf::SymbolLayerData,
     feature: &crate::sdf::Feature,
     ground: f32,
-    view: &crate::render::view_state::ViewState,
-    projection: &crate::render::projection::ShaderProjectionData,
+    (view, projection, projector): (
+        &crate::render::view_state::ViewState,
+        &crate::render::projection::ShaderProjectionData,
+        Option<&TileProjector>,
+    ),
     uniforms: &crate::sdf::paint::SymbolUniforms,
     anchor_clip: Option<(f64, cgmath::Vector4<f64>)>,
 ) -> bool {
@@ -299,6 +309,10 @@ pub(super) fn beyond_perspective_cutoff_with_clip(
         }
     }
     crate::sdf::placement::beyond_perspective_cutoff(
-        layer, feature, ground, view, projection, uniforms,
+        layer,
+        feature,
+        ground,
+        (view, projection, projector),
+        uniforms,
     )
 }

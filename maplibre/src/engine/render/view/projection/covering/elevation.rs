@@ -5,15 +5,76 @@ use crate::{
         covering::{TileElevationProvider, TileElevationRange},
     },
     style::{layer::LayerPaint, Style},
-    tcs::{tiles::Tiles, world::World},
+    tcs::{pyramid::TilePyramid, tiles::Tiles, world::World},
 };
+
+#[inline]
+fn dem_tile_coords_for(
+    coords: WorldTileCoords,
+    minzoom: u8,
+    maxzoom: u8,
+) -> Option<WorldTileCoords> {
+    let zoom = u8::from(coords.z).saturating_sub(1).min(maxzoom);
+    if zoom < minzoom {
+        return None;
+    }
+    let mut current = coords;
+    while u8::from(current.z) > zoom {
+        current = current.get_parent()?;
+    }
+    Some(current)
+}
+
+/// Borrowed terrain DEM elevation bounds enabling direct static-dispatch lookups during covering.
+#[derive(Clone, Copy)]
+pub struct ElevationBoundsView<'a> {
+    /// Interior elevation bounds of every loaded DEM tile, without exaggeration.
+    pub dem_bounds: &'a TilePyramid<(f64, f64)>,
+    /// Vertical terrain exaggeration multiplier.
+    pub exaggeration: f64,
+    /// Minimum zoom of the active DEM source.
+    pub minzoom: u8,
+    /// Maximum zoom of the active DEM source.
+    pub maxzoom: u8,
+    /// North polar cap datum elevation in metres.
+    pub north_pole_meters: f32,
+    /// South polar cap datum elevation in metres.
+    pub south_pole_meters: f32,
+}
+
+impl ElevationBoundsView<'_> {
+    #[inline]
+    fn tile_elevation_range(&self, coords: WorldTileCoords) -> Option<TileElevationRange> {
+        let current = dem_tile_coords_for(coords, self.minzoom, self.maxzoom)?;
+        let (_, &(min, max)) = self.dem_bounds.nearest_ancestor_or_self(current)?;
+        let mut min_meters = min * self.exaggeration;
+        let mut max_meters = max * self.exaggeration;
+        let max_row = 1_i32
+            .checked_shl(u32::from(u8::from(coords.z)))
+            .unwrap_or(1)
+            - 1;
+        if coords.y == 0 && self.north_pole_meters != 0.0 {
+            let pole = f64::from(self.north_pole_meters) * self.exaggeration;
+            min_meters = min_meters.min(pole);
+            max_meters = max_meters.max(pole);
+        }
+        if coords.y == max_row && self.south_pole_meters != 0.0 {
+            let pole = f64::from(self.south_pole_meters) * self.exaggeration;
+            min_meters = min_meters.min(pole);
+            max_meters = max_meters.max(pole);
+        }
+        Some(TileElevationRange {
+            min_meters,
+            max_meters,
+        })
+    }
+}
 
 /// Elevation lookup interface implemented by terrain's coverage index so projection covering
 /// and culling stay decoupled from `crate::terrain`.
 pub trait TerrainElevationSource {
-    /// Exaggerated elevation bounds of `tile`, or `fallback` when no DEM covers it.
-    fn elevation_range(&self, tile: TileCoords, fallback: TileElevationRange)
-        -> TileElevationRange;
+    /// Borrowed DEM bounds view for static-dispatch per-tile elevation queries.
+    fn elevation_bounds_view(&self) -> ElevationBoundsView<'_>;
     /// Exaggerated ground elevation at the camera nadir using the finest loaded DEM.
     fn nadir_ground_elevation(&self, tiles: &Tiles, camera: &GlobeCameraState) -> f64;
     /// Compact cache key `(min_elevation_bits, max_elevation_bits, dem_bounds_len)`.
@@ -59,13 +120,21 @@ pub(crate) fn style_elevated_headroom_meters(style: &Style) -> f64 {
 }
 
 pub(super) struct BorrowedTileElevation<'a> {
-    index: &'a dyn TerrainElevationSource,
+    view: ElevationBoundsView<'a>,
     fallback: TileElevationRange,
 }
 
 impl TileElevationProvider for BorrowedTileElevation<'_> {
+    #[inline]
     fn elevation_range(&self, tile: TileCoords) -> TileElevationRange {
-        self.index.elevation_range(tile, self.fallback)
+        let coords = WorldTileCoords {
+            x: tile.x as i32,
+            y: tile.y as i32,
+            z: tile.z,
+        };
+        self.view
+            .tile_elevation_range(coords)
+            .unwrap_or(self.fallback)
     }
 }
 
@@ -75,6 +144,7 @@ pub(super) struct HeadroomTileElevation<P> {
 }
 
 impl<P: TileElevationProvider> TileElevationProvider for HeadroomTileElevation<P> {
+    #[inline]
     fn elevation_range(&self, tile: TileCoords) -> TileElevationRange {
         let mut range = self.inner.elevation_range(tile);
         range.max_meters += self.headroom_meters;
@@ -89,6 +159,7 @@ pub(super) enum TileElevation<'a> {
 }
 
 impl TileElevationProvider for TileElevation<'_> {
+    #[inline]
     fn elevation_range(&self, tile: TileCoords) -> TileElevationRange {
         match self {
             Self::Indexed(indexed) => indexed.elevation_range(tile),
@@ -105,14 +176,22 @@ pub(super) fn tile_elevation<'a>(
     fallback: TileElevationRange,
     headroom_meters: f64,
 ) -> TileElevation<'a> {
+    if style.terrain.is_none() {
+        return TileElevation::Constant(TileElevationRange {
+            min_meters: fallback.min_meters,
+            max_meters: fallback.max_meters + headroom_meters,
+        });
+    }
     match world
         .resources
         .get::<TerrainElevationBridge>()
         .and_then(|bridge| (bridge.get_index)(world))
-        .filter(|_| style.terrain.is_some())
     {
         Some(index) => TileElevation::Indexed(HeadroomTileElevation {
-            inner: BorrowedTileElevation { index, fallback },
+            inner: BorrowedTileElevation {
+                view: index.elevation_bounds_view(),
+                fallback,
+            },
             headroom_meters,
         }),
         None => TileElevation::Constant(TileElevationRange {

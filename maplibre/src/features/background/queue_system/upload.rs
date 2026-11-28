@@ -135,6 +135,7 @@ fn push_background_layer(
         entry_slot: crate::render::render_phase::UNSET_ENTRY_SLOT,
         source_shape: crate::render::tile_view_pattern::ShapeDrawData::default(),
         mask_group: crate::render::render_phase::MaskGroup::Unmasked,
+        draw_kind: crate::render::render_phase::LayerDrawKind::Other,
         tile: crate::tcs::tiles::Tile {
             coords: WorldTileCoords::default(),
         },
@@ -159,6 +160,7 @@ fn queue_sky_and_atmosphere(
             entry_slot: crate::render::render_phase::UNSET_ENTRY_SLOT,
             source_shape: crate::render::tile_view_pattern::ShapeDrawData::default(),
             mask_group: crate::render::render_phase::MaskGroup::Unmasked,
+            draw_kind: crate::render::render_phase::LayerDrawKind::Other,
             tile: crate::tcs::tiles::Tile {
                 coords: WorldTileCoords::default(),
             },

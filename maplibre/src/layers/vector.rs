@@ -360,7 +360,15 @@ impl<E: Environment, T: VectorTransferables> Plugin<E> for VectorPlugin<T> {
             crate::io::vector_tile::index_mvt_bytes_rescaled,
         );
         install_pattern_hooks(world);
-        crate::render::pass_refs::PassRefPopulators::register(world, populate_vector_pass_refs);
+        crate::render::pass_refs::PassRefPopulators::register(
+            world,
+            crate::render::pass_refs::PassFrameRefs::DOMAIN_VECTOR,
+            populate_vector_pass_refs,
+        );
+        world
+            .resources
+            .get_or_init_mut::<crate::render::graph::LayerPassHooks>()
+            .try_draw_vector_group = Some(render_commands::try_draw_vector_group);
         let resources = &mut world.resources;
 
         resources.insert(Eventually::<VectorBufferPool>::Uninitialized);

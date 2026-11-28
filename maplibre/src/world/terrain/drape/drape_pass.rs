@@ -55,7 +55,10 @@ impl Node for DrapePassNode {
             .resources
             .get::<crate::terrain::drape_timing::DrapeTimerSlot>();
         let pass_started = timer.is_some().then(instant::Instant::now);
-        let frame_refs = crate::render::pass_refs::PassFrameRefs::from_world(world);
+        let frame_refs = crate::render::pass_refs::PassFrameRefs::from_world_for(
+            world,
+            crate::render::pass_refs::PassFrameRefs::DOMAIN_DRAPE,
+        );
         for (index, (target, texture, top_level, scratch)) in drawn.iter().enumerate() {
             let timestamp_writes =
                 timer.and_then(|slot| slot.pass_timestamp_writes(index, drawn.len()));
@@ -106,6 +109,10 @@ fn draw_layers<'w>(
     target: &'w DrapeTarget,
 ) {
     let unique_stencils = crate::render::main_pass::unique_vector_stencils(&target.masks);
+    let layer_hooks = world
+        .resources
+        .get::<crate::render::graph::LayerPassHooks>()
+        .copied();
     let mut stencil_state = crate::render::main_pass::StencilState::Cleared;
     for layers in target
         .layers
@@ -119,8 +126,10 @@ fn draw_layers<'w>(
             &mut stencil_state,
             layers,
         );
-        for layer in layers {
-            layer.draw_function.draw(pass, world, layer);
+        if !layer_hooks.is_some_and(|hooks| hooks.dispatch_group(world, layers, pass)) {
+            for layer in layers {
+                layer.draw_function.draw(pass, world, layer);
+            }
         }
     }
 }

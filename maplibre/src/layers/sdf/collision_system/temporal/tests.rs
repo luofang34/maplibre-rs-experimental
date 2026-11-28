@@ -42,19 +42,20 @@ fn parent_child_replacement_keeps_opacity_and_suppresses_the_duplicate() {
     let child = layer(13);
     let a = feature(1000.0);
     let b = feature(2000.0);
+    let city_id = StyleLayerId::intern(&parent.style_layer_id);
     history.begin(Duration::ZERO);
     assert_eq!(history.opacity(&parent, &a, [true, false]), [0.0, 0.0]);
     history.begin(Duration::from_millis(200));
     assert_eq!(history.opacity(&parent, &a, [true, false]), [1.0, 0.0]);
     history.begin(Duration::from_millis(216));
-    assert!(history.was_visible(&child, &b));
+    assert!(history.was_visible(city_id, child.coords, &b));
     assert!(
-        !history.shown_elsewhere(&child, &b),
+        !history.shown_elsewhere(city_id, child.coords, &b),
         "the first copy takes the label"
     );
     assert_eq!(history.opacity(&child, &b, [true, false]), [1.0, 0.0]);
     assert!(
-        history.shown_elsewhere(&parent, &a),
+        history.shown_elsewhere(city_id, parent.coords, &a),
         "the parent's copy is a duplicate this frame, so a query skips it"
     );
     assert_eq!(history.opacity(&parent, &a, [true, false]), [0.0, 0.0]);
@@ -115,11 +116,12 @@ fn placed_features_of_one_tile_with_the_same_key_are_each_drawn() {
 fn the_anchor_of_a_label_is_kept_until_it_has_faded_out() {
     let mut history = PlacementHistory::default();
     let (layer, feature) = (layer(12), feature(100.0));
+    let layer_id = StyleLayerId::intern(&layer.style_layer_id);
     let mut frame = |millis: u64, shown: bool, anchor: Option<usize>| {
         history.begin(Duration::from_millis(millis));
-        let previous = history.previous_anchor(&layer, &feature);
+        let previous = history.previous_anchor(layer_id, layer.coords, &feature);
         history.opacity(&layer, &feature, [shown, false]);
-        history.remember_anchor(&layer, &feature, anchor);
+        history.remember_anchor(layer_id, layer.coords, &feature, anchor);
         previous
     };
     assert_eq!(frame(0, true, Some(1)), None);

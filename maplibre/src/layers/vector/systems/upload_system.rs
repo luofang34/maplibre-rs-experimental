@@ -78,7 +78,9 @@ pub fn upload_system(
     let (paint_frame, previous_paint) = frame_paint(world, style, view_state);
     let refresh_paint = previous_paint != Some(paint_frame);
     let upload_sources = sources::frame_sources_and_painted_mut(world, style, view_state)?;
-    init_upload_resources(world);
+    if !world.resources.exists::<SharedStyleLayers>() {
+        init_upload_resources(world);
+    }
     let has_pending_uploads =
         check_pending_vector_uploads(world, style, eviction_gen, &upload_sources.source_tiles)?;
     let permit_source_set = super::request_system::snapshot_permit_sources(
@@ -148,7 +150,7 @@ pub fn upload_system(
     if changed {
         crate::vector::structures::refresh_gpu(buffer_pool, queue, &spatial, &world.tiles);
     }
-    let (deferred, needs_refetch) = if has_pending_uploads {
+    let (deferred, needs_refetch, any_stamp_mutated) = if has_pending_uploads {
         let allow_cpu_release = (style.terrain.is_none() || cfg!(target_arch = "wasm32"))
             && !retain_loaded_tiles
             && settings.buffer_pools.vertices >= 1_000_000;
@@ -173,9 +175,9 @@ pub fn upload_system(
             },
         )
     } else {
-        (false, false)
+        (false, false, false)
     };
-    if has_pending_uploads {
+    if any_stamp_mutated {
         crate::vector::bump_upload_stamp_epoch(world);
     }
     #[cfg(feature = "geojson")]

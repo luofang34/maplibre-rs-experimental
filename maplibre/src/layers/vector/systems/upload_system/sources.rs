@@ -66,8 +66,9 @@ pub(super) fn frame_upload_sources(
     view_state: &ViewState,
 ) -> Result<FrameUploadSources, SystemError> {
     let mut scratch = Vec::new();
+    let needs_view_tiles = compute_needs_view_tiles_for_paint(style);
     let (present, fresh_tight) =
-        resolve_view_tiles_for_paint(world, style, view_state, &mut scratch)?;
+        resolve_view_tiles_for_paint(world, style, view_state, needs_view_tiles, &mut scratch)?;
     let _ = fresh_tight;
     compute_frame_sources_with_tiles(world, style, present.then_some(scratch.as_slice()))
 }
@@ -77,13 +78,23 @@ pub(super) fn frame_sources_and_painted_mut(
     style: &Style,
     view_state: &ViewState,
 ) -> Result<FrameUploadSources, SystemError> {
-    let mut scratch = world
-        .resources
-        .get_mut::<FrameSourcesCache>()
-        .map(|cache| std::mem::take(&mut cache.view_tiles_scratch))
-        .unwrap_or_default();
+    let style_rev = style.revision();
+    let (mut scratch, needs_view_tiles) = match world.resources.get_mut::<FrameSourcesCache>() {
+        Some(cache) => {
+            let needs = match cache.needs_view_tiles_for_paint {
+                Some((rev, needs)) if rev == style_rev => needs,
+                _ => {
+                    let needs = compute_needs_view_tiles_for_paint(style);
+                    cache.needs_view_tiles_for_paint = Some((style_rev, needs));
+                    needs
+                }
+            };
+            (std::mem::take(&mut cache.view_tiles_scratch), needs)
+        }
+        None => (Vec::new(), compute_needs_view_tiles_for_paint(style)),
+    };
     let (present, fresh_tight) =
-        resolve_view_tiles_for_paint(world, style, view_state, &mut scratch)?;
+        resolve_view_tiles_for_paint(world, style, view_state, needs_view_tiles, &mut scratch)?;
     update_loose_tight_tiles(world, fresh_tight.as_ref());
     let resolved_tiles = present.then_some(scratch.as_slice());
     let key = build_frame_sources_key(world, style, view_state, resolved_tiles);
@@ -217,13 +228,8 @@ fn resolve_cached_wrapped_tiles(
     )
 }
 
-fn resolve_view_tiles_for_paint(
-    world: &World,
-    style: &Style,
-    view_state: &ViewState,
-    out: &mut Vec<WorldTileCoords>,
-) -> Result<(bool, Option<FreshTightTiles>), SystemError> {
-    let needs_view_tiles_for_paint = style.terrain.is_none()
+fn compute_needs_view_tiles_for_paint(style: &Style) -> bool {
+    style.terrain.is_none()
         || style.layers.iter().any(|l| {
             !l.is_hidden()
                 && !matches!(
@@ -232,7 +238,16 @@ fn resolve_view_tiles_for_paint(
                 )
                 && (!crate::terrain::is_drapeable(&l.type_)
                     || crate::vector::structures::kind(l).is_some())
-        });
+        })
+}
+
+fn resolve_view_tiles_for_paint(
+    world: &World,
+    style: &Style,
+    view_state: &ViewState,
+    needs_view_tiles_for_paint: bool,
+    out: &mut Vec<WorldTileCoords>,
+) -> Result<(bool, Option<FreshTightTiles>), SystemError> {
     if !needs_view_tiles_for_paint {
         out.clear();
         return Ok((false, None));

@@ -64,16 +64,21 @@ const DOMAIN_SLOT_COUNT: usize = 13;
 /// Callback populating one domain's slots into [`PassFrameRefs`] at render-pass start.
 pub(crate) type PassRefPopulator = for<'w> fn(&'w World, &mut PassFrameRefs<'w>);
 
-/// Registered domain populators invoked in [`PassFrameRefs::from_world`].
+/// Registered domain populators invoked in [`PassFrameRefs::from_world_for`].
 #[derive(Default)]
-pub(crate) struct PassRefPopulators(Vec<PassRefPopulator>);
+pub(crate) struct PassRefPopulators(Vec<(u8, PassRefPopulator)>);
 
 impl PassRefPopulators {
-    /// Registers `populator` idempotently so its domain slots populate each render pass.
-    pub(crate) fn register(world: &mut World, populator: PassRefPopulator) {
+    /// Registers `populator` idempotently so its domain slots populate relevant render passes.
+    pub(crate) fn register(world: &mut World, domain: u8, populator: PassRefPopulator) {
         let populators = &mut world.resources.get_or_init_mut::<Self>().0;
-        if !populators.contains(&populator) {
-            populators.push(populator);
+        if let Some(entry) = populators
+            .iter_mut()
+            .find(|(_, existing)| std::ptr::fn_addr_eq(*existing, populator))
+        {
+            entry.0 |= domain;
+        } else {
+            populators.push((domain, populator));
         }
     }
 }
@@ -139,6 +144,151 @@ impl DrawCapabilities {
     #[inline]
     pub const fn supports_multidraw_indirect(&self, indexed: bool) -> bool {
         self.multi_draw_indirect && self.supports_indirect_batching(indexed)
+    }
+}
+
+#[inline]
+pub(crate) fn initialized<T: 'static>(world: &World) -> Option<&T> {
+    match world.resources.get::<Eventually<T>>() {
+        Some(Initialized(value)) => Some(value),
+        _ => None,
+    }
+}
+
+/// Immutable render pipelines, pools, and frame uniforms resolved once per render pass.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct PassFrameRefs<'w> {
+    pub capabilities: Option<&'w DrawCapabilities>,
+    pub projection: Option<&'w ProjectionGpuResources>,
+    pub tile_view_pattern: Option<&'w WgpuTileViewPattern>,
+    pub tile_mesh_cache: Option<&'w GlobeTileMeshCache>,
+    pub mask_pipeline: Option<&'w MaskPipeline>,
+    pub vector_pool: Option<&'w VectorPoolRef>,
+    pub symbol_pool: Option<&'w SymbolPoolRef>,
+    pub terrain_active: bool,
+    domain_slots: [Option<&'w dyn Any>; DOMAIN_SLOT_COUNT],
+}
+
+impl<'w> PassFrameRefs<'w> {
+    pub(crate) const DOMAIN_EMPTY: u8 = 0;
+    pub(crate) const DOMAIN_VECTOR: u8 = 1 << 0;
+    pub(crate) const DOMAIN_SDF: u8 = 1 << 1;
+    pub(crate) const DOMAIN_TERRAIN: u8 = 1 << 2;
+    pub(crate) const DOMAIN_RASTER: u8 = 1 << 3;
+    pub(crate) const DOMAIN_DRAPE: u8 = Self::DOMAIN_VECTOR | Self::DOMAIN_RASTER;
+
+    /// Snapshots only the resource domains listed in `domains` at render-pass start.
+    pub(crate) fn from_world_for(world: &'w World, domains: u8) -> Self {
+        let needs_drape = (domains & Self::DOMAIN_DRAPE) != 0;
+        let mut refs = Self {
+            capabilities: world.resources.get::<DrawCapabilities>(),
+            projection: initialized::<ProjectionGpuResources>(world),
+            tile_view_pattern: needs_drape
+                .then(|| initialized::<WgpuTileViewPattern>(world))
+                .flatten(),
+            tile_mesh_cache: world.resources.get::<GlobeTileMeshCache>(),
+            mask_pipeline: needs_drape
+                .then(|| initialized::<MaskPipeline>(world))
+                .flatten(),
+            vector_pool: ((domains & Self::DOMAIN_VECTOR) != 0)
+                .then(|| initialized::<VectorPoolRef>(world))
+                .flatten(),
+            symbol_pool: ((domains & Self::DOMAIN_SDF) != 0)
+                .then(|| initialized::<SymbolPoolRef>(world))
+                .flatten(),
+            terrain_active: false,
+            domain_slots: [None; DOMAIN_SLOT_COUNT],
+        };
+        if domains != 0
+            && let Some(populators) = world.resources.get::<PassRefPopulators>()
+        {
+            for &(domain, populate) in &populators.0 {
+                if (domain & domains) != 0 {
+                    populate(world, &mut refs);
+                }
+            }
+        }
+        refs
+    }
+
+    #[inline]
+    pub(crate) fn set_terrain<T: 'static>(&mut self, active: bool, resources: Option<&'w T>) {
+        self.terrain_active = active;
+        self.set_slot(DomainPassSlot::TerrainResources, resources);
+    }
+
+    #[inline(always)]
+    pub(crate) fn set_slot<T: 'static>(&mut self, slot: DomainPassSlot, value: Option<&'w T>) {
+        if let Some(entry) = self.domain_slots.get_mut(slot as usize) {
+            *entry = value.map(|v| v as &'w dyn Any);
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn resolve_slot<T: 'static>(
+        refs: Option<&Self>,
+        slot: DomainPassSlot,
+        fallback: impl FnOnce() -> Option<&'w T>,
+    ) -> Option<&'w T> {
+        match refs {
+            Some(refs) => refs
+                .domain_slots
+                .get(slot as usize)
+                .and_then(|entry| *entry)?
+                .downcast_ref::<T>(),
+            None => fallback(),
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn resolve_vector_pool(
+        refs: Option<&Self>,
+        world: &'w World,
+    ) -> Option<&'w VectorPoolRef> {
+        refs.map_or_else(|| initialized(world), |r| r.vector_pool)
+    }
+
+    #[inline(always)]
+    pub(crate) fn resolve_symbol_pool(
+        refs: Option<&Self>,
+        world: &'w World,
+    ) -> Option<&'w SymbolPoolRef> {
+        refs.map_or_else(|| initialized(world), |r| r.symbol_pool)
+    }
+
+    #[inline]
+    pub(crate) fn resolve_projection(
+        refs: Option<&Self>,
+        world: &'w World,
+    ) -> Option<&'w ProjectionGpuResources> {
+        refs.map_or_else(|| initialized(world), |r| r.projection)
+    }
+
+    #[inline]
+    pub(crate) fn resolve_tile_view_pattern(
+        refs: Option<&Self>,
+        world: &'w World,
+    ) -> Option<&'w WgpuTileViewPattern> {
+        refs.map_or_else(|| initialized(world), |r| r.tile_view_pattern)
+    }
+
+    #[inline]
+    pub(crate) fn resolve_tile_mesh_cache(
+        refs: Option<&Self>,
+        world: &'w World,
+    ) -> Option<&'w GlobeTileMeshCache> {
+        refs.map_or_else(
+            || world.resources.get::<GlobeTileMeshCache>(),
+            |r| r.tile_mesh_cache,
+        )
+    }
+
+    #[inline]
+    pub(crate) fn resolve_mask_pipeline(
+        refs: Option<&Self>,
+        world: &'w World,
+    ) -> Option<&'w MaskPipeline> {
+        refs.map_or_else(|| initialized(world), |r| r.mask_pipeline)
     }
 }
 
@@ -233,131 +383,6 @@ impl Hasher for HandleIdHasher {
 
     fn write_usize(&mut self, i: usize) {
         self.push(i as u64);
-    }
-}
-
-#[inline]
-pub(crate) fn initialized<T: 'static>(world: &World) -> Option<&T> {
-    match world.resources.get::<Eventually<T>>() {
-        Some(Initialized(value)) => Some(value),
-        _ => None,
-    }
-}
-
-/// Immutable render pipelines, pools, and frame uniforms resolved once per render pass.
-#[derive(Clone, Copy, Default)]
-pub(crate) struct PassFrameRefs<'w> {
-    pub capabilities: Option<&'w DrawCapabilities>,
-    pub projection: Option<&'w ProjectionGpuResources>,
-    pub tile_view_pattern: Option<&'w WgpuTileViewPattern>,
-    pub tile_mesh_cache: Option<&'w GlobeTileMeshCache>,
-    pub mask_pipeline: Option<&'w MaskPipeline>,
-    pub vector_pool: Option<&'w VectorPoolRef>,
-    pub symbol_pool: Option<&'w SymbolPoolRef>,
-    pub terrain_active: bool,
-    domain_slots: [Option<&'w dyn Any>; DOMAIN_SLOT_COUNT],
-}
-
-impl<'w> PassFrameRefs<'w> {
-    /// Snapshots all shared draw-loop resources from `world` once at pass start.
-    pub(crate) fn from_world(world: &'w World) -> Self {
-        let mut refs = Self {
-            capabilities: world.resources.get::<DrawCapabilities>(),
-            projection: initialized::<ProjectionGpuResources>(world),
-            tile_view_pattern: initialized::<WgpuTileViewPattern>(world),
-            tile_mesh_cache: world.resources.get::<GlobeTileMeshCache>(),
-            mask_pipeline: initialized::<MaskPipeline>(world),
-            vector_pool: initialized::<VectorPoolRef>(world),
-            symbol_pool: initialized::<SymbolPoolRef>(world),
-            terrain_active: false,
-            domain_slots: [None; DOMAIN_SLOT_COUNT],
-        };
-        if let Some(populators) = world.resources.get::<PassRefPopulators>() {
-            for populate in &populators.0 {
-                populate(world, &mut refs);
-            }
-        }
-        refs
-    }
-
-    #[inline]
-    pub(crate) fn set_terrain<T: 'static>(&mut self, active: bool, resources: Option<&'w T>) {
-        self.terrain_active = active;
-        self.set_slot(DomainPassSlot::TerrainResources, resources);
-    }
-
-    #[inline]
-    pub(crate) fn set_slot<T: 'static>(&mut self, slot: DomainPassSlot, value: Option<&'w T>) {
-        if let Some(entry) = self.domain_slots.get_mut(slot as usize) {
-            *entry = value.map(|v| v as &'w dyn Any);
-        }
-    }
-
-    #[inline]
-    pub(crate) fn resolve_slot<T: 'static>(
-        refs: Option<&Self>,
-        slot: DomainPassSlot,
-        fallback: impl FnOnce() -> Option<&'w T>,
-    ) -> Option<&'w T> {
-        match refs {
-            Some(refs) => refs
-                .domain_slots
-                .get(slot as usize)
-                .and_then(|entry| *entry)?
-                .downcast_ref::<T>(),
-            None => fallback(),
-        }
-    }
-
-    #[inline(always)]
-    pub(crate) fn resolve_vector_pool(
-        refs: Option<&Self>,
-        world: &'w World,
-    ) -> Option<&'w VectorPoolRef> {
-        refs.map_or_else(|| initialized(world), |r| r.vector_pool)
-    }
-
-    #[inline(always)]
-    pub(crate) fn resolve_symbol_pool(
-        refs: Option<&Self>,
-        world: &'w World,
-    ) -> Option<&'w SymbolPoolRef> {
-        refs.map_or_else(|| initialized(world), |r| r.symbol_pool)
-    }
-
-    #[inline]
-    pub(crate) fn resolve_projection(
-        refs: Option<&Self>,
-        world: &'w World,
-    ) -> Option<&'w ProjectionGpuResources> {
-        refs.map_or_else(|| initialized(world), |r| r.projection)
-    }
-
-    #[inline]
-    pub(crate) fn resolve_tile_view_pattern(
-        refs: Option<&Self>,
-        world: &'w World,
-    ) -> Option<&'w WgpuTileViewPattern> {
-        refs.map_or_else(|| initialized(world), |r| r.tile_view_pattern)
-    }
-
-    #[inline]
-    pub(crate) fn resolve_tile_mesh_cache(
-        refs: Option<&Self>,
-        world: &'w World,
-    ) -> Option<&'w GlobeTileMeshCache> {
-        refs.map_or_else(
-            || world.resources.get::<GlobeTileMeshCache>(),
-            |r| r.tile_mesh_cache,
-        )
-    }
-
-    #[inline]
-    pub(crate) fn resolve_mask_pipeline(
-        refs: Option<&Self>,
-        world: &'w World,
-    ) -> Option<&'w MaskPipeline> {
-        refs.map_or_else(|| initialized(world), |r| r.mask_pipeline)
     }
 }
 

@@ -185,6 +185,7 @@ pub(crate) fn queue_custom_layers_system(
             source_shape: ShapeDrawData::default(),
             projection: ProjectionBinding::View,
             mask_group: MaskGroup::Custom,
+            draw_kind: crate::render::render_phase::LayerDrawKind::Other,
             run: None,
         });
     }

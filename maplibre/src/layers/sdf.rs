@@ -226,7 +226,11 @@ impl<E: Environment, T: SymbolTransferables> Plugin<E> for SdfPlugin<T> {
         world: &mut World,
         _renderer: &mut crate::render::Renderer,
     ) -> Result<(), crate::plugin::PluginError> {
-        crate::render::pass_refs::PassRefPopulators::register(world, populate_symbol_pass_refs);
+        crate::render::pass_refs::PassRefPopulators::register(
+            world,
+            crate::render::pass_refs::PassFrameRefs::DOMAIN_SDF,
+            populate_symbol_pass_refs,
+        );
         let resources = &mut world.resources;
 
         resources.insert(Eventually::<SymbolPipeline>::Uninitialized);

@@ -11,7 +11,6 @@ use rustc_hash::FxHashSet;
 use crate::{
     coords::{ViewRegion, WorldTileCoords, ZoomLevel},
     io::tile_sources::RasterSourceId,
-    projection::lod_history::LodHistory,
     render::{
         projection::{view_region_for_projection, ProjectionStateError},
         view_state::{ViewState, ViewStatePadding},
@@ -19,7 +18,9 @@ use crate::{
     style::Style,
     tcs::world::World,
 };
+mod lod_snapshot;
 mod raster;
+pub(crate) use lod_snapshot::snapshot_lod_history;
 pub use raster::raster_source_regions;
 
 pub use crate::render::frame_signals::EyeInFrame;
@@ -131,39 +132,6 @@ pub(crate) struct EyePassCount(pub usize);
 /// Tiles per raster source, as [`raster_source_regions`] selects them.
 pub type RasterCoverings = Vec<(RasterSourceId, Vec<WorldTileCoords>)>;
 
-/// Takes the snapshot for the frame about to select tiles. Every camera gets it, not only a
-/// host's eye: a map camera that moves a little each frame would otherwise switch a tile
-/// sitting on a level threshold between its fine and coarse version frame after frame.
-pub(crate) fn snapshot_lod_history(world: &mut World) {
-    if EyeInFrame::reuses_content(world) {
-        return;
-    }
-    let shared = world.resources.get::<SharedCovering>();
-    let history = FrameLodHistory {
-        view: LodHistory::new(
-            shared
-                .and_then(|shared| shared.tiles.as_ref())
-                .map_or(&[], |(tiles, _)| &**tiles),
-        ),
-        raster: shared
-            .map(|shared| {
-                shared
-                    .raster
-                    .iter()
-                    .map(|(name, tiles)| (name.clone(), LodHistory::new(tiles)))
-                    .collect()
-            })
-            .unwrap_or_default(),
-        terrain: LodHistory::new(
-            world
-                .resources
-                .get::<crate::render::projection::TerrainElevationBridge>()
-                .map_or(&[][..], |bridge| (bridge.drawn_surface_tiles)(world)),
-        ),
-    };
-    world.resources.insert(history);
-}
-
 /// The drawn tiles a frame selected: the first eye's, which later eyes of the frame reuse, or
 /// the map camera's own.
 #[derive(Clone, Debug)]
@@ -176,8 +144,8 @@ pub struct SharedCovering {
     level: ZoomLevel,
     view_proj_bits: [[u64; 4]; 4],
     terrain_key: (u64, u64, usize),
-    tiles: Option<(Arc<[WorldTileCoords]>, ZoomLevel)>,
-    raster: RasterCoverings,
+    pub(super) tiles: Option<(Arc<[WorldTileCoords]>, ZoomLevel)>,
+    pub(super) raster: RasterCoverings,
 }
 
 impl SharedCovering {
@@ -193,16 +161,6 @@ impl SharedCovering {
     /// The tiles the first eye selected, or `None` when it selected no region.
     pub(crate) fn tiles(&self) -> Option<&[WorldTileCoords]> {
         self.tiles.as_ref().map(|(tiles, _)| &**tiles)
-    }
-
-    pub(crate) fn tiles_arc(&self) -> Option<&Arc<[WorldTileCoords]>> {
-        self.tiles.as_ref().map(|(tiles, _)| tiles)
-    }
-
-    fn region(&self) -> Option<ViewRegion> {
-        self.tiles
-            .as_ref()
-            .map(|(tiles, level)| ViewRegion::from_tiles(tiles.to_vec(), *level, tiles.len()))
     }
 }
 
@@ -412,15 +370,49 @@ fn compute_covering_parts(
     Ok((cached_arc, region, raster))
 }
 
+fn region_tiles(
+    cached_arc: Option<Arc<[WorldTileCoords]>>,
+    region: Option<&ViewRegion>,
+) -> Option<(Arc<[WorldTileCoords]>, ZoomLevel)> {
+    region.map(|region| {
+        let arc = cached_arc.unwrap_or_else(|| Arc::from(region.copies().collect::<Vec<_>>()));
+        (arc, region.zoom_level())
+    })
+}
+
+/// Fast covering result that keeps shared covering `Arc<[WorldTileCoords]>` lazy so fast-key
+/// hits skip building `ViewRegion`.
+pub(crate) struct FastDrawnCovering {
+    tiles: Option<(Arc<[WorldTileCoords]>, ZoomLevel)>,
+    cached_region: Option<ViewRegion>,
+    pub(crate) raster: RasterCoverings,
+}
+
+impl FastDrawnCovering {
+    pub(crate) fn has_tiles(&self) -> bool {
+        self.tiles.is_some()
+    }
+
+    pub(crate) fn tiles_arc(&self) -> Option<&Arc<[WorldTileCoords]>> {
+        self.tiles.as_ref().map(|(tiles, _)| tiles)
+    }
+
+    pub(crate) fn into_region(self) -> Option<ViewRegion> {
+        self.cached_region.or_else(|| {
+            self.tiles
+                .map(|(tiles, level)| ViewRegion::from_tiles(tiles.to_vec(), level, tiles.len()))
+        })
+    }
+}
+
 impl CoveringQuery {
-    fn store_shared(
+    fn store_shared_tiles(
         &self,
         world: &mut World,
-        cached_arc: Option<Arc<[WorldTileCoords]>>,
-        region: Option<&ViewRegion>,
+        tiles: Option<(Arc<[WorldTileCoords]>, ZoomLevel)>,
         raster: RasterCoverings,
     ) {
-        world.resources.insert(SharedCovering {
+        let next = SharedCovering {
             frame: self.eye.map(|eye| eye.frame),
             view_slot: self.view_slot,
             host_frame: self.host_frame,
@@ -428,13 +420,14 @@ impl CoveringQuery {
             level: self.level,
             view_proj_bits: self.view_proj_bits,
             terrain_key: self.terrain_key,
-            tiles: region.map(|region| {
-                let arc =
-                    cached_arc.unwrap_or_else(|| Arc::from(region.copies().collect::<Vec<_>>()));
-                (arc, region.zoom_level())
-            }),
+            tiles,
             raster,
-        });
+        };
+        if let Some(slot) = world.resources.get_mut::<SharedCovering>() {
+            *slot = next;
+        } else {
+            world.resources.insert(next);
+        }
     }
 }
 
@@ -453,41 +446,38 @@ pub(crate) fn ensure_drawn_covering_for_raster(
     }
     let (cached_arc, region, raster) = compute_covering_parts(style, view_state, world, &query)?;
     if query.is_primary_eye() {
-        query.store_shared(world, cached_arc, region.as_ref(), raster);
+        let tiles = region_tiles(cached_arc, region.as_ref());
+        query.store_shared_tiles(world, tiles, raster);
         return Ok(None);
     }
     Ok(Some(raster))
 }
 
-/// The tiles the frame draws at `level`, with the raster tiles each raster source draws:
-/// the first eye's selection when the schedule runs for a later eye of the same frame, and
-/// otherwise this view's own, kept as the next frame's level history.
-pub(crate) fn drawn_covering(
+/// Returns [`FastDrawnCovering`] without building a `ViewRegion` when [`SharedCovering`] hits.
+pub(crate) fn drawn_covering_fast(
     style: &Style,
     view_state: &ViewState,
     world: &mut World,
     level: ZoomLevel,
-) -> Result<(Option<ViewRegion>, RasterCoverings), ProjectionStateError> {
+) -> Result<FastDrawnCovering, ProjectionStateError> {
     let query = CoveringQuery::from_frame(style, view_state, world, level);
     if let Some(shared) = matching_shared_covering(world, &query) {
-        return Ok((shared.region(), shared.raster.clone()));
+        return Ok(FastDrawnCovering {
+            tiles: shared.tiles.clone(),
+            cached_region: None,
+            raster: shared.raster.clone(),
+        });
     }
     let (cached_arc, region, raster) = compute_covering_parts(style, view_state, world, &query)?;
+    let tiles = region_tiles(cached_arc, region.as_ref());
     if query.is_primary_eye() {
-        query.store_shared(world, cached_arc, region.as_ref(), raster.clone());
+        query.store_shared_tiles(world, tiles.clone(), raster.clone());
     }
-    Ok((region, raster))
-}
-
-/// Returns the shared covering `Arc<[WorldTileCoords]>` when it matches the current frame's eye.
-pub(crate) fn matching_drawn_tiles_arc(
-    style: &Style,
-    view_state: &ViewState,
-    world: &World,
-    level: ZoomLevel,
-) -> Option<Arc<[WorldTileCoords]>> {
-    let query = CoveringQuery::from_frame(style, view_state, world, level);
-    matching_shared_covering(world, &query).and_then(|shared| shared.tiles_arc().cloned())
+    Ok(FastDrawnCovering {
+        tiles,
+        cached_region: region,
+        raster,
+    })
 }
 
 #[cfg(test)]

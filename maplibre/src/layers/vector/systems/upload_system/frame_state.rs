@@ -43,7 +43,13 @@ pub(in crate::layers::vector::systems::upload_system) fn frame_paint(
         bearing,
         light,
     };
-    let previous_paint = world.resources.get::<VectorPaintFrame>().copied();
-    world.resources.insert(paint_frame);
+    let previous_paint = if let Some(slot) = world.resources.get_mut::<VectorPaintFrame>() {
+        let prev = *slot;
+        *slot = paint_frame;
+        Some(prev)
+    } else {
+        world.resources.insert(paint_frame);
+        None
+    };
     (paint_frame, previous_paint)
 }

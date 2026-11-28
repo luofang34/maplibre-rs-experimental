@@ -4,13 +4,93 @@
 use cgmath::{InnerSpace, Matrix4, Vector4};
 
 use crate::{
-    coords::{TileCoords, WorldTileCoords, ZOOM_BOUNDS},
-    render::{projection::ShaderProjectionData, view_state::ViewState},
+    coords::{TileCoords, WorldTileCoords, Zoom, ZOOM_BOUNDS},
+    render::{camera::ViewProjection, projection::ShaderProjectionData, view_state::ViewState},
     sdf::{Feature, SymbolLayerData},
     style::layer::SymbolPaint,
     tcs::world::World,
     terrain::coverage::TerrainCoverageIndex,
 };
+
+/// Precomputed per-tile matrices and constants shared across all features and glyphs in a tile.
+pub(in crate::layers::sdf) struct TileProjector {
+    tile: TileCoords,
+    pub(in crate::layers::sdf) flat_mvp: Option<Matrix4<f64>>,
+    transition: f64,
+    clip_cull: bool,
+    globe_matrix: Option<Matrix4<f64>>,
+    clipping_plane: Option<Vector4<f64>>,
+    radius_meters: f64,
+    pub(in crate::layers::sdf) z_scale: f64,
+    pub(in crate::layers::sdf) tile_y: f64,
+}
+
+impl TileProjector {
+    pub(in crate::layers::sdf) fn new(
+        coords: WorldTileCoords,
+        gpu_vp: ViewProjection,
+        zoom: Zoom,
+        projection: &ShaderProjectionData,
+    ) -> Option<Self> {
+        let tile = canonical_tile(coords)?;
+        let transition = f64::from(projection.transition);
+        let flat_mvp = (transition < 1.0).then(|| {
+            gpu_vp
+                .to_model_view_projection(coords.transform_for_zoom(zoom))
+                .get()
+        });
+        let (globe_matrix, clipping_plane) = if transition > 0.0 {
+            (
+                Matrix4::<f32>::from(projection.main_matrix).cast::<f64>(),
+                Vector4::<f32>::from(projection.clipping_plane).cast::<f64>(),
+            )
+        } else {
+            (None, None)
+        };
+        Some(Self {
+            tile,
+            flat_mvp,
+            transition,
+            clip_cull: projection.transition >= 0.98,
+            globe_matrix,
+            clipping_plane,
+            radius_meters: f64::from(projection.radius_meters),
+            z_scale: 2_f64.powi(i32::from(u8::from(coords.z))),
+            tile_y: f64::from(coords.y),
+        })
+    }
+
+    #[inline]
+    pub(in crate::layers::sdf) fn project(
+        &self,
+        anchor: [f64; 2],
+        elevation: f64,
+    ) -> Option<Vector4<f64>> {
+        if self.transition <= 0.0 {
+            return self
+                .flat_mvp
+                .map(|mvp| mvp * Vector4::new(anchor[0], anchor[1], elevation, 1.0));
+        }
+        let surface = crate::projection::globe::project_tile_coordinates_to_unit_sphere(
+            self.tile.x,
+            self.tile.y,
+            u8::from(self.tile.z),
+            anchor[0],
+            anchor[1],
+        );
+        let plane = self.clipping_plane?;
+        if self.clip_cull && plane.dot(surface.extend(1.0)) < 0.0 {
+            return None;
+        }
+        let globe =
+            self.globe_matrix? * (surface * (1.0 + elevation / self.radius_meters)).extend(1.0);
+        if self.transition >= 1.0 {
+            return Some(globe);
+        }
+        let flat = self.flat_mvp? * Vector4::new(anchor[0], anchor[1], elevation, 1.0);
+        Some(flat * (1.0 - self.transition) + globe * self.transition)
+    }
+}
 
 pub(in crate::layers::sdf) fn canonical_tile(coords: WorldTileCoords) -> Option<TileCoords> {
     let bound = ZOOM_BOUNDS.get(usize::from(u8::from(coords.z))).copied()?;
@@ -20,6 +100,21 @@ pub(in crate::layers::sdf) fn canonical_tile(coords: WorldTileCoords) -> Option<
         y: coords.y as u32,
         z: coords.z,
     })
+}
+
+#[inline]
+pub(in crate::layers::sdf) fn project_with(
+    projector: Option<&TileProjector>,
+    coords: WorldTileCoords,
+    anchor: [f64; 2],
+    elevation: f64,
+    view: &ViewState,
+    projection: &ShaderProjectionData,
+) -> Option<Vector4<f64>> {
+    match projector {
+        Some(projector) => projector.project(anchor, elevation),
+        None => project(coords, anchor, elevation, view, projection),
+    }
 }
 
 pub(in crate::layers::sdf) fn project(
@@ -103,24 +198,6 @@ fn anchor_point(feature: &Feature) -> [f64; 2] {
     ]
 }
 
-/// The height of the label's anchor: the terrain under it unless the style places the symbol
-/// at an absolute height, plus the style's height offset.
-pub(in crate::layers::sdf) fn symbol_elevation(
-    world: &World,
-    layer: &SymbolLayerData,
-    feature: &Feature,
-    paint: &SymbolPaint,
-    zoom: f64,
-) -> f32 {
-    let terrain = elevation(world, layer, feature);
-    let follows_ground = paint.height_follows_ground("text");
-    if !paint.uses_shared_height() && follows_ground {
-        return terrain;
-    }
-    let base = if follows_ground { terrain } else { 0.0 };
-    base + paint.height_offset("text", &feature.data.properties, zoom)
-}
-
 /// Whether the anchor at `height` is inside the terrain surface below it, where the depth test
 /// hides it. Such a label must not hold collision space or answer queries.
 pub(in crate::layers::sdf) fn buried_in_terrain(
@@ -138,7 +215,7 @@ pub(in crate::layers::sdf) fn buried_in_terrain(
 pub(in crate::layers::sdf) struct LabelGround<'a> {
     world: &'a World,
     coords: WorldTileCoords,
-    /// The height of the label's anchor, as [`symbol_elevation`] gives it.
+    /// The height of the label's anchor above sea level.
     pub(in crate::layers::sdf) elevation: f32,
     /// The terrain under the anchor, which glyphs rise from; `None` when the label's height
     /// does not follow the ground.
@@ -162,13 +239,24 @@ impl<'a> LabelGround<'a> {
         paint: &SymbolPaint,
         zoom: f64,
     ) -> Self {
+        let terrain = elevation(world, layer, feature);
         let follows = paint.height_follows_ground("text")
             && world.resources.get::<TerrainCoverageIndex>().is_some();
+        let height = if !paint.uses_shared_height() && paint.height_follows_ground("text") {
+            terrain
+        } else {
+            let base = if paint.height_follows_ground("text") {
+                terrain
+            } else {
+                0.0
+            };
+            base + paint.height_offset("text", &feature.data.properties, zoom)
+        };
         Self {
             world,
             coords: layer.coords,
-            elevation: symbol_elevation(world, layer, feature, paint, zoom),
-            anchor_terrain: follows.then(|| elevation(world, layer, feature)),
+            elevation: height,
+            anchor_terrain: follows.then_some(terrain),
         }
     }
 

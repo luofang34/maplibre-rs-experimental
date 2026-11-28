@@ -145,6 +145,7 @@ impl TerrainResources {
     }
 
     /// Draws every terrain tile queued for this frame, writing depth.
+    #[inline]
     pub(crate) fn draw<'w>(
         &'w self,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,

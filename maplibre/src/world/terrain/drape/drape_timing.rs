@@ -90,10 +90,10 @@ impl DrapeTimerSlot {
     pub(crate) fn take_measurement(
         &self,
         device: &wgpu::Device,
-        period: f32,
+        queue: &crate::render::upload_queue::UploadQueue,
     ) -> Option<(Duration, u32)> {
         if self.timer.is_some() {
-            self.take(device, period)
+            self.take(device, queue.get_timestamp_period())
         } else {
             self.take_cpu_fallback()
         }
@@ -188,11 +188,10 @@ pub(crate) fn drape_timer_system(
     if world.resources.get::<DrapeTimerSlot>().is_none() {
         world.resources.insert(DrapeTimerSlot::new(device));
     }
-    let period = queue.get_timestamp_period();
     let measured = world
         .resources
         .get::<DrapeTimerSlot>()
-        .and_then(|slot| slot.take_measurement(device, period));
+        .and_then(|slot| slot.take_measurement(device, queue));
     if let Some((spent, drapes)) = measured {
         world
             .resources

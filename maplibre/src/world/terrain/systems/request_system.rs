@@ -26,6 +26,7 @@ use crate::{
     schedule::system::{System, SystemError, SystemResult},
     tcs::tiles::Tiles,
     terrain::{
+        dem::dem_tile_coords,
         source::dem_source,
         transferables::{DemTransferables, LayerDem, LayerDemMissing},
         DemTileComponent,
@@ -60,8 +61,6 @@ pub(crate) fn wanted_dems_epoch(world: &crate::tcs::world::World) -> u64 {
 /// elevation range of an area before its own tiles arrive, as in GL JS `_addTerrainIdealTiles`.
 const ANCESTOR_ZOOM: u8 = 5;
 
-use crate::terrain::dem::dem_tile_coords;
-
 /// Returns the coarse ancestor requested together with a DEM tile, if it differs from it.
 pub fn dem_ancestor_coords(coords: WorldTileCoords, minzoom: u8) -> Option<WorldTileCoords> {
     let target = u8::from(coords.z).min(ANCESTOR_ZOOM).max(minzoom);
@@ -92,6 +91,7 @@ pub fn missing_dem_fallback(
 pub struct RequestSystem<E: Environment, T: DemTransferables> {
     kernel: Rc<Kernel<E>>,
     memo: memo::DemRequestMemo,
+    scratch: memo::DemRequestScratch,
     phantom_t: PhantomData<T>,
 }
 
@@ -100,6 +100,7 @@ impl<E: Environment, T: DemTransferables> RequestSystem<E, T> {
         Self {
             kernel: kernel.clone(),
             memo: memo::DemRequestMemo::default(),
+            scratch: memo::DemRequestScratch::default(),
             phantom_t: PhantomData,
         }
     }
@@ -144,18 +145,23 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
             return Ok(());
         }
         crate::io::tile_backpressure::set_dem_deferred(world, false);
-        let (terrain_tiles, fresh_region) = match &multi {
-            Some(m) => (m.terrain_tiles.clone(), None),
-            None => {
-                let Some(tiles_and_region) =
-                    resolve_single_view_tiles(style, view_state, world, &dem)?
-                else {
-                    return Ok(());
-                };
-                (tiles_and_region.0, Some(tiles_and_region.1))
-            }
+        let fresh_region = if multi.is_some() {
+            None
+        } else if let Some(region) =
+            resolve_single_view_tiles(style, view_state, world, &dem, &mut self.scratch)?
+        {
+            Some(region)
+        } else {
+            return Ok(());
         };
-        self.dispatch_wanted(style, world, &dem, &terrain_tiles, multi.as_ref());
+        dispatch_wanted::<E, T>(
+            &self.kernel,
+            &mut self.scratch,
+            style,
+            world,
+            &dem,
+            multi.as_ref(),
+        );
         if let Some(memo_key) = memo_key {
             self.memo.record(memo_key, world.tiles.len(), fresh_region);
         }
@@ -163,20 +169,19 @@ impl<E: Environment, T: DemTransferables> System for RequestSystem<E, T> {
     }
 }
 
-type SingleViewTiles = (
-    Vec<WorldTileCoords>,
-    (
-        crate::terrain::coverage::PreparedTerrainKey,
-        crate::coords::ViewRegion,
-    ),
-);
-
 fn resolve_single_view_tiles(
     style: &crate::style::Style,
     view_state: &crate::render::view_state::ViewState,
     world: &mut crate::tcs::world::World,
     dem: &crate::terrain::source::DemSource,
-) -> Result<Option<SingleViewTiles>, SystemError> {
+    scratch: &mut memo::DemRequestScratch,
+) -> Result<
+    Option<(
+        crate::terrain::coverage::PreparedTerrainKey,
+        crate::coords::ViewRegion,
+    )>,
+    SystemError,
+> {
     let view_region = crate::render::projection::terrain_region(
         style,
         view_state,
@@ -190,13 +195,22 @@ fn resolve_single_view_tiles(
         world,
         dem.tile_size,
     );
-    world
+    if let Some(slot) = world
         .resources
-        .insert(crate::terrain::coverage::PreparedTerrainRegion {
-            key,
-            region: view_region.clone(),
-        });
+        .get_mut::<crate::terrain::coverage::PreparedTerrainRegion>()
+    {
+        slot.key = key;
+        slot.region = view_region.clone();
+    } else {
+        world
+            .resources
+            .insert(crate::terrain::coverage::PreparedTerrainRegion {
+                key,
+                region: view_region.clone(),
+            });
+    }
     let Some(view_region) = view_region else {
+        scratch.single_view_tiles.clear();
         return Ok(None);
     };
     let resolved = world
@@ -209,111 +223,95 @@ fn resolve_single_view_tiles(
         view_state,
         f64::from(dem.tile_size),
     );
-    let mut keyed: Vec<(f64, WorldTileCoords)> =
-        view_region.iter().map(|c| (order_key(&c), c)).collect();
-    keyed.sort_unstable_by(|left, right| left.0.total_cmp(&right.0));
-    let ordered = keyed.into_iter().map(|(_, c)| c).collect();
-    Ok(Some((ordered, (key, view_region))))
+    scratch.keyed.clear();
+    scratch
+        .keyed
+        .extend(view_region.iter().map(|c| (order_key(&c), c)));
+    scratch
+        .keyed
+        .sort_unstable_by(|left, right| left.0.total_cmp(&right.0));
+    scratch.single_view_tiles.clear();
+    scratch
+        .single_view_tiles
+        .extend(scratch.keyed.iter().map(|(_, c)| *c));
+    Ok(Some((key, view_region)))
 }
 
-impl<E: Environment, T: DemTransferables> RequestSystem<E, T> {
-    fn dispatch_wanted(
-        &self,
-        style: &crate::style::Style,
-        world: &mut crate::tcs::world::World,
-        dem: &crate::terrain::source::DemSource,
-        terrain_tiles: &[WorldTileCoords],
-        multi: Option<&crate::render::eye_covering::MultiViewExtractCovering>,
-    ) {
-        let mut requested = FxHashSet::default();
-        let has_raster = style.cached_has_visible_raster_type(&RASTER_LAYER_TYPES);
-        let mut budget = dem_request_budget(world, has_raster);
-        let mut wanted = {
-            let drapes = world
-                .resources
-                .get::<DrapeRequests>()
-                .map(|r| r.0.as_slice())
-                .unwrap_or(&[]);
-            let prefetch = world
-                .resources
-                .get::<DrapePrefetchRequests>()
-                .map(|r| r.0.as_slice())
-                .unwrap_or(&[]);
-            let mut list = request_order(
-                terrain_tiles.iter().copied().chain(drapes.iter().copied()),
-                &world.tiles,
-                dem.minzoom,
-                dem.maxzoom,
-            );
-            list.extend(request_order(
-                prefetch.iter().copied(),
-                &world.tiles,
-                dem.minzoom,
-                dem.maxzoom,
-            ));
-            list
-        };
-        let mut deferred = false;
-        let mut frame_style = FrameStyle::new(style);
-        for coords in wanted.drain(..) {
-            if coords.build_quad_key().is_none() || !requested.insert(coords) {
-                continue;
-            }
-            if tile_retry::backing_off(world, coords, RequestKind::Dem)
-                || world.tiles.query::<&DemTileComponent>(coords).is_some()
-                    && !tile_retry::due(world, coords, RequestKind::Dem)
-            {
-                continue;
-            }
-            // The rest wait for a later frame, once tiles in flight have landed.
-            if budget == 0 {
-                deferred = true;
-                continue;
-            }
-            budget -= 1;
-            // One rejected tile must not cost the frame its other tiles.
-            if let Err(error) = self.request(coords, &mut frame_style, world) {
-                tracing::warn!(%error, "tile request rejected; it is requested again after a backoff");
-                tile_retry::rejected(world, coords, RequestKind::Dem, None);
-            }
+fn dispatch_wanted<E: Environment, T: DemTransferables>(
+    kernel: &Rc<Kernel<E>>,
+    scratch: &mut memo::DemRequestScratch,
+    style: &crate::style::Style,
+    world: &mut crate::tcs::world::World,
+    dem: &crate::terrain::source::DemSource,
+    multi: Option<&crate::render::eye_covering::MultiViewExtractCovering>,
+) {
+    scratch.requested.clear();
+    let has_raster = style.cached_has_visible_raster_type(&RASTER_LAYER_TYPES);
+    let mut budget = dem_request_budget(world, has_raster);
+    fill_wanted(world, scratch, dem, multi);
+    let mut deferred = false;
+    let mut frame_style = FrameStyle::new(style);
+    for coords in scratch.wanted.drain(..) {
+        if coords.build_quad_key().is_none() || !scratch.requested.insert(coords) {
+            continue;
         }
-        crate::io::tile_backpressure::set_dem_deferred(world, deferred);
-        if let Some(multi) = multi {
-            requested.extend(multi.skipped_wanted_dem.iter().copied());
+        if tile_retry::backing_off(world, coords, RequestKind::Dem)
+            || world.tiles.query::<&DemTileComponent>(coords).is_some()
+                && !tile_retry::due(world, coords, RequestKind::Dem)
+        {
+            continue;
         }
-        tile_retry::want(world, RequestKind::Dem, &requested);
-        memo::store_wanted_dems(world, requested);
+        // The rest wait for a later frame, once tiles in flight have landed.
+        if budget == 0 {
+            deferred = true;
+            continue;
+        }
+        budget -= 1;
+        // One rejected tile must not cost the frame its other tiles.
+        if let Err(error) = request_dem_tile::<E, T>(kernel, coords, &mut frame_style, world) {
+            tracing::warn!(%error, "tile request rejected; it is requested again after a backoff");
+            tile_retry::rejected(world, coords, RequestKind::Dem, None);
+        }
     }
-    fn request(
-        &self,
-        coords: WorldTileCoords,
-        style: &mut FrameStyle,
-        world: &mut crate::tcs::world::World,
-    ) -> SystemResult {
-        let exists = world.tiles.query::<&DemTileComponent>(coords).is_some();
-        let attempt = tile_retry::next_attempt(world);
-        let Some(mut tile) = world.tiles.spawn_mut(coords) else {
-            return Err(SystemError::InvalidTile { coords });
-        };
-        self.kernel
-            .apc()
-            .call_tagged(
-                ProcedureTag::FetchDem,
-                Input::new(coords, style.worker_snapshot(), attempt),
-                fetch_dem_apc::<E::OffscreenKernelEnvironment, T, _>,
-            )
-            .map_err(|source| SystemError::TileRequest {
-                kind: "DEM",
-                coords,
-                source,
-            })?;
-        if !exists {
-            tile.insert(DemTileComponent::Pending);
-        }
-        tile_retry::started(world, coords, RequestKind::Dem, attempt, None);
-        tracing::debug!(%coords, "DEM tile request accepted");
-        Ok(())
+    crate::io::tile_backpressure::set_dem_deferred(world, deferred);
+    if let Some(multi) = multi {
+        scratch
+            .requested
+            .extend(multi.skipped_wanted_dem.iter().copied());
     }
+    tile_retry::want(world, RequestKind::Dem, &scratch.requested);
+    memo::store_wanted_dems(world, &scratch.requested);
+}
+
+fn request_dem_tile<E: Environment, T: DemTransferables>(
+    kernel: &Rc<Kernel<E>>,
+    coords: WorldTileCoords,
+    style: &mut FrameStyle,
+    world: &mut crate::tcs::world::World,
+) -> SystemResult {
+    let exists = world.tiles.query::<&DemTileComponent>(coords).is_some();
+    let attempt = tile_retry::next_attempt(world);
+    let Some(mut tile) = world.tiles.spawn_mut(coords) else {
+        return Err(SystemError::InvalidTile { coords });
+    };
+    kernel
+        .apc()
+        .call_tagged(
+            ProcedureTag::FetchDem,
+            Input::new(coords, style.worker_snapshot(), attempt),
+            fetch_dem_apc::<E::OffscreenKernelEnvironment, T, _>,
+        )
+        .map_err(|source| SystemError::TileRequest {
+            kind: "DEM",
+            coords,
+            source,
+        })?;
+    if !exists {
+        tile.insert(DemTileComponent::Pending);
+    }
+    tile_retry::started(world, coords, RequestKind::Dem, attempt, None);
+    tracing::debug!(%coords, "DEM tile request accepted");
+    Ok(())
 }
 
 /// Fetches and decodes one DEM tile on a worker.
@@ -412,39 +410,91 @@ async fn load_and_send_dem<K: OffscreenKernel, T: DemTransferables, C: Context>(
 mod tests;
 
 // Foreground DEMs must not queue behind coarse textures: their resolutions are independent.
-fn request_order(
+fn fill_wanted(
+    world: &crate::tcs::world::World,
+    scratch: &mut memo::DemRequestScratch,
+    dem: &crate::terrain::source::DemSource,
+    multi: Option<&crate::render::eye_covering::MultiViewExtractCovering>,
+) {
+    scratch.wanted.clear();
+    let drapes = world
+        .resources
+        .get::<DrapeRequests>()
+        .map_or(&[][..], |r| r.0.as_slice());
+    let prefetch = world
+        .resources
+        .get::<DrapePrefetchRequests>()
+        .map_or(&[][..], |r| r.0.as_slice());
+    let terrain_tiles = multi.map_or(scratch.single_view_tiles.as_slice(), |m| {
+        m.terrain_tiles.as_slice()
+    });
+    append_ordered_into(
+        terrain_tiles.iter().copied().chain(drapes.iter().copied()),
+        &world.tiles,
+        (dem.minzoom, dem.maxzoom),
+        (
+            &mut scratch.seen,
+            &mut scratch.fine,
+            &mut scratch.remaining,
+            &mut scratch.wanted,
+        ),
+    );
+    append_ordered_into(
+        prefetch.iter().copied(),
+        &world.tiles,
+        (dem.minzoom, dem.maxzoom),
+        (
+            &mut scratch.seen,
+            &mut scratch.fine,
+            &mut scratch.remaining,
+            &mut scratch.wanted,
+        ),
+    );
+}
+
+fn append_ordered_into(
     tiles: impl Iterator<Item = WorldTileCoords>,
     loaded: &Tiles,
-    minzoom: u8,
-    maxzoom: u8,
-) -> Vec<WorldTileCoords> {
-    let mut seen = FxHashSet::default();
-    let fine: Vec<_> = tiles
-        .filter_map(|coords| dem_tile_coords(coords, minzoom, maxzoom))
-        .filter(|coords| seen.insert(*coords))
-        .collect();
-    let mut result = Vec::new();
-    for coords in &fine {
+    (minzoom, maxzoom): (u8, u8),
+    (seen, fine, remaining, out): (
+        &mut FxHashSet<WorldTileCoords>,
+        &mut Vec<WorldTileCoords>,
+        &mut Vec<WorldTileCoords>,
+        &mut Vec<WorldTileCoords>,
+    ),
+) {
+    seen.clear();
+    fine.clear();
+    remaining.clear();
+    for coords in tiles {
+        if let Some(dem_coords) = dem_tile_coords(coords, minzoom, maxzoom)
+            && seen.insert(dem_coords)
+        {
+            fine.push(dem_coords);
+        }
+    }
+    let ancestor_start = out.len();
+    for &coords in fine.iter() {
         let already_loaded = matches!(
-            loaded.query::<&DemTileComponent>(*coords),
+            loaded.query::<&DemTileComponent>(coords),
             Some(DemTileComponent::Loaded(_))
         );
-        if !already_loaded {
-            if let Some(parent) = dem_ancestor_coords(*coords, minzoom) {
-                if seen.insert(parent) {
-                    result.push(parent);
-                }
+        if !already_loaded
+            && let Some(parent) = dem_ancestor_coords(coords, minzoom)
+            && seen.insert(parent)
+        {
+            if out.len() - ancestor_start < 4 {
+                out.push(parent);
+            } else {
+                remaining.push(parent);
             }
         }
     }
-    // Up to four coarse `z5` tiles bracket viewports straddling continental tile boundaries
-    // (e.g. Innsbruck near `11.25° E`) before fine DEM tiles stream in.
-    let remaining = result.split_off(result.len().min(4));
-    result.extend(fine.iter().copied());
-    result.extend(remaining);
-    result.extend(
-        fine.into_iter()
+    out.extend_from_slice(fine);
+    out.extend_from_slice(remaining);
+    out.extend(
+        fine.iter()
+            .copied()
             .filter_map(|coords| missing_dem_fallback(loaded, coords, minzoom)),
     );
-    result
 }

@@ -1,6 +1,5 @@
 //! Repeating-image pattern binding and fused draw commands.
 
-use super::DrawVectorTile;
 use crate::{
     render::{
         pass_refs::PassFrameRefs,
@@ -54,58 +53,16 @@ impl RenderCommand<LayerItem> for DrawPatternTiles {
         item: &LayerItem,
         pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let refs = pass.as_ref().as_ref();
-        let (
-            Some(patterns),
-            Some(projection_resources),
-            Some(buffer_pool),
-            Some(tile_view_pattern),
-        ) = (
-            super::resolve_pattern_resources(refs, world),
-            PassFrameRefs::resolve_projection(refs, world),
-            super::resolve_vector_pool(refs, world),
-            PassFrameRefs::resolve_tile_view_pattern(refs, world),
-        )
-        else {
-            return RenderCommandResult::Failure;
-        };
-        let binding = patterns.binding(item.style_layer);
-        if (binding.is_none() && !patterns.is_per_feature(item.style_layer))
-            || !patterns.has_pipeline()
-        {
-            return RenderCommandResult::Failure;
-        }
-        let Some(entry) =
-            buffer_pool
-                .as_ref()
-                .resolve_entry(item.tile.coords, item.style_layer, item.entry_slot)
-        else {
-            return RenderCommandResult::Failure;
-        };
-        if entry.indices_buffer_range().is_empty() {
-            tracing::error!("Tried to draw a vector tile without any vertices");
-            return RenderCommandResult::Failure;
-        }
-        let Some(pipeline) = patterns.select_pipeline(entry.is_uniform_feature_metadata()) else {
-            return RenderCommandResult::Failure;
-        };
-        pass.set_pipeline(pipeline);
-        pass.set_bind_group(
-            0,
-            projection_resources.bind_group_for(item.projection_binding()),
-            &[],
-        );
-        if let Some(binding) = binding {
-            pass.set_bind_group(1, binding, &[]);
-        }
-        DrawVectorTile::<true>::draw_prepared(
+        if super::try_draw_vector_group_with_kind(
             world,
-            buffer_pool,
-            tile_view_pattern,
-            entry,
-            item,
+            std::slice::from_ref(item),
             pass,
-        )
+            crate::render::render_phase::LayerDrawKind::VectorPattern,
+        ) {
+            RenderCommandResult::Success
+        } else {
+            RenderCommandResult::Failure
+        }
     }
 }
 

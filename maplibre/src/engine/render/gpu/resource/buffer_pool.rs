@@ -468,7 +468,7 @@ mod u16_chunks;
 mod updates;
 mod upload;
 pub use allocator::AllocationError;
-pub use device::BufferBindPass;
+pub use device::{BufferBindPass, SlabBindCache};
 pub use index::{IndexEntry, RingIndex};
 pub use shared::UniformLayerUpload;
 pub use upload::LayerGeometryUpload;
