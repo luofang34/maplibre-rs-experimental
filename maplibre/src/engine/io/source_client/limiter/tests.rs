@@ -83,8 +83,8 @@ fn pending_upload_permits_deduplicates_and_releases_when_not_deferred() {
 #[test]
 fn heavy_tile_limit_throttles_above_threshold_and_drains_cleanly() {
     assert_eq!(heavy_tile_limit_for_pages(0), 4);
-    assert_eq!(heavy_tile_limit_for_pages(383), 4);
-    assert_eq!(heavy_tile_limit_for_pages(384), 2);
+    assert_eq!(heavy_tile_limit_for_pages(895), 4);
+    assert_eq!(heavy_tile_limit_for_pages(896), 2);
     assert_eq!(heavy_tile_limit_for_pages(1024), 2);
 
     let counter = Arc::new(CountWake(AtomicUsize::new(0)));
@@ -97,28 +97,28 @@ fn heavy_tile_limit_throttles_above_threshold_and_drains_cleanly() {
 
     // Tightening limit mid-flight blocks new work until in-flight count drains below 2.
     assert!(state
-        .poll_acquire(heavy_tile_limit_for_pages(384), &waker)
+        .poll_acquire(heavy_tile_limit_for_pages(896), &waker)
         .is_pending());
     for w in state.release() {
         w.wake();
     }
     assert_eq!(state.in_use, 3);
     assert!(state
-        .poll_acquire(heavy_tile_limit_for_pages(384), &waker)
+        .poll_acquire(heavy_tile_limit_for_pages(896), &waker)
         .is_pending());
     for w in state.release() {
         w.wake();
     }
     assert_eq!(state.in_use, 2);
     assert!(state
-        .poll_acquire(heavy_tile_limit_for_pages(384), &waker)
+        .poll_acquire(heavy_tile_limit_for_pages(896), &waker)
         .is_pending());
     for w in state.release() {
         w.wake();
     }
     assert_eq!(state.in_use, 1);
     assert!(state
-        .poll_acquire(heavy_tile_limit_for_pages(384), &waker)
+        .poll_acquire(heavy_tile_limit_for_pages(896), &waker)
         .is_ready());
     assert_eq!(state.in_use, 2);
 }
@@ -126,14 +126,40 @@ fn heavy_tile_limit_throttles_above_threshold_and_drains_cleanly() {
 #[test]
 fn shared_and_dem_tile_limits_tighten_at_memory_threshold() {
     assert_eq!(shared_tile_limit_for_pages(0), 8);
-    assert_eq!(shared_tile_limit_for_pages(383), 8);
-    assert_eq!(shared_tile_limit_for_pages(384), 4);
+    assert_eq!(shared_tile_limit_for_pages(895), 8);
+    assert_eq!(shared_tile_limit_for_pages(896), 4);
     assert_eq!(shared_tile_limit_for_pages(1024), 4);
 
-    assert_eq!(dem_tile_limit_for_pages(0), 2);
-    assert_eq!(dem_tile_limit_for_pages(383), 2);
-    assert_eq!(dem_tile_limit_for_pages(384), 1);
-    assert_eq!(dem_tile_limit_for_pages(1024), 1);
+    assert_eq!(dem_tile_limit_for_pages(0), 4);
+    assert_eq!(dem_tile_limit_for_pages(895), 4);
+    assert_eq!(dem_tile_limit_for_pages(896), 2);
+    assert_eq!(dem_tile_limit_for_pages(1024), 2);
+}
+
+#[test]
+fn mt_memory_policy_tiers_scale_by_device_memory_gib() {
+    let low = MtMemoryPolicy::for_device_memory_gib(Some(2));
+    assert_eq!(low, MtMemoryPolicy::CONSERVATIVE_24_MIB);
+    assert_eq!(low.throttle_pages(), 384);
+    assert_eq!(low.dem_limit(383), 2);
+    assert_eq!(low.dem_limit(384), 1);
+
+    let mid = MtMemoryPolicy::for_device_memory_gib(Some(4));
+    assert_eq!(mid, MtMemoryPolicy::BALANCED_40_MIB);
+    assert_eq!(mid.throttle_pages(), 640);
+    assert_eq!(mid.dem_limit(639), 3);
+    assert_eq!(mid.dem_limit(640), 1);
+
+    let high = MtMemoryPolicy::for_device_memory_gib(Some(8));
+    assert_eq!(high, MtMemoryPolicy::STANDARD_56_MIB);
+    assert_eq!(MtMemoryPolicy::for_device_memory_gib(None), high);
+    assert_eq!(high.throttle_pages(), 896);
+    assert_eq!(high.heavy_limit(895), 4);
+    assert_eq!(high.heavy_limit(896), 2);
+    assert_eq!(high.dem_limit(895), 4);
+    assert_eq!(high.dem_limit(896), 2);
+    assert_eq!(high.shared_limit(895), 8);
+    assert_eq!(high.shared_limit(896), 4);
 }
 
 #[test]

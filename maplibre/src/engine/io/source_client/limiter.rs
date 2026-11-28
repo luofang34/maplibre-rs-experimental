@@ -11,36 +11,105 @@ use std::{
 };
 
 #[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
-const MAX_HEAVY_TILES_LOW_MEM: usize = 4;
-#[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
-const MAX_HEAVY_TILES_HIGH_MEM: usize = 2;
-#[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
-const MAX_DEM_TILES_LOW_MEM: usize = 2;
-#[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
-const MAX_DEM_TILES_HIGH_MEM: usize = 1;
-/// 24 MiB (`384 * 64 KiB` WASM pages): run up to 4 heavy workers in parallel during low-memory
-/// boot and scene switches, then throttle heavy decodes to 2 once shared linear memory reaches
-/// 24 MiB so dense flight bursts reuse freed pages instead of permanently ratcheting
-/// `WebAssembly.Memory`.
-#[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
-const HEAVY_TILE_THROTTLE_PAGES: usize = 24 * 16;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct MtMemoryPolicy {
+    throttle_mib: usize,
+    heavy_low_mem: usize,
+    heavy_high_mem: usize,
+    dem_low_mem: usize,
+    dem_high_mem: usize,
+    shared_low_mem: usize,
+    shared_high_mem: usize,
+}
 
 #[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
-const fn heavy_tile_limit_for_pages(pages: usize) -> usize {
-    if pages >= HEAVY_TILE_THROTTLE_PAGES {
-        MAX_HEAVY_TILES_HIGH_MEM
-    } else {
-        MAX_HEAVY_TILES_LOW_MEM
+impl MtMemoryPolicy {
+    const WASM_PAGES_PER_MIB: usize = 16;
+
+    /// Conservative baseline (`24 MiB`, `384 * 64 KiB` pages) suited for `<= 2 GiB` devices.
+    const CONSERVATIVE_24_MIB: Self = Self {
+        throttle_mib: 24,
+        heavy_low_mem: 4,
+        heavy_high_mem: 2,
+        dem_low_mem: 2,
+        dem_high_mem: 1,
+        shared_low_mem: 8,
+        shared_high_mem: 4,
+    };
+
+    /// Balanced tier (`40 MiB`, `640 * 64 KiB` pages) suited for `<= 4 GiB` mid-memory devices.
+    const BALANCED_40_MIB: Self = Self {
+        throttle_mib: 40,
+        heavy_low_mem: 4,
+        heavy_high_mem: 2,
+        dem_low_mem: 3,
+        dem_high_mem: 1,
+        shared_low_mem: 8,
+        shared_high_mem: 4,
+    };
+
+    /// Standard tier (`56 MiB`, `896 * 64 KiB` pages): allows 4 parallel heavy/DEM workers during
+    /// boot and scene transitions before tightening to 2 once shared memory crosses 56 MiB.
+    const STANDARD_56_MIB: Self = Self {
+        throttle_mib: 56,
+        heavy_low_mem: 4,
+        heavy_high_mem: 2,
+        dem_low_mem: 4,
+        dem_high_mem: 2,
+        shared_low_mem: 8,
+        shared_high_mem: 4,
+    };
+
+    /// Selects the multithreaded decode memory tier for an optional `navigator.deviceMemory` GiB
+    /// hint (`None` defaults to `STANDARD_56_MIB`).
+    const fn for_device_memory_gib(device_memory_gib: Option<u32>) -> Self {
+        match device_memory_gib {
+            Some(gib) if gib <= 2 => Self::CONSERVATIVE_24_MIB,
+            Some(gib) if gib <= 4 => Self::BALANCED_40_MIB,
+            Some(_) | None => Self::STANDARD_56_MIB,
+        }
+    }
+
+    const fn throttle_pages(self) -> usize {
+        self.throttle_mib * Self::WASM_PAGES_PER_MIB
+    }
+
+    const fn heavy_limit(self, pages: usize) -> usize {
+        if pages >= self.throttle_pages() {
+            self.heavy_high_mem
+        } else {
+            self.heavy_low_mem
+        }
+    }
+
+    const fn dem_limit(self, pages: usize) -> usize {
+        if pages >= self.throttle_pages() {
+            self.dem_high_mem
+        } else {
+            self.dem_low_mem
+        }
+    }
+
+    const fn shared_limit(self, pages: usize) -> usize {
+        if pages >= self.throttle_pages() {
+            self.shared_high_mem
+        } else {
+            self.shared_low_mem
+        }
     }
 }
 
 #[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
+const ACTIVE_MT_MEMORY_POLICY: MtMemoryPolicy = MtMemoryPolicy::for_device_memory_gib(None);
+
+#[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
+const fn heavy_tile_limit_for_pages(pages: usize) -> usize {
+    ACTIVE_MT_MEMORY_POLICY.heavy_limit(pages)
+}
+
+#[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
 const fn dem_tile_limit_for_pages(pages: usize) -> usize {
-    if pages >= HEAVY_TILE_THROTTLE_PAGES {
-        MAX_DEM_TILES_HIGH_MEM
-    } else {
-        MAX_DEM_TILES_LOW_MEM
-    }
+    ACTIVE_MT_MEMORY_POLICY.dem_limit(pages)
 }
 
 #[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
@@ -51,7 +120,7 @@ fn current_dem_tile_limit() -> usize {
     }
     #[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
     {
-        MAX_DEM_TILES_LOW_MEM
+        ACTIVE_MT_MEMORY_POLICY.dem_low_mem
     }
 }
 
@@ -67,17 +136,8 @@ fn current_heavy_tile_limit() -> usize {
 }
 
 #[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
-const MAX_SHARED_TILES_LOW_MEM: usize = 8;
-#[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
-const MAX_SHARED_TILES_HIGH_MEM: usize = 4;
-
-#[cfg(any(test, all(target_arch = "wasm32", target_feature = "atomics")))]
 const fn shared_tile_limit_for_pages(pages: usize) -> usize {
-    if pages >= HEAVY_TILE_THROTTLE_PAGES {
-        MAX_SHARED_TILES_HIGH_MEM
-    } else {
-        MAX_SHARED_TILES_LOW_MEM
-    }
+    ACTIVE_MT_MEMORY_POLICY.shared_limit(pages)
 }
 
 #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
