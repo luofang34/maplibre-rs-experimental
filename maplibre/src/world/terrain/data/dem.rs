@@ -1,0 +1,432 @@
+//! Decoded elevation tiles.
+
+use image::RgbaImage;
+use thiserror::Error;
+
+use crate::coords::{WorldTileCoords, EXTENT};
+
+/// Zoom levels between a draped tile and the DEM tile it samples, as in GL JS `deltaZoom`.
+const DELTA_ZOOM: u8 = 1;
+
+/// Returns the DEM tile a view tile samples: one zoom level up, clamped to the source range.
+pub fn dem_tile_coords(
+    coords: WorldTileCoords,
+    minzoom: u8,
+    maxzoom: u8,
+) -> Option<WorldTileCoords> {
+    let zoom = u8::from(coords.z).saturating_sub(DELTA_ZOOM).min(maxzoom);
+    if zoom < minzoom {
+        return None;
+    }
+    let mut current = coords;
+    while u8::from(current.z) > zoom {
+        current = current.get_parent()?;
+    }
+    Some(current)
+}
+
+/// Failure while decoding a DEM tile or filling its border.
+#[derive(Clone, Copy, Debug, Error, PartialEq)]
+pub enum DemError {
+    /// Elevation tiles must be square.
+    #[error("DEM tiles must be square, got {width}x{height} pixels")]
+    NotSquare {
+        /// Image width in pixels.
+        width: u32,
+        /// Image height in pixels.
+        height: u32,
+    },
+    /// Elevation tiles must contain at least one sample.
+    #[error("DEM tiles must not be empty")]
+    Empty,
+    /// Neighbouring tiles must have the same number of samples to share borders.
+    #[error("DEM neighbour has {actual} samples per edge, expected {expected}")]
+    DimensionMismatch {
+        /// Samples per edge of this tile.
+        expected: u32,
+        /// Samples per edge of the neighbour.
+        actual: u32,
+    },
+    /// A border must face one of the eight adjacent tiles.
+    #[error("invalid DEM neighbour offset ({dx}, {dy})")]
+    InvalidNeighbour {
+        /// Horizontal offset.
+        dx: i32,
+        /// Vertical offset.
+        dy: i32,
+    },
+    /// Encoded samples cannot be copied between differently encoded tiles.
+    #[error("DEM neighbour unpack vector {actual:?} differs from {expected:?}")]
+    EncodingMismatch {
+        /// This tile's channel factors and base shift.
+        expected: [f64; 4],
+        /// The neighbour's channel factors and base shift.
+        actual: [f64; 4],
+    },
+    /// The border must be supplied in full to avoid partially updated samples.
+    #[error("DEM border ({dx}, {dy}) requires {expected} bytes, got {actual}")]
+    BorderLength {
+        /// Horizontal offset.
+        dx: i32,
+        /// Vertical offset.
+        dy: i32,
+        /// Required byte count.
+        expected: usize,
+        /// Supplied byte count.
+        actual: usize,
+    },
+}
+
+/// Elevation samples of one tile with a two-pixel border, following GL JS `DEMData`.
+///
+/// Pixels keep their RGB encoding so the same bytes upload to the GPU unchanged; the unpack
+/// vector turns a channel triple into metres on both sides. The border replicates the nearest
+/// edge sample so interpolation stays continuous until neighbours can fill it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DemTile {
+    dim: u32,
+    stride: u32,
+    pixels: Vec<u8>,
+    unpack: [f64; 4],
+    min: f64,
+    max: f64,
+}
+
+impl DemTile {
+    /// Builds a tile from a decoded image and the source's unpack vector.
+    pub fn from_image(image: &RgbaImage, unpack: [f64; 4]) -> Result<Self, DemError> {
+        Self::decode(image, unpack, None)
+    }
+
+    /// Builds a tile like [`from_image`](Self::from_image), lowering the samples that rise more
+    /// steeply than terrain on both flanks for a sample `sample_metres` across.
+    pub fn from_image_despiked(
+        image: &RgbaImage,
+        unpack: [f64; 4],
+        sample_metres: f64,
+    ) -> Result<Self, DemError> {
+        Self::decode(image, unpack, Some(sample_metres))
+    }
+
+    /// Constructs a tile directly from pre-decoded bordered RGBA pixels and elevation bounds.
+    pub fn from_raw_parts(
+        dim: u32,
+        stride: u32,
+        pixels: Vec<u8>,
+        unpack: [f64; 4],
+        min: f64,
+        max: f64,
+    ) -> Result<Self, DemError> {
+        let expected_stride = dim.checked_add(4).ok_or(DemError::Empty)?;
+        let expected_bytes = usize::try_from(stride)
+            .ok()
+            .and_then(|s| s.checked_mul(s))
+            .and_then(|n| n.checked_mul(4));
+        if dim == 0 || stride != expected_stride || expected_bytes != Some(pixels.len()) {
+            return Err(DemError::Empty);
+        }
+        Ok(Self {
+            dim,
+            stride,
+            pixels,
+            unpack,
+            min,
+            max,
+        })
+    }
+
+    fn decode(
+        image: &RgbaImage,
+        unpack: [f64; 4],
+        sample_metres: Option<f64>,
+    ) -> Result<Self, DemError> {
+        let (width, height) = image.dimensions();
+        if width != height {
+            return Err(DemError::NotSquare { width, height });
+        }
+        if width == 0 {
+            return Err(DemError::Empty);
+        }
+        let dim = width;
+        let stride = dim + 4;
+        let mut tile = Self {
+            dim,
+            stride,
+            pixels: vec![0; (stride * stride * 4) as usize],
+            unpack,
+            min: f64::INFINITY,
+            max: f64::NEG_INFINITY,
+        };
+        let source = image.as_raw();
+        let row_bytes = (dim * 4) as usize;
+        for y in 0..dim {
+            let source_row = y as usize * row_bytes;
+            let target_row = tile.byte_index(0, i64::from(y));
+            if let (Some(dst), Some(src)) = (
+                tile.pixels.get_mut(target_row..target_row + row_bytes),
+                source.get(source_row..source_row + row_bytes),
+            ) {
+                dst.copy_from_slice(src);
+            }
+        }
+        if let Some(sample_metres) = sample_metres {
+            let replaced = tile.remove_spikes(sample_metres);
+            if replaced > 0 {
+                tracing::debug!(replaced, sample_metres, "removed DEM spike samples");
+            }
+        }
+        tile.replicate_border();
+        for y in 0..dim {
+            for x in 0..dim {
+                let elevation = tile.get(i64::from(x), i64::from(y));
+                tile.min = tile.min.min(elevation);
+                tile.max = tile.max.max(elevation);
+            }
+        }
+        Ok(tile)
+    }
+
+    fn replicate_border(&mut self) {
+        let dim = i64::from(self.dim);
+        for y in -2..dim + 2 {
+            if y < 0 || y >= dim {
+                let from = self.byte_index(0, y.clamp(0, dim - 1));
+                let to = self.byte_index(0, y);
+                self.pixels
+                    .copy_within(from..from + self.dim as usize * 4, to);
+            }
+            for x in [-2, -1, dim, dim + 1] {
+                self.copy_pixel((x.clamp(0, dim - 1), y), (x, y));
+            }
+        }
+    }
+
+    fn copy_pixel(&mut self, from: (i64, i64), to: (i64, i64)) {
+        let from = self.byte_index(from.0, from.1);
+        let to = self.byte_index(to.0, to.1);
+        self.pixels.copy_within(from..from + 4, to);
+    }
+
+    /// Byte offset in the two-pixel padded image.
+    fn byte_index(&self, x: i64, y: i64) -> usize {
+        let stride = i64::from(self.stride);
+        (((y + 2) * stride + (x + 2)) * 4) as usize
+    }
+
+    /// Elevation in metres, clamped to the padded range `-2..=dim + 1`.
+    pub fn get(&self, x: i64, y: i64) -> f64 {
+        let x = x.clamp(-2, i64::from(self.dim) + 1);
+        let y = y.clamp(-2, i64::from(self.dim) + 1);
+        let index = self.byte_index(x, y);
+        let [red, green, blue, base] = self.unpack;
+        let Some(&[r, g, b, _]) = self.pixels.get(index..index + 4) else {
+            return -base;
+        };
+        f64::from(r) * red + f64::from(g) * green + f64::from(b) * blue - base
+    }
+
+    /// Bilinear elevation in sample space, clamped to `-1..=dim`.
+    ///
+    /// Integer coordinates address pixel centres; negative fractions interpolate the west or
+    /// north border with the first interior sample.
+    pub fn sample_bilinear(&self, x: f64, y: f64) -> f64 {
+        let x = x.clamp(-1.0, f64::from(self.dim));
+        let y = y.clamp(-1.0, f64::from(self.dim));
+        let cx = x.floor();
+        let cy = y.floor();
+        let (tx, ty) = (x - cx, y - cy);
+        let (cx, cy) = (cx as i64, cy as i64);
+        let top = self.get(cx, cy) * (1.0 - tx) + self.get(cx + 1, cy) * tx;
+        let bottom = self.get(cx, cy + 1) * (1.0 - tx) + self.get(cx + 1, cy + 1) * tx;
+        top * (1.0 - ty) + bottom * ty
+    }
+
+    /// Elevation at tile coordinates in `0..=EXTENT`. As in GL JS, a sample sits at the integer
+    /// coordinate of its texel, not at the texel's centre.
+    pub fn elevation_at_tile_coords(&self, x: f64, y: f64) -> f64 {
+        let scale = f64::from(self.dim) / EXTENT;
+        self.sample_bilinear(x.clamp(0.0, EXTENT) * scale, y.clamp(0.0, EXTENT) * scale)
+    }
+
+    /// Replaces the border facing a neighbour at `(dx, dy)` with that neighbour's edge samples.
+    pub fn backfill_border(
+        &mut self,
+        neighbour: &DemTile,
+        dx: i32,
+        dy: i32,
+    ) -> Result<(), DemError> {
+        self.validate_neighbour(neighbour.dim, neighbour.unpack)?;
+        self.fill_border(dx, dy, &neighbour.edge_samples(dx, dy)?)?;
+        Ok(())
+    }
+
+    pub(super) fn validate_neighbour(&self, dim: u32, unpack: [f64; 4]) -> Result<(), DemError> {
+        if dim != self.dim {
+            return Err(DemError::DimensionMismatch {
+                expected: self.dim,
+                actual: dim,
+            });
+        }
+        if unpack != self.unpack {
+            return Err(DemError::EncodingMismatch {
+                expected: self.unpack,
+                actual: unpack,
+            });
+        }
+        Ok(())
+    }
+
+    /// Samples of this tile that a neighbour at `(-dx, -dy)` stores in its border facing us.
+    ///
+    /// Row-major over two columns or rows, or a 2x2 corner when both offsets are set.
+    pub fn edge_samples(&self, dx: i32, dy: i32) -> Result<Vec<u8>, DemError> {
+        let dim = i64::from(self.dim);
+        let (x_range, y_range) = Self::border_region(dim, dx, dy)?;
+        let count = (x_range.end - x_range.start) * (y_range.end - y_range.start);
+        let mut samples = Vec::with_capacity(count.max(0) as usize * 4);
+        for y in y_range {
+            for x in x_range.clone() {
+                let index = self.byte_index(x - i64::from(dx) * dim, y - i64::from(dy) * dim);
+                if let Some(pixel) = self.pixels.get(index..index + 4) {
+                    samples.extend_from_slice(pixel);
+                }
+            }
+        }
+        Ok(samples)
+    }
+
+    /// Returns whether the border facing `(dx, dy)` already equals `samples`.
+    pub fn border_matches(&self, dx: i32, dy: i32, samples: &[u8]) -> Result<bool, DemError> {
+        let dim = i64::from(self.dim);
+        let (x_range, y_range) = Self::border_region(dim, dx, dy)?;
+        let expected =
+            (x_range.end - x_range.start) as usize * (y_range.end - y_range.start) as usize * 4;
+        if samples.len() != expected {
+            return Err(DemError::BorderLength {
+                dx,
+                dy,
+                expected,
+                actual: samples.len(),
+            });
+        }
+        let mut positions = y_range.flat_map(|y| x_range.clone().map(move |x| (x, y)));
+        Ok(positions
+            .by_ref()
+            .zip(samples.as_chunks::<4>().0.iter())
+            .all(|((x, y), pixel)| {
+                let index = self.byte_index(x, y);
+                self.pixels.get(index..index + 4) == Some(pixel.as_slice())
+            }))
+    }
+
+    /// Writes samples produced by a neighbour's [`edge_samples`](Self::edge_samples) into the
+    /// border facing that neighbour at `(dx, dy)`.
+    /// Returns whether any pixels changed.
+    pub fn fill_border(&mut self, dx: i32, dy: i32, samples: &[u8]) -> Result<bool, DemError> {
+        let dim = i64::from(self.dim);
+        let (x_range, y_range) = Self::border_region(dim, dx, dy)?;
+        let expected =
+            (x_range.end - x_range.start) as usize * (y_range.end - y_range.start) as usize * 4;
+        if samples.len() != expected {
+            return Err(DemError::BorderLength {
+                dx,
+                dy,
+                expected,
+                actual: samples.len(),
+            });
+        }
+        let mut changed = false;
+        let positions = y_range.flat_map(|y| x_range.clone().map(move |x| (x, y)));
+        for ((x, y), pixel) in positions.zip(samples.as_chunks::<4>().0.iter()) {
+            let index = self.byte_index(x, y);
+            if let Some(target) = self.pixels.get_mut(index..index + 4) {
+                changed |= target != pixel;
+                target.copy_from_slice(pixel);
+            }
+        }
+        Ok(changed)
+    }
+
+    fn border_region(
+        dim: i64,
+        dx: i32,
+        dy: i32,
+    ) -> Result<(std::ops::Range<i64>, std::ops::Range<i64>), DemError> {
+        if !(-1..=1).contains(&dx) || !(-1..=1).contains(&dy) || (dx == 0 && dy == 0) {
+            return Err(DemError::InvalidNeighbour { dx, dy });
+        }
+        let axis = |delta: i32| match delta {
+            -1 => -2..0,
+            1 => dim..dim + 2,
+            _ => 0..dim,
+        };
+        Ok((axis(dx), axis(dy)))
+    }
+
+    /// Number of samples along one edge, excluding the border.
+    pub fn dim(&self) -> u32 {
+        self.dim
+    }
+
+    /// Number of pixels along one edge of the bordered image.
+    pub fn stride(&self) -> u32 {
+        self.stride
+    }
+
+    /// Bordered RGBA pixels, `stride * stride * 4` bytes.
+    pub fn pixels(&self) -> &[u8] {
+        &self.pixels
+    }
+
+    /// Reconstructs the `dim × dim` interior RGBA8 image (excluding the two-pixel border).
+    pub fn to_rgba_image(&self) -> RgbaImage {
+        let row_bytes = (self.dim * 4) as usize;
+        let mut raw = vec![0_u8; row_bytes * self.dim as usize];
+        for y in 0..self.dim {
+            let src_row = self.byte_index(0, i64::from(y));
+            let dst_row = y as usize * row_bytes;
+            if let (Some(dst), Some(src)) = (
+                raw.get_mut(dst_row..dst_row + row_bytes),
+                self.pixels.get(src_row..src_row + row_bytes),
+            ) {
+                dst.copy_from_slice(src);
+            }
+        }
+        RgbaImage::from_raw(self.dim, self.dim, raw).unwrap_or_else(|| RgbaImage::new(0, 0))
+    }
+
+    /// Returns `fallback` cloned when non-empty, or reconstructs the interior RGBA8 image from
+    /// `self` when `fallback` is a zero-sized placeholder.
+    pub fn resolve_fallback_image(&self, fallback: &RgbaImage) -> RgbaImage {
+        if fallback.width() == 0 || fallback.height() == 0 {
+            self.to_rgba_image()
+        } else {
+            fallback.clone()
+        }
+    }
+
+    /// Channel factors and base shift used to decode the pixels.
+    pub fn unpack(&self) -> [f64; 4] {
+        self.unpack
+    }
+
+    /// Lowest interior elevation in metres.
+    pub fn min(&self) -> f64 {
+        self.min
+    }
+
+    /// Highest interior elevation in metres.
+    pub fn max(&self) -> f64 {
+        self.max
+    }
+}
+
+pub(crate) mod cache;
+mod spikes;
+pub(crate) use spikes::sample_metres;
+
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+pub(crate) mod gpu_readback;

@@ -41,7 +41,7 @@ struct SyncShared<T> {
 }
 
 fn lock<S>(mutex: &Mutex<S>) -> MutexGuard<'_, S> {
-    crate::platform::lock_unpoisoned(mutex)
+    crate::util::sync::lock_unpoisoned(mutex)
 }
 
 /// The owner's side of a thread-safe command and watcher queue over any target `T`.
@@ -372,12 +372,3 @@ where
 
 /// Thread-safe handle (`Clone + Send + Sync + 'static`) to a headed [`Map`].
 pub type SyncMapHandle<E> = SyncHandle<Map<E>>;
-
-/// Thread-safe command queue for an offscreen [`crate::headless::map::HeadlessMap`].
-#[cfg(feature = "headless")]
-pub type SyncHeadlessCommands = SyncCommandQueue<crate::headless::map::HeadlessMap>;
-
-/// Thread-safe handle (`Clone + Send + Sync + 'static`) to an offscreen
-/// [`crate::headless::map::HeadlessMap`].
-#[cfg(feature = "headless")]
-pub type SyncHeadlessHandle = SyncHandle<crate::headless::map::HeadlessMap>;

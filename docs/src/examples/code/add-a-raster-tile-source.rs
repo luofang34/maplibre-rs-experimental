@@ -6,13 +6,13 @@ use maplibre::{
     style::{
         layer::{LayerPaint, RasterPaint, StyleLayer},
         source::{Source, VectorSource},
-        Style,
+        Style, StyleDocument,
     },
 };
 use maplibre_winit::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
 
 pub fn style() -> Style {
-    Style {
+    Style::from_document(StyleDocument {
         version: 8,
         sources: [(
             "raster-tiles".to_string(),
@@ -43,7 +43,7 @@ pub fn style() -> Style {
         center: Some([0.0, 0.0]),
         zoom: Some(0.0),
         ..Default::default()
-    }
+    })
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

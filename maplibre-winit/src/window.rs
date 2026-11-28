@@ -8,6 +8,22 @@ use maplibre::window::{HeadedMapWindow, MapWindow, PhysicalSize, WindowCreateErr
 
 /// Platform window retained by each presentation surface.
 pub type RawWinitWindow = winit::window::Window;
+/// Platform event loop for application events.
+pub type RawWinitEventLoop<ET> = winit::event_loop::EventLoop<ET>;
+/// Platform user-event sender.
+pub type RawEventLoopProxy<ET> = winit::event_loop::EventLoopProxy<ET>;
+
+#[cfg(not(target_arch = "wasm32"))]
+mod noweb;
+#[cfg(not(target_arch = "wasm32"))]
+pub use noweb::WinitMapWindowConfig;
+
+#[cfg(target_arch = "wasm32")]
+mod web;
+#[cfg(target_arch = "wasm32")]
+pub use web::{
+    get_canvas, is_safari_gesture_active, take_safari_trackpad_gesture, WinitMapWindowConfig,
+};
 
 /// A drawable window whose event loop is owned by the application runner.
 pub struct WinitMapWindow<ET: 'static> {

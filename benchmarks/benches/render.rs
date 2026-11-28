@@ -12,9 +12,9 @@ use geozero::mvt::{tile, Message as _, Tile};
 use maplibre::{
     headless::{create_headless_renderer, map::HeadlessMap, HeadlessPlugin},
     plugin::Plugin,
-    render::RenderPlugin,
     style::Style,
     vector::{DefaultVectorTransferables, VectorPlugin},
+    RenderPlugin,
 };
 
 fn zigzag(value: i32) -> u32 {
@@ -68,11 +68,11 @@ fn headless_render(c: &mut Criterion) {
         let (kernel, renderer) = create_headless_renderer(1000, 1000, None)
             .await
             .unwrap_or_else(|error| panic!("Failed to create benchmark renderer: {error}"));
-        let style = Style {
+        let style = Style::from_document(maplibre::style::StyleDocument {
             center: Some([0.0, 0.0]),
             zoom: Some(0.0),
-            ..Style::default()
-        };
+            ..Default::default()
+        });
 
         let plugins: Vec<Box<dyn Plugin<_>>> = vec![
             Box::new(RenderPlugin),

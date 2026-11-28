@@ -9,13 +9,13 @@ use maplibre::{
         sky::SkySpecification,
         source::{RasterDemSource, Source, VectorSource},
         terrain::TerrainSpecification,
-        Style,
+        Style, StyleDocument,
     },
 };
 use maplibre_winit::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
 
 pub fn style() -> Style {
-    Style {
+    Style::from_document(StyleDocument {
         version: 8,
         sources: [
             (
@@ -83,7 +83,7 @@ pub fn style() -> Style {
         zoom: Some(12.0),
         pitch: Some(70.0),
         ..Default::default()
-    }
+    })
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -232,7 +232,7 @@ fn bench_dem_3x3_group(
                     }
                 }
             }
-            black_box((tiles.tiles.len(), uploaded_bordered.len()))
+            black_box((tiles.len(), uploaded_bordered.len()))
         });
     });
 
@@ -247,7 +247,7 @@ fn bench_dem_3x3_group(
                     .expect("dem");
                 ingest_source_dem(&mut tiles, source, *coords, dem, true);
             }
-            black_box(tiles.tiles.len())
+            black_box(tiles.len())
         });
     });
     full_group.finish();
@@ -314,7 +314,7 @@ fn bench_dem_centre_arrival_group(
                 LoadedDem::from_shared(Arc::clone(&centre_shared_dem)),
                 true,
             );
-            black_box(base_tiles.tiles.len())
+            black_box(base_tiles.len())
         });
     });
     border_group.finish();
@@ -334,7 +334,7 @@ fn bench_dem_pipeline(c: &mut Criterion) {
         .map(|(coords, image)| {
             let loaded = decode_image_to_dem(*coords, image, UNPACK_TERRARIUM, circumference)
                 .expect("valid synthetic DEM");
-            (*coords, loaded.tile)
+            (*coords, Arc::clone(loaded.as_ref()))
         })
         .collect();
 

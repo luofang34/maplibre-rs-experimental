@@ -144,9 +144,9 @@ impl InputController {
             };
             if !is_discrete_wheel
                 && self.inner.navigation_state().ctrl_held
-                && crate::web::is_safari_gesture_active()
+                && crate::window::is_safari_gesture_active()
             {
-                self.inner.navigation_state_mut().on_manual_pan_or_zoom();
+                self.inner.on_manual_pan_or_zoom();
                 return true;
             }
         }
@@ -168,7 +168,7 @@ impl UpdateState for InputController {
     fn update_state(&mut self, map_context: &mut MapContext, dt: Duration) {
         #[cfg(target_arch = "wasm32")]
         {
-            let (safari_pinch, safari_rotate_deg) = crate::web::take_safari_trackpad_gesture();
+            let (safari_pinch, safari_rotate_deg) = crate::window::take_safari_trackpad_gesture();
             if safari_pinch.abs() > 1e-5 {
                 self.inner.handle_event(InputEvent::WebPinchWheel {
                     magnification: safari_pinch,

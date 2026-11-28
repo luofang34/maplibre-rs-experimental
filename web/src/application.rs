@@ -3,19 +3,22 @@ use maplibre::{
     environment::OffscreenKernelConfig,
     kernel::{Kernel, KernelBuilder},
     map::{handle::MapHandle, Map},
+    plugin::Plugin,
     render::builder::RendererBuilder,
+    style::Style,
 };
-use maplibre::{plugin::Plugin, style::Style};
 #[cfg(feature = "winit-window")]
 use maplibre_winit::{WinitApplicationError, WinitEventLoop, WinitMapWindowConfig};
 #[cfg(feature = "winit-window")]
 use wasm_bindgen::prelude::*;
 
 #[cfg(feature = "winit-window")]
-use crate::environment::CurrentEnvironment;
-#[cfg(feature = "winit-window")]
-use crate::platform::http_client::web_http_client;
-use crate::{error::JSError, platform};
+use crate::{
+    environment::CurrentEnvironment,
+    error::JSError,
+    platform::{self, http_client::web_http_client},
+    setup::{default_plugins_for, parse_style},
+};
 
 /// A browser map using the configured worker transport.
 #[cfg(feature = "winit-window")]
@@ -73,15 +76,6 @@ impl WebMapHost {
             configure(map);
         }
     }
-}
-
-pub(crate) fn parse_style(style_json: &str) -> Result<Style, JSError> {
-    let mut style = Style::from_json_str(style_json).map_err(JSError::InvalidStyle)?;
-    // Layer order becomes render order; index 0 is reserved for the depth clear.
-    for (index, layer) in style.layers.iter_mut().enumerate() {
-        layer.index = index as u32 + 1;
-    }
-    Ok(style)
 }
 
 #[cfg(feature = "winit-window")]
@@ -201,11 +195,15 @@ pub fn create_kernel(
 
     #[cfg(target_feature = "atomics")]
     {
-        kernel_builder =
-            kernel_builder.with_apc(maplibre::io::apc::SchedulerAsyncProcedureCall::new(
+        kernel_builder = kernel_builder.with_apc(
+            maplibre::io::apc::SchedulerAsyncProcedureCall::new(
                 platform::multithreaded::pool_scheduler::WebWorkerPoolScheduler::new(new_worker)?,
                 offscreen_kernel_config,
-            ));
+            )
+            .with_style_warmer(maplibre::sdf::assets::spawn_wasm_style_prefetch::<
+                <CurrentEnvironment as maplibre::environment::Environment>::OffscreenKernelEnvironment,
+            >),
+        );
     }
 
     #[cfg(not(target_feature = "atomics"))]
@@ -228,33 +226,4 @@ pub fn create_kernel(
 #[cfg(feature = "winit-window")]
 pub fn default_plugins(style: &Style) -> Vec<MapPlugin> {
     default_plugins_for::<CurrentEnvironment>(style)
-}
-
-pub(crate) fn default_plugins_for<E>(_style: &Style) -> Vec<Box<dyn Plugin<E>>>
-where
-    E: maplibre::environment::Environment<
-        OffscreenKernelEnvironment = platform::UsedOffscreenKernelEnvironment,
-    >,
-    <E::MapWindowConfig as maplibre::window::MapWindowConfig>::MapWindow:
-        maplibre::window::HeadedMapWindow,
-{
-    #[cfg_attr(not(debug_assertions), allow(unused_mut))]
-    let mut plugins: Vec<Box<dyn Plugin<E>>> = vec![
-        Box::<maplibre::render::RenderPlugin>::default(),
-        Box::<maplibre::background::BackgroundPlugin>::default(),
-        Box::<maplibre::vector::VectorPlugin<platform::UsedVectorTransferables>>::default(),
-        Box::new(maplibre::sdf::SdfPlugin::<platform::UsedVectorTransferables>::default()),
-        Box::new(maplibre::heatmap::HeatmapPlugin),
-        Box::new(maplibre::raster::RasterPlugin::<
-            platform::UsedRasterTransferables,
-        >::default()),
-        Box::new(maplibre::hillshade::HillshadePlugin),
-        Box::new(maplibre::terrain::TerrainPlugin::<
-            platform::UsedDemTransferables,
-        >::default()),
-        Box::new(maplibre::hud::NavigationHudPlugin),
-    ];
-    #[cfg(debug_assertions)]
-    plugins.push(Box::<maplibre::debug::DebugPlugin>::default());
-    plugins
 }

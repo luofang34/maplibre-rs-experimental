@@ -1,0 +1,104 @@
+//! Optional tile-boundary overlays and frame-count diagnostics.
+
+#![deny(missing_docs)]
+
+use std::{ops::Deref, rc::Rc};
+
+use crate::{
+    debug::{
+        cleanup_system::cleanup_system, debug_pass::DebugPassNode, fps_system::fps_system,
+        queue_system::queue_system, resource_system::resource_system,
+    },
+    environment::Environment,
+    kernel::Kernel,
+    plugin::Plugin,
+    render::{
+        eventually::Eventually,
+        render_phase::{Draw, PhaseItem, RenderPhase},
+        tile_view_pattern::ShapeDrawData,
+    },
+    schedule::{RenderStageLabel, Schedule},
+    tcs::world::World,
+    util::FPSMeter,
+};
+
+mod cleanup_system;
+mod debug_pass;
+mod fps_system;
+mod queue_system;
+mod render_commands;
+mod resource_system;
+
+/// Labels for the "draw" graph
+mod draw_graph {
+    pub mod node {
+        pub const DEBUG_PASS: &str = "debug_pass";
+    }
+}
+
+struct DebugPipeline(wgpu::RenderPipeline);
+impl Deref for DebugPipeline {
+    type Target = wgpu::RenderPipeline;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[derive(Clone, Copy)]
+struct TileDebugItem {
+    pub draw_function: &'static dyn Draw<TileDebugItem>,
+    pub source_shape: ShapeDrawData,
+}
+
+impl PhaseItem for TileDebugItem {
+    type SortKey = u32;
+
+    fn sort_key(&self) -> Self::SortKey {
+        0
+    }
+
+    fn draw_function(&self) -> &dyn Draw<TileDebugItem> {
+        self.draw_function
+    }
+}
+
+/// Adds tile outlines after translucent drawing and logs frame counts during cleanup.
+/// Build the render plugin first so its draw graph and stages are available.
+#[derive(Default)]
+pub struct DebugPlugin;
+
+impl<E: Environment> Plugin<E> for DebugPlugin {
+    fn build(
+        &self,
+        schedule: &mut Schedule,
+        _kernel: Rc<Kernel<E>>,
+        world: &mut World,
+        renderer: &mut crate::render::Renderer,
+    ) -> Result<(), crate::plugin::PluginError> {
+        let resources = &mut world.resources;
+
+        let draw_graph = &mut renderer.render_graph;
+        let edges = [
+            draw_graph.add_node(draw_graph::node::DEBUG_PASS, DebugPassNode::new()),
+            draw_graph.add_node_edge(
+                crate::render::draw_graph::node::TRANSLUCENT_PASS,
+                draw_graph::node::DEBUG_PASS,
+            ),
+        ];
+        for edge in edges {
+            edge?;
+        }
+
+        resources.init::<RenderPhase<TileDebugItem>>();
+        resources.insert(Eventually::<DebugPipeline>::Uninitialized);
+
+        schedule.add_system_to_stage(RenderStageLabel::Prepare, resource_system)?;
+        schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system)?;
+        schedule.add_system_to_stage(RenderStageLabel::Cleanup, cleanup_system)?;
+
+        resources.insert(FPSMeter::new());
+        schedule.add_system_to_stage(RenderStageLabel::Cleanup, fps_system)?;
+        Ok(())
+    }
+}

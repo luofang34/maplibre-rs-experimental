@@ -15,8 +15,8 @@ use std::{
 };
 
 use maplibre::style::expression::{
-    EvaluationContext, Expression, FeatureProperties, LegacyPropertySpec, PropertyKind, Type,
-    Value, FEATURE_STATE_PREFIX, GEOMETRY_PROPERTY,
+    EvaluationContext, FeatureProperties, LegacyPropertySpec, PropertyKind, Type, Value,
+    FEATURE_STATE_PREFIX, GEOMETRY_PROPERTY,
 };
 use serde_json::Value as Json;
 
@@ -142,7 +142,7 @@ fn run_case(path: &Path) -> Outcome {
     // The suite treats every case as a property expression; without a specification the
     // property accepts any value.
     let spec = spec.unwrap_or_else(|| LegacyPropertySpec::stepped(PropertyKind::Value));
-    let parsed = Expression::parse_property(&case["expression"], &spec);
+    let parsed = maplibre::style::expression::parse_property(&case["expression"], &spec);
     // An unknown operator passes a case expecting an error only when that error is the unknown
     // operator itself; otherwise an operator the engine lacks would pass for a type error.
     let expects_unknown = compiled["errors"]

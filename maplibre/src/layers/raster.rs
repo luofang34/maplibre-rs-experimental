@@ -1,0 +1,381 @@
+//! Raster tile requests, decoded image results and GPU draw registration.
+
+#![deny(missing_docs)]
+
+use std::{marker::PhantomData, rc::Rc};
+
+pub use image::RgbaImage;
+
+use crate::{
+    coords::WorldTileCoords,
+    environment::Environment,
+    io::tile_sources::TileKind,
+    kernel::Kernel,
+    plugin::Plugin,
+    raster::{
+        resource::RasterResources,
+        systems::{
+            populate_world_system::PopulateWorldSystem, queue_system::queue_system,
+            request_system::RequestSystem, resource_system::resource_system,
+        },
+    },
+    render::{
+        eventually::Eventually,
+        tile_view_pattern::{HasTile, ViewTileSources},
+    },
+    schedule::{system::SystemContainer, RenderStageLabel, Schedule},
+    tcs::{tiles::TileComponent, world::World},
+    terrain::{DemLayersComponent, GpuDemPool},
+};
+
+pub mod cross_fade;
+pub mod image_source;
+pub(crate) mod media_source;
+
+/// Drops a source that left the style: its results on every tile and its textures, so neither
+/// outlives it.
+pub(crate) fn forget_source(world: &mut World, name: &str) {
+    let source = RasterSourceId::from(name);
+    let coords: Vec<WorldTileCoords> = world.tiles.coords().collect();
+    for coords in coords {
+        if let Some(component) = world
+            .tiles
+            .query_mut::<&mut RasterLayersDataComponent>(coords)
+        {
+            component.layers.retain(|layer| layer.source() != &source);
+        }
+        if let Some(dem) = world.tiles.query_mut::<&mut DemLayersComponent>(coords) {
+            dem.remove(&source);
+        }
+    }
+    if let Some(Eventually::Initialized(raster)) = world
+        .resources
+        .get_mut::<Eventually<resource::RasterResources>>()
+    {
+        raster.forget_source(&source);
+    }
+    let keep_for_terrain = world
+        .resources
+        .get::<Eventually<crate::terrain::resources::TerrainResources>>()
+        .is_some();
+    if !keep_for_terrain {
+        if let Some(pool) = world.resources.get_mut::<GpuDemPool>() {
+            pool.drop_source(&source);
+        }
+    }
+}
+pub use crate::io::tile_sources::RasterSourceId;
+mod has_tile;
+pub mod paint;
+pub mod resource;
+mod systems;
+mod transferables;
+pub(crate) use systems::upload_system;
+#[cfg(test)]
+pub(crate) use systems::{populate_world_system, request_system};
+pub use systems::{render_commands, request_system::fetch_raster_apc};
+pub use transferables::{
+    DefaultRasterTransferables, LayerRaster, LayerRasterMissing, RasterTransferables,
+    SharedRasterDem,
+};
+
+/// Registers raster requests, worker results, uploads and draws with the render schedule.
+/// `T` supplies the host-specific worker message representation.
+pub struct RasterPlugin<T>(PhantomData<T>);
+
+impl<T: RasterTransferables> Default for RasterPlugin<T> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+fn for_each_raster_departing(
+    world: &World,
+    source_name: Option<&str>,
+    visit: &mut dyn FnMut(WorldTileCoords),
+) {
+    if let Some(departing) = world
+        .resources
+        .get::<cross_fade::RasterCrossFade>()
+        .and_then(|fade| fade.departing(source_name))
+    {
+        for &tile in &departing.tiles {
+            visit(tile);
+        }
+    }
+}
+
+pub(crate) fn install_pattern_hooks(world: &mut World) {
+    let hooks = world
+        .resources
+        .get_or_init_mut::<crate::render::tile_view_pattern::PatternDomainHooks>();
+    hooks.for_each_raster_departing = Some(for_each_raster_departing);
+}
+
+fn populate_raster_pass_refs<'w>(
+    world: &'w World,
+    refs: &mut crate::render::pass_refs::PassFrameRefs<'w>,
+) {
+    use crate::render::pass_refs::{initialized, DomainPassSlot};
+    refs.set_slot(
+        DomainPassSlot::RasterResources,
+        initialized::<RasterResources>(world),
+    );
+    refs.set_slot(
+        DomainPassSlot::RasterCrossFade,
+        world.resources.get::<cross_fade::RasterCrossFade>(),
+    );
+}
+
+impl<E: Environment, T: RasterTransferables> Plugin<E> for RasterPlugin<T> {
+    fn build(
+        &self,
+        schedule: &mut Schedule,
+        kernel: Rc<Kernel<E>>,
+        world: &mut World,
+        _renderer: &mut crate::render::Renderer,
+    ) -> Result<(), crate::plugin::PluginError> {
+        install_pattern_hooks(world);
+        crate::render::pass_refs::PassRefPopulators::register(world, populate_raster_pass_refs);
+        world
+            .resources
+            .insert(Eventually::<RasterResources>::Uninitialized);
+
+        world
+            .resources
+            .get_or_init_mut::<ViewTileSources>()
+            .add::<RasterTilesDone>(TileKind::Raster);
+
+        schedule.add_early_system_to_stage(
+            RenderStageLabel::Request,
+            SystemContainer::new(PopulateWorldSystem::<E, T>::new(&kernel)),
+        )?;
+        schedule.add_system_to_stage(
+            RenderStageLabel::Request,
+            SystemContainer::new(RequestSystem::<E, T>::new(&kernel)),
+        )?;
+        schedule.add_system_to_stage(RenderStageLabel::Prepare, resource_system)?;
+        schedule.add_system_to_stage(RenderStageLabel::Queue, queue_system)?;
+        Ok(())
+    }
+}
+
+/// Decoded tile pixels waiting for upload; availability does not imply GPU residency.
+pub struct AvailableRasterLayerData {
+    /// Tile-grid coordinates covered by the image.
+    pub coords: WorldTileCoords,
+    /// Style source owning these pixels, or the explicit fallback source.
+    pub source: RasterSourceId,
+    /// Decoded RGBA8 texels sampled without sRGB-to-linear conversion.
+    pub image: RgbaImage,
+}
+
+/// A completed raster request that produced no usable image.
+pub struct MissingRasterLayerData {
+    /// Coordinates of the unavailable tile.
+    pub coords: WorldTileCoords,
+    /// Style source whose request yielded no image.
+    pub source: RasterSourceId,
+}
+
+/// A completed imagery raster request whose tile was intentionally empty (e.g. HTTP 204).
+pub struct EmptyRasterLayerData {
+    /// Coordinates of the empty tile.
+    pub coords: WorldTileCoords,
+    /// Style source whose request yielded an empty tile.
+    pub source: RasterSourceId,
+}
+
+/// A worker result retained on a tile before GPU upload and fallback selection.
+pub enum RasterLayerData {
+    /// Decoded pixels can supply coverage once uploaded.
+    Available(AvailableRasterLayerData),
+    /// Fetching or decoding yielded no image; usable ancestors must remain eligible.
+    Missing(MissingRasterLayerData),
+    /// Server reported an intentionally empty tile (e.g. HTTP 204); parent fallback is
+    /// suppressed and no GPU texture is allocated.
+    Empty(EmptyRasterLayerData),
+}
+
+impl RasterLayerData {
+    pub(crate) fn source(&self) -> &RasterSourceId {
+        match self {
+            Self::Available(layer) => &layer.source,
+            Self::Missing(layer) => &layer.source,
+            Self::Empty(layer) => &layer.source,
+        }
+    }
+}
+
+impl RasterLayersDataComponent {
+    pub(crate) fn record(&mut self, layer: RasterLayerData) -> bool {
+        let has_data = !matches!(layer, RasterLayerData::Missing(_));
+        if let Some(existing) = self
+            .layers
+            .iter_mut()
+            .find(|existing| existing.source() == layer.source())
+        {
+            // A failed refresh must not discard usable pixels or an authoritative empty marker.
+            if !has_data && !matches!(existing, RasterLayerData::Missing(_)) {
+                return false;
+            }
+            *existing = layer;
+        } else {
+            self.layers.push(layer);
+        }
+        has_data
+    }
+
+    /// Whether this source delivered an image for the tile.
+    pub fn has_source_image(&self, source: &RasterSourceId) -> bool {
+        self.layers.iter().any(
+            |layer| matches!(layer, RasterLayerData::Available(data) if &data.source == source),
+        )
+    }
+
+    /// Whether this source completed as an intentionally empty tile (e.g. HTTP 204).
+    pub fn has_empty_source(&self, source: &RasterSourceId) -> bool {
+        self.layers
+            .iter()
+            .any(|layer| matches!(layer, RasterLayerData::Empty(data) if &data.source == source))
+    }
+
+    /// Whether this source has a completed unavailable result.
+    pub fn source_is_missing(&self, source: &RasterSourceId) -> bool {
+        self.layers
+            .iter()
+            .any(|layer| matches!(layer, RasterLayerData::Missing(data) if &data.source == source))
+    }
+
+    /// Whether a result has arrived for this source.
+    pub fn has_source_result(&self, source: &RasterSourceId) -> bool {
+        self.layers.iter().any(|layer| layer.source() == source)
+    }
+
+    /// Whether any source delivered an image for the tile.
+    pub fn has_image(&self) -> bool {
+        self.layers
+            .iter()
+            .any(|layer| matches!(layer, RasterLayerData::Available(_)))
+    }
+
+    /// Whether every received result is unavailable, including fetch and decode failures.
+    pub fn is_missing(&self) -> bool {
+        !self.layers.is_empty()
+            && self
+                .layers
+                .iter()
+                .all(|layer| matches!(layer, RasterLayerData::Missing(_)))
+    }
+}
+
+/// Received raster results; an empty component has no completed result yet.
+#[derive(Default)]
+pub struct RasterLayersDataComponent {
+    /// Available and unavailable worker results retained for this tile.
+    pub layers: Vec<RasterLayerData>,
+}
+
+impl TileComponent for RasterLayersDataComponent {}
+
+#[derive(Default)]
+struct RasterTilesDone;
+
+fn source_texture_ready(source: &RasterSourceId, coords: WorldTileCoords, world: &World) -> bool {
+    match world.resources.get::<Eventually<RasterResources>>() {
+        Some(Eventually::Initialized(resources)) if resources.draws(source) => {
+            resources.get_bound_texture(source, &coords).is_some()
+        }
+        _ => true,
+    }
+}
+
+impl HasTile for RasterTilesDone {
+    fn has_source_tile(
+        &self,
+        source: &RasterSourceId,
+        coords: WorldTileCoords,
+        world: &World,
+    ) -> bool {
+        if world
+            .tiles
+            .query::<&RasterLayersDataComponent>(coords)
+            .is_some_and(|data| data.has_empty_source(source))
+        {
+            return true;
+        }
+        let cpu_ready = world
+            .tiles
+            .query::<&RasterLayersDataComponent>(coords)
+            .is_some_and(|data| data.has_source_image(source))
+            || world
+                .tiles
+                .query::<&DemLayersComponent>(coords)
+                .is_some_and(|dem| dem.contains(source));
+        cpu_ready && source_texture_ready(source, coords, world)
+    }
+
+    fn has_tile(&self, coords: WorldTileCoords, world: &World) -> bool {
+        let raster_ready = world
+            .tiles
+            .query::<&RasterLayersDataComponent>(coords)
+            .is_some_and(|data| {
+                data.layers.iter().any(|layer| {
+                    matches!(
+                        layer,
+                        RasterLayerData::Available(available)
+                            if source_texture_ready(&available.source, coords, world)
+                    ) || matches!(layer, RasterLayerData::Empty(_))
+                })
+            });
+        let dem_ready = match world.resources.get::<Eventually<RasterResources>>() {
+            Some(Eventually::Initialized(resources)) => world
+                .tiles
+                .query::<&DemLayersComponent>(coords)
+                .is_some_and(|dem| {
+                    dem.iter().any(|(source, _)| {
+                        resources.draws(source)
+                            && resources.get_bound_texture(source, &coords).is_some()
+                    })
+                }),
+            _ => false,
+        };
+        raster_ready || dem_ready
+    }
+
+    fn nearest_ancestor_candidate(
+        &self,
+        coords: WorldTileCoords,
+        world: &World,
+    ) -> Option<WorldTileCoords> {
+        let raster = world
+            .tiles
+            .pyramid_of::<RasterLayersDataComponent>()
+            .nearest_ancestor(coords)
+            .map(|(ancestor, _)| ancestor);
+        let dem = world
+            .tiles
+            .pyramid_of::<DemLayersComponent>()
+            .nearest_ancestor(coords)
+            .map(|(ancestor, _)| ancestor);
+        raster.into_iter().chain(dem).max_by_key(|c| c.z)
+    }
+
+    fn has_descendant_candidates(
+        &self,
+        coords: WorldTileCoords,
+        max_depth: usize,
+        world: &World,
+    ) -> bool {
+        world
+            .tiles
+            .pyramid_of::<RasterLayersDataComponent>()
+            .has_descendants(coords, max_depth)
+            || world
+                .tiles
+                .pyramid_of::<DemLayersComponent>()
+                .has_descendants(coords, max_depth)
+    }
+}
+
+pub(crate) use crate::tcs::tile_epochs::{bump_raster_arrival_epoch, raster_arrival_epoch};

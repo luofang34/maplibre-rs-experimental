@@ -1,0 +1,153 @@
+//! Renders the drapeable layers of each view tile into that tile's texture.
+
+use wgpu::StoreOp;
+
+use crate::{
+    render::{
+        eventually::{Eventually, Eventually::Initialized},
+        graph::{Node, RenderContext},
+        RenderResources,
+    },
+    tcs::world::World,
+    terrain::{
+        resources::{DrapeScratch, TerrainResources},
+        DrapePhase, DrapeTarget,
+    },
+};
+
+/// Name of the drape node inside the draw sub-graph.
+pub const DRAPE_PASS: &str = "drape_pass";
+
+/// Render-graph node running one render pass per drape target before the main pass.
+pub struct DrapePassNode;
+
+impl Node for DrapePassNode {
+    fn writes_custom_scene_depth(&self) -> bool {
+        false
+    }
+
+    fn run(&self, render_context: &mut RenderContext, _resources: &RenderResources, world: &World) {
+        let Some(Initialized(terrain)) = world.resources.get::<Eventually<TerrainResources>>()
+        else {
+            return;
+        };
+        let Some(phase) = world.resources.get::<DrapePhase>() else {
+            return;
+        };
+        if phase.targets.is_empty() {
+            return;
+        }
+        tracing::trace!(targets = phase.targets.len(), "drape pass");
+        let drawn: Vec<_> = phase
+            .targets
+            .iter()
+            .filter_map(|target| {
+                let (texture, top_level) = terrain.drape_target(target.coords)?;
+                let scratch = terrain.scratch_for_size(texture.extent().width)?;
+                Some((target, texture, top_level, scratch))
+            })
+            .collect();
+        if drawn.is_empty() {
+            return;
+        }
+        // The drape passes are timed together: the first writes the start, the last the end.
+        let timer = world
+            .resources
+            .get::<crate::terrain::drape_timing::DrapeTimerSlot>();
+        let pass_started = timer.is_some().then(instant::Instant::now);
+        let frame_refs = crate::render::pass_refs::PassFrameRefs::from_world(world);
+        for (index, (target, texture, top_level, scratch)) in drawn.iter().enumerate() {
+            let timestamp_writes =
+                timer.and_then(|slot| slot.pass_timestamp_writes(index, drawn.len()));
+            // The layers are drawn into the first level alone.
+            let color_attachment = color_attachment(scratch, top_level, target.clear_color);
+            let pass =
+                render_context
+                    .command_encoder
+                    .begin_render_pass(&wgpu::RenderPassDescriptor {
+                        multiview_mask: None,
+                        label: cfg!(debug_assertions).then_some("drape_pass"),
+                        color_attachments: &[Some(color_attachment)],
+                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                            view: &scratch.depth_stencil,
+                            depth_ops: Some(wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(0.0),
+                                store: StoreOp::Discard,
+                            }),
+                            stencil_ops: Some(wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(crate::render::EMPTY_STENCIL_REFERENCE),
+                                store: StoreOp::Discard,
+                            }),
+                        }),
+                        timestamp_writes,
+                        occlusion_query_set: None,
+                    });
+            {
+                let mut render_pass = crate::render::tracked_pass::TrackedRenderPass::new(pass)
+                    .with_frame_refs(frame_refs);
+                draw_layers(&mut render_pass, world, target);
+                render_pass.finish(world);
+            }
+            terrain.generate_drape_mipmaps(
+                render_context.device,
+                &mut render_context.command_encoder,
+                texture,
+            );
+        }
+        if let (Some(slot), Some(started)) = (timer, pass_started) {
+            slot.record_pass_cpu(started.elapsed(), drawn.len());
+        }
+    }
+}
+
+fn draw_layers<'w>(
+    pass: &mut crate::render::tracked_pass::TrackedRenderPass<'w>,
+    world: &'w World,
+    target: &'w DrapeTarget,
+) {
+    let unique_stencils = crate::render::main_pass::unique_vector_stencils(&target.masks);
+    let mut stencil_state = crate::render::main_pass::StencilState::Cleared;
+    for layers in target
+        .layers
+        .chunk_by(|left, right| left.index == right.index && left.style_layer == right.style_layer)
+    {
+        crate::render::main_pass::apply_layer_masks(
+            pass,
+            world,
+            &target.masks,
+            unique_stencils,
+            &mut stencil_state,
+            layers,
+        );
+        for layer in layers {
+            layer.draw_function.draw(pass, world, layer);
+        }
+    }
+}
+
+fn color_attachment<'a>(
+    scratch: &'a DrapeScratch,
+    top_level: &'a wgpu::TextureView,
+    color: wgpu::Color,
+) -> wgpu::RenderPassColorAttachment<'a> {
+    match &scratch.color {
+        Some(multisampled) => wgpu::RenderPassColorAttachment {
+            depth_slice: None,
+            view: multisampled,
+            resolve_target: Some(top_level),
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(color),
+                store: StoreOp::Discard,
+            },
+        },
+        None => wgpu::RenderPassColorAttachment {
+            depth_slice: None,
+            view: top_level,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(color),
+                store: StoreOp::Store,
+            },
+        },
+    }
+}

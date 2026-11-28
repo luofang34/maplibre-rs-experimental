@@ -1,0 +1,359 @@
+//! Builds the drape targets and terrain draws for the current frame.
+
+use super::{
+    drape_phase::{background_clear_color, encode_drapes},
+    drape_prepare::{prepare_drapes, PreparedDrapes},
+    frame::{hide_draped_layers, set_frame},
+    prepare_uniforms::{prepare_tiles_into, surface_context},
+    spec_cache::DrapePrepareCache,
+    targets::{procedural_tiles, target_specs_arc},
+};
+use crate::{
+    context::MapContext,
+    coords::WorldTileCoords,
+    render::{
+        eventually::{Eventually, Eventually::Initialized},
+        eye_covering::EyeInFrame,
+        resolved_view::ResolvedFrameView,
+        view_state::ViewState,
+        Renderer,
+    },
+    schedule::system::{SystemError, SystemResult},
+    style::Style,
+    tcs::world::World,
+    terrain::{
+        queue_system::{
+            edges, next_drape_fingerprint_zoom, steady_cache, surface_covering, uniforms,
+            TerrainEyeFrame,
+        },
+        resources::TerrainResources,
+        source::{dem_source, DemSource},
+        DrapePhase, TerrainFrame,
+    },
+};
+
+#[derive(Default)]
+struct DrapeFingerprintZoom(Option<f64>);
+
+fn stabilize_drape_fingerprint_zoom(world: &mut World, requested: f64) -> f64 {
+    let state = world.resources.get_or_init_mut::<DrapeFingerprintZoom>();
+    let zoom = next_drape_fingerprint_zoom(state.0, requested);
+    state.0 = Some(zoom);
+    zoom
+}
+
+pub(crate) fn queue_system(
+    MapContext {
+        style,
+        view_state,
+        world,
+        renderer:
+            Renderer {
+                device,
+                queue,
+                settings,
+                ..
+            },
+        ..
+    }: &mut MapContext,
+) -> SystemResult {
+    if world
+        .resources
+        .get::<crate::render::settings::TightTileRequests>()
+        .is_none_or(|tight| tight.0 != settings.tight_tile_requests)
+    {
+        world
+            .resources
+            .insert(crate::render::settings::TightTileRequests(
+                settings.tight_tile_requests,
+            ));
+    }
+    let Some(dem) = dem_source(style) else {
+        if let Some(terrain) = world.resources.get_mut::<Eventually<TerrainResources>>() {
+            if matches!(terrain, Initialized(_)) {
+                *terrain = Eventually::Uninitialized;
+            }
+        }
+        if let Some(dem_pool) = world
+            .resources
+            .get_mut::<crate::terrain::gpu_dem_pool::GpuDemPool>()
+            && dem_pool.texture_count() > 0
+        {
+            dem_pool.retain_sources(|id| {
+                id.name().is_some_and(|name| {
+                    matches!(
+                        style.sources.get(name),
+                        Some(crate::style::source::Source::RasterDem(_))
+                    )
+                })
+            });
+        }
+        let was_active = world
+            .resources
+            .get::<TerrainFrame>()
+            .is_some_and(|frame| frame.active);
+        if was_active
+            || world
+                .resources
+                .get::<DrapePhase>()
+                .is_some_and(|phase| !phase.targets.is_empty())
+        {
+            world.resources.insert(TerrainEyeFrame::default());
+            world
+                .resources
+                .insert(surface_covering::SurfaceTiles::default());
+            world.resources.insert(DrapePhase::default());
+            set_frame(world, TerrainFrame::default());
+        } else if world
+            .resources
+            .get::<crate::render::ground::FrameGround>()
+            .is_none_or(|g| g.0.is_some())
+        {
+            set_frame(world, TerrainFrame::default());
+        }
+        return Ok(());
+    };
+    let drape_mode = world
+        .resources
+        .get::<crate::render::settings::TerrainDrapeMode>()
+        .copied()
+        .unwrap_or_else(|| settings.effective_terrain_drape_mode());
+    let drape_view = world
+        .resources
+        .get::<crate::render::eye_covering::DrapeView>()
+        .and_then(|view| view.0);
+    if let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>() {
+        terrain.sync_frame_drape_mode(device, drape_view, drape_mode);
+    }
+    if EyeInFrame::reuses_content(world) {
+        return uniforms::replay(world, style, view_state, queue, hide_draped_layers);
+    }
+    if !steady_cache::needs_eye_frame(world) {
+        if let Some(frame) = world.resources.get_mut::<TerrainEyeFrame>()
+            && (!frame.0.is_empty() || !frame.1.is_empty())
+        {
+            frame.0.clear();
+            frame.1.clear();
+        }
+    }
+    world
+        .resources
+        .insert(surface_covering::SurfaceTiles::default());
+    let (phase, surface_coords, surface_sources, clear_color) = if drape_mode.is_procedural_relief()
+    {
+        let coords = procedural_tiles(style, view_state, world)?;
+        let sources = vec![None; coords.len()];
+        (
+            DrapePhase::default(),
+            coords,
+            sources,
+            background_clear_color(style),
+        )
+    } else {
+        let specs = target_specs_arc(style, view_state, world)?;
+        let drape_zoom = stabilize_drape_fingerprint_zoom(world, view_state.style_zoom().value());
+        let PreparedDrapes {
+            redraw,
+            sources,
+            clear_color,
+        } = prepare_drapes(&specs, style, view_state, world, device, drape_zoom)?;
+        let has_timer = world
+            .resources
+            .get::<crate::terrain::drape_timing::DrapeTimerSlot>()
+            .is_some();
+        let encode_started = (has_timer && redraw.iter().any(|&r| r)).then(instant::Instant::now);
+        let phase = encode_drapes(
+            &specs,
+            &redraw,
+            clear_color,
+            world,
+            crate::coords::Zoom::new(drape_zoom),
+            queue,
+        )?;
+        if let Some(started) = encode_started
+            && !phase.targets.is_empty()
+            && let Some(slot) = world
+                .resources
+                .get::<crate::terrain::drape_timing::DrapeTimerSlot>()
+        {
+            slot.record_encode_cpu(started.elapsed());
+        }
+        let (surface_coords, surface_sources) =
+            surface_covering::coords_for_frame(world, &specs, &sources);
+        let mut redraw = redraw;
+        let mut sources = sources;
+        redraw.clear();
+        sources.clear();
+        let scratch = world
+            .resources
+            .get_or_init_mut::<steady_cache::AcquireScratch>();
+        scratch.redraw = redraw;
+        scratch.sources = sources;
+        (phase, surface_coords, surface_sources, clear_color)
+    };
+    queue_tiles(
+        world,
+        style,
+        view_state,
+        device,
+        queue,
+        (&dem, clear_color),
+        (&surface_coords, &surface_sources),
+    )?;
+    hide_draped_layers(world, style);
+    let draw_after_layer_index = world
+        .resources
+        .get_or_init_mut::<DrapePrepareCache>()
+        .cached_draw_after_layer_index(style);
+    world.resources.insert(phase);
+    set_frame(
+        world,
+        TerrainFrame {
+            active: true,
+            draw_after_layer_index,
+        },
+    );
+    Ok(())
+}
+
+fn queue_tiles(
+    world: &mut World,
+    style: &Style,
+    view_state: &ViewState,
+    device: &wgpu::Device,
+    queue: &crate::render::upload_queue::UploadQueue,
+    (dem, clear_color): (&DemSource, wgpu::Color),
+    targets: (&[WorldTileCoords], &[Option<WorldTileCoords>]),
+) -> SystemResult {
+    let mut edge_cache = std::mem::take(world.resources.get_or_init_mut::<edges::EdgeCache>());
+    let mut queue_scratch = std::mem::take(
+        world
+            .resources
+            .get_or_init_mut::<steady_cache::TerrainQueueScratch>(),
+    );
+    let copies_non_empty = steady_cache::populate_copies(
+        &mut queue_scratch.copies_scratch,
+        world.resources.get::<surface_covering::SurfaceCopies>(),
+    );
+    let dem_arrival_epoch = crate::tcs::tile_epochs::dem_arrival_epoch(world);
+    let ctx = surface_context(world, style, view_state, dem, clear_color);
+    let key_fn = crate::terrain::coverage::draw_order_key_with_resolved(
+        world
+            .resources
+            .get::<ResolvedFrameView>()
+            .filter(|resolved| resolved.matches(style, view_state)),
+        style,
+        view_state,
+        f64::from(dem.tile_size),
+    );
+    let result = (|| -> SystemResult {
+        let Some(Initialized(terrain)) = world.resources.get_mut::<Eventually<TerrainResources>>()
+        else {
+            return Err(SystemError::Dependencies);
+        };
+        terrain.begin_dem_frame();
+        prepare_tiles_into(
+            &mut queue_scratch.prepared,
+            &mut queue_scratch.static_cache,
+            targets,
+            terrain,
+            &world.tiles,
+            ctx,
+        );
+        uniforms::with_world_copies(
+            &mut queue_scratch.prepared,
+            copies_non_empty.then_some(&queue_scratch.copies_scratch),
+            view_state,
+        );
+        let (edge_gen, written) = prepare_and_upload_tile_gpu(
+            terrain,
+            &mut edge_cache,
+            &mut queue_scratch.prepared,
+            &world.tiles,
+            queue,
+            dem_arrival_epoch,
+            targets.0.len(),
+        );
+        queue_scratch.draw_cache.sync_draws(
+            &queue_scratch.prepared,
+            device,
+            terrain,
+            written,
+            &key_fn,
+        );
+        finish_surface_and_eye_frame(
+            world,
+            &mut queue_scratch.prepared,
+            &edge_cache,
+            edge_gen,
+            written,
+        );
+        Ok(())
+    })();
+    world.resources.insert(edge_cache);
+    world.resources.insert(queue_scratch);
+    result
+}
+
+fn prepare_and_upload_tile_gpu(
+    terrain: &mut TerrainResources,
+    edge_cache: &mut edges::EdgeCache,
+    prepared: &mut uniforms::PreparedTerrain,
+    tiles: &crate::tcs::tiles::Tiles,
+    queue: &crate::render::upload_queue::UploadQueue,
+    dem_arrival_epoch: u64,
+    target_count: usize,
+) -> (u64, usize) {
+    let edge_gen = edge_cache.assign_and_upload_edges(
+        terrain,
+        queue,
+        (&prepared.sources, &mut prepared.uniforms),
+        tiles,
+        dem_arrival_epoch,
+    );
+    let written = terrain.write_uniforms(queue, &prepared.uniforms);
+    tracing::debug!(
+        targets = target_count,
+        dem_hits = prepared
+            .sources
+            .iter()
+            .filter(|(dem, _, _)| dem.is_some())
+            .count(),
+        written,
+        "terrain frame queued"
+    );
+    (edge_gen, written)
+}
+
+fn finish_surface_and_eye_frame(
+    world: &mut World,
+    prepared: &mut uniforms::PreparedTerrain,
+    edge_cache: &edges::EdgeCache,
+    edge_gen: u64,
+    written: usize,
+) {
+    if let (Some(index), Some(written_sources)) = (
+        world
+            .resources
+            .get_mut::<crate::terrain::TerrainCoverageIndex>(),
+        prepared.sources.get(..written),
+    ) {
+        edge_cache.sync_coverage_edges(index, written_sources, edge_gen);
+    }
+    if steady_cache::needs_eye_frame(world) {
+        let frame = world.resources.get_or_init_mut::<TerrainEyeFrame>();
+        frame.0.clear();
+        frame.0.extend(
+            prepared
+                .sources
+                .iter()
+                .zip(prepared.uniforms.iter())
+                .take(written)
+                .map(|((_, coords, _), uniform)| (*coords, *uniform)),
+        );
+        frame.1.clear();
+        frame
+            .1
+            .extend(prepared.globe_bases.iter().take(written).copied());
+    }
+}

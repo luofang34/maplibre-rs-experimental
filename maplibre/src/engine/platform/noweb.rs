@@ -1,0 +1,94 @@
+//! Native HTTP, task scheduling and Tokio runtime entry points.
+
+#![deny(missing_docs)]
+
+use std::{
+    future::Future,
+    sync::atomic::{AtomicUsize, Ordering},
+};
+
+use crate::{
+    environment::{OffscreenKernel, OffscreenKernelConfig},
+    io::{
+        mbtiles::MbtilesClient,
+        pmtiles::PmtilesClient,
+        resource_loader::SharedLoader,
+        source_client::{HttpSourceClient, SourceClient},
+    },
+    platform::http_client::ReqwestHttpClient,
+};
+
+pub mod http_client;
+pub mod scheduler;
+pub mod trace;
+
+/// Default native HTTP transport stack supporting `mbtiles://`, `pmtiles://`, and HTTP(S).
+pub type NativeHttpClient = MbtilesClient<PmtilesClient<ReqwestHttpClient>>;
+
+/// Constructs a [`NativeHttpClient`] with optional disk cache directory `cache_path`.
+pub fn native_http_client<P: Into<std::path::PathBuf>>(cache_path: Option<P>) -> NativeHttpClient {
+    MbtilesClient::new(PmtilesClient::new(ReqwestHttpClient::new(cache_path)))
+}
+
+/// Creates an I/O- and timer-enabled Tokio runtime and blocks until `future` completes.
+/// The runtime is dropped before this function returns; detached work must finish before
+/// the supplied future if its results are required.
+///
+/// # Panics
+/// Panics if runtime creation fails or if called from within an asynchronous runtime.
+#[expect(
+    clippy::expect_used,
+    reason = "synchronous entry point panics if Tokio runtime fails to initialize"
+)]
+pub fn run_multithreaded<F: Future>(future: F) -> F::Output {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .max_blocking_threads(2)
+        .enable_io()
+        .enable_time()
+        .thread_name_fn(|| {
+            static ATOMIC_ID: AtomicUsize = AtomicUsize::new(0);
+            let id = ATOMIC_ID.fetch_add(1, Ordering::SeqCst);
+            format!("maplibre-rs-pool-{id}")
+        })
+        .on_thread_start(|| {
+            #[cfg(feature = "trace")]
+            tracing_tracy::client::set_thread_name!("tokio-runtime-worker");
+
+            log::info!("Worker thread started")
+        })
+        .build()
+        .expect("failed to build Tokio runtime")
+        .block_on(future)
+}
+
+/// Drives `future` to completion on a current-thread Tokio runtime with I/O and timers enabled.
+#[cfg(test)]
+#[cfg(feature = "headless")]
+pub(crate) fn run_current_thread<F: Future>(future: F) -> F::Output {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("failed to build current-thread Tokio runtime")
+        .block_on(future)
+}
+
+/// Worker services that construct a Reqwest source client using the configured cache directory.
+pub struct ReqwestOffscreenKernelEnvironment(OffscreenKernelConfig);
+
+impl OffscreenKernel for ReqwestOffscreenKernelEnvironment {
+    type HttpClient = SharedLoader;
+
+    fn create(config: OffscreenKernelConfig) -> Self {
+        ReqwestOffscreenKernelEnvironment(config)
+    }
+
+    fn source_client(&self) -> SourceClient<Self::HttpClient> {
+        let loader = self.0.loader.clone().unwrap_or_else(|| {
+            SharedLoader::new(native_http_client::<String>(self.0.cache_directory.clone()))
+        });
+        SourceClient::new(HttpSourceClient::new(loader))
+            .with_asset_cache(self.0.asset_cache.clone())
+            .with_image_providers(self.0.image_providers.clone())
+    }
+}

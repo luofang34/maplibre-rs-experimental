@@ -1,0 +1,488 @@
+//! A GeoJSON document parsed once into a spatial index, tiled into vector tile bytes on demand.
+//!
+//! Tiles are cut from the index instead of re-reading the document, so a source is parsed once
+//! per generation however many tiles are requested. Each tile carries its features' geometry
+//! cut to the tile and its buffer, unsimplified.
+
+use geozero::mvt::{Message, Tile};
+use rstar::{RTree, RTreeObject, AABB};
+use serde_json::Value;
+use thiserror::Error;
+
+use crate::{
+    coords::WorldTileCoords,
+    style::{filter::Filter, source::GeoJsonSource},
+};
+
+/// Vector tile grid the features are quantized to.
+pub const EXTENT: u32 = 4096;
+
+/// Why a document could not be indexed.
+#[derive(Debug, Error)]
+pub enum GeoJsonError {
+    /// The text is not JSON.
+    #[error("GeoJSON is not valid JSON")]
+    Json(#[source] serde_json::Error),
+    /// The document is neither a feature collection, a feature nor a geometry.
+    #[error("GeoJSON root has unsupported type `{found}`")]
+    Root {
+        /// The `type` member found, or an empty string.
+        found: String,
+    },
+    /// A feature's geometry cannot be read.
+    #[error("GeoJSON feature {index} has an invalid geometry: {reason}")]
+    Geometry {
+        /// Position of the feature in the document.
+        index: usize,
+        /// What is wrong with it.
+        reason: &'static str,
+    },
+}
+
+type Point = [f64; 2];
+type Ring = Vec<Point>;
+
+/// Points, lines and polygons of one feature in world coordinates, where the world is `0..1`.
+#[derive(Default, Clone)]
+struct Geometry {
+    points: Vec<Point>,
+    lines: Vec<Ring>,
+    polygons: Vec<Vec<Ring>>,
+}
+
+#[derive(Clone)]
+struct IndexedFeature {
+    id: Option<u64>,
+    geometry: Geometry,
+    is_line_string: bool,
+    properties: Vec<(String, Value)>,
+}
+
+struct Entry {
+    bounds: [f64; 4],
+    feature: u32,
+}
+
+impl RTreeObject for Entry {
+    type Envelope = AABB<Point>;
+
+    fn envelope(&self) -> Self::Envelope {
+        AABB::from_corners(
+            [self.bounds[0], self.bounds[1]],
+            [self.bounds[2], self.bounds[3]],
+        )
+    }
+}
+
+/// Features of one GeoJSON document, findable by the tile they fall in.
+pub struct GeoJsonIndex {
+    features: Vec<IndexedFeature>,
+    /// The points of a clustering source, and how they group at each zoom.
+    clustered: Option<(Vec<IndexedFeature>, Clusters)>,
+    /// Whether the source filters its features before they are tiled.
+    filtered: bool,
+    /// Douglas-Peucker simplification tolerance in pixels on a 512-px tile.
+    tolerance: f64,
+    /// Whether `LineString` features carry cumulative distance fractions for `line-gradient`.
+    line_metrics: bool,
+    tree: RTree<Entry>,
+    approximate_bytes: usize,
+}
+
+struct IndexBuilder<'a> {
+    source: &'a GeoJsonSource,
+    promote: Option<&'a str>,
+    filter: Option<Filter>,
+    features: Vec<IndexedFeature>,
+    entries: Vec<Entry>,
+    points: Vec<IndexedFeature>,
+    bytes: usize,
+    position: usize,
+}
+
+impl<'a> IndexBuilder<'a> {
+    fn new(source: &'a GeoJsonSource) -> Self {
+        Self {
+            source,
+            promote: source
+                .promote_id
+                .as_ref()
+                .and_then(|p| p.property_for(None)),
+            filter: source_filter(source),
+            features: Vec::new(),
+            entries: Vec::new(),
+            points: Vec::new(),
+            bytes: 0,
+            position: 0,
+        }
+    }
+
+    fn add(&mut self, feature: &Value) -> Result<(), GeoJsonError> {
+        let index = self.position;
+        self.position += 1;
+        if self
+            .filter
+            .as_ref()
+            .is_some_and(|filter| !feature_passes(feature, filter, 0.0))
+        {
+            return Ok(());
+        }
+        let Some(geometry) = feature.get("geometry").filter(|value| !value.is_null()) else {
+            return Ok(());
+        };
+        let mut parsed = Geometry::default();
+        read_geometry(geometry, &mut parsed)
+            .map_err(|reason| GeoJsonError::Geometry { index, reason })?;
+        let Some(bounds) = bounds_of(&parsed) else {
+            return Ok(());
+        };
+        let mut properties: Vec<(String, Value)> = feature
+            .get("properties")
+            .and_then(Value::as_object)
+            .map(|map| map.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+            .unwrap_or_default();
+        if let Some(state_id) = crate::style::feature_state::resolve_geojson_state_id(
+            feature,
+            self.promote,
+            self.source.generate_id.then_some(index),
+        ) {
+            properties.push((
+                crate::style::feature_state::STATE_ID_PROPERTY.to_owned(),
+                Value::String(state_id),
+            ));
+        }
+        let id = numeric_feature_id(
+            feature,
+            self.promote,
+            self.source.generate_id.then_some(index),
+        );
+        let is_line_string = geometry.get("type").and_then(Value::as_str) == Some("LineString");
+        if self.source.cluster && is_single_point(geometry, &parsed) {
+            self.points.push(IndexedFeature {
+                id,
+                geometry: parsed,
+                is_line_string: false,
+                properties,
+            });
+            return Ok(());
+        }
+        self.bytes += coordinate_count(&parsed) * 16
+            + properties
+                .iter()
+                .map(|(key, value)| key.len() + value.to_string().len())
+                .sum::<usize>()
+            + 64;
+        self.entries.push(Entry {
+            bounds,
+            feature: self.features.len() as u32,
+        });
+        self.features.push(IndexedFeature {
+            id,
+            geometry: parsed,
+            is_line_string,
+            properties,
+        });
+        Ok(())
+    }
+
+    fn finish(self, source: &GeoJsonSource) -> GeoJsonIndex {
+        let filtered = self.filter.is_some();
+        let clustered = source.cluster.then(|| {
+            let clusters = build_clusters(source, &self.points);
+            (self.points, clusters)
+        });
+        GeoJsonIndex {
+            features: self.features,
+            clustered,
+            filtered,
+            tolerance: source.effective_tolerance(),
+            line_metrics: source.line_metrics,
+            tree: RTree::bulk_load(self.entries),
+            approximate_bytes: self.bytes,
+        }
+    }
+}
+
+fn build_clusters(source: &GeoJsonSource, points: &[IndexedFeature]) -> Clusters {
+    let inputs: Vec<ClusterInput<'_>> = points
+        .iter()
+        .filter_map(|feature| {
+            Some((
+                *feature.geometry.points.first()?,
+                feature.properties.as_slice(),
+            ))
+        })
+        .collect();
+    let options = ClusterOptions::new(
+        source.cluster_radius,
+        source.cluster_max_zoom,
+        source.cluster_min_points,
+        source.cluster_properties.as_ref(),
+        source.maxzoom,
+    );
+    Clusters::new(&inputs, options)
+}
+
+impl GeoJsonIndex {
+    /// Indexes the document text a source URL returned.
+    pub fn from_text(text: &[u8], source: &GeoJsonSource) -> Result<Self, GeoJsonError> {
+        let value = serde_json::from_slice(text).map_err(GeoJsonError::Json)?;
+        Self::from_value(&value, source)
+    }
+
+    /// Indexes an inline document, applying the source's id options.
+    pub fn from_value(document: &Value, source: &GeoJsonSource) -> Result<Self, GeoJsonError> {
+        let mut builder = IndexBuilder::new(source);
+        match document.get("type").and_then(Value::as_str) {
+            Some("FeatureCollection") => {
+                for feature in document
+                    .get("features")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    builder.add(feature)?;
+                }
+            }
+            Some("Feature") => builder.add(document)?,
+            Some(
+                "Point" | "MultiPoint" | "LineString" | "MultiLineString" | "Polygon"
+                | "MultiPolygon" | "GeometryCollection",
+            ) => builder.add(&serde_json::json!({ "geometry": document }))?,
+            other => {
+                return Err(GeoJsonError::Root {
+                    found: other.unwrap_or_default().to_owned(),
+                })
+            }
+        }
+        Ok(builder.finish(source))
+    }
+
+    /// Number of indexed features.
+    pub fn len(&self) -> usize {
+        self.features.len()
+    }
+
+    /// Whether the document held no drawable feature.
+    pub fn is_empty(&self) -> bool {
+        self.features.is_empty()
+    }
+
+    /// Memory the index holds, for the shared cache's byte budget.
+    pub fn approximate_bytes(&self) -> usize {
+        self.approximate_bytes
+    }
+
+    /// The GeoJSON a source with a filter or clusters presents to `coords`: the features of
+    /// `document` that pass the filter, with its points replaced by the clusters they form at
+    /// that zoom. `None` for a source that presents its document unchanged.
+    pub fn source_document(
+        &self,
+        document: &Value,
+        source: &GeoJsonSource,
+        coords: WorldTileCoords,
+    ) -> Option<Value> {
+        let clusters = self.clustered.as_ref().map(|(_, clusters)| clusters);
+        if clusters.is_none() && !self.filtered {
+            return None;
+        }
+        let filter = source_filter(source);
+        let members: Vec<&Value> = match document.get("type").and_then(Value::as_str) {
+            Some("FeatureCollection") => document
+                .get("features")
+                .and_then(Value::as_array)
+                .map(|features| features.iter().collect())
+                .unwrap_or_default(),
+            _ => vec![document],
+        };
+        let mut features: Vec<Value> = members
+            .into_iter()
+            .filter(|feature| {
+                filter
+                    .as_ref()
+                    .is_none_or(|filter| feature_passes(feature, filter, 0.0))
+            })
+            .filter(|feature| {
+                clusters.is_none()
+                    || !feature.get("geometry").is_some_and(|geometry| {
+                        geometry.get("type").and_then(Value::as_str) == Some("Point")
+                    })
+            })
+            .cloned()
+            .collect();
+        if let Some(clusters) = clusters {
+            let zoom = u32::from(u8::from(coords.z));
+            let window = TileWindow::of(coords).bounds;
+            let points = &self.clustered.as_ref()?.0;
+            for item in clusters.within(zoom.min(24) as u8, window) {
+                let (position, id, properties) = match item {
+                    Clustered::Point(index, position) => {
+                        let Some(point) = points.get(index) else {
+                            continue;
+                        };
+                        (position, point.id, point.properties.clone())
+                    }
+                    Clustered::Cluster(position, id, properties) => {
+                        (position, Some(id), properties)
+                    }
+                };
+                let mut feature = serde_json::json!({
+                    "type": "Feature",
+                    "properties": properties.into_iter().collect::<serde_json::Map<String, Value>>(),
+                    "geometry": {"type": "Point", "coordinates": super::cluster::unproject(position)},
+                });
+                if let (Some(id), Some(obj)) = (id, feature.as_object_mut()) {
+                    obj.insert("id".to_owned(), serde_json::json!(id));
+                }
+                features.push(feature);
+            }
+        }
+        Some(serde_json::json!({"type": "FeatureCollection", "features": features}))
+    }
+
+    /// Vector tile bytes with the features that touch `coords`, in document order.
+    pub fn tile(&self, coords: WorldTileCoords) -> Vec<u8> {
+        let zoom = u32::from(u8::from(coords.z));
+        let TileWindow {
+            tiles,
+            west,
+            north,
+            bounds,
+        } = TileWindow::of(coords);
+        let window = AABB::from_corners([bounds[0], bounds[1]], [bounds[2], bounds[3]]);
+        let mut hits: Vec<u32> = self
+            .tree
+            .locate_in_envelope_intersecting(&window)
+            .map(|entry| entry.feature)
+            .collect();
+        hits.sort_unstable();
+        let mut encoder = TileEncoder::default();
+        let to_tile = |point: &Point| -> (i32, i32) {
+            (
+                ((point[0] - west) * tiles * f64::from(EXTENT)).round() as i32,
+                ((point[1] - north) * tiles * f64::from(EXTENT)).round() as i32,
+            )
+        };
+        let sq_tol = simplify::squared_world_tolerance(self.tolerance, zoom);
+        for index in hits {
+            let Some(feature) = self.features.get(index as usize) else {
+                continue;
+            };
+            if self.line_metrics && feature.is_line_string {
+                for line in &feature.geometry.lines {
+                    for run in line_metrics::clip_line_with_metrics(line, bounds) {
+                        let simplified = simplify::simplify_points(&run.points, sq_tol);
+                        encoder.metric_line(
+                            feature,
+                            &simplified,
+                            run.start_fraction,
+                            run.end_fraction,
+                            &to_tile,
+                        );
+                    }
+                }
+            } else {
+                let mut clipped = feature.geometry.within(bounds);
+                simplify::simplify_geometry(&mut clipped, self.tolerance, zoom);
+                encoder.feature(feature, &clipped, &to_tile);
+            }
+        }
+        if let Some((points, clusters)) = &self.clustered {
+            for item in clusters.within(zoom.min(24) as u8, bounds) {
+                let Some(feature) = (match item {
+                    Clustered::Point(index, _) => points.get(index).cloned(),
+                    Clustered::Cluster(position, id, properties) => Some(IndexedFeature {
+                        id: Some(id),
+                        geometry: Geometry {
+                            points: vec![position],
+                            ..Geometry::default()
+                        },
+                        is_line_string: false,
+                        properties,
+                    }),
+                }) else {
+                    continue;
+                };
+                encoder.feature(&feature, &feature.geometry, &to_tile);
+            }
+        }
+        Tile {
+            layers: vec![encoder.finish()],
+        }
+        .encode_to_vec()
+    }
+}
+
+/// The id a feature carries into tiles and queries: the promoted property or `id` when it is a
+/// whole non-negative number, else its position in the document with `generateId`.
+/// The id of each feature of a collection, or of a bare feature, in the order a geometry
+/// processor meets them.
+pub(crate) fn feature_ids_with(
+    geojson: &Value,
+    promoted: Option<&str>,
+    generate_id: bool,
+) -> Vec<Option<u64>> {
+    geojson
+        .get("features")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(std::slice::from_ref(geojson))
+        .iter()
+        .enumerate()
+        .map(|(position, feature)| {
+            numeric_feature_id(feature, promoted, generate_id.then_some(position))
+        })
+        .collect()
+}
+
+pub(super) fn numeric_feature_id(
+    feature: &Value,
+    promoted: Option<&str>,
+    generated: Option<usize>,
+) -> Option<u64> {
+    if let Some(name) = promoted {
+        return feature
+            .get("properties")
+            .and_then(|props| props.get(name))
+            .and_then(integer_id);
+    }
+    if let Some(index) = generated {
+        return Some(index as u64);
+    }
+    feature.get("id").and_then(integer_id)
+}
+
+fn integer_id(value: &Value) -> Option<u64> {
+    value.as_u64().or_else(|| {
+        let number = value.as_f64()?;
+        (number >= 0.0 && number.fract() == 0.0 && number < 9.0e15).then_some(number as u64)
+    })
+}
+
+mod clip;
+pub(crate) mod coverage;
+mod encode;
+mod line_metrics;
+mod read;
+mod simplify;
+use coverage::TileWindow;
+use encode::TileEncoder;
+use read::{bounds_of, coordinate_count, read_geometry};
+
+use super::{
+    cluster::{ClusterInput, ClusterOptions, Clustered, Clusters},
+    feature_passes,
+};
+
+/// The source's own filter, when it has a valid one.
+fn source_filter(source: &GeoJsonSource) -> Option<crate::style::filter::Filter> {
+    crate::style::filter::Filter::parse(source.filter.as_ref()?).ok()
+}
+
+/// Whether a feature is one point, the only geometry that clusters.
+fn is_single_point(geometry: &Value, parsed: &Geometry) -> bool {
+    geometry.get("type").and_then(Value::as_str) == Some("Point")
+        && parsed.points.len() == 1
+        && parsed.lines.is_empty()
+        && parsed.polygons.is_empty()
+}

@@ -1,0 +1,148 @@
+//! Queues the density draws of every visible heatmap layer and its composite in the main pass.
+
+use crate::{
+    context::MapContext,
+    heatmap::{
+        render_commands::{DrawHeatmapComposite, DrawHeatmapDensityTiles},
+        resources::HeatmapResources,
+    },
+    io::tile_sources::TileKind,
+    render::{
+        eventually::{Eventually, Eventually::Initialized},
+        render_phase::{DrawState, LayerItem, ProjectionBinding, RenderPhase},
+        tile_view_pattern::{TileShape, WgpuTileViewPattern},
+    },
+    schedule::system::{SystemError, SystemResult},
+    style::layer::LayerPaint,
+    tcs::tiles::Tile,
+    vector::VectorBufferPool,
+};
+
+/// The point draws of one heatmap layer, in the order its density pass runs them.
+pub struct DensityLayer {
+    /// Style layer whose density target the draws add into.
+    pub layer: String,
+    /// One draw per source tile with points of the layer.
+    pub items: Vec<LayerItem>,
+}
+
+/// Every visible heatmap layer's density draws for this frame.
+#[derive(Default)]
+pub struct HeatmapDensityPhase {
+    /// Layers in style order; a layer without points still appears, so its target is cleared.
+    pub layers: Vec<DensityLayer>,
+}
+
+pub fn queue_system(
+    MapContext {
+        style,
+        view_state,
+        world,
+        ..
+    }: &mut MapContext,
+) -> SystemResult {
+    let Some((tile_view_pattern, buffer_pool, resources, density_phase, layer_item_phase)) =
+        world.resources.query_mut::<(
+            &mut Eventually<WgpuTileViewPattern>,
+            &mut Eventually<VectorBufferPool>,
+            &mut Eventually<HeatmapResources>,
+            &mut HeatmapDensityPhase,
+            &mut RenderPhase<LayerItem>,
+        )>()
+    else {
+        return Err(SystemError::Dependencies);
+    };
+    density_phase.layers.clear();
+    if !style.cached_has_heatmap_layers() {
+        return Ok(());
+    }
+    let (Initialized(tile_view_pattern), Initialized(buffer_pool), Initialized(resources)) =
+        (tile_view_pattern, buffer_pool, resources)
+    else {
+        return Ok(());
+    };
+    let zoom = view_state.style_zoom().value();
+    let layers: Vec<_> = style
+        .layers
+        .iter()
+        .filter(|layer| {
+            matches!(layer.paint, Some(LayerPaint::Heatmap(_)))
+                && layer.is_visible_at(zoom)
+                && resources.density_view(&layer.id).is_some()
+        })
+        .collect();
+    if layers.is_empty() {
+        return Ok(());
+    }
+
+    // Each source tile is drawn once at each place, however many view tiles it stands in for
+    // while its children load, so a point is never counted twice; a world copy is another place.
+    let mut sources: Vec<TileShape> = Vec::new();
+    for view_tile in tile_view_pattern.iter() {
+        view_tile.render_kind(TileKind::Vector, |source_shape| {
+            if !sources
+                .iter()
+                .any(|known| known.same_placement(source_shape))
+            {
+                sources.push(source_shape.clone());
+            }
+        });
+    }
+    let Some(any_shape) = sources.first().cloned() else {
+        return Ok(());
+    };
+
+    let pool_index = buffer_pool.as_ref();
+    for layer in layers {
+        let layer_id = layer.layer_id();
+        let mut items = Vec::new();
+        for source_shape in &sources {
+            let Some(entries) = pool_index.get_layers(source_shape.coords()) else {
+                continue;
+            };
+            let shape_data = source_shape.draw_data();
+            for (slot_idx, entry) in entries.iter().enumerate() {
+                if entry.style_layer_id != layer_id {
+                    continue;
+                }
+                items.push(LayerItem {
+                    projection: ProjectionBinding::View,
+                    draw_function: &DrawState::<LayerItem, DrawHeatmapDensityTiles>::INSTANCE,
+                    index: layer.index,
+                    generate_borders: false,
+                    style_layer: layer_id,
+                    entry_slot: u16::try_from(slot_idx)
+                        .unwrap_or(crate::render::render_phase::UNSET_ENTRY_SLOT),
+                    tile: Tile {
+                        coords: entry.coords,
+                    },
+                    source_shape: shape_data,
+                    mask_group: crate::render::render_phase::MaskGroup::Vector,
+                    run: None,
+                });
+            }
+        }
+        density_phase.layers.push(DensityLayer {
+            layer: layer.id.clone(),
+            items,
+        });
+        // Ignoring depth, the composite lands over opaque layers above it; at their index it
+        // sorts behind them through the borders flag.
+        let above = style.opaque_layer_above(layer, zoom);
+        layer_item_phase.add(LayerItem {
+            projection: ProjectionBinding::View,
+            draw_function: &DrawState::<LayerItem, DrawHeatmapComposite>::INSTANCE,
+            index: above.unwrap_or(layer.index),
+            generate_borders: above.is_some(),
+            style_layer: layer_id,
+            entry_slot: crate::render::render_phase::UNSET_ENTRY_SLOT,
+            tile: Tile {
+                coords: any_shape.coords(),
+            },
+            source_shape: any_shape.draw_data(),
+            mask_group: crate::render::render_phase::MaskGroup::Unmasked,
+            run: None,
+        });
+    }
+    Ok(())
+}

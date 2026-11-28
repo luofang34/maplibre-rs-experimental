@@ -8,13 +8,13 @@ use maplibre::{
         layer::{LayerPaint, StyleLayer, StyleProperty},
         property::NumberList,
         source::{RasterDemSource, Source},
-        Style,
+        Style, StyleDocument,
     },
 };
 use maplibre_winit::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
 
 pub fn style() -> Style {
-    Style {
+    Style::from_document(StyleDocument {
         version: 8,
         sources: [(
             "hillshadeSource".to_string(),
@@ -55,7 +55,7 @@ pub fn style() -> Style {
         zoom: Some(10.0),
         pitch: Some(0.0),
         ..Default::default()
-    }
+    })
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

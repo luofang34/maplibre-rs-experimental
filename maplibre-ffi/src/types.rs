@@ -3,8 +3,11 @@
 use cgmath::Deg;
 use maplibre::{
     coords::LatLon,
-    headless::map::{readback::ReadbackError, HeadlessMap, HeadlessMapOperationError},
-    map::handle::{HeadlessRuntimeError, MapClosed},
+    headless::{
+        map::{readback::ReadbackError, HeadlessMap, HeadlessMapOperationError},
+        HeadlessRuntimeError,
+    },
+    map::handle::MapClosed,
     render::{
         settings::{BufferPoolSizes, RendererSettings},
         view_state::{CameraOptions, NavigationError},

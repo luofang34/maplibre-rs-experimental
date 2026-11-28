@@ -11,9 +11,9 @@ use maplibre::{
         SendError,
     },
     kernel::KernelBuilder,
-    map::Map,
+    map::{Map, RenderPlugin},
     platform::{http_client::ReqwestHttpClient, ReqwestOffscreenKernelEnvironment},
-    render::{builder::RendererBuilder, RenderPlugin},
+    render::builder::RendererBuilder,
     sdf::SdfPlugin,
     vector::{DefaultVectorTransferables, VectorPlugin},
 };

@@ -4,17 +4,17 @@ use std::path::PathBuf;
 
 use maplibre::{coords::WorldTileCoords, style::source::TileAddressingScheme};
 
-pub(super) fn workspace_tests_dir() -> PathBuf {
+pub(crate) fn workspace_tests_dir() -> PathBuf {
     PathBuf::from("render-tests/src/tests")
 }
 
-pub(super) fn workspace_ignores_path() -> PathBuf {
+pub(crate) fn workspace_ignores_path() -> PathBuf {
     PathBuf::from("render-tests/ignores.json")
 }
 
 /// Canonical slash-separated fixture ID relative to `render-tests/src/tests` (when under it)
 /// or `test_root` otherwise, avoiding collisions across deeply nested categories.
-pub(super) fn fixture_id(test_dir: &std::path::Path, test_root: &std::path::Path) -> String {
+pub(crate) fn fixture_id(test_dir: &std::path::Path, test_root: &std::path::Path) -> String {
     let canonical_base = workspace_tests_dir();
     let relative = test_dir
         .strip_prefix(&canonical_base)
@@ -29,11 +29,11 @@ pub(super) fn fixture_id(test_dir: &std::path::Path, test_root: &std::path::Path
         .join("/")
 }
 
-pub(super) fn workspace_templates_dir() -> PathBuf {
+pub(crate) fn workspace_templates_dir() -> PathBuf {
     PathBuf::from("render-tests/src/templates")
 }
 
-pub(super) fn local_tile_path(
+pub(crate) fn local_tile_path(
     template: &str,
     coords: WorldTileCoords,
     scheme: Option<TileAddressingScheme>,
@@ -58,7 +58,7 @@ fn row_in_scheme(coords: WorldTileCoords, scheme: Option<TileAddressingScheme>) 
     }
 }
 
-pub(super) fn local_data_path(url: &str) -> Result<PathBuf, String> {
+pub(crate) fn local_data_path(url: &str) -> Result<PathBuf, String> {
     for directory in ["data", "geojson"] {
         if let Some(relative) = url.strip_prefix(&format!("local://{directory}/")) {
             return Ok(PathBuf::from("render-tests/src/assets")
@@ -70,14 +70,14 @@ pub(super) fn local_data_path(url: &str) -> Result<PathBuf, String> {
 }
 
 /// The file behind a `local://styles/...` style URL.
-pub(super) fn local_style_path(url: &str) -> Result<PathBuf, String> {
+pub(crate) fn local_style_path(url: &str) -> Result<PathBuf, String> {
     let relative = url
         .strip_prefix("local://styles/")
         .ok_or_else(|| format!("Unsupported style URL in render harness: {url}"))?;
     Ok(PathBuf::from("render-tests/src/assets/styles").join(relative))
 }
 
-pub(super) fn collect_tests(test_root: &std::path::Path) -> Vec<PathBuf> {
+pub(crate) fn collect_tests(test_root: &std::path::Path) -> Vec<PathBuf> {
     let mut tests = walkdir::WalkDir::new(test_root)
         .min_depth(1)
         .into_iter()
@@ -91,7 +91,7 @@ pub(super) fn collect_tests(test_root: &std::path::Path) -> Vec<PathBuf> {
 }
 
 /// Filters `tests` by canonical fixture-ID prefixes, failing fast if nothing matches.
-pub(super) fn filter_tests(
+pub(crate) fn filter_tests(
     tests: Vec<PathBuf>,
     test_root: &std::path::Path,
     filters: &[String],

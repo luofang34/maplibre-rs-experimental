@@ -30,18 +30,15 @@ pub mod input;
 mod window;
 
 pub use environment::WinitEnvironment;
-pub use event_loop::{
-    ProxyWake, RawEventLoopProxy, RawWinitEventLoop, WinitApplication, WinitEventLoop,
-    WinitEventLoopProxy,
+pub use event_loop::{ProxyWake, WinitApplication, WinitEventLoop, WinitEventLoopProxy};
+#[cfg(target_arch = "wasm32")]
+pub use window::{get_canvas, is_safari_gesture_active, take_safari_trackpad_gesture};
+pub use window::{
+    RawEventLoopProxy, RawWinitEventLoop, RawWinitWindow, WinitMapWindow, WinitMapWindowConfig,
 };
-pub use window::{RawWinitWindow, WinitMapWindow};
 #[cfg(target_os = "android")]
 pub use winit::platform::android::activity as android_activity;
 #[cfg(not(target_arch = "wasm32"))]
 mod noweb;
 #[cfg(not(target_arch = "wasm32"))]
 pub use noweb::*;
-#[cfg(target_arch = "wasm32")]
-mod web;
-#[cfg(target_arch = "wasm32")]
-pub use web::*;

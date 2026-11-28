@@ -107,14 +107,15 @@ struct PreparedPrepack {
 
 impl PreparedPrepack {
     fn from_input(
-        mut buffer: OverAlignedVertexBuffer<ShaderVertex, IndexDataType>,
+        buffer: OverAlignedVertexBuffer<ShaderVertex, IndexDataType>,
         has_colors_or_paint: bool,
         style_type: &str,
     ) -> Self {
-        let shared_key = buffer.shared_geometry_key().unwrap_or(0);
-        let usable_indices = buffer.usable_indices;
-        let shared_pre = buffer.take_prepacked_gpu_arc();
-        let raw_indices_owned = buffer.buffer.indices;
+        let parts = buffer.into_raw_parts();
+        let shared_key = parts.shared_geometry_key.unwrap_or(0);
+        let usable_indices = parts.usable_indices;
+        let shared_pre = parts.prepacked_gpu;
+        let raw_indices_owned = parts.indices;
         if let Some(pre) = shared_pre.as_deref() {
             return Self {
                 shared_key,
@@ -126,7 +127,7 @@ impl PreparedPrepack {
                 raw_indices_owned,
             };
         }
-        let raw_vertices = buffer.buffer.vertices;
+        let raw_vertices = parts.vertices;
         let logical_vertex_count = raw_vertices.len();
         let mut owned_vertices = Vec::new();
         let compact_extrusion = shared_key == 0

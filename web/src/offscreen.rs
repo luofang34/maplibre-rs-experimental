@@ -6,7 +6,6 @@
 mod input;
 mod preinit;
 mod wake;
-mod window;
 
 use std::{
     cell::{Cell, RefCell},
@@ -24,9 +23,14 @@ use maplibre::{
 use wasm_bindgen::{closure::Closure, prelude::*};
 use web_sys::{DedicatedWorkerGlobalScope, MessagePort};
 
-pub(crate) use self::window::OffscreenEnvironment;
-use self::window::{register_runner_waker, unregister_runner_waker, SharedWindowState, WorkerApc};
-use crate::{controller::MapController, platform::UsedOffscreenKernelEnvironment};
+pub(crate) use crate::offscreen_window::OffscreenEnvironment;
+use crate::{
+    controller::MapController,
+    offscreen_window::{
+        register_runner_waker, unregister_runner_waker, SharedWindowState, WorkerApc,
+    },
+    platform::UsedOffscreenKernelEnvironment,
+};
 
 const MAX_INPUT_DT: Duration = Duration::from_millis(50);
 
@@ -120,9 +124,7 @@ impl RunnerInner {
             s.commands.apply(&mut s.map);
             s.sync_style_swap();
             !s.closed.get()
-                && (s.map.has_ready_work()
-                    || apc_has_arrivals(s.map.kernel().apc())
-                    || s.input.moved_view())
+                && (s.map.has_ready_work() || apc_has_arrivals(s.map.apc()) || s.input.moved_view())
         };
         if needs_frame {
             Self::schedule_wakeup(rc);
@@ -143,16 +145,16 @@ impl RunnerInner {
     }
 
     fn compute_next_wakeup(&self, after: Instant) -> (Option<Duration>, bool) {
-        let map_ready = if apc_supports_waker(self.map.kernel().apc()) {
+        let map_ready = if apc_supports_waker(self.map.apc()) {
             self.map.has_ready_work()
         } else {
             self.map.needs_redraw()
         };
-        let arrivals = apc_has_arrivals(self.map.kernel().apc());
+        let arrivals = apc_has_arrivals(self.map.apc());
         let input_moved = self.input.moved_view();
         let in_flight =
             <WorkerApc as AsyncProcedureCall<UsedOffscreenKernelEnvironment>>::in_flight_calls(
-                self.map.kernel().apc(),
+                self.map.apc(),
             );
         let wait = match (self.input.next_wait(after), self.map.next_retry_delay()) {
             (Some(a), Some(b)) => Some(a.min(b)),
@@ -174,7 +176,7 @@ impl RunnerInner {
         {
             self.initial_load_settled.set(true);
             <WorkerApc as AsyncProcedureCall<UsedOffscreenKernelEnvironment>>::set_boot_unthrottled(
-                self.map.kernel().apc(),
+                self.map.apc(),
                 false,
             );
         }
@@ -323,7 +325,7 @@ fn start_runner(
     let apc_waker = register_runner_waker(runner_id, redraw_rc);
     if let Ok(guard) = inner.try_borrow() {
         <WorkerApc as AsyncProcedureCall<UsedOffscreenKernelEnvironment>>::set_waker(
-            guard.map.kernel().apc(),
+            guard.map.apc(),
             apc_waker,
         );
     }

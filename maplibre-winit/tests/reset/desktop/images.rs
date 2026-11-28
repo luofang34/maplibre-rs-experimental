@@ -1,10 +1,9 @@
 use maplibre::{
-    map::Map,
+    map::{Map, RenderPlugin, TerrainPlugin},
     raster::{
         DefaultRasterTransferables, RasterLayerData, RasterLayersDataComponent, RasterPlugin,
     },
-    render::RenderPlugin,
-    terrain::{DefaultDemTransferables, DemTileComponent, TerrainPlugin},
+    terrain::{DefaultDemTransferables, DemTileComponent},
 };
 use maplibre_winit::WinitMapWindowConfig;
 

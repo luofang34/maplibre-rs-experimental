@@ -1,0 +1,274 @@
+//! Frames for a head-mounted display, drawn through the offscreen map.
+
+use thiserror::Error;
+
+mod motion;
+
+use crate::{
+    headless::map::HeadlessMap,
+    map::runtime::frame::{frame_input_system, run_frame, run_stages},
+    projection::ProjectionType,
+    render::{
+        eventually::Eventually,
+        eye_covering::{EyeInFrame, EyePassCount},
+        frame_input::ViewSource,
+        resource::TextureView,
+        xr::{PrefetchView, ScenePlacement, XrEye, XrFrame},
+    },
+    schedule::{RenderStageLabel, StageError},
+};
+
+/// Why a frame for a head-mounted display could not be drawn.
+#[derive(Error, Debug)]
+pub enum XrFrameError {
+    /// An eye's pose has no inverse, so it looks from nowhere.
+    #[error("eye {index} has a singular pose")]
+    SingularEye {
+        /// Position of the eye in the frame.
+        index: usize,
+    },
+    /// An external view is invalid; the host can keep its complete stereo frame.
+    #[error("eye {index} has an invalid external view")]
+    InvalidView {
+        /// Position of the eye in the frame.
+        index: usize,
+        /// Validation failure from the supplied placement or frustum.
+        #[source]
+        source: crate::render::view_state::ExternalViewError,
+    },
+    /// A stage of the schedule failed while drawing an eye.
+    #[error("eye {index} could not be drawn")]
+    Eye {
+        /// Position of the eye in the frame.
+        index: usize,
+        /// The stage failure.
+        #[source]
+        source: StageError,
+    },
+}
+
+impl HeadlessMap {
+    /// Resize the render attachments and viewport without discarding supplied tiles. The
+    /// display keeps the pixel ratio [`Self::set_pixel_ratio`] gave it, so the viewport is the
+    /// new size in layout pixels.
+    pub fn resize(&mut self, size: crate::window::PhysicalSize) {
+        let ratio = self
+            .map_context
+            .world
+            .resources
+            .get::<crate::sdf::provided::DisplayPixelRatio>()
+            .map_or(1.0, |ratio| f64::from(ratio.0));
+        self.map_context.resize(size, ratio);
+    }
+
+    /// Draws every eye of the frame into its own target, from the placement the host chose.
+    ///
+    /// Tile ingestion runs once, before the first eye. Later eyes keep its tile content and
+    /// terrain refinement while updating their own projection and render targets.
+    /// An eye without a colour target draws into the map's own texture, which then holds
+    /// the last such eye.
+    pub fn run_xr_frame(&mut self, frame: XrFrame) -> Result<(), XrFrameError> {
+        let views = self.validate_views(&frame)?;
+        self.map_context
+            .view_state
+            .set_opaque_environment(frame.opaque_environment);
+        self.set_motion_prefetch(&frame, views.first().copied());
+        let eye_count = views.len();
+        let resources = &mut self.map_context.world.resources;
+        let frame_number = resources
+            .get::<EyeInFrame>()
+            .map_or(0, |eye| eye.frame.wrapping_add(1));
+        resources.insert(EyePassCount(eye_count));
+        for (index, (eye, view)) in frame.eyes.into_iter().zip(views).enumerate() {
+            // The first eye selects the frame's tiles; the others draw the same ones.
+            self.map_context.world.resources.insert(EyeInFrame {
+                index,
+                frame: frame_number,
+            });
+            let input = self.frame_input_mut();
+            input.timestamp = frame.timestamp;
+            input.view = ViewSource::External(view);
+            input.request_overscan = frame.request_overscan;
+
+            let resources = &mut self.map_context.renderer.resources;
+            if let Some(color) = eye.target.color {
+                resources.render_target = Eventually::Initialized(TextureView::from(color));
+            }
+            resources.eye_depth_target = eye.target.depth;
+            let result = if index == 0 {
+                run_frame(&mut self.schedule, &mut self.map_context)
+            } else {
+                // Later eyes apply their own view; the camera advanced and the tiles were
+                // requested once, for the first eye.
+                frame_input_system(&mut self.map_context)
+                    .map_err(StageError::from)
+                    .and_then(|()| {
+                        run_stages(&mut self.schedule, &mut self.map_context, |label| {
+                            label != &RenderStageLabel::Input as &dyn crate::schedule::StageLabel
+                                && label
+                                    != &RenderStageLabel::Request
+                                        as &dyn crate::schedule::StageLabel
+                        })
+                    })
+            };
+            let resources = &mut self.map_context.renderer.resources;
+            resources.eye_depth_target = None;
+            // The graph runner takes the target after a frame; a failed frame must not leave
+            // the eye's texture behind for the next one.
+            resources.render_target.take();
+            if let Err(source) = result {
+                self.map_context.world.resources.remove::<EyePassCount>();
+                self.map_context.world.resources.insert(EyeInFrame {
+                    index: 0,
+                    frame: frame_number,
+                });
+                return Err(XrFrameError::Eye { index, source });
+            }
+        }
+        self.map_context.world.resources.remove::<EyePassCount>();
+        self.map_context.world.resources.insert(EyeInFrame {
+            index: 0,
+            frame: frame_number,
+        });
+        Ok(())
+    }
+
+    fn validate_views(
+        &self,
+        frame: &XrFrame,
+    ) -> Result<Vec<crate::render::view_state::ExternalView>, XrFrameError> {
+        let projection = self
+            .map_context
+            .style
+            .projection
+            .as_ref()
+            .map_or(ProjectionType::Mercator, |spec| {
+                spec.projection_type.clone()
+            });
+        let mut checked = self.map_context.view_state.clone();
+        frame
+            .eyes
+            .iter()
+            .enumerate()
+            .map(|(index, eye)| {
+                let view = frame
+                    .placement
+                    .view_from(eye.world_from_eye, eye.frustum)
+                    .ok_or(XrFrameError::SingularEye { index })?;
+                checked
+                    .set_external_view(view, &projection)
+                    .map_err(|source| XrFrameError::InvalidView { index, source })?;
+                Ok(view)
+            })
+            .collect()
+    }
+
+    fn set_motion_prefetch(
+        &mut self,
+        frame: &XrFrame,
+        view: Option<crate::render::view_state::ExternalView>,
+    ) {
+        if frame.prefetch.is_some() {
+            self.map_context
+                .world
+                .resources
+                .insert(motion::MotionPrefetch::default());
+            self.set_prefetch(frame.prefetch.as_ref(), frame.eyes.first());
+            return;
+        }
+        let projection = self
+            .map_context
+            .style
+            .projection
+            .as_ref()
+            .map_or(ProjectionType::Mercator, |spec| {
+                spec.projection_type.clone()
+            });
+        let motion = self
+            .map_context
+            .world
+            .resources
+            .get_or_init_mut::<motion::MotionPrefetch>();
+        let ahead = view.and_then(|view| {
+            motion.update(
+                frame.timestamp,
+                view,
+                &self.map_context.view_state,
+                &projection,
+            )
+        });
+        self.map_context.world.resources.insert(PrefetchView {
+            view_state: ahead,
+            placement: None,
+        });
+    }
+
+    /// Keeps the view the frame's first eye would have from `placement`, so the request
+    /// systems can cover it, or clears it.
+    fn set_prefetch(&mut self, placement: Option<&ScenePlacement>, eye: Option<&XrEye>) {
+        // The anchor's altitude follows the terrain as DEM tiles arrive; a destination
+        // whose only change is that is the same destination.
+        let same_destination = |kept: &ScenePlacement, wanted: &ScenePlacement| {
+            kept.world_from_scene == wanted.world_from_scene
+                && kept.anchor.position == wanted.anchor.position
+        };
+        let resources = &mut self.map_context.world.resources;
+        let kept = resources.get::<PrefetchView>().is_some_and(|prefetch| {
+            match (prefetch.placement.as_ref(), placement) {
+                (Some(kept), Some(wanted)) => same_destination(kept, wanted),
+                (None, None) => true,
+                _ => false,
+            }
+        });
+        if kept {
+            return;
+        }
+        let view = placement
+            .zip(eye)
+            .and_then(|(placement, eye)| placement.view_from(eye.world_from_eye, eye.frustum));
+        let view_state = view.and_then(|view| {
+            let projection = self
+                .map_context
+                .style
+                .projection
+                .as_ref()
+                .map_or(ProjectionType::Mercator, |specification| {
+                    specification.projection_type.clone()
+                });
+            let mut ahead = self.map_context.view_state.clone();
+            ahead.set_external_view(view, &projection).ok()?;
+            Some(ahead)
+        });
+        self.map_context.world.resources.insert(PrefetchView {
+            view_state,
+            placement: placement.copied(),
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+#[path = "xr/resizing/tests.rs"]
+mod resizing;
+
+#[cfg(test)]
+#[path = "xr/imagery/tests.rs"]
+mod imagery;
+
+#[cfg(test)]
+#[path = "xr/regression/tests.rs"]
+mod regression;
+
+#[cfg(test)]
+#[path = "xr/surface/tests.rs"]
+mod surface;
+
+#[cfg(test)]
+#[path = "xr/poles/tests.rs"]
+mod poles;
+
+#[cfg(test)]
+#[path = "xr/drape_sources/tests.rs"]
+mod drape_sources;

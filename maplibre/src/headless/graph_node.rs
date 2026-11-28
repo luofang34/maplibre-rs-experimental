@@ -29,7 +29,7 @@ impl Node for CopySurfaceBufferNode {
         _world: &World,
     ) {
         let surface = state.surface();
-        match surface.head() {
+        match surface.as_ref() {
             Head::Headed(_) => {}
             Head::Headless(buffered_texture) => {
                 let size = surface.size();

@@ -1,9 +1,7 @@
 //! Compile-time gated telemetry, camera-sync and idle hooks for external comparison/benchmark
 //! harnesses (`--features arena-telemetry`). Absent from default and production builds.
 
-use std::{cell::RefCell, rc::Rc};
-
-use maplibre::{io::apc::AsyncProcedureCall, map::handle::Reply};
+use maplibre::io::apc::AsyncProcedureCall;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -12,21 +10,6 @@ use crate::{
     environment::WHATWGOffscreenKernelEnvironment,
     error::JSError,
 };
-
-/// Active frame-watcher handles attached to a [`MapController`]. Dropping or replacing a [`Reply`]
-/// cancels its watcher in [`maplibre::map::handle::MapCommands::observe`] automatically.
-#[derive(Clone, Default)]
-pub(crate) struct TelemetryWatchers {
-    camera: Rc<RefCell<Option<Reply<()>>>>,
-    telemetry: Rc<RefCell<Option<Reply<()>>>>,
-}
-
-impl TelemetryWatchers {
-    pub(crate) fn detach(&self) {
-        self.camera.borrow_mut().take();
-        self.telemetry.borrow_mut().take();
-    }
-}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -162,7 +145,7 @@ impl MapController {
                 if stats.frame != 0 && stats.frame != last_frame {
                     last_frame = stats.frame;
                     let has_arrivals = AsyncProcedureCall::<WHATWGOffscreenKernelEnvironment>::has_pending_arrivals(
-                        map.kernel().apc(),
+                        map.apc(),
                     );
                     let reasons = context.redraw_reasons();
                     let loaded = !reasons.loading
@@ -234,7 +217,7 @@ impl MapController {
             handle.until(|map| {
                 let has_arrivals =
                     AsyncProcedureCall::<WHATWGOffscreenKernelEnvironment>::has_pending_arrivals(
-                        map.kernel().apc(),
+                        map.apc(),
                     );
                 let context = map.context().ok()?;
                 let stats = context.last_frame_stats();
@@ -266,7 +249,7 @@ impl MapController {
             handle.until(|map| {
                 let has_arrivals =
                     AsyncProcedureCall::<WHATWGOffscreenKernelEnvironment>::has_pending_arrivals(
-                        map.kernel().apc(),
+                        map.apc(),
                     );
                 let context = map.context().ok()?;
                 let stats = context.last_frame_stats();

@@ -6,8 +6,8 @@ use js_sys::{Array, ArrayBuffer};
 use wasm_bindgen::{closure::Closure, JsCast, JsValue};
 use web_sys::{MessageEvent, MessagePort, Worker};
 
-use super::ReceivedType;
-use crate::{error::WebError, platform::singlethreaded::wasm_entries::deliver_received_data};
+use super::{deliver_received_data, ReceivedType};
+use crate::error::WebError;
 
 /// Builds a worker message `{ type: kind, <key>: value, ... }`.
 pub(super) fn worker_message(
@@ -146,6 +146,20 @@ fn make_worker_listener(received: &Rc<ReceivedType>) -> WorkerMessageClosure {
             tracing::warn!(?err, "failed delivering single-threaded worker message");
         }
     }) as Box<dyn FnMut(MessageEvent)>)
+}
+
+pub(super) fn release_workers_with_busy(
+    workers: Vec<WorkerEndpoint>,
+    listeners: Vec<WorkerMessageClosure>,
+    busy_worker_indices: impl Iterator<Item = usize>,
+) {
+    let mut busy = vec![false; workers.len()];
+    for idx in busy_worker_indices {
+        if let Some(slot) = busy.get_mut(idx) {
+            *slot = true;
+        }
+    }
+    release_workers(workers, listeners, &busy);
 }
 
 pub(super) fn release_workers(

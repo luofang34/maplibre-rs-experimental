@@ -17,10 +17,10 @@ use crate::{
     plugin::Plugin,
     render::{
         builder::RendererBuilder, settings::RendererSettings, tile_view_pattern::ViewTileSources,
-        RenderStageLabel, Renderer,
+        Renderer,
     },
-    schedule::Schedule,
-    tcs::{system::SystemContainer, world::World},
+    schedule::{system::SystemContainer, RenderStageLabel, Schedule},
+    tcs::world::World,
     window::{MapWindowConfig, PhysicalSize},
 };
 
@@ -55,8 +55,19 @@ pub enum HeadlessRendererError {
 }
 
 mod graph_node;
+#[cfg(all(feature = "native-io", not(target_arch = "wasm32")))]
+mod runtime_thread;
 mod shared_assets;
 mod system;
+
+#[cfg(all(feature = "native-io", not(target_arch = "wasm32")))]
+pub use runtime_thread::{HeadlessRuntimeConfig, HeadlessRuntimeError, HeadlessRuntimeThread};
+
+/// Thread-safe command queue for an offscreen [`map::HeadlessMap`].
+pub type SyncHeadlessCommands = crate::map::handle::SyncCommandQueue<map::HeadlessMap>;
+
+/// Thread-safe handle (`Clone + Send + Sync + 'static`) to an offscreen [`map::HeadlessMap`].
+pub type SyncHeadlessHandle = crate::map::handle::SyncHandle<map::HeadlessMap>;
 
 pub mod environment;
 pub mod map;
@@ -291,9 +302,9 @@ mod tests {
             use std::rc::Rc;
 
             use crate::{
+                map::RenderPlugin,
                 plugin::Plugin,
-                render::{RenderPlugin, RenderStageLabel},
-                schedule::Schedule,
+                schedule::{RenderStageLabel, Schedule},
                 tcs::world::World,
             };
 

@@ -16,7 +16,7 @@ use maplibre::{
     plugin::{Plugin, PluginError},
     render::Renderer,
     schedule::Schedule,
-    tcs::{system::heap::HeapSampler, world::World},
+    schedule::{system::heap::HeapSampler, world::World},
 };
 use tracing_subscriber::{
     filter::Targets, fmt::MakeWriter, layer::SubscriberExt, util::SubscriberInitExt, Layer,

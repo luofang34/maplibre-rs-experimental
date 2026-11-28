@@ -12,11 +12,14 @@ use std::{
 use cgmath::Deg;
 use maplibre::{
     custom_layer::CustomStyleLayer,
-    headless::map::{
-        readback::{FrameReadback, PixelLayout},
-        HeadlessMap,
+    headless::{
+        map::{
+            readback::{FrameReadback, PixelLayout},
+            HeadlessMap,
+        },
+        HeadlessRuntimeConfig, HeadlessRuntimeThread, SyncHeadlessHandle,
     },
-    map::handle::{HeadlessRuntimeConfig, HeadlessRuntimeThread, MapClosed, SyncHeadlessHandle},
+    map::handle::MapClosed,
     sdf::query::{QueryGeometry, QueryOptions},
     style::{feature_state::FeatureId, StyleImage},
     window::PhysicalSize,

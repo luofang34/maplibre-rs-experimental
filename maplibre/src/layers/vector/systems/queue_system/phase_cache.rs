@@ -1,0 +1,406 @@
+//! Per-style compiled layer predicates and sorted draw-phase snapshot caching for
+//! [`super::queue_system`].
+
+use std::hash::{Hash, Hasher};
+
+use rustc_hash::{FxHashSet, FxHasher};
+
+use crate::{
+    render::render_phase::{LayerItem, RenderPhase, TileMaskItem},
+    style::{
+        layer::{LayerPaint, PatternName, StyleLayer},
+        property::StyleProperty,
+        Style, StyleLayerId,
+    },
+};
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct VectorPhaseCacheKey {
+    pub(super) topology_gen: u64,
+    pub(super) buffer_pool_rev: u64,
+    pub(super) style_rev: u64,
+    pub(super) layer_state_digest: u64,
+    pub(super) needs_mask_borders: bool,
+    pub(super) skip_draped: bool,
+}
+
+#[derive(Default)]
+pub(super) struct CachedVectorPhases {
+    pub(super) key: VectorPhaseCacheKey,
+    pub(super) masks: Vec<TileMaskItem>,
+    pub(super) layers: Vec<LayerItem>,
+}
+
+struct CompiledLayerRule {
+    id: StyleLayerId,
+    index: u32,
+    minzoom: Option<f64>,
+    maxzoom: Option<f64>,
+    is_translucent_extrusion: bool,
+    is_unclipped_3d: bool,
+    is_drapeable: bool,
+    is_heatmap: bool,
+    pattern_prop: Option<StyleProperty<PatternName>>,
+    missing_pattern_prop: Option<StyleProperty<PatternName>>,
+    opacity_prop: Option<StyleProperty<f32>>,
+    width_prop: Option<StyleProperty<f32>>,
+}
+
+impl CompiledLayerRule {
+    fn from_layer(layer: &StyleLayer) -> Self {
+        let is_translucent_extrusion = matches!(
+            &layer.paint,
+            Some(LayerPaint::FillExtrusion(paint)) if paint.fill_extrusion_translucent == Some(true)
+        );
+        let is_unclipped_3d = is_translucent_extrusion
+            || matches!(
+                crate::vector::structures::kind(layer),
+                Some(crate::vector::structures::StructureKind::ElevatedLine)
+            );
+        let is_drapeable = crate::terrain::is_drapeable(&layer.type_)
+            && crate::vector::structures::kind(layer).is_none();
+        let is_heatmap = layer.type_ == "heatmap";
+        let raw_pattern = match &layer.paint {
+            Some(LayerPaint::Fill(fill)) => fill.fill_pattern.as_ref(),
+            Some(LayerPaint::Line(line)) => line.line_pattern.as_ref(),
+            Some(LayerPaint::FillExtrusion(extrusion)) => extrusion.fill_extrusion_pattern.as_ref(),
+            Some(LayerPaint::Background(background)) => background.background_pattern.as_ref(),
+            _ => None,
+        };
+        let pattern_prop = raw_pattern.map(StyleProperty::<PatternName>::parse);
+        let missing_pattern_prop = pattern_prop
+            .as_ref()
+            .filter(|prop| prop.is_feature_constant())
+            .cloned();
+
+        let (raw_opacity, raw_width) = if layer.transitions.is_empty() {
+            match &layer.paint {
+                Some(LayerPaint::Fill(p)) => (p.fill_opacity.as_ref(), None),
+                Some(LayerPaint::Line(p)) => (p.line_opacity.as_ref(), p.line_width.as_ref()),
+                Some(LayerPaint::FillExtrusion(p)) => (p.fill_extrusion_opacity.as_ref(), None),
+                _ => (None, None),
+            }
+        } else {
+            (None, None)
+        };
+        let opacity_prop = raw_opacity.filter(|p| p.is_feature_constant()).cloned();
+        let width_prop = raw_width.filter(|p| p.is_feature_constant()).cloned();
+
+        Self {
+            id: layer.layer_id(),
+            index: layer.index,
+            minzoom: layer.minzoom,
+            maxzoom: layer.maxzoom,
+            is_translucent_extrusion,
+            is_unclipped_3d,
+            is_drapeable,
+            is_heatmap,
+            pattern_prop,
+            missing_pattern_prop,
+            opacity_prop,
+            width_prop,
+        }
+    }
+
+    #[inline]
+    fn has_zoom_dependent_prop(&self) -> bool {
+        let prop_var = |p: Option<&StyleProperty<f32>>| p.is_some_and(|v| !v.is_zoom_constant());
+        let pat_var =
+            |p: Option<&StyleProperty<PatternName>>| p.is_some_and(|v| !v.is_zoom_constant());
+        pat_var(self.pattern_prop.as_ref())
+            || pat_var(self.missing_pattern_prop.as_ref())
+            || prop_var(self.opacity_prop.as_ref())
+            || prop_var(self.width_prop.as_ref())
+    }
+
+    #[inline]
+    fn is_visible_at(&self, zoom: f64) -> bool {
+        self.minzoom.is_none_or(|min| min <= 0.0 || zoom >= min)
+            && self.maxzoom.is_none_or(|max| zoom < max)
+    }
+
+    fn push_zoom_breakpoints(&self, out: &mut Vec<f64>) {
+        if let Some(min) = self.minzoom.filter(|z| z.is_finite() && *z > 0.0) {
+            out.push(min);
+        }
+        if let Some(max) = self.maxzoom.filter(|z| z.is_finite()) {
+            out.push(max);
+        }
+    }
+
+    #[inline]
+    fn is_zero_opacity(&self, zoom: f64) -> bool {
+        let zero = |prop: Option<&StyleProperty<f32>>| {
+            prop.is_some_and(|p| p.evaluate_at_zoom(zoom).is_some_and(|v| v <= 0.0))
+        };
+        zero(self.opacity_prop.as_ref()) || zero(self.width_prop.as_ref())
+    }
+
+    #[inline]
+    fn has_pattern(&self, has_per_feature: bool, zoom: f64) -> bool {
+        has_per_feature
+            || self.pattern_prop.as_ref().is_some_and(|prop| {
+                prop.evaluate_at_zoom(zoom)
+                    .is_some_and(|name| !name.0.is_empty())
+            })
+    }
+
+    #[inline]
+    fn names_missing_image(&self, style: &Style, zoom: f64) -> bool {
+        self.missing_pattern_prop.as_ref().is_some_and(|prop| {
+            prop.evaluate_at_zoom(zoom)
+                .is_none_or(|name| !style.images.contains_key(&name.0))
+        })
+    }
+}
+
+struct StyleSetsMut<'a> {
+    pattern_layers: &'a mut FxHashSet<StyleLayerId>,
+    missing_image_layers: &'a mut FxHashSet<StyleLayerId>,
+    translucent_extrusion_layers: &'a mut FxHashSet<StyleLayerId>,
+    unclipped_3d_layers: &'a mut FxHashSet<StyleLayerId>,
+    zero_opacity_layers: &'a mut FxHashSet<StyleLayerId>,
+    drapeable_layers: &'a mut FxHashSet<StyleLayerId>,
+    has_visible_heatmap: &'a mut bool,
+}
+
+#[derive(Default)]
+pub(super) struct CompiledStyleRules {
+    style_rev: Option<u64>,
+    has_zoom_dependent_props: bool,
+    zoom_breakpoints: Vec<f64>,
+    rules: Vec<(CompiledLayerRule, bool)>,
+}
+
+impl CompiledStyleRules {
+    fn sync(&mut self, style: &Style) -> bool {
+        let rev = style.revision();
+        if self.style_rev == Some(rev) {
+            return false;
+        }
+        self.style_rev = Some(rev);
+        self.has_zoom_dependent_props = false;
+        self.zoom_breakpoints.clear();
+        self.rules.clear();
+        self.rules.reserve(style.layers.len());
+        for layer in &style.layers {
+            let has_per_feature = layer
+                .paint
+                .as_ref()
+                .and_then(crate::vector::pattern::per_feature_pattern)
+                .is_some();
+            let rule = CompiledLayerRule::from_layer(layer);
+            if rule.has_zoom_dependent_prop() {
+                self.has_zoom_dependent_props = true;
+            }
+            rule.push_zoom_breakpoints(&mut self.zoom_breakpoints);
+            self.rules.push((rule, has_per_feature));
+        }
+        self.zoom_breakpoints.sort_unstable_by(f64::total_cmp);
+        self.zoom_breakpoints.dedup();
+        true
+    }
+
+    fn style_state_digest(&self, style: &Style, style_zoom: f64) -> u64 {
+        let mut hasher = FxHasher::default();
+        self.rules.len().hash(&mut hasher);
+        for (rule, has_per_feature) in &self.rules {
+            let bits = u8::from(rule.is_visible_at(style_zoom))
+                | (u8::from(rule.has_pattern(*has_per_feature, style_zoom)) << 1)
+                | (u8::from(rule.names_missing_image(style, style_zoom)) << 2)
+                | (u8::from(rule.is_zero_opacity(style_zoom)) << 3)
+                | (u8::from(rule.is_translucent_extrusion) << 4)
+                | (u8::from(rule.is_unclipped_3d) << 5)
+                | (u8::from(rule.is_drapeable) << 6)
+                | (u8::from(rule.is_heatmap) << 7);
+            (rule.id, rule.index, bits).hash(&mut hasher);
+        }
+        hasher.finish()
+    }
+
+    fn populate_sets(&self, style: &Style, style_zoom: f64, sets: StyleSetsMut<'_>) {
+        sets.pattern_layers.clear();
+        sets.missing_image_layers.clear();
+        sets.translucent_extrusion_layers.clear();
+        sets.unclipped_3d_layers.clear();
+        sets.zero_opacity_layers.clear();
+        sets.drapeable_layers.clear();
+        *sets.has_visible_heatmap = false;
+        for (rule, has_per_feature) in &self.rules {
+            if rule.has_pattern(*has_per_feature, style_zoom) {
+                sets.pattern_layers.insert(rule.id);
+            }
+            if rule.names_missing_image(style, style_zoom) {
+                sets.missing_image_layers.insert(rule.id);
+            }
+            if rule.is_translucent_extrusion {
+                sets.translucent_extrusion_layers.insert(rule.id);
+            }
+            if rule.is_unclipped_3d {
+                sets.unclipped_3d_layers.insert(rule.id);
+            }
+            if rule.is_zero_opacity(style_zoom) {
+                sets.zero_opacity_layers.insert(rule.id);
+            }
+            if rule.is_drapeable {
+                sets.drapeable_layers.insert(rule.id);
+            }
+            if rule.is_heatmap && rule.is_visible_at(style_zoom) {
+                *sets.has_visible_heatmap = true;
+            }
+        }
+    }
+
+    #[inline]
+    fn zoom_interval_for(&self, style_zoom: f64) -> Option<(f64, f64)> {
+        if self.has_zoom_dependent_props || !style_zoom.is_finite() {
+            return None;
+        }
+        let pos = self.zoom_breakpoints.partition_point(|&z| z <= style_zoom);
+        let lo = pos
+            .checked_sub(1)
+            .and_then(|idx| self.zoom_breakpoints.get(idx).copied())
+            .unwrap_or(f64::NEG_INFINITY);
+        let hi = self
+            .zoom_breakpoints
+            .get(pos)
+            .copied()
+            .unwrap_or(f64::INFINITY);
+        Some((lo, hi))
+    }
+}
+
+#[derive(Default)]
+pub(super) struct VectorQueueScratch {
+    compiled: CompiledStyleRules,
+    last_digest: Option<(u64, u64)>,
+    last_style_zoom_bits: Option<u64>,
+    valid_zoom_interval: Option<(f64, f64)>,
+    pub(super) layer_state_digest: u64,
+    pub(super) pattern_layers: FxHashSet<StyleLayerId>,
+    pub(super) missing_image_layers: FxHashSet<StyleLayerId>,
+    pub(super) translucent_extrusion_layers: FxHashSet<StyleLayerId>,
+    pub(super) unclipped_3d_layers: FxHashSet<StyleLayerId>,
+    pub(super) zero_opacity_layers: FxHashSet<StyleLayerId>,
+    pub(super) drapeable_layers: FxHashSet<StyleLayerId>,
+    pub(super) has_visible_heatmap: bool,
+    pub(super) active_unclipped_3d_shapes: FxHashSet<(i32, crate::coords::WorldTileCoords, u32)>,
+    pub(super) queued_unclipped_3d: FxHashSet<(i32, crate::coords::WorldTileCoords, u32)>,
+    pub(super) extrusion_colors: Vec<LayerItem>,
+    pub(super) extrusion_clears: Vec<LayerItem>,
+    pub(super) translucent_fronts: Vec<LayerItem>,
+    cached_phases: Option<CachedVectorPhases>,
+}
+
+impl VectorQueueScratch {
+    /// Evaluates zoom-dependent layer flags without reallocating or reparsing expressions; returns
+    /// cleanly with the exact `layer_state_digest` and only rebuilds hash sets when flags change.
+    pub(super) fn sync_style_sets(&mut self, style: &Style, style_zoom: f64) -> u64 {
+        let style_changed = self.compiled.sync(style);
+        let style_rev = style.revision();
+        let zoom_bits = style_zoom.to_bits();
+        if style_changed {
+            self.last_style_zoom_bits = None;
+            self.valid_zoom_interval = None;
+        } else if self.last_style_zoom_bits == Some(zoom_bits) {
+            return self.layer_state_digest;
+        } else if !self.compiled.has_zoom_dependent_props
+            && self
+                .valid_zoom_interval
+                .is_some_and(|(lo, hi)| style_zoom >= lo && style_zoom < hi)
+        {
+            self.last_style_zoom_bits = Some(zoom_bits);
+            return self.layer_state_digest;
+        }
+        self.last_style_zoom_bits = Some(zoom_bits);
+        self.valid_zoom_interval = self.compiled.zoom_interval_for(style_zoom);
+
+        let digest = self.compiled.style_state_digest(style, style_zoom);
+        self.layer_state_digest = digest;
+
+        if !style_changed && self.last_digest == Some((style_rev, digest)) {
+            return digest;
+        }
+        self.last_digest = Some((style_rev, digest));
+        self.compiled.populate_sets(
+            style,
+            style_zoom,
+            StyleSetsMut {
+                pattern_layers: &mut self.pattern_layers,
+                missing_image_layers: &mut self.missing_image_layers,
+                translucent_extrusion_layers: &mut self.translucent_extrusion_layers,
+                unclipped_3d_layers: &mut self.unclipped_3d_layers,
+                zero_opacity_layers: &mut self.zero_opacity_layers,
+                drapeable_layers: &mut self.drapeable_layers,
+                has_visible_heatmap: &mut self.has_visible_heatmap,
+            },
+        );
+        digest
+    }
+
+    pub(super) fn try_replay_cached(
+        &self,
+        key: VectorPhaseCacheKey,
+        mask_phase: &mut RenderPhase<TileMaskItem>,
+        layer_phase: &mut RenderPhase<LayerItem>,
+    ) -> bool {
+        let Some(cached) = &self.cached_phases else {
+            return false;
+        };
+        if cached.key != key {
+            return false;
+        }
+        mask_phase.extend_from_slice(&cached.masks);
+        layer_phase.extend_from_slice(&cached.layers);
+        true
+    }
+
+    pub(super) fn store_cached_phases(
+        &mut self,
+        key: VectorPhaseCacheKey,
+        mask_phase: &RenderPhase<TileMaskItem>,
+        mask_start: usize,
+        layer_phase: &RenderPhase<LayerItem>,
+        layer_start: usize,
+    ) {
+        let mask_slice = mask_phase.as_ref().get(mask_start..).unwrap_or_default();
+        let layer_slice = layer_phase.as_ref().get(layer_start..).unwrap_or_default();
+        let cached = self.cached_phases.get_or_insert_default();
+        cached.key = key;
+        cached.masks.clear();
+        cached.masks.extend_from_slice(mask_slice);
+        cached.layers.clear();
+        cached.layers.extend_from_slice(layer_slice);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::VectorQueueScratch;
+    use crate::style::Style;
+
+    #[test]
+    fn zoom_interval_cache_reuses_within_half_open_breakpoints_and_recomputes_at_edges() {
+        let style: Style = serde_json::from_value(serde_json::json!({
+            "version": 8,
+            "sources": {},
+            "layers": [
+                { "id": "mid", "type": "fill", "minzoom": 5, "maxzoom": 10 }
+            ]
+        }))
+        .expect("style");
+        let mut scratch = VectorQueueScratch::default();
+        let d_below = scratch.sync_style_sets(&style, 4.5);
+        assert_eq!(scratch.valid_zoom_interval, Some((f64::NEG_INFINITY, 5.0)));
+        assert_eq!(scratch.sync_style_sets(&style, 4.99), d_below);
+
+        let d_at_min = scratch.sync_style_sets(&style, 5.0);
+        assert_ne!(d_at_min, d_below);
+        assert_eq!(scratch.valid_zoom_interval, Some((5.0, 10.0)));
+        assert_eq!(scratch.sync_style_sets(&style, 7.5), d_at_min);
+
+        let d_at_max = scratch.sync_style_sets(&style, 10.0);
+        assert_eq!(d_at_max, d_below);
+        assert_eq!(scratch.valid_zoom_interval, Some((10.0, f64::INFINITY)));
+    }
+}

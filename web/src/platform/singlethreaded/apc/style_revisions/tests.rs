@@ -39,10 +39,10 @@ fn a_changed_style_is_sent_under_a_new_revision() {
     let first = revisions
         .revision(&Arc::new(Style::default()), recording(&posts))
         .expect("sent");
-    let changed = Arc::new(Style {
+    let changed = Arc::new(Style::from_document(maplibre::style::StyleDocument {
         glyphs: Some("https://example.invalid/{fontstack}/{range}.pbf".into()),
-        ..Style::default()
-    });
+        ..Default::default()
+    }));
     let second = revisions
         .revision(&changed, recording(&posts))
         .expect("sent");

@@ -1,0 +1,350 @@
+//! Window presentation and offscreen render targets with deferred resizing.
+
+use std::sync::Arc;
+
+mod acquisition;
+mod offscreen;
+mod window;
+
+pub use acquisition::SurfaceAcquireError;
+pub use offscreen::BufferedTextureHead;
+#[cfg(feature = "headless")]
+pub use offscreen::{BufferDimensions, BufferReadbackError, WriteImageError};
+pub use window::WindowHead;
+
+use crate::{
+    render::{
+        error::RenderError,
+        eventually::HasChanged,
+        resource::{share_gpu, texture::TextureView},
+        settings::{Msaa, RendererSettings},
+    },
+    window::{HeadedMapWindow, MapWindow, PhysicalSize},
+};
+
+/// Backing storage for a render target, including ownership of a window frame or offscreen image.
+pub enum Head {
+    /// A host window from which a new presentation image is acquired each frame.
+    Headed(WindowHead),
+    /// A persistent texture shared with capture readers, which can outlive a surface resize.
+    Headless(Arc<BufferedTextureHead>),
+}
+
+/// A render target's requested dimensions and currently allocated backing storage.
+/// Resizing changes the requested size; [`Self::reconfigure`] applies it to GPU resources.
+pub struct Surface {
+    size: PhysicalSize,
+    max_texture_dimension_2d: u32,
+    dirty_size: bool,
+    head: Head,
+}
+
+/// Clamps drawable dimensions to `1..=max_dim.max(1)`.
+fn clamp_size(size: PhysicalSize, max_dim: u32) -> PhysicalSize {
+    let max_dim = max_dim.max(1);
+    PhysicalSize::new(size.width().min(max_dim), size.height().min(max_dim))
+        .unwrap_or(PhysicalSize::MIN)
+}
+
+fn pick_surface_format(
+    settings: &RendererSettings,
+    capabilities: &wgpu::SurfaceCapabilities,
+) -> wgpu::TextureFormat {
+    settings
+        .texture_format
+        .or_else(|| {
+            capabilities
+                .formats
+                .iter()
+                .copied()
+                .find(|format| !format.is_srgb())
+        })
+        .or_else(|| capabilities.formats.first().copied())
+        .unwrap_or(wgpu::TextureFormat::Rgba8Unorm)
+}
+
+fn headless_format(settings: &RendererSettings) -> wgpu::TextureFormat {
+    settings
+        .texture_format
+        .unwrap_or(wgpu::TextureFormat::Rgba8Unorm)
+}
+
+fn acquire_headed_view(
+    window: &WindowHead,
+    device: &wgpu::Device,
+) -> Result<TextureView, SurfaceAcquireError> {
+    let frame = acquisition::acquire(
+        || window.surface.get_current_texture(),
+        || window.configure(device),
+    )?;
+    // Create view with non-sRGB format to prevent double-gamma on CSS colors
+    let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
+        format: Some(window.render_format),
+        ..Default::default()
+    });
+    Ok(TextureView::SurfaceTexture {
+        view,
+        texture: frame,
+    })
+}
+
+fn reconfigure_headed(window: &mut WindowHead, size: PhysicalSize, device: &wgpu::Device) {
+    if window.has_changed(&(size.width(), size.height())) {
+        window.resize_and_configure(size.width(), size.height(), device);
+    }
+}
+
+fn reconfigure_headless(
+    head: &mut Arc<BufferedTextureHead>,
+    size: PhysicalSize,
+    device: &wgpu::Device,
+) {
+    if !head.matches_size(size) {
+        *head = share_gpu(head.recreate(device, size));
+    }
+}
+
+impl Surface {
+    /// Wraps an unconfigured window surface using the window's physical dimensions.
+    ///
+    /// Uses the requested format, otherwise prefers a supported non-sRGB format and falls back
+    /// to the first advertised format. The returned window head must be configured before use.
+    /// The window is read for its dimensions; ownership comes from the supplied surface.
+    pub fn from_surface<MW>(
+        surface: wgpu::Surface<'static>,
+        adapter: &wgpu::Adapter,
+        window: &MW,
+        settings: &RendererSettings,
+    ) -> Self
+    where
+        MW: MapWindow + HeadedMapWindow,
+    {
+        let max_texture_dimension_2d = adapter.limits().max_texture_dimension_2d;
+        let size = clamp_size(window.size(), max_texture_dimension_2d);
+
+        let capabilities = surface.get_capabilities(adapter);
+        log::info!("adapter capabilities on surface: {capabilities:?}");
+
+        let texture_format = pick_surface_format(settings, &capabilities);
+        let render_format = window::strip_srgb(texture_format);
+        log::info!("surface format: {texture_format:?}, render format: {render_format:?}");
+
+        let texture_format_features = adapter.get_texture_format_features(texture_format);
+        log::info!("format features: {texture_format_features:?}");
+        let alpha_mode =
+            window::select_alpha_mode(cfg!(target_arch = "wasm32"), &capabilities.alpha_modes);
+
+        Self {
+            size,
+            max_texture_dimension_2d,
+            dirty_size: true,
+            head: Head::Headed(WindowHead {
+                surface,
+                size,
+                texture_format,
+                render_format,
+                texture_format_features,
+                present_mode: settings.present_mode,
+                alpha_mode,
+            }),
+        }
+    }
+
+    /// Allocates a single-sample offscreen target at the window's physical size.
+    ///
+    /// The format defaults to `Rgba8Unorm`. With the `headless` feature this also allocates a
+    /// readback buffer with four bytes per pixel; PNG capture requires RGBA8 pixel data.
+    /// Dimensions, format and usages must be supported by `device`, or wgpu reports validation
+    /// errors. The window is used only for its size and is not retained.
+    pub fn from_image<MW>(
+        device: &wgpu::Device,
+        adapter: &wgpu::Adapter,
+        window: &MW,
+        settings: &RendererSettings,
+    ) -> Self
+    where
+        MW: MapWindow,
+    {
+        Self::from_headless_size(device, adapter, window.size(), settings)
+    }
+
+    /// Allocates a single-sample offscreen target at `size` without a window factory.
+    pub(crate) fn from_headless_size(
+        device: &wgpu::Device,
+        adapter: &wgpu::Adapter,
+        size: PhysicalSize,
+        settings: &RendererSettings,
+    ) -> Self {
+        Self::from_headless_size_owned(device, adapter, size, settings, false)
+    }
+
+    /// Allocates a single-sample offscreen target for an internal view slot whose color texture
+    /// is explicitly destroyed when replaced on resize or unregistered.
+    #[cfg(feature = "headless")]
+    pub(crate) fn from_slot_size(
+        device: &wgpu::Device,
+        adapter: &wgpu::Adapter,
+        size: PhysicalSize,
+        settings: &RendererSettings,
+    ) -> Self {
+        Self::from_headless_size_owned(device, adapter, size, settings, true)
+    }
+
+    fn from_headless_size_owned(
+        device: &wgpu::Device,
+        adapter: &wgpu::Adapter,
+        size: PhysicalSize,
+        settings: &RendererSettings,
+        destroy_texture_on_drop: bool,
+    ) -> Self {
+        let max_texture_dimension_2d = device.limits().max_texture_dimension_2d;
+        let size = clamp_size(size, max_texture_dimension_2d);
+        let format = headless_format(settings);
+        Self {
+            size,
+            max_texture_dimension_2d,
+            dirty_size: false,
+            head: Head::Headless(share_gpu(BufferedTextureHead::new(
+                device,
+                size,
+                format,
+                adapter.get_texture_format_features(format),
+                destroy_texture_on_drop,
+            ))),
+        }
+    }
+
+    /// Format used by render pipelines and attachment views.
+    /// For a window this strips the sRGB suffix to avoid converting CSS colors a second time;
+    /// an offscreen target retains its explicitly requested format.
+    pub fn surface_format(&self) -> wgpu::TextureFormat {
+        match &self.head {
+            Head::Headed(headed) => headed.render_format,
+            Head::Headless(headless) => headless.format(),
+        }
+    }
+
+    /// Acquires a window frame or creates a view of the persistent offscreen texture.
+    ///
+    /// Window acquisition retries once after reconfiguration for an outdated or suboptimal
+    /// frame. Other acquisition failures are returned directly. A successful window frame
+    /// must be presented through [`TextureView::take_surface_texture`] or dropped before
+    /// reconfiguration. This does not apply a pending [`Self::resize`].
+    #[tracing::instrument(name = "create_view", skip_all)]
+    pub fn create_view(&self, device: &wgpu::Device) -> Result<TextureView, SurfaceAcquireError> {
+        match &self.head {
+            Head::Headed(window) => acquire_headed_view(window, device),
+            Head::Headless(arc) => Ok(AsRef::<wgpu::TextureView>::as_ref(&**arc).clone().into()),
+        }
+    }
+
+    /// Requested physical-pixel dimensions, which may differ from storage until reconfiguration.
+    pub fn size(&self) -> PhysicalSize {
+        self.size
+    }
+
+    /// Records nonzero physical-pixel dimensions without allocating or configuring GPU resources.
+    pub fn resize(&mut self, size: PhysicalSize) {
+        if self.size != size {
+            self.size = size;
+            self.dirty_size = true;
+        }
+    }
+
+    /// Applies a pending size change; an unchanged size leaves resources untouched.
+    ///
+    /// Drop outstanding window frames before calling. An offscreen resize allocates a new
+    /// texture and readback buffer; existing [`Arc`] clones retain the previous allocation.
+    /// This does not recreate dependent depth or multisample attachments.
+    pub fn reconfigure(&mut self, device: &wgpu::Device) {
+        if !self.dirty_size {
+            return;
+        }
+        self.dirty_size = false;
+        self.size = clamp_size(self.size, self.max_texture_dimension_2d);
+        match &mut self.head {
+            Head::Headed(window) => reconfigure_headed(window, self.size, device),
+            Head::Headless(head) => reconfigure_headless(head, self.size, device),
+        }
+    }
+
+    /// Replaces a window surface when its configured dimensions differ from the requested size.
+    ///
+    /// Offscreen surfaces and window surfaces with no pending size change are left alone.
+    /// Recreation returns host-handle or surface-creation failures without replacing the
+    /// existing surface. On success, call [`Self::reconfigure`] before acquiring another frame.
+    /// The recreated surface retains a cloned window-handle owner.
+    pub fn recreate<MW>(
+        &mut self,
+        window: &MW,
+        instance: &wgpu::Instance,
+    ) -> Result<(), RenderError>
+    where
+        MW: MapWindow + HeadedMapWindow,
+    {
+        match &mut self.head {
+            Head::Headed(window_head) => {
+                if window_head.has_changed(&(self.size.width(), self.size.height())) {
+                    window_head.recreate_surface(window, instance)?;
+                    self.dirty_size = true;
+                }
+            }
+            Head::Headless(_) => {}
+        }
+        Ok(())
+    }
+
+    /// Whether the adapter advertises the exact sample count for the color target format.
+    ///
+    /// A count of one is supported; zero and non-power-of-two counts are rejected. This checks
+    /// neither the selected depth format nor whether optional device features have been enabled.
+    pub fn is_multisampling_supported(&self, msaa: Msaa) -> bool {
+        let is_supported = match &self.head {
+            Head::Headed(headed) => headed
+                .texture_format_features
+                .flags
+                .sample_count_supported(msaa.samples),
+            Head::Headless(headless) => headless.supports_sample_count(msaa.samples),
+        };
+        if !is_supported {
+            log::debug!("Multisampling is not supported on surface");
+        }
+        is_supported
+    }
+
+    /// Usage of the multisampled color target that goes with a depth attachment of
+    /// `depth_usage`. Depth is transient exactly when one pass draws the whole frame; the color
+    /// samples are then resolved inside that pass and never loaded again, so a tile-based GPU
+    /// need not back them with memory either.
+    pub(crate) fn multisampling_usage(
+        &self,
+        depth_usage: wgpu::TextureUsages,
+    ) -> wgpu::TextureUsages {
+        match &self.head {
+            Head::Headed(headed) => {
+                let allowed = headed.texture_format_features.allowed_usages;
+                let transient = wgpu::TextureUsages::TRANSIENT_ATTACHMENT;
+                if depth_usage.contains(transient) && allowed.contains(transient) {
+                    wgpu::TextureUsages::RENDER_ATTACHMENT | transient
+                } else {
+                    wgpu::TextureUsages::RENDER_ATTACHMENT
+                }
+            }
+            Head::Headless(headless) => headless.multisampling_usage(depth_usage),
+        }
+    }
+}
+
+impl AsRef<Head> for Surface {
+    #[inline]
+    fn as_ref(&self) -> &Head {
+        &self.head
+    }
+}
+
+impl AsMut<Head> for Surface {
+    #[inline]
+    fn as_mut(&mut self) -> &mut Head {
+        &mut self.head
+    }
+}

@@ -2,6 +2,8 @@
 //! shapes. Every method queues a command the map applies between frames, in call order, and
 //! returns a promise that settles once it has.
 
+#[cfg(feature = "arena-telemetry")]
+use std::cell::RefCell;
 use std::{cell::Cell, future::Future, rc::Rc};
 
 use futures::channel::oneshot;
@@ -29,11 +31,28 @@ use options::{
     ScreenGeometry,
 };
 
+/// Active frame-watcher handles attached to a [`MapController`]. Dropping or replacing a [`Reply`]
+/// cancels its watcher in [`maplibre::map::handle::MapCommands::observe`] automatically.
+#[cfg(feature = "arena-telemetry")]
+#[derive(Clone, Default)]
+pub(crate) struct TelemetryWatchers {
+    pub(crate) camera: Rc<RefCell<Option<Reply<()>>>>,
+    pub(crate) telemetry: Rc<RefCell<Option<Reply<()>>>>,
+}
+
+#[cfg(feature = "arena-telemetry")]
+impl TelemetryWatchers {
+    pub(crate) fn detach(&self) {
+        self.camera.borrow_mut().take();
+        self.telemetry.borrow_mut().take();
+    }
+}
+
 #[derive(Clone)]
 pub(crate) enum ControllerHandle {
     #[cfg(feature = "winit-window")]
     Main(MapHandle<CurrentEnvironment>),
-    Offscreen(MapHandle<crate::offscreen::OffscreenEnvironment>),
+    Offscreen(MapHandle<crate::offscreen_window::OffscreenEnvironment>),
 }
 
 impl ControllerHandle {
@@ -81,7 +100,7 @@ pub struct MapController {
     pub(crate) handle: ControllerHandle,
     coalesced: Rc<CoalescedCommands>,
     #[cfg(feature = "arena-telemetry")]
-    pub(crate) watchers: crate::arena_telemetry::TelemetryWatchers,
+    pub(crate) watchers: TelemetryWatchers,
 }
 
 impl std::fmt::Debug for MapController {
@@ -104,7 +123,9 @@ impl MapController {
         }
     }
 
-    pub(crate) fn new_offscreen(handle: MapHandle<crate::offscreen::OffscreenEnvironment>) -> Self {
+    pub(crate) fn new_offscreen(
+        handle: MapHandle<crate::offscreen_window::OffscreenEnvironment>,
+    ) -> Self {
         Self {
             handle: ControllerHandle::Offscreen(handle),
             coalesced: Rc::default(),

@@ -2,7 +2,9 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{TestOutcome, TestResult};
+use serde::Serialize;
+
+use super::{CaseKind, TestOutcome, TestResult};
 
 pub(super) fn generate_report(
     outcomes: &[TestOutcome],
@@ -94,4 +96,121 @@ fn report_banner(outcomes: &[TestOutcome], failed: usize, errored: usize) -> Str
             outcomes.len()
         )
     }
+}
+
+/// Structured per-fixture telemetry captured during a harness run.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub(crate) struct FixtureTelemetry {
+    pub(crate) id: String,
+    pub(crate) kind: &'static str,
+    pub(crate) center: Option<[f64; 2]>,
+    pub(crate) zoom: Option<f64>,
+    pub(crate) pitch: Option<f64>,
+    pub(crate) bearing: Option<f64>,
+    pub(crate) fov_deg: Option<f64>,
+    pub(crate) center_elevation_m: Option<f64>,
+    pub(crate) required_tile_count: usize,
+    pub(crate) dem_tile_count: usize,
+    pub(crate) paused_source_count: usize,
+    pub(crate) frame_count: u8,
+    pub(crate) draws: u64,
+    pub(crate) state_changes: u64,
+    pub(crate) mean_diff: Option<f64>,
+    pub(crate) solid_diff: Option<u64>,
+    pub(crate) passed: bool,
+    pub(crate) ignored: bool,
+}
+
+impl FixtureTelemetry {
+    /// Builds minimal telemetry when a fixture fails before rendering finishes.
+    pub(crate) fn fallback(id: String, kind: CaseKind, ignored: bool) -> Self {
+        Self {
+            id,
+            kind: match kind {
+                CaseKind::Render => "render",
+                CaseKind::Query => "query",
+            },
+            center: None,
+            zoom: None,
+            pitch: None,
+            bearing: None,
+            fov_deg: None,
+            center_elevation_m: None,
+            required_tile_count: 0,
+            dem_tile_count: 0,
+            paused_source_count: 0,
+            frame_count: 0,
+            draws: 0,
+            state_changes: 0,
+            mean_diff: None,
+            solid_diff: None,
+            passed: false,
+            ignored,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct LifecycleReport<'a> {
+    fixtures: Vec<&'a FixtureTelemetry>,
+}
+
+/// Writes `{ "fixtures": [...] }` sorted deterministically by fixture ID.
+pub(crate) fn write_lifecycle_json(
+    path: &Path,
+    fixtures: &[FixtureTelemetry],
+) -> Result<(), String> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent)
+            .map_err(|err| format!("Cannot create directory {}: {err}", parent.display()))?;
+    }
+    let mut sorted: Vec<&FixtureTelemetry> = fixtures.iter().collect();
+    sorted.sort_by(|left, right| left.id.cmp(&right.id));
+    let mut json = serde_json::to_string_pretty(&LifecycleReport { fixtures: sorted })
+        .map_err(|err| format!("Cannot serialize lifecycle JSON: {err}"))?;
+    json.push('\n');
+    std::fs::write(path, json).map_err(|err| format!("Cannot write {}: {err}", path.display()))
+}
+
+/// Converts a slash-separated fixture ID into a flat filename slug.
+pub(crate) fn artifact_slug(id: &str) -> String {
+    id.replace('/', "__")
+}
+
+/// Ensures the output artifact directory exists before any fixture runs.
+pub(crate) fn ensure_artifact_dir(dir: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dir)
+        .map_err(|err| format!("Cannot create artifact directory {}: {err}", dir.display()))
+}
+
+/// Copies `actual.png` and `diff.png` of a render fixture into `artifact_dir`.
+pub(crate) fn copy_fixture_artifacts(
+    artifact_dir: &Path,
+    test_dir: &Path,
+    id: &str,
+    kind: CaseKind,
+) -> Result<(), String> {
+    ensure_artifact_dir(artifact_dir)?;
+    if kind != CaseKind::Render {
+        return Ok(());
+    }
+    let slug = artifact_slug(id);
+    for file_name in ["actual.png", "diff.png"] {
+        let source = test_dir.join(file_name);
+        if !source.is_file() {
+            continue;
+        }
+        let destination = artifact_dir.join(format!("{slug}-{file_name}"));
+        std::fs::copy(&source, &destination).map_err(|err| {
+            format!(
+                "Cannot copy artifact {} to {}: {err}",
+                source.display(),
+                destination.display()
+            )
+        })?;
+    }
+    Ok(())
 }

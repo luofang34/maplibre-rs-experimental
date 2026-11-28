@@ -28,7 +28,7 @@ where
     }
     pub async fn run(mut self) -> Result<Dispatch<E>, MapError> {
         let dispatch = self.dispatch.as_mut().ok_or(MapError::RendererNotReady)?;
-        dispatch.map.initialize_renderer().await?;
+        dispatch.initialize_renderer().await?;
         self.dispatch.take().ok_or(MapError::RendererNotReady)
     }
 }
@@ -38,7 +38,7 @@ where
 {
     fn drop(&mut self) {
         if let Some(mut dispatch) = self.dispatch.take() {
-            dispatch.map.reset();
+            dispatch.reset();
             *self.recovery.borrow_mut() = Some(dispatch);
         }
     }

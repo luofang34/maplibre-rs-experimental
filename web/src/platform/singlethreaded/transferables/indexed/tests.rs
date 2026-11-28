@@ -79,10 +79,10 @@ fn lazy_mvt_layer_indexed_roundtrips_without_eager_decode() {
     let decoded = transferable.to_tile_index();
     match decoded {
         TileIndex::LazyMvt(lazy) => {
-            let (bytes, compressed) = lazy.wire_bytes();
-            assert!(compressed);
+            let wire = lazy.wire();
+            assert!(wire.compressed);
             assert!(lazy.rescale().is_none());
-            assert_eq!(&**bytes, payload);
+            assert_eq!(wire.bytes, payload);
         }
         _ => panic!("expected LazyMvt variant without eager decode"),
     }
@@ -118,10 +118,10 @@ fn lazy_mvt_layer_indexed_roundtrips_with_rescale() {
     let decoded = transferable.to_tile_index();
     match decoded {
         TileIndex::LazyMvt(lazy) => {
-            let (bytes, compressed) = lazy.wire_bytes();
-            assert!(compressed);
+            let wire = lazy.wire();
+            assert!(wire.compressed);
             assert_eq!(lazy.rescale(), Some((from, coords)));
-            assert_eq!(&**bytes, payload);
+            assert_eq!(wire.bytes, payload);
         }
         _ => panic!("expected LazyMvt variant"),
     }

@@ -4,10 +4,10 @@
 
 use std::rc::Rc;
 
-use thiserror::Error;
+pub use context_ops::error::MapError;
+pub use runtime::{BinnedRenderPhasePlugin, RenderPlugin};
+pub use terrain_drape::TerrainPlugin;
 
-#[cfg(feature = "geojson")]
-use crate::geojson::{query::SourceQueryError, update::SourceUpdateError};
 use crate::{
     context::MapContext,
     environment::Environment,
@@ -17,57 +17,16 @@ use crate::{
     render::{
         builder::RendererBuilder,
         camera::DEFAULT_MAX_PITCH,
-        error::RenderError,
-        view_state::{CameraOptions, NavigationError, ViewState},
+        view_state::{CameraOptions, ViewState},
     },
-    schedule::{Schedule, StageError},
-    sdf::query::{QueryError, QueryGeometry, QueryOptions, RenderedSymbol},
+    schedule::Schedule,
+    sdf::query::{QueryGeometry, QueryOptions, RenderedSymbol},
     style::{
         mutation::{StyleChange, StyleMutationError},
         Style,
     },
-    window::{HeadedMapWindow, MapWindowConfig, WindowCreateError},
+    window::{HeadedMapWindow, MapWindow, MapWindowConfig},
 };
-
-/// A window, renderer or scheduled update failed, or the map is in the wrong lifecycle state.
-#[derive(Error, Debug)]
-pub enum MapError {
-    /// Renderer initialization was requested while the map is already ready.
-    #[error("renderer was already set for this map")]
-    RendererAlreadySet,
-    /// The requested operation requires an initialized renderer.
-    #[error("renderer is not fully initialized")]
-    RendererNotReady,
-    /// A plugin could not install its systems, render passes or GPU resources.
-    #[error("installing a plugin failed")]
-    Plugin(#[source] crate::plugin::PluginError),
-    /// Renderer initialization or presentation surface recovery failed.
-    #[error("initializing device failed")]
-    DeviceInit(#[source] RenderError),
-    /// The host could not create the map window or its event loop.
-    #[error("creating window failed")]
-    Window(#[from] WindowCreateError),
-    /// A scheduled update failed; preceding state changes are not rolled back.
-    #[error("executing map stage failed")]
-    StageError(#[from] StageError),
-    /// A source's data could not be replaced or edited; the source is unchanged.
-    #[cfg(feature = "geojson")]
-    #[error("updating source data failed")]
-    SourceUpdate(#[from] SourceUpdateError),
-    /// A source's features could not be read.
-    #[cfg(feature = "geojson")]
-    #[error("querying source features failed")]
-    SourceQuery(#[from] SourceQueryError),
-    /// A rendered-feature query was rejected.
-    #[error("querying rendered features failed")]
-    Query(#[from] QueryError),
-    /// A style change was refused; the style is unchanged.
-    #[error("changing the style failed")]
-    StyleChange(#[from] StyleMutationError),
-    /// A camera move was refused; the camera is unchanged.
-    #[error("moving the camera failed")]
-    Navigation(#[from] NavigationError),
-}
 
 /// Initialization state of a map's renderer and frame data.
 pub enum CurrentMapContext {
@@ -150,9 +109,15 @@ where
 
     /// Sets the largest pitch the camera accepts, matching the GL JS `maxPitch` map option.
     ///
-    /// Takes effect when the renderer initializes or restores the view state.
+    /// Takes effect immediately once ready, or when the renderer initializes or restores the view state.
     pub fn set_max_pitch(&mut self, max_pitch: cgmath::Deg<f64>) {
+        if !max_pitch.0.is_finite() {
+            return;
+        }
         self.max_pitch = max_pitch;
+        if let CurrentMapContext::Ready(context) = &mut self.map_context {
+            context.view_state.set_max_pitch(max_pitch);
+        }
     }
 
     /// Sets the largest pitch the camera accepts, in degrees.
@@ -395,18 +360,42 @@ where
     pub fn kernel(&self) -> &Rc<Kernel<E>> {
         &self.kernel
     }
+
+    /// Worker request and reply transport used by this map.
+    #[inline]
+    pub fn apc(&self) -> &E::AsyncProcedureCall {
+        self.kernel.apc()
+    }
+
+    /// Current physical pixel dimensions of the host window.
+    #[inline]
+    pub fn window_size(&self) -> crate::window::PhysicalSize {
+        self.window.size()
+    }
+
+    /// Scale factor between logical and physical pixels reported by the host window.
+    #[inline]
+    pub fn window_scale_factor(&self) -> f64 {
+        self.window.scale_factor()
+    }
+
+    /// Asks the host platform window to schedule a redraw.
+    #[inline]
+    pub fn request_redraw(&self) {
+        self.window.request_redraw();
+    }
 }
 
 pub(crate) mod camera;
-mod custom_layers;
-mod events;
+pub(crate) mod context_ops;
+pub(crate) mod custom_layers;
 mod frame;
 pub mod handle;
 mod init;
 mod prewarm;
-mod provided_images;
-mod signals;
+pub(crate) mod runtime;
 mod sources;
+pub(crate) mod terrain_drape;
 use camera::merged;
 
 #[cfg(test)]

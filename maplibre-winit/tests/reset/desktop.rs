@@ -148,7 +148,7 @@ async fn initialize(map: &mut Map<Environment>) {
         .expect("live window");
     let renderer = &mut map.context_mut().expect("ready map").renderer;
     assert!(matches!(
-        renderer.resources.surface.head(),
+        renderer.resources.surface.as_ref(),
         maplibre::render::resource::Head::Headed(_)
     ));
     assert_eq!(

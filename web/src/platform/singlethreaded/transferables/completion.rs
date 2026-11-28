@@ -10,38 +10,36 @@ use maplibre::{
 use super::UnpackedTiny;
 use super::{read_coords_at, read_u32_le, FlatBufferTransferable, WebMessageTag};
 
-pub(super) fn tile_completion(
-    coords: WorldTileCoords,
-    pending: bool,
-    failed: bool,
-) -> FlatBufferTransferable {
-    let mut data = Vec::with_capacity(11);
-    data.extend_from_slice(&coords.x.to_le_bytes());
-    data.extend_from_slice(&coords.y.to_le_bytes());
-    data.push(u8::from(coords.z));
-    data.push(u8::from(pending));
-    data.push(u8::from(failed));
-    FlatBufferTransferable::from_vec(WebMessageTag::TileTessellated, data, 0)
-}
-
-pub(super) fn encode_named_coords(
-    tag: WebMessageTag,
-    coords: WorldTileCoords,
-    name: Option<&str>,
-) -> FlatBufferTransferable {
-    let name_bytes = name.map(str::as_bytes);
-    let name_len = name_bytes.map_or(0, <[u8]>::len);
-    let mut data = Vec::with_capacity(16 + name_len);
-    data.extend_from_slice(&coords.x.to_le_bytes());
-    data.extend_from_slice(&coords.y.to_le_bytes());
-    data.push(u8::from(coords.z));
-    data.push(u8::from(name_bytes.is_some()));
-    data.extend_from_slice(&[0, 0]);
-    data.extend_from_slice(&(name_len as u32).to_le_bytes());
-    if let Some(bytes) = name_bytes {
-        data.extend_from_slice(bytes);
+impl FlatBufferTransferable {
+    pub(super) fn tile_completion(coords: WorldTileCoords, pending: bool, failed: bool) -> Self {
+        let mut data = Vec::with_capacity(11);
+        data.extend_from_slice(&coords.x.to_le_bytes());
+        data.extend_from_slice(&coords.y.to_le_bytes());
+        data.push(u8::from(coords.z));
+        data.push(u8::from(pending));
+        data.push(u8::from(failed));
+        Self::from_vec(WebMessageTag::TileTessellated, data, 0)
     }
-    FlatBufferTransferable::from_vec(tag, data, 0)
+
+    pub(super) fn encode_named_coords(
+        tag: WebMessageTag,
+        coords: WorldTileCoords,
+        name: Option<&str>,
+    ) -> Self {
+        let name_bytes = name.map(str::as_bytes);
+        let name_len = name_bytes.map_or(0, <[u8]>::len);
+        let mut data = Vec::with_capacity(16 + name_len);
+        data.extend_from_slice(&coords.x.to_le_bytes());
+        data.extend_from_slice(&coords.y.to_le_bytes());
+        data.push(u8::from(coords.z));
+        data.push(u8::from(name_bytes.is_some()));
+        data.extend_from_slice(&[0, 0]);
+        data.extend_from_slice(&(name_len as u32).to_le_bytes());
+        if let Some(bytes) = name_bytes {
+            data.extend_from_slice(bytes);
+        }
+        Self::from_vec(tag, data, 0)
+    }
 }
 
 #[cfg(any(test, feature = "renderer"))]
@@ -76,15 +74,15 @@ impl TileTessellated for FlatBufferTransferable {
     }
 
     fn build_from(coords: WorldTileCoords) -> Self {
-        tile_completion(coords, false, false)
+        Self::tile_completion(coords, false, false)
     }
 
     fn build_partial(coords: WorldTileCoords) -> Self {
-        tile_completion(coords, true, false)
+        Self::tile_completion(coords, true, false)
     }
 
     fn build_failed(coords: WorldTileCoords, pending_symbols: bool) -> Self {
-        tile_completion(coords, pending_symbols, true)
+        Self::tile_completion(coords, pending_symbols, true)
     }
 
     fn failed(&self) -> bool {
@@ -121,7 +119,7 @@ impl LayerMissing for FlatBufferTransferable {
     }
 
     fn build_from(coords: WorldTileCoords, layer_name: String) -> Self {
-        encode_named_coords(WebMessageTag::LayerMissing, coords, Some(&layer_name))
+        Self::encode_named_coords(WebMessageTag::LayerMissing, coords, Some(&layer_name))
     }
 
     fn coords(&self) -> WorldTileCoords {

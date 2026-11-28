@@ -381,7 +381,7 @@ fn bench_terrain_3d_query(group: &mut BenchmarkGroup<'_, WallTime>) {
     populate_city_tile(&mut world, tile);
     let resolved = ResolvedFrameView::resolve(&style, &view).expect("valid benchmark fixture");
     let ti = maplibre::terrain::coverage::TerrainCoverageIndex::build(
-        world.tiles.tiles.values().map(|t| t.coords),
+        world.tiles.coords(),
         &world.tiles,
         &maplibre::terrain::source::dem_source(&style).expect("valid benchmark fixture"),
     );

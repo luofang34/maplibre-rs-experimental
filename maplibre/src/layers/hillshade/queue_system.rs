@@ -1,0 +1,155 @@
+//! Queues one draw per DEM-shaded layer and raster tile shape, as the raster queue does.
+
+use crate::{
+    context::MapContext,
+    hillshade::{dem_layer_kind, render_commands::DrawDemTiles, resources::HillshadeResources},
+    raster::resource::RasterResources,
+    render::{
+        eventually::{Eventually, Eventually::Initialized},
+        render_commands::DrawMasks,
+        render_phase::{
+            DrawState, LayerItem, MaskGroup, ProjectionBinding, RenderPhase, TileMaskItem,
+        },
+        tile_view_pattern::WgpuTileViewPattern,
+    },
+    schedule::system::{SystemError, SystemResult},
+    tcs::tiles::Tile,
+};
+
+pub fn queue_system(
+    MapContext {
+        style,
+        view_state,
+        world,
+        ..
+    }: &mut MapContext,
+) -> SystemResult {
+    if (style.terrain.is_some() && crate::terrain::source::dem_source(style).is_some())
+        || !style.cached_has_dem_layers()
+    {
+        return Ok(());
+    }
+    let Some((tile_view_pattern, raster_resources, resources)) = world.resources.query::<(
+        &Eventually<WgpuTileViewPattern>,
+        &Eventually<RasterResources>,
+        &Eventually<HillshadeResources>,
+    )>() else {
+        return Err(SystemError::Dependencies);
+    };
+    let (Initialized(tile_view_pattern), Initialized(raster_resources), Initialized(resources)) =
+        (tile_view_pattern, raster_resources, resources)
+    else {
+        return Ok(());
+    };
+    let zoom = view_state.zoom().value();
+    let uses_globe = style
+        .projection
+        .as_ref()
+        .is_some_and(|specification| specification.projection_type.uses_globe_rendering(zoom));
+    let layers: Vec<_> = style
+        .layers
+        .iter()
+        .filter(|layer| {
+            dem_layer_kind(&layer.type_).is_some()
+                && layer.is_visible_at(zoom)
+                && resources.layer(&layer.id).is_some()
+        })
+        .collect();
+    if layers.is_empty() {
+        return Ok(());
+    }
+
+    let mut items = Vec::new();
+    for view_tile in tile_view_pattern.iter() {
+        for style_layer in &layers {
+            let Some(source) = raster_resources.layer_source(&style_layer.id) else {
+                continue;
+            };
+            view_tile.render_raster_source(source, |source_shape| {
+                if raster_resources
+                    .layer_texture(&style_layer.id, &source_shape.coords())
+                    .is_none()
+                {
+                    return;
+                }
+                items.push(source_draws(source_shape, style_layer, uses_globe));
+            });
+        }
+    }
+
+    let Some((layer_item_phase, tile_mask_phase)) = world
+        .resources
+        .query_mut::<(&mut RenderPhase<LayerItem>, &mut RenderPhase<TileMaskItem>)>()
+    else {
+        return Err(SystemError::Dependencies);
+    };
+    for (draws, masks) in items {
+        for draw in draws {
+            layer_item_phase.add(draw);
+        }
+        for mask in masks {
+            tile_mask_phase.add(mask);
+        }
+    }
+    Ok(())
+}
+
+fn source_draws(
+    source_shape: &crate::render::tile_view_pattern::TileShape,
+    style_layer: &crate::style::layer::StyleLayer,
+    uses_globe: bool,
+) -> (Vec<LayerItem>, Vec<TileMaskItem>) {
+    let shape_data = source_shape.draw_data();
+    let layer_id = style_layer.layer_id();
+    let mut masks = Vec::with_capacity(2);
+    if uses_globe {
+        masks.push(TileMaskItem {
+            projection: ProjectionBinding::View,
+            draw_function: &DrawState::<TileMaskItem, DrawMasks>::INSTANCE,
+            source_shape: shape_data,
+            generate_borders: true,
+            is_vector: false,
+        });
+    }
+    masks.push(TileMaskItem {
+        projection: ProjectionBinding::View,
+        draw_function: &DrawState::<TileMaskItem, DrawMasks>::INSTANCE,
+        source_shape: shape_data,
+        generate_borders: false,
+        is_vector: false,
+    });
+    let mut draws = Vec::with_capacity(2);
+    if uses_globe {
+        draws.push(LayerItem {
+            projection: ProjectionBinding::View,
+            draw_function: &DrawState::<LayerItem, DrawDemTiles>::INSTANCE,
+            index: style_layer.index,
+            generate_borders: true,
+            style_layer: layer_id,
+            entry_slot: crate::render::render_phase::UNSET_ENTRY_SLOT,
+            tile: Tile {
+                coords: source_shape.coords(),
+            },
+            source_shape: shape_data,
+            mask_group: MaskGroup::Mutating,
+            run: None,
+        });
+    }
+    // The seam-expanding mesh would draw the tile edges twice, which shows through
+    // translucent shading; the flat map has no cracks to hide, as in GL JS.
+    draws.push(LayerItem {
+        projection: ProjectionBinding::View,
+        draw_function: &DrawState::<LayerItem, DrawDemTiles>::INSTANCE,
+        index: style_layer.index,
+        generate_borders: false,
+        style_layer: layer_id,
+        entry_slot: crate::render::render_phase::UNSET_ENTRY_SLOT,
+        tile: Tile {
+            coords: source_shape.coords(),
+        },
+        source_shape: shape_data,
+        mask_group: MaskGroup::Mutating,
+        run: None,
+    });
+    (draws, masks)
+}

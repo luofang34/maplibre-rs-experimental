@@ -203,13 +203,21 @@ fn build_world<E: Environment>(
         }
     }
     prewarmed.commit_into(&mut world);
-    drop(parts.schedule.add_system_to_stage(
-        crate::render::RenderStageLabel::Input,
-        crate::context::style_transition_system,
+    drop(parts.schedule.add_early_system_to_stage(
+        crate::schedule::RenderStageLabel::Input,
+        crate::map::context_ops::flight::camera_flight_system,
     ));
     drop(parts.schedule.add_system_to_stage(
-        crate::render::RenderStageLabel::Request,
-        crate::tcs::system::SystemContainer::new(FlushRequestsSystem {
+        crate::schedule::RenderStageLabel::Queue,
+        crate::map::custom_layers::queue_custom_layers_system,
+    ));
+    drop(parts.schedule.add_system_to_stage(
+        crate::schedule::RenderStageLabel::Input,
+        crate::map::context_ops::transitions::style_transition_system,
+    ));
+    drop(parts.schedule.add_system_to_stage(
+        crate::schedule::RenderStageLabel::Request,
+        crate::schedule::system::SystemContainer::new(FlushRequestsSystem {
             kernel: parts.kernel.clone(),
         }),
     ));
@@ -220,12 +228,12 @@ struct FlushRequestsSystem<E: Environment> {
     kernel: std::rc::Rc<crate::kernel::Kernel<E>>,
 }
 
-impl<E: Environment> crate::tcs::system::System for FlushRequestsSystem<E> {
+impl<E: Environment> crate::schedule::system::System for FlushRequestsSystem<E> {
     fn name(&self) -> std::borrow::Cow<'static, str> {
         "flush_requests".into()
     }
 
-    fn run(&mut self, _context: &mut MapContext) -> crate::tcs::system::SystemResult {
+    fn run(&mut self, _context: &mut MapContext) -> crate::schedule::system::SystemResult {
         use crate::io::apc::AsyncProcedureCall;
         self.kernel.apc().flush_calls();
         Ok(())

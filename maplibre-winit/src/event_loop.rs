@@ -7,7 +7,10 @@ use maplibre::{
     map::{handle::WakeHost, Map},
 };
 
-use crate::{WinitApplicationError, WinitHostError, WinitMapWindowConfig};
+use crate::{
+    RawEventLoopProxy, RawWinitEventLoop, WinitApplicationError, WinitHostError,
+    WinitMapWindowConfig,
+};
 
 mod dispatch;
 mod lifecycle;
@@ -19,11 +22,6 @@ mod initialization;
 #[cfg(target_arch = "wasm32")]
 pub(crate) type ActiveWindowSlot =
     std::rc::Rc<std::cell::RefCell<Option<std::sync::Weak<crate::RawWinitWindow>>>>;
-
-/// Platform event loop for application events.
-pub type RawWinitEventLoop<ET> = winit::event_loop::EventLoop<ET>;
-/// Platform user-event sender.
-pub type RawEventLoopProxy<ET> = winit::event_loop::EventLoopProxy<ET>;
 
 /// Owns event dispatch independently of any window or presentation surface.
 pub struct WinitEventLoop<ET: 'static> {
@@ -82,8 +80,7 @@ impl<ET: 'static + Clone> WinitEventLoop<ET> {
     {
         use winit::platform::web::EventLoopExtWebSys;
         let (callback, completion) = completion::channel();
-        let mut app = lifecycle::Application::new(config, factory, max_frames);
-        app.completion = Some(callback);
+        let app = lifecycle::Application::with_completion(config, factory, max_frames, callback);
         let active_window = app.active_window.clone();
         let handle = app.handle(
             self.create_proxy()

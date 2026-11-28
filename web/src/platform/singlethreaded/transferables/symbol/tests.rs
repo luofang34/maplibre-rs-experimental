@@ -91,8 +91,8 @@ fn parse_symbol_header_uses_total_len_and_roundtrips_bucket() {
     assert_eq!(bucket.coords, coords);
     assert_eq!(bucket.source_layer, "transportation_name");
     assert_eq!(bucket.style_layer_id, "road-label");
-    assert_eq!(bucket.buffer.buffer.vertices.len(), 4);
-    assert_eq!(bucket.buffer.buffer.indices.len(), 6);
+    assert_eq!(bucket.buffer.vertices.len(), 4);
+    assert_eq!(bucket.buffer.indices.len(), 6);
     assert_eq!(bucket.features.len(), 1);
     assert_eq!(bucket.features[0].str, "Amstel");
     assert_eq!(bucket.features[0].data.source_feature_index, Some(17));

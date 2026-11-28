@@ -24,14 +24,15 @@ use maplibre::{
         },
         HeadlessPlugin,
     },
+    map::TerrainPlugin,
     render::{
         camera::EyeFrustum,
         view_state::ExternalAnchor,
         xr::{EyeTarget, ScenePlacement, XrEye, XrFrame},
-        RenderPlugin,
     },
     style::Style,
-    terrain::{DefaultDemTransferables, TerrainPlugin},
+    terrain::DefaultDemTransferables,
+    RenderPlugin,
 };
 
 const SIZES: [(u32, u32); 2] = [(640, 480), (1280, 720)];

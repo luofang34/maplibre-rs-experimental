@@ -39,8 +39,7 @@ impl_downcast!(TileComponent);
 /// Owns tile records, typed components and their feature-query index.
 /// Component references borrow this store and exclude mutation of its tile membership.
 pub struct Tiles<G: TileGeometryStore = ()> {
-    /// Tile records keyed by canonical quadkey.
-    pub tiles: BTreeMap<Quadkey, Tile>,
+    tiles: BTreeMap<Quadkey, Tile>,
     /// Dense component slots under each tile's key, indexed by registered component type ID.
     /// Use [`TileSpawnResult::insert`] to preserve one component per type and release replaced values.
     pub components: FxHashMap<Quadkey, Vec<Option<Box<dyn TileComponent>>>>,
@@ -69,6 +68,36 @@ impl<G: TileGeometryStore> Default for Tiles<G> {
 }
 
 impl<G: TileGeometryStore> Tiles<G> {
+    /// Number of resident tiles currently in this store.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.tiles.len()
+    }
+
+    /// Whether this store holds no tiles.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.tiles.is_empty()
+    }
+
+    /// Iterates coordinates of all resident tiles in canonical quadkey order.
+    #[inline]
+    pub fn coords(&self) -> impl Iterator<Item = WorldTileCoords> + '_ {
+        self.tiles.values().map(|tile| tile.coords)
+    }
+
+    /// Iterates resident tile coordinates in coarse-to-fine pyramid order.
+    #[inline]
+    pub fn coords_coarse_to_fine(&self) -> impl Iterator<Item = WorldTileCoords> + '_ {
+        self.pyramid.coords_coarse_to_fine()
+    }
+
+    /// Highest zoom level among resident tiles, or `None` when empty.
+    #[inline]
+    pub const fn max_zoom(&self) -> Option<u8> {
+        self.pyramid.max_zoom()
+    }
+
     /// Hierarchical pyramid of every resident tile in this store.
     #[inline]
     pub fn pyramid(&self) -> &TilePyramid<()> {
@@ -83,12 +112,14 @@ impl<G: TileGeometryStore> Tiles<G> {
 
     /// Borrows `&T` or a tuple of shared component references from one tile.
     /// Built-in queries return `None` for invalid coordinates or missing components.
+    #[inline(always)]
     pub fn query<Q: ComponentQuery>(&self, coords: WorldTileCoords) -> Option<Q::Item<'_>> {
         Q::query(self, Tile { coords })
     }
 
     /// Borrows components of one tile, or returns `None` for missing data or conflicting
     /// reference types. Repeated shared references are allowed; mutable ones must be disjoint.
+    #[inline(always)]
     pub fn query_mut<Q: ComponentQueryMut>(
         &mut self,
         coords: WorldTileCoords,
@@ -188,6 +219,20 @@ impl<G: TileGeometryStore> Tiles<G> {
             tile.coords,
         );
         Some(comp)
+    }
+}
+
+impl<G: TileGeometryStore> AsRef<G> for Tiles<G> {
+    #[inline]
+    fn as_ref(&self) -> &G {
+        &self.geometry_index
+    }
+}
+
+impl<G: TileGeometryStore> AsMut<G> for Tiles<G> {
+    #[inline]
+    fn as_mut(&mut self) -> &mut G {
+        &mut self.geometry_index
     }
 }
 
@@ -324,6 +369,7 @@ pub trait ComponentQuery {
 impl<T: TileComponent> ComponentQuery for &T {
     type Item<'t> = &'t T;
 
+    #[inline(always)]
     fn query<G: TileGeometryStore>(tiles: &Tiles<G>, tile: Tile) -> Option<Self::Item<'_>> {
         tiles.get_component::<T>(tile)
     }
@@ -375,6 +421,7 @@ impl<T: TileComponent> ComponentQueryMut for &T {
         slice.borrow_shared(index)?.as_ref()?.downcast_ref()
     }
 
+    #[inline(always)]
     fn query_mut<G: TileGeometryStore>(
         tiles: &mut Tiles<G>,
         tile: Tile,
@@ -395,6 +442,7 @@ impl<T: TileComponent> ComponentQueryMut for &mut T {
         slice.borrow_mut(index)?.as_mut()?.downcast_mut()
     }
 
+    #[inline(always)]
     fn query_mut<G: TileGeometryStore>(
         tiles: &mut Tiles<G>,
         tile: Tile,

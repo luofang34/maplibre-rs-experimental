@@ -40,7 +40,7 @@ async fn a_call_is_cancellable_as_soon_as_the_worker_starts_it() {
 
 #[wasm_bindgen_test]
 fn finished_call_payloads_round_trip_and_reject_other_lengths() {
-    use crate::platform::singlethreaded::apc::encode_call_finished;
+    use crate::platform::singlethreaded::apc::{decode_call_finished, encode_call_finished};
 
     let attempt = u64::MAX - 3;
     assert_eq!(

@@ -1,0 +1,120 @@
+//! Strokes split along a grid of tile cells: the globe's, so a line follows the curve of the
+//! sphere, and the terrain mesh's, so a line drawn over the terrain follows its faces.
+use geozero::error::{GeozeroError, Result as GeoResult};
+use lyon::geom;
+
+use super::super::{MaxIndex, ZeroTessellator};
+use crate::{
+    projection::globe::subdivision::subdivide_line_segment_on_grid,
+    style::{layer::StyleLayer, line_stroke::LineStroke},
+    terrain::mesh::TERRAIN_MESH_SIZE,
+};
+
+/// Whether a layer is drawn over the terrain surface rather than draped into its textures.
+pub(crate) fn is_overlay(layer: &StyleLayer) -> bool {
+    layer.type_ == "line"
+        && !matches!(
+            &layer.paint,
+            Some(crate::style::layer::LayerPaint::Line(paint)) if paint.line_elevation.is_some()
+        )
+        && layer
+            .metadata
+            .as_ref()
+            .and_then(|meta| meta.get("maplibre-rs:terrain-structure"))
+            .and_then(|value| value.as_str())
+            == Some("overlay")
+}
+
+impl<I> ZeroTessellator<I>
+where
+    I: std::ops::Add + From<lyon::tessellation::VertexId> + MaxIndex + Copy + Into<u32>,
+{
+    /// Strokes features as `layer` lays them out: with its cap and join and, for a line drawn
+    /// over the terrain surface, split at every edge of the triangles of a terrain mesh over
+    /// this tile or any coarser one, so each straight piece lies on one planar face of the
+    /// surface the shader lifts it onto.
+    pub fn set_layer_strokes(&mut self, layer: &StyleLayer) {
+        self.stroke = LineStroke::of_layer_at_zoom(layer, self.zoom);
+        self.join_property = LineStroke::join_property(layer);
+        if is_overlay(layer) {
+            self.subdivision_granularity = self.subdivision_granularity.max(TERRAIN_MESH_SIZE);
+            self.terrain_grid = true;
+        } else if matches!(
+            &layer.paint,
+            Some(crate::style::layer::LayerPaint::Line(paint)) if paint.may_use_vertex_agl()
+        ) {
+            self.subdivision_granularity = self.subdivision_granularity.max(32);
+        }
+    }
+
+    #[inline]
+    fn skip_contour_subdivision(&self) -> bool {
+        self.in_polygon
+            && !self.is_line_layer
+            && self.outline_property.is_none()
+            && !self.terrain_grid
+            && self.extrusion.is_none()
+    }
+
+    pub(in crate::layers::vector::tessellation) fn append_coordinate(
+        &mut self,
+        coordinate: [f32; 2],
+    ) -> GeoResult<()> {
+        if let Some(previous) = self.contour_last {
+            if self.skip_contour_subdivision() {
+                self.path_builder
+                    .borrow_mut()
+                    .line_to(geom::point(coordinate[0], coordinate[1]));
+            } else {
+                let points = subdivide_line_segment_on_grid(
+                    previous,
+                    coordinate,
+                    self.subdivision_granularity,
+                    self.terrain_grid,
+                )
+                .map_err(|error| GeozeroError::Geometry(error.to_string()))?;
+                for point in points {
+                    self.path_builder
+                        .borrow_mut()
+                        .line_to(geom::point(point[0], point[1]));
+                }
+            }
+        } else {
+            self.path_builder
+                .borrow_mut()
+                .begin(geom::point(coordinate[0], coordinate[1]));
+            self.contour_start = Some(coordinate);
+            self.path_open = true;
+        }
+        self.contour_last = Some(coordinate);
+        Ok(())
+    }
+
+    pub(in crate::layers::vector::tessellation) fn subdivide_closing_segment(
+        &mut self,
+    ) -> GeoResult<()> {
+        if self.skip_contour_subdivision() {
+            return Ok(());
+        }
+        let (Some(start), Some(last)) = (self.contour_start, self.contour_last) else {
+            return Ok(());
+        };
+        let mut points = subdivide_line_segment_on_grid(
+            last,
+            start,
+            self.subdivision_granularity,
+            self.terrain_grid,
+        )
+        .map_err(|error| GeozeroError::Geometry(error.to_string()))?;
+        points.pop();
+        for point in points {
+            self.path_builder
+                .borrow_mut()
+                .line_to(geom::point(point[0], point[1]));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests;

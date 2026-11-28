@@ -73,9 +73,10 @@ impl SymbolLayerTessellated for FlatBufferTransferable {
         layer_data: Layer,
         style_layer_id: String,
     ) -> Self {
-        let usable_indices = buffer.usable_indices;
-        let raw_vertices = buffer.buffer.vertices;
-        let raw_indices = buffer.buffer.indices;
+        let parts = buffer.into_raw_parts();
+        let usable_indices = parts.usable_indices;
+        let raw_vertices = parts.vertices;
+        let raw_indices = parts.indices;
         let vert_bytes = raw_vertices.len() * std::mem::size_of::<ShaderSymbolVertex>();
         let idx_bytes = raw_indices.len() * 4;
         let layer_bytes = layer_data.name.as_bytes();
@@ -406,12 +407,13 @@ fn encode_symbol_atlas(
         sent.insert((coords, ptr_usize), std::sync::Arc::downgrade(atlas));
         false
     });
+    let (atlas_w, atlas_h) = atlas.dimensions();
     if already_sent {
         let mut out = Vec::with_capacity(24);
         out.extend_from_slice(&ATLAS_WIRE_MAGIC.to_le_bytes());
         out.extend_from_slice(&ATLAS_WIRE_REF.to_le_bytes());
-        out.extend_from_slice(&atlas.size[0].to_le_bytes());
-        out.extend_from_slice(&atlas.size[1].to_le_bytes());
+        out.extend_from_slice(&atlas_w.to_le_bytes());
+        out.extend_from_slice(&atlas_h.to_le_bytes());
         out.extend_from_slice(&ptr_id.to_le_bytes());
         return out;
     }
@@ -419,8 +421,8 @@ fn encode_symbol_atlas(
         let mut out = Vec::with_capacity(24 + pixels.len());
         out.extend_from_slice(&ATLAS_WIRE_MAGIC.to_le_bytes());
         out.extend_from_slice(&ATLAS_WIRE_FULL.to_le_bytes());
-        out.extend_from_slice(&atlas.size[0].to_le_bytes());
-        out.extend_from_slice(&atlas.size[1].to_le_bytes());
+        out.extend_from_slice(&atlas_w.to_le_bytes());
+        out.extend_from_slice(&atlas_h.to_le_bytes());
         out.extend_from_slice(&ptr_id.to_le_bytes());
         out.extend_from_slice(pixels);
         out

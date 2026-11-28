@@ -9,7 +9,7 @@ use bytemuck_derive::{Pod, Zeroable};
 use cgmath::AbsDiffEq;
 use serde::{Deserialize, Serialize};
 
-use crate::{SignificantlyDifferent, WorldTileCoords, MAX_ZOOM, TILE_SIZE};
+use crate::{SignificantlyDifferent, MAX_ZOOM, TILE_SIZE};
 
 /// Number of tile columns or rows at each supported grid level: `2^z` for `z` in `0..MAX_ZOOM`.
 pub const ZOOM_BOUNDS: [u32; MAX_ZOOM] = [
@@ -187,11 +187,6 @@ impl Zoom {
     /// Converts a discrete tile level to a continuous zoom with no fractional component.
     pub fn from(zoom_level: ZoomLevel) -> Self {
         Zoom(zoom_level.0 as f64)
-    }
-
-    /// Scale factor `2^(tile.z - self)` from this zoom to the tile's grid level.
-    pub fn scale_to_tile(&self, coords: &WorldTileCoords) -> f64 {
-        2.0_f64.powf(coords.z.0 as f64 - self.0)
     }
 
     /// Scale factor `2^(z - self)` from this zoom to a discrete grid level.

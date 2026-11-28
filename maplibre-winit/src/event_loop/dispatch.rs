@@ -7,7 +7,7 @@ use maplibre::{
     io::apc::AsyncProcedureCall,
     map::Map,
     render::frame_input::FrameInput,
-    window::{HeadedMapWindow, MapWindow, MapWindowConfig, PhysicalSize},
+    window::{HeadedMapWindow, MapWindowConfig, PhysicalSize},
 };
 use winit::{
     event::{ElementState, KeyEvent, WindowEvent},
@@ -25,7 +25,7 @@ pub(super) struct Dispatch<E: Environment>
 where
     <E::MapWindowConfig as MapWindowConfig>::MapWindow: HeadedMapWindow,
 {
-    pub(super) map: Map<E>,
+    map: Map<E>,
     input: InputController,
     started: Instant,
     last_render: Instant,
@@ -49,9 +49,9 @@ where
         window: std::sync::Weak<crate::RawWinitWindow>,
     ) -> Self {
         let now = Instant::now();
-        let scale_factor = map.window().scale_factor();
+        let scale_factor = map.window_scale_factor();
         let wake_window = window.clone();
-        map.kernel().apc().set_waker(std::sync::Arc::new(move || {
+        map.apc().set_waker(std::sync::Arc::new(move || {
             if let Some(window) = wake_window.upgrade() {
                 window.request_redraw();
             }
@@ -69,6 +69,39 @@ where
             window,
             #[cfg(target_arch = "wasm32")]
             wake_timer: None,
+        }
+    }
+
+    pub(super) async fn initialize_renderer(&mut self) -> Result<(), maplibre::map::MapError> {
+        self.map.initialize_renderer().await
+    }
+
+    pub(super) fn reset(&mut self) {
+        self.map.reset();
+    }
+
+    pub(super) fn apply_commands(
+        &mut self,
+        commands: &mut maplibre::map::handle::MapCommands<E>,
+    ) -> bool {
+        commands.apply(&mut self.map);
+        if commands.is_closed() {
+            self.clear_wake_timer();
+            return false;
+        }
+        if self.map.needs_redraw() || self.map.apc().has_arrivals() {
+            self.map.request_redraw();
+        }
+        true
+    }
+
+    pub(super) fn observe_commands(
+        &mut self,
+        commands: &mut maplibre::map::handle::MapCommands<E>,
+    ) {
+        commands.observe(&mut self.map);
+        if self.map.has_ready_work() || self.map.apc().has_arrivals() {
+            self.map.request_redraw();
         }
     }
 
@@ -90,7 +123,7 @@ where
         if now >= wake_at {
             self.clear_wake_timer();
             target.set_control_flow(ControlFlow::Wait);
-            self.map.window().request_redraw();
+            self.map.request_redraw();
         } else {
             #[cfg(not(target_arch = "wasm32"))]
             target.set_control_flow(ControlFlow::WaitUntil(
@@ -104,8 +137,8 @@ where
     }
 
     pub(super) fn sync_size(&mut self) {
-        self.scale_factor = self.map.window().scale_factor();
-        let size = self.map.window().size();
+        self.scale_factor = self.map.window_scale_factor();
+        let size = self.map.window_size();
         if let Ok(context) = self.map.context_mut() {
             context.resize(size, self.scale_factor);
         }
@@ -118,7 +151,7 @@ where
         }
         if self.input.window_input(event, self.scale_factor) {
             // The gesture is applied when the next frame updates the view.
-            self.map.window().request_redraw();
+            self.map.request_redraw();
             return;
         }
         match event {
@@ -137,16 +170,16 @@ where
                 if let Some(size) = PhysicalSize::new(size.width, size.height) {
                     if let Ok(context) = self.map.context_mut() {
                         context.resize(size, self.scale_factor);
-                        self.map.window().request_redraw();
+                        self.map.request_redraw();
                     }
                 }
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 self.scale_factor = *scale_factor;
-                let size = self.map.window().size();
+                let size = self.map.window_size();
                 if let Ok(context) = self.map.context_mut() {
                     context.resize(size, self.scale_factor);
-                    self.map.window().request_redraw();
+                    self.map.request_redraw();
                 }
             }
             _ => {}
@@ -181,13 +214,13 @@ where
         }
         let after = Instant::now();
         let next = NextFrame {
-            map: if self.map.kernel().apc().supports_waker() {
+            map: if self.map.apc().supports_waker() {
                 self.map.has_ready_work()
             } else {
                 self.map.needs_redraw()
             },
             retry: self.map.next_retry_delay(),
-            arrivals: self.map.kernel().apc().has_arrivals(),
+            arrivals: self.map.apc().has_arrivals(),
             input: self.input.moved_view(),
             counting_frames: self.max_frames.is_some(),
             wait: self.input.next_wait(after),
@@ -197,7 +230,7 @@ where
             NextAction::Redraw => {
                 self.clear_wake_timer();
                 target.set_control_flow(ControlFlow::Wait);
-                self.map.window().request_redraw();
+                self.map.request_redraw();
             }
             NextAction::Wait(delay) => self.schedule_wake(target, after, delay),
             NextAction::Sleep => {

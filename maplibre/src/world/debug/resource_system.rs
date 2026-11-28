@@ -1,0 +1,63 @@
+//! Prepares GPU-owned resources by initializing them if they are uninitialized or out-of-date.
+use crate::{
+    context::MapContext,
+    debug::DebugPipeline,
+    render::{
+        eventually::{Eventually, Eventually::Initialized},
+        projection::ProjectionGpuResources,
+        resource::{RenderPipeline, TilePipeline},
+        shaders,
+        shaders::Shader,
+        RenderResources, Renderer,
+    },
+    schedule::system::{SystemError, SystemResult},
+};
+
+pub fn resource_system(
+    MapContext {
+        world,
+        renderer:
+            Renderer {
+                device,
+                resources: RenderResources { surface, .. },
+                settings,
+                ..
+            },
+        ..
+    }: &mut MapContext,
+) -> SystemResult {
+    let Some((debug_pipeline, Initialized(projection_resources))) = world.resources.query_mut::<(
+        &mut Eventually<DebugPipeline>,
+        &mut Eventually<ProjectionGpuResources>,
+    )>() else {
+        return Err(SystemError::Dependencies);
+    };
+
+    debug_pipeline.initialize(|| {
+        let mask_shader = shaders::TileMaskShader {
+            format: surface.surface_format(),
+            draw_colors: true,
+            debug_lines: true,
+        };
+
+        let pipeline = TilePipeline::new(
+            "debug_pipeline".into(),
+            *settings,
+            mask_shader.describe_vertex(),
+            mask_shader.describe_fragment(),
+            crate::render::resource::TilePipelineOptions {
+                depth_stencil_enabled: false,
+                update_stencil: false,
+                debug_stencil: true,
+                wireframe: false,
+                multisampling: false,
+                textured: false,
+            },
+        )
+        .describe_render_pipeline()
+        .initialize_with_prefix_layouts(device, &[projection_resources.as_ref()]);
+        DebugPipeline(pipeline)
+    });
+
+    Ok(())
+}

@@ -13,18 +13,15 @@ use maplibre::{
 use wasm_bindgen::{prelude::*, JsCast};
 use web_sys::{DedicatedWorkerGlobalScope, OffscreenCanvas};
 
-use super::{
-    start_runner,
-    window::{
+use super::{start_runner, OffscreenMapRunner};
+use crate::{
+    error::{JSError, WebError},
+    offscreen_window::{
         next_runner_id, OffscreenCanvasHandle, OffscreenEnvironment, OffscreenMapWindow,
         OffscreenMapWindowConfig, SharedWindowState,
     },
-    OffscreenMapRunner,
-};
-use crate::{
-    application::{default_plugins_for, parse_style},
-    error::{JSError, WebError},
     platform::{self, http_client::web_http_client},
+    setup::{default_plugins_for, parse_style},
 };
 
 /// WebGPU adapter, device, surface, and worker pool ready to bind to a fetched map style.
@@ -96,7 +93,10 @@ fn create_window_and_kernel(
     let apc = maplibre::io::apc::SchedulerAsyncProcedureCall::new(
         platform::multithreaded::pool_scheduler::WebWorkerPoolScheduler::from_ports(new_worker)?,
         offscreen_kernel_config.clone(),
-    );
+    )
+    .with_style_warmer(maplibre::sdf::assets::spawn_wasm_style_prefetch::<
+        <OffscreenEnvironment as maplibre::environment::Environment>::OffscreenKernelEnvironment,
+    >);
     let kernel: Kernel<OffscreenEnvironment> = KernelBuilder::new()
         .with_map_window_config(window_config)
         .with_http_client(web_http_client())

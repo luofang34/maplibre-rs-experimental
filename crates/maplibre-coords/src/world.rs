@@ -19,6 +19,21 @@ pub struct LatLon {
     pub longitude: f64,
 }
 
+#[inline]
+fn mercator_y_from_latitude(latitude: f64) -> f64 {
+    ((1.0 - latitude.to_radians().tan().asinh() / PI) * 0.5).clamp(0.0, 1.0 - 1e-9)
+}
+
+#[inline]
+fn latitude_from_mercator_y(mercator_y: f64) -> f64 {
+    (PI * (1.0 - 2.0 * mercator_y)).sinh().atan().to_degrees()
+}
+
+#[inline]
+fn world_width_at_zoom(zoom: Zoom) -> f64 {
+    TILE_SIZE * 2.0_f64.powf(zoom.value())
+}
+
 impl LatLon {
     /// Stores coordinates in degrees without clamping latitude or wrapping longitude.
     pub fn new(latitude: f64, longitude: f64) -> Self {
@@ -31,13 +46,12 @@ impl LatLon {
     /// Projects this geographic location to normalized Mercator coordinates in `[0..1] x [0..1]`.
     pub fn to_mercator(&self) -> Point2<f64> {
         let x = self.longitude / 360.0 + 0.5;
-        let y = (1.0 - self.latitude.to_radians().tan().asinh() / PI) * 0.5;
-        Point2::new(x, y.clamp(0.0, 1.0 - 1e-9))
+        Point2::new(x, mercator_y_from_latitude(self.latitude))
     }
 
     /// Converts normalized Mercator coordinates in `[0..1] x [0..1]` back to geographic coordinates.
     pub fn from_mercator(mercator: Point2<f64>) -> Self {
-        let lat = (PI * (1.0 - 2.0 * mercator.y)).sinh().atan().to_degrees();
+        let lat = latitude_from_mercator_y(mercator.y);
         let lon = mercator.x * 360.0 - 180.0;
         LatLon::new(lat, lon)
     }
@@ -75,7 +89,7 @@ impl WorldCoords {
     /// Projects degrees to Mercator pixels at `zoom` without clamping latitude or wrapping longitude.
     /// Callers must supply finite longitude and latitude strictly between -90 and 90 degrees.
     pub fn from_lat_lon(lat_lon: LatLon, zoom: Zoom) -> WorldCoords {
-        let tile_size = TILE_SIZE * 2.0_f64.powf(zoom.value());
+        let tile_size = world_width_at_zoom(zoom);
         let x = (lat_lon.longitude + 180.0) * (tile_size / 360.0);
         let lat_rad = (lat_lon.latitude * PI) / 180.0;
         let merc_n = f64::ln(f64::tan((PI / 4.0) + (lat_rad / 2.0)));

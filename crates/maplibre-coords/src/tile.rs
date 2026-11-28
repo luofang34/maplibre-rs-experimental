@@ -40,6 +40,32 @@ pub struct TileCoords {
     pub z: ZoomLevel,
 }
 
+#[inline]
+fn zoom_grid_bounds(z: ZoomLevel) -> Option<u32> {
+    ZOOM_BOUNDS.get(z.0 as usize).copied()
+}
+
+#[inline]
+fn apply_addressing_y(y: u32, bounds: u32, scheme: TileAddressingScheme) -> u32 {
+    match scheme {
+        TileAddressingScheme::XYZ => y,
+        TileAddressingScheme::TMS => bounds - 1 - y,
+    }
+}
+
+#[inline]
+fn tile_scale_for_zoom(z: ZoomLevel, zoom: Zoom) -> f64 {
+    TILE_SIZE * Zoom::from(z).scale_delta(&zoom)
+}
+
+#[inline]
+fn encode_morton_quadkey(x: u32, y: u32, z: ZoomLevel) -> Quadkey {
+    let rx = x.reverse_bits();
+    let ry = y.reverse_bits();
+    let morton = (spread_bits_32(ry) << 1) | spread_bits_32(rx);
+    Quadkey((u128::from(z.0) << 120) | (u128::from(morton) << 56))
+}
+
 impl TileCoords {
     /// Transforms the tile coordinates as defined by the tile grid addressing scheme into a
     /// representation which is used in the 3d-world.
@@ -49,16 +75,13 @@ impl TileCoords {
     /// The [`TileCoords`] `T(x=5,y=5,z=0)` exceeds its bounds because there is no tile
     /// `x=5,y=5` at zoom level `z=0`.
     pub fn into_world_tile(self, scheme: TileAddressingScheme) -> Option<WorldTileCoords> {
-        let bounds = *ZOOM_BOUNDS.get(self.z.0 as usize)?;
+        let bounds = zoom_grid_bounds(self.z)?;
         if self.x >= bounds || self.y >= bounds {
             return None;
         }
         // Canonical indices fit i32 even at z=31; the exclusive bound does not.
         let x = self.x as i32;
-        let y = match scheme {
-            TileAddressingScheme::XYZ => self.y,
-            TileAddressingScheme::TMS => bounds - 1 - self.y,
-        } as i32;
+        let y = apply_addressing_y(self.y, bounds, scheme) as i32;
         Some(WorldTileCoords { x, y, z: self.z })
     }
 }
@@ -113,7 +136,7 @@ impl WorldTileCoords {
     /// The [`WorldTileCoords`] `WT(x=5,y=5,z=0)` exceeds its bounds because there is no tile
     /// `x=5,y=5` at zoom level `z=0`.
     pub fn into_tile(self, scheme: TileAddressingScheme) -> Option<TileCoords> {
-        let bounds = *ZOOM_BOUNDS.get(self.z.0 as usize)?;
+        let bounds = zoom_grid_bounds(self.z)?;
         let x = self.x as u32;
         let y = self.y as u32;
 
@@ -121,13 +144,10 @@ impl WorldTileCoords {
             return None;
         }
 
-        Some(match scheme {
-            TileAddressingScheme::XYZ => TileCoords { x, y, z: self.z },
-            TileAddressingScheme::TMS => TileCoords {
-                x,
-                y: bounds - 1 - y,
-                z: self.z,
-            },
+        Some(TileCoords {
+            x,
+            y: apply_addressing_y(y, bounds, scheme),
+            z: self.z,
         })
     }
 
@@ -138,7 +158,7 @@ impl WorldTileCoords {
     /// [Transform::calculatePosMatrix](https://github.com/maplibre/maplibre-gl-js/blob/80e232a64716779bfff841dbc18fddc1f51535ad/src/geo/transform.ts#L719-L731)
     #[tracing::instrument(skip_all)]
     pub fn transform_for_zoom(&self, zoom: Zoom) -> Matrix4<f64> {
-        let tile_scale = TILE_SIZE * Zoom::from(self.z).scale_delta(&zoom);
+        let tile_scale = tile_scale_for_zoom(self.z, zoom);
 
         let translate = Matrix4::from_translation(Vector3::new(
             self.x as f64 * tile_scale,
@@ -166,7 +186,7 @@ impl WorldTileCoords {
     /// tile that a view sees in a copy of the world; `None` when the row or level is outside
     /// the grid, which no copy can fix.
     pub fn wrapped(self) -> Option<(WorldTileCoords, i32)> {
-        let bounds = i64::from(*ZOOM_BOUNDS.get(self.z.0 as usize)?);
+        let bounds = i64::from(zoom_grid_bounds(self.z)?);
         if !(0..bounds).contains(&i64::from(self.y)) {
             return None;
         }
@@ -183,7 +203,7 @@ impl WorldTileCoords {
     /// Quadrant encoding follows [tilebelt](https://github.com/mapbox/tilebelt).
     #[inline]
     pub fn build_quad_key(&self) -> Option<Quadkey> {
-        let bounds = *ZOOM_BOUNDS.get(self.z.0 as usize)?;
+        let bounds = zoom_grid_bounds(self.z)?;
         let x = self.x as u32;
         let y = self.y as u32;
 
@@ -191,11 +211,7 @@ impl WorldTileCoords {
             return None;
         }
 
-        let rx = x.reverse_bits();
-        let ry = y.reverse_bits();
-        let morton = (spread_bits_32(ry) << 1) | spread_bits_32(rx);
-        let bits = (u128::from(self.z.0) << 120) | (u128::from(morton) << 56);
-        Some(Quadkey(bits))
+        Some(encode_morton_quadkey(x, y, self.z))
     }
 
     /// Returns children clockwise from the upper left, without clipping to canonical bounds.

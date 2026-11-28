@@ -105,17 +105,16 @@ fn parse_header(hdr: &[u8; HEADER_BYTES], total_len: usize) -> Option<WireHeader
 }
 
 pub(super) fn encode_layer_tessellated(input: TessellatedEncodeInput<'_>) -> Vec<u8> {
-    if (input.allow_prepack
-        && !input.style_type.is_empty()
-        && !input.buffer.buffer.vertices.is_empty())
-        || input.buffer.prepacked_gpu().is_some()
+    if (input.allow_prepack && !input.style_type.is_empty() && !input.buffer.vertices.is_empty())
+        || input.buffer.prepacked_slices().is_some()
     {
         return encode_prepacked_layer_tessellated(HEADER_BYTES, input);
     }
-    let shared_key = input.buffer.shared_geometry_key().unwrap_or(0);
-    let usable_indices = input.buffer.usable_indices;
-    let raw_vertices = input.buffer.buffer.vertices;
-    let raw_indices = input.buffer.buffer.indices;
+    let parts = input.buffer.into_raw_parts();
+    let shared_key = parts.shared_geometry_key.unwrap_or(0);
+    let usable_indices = parts.usable_indices;
+    let raw_vertices = parts.vertices;
+    let raw_indices = parts.indices;
     let paint_slice = input.paint_bytes.unwrap_or_default();
 
     let total_len = HEADER_BYTES

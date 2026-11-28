@@ -23,7 +23,6 @@ use wasm_bindgen::JsValue;
 
 #[cfg(any(test, feature = "renderer"))]
 pub use self::raw_decode::PassingReceiveIter;
-pub use self::tag::WebMessageTag;
 #[cfg(test)]
 pub(crate) use self::wire::{encode_call_finished, prepare_message};
 pub(crate) use self::wire::{post_call_finished, set_worker_reply_port};
@@ -34,6 +33,7 @@ pub(crate) use self::{
     raw_queue::QueuedMessage,
     wire::{decode_call_finished, decode_message, TrackedPayloadError},
 };
+pub use super::tag::WebMessageTag;
 #[cfg(any(test, feature = "renderer"))]
 use crate::{error::WebError, platform::singlethreaded::UsedContext};
 
@@ -52,6 +52,14 @@ pub struct Received {
     pub(crate) cancelled: rustc_hash::FxHashSet<u64>,
     /// Main-thread redraw waker invoked when results transition from empty to non-empty.
     pub(crate) waker: Option<Arc<dyn Fn() + Send + Sync>>,
+}
+
+#[cfg(any(test, feature = "renderer"))]
+fn record_cancelled(cancelled: &mut rustc_hash::FxHashSet<u64>, attempt: u64) {
+    if cancelled.len() > 2048 {
+        cancelled.clear();
+    }
+    cancelled.insert(attempt);
 }
 
 #[cfg(any(test, feature = "renderer"))]
@@ -324,7 +332,12 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
         true
     }
 
-    fn prewarm_call(&self, tag: ProcedureTag, input: Input) -> Result<(), CallError> {
+    fn prewarm_call(
+        &self,
+        tag: ProcedureTag,
+        input: Input,
+        _procedure: AsyncProcedure<K, UsedContext>,
+    ) -> Result<(), CallError> {
         self.dispatch_tagged(tag, input)
     }
 
@@ -336,10 +349,7 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
             return;
         }
         if let Ok(mut received) = self.received.try_borrow_mut() {
-            if received.cancelled.len() > 2048 {
-                received.cancelled.clear();
-            }
-            received.cancelled.insert(attempt);
+            record_cancelled(&mut received.cancelled, attempt);
         }
         let Some(worker) = self.workers.get(index) else {
             return;
@@ -375,10 +385,7 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
                         continue;
                     }
                     if let Some(ref mut rec) = received {
-                        if rec.cancelled.len() > 2048 {
-                            rec.cancelled.clear();
-                        }
-                        rec.cancelled.insert(attempt);
+                        record_cancelled(&mut rec.cancelled, attempt);
                     }
                     if let Some(bucket) = scratch.cancel_buckets.get_mut(index) {
                         bucket.push(attempt);
@@ -387,19 +394,14 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
             }
         }
         for (index, bucket) in scratch.cancel_buckets.iter().enumerate() {
-            if bucket.is_empty() {
-                continue;
-            }
-            let Some(worker) = self.workers.get(index) else {
-                continue;
-            };
-            let res = if let [only] = bucket.as_slice() {
-                post::post_st_cancel(worker.as_js_value(), *only)
-            } else {
-                post::post_st_cancel_batch(worker.as_js_value(), bucket.as_slice())
-            };
-            if let Err(error) = res.map_err(WebError::from) {
-                tracing::warn!(count = bucket.len(), %error, "batch-cancelling worker calls failed");
+            if let (false, Some(worker)) = (bucket.is_empty(), self.workers.get(index)) {
+                let res = match bucket.as_slice() {
+                    [only] => post::post_st_cancel(worker.as_js_value(), *only),
+                    slice => post::post_st_cancel_batch(worker.as_js_value(), slice),
+                };
+                if let Err(error) = res.map_err(WebError::from) {
+                    tracing::warn!(count = bucket.len(), %error, "batch-cancelling worker calls failed");
+                }
             }
         }
     }
@@ -456,15 +458,10 @@ impl<K: OffscreenKernel> AsyncProcedureCall<K> for PassingAsyncProcedureCall {
 impl Drop for PassingAsyncProcedureCall {
     fn drop(&mut self) {
         self.outgoing.get_mut().clear();
-        let mut busy = vec![false; self.workers.len()];
-        for (_, idx) in self.assignments.get_mut().drain() {
-            if let Some(slot) = busy.get_mut(idx) {
-                *slot = true;
-            }
-        }
         let workers = std::mem::take(&mut self.workers);
         let listeners = std::mem::take(&mut self.listeners);
-        recycle::release_workers(workers, listeners, &busy);
+        let busy = self.assignments.get_mut().drain().map(|(_, idx)| idx);
+        recycle::release_workers_with_busy(workers, listeners, busy);
         self.buffer.get_mut().clear();
         if let Ok(mut received) = self.received.try_borrow_mut() {
             received.messages.clear();
@@ -478,7 +475,12 @@ impl Drop for PassingAsyncProcedureCall {
 }
 
 #[cfg(any(test, feature = "renderer"))]
+pub(crate) use self::deliver::deliver_received_data;
+
+#[cfg(any(test, feature = "renderer"))]
 mod assignments;
+#[cfg(any(test, feature = "renderer"))]
+mod deliver;
 #[cfg(any(test, feature = "renderer"))]
 mod outgoing;
 #[cfg(any(test, feature = "renderer"))]
@@ -493,7 +495,6 @@ mod recycle;
 mod scratch;
 #[cfg(any(test, feature = "renderer"))]
 mod style_revisions;
-pub mod tag;
 #[cfg(test)]
 mod tests;
 pub(crate) mod wire;

@@ -27,7 +27,7 @@ fn enable_tracing() {
 /// Installs logging and panic reporting for each wasm instance.
 pub fn wasm_bindgen_start() {
     #[cfg(target_arch = "wasm32")]
-    maplibre::tcs::system::timings::register_wasm_clock(maplibre_perf_now_ms);
+    maplibre::schedule::system::timings::register_wasm_clock(maplibre_perf_now_ms);
     #[cfg(debug_assertions)]
     {
         console_log::init_with_level(log::Level::Info).ok();

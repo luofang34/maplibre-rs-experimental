@@ -37,7 +37,11 @@ mod environment;
 mod error;
 #[cfg(feature = "renderer")]
 mod offscreen;
+#[cfg(feature = "renderer")]
+mod offscreen_window;
 mod platform;
+#[cfg(feature = "renderer")]
+mod setup;
 mod startup;
 
 #[cfg(feature = "winit-window")]

@@ -1,9 +1,9 @@
 use cgmath::{Deg, Point2, Vector2, Vector4};
 use maplibre::{
     coords::{LatLon, WorldCoords, Zoom},
-    map::Map,
+    map::{Map, RenderPlugin},
     projection::ProjectionType,
-    render::{camera::EdgeInsets, eventually::Eventually, view_state::ViewState, RenderPlugin},
+    render::{camera::EdgeInsets, eventually::Eventually, view_state::ViewState},
     window::{HeadedMapWindow, MapWindow, PhysicalSize},
 };
 use maplibre_winit::{WinitMapWindow, WinitMapWindowConfig};

@@ -327,21 +327,6 @@ where
 
 mod sync_handle;
 pub use sync_handle::{SyncCommandQueue, SyncHandle, SyncMapCommands, SyncMapHandle, SyncWakeHost};
-#[cfg(feature = "headless")]
-pub use sync_handle::{SyncHeadlessCommands, SyncHeadlessHandle};
-
-#[cfg(all(
-    feature = "headless",
-    feature = "native-io",
-    not(target_arch = "wasm32")
-))]
-mod headless_thread;
-#[cfg(all(
-    feature = "headless",
-    feature = "native-io",
-    not(target_arch = "wasm32")
-))]
-pub use headless_thread::{HeadlessRuntimeConfig, HeadlessRuntimeError, HeadlessRuntimeThread};
 
 #[cfg(test)]
 mod tests;

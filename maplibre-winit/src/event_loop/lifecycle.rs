@@ -10,7 +10,6 @@ use std::{
 
 use maplibre::{
     environment::Environment,
-    io::apc::AsyncProcedureCall,
     map::{
         handle::{MapCommands, MapHandle, WakeHost},
         Map,
@@ -59,7 +58,7 @@ where
     active: bool,
     initialized: bool,
     error: Option<WinitApplicationError<C>>,
-    pub(super) completion: Option<Completion<C>>,
+    completion: Option<Completion<C>>,
     commands: MapCommands<E>,
 }
 
@@ -87,6 +86,18 @@ where
             completion: None,
             commands: MapCommands::default(),
         }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn with_completion(
+        config: WinitMapWindowConfig<ET>,
+        factory: F,
+        max_frames: Option<u64>,
+        completion: Completion<C>,
+    ) -> Self {
+        let mut app = Self::new(config, factory, max_frames);
+        app.completion = Some(completion);
+        app
     }
     /// A handle whose commands this handler applies once the map is ready. `wake` must make
     /// the event loop deliver a user event to [`ApplicationHandler::user_event`], as
@@ -118,9 +129,7 @@ where
             return false;
         }
         if let State::Ready(dispatch) = &mut self.state {
-            self.commands.apply(&mut dispatch.map);
-            if self.commands.is_closed() {
-                dispatch.clear_wake_timer();
+            if !dispatch.apply_commands(&mut self.commands) {
                 self.state = State::Dormant;
                 self.set_wake_window(None);
                 drop(self.recovery.borrow_mut().take());
@@ -128,9 +137,6 @@ where
                     active.exit();
                 }
                 return false;
-            }
-            if dispatch.map.needs_redraw() || dispatch.map.kernel().apc().has_arrivals() {
-                dispatch.map.window().request_redraw();
             }
         }
         true
@@ -164,7 +170,7 @@ where
                 let window = self.config.create_window(active)?;
                 let config = self.config.clone().with_window(&window);
                 let map = (self.factory)(config).map_err(WinitApplicationError::CreateMap)?;
-                self.window = Arc::downgrade(map.window().handle());
+                self.window = Arc::downgrade(window.handle());
                 Dispatch::new(map, self.max_frames, self.window.clone())
             }
             other => {
@@ -230,7 +236,7 @@ where
         self.state = match state {
             State::Ready(mut dispatch) => {
                 dispatch.clear_wake_timer();
-                dispatch.map.reset();
+                dispatch.reset();
                 State::Suspended(dispatch)
             }
             State::Suspended(dispatch) => State::Suspended(dispatch),
@@ -273,12 +279,7 @@ where
             if let State::Ready(dispatch) = &mut self.state {
                 match dispatch.redraw(active) {
                     Ok(()) => {
-                        self.commands.observe(&mut dispatch.map);
-                        if dispatch.map.has_ready_work()
-                            || dispatch.map.kernel().apc().has_arrivals()
-                        {
-                            dispatch.map.window().request_redraw();
-                        }
+                        dispatch.observe_commands(&mut self.commands);
                     }
                     Err(error) => self.fail(active, WinitApplicationError::Frame(error)),
                 }

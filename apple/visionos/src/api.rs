@@ -25,9 +25,9 @@ use maplibre::{
         settings::{BufferPoolSizes, RendererSettings},
         view_state::ExternalAnchor,
         xr::{EyeTarget, ScenePlacement, XrEye, XrFrame},
-        RenderPlugin,
     },
     style::Style,
+    RenderPlugin,
 };
 
 /// The format the map renders in: the linear twin of the compositor's `bgra8Unorm_srgb`, so

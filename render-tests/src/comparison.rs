@@ -6,7 +6,7 @@ use image::{ImageBuffer, Rgba, RgbaImage};
 
 use crate::TestMeta;
 
-pub(super) fn composite_opaque_background(path: &Path, background: [u8; 3]) -> Result<(), String> {
+pub(crate) fn composite_opaque_background(path: &Path, background: [u8; 3]) -> Result<(), String> {
     let mut image = image::open(path)
         .map_err(|error| format!("Cannot open actual for compositing: {error}"))?
         .to_rgba8();
@@ -28,7 +28,7 @@ pub(super) fn composite_opaque_background(path: &Path, background: [u8; 3]) -> R
 
 /// Turns the premultiplied frame into straight colours, the form a browser exports a canvas
 /// in and therefore the form the expected images hold.
-pub(super) fn unpremultiply(path: &Path) -> Result<(), String> {
+pub(crate) fn unpremultiply(path: &Path) -> Result<(), String> {
     let mut image = image::open(path)
         .map_err(|error| format!("Cannot open actual for unpremultiplying: {error}"))?
         .to_rgba8();
@@ -58,11 +58,11 @@ const SOLID_REGION_RADIUS: f64 = 4.0;
 
 /// How two images differ.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct Difference {
+pub(crate) struct Difference {
     /// Normalized mean channel difference in `[0, 1]`.
-    pub(super) mean: f64,
+    pub(crate) mean: f64,
     /// Pixels at the centre of a square of wrong pixels; see [`SOLID_REGION_RADIUS`].
-    pub(super) solid: u64,
+    pub(crate) solid: u64,
 }
 
 /// Pixels at the centre of a wholly wrong square a frame at one physical pixel per logical pixel
@@ -72,7 +72,7 @@ const MAX_SOLID_PIXELS: f64 = 16.0;
 
 impl Difference {
     /// The largest difference a fixture allows, its mean being `max_diff`.
-    pub(super) fn limits(max_diff: f64, pixel_ratio: f64) -> Self {
+    pub(crate) fn limits(max_diff: f64, pixel_ratio: f64) -> Self {
         Self {
             mean: max_diff,
             solid: (MAX_SOLID_PIXELS * pixel_ratio * pixel_ratio).round() as u64,
@@ -80,7 +80,7 @@ impl Difference {
     }
 
     /// Whether the difference stays below the mean limit and within the solid region one.
-    pub(super) fn within(self, limits: Self) -> bool {
+    pub(crate) fn within(self, limits: Self) -> bool {
         self.mean < limits.mean && self.solid <= limits.solid
     }
 }
@@ -92,7 +92,7 @@ impl std::fmt::Display for Difference {
 }
 
 /// Writes a diff PNG and measures how the images differ.
-pub(super) fn compare_and_diff(
+pub(crate) fn compare_and_diff(
     actual_path: &Path,
     expected_path: &Path,
     diff_path: &Path,
@@ -202,7 +202,7 @@ fn solid_pixels(wrong: &[bool], width: usize, radius: usize) -> u64 {
 }
 
 /// Moves the final rendered frame to `actual.png`, normalizes it, and compares against references.
-pub(super) fn compare_frame_blocking(
+pub(crate) fn compare_frame_blocking(
     frame: &Path,
     test_dir: &Path,
     meta: &TestMeta,
@@ -215,7 +215,7 @@ pub(super) fn compare_frame_blocking(
         .map_err(|error| format!("Cannot move rendered frame into test output: {error}"))?;
     unpremultiply(&actual)?;
     if meta.show_padding {
-        crate::camera_options::draw_overlay(
+        camera_options::draw_overlay(
             &actual,
             meta.padding,
             (meta.width, meta.height),
@@ -272,5 +272,6 @@ fn expected_images(test_dir: &Path) -> Result<Vec<PathBuf>, String> {
     Ok(references)
 }
 
+pub(crate) mod camera_options;
 #[cfg(test)]
 mod tests;

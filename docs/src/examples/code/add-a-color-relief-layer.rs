@@ -7,14 +7,14 @@ use maplibre::{
         hillshade::{ColorReliefPaint, HillshadeMethod, HillshadePaint},
         layer::{BackgroundPaint, LayerPaint, StyleLayer, StyleProperty},
         source::{RasterDemSource, Source},
-        Style,
+        Style, StyleDocument,
     },
 };
 use maplibre_winit::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
 use serde_json::json;
 
 pub fn style() -> Style {
-    Style {
+    Style::from_document(StyleDocument {
         version: 8,
         sources: [(
             "elevationSource".to_string(),
@@ -87,7 +87,7 @@ pub fn style() -> Style {
         zoom: Some(10.5),
         pitch: Some(0.0),
         ..Default::default()
-    }
+    })
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

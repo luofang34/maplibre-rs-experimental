@@ -7,7 +7,7 @@ async fn png_failure_releases_the_buffer_for_the_next_capture() {
     let (_, renderer) = crate::headless::create_headless_renderer(3, 2, None)
         .await
         .expect("headless renderer");
-    let Head::Headless(texture) = renderer.resources.surface.head() else {
+    let Head::Headless(texture) = renderer.resources.surface.as_ref() else {
         panic!("offscreen surface");
     };
     let directory = std::env::temp_dir();

@@ -14,13 +14,16 @@ use maplibre::{
         ReqwestOffscreenKernelEnvironment,
     },
     plugin::Plugin,
-    render::{builder::RendererBuilder, settings::WgpuSettings, RenderPlugin},
+    render::{builder::RendererBuilder, settings::WgpuSettings},
     style::{source::Source, Style},
+    RenderPlugin,
 };
 use thiserror::Error;
 
-use super::{HeadedMapOptions, WinitMapWindowConfig};
-use crate::{WinitApplicationError, WinitEnvironment, WinitEventLoop, WinitHostError};
+use super::HeadedMapOptions;
+use crate::{
+    WinitApplicationError, WinitEnvironment, WinitEventLoop, WinitHostError, WinitMapWindowConfig,
+};
 
 /// The environment of a windowed native map, which a host's plugins are written for.
 pub type NativeEnvironment = WinitEnvironment<
@@ -261,7 +264,7 @@ pub fn default_plugins(style: &Style, debug_tiles: bool) -> Vec<MapPlugin> {
     }
     if style.terrain.is_some() {
         plugins.push(Box::<
-            maplibre::terrain::TerrainPlugin<maplibre::terrain::DefaultDemTransferables>,
+            maplibre::map::TerrainPlugin<maplibre::terrain::DefaultDemTransferables>,
         >::default());
     }
     plugins.push(Box::new(maplibre::hud::NavigationHudPlugin));

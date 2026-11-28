@@ -32,6 +32,8 @@ in_scope = [
 ]
 no_out_of_scope_deps = true
 require_all_crates_layered = true
+forbid_module_cycles = true
+module_cycle_allowlist = []
 
 [[architecture.layers]]
 name = "foundation"
@@ -98,17 +100,16 @@ forbid_crates = { curl = "native curl is unsupported on wasm32", "curl-sys" = "n
 [structure]
 enabled = true
 max_rs_lines = 500
+max_dir_entries = 15
 max_lib_rs_lines = 100
 max_fn_lines = 80
 require_lib_rs_doc = true
 forbid_mod_rs = true
 forbid_generic_filenames = ["utils.rs", "helpers.rs", "common.rs"]
 forbid_stray_artifacts = true
+file_size_allowlist = {}
 
-[structure.file_size_allowlist]
-"maplibre/src/projection/globe/covering.rs" = 532
-"maplibre/src/style/expression/evaluate/dispatch.rs" = 509
-"maplibre/src/vector/process_vector/shared_geometry.rs" = 509
+wide_directory_allowlist = {}
 
 [lints]
 require_workspace_lints_inheritance = true
@@ -201,31 +202,31 @@ require_scoped_test_cmd = true
 [feature_map.coords_projection]
 description = "Coordinate spaces, tile math, zoom bounds, Mercator/Globe/VerticalPerspective projections"
 crates = ["maplibre-coords", "maplibre"]
-modules = ["crates/maplibre-coords/src", "maplibre/src/projection.rs"]
+modules = ["crates/maplibre-coords/src", "maplibre/src/foundation/projection.rs"]
 verify_targets = ["maplibre-coords", "harness:proptest", "harness:native-nextest"]
 
 [feature_map.globe_terrain]
 description = "Globe subdivision, tile covering, raster-dem pipeline, height/drape uniforms"
 crates = ["maplibre"]
-modules = ["maplibre/src/terrain.rs", "maplibre/src/projection/globe.rs"]
+modules = ["maplibre/src/world/terrain.rs", "maplibre/src/foundation/projection/globe.rs"]
 verify_targets = ["maplibre", "harness:proptest", "harness:render-tests"]
 
 [feature_map.vector_tessellation]
 description = "MVT/MLT/GeoJSON decoding, polygon/extrusion/line tessellation, vector GPU buffer pools"
 crates = ["maplibre"]
-modules = ["maplibre/src/vector.rs", "maplibre/src/geojson.rs"]
+modules = ["maplibre/src/layers/vector.rs", "maplibre/src/features/geojson.rs"]
 verify_targets = ["maplibre", "harness:native-nextest"]
 
 [feature_map.sdf_symbols]
 description = "Font/WOFF2 shaping, glyph/sprite atlas packing, text/icon layout, collision placement"
 crates = ["maplibre"]
-modules = ["maplibre/src/sdf.rs", "maplibre/src/font.rs"]
+modules = ["maplibre/src/layers/sdf.rs", "maplibre/src/foundation/font.rs"]
 verify_targets = ["maplibre", "harness:proptest", "harness:native-nextest"]
 
 [feature_map.apc_io]
 description = "Async Procedure Call worker channels, retry state machines, geometry index wire, HTTP loaders"
 crates = ["maplibre", "web", "web-tile-worker"]
-modules = ["maplibre/src/io.rs", "web/src/platform.rs"]
+modules = ["maplibre/src/engine/io.rs", "web/src/platform.rs"]
 verify_targets = ["maplibre", "harness:proptest", "harness:wasm32-clippy"]
 
 [feature_map.web_platform]
@@ -243,7 +244,7 @@ verify_targets = [
 [feature_map.render_pipeline]
 description = "TCS World/Schedule stages, wgpu render graph/passes, headless readback, render conformance"
 crates = ["maplibre", "maplibre-tcs", "render-tests"]
-modules = ["maplibre/src/render.rs", "maplibre/src/headless.rs", "crates/maplibre-tcs/src", "render-tests"]
+modules = ["maplibre/src/engine/render.rs", "maplibre/src/headless.rs", "crates/maplibre-tcs/src", "render-tests"]
 verify_targets = ["render-tests", "harness:native-nextest", "harness:render-tests"]
 
 [floors]
@@ -286,84 +287,82 @@ web-tile-worker = { unwrap = 0, expect = 0, panic = 0, todo = 0, unimplemented =
 "benchmarks/benches/tile_pyramid.rs" = { expect = 1 }
 "benchmarks/benches/view_and_query.rs" = { expect = 24 }
 "benchmarks/benches/xr_readback.rs" = { panic = 12 }
-"maplibre/src/headless/map/injected_loader.rs" = { expect = 26 }
-"maplibre/src/headless/map/signals/terrain_idle.rs" = { expect = 13 }
-"maplibre/src/headless/map/style/sky/bright_moon.rs" = { expect = 13 }
-"maplibre/src/headless/map/style/sky/daylight.rs" = { expect = 13 }
-"maplibre/src/headless/map/style/sky/eclipse.rs" = { expect = 14 }
-"maplibre/src/headless/map/style/sky/eye_ground.rs" = { expect = 10 }
-"maplibre/src/headless/map/style/sky/globe_daylight.rs" = { expect = 11 }
-"maplibre/src/headless/map/style/sky/globe_sky.rs" = { expect = 8 }
-"maplibre/src/headless/map/style/sky/host_atmosphere.rs" = { expect = 20 }
-"maplibre/src/headless/map/style/sky/look_up.rs" = { expect = 15 }
-"maplibre/src/headless/map/style/sky/lunar_eclipse.rs" = { expect = 10 }
-"maplibre/src/headless/map/style/sky/moon.rs" = { expect = 9 }
-"maplibre/src/headless/map/style/sky/starfield.rs" = { expect = 16 }
-"maplibre/src/headless/map/style/sky/sun.rs" = { expect = 14 }
-"maplibre/src/headless/map/symbol_worker/anchor_depth/navigation.rs" = { expect = 5 }
-"maplibre/src/headless/map/symbol_worker/anchor_depth/ridge.rs" = { expect = 3 }
-"maplibre/src/headless/map/symbol_worker/anchor_depth.rs" = { expect = 3 }
-"maplibre/src/headless/map/symbol_worker/circle_stroke.rs" = { expect = 2 }
-"maplibre/src/headless/map/symbol_worker/curve.rs" = { expect = 7 }
-"maplibre/src/headless/map/symbol_worker/dem.rs" = { expect = 1 }
-"maplibre/src/headless/map/symbol_worker/geojson.rs" = { expect = 6 }
-"maplibre/src/headless/map/symbol_worker/globe_precision.rs" = { expect = 5 }
-"maplibre/src/headless/map/symbol_worker/horizon.rs" = { expect = 2 }
-"maplibre/src/headless/map/symbol_worker/line_ground/slope.rs" = { expect = 2 }
-"maplibre/src/headless/map/symbol_worker/line_ground.rs" = { expect = 5 }
-"maplibre/src/headless/map/symbol_worker/motion.rs" = { expect = 3 }
-"maplibre/src/headless/map/symbol_worker/mvt.rs" = { expect = 3 }
-"maplibre/src/headless/map/symbol_worker/provided/arrival.rs" = { expect = 8 }
-"maplibre/src/headless/map/symbol_worker/provided/cost.rs" = { expect = 3 }
-"maplibre/src/headless/map/symbol_worker/provided/formatted.rs" = { expect = 7 }
-"maplibre/src/headless/map/symbol_worker/provided/groups.rs" = { expect = 8 }
-"maplibre/src/headless/map/symbol_worker/provided/placement.rs" = { expect = 3 }
-"maplibre/src/headless/map/symbol_worker/provided.rs" = { expect = 9 }
-"maplibre/src/headless/map/symbol_worker/retry.rs" = { expect = 2 }
-"maplibre/src/headless/map/symbol_worker.rs" = { expect = 17 }
-"maplibre/src/headless/map/terrain_coverage/alpha/fill_opacity.rs" = { expect = 2 }
-"maplibre/src/headless/map/terrain_coverage/alpha/globe.rs" = { expect = 1 }
-"maplibre/src/headless/map/terrain_coverage/alpha.rs" = { expect = 10 }
-"maplibre/src/headless/map/terrain_coverage/drag.rs" = { expect = 7 }
-"maplibre/src/headless/map/terrain_coverage/faults.rs" = { expect = 2 }
-"maplibre/src/headless/map/terrain_coverage/heatmap.rs" = { expect = 16 }
-"maplibre/src/headless/map/terrain_coverage/hillshade.rs" = { expect = 4 }
-"maplibre/src/headless/map/terrain_coverage/reload.rs" = { expect = 5 }
-"maplibre/src/headless/map/terrain_coverage/source_identity.rs" = { expect = 11 }
-"maplibre/src/headless/map/terrain_coverage/stencil.rs" = { expect = 6 }
-"maplibre/src/headless/map/terrain_coverage/unified_dem.rs" = { expect = 11 }
-"maplibre/src/headless/map/terrain_coverage/uniforms.rs" = { expect = 10 }
-"maplibre/src/headless/map/terrain_coverage.rs" = { expect = 12 }
-"maplibre/src/headless/map/vertical_perspective/ground.rs" = { expect = 3 }
-"maplibre/src/headless/map/vertical_perspective/occlusion.rs" = { expect = 6 }
-"maplibre/src/headless/map/vertical_perspective/poles.rs" = { expect = 6 }
-"maplibre/src/headless/map/vertical_perspective/sight.rs" = { expect = 8 }
-"maplibre/src/headless/map/vertical_perspective/unclamped.rs" = { expect = 30 }
-"maplibre/src/headless/map/vertical_perspective/zoom.rs" = { expect = 7 }
-"maplibre/src/headless/map/vertical_perspective.rs" = { expect = 18 }
-"maplibre/src/headless/map/xr/poles/caps.rs" = { expect = 7 }
-"maplibre/src/headless/map/xr/regression/binned_phase.rs" = { expect = 14 }
-"maplibre/src/headless/map/xr/surface/ocean.rs" = { expect = 6 }
-"maplibre/src/platform/noweb/trace.rs" = { expect = 1 }
-"maplibre/src/platform/noweb.rs" = { expect = 1 }
-"maplibre/src/sdf/pixels/line_labels.rs" = { expect = 2 }
-"maplibre/src/sdf/pixels/loaded_assets.rs" = { expect = 8 }
-"maplibre/src/sdf/pixels/navigation.rs" = { expect = 10 }
-"maplibre/src/sdf/pixels/queries.rs" = { expect = 17 }
-"maplibre/src/sdf/pixels/query_visibility.rs" = { expect = 2 }
-"maplibre/src/sdf/pixels/stability.rs" = { expect = 4 }
-"maplibre/src/sdf/pixels/variable_anchors.rs" = { expect = 7 }
-"maplibre/src/sdf/upload_system/retry.rs" = { expect = 6 }
-"maplibre/src/terrain/dem/gpu_readback.rs" = { expect = 3 }
-"maplibre/src/terrain/gpu_dem_pool.rs" = { expect = 2 }
-"maplibre/src/terrain/mesh/pixels/seams.rs" = { expect = 5 }
-"maplibre/src/terrain/mesh/pixels.rs" = { expect = 17 }
-"maplibre/src/terrain/sightline/synthetic.rs" = { expect = 3 }
-"maplibre/src/vector/resource/buffer_pool.rs" = { expect = 1 }
-"maplibre/src/vector/structures/pixels/circle.rs" = { expect = 9 }
-"maplibre/src/vector/structures/pixels/overlay.rs" = { expect = 7 }
-"maplibre/src/vector/structures/pixels/volumetric.rs" = { expect = 9 }
-"maplibre/src/vector/structures/pixels.rs" = { expect = 12 }
+"maplibre/src/headless/map/suites/injected_loader.rs" = { expect = 26 }
+"maplibre/src/headless/map/state/signals/terrain_idle.rs" = { expect = 13 }
+"maplibre/src/headless/map/state/style/sky/bright_moon.rs" = { expect = 13 }
+"maplibre/src/headless/map/state/style/sky/daylight.rs" = { expect = 13 }
+"maplibre/src/headless/map/state/style/sky/eclipse.rs" = { expect = 14 }
+"maplibre/src/headless/map/state/style/sky/eye_ground.rs" = { expect = 10 }
+"maplibre/src/headless/map/state/style/sky/globe_daylight.rs" = { expect = 11 }
+"maplibre/src/headless/map/state/style/sky/globe_sky.rs" = { expect = 8 }
+"maplibre/src/headless/map/state/style/sky/host_atmosphere.rs" = { expect = 20 }
+"maplibre/src/headless/map/state/style/sky/look_up.rs" = { expect = 15 }
+"maplibre/src/headless/map/state/style/sky/lunar_eclipse.rs" = { expect = 10 }
+"maplibre/src/headless/map/state/style/sky/moon.rs" = { expect = 9 }
+"maplibre/src/headless/map/state/style/sky/starfield.rs" = { expect = 16 }
+"maplibre/src/headless/map/state/style/sky/sun.rs" = { expect = 14 }
+"maplibre/src/headless/map/suites/symbol_worker/anchor_depth/navigation.rs" = { expect = 5 }
+"maplibre/src/headless/map/suites/symbol_worker/anchor_depth/ridge.rs" = { expect = 3 }
+"maplibre/src/headless/map/suites/symbol_worker/anchor_depth.rs" = { expect = 3 }
+"maplibre/src/headless/map/suites/symbol_worker/circle_stroke.rs" = { expect = 2 }
+"maplibre/src/headless/map/suites/symbol_worker/curve.rs" = { expect = 7 }
+"maplibre/src/headless/map/suites/symbol_worker/dem.rs" = { expect = 1 }
+"maplibre/src/headless/map/suites/symbol_worker/geojson.rs" = { expect = 6 }
+"maplibre/src/headless/map/suites/symbol_worker/globe_precision.rs" = { expect = 5 }
+"maplibre/src/headless/map/suites/symbol_worker/horizon.rs" = { expect = 2 }
+"maplibre/src/headless/map/suites/symbol_worker/line_ground/slope.rs" = { expect = 2 }
+"maplibre/src/headless/map/suites/symbol_worker/line_ground.rs" = { expect = 5 }
+"maplibre/src/headless/map/suites/symbol_worker/motion.rs" = { expect = 3 }
+"maplibre/src/headless/map/suites/symbol_worker/mvt.rs" = { expect = 3 }
+"maplibre/src/headless/map/suites/symbol_worker/provided/arrival.rs" = { expect = 8 }
+"maplibre/src/headless/map/suites/symbol_worker/provided/cost.rs" = { expect = 3 }
+"maplibre/src/headless/map/suites/symbol_worker/provided/formatted.rs" = { expect = 7 }
+"maplibre/src/headless/map/suites/symbol_worker/provided/groups.rs" = { expect = 8 }
+"maplibre/src/headless/map/suites/symbol_worker/provided/placement.rs" = { expect = 3 }
+"maplibre/src/headless/map/suites/symbol_worker/provided.rs" = { expect = 9 }
+"maplibre/src/headless/map/suites/symbol_worker/retry.rs" = { expect = 2 }
+"maplibre/src/headless/map/suites/symbol_worker.rs" = { expect = 17 }
+"maplibre/src/headless/map/suites/terrain_coverage/alpha/fill_opacity.rs" = { expect = 2 }
+"maplibre/src/headless/map/suites/terrain_coverage/alpha/globe.rs" = { expect = 1 }
+"maplibre/src/headless/map/suites/terrain_coverage/alpha.rs" = { expect = 10 }
+"maplibre/src/headless/map/suites/terrain_coverage/drag.rs" = { expect = 7 }
+"maplibre/src/headless/map/suites/terrain_coverage/heatmap.rs" = { expect = 16 }
+"maplibre/src/headless/map/suites/terrain_coverage/hillshade.rs" = { expect = 4 }
+"maplibre/src/headless/map/suites/terrain_coverage/reload.rs" = { expect = 7 }
+"maplibre/src/headless/map/suites/terrain_coverage/source_identity.rs" = { expect = 11 }
+"maplibre/src/headless/map/suites/terrain_coverage/stencil.rs" = { expect = 6 }
+"maplibre/src/headless/map/suites/terrain_coverage/unified_dem.rs" = { expect = 21 }
+"maplibre/src/headless/map/suites/terrain_coverage.rs" = { expect = 12 }
+"maplibre/src/headless/map/suites/vertical_perspective/ground.rs" = { expect = 3 }
+"maplibre/src/headless/map/suites/vertical_perspective/occlusion.rs" = { expect = 6 }
+"maplibre/src/headless/map/suites/vertical_perspective/poles.rs" = { expect = 6 }
+"maplibre/src/headless/map/suites/vertical_perspective/sight.rs" = { expect = 8 }
+"maplibre/src/headless/map/suites/vertical_perspective/unclamped.rs" = { expect = 30 }
+"maplibre/src/headless/map/suites/vertical_perspective/zoom.rs" = { expect = 7 }
+"maplibre/src/headless/map/suites/vertical_perspective.rs" = { expect = 18 }
+"maplibre/src/headless/map/rendering/xr/poles/caps.rs" = { expect = 7 }
+"maplibre/src/headless/map/rendering/xr/regression/binned_phase.rs" = { expect = 14 }
+"maplibre/src/headless/map/rendering/xr/surface/ocean.rs" = { expect = 6 }
+"maplibre/src/engine/platform/noweb/trace.rs" = { expect = 1 }
+"maplibre/src/engine/platform/noweb.rs" = { expect = 1 }
+"maplibre/src/layers/sdf/pixels/line_labels.rs" = { expect = 2 }
+"maplibre/src/layers/sdf/pixels/loaded_assets.rs" = { expect = 8 }
+"maplibre/src/layers/sdf/pixels/navigation.rs" = { expect = 10 }
+"maplibre/src/layers/sdf/pixels/queries.rs" = { expect = 17 }
+"maplibre/src/layers/sdf/pixels/query_visibility.rs" = { expect = 2 }
+"maplibre/src/layers/sdf/pixels/stability.rs" = { expect = 4 }
+"maplibre/src/layers/sdf/pixels/variable_anchors.rs" = { expect = 7 }
+"maplibre/src/layers/sdf/systems/upload_system/retry.rs" = { expect = 6 }
+"maplibre/src/world/terrain/data/dem/gpu_readback.rs" = { expect = 3 }
+"maplibre/src/world/terrain/drape/gpu_dem_pool.rs" = { expect = 2 }
+"maplibre/src/world/terrain/data/mesh/pixels/seams.rs" = { expect = 5 }
+"maplibre/src/world/terrain/data/mesh/pixels.rs" = { expect = 17 }
+"maplibre/src/world/terrain/surface/sightline/synthetic.rs" = { expect = 3 }
+"maplibre/src/layers/vector/resource/buffer_pool.rs" = { expect = 1 }
+"maplibre/src/layers/vector/structures/pixels/circle.rs" = { expect = 9 }
+"maplibre/src/layers/vector/structures/pixels/overlay.rs" = { expect = 7 }
+"maplibre/src/layers/vector/structures/pixels/volumetric.rs" = { expect = 9 }
+"maplibre/src/layers/vector/structures/pixels.rs" = { expect = 12 }
 
 [verify]
 fail_fast = true

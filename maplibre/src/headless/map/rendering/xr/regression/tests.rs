@@ -1,0 +1,367 @@
+#![allow(clippy::expect_used, clippy::panic)]
+
+use std::time::Duration;
+
+use cgmath::{Matrix4, Rad, SquareMatrix, Vector3};
+
+use crate::{
+    context::MapContext,
+    coords::LatLon,
+    headless::{create_headless_renderer, map::HeadlessMap},
+    map::RenderPlugin,
+    render::{
+        camera::EyeFrustum,
+        eventually::{Eventually, Eventually::Initialized},
+        view_state::ExternalAnchor,
+        xr::{EyeTarget, ScenePlacement, XrEye, XrFrame},
+    },
+    schedule::{
+        system::{stage::SystemStage, SystemResult},
+        RenderStageLabel,
+    },
+    style::Style,
+    terrain::{resources::TerrainResources, DrapePhase},
+};
+
+#[derive(Default)]
+struct Observations {
+    extractions: usize,
+    eyes: Vec<(usize, Vec<crate::coords::WorldTileCoords>, usize)>,
+}
+
+fn ingest(context: &mut MapContext) -> SystemResult {
+    let observations = context.world.resources.get_or_init_mut::<Observations>();
+    observations.extractions = observations.extractions.wrapping_add(1);
+    Ok(())
+}
+
+fn observe(context: &mut MapContext) -> SystemResult {
+    let world = &mut context.world;
+    let drawn = match world.resources.get::<Eventually<TerrainResources>>() {
+        Some(Initialized(terrain)) => terrain.draws().iter().map(|draw| draw.coords).collect(),
+        _ => Vec::new(),
+    };
+    let drapes = world
+        .resources
+        .get::<DrapePhase>()
+        .map_or(0, |phase| phase.targets.len());
+    let observations = world.resources.get_or_init_mut::<Observations>();
+    observations
+        .eyes
+        .push((observations.extractions, drawn, drapes));
+    Ok(())
+}
+
+pub(super) fn frame(timestamp: u64) -> XrFrame {
+    XrFrame {
+        opaque_environment: false,
+        timestamp: Duration::from_millis(timestamp),
+        placement: ScenePlacement {
+            anchor: ExternalAnchor {
+                position: LatLon::new(47.26, 11.39),
+                altitude_meters: 0.0,
+            },
+            world_from_scene: Matrix4::identity(),
+        },
+        eyes: [-0.032, 0.032]
+            .into_iter()
+            .map(|x| XrEye {
+                world_from_eye: Matrix4::from_translation(Vector3::new(x, 0.0, 4000.0)),
+                frustum: EyeFrustum::symmetric(Rad(1.4), 1.0, 0.05, 1.0e8),
+                target: EyeTarget::default(),
+            })
+            .collect(),
+        request_overscan: 1.5,
+        prefetch: None,
+    }
+}
+
+#[test]
+fn stereo_ingests_and_refines_terrain_once_per_frame() {
+    crate::headless::map::test_async::run_async(async {
+        let style: Style = serde_json::from_str(r##"{"version":8,"sources":{"dem":{"type":"raster-dem","tiles":["https://dem.example/{z}/{x}/{y}.png"]}},"layers":[{"id":"background","type":"background","paint":{"background-color":"#718474"}}],"terrain":{"source":"dem"}}"##).expect("terrain style");
+        let (kernel, renderer) = create_headless_renderer(2048, 2048, None)
+            .await
+            .expect("renderer");
+        let mut map = HeadlessMap::new(
+            style,
+            renderer,
+            kernel,
+            vec![
+                Box::new(RenderPlugin),
+                Box::new(crate::background::BackgroundPlugin),
+                Box::new(crate::map::TerrainPlugin::<
+                    crate::terrain::DefaultDemTransferables,
+                >::default()),
+            ],
+        )
+        .expect("map");
+        // Deterministic ingestion at the same stage as worker results, without network timing.
+        map.schedule
+            .remove_stage(RenderStageLabel::Request)
+            .expect("schedule");
+        map.schedule
+            .add_stage_before(
+                RenderStageLabel::Prepare,
+                RenderStageLabel::Request,
+                SystemStage::default().with_system(ingest),
+            )
+            .expect("schedule");
+        map.schedule
+            .add_system_to_stage(RenderStageLabel::PhaseSort, observe)
+            .expect("schedule");
+        map.run_xr_frame(frame(16)).expect("first stereo frame");
+        map.run_xr_frame(frame(32)).expect("second stereo frame");
+        let observations = map
+            .world()
+            .resources
+            .get::<Observations>()
+            .expect("observations");
+        assert_eq!(observations.extractions, 2);
+        for pair in observations.eyes.as_chunks::<2>().0.iter() {
+            assert_eq!(
+                pair[0].0, pair[1].0,
+                "both eyes have the same ingestion generation"
+            );
+            assert_eq!(
+                pair[0].1, pair[1].1,
+                "both eyes draw the same terrain refinements"
+            );
+            assert!(!pair[0].1.is_empty());
+            assert!(pair[0].2 <= 8);
+            assert_eq!(pair[1].2, 0, "later eyes reuse completed drapes");
+        }
+        assert!(observations.eyes[0].2 > 0);
+        // A tile may be refined into its children between the frames, but the surface they cover
+        // stays the same: the area is equal and every tile of the second frame lies in one of the
+        // first.
+        let (first, second) = (&observations.eyes[0].1, &observations.eyes[2].1);
+        use crate::coords::WorldTileCoords;
+        let area = |tiles: &[WorldTileCoords]| -> f64 {
+            tiles
+                .iter()
+                .map(|tile| 4_f64.powi(-i32::from(u8::from(tile.z))))
+                .sum()
+        };
+        assert!(
+        (area(first) - area(second)).abs() < 1e-15,
+        "texture refinement keeps the entire stationary surface visible: {first:?} then {second:?}"
+    );
+        assert!(
+            second.iter().all(|tile| {
+                std::iter::successors(Some(*tile), WorldTileCoords::get_parent)
+                    .any(|ancestor| first.contains(&ancestor))
+            }),
+            "the second frame draws only within the first: {first:?} then {second:?}"
+        );
+    })
+}
+
+#[test]
+fn head_motion_and_stationary_frames_both_request_visible_tiles() {
+    crate::headless::map::test_async::run_async(async {
+        use crate::{projection::ProjectionType, render::frame_input::ViewSource};
+        let style: Style = serde_json::from_str(r#"{"version":8,"sources":{"v":{"type":"vector","tiles":["https://unused.example/{z}/{x}/{y}.pbf"]}},"layers":[]}"#).expect("style");
+        let (kernel, renderer) = create_headless_renderer(128, 128, None)
+            .await
+            .expect("renderer");
+        let mut map = HeadlessMap::new(
+            style,
+            renderer,
+            kernel,
+            vec![
+                Box::new(RenderPlugin),
+                Box::new(crate::vector::VectorPlugin::<
+                    crate::vector::DefaultVectorTransferables,
+                >::default()),
+            ],
+        )
+        .expect("map");
+        let frame = frame(16);
+        let eye = &frame.eyes[0];
+        let initial = frame
+            .placement
+            .view_from(eye.world_from_eye, eye.frustum)
+            .expect("initial view");
+        let settled = frame
+            .placement
+            .view_from(
+                Matrix4::from_translation(Vector3::new(0.0, 0.0, 2000.0)),
+                eye.frustum,
+            )
+            .expect("destination view");
+        map.map_context
+            .view_state
+            .set_external_view(initial, &ProjectionType::Mercator)
+            .expect("initial pose");
+        map.map_context.view_state.update_references();
+        map.frame_input_mut().view = ViewSource::External(settled);
+        run_input_and_requests(&mut map).expect("moving frame");
+        assert!(!map.view_state().eye_settled());
+        assert!(
+            !map.world().tiles.is_empty(),
+            "head motion must not suspend visible requests"
+        );
+        map.map_context.world.tiles.clear();
+        map.map_context.view_state.update_references();
+        run_input_and_requests(&mut map).expect("stationary frame");
+        assert!(map.view_state().eye_settled());
+        assert!(!map.view_state().did_camera_change());
+        assert!(
+            !map.world().tiles.is_empty(),
+            "settling resumes requests without head movement"
+        );
+    })
+}
+
+#[test]
+fn invalid_second_eye_preserves_the_complete_frame_and_recovers() {
+    crate::headless::map::test_async::run_async(async {
+        let style: Style = serde_json::from_str(r##"{"version":8,"sources":{},"layers":[{"id":"background","type":"background","paint":{"background-color":"#718474"}}]}"##).expect("style");
+        let (kernel, renderer) = create_headless_renderer(64, 64, None)
+            .await
+            .expect("renderer");
+        let mut map = HeadlessMap::new(
+            style,
+            renderer,
+            kernel,
+            vec![
+                Box::new(RenderPlugin),
+                Box::new(crate::background::BackgroundPlugin),
+            ],
+        )
+        .expect("map");
+        map.run_xr_frame(frame(16)).expect("valid stereo");
+        let previous = map.view_state().view_projection().0;
+        let generation = map
+            .world()
+            .resources
+            .get::<crate::render::eye_covering::EyeInFrame>()
+            .expect("frame")
+            .frame;
+        let mut invalid = frame(32);
+        invalid.eyes[1].frustum.near = f64::NAN;
+        assert!(matches!(
+            map.run_xr_frame(invalid),
+            Err(super::XrFrameError::InvalidView { index: 1, .. })
+        ));
+        assert_eq!(map.view_state().view_projection().0, previous);
+        assert_eq!(
+            map.world()
+                .resources
+                .get::<crate::render::eye_covering::EyeInFrame>()
+                .expect("preserved frame")
+                .frame,
+            generation
+        );
+        map.run_xr_frame(frame(48)).expect("tracking recovered");
+    })
+}
+
+#[test]
+fn both_eyes_of_an_xr_frame_land_in_one_timeline_record() {
+    crate::headless::map::test_async::run_async(async {
+        use crate::render::frame_trace::Clock;
+        let style: Style =
+            serde_json::from_str(r#"{"version":8,"sources":{},"layers":[]}"#).expect("style");
+        let (kernel, renderer) = create_headless_renderer(64, 64, None)
+            .await
+            .expect("renderer");
+        let mut map =
+            HeadlessMap::new(style, renderer, kernel, vec![Box::new(RenderPlugin)]).expect("map");
+        map.enable_frame_trace(16);
+        for timestamp in [16, 32] {
+            map.run_xr_frame(frame(timestamp)).expect("stereo frame");
+            // The host records under the number the map reports after the frame.
+            let host_frame = map.last_frame_stats().host_frame;
+            map.frame_trace_mut().expect("trace").record_span(
+                host_frame,
+                "copy-encode",
+                Clock::Cpu,
+                Duration::from_micros(10),
+            );
+        }
+        let export = map.frame_trace_mut().expect("trace").export();
+        assert_eq!(
+            export
+                .frames
+                .iter()
+                .map(|record| record.frame)
+                .collect::<Vec<_>>(),
+            [1, 2],
+            "one record per stereo frame"
+        );
+        for record in &export.frames {
+            let renders = record
+                .spans
+                .iter()
+                .filter(|span| span.name == "Render")
+                .count();
+            assert_eq!(
+                renders, 2,
+                "both eyes' stages are in the frame's record: {record:?}"
+            );
+            assert!(record.spans.iter().any(|span| span.name == "copy-encode"));
+        }
+    })
+}
+
+#[derive(Default)]
+struct MovedEyes(Vec<bool>);
+
+fn note_moved(context: &mut MapContext) -> SystemResult {
+    let moved = crate::render::frame_signals::camera_moved(&context.world, &context.view_state);
+    context
+        .world
+        .resources
+        .get_or_init_mut::<MovedEyes>()
+        .0
+        .push(moved);
+    Ok(())
+}
+
+#[test]
+fn each_eye_of_a_still_stereo_view_is_at_rest() {
+    crate::headless::map::test_async::run_async(async {
+        let style: Style =
+            serde_json::from_str(r#"{"version":8,"sources":{},"layers":[]}"#).expect("style");
+        let (kernel, renderer) = create_headless_renderer(64, 64, None)
+            .await
+            .expect("renderer");
+        let mut map =
+            HeadlessMap::new(style, renderer, kernel, vec![Box::new(RenderPlugin)]).expect("map");
+        map.schedule
+            .add_system_to_stage(RenderStageLabel::Queue, note_moved)
+            .expect("schedule");
+        // The same placement twice: each eye sees what it saw the frame before.
+        map.run_xr_frame(frame(16)).expect("first stereo frame");
+        map.run_xr_frame(frame(32)).expect("second stereo frame");
+        let moved = &map
+            .world()
+            .resources
+            .get::<MovedEyes>()
+            .expect("observed")
+            .0;
+        assert_eq!(
+            moved[2..],
+            [false, false],
+            "neither eye moved, so drapes catch up at full pace: {moved:?}"
+        );
+    })
+}
+
+/// Applies the frame input and runs the request systems, without drawing.
+fn run_input_and_requests(
+    map: &mut crate::headless::map::HeadlessMap,
+) -> crate::schedule::StageResult {
+    for label in [RenderStageLabel::Input, RenderStageLabel::Request] {
+        let stage = map
+            .schedule
+            .get_stage_mut::<SystemStage>(&label)
+            .expect("stage");
+        crate::schedule::Stage::run(stage, &mut map.map_context)?;
+    }
+    Ok(())
+}
+
+mod binned_phase;

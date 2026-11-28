@@ -188,14 +188,13 @@ fn bench_component_pyramid_iteration(c: &mut Criterion) {
         b.iter(|| {
             let max_z = world
                 .tiles
-                .tiles
-                .values()
-                .map(|t| u8::from(t.coords.z))
+                .coords()
+                .map(|coords| u8::from(coords.z))
                 .max()
                 .unwrap_or(0);
             let mut sum = u32::from(max_z);
-            for tile in world.tiles.tiles.values() {
-                if let Some(dem) = world.tiles.query::<&BenchDemMarker>(tile.coords) {
+            for coords in world.tiles.coords() {
+                if let Some(dem) = world.tiles.query::<&BenchDemMarker>(coords) {
                     sum = sum.wrapping_add(dem.0);
                 }
             }

@@ -1,0 +1,276 @@
+//! Which source tiles and layers each terrain tile drapes.
+
+use crate::{
+    coords::WorldTileCoords,
+    io::tile_sources::{missing_tile_fallback, RasterSourceId, TileKind},
+    render::tile_view_pattern::{
+        coverage, covering_shapes_for, HasTile, RasterCoverings, SourceTiles, ViewTileSources,
+    },
+    tcs::world::World,
+};
+
+const DRAPEABLE_LAYER_TYPES: [&str; 5] = ["fill", "line", "raster", "hillshade", "color-relief"];
+
+#[cfg(test)]
+mod tests;
+
+/// Whether a style layer renders into drape textures rather than straight to the screen.
+pub fn is_drapeable(layer_type: &str) -> bool {
+    DRAPEABLE_LAYER_TYPES.contains(&layer_type)
+}
+
+/// One vector layer of a source tile drawn into a drape texture.
+#[derive(Clone, Debug)]
+pub(crate) struct VectorLayerSpec {
+    pub(crate) id: crate::style::StyleLayerId,
+    pub(crate) index: u32,
+    pub(crate) is_line: bool,
+    pub(crate) coords: WorldTileCoords,
+    pub(crate) content_revision: u64,
+}
+
+/// A source tile with the layers it contributes.
+#[derive(Clone, Debug)]
+pub(crate) struct ShapeSpec {
+    pub(crate) source: WorldTileCoords,
+    pub(crate) is_vector: bool,
+    pub(crate) vector_layers: Vec<VectorLayerSpec>,
+    /// Raster and DEM-shaded layers as id, style index and whether the DEM shaders draw it.
+    pub(crate) raster_layers: Vec<(String, u32, bool)>,
+    /// Whether this raster tile stands in for a set that does not fill the terrain tile because
+    /// the rest lies outside the view.
+    pub(crate) view_complete: bool,
+}
+
+/// A terrain tile and the source tiles drawn into its texture.
+#[derive(Clone, Debug)]
+pub(crate) struct TargetSpec {
+    pub(crate) coords: WorldTileCoords,
+    pub(crate) shapes: Vec<ShapeSpec>,
+    /// Raster sources that have tiles in the view but none over this terrain tile, which their
+    /// layers therefore do not wait for.
+    #[cfg_attr(not(feature = "raster"), allow(dead_code))]
+    pub(crate) absent_sources: Vec<RasterSourceId>,
+}
+
+/// One source tile drawn into a terrain tile's texture: vector data of the tile itself, or
+/// the raster tiles of one source, which covers the view at its own zoom.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ShapeSource {
+    pub(crate) coords: WorldTileCoords,
+    pub(crate) raster_source: Option<RasterSourceId>,
+    /// See [`ShapeSpec::view_complete`].
+    pub(crate) view_complete: bool,
+    /// Marks a raster source with nothing over the terrain tile rather than a tile to draw.
+    pub(crate) absent: bool,
+}
+
+/// Pairs every view tile with the vector source tiles that hold its data.
+pub(crate) fn select_vector_targets(
+    coords: impl Iterator<Item = WorldTileCoords>,
+    world: &World,
+) -> Vec<(WorldTileCoords, Vec<ShapeSource>)> {
+    select_targets_as_with(coords, world, &[], Arrivals::Together, &|_, _, _| false)
+}
+
+/// When the raster tiles a view wants under a terrain tile show in its drape while some of
+/// them are still loading.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Arrivals {
+    /// The set replaces its stand-in once its last tile has loaded. A view at rest gets there
+    /// within moments, and the drape changes once.
+    Together,
+    /// Each tile is drawn over the stand-in as it arrives. An eye in flight keeps wanting new
+    /// tiles under a terrain tile, so its set may never be whole.
+    OverStandIn,
+}
+
+/// [`select_targets_with`] with the say over how a loading raster set shows.
+pub(crate) fn select_targets_as_with(
+    coords: impl Iterator<Item = WorldTileCoords>,
+    world: &World,
+    raster_coverings: &RasterCoverings,
+    arrivals: Arrivals,
+    is_raster_missing: &impl Fn(&RasterSourceId, WorldTileCoords, &World) -> bool,
+) -> Vec<(WorldTileCoords, Vec<ShapeSource>)> {
+    let Some(sources) = world.resources.get::<ViewTileSources>() else {
+        return Vec::new();
+    };
+    let vector_sources = sources.of_kind(TileKind::Vector);
+    coords
+        .filter(|coords| coords.build_quad_key().is_some())
+        .map(|coords| {
+            let mut shapes: Vec<ShapeSource> =
+                coverage::loaded_or_partial_cover(&vector_sources, coords, world)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|source| ShapeSource {
+                        coords: source,
+                        raster_source: None,
+                        view_complete: false,
+                        absent: false,
+                    })
+                    .collect();
+            for (source_id, covering) in raster_coverings {
+                shapes.extend(raster_shapes(
+                    coords,
+                    (source_id, covering),
+                    sources.of_kind(TileKind::Raster),
+                    world,
+                    arrivals,
+                    is_raster_missing,
+                ));
+            }
+            (coords, shapes)
+        })
+        .collect()
+}
+
+/// The tiles of one raster source drawn into a terrain tile's drape.
+///
+/// A source with nothing over the terrain tile is absent, so its layers do not hold the
+/// drape back: one whose view covering is empty (the view is outside its zoom range or
+/// bounds) as well as one whose covering misses this tile. When every wanted tile has
+/// either loaded or completed without an image, the source has delivered all it will; its
+/// loaded ancestors and tiles are drawn as final, or it is absent when it has none.
+fn raster_shapes<H: HasTile>(
+    coords: WorldTileCoords,
+    (source_id, covering): (&RasterSourceId, &[WorldTileCoords]),
+    availability: H,
+    world: &World,
+    arrivals: Arrivals,
+    is_raster_missing: &impl Fn(&RasterSourceId, WorldTileCoords, &World) -> bool,
+) -> Vec<ShapeSource> {
+    let absent = || {
+        vec![ShapeSource {
+            coords,
+            raster_source: Some(source_id.clone()),
+            view_complete: true,
+            absent: true,
+        }]
+    };
+    let raster_sources = SourceTiles {
+        source: source_id,
+        availability,
+    };
+    let wanted = covering_shapes_for(coords, covering);
+    if wanted.is_empty() {
+        return absent();
+    }
+    let shape = |coords, view_complete| ShapeSource {
+        coords,
+        raster_source: Some(source_id.clone()),
+        view_complete,
+        absent: false,
+    };
+    if let Some(descendants) = loaded_descendant_level(coords, &wanted, &raster_sources, world) {
+        return descendants
+            .into_iter()
+            .map(|source| shape(source, false))
+            .collect();
+    }
+    let loaded: Vec<WorldTileCoords> = wanted
+        .iter()
+        .copied()
+        .filter(|source| raster_sources.has_tile(*source, world))
+        .collect();
+    // A partial child set would erase the uncovered part when the drape is cleared,
+    // so an ancestor goes underneath it; the set itself is what the view needs
+    // over this terrain tile.
+    let all_loaded = loaded.len() == wanted.len();
+    let settled = wanted
+        .iter()
+        .all(|tile| tile_settled(source_id, *tile, &raster_sources, world, is_raster_missing));
+    let complete = coverage::complete_cover(coords, loaded.clone());
+    let (under, over, view_complete) = match complete {
+        Some(complete) => (Vec::new(), complete, false),
+        None => {
+            let under = coverage::loaded_cover(&raster_sources, coords, world).unwrap_or_default();
+            // Without a stand-in the drape waits whatever the view, since the gaps between
+            // the tiles that have arrived would show the cleared texture.
+            let over_stand_in = arrivals == Arrivals::OverStandIn && !under.is_empty();
+            let over = if all_loaded || settled || over_stand_in {
+                disjoint_from(loaded, &under)
+            } else {
+                Vec::new()
+            };
+            (under, over, all_loaded || settled)
+        }
+    };
+    if settled && !all_loaded && under.is_empty() && over.is_empty() {
+        return absent();
+    }
+    let under_complete = if over.is_empty() {
+        view_complete
+    } else {
+        false
+    };
+    under
+        .into_iter()
+        .map(|source| shape(source, under_complete))
+        .chain(over.into_iter().map(|source| shape(source, view_complete)))
+        .collect()
+}
+
+/// Whether `tile` has either loaded or exhausted its missing-tile ancestor fallback chain.
+fn tile_settled(
+    source_id: &RasterSourceId,
+    tile: WorldTileCoords,
+    raster_sources: &impl HasTile,
+    world: &World,
+    is_raster_missing: &impl Fn(&RasterSourceId, WorldTileCoords, &World) -> bool,
+) -> bool {
+    if raster_sources.has_tile(tile, world) {
+        return true;
+    }
+    if !is_raster_missing(source_id, tile, world) {
+        return false;
+    }
+    match missing_tile_fallback(tile, 0, |coords| {
+        is_raster_missing(source_id, coords, world)
+    }) {
+        Some(fallback) => raster_sources.has_tile(fallback, world),
+        None => true,
+    }
+}
+
+/// `tiles` without those the stand-in already holds.
+fn disjoint_from(tiles: Vec<WorldTileCoords>, under: &[WorldTileCoords]) -> Vec<WorldTileCoords> {
+    tiles
+        .into_iter()
+        .filter(|tile| !under.contains(tile))
+        .collect()
+}
+
+/// Levels below a terrain tile within which [`loaded_descendant_level`] looks: 64 tiles. Every
+/// shape of a drape takes a slot of the tile metadata buffer the whole frame shares, so a
+/// deeper level would let one drape crowd the others out of their updates.
+const DESCENDANT_LEVEL_DEPTH: u8 = 3;
+
+/// Every tile of the wanted level below a terrain tile, when all of them have loaded.
+///
+/// A view that sees only part of the terrain tile wants only the source tiles in sight, and
+/// that subset changes as the view moves across it, which would redraw the drape each time.
+/// The whole level, once resident, is what any such subset would complete to, so the drape
+/// stays the same while the view pans. The wanted tiles must share one level finer than the
+/// terrain tile; a mixed-level covering is left to the general selection.
+fn loaded_descendant_level(
+    coords: WorldTileCoords,
+    wanted: &[WorldTileCoords],
+    sources: &impl HasTile,
+    world: &World,
+) -> Option<Vec<WorldTileCoords>> {
+    let level = wanted.first()?.z;
+    let depth = u8::from(level).checked_sub(u8::from(coords.z))?;
+    if depth == 0 || depth > DESCENDANT_LEVEL_DEPTH || wanted.iter().any(|tile| tile.z != level) {
+        return None;
+    }
+    let mut tiles = vec![coords];
+    for _ in 0..depth {
+        tiles = tiles.iter().flat_map(|tile| tile.get_children()).collect();
+    }
+    tiles
+        .iter()
+        .all(|tile| sources.has_tile(*tile, world))
+        .then_some(tiles)
+}

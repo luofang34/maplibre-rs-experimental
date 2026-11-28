@@ -26,35 +26,26 @@ use std::{
 use maplibre::platform::run_multithreaded;
 use serde_json::Value;
 
-mod artifacts;
-mod camera_options;
 mod ci;
 mod comparison;
-mod image_sources;
-mod operations;
 mod paths;
-mod pattern_images;
-mod queries;
-mod render_case;
 mod report;
-mod source_loading;
-mod source_tiles;
-mod symbol_assets;
-mod tilesets;
-mod transitions;
+mod runner;
+mod sources;
 
-use artifacts::{
-    copy_fixture_artifacts, ensure_artifact_dir, write_lifecycle_json, FixtureTelemetry,
-};
 use ci::{
     build_updated_ignores, evaluate_ci_for_options, parse_cli_args, write_summaries, CliOptions,
     IgnoreFile, SuiteSummary,
 };
+use comparison::camera_options;
 use paths::{collect_tests, filter_tests, fixture_id, workspace_templates_dir};
+use report::{
+    copy_fixture_artifacts, ensure_artifact_dir, generate_report, write_lifecycle_json,
+    FixtureTelemetry,
+};
 #[cfg(test)]
-use render_case::run_test_inner;
-use render_case::run_test_with_telemetry;
-use report::generate_report;
+use runner::render_case::run_test_inner;
+use runner::{operations, render_case::run_test_with_telemetry};
 
 // ---------------------------------------------------------------------------
 // Test metadata

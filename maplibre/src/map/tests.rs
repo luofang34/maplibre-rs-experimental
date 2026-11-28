@@ -5,7 +5,7 @@ use std::error::Error;
 use super::*;
 use crate::{
     map::camera::starting_view,
-    render::{graph::RenderGraphError, view_state::CameraBounds},
+    render::{error::RenderError, graph::RenderGraphError, view_state::CameraBounds},
 };
 
 #[test]
@@ -137,11 +137,11 @@ fn initial_style_center_at_poles_clamps_to_finite_mercator_latitude() {
         (90.0, MERCATOR_LATITUDE_LIMIT),
         (-90.0, -MERCATOR_LATITUDE_LIMIT),
     ] {
-        let style = Style {
+        let style = Style::from_document(crate::style::StyleDocument {
             center: Some([15.0, pole_lat]),
             zoom: Some(1.5),
-            ..Style::default()
-        };
+            ..Default::default()
+        });
         let view = starting_view(
             &style,
             None,

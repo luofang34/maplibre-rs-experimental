@@ -2,10 +2,9 @@
 
 use super::{CurrentMapContext, Map, MapError};
 use crate::{
-    context::{FlightId, FlightOutcome},
-    coords::{LatLon, WorldCoords, Zoom},
+    context::{clamped_style_center, FlightId, FlightOutcome},
+    coords::{WorldCoords, Zoom},
     environment::Environment,
-    projection::globe::scale::MERCATOR_LATITUDE_LIMIT,
     render::view_state::{
         CameraBounds, CameraFit, CameraOptions, EdgePadding, FlightCurve, LatLonBounds,
         NavigationError, ViewState,
@@ -56,15 +55,6 @@ pub(super) fn starting_view(
         view.jump_to(jump)?;
     }
     Ok(view)
-}
-
-/// Returns `style.center` as [`LatLon`] with latitude clamped to [`MERCATOR_LATITUDE_LIMIT`].
-pub(crate) fn clamped_style_center(style: &Style) -> LatLon {
-    let [lon, lat] = style.center.unwrap_or_default();
-    LatLon::new(
-        lat.clamp(-MERCATOR_LATITUDE_LIMIT, MERCATOR_LATITUDE_LIMIT),
-        lon,
-    )
 }
 
 fn initial_view_state(

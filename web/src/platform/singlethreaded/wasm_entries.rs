@@ -18,7 +18,7 @@ use web_sys::DedicatedWorkerGlobalScope;
 
 use self::{running_calls::RunningCalls, worker_styles::WorkerStyles};
 #[cfg(any(test, feature = "renderer"))]
-use crate::platform::singlethreaded::apc::{decode_call_finished, ReceivedType, WebMessageTag};
+use crate::platform::singlethreaded::apc::{deliver_received_data, ReceivedType};
 use crate::{
     error::{JSError, WebError},
     platform::{
@@ -315,56 +315,6 @@ impl TileWorkerCalls {
         self.running.borrow_mut().finish(attempt);
         drop(post_call_finished(attempt));
     }
-}
-
-/// Delivers a `[tag, ArrayBuffer]` message to `received` without leaking raw `Rc` pointers.
-#[cfg(any(test, feature = "renderer"))]
-pub(crate) fn deliver_received_data(
-    received: &ReceivedType,
-    tag: u32,
-    buffer: js_sys::ArrayBuffer,
-) -> Result<(), JSError> {
-    let tag = WebMessageTag::from_u32(tag).map_err(|e| CallError::Deserialize(Box::new(e)))?;
-
-    log::debug!(
-        "received message ({tag:?}) with {}bytes on main thread",
-        buffer.byte_length()
-    );
-
-    let waker = {
-        let mut received = received
-            .try_borrow_mut()
-            .map_err(|_| WebError::ReceivedBusy)?;
-
-        if tag == WebMessageTag::CallFinished {
-            let attempt = decode_call_finished(&buffer)?;
-            received.cancelled.remove(&attempt);
-            received.finished.push(attempt);
-            if !received.messages.is_empty() || !received.queued.is_empty() {
-                received.waker.clone()
-            } else {
-                None
-            }
-        } else {
-            let received_ref = &mut *received;
-            crate::platform::singlethreaded::apc::QueuedMessage::push_from_wire(
-                &mut received_ref.queued,
-                tag,
-                buffer,
-                &received_ref.cancelled,
-            )?;
-            if !received_ref.messages.is_empty() || !received_ref.queued.is_empty() {
-                received_ref.waker.clone()
-            } else {
-                None
-            }
-        }
-    };
-    if let Some(wake) = waker {
-        wake();
-    }
-
-    Ok(())
 }
 
 /// Entry point invoked by the main thread. Receives data on the main thread and makes it available

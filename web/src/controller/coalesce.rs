@@ -18,9 +18,9 @@ use wasm_bindgen::JsValue;
 
 use super::options::merge_camera;
 use crate::{
-    application::parse_style,
     error::{ArgumentError, JSError},
     platform::http_client::web_http_client,
+    setup::parse_style,
 };
 
 struct PendingJump {
@@ -216,9 +216,9 @@ where
                 map.set_max_pitch_degrees(parsed.pitch.unwrap_or(0.0).max(70.0));
             }
             drop(map.set_style(parsed));
-            map.kernel().apc().set_boot_unthrottled(true);
+            map.apc().set_boot_unthrottled(true);
             if let Ok(ctx) = map.context() {
-                map.kernel().apc().warm_style(&ctx.style);
+                map.apc().warm_style(&ctx.style);
             }
             Ok::<_, JSError>(())
         })

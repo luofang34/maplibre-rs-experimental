@@ -5,12 +5,10 @@ use super::{
     parse_cli_args, CliOptions, IgnoreFile,
 };
 use crate::{
-    artifacts::{
-        copy_fixture_artifacts, ensure_artifact_dir, write_lifecycle_json, FixtureTelemetry,
-    },
     comparison::Difference,
     paths::{filter_tests, workspace_tests_dir},
-    render_case::FrameCleanupGuard,
+    report::{copy_fixture_artifacts, ensure_artifact_dir, write_lifecycle_json, FixtureTelemetry},
+    runner::render_case::FrameCleanupGuard,
     CaseKind, TestOutcome, TestResult,
 };
 

@@ -22,7 +22,7 @@ use maplibre::{
     vector::{LayerIndexed, SymbolLayerTessellated, VectorTransferables},
 };
 
-use crate::platform::singlethreaded::apc::WebMessageTag;
+use super::tag::WebMessageTag;
 
 pub(crate) type UnpackedDem = (
     WorldTileCoords,
@@ -263,12 +263,12 @@ impl FlatBufferTransferable {
         offset: u32,
         len: u32,
     ) -> Option<Self> {
-        indexed::decode_js_layer_indexed(buffer, offset, len)
+        Self::decode_js_layer_indexed(buffer, offset, len)
     }
 
     #[cfg(any(test, feature = "renderer"))]
     pub(crate) fn from_bytes_layer_indexed(bytes: &[u8]) -> Option<Self> {
-        indexed::decode_bytes_layer_indexed(bytes)
+        Self::decode_bytes_layer_indexed(bytes)
     }
 
     #[cfg(any(test, feature = "renderer"))]
@@ -277,12 +277,12 @@ impl FlatBufferTransferable {
         offset: u32,
         len: u32,
     ) -> Option<Self> {
-        raster::decode_js_layer_raster(buffer, offset, len)
+        Self::decode_js_layer_raster(buffer, offset, len)
     }
 
     #[cfg(any(test, feature = "renderer"))]
     pub(crate) fn from_bytes_layer_raster(bytes: &[u8]) -> Option<Self> {
-        raster::decode_bytes_layer_raster(bytes)
+        Self::decode_bytes_layer_raster(bytes)
     }
 
     #[cfg(any(test, feature = "renderer"))]
@@ -291,12 +291,12 @@ impl FlatBufferTransferable {
         offset: u32,
         len: u32,
     ) -> Option<Self> {
-        terrain::decode_js_layer_dem(buffer, offset, len)
+        Self::decode_js_layer_dem(buffer, offset, len)
     }
 
     #[cfg(any(test, feature = "renderer"))]
     pub(crate) fn from_bytes_layer_dem(bytes: &[u8]) -> Option<Self> {
-        terrain::decode_bytes_layer_dem(bytes)
+        Self::decode_bytes_layer_dem(bytes)
     }
 
     pub fn data(&self) -> &[u8] {
@@ -392,6 +392,6 @@ impl RasterTransferables for FlatTransferables {
 mod terrain;
 
 mod completion;
+use self::completion::decode_named_coords;
 #[cfg(any(test, feature = "renderer"))]
 use self::completion::parse_named_coords_strict;
-use self::completion::{decode_named_coords, encode_named_coords};

@@ -64,16 +64,24 @@ impl ViewRegion {
         self.zoom_level
     }
 
+    #[inline]
+    fn padded_x_range(&self) -> std::ops::Range<i32> {
+        (self.min_tile.x - self.padding)..(self.max_tile.x + 1 + self.padding)
+    }
+
+    #[inline]
+    fn padded_y_range(&self) -> std::ops::Range<i32> {
+        (self.min_tile.y - self.padding)..(self.max_tile.y + 1 + self.padding)
+    }
+
     /// Tests the padded bounds or explicit selection without applying the iteration limit.
     pub fn is_in_view(&self, &world_coords: &WorldTileCoords) -> bool {
         if let Some(tiles) = &self.explicit_tiles {
             return tiles.contains(&world_coords);
         }
-        world_coords.x <= self.max_tile.x + self.padding
-            && world_coords.y <= self.max_tile.y + self.padding
-            && world_coords.x >= self.min_tile.x - self.padding
-            && world_coords.y >= self.min_tile.y - self.padding
-            && world_coords.z == self.zoom_level
+        world_coords.z == self.zoom_level
+            && self.padded_x_range().contains(&world_coords.x)
+            && self.padded_y_range().contains(&world_coords.y)
     }
 
     /// The tiles a view sees, with those seen in copies of the world as the tiles they repeat,
@@ -95,9 +103,9 @@ impl ViewRegion {
             return Box::new(tiles.iter().copied().take(self.max_n_tiles));
         }
         Box::new(
-            (self.min_tile.x - self.padding..self.max_tile.x + 1 + self.padding)
+            self.padded_x_range()
                 .flat_map(move |x| {
-                    (self.min_tile.y - self.padding..self.max_tile.y + 1 + self.padding)
+                    self.padded_y_range()
                         .map(move |y| (x, y, self.zoom_level).into())
                 })
                 .take(self.max_n_tiles),

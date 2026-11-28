@@ -10,11 +10,9 @@ use maplibre::{
         scheduler::{ScheduleError, Scheduler},
     },
     kernel::KernelBuilder,
-    map::Map,
+    map::{Map, RenderPlugin},
     projection::{ProjectionSpecification, ProjectionType},
-    render::{
-        builder::RendererBuilder, resource::Head, settings::WgpuSettings, RenderPlugin, Renderer,
-    },
+    render::{builder::RendererBuilder, resource::Head, settings::WgpuSettings, Renderer},
     sdf::SdfPlugin,
     vector::{DefaultVectorTransferables, VectorPlugin},
     window::{HeadedMapWindow, MapWindow, PhysicalSize},
@@ -168,7 +166,7 @@ async fn assert_surface_retains_window(map: Map<TestEnvironment>, backend: wgpu:
         3,
         "standalone surface retains its own owner"
     );
-    let Head::Headed(head) = renderer.resources.surface.head_mut() else {
+    let Head::Headed(head) = renderer.resources.surface.as_mut() else {
         panic!("expected window surface");
     };
     head.recreate_surface(map.window(), &renderer.instance)
@@ -216,7 +214,7 @@ async fn assert_surface_retains_window(map: Map<TestEnvironment>, backend: wgpu:
 }
 
 fn draw_retained_surface(renderer: &Renderer) {
-    let Head::Headed(head) = renderer.resources.surface.head() else {
+    let Head::Headed(head) = renderer.resources.surface.as_ref() else {
         panic!("expected window surface");
     };
     let frame = match head.surface().get_current_texture() {

@@ -16,11 +16,9 @@ use maplibre::{
     },
     platform::native_http_client,
     plugin::Plugin,
-    render::{
-        settings::{BufferPoolSizes, Msaa, RendererSettings},
-        RenderPlugin,
-    },
+    render::settings::{BufferPoolSizes, Msaa, RendererSettings},
     style::{source::Source, Style},
+    RenderPlugin,
 };
 
 pub fn style_has_vector(style: &Style) -> bool {
@@ -84,7 +82,7 @@ pub fn headless_plugins(
     }
     if style.terrain.is_some() {
         plugins.push(Box::<
-            maplibre::terrain::TerrainPlugin<maplibre::terrain::DefaultDemTransferables>,
+            maplibre::map::TerrainPlugin<maplibre::terrain::DefaultDemTransferables>,
         >::default());
     }
     plugins

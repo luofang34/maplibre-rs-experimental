@@ -41,52 +41,26 @@ pub mod euclid {
     pub use lyon::geom::euclid::*;
 }
 
-#[cfg(feature = "experimental")]
-pub mod celestial;
-pub mod context;
-pub mod coords;
-pub mod custom_layer;
-pub mod event;
+mod engine;
+mod features;
+mod foundation;
 #[cfg(feature = "headless")]
 pub mod headless;
-pub mod input;
-pub mod io;
-pub mod platform;
-pub mod projection;
-pub mod query;
-pub mod render;
-pub mod style;
-pub mod util;
-
-pub mod schedule;
-pub mod window;
-
-pub mod environment;
-pub mod font;
-
-pub mod benchmarking;
-
-pub mod background;
-pub mod event_loop;
-pub mod kernel;
+mod layers;
 pub mod map;
-pub mod plugin;
-pub mod tcs;
+mod world;
 
-pub mod debug;
+pub use engine::{context, custom_layer, environment, io, kernel, platform, render, schedule};
 #[cfg(feature = "geojson")]
-pub mod geojson;
-pub mod heatmap;
-pub mod hillshade;
-pub mod hud;
-pub mod navigation;
+pub use features::geojson;
 #[cfg(feature = "experimental")]
-pub mod overlay;
+pub use features::starfield;
+pub use features::{background, benchmarking, heatmap, input};
+pub use foundation::{coords, event_loop, font, projection, style, tcs, util, window};
 #[cfg(feature = "raster")]
-pub mod raster;
-pub mod vector;
-
-pub mod sdf;
+pub use layers::raster;
+pub use layers::{hillshade, navigation, query, sdf, vector};
+pub use map::{BinnedRenderPhasePlugin, RenderPlugin};
 #[cfg(feature = "experimental")]
-pub mod starfield;
-pub mod terrain;
+pub use world::{celestial, overlay};
+pub use world::{debug, event, hud, plugin, terrain};

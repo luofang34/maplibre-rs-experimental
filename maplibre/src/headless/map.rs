@@ -3,7 +3,7 @@
 use std::{cell::RefCell, ops::Deref, rc::Rc, time::Duration};
 
 use crate::{
-    context::MapContext,
+    context::{clamped_style_center, MapContext},
     coords::{WorldCoords, WorldTileCoords, Zoom},
     headless::environment::HeadlessEnvironment,
     io::{
@@ -26,39 +26,16 @@ use crate::{
     tcs::world::World,
 };
 
-mod camera;
-mod custom_layers;
-mod dem;
 mod error;
-mod events;
-#[cfg(test)]
-mod injected_loader;
-mod labels;
-pub mod multi_view;
-pub use error::HeadlessMapOperationError;
-#[cfg(feature = "experimental")]
-mod experimental;
 mod processed;
-mod provided_images;
-#[cfg(feature = "raster")]
-mod raster;
-pub mod readback;
-pub mod reference;
-mod signals;
-mod style;
+mod rendering;
+mod state;
 #[cfg(test)]
-mod symbol_worker;
-mod symbols;
-mod targets;
-#[cfg(test)]
-mod terrain_coverage;
-mod terrain_patch;
+mod suites;
 #[cfg(test)]
 mod test_async;
-#[cfg(all(test, feature = "experimental"))]
-mod vertical_perspective;
-mod xr;
 
+pub use error::HeadlessMapOperationError;
 pub use multi_view::{
     CoveringPolicy, MultiViewError, MultiViewFrame, SlotView, ViewSlotConfig, ViewSlotEntry,
     ViewSlotId,
@@ -69,8 +46,12 @@ pub use processed::{
     process_tile_layers, process_tile_layers_for_style, process_tile_layers_with_atlas,
     ProcessedLayers, SymbolLayer, VectorLayer,
 };
-pub use terrain_patch::TerrainPatchSnapshot;
-pub use xr::XrFrameError;
+pub(crate) use rendering::xr;
+pub use rendering::{
+    multi_view, readback, reference, terrain_patch::TerrainPatchSnapshot, xr::XrFrameError,
+};
+#[cfg(test)]
+pub(crate) use suites::symbol_worker;
 
 pub use crate::io::tile_json::resolve_tile_json_sources;
 
@@ -117,9 +98,17 @@ impl HeadlessMap {
                 .build(&mut schedule, kernel.clone(), &mut world, &mut renderer)
                 .map_err(MapError::Plugin)?;
         }
+        drop(schedule.add_early_system_to_stage(
+            crate::schedule::RenderStageLabel::Input,
+            crate::map::context_ops::flight::camera_flight_system,
+        ));
         drop(schedule.add_system_to_stage(
-            crate::render::RenderStageLabel::Input,
-            crate::context::style_transition_system,
+            crate::schedule::RenderStageLabel::Queue,
+            crate::map::custom_layers::queue_custom_layers_system,
+        ));
+        drop(schedule.add_system_to_stage(
+            crate::schedule::RenderStageLabel::Input,
+            crate::map::context_ops::transitions::style_transition_system,
         ));
 
         Ok(Self {
@@ -185,7 +174,7 @@ impl HeadlessMap {
         self.map_context
             .mark_busy_if_needed(self.kernel.apc().has_arrivals());
         if let Err(source) =
-            crate::render::frame::run_frame(&mut self.schedule, &mut self.map_context)
+            crate::map::runtime::frame::run_frame(&mut self.schedule, &mut self.map_context)
         {
             self.map_context
                 .event_bus()
@@ -263,10 +252,9 @@ impl HeadlessMap {
         &self.map_context.renderer.device
     }
 
-    /// The queue the renderer submits to. What a host writes through it is its own upload,
-    /// not counted in the map's frame statistics.
-    pub fn queue(&self) -> &wgpu::Queue {
-        self.map_context.renderer.queue.inner()
+    /// The queue the renderer submits through.
+    pub fn queue(&self) -> &crate::render::upload_queue::UploadQueue {
+        &self.map_context.renderer.queue
     }
 
     /// Tells the map how much memory the host still has, or `None` when it cannot tell, so
@@ -419,8 +407,7 @@ fn initial_view_state(window_size: crate::window::PhysicalSize, style: &Style) -
         (f64::from(window_size.height()) / crate::coords::TILE_SIZE).log2()
     };
     let zoom = Zoom::new(style.zoom.unwrap_or_default().max(lowest_zoom));
-    let mut center =
-        WorldCoords::from_lat_lon(crate::map::camera::clamped_style_center(style), zoom);
+    let mut center = WorldCoords::from_lat_lon(clamped_style_center(style), zoom);
     if !globe {
         // The view may not show past the poles of a flat world, as GL JS constrains the centre.
         let world = crate::coords::TILE_SIZE * 2_f64.powf(zoom.value());
@@ -459,6 +446,3 @@ impl Context for HeadlessContext {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests;

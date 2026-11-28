@@ -6,13 +6,13 @@ use maplibre::{
     style::{
         layer::{LayerPaint, RasterPaint, StyleLayer},
         source::{Source, VectorSource},
-        Style,
+        Style, StyleDocument,
     },
 };
 use maplibre_winit::{run_headed_map, HeadedMapOptions, WinitMapWindowConfig};
 
 pub fn style() -> Style {
-    Style {
+    Style::from_document(StyleDocument {
         version: 8,
         sources: [(
             "satellite".to_string(),
@@ -41,7 +41,7 @@ pub fn style() -> Style {
         center: Some([137.9150899566626, 36.25956997955441]),
         zoom: Some(9.0),
         ..Default::default()
-    }
+    })
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -15,15 +15,14 @@ use crate::{
     projection::ProjectionType,
     sdf::{
         assets::{fallback_atlas, SymbolAtlas},
-        SymbolLayersDataComponent,
+        sync_arriving_symbol_bucket, SymbolLayersDataComponent,
     },
     style::{feature_state::FeatureStateArcMemo, layer::StyleLayer, Style},
     tcs::tiles::Tiles,
     vector::{
-        arrival_sync::{
-            sync_arriving_symbol_bucket, sync_arriving_tile_index, sync_arriving_vector_bucket,
-        },
-        feature_paint::{intern::TilePropertyInterner, TileFeaturePaintComponent},
+        arrival_sync::{sync_arriving_tile_index, sync_arriving_vector_bucket},
+        content::TilePropertyInterner,
+        feature_paint::TileFeaturePaintComponent,
         process_vector_tile_with_assets,
         transferables::{
             LayerIndexed, LayerTessellated, SymbolLayerTessellated, TileTessellated as _,
@@ -193,7 +192,7 @@ impl ProcessedLayers {
         Ok(())
     }
 
-    pub(super) fn insert_into_tiles(
+    pub(in crate::headless::map) fn insert_into_tiles(
         self,
         style: &Style,
         tiles: &mut Tiles,
@@ -206,7 +205,7 @@ impl ProcessedLayers {
             let mut tile_index = (*index).to_tile_index();
             sync_arriving_tile_index(style, source.as_deref(), &mut tile_index, &mut memo);
             interner.intern_tile_index(tiles, coords, &mut tile_index);
-            tiles.geometry_index.index_tile(&coords, source, tile_index);
+            tiles.as_mut().index_tile(&coords, source, tile_index);
         }
 
         let overscaled_by_tile =

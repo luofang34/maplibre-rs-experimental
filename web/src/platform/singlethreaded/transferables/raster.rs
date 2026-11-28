@@ -88,75 +88,186 @@ fn parse_raw_raster_dem_header(
     })
 }
 
-fn decode_rgba_layer(transferable: FlatBufferTransferable) -> AvailableRasterLayerData {
-    let bytes = transferable.data();
-    let empty = || AvailableRasterLayerData {
-        coords: WorldTileCoords::default(),
-        source: RasterSourceId::default(),
-        image: RgbaImage::new(0, 0),
-    };
-    if bytes.len() < RASTER_HEADER_BYTES {
-        return empty();
-    }
-    let Some(coords) = read_coords_at(bytes, 0) else {
-        return empty();
-    };
-    let has_name = bytes.get(9).is_some_and(|&b| b != 0);
-    let (Some(width), Some(height), Some(name_len)) = (
-        read_u32_le(bytes, 12),
-        read_u32_le(bytes, 16),
-        read_u32_le(bytes, 20),
-    ) else {
-        return empty();
-    };
-    let Some(px_offset) = RASTER_HEADER_BYTES.checked_add(name_len as usize) else {
-        return empty();
-    };
-    let source_name = if has_name {
-        bytes
-            .get(RASTER_HEADER_BYTES..px_offset)
-            .and_then(|slice| std::str::from_utf8(slice).ok())
-            .map(str::to_owned)
-    } else {
-        None
-    };
-    let expected = (width as usize)
-        .checked_mul(height as usize)
-        .and_then(|n| n.checked_mul(4));
-    if expected != bytes.get(px_offset..).map(<[u8]>::len) {
-        return AvailableRasterLayerData {
-            coords,
-            source: RasterSourceId::new(source_name),
+impl FlatBufferTransferable {
+    fn decode_rgba_layer(self) -> AvailableRasterLayerData {
+        let bytes = self.data();
+        let empty = || AvailableRasterLayerData {
+            coords: WorldTileCoords::default(),
+            source: RasterSourceId::default(),
             image: RgbaImage::new(0, 0),
         };
+        if bytes.len() < RASTER_HEADER_BYTES {
+            return empty();
+        }
+        let Some(coords) = read_coords_at(bytes, 0) else {
+            return empty();
+        };
+        let has_name = bytes.get(9).is_some_and(|&b| b != 0);
+        let (Some(width), Some(height), Some(name_len)) = (
+            read_u32_le(bytes, 12),
+            read_u32_le(bytes, 16),
+            read_u32_le(bytes, 20),
+        ) else {
+            return empty();
+        };
+        let Some(px_offset) = RASTER_HEADER_BYTES.checked_add(name_len as usize) else {
+            return empty();
+        };
+        let source_name = if has_name {
+            bytes
+                .get(RASTER_HEADER_BYTES..px_offset)
+                .and_then(|slice| std::str::from_utf8(slice).ok())
+                .map(str::to_owned)
+        } else {
+            None
+        };
+        let expected = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|n| n.checked_mul(4));
+        if expected != bytes.get(px_offset..).map(<[u8]>::len) {
+            return AvailableRasterLayerData {
+                coords,
+                source: RasterSourceId::new(source_name),
+                image: RgbaImage::new(0, 0),
+            };
+        }
+        let pixels = self.into_tail_vec(px_offset);
+        let image =
+            RgbaImage::from_vec(width, height, pixels).unwrap_or_else(|| RgbaImage::new(0, 0));
+        AvailableRasterLayerData {
+            coords,
+            source: RasterSourceId::new(source_name),
+            image,
+        }
     }
-    let pixels = transferable.into_tail_vec(px_offset);
-    let image = RgbaImage::from_vec(width, height, pixels).unwrap_or_else(|| RgbaImage::new(0, 0));
-    AvailableRasterLayerData {
-        coords,
-        source: RasterSourceId::new(source_name),
-        image,
-    }
-}
 
-fn decode_dem_frame(
-    transferable: FlatBufferTransferable,
-) -> Result<SharedRasterDem, AvailableRasterLayerData> {
-    let hdr = parse_raw_raster_dem_header(transferable.data())?;
-    let pixels = transferable.into_tail_vec(hdr.px_offset);
-    match DemTile::from_raw_parts(hdr.dim, hdr.stride, pixels, hdr.unpack, hdr.min, hdr.max) {
-        Ok(dem) => Ok(SharedRasterDem {
-            coords: hdr.coords,
-            source: RasterSourceId::new(hdr.source_name),
-            tile: Arc::new(dem),
-            circumference_meters: hdr.circumference_meters,
-            fallback: Arc::new(RgbaImage::new(0, 0)),
-        }),
-        Err(_) => Err(AvailableRasterLayerData {
-            coords: hdr.coords,
-            source: RasterSourceId::new(hdr.source_name),
-            image: RgbaImage::new(0, 0),
-        }),
+    fn decode_dem_frame(self) -> Result<SharedRasterDem, AvailableRasterLayerData> {
+        let hdr = parse_raw_raster_dem_header(self.data())?;
+        let pixels = self.into_tail_vec(hdr.px_offset);
+        match DemTile::from_raw_parts(hdr.dim, hdr.stride, pixels, hdr.unpack, hdr.min, hdr.max) {
+            Ok(dem) => Ok(SharedRasterDem {
+                coords: hdr.coords,
+                source: RasterSourceId::new(hdr.source_name),
+                tile: Arc::new(dem),
+                circumference_meters: hdr.circumference_meters,
+                fallback: Arc::new(RgbaImage::new(0, 0)),
+            }),
+            Err(_) => Err(AvailableRasterLayerData {
+                coords: hdr.coords,
+                source: RasterSourceId::new(hdr.source_name),
+                image: RgbaImage::new(0, 0),
+            }),
+        }
+    }
+
+    #[cfg(any(test, feature = "renderer"))]
+    pub(super) fn decode_bytes_layer_raster(bytes: &[u8]) -> Option<Self> {
+        if is_raw_dem_frame(bytes) {
+            let res = match parse_raw_raster_dem_header(bytes) {
+                Ok(hdr) => {
+                    let pixels = bytes.get(hdr.px_offset..)?.to_vec();
+                    match DemTile::from_raw_parts(
+                        hdr.dim, hdr.stride, pixels, hdr.unpack, hdr.min, hdr.max,
+                    ) {
+                        Ok(dem) => Err(Box::new(SharedRasterDem {
+                            coords: hdr.coords,
+                            source: RasterSourceId::new(hdr.source_name),
+                            tile: Arc::new(dem),
+                            circumference_meters: hdr.circumference_meters,
+                            fallback: Arc::new(RgbaImage::new(0, 0)),
+                        })),
+                        Err(_) => Ok(AvailableRasterLayerData {
+                            coords: hdr.coords,
+                            source: RasterSourceId::new(hdr.source_name),
+                            image: RgbaImage::new(0, 0),
+                        }),
+                    }
+                }
+                Err(layer) => Ok(layer),
+            };
+            return Some(Self::from_unpacked_raster(res));
+        }
+        if bytes.len() < RASTER_HEADER_BYTES {
+            return None;
+        }
+        let coords = read_coords_at(bytes, 0)?;
+        let has_name = bytes.get(9).is_some_and(|&b| b != 0);
+        let (width, height, name_len) = (
+            read_u32_le(bytes, 12)?,
+            read_u32_le(bytes, 16)?,
+            read_u32_le(bytes, 20)? as usize,
+        );
+        let px_offset = RASTER_HEADER_BYTES.checked_add(name_len)?;
+        let source_name = has_name
+            .then(|| {
+                bytes
+                    .get(RASTER_HEADER_BYTES..px_offset)
+                    .and_then(|s| std::str::from_utf8(s).ok())
+                    .map(str::to_owned)
+            })
+            .flatten();
+        let expected = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|n| n.checked_mul(4))?;
+        let px_slice = bytes.get(px_offset..)?;
+        let image = if px_slice.len() == expected {
+            RgbaImage::from_vec(width, height, px_slice.to_vec())
+                .unwrap_or_else(|| RgbaImage::new(0, 0))
+        } else {
+            RgbaImage::new(0, 0)
+        };
+        Some(Self::from_unpacked_raster(Ok(AvailableRasterLayerData {
+            coords,
+            source: RasterSourceId::new(source_name),
+            image,
+        })))
+    }
+
+    #[cfg(any(test, feature = "renderer"))]
+    pub(super) fn decode_js_layer_raster(
+        buffer: &js_sys::ArrayBuffer,
+        base_offset: u32,
+        byte_len: u32,
+    ) -> Option<Self> {
+        let end = base_offset.checked_add(byte_len)?;
+        if end > buffer.byte_length() || (byte_len as usize) < RASTER_HEADER_BYTES {
+            return None;
+        }
+        let mut peek = [0_u8; 256];
+        let peek_len = (byte_len as usize).min(peek.len());
+        let peek_slice = peek.get_mut(..peek_len)?;
+        js_sys::Uint8Array::new_with_byte_offset_and_length(buffer, base_offset, peek_len as u32)
+            .copy_to(peek_slice);
+        let is_dem = is_raw_dem_frame(peek_slice);
+        let min_hdr = if is_dem {
+            RASTER_DEM_HEADER_BYTES
+        } else {
+            RASTER_HEADER_BYTES
+        };
+        let name_len = read_u32_le(peek_slice, 20)? as usize;
+        let px_offset = min_hdr.checked_add(name_len)?;
+        if (byte_len as usize) < px_offset {
+            return None;
+        }
+        let overflow_hdr;
+        let hdr_bytes = if px_offset <= peek_len {
+            peek_slice.get(..px_offset)?
+        } else {
+            overflow_hdr = copy_header_bytes(buffer, base_offset, byte_len, px_offset)?;
+            overflow_hdr.as_slice()
+        };
+        let px_len = (byte_len as usize) - px_offset;
+        let mut pixels = vec![0_u8; px_len];
+        if px_len > 0 {
+            js_sys::Uint8Array::new_with_byte_offset_and_length(
+                buffer,
+                base_offset + px_offset as u32,
+                px_len as u32,
+            )
+            .copy_to(&mut pixels);
+        }
+        let res = decode_js_dem_or_rgba(is_dem, hdr_bytes, px_offset, pixels)?;
+        Some(Self::from_unpacked_raster(res))
     }
 }
 
@@ -174,71 +285,6 @@ fn copy_header_bytes(
     js_sys::Uint8Array::new_with_byte_offset_and_length(buffer, base_offset, need as u32)
         .copy_to(&mut hdr);
     Some(hdr)
-}
-
-#[cfg(any(test, feature = "renderer"))]
-pub(super) fn decode_bytes_layer_raster(bytes: &[u8]) -> Option<FlatBufferTransferable> {
-    if is_raw_dem_frame(bytes) {
-        let res = match parse_raw_raster_dem_header(bytes) {
-            Ok(hdr) => {
-                let pixels = bytes.get(hdr.px_offset..)?.to_vec();
-                match DemTile::from_raw_parts(
-                    hdr.dim, hdr.stride, pixels, hdr.unpack, hdr.min, hdr.max,
-                ) {
-                    Ok(dem) => Err(Box::new(SharedRasterDem {
-                        coords: hdr.coords,
-                        source: RasterSourceId::new(hdr.source_name),
-                        tile: Arc::new(dem),
-                        circumference_meters: hdr.circumference_meters,
-                        fallback: Arc::new(RgbaImage::new(0, 0)),
-                    })),
-                    Err(_) => Ok(AvailableRasterLayerData {
-                        coords: hdr.coords,
-                        source: RasterSourceId::new(hdr.source_name),
-                        image: RgbaImage::new(0, 0),
-                    }),
-                }
-            }
-            Err(layer) => Ok(layer),
-        };
-        return Some(FlatBufferTransferable::from_unpacked_raster(res));
-    }
-    if bytes.len() < RASTER_HEADER_BYTES {
-        return None;
-    }
-    let coords = read_coords_at(bytes, 0)?;
-    let has_name = bytes.get(9).is_some_and(|&b| b != 0);
-    let (width, height, name_len) = (
-        read_u32_le(bytes, 12)?,
-        read_u32_le(bytes, 16)?,
-        read_u32_le(bytes, 20)? as usize,
-    );
-    let px_offset = RASTER_HEADER_BYTES.checked_add(name_len)?;
-    let source_name = has_name
-        .then(|| {
-            bytes
-                .get(RASTER_HEADER_BYTES..px_offset)
-                .and_then(|s| std::str::from_utf8(s).ok())
-                .map(str::to_owned)
-        })
-        .flatten();
-    let expected = (width as usize)
-        .checked_mul(height as usize)
-        .and_then(|n| n.checked_mul(4))?;
-    let px_slice = bytes.get(px_offset..)?;
-    let image = if px_slice.len() == expected {
-        RgbaImage::from_vec(width, height, px_slice.to_vec())
-            .unwrap_or_else(|| RgbaImage::new(0, 0))
-    } else {
-        RgbaImage::new(0, 0)
-    };
-    Some(FlatBufferTransferable::from_unpacked_raster(Ok(
-        AvailableRasterLayerData {
-            coords,
-            source: RasterSourceId::new(source_name),
-            image,
-        },
-    )))
 }
 
 #[cfg(any(test, feature = "renderer"))]
@@ -295,53 +341,6 @@ fn decode_js_dem_or_rgba(
         source: RasterSourceId::new(source_name),
         image,
     }))
-}
-
-#[cfg(any(test, feature = "renderer"))]
-pub(super) fn decode_js_layer_raster(
-    buffer: &js_sys::ArrayBuffer,
-    base_offset: u32,
-    byte_len: u32,
-) -> Option<FlatBufferTransferable> {
-    let end = base_offset.checked_add(byte_len)?;
-    if end > buffer.byte_length() || (byte_len as usize) < RASTER_HEADER_BYTES {
-        return None;
-    }
-    let mut peek = [0_u8; 256];
-    let peek_len = (byte_len as usize).min(peek.len());
-    let peek_slice = peek.get_mut(..peek_len)?;
-    js_sys::Uint8Array::new_with_byte_offset_and_length(buffer, base_offset, peek_len as u32)
-        .copy_to(peek_slice);
-    let is_dem = is_raw_dem_frame(peek_slice);
-    let min_hdr = if is_dem {
-        RASTER_DEM_HEADER_BYTES
-    } else {
-        RASTER_HEADER_BYTES
-    };
-    let name_len = read_u32_le(peek_slice, 20)? as usize;
-    let px_offset = min_hdr.checked_add(name_len)?;
-    if (byte_len as usize) < px_offset {
-        return None;
-    }
-    let overflow_hdr;
-    let hdr_bytes = if px_offset <= peek_len {
-        peek_slice.get(..px_offset)?
-    } else {
-        overflow_hdr = copy_header_bytes(buffer, base_offset, byte_len, px_offset)?;
-        overflow_hdr.as_slice()
-    };
-    let px_len = (byte_len as usize) - px_offset;
-    let mut pixels = vec![0_u8; px_len];
-    if px_len > 0 {
-        js_sys::Uint8Array::new_with_byte_offset_and_length(
-            buffer,
-            base_offset + px_offset as u32,
-            px_len as u32,
-        )
-        .copy_to(&mut pixels);
-    }
-    let res = decode_js_dem_or_rgba(is_dem, hdr_bytes, px_offset, pixels)?;
-    Some(FlatBufferTransferable::from_unpacked_raster(res))
 }
 
 impl LayerRaster for FlatBufferTransferable {
@@ -428,7 +427,7 @@ impl LayerRaster for FlatBufferTransferable {
             };
         }
         if is_raw_dem_frame(self.data()) {
-            match decode_dem_frame(self) {
+            match self.decode_dem_frame() {
                 Ok(shared) => AvailableRasterLayerData {
                     coords: shared.coords,
                     source: shared.source,
@@ -437,7 +436,7 @@ impl LayerRaster for FlatBufferTransferable {
                 Err(layer) => layer,
             }
         } else {
-            decode_rgba_layer(self)
+            self.decode_rgba_layer()
         }
     }
 
@@ -449,9 +448,9 @@ impl LayerRaster for FlatBufferTransferable {
             };
         }
         if is_raw_dem_frame(self.data()) {
-            decode_dem_frame(self)
+            self.decode_dem_frame()
         } else {
-            Err(decode_rgba_layer(self))
+            Err(self.decode_rgba_layer())
         }
     }
 }
@@ -462,7 +461,7 @@ impl LayerRasterMissing for FlatBufferTransferable {
     }
 
     fn build_from(coords: WorldTileCoords, source: RasterSourceId) -> Self {
-        encode_named_coords(WebMessageTag::LayerRasterMissing, coords, source.name())
+        Self::encode_named_coords(WebMessageTag::LayerRasterMissing, coords, source.name())
     }
 
     fn coords(&self) -> WorldTileCoords {

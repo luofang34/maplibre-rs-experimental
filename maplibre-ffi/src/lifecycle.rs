@@ -7,7 +7,7 @@
 
 use std::ffi::{c_char, CString};
 
-use maplibre::map::handle::{MapClosed, SyncHeadlessHandle};
+use maplibre::{headless::SyncHeadlessHandle, map::handle::MapClosed};
 
 use crate::{
     engine::MapEngine,
@@ -76,20 +76,20 @@ pub struct MaplibreCamera {
     pub pitch_deg: f64,
 }
 
-impl From<CameraState> for MaplibreCamera {
-    fn from(value: CameraState) -> Self {
-        Self {
-            latitude: value.latitude,
-            longitude: value.longitude,
-            zoom: value.zoom,
-            bearing_deg: value.bearing_deg,
-            pitch_deg: value.pitch_deg,
+impl MaplibreCamera {
+    pub(crate) fn into_state(self) -> CameraState {
+        CameraState {
+            latitude: self.latitude,
+            longitude: self.longitude,
+            zoom: self.zoom,
+            bearing_deg: self.bearing_deg,
+            pitch_deg: self.pitch_deg,
         }
     }
 }
 
-impl From<MaplibreCamera> for CameraState {
-    fn from(value: MaplibreCamera) -> Self {
+impl From<CameraState> for MaplibreCamera {
+    fn from(value: CameraState) -> Self {
         Self {
             latitude: value.latitude,
             longitude: value.longitude,
@@ -261,7 +261,7 @@ pub unsafe extern "C" fn maplibre_handle_set_camera(
         if handle_ref.handle.is_closed() {
             return Err(FfiError::Closed(MapClosed));
         }
-        let options = CameraState::from(*cam).to_options()?;
+        let options = (*cam).into_state().to_options()?;
         handle_ref.handle.send_fire_and_forget(move |map| {
             drop(map.jump_to(options));
         });
@@ -366,6 +366,6 @@ pub unsafe extern "C" fn maplibre_map_set_camera(
         let map_ref = unsafe { borrow_map_mut(map) }?;
         // SAFETY: Validated against null; caller guarantees `camera` points to `MaplibreCamera`.
         let cam = unsafe { camera.as_ref() }.ok_or(FfiError::NullPointer("camera"))?;
-        map_ref.engine.set_camera(CameraState::from(*cam))
+        map_ref.engine.set_camera((*cam).into_state())
     })
 }

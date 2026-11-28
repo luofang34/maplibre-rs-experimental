@@ -95,7 +95,7 @@ impl RunnerInner {
             if inner.closed.get() || inner.immediate_wake_pending.get() {
                 return;
             }
-            let arrivals = apc_has_arrivals(inner.map.kernel().apc());
+            let arrivals = apc_has_arrivals(inner.map.apc());
             if inner.raf_pending.get() {
                 if !inner.initial_load_settled.get() && arrivals && inner.take_boot_pump(true) {
                     inner.cancel_raf();

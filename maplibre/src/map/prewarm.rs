@@ -23,7 +23,8 @@ use crate::{
     style::Style,
     tcs::world::World,
     terrain::{
-        request_system::{dem_ancestor_coords, dem_tile_coords, TerrainWantedDems},
+        dem::dem_tile_coords,
+        request_system::{dem_ancestor_coords, TerrainWantedDems},
         source::dem_source,
         DemTileComponent,
     },
@@ -123,6 +124,11 @@ fn dispatch_vector_tile<K: OffscreenKernel, A: AsyncProcedureCall<K>>(
                 only_sources: None,
                 refetch: false,
             },
+            crate::vector::fetch_vector_apc::<
+                K,
+                crate::vector::DefaultVectorTransferables,
+                A::Context,
+            >,
         )
         .is_ok()
     {
@@ -245,6 +251,11 @@ fn prewarm_dem_tiles<K: OffscreenKernel, A: AsyncProcedureCall<K>>(
             .prewarm_call(
                 ProcedureTag::FetchDem,
                 Input::new(coords, dem_style.clone(), attempt),
+                crate::terrain::fetch_dem_apc::<
+                    K,
+                    crate::terrain::DefaultDemTransferables,
+                    A::Context,
+                >,
             )
             .is_ok()
         {
@@ -260,7 +271,7 @@ fn prewarm_raster_tiles<K: OffscreenKernel, A: AsyncProcedureCall<K>>(
     apc: &A,
     out: &mut PrewarmedRequests,
 ) {
-    let Ok(regions) = crate::render::projection::raster_source_regions(
+    let Ok(regions) = crate::render::eye_covering::raster_source_regions(
         ctx.style,
         ctx.view_state,
         ctx.empty_world,
@@ -291,6 +302,11 @@ fn prewarm_raster_tiles<K: OffscreenKernel, A: AsyncProcedureCall<K>>(
                 .prewarm_call(
                     ProcedureTag::FetchRaster,
                     Input::new(coords, raster_style.clone(), attempt),
+                    crate::raster::fetch_raster_apc::<
+                        K,
+                        crate::raster::DefaultRasterTransferables,
+                        A::Context,
+                    >,
                 )
                 .is_ok()
             {

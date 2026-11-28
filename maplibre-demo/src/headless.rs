@@ -7,10 +7,10 @@ use maplibre::{
     },
     plugin::Plugin,
     raster::{DefaultRasterTransferables, RasterPlugin},
-    render::RenderPlugin,
     style::Style,
     util::grid::google_mercator,
     vector::{DefaultVectorTransferables, VectorPlugin},
+    RenderPlugin,
 };
 use tile_grid::{extent_wgs84_to_merc, Extent, GridIterator};
 

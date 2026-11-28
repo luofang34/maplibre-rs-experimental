@@ -159,7 +159,7 @@ impl Stage for Present {
         context.renderer.resize_surface(size);
         let renderer = &mut context.renderer;
         renderer.resources.surface.reconfigure(&renderer.device);
-        let Head::Headed(head) = renderer.resources.surface.head() else {
+        let Head::Headed(head) = renderer.resources.surface.as_ref() else {
             panic!("headed surface")
         };
         let frame = match head.surface().get_current_texture() {

@@ -78,7 +78,7 @@ fn layer_tessellated_preserves_all_shader_vertex_fields_and_feature_paint() {
     assert_eq!(*paint[0].properties, props);
 
     let bucket = transferable.to_bucket();
-    let output = bucket.buffer.buffer.vertices[0];
+    let output = bucket.buffer.vertices[0];
     assert_eq!(output.position, input.position);
     assert_eq!(output.normal, input.normal);
     assert_eq!(output.distance, input.distance);
@@ -309,8 +309,8 @@ fn prepacked_wire_round_trips_u16_odd_even_and_u32_dense_fallback() {
     assert!(odd_msg.take_feature_paint().is_some());
     assert_eq!(odd_msg.style_layer_id(), "road-primary");
     let odd_bucket = odd_msg.to_bucket();
-    assert!(odd_bucket.buffer.buffer.vertices.is_empty());
-    assert!(odd_bucket.buffer.buffer.indices.is_empty());
+    assert!(odd_bucket.buffer.vertices.is_empty());
+    assert!(odd_bucket.buffer.indices.is_empty());
     assert_eq!(odd_bucket.buffer.usable_indices, 3);
     assert_eq!(odd_bucket.buffer.vertex_count(), 3);
     assert_eq!(odd_bucket.buffer.cpu_index_len(), 4);
@@ -359,6 +359,6 @@ fn prepacked_wire_round_trips_u16_odd_even_and_u32_dense_fallback() {
         pre_dense.indices_u32.as_deref(),
         Some(&[0_u32, 65_536, 1, 2][..])
     );
-    assert!(dense_bucket.buffer.buffer.indices.is_empty());
+    assert!(dense_bucket.buffer.indices.is_empty());
     let _: GpuShaderVertex = pre_dense.vertices[0];
 }

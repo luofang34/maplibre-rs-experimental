@@ -86,54 +86,56 @@ fn decode_dem_parts_from_header_and_pixels(
     }
 }
 
-#[cfg(any(test, feature = "renderer"))]
-pub(super) fn decode_bytes_layer_dem(bytes: &[u8]) -> Option<FlatBufferTransferable> {
-    let px_offset = match read_u32_le(bytes, 0)? {
-        LAYER_DEM_IMAGE_MAGIC => DEM_IMAGE_HEADER_BYTES,
-        LAYER_DEM_RAW_MAGIC => DEM_RAW_HEADER_BYTES,
-        _ => return None,
-    };
-    let hdr_bytes = bytes.get(..px_offset)?;
-    let pixels = bytes.get(px_offset..)?.to_vec();
-    let (coords, outcome) = decode_dem_parts_from_header_and_pixels(hdr_bytes, pixels)?;
-    Some(FlatBufferTransferable::from_unpacked_dem(coords, outcome))
-}
+impl FlatBufferTransferable {
+    #[cfg(any(test, feature = "renderer"))]
+    pub(super) fn decode_bytes_layer_dem(bytes: &[u8]) -> Option<Self> {
+        let px_offset = match read_u32_le(bytes, 0)? {
+            LAYER_DEM_IMAGE_MAGIC => DEM_IMAGE_HEADER_BYTES,
+            LAYER_DEM_RAW_MAGIC => DEM_RAW_HEADER_BYTES,
+            _ => return None,
+        };
+        let hdr_bytes = bytes.get(..px_offset)?;
+        let pixels = bytes.get(px_offset..)?.to_vec();
+        let (coords, outcome) = decode_dem_parts_from_header_and_pixels(hdr_bytes, pixels)?;
+        Some(Self::from_unpacked_dem(coords, outcome))
+    }
 
-#[cfg(any(test, feature = "renderer"))]
-pub(super) fn decode_js_layer_dem(
-    buffer: &js_sys::ArrayBuffer,
-    base_offset: u32,
-    byte_len: u32,
-) -> Option<FlatBufferTransferable> {
-    let end = base_offset.checked_add(byte_len)?;
-    if end > buffer.byte_length() || (byte_len as usize) < 4 {
-        return None;
+    #[cfg(any(test, feature = "renderer"))]
+    pub(super) fn decode_js_layer_dem(
+        buffer: &js_sys::ArrayBuffer,
+        base_offset: u32,
+        byte_len: u32,
+    ) -> Option<Self> {
+        let end = base_offset.checked_add(byte_len)?;
+        if end > buffer.byte_length() || (byte_len as usize) < 4 {
+            return None;
+        }
+        let peek_len = byte_len.min(DEM_RAW_HEADER_BYTES as u32);
+        let mut hdr = [0_u8; DEM_RAW_HEADER_BYTES];
+        let peek_slice = hdr.get_mut(..peek_len as usize)?;
+        js_sys::Uint8Array::new_with_byte_offset_and_length(buffer, base_offset, peek_len)
+            .copy_to(peek_slice);
+        let hdr_len = match u32::from_le_bytes(*peek_slice.first_chunk::<4>()?) {
+            LAYER_DEM_IMAGE_MAGIC => DEM_IMAGE_HEADER_BYTES,
+            LAYER_DEM_RAW_MAGIC => DEM_RAW_HEADER_BYTES,
+            _ => return None,
+        };
+        let hdr_slice = hdr
+            .get(..hdr_len)
+            .filter(|_| (peek_len as usize) >= hdr_len)?;
+        let px_len = (byte_len as usize) - hdr_len;
+        let mut pixels = vec![0_u8; px_len];
+        if px_len > 0 {
+            js_sys::Uint8Array::new_with_byte_offset_and_length(
+                buffer,
+                base_offset + hdr_len as u32,
+                px_len as u32,
+            )
+            .copy_to(&mut pixels);
+        }
+        let (coords, outcome) = decode_dem_parts_from_header_and_pixels(hdr_slice, pixels)?;
+        Some(Self::from_unpacked_dem(coords, outcome))
     }
-    let peek_len = byte_len.min(DEM_RAW_HEADER_BYTES as u32);
-    let mut hdr = [0_u8; DEM_RAW_HEADER_BYTES];
-    let peek_slice = hdr.get_mut(..peek_len as usize)?;
-    js_sys::Uint8Array::new_with_byte_offset_and_length(buffer, base_offset, peek_len)
-        .copy_to(peek_slice);
-    let hdr_len = match u32::from_le_bytes(*peek_slice.first_chunk::<4>()?) {
-        LAYER_DEM_IMAGE_MAGIC => DEM_IMAGE_HEADER_BYTES,
-        LAYER_DEM_RAW_MAGIC => DEM_RAW_HEADER_BYTES,
-        _ => return None,
-    };
-    let hdr_slice = hdr
-        .get(..hdr_len)
-        .filter(|_| (peek_len as usize) >= hdr_len)?;
-    let px_len = (byte_len as usize) - hdr_len;
-    let mut pixels = vec![0_u8; px_len];
-    if px_len > 0 {
-        js_sys::Uint8Array::new_with_byte_offset_and_length(
-            buffer,
-            base_offset + hdr_len as u32,
-            px_len as u32,
-        )
-        .copy_to(&mut pixels);
-    }
-    let (coords, outcome) = decode_dem_parts_from_header_and_pixels(hdr_slice, pixels)?;
-    Some(FlatBufferTransferable::from_unpacked_dem(coords, outcome))
 }
 
 impl LayerDem for FlatBufferTransferable {
@@ -254,7 +256,7 @@ impl LayerDemMissing for FlatBufferTransferable {
     }
 
     fn build_from(coords: WorldTileCoords) -> Self {
-        encode_named_coords(WebMessageTag::LayerDemMissing, coords, None)
+        Self::encode_named_coords(WebMessageTag::LayerDemMissing, coords, None)
     }
 
     fn coords(&self) -> WorldTileCoords {

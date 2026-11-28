@@ -146,8 +146,6 @@ fn a_dropped_reply_still_applies_its_command() {
 fn sync_handles_are_send_and_sync_even_for_non_send_targets() {
     fn assert_send_sync<T: Send + Sync + Clone + 'static>() {}
     assert_send_sync::<super::SyncHandle<Rc<Cell<i32>>>>();
-    #[cfg(feature = "headless")]
-    assert_send_sync::<super::SyncHeadlessHandle>();
 }
 
 #[test]
@@ -300,84 +298,4 @@ fn sync_queue_processes_concurrent_multithreaded_calls_and_watchers() {
         "unsatisfied watcher resolves to MapClosed on shutdown"
     );
     assert_eq!(handle.call_blocking(|v| *v), Err(MapClosed));
-}
-
-#[cfg(all(
-    feature = "headless",
-    feature = "native-io",
-    not(target_arch = "wasm32")
-))]
-#[test]
-fn headless_runtime_thread_drives_map_across_os_threads_and_closes_cleanly() {
-    use std::thread;
-
-    use cgmath::Deg;
-
-    use crate::{
-        coords::LatLon,
-        map::handle::{HeadlessRuntimeConfig, HeadlessRuntimeThread},
-        render::view_state::CameraOptions,
-        style::Style,
-    };
-
-    let style: Style = serde_json::from_value(serde_json::json!({
-        "version": 8,
-        "layers": [
-            {
-                "id": "bg",
-                "type": "background",
-                "paint": { "background-color": "#112233" }
-            }
-        ]
-    }))
-    .expect("valid style");
-
-    let runtime_thread = HeadlessRuntimeThread::spawn(HeadlessRuntimeConfig {
-        width: 32,
-        height: 32,
-        pixel_ratio: 1.0,
-        style,
-        cache_dir: None,
-        max_pitch_deg: Some(75.0),
-        ..HeadlessRuntimeConfig::default()
-    })
-    .expect("spawn headless runtime thread");
-
-    let handle = runtime_thread.handle();
-    let mut joins = Vec::new();
-    for idx in 0..4 {
-        let thread_handle = handle.clone();
-        joins.push(thread::spawn(move || {
-            let zoom = 3.0 + f64::from(idx);
-            thread_handle
-                .call_blocking(move |map| {
-                    map.jump_to(CameraOptions {
-                        center: Some(LatLon::new(10.0 + f64::from(idx), 20.0)),
-                        zoom: Some(zoom),
-                        pitch: Some(Deg(15.0)),
-                        ..CameraOptions::default()
-                    })
-                    .expect("jump_to");
-                    map.view_state().zoom().value()
-                })
-                .expect("call succeeded")
-        }));
-    }
-    for join in joins {
-        let reported_zoom = join.join().expect("thread join");
-        assert!(reported_zoom >= 3.0);
-    }
-
-    // Exercise until_blocking watcher waiting for a settled frame on the worker thread.
-    let frame_number = handle
-        .until_blocking(|map| {
-            let stats = map.last_frame_stats();
-            (stats.frame >= 1 && !map.needs_redraw()).then_some(stats.frame)
-        })
-        .expect("settled frame watcher");
-    assert!(frame_number >= 1);
-
-    runtime_thread.shutdown();
-    assert!(handle.is_closed());
-    assert_eq!(handle.call_blocking(|_| ()), Err(MapClosed));
 }

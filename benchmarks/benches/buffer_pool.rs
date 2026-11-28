@@ -107,7 +107,7 @@ fn bench_buffer_pool_churn_and_coalesce(c: &mut Criterion) {
                     &feature_meta,
                 )
                 .expect("reuse coalesced hole");
-                black_box(pool.index().max_zoom());
+                black_box(pool.as_ref().max_zoom());
             }
         });
     });

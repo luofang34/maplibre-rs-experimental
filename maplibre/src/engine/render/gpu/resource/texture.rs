@@ -1,0 +1,232 @@
+//! Texture allocations and attachment views that retain ownership of presentation frames.
+
+use std::{ops::Deref, sync::Arc};
+
+use crate::render::{eventually::HasChanged, settings::Msaa};
+
+/// Sole owner of a [`wgpu::Texture`] that calls [`wgpu::Texture::destroy`] once every
+/// [`Texture`] handle sharing the allocation has been dropped.
+#[derive(Debug)]
+struct OwnedTexture(wgpu::Texture);
+
+impl Drop for OwnedTexture {
+    fn drop(&mut self) {
+        self.0.destroy();
+    }
+}
+
+/// Describes a [`TextureView`].
+///
+/// May be converted from a [`TextureView`](wgpu::TextureView) or [`SurfaceTexture`](wgpu::SurfaceTexture)
+/// or dereferences to a wgpu [`TextureView`](wgpu::TextureView).
+#[derive(Debug)]
+pub enum TextureView {
+    /// The value is an actual wgpu [`TextureView`](wgpu::TextureView).
+    TextureView(wgpu::TextureView),
+
+    /// The value is a wgpu [`SurfaceTexture`](wgpu::SurfaceTexture), but dereferences to
+    /// a [`TextureView`](wgpu::TextureView).
+    SurfaceTexture {
+        // NOTE: The order of these fields is important because the view must be dropped before the
+        // frame is dropped
+        /// Attachment view, dropped before the retained presentation frame.
+        view: wgpu::TextureView,
+        /// Frame to present after rendering, or drop to discard it.
+        texture: wgpu::SurfaceTexture,
+    },
+}
+
+impl TextureView {
+    /// Drops the attachment view and returns its presentation frame for the caller to present.
+    /// Consumes ordinary texture views as well, returning `None` for them.
+    #[inline]
+    pub fn take_surface_texture(self) -> Option<wgpu::SurfaceTexture> {
+        match self {
+            TextureView::TextureView(_) => None,
+            TextureView::SurfaceTexture { texture, .. } => Some(texture),
+        }
+    }
+}
+
+impl From<wgpu::TextureView> for TextureView {
+    fn from(value: wgpu::TextureView) -> Self {
+        TextureView::TextureView(value)
+    }
+}
+
+impl From<wgpu::SurfaceTexture> for TextureView {
+    fn from(surface_texture: wgpu::SurfaceTexture) -> Self {
+        let view = surface_texture.texture.create_view(&Default::default());
+
+        TextureView::SurfaceTexture {
+            texture: surface_texture,
+            view,
+        }
+    }
+}
+
+impl Deref for TextureView {
+    type Target = wgpu::TextureView;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        match &self {
+            TextureView::TextureView(value) => value,
+            TextureView::SurfaceTexture { view, .. } => view,
+        }
+    }
+}
+
+/// An allocated two-dimensional GPU texture and a view spanning its layers and mip levels.
+pub struct Texture {
+    size: wgpu::Extent3d,
+    texture: wgpu::Texture,
+    view: TextureView,
+    /// Shared ownership guard; declared last so `view` drops before `wgpu::Texture::destroy`.
+    owner: Arc<OwnedTexture>,
+}
+
+impl Texture {
+    /// Allocates a one-layer, one-mip-level texture with the requested physical-pixel dimensions.
+    ///
+    /// The caller must provide nonzero dimensions within device limits, a format supporting
+    /// `usage`, and a supported sample count. This does not validate or reduce MSAA requests;
+    /// unsupported descriptors are reported through wgpu's validation mechanism.
+    pub fn new(
+        label: wgpu::Label,
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+        msaa: Msaa,
+        usage: wgpu::TextureUsages,
+    ) -> Texture {
+        let size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+
+        let view_formats: &[wgpu::TextureFormat] =
+            if usage.contains(wgpu::TextureUsages::TRANSIENT_ATTACHMENT) {
+                &[]
+            } else {
+                &[format]
+            };
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label,
+            size,
+            mip_level_count: 1,
+            sample_count: msaa.samples,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage,
+            view_formats,
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let owner = super::share_gpu(OwnedTexture(texture.clone()));
+        Self {
+            size,
+            texture,
+            view: TextureView::TextureView(view),
+            owner,
+        }
+    }
+
+    /// A single-sample texture with a full mip chain, its view spanning every level, for
+    /// textures sampled far smaller than they are drawn. The levels below the first are
+    /// filled by a [`MipmapGenerator`](super::MipmapGenerator).
+    pub fn new_mipmapped(
+        label: wgpu::Label,
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+        usage: wgpu::TextureUsages,
+    ) -> Texture {
+        Self::new_mipmapped_capped(label, device, format, width, height, u32::MAX, usage)
+    }
+
+    /// Like [`new_mipmapped`](Self::new_mipmapped), capping the mip chain depth to at most
+    /// `max_mip_levels` (`>= 1`) to bound per-texture mipmap render-pass count.
+    pub fn new_mipmapped_capped(
+        label: wgpu::Label,
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+        max_mip_levels: u32,
+        usage: wgpu::TextureUsages,
+    ) -> Texture {
+        let size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+        let mip_level_count = super::mip_level_count(width, height).min(max_mip_levels.max(1));
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label,
+            size,
+            mip_level_count,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage,
+            view_formats: &[format],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let owner = super::share_gpu(OwnedTexture(texture.clone()));
+        Self {
+            size,
+            texture,
+            view: TextureView::TextureView(view),
+            owner,
+        }
+    }
+
+    /// Allocated physical-pixel dimensions of this texture.
+    #[inline]
+    pub fn extent(&self) -> wgpu::Extent3d {
+        self.size
+    }
+
+    /// Clones the underlying GPU texture and view handles without allocating additional GPU memory.
+    ///
+    /// Returns `None` for presentation [`SurfaceTexture`](wgpu::SurfaceTexture) attachments.
+    pub fn clone_handle(&self) -> Option<Self> {
+        match &self.view {
+            TextureView::TextureView(view) => Some(Self {
+                size: self.size,
+                texture: self.texture.clone(),
+                view: TextureView::TextureView(view.clone()),
+                owner: Arc::clone(&self.owner),
+            }),
+            TextureView::SurfaceTexture { .. } => None,
+        }
+    }
+}
+
+impl Deref for Texture {
+    type Target = wgpu::TextureView;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.view
+    }
+}
+
+impl AsRef<wgpu::Texture> for Texture {
+    #[inline]
+    fn as_ref(&self) -> &wgpu::Texture {
+        &self.texture
+    }
+}
+
+impl HasChanged for Texture {
+    type Criteria = (u32, u32);
+
+    fn has_changed(&self, criteria: &Self::Criteria) -> bool {
+        let size = (self.size.width, self.size.height);
+        !size.eq(criteria)
+    }
+}

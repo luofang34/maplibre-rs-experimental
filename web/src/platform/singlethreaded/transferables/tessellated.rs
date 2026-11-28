@@ -14,16 +14,16 @@ use maplibre::{
 };
 
 use super::FlatBufferTransferable;
-use crate::platform::singlethreaded::apc::WebMessageTag;
+use crate::platform::singlethreaded::tag::WebMessageTag;
 
 pub(crate) mod js_wire;
 mod prepacked_wire;
 
-fn pack_flat_layer_tessellated(
-    input: js_wire::TessellatedEncodeInput<'_>,
-) -> FlatBufferTransferable {
-    let data = js_wire::encode_layer_tessellated(input);
-    FlatBufferTransferable::from_vec(WebMessageTag::LayerTessellated, data, 0)
+impl FlatBufferTransferable {
+    fn pack_flat_layer_tessellated(input: js_wire::TessellatedEncodeInput<'_>) -> Self {
+        let data = js_wire::encode_layer_tessellated(input);
+        Self::from_vec(WebMessageTag::LayerTessellated, data, 0)
+    }
 }
 
 impl LayerTessellated for FlatBufferTransferable {
@@ -47,7 +47,7 @@ impl LayerTessellated for FlatBufferTransferable {
         layer_data: Layer,
         style_layer_id: String,
     ) -> Self {
-        pack_flat_layer_tessellated(js_wire::TessellatedEncodeInput {
+        Self::pack_flat_layer_tessellated(js_wire::TessellatedEncodeInput {
             coords,
             buffer,
             feature_indices,
@@ -71,7 +71,7 @@ impl LayerTessellated for FlatBufferTransferable {
         allow_prepack: bool,
     ) -> Self {
         let encoded = (!payload.entries.is_empty()).then(|| encode_feature_paint(&payload.entries));
-        pack_flat_layer_tessellated(js_wire::TessellatedEncodeInput {
+        Self::pack_flat_layer_tessellated(js_wire::TessellatedEncodeInput {
             coords: payload.coords,
             buffer: payload.buffer,
             feature_indices: payload.feature_indices,
@@ -88,7 +88,7 @@ impl LayerTessellated for FlatBufferTransferable {
     fn with_feature_paint(self, entries: Vec<BucketFeatureEntry>) -> Self {
         let encoded = (!entries.is_empty()).then(|| encode_feature_paint(&entries));
         let bucket = self.to_bucket();
-        pack_flat_layer_tessellated(js_wire::TessellatedEncodeInput {
+        Self::pack_flat_layer_tessellated(js_wire::TessellatedEncodeInput {
             coords: bucket.coords,
             buffer: bucket.buffer,
             feature_indices: bucket.feature_indices,

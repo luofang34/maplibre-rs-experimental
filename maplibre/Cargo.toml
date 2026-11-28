@@ -175,42 +175,52 @@ web-sys = { workspace = true, features = ["Window"] }
 
 [[test]]
 name = "headless_symbol_render"
+path = "tests/headless/headless_symbol_render.rs"
 required-features = ["headless"]
 
 [[test]]
 name = "globe_polar_atmosphere"
+path = "tests/headless/globe_polar_atmosphere.rs"
 required-features = ["headless"]
 
 [[test]]
 name = "web_local_scheduler"
+path = "tests/headless/web_local_scheduler.rs"
 required-features = ["headless"]
 
 [[test]]
 name = "web_sources"
+path = "tests/headless/web_sources.rs"
 required-features = ["headless"]
 
 [[test]]
 name = "web_host_gpu_render"
+path = "tests/headless/web_host_gpu_render.rs"
 required-features = ["headless", "raster"]
 
 [[test]]
 name = "empty_tile_test"
+path = "tests/headless/empty_tile_test.rs"
 required-features = ["headless", "raster", "thread-safe-futures"]
 
 [[test]]
 name = "gtest_symbol_rendering"
+path = "tests/headless/gtest_symbol_rendering.rs"
 required-features = ["headless", "raster", "thread-safe-futures"]
 
 [[test]]
 name = "globe_query_conformance"
+path = "tests/headless/globe_query_conformance.rs"
 required-features = ["headless", "raster", "thread-safe-futures"]
 
 [[test]]
 name = "gpu_resource_lifecycle"
+path = "tests/headless/gpu_resource_lifecycle.rs"
 required-features = ["headless", "raster", "thread-safe-futures"]
 
 [[test]]
 name = "line_dasharray_zoom"
+path = "tests/headless/line_dasharray_zoom.rs"
 required-features = ["headless", "geojson"]
 
 [build-dependencies]

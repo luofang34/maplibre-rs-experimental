@@ -19,19 +19,53 @@ pub struct OverscaledTileId {
     pub canonical: WorldTileCoords,
 }
 
+#[inline]
+fn is_valid_canonical(canonical: WorldTileCoords) -> bool {
+    let Some(&bounds) = ZOOM_BOUNDS.get(usize::from(u8::from(canonical.z))) else {
+        return false;
+    };
+    canonical.x >= 0
+        && canonical.y >= 0
+        && (canonical.x as u32) < bounds
+        && (canonical.y as u32) < bounds
+}
+
+#[inline]
+fn clamp_canonical_to_zoom(canonical: WorldTileCoords, target_z: u8) -> WorldTileCoords {
+    let current_z = u8::from(canonical.z);
+    if current_z <= target_z {
+        return canonical;
+    }
+    let shift = u32::from(current_z - target_z);
+    WorldTileCoords {
+        x: canonical.x >> shift,
+        y: canonical.y >> shift,
+        z: ZoomLevel::new(target_z),
+    }
+}
+
+#[inline]
+fn resolve_overscaled_zoom(
+    canonical_z: u8,
+    target_z: u8,
+    source_max_zoom: Option<u8>,
+    retain_overscale: bool,
+) -> u8 {
+    if retain_overscale && source_max_zoom.is_some_and(|m| canonical_z >= m) {
+        target_z.max(canonical_z).min((MAX_ZOOM - 1) as u8)
+    } else {
+        canonical_z
+    }
+}
+
 impl OverscaledTileId {
     /// Constructs an overscaled tile identifier when `canonical` lies inside the canonical grid
     /// and `overscaled_z` is at least `canonical.z` and below [`MAX_ZOOM`].
     pub fn new(overscaled_z: u8, wrap: i16, canonical: WorldTileCoords) -> Option<Self> {
         let canonical_z = u8::from(canonical.z);
-        if usize::from(overscaled_z) >= MAX_ZOOM || overscaled_z < canonical_z {
-            return None;
-        }
-        let bounds = *ZOOM_BOUNDS.get(usize::from(canonical_z))?;
-        if canonical.x < 0
-            || canonical.y < 0
-            || (canonical.x as u32) >= bounds
-            || (canonical.y as u32) >= bounds
+        if usize::from(overscaled_z) >= MAX_ZOOM
+            || overscaled_z < canonical_z
+            || !is_valid_canonical(canonical)
         {
             return None;
         }
@@ -64,23 +98,11 @@ impl OverscaledTileId {
         let (mut canonical, wrap) = view_coords.wrapped()?;
         let wrap = i16::try_from(wrap).ok()?;
         if let Some(max_z) = source_max_zoom {
-            let current_z = u8::from(canonical.z);
-            if current_z > max_z {
-                let shift = u32::from(current_z - max_z);
-                canonical = WorldTileCoords {
-                    x: canonical.x >> shift,
-                    y: canonical.y >> shift,
-                    z: ZoomLevel::new(max_z),
-                };
-            }
+            canonical = clamp_canonical_to_zoom(canonical, max_z);
         }
         let canonical_z = u8::from(canonical.z);
-        let overscaled_z = if retain_overscale && source_max_zoom.is_some_and(|m| canonical_z >= m)
-        {
-            target_z.max(canonical_z).min((MAX_ZOOM - 1) as u8)
-        } else {
-            canonical_z
-        };
+        let overscaled_z =
+            resolve_overscaled_zoom(canonical_z, target_z, source_max_zoom, retain_overscale);
         Some(Self {
             overscaled_z,
             wrap,
@@ -117,25 +139,11 @@ impl OverscaledTileId {
         if usize::from(target_z) >= MAX_ZOOM {
             return None;
         }
-        let canonical_z = u8::from(self.canonical.z);
-        if target_z >= canonical_z {
-            Some(Self {
-                overscaled_z: target_z,
-                wrap: self.wrap,
-                canonical: self.canonical,
-            })
-        } else {
-            let shift = u32::from(canonical_z - target_z);
-            Some(Self {
-                overscaled_z: target_z,
-                wrap: self.wrap,
-                canonical: WorldTileCoords {
-                    x: self.canonical.x >> shift,
-                    y: self.canonical.y >> shift,
-                    z: ZoomLevel::new(target_z),
-                },
-            })
-        }
+        Some(Self {
+            overscaled_z: target_z,
+            wrap: self.wrap,
+            canonical: clamp_canonical_to_zoom(self.canonical, target_z),
+        })
     }
 
     /// Whether `self` lies in the same wrapped world and strictly deeper in `parent`'s subtree.

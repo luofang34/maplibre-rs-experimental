@@ -28,13 +28,10 @@ impl ReceiveScratch {
         self.deferred.clear();
         for item in received_queued.drain(..) {
             if let Some(id) = item.attempt() {
-                if !self.budget.attempts.contains(&id)
-                    && self.budget.attempts.len() >= BOOT_MAX_DRAIN_ATTEMPTS
-                {
+                if !self.budget.admit_boot_attempt(id) {
                     self.deferred.push(item);
                     continue;
                 }
-                self.budget.attempts.insert(id);
             }
             if item.matches(filter) {
                 ret.push(item);
@@ -58,6 +55,14 @@ impl BatchBudget {
     const MAX_RAW_BYTES: usize = 768 * 1024;
     const MAX_RAW_MESSAGES: usize = 16;
     const MAX_RAW_ATTEMPTS: usize = 3;
+
+    pub(super) fn admit_boot_attempt(&mut self, id: u64) -> bool {
+        if !self.attempts.contains(&id) && self.attempts.len() >= BOOT_MAX_DRAIN_ATTEMPTS {
+            return false;
+        }
+        self.attempts.insert(id);
+        true
+    }
 
     pub(super) fn clear_attempts(&mut self) {
         self.attempts.clear();

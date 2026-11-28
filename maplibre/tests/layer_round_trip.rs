@@ -205,7 +205,7 @@ fn round_trip_font_face_unicode_ranges() {
 
     assert_eq!(v1, v2);
     assert_eq!(s1.font_faces, s2.font_faces);
-    let faces = s2.font_faces.expect("font-faces preserved");
+    let faces = s2.font_faces.as_ref().expect("font-faces preserved");
     let face = &faces.0[0];
     assert_eq!(face.family, "Noto Sans");
     assert_eq!(face.unicode_ranges.len(), 3);
